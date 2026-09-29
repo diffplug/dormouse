@@ -1,19 +1,18 @@
-import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
-import type { ServerResponse } from 'node:http';
-import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { fileViewerFormat } from './file-viewer-format.js';
-import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
+import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
+import { editorPage } from './editor-page.js';
+import { readEditableFile, readUpTo, saveEditableFile, TEXT_LIMIT } from './editable-file.js';
+import { viewerAsset } from './viewer-assets.js';
 
-const TEXT_LIMIT = 8 * 1024 * 1024;
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
+const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'";
 type Resource = { file: FileHandle; mime: string };
 /** A bound on the grant itself: fatal even when reached through an optional asset. */
 class ViewerLimitError extends Error {}
-const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!);
 
 async function textSize(file: FileHandle): Promise<number> {
   const { size } = await file.stat();
@@ -23,15 +22,9 @@ async function textSize(file: FileHandle): Promise<number> {
 
 async function readText(file: FileHandle): Promise<string> {
   const size = await textSize(file);
-  const bytes = Buffer.allocUnsafe(size + 1);
-  let offset = 0;
-  while (offset < bytes.length) {
-    const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
-    if (!bytesRead) break;
-    offset += bytesRead;
-  }
-  if (offset > size) throw new Error('file changed while preparing preview; open it again');
-  return bytes.subarray(0, offset).toString('utf8');
+  const bytes = await readUpTo(file, size);
+  if (bytes.length > size) throw new Error('file changed while preparing preview; open it again');
+  return bytes.toString('utf8');
 }
 
 /** Static local dependencies only. No directory browsing, arbitrary fetch API,
@@ -51,38 +44,28 @@ function references(text: string, html: boolean): string[] {
   return refs;
 }
 
-function finish(res: ServerResponse, status: number, message = ''): void {
-  res.writeHead(status, { 'Content-Type': 'text/plain; charset=utf-8' });
-  res.end(message);
-}
-
 /** One Tool process owns one file grant and its file descriptors. Restarting
  * creates a fresh capability; only the file argument is persisted by Dormouse. */
-export async function startFileViewer(input: string): Promise<{ port: number; path: string; close(): Promise<void> }> {
-  // Loaded on demand: this module is bundled into every `dor` invocation, and
-  // these two builtins cost more to load than everything else the CLI touches.
-  const [{ open, realpath }, { createServer }] = await Promise.all([import('node:fs/promises'), import('node:http')]);
+export async function startFileViewer(input: string, { onDirty = () => {} }: { onDirty?: (dirty: boolean) => void } = {}): Promise<{ port: number; path: string; target: string; close(): Promise<void> }> {
+  // Loaded on demand: this module is bundled into every `dor` invocation, and this
+  // builtin and `node:http` (see `startCapabilityViewer`) cost more to load than everything else the CLI touches.
+  const { open, realpath } = await import('node:fs/promises');
   const target = await realpath(input);
   const format = fileViewerFormat(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
-  // A source preview escapes the document; none of its references load.
+  // Source reaches Monaco as inert JSON; none of its references load.
   const inspectDependencies = !format.text;
   const root = dirname(target);
-  const prefix = `/${randomBytes(32).toString('hex')}/`;
   const resources = new Map<string, Resource>();
   const scanned = new Set<string>();
   const closeFiles = async () => { await Promise.all([...resources.values()].map(r => r.file.close())); };
-  const outsideRoot = (path: string) => {
-    const rel = relative(root, path);
-    return isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`);
-  };
 
   async function register(path: string, required: boolean): Promise<Resource | undefined> {
     try {
       const route = `file/${relative(root, path).split(sep).join('/')}`;
       if (resources.has(route)) return resources.get(route);
       const canonical = await realpath(path);
-      if (outsideRoot(canonical)) return;
+      if (!isInsideRoot(root, canonical)) return;
       if (resources.size >= ASSET_LIMIT) throw new ViewerLimitError('local preview exceeds 256 referenced files');
       const type = fileViewerFormat(canonical);
       if (!type) return;
@@ -101,7 +84,7 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
           let local: string;
           try { local = decodeURIComponent(ref.split(/[?#]/, 1)[0]); } catch { continue; }
           const asset = resolve(dirname(path), local);
-          if (outsideRoot(asset)) continue;
+          if (!isInsideRoot(root, asset)) continue;
           await register(asset, false);
         }
       }
@@ -116,40 +99,57 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
     const main = await register(target, true);
     if (!main) throw new Error('not a supported regular file');
     if (format.text) await textSize(main.file); // fail oversized text before announcing
-    let port = 0;
-    const server = createServer((req, res) => {
-      res.setHeader('Cache-Control', 'no-store');
-      res.setHeader('Referrer-Policy', 'no-referrer');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      // The iframe proxy must retain this policy on every MIME type.
-      res.setHeader('X-Dormouse-Preserve-CSP', '1');
-      res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'");
-      if (!allowsFileViewerRequest(req, port, prefix)) { finish(res, 403); return; }
-      void (async () => {
+    let saving = false;
+    const viewer = await startCapabilityViewer({ csp: format.text ? CSP + "; worker-src 'self'" : CSP, post: format.text, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
+      route: async (req, res, prefix) => {
         let route: string;
         try { route = decodeURIComponent(new URL(req.url!, 'http://localhost').pathname.slice(prefix.length)); }
-        catch { finish(res, 400); return; }
-        if (route.includes('\\') || route.split('/').some(part => part === '..' || part === '.')) { finish(res, 403); return; }
+        catch { throw new HttpError(400); }
+        if (!pathSegments(route)) throw new HttpError(403);
+        if (req.method === 'POST') {
+          if (!format.text || (route !== 'save' && route !== 'state')) throw new HttpError(404);
+          // JSON escapes a byte as at most six (`\u00XX`).
+          const data = await readJsonBody(req, TEXT_LIMIT * 6 + 1024) as { dirty?: unknown; text?: unknown; version?: unknown } | null;
+          if (route === 'state') {
+            if (typeof data?.dirty !== 'boolean') throw new HttpError(400);
+            onDirty(data.dirty);
+            reply(res, 200, '{}', 'application/json');
+            return;
+          }
+          if (typeof data?.text !== 'string' || typeof data?.version !== 'string') throw new HttpError(400);
+          if (saving) throw new HttpError(409, 'Another save is in progress.');
+          saving = true;
+          try { reply(res, 200, JSON.stringify(await saveEditableFile(target, data.text, data.version)), 'application/json'); }
+          finally { saving = false; }
+          return;
+        }
+        if (format.text && route.startsWith('assets/')) {
+          const asset = await viewerAsset(route.slice('assets/'.length));
+          reply(res, 200, asset.bytes, asset.mime);
+          return;
+        }
+        if (format.text && route === 'source') {
+          const { text, version } = await readEditableFile(target);
+          reply(res, 200, JSON.stringify({ text, version, name: basename(target) }), 'application/json');
+          return;
+        }
         if (route === 'view' && format.text) {
-          const text = await readText(main.file);
-          const body = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(basename(target))}</title><style>:root{color-scheme:light dark}body{margin:1rem;background:Canvas;color:CanvasText}pre{font:14px/1.5 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere}</style><pre>${escapeHtml(text)}</pre>`;
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
-          res.end(req.method === 'HEAD' ? undefined : body);
+          reply(res, 200, editorPage(basename(target)), 'text/html; charset=utf-8');
           return;
         }
         const resource = resources.get(route);
-        if (!resource) { finish(res, 404); return; }
+        if (!resource) throw new HttpError(404);
         const size = (await resource.file.stat()).size;
         let start = 0;
         let end = size - 1;
         const range = req.headers.range;
         if (range) {
           const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-          if (!match || (!match[1] && !match[2])) { res.setHeader('Content-Range', `bytes */${size}`); finish(res, 416); return; }
+          if (!match || (!match[1] && !match[2])) { res.setHeader('Content-Range', `bytes */${size}`); throw new HttpError(416); }
           start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
           end = match[1] && match[2] ? Math.min(Number(match[2]), end) : end;
           if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start < 0 || start >= size) {
-            res.setHeader('Content-Range', `bytes */${size}`); finish(res, 416); return;
+            res.setHeader('Content-Range', `bytes */${size}`); throw new HttpError(416);
           }
           res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
         }
@@ -170,26 +170,17 @@ export async function startFileViewer(input: string): Promise<{ port: number; pa
           });
         }
         res.end();
-      })().catch(() => { if (res.headersSent) res.destroy(); else finish(res, 500, 'File preview unavailable'); });
+      },
     });
-    await new Promise<void>((yes, no) => { server.once('error', no); server.listen(0, '127.0.0.1', yes); });
-    port = (server.address() as { port: number }).port;
-    let closing: Promise<void> | undefined;
-    return { port, path: `${prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`,
-      close: () => closing ??= new Promise<void>((yes, no) => {
-        server.close(error => { void closeFiles().then(() => error ? no(error) : yes(), no); });
-        server.closeAllConnections();
-      }),
-    };
+    return { port: viewer.port, path: `${viewer.prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`, target, close: viewer.close };
   } catch (error) { await closeFiles(); throw error; }
 }
 
 /** The `dor __view-file <file>` entry: starts the viewer, which outlives the
- * call, and returns the OSC 367 announcement for the caller to print. */
+ * call, and returns its title and OSC 367 announcement for the caller to print. */
 export async function runFileViewer(file: string): Promise<string> {
-  const viewer = await startFileViewer(file);
-  const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
-  return `\x1b]367;serve;${JSON.stringify({ port: viewer.port, path: viewer.path, v: 1 })}\x07`;
+  const viewer = await startFileViewer(file, { onDirty: dirty => {
+    process.stdout.write(`\x1b]367;state;${JSON.stringify({ v: 1, dirty })}\x07`);
+  } });
+  return announceViewer(viewer, viewer.target);
 }

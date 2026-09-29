@@ -56,7 +56,7 @@ interface ListFlags extends WorkspaceScopedFlags {
 
 const FULL_DESCRIPTION = `Lists every Surface in the current Workspace — terminals and browser Surfaces, including minimized ones (view "minimized").
 
-Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, and listening ports with --ports.
+Text output prints one row per Surface: a * marks the focused Surface, then the handle, kind, render mode ("-" for terminals), view, location (cwd for terminals, URL for browser Surfaces), and title. Trailing tags: (you) for the calling terminal, [ringing], [todo], [awaited] while a dor await is parked on it, [preview] for the Workspace's preview slot (dor open --preview), and listening ports with --ports.
 
 --ports adds each terminal's listening TCP ports. The host shells out per pane (lsof / PowerShell), so it is opt-in; remote sessions report none.
 
@@ -64,7 +64,7 @@ Text output prints one row per Surface: a * marks the focused Surface, then the 
 
 Filters are ANDed. --command is an exact match against the running command reported by shell integration. --cwd resolves to an absolute path like dor ensure --cwd, relative to the invoking shell's PWD when available.
 
-JSON output (--json) always includes both stable ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
+JSON output (--json) always includes both stable ids and refs, and each row carries has_terminal (a PTY) and has_browser (a browser renderer) — gate on those, not on kind, so a Surface that has both still matches — and the preview slot's row adds preview: true. It adds top-level caller_surface_ref/caller_surface_id and focused_surface_ref/focused_surface_id — the calling and focused Surfaces, null when neither is in the list — plus workspace_ref, window_ref, and a host block (app, workspace, cli_js_path, node_path): the identity dump dor identify used to print.
 
 --workspace <ref> lists another Workspace instead, in this window or another: workspace:<n> (a stable number) or workspace:<name>, which resolves only when exactly one Workspace carries that name. Both are accepted bare ("2", "build"). --window <label> lists another window's Surfaces or Workspaces (window:main, ws-2).
 
@@ -336,6 +336,7 @@ function surfaceRows(
       ...(callerId !== undefined && surface.id === callerId ? ['(you)'] : []),
       ...attentionTags(surface),
       ...(surface.awaited ? ['[awaited]'] : []),
+      ...(surface.preview ? ['[preview]'] : []),
       ...(includePorts && surface.ports && surface.ports.length > 0
         ? [surface.ports.map((port) => `:${port.port}`).join(' ')]
         : []),
@@ -442,6 +443,7 @@ function renderSurfaceJson(
     ringing: surface.ringing,
     todo: surface.todo,
     awaited: surface.awaited,
+    ...(surface.preview ? { preview: true } : {}),
     ...(includePorts && hasTerminal(surface.kind)
       ? { ports: (surface.ports ?? []).map(renderPortJson) }
       : {}),

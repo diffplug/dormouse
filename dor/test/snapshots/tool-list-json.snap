@@ -1,0 +1,60 @@
+exitCode: 0
+stdout:
+{
+  "project": {
+    "path": "/work/site/dormouse.yml",
+    "approved": true
+  },
+  "user": {
+    "path": "/home/me/.config/dormouse/dormouse.yml",
+    "found": true
+  },
+  "tools": [
+    {
+      "name": "storybook",
+      "scope": "project",
+      "run": "pnpm storybook",
+      "render": "iframe",
+      "port": "auto",
+      "keyed": true,
+      "description": "The component catalog.\n\nView only.",
+      "shadowed": false
+    },
+    {
+      "name": "harness",
+      "scope": "project",
+      "run": "pnpm harness",
+      "render": "agent-browser-screencast",
+      "port": "announced",
+      "keyed": true,
+      "description": null,
+      "shadowed": false
+    },
+    {
+      "name": "storybook",
+      "scope": "user",
+      "run": "npx storybook",
+      "render": "iframe",
+      "port": "auto",
+      "keyed": false,
+      "description": null,
+      "shadowed": true
+    },
+    {
+      "name": "md",
+      "scope": "user",
+      "run": [
+        "glow",
+        "$TARGET"
+      ],
+      "render": "iframe",
+      "port": "announced",
+      "keyed": true,
+      "description": "Render Markdown.",
+      "shadowed": false
+    }
+  ]
+}
+
+stderr:
+/work/site/dormouse.yml: tools.harness: ignoring unknown field 'colour'

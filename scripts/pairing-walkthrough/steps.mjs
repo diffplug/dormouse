@@ -63,7 +63,7 @@ const RELAY_LISTENING_LINE = /relay listening on .* \(origin (http:\/\/localhost
  * anchor where they do: the copy around it is under review and the name is a
  * contract.
  *
- * Mirrors `PAIRING_CODE_LABEL` in `lib/src/remote/pocket-app/App.tsx`; pinned by
+ * Mirrors `PAIRING_CODE_LABEL` in `lib/src/remote/pocket-app/views.tsx`; pinned by
  * `lib/src/lib/mirrored-constants.test.ts`.
  */
 const PAIRING_CODE_REGION = '[role="status"][aria-label="Pairing code"]';
@@ -366,6 +366,8 @@ async function stepEnroll(ctx) {
   const ab = ctx.state.burrowBrowser;
   const { opts } = ctx;
 
+  // A Burrow with no enrollment and no offer opens with Persistent Relay folded.
+  await ab.run(['find', 'role', 'button', 'click', '--name', 'Persistent Relay', '--exact']);
   await fillField(ctx, 'input[type="url"]', ctx.relayOrigin);
   await fillField(ctx, 'input[type="password"]', ctx.state.setupPassword);
   await fillField(ctx, 'input[placeholder="e.g. Work laptop"]', opts.machineName);

@@ -171,18 +171,6 @@ export async function waitFor(
   if (!held) throw new Error(`timed out waiting for ${what}`);
 }
 
-/**
- * A peer factory that keeps what it builds, so a case can close or inspect the
- * far end by hand. Both ends of a session get their own array.
- */
-export function collect<T>(into: T[], build: () => T): () => T {
-  return () => {
-    const peer = build();
-    into.push(peer);
-    return peer;
-  };
-}
-
 export const CREDENTIAL_ID = 'cred-123';
 export const PASSKEY_PUBLIC_KEY = 'pk-spki-b64u';
 
@@ -225,7 +213,9 @@ export interface E2eHarness {
   noiseStatic: NoiseStaticKeyMaterial;
   knownBurrows: MemoryKnownBurrows;
   pendingDeletions: MemoryPendingDeletions;
-  approvals: PendingPairing[];
+  approvals: Array<Omit<PendingPairing, 'kind'>>;
+  /** Every remote-api session the Burrow built, with the label and end it handed each. */
+  sessions: Array<{ label: string; end: () => void }>;
   savedAcl: BurrowAclRecord[];
   calls: FetchCall[];
   /** The harness's own `fetch`, for a second client on the same fake Relay. */
@@ -287,7 +277,8 @@ export async function makeE2eHarness(
   const noiseStatic = options.noiseStatic ?? (await mintNoiseStaticKeyPair());
   const knownBurrows = options.knownBurrows ?? memoryKnownBurrows();
   const pendingDeletions = options.pendingDeletions ?? memoryPendingDeletions();
-  const approvals: PendingPairing[] = [];
+  const approvals: Array<Omit<PendingPairing, 'kind'>> = [];
+  const sessions: Array<{ label: string; end: () => void }> = [];
   let savedAcl: BurrowAclRecord[] = [];
 
   const enrollment: BurrowEnrollment = {
@@ -312,29 +303,32 @@ export async function makeE2eHarness(
     },
     requestApproval: (pending) => approvals.push(pending),
     dismissApproval: () => {},
-    createSession: ({ send }) => ({
-      // Enough protocol-v1 to prove the byte stream: every request is answered
-      // with its own `requestId`, which is what `hello` correlates on.
-      handle: (data) => {
-        const request = data as { requestId?: unknown; method?: unknown };
-        if (typeof request.requestId !== 'string') return;
-        send({
-          requestId: request.requestId,
-          ok: true,
-          result: { protocolVersion: 1, burrowId, grants: { input: true, layout: false } },
-        });
-        // An attach opens its stream under the request's own id, so one canned
-        // event proves the subscription path as well as the request one.
-        if (request.method === REMOTE_METHODS.surfaceAttach) {
+    createSession: ({ send, label, end }) => {
+      sessions.push({ label, end });
+      return {
+        // Enough protocol-v1 to prove the byte stream: every request is answered
+        // with its own `requestId`, which is what `hello` correlates on.
+        handle: (data) => {
+          const request = data as { requestId?: unknown; method?: unknown };
+          if (typeof request.requestId !== 'string') return;
           send({
-            subId: request.requestId,
-            event: REMOTE_EVENTS.terminalData,
-            data: STREAMED_CHUNK,
+            requestId: request.requestId,
+            ok: true,
+            result: { protocolVersion: 1, burrowId, grants: { input: true, layout: false } },
           });
-        }
-      },
-      dispose: () => {},
-    }),
+          // An attach opens its stream under the request's own id, so one canned
+          // event proves the subscription path as well as the request one.
+          if (request.method === REMOTE_METHODS.surfaceAttach) {
+            send({
+              subId: request.requestId,
+              event: REMOTE_EVENTS.terminalData,
+              data: STREAMED_CHUNK,
+            });
+          }
+        },
+        dispose: () => {},
+      };
+    },
   });
   burrow.start();
   burrowSocket.open();
@@ -438,6 +432,7 @@ export async function makeE2eHarness(
     knownBurrows,
     pendingDeletions,
     approvals,
+    sessions,
     get savedAcl() {
       return savedAcl;
     },

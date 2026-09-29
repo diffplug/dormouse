@@ -11,6 +11,8 @@ import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
 import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
+import { confirmToolEditorsClose, decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
+import { resetToolDirty } from '../../lib/tool-dirty-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,6 +31,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  void decideEditorClose('cancel');
+  resetToolDirty();
   act(() => root.unmount());
   container.remove();
   vi.restoreAllMocks();
@@ -60,6 +64,24 @@ async function renderPanel(
 }
 
 describe('IframePanel', () => {
+  it('connects the resolved built-in file Tool to save consent', async () => {
+    const platform = new FakePtyAdapter();
+    platform.createIframeProxyUrl = async () => ({ ok: true, url: 'http://localhost:4555/token/view' });
+    setPlatform(platform);
+    const iframe = await renderPanel(stubActions(), { id: 'edit', title: 'example.ts', params: {
+      surfaceType: 'tool', toolName: 'file', toolScope: 'builtin', toolTarget: '/project/example.ts',
+      command: 'dor __view-file /project/example.ts', renderMode: 'iframe', url: 'http://localhost:4000/token/view',
+    } });
+    const post = vi.spyOn(iframe.contentWindow!, 'postMessage');
+    iframe.dispatchEvent(new Event('load'));
+    const command = post.mock.calls.find(([data]) => data.__dormouse === 'editor-command')?.[0];
+    expect(command?.kind).toBe('connect');
+    window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, origin: 'http://localhost:4555',
+      data: { __dormouse: 'editor', connection: command.connection, kind: 'ready', dirty: true } }));
+    const close = confirmToolEditorsClose(['edit']);
+    expect(getEditorClosePrompt()?.items.map(item => item.label)).toEqual(['/project/example.ts']);
+    await decideEditorClose('cancel'); expect(await close).toBe(false);
+  });
   // The raw fallback is the case with no proxy in front of it at all — the
   // website, Storybook, the tutorial — so it is not the trusted one. It used to
   // be framed with no sandbox and a full camera/microphone/geolocation/
@@ -273,6 +295,54 @@ describe('IframePanel', () => {
     // showing /other while the chrome shows /app.
     expect(updateParameters).toHaveBeenLastCalledWith({ url: 'http://example.test/app' });
     expect(createProxy.mock.calls.length).toBeGreaterThan(callsBeforeBack);
+  });
+});
+
+describe('before its first paint', () => {
+  const hidden = (iframe: HTMLIFrameElement) => iframe.classList.contains('opacity-0');
+  function renderUrl(url: string, onReady?: () => void) {
+    act(() => {
+      root.render(
+        <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+          <WallActionsContext.Provider value={stubActions()}>
+            <IframePanel id="iframe-paint" title="t" params={{ url }} onReady={onReady} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    return container.querySelector('iframe')!;
+  }
+
+  it('hides the frame until its first load, then reports ready a frame later', async () => {
+    const onReady = vi.fn();
+    const iframe = renderUrl('http://example.test/a', onReady);
+    expect(hidden(iframe)).toBe(true);
+    await act(async () => { iframe.dispatchEvent(new Event('load')); });
+    expect(hidden(iframe)).toBe(false);
+    expect(onReady).not.toHaveBeenCalled();
+    await act(async () => { await new Promise(resolve => requestAnimationFrame(() => resolve(undefined))); });
+    expect(onReady).toHaveBeenCalledOnce();
+  });
+
+  it('never hides a loaded frame again when it navigates', async () => {
+    const iframe = renderUrl('http://example.test/a');
+    await act(async () => { iframe.dispatchEvent(new Event('load')); });
+    const next = renderUrl('http://example.test/b');
+    expect(next.getAttribute('src')).toBe('http://example.test/b');
+    expect(hidden(next)).toBe(false);
+  });
+
+  it('shows a frame whose load never fires after a second', async () => {
+    vi.useFakeTimers();
+    try {
+      const iframe = renderUrl('http://example.test/a');
+      await act(async () => { vi.advanceTimersByTime(900); });
+      expect(hidden(iframe)).toBe(true);
+      await act(async () => { vi.advanceTimersByTime(200); });
+      expect(hidden(iframe)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

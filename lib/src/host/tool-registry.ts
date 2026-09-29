@@ -6,9 +6,10 @@
  * `tool-trust.ts`. Node-side so the YAML dependency stays out of the webview
  * bundle.
  */
-import { parse as parseYaml } from 'yaml';
-import { BUILTIN_FILE_TOOL } from 'dor/file-viewer-format';
+import { isMap, isScalar, parseDocument as parseYamlDocument, type Document } from 'yaml';
+import { builtinFor, FOLDER_MATCH_SUFFIX } from 'dor/file-viewer-format';
 import { isRecord } from '../lib/is-record';
+import { truncateText } from '../lib/osc-sanitize';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import { isToolRender, TOOL_RENDERS, type ToolRender } from '../lib/platform/tool-types';
 import type { BrowserViewportSelection } from 'dor-lib-common/browser-viewports';
@@ -40,9 +41,17 @@ export interface ToolEntry {
    * derived from the command or cwd (`docs/specs/dor-tool.md`).
    */
   readonly dedupeTemplate: readonly string[] | null;
+  /** The comment block directly above the entry, `#` markers stripped; null
+   *  when there is none. `dor tool --list` reports it; nothing executes it. */
+  readonly description: string | null;
 }
 
-export interface OpenRule { readonly match: string; readonly tool: string }
+export interface OpenRule {
+  readonly match: string;
+  readonly tool: string;
+  /** The handler `dor open --preview` uses instead of `tool`. */
+  readonly preview?: string;
+}
 
 export interface ToolFile {
   readonly browser?: BrowserConfigLayer;
@@ -59,17 +68,45 @@ export class ToolFileError extends Error {}
 
 /** Parse the shared YAML document before choosing which section to validate.
  * A malformed document is always an error; browser-only reads deliberately do
- * not inspect `tools` or `open` fields. */
-function parseDocument(text: string, path: string): Record<string, unknown> | undefined {
-  let doc: unknown;
-  try {
-    doc = parseYaml(text);
-  } catch (error) {
-    throw new ToolFileError(`${path}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (doc === null || doc === undefined) return undefined;
-  if (!isRecord(doc)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
-  return doc;
+ * not inspect `tools` or `open` fields. The document is kept for its comments,
+ * which `parseToolFile` reads as descriptions. */
+function parseDocument(text: string, path: string): { data: Record<string, unknown> | undefined; document: Document } {
+  const document = parseYamlDocument(text);
+  if (document.errors.length > 0) throw new ToolFileError(`${path}: ${document.errors[0].message}`);
+  const data: unknown = document.toJS();
+  if (data === null || data === undefined) return { data: undefined, document };
+  if (!isRecord(data)) throw new ToolFileError(`${path}: expected a mapping at the top level`);
+  return { data, document };
+}
+
+/** Longest description `dor tool --list` reports, in code points. */
+export const TOOL_DESCRIPTION_LIMIT = 2_000;
+
+/**
+ * Each Tool's documentation: the comment block directly above its entry
+ * (`docs/specs/dor-tool.md` -> CLI). `yaml` hangs the first entry's comment on
+ * the `tools` map itself and every later one on the entry's key.
+ */
+function entryDescriptions(document: Document): Map<string, string> {
+  const descriptions = new Map<string, string>();
+  const tools = document.get('tools', true);
+  if (!isMap(tools)) return descriptions;
+  tools.items.forEach((pair, index) => {
+    if (!isScalar(pair.key)) return;
+    const comment = pair.key.commentBefore ?? (index === 0 ? tools.commentBefore : undefined);
+    const description = comment ? cleanDescription(comment) : '';
+    if (description) descriptions.set(String(pair.key.value), description);
+  });
+  return descriptions;
+}
+
+/** Formatting only: control characters are escaped by whatever prints it. */
+function cleanDescription(comment: string): string {
+  const text = comment.split('\n')
+    .map(line => line.replace(/^ /, '').replace(/\t/g, ' ').trimEnd())
+    .join('\n')
+    .trim();
+  return text.length > TOOL_DESCRIPTION_LIMIT ? `${truncateText(text, TOOL_DESCRIPTION_LIMIT - 1)}…` : text;
 }
 
 /** Read only browser preferences from a bounded `dormouse.yml` text. Tool
@@ -84,7 +121,7 @@ function browserFromDocument(doc: Record<string, unknown> | undefined, path: str
 }
 
 export function parseBrowserSection(text: string, path: string): BrowserConfigLayer | undefined {
-  return browserFromDocument(parseDocument(text, path), path);
+  return browserFromDocument(parseDocument(text, path).data, path);
 }
 
 /** Substitutions a `prespawn_dedupe` element may use. Closed set: an
@@ -150,7 +187,7 @@ export function parseToolFile(
   opts: { path: string; dir: string; scope: ToolScope },
 ): ToolFile {
   const { path, dir, scope } = opts;
-  const doc = parseDocument(text, path);
+  const { data: doc, document } = parseDocument(text, path);
   // An empty file is a valid file with no tools, not a broken one.
   if (doc === undefined) {
     return { scope, dir, tools: new Map(), warnings: [], open: [] };
@@ -162,6 +199,7 @@ export function parseToolFile(
 
   const tools = new Map<string, ToolEntry>();
   const warnings: string[] = [];
+  const descriptions = entryDescriptions(document);
 
   for (const [name, rawEntry] of Object.entries(toolsNode)) {
     const where = `${path}: tools.${name}`;
@@ -227,7 +265,10 @@ export function parseToolFile(
     }
     const port = (rawPort as ToolPortMode | undefined) ?? 'announced';
 
-    tools.set(name, { name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate, ...(viewport !== undefined ? { viewport } : {}) });
+    tools.set(name, {
+      name, run: typeof run === 'string' ? run.trim() : run, render, port, dedupeTemplate,
+      description: descriptions.get(name) ?? null, ...(viewport !== undefined ? { viewport } : {}),
+    });
   }
 
   // Associations are user-only (`docs/specs/dor-tool.md` -> Opening local files).
@@ -255,7 +296,7 @@ export function substituteToolTokens(element: string, context: SubstitutionConte
   return element.replace(SUBSTITUTION_TOKEN, (token) => {
     if (token === '$CWD') return context.cwd;
     if (token === '$TARGET') {
-      if (!context.target) throw new ToolFileError(`tool '${toolName}': $TARGET requires one local file argument`);
+      if (!context.target) throw new ToolFileError(`tool '${toolName}': $TARGET requires one local file or folder argument`);
       return context.target;
     }
     if (token === '$PROJECT_ROOT') {
@@ -268,23 +309,39 @@ export function substituteToolTokens(element: string, context: SubstitutionConte
   });
 }
 
+const OPEN_RULE_FIELDS = ['match', 'tool', 'preview'];
+
+/** A rule's `tool` and `preview` each name an argument-list Tool in this file
+ * or the built-in handler for the rule's kind: a pattern ending in
+ * `FOLDER_MATCH_SUFFIX` matches only directories (`docs/specs/dor-tool.md` -> Folders). */
 function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, path: string): OpenRule[] {
   if (node === undefined) return [];
   if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
   return node.map((rule: unknown) => {
-    const entry = isRecord(rule) && typeof rule.tool === 'string' ? tools.get(rule.tool) : undefined;
-    const builtin = isRecord(rule) && rule.tool === BUILTIN_FILE_TOOL;
-    if (!isRecord(rule) || (!builtin && !entry) || typeof rule.match !== 'string' || !rule.match) {
-      throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
+    if (!isRecord(rule) || typeof rule.match !== 'string' || !rule.match) {
+      throw new ToolFileError(`${path}: each open rule needs a match pattern`);
     }
-    const unknown = Object.keys(rule).find(key => key !== 'match' && key !== 'tool');
+    const unknown = Object.keys(rule).find(key => !OPEN_RULE_FIELDS.includes(key));
     if (unknown !== undefined) {
-      throw new ToolFileError(`${path}: open rule for '${rule.tool}' has an unknown field '${unknown}' (known: match, tool)`);
+      throw new ToolFileError(`${path}: open rule for '${String(rule.tool)}' has an unknown field '${unknown}' (known: ${OPEN_RULE_FIELDS.join(', ')})`);
     }
-    if (entry && typeof entry.run === 'string') {
-      throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the file`);
-    }
-    return { match: rule.match, tool: builtin ? BUILTIN_FILE_TOOL : entry!.name };
+    const folder = rule.match.endsWith(FOLDER_MATCH_SUFFIX);
+    const { own, other } = builtinFor(folder);
+    const handler = (field: 'tool' | 'preview'): string => {
+      const name = rule[field];
+      if (name === own) return own;
+      if (name === other) {
+        throw new ToolFileError(`${path}: open rule '${rule.match}' names ${name} as its ${field}, which opens ${folder ? 'files' : 'folders'}, `
+          + (folder ? `but a pattern ending in ${FOLDER_MATCH_SUFFIX} matches only folders` : `but only a pattern ending in ${FOLDER_MATCH_SUFFIX} matches folders`));
+      }
+      const entry = typeof name === 'string' ? tools.get(name) : undefined;
+      if (!entry) throw new ToolFileError(`${path}: open rule '${rule.match}' needs a ${field} defined in this user file`);
+      if (typeof entry.run === 'string') {
+        throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the path`);
+      }
+      return entry.name;
+    };
+    return { match: rule.match, tool: handler('tool'), ...(rule.preview !== undefined ? { preview: handler('preview') } : {}) };
   });
 }
 

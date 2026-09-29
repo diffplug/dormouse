@@ -35,7 +35,6 @@ import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
 import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import { createMemoryNotepadArchivePort } from "dormouse-lib/lib/notepad/memory-archive-port";
 import type { ManagedVoicePort } from "dormouse-lib/lib/platform/managed-voice-types";
 import { createManagedVoicePort } from "./managed-voice-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
@@ -316,23 +315,12 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     return this.windowSlot.read();
   }
 
-  // The notepad archive as memory, not the Tauri file: this harness is a browser
-  // tab with no app-data directory, and a dev run must not write into (or read)
-  // the installed app's archive. Notes last as long as the page
-  // (docs/specs/notepad.md).
-  readonly notepadArchive = createMemoryNotepadArchivePort();
-
   // The harness answers `managed_voice_speak` with base64 where Rust sends raw bytes.
   readonly managedVoice: ManagedVoicePort = createManagedVoicePort({
     invoke: (cmd, args) => this.host.invoke(cmd, args),
     decodeSpeak: (raw) => decodeBase64Bytes((raw as { audioBase64: string }).audioBase64),
     offerSetup: import.meta.env.DEV,
   });
-
-  // Cmd/Ctrl+N opens a browser window before any listener sees it, so the
-  // harness shows no chord and binds none — the same reason the website's demo
-  // adapter sets this. The shipped Tauri build owns its keyboard and does not.
-  readonly browserReservesNotepadChord = true;
 
   private handleHostEvent(event: string, data: unknown): void {
     if (event === "dormouse://workspaces") {

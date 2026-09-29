@@ -9,8 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MAX_TERMINAL_DIMENSION, toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 
-import { RemotePtyAdapter, type RemoteAdapterClient } from './remote-adapter';
-import type { TerminalHandlers } from './pocket-client';
+import { RemotePtyAdapter, type RemoteAdapterClient, type TerminalHandlers } from './remote-adapter';
 import type { PtyDataDetail, PtyInfo } from '../../lib/platform/types';
 
 interface AttachCall {
@@ -308,6 +307,71 @@ describe('RemotePtyAdapter attach / active pane', () => {
 
     adapter.writePty('s1', 'ls\r');
     expect(client.writes).toEqual([{ surfaceId: 's1', bytes: toBase64Url(utf8Encode('ls\r')) }]);
+  });
+
+  it('follows an attach with the size its pane was fitted to while the attach was in flight', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const originalAttach = client.attach.bind(client);
+    let finishAttach!: () => void;
+    const landed = new Promise<void>((resolve) => { finishAttach = resolve; });
+    vi.spyOn(client, 'attach').mockImplementationOnce(async (...args) => {
+      const result = await originalAttach(...args);
+      await landed;
+      return result;
+    });
+    // The wall attaches with the xterm's pre-fit default, then fits it mid-flight.
+    const activation = adapter.setActivePane('s1', 80, 24);
+    await Promise.resolve();
+    adapter.resizePty('s1', 53, 28);
+    adapter.resizePty('s2', 10, 10); // neither attached nor being attached → dropped
+    expect(client.resizes).toEqual([]);
+    finishAttach();
+    await activation;
+
+    expect(client.lastAttach()).toMatchObject({ surfaceId: 's1', cols: 80, rows: 24 });
+    expect(client.resizes).toEqual([{ surfaceId: 's1', cols: 53, rows: 28 }]);
+  });
+
+  it('keeps the attach when the Burrow refuses its catch-up resize', async () => {
+    // `PocketWall` ends the session on a rejected activation; a resize lost
+    // to a terminal that exited just after attaching must not do that.
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    const originalAttach = client.attach.bind(client);
+    let finishAttach!: () => void;
+    const landed = new Promise<void>((resolve) => { finishAttach = resolve; });
+    vi.spyOn(client, 'attach').mockImplementationOnce(async (...args) => {
+      const result = await originalAttach(...args);
+      await landed;
+      return result;
+    });
+    const resize = vi.spyOn(client, 'resize').mockRejectedValue(new Error('surface is not attached'));
+    const activation = adapter.setActivePane('s1', 80, 24);
+    await Promise.resolve();
+    adapter.resizePty('s1', 53, 28);
+    finishAttach();
+
+    await expect(activation).resolves.toBeUndefined();
+    expect(resize).toHaveBeenCalledWith('s1', 53, 28);
+    expect(adapter.activeSurfaceId).toBe('s1');
+  });
+
+  it('attaches at a size asked of the pane while the previous one detached', async () => {
+    const client = new FakeClient();
+    const adapter = new RemotePtyAdapter(client);
+    await adapter.setActivePane('s1', 80, 24);
+    let finishDetach!: () => void;
+    const detached = new Promise<void>((resolve) => { finishDetach = resolve; });
+    vi.spyOn(client, 'detach').mockImplementationOnce(async () => { await detached; });
+    const activation = adapter.setActivePane('s2', 80, 24);
+    await Promise.resolve();
+    adapter.resizePty('s2', 53, 28);
+    finishDetach();
+    await activation;
+
+    expect(client.lastAttach()).toMatchObject({ surfaceId: 's2', cols: 53, rows: 28 });
+    expect(client.resizes).toEqual([]);
   });
 
   it('normalizes resizes before caching dimensions for the next attachment', async () => {

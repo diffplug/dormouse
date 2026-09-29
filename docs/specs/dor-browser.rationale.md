@@ -22,15 +22,13 @@ views without weakening that first signal.
 
 **Why activation moves focus at all.** A repeat activation on an already-connected port only re-navigates to the current URL; without the reveal, the click has no visible feedback.
 
-**Why the eager pane is created before `agent-browser open` runs.** A cold daemon boot is 1–3s, and a menu that closes on a pane appearing three seconds later reads as a click that did nothing.
-
-**Why the eager pane shows its own placeholder.** The idle placeholder asks for `dor agent-browser open <url>`, telling the user to repeat the action they just took instead of naming the pane's actual state.
+**Why Connect acknowledges before placing.** Creating a pane before startup made a missing executable briefly split and then collapse the terminal (reported 2026-09). The button’s `opening…` state acknowledges the click during daemon startup without layout churn. Preparing the Surface's own controller, rather than a Wall-side launch, retains its launch configuration, binding, and late-result cleanup.
 
 **Why a reuse is one intent.** Revealing the target and then asking for its mode and its URL separately sent `open <url>` in the same tick as a pop-out began its close/reopen, deterministically: the navigation raced the relaunch, which had already captured the old URL.
 
 ## Display Modal And Render Swaps
 
-**Why the iframe swap is eager.** The same 1–3s daemon boot as the context-menu connect, behind a modal that has already closed; and while the swap awaited `open`, a slow page held the iframe on screen for the whole load and a timed-out `open` dropped the swap silently — leaving an orphan `gui-<hex>` browser nobody could see or close.
+**Why the iframe swap is eager.** A 1–3s daemon boot behind a modal that has already closed; and while the swap awaited `open`, a slow page held the iframe on screen for the whole load and a timed-out `open` dropped the swap silently — leaving an orphan `gui-<hex>` browser nobody could see or close.
 
 **Why the Surface's controller launches, not the Wall.** The launch-and-bind existed four times — Tool swap, iframe/cross-provider swap, context-menu port, Tool serving — each with its own "still wanted?" predicate and failure rule, racing the controller it handed a session to. Because the launch lived in a Wall closure rather than on the Surface, a session-less pane that was persisted, or whose webview reloaded mid-launch, restored session-less forever, and Tool serving still blocked on the page load (static reading, 2026-09).
 
@@ -47,6 +45,14 @@ views without weakening that first signal.
 **Why the pane's laid-out size.** A Workspace presentation scales the Wall's subtree while it moves. `getBoundingClientRect` read mid-scale, as a harness reload does, synced a Playwright page to 681×589 in a 689×596 pane (0.988, 2026-09-24). No resize followed to correct it.
 
 ## Automated Browser
+
+**Why GUI launches resolve in a fresh shell.** The installed macOS sidecar had
+`/usr/bin:/bin:/usr/sbin:/sbin` while both provider CLIs were installed under
+`/opt/homebrew/bin` (measured 2026-09-28). Remembering an executable alone also
+misses the Node runtime needed by its shebang. A fresh shell exports both
+without shell-integration state publication or a global cache. Calling the
+public `dor … open` command would duplicate the host's pane-binding lifecycle,
+so the private helper only supplies environment.
 
 **Why one-session-one-surface is not an invariant.** `dor` forwards the user's command before it asks the host for a surface, so a surface killed or render-swapped inside that window is gone by the time the trailing request arrives — and the session behind it is still live and needs somewhere to render.
 
@@ -66,7 +72,7 @@ views without weakening that first signal.
 
 **Why the connection is dropped at relaunch start rather than left to fail.** The host closes the browser and kills the daemon, so the old socket's close is certain. Left connected, its three reconnect failures flagged the pane "ended" about three seconds into a pop-in that a slow page could hold open for 25s. When the popped-out URL observer still ran in the webview, its `get cdp-url` — issued the moment `poppedOut` flipped — landed in the close→reopen gap, where a daemon command spawns a competing headless daemon that the headed relaunch then reattaches to; flipping headedness before leaving `live` started it there too. Now it would open a headed viewer socket onto the browser being closed.
 
-**Why one daemon gate, not a check per call site.** The rule against daemon commands in the relaunch gap was a `relaunching` flag each caller had to check, and most did not (static reading, 2026-09): the header's back/forward/reload/URL edit, the Display modal's device and custom viewport, tab clicks, sync-to-pane (reached by a resize once a pop-in had already flipped `poppedOut`), and Cmd-A/C/X all reached the daemon mid-relaunch. The lifecycle behind it was a dozen flags whose invariants lived in five predicates. Once captures and the popped-out URL observer moved into the host, and the host itself refused operations mid-relaunch (see [Browser Host](#browser-host)), the gate was left ordering the Surface's own intents.
+**Why one daemon gate, not a check per call site.** The rule against daemon commands in the relaunch gap was a `relaunching` flag each caller had to check, and most did not (static reading, 2026-09): the header's back/forward/reload/URL edit, the Display modal's custom viewport, tab clicks, sync-to-pane (reached by a resize once a pop-in had already flipped `poppedOut`), and Cmd-A/C/X all reached the daemon mid-relaunch. The lifecycle behind it was a dozen flags whose invariants lived in five predicates. Once captures and the popped-out URL observer moved into the host, and the host itself refused operations mid-relaunch (see [Browser Host](#browser-host)), the gate was left ordering the Surface's own intents.
 
 **Why an unpark streams from its parked port first, and attaches with no page.** Asking the host first cost every unpark an attach round trip (a pid and stream-file read plus a port probe) before the first frame, for a daemon that almost never moves while hidden (review, 2026-09). When it did move, or went away: a daemon gone while the pane was hidden is the same failure as one gone while visible, which the pane shows as ended; relaunching it on unpark would hide that failure and undo a `dor agent-browser close` made meanwhile. A restore has no such history, so it reopens the page.
 
@@ -174,7 +180,7 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 - clearing the host's override leaves the page with no emulation (1280×633) until the next navigation re-applies Playwright's;
 - the CLI's `screenshot` re-applies Playwright's own emulation.
 
-The old double write, `setViewportSize` then a host override carrying the ratio, therefore lost its ratio to every agent `screenshot`. It also undid an agent's `resize` on the next navigation: 800×600@1 became 1000×700@2 again. An override alone was replaced outright by `screenshot` (900×600@2 to 1280×720@1). `setViewportSize` alone survived same-site, cross-site and CLI navigation, reload, a tab switch, `screenshot` and `snapshot`, and an agent's `resize` replaced it and stayed. A device's touch and user-agent overrides from the host's session reset cleanly (`userAgent: ''` restores Playwright's own).
+The old double write, `setViewportSize` then a host override carrying the ratio, therefore lost its ratio to every agent `screenshot`. It also undid an agent's `resize` on the next navigation: 800×600@1 became 1000×700@2 again. An override alone was replaced outright by `screenshot` (900×600@2 to 1280×720@1). `setViewportSize` alone survived same-site, cross-site and CLI navigation, reload, a tab switch, `screenshot` and `snapshot`, and an agent's `resize` replaced it and stayed.
 
 **What one writer costs.** Playwright has no API to change a context's ratio after launch, and the CLI reads it only from a config file, which as `--config` would displace the project's own. So a Playwright page renders at 1, and its crisp capture is CSS-resolution. A `clip.scale` capture renders at 2× but left the page at 900×513 afterward.
 
@@ -195,6 +201,8 @@ The built-in local-file viewer supplies its own content boundary and permits the
 **Why the HTML path keeps the body's own encoding.** Each was reproduced against the proxy (2026-09-23): relabelling every HTML response `charset=utf-8` overrode both the upstream header and any `<meta charset>`, so a Shift_JIS or windows-1252 page mis-decoded; an upstream that compresses without being asked had the shim prepended to its gzip bytes with `content-encoding: gzip` kept, and the frame failed with `ERR_CONTENT_DECODING_FAILED`; and a valid document with neither `</head>` nor `<body>` got the shim before `<!doctype html>`, switching it to quirks mode. Deleting `Accept-Encoding` on every request sent a remote upstream's scripts and styles uncompressed, typically 3-5x the bytes.
 
 **Why a grant gets its own origin instead of a path token.** A dedicated origin keeps root-relative resources and client-side routers working with no body URL rewriting; a path token would have to survive every link, redirect and `fetch` the page makes.
+
+**Why a frame is transparent until its first load.** An iframe paints its `bg-white` before its document arrives, so a new frame flashed white in a dark theme for as long as its server took to answer (observed on preview slot switches, 2026-09-28). Opacity leaves the frame laid out and loading, and no shim or uninstrumented-document check reads visibility. The 1s fallback shows a document whose `load` never fires.
 
 ## Iframe Shim
 

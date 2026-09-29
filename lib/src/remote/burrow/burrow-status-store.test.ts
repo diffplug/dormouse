@@ -272,3 +272,52 @@ describe('publishing', () => {
   });
 });
 
+
+describe('an answer from an older broker', () => {
+  /**
+   * A VS Code broker window may run the extension from before a field existed
+   * (`docs/specs/vscode.md` → the peer link), so the typed shape is filled in
+   * at the one seam where the untrusted one becomes it.
+   */
+  it('reads a missing `serving` as `enrolled`, and publishes when it flips', async () => {
+    vi.useFakeTimers();
+    let status: Record<string, unknown> = {
+      enrolled: true,
+      relayUrl: 'https://laptop.tailnet.ts.net',
+      burrowId: 'burrow-1',
+      connection: 'connected',
+      pairedClients: 0,
+      suggestedLabel: 'ned-mac',
+      offer: null,
+    };
+    burrowLink = {
+      command: async () => ({ ...status }),
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeToBurrowStatus(listener);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getBurrowStatusSnapshot()).toMatchObject({
+        kind: 'ready',
+        status: { enrolled: true, serving: true },
+      });
+
+      status = { ...status, enrolled: false, relayUrl: null, burrowId: null };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ status: { enrolled: false, serving: false } });
+
+      // A current service's own answer wins, and `serving` alone moving is a change.
+      status = { ...status, serving: true };
+      const calls = listener.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ status: { enrolled: false, serving: true } });
+      expect(listener.mock.calls.length).toBe(calls + 1);
+    } finally {
+      unsubscribe();
+    }
+  });
+});

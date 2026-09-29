@@ -1,32 +1,27 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { clsx } from 'clsx';
 import { POPOVER_FOCUSABLE_SELECTOR, usePopoverFocusTrap } from '../use-popover-focus-trap';
 import { useDismissOverlay } from './use-dismiss-overlay';
 import { useHeaderTier } from './use-header-tier';
 import { useSurfaceVisibility } from './use-surface-visibility';
-import { noteCountPhrase, useNoteCount } from '../use-notepad';
 import { clampOverlayPosition, OVERLAY_VIEWPORT_MARGIN_PX } from '../../lib/ui-geometry';
 import {
   DotsThreeIcon,
-  NotepadIcon,
   ArrowClockwiseIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
-  SplitHorizontalIcon,
-  SplitVerticalIcon,
 } from '@phosphor-icons/react';
-import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
-import { NotepadHeaderButton } from './NotepadHeaderButton';
-import { MinimizeKillButtons, PaneActionGroup } from './PaneActionButtons';
+import { chromeButton, OVERLAY_MAX_HEIGHT, paneHeader, POPUP_SURFACE_CLASS } from '../design';
+import { MinimizeKillButtons, PaneActionGroup, SplitButtons } from './PaneActionButtons';
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
   useAgentBrowserScreenSnapshot,
   browserDisplayMode,
 } from './agent-browser-screen';
-import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
+import { BrowserDisplayButton } from './BrowserDisplayIcon';
 import { InlineEditInput } from './InlineEditInput';
 import type { PaneProps } from './pane-props';
 import { browserSurfaceUrl, loopbackPort, pathDisplay } from './browser-url';
@@ -43,15 +38,15 @@ import {
 
 /** What the browser chrome shows inline at a header width (`docs/specs/layout.md`
  *  → "Pane header responsive sizing"). Below `minimal` the chrome moves into the
- *  popover, where it renders at `full`. */
+ *  popover, where it renders at `full`. A Tool has its own header,
+ *  `ToolPaneHeader`. */
 type BrowserInlineTier = 'full' | 'compact' | 'minimal';
-type BrowserHeaderTier = BrowserInlineTier | 'overflow' | 'tight' | 'tiny';
+type BrowserHeaderTier = BrowserInlineTier | 'overflow' | 'tiny';
 // Border-box widths; `docs/specs/layout.rationale.md` derives each boundary.
 const browserHeaderTier = (width: number): BrowserHeaderTier =>
-  width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 102 ? 'overflow' : width >= 94 ? 'tight' : 'tiny';
+  width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 94 ? 'overflow' : 'tiny';
 
-export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
-  const dirty = useToolDirty(id, params);
+export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
   const visible = useSurfaceVisibility(parked);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -68,12 +63,6 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const screen = useAgentBrowserScreenController(id);
   const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
   const chrome = useAgentBrowserChromeSnapshot(screen);
-  // The far-left chip uses the same capability-first identity as the Display
-  // modal and minimized Door, keyed once so its visible and accessible meanings
-  // cannot drift.
-  const displayMode = screenSnapshot ? browserDisplayMode(screenSnapshot) : null;
-  const displayLabel = displayMode ? `${BROWSER_DISPLAY_LABEL[displayMode]} — change display` : undefined;
-
   // Dev-server connection: when the active tab is loopback, correlate its port
   // to the Dormouse terminal pane serving it (resolved Wall-side). Hooks run
   // unconditionally; a non-loopback/no-screen surface just yields null.
@@ -104,11 +93,10 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
     else if (value.trim()) setUrlRefusal({ rect: el.getBoundingClientRect(), value: value.trim() });
     setEditingUrl(false);
   };
-  const closeUrlEditor = () => setEditingUrl(false);
 
   // Below the `minimal` tier the chrome lives in a popover behind one trigger;
-  // resizing, moved essential controls, or a hidden Surface closes it, the
-  // last without pulling focus back to a trigger nobody can see. `closeMenu` stays identity-stable
+  // resizing or a hidden Surface closes it, the latter without pulling focus
+  // back to a trigger nobody can see. `closeMenu` stays identity-stable
   // (reading `visibleRef`) so the popover's listeners subscribe once.
   const headerRef = useRef<HTMLDivElement>(null);
   const overflowRef = useRef<HTMLButtonElement>(null);
@@ -119,150 +107,127 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
     if (restoreFocus && visibleRef.current) overflowRef.current?.focus();
   }, []);
   const tier = useHeaderTier(headerRef, browserHeaderTier, { onResize: () => closeMenu(false) });
-  const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tight' || tier === 'tiny' ? null : tier;
-  // Zoom stays in the header at every width, so only its two companions move.
-  // Keep 94–101px distinct so a dirty report can move them without a resize.
-  const inlineMinimizeKill = tier !== 'tiny' && (tier !== 'tight' || !dirty);
+  const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tiny' ? null : tier;
+  // Zoom stays in the header at every width, so only its two companions move;
+  // a focused one hands focus to the trigger as it goes.
+  const inlineMinimizeKill = tier !== 'tiny';
   const minimizeKillFocused = useRef(false);
-  const previousInlineMinimizeKill = useRef(inlineMinimizeKill);
   useLayoutEffect(() => {
-    if (previousInlineMinimizeKill.current !== inlineMinimizeKill) {
-      if (menuOpen || (!inlineMinimizeKill && minimizeKillFocused.current)) closeMenu();
-      minimizeKillFocused.current = false;
-    }
-    previousInlineMinimizeKill.current = inlineMinimizeKill;
-  }, [inlineMinimizeKill, menuOpen, closeMenu]);
+    if (!inlineMinimizeKill && minimizeKillFocused.current) closeMenu();
+    minimizeKillFocused.current = false;
+  }, [inlineMinimizeKill, closeMenu]);
   const popoverOpen = visible && inline === null && menuOpen;
-  const noteCount = useNoteCount(id);
-  const overflowLabel = `Browser controls${noteCount ? `, ${noteCountPhrase(noteCount)}` : ''}`;
+  const overflowLabel = 'Browser controls';
   useEffect(() => {
     if (!visible) closeMenu(false);
   }, [visible, closeMenu]);
 
-  const renderBrowserControls = (placement: BrowserInlineTier | 'popover') => (
-    <>
-      {screen && screenSnapshot && chrome ? (
-        <>
-          {/* Render/screen chip → far left, out of the way of the nav controls.
-              Opens the Display modal; the glyph reflects reality — frame =
-              embed, and robot + presentation = agent-visible browser. */}
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
-            aria-label={displayLabel}
-            title={displayLabel}
-            data-browser-display-trigger="true"
-            className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
-          >
-            {displayMode && <BrowserDisplayIcon mode={displayMode} size={14} />}
-          </button>
+  const renderBrowserControls = (placement: BrowserInlineTier | 'popover') => {
+    return (
+      <>
+        {screen && screenSnapshot && chrome ? (
+          <>
+            {/* Render/screen chip → far left, out of the way of the nav controls.
+                The glyph reflects reality — frame = embed, and robot +
+                presentation = agent-visible browser. */}
+            <BrowserDisplayButton mode={browserDisplayMode(screenSnapshot)} onOpen={() => screen.actions.openModal()} />
 
-          {/* Back / forward / refresh — native agent-browser commands; always
-              enabled (no canGoBack/Forward in the stream). Collapse before the
-              URL but after the splits. */}
-          {placement !== 'minimal' && <div className="flex shrink-0 items-center gap-0.5">
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); screen.chromeActions.back(); }}
-              ariaLabel="Back"
-              tooltip="Back"
-            ><ArrowLeftIcon size={14} /></HeaderActionButton>
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); screen.chromeActions.forward(); }}
-              ariaLabel="Forward"
-              tooltip="Forward"
-            ><ArrowRightIcon size={14} /></HeaderActionButton>
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); screen.chromeActions.reload(); triggerDevServerRescan(); }}
-              ariaLabel="Reload"
-              tooltip="Reload"
-            ><ArrowClockwiseIcon size={14} /></HeaderActionButton>
-          </div>}
+            {/* Back / forward / refresh — native agent-browser commands; always
+                enabled (no canGoBack/Forward in the stream). Collapse before the
+                URL but after the splits. */}
+            {placement !== 'minimal' && <div className="flex shrink-0 items-center gap-0.5">
+              <HeaderActionButton
+                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                onClick={(e) => { e.stopPropagation(); screen.chromeActions.back(); }}
+                ariaLabel="Back"
+                tooltip="Back"
+              ><ArrowLeftIcon size={14} /></HeaderActionButton>
+              <HeaderActionButton
+                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                onClick={(e) => { e.stopPropagation(); screen.chromeActions.forward(); }}
+                ariaLabel="Forward"
+                tooltip="Forward"
+              ><ArrowRightIcon size={14} /></HeaderActionButton>
+              <HeaderActionButton
+                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                onClick={(e) => { e.stopPropagation(); screen.chromeActions.reload(); triggerDevServerRescan(); }}
+                ariaLabel="Reload"
+                tooltip="Reload"
+              ><ArrowClockwiseIcon size={14} /></HeaderActionButton>
+            </div>}
 
-          {/* --key indicator for non-default keys only — the key name inline,
-              small + quiet (hover reveals `--key <name>`), never a prefix on the
-              persisted title. Raw --session surfaces show none. */}
-          {chrome.key && chrome.key !== 'default' && (
-            <span
-              className="min-w-0 max-w-16 truncate text-xs text-current/70"
-              title={`--key ${chrome.key}`}
-            >{chrome.key}</span>
-          )}
-
-          {editingUrl ? (
-            /* Inline URL editor (like renaming a terminal tab): pre-filled with
-               the full URL + all selected, Enter navigates, Escape/blur cancels
-               (browser-omnibox style). Fills the URL+chip+spacer span. */
-            <InlineEditInput
-              data-url-input-for={id}
-              className="min-w-0 flex-1 border-none bg-transparent p-0 font-medium text-inherit outline-none"
-              initialValue={chrome.url}
-              blurAction="cancel"
-              onSubmit={submitUrl}
-              onCancel={closeUrlEditor}
-            />
-          ) : (
-            <>
-              {/* Dev-server connection chip — in front of the URL when the port
-                  maps to a single pane; click focuses that terminal. The full
-                  command shows by default (no fixed cap); it only truncates
-                  after the URL path has, since the URL shrinks far faster.
-                  Absent ⇒ no chip + full host+path. */}
-              {devServer && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
-                  aria-label={`Focus ${devServer.label} — serves this localhost port`}
-                  title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
-                  className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
-                >
-                  <span className="min-w-0 truncate">{devServer.label}</span>
-                  {port != null && <span className="min-w-0 truncate text-current/70">:{port}</span>}
-                </button>
-              )}
-
-              {/* URL is the path only when a chip fronts it (domain is in the
-                  chip), else the full host+path. Click to edit/navigate; HTML
-                  <title> / full URL → tooltip. Gives up width (shrink-[10]) long
-                  before the command does. */}
+            {/* --key indicator for non-default keys only — the key name inline,
+                small + quiet (hover reveals `--key <name>`), never a prefix on the
+                persisted title. Raw --session surfaces show none. */}
+            {chrome.key && chrome.key !== 'default' && (
               <span
-                className={`${placement === 'popover' ? 'basis-full' : ''} min-w-0 shrink-[10] cursor-text truncate font-medium underline-offset-2 hover:underline`}
-                title={chrome.title ?? chrome.url ?? undefined}
-                onMouseDown={(e) => e.stopPropagation()}
-                role="button"
-                tabIndex={0}
-                onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setEditingUrl(true); } }}
-                onClick={(e) => { e.stopPropagation(); setEditingUrl(true); }}
-              >{urlText || title || id}</span>
+                className="min-w-0 max-w-16 truncate text-xs text-current/70"
+                title={`--key ${chrome.key}`}
+              >{chrome.key}</span>
+            )}
 
-              {/* Flexible spacer keeps the layout buttons right-aligned. */}
-              {placement !== 'popover' && <div className="min-w-0 flex-1" />}
-            </>
-          )}
-        </>
-      ) : (
-        <span className="min-w-0 flex-1 truncate font-medium">{title ?? id}</span>
-      )}
+            {editingUrl ? (
+              /* Inline URL editor (like renaming a terminal tab): pre-filled with
+                 the full URL + all selected, Enter navigates, Escape/blur cancels
+                 (browser-omnibox style). Fills the URL+chip+spacer span. */
+              <InlineEditInput
+                data-url-input-for={id}
+                className="min-w-0 flex-1 border-none bg-transparent p-0 font-medium text-inherit outline-none"
+                initialValue={chrome.url}
+                blurAction="cancel"
+                onSubmit={submitUrl}
+                onCancel={() => setEditingUrl(false)}
+              />
+            ) : (
+              <>
+                {/* Dev-server connection chip — in front of the URL when the port
+                    maps to a single pane; click focuses that terminal. The full
+                    label shows by default (no fixed cap); it truncates only once
+                    the URL path, whose flex basis is zero, has none left.
+                    Absent ⇒ no chip + full host+path. */}
+                {devServer && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
+                    aria-label={`Focus ${devServer.label} — serves this localhost port`}
+                    title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
+                    className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
+                  >
+                    <span className="min-w-0 truncate">{devServer.label}</span>
+                    {port != null && <span className="min-w-0 truncate text-current/70">:{port}</span>}
+                  </button>
+                )}
 
-      <NotepadHeaderButton surfaceId={id} />
-      {(placement === 'popover' || placement === 'full') && <div className="ml-1 flex shrink-0 items-center gap-0.5">
-        <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={(e) => { e.stopPropagation(); actions.onSplitH(id); }}
-          ariaLabel="Split left/right"
-          tooltip="Split left/right [|] or [%]"
-        ><SplitHorizontalIcon size={14} /></HeaderActionButton>
-        <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={(e) => { e.stopPropagation(); actions.onSplitV(id); }}
-          ariaLabel="Split top/bottom"
-          tooltip={'Split top/bottom [-] or ["]'}
-        ><SplitVerticalIcon size={14} /></HeaderActionButton>
-      </div>}
-    </>
-  );
+                {/* URL is the path only when a chip fronts it (domain is in the
+                    chip), else the full host+path. Click to edit/navigate; HTML
+                    <title> / full URL → tooltip. Inline it grows from a zero
+                    basis up to its text, so it gives up all its width before the
+                    chip shrinks at all. */}
+                <span
+                  className={clsx(placement === 'popover' ? 'basis-full' : 'max-w-max grow basis-0', 'min-w-0 cursor-text truncate font-medium underline-offset-2 hover:underline')}
+                  title={chrome.title ?? (chrome.url || undefined)}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setEditingUrl(true); } }}
+                  onClick={(e) => { e.stopPropagation(); setEditingUrl(true); }}
+                >{urlText || title || id}</span>
+
+                {/* Takes the space the URL leaves, keeping the layout buttons
+                    right-aligned; an auto margin, so it never competes with the
+                    URL for width. */}
+                {placement !== 'popover' && <div className="ml-auto" />}
+              </>
+            )}
+          </>
+        ) : (
+          <span className="min-w-0 flex-1 truncate font-medium">{title ?? id}</span>
+        )}
+
+        {(placement === 'popover' || placement === 'full') && <SplitButtons surfaceId={id} />}
+      </>
+    );
+  };
 
   const minimizeKillFocus = {
     onFocus: () => { minimizeKillFocused.current = true; },
@@ -282,10 +247,9 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   return (
     <div
       ref={headerRef}
-      className={`flex h-full min-w-0 flex-1 cursor-grab items-center ${inline ? 'gap-1.5 pl-2 pr-[5px]' : 'gap-0.5 px-1'} ${TERMINAL_TOP_RADIUS_CLASS} text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS} ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
+      className={paneHeader({ state: isActiveHeader ? 'active' : 'inactive', class: inline ? undefined : 'gap-0.5 px-1' })}
       onMouseDown={() => actions.onClickPanel(id)}
     >
-      <ToolDirtyIndicator dirty={dirty} />
       {inline ? renderBrowserControls(inline) : (
         <button ref={overflowRef} type="button" aria-label={overflowLabel}
           aria-haspopup="dialog" aria-expanded={popoverOpen}
@@ -295,13 +259,13 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
           onPointerDown={event => event.stopPropagation()}
           onMouseDown={event => event.stopPropagation()}
           onClick={event => { event.stopPropagation(); if (menuOpen) closeMenu(); else setMenuOpen(true); }}>
-          {noteCount ? <NotepadIcon size={14} weight="fill" /> : <DotsThreeIcon size={14} />}
+          <DotsThreeIcon size={14} />
         </button>
       )}
       {paneActions}
       {popoverOpen && <BrowserHeaderPopover anchorRef={overflowRef} onClose={closeMenu}>
         {renderBrowserControls('popover')}
-        {!inlineMinimizeKill && <MinimizeKillButtons surfaceId={id} beforeAct={closeMenu} {...minimizeKillFocus} />}
+        {!inlineMinimizeKill && <MinimizeKillButtons surfaceId={id} beforeAct={closeMenu} />}
       </BrowserHeaderPopover>}
       {urlRefusal && (
         <AnchoredWarning
@@ -339,7 +303,7 @@ function BrowserHeaderPopover({ anchorRef, onClose, children }: {
     positionPopover();
     const observer = new ResizeObserver(positionPopover);
     observer.observe(element, { box: 'border-box' });
-    // Content resizing (URL editing, notes, or connection labels) changes only
+    // Content resizing (URL editing or connection labels) changes only
     // geometry. Moving focus again would cancel the URL editor on its blur.
     element.querySelector<HTMLElement>(POPOVER_FOCUSABLE_SELECTOR)?.focus();
     return () => observer.disconnect();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyDisplayMatch, inspectExternalUri, normalizeExternalUri } from './external-links';
+import { classifyDisplayMatch, inspectExternalUri, localFileLinkPreviewPath, normalizeExternalUri } from './external-links';
 
 describe('normalizeExternalUri', () => {
   it('allows absolute external URIs after inspection', () => {
@@ -73,5 +73,57 @@ describe('classifyDisplayMatch', () => {
     // "Click for https://goog1e.com/free" contains a URL but is itself not URL-shaped.
     // Conservative call: classify as plain. (We'd need to scan for embedded URLs to flag.)
     expect(classifyDisplayMatch('https://evil.com/phish', 'Click for free money')).toBe('plain');
+  });
+});
+
+describe('localFileLinkPreviewPath', () => {
+  const uri = 'file://host.local/x/README.md';
+
+  it('accepts display text naming the whole path or its trailing components', () => {
+    expect(localFileLinkPreviewPath(uri, 'README.md')).toBe('/x/README.md');
+    expect(localFileLinkPreviewPath(uri, ' x/README.md ')).toBe('/x/README.md');
+    expect(localFileLinkPreviewPath(uri, '/x/README.md')).toBe('/x/README.md');
+    expect(localFileLinkPreviewPath('file:///x/README.md', 'README.md')).toBe('/x/README.md');
+  });
+
+  it('rejects text that is not a whole-component suffix of the path', () => {
+    expect(localFileLinkPreviewPath(uri, 'EADME.md')).toBeNull();
+    expect(localFileLinkPreviewPath(uri, '/README.md')).toBeNull();
+    expect(localFileLinkPreviewPath(uri, 'readme.md')).toBeNull();
+    expect(localFileLinkPreviewPath(uri, 'see the docs')).toBeNull();
+  });
+
+  it('rejects empty display text', () => {
+    expect(localFileLinkPreviewPath(uri, '')).toBeNull();
+    expect(localFileLinkPreviewPath(uri, '  ')).toBeNull();
+    expect(localFileLinkPreviewPath(uri, '*')).toBeNull();
+    expect(localFileLinkPreviewPath('file:///', '')).toBeNull();
+    expect(localFileLinkPreviewPath('file:///', '/')).toBe('/');
+  });
+
+  it('strips one ls -F classifier', () => {
+    expect(localFileLinkPreviewPath(uri, 'README.md*')).toBe('/x/README.md');
+    expect(localFileLinkPreviewPath('file:///x/src', 'src/')).toBe('/x/src');
+    expect(localFileLinkPreviewPath('file:///x/src/', 'src/')).toBe('/x/src');
+    expect(localFileLinkPreviewPath(uri, 'README.md**')).toBeNull();
+    expect(localFileLinkPreviewPath('file:///x/a=', 'a=')).toBe('/x/a=');
+  });
+
+  it('compares against the percent-decoded path', () => {
+    expect(localFileLinkPreviewPath('file:///x/my%20notes.md', 'my notes.md')).toBe('/x/my notes.md');
+    expect(localFileLinkPreviewPath('file:///x/my%20notes.md', 'my%20notes.md')).toBeNull();
+    expect(localFileLinkPreviewPath('file:///x/%E0%A4%A', 'x')).toBeNull();
+  });
+
+  it('rejects a path carrying control characters', () => {
+    expect(localFileLinkPreviewPath('file:///x/a%1Bb', 'a\x1bb')).toBeNull();
+    expect(localFileLinkPreviewPath('file:///x/a%0Ab', 'a\nb')).toBeNull();
+  });
+
+  it('rejects every other scheme and an IP-literal host', () => {
+    expect(localFileLinkPreviewPath('https://example.com/x/README.md', 'README.md')).toBeNull();
+    expect(localFileLinkPreviewPath('vscode://file/x/README.md', 'README.md')).toBeNull();
+    expect(localFileLinkPreviewPath('file://[::1]/x/README.md', 'README.md')).toBeNull();
+    expect(localFileLinkPreviewPath('not a url', 'not a url')).toBeNull();
   });
 });

@@ -35,12 +35,15 @@ import type {
   SendSurfaceResponse,
   SplitSurfaceRequest,
   SplitSurfaceResponse,
+  ToolListRequest,
+  ToolListResponse,
   ToolSurfaceRequest,
   ToolSurfaceResponse,
 } from './commands/types.js';
 import {
   APP_CONTROL_METHODS,
   SURFACE_CONTROL_METHODS,
+  TOOL_CONTROL_METHODS,
   WORKSPACE_CONTROL_METHODS,
   type DorControlMethod,
 } from './protocol.js';
@@ -81,9 +84,8 @@ function proofMatches(provided: unknown, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-/** `dor workspace close` archives and tears down every member Surface, which a
- *  refused notepad archive can park on; the server's own reaper sits above it.
- *  Also covers moves: must exceed `ARRIVAL_MAX` in
+/** `dor workspace close` tears down every member Surface. Also covers moves:
+ *  must exceed `ARRIVAL_MAX` in
  *  `standalone/src-tauri/src/routing.rs` so hand-back reasons arrive before timeout. */
 const CLOSE_WORKSPACE_TIMEOUT_MS = 30_000;
 
@@ -120,6 +122,10 @@ export class SocketControlClient implements ControlClient {
 
   toolSurface(request: ToolSurfaceRequest): Promise<ToolSurfaceResponse> {
     return this.request<ToolSurfaceResponse>(SURFACE_CONTROL_METHODS.tool, request);
+  }
+
+  toolList(request: ToolListRequest): Promise<ToolListResponse> {
+    return this.request<ToolListResponse>(TOOL_CONTROL_METHODS.list, request);
   }
 
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse> {

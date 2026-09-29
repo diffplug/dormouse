@@ -42,11 +42,14 @@ import { BrowserView, WEBVIEW_ID, closeSocket, createViewerServer, measuredViewp
 
 /** An operation on a live browser that each provider maps to its own call:
  *  a fixed agent-browser argv, or a Playwright client call. */
-export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab' | 'viewport' | 'device' }>;
+export type BrowserAct = Extract<BrowserOp, { op: 'navigate' | 'history' | 'tab' | 'viewport' }>;
+
+// For the sidecar, which loads each host module as its own bundle.
+export { browserLaunchEnv } from './browser-launch-env';
 
 /** The binding a provider runs one request with: the session named, or minted
- *  for a new launch. */
-export type ProviderBinding = BrowserBinding;
+ *  for a new launch. Its environment stays inside the host. */
+export type ProviderBinding = BrowserBinding & { env?: NodeJS.ProcessEnv };
 
 /** A browser that is up: its stream — what `view` subscribes to — and
  *  whether it runs headed when the provider can tell. */
@@ -112,6 +115,8 @@ export interface BrowserProvider<B = unknown> {
 }
 
 export interface BrowserHostDeps {
+  /** Trusted host callback; the returned environment is never serialized. */
+  launchEnv?(cwd: string | undefined): Promise<NodeJS.ProcessEnv>;
   /** Write text to the OS clipboard (copy/cut land here). VS Code passes
    *  `vscode.env.clipboard.writeText`; the sidecar shells out (pbcopy/clip/…). */
   writeClipboardText(text: string): void | Promise<void>;
@@ -153,7 +158,6 @@ function generateGuiSession(): string {
 }
 
 const TAB_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ()._-]{0,63}$/;
 
 /** `value` as an optional request id: absent, valid, or `null` when invalid. */
 function optionalRequestId(value: unknown): { requestId?: string } | null {
@@ -200,9 +204,6 @@ function parseBrowserRequest(raw: unknown): BrowserRequest | string {
 }
 
 function parseOp(r: Record<string, unknown>): BrowserOp | string {
-  if ((r.op === 'viewport' || r.op === 'device') && r.endsSync !== undefined
-    && (typeof r.endsSync !== 'string' || !WEBVIEW_ID.test(r.endsSync))) return 'invalid sync engagement';
-  const endsSync = typeof r.endsSync === 'string' ? { endsSync: r.endsSync } : {};
   switch (r.op) {
     case 'launch':
     case 'attach': {
@@ -232,6 +233,8 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
       return { op: 'tab', action, tabId };
     }
     case 'viewport': {
+      if (r.endsSync !== undefined && (typeof r.endsSync !== 'string' || !WEBVIEW_ID.test(r.endsSync))) return 'invalid sync engagement';
+      const endsSync = typeof r.endsSync === 'string' ? { endsSync: r.endsSync } : {};
       const [width, height, dpr] = [dimension(r.width, VIEWPORT_MAX_SIDE), dimension(r.height, VIEWPORT_MAX_SIDE), r.dpr === undefined ? undefined : dimension(r.dpr, VIEWPORT_MAX_DPR)];
       if (dpr === null) return 'invalid viewport';
       return width && Number.isInteger(width) && height && Number.isInteger(height) && (r.dpr === undefined || dpr)
@@ -239,8 +242,6 @@ function parseOp(r: Record<string, unknown>): BrowserOp | string {
         : 'invalid viewport';
     }
     case 'measure': return { op: 'measure' };
-    case 'device':
-      return typeof r.name === 'string' && DEVICE_NAME.test(r.name) ? { op: 'device', name: r.name, ...endsSync } : 'invalid device name';
     case 'close': {
       const cancels = r.cancels;
       if (cancels === undefined) return { op: 'close' };
@@ -372,7 +373,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   // running must leave the newer pane size last. Recheck lifecycle at execution,
   // since a queued write belongs to the browser that existed at arrival.
   const viewportWrites = new Map<string, Promise<BrowserResult>>();
-  function writeViewport({ p, b, id }: Bound, act: Extract<BrowserAct, { op: 'viewport' | 'device' }>, options: { isCurrent?: () => boolean; onSuccess?: () => void } = {}): Promise<BrowserResult> {
+  function writeViewport({ p, b, id }: Bound, act: Extract<BrowserAct, { op: 'viewport' }>, options: { isCurrent?: () => boolean; onSuccess?: () => void } = {}): Promise<BrowserResult> {
     const generation = generations.get(id);
     const writing = (viewportWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(async () => {
       if (closed) throw new Error('the browser host is shutting down');
@@ -654,22 +655,55 @@ export function createBrowserHost(deps: BrowserHostDeps) {
 
   // --- dispatch ---
 
+  // One environment per live session, including concurrent first requests.
+  // Restored sessions resolve afresh; no environment is saved with the layout.
+  type LaunchEnv = { promise: Promise<NodeJS.ProcessEnv>; closing: boolean; env?: NodeJS.ProcessEnv };
+  const launchEnvs = new Map<string, LaunchEnv>();
+  const forgetEnv = (key: string, entry: LaunchEnv) => { if (launchEnvs.get(key) === entry) launchEnvs.delete(key); };
   async function run(raw: unknown): Promise<BrowserResult> {
     const r = parseBrowserRequest(raw);
     if (typeof r === 'string') return { ok: false, error: r };
+    const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
+    let envKey = '';
+    let created: LaunchEnv | undefined;
     try {
       if (closed) throw new Error('the browser host is shutting down');
       // Sent before a close that cancelled it, delivered after: it opens
       // nothing for the Surface that close was for.
       if ((r.op === 'launch' || r.op === 'attach') && wasCancelled(r.requestId)) throw new Error('the browser was closed');
+      if (r.op === 'close') cancelRequests(r.cancels);
       const p = providerFor(r.provider);
-      const b = p.bind({ ...r.binding, session: r.binding.session ?? generateGuiSession() });
+      const binding: ProviderBinding = { ...r.binding, session: r.binding.session ?? generateGuiSession() };
+      if (deps.launchEnv) {
+        // Keyed on the cwd a provider defaults to, so the one it answers with
+        // finds the same environment.
+        envKey = JSON.stringify([r.provider, binding.session, binding.cwd ?? process.cwd()]);
+        let entry = launchEnvs.get(envKey);
+        if (r.op === 'close') {
+          // Cleanup never starts or waits for a shell. A restored binding can
+          // still close with its validated executable and the host environment.
+          if (entry) {
+            entry.closing = true;
+            binding.env = entry.env;
+            forgetEnv(envKey, entry);
+          }
+        } else {
+          if (!entry) launchEnvs.set(envKey, entry = created = { promise: deps.launchEnv(binding.cwd), closing: false });
+          binding.env = entry.env = await entry.promise;
+          if (closed || ((r.op === 'launch' || r.op === 'attach') && (entry.closing || wasCancelled(r.requestId)))) {
+            forgetEnv(envKey, entry);
+            throw new Error('the browser was closed');
+          }
+        }
+      }
+      const b = p.bind(binding);
       const bound: Bound = { p, b, id: p.identity(b) };
       const answer = (live: LiveBrowser): BrowserResult => {
         trackHeaded(bound, live.headed);
-        return { ok: true, ...p.describe(b), nativeIdentity: bound.id, stream: live.stream, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
+        // Picked, so no provider's binding (its environment) reaches the webview.
+        const { session, cwd, binaryPath } = p.describe(b);
+        return { ok: true, session, cwd, binaryPath, nativeIdentity: bound.id, stream: live.stream, ...(live.headed !== undefined ? { headed: live.headed } : {}) };
       };
-      const requestDeadline = Date.now() + REQUEST_BUDGET_MS;
       const settlingAnswer = { ok: false, error: 'the browser is being relaunched or closed' };
       if (r.op !== 'launch' && r.op !== 'attach' && r.op !== 'close' && settling.has(bound.id)) return settlingAnswer;
       switch (r.op) {
@@ -684,7 +718,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return { ...answer(live), ...(relaunched ? { relaunched } : {}) };
         }
         case 'close':
-          cancelRequests(r.cancels);
           await closeSession(bound);
           return { ok: true };
         case 'view': {
@@ -707,8 +740,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           if (!measured) throw new Error('the browser did not report a viewport');
           return { ok: true, viewport: { width: measured.viewportWidth, height: measured.viewportHeight, dpr: measured.devicePixelRatio } };
         }
-        case 'viewport':
-        case 'device': {
+        case 'viewport': {
           const engagement = r.endsSync ?? sync.current(bound.id);
           return await writeViewport(bound, r, { onSuccess: () => sync.fixed(bound.id, engagement) });
         }
@@ -716,6 +748,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
           return await p.act(b, r);
       }
     } catch (error) {
+      if (created) forgetEnv(envKey, created);
       return { ok: false, error: messageOf(error) };
     }
   }
@@ -729,6 +762,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     close: async () => {
       // Every launch and sweep still pending now finds itself superseded.
       closed = true;
+      launchEnvs.clear();
       sync.close();
       const windows = [...headed.values()];
       headed.clear();

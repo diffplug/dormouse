@@ -57,7 +57,10 @@ the user's own binary overrides that no host sets (`docs/specs/dor-browser.md`).
 **`DORMOUSE_CLI_BIN` is host-internal spawn configuration, never
 terminal-facing:** `pty-core` prepends its *value* to the child's `PATH`, then
 deletes the variable (with `DORMOUSE_SHELL_INTEGRATION_DIR`) from the child env,
-so a terminal sees `dor` on `PATH` and nothing else.
+so a terminal sees `dor` on `PATH` and nothing else. **Must delete the sidecar's
+storage roots, `DORMOUSE_STATE_DIR` and `DORMOUSE_RECOVERY_DIR`, from the child
+env too**, so a dev server run in a pane never writes into the running app's
+state.
 
 **On Windows, `DORMOUSE_CLI_BIN` and `DORMOUSE_CLI_JS` must be plain paths,
 never `\\?\` verbatim paths** — cmd.exe cannot execute `dor.cmd` through one,
@@ -101,11 +104,9 @@ resolution on `exit` with an exit-time output snapshot (rationale).
 it through a `.cmd` shim, an unavoidable batch limitation; today's forwarded
 arguments carry none.
 
-- **`dor agent-browser`, `dor playwright` and the Playwright host spawn the `PATH`-resolved
+- **`dor agent-browser`, `dor playwright` and both browser hosts spawn the `PATH`-resolved
   absolute path, never the bare name** — cross-spawn resolves a bare name
   through `which`, which searches the cwd before `PATH` on Windows (rationale).
-  The agent-browser host's candidate list still ends in a bare name
-  (`## Future`).
 - **Within the `PATH` directories, and only those, the walk must select the file
   `which` would** — a divergence either runs a different binary or reports a
   present install as missing. **Never extend the search to the cwd**, which is
@@ -250,10 +251,10 @@ late response for a reaped id is a silent no-op on the server.
 
 **Must cancel `ensure`'s polling when the client disconnects.** Cancellation
 before an interrupted command returns to its prompt prevents relaunch;
-cancellation during initial integration detection closes the temporary Surface per `docs/specs/notepad.md` → "Closure".
+cancellation during initial integration detection closes the temporary Surface.
 `lib/src/components/Wall.test.tsx` pins both paths.
 
-**Must exclude Surfaces with a Wall closure in progress from reuse.** An unrelated notes freeze permits reuse.
+**Must exclude Surfaces with a Wall closure in progress from reuse.**
 
 Source of truth: `standalone/sidecar/dor-control-server.js`,
 `dor/src/control-client.ts`, `dor/src/protocol.ts`, `peerDirIsSafe` in
@@ -420,7 +421,7 @@ The spec keeps the behavior help cannot express:
 | Command | Behavioral contract |
 |---|---|
 | `split` | **Only a bare split focuses the new Surface.** A `--` marker or command tail leaves the caller focused; pre-parse preserves the marker stricli discards. |
-| `ensure` | **Must have a `--` command tail.** Matching uses the exact OSC 633 command plus resolved CWD; `cmd.exe` without integration fails immediately, other unintegrated shells time out after 8s and close through the notepad coordinator. `--restart` drives the live PTY in place, preserving layout and minimized/visible state, so it works on Doors too. |
+| `ensure` | **Must have a `--` command tail.** Matching uses the exact OSC 633 command plus resolved CWD; `cmd.exe` without integration fails immediately, other unintegrated shells time out after 8s and close the temporary Surface. `--restart` drives the live PTY in place, preserving layout and minimized/visible state, so it works on Doors too. |
 | `send` | **Must select exactly one input mode.** Text then key is the only mixed order; duplicate flags require the explicit sequence form. Input is paced, `sent` meaning queued ([transport.md → Paced input](transport.md#paced-input)). |
 | `read` | Clean, ANSI-free rendered lines; line limits count rendered lines. |
 | `await` | **Must name `--until quiet\|exit`; never infer it.** Timeout 1–86400 whole seconds, default 600; `alert.md` owns wake semantics. |
@@ -465,13 +466,13 @@ Wall (Handle Model), and each takes a `workspace:<n|name>` target except `new`:
 |---|---|
 | `new [name]` | **Creates in the background**, never activating: moving the user to another Workspace is a larger theft than the focus a bare `dor split` takes. Answers with the new ref. Without a name it is auto-named (`docs/specs/layout.md` → "Workspace names"). |
 | `rename <ref> <name>\|--auto` | Renames the Workspace only — no Surface title (`docs/specs/layout.md` → "Workspaces"); `--auto` hands the name back to auto-naming and answers with the outgoing name, since the derived one is computed afterwards. **An auto-name follows the terminals**, so a `workspace:<name>` target can stop resolving; `dor list --workspaces --json` reports `auto`. |
-| `close <ref> [--force]` | **Refuses, raising no confirmation, when the Workspace holds a touched or running Surface** unless `--force` — the caller is a command, not someone watching the Wall, exactly as `dor kill` archives silently. A Workspace whose close meets another already in flight and one whose Wall never registers (`still mounting`, after the routing retry — closing past it would leave its Sessions running with nothing holding them) refuse too. Member Surfaces close through the closure coordinator, and a refusal leaves the Workspace open and the user where they were (`docs/specs/notepad.md` → "Closure"). |
+| `close <ref> [--force]` | **Refuses, raising no confirmation, when the Workspace holds a touched or running Surface** unless `--force` — the caller is a command, not someone watching the Wall, exactly as `dor kill` refuses silently. A Workspace whose close meets another already in flight and one whose Wall never registers (`still mounting`, after the routing retry — closing past it would leave its Sessions running with nothing holding them) refuse too. Member Surfaces close in sequence, and a refusal leaves the Workspace open and the user where they were. A dirty Tool refuses even `--force` (`docs/specs/dor-tool.md` → Editing files). |
 | `switch <ref>` | Activates it. |
 | `move <ref> [--window <label\|new>] [--index <n>] [--dangerously-destroy-iframe-page-state]` | The Window handling it runs the same transfer the strip's drag does (`docs/specs/standalone.md` → Transfer), with no pointer to place the tab by. **Answers `moved` only once the target Window has adopted the Workspace.** **Refuses a move between Windows while the Workspace holds a plain iframe Surface unless the flag is passed**, naming them: the page state is lost (`docs/specs/layout.md` → Workspaces). A host with one Window reorders only. |
 
 **Each verb ships as one action of one command**, not a route map: the published
 CLI reference renders one help page per top-level command
-(`docs/specs/website-docs.md` → /docs/dor), and a nested command would have
+(`docs/specs/website-docs.md` → /dor), and a nested command would have
 none.
 
 **VS Code refuses every Workspace-spanning request at the extension host** —
@@ -658,10 +659,8 @@ hand. Only browser Surfaces carry an explicit join key (`dor agent-browser --key
 `dor playwright --key <name>`), because their session is held externally by the browser
 CLI.
 
-The worked examples — dev-server sharing, sub-agent launch and await, paired
-browser keys, multi-worktree, minimized watchers, port-owner handoff, safe
-cleanup — are `dor/skill.md`'s "## Recipes", which ships with the CLI
-([Agent Skill](#agent-skill)).
+The worked examples are `dor/skill.md`'s "## Recipes", which ships with the
+CLI ([Agent Skill](#agent-skill)).
 
 ## Agent Skill
 
@@ -675,7 +674,10 @@ bootstrap so each is exactly as stable as it needs to be:
   gitignored `generated-skill.ts`, so `dor skill` prints text version-locked to
   the CLI that staged it and the staged package stays launchers + bundle. **The
   skill body must carry no environment detection:** if `dor skill` ran, `dor` is
-  available — detection lives only in the stub.
+  available — detection lives only in the stub. **Its connection
+  troubleshooting must distinguish sandbox socket denial from stale caller
+  context**, directing agents to sandbox approval or a fresh caller environment,
+  never socket discovery or authentication bypass.
 - **Bootstrap is a loud stub that barely drifts.** `dor skill --install` writes
   a marker-delimited block (`<!-- dor-skill:begin` … `dor-skill:end -->`) into
   the project's agent instructions file, resolved against the invoking shell's
@@ -711,16 +713,11 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
 
 **Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
 
-Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`.
+**The router answers `tool.list` (`dor tool --list`) before resolving any Workspace or Surface**, like `app.*`.
+
+Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`; `handleToolControl` in `lib/src/components/wall/tool-control.ts`. Pinned by `dor tool reads` in `lib/src/components/wall/dor-control-router.test.ts`.
 
 ## Future
-
-- **Resolve the host's agent-browser candidates on `PATH` too.**
-  `runWithBinaryFallback` still ends its list with the bare
-  `DEFAULT_AGENT_BROWSER_BIN`, so on Windows the extension-host or Tauri-app
-  working directory is searched first — narrower than `dor agent-browser`'s case, since a
-  user does not clone into it. `resolvePlaywrightInstall` already walks its
-  candidates through `dor-lib-common`'s `resolveBinaryPath`.
 
 - **Surface a dead control channel in the UI.** A lost bind leaves one
   `[dor-control]` line on the host's stderr, and all a user sees is `dor`

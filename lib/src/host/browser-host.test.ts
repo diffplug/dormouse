@@ -430,7 +430,7 @@ describe('sync-to-pane', () => {
         viewer.send({ type: 'sync', width, height, dpr: 2, engagement });
         await vi.waitFor(() => expect(syncStates(viewer).length).toBeGreaterThan(answered));
       },
-      writes: () => fake.calls.filter((call) => call.startsWith('viewport ') || call.startsWith('device ')),
+      writes: () => fake.calls.filter((call) => call.startsWith('viewport ')),
       state: () => syncStates(viewer).at(-1),
     };
   }
@@ -521,24 +521,21 @@ describe('sync-to-pane', () => {
     const pane = await paneOn();
     pane.fake.gate('viewport s1 800x600@2');
     await pane.size(800, 600);
-    const fixed = pane.host.request({ ...s1, op: 'device', name: 'iPhone 15' });
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 });
     expect(pane.state()).toBe('applying');
     expect(pane.writes()).toEqual(['viewport s1 800x600@2']);
     pane.fake.release('viewport s1 800x600@2');
     expect((await fixed).ok).toBe(true);
     await vi.waitFor(() => expect(pane.state()).toBe('off'));
-    expect(pane.writes()).toEqual(['viewport s1 800x600@2', 'device s1 iPhone 15']);
+    expect(pane.writes()).toEqual(['viewport s1 800x600@2', 'viewport s1 1024x768@1']);
     // A pane size still on its way is not a new engagement.
     await pane.size(820, 600);
     expect(pane.writes()).toHaveLength(2);
   });
 
-  it.each([
-    { op: 'viewport', width: 1024, height: 768, dpr: 1 },
-    { op: 'device', name: 'iPhone 15' },
-  ] as const)('cancels unseen sync intents when Fixed $op arrives first', async (op) => {
+  it('cancels unseen sync intents when a Fixed viewport arrives first', async () => {
     const pane = await paneOn();
-    expect((await pane.host.request({ ...s1, ...op, endsSync: 'e1' })).ok).toBe(true);
+    expect((await pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1, endsSync: 'e1' })).ok).toBe(true);
     // Sent before Fixed on the socket, but delivered after its host request.
     await pane.size(800, 600, 'e1');
     expect(pane.state()).toBe('off');
@@ -555,12 +552,10 @@ describe('sync-to-pane', () => {
     expect(pane.viewer.states.at(-1)).toMatchObject({ engagement: 'e2' });
   });
 
-  it('rejects malformed ended engagements before writing a viewport or device', async () => {
+  it('rejects malformed ended engagements before writing a viewport', async () => {
     const pane = await paneOn();
     for (const endsSync of ['', 'has space', 'x'.repeat(65), 7]) {
-      for (const op of [{ op: 'viewport', width: 800, height: 600, dpr: 1 }, { op: 'device', name: 'iPhone 15' }]) {
-        expect(await pane.host.request({ ...s1, ...op, endsSync })).toEqual({ ok: false, error: 'invalid sync engagement' });
-      }
+      expect(await pane.host.request({ ...s1, op: 'viewport', width: 800, height: 600, dpr: 1, endsSync })).toEqual({ ok: false, error: 'invalid sync engagement' });
     }
     expect(pane.writes()).toEqual([]);
   });
@@ -623,7 +618,7 @@ describe('sync-to-pane', () => {
     const pane = await paneOn();
     pane.fake.gate('viewport s1 800x600@2');
     await pane.size(800, 600);
-    const fixed = pane.host.request({ ...s1, op: 'device', name: 'iPhone 15' });
+    const fixed = pane.host.request({ ...s1, op: 'viewport', width: 1024, height: 768, dpr: 1 });
     await flush();
     expect((await pane.host.request({ ...s1, op: 'launch', url: 'http://localhost:5173/' })).ok).toBe(true);
     pane.fake.release('viewport s1 800x600@2');
@@ -649,5 +644,80 @@ describe('sync-to-pane', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(pane.writes()).toEqual([]);
     expect(pane.state()).toBeUndefined();
+  });
+});
+
+describe('launch environment', () => {
+  const envRequest = { provider: 'agent-browser', binding: { session: 'shell-test' }, op: 'launch', headed: false, url: 'https://example.com' } as const;
+  it('retains one host-only environment per session and refreshes after close', async () => {
+    const fake = fakeProvider();
+    const env = { PATH: '/shell/bin', SECRET: 'private' };
+    const launchEnv = vi.fn(async () => env);
+    const bind = vi.spyOn(fake.provider, 'bind');
+    // A provider may describe its whole binding; the host still answers without the environment.
+    vi.spyOn(fake.provider, 'describe').mockImplementation((b) => b as never);
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      const results = await Promise.all([host.request(envRequest), host.request(envRequest)]);
+      expect(results.every(r => r.ok)).toBe(true);
+      expect(JSON.stringify(results)).not.toContain('private');
+      expect(launchEnv).toHaveBeenCalledTimes(1);
+      expect(bind.mock.calls.every(([b]) => b.env === env)).toBe(true);
+      await host.request({ ...envRequest, op: 'close' });
+      await host.request(envRequest);
+      expect(launchEnv).toHaveBeenCalledTimes(2);
+    } finally { await host.close(); }
+  });
+  it.each([true, false])('cancels startup before opening (request ids: %s)', async (withId) => {
+    const fake = fakeProvider();
+    let resolve!: (env: NodeJS.ProcessEnv) => void;
+    const launchEnv = vi.fn(() => new Promise<NodeJS.ProcessEnv>(r => { resolve = r; }));
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      const opening = host.request({ ...envRequest, ...(withId ? { requestId: 'shell-opening' } : {}) });
+      const closing = host.request({ ...envRequest, op: 'close', ...(withId ? { cancels: ['shell-opening'] } : {}) });
+      // Close must finish even while startup remains pending indefinitely.
+      expect(await closing).toMatchObject({ ok: true });
+      resolve({ PATH: '/shell/bin' });
+      expect(await opening).toMatchObject({ ok: false, error: 'the browser was closed' });
+      expect(fake.calls.some(c => c.startsWith('open '))).toBe(false);
+    } finally { await host.close(); }
+  });
+  it('runs a launch arriving during a close after it, on a fresh environment', async () => {
+    const fake = fakeProvider();
+    const launchEnv = vi.fn(async () => ({ PATH: '/shell/bin' }));
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      fake.gate('close shell-test');
+      const closing = host.request({ ...envRequest, op: 'close' });
+      await flush();
+      const relaunch = host.request(envRequest);
+      await flush();
+      fake.release('close shell-test');
+      expect(await closing).toMatchObject({ ok: true });
+      expect(await relaunch).toMatchObject({ ok: true });
+      expect(launchEnv).toHaveBeenCalledTimes(1);
+      expect(fake.calls.indexOf('close shell-test')).toBeLessThan(fake.calls.findIndex(c => c.startsWith('open shell-test')));
+    } finally { await host.close(); }
+  });
+  it('closes a restored binding without starting a potentially broken shell', async () => {
+    const fake = fakeProvider();
+    const launchEnv = vi.fn(async () => { throw new Error('broken startup'); });
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      expect(await host.request({ ...envRequest, op: 'close' })).toEqual({ ok: true });
+      expect(launchEnv).not.toHaveBeenCalled();
+      expect(fake.calls).toContain('close shell-test');
+    } finally { await host.close(); }
+  });
+  it('retries shell initialization after failure', async () => {
+    const fake = fakeProvider();
+    const launchEnv = vi.fn().mockRejectedValueOnce(new Error('shell failed')).mockResolvedValue({ PATH: '/shell/bin' });
+    const host = createBrowserHost({ launchEnv, writeClipboardText() {}, providers: { 'agent-browser': () => fake.provider } });
+    try {
+      expect(await host.request(envRequest)).toMatchObject({ ok: false, error: 'shell failed' });
+      expect(await host.request(envRequest)).toMatchObject({ ok: true });
+      expect(launchEnv).toHaveBeenCalledTimes(2);
+    } finally { await host.close(); }
   });
 });

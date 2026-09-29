@@ -24,11 +24,12 @@ export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
     title: "Dormouse Hosted",
     description:
-      "Coming soon: a managed Dormouse Relay and optional ElevenLabs voice, without giving up free self-hosting.",
+      "Manage your Dormouse Hosted sign-in methods. Managed remote control and optional ElevenLabs voice are coming later.",
   });
 }
 
 export const HOSTED_TOC: TocEntry[] = [
+  { id: "account", text: "Your Hosted account", children: [] },
   { id: "remote-control", text: "Remote control", children: [] },
   { id: "voice", text: "ElevenLabs voice", children: [] },
   { id: "self-hosting", text: "Self-hosting stays", children: [] },
@@ -43,6 +44,23 @@ export default function Hosted() {
       intro={<HostingRequirementNotice mode="planned-hosted" />}
       toc={HOSTED_TOC}
     >
+      <section className="mb-14">
+        <AnchoredHeading id="account" spacing="mt-0 mb-3">Your Hosted account</AnchoredHeading>
+        <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
+          Dormouse Hosted, operated by DiffPlug LLC, provides an account where you can
+          manage your sign-in methods. Use an email code or a supported identity
+          provider, and explicitly connect additional methods from your account.
+          Creating an account does not upload your terminal contents or subscribe
+          you to the devlog.
+        </p>
+        <p className={BODY_TEXT_CLASS}>
+          <a href="https://hosted.dormouse.sh" className={LINK_CLASS}>Manage your Hosted account</a>.
+          Read the <a href={sitePath("/privacy")} className={LINK_CLASS}>privacy policy</a> and{" "}
+          <a href={sitePath("/terms")} className={LINK_CLASS}>terms of service</a>.
+          Managed remote control and hosted voice remain unavailable, as described below.
+        </p>
+      </section>
+
       <section>
         <div className="grid items-center gap-8 sm:grid-cols-[minmax(0,1fr)_12rem] lg:gap-12">
           <div>
@@ -132,7 +150,7 @@ export default function Hosted() {
           The Relay remains available in the repository under
           FSL-1.1-MIT and free for internal use. Hosted will be a paid convenience option,
           not a replacement. If you would rather operate it, the{" "}
-          <a href={sitePath("/docs/self-host")} className={LINK_CLASS}>
+          <a href={sitePath("/self-host")} className={LINK_CLASS}>
             self-hosting guide
           </a>{" "}
           is ready now.

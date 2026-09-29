@@ -47,6 +47,21 @@ export function renderJson(payload: unknown): string {
   return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
+const TERMINAL_CONTROLS = /[\x00-\x1f\x7f-\x9f]/g;
+const escapeControl = (char: string) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
+
+/** Repo text relayed by the host, bound for a terminal: C0, DEL, and C1
+ *  controls become `\u` escapes, so the text cannot drive the terminal. */
+export function printable(text: string): string {
+  return text.replace(TERMINAL_CONTROLS, escapeControl);
+}
+
+/** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1
+ *  are escaped too, which leaves the parsed value unchanged. */
+export function renderPrintableJson(payload: unknown): string {
+  return renderJson(payload).replace(/[\x7f-\x9f]/g, escapeControl);
+}
+
 export function isIdFormat(value: string): value is IdFormat {
   return value === 'refs' || value === 'ids' || value === 'both';
 }

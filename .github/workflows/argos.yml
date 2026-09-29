@@ -79,6 +79,10 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium webkit
         working-directory: lib
 
+      - name: Install snapshot symbol font
+        # Matches the explicit fallback in lib/.storybook/themes.ts.
+        run: sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+
       - name: Capture and upload screenshots
         # One Argos build per browser: `storybook-chromium`, `storybook-webkit`.
         run: pnpm test:argos

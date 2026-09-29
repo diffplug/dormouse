@@ -14,8 +14,8 @@ const boxPx = ({ x, y, width, height }: Rect) => ({ left: `${x}px`, top: `${y}px
 /** One stable host per opening: moving the overlay never remounts its terminal. LathHost's
  *  paint places the host from the frame it just wrote, then publishes it to the selection
  *  ring; React re-renders only when the side or the available sides change. */
-export function TerminalContextOverlay({ context, title, tool, wall, source, multiPane, lath, preferences }: {
-  context: TerminalContextState; title?: string; tool: boolean; wall: Rect; source: Rect;
+export function TerminalContextOverlay({ context, title, tool, preview = false, wall, source, multiPane, lath, preferences }: {
+  context: TerminalContextState; title?: string; tool: boolean; preview?: boolean; wall: Rect; source: Rect;
   multiPane: boolean; lath: LathWallEngine; preferences: Map<string, ContextSide>;
 }) {
   const [cursorSide] = useState(() => {
@@ -48,7 +48,7 @@ export function TerminalContextOverlay({ context, title, tool, wall, source, mul
     setManual(side);
   }, [context.id, preferences]);
   // LathHost re-renders on every commit and resize frame; the panel needs only these.
-  const panel = useMemo(() => <TerminalContext {...context} title={title} tool={tool}
-    placement={{ side: shown.side, available: shown.available, onChange }} />, [context, title, tool, shown, onChange]);
+  const panel = useMemo(() => <TerminalContext {...context} title={title} tool={tool} preview={preview}
+    placement={{ side: shown.side, available: shown.available, onChange }} />, [context, title, tool, preview, shown, onChange]);
   return <div ref={host} className="absolute" style={{ ...boxPx(initial.rect), zIndex: Z_CONTEXT }}>{panel}</div>;
 }

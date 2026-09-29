@@ -19,6 +19,8 @@ import {
   resetWorkspaces,
   setActiveWorkspace,
 } from '../../lib/workspace-store';
+import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
+import { cancelEditorClose, decideEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-editor';
 
 function handleFor(workspaceId: string, overrides: Partial<WallHandle> = {}): WallHandle {
   const handle = stubWallHandle(workspaceId, overrides);
@@ -35,6 +37,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cancelEditorClose();
+  resetToolDirty();
   vi.restoreAllMocks();
 });
 
@@ -45,9 +49,30 @@ describe('closeWorkspaceWithSurfaces', () => {
     handleFor(only, { closeAll });
 
     expect(await closeWorkspaceWithSurfaces(only)).toBeNull();
-    expect(closeAll).toHaveBeenCalledWith('prompt');
+    expect(closeAll).toHaveBeenCalled();
     expect(ids()).toHaveLength(1);
     expect(ids()).not.toContain(only);
+  });
+
+  it('asks once for every dirty Tool before closing any Surface; a command close refuses', async () => {
+    const [only] = ids();
+    const closeAll = vi.fn(async () => null);
+    handleFor(only, { closeAll, dirtyToolIds: () => ['a', 'b'] });
+    recordToolDirty('a', true);
+    recordToolDirty('b', true);
+
+    expect(await closeWorkspaceWithSurfaces(only, 'silent')).toBe(UNSAVED_TOOL_REFUSAL);
+    expect(getEditorClosePrompt()).toBeNull();
+    const cancelled = closeWorkspaceWithSurfaces(only);
+    expect(getEditorClosePrompt()?.items.map((item) => item.id)).toEqual(['a', 'b']);
+    await decideEditorClose('cancel');
+    expect(await cancelled).toBe(UNSAVED_TOOL_REFUSAL);
+    expect(closeAll).not.toHaveBeenCalled();
+
+    const discarded = closeWorkspaceWithSurfaces(only);
+    await decideEditorClose('discard');
+    expect(await discarded).toBeNull();
+    expect(closeAll).toHaveBeenCalledWith(['a', 'b']);
   });
 
   it('refuses a second close while one is in flight, so both Walls cannot empty', async () => {
@@ -84,22 +109,6 @@ describe('closeWorkspaceWithSurfaces', () => {
     expect(ids()).not.toContain('ws-2');
   });
 
-  it('reveals a refused Workspace only when a prompt is what refused it', async () => {
-    const [first] = ids();
-    createWorkspace({ id: 'ws-2', activate: false });
-    handleFor('ws-2', { closeAll: async () => 'notepad archive failed' });
-
-    // `dor workspace close`: the caller is a command, so the refusal comes back
-    // as a message and the user stays where they were.
-    expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBe('notepad archive failed');
-    expect(getActiveWorkspaceId()).toBe(first);
-
-    // A user gesture: the archive-failure prompt is on the refused Workspace's
-    // Wall, so that Workspace is revealed.
-    expect(await closeWorkspaceWithSurfaces('ws-2', 'prompt')).toBe('notepad archive failed');
-    expect(getActiveWorkspaceId()).toBe('ws-2');
-  });
-
   it('refuses a Workspace with no registered Wall instead of closing past its Sessions', async () => {
     const [first] = ids();
     createWorkspace({ id: 'ws-2', activate: false });
@@ -108,18 +117,6 @@ describe('closeWorkspaceWithSurfaces', () => {
     // wording is the router's, so a `dor` caller reads one refusal either way.
     expect(await closeWorkspaceWithSurfaces('ws-2', 'silent')).toBe("workspace 'workspace:2' is still mounting");
     expect(ids()).toEqual([first, 'ws-2']);
-  });
-
-  it('releases the lock after a refusal, so the next close still works', async () => {
-    const [first] = ids();
-    createWorkspace({ id: 'ws-2' });
-    handleFor('ws-2', { closeAll: async () => 'notepad archive failed' });
-    expect(await closeWorkspaceWithSurfaces('ws-2')).toBe('notepad archive failed');
-    expect(ids()).toEqual([first, 'ws-2']);
-
-    handleFor('ws-2', { closeAll: async () => null });
-    expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
-    expect(ids()).toEqual([first]);
   });
 
   it('drops the strip UI state with the Workspace, so a stranded rename cannot hold the keyboard lease', async () => {
@@ -153,7 +150,7 @@ describe('requestWorkspaceClose', () => {
       handleFor('ws-2', { closeAll });
 
       await vi.advanceTimersByTimeAsync(0);
-      expect(closeAll).toHaveBeenCalledWith('prompt');
+      expect(closeAll).toHaveBeenCalled();
       expect(ids()).toEqual([first]);
       expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
     } finally {

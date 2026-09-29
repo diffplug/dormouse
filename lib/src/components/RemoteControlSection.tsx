@@ -1,17 +1,10 @@
-import {
-  Component,
-  Suspense,
-  lazy,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
+import { OneTimeConnection } from './OneTimeConnection';
+import { FIELD_HINT, FIELD_LABEL, own, revealPanel } from './remote-control-shared';
+import { ExpiringCode } from './ScannableCode';
 import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
   PairingOutcome,
@@ -30,20 +23,6 @@ import {
   subscribeToBurrowStatus,
   subscribeToInvitation,
 } from '../remote/burrow/burrow-status-store';
-
-/**
- * The QR encoder (`uqr`) is only ever reached by one panel inside one dialog on
- * an enrolled machine, so it is lazy for the same reason `Wall.tsx` lazies
- * `RemotePairingModalHost`: otherwise every build — the website included, where
- * this section renders nothing at all — ships it in the main chunk.
- *
- * A factory rather than a module constant because retry needs a *fresh* one:
- * `lazy` memoizes the rejected promise against the component's identity, so
- * re-rendering the same one re-throws the same chunk failure forever.
- */
-function makeQrCode() {
-  return lazy(() => import('./QrCode').then((m) => ({ default: m.QrCode })));
-}
 
 /**
  * How each relay-socket state reads to someone who is not holding the spec.
@@ -76,9 +55,8 @@ const TONE_CLASS = {
   muted: 'text-muted',
 } as const;
 
-const FIELD_LABEL = 'text-xs text-muted';
-const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
 const HOSTED_REMOTE_URL = 'https://dormouse.sh/hosted/#remote-control';
+const SELF_HOST_URL = 'https://dormouse.sh/self-host/';
 
 /**
  * How far ahead of `expiresAt` the phone-setup panel mints a replacement code.
@@ -112,11 +90,6 @@ function refreshDelay(expiresAt: number, now: number): number {
     Math.max(expiresAt - now - SETUP_QR_REFRESH_LEAD_MS, SETUP_QR_MIN_REFRESH_MS),
     SETUP_QR_MAX_REFRESH_MS,
   );
-}
-
-/** Whole minutes until a setup code stops redeeming; never negative. */
-function minutesUntil(expiresAt: number, now: number): number {
-  return Math.max(0, Math.ceil((expiresAt - now) / 60_000));
 }
 
 /**
@@ -210,23 +183,6 @@ const TERMINAL_COPY: Record<TerminalPhase, { headline: string; detail: string }>
     detail: 'Get a new one.',
   },
 };
-
-/**
- * A lookup into one of this panel's copy tables, answering only for a key the
- * table actually holds.
- *
- * **Never the `in` operator.** Every one of these tables is keyed by a string
- * the Burrow chose and a bridge relayed, and `in` walks the prototype chain — so
- * `'toString'` would answer "yes, there is copy for that" and hand back
- * `Object.prototype.toString` to render. The store checks that those fields are
- * strings and deliberately *not* that they are members of the closed set
- * (`burrow-status-store.ts`), so this is where a stranger stops.
- * `hasOwnProperty.call` rather than `Object.hasOwn`, which is ES2022 and this
- * build's lib is ES2020.
- */
-function own<T>(table: Record<string, T>, key: string): T | undefined {
-  return Object.prototype.hasOwnProperty.call(table, key) ? table[key] : undefined;
-}
 
 /** The terminal copy for a state, or `undefined` while the panel is still live. */
 function terminalCopy(state: SetupQrState): { headline: string; detail: string } | undefined {
@@ -516,8 +472,9 @@ function BurrowNameField({
 }
 
 /**
- * Connect this machine to a coordinating Relay, so a phone running Dormouse
- * Pocket can pair with it.
+ * The two ways a phone can reach this machine — a one-time connection, or a
+ * persistent Relay this machine enrolls with so a phone running Dormouse Pocket
+ * can pair with it.
  *
  * Renders nothing at all on a build with no Burrow service behind it (the
  * website, the lib dev server): there is no Burrow to enroll, and offering the
@@ -547,20 +504,82 @@ export function RemoteControlSection() {
         <div className="mt-1.5 text-sm leading-relaxed text-muted">
           Could not reach this machine’s remote-control service: {state.message}
         </div>
-      ) : state.status.enrolled ? (
-        // Keyed by which enrollment this is: a swap to another Relay — the
-        // console hook can do one under an open dialog — must not leave a setup
-        // code, or an error, belonging to the machine we just left.
-        <EnrolledView
-          key={state.status.burrowId ?? state.status.relayUrl ?? 'enrolled'}
-          relayUrl={state.status.relayUrl}
-          connection={state.status.connection}
-          pairedClients={state.status.pairedClients}
-        />
       ) : (
-        <EnrollView offer={state.status.offer} suggestedLabel={state.status.suggestedLabel} />
+        <RelayChoices status={state.status} />
       )}
     </section>
+  );
+}
+
+/**
+ * One-time connection and Persistent Relay, as two choices. The one-time panel
+ * is the same whether or not this machine enrolled (`OneTimeConnection.tsx`).
+ *
+ * **Enrolled, the Relay's view is always shown.** Un-enrolled, Persistent Relay
+ * is a disclosure that **stays folded until clicked**, installer's offer or not.
+ * **Folding hides the enroll view, never unmounts it**, for the same reason
+ * {@link EnrollView} folds its own.
+ */
+function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
+  const [unfolded, setUnfolded] = useState(false);
+
+  return (
+    <div className="mt-1.5 text-sm leading-relaxed">
+      <div className="text-muted">Control this Dormouse from your phone.</div>
+
+      <OneTimeConnection />
+
+      <div className="mt-3">
+        {status.enrolled ? (
+          <div className="text-foreground">Persistent Relay</div>
+        ) : (
+          <button
+            type="button"
+            aria-expanded={unfolded}
+            className={modalActionButton({ tone: unfolded ? 'secondary' : 'primary' })}
+            onClick={() => setUnfolded((was) => !was)}
+          >
+            Persistent Relay
+          </button>
+        )}
+        {status.enrolled ? null : (
+          <div className={FIELD_HINT}>
+            Enroll this Dormouse with hosted.dormouse.sh or a Relay you run, so paired phones
+            can reconnect any time.
+          </div>
+        )}
+
+        {status.enrolled ? (
+          // Keyed by which enrollment this is: a swap to another Relay — the
+          // console hook can do one under an open dialog — must not leave a setup
+          // code, or an error, belonging to the machine we just left.
+          <EnrolledView
+            key={status.burrowId ?? status.relayUrl ?? 'enrolled'}
+            relayUrl={status.relayUrl}
+            connection={status.connection}
+            pairedClients={status.pairedClients}
+          />
+        ) : (
+          // The same framed panel as "Set up a phone", the other disclosure here.
+          <div className="mt-2 rounded border border-border p-2" hidden={!unfolded}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <button type="button" disabled className={modalActionButton()}>
+                Use hosted.dormouse.sh
+              </button>
+              <span className="text-xs text-muted">
+                Coming soon.{' '}
+                <ExternalTextLink href={HOSTED_REMOTE_URL}>Get updates on Hosted.</ExternalTextLink>
+              </span>
+            </div>
+            <div className={`${FIELD_LABEL} mt-3`}>
+              Or a <ExternalTextLink href={SELF_HOST_URL}>self-hosted Relay</ExternalTextLink> you
+              run
+            </div>
+            <EnrollView offer={status.offer} suggestedLabel={status.suggestedLabel} />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -844,29 +863,22 @@ function SetupPhonePanel({
 }) {
   const shown = displayedQr(state);
   const terminal = terminalCopy(state);
-  const expiresAt = shown?.expiresAt ?? null;
-  const [now, setNow] = useState(() => Date.now());
-
-  // The copy names whole minutes, so re-render on the minute rather than on a
-  // clock tick: a 1 Hz interval bought ~300 renders per code for five numbers,
-  // and left Storybook repainting forever after the code expired.
+  const frame = useRef<HTMLDivElement>(null);
+  // Once, when a code first draws where none showed: the panel re-mints while
+  // it stays open, and a refresh must not pull the dialog out from under
+  // someone reading it.
+  const revealed = useRef(false);
   useEffect(() => {
-    if (expiresAt === null) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const arm = (): void => {
-      const at = Date.now();
-      setNow(at);
-      const remaining = expiresAt - at;
-      // Expired: the number cannot change again, so nothing re-arms.
-      if (remaining <= 0) return;
-      timer = setTimeout(arm, remaining % 60_000 || 60_000);
-    };
-    arm();
-    return () => clearTimeout(timer);
-  }, [expiresAt]);
+    if (!shown) revealed.current = false;
+  }, [shown]);
+  const reveal = () => {
+    if (revealed.current) return;
+    revealed.current = true;
+    revealPanel(frame.current);
+  };
 
   return (
-    <div className="mt-2 rounded border border-border p-2">
+    <div ref={frame} className="mt-2 rounded border border-border p-2">
       <div className={FIELD_LABEL}>Set up a phone</div>
       {/* The report supersedes `finished`'s deliberately-vague sentence, which
           is the only reason the panel ever draws one (`EnrolledView`). */}
@@ -887,14 +899,13 @@ function SetupPhonePanel({
             In Dormouse Pocket on the phone, tap {SCAN_LABEL} and point it at this. Nothing to type
             — no address, no password.
           </div>
-          <div className="mt-2 flex justify-center">
-            <ScannableCode url={shown.url} />
-          </div>
-          <div className="mt-1.5 text-center text-xs text-muted">
-            {minutesUntil(shown.expiresAt, now) > 0
-              ? `Good for one phone. Expires in ${minutesUntil(shown.expiresAt, now)} min.`
-              : 'This code has expired — get a new one.'}
-          </div>
+          <ExpiringCode
+            url={shown.url}
+            label="Setup code for this machine"
+            expiresAt={shown.expiresAt}
+            noun="code"
+            onShown={reveal}
+          />
         </>
       ) : state.phase === 'failed' ? (
         // The panel's own slot, not the enrolled view's: this mint may have been
@@ -920,70 +931,6 @@ function SetupPhonePanel({
       </div>
     </div>
   );
-}
-
-/**
- * The QR itself, behind its own error boundary.
- *
- * Two ways drawing a code can throw, and neither may reach the app-wide
- * ErrorBoundary, which takes every terminal in the window with it: the encoder
- * is a lazily-imported chunk whose fetch can fail, and `encode` itself refuses
- * data past the format's capacity. Contained here each costs a retry button.
- *
- * The retry mints a *fresh* `lazy`, because React caches the rejected import
- * against the component identity — re-rendering the same one re-throws forever.
- */
-function ScannableCode({ url }: { url: string }) {
-  const [attempt, setAttempt] = useState(0);
-  const [QrCode, setQrCode] = useState(makeQrCode);
-
-  return (
-    // Keyed, so a boundary that has already caught is remounted both by a retry
-    // and by a new code arriving — the second is the recovery for a URL this
-    // encoder refused, which retrying the same one never fixes.
-    <QrChunkBoundary
-      key={`${attempt}:${url}`}
-      fallback={
-        <div className="text-center">
-          <div className="text-sm leading-relaxed text-muted">
-            Couldn’t display the code — the encoder didn’t load.
-          </div>
-          <button
-            type="button"
-            className={`mt-1.5 ${modalActionButton()}`}
-            onClick={() => {
-              setQrCode(makeQrCode);
-              setAttempt((n) => n + 1);
-            }}
-          >
-            Try again
-          </button>
-        </div>
-      }
-    >
-      {/* Nothing while the encoder chunk arrives: it is one import away, and a
-          placeholder the size of a QR would flash on every open. */}
-      <Suspense fallback={null}>
-        <QrCode value={url} label="Setup code for this machine" />
-      </Suspense>
-    </QrChunkBoundary>
-  );
-}
-
-/** Catches a render throw from the code area, and nothing else. */
-class QrChunkBoundary extends Component<
-  { children: ReactNode; fallback: ReactNode },
-  { failed: boolean }
-> {
-  state = { failed: false };
-
-  static getDerivedStateFromError() {
-    return { failed: true };
-  }
-
-  render() {
-    return this.state.failed ? this.props.fallback : this.props.children;
-  }
 }
 
 /**
@@ -1036,11 +983,7 @@ function EnrollForm({
       }}
     >
       <div className="text-sm leading-relaxed text-muted">
-        Connect this machine to a Dormouse Relay to control it from your phone.
-        {' '}
-        <ExternalTextLink href={HOSTED_REMOTE_URL}>
-          Prefer not to run one? Hosted is coming soon.
-        </ExternalTextLink>
+        Needs a Dormouse build that allows your Relay’s address.
       </div>
 
       <label className="mt-2 block">

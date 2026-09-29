@@ -679,6 +679,7 @@ version = "1.1.0"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
@@ -689,6 +690,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-shell",
  "tauri-plugin-updater",
+ "tauri-runtime-wry",
  "windows 0.62.2",
 ]
 
@@ -1411,7 +1413,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -1773,9 +1775,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.186"
+version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "libdbus-sys"
@@ -2502,9 +2504,9 @@ dependencies = [
 
 [[package]]
 name = "process-wrap"
-version = "10.0.0"
+version = "10.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e3f4237d0e4741eb50bc5584db701f1299c85fa31ff0274dd6445e79dc42d12"
+checksum = "1f21b97672d2dc848e7b25701ab4535618b92f4861c13cc3f7f7bed52ad3c8da"
 dependencies = [
  "indexmap 2.14.0",
  "nix",
@@ -3361,8 +3363,7 @@ dependencies = [
 [[package]]
 name = "tao"
 version = "0.35.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a33f7f9e486ade65fcf1e45c440f9236c904f5c1002cdc7fc6ae582777345ce4"
+source = "git+https://github.com/diffplug/tao?rev=397f6789285412024892579aff0897aade11d832#397f6789285412024892579aff0897aade11d832"
 dependencies = [
  "bitflags 2.11.1",
  "block2",
@@ -3401,8 +3402,7 @@ dependencies = [
 [[package]]
 name = "tao-macros"
 version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4e16beb8b2ac17db28eab8bca40e62dbfbb34c0fcdc6d9826b11b7b5d047dfd"
+source = "git+https://github.com/diffplug/tao?rev=397f6789285412024892579aff0897aade11d832#397f6789285412024892579aff0897aade11d832"
 dependencies = [
  "proc-macro2",
  "quote",

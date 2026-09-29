@@ -12,12 +12,12 @@ A multitasking terminal for VS Code and the desktop — a real tiling layout, tm
 
 ## Documentation
 
-- [CLI reference](https://dormouse.sh/docs/dor) — every `dor` command
-- [Compatible agents](https://dormouse.sh/docs/compatible-agents) — conversation recovery, watching, and contributing an agent integration
-- [Agent skill](https://dormouse.sh/docs/agent-skill) — the operating guide Dormouse bundles for coding agents
-- [Self-host](https://dormouse.sh/docs/self-host) — run the coordinating Relay on your own tailnet
+- [CLI reference](https://dormouse.sh/dor) — every `dor` command
+- [Compatible agents](https://dormouse.sh/compatible-agents) — conversation recovery, watching, and contributing an agent integration
+- [Agent skill](https://dormouse.sh/agent-skill) — the operating guide Dormouse bundles for coding agents
+- [Self-host](https://dormouse.sh/self-host) — run the coordinating Relay on your own tailnet
 - [Hosted](https://dormouse.sh/hosted/) — upcoming managed Relay and ElevenLabs voice options
-- [Security](https://dormouse.sh/docs/security) — what Dormouse guarantees, what it does not, and how that is checked
+- [Security](https://dormouse.sh/security) — what Dormouse guarantees, what it does not, and how that is checked
 
 ## Features
 

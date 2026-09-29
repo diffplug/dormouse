@@ -12,6 +12,7 @@ import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-
 import { recordToolEvents } from '../../lib/tool-events';
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
 import { useToolServing } from './use-tool-serving';
+import { retargetToolLeaf } from './preview-slot';
 import { captureToolParams } from './tool-transfer';
 import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
@@ -47,7 +48,8 @@ let root: Root;
 let currentCommand: string | null = 'x';
 let runId = 0;
 
-vi.mock('../../lib/terminal-registry', () => ({
+vi.mock('../../lib/terminal-registry', async () => ({
+  UNNAMED_PANEL_TITLE: (await import('../../lib/terminal-state')).UNNAMED_PANEL_TITLE,
   getTerminalPaneState: () => ({ currentCommand: currentCommand === null ? null : { id: `${runId}-${currentCommand}`, rawCommandLine: currentCommand } }),
 }));
 
@@ -133,10 +135,11 @@ describe('port: announced', () => {
     expect(state.params.session).toBeUndefined();
   });
 
-  it('frames nothing without an announcement, however many ports bind', async () => {
-    const { state } = await run(announced, [[tcp(6006)], [tcp(6006)], [tcp(6006)]]);
+  it('frames nothing without an announcement, however many ports bind, and never scans for one', async () => {
+    const { state, platform } = await run(announced, [[tcp(6006)], [tcp(6006)], [tcp(6006)]]);
     expect(state.params.url).toBeUndefined();
     expect(state.params.toolPortConflict).toBeUndefined();
+    expect(platform.getOpenPorts).not.toHaveBeenCalled();
   });
 
   it('frames the announced port', async () => {
@@ -182,6 +185,133 @@ describe('port: announced', () => {
   });
 });
 
+describe('an announcement scans at once', () => {
+  const announced = { surfaceType: 'tool', command: 'x', toolPort: 'announced' };
+  const auto = { ...announced, toolPort: 'auto' };
+  const announce = (port: number | null, key: string[] | null = null) =>
+    ({ port, name: null, key, dehydrate: false, persist: null });
+
+  it('frames the announced port before the next poll', async () => {
+    const { state, platform } = await run(announced, [[tcp(6006)]]);
+    expect(state.params.url).toBeUndefined();
+
+    await act(async () => { recordToolAnnounce('tool-1', announce(6006)); });
+
+    expect(state.params.url).toBe('http://localhost:6006/');
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it('scans an announcement that lands mid-tick once that tick settles', async () => {
+    const { lath, state } = toolEngine(auto);
+    const gate = Promise.withResolvers<OpenPort[]>();
+    const platform = new FakePtyAdapter();
+    platform.getOpenPorts = vi.fn()
+      .mockImplementationOnce(() => gate.promise)
+      .mockImplementation(async () => [tcp(6006)]);
+    setPlatform(platform);
+    function Probe() { useToolServing({ lath, doorsRef: { current: [] } }); return null; }
+    await act(async () => root.render(<Probe />));
+
+    // The first tick decided its scan before the announcement existed.
+    await act(async () => { recordToolAnnounce('tool-1', announce(6006)); });
+    await act(async () => gate.resolve([tcp(6006)]));
+
+    expect(state.params.url).toBe('http://localhost:6006/');
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(2);
+  });
+
+  it('frames nothing when the announced port is absent from the scan, and the poll retries', async () => {
+    const { state, platform } = await run(announced, [[tcp(6006)]]);
+
+    await act(async () => { recordToolAnnounce('tool-1', announce(9999)); });
+    expect(state.params.url).toBeUndefined();
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(1);
+
+    // Saying it again is not news: only the poll retries it.
+    await act(async () => { recordToolAnnounce('tool-1', announce(9999)); });
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(2);
+    expect(state.params.url).toBeUndefined();
+  });
+
+  it('scans only the announcing Tool, leaving the others to the poll', async () => {
+    // For autobind, two scans milliseconds apart would otherwise count as the
+    // one unchanged tick it waits for, framing whichever port bound first.
+    const lath = createLathWallEngine();
+    lath.store.addLeaf('tool-a', toolLeafMeta('Tool', announced), null);
+    lath.store.addLeaf('tool-b', toolLeafMeta('Tool', auto), { refId: 'tool-a', edge: 'right' });
+    lath.store.addLeaf('tool-c', toolLeafMeta('Tool', announced), { refId: 'tool-b', edge: 'right' });
+    recordToolAnnounce('tool-c', announce(9999)); // never binds
+    const platform = new FakePtyAdapter();
+    platform.getOpenPorts = vi.fn(async (id: string) => [tcp(id === 'tool-a' ? 6006 : 1422)]);
+    setPlatform(platform);
+    function Probe() { useToolServing({ lath, doorsRef: { current: [] } }); return null; }
+    await act(async () => root.render(<Probe />));
+    const paramsOf = (id: string) => lath.getMeta(id)?.params ?? {};
+
+    await act(async () => { recordToolAnnounce('tool-a', announce(6006)); });
+    expect(paramsOf('tool-a').url).toBe('http://localhost:6006/');
+    expect(paramsOf('tool-b').url).toBeUndefined();
+    expect(vi.mocked(platform.getOpenPorts!).mock.calls.map(([id]) => id)).toEqual(['tool-b', 'tool-c', 'tool-a']);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(paramsOf('tool-b').url).toBe('http://localhost:1422/');
+  });
+
+  it('never counts as an autobind settle tick', async () => {
+    const { state, platform } = await run(auto, [[tcp(1422)]]);
+    await act(async () => { recordToolAnnounce('tool-1', announce(9999)); });
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(2);
+    // Withdrawing the port hands the Tool back to autobind, which waits for the poll.
+    await act(async () => { recordToolAnnounce('tool-1', announce(null)); });
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(2);
+    expect(state.params.url).toBeUndefined();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(state.params.url).toBe('http://localhost:1422/');
+  });
+
+  it('waits for the rest of the chunk, whose command start can retire the announcement', async () => {
+    const { state, platform } = await run(announced, [[tcp(6006)]]);
+    recordToolEvents('tool-1', new TerminalProtocolParser().process('\x1b]367;serve;{"port":6006}\x07\x1b]633;C\x07').events);
+    await act(async () => {});
+    expect(platform.getOpenPorts).not.toHaveBeenCalled();
+    expect(state.params.url).toBeUndefined();
+  });
+
+  it('ignores an announcement from a Session that is not a Tool of this Wall', async () => {
+    const { platform } = await run(auto, [[tcp(6006)]]);
+    await act(async () => { recordToolAnnounce('elsewhere', announce(6006)); });
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops an announcement still waiting when it unmounts mid-tick', async () => {
+    const { lath, state } = toolEngine({ ...auto, toolName: 'named' });
+    const gate = Promise.withResolvers<OpenPort[]>();
+    const platform = new FakePtyAdapter();
+    platform.getOpenPorts = vi.fn(() => gate.promise);
+    setPlatform(platform);
+    function Probe() { useToolServing({ lath, doorsRef: { current: [] } }); return null; }
+    await act(async () => root.render(<Probe />));
+    await act(async () => { recordToolAnnounce('tool-1', announce(6006, ['late'])); });
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => gate.resolve([tcp(6006)]));
+    expect(state.params.toolKey).toBeUndefined();
+  });
+
+  it('stops listening once unmounted', async () => {
+    // A re-key is the part of a tick that runs before any scan or cancel check.
+    const { state } = await run({ ...announced, toolName: 'named' }, [[tcp(6006)]]);
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => { recordToolAnnounce('tool-1', announce(6006, ['late'])); });
+    expect(state.params.toolKey).toBeUndefined();
+  });
+});
+
 describe('port: auto (autobind)', () => {
   const auto = { surfaceType: 'tool', command: 'x', toolPort: 'auto' };
 
@@ -204,7 +334,7 @@ describe('port: auto (autobind)', () => {
   });
 
   it('does not frame the bridge when vite binds a tick later', async () => {
-    // The standalone harness: the dev bridge (1422) binds before vite (1420).
+    // The innerdogfood harness: the dev bridge (1422) binds before vite (1420).
     // Committing on first sighting would frame the JSON bridge permanently,
     // since a framed leaf is never scanned again. This is the regression that
     // motivates the settle window.
@@ -320,6 +450,30 @@ describe('agent-browser retirement on command exit', () => {
   });
 });
 
+describe('a preview retarget', () => {
+  it('releases the old agent-browser session once and frames the new Tool\'s port under its own render', async () => {
+    recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+    const { lath, state, platform } = await run({ surfaceType: 'tool', command: 'x', toolRender: 'agent-browser-screencast', toolPort: 'announced' }, [[tcp(6006)]]);
+    state.set({ session: 'dormouse.1.tool.tool-1' });
+    expect(state.params).toMatchObject({ url: 'http://localhost:6006/', renderMode: 'agent-browser-screencast' });
+    controllerMocks.closeBrowserSurface.mockClear();
+
+    // The retarget's commit: the browser retires with the old identity, then a
+    // new command runs.
+    retargetToolLeaf(lath, 'tool-1', { title: 'y', identity: { command: 'y', toolRender: 'iframe', toolPort: 'announced' } });
+    currentCommand = 'y';
+    runId += 1;
+    resetToolAnnounces();
+    recordToolAnnounce('tool-1', { port: 7007, name: null, key: null, dehydrate: false, persist: null });
+    platform.getOpenPorts = vi.fn(async () => [tcp(7007)]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+
+    expect(controllerMocks.closeBrowserSurface).toHaveBeenCalledExactlyOnceWith('tool-1', expect.objectContaining({ session: 'dormouse.1.tool.tool-1' }));
+    expect(state.params).toMatchObject({ url: 'http://localhost:7007/', renderMode: 'iframe' });
+    expect(state.params.session).toBeUndefined();
+    expect(state.params.launchSession).toBeUndefined();
+  });
+});
 
 it('does not frame or re-key a different command running in a Tool Session', async () => {
   currentCommand = 'cat untrusted.log';

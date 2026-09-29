@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceTeardownModalHost, WorkspaceTeardownModal } from "./WorkspaceTeardownModal";
 
-import { openQuitConfirm, openQuitArchiveFailure, confirmQuit, getQuitConfirmChar, getQuitConfirmPhase, _resetQuitConfirmForTesting } from './quit-confirm-store';
+import { openQuitConfirm, confirmQuit, getQuitConfirmChar, getQuitConfirmPhase, _resetQuitConfirmForTesting } from './quit-confirm-store';
 import { createWorkspace, resetWorkspaces } from 'dormouse-lib/lib/workspace-store';
 import { applyTerminalSemanticEvents, removeTerminalPaneState } from 'dormouse-lib/lib/terminal-registry';
 
@@ -112,27 +112,6 @@ describe('WorkspaceTeardownModal host decisions', () => {
     expect(ctx.cancel).not.toHaveBeenCalled();
     expect(getQuitConfirmPhase()).toBe('quitting');
     expect(document.body.textContent).toContain('Waiting for all windows, then closing…');
-  });
-
-  it.each(['Cancel', 'Discard notes and continue'])('requires an independent archive-loss decision: %s', (choice) => {
-    const kill = { confirm: vi.fn(), cancel: vi.fn() };
-    const archive = { confirm: vi.fn(), cancel: vi.fn() };
-    openQuitConfirm(kill);
-    const letter = getQuitConfirmChar();
-    confirmQuit();
-    openQuitArchiveFailure('disk is full', archive);
-    mount(createElement(WorkspaceTeardownModalHost));
-    expect(document.body.textContent).toContain('Notes could not be archived');
-    expect(document.body.textContent).toContain('disk is full');
-    expect(document.body.textContent).not.toContain('Confirm kill workspace');
-    expect(document.activeElement?.textContent).toBe('Cancel');
-    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: letter, cancelable: true })); });
-    expect(archive.confirm).not.toHaveBeenCalled();
-    expect(archive.cancel).not.toHaveBeenCalled();
-    const button = [...document.querySelectorAll('button')].find((button) => button.textContent === choice)!;
-    act(() => button.click());
-    expect(choice === 'Cancel' ? archive.cancel : archive.confirm).toHaveBeenCalledOnce();
-    expect(kill.confirm).toHaveBeenCalledOnce();
   });
 
   it('blocks the entire window during confirmation and while waiting for other votes', () => {

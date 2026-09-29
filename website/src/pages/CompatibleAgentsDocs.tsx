@@ -13,7 +13,7 @@ export function meta({ location }: MetaArgs) {
 
 export default function CompatibleAgentsDocs() {
   return (
-    <DocsLayout activePath="/docs/compatible-agents" title={agents.title} toc={agents.toc}>
+    <DocsLayout activePath="/compatible-agents" title={agents.title} toc={agents.toc}>
       <MarkdownDocument blocks={agents.blocks as BlockNode[]} />
     </DocsLayout>
   );

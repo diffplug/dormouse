@@ -60,8 +60,6 @@ export interface ScreenSnapshot {
 export interface ScreenActions {
   /** Follow the pane pixel-for-pixel (Dormouse-side behavior, not native). */
   engageSync(): void;
-  /** Issue native `set device <name>` (bundles viewport + DPR + touch + UA). */
-  applyDevice(name: string): void;
   /** Issue native `set viewport <w> <h> <dpr>`. */
   applyViewport(w: number, h: number, dpr: number): void;
   applyViewportSetting?(setting: BrowserViewportSetting): Promise<void>;
@@ -280,6 +278,15 @@ export function useAgentBrowserScreenSnapshot(controller: ScreenController | nul
   return useSyncExternalStore(
     controller ? controller.subscribe : NO_SUBSCRIBE,
     () => controller?.snapshot() ?? null,
+  );
+}
+
+/** A controller's display identity alone, or null: re-renders only when it
+ *  changes, never for the pane size every resize frame republishes. */
+export function useAgentBrowserDisplayMode(controller: ScreenController | null): BrowserDisplayMode | null {
+  return useSyncExternalStore(
+    controller ? controller.subscribe : NO_SUBSCRIBE,
+    () => { const snapshot = controller?.snapshot(); return snapshot ? browserDisplayMode(snapshot) : null; },
   );
 }
 

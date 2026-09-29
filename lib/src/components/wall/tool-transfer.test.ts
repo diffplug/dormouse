@@ -32,6 +32,15 @@ describe('Tool Workspace transfer', () => {
     expect(lath.getMeta('tool')!.params).toEqual(params);
   });
 
+  it('keeps a preview slot the slot, in the live binding and the durable record alike', () => {
+    const slot = { ...params, toolPreview: true, toolTarget: '/repo/a.md' };
+    const lath = engine(slot);
+    const plan: RestoredSession = { paneIds: ['tool'], lathLayout: lath.serializeLayout(), doors: [] };
+    expect(plan.lathLayout!.leafMeta.tool.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+    restoreToolParams(plan, captureToolParams(lath, ['tool']));
+    expect(plan.lathLayout!.leafMeta.tool.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+  });
+
   it('refuses while approval or browser startup still owns work in the source', () => {
     const lath = engine();
     lath.store.updateParams('tool', { session: undefined });

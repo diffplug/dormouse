@@ -14,20 +14,40 @@
  * the digits a person typed; the Burrow compares them. A mirrored code would make
  * the confirmation a formality any webview-side attacker could satisfy
  * (`docs/specs/remote-security-model.md` → Pairing).
+ *
+ * A one-time connection's request rides the same queue under `kind:
+ * 'one-time'`, so **every request is named by `(kind, clientId)`**: a one-time
+ * request has no Relay and so no client id (`''`), and must never be taken for,
+ * or coalesce with, a pairing.
  */
 
+import type { ApprovalKind } from '../../host/remote/service-protocol';
+
 export interface PendingPairing {
-  /** Relay-assigned client socket id. */
+  /** Which ceremony: the modal's copy, and where its answer goes. */
+  kind: ApprovalKind;
+  /** Relay-assigned client socket id; `''` for a one-time request. */
   clientId: string;
   /** Immutable ceremony id; approve/deny must name this exact request. */
   pairingId: string;
   /** The Client's own name for itself, already bounded and stripped. */
   label: string;
   requestedAt: number;
-  /** Confirm with the digits the phone is showing — the only path that writes the ACL. */
+  /**
+   * Confirm with the digits the phone is showing — for a pairing, the only
+   * path that writes the ACL; for a one-time request, the one attempt.
+   */
   approve: (code: string) => void | Promise<void>;
   /** Deny locally — the ACL is untouched. */
   deny: () => void;
+}
+
+/** The one identity a request has in this queue and in the service's. */
+export function sameRequest(
+  a: Pick<PendingPairing, 'kind' | 'clientId'>,
+  b: Pick<PendingPairing, 'kind' | 'clientId'>,
+): boolean {
+  return a.kind === b.kind && a.clientId === b.clientId;
 }
 
 let queue: readonly PendingPairing[] = [];
@@ -38,13 +58,13 @@ function emit(): void {
 }
 
 export function enqueuePairingApproval(pending: PendingPairing): void {
-  // Coalesce by clientId: a re-sent pairing for the same client replaces the old.
-  queue = [...queue.filter((p) => p.clientId !== pending.clientId), pending];
+  // Coalesce by request: a re-sent pairing for the same client replaces the old.
+  queue = [...queue.filter((p) => !sameRequest(p, pending)), pending];
   emit();
 }
 
-export function resolvePairingApproval(clientId: string): void {
-  const next = queue.filter((p) => p.clientId !== clientId);
+export function resolvePairingApproval(request: Pick<PendingPairing, 'kind' | 'clientId'>): void {
+  const next = queue.filter((p) => !sameRequest(p, request));
   if (next.length === queue.length) return;
   queue = next;
   emit();

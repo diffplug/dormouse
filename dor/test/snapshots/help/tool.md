@@ -6,6 +6,7 @@ Invocation: `dor tool --help`
 USAGE
   dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]
   dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
+  dor tool --list [--global] [--cwd path] [--json]
   dor tool --help
 
 Runs a command in a new surface and watches the ports it opens. When the command starts serving, the surface grows a browser in place — same surface, same id, no second pane — and the pane flips to it with the terminal behind the header's far-left chip. When the command exits the browser retires and the pane flips back.
@@ -24,10 +25,17 @@ Where the tool lands: typed alone at a prompt in a visible, integrated plain ter
 
 --cwd sets the working directory used to find dormouse.yml and to run the command; it defaults to the directory dor was invoked from.
 
+--list runs nothing: it prints the Tools `dor tool <name>` would find from the working directory — the nearest project dormouse.yml and whether you have approved it, then the user file. Each Tool shows its command, render, port strategy, and whether it has a key, then the comment block directly above its entry, which is where a Tool is documented. A user Tool that a project Tool of the same name hides is marked shadowed. --global lists only user Tools.
+
 Text output:
   created surface:3  "pnpm storybook"
   existing surface:3  "pnpm storybook"
   takeover surface:1  "pnpm storybook"
+
+  project  /Users/me/projects/site/dormouse.yml  [approved]
+    storybook  "pnpm storybook"  [iframe]  [port auto]  [keyed]
+        The component catalog, for a human to look at.
+  user  /Users/me/.config/dormouse/dormouse.yml  [not found]
 
 JSON output:
   {
@@ -40,6 +48,23 @@ JSON output:
     "key": ["storybook", "/Users/me/projects/site"]
   }
 
+  {
+    "project": { "path": "/Users/me/projects/site/dormouse.yml", "approved": true },
+    "user": { "path": "/Users/me/.config/dormouse/dormouse.yml", "found": false },
+    "tools": [
+      {
+        "name": "storybook",
+        "scope": "project",
+        "run": "pnpm storybook",
+        "render": "iframe",
+        "port": "auto",
+        "keyed": true,
+        "description": "The component catalog, for a human to look at.",
+        "shadowed": false
+      }
+    ]
+  }
+
 FLAGS
      [--global]     Resolve only user-global tools.
      [--json]       Print JSON output.
@@ -48,6 +73,7 @@ FLAGS
      [--surface]    Surface to split when creating.
      [--workspace]  Workspace to act in, instead of the caller's.
      [--cwd]        Working directory for the tool file and the command.
+     [--list]       List the declared Tools instead of running one.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

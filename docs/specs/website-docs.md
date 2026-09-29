@@ -3,15 +3,14 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes specialized references and a hosted-services preview
-on the marketing site. Each reference is generated from its canonical source.
+The following references are generated from canonical sources.
 
 ```text
-/docs/dor                dor CLI reference
-/docs/compatible-agents  supported agents and contribution guide
-/docs/agent-skill        exact bundled agent skill
-/docs/self-host          the SELF_HOST.md runbook, minus its withheld halves
-/docs/security           the security spec, every section of it
+/dor                dor CLI reference
+/compatible-agents  supported agents and contribution guide
+/agent-skill        exact bundled agent skill
+/self-host          the SELF_HOST.md runbook, minus its withheld halves
+/security           the security spec, every section of it
 ```
 
 `/docs` is an entrypoint rather than a page: it redirects to the page
@@ -26,12 +25,13 @@ that once rendered it at `/docs` is retained and still runs (see
 | --- | --- | --- |
 | Homepage | Product marketing, visual proof, conversion, and the way in to every reference | `website/src/pages/Home.tsx` |
 | Marketplace and Open VSX | Extension discovery, evaluation, and basic onboarding | `vscode-ext/README.md` plus public metadata in `vscode-ext/package.json` |
-| `/docs/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
-| `/docs/compatible-agents` | Agent recovery, watching, and contributions | `docs/compatible-agents.md` |
-| `/docs/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
-| `/docs/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
-| `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
-| `/docs/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
+| `/dor` | Complete CLI reference | Help snapshots in `dor/test/snapshots/help/`, verified against the built CLI |
+| `/compatible-agents` | Agent recovery, watching, and contributions | `docs/compatible-agents.md` |
+| `/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
+| `/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
+| `/hosted` | Account-service introduction and prelaunch managed services | `website/src/pages/Hosted.tsx` |
+| `/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
+| `/privacy`, `/terms` | Standalone Hosted account policies outside Docs | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
 Internal specs remain maintainer references, the one exception being the
@@ -51,21 +51,23 @@ The generator still parses it on every build, and the lint's guide checks still
 run, because both constrain the guide as a *Marketplace listing* rather than as
 a website page (rationale).
 
-The guide is host-neutral at the top level; VS Code and standalone instructions
-live under explicit subsections rather than relying on the website to rewrite
-host-specific prose. Its sections are:
+The guide is written for a VS Code user, because every channel that publishes
+it is an extension listing or the extension's folder on GitHub; the standalone
+app gets one section pointing at its download. Its sections are:
 
 ```text
-## Get Dormouse
-## Layout and panes
-## Alerts and TODOs
-## Browsers for you and your agents
-## Mouse, selection, and copy/paste
+## Tmux with browsers
+## Alerts
+## Push notifications you can self-host
+## Terminals that know their ports
+## Browsers for you (and your agents)
+## Select and copy-paste like you meant
+## Getting started
 ## Keyboard shortcuts
-## Themes and host integration
-## Getting started  (### VS Code, ### Standalone)
-## Automation and agents
-## Help and project links
+## Coding agents
+## Dormouse Hosted
+## Standalone app
+## Links
 ```
 
 Content invariants, enforced by the public-doc lint where mechanically
@@ -82,9 +84,9 @@ checkable and by review otherwise:
   without exposing persisted params, controller registries, proxy plumbing, or
   future renderers.
 - VS Code command names in getting started exist in `vscode-ext/package.json`.
-- Detailed CLI behavior links to `/docs/dor`; the complete agent operating guide
-  links to `/docs/agent-skill`; the hosted-services preview links to `/hosted`.
-- The guide contains no `TODO:` placeholders and no copied internal future
+- Detailed CLI behavior links to `/dor`; the complete agent operating guide
+  links to `/agent-skill`; the hosted-services preview links to `/hosted`.
+- The guide renders no `TODO:` placeholders and no copied internal future
   design.
 
 ### Marketplace and Open VSX constraints
@@ -114,7 +116,7 @@ verified:
 | Marketplace / Open VSX | `vsce --baseImagesUrl https://dormouse.sh/guide` rewrites both Markdown images **and** raw `<img src>` attributes at package time |
 | `dormouse.sh` | The generator copies `vscode-ext/images/` to `public/guide/images/`, which is what `--baseImagesUrl` above resolves against |
 
-**The guide spells site links absolutely** (`https://dormouse.sh/docs/dor`),
+**The guide spells site links absolutely** (`https://dormouse.sh/dor`),
 because every channel that publishes it renders it away from this origin;
 `localizeSiteLinks` turns them back into served paths on the site
 ([rendering contract](#markdown-rendering-contract) op 5).
@@ -158,7 +160,9 @@ Raw HTML is disabled except for a narrow `<img>` allowlist carrying only `src`,
 `alt`, `width`, `height`, and `title`, with a relative or `https:` source. Every other tag,
 and every other attribute on `<img>`, is rejected outright. The exception exists
 because the guide's inline 22px alert-state icons need sizing and portable
-Markdown has no syntax for it; it is not a general licence for HTML.
+Markdown has no syntax for it; it is not a general licence for HTML. An HTML
+comment on its own lines is dropped, as GitHub drops it; one sharing a line is
+rejected.
 
 **Must assign unique heading ids**, reserving authored and generated numeric
 suffixes alike. Heading ids come from one GitHub-style slugger, including
@@ -188,8 +192,8 @@ delta is structural:
 5. Rewrite links pointing back at this site to the **served** root-relative
    path: origin dropped, `sitePath`'s trailing slash added unless the path
    already carries one or an extension, query and fragment verbatim — so
-   `https://dormouse.sh/docs/dor#agent-browser` becomes
-   `/docs/dor/#agent-browser`. Only exact-origin matches are rewritten.
+   `https://dormouse.sh/dor#agent-browser` becomes
+   `/dor/#agent-browser`. Only exact-origin matches are rewritten.
 6. Render the subset using the marketing website's typography, spacing, links,
    code blocks, tables, and responsive raster-media treatment.
 7. Add the shared site header and footer.
@@ -199,7 +203,7 @@ Operations 1–5 live in the generator; 6–8 live in the page components.
 Operations 1–5 run in `buildDocument`, so they apply to the guide, which has no
 page today, the self-host runbook, and the security spec. `dor/skill.md` is
 exempt from operation 5 and asserted instead
-([`/docs/agent-skill` guide](#docsagent-skill-guide)).
+([`/agent-skill` guide](#agent-skill-guide)).
 
 **Never** publish a relative repository link as-is; `resolveRepoLinks` sends it
 to the publishing page or the canonical file and fails the build when the
@@ -259,7 +263,7 @@ Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page.
 ## Reference page chrome
 
 `DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
-prev/next. `/hosted` follows `/docs/self-host`. **Must place “Compatible agents”
+prev/next. `/hosted` follows `/self-host`. **Must place “Compatible agents”
 immediately after “dor CLI reference”.**
 
 **Each page's `linkedFrom` names every document owing it a link** — the two
@@ -267,7 +271,7 @@ READMEs and the homepage — so the obligation is registry-driven, never inferre
 from the path. The changelog names none; the rail and the updater's deep link
 are its way in. `checkRoutesToReferences` reads it.
 
-**Must title `/docs/self-host` “How to self-host” and `/hosted` “Dormouse Hosted”
+**Must title `/self-host` “How to self-host” and `/hosted` “Dormouse Hosted”
 in chrome and metadata while keeping URLs stable.**
 
 **The rail is the only table of contents.** List all pages; expand only current
@@ -276,7 +280,7 @@ sections.
 **The page list never shrinks; the expanded sections scroll.** The rail is a
 bounded flex column whose section list is the only part that gives up space, so
 everything shows when it fits and the page list stays reachable when it does
-not. `/docs/dor` nests its subcommands under one `Commands` heading rather than
+not. `/dor` nests its subcommands under one `Commands` heading rather than
 listing every command beside the handful of entries elsewhere. A reader on a screen reader
 navigates the outline rather than the rail, so **must** keep the two agreeing:
 the commands render a level below that heading, and their own labels a level
@@ -286,7 +290,10 @@ below them again (`website/src/pages/DorDocs.test.tsx`).
 `DOCS_DEFAULT_PATH` names — a 302, because the target is a judgement call we
 expect to revisit and a 301 outlives it in readers' caches. There is no page at
 `/docs` itself, and `checkDocsEntrypoint` keeps the redirect and the constant
-saying the same thing. `Docs` joins the marketing nav on desktop only; on a
+saying the same thing. Reference pages live at the top level (`/dor`,
+`/security`), and each old `/docs/<page>` URL keeps a 301 in `_redirects` because
+it is in READMEs and external links. **Never give a page a slug that
+`website/src/routes.ts` or `website/public/` already serves.** `Docs` joins the marketing nav on desktop only; on a
 phone the docs are reached from the homepage's own links.
 
 **These pages follow the reader's theme; the rest of the site does not.** They
@@ -325,6 +332,9 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 
 ## `/hosted` preview
 
+**Must describe the account service and link its account app, privacy policy, and terms.**
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`.
+
 **Must mark both services unavailable:** Hosted operates Pocket's Relay;
 optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
 computer; browser speech and self-hosting remain. `NotifySignupForm` exposes
@@ -334,14 +344,20 @@ the `nedshed.dev` devlog handoff and keeps email per tab.
 
 **Must open both hosting pages with the Relay boundary:** Dormouse needs none;
 remote features require a configured Relay and otherwise make no network
-requests. `/docs/self-host` links `/hosted`; `/hosted` labels hosting pending review,
+requests. `/self-host` links `/hosted`; `/hosted` labels hosting pending review,
 discloses metadata, and links the model.
 `website/src/lib/docs-rail.test.tsx` pins this.
 
 **Must also link the preview from** Pocket marketing/tutorial, self-host docs,
 and the speech and remote-control settings; `linkedFrom` owns the rest.
 
-## `/docs/dor` reference
+## Hosted policies
+
+**Must prerender `/privacy` and `/terms` outside Docs navigation with standalone marketing chrome and an effective date.**
+
+Source of truth: `HostedPolicyLayout` in `website/src/components/HostedPolicyLayout.tsx`.
+
+## `/dor` reference
 
 The CLI page consumes the Markdown snapshots generated by
 `dor/test/cli-help.test.mjs`. The root help snapshot owns command order and
@@ -378,7 +394,7 @@ Generation fails on a malformed snapshot envelope, duplicate command id, missing
 or extra snapshot, or root inventory mismatch. Semantic parsing may fall back to
 prose but never silently discards source text.
 
-## `/docs/compatible-agents` guide
+## `/compatible-agents` guide
 
 **Must publish `docs/compatible-agents.md` with `COMPATIBLE_AGENTS_DELTA` removing its title, spec front matter, “Recovery contract (maintainers)” section, and `## Future`.** Links into withheld sections resolve to the canonical file on GitHub. **Must keep its supported-agent table aligned with
 `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`**, pinned by
@@ -386,7 +402,7 @@ prose but never silently discards source text.
 
 Source of truth: `generateDocs` in `website/scripts/generate-docs.js`.
 
-## `/docs/agent-skill` guide
+## `/agent-skill` guide
 
 The agent page renders `dor/skill.md` exactly. Page chrome adds a table of
 contents, stable heading ids, styled code blocks, copy buttons for `dor skill`
@@ -408,13 +424,13 @@ self-contained and version-matched rather than directing its instructions to
 the latest website reference — and **the generator asserts the skill names no
 site URL rather than rewriting one**, which would repair the violation instead
 of reporting it. `buildCli` lifts the intro sections out of these same block
-objects, so a site URL here would reach `/docs/dor` too. Pinned by
+objects, so a site URL here would reach `/dor` too. Pinned by
 `website/scripts/generate-docs.test.js`.
 
 Generation fails when an introduction heading is missing or ambiguous, or a
 command heading names no anchor in the generated CLI reference.
 
-## `/docs/self-host` runbook
+## `/self-host` runbook
 
 `SELF_HOST.md` stays canonical in the repository and is published from there.
 It has two consumers that outrank the website: an assistant reads it in a
@@ -440,10 +456,10 @@ delta meant to hold back.
 
 Above the runbook the page renders the security spec's self-host rows and
 bullets — guarantees, what is not defended, known gaps — from
-`docs.security.json` ([`/docs/security` spec](#docssecurity-spec)), then the
+`docs.security.json` ([`/security` spec](#security-spec)), then the
 disclosure link and the advice to use an assistant.
 
-## `/docs/security` spec
+## `/security` spec
 
 `docs/specs/security.md` stays canonical in `docs/specs/` because it is a spec:
 `scripts/spec-lint.mjs` budgets it like any other, and the nightly audit reads
@@ -461,14 +477,14 @@ exist in the file.
 `docs.security.json`, never restated: `securityAudiences` splits each entry by
 the spec its links name — `security-local.md`, `security-ci.md`, and
 `security-audit.md` to this page; `remote-security-model.md`,
-`security-remote.md`, and `SELF_HOST.md` to `/docs/self-host`;
+`security-remote.md`, and `SELF_HOST.md` to `/self-host`;
 `security-supply-chain.md` to `/supply-chain` — and an entry naming no spec, a
 spec in no group, or two groups fails the build. `audienceBlocks` gives this
 page its own audience's three blocks with every other block whole, so the spec
 file on GitHub is the one place every entry appears together. All three pages
 cross-link in prose, this page's callout naming where the other two audiences
 are, and each specialized page links
-`/docs/security#how-the-guarantees-are-checked`;
+`/security#how-the-guarantees-are-checked`;
 `website/src/pages/security-pages.test.tsx` pins the rendered entries and the
 links.
 
@@ -521,8 +537,8 @@ output stays out of version control and is reproducible from a clean checkout.
 
 The **Browsers for you (and your agents)** section in
 `website/src/pages/Home.tsx` shows a terminal-to-browser transcript followed by
-a browser Surface preview, and links to `/docs/dor#agent-browser` and
-`/docs/agent-skill`.
+a browser Surface preview, and links to `/dor#agent-browser` and
+`/agent-skill`.
 
 The transcript is **authored literals in `Home.tsx`, not generated or tested**,
 so it can drift from real output with nothing to catch it (rationale). Two
@@ -560,20 +576,23 @@ consumers.
 lint, checks the rules above mechanically; each rule names its own check, and
 the lint's header comment is the inventory. The rules with no other home:
 
-- **No public source carries a `TODO:` placeholder** — the two READMEs and
-  every Markdown page `SITE_ROUTES` publishes.
+- **No public source renders a `TODO:` placeholder** — the two READMEs and
+  every Markdown page `SITE_ROUTES` publishes. A pending image may wait in an
+  HTML comment.
 - **Public links use canonical HTTPS URLs, and a local link resolves** — read
   off the parsed tree, so a link-shaped string in a code span is not a link.
   `SELF_HOST.md` and the security spec get only the HTTPS half; spec-lint
   already resolves their relative links and validates their fragments.
 - **Every page whose `linkedFrom` names a README is linked from it**, as an
   exact URL, so the `/docs` entrypoint cannot stand in for a page under a
-  prefix test. The guide owes no link to `/docs/self-host` or `/docs/security`:
+  prefix test. The guide owes no link to `/self-host` or `/security`:
   it is a Marketplace listing for the editor extension, and neither running a
   Relay nor auditing the repository is part of installing one.
-- **The homepage links every `/docs` page root-relatively, and every `/docs`
-  href on it resolves to one** — both directions, because a rewritten section
-  can strand a page's only link or leave one aimed at the entrypoint.
+- **The homepage links every page whose `linkedFrom` names it**, root-relatively,
+  because a rewritten section can strand a page's only link.
+- **No page is served under `/docs`, and the homepage links none there**:
+  `checkNoDocsPrefixPages` fails on a `DOCS_PAGES` path or a homepage href
+  starting with `/docs`, which can only be the entrypoint or a legacy 301.
 - **Public copy does not present staged WebRTC as shipped**, for as long as
   WebRTC is still under `## Future` in [remote-api.md](remote-api.md).
 
@@ -591,12 +610,12 @@ spec.
 | `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
 | `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
 | `docs/specs/security.md` | The security spec; every section publishes, its rows split across three pages |
-| `docs/compatible-agents.md` | The agent guide and recovery contract; the public guide publishes at `/docs/compatible-agents` |
+| `docs/compatible-agents.md` | The agent guide and recovery contract; the public guide publishes at `/compatible-agents` |
 | `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
 | `README.md` | Repository and contributor entry point |
 | `vscode-ext/images/` | Guide media; the generator copies it to `public/guide/images/`, which the Marketplace listing loads from |
-| `dor/skill.md` | The bundled agent skill, rendered exactly at `/docs/agent-skill` |
-| `dor/test/snapshots/help/` | Tested CLI help, the source for `/docs/dor` |
+| `dor/skill.md` | The bundled agent skill, rendered exactly at `/agent-skill` |
+| `dor/test/snapshots/help/` | Tested CLI help, the source for `/dor` |
 | `website/src/lib/site-meta.ts` | Every page's title, description, canonical, and social cards |
 | `website/src/lib/docs-pages.ts` | The rail's pages and their order; routes, prerender, rail, and lint all read it |
 | `website/src/pages/Changelog.tsx`, `website/src/pages/SupplyChain.tsx` | Rail pages deriving their own sections |
@@ -611,11 +630,11 @@ spec.
 | `website/src/lib/docs-accent.ts` | The themed text colors, contrast-corrected per rendered surface |
 | `website/src/lib/docs-theme.ts` | Default docs theme, and whether the reader has chosen |
 | `website/src/components/DorCommandReference.tsx` | One CLI command section |
-| `website/src/pages/DorDocs.tsx` | `/docs/dor` |
-| `website/src/pages/AgentSkillDocs.tsx` | `/docs/agent-skill` |
-| `website/src/pages/CompatibleAgentsDocs.tsx` | `/docs/compatible-agents` |
+| `website/src/pages/DorDocs.tsx` | `/dor` |
+| `website/src/pages/AgentSkillDocs.tsx` | `/agent-skill` |
+| `website/src/pages/CompatibleAgentsDocs.tsx` | `/compatible-agents` |
 | `website/src/pages/SelfHostDocs.tsx`, `website/src/pages/Hosted.tsx`; `website/src/components/HostingRequirementNotice.tsx` | The two hosting choices and their shared server boundary |
-| `website/src/pages/SecurityDocs.tsx` | `/docs/security` |
+| `website/src/pages/SecurityDocs.tsx` | `/security` |
 | `scripts/public-docs-lint.mjs` | Public-doc validation |
 
 ## Future

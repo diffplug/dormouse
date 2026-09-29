@@ -1,12 +1,13 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CheckIcon, CircleNotchIcon, CopyIcon, FrameCornersIcon, PauseIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
-import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type ReactNode, type RefObject } from 'react';
+import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, PauseIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
+import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
-import { BROWSER_PROVIDER_IDS, renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
-import { AgentRobotIcon } from './BrowserDisplayIcon';
+import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import { AgentRobotIcon, BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
+import { browserProviderSwitch, rememberBrowserProvider, useBrowserProvider } from './BrowserProviderSwitch';
 import type { PortUrlEntry } from './port-url';
-import type { RenderMode } from './agent-browser-screen';
+import { displayModeFor, type RenderMode } from './agent-browser-screen';
 import type { HelperStatus } from '../../lib/helper-terminal';
 import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
@@ -33,20 +34,22 @@ const HELPER_STATUS: Record<HelperStatus, { icon: ReactNode; label: (command: st
   exited: { icon: SETTLED, label: () => 'Helper exited', reset: true },
 };
 
-/** The port row's launch targets: the system browser, the embed, then each
- *  provider's screencast and popout. `needs` names what the host must offer. */
-const PORT_ACTIONS: readonly ({ mode: PortMode; label: string; icon: ReactNode; text: string } & ({ needs?: undefined } | { needs: 'iframe' | BrowserAutomationProvider; unavailable: string }))[] = [
-  { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'System browser' },
-  { mode: 'iframe', label: 'Open in iframe embed', needs: 'iframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'Iframe' },
-  ...BROWSER_PROVIDER_IDS.flatMap((provider) => {
-    const { label } = BROWSER_PROVIDER_GUI[provider];
-    const unavailable = `${label} unavailable on this host`;
-    return [
-      { mode: renderModeFor(provider, 'screencast'), label: `Open in ${label} screencast`, needs: provider, unavailable, icon: <AgentRobotIcon size={17} />, text: label },
-      { mode: renderModeFor(provider, 'popout'), label: `Open in ${label} popout`, needs: provider, unavailable, icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: `${label} popout` },
-    ];
-  }),
-];
+/** A port row entry: a launch target, or (`mode: null`) the provider switch. */
+type PortAction = { mode: PortMode | null; label: string; text: string; icon: ReactNode; disabled: boolean };
+
+/** The launch targets for `provider`, drawn and named as the Display modal draws and names them. */
+function portActions(provider: BrowserAutomationProvider, providers: readonly BrowserAutomationProvider[], canIframe: boolean): PortAction[] {
+  const { label } = BROWSER_PROVIDER_GUI[provider];
+  const automated = providers.includes(provider) ? null : `${label} unavailable on this host`;
+  const popout = displayModeFor(provider, 'popout');
+  const targets: { mode: PortMode; icon: ReactNode; text: string; unavailable: string | null }[] = [
+    { mode: 'system', icon: <ArrowSquareOutIcon size={15} />, text: 'system browser', unavailable: null },
+    { mode: 'iframe', icon: <BrowserDisplayIcon mode="iframe" size={15} />, text: BROWSER_DISPLAY_LABEL.iframe, unavailable: canIframe ? null : 'Iframe unavailable on this host' },
+    { mode: renderModeFor(provider, 'screencast'), icon: <AgentRobotIcon size={15} />, text: `${label} screencast`, unavailable: automated },
+    { mode: renderModeFor(provider, 'popout'), icon: <BrowserDisplayIcon mode={popout} size={15} />, text: BROWSER_DISPLAY_LABEL[popout], unavailable: automated },
+  ];
+  return targets.map(({ unavailable, ...target }) => ({ ...target, label: unavailable ?? `Open in ${target.text}`, disabled: !!unavailable }));
+}
 
 const DETAILS = {
   title: { label: 'Title sources', heading: 'Why this title?' },
@@ -69,17 +72,19 @@ export interface TerminalContextViewProps {
   /** The providers this host can launch a browser with. */
   browserProviders: readonly BrowserAutomationProvider[];
   explorerLabel: string; canExplore: boolean; canIframe: boolean;
-  children: ReactNode; notepadAction?: ReactNode; notepadPanel?: ReactNode;
+  children: ReactNode;
   onClose(): void; onCopyRef: Action; onCopyPath: Action; onExplore: Action;
   onWatch(): void; onTodo(): void; onPort(entry: PortUrlEntry, mode: PortMode): void | Promise<void>;
   onModify(command: string): Promise<void>; onReset: Action; onPromote: Action;
+  /** Present only while the source is a preview slot: keep it open. */
+  onKeepPreview?(): void;
   initialDetail?: Detail | null;
 }
 
-/** `fit` lets the button shrink to its row and truncate its text rather than
- *  overflow the panel; wrap the text in a `truncate` span. The tooltip keeps the
- *  full label. For a row whose labels grow with the host's browser providers. */
-export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false, fit = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean; fit?: boolean }) {
+/** A context action's box, shared with the port row's off-screen measurements. */
+const ACTION_BOX_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-1.5';
+
+export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean }) {
   const windowFocused = useContext(WindowFocusedContext);
   // Native app launches can leave :hover stale until this window regains focus.
   const color = muted ? 'text-muted' : windowFocused ? SUBTLE_ACTION_COLOR_CLASS : SUBTLE_ACTION_REST_COLOR_CLASS;
@@ -87,30 +92,50 @@ export function ContextAction({ children, label, onClick, disabled = false, busy
   // and this context's Escape and Tab handling both live on the <section> and need a focused descendant.
   return <button type="button" title={label} aria-label={label} aria-busy={busy || undefined} aria-disabled={busy || undefined} disabled={disabled} onClick={busy ? undefined : onClick}
     aria-pressed={pressed} onPointerDown={keepFocus ? event => event.preventDefault() : undefined}
-    className={`inline-flex h-6 ${fit ? 'min-w-0' : 'shrink-0'} items-center justify-center gap-1.5 rounded px-1.5 disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
+    className={`${ACTION_BOX_CLASS} disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
 }
 
-function ContextCopyAction({ children, label, onCopy }: { children: ReactNode; label: string; onCopy: () => Promise<boolean> }) {
-  const [confirmation, setConfirmation] = useState(0);
+/** docs/specs/layout.md → "Header context menu" lowercases visible action text only. */
+const actionText = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);
+
+const COPIED = <><CheckIcon size={14} weight="bold" />copied</>;
+
+/** `confirmation` replaces the face on a successful copy; an unlabeled button confirms with the check alone. */
+function ContextCopyAction({ children, label, onCopy, confirmation = COPIED }: { children: ReactNode; label: string; onCopy: () => Promise<boolean>; confirmation?: ReactNode }) {
+  const [confirmed, setConfirmed] = useState(0);
   useEffect(() => {
-    if (!confirmation) return;
-    const timer = setTimeout(() => setConfirmation(0), 1400);
+    if (!confirmed) return;
+    const timer = setTimeout(() => setConfirmed(0), 1400);
     return () => clearTimeout(timer);
-  }, [confirmation]);
+  }, [confirmed]);
   return <ContextAction label={label} onClick={() => {
-    setConfirmation(0);
-    void onCopy().then(success => { if (success) setConfirmation(value => value + 1); });
+    setConfirmed(0);
+    void onCopy().then(success => { if (success) setConfirmed(value => value + 1); });
   }}>
-    <span className="grid">
-      <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5 ${confirmation ? 'invisible' : ''}`}>{children}</span>
-      <span role="status" className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5">
-        {confirmation ? <><CheckIcon size={14} weight="bold" />Copied</> : null}
-      </span>
-    </span>
+    <ActionFace status={confirmed ? confirmation : null}>{children}</ActionFace>
   </ContextAction>;
 }
 
-function ContextOpenAction({ children, label, disabled, onOpen }: { children: ReactNode; label: string; disabled: boolean; onOpen: () => Promise<boolean> }) {
+/** `children`, covered by `status` while it is set without giving up their width. */
+function ActionFace({ status, children }: { status: ReactNode; children: ReactNode }) {
+  return <span className="grid">
+    <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5 ${status ? 'invisible' : ''}`}>{children}</span>
+    <span role="status" className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5">{status}</span>
+  </span>;
+}
+
+const SPINNER = <CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />;
+const OPENING = <>{SPINNER}opening…</>;
+
+/** Drag-selectable diagnostic text. A press focuses it, so Cmd/Ctrl+C reaches
+ *  `handleContextCopy` rather than the helper terminal. */
+function ContextDiagnostic({ className, children }: { className: string; children: ReactNode }) {
+  return <div role="alert" data-context-diagnostic tabIndex={-1} onPointerDown={event => event.currentTarget.focus({ preventScroll: true })}
+    className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
+}
+
+/** `compact`: the button shows only its icon, so opening shows only the spinner. */
+function ContextOpenAction({ children, label, disabled, compact = false, onOpen }: { children: ReactNode; label: string; disabled: boolean; compact?: boolean; onOpen: () => Promise<boolean> }) {
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState(false);
   const opening = pending || feedback;
@@ -124,13 +149,175 @@ function ContextOpenAction({ children, label, disabled, onOpen }: { children: Re
     setFeedback(true);
     void onOpen().then(success => { setPending(false); if (!success) setFeedback(false); });
   }}>
-    <span className="grid">
-      <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5 ${opening ? 'invisible' : ''}`}>{children}</span>
-      <span role="status" className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5">
-        {opening ? <><CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />Opening…</> : null}
-      </span>
-    </span>
+    <ActionFace status={opening ? compact ? SPINNER : OPENING : null}>{children}</ActionFace>
   </ContextAction>;
+}
+
+const MEASURER_CLASS = 'pointer-events-none invisible absolute inset-x-0 top-0 flex h-0 overflow-hidden';
+
+/** Runs `fit` with `row`'s width, its column gap, and the widths of `measurer`'s
+ *  children: now, on `deps`, and whenever either resizes, or any element in
+ *  `alsoObserve` whose width `fit` reads. A hidden row reports nothing. */
+function useRowFit(row: RefObject<HTMLElement | null>, measurer: RefObject<HTMLElement | null>, fit: (width: number, gap: number, widths: number[]) => void, deps: DependencyList, alsoObserve: readonly RefObject<HTMLElement | null>[] = []) {
+  useLayoutEffect(() => {
+    const element = row.current;
+    const hidden = measurer.current;
+    if (!element || !hidden) return;
+    const measure = () => {
+      const width = element.clientWidth;
+      if (width) fit(width, parseFloat(getComputedStyle(element).columnGap) || 0, Array.from(hidden.children, child => (child as HTMLElement).offsetWidth));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    for (const child of hidden.children) observer.observe(child);
+    for (const extra of alsoObserve) if (extra.current) observer.observe(extra.current);
+    return () => observer.disconnect();
+  }, deps);
+}
+
+const COPY_ICON = <CopyIcon size={12} />;
+const COPY_CHECK = <CheckIcon size={12} weight="bold" />;
+const EXPLORE_ICON = <ArrowSquareOutIcon size={15} />;
+const EXPLAIN_ICON = <BugBeetleIcon size={15} />;
+
+/** The title, its explanation, the copyable Surface ref, and `actions` on one line. */
+function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions }: {
+  title: string; surfaceRef: string; actions: ReactNode;
+  onExplain(): void; onCopyRef(): Promise<boolean>;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  const measures = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const [explainCompact, setExplainCompact] = useState(false);
+  const [refCompact, setRefCompact] = useState(false);
+  // Explain drops its label, the title truncates to 8ch, the ref drops to its icon, then the title truncates on.
+  useRowFit(row, measures, (width, gap, [text, least, explainFull, explainIcon, refFull]) => {
+    const rest = (actionsRef.current?.offsetWidth ?? 0) + 3 * gap;
+    setExplainCompact(text + explainFull + refFull + rest > width);
+    setRefCompact(Math.min(text, least) + explainIcon + refFull + rest > width);
+  }, [title, surfaceRef], [actionsRef]);
+  return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 items-center gap-1.5">
+    <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
+      <span className="whitespace-nowrap">{title}</span>
+      <span className="w-[8ch] shrink-0" />
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}explain</span>
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
+      <span className={ACTION_BOX_CLASS}>{surfaceRef}{COPY_ICON}</span>
+    </div>
+    <span className="min-w-0 flex-1 truncate" title={title}>{title}</span>
+    <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}{!explainCompact && 'explain'}</ContextAction>
+    <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={refCompact ? COPY_CHECK : undefined} onCopy={onCopyRef}>{!refCompact && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>
+    <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5">{actions}</div>
+  </div>;
+}
+
+/** The directory, its unlabeled copy, and the explorer action on one line. */
+function DirRow({ cwd, explorerLabel, canExplore, onExplore, onCopyPath }: {
+  cwd: string; explorerLabel: string; canExplore: boolean;
+  onExplore(): Promise<boolean>; onCopyPath(): Promise<boolean>;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  const measures = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  const text = actionText(explorerLabel);
+  // The explorer drops its label before the directory truncates.
+  useRowFit(row, measures, (width, gap, [path, copy, explorer]) => setCompact(path + copy + explorer + 2 * gap > width), [cwd, text]);
+  return <div ref={row} data-context-dir className="relative flex min-h-6 min-w-0 items-center gap-1.5">
+    <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
+      <span className="whitespace-nowrap">{cwd}</span>
+      <span className={ACTION_BOX_CLASS}>{COPY_ICON}</span>
+      <span className={ACTION_BOX_CLASS}>{EXPLORE_ICON}{text}</span>
+    </div>
+    {/* Right-to-left so truncation drops the start; the isolate keeps the path's own order. */}
+    <span className="min-w-0 truncate [direction:rtl]" title={cwd}><bdi>{cwd}</bdi></span>
+    <ContextCopyAction label="Copy absolute path" confirmation={COPY_CHECK} onCopy={onCopyPath}>{COPY_ICON}</ContextCopyAction>
+    <ContextOpenAction label={canExplore ? explorerLabel : 'Directory unavailable on this host'} disabled={!canExplore} compact={compact} onOpen={onExplore}>{EXPLORE_ICON}{!compact && text}</ContextOpenAction>
+  </div>;
+}
+
+const MORE = <span className="inline-flex items-center gap-1">more…<CaretDownIcon size={10} weight="fill" /></span>;
+/** Keys that open, close, or leave a closed select. Chromium on Windows and Linux
+ *  lets any other key change a closed select's value, which here would launch. */
+const SELECT_PASSTHROUGH_KEYS = new Set(['Enter', ' ', 'Tab', 'Escape', 'F4']);
+
+/** Measure natural action widths so overflow follows this row, not the window.
+ * The native dropdown escapes the context's scroll/animation clipping and owns
+ * keyboard navigation; its entries are exactly the actions missing from the row. */
+function PortLaunchActions({ providers, canIframe, onPort }: {
+  providers: readonly BrowserAutomationProvider[];
+  canIframe: boolean;
+  onPort(mode: PortMode): Promise<boolean>;
+}) {
+  const [provider, setProvider] = useBrowserProvider(providers);
+  const offer = browserProviderSwitch(providers, provider);
+  const actions: PortAction[] = [
+    ...portActions(provider, providers, canIframe),
+    ...(offer ? [{ mode: null, label: offer.label, text: offer.label, icon: null, disabled: false }] : []),
+  ];
+  const root = useRef<HTMLDivElement>(null);
+  const measures = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(actions.length);
+  const [pending, setPending] = useState<PortMode | null>(null);
+  const windowFocused = useContext(WindowFocusedContext);
+  const hiddenPending = pending !== null && actions.findIndex(action => action.mode === pending) >= visible;
+  const labels = actions.map(action => action.text).join('|');
+  // A pending action shows "opening…", so each action reserves at least that.
+  useRowFit(root, measures, (width, gap, [rest, opening, ...faces]) => {
+    const widths = faces.map(face => Math.max(face, opening));
+    const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * gap;
+    if (total <= width) { setVisible(widths.length); return; }
+    let used = hiddenPending ? opening : rest;
+    let count = 0;
+    for (const value of widths) {
+      if (used + gap + value > width) break;
+      used += gap + value;
+      count++;
+    }
+    setVisible(count);
+  }, [labels, hiddenPending]);
+  const run = async ({ mode, disabled }: PortAction) => {
+    if (pending !== null || disabled) return;
+    if (!mode) {
+      if (offer) { setProvider(offer.next); rememberBrowserProvider(offer.next); }
+      return;
+    }
+    setPending(mode);
+    try { await onPort(mode); } finally { setPending(null); }
+  };
+  const key = (action: PortAction) => action.mode ?? 'switch';
+  return <div ref={root} data-port-actions className="relative flex min-w-8 flex-1 items-center gap-1">
+    <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
+      {/* The trigger at rest and while opening, then each action's face. */}
+      <span className={ACTION_BOX_CLASS}>{MORE}</span>
+      <span className={ACTION_BOX_CLASS}>{OPENING}</span>
+      {actions.map(action => <span key={key(action)} className={ACTION_BOX_CLASS}>{action.icon}{action.text}</span>)}
+    </div>
+    {actions.slice(0, visible).map(action => {
+      const opening = pending !== null && pending === action.mode;
+      return <ContextAction key={key(action)} label={action.label} disabled={action.disabled} busy={opening} onClick={() => void run(action)}>
+        <ActionFace status={opening ? OPENING : null}>{action.icon}{action.text}</ActionFace>
+      </ContextAction>;
+    })}
+    {/* A transparent native select over a link-styled label, like the other actions. */}
+    {visible < actions.length && <span className={`relative overflow-hidden ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
+      {hiddenPending ? OPENING : MORE}
+      <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
+        className="absolute inset-0 cursor-pointer appearance-none opacity-0"
+        onKeyDown={event => {
+          if (SELECT_PASSTHROUGH_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+          // Only a choice from the open list launches; arrows open it instead.
+          event.preventDefault();
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            try { event.currentTarget.showPicker(); } catch { /* Space and Alt+↓ still open it */ }
+          }
+        }}
+        onChange={event => { const action = actions.find(item => key(item) === event.target.value); if (action) void run(action); }}>
+        <option value="">More browser actions</option>
+        {actions.slice(visible).map(action => <option key={key(action)} value={key(action)} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}
+      </select>
+    </span>}
+  </div>;
 }
 
 /** The supplied Phosphor panel glyph, mirrored so its filled panel marks `side`. */
@@ -194,7 +381,14 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const [error, setError] = useState('');
   const entries = p.scan.status === 'loaded' ? p.scan.entries : [];
   const selected = entries.find(entry => entry.port === port) ?? entries[0];
-  const attempt = async (action: Action) => { setError(''); try { await action(); return true; } catch (e) { setError(messageOf(e)); return false; } };
+  const attempt = async (action: Action) => {
+    setError('');
+    try { await action(); return true; }
+    catch (e) {
+      if (!(e instanceof DOMException && e.name === 'AbortError')) setError(messageOf(e));
+      return false;
+    }
+  };
   /** A detail-dialog action: closes the dialog on success and holds the buttons meanwhile. */
   const submit = async (action: Action) => { setBusy(true); if (await attempt(action)) setDetail(null); setBusy(false); };
   const status = HELPER_STATUS[p.status];
@@ -218,27 +412,22 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       <div className="shrink-0 max-h-[45%] overflow-auto px-3 py-2">
         <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-y-1">
           <span className="text-muted">Title</span>
-          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
-            <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span><ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>
-            <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction><div data-context-header-actions className="flex shrink-0 items-center gap-0.5">
-              {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
-                <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
-              <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
-            </div></div>
-          </div>
+          <TitleRow title={p.title} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
+            {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
+              <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
+            <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
+          </>} />
           <span className="text-muted">Dir</span>
-          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></div>
+          <DirRow cwd={p.cwd} explorerLabel={p.explorerLabel} canExplore={p.canExplore} onExplore={() => attempt(p.onExplore)} onCopyPath={() => attempt(p.onCopyPath)} />
           <span className="text-muted">Ports</span>
-          <div className="flex min-h-7 flex-wrap items-center gap-2">
-            {p.scan.status === 'scanning' ? <span className="text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="text-muted">No listening ports</span> : <>
-              {entries.length > 1 ? <div className="flex w-full min-w-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 flex-1 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
-              <div className="ml-1 flex min-w-0 flex-wrap items-center gap-1 border-l border-border pl-2">
-                {PORT_ACTIONS.map(action => {
-                  const offered = action.needs === 'iframe' ? p.canIframe : !action.needs || p.browserProviders.includes(action.needs);
-                  const unavailable = action.needs && !offered ? action.unavailable : null;
-                  return <ContextAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} fit onClick={() => void attempt(() => p.onPort(selected, action.mode))}>{action.icon}<span className="truncate">{action.text}</span></ContextAction>;
-                })}
+          <div data-context-ports className="flex min-h-7 min-w-0 items-center gap-2">
+            {p.scan.status === 'scanning' ? <span className="truncate text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="truncate text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="truncate text-muted">No listening ports</span> : <>
+              <div className="flex min-w-0 max-w-[45%] shrink items-center gap-2">
+                {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="shrink-0 text-muted">{entries.length} ports</span></>
+                  : <span className="truncate" title={`${selected.host}:${selected.port}${selected.processName ? ` · ${selected.processName}` : ''}`}>{selected.host}:{selected.port} <span className="text-muted">{selected.processName}</span></span>}
               </div>
+              <span className="ml-1 h-3 shrink-0 border-l border-border" />
+              <PortLaunchActions providers={p.browserProviders} canIframe={p.canIframe} onPort={mode => attempt(() => p.onPort(selected, mode))} />
             </>}
           </div>
           <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.watchRule ? `Watch all ${p.watchRule} commands` : 'No command running'}</span>{p.watchRule && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>
@@ -251,17 +440,20 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <div className="flex min-w-0 items-center gap-2 text-muted">{status.icon}<span className="truncate" title={statusLabel}>{statusLabel}</span>
             {!isTool && (status.reset ? <ContextAction label="Reset helper terminal" onClick={() => setDetail('reset')}><ArrowCounterClockwiseIcon size={13} />Reset…</ContextAction> : <ContextAction label="Modify autorun command" onClick={() => { setCommand(p.defaultCommand ?? p.command); setDetail('modify'); }}><SlidersHorizontalIcon size={15} />Modify</ContextAction>)}
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2">{p.notepadAction}{!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}</div>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {/* The action leaves with the mark, so focus stays in the context for Escape and Tab. */}
+            {p.onKeepPreview && <ContextAction label="Keep open" onClick={() => { surface.current?.focus({ preventScroll: true }); p.onKeepPreview?.(); }}><PushPinIcon size={15} />Keep open</ContextAction>}
+            {!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}
+          </div>
         </div>
-        {p.mismatch && <div role="alert" className="mx-3 mb-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></div>}
-        {(p.warning || (!detail && error)) && <div role="alert" className="mx-3 mb-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</div>}
+        {p.mismatch && <ContextDiagnostic className="mx-3 mb-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
+        {(p.warning || (!detail && error)) && <ContextDiagnostic className="mx-3 mb-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}
         <div className="min-h-16 flex-1 bg-terminal-bg text-terminal-fg">{p.children}</div>
       </div>
-    {p.notepadPanel}
     {detail && <div className="absolute inset-0 z-10 bg-app-bg/35" onClick={() => setDetail(null)}><div ref={detailRoot} role="dialog" aria-modal="true" aria-label={DETAILS[detail].label} className={`${POPUP_SURFACE_CLASS} absolute inset-x-3 top-3 max-h-[calc(100%-1.5rem)] overflow-auto p-4`} onClick={e => e.stopPropagation()}>
       <div className="mb-3 flex items-center justify-between font-semibold"><span>{DETAILS[detail].heading}</span><ContextAction label="Close details" onClick={() => setDetail(null)} muted><XIcon size={14} /></ContextAction></div>
       {detail === 'title' ? <div className="grid grid-cols-[8rem_1fr_auto] gap-x-3 gap-y-2">{p.titleSources.map((source, index) => <div className="contents" key={index}><span className="text-muted">{source.source}</span><span>{source.value}</span><span className="text-muted">{source.note}</span></div>)}</div> : detail === 'modify' ? <><input autoFocus aria-label="Default helper autorun command" value={command} onChange={e => setCommand(e.target.value)} maxLength={4096} placeholder="Leave empty to turn autorun off" className="w-full border-b border-input-border bg-input-bg px-2 py-1.5 outline-focus-ring" /><p className="mb-4 mt-2 text-muted">Global default. Applies to new and reset helpers. Leave empty to turn autorun off.</p><div className="flex justify-end gap-2"><ContextAction label="Reset helper terminal" onClick={() => setDetail('reset')}>Reset helper…</ContextAction><ContextAction label="Save default" busy={busy} onClick={() => void submit(() => p.onModify(command))}>Save default</ContextAction></div></> : <><p>Discard this helper, including scrollback, unfinished input, and any running program? Unsaved edits will be lost.</p><p className="mb-4 mt-2 text-muted">A fresh helper starts in the parent's current directory using the global autorun default.</p><div className="flex justify-end gap-2"><ContextAction label="Keep helper" onClick={() => setDetail(null)}>Keep helper</ContextAction><ContextAction label="Discard and reset" busy={busy} onClick={() => void submit(p.onReset)}>Discard and reset</ContextAction></div></>}
-      {error && <p role="alert" className="mt-2 text-error">{error}</p>}
+      {error && <ContextDiagnostic className="mt-2 text-error">{error}</ContextDiagnostic>}
     </div></div>}
     </div>
   </section>;

@@ -23,7 +23,7 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 | `z` | Zoom and focus | Enters passthrough; on the pane that already owns zoom, unzooms. |
 | `m` or `d` | Minimize / reattach | Stays in command mode, unlike `Enter` on a door. |
 | `k` or `x` | Kill | Kills the selected pane or door behind a random-letter prompt; an untouched Surface skips it. |
-| `,` | Rename selected item | Rename the selected terminal pane or Workspace tab; consumed no-op on browser surfaces, doors, and `+`. |
+| `,` | Rename selected item | Rename the selected terminal or Tool pane or Workspace tab; consumed no-op on browser surfaces, doors, and `+`. |
 | `a` | Alert | Dismiss the ring if any, then open the terminal context. Terminal Surfaces only; doors excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |
 | `>` | Terminal context | Terminal panes only; consumed no-op on browser panes, inert on doors. |
@@ -36,6 +36,7 @@ Standalone only — a bare Wall (VS Code, the website playground) leaves these k
 |-----|--------|-------------|
 | `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
 | `,` | Rename selected item | Edit the highlighted Workspace tab, without activating it. |
+| `k` or `x` | Close Workspace | Close the highlighted tab through its `×` action, including its confirmation. |
 | `Enter` (Workspace tab) | Activate / focus | An inactive tab activates in command mode; an active tab enters its terminal in passthrough. |
 | `Enter` (`+`) | New Workspace | Creates and focuses its terminal in passthrough after mount. |
 
@@ -59,7 +60,6 @@ Both modes, ahead of the passthrough gate, and only on a terminal **selected** S
 | *(any other key)* | — | Swallowed during a terminal-handled drag, never reaching the inside program (`docs/specs/mouse-and-clipboard.md` §3.6). |
 | `⌘C` (macOS) / `Ctrl+C` (others) | Copy raw | Copy the selection as-is; requires a finalized selection. |
 | `⌘⇧C` (macOS) / `Ctrl+Shift+C` (others) | Copy rewrapped | Copy the selection rewrapped for single-line display. |
-| `⌘N` (macOS) / `Ctrl+N` (others) | Add to notepad | Capture the finalized selection as a note on that Surface; unbound where the browser reserves the chord (`docs/specs/notepad.md`). |
 | `⌘V` / `⌘⇧V` / `Ctrl+V` / `Ctrl+Shift+V` | Paste | Paste into the terminal; the `Ctrl` variants are intercepted on every platform, macOS included. |
 
 On macOS `Ctrl+C` still reaches the running program; a literal `0x16` needs the shell's `quoted-insert` (`Ctrl+Q`) (`docs/specs/mouse-and-clipboard.md` §8.3).

@@ -87,6 +87,8 @@ export interface Surface {
   /** At least one `dor await` is parked on this Surface. Never persisted — a
    *  wait cannot outlive the process blocking on it. */
   awaited: boolean;
+  /** The Workspace's preview slot (`dor open --preview`); omitted otherwise. */
+  preview?: boolean;
   /** Listening ports opened by this terminal Surface. Present only when the
    *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
   ports?: SurfacePort[];
@@ -268,7 +270,7 @@ export interface EnsureSurfaceResponse {
  * authorized it (`docs/specs/dor-tool.md` -> Trust).
  */
 export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
-  /** Local-file dispatch; never eligible for caller takeover. */
+  /** Local-file dispatch (`dor open`). */
   file?: string;
   tool?: string;
   /** Registered tool name (`dor tool <name>`). */
@@ -284,6 +286,8 @@ export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
   cwd: string;
   /** Surface to split when creating. */
   surface?: string;
+  /** Show `file` in the Workspace's preview slot (`dor open --preview`). */
+  preview?: boolean;
 }
 
 export interface ToolSurfaceResponse {
@@ -295,8 +299,14 @@ export interface ToolSurfaceResponse {
    * for the same reason `takeover` is. `takeover` is the calling pane itself
    * becoming the tool, answered before the command is typed — `dor` has to exit
    * before its own shell is free to run it.
+   *
+   * `retargeted` is the preview slot running the newly resolved Tool in place,
+   * answered once the command is typed; the slot re-running the Tool and
+   * target it already had, after its command exited, is `adopted`.
+   * `superseded` is a preview a newer one replaced before it ran; the handle is
+   * the slot's.
    */
-  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover';
+  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover' | 'retargeted' | 'superseded';
   surfaceId: string;
   surfaceRef: string;
   /** The rendered command, as typed into the shell. */
@@ -307,6 +317,46 @@ export interface ToolSurfaceResponse {
   key: string[] | null;
   /** Non-fatal `dormouse.yml` lint output, printed to stderr by the CLI. */
   warnings?: string[];
+}
+
+/** The error a preview answers with when a newer one replaced it while no
+ *  slot exists: superseded, as the `superseded` status is, not failed. */
+export const PREVIEW_SUPERSEDED_ERROR = 'superseded by a newer preview';
+
+/** `dor tool --list`: the Tools `dor tool <name>` would resolve from `cwd`. */
+export interface ToolListRequest {
+  cwd: string;
+  /** Skip project discovery, as `dor tool --global <name>` does. */
+  global: boolean;
+}
+
+/** One declared Tool, as `dor tool --list` reports it. */
+export interface ToolListEntry {
+  name: string;
+  scope: 'project' | 'user';
+  run: string | string[];
+  render: 'iframe' | 'agent-browser-screencast' | 'playwright-screencast';
+  port: 'announced' | 'auto';
+  /** Declares `prespawn_dedupe`, so a rerun reveals the running Tool. */
+  keyed: boolean;
+  /** The comment block directly above the entry, raw: control characters are
+   *  escaped by whatever prints it. Null when there is none. Repo text: it
+   *  describes, it never authorizes. */
+  description: string | null;
+  /** A user Tool hidden from `dor tool <name>` by a project Tool of that name. */
+  shadowed: boolean;
+}
+
+export interface ToolListResponse {
+  /** The nearest project `dormouse.yml`, and whether the user has approved it;
+   *  null when there is none or the request was `global`. */
+  project: { path: string; approved: boolean } | null;
+  /** Where user Tools are read from, whether or not that file exists. */
+  user: { path: string; found: boolean };
+  /** Project Tools, then user Tools, each in file order. */
+  tools: ToolListEntry[];
+  /** Non-fatal `dormouse.yml` lint output, printed to stderr by the CLI. */
+  warnings: string[];
 }
 
 export interface SendSurfaceRequest extends WorkspaceScopedRequest {
@@ -490,6 +540,7 @@ export interface ControlClient {
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
   toolSurface(request: ToolSurfaceRequest): Promise<ToolSurfaceResponse>;
+  toolList(request: ToolListRequest): Promise<ToolListResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;

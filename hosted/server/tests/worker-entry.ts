@@ -1,6 +1,7 @@
 import { DevTime, DevRandom } from "pgstencil";
 import { deterministicScope } from "@pgstencil/auth/better-auth-testing";
 import worker from "../worker";
+export { OneTimeRoom } from "../worker";
 const time = new DevTime();
 const scope = { time, random: new DevRandom("dormouse-hosted-test") };
 export default {

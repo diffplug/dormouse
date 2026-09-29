@@ -138,6 +138,7 @@ function running(...sessions: string[]): void {
 vi.mock('dor-lib-common', async (importOriginal) => ({
   ...(await importOriginal<typeof import('dor-lib-common')>()),
   spawnAndCapture: spawnMock,
+  resolveBinaryPath: (binary: string) => binary === 'agent-browser' ? '/test/bin/agent-browser' : binary,
 }));
 
 type Host = ReturnType<typeof createBrowserHost>;
@@ -443,7 +444,7 @@ describe('agent-browser host daemon stop', () => {
   it('bounds the CLI a close runs, which a hung daemon would otherwise hold forever', async () => {
     enqueueSpawnResults([{}]);
     await ab(makeHost(), { op: 'close' }, { session });
-    expect(spawnMock).toHaveBeenCalledExactlyOnceWith('agent-browser', ['--session', session, 'close'], { timeoutMs: 10_000 });
+    expect(spawnMock).toHaveBeenCalledExactlyOnceWith('/test/bin/agent-browser', ['--session', session, 'close'], { timeoutMs: 10_000 });
   });
 
   it('terminates a daemon its state files prove live before relaunching it in the other mode', async () => {
@@ -534,7 +535,6 @@ describe('agent-browser host attach', () => {
       { op: 'history', dir: 'back' },
       { op: 'tab', action: 'select', tabId: 't1' },
       { op: 'viewport', width: 800, height: 600, dpr: 2 },
-      { op: 'device', name: 'iPhone 16' },
       { op: 'edit', edit: 'copy' },
     ];
     const provider = createAgentBrowserProvider();
@@ -1092,7 +1092,7 @@ describe('agent-browser host binary', () => {
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
     // Fell through to the host's own candidate rather than spawning curl.
-    expect(spawnMock.mock.calls[0][0]).toBe('agent-browser');
+    expect(spawnMock.mock.calls[0][0]).toBe('/test/bin/agent-browser');
   });
 
   it('accepts an absolute path to an agent-browser, including its Windows shims', async () => {
@@ -1124,8 +1124,6 @@ describe('agent-browser host requests', () => {
       [{ op: 'tab', action: 'close', tabId: 't2' }, ['tab', 'close', 't2']],
       [{ op: 'viewport', width: 1280, height: 720, dpr: 2 }, ['set', 'viewport', '1280', '720', '2']],
       [{ op: 'viewport', width: 801, height: 599, dpr: 1.100000023841858 }, ['set', 'viewport', '801', '599', '1.100000023841858']],
-      [{ op: 'device', name: 'iPhone 16 Pro' }, ['set', 'device', 'iPhone 16 Pro']],
-      [{ op: 'device', name: 'iPad (gen 11)' }, ['set', 'device', 'iPad (gen 11)']],
     ];
     const host = makeHost();
     for (const [op, argv] of shapes) {
@@ -1152,7 +1150,6 @@ describe('agent-browser host requests', () => {
       { op: 'tab', action: 'select', tabId: '--extension' },
       { op: 'tab', action: 'close', tabId: '--args=--disable-web-security' },
       { op: 'tab', action: 'list', tabId: 't2' },
-      { op: 'device', name: '--state=/tmp/s.json' },
       { op: 'screenshotTo', path: '/Users/someone/.zshrc' },
       { op: 'eval', script: 'document.cookie' },
       // The webview holds no CDP, captures nothing itself, and names no port to dial but a stream's.
@@ -1245,6 +1242,28 @@ describe('agent-browser host edit ops', () => {
       expect(args.slice(0, 3)).toEqual(['--session', 'sess', 'eval']);
       expect(typeof args[3]).toBe('string');
       expect(args[3]).toContain('document');
+    }
+  });
+});
+
+describe('agent-browser shell environment', () => {
+  useTempSocketDir('dor-ab-env-');
+  it('uses the binding environment for daemon proof and commands', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dor-ab-shell-'));
+    const { port, server } = await listen();
+    const provider = createAgentBrowserProvider();
+    const env = { PATH: '/shell/bin', AGENT_BROWSER_SOCKET_DIR: dir, PRIVATE: 'secret' };
+    const binding = provider.bind({ session: 'shell-env', cwd: dir, binaryPath: '/shell/bin/agent-browser', env });
+    writeFileSync(join(dir, 'shell-env.pid'), String(process.pid));
+    writeFileSync(join(dir, 'shell-env.stream'), String(port));
+    try {
+      expect(await provider.find(binding)).toEqual({ stream: port });
+      enqueueSpawnResults([{}]);
+      await provider.act(binding, { op: 'history', dir: 'reload' });
+      expect(spawnMock.mock.calls[0][2]).toEqual({ env });
+    } finally {
+      await closeServer(server);
+      await fsp.rm(dir, { recursive: true, force: true });
     }
   });
 });

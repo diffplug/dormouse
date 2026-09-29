@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM"], "module": "ES2022",
+    "moduleResolution": "bundler", "strict": true, "noEmit": true,
+    "skipLibCheck": true, "noUnusedLocals": true, "noUnusedParameters": true
+  },
+  "include": ["viewer/**/*.ts"]
+}

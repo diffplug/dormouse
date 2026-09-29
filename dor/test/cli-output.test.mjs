@@ -181,6 +181,27 @@ function fixtureClient(surfacesFixture = fixtureSurfaces) {
         ...(command ? { command } : {}),
       };
     },
+    // An approved project and a user file; the user `storybook` is hidden by
+    // the project's. `--global` answers the user file alone, as the host does.
+    async toolList(request) {
+      this.requests.push({ method: 'toolList', request });
+      const user = [
+        { name: 'storybook', scope: 'user', run: 'npx storybook', render: 'iframe', port: 'auto', keyed: false, description: null, shadowed: !request.global },
+        { name: 'md', scope: 'user', run: ['glow', '$TARGET'], render: 'iframe', port: 'announced', keyed: true, description: 'Render Markdown.', shadowed: false },
+      ];
+      return {
+        project: request.global ? null : { path: '/work/site/dormouse.yml', approved: true },
+        user: { path: '/home/me/.config/dormouse/dormouse.yml', found: true },
+        tools: [
+          ...(request.global ? [] : [
+            { name: 'storybook', scope: 'project', run: 'pnpm storybook', render: 'iframe', port: 'auto', keyed: true, description: 'The component catalog.\n\nView only.', shadowed: false },
+            { name: 'harness', scope: 'project', run: 'pnpm harness', render: 'agent-browser-screencast', port: 'announced', keyed: true, description: null, shadowed: false },
+          ]),
+          ...user,
+        ],
+        warnings: request.global ? [] : ['/work/site/dormouse.yml: tools.harness: ignoring unknown field \'colour\''],
+      };
+    },
     async toolSurface(request) {
       this.requests.push({ method: 'toolSurface', request });
       // Mirror the host: a named tool renders from the (fixture) registry, a
@@ -1591,6 +1612,16 @@ test('list tags an awaited surface after its todo', async () => {
   );
 });
 
+test('list tags the preview slot in text and JSON only', async () => {
+  const surfaces = [fixtureSurfaces[0], { ...fixtureSurfaces[1], kind: 'tool', todo: false, awaited: false, preview: true }];
+  const text = await runCli(['list'], { client: fixtureClient(surfaces), env: listEnv });
+  const rows = text.stdout.split('\n');
+  assert.match(rows.find((line) => line.includes('surface:2')), /\[preview\]$/);
+  assert.doesNotMatch(rows.find((line) => line.includes('surface:1')), /\[preview\]/);
+  const json = await runCli(['list', '--json'], { client: fixtureClient(surfaces), env: listEnv });
+  assert.deepEqual(JSON.parse(json.stdout).surfaces.map((surface) => [surface.ref, surface.preview]), [['surface:1', undefined], ['surface:2', true]]);
+});
+
 test('list --all groups every Workspace under a header', async () => {
   const client = fixtureClient();
   const result = await runCli(['list', '--all'], { client, env: listEnv });
@@ -1968,6 +1999,56 @@ test('tool rejects an empty command tail', async () => {
   await snapshot('tool-empty-tail', await runCli(['tool', '--'], { client: fixtureClient() }));
 });
 
+test('tool --list text output groups Tools under their file with descriptions', async () => {
+  await snapshot('tool-list', await runCli(['tool', '--list'], { client: fixtureClient(), env: { PWD: '/work/site' } }));
+});
+
+test('tool --list --json keeps warnings on stderr', async () => {
+  await snapshot('tool-list-json', await runCli(['tool', '--list', '--json'], { client: fixtureClient(), env: { PWD: '/work/site' } }));
+});
+
+test('tool --list --global reports no project', async () => {
+  await snapshot('tool-list-global', await runCli(['tool', '--list', '--global'], { client: fixtureClient(), env: { PWD: '/work/site' } }));
+});
+
+test('tool --list asks for the caller directory, or --cwd', async () => {
+  const client = fixtureClient();
+  await runCli(['tool', '--list', '--cwd', 'sub'], { client, env: { PWD: '/work/site' } });
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests, [{ method: 'toolList', request: { cwd: '/work/site/sub', global: false } }]);
+});
+
+test('tool --list takes no name, command, or placement flag', async () => {
+  for (const argv of [['--list', 'storybook'], ['--list', '--', 'pnpm', 'dev'], ['--list', '--minimize'], ['--list', '--workspace', 'workspace:2']]) {
+    const client = fixtureClient();
+    const result = await runCli(['tool', ...argv], { client });
+    assert.equal(result.exitCode, 1, argv.join(' '));
+    assert.match(result.stderr, /--list takes (no tool name or command|only --global, --cwd, and --json)/);
+    assert.deepEqual(client.requests, []);
+  }
+});
+
+test('tool --list escapes control characters in repo text, in every output', async () => {
+  const listing = {
+    project: { path: '/work/site/dormouse.yml', approved: false },
+    user: { path: '/home/me/.config/dormouse/dormouse.yml', found: false },
+    tools: [{ name: 'evil\u001b]52;c;x\u0007', scope: 'project', run: 'echo \u009b31m', render: 'iframe', port: 'auto', keyed: false, description: 'fine\u001b[2Jtext', shadowed: false }],
+    warnings: ['/work/site/dormouse.yml: tools.evil\u001b[2J: ignoring unknown field \'x\''],
+  };
+  const client = fixtureClient();
+  client.toolList = async () => listing;
+  const controls = /[\x00-\x09\x0b-\x1f\x7f-\x9f]/;
+  const text = await runCli(['tool', '--list'], { client });
+  assert.doesNotMatch(text.stdout, controls);
+  assert.doesNotMatch(text.stderr, controls);
+  assert.match(text.stdout, /evil\\u001b\]52;c;x\\u0007/);
+  assert.match(text.stdout, /\\u009b31m/);
+  assert.match(text.stdout, /fine\\u001b\[2Jtext/);
+  const json = await runCli(['tool', '--list', '--json'], { client });
+  assert.doesNotMatch(json.stdout, controls);
+  assert.deepEqual(JSON.parse(json.stdout).tools, listing.tools);
+});
+
 test('tool rejects an unknown option', async () => {
   await snapshot('tool-unknown-option', await runCli(['tool', '--nope', 'storybook'], { client: fixtureClient() }));
 });
@@ -1992,6 +2073,54 @@ test('open forwards one file, explicit handler, placement, and Workspace to Tool
     workspace: 'workspace:2', fresh: true, minimized: true, surface: 'surface:4',
   } });
   assert.equal(JSON.parse(result.stdout).surface_ref, 'surface:4');
+});
+
+test('open --preview asks for the preview slot and prints its retarget', async () => {
+  const client = fixtureClient();
+  client.toolSurface = async function toolSurface(request) {
+    this.requests.push({ method: 'toolSurface', request });
+    return { status: 'retargeted', surfaceId: 'slot', surfaceRef: 'surface:5', command: 'viewer a.md', cwd: request.cwd, minimized: false, key: null };
+  };
+  const result = await runCli(['open', '--preview', 'a.md'], { client, env: { PWD: '/repo' } });
+  assert.equal(result.exitCode, 0);
+  assert.equal(client.requests[0].request.preview, true);
+  assert.equal(result.stdout, 'retargeted surface:5  "viewer a.md"\n');
+  const plain = fixtureClient();
+  await runCli(['open', 'a.md'], { client: plain, env: { PWD: '/repo' } });
+  assert.equal('preview' in plain.requests[0].request, false);
+});
+
+test('open, tool, and tool --list escape control characters in a host error', async () => {
+  const client = fixtureClient();
+  const failure = async () => { throw new Error('ENAMETOOLONG: name too long, realpath \'/tmp/x\u001b]0;pwn\u0007\''); };
+  client.toolSurface = failure;
+  client.toolList = failure;
+  for (const argv of [['open', 'a.md'], ['tool', 'viewer'], ['tool', '--list']]) {
+    const result = await runCli(argv, { client, env: { PWD: '/repo' } });
+    assert.equal(result.exitCode, 1);
+    assert.doesNotMatch(result.stderr, /[\x00-\x09\x0b-\x1f\x7f-\x9f]/);
+    assert.match(result.stderr, /x\\u001b\]0;pwn\\u0007/);
+  }
+});
+
+test('open --preview refuses --fresh and --minimize before asking the host', async () => {
+  for (const flag of ['--fresh', '--minimize']) {
+    const client = fixtureClient();
+    const result = await runCli(['open', '--preview', flag, 'a.md'], { client, env: { PWD: '/repo' } });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, new RegExp(`--preview cannot be combined with ${flag}`));
+    assert.equal(client.requests.length, 0);
+  }
+});
+
+test('open forwards a folder to Tool dispatch as it forwards a file', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['open', '--preview', 'docs/'], { client, env: { PWD: '/repo' } });
+  assert.equal(result.exitCode, 0);
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests[0], { method: 'toolSurface', request: {
+    file: 'docs/', cwd: '/repo', fresh: false, minimized: false, surface: undefined, tool: undefined, preview: true,
+  } });
 });
 
 test('open requires exactly one file', async () => {

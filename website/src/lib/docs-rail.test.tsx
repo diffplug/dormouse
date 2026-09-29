@@ -29,13 +29,13 @@ import cli from "../data/docs.cli.json";
 /** Every page in the rail, with the entries it hands the rail. */
 const PAGES: Record<string, { element: React.ReactElement; toc: TocEntry[] }> = {
   "/changelog": { element: <Changelog />, toc: changelogToc(changelog.releases) },
-  "/docs/security": { element: <SecurityDocs />, toc: security.toc },
+  "/security": { element: <SecurityDocs />, toc: security.toc },
   "/supply-chain": { element: <SupplyChain />, toc: SUPPLY_CHAIN_TOC },
-  "/docs/self-host": { element: <SelfHostDocs />, toc: SELF_HOST_TOC },
+  "/self-host": { element: <SelfHostDocs />, toc: SELF_HOST_TOC },
   "/hosted": { element: <Hosted />, toc: HOSTED_TOC },
-  "/docs/agent-skill": { element: <AgentSkillDocs />, toc: skill.toc },
-  "/docs/dor": { element: <DorDocs />, toc: cli.toc },
-  "/docs/compatible-agents": { element: <CompatibleAgentsDocs />, toc: agents.toc },
+  "/agent-skill": { element: <AgentSkillDocs />, toc: skill.toc },
+  "/dor": { element: <DorDocs />, toc: cli.toc },
+  "/compatible-agents": { element: <CompatibleAgentsDocs />, toc: agents.toc },
 };
 
 const idsIn = (entries: TocEntry[]): string[] =>
@@ -43,8 +43,8 @@ const idsIn = (entries: TocEntry[]): string[] =>
 
 describe("every page in the rail", () => {
   it("places compatible agents directly after the dor CLI reference", () => {
-    const index = DOCS_PAGES.findIndex((page) => page.path === "/docs/dor");
-    expect(DOCS_PAGES[index + 1]).toMatchObject({ path: "/docs/compatible-agents", label: "Compatible agents" });
+    const index = DOCS_PAGES.findIndex((page) => page.path === "/dor");
+    expect(DOCS_PAGES[index + 1]).toMatchObject({ path: "/compatible-agents", label: "Compatible agents" });
   });
   it("is covered by this test", () => {
     // A page added to the rail without an entry here would go unchecked, and
@@ -96,7 +96,7 @@ describe("every page in the rail", () => {
   });
 
   it("names the two hosting choices", () => {
-    expect(DOCS_PAGES.find((page) => page.path === "/docs/self-host")?.label)
+    expect(DOCS_PAGES.find((page) => page.path === "/self-host")?.label)
       .toBe("How to self-host");
     expect(DOCS_PAGES.find((page) => page.path === "/hosted")?.label)
       .toBe("Dormouse Hosted");

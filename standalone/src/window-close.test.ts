@@ -12,9 +12,6 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(async (_cmd: string) => undefined as unknown),
   listen: vi.fn(),
   countRunningSessions: vi.fn(() => 0),
-  archiveSurfaceNotes: vi.fn(async (_ids: readonly string[], _opts?: { signal?: AbortSignal }) => {}),
-  notepadSurfaceIds: vi.fn(() => [] as string[]),
-  removeSurface: vi.fn(),
   getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
   hasPendingUpdate: vi.fn(() => false),
 }));
@@ -24,13 +21,8 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 vi.mock("dormouse-lib/lib/terminal-registry", () => ({
   countRunningSessions: mocks.countRunningSessions,
 }));
-vi.mock("dormouse-lib/lib/notepad/close-coordinator", () => ({
-  archiveSurfaceNotes: mocks.archiveSurfaceNotes,
-}));
-vi.mock("dormouse-lib/lib/notepad/notepad-store", () => ({
-  notepadSurfaceIds: mocks.notepadSurfaceIds,
-  removeSurface: mocks.removeSurface,
-}));
+
+
 // The Workspaces the dialog names, which the quit-confirm store captures.
 vi.mock("dormouse-lib/lib/workspace-store", () => ({
   subscribeToWorkspaces: () => () => {},
@@ -43,8 +35,6 @@ vi.mock("./updater", () => ({ hasPendingUpdate: mocks.hasPendingUpdate }));
 import { initWindowClose, _resetWindowCloseForTesting } from "./window-close";
 import {
   cancelQuit as dismissDialog,
-  confirmQuit,
-  getQuitArchiveError,
   getQuitConfirmIntent,
   getQuitConfirmPhase,
   _resetQuitConfirmForTesting,
@@ -74,8 +64,6 @@ describe("per-window close", () => {
     });
     mocks.countRunningSessions.mockReturnValue(0);
     mocks.invoke.mockResolvedValue(undefined);
-    mocks.archiveSurfaceNotes.mockResolvedValue(undefined);
-    mocks.notepadSurfaceIds.mockReturnValue([]);
     mocks.hasPendingUpdate.mockReturnValue(false);
   });
 
@@ -129,40 +117,6 @@ describe("per-window close", () => {
     expect(commands()).toContain("window_close_cancel");
     expect(commands()).not.toContain("close_window");
     expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
-  });
-
-  it("archives every Surface holding notes, because a close is deliberate", async () => {
-    mocks.notepadSurfaceIds.mockReturnValue(["pane-a"]);
-    const order: string[] = [];
-    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
-    mocks.archiveSurfaceNotes.mockImplementation(async () => void order.push("archive"));
-
-    initWindowClose(fakeAdapter(order));
-    closeRequested();
-    await settle();
-
-    expect(order.slice(0, 3)).toEqual(["window_close_ack", "archive", "remove_window_session"]);
-    expect(mocks.archiveSurfaceNotes).toHaveBeenCalledWith(["pane-a"], expect.anything());
-  });
-
-  it("holds the close open when the archive refuses, and Close anyway discards the notes", async () => {
-    mocks.notepadSurfaceIds.mockReturnValue(["pane-a"]);
-    mocks.archiveSurfaceNotes.mockRejectedValue(new Error("disk is full"));
-    const adapter = fakeAdapter();
-    initWindowClose(adapter);
-    closeRequested();
-    await settle();
-
-    expect(getQuitConfirmPhase()).toBe("archive-failed");
-    expect(getQuitArchiveError()).toBe("disk is full");
-    expect(getQuitConfirmIntent().kind).toBe("close-window");
-    expect(commands()).not.toContain("window_close_cancel");
-    expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
-
-    confirmQuit();
-    await settle();
-    expect(mocks.removeSurface).toHaveBeenCalledWith("pane-a");
-    expect(commands()).toContain("close_window");
   });
 
   it("asks about an approved download even with nothing running", async () => {

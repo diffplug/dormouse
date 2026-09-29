@@ -36,8 +36,8 @@ const SHOULD_TERMINATE_TYPES: &[u8] = b"L@:@\0";
 /// `[NSApp stop:]`, not `terminate:` — so an approved pass is the OS asking
 /// again (Dock Quit, logout) while the exit waits on the bounded hand-back
 /// cleanup gate, and it answers `Now` once the gate permits. Panic-free by
-/// construction: the release profile aborts on unwind, and this runs inside
-/// AppKit's stack.
+/// construction: every Rust panic aborts (`panic_policy`), and this runs
+/// inside AppKit's stack.
 unsafe extern "C-unwind" fn should_terminate(
     _this: *mut AnyObject,
     _cmd: Sel,

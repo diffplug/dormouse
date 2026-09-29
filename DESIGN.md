@@ -197,16 +197,16 @@ Shadows appear only on **raised surfaces that float above content**: popovers, t
 Doors are the pane-header indicators on the baseboard. The most signature component in the system.
 - **Shape:** top corners only — `rounded-t-lg` (8px). The bottom is square so the door visually anchors to the baseboard. The pane body owns the bottom corners (`rounded-b-lg`); together they form one continuous rounded rectangle when expanded.
 - **Surface:** `bg-door-bg` + `text-door-fg`. These resolve at runtime via `computeDynamicPalette()` and may match either the inactive-header palette or the terminal palette, whichever has stronger separation from `app-bg`.
-- **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`; the title button pads `pl-2.5` (10px), `gap-2` between its glyph, title, and badges, ending `pr-2.5` alone or `pr-1` when the notepad button follows it. The notepad button carries the trailing inset itself (`pl-0.5 pr-2`).
+- **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`; the button pads `px-2.5` (10px), with `gap-2` between its glyph, title, and badges.
 - **Type:** `text-sm font-medium font-mono`.
-- **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing); trailing notepad button (`size={12}`, `weight="fill"`) when the minimized Surface holds notes.
+- **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing).
 - **Alarm:** one 2px inset overlay (`--color-alarm-vs-door`) draws the edge for both the unlabelled ring, where it flashes once on arrival, and `SPOKEN`, which persists until the ring clears and adds a speaker icon *beside* the TODO pill instead of evicting it. `SPEAKING` instead inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label, for one utterance. Both speech states carry a speaker icon (shape, not color); all three name the state in the accessible name. The row inventory is `docs/specs/layout.md` → Alarm overlay.
-- **Hover/Focus:** no decorative hover on the door itself; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment. The door is a labelled `role="group"` wrapper holding one or two buttons rather than one button — the title button reattaches, the notepad button opens the popover and does not (`docs/specs/notepad.md` → Notepad UI) — and only the notepad button takes the standard `hover:bg-current/10` wash.
+- **Hover/Focus:** no decorative hover on the door itself; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment. The door is a labelled `role="group"` wrapper with one button that reattaches.
 
 ### Buttons
 
 #### Header Action Button
-The icon-and-tooltip button used inside pane headers (kill, minimize, notepad, etc.).
+The icon-and-tooltip button used inside pane headers (kill, minimize, etc.).
 - **Shape:** `rounded` (4px) when icon-only, also `rounded` for labeled variants.
 - **Color:** `text-inherit` — inherits the header's foreground, so it tints with the active/inactive header palette.
 - **Hover:** `hover:bg-current/10` — a 10%-opacity wash of the current text color. Theme-agnostic, works light or dark.

@@ -7,12 +7,15 @@
  */
 
 import type { BrowserViewportConfig, BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+import type { ToolListRequest, ToolListResponse } from 'dor/commands/types';
 
 export type ToolHostRequest =
-  | { op: 'open'; target: string; cwd: string; tool?: string }
+  /** `preview` selects a matching rule's `preview:` handler (`dor open --preview`). */
+  | { op: 'open'; target: string; cwd: string; tool?: string; preview?: boolean }
   | { op: 'lookup'; name: string; cwd: string; args?: string[]; global?: boolean }
   | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string }
-  | { op: 'browser-config'; cwd: string };
+  | { op: 'browser-config'; cwd: string }
+  | ({ op: 'list' } & ToolListRequest);
 
 /** Which authority declared a Tool, namespacing its dedupe key and persisted
  *  `scope`. Project Tools carry none. `docs/specs/dor-tool.md` -> Identity and
@@ -67,6 +70,14 @@ export type ToolLookupResult =
       port: 'announced' | 'auto';
       key: string[] | null;
       warnings: string[];
+      /** The canonical absolute path an `open` lookup resolved; the preview
+       *  slot compares it (`docs/specs/dor-tool.md` -> Preview slot). Named
+       *  lookups leave it unset. */
+      target?: string;
     };
 
-export type ToolControlResult = ToolLookupResult | { status: 'trust-recorded' } | { status: 'browser-config'; config: BrowserViewportConfig };
+export type ToolControlResult =
+  | ToolLookupResult
+  | { status: 'trust-recorded' }
+  | { status: 'browser-config'; config: BrowserViewportConfig }
+  | { status: 'list'; listing: ToolListResponse };

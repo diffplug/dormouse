@@ -19,14 +19,15 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
-import { toolCommand } from './commands/tool.js';
+import { TOOL_TIMEOUT_MS, toolCommand } from './commands/tool.js';
 import { openCommand } from './commands/open.js';
 import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
-import { errorLine, errorMessage, fail } from './commands/shared.js';
-import { VIEW_FILE_ARGV } from './file-viewer-format.js';
+import { errorLine, errorMessage, fail, requireControlClient } from './commands/shared.js';
+import { VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from './file-viewer-format.js';
 import { runFileViewer } from './file-viewer.js';
+import { runFolderViewer } from './folder-viewer.js';
 import type {
   CliEnv,
   CliOptions,
@@ -197,6 +198,23 @@ interface CaptureProcess extends StricliProcess {
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
   const argv = normalizeVersionAlias(rawArgv);
+  // Private host helper: stdout stays on a host-owned pipe, never a terminal
+  // or control-socket response. The marker separates shell startup chatter.
+  if (argv[0] === '__launch-env' && argv.length === 2 && /^[a-f0-9]{32}$/.test(argv[1])) {
+    const env = { ...(options.env ?? process.env) };
+    delete env.ELECTRON_RUN_AS_NODE;
+    // A JSON copy loses process.env's case-insensitive Windows lookup.
+    if (process.platform === 'win32') {
+      for (const key of Object.keys(env)) {
+        const canonical = key.toUpperCase();
+        if ((canonical === 'PATH' || canonical === 'PATHEXT') && key !== canonical) {
+          env[canonical] = env[key];
+          delete env[key];
+        }
+      }
+    }
+    return { stdout: `\n${argv[1]}:${Buffer.from(JSON.stringify(env)).toString('base64')}\n`, stderr: '', exitCode: 0 };
+  }
 
   // `dor agent-browser <args...>` and `dor playwright <args...>` forward args verbatim to the
   // provider's CLI, so they must never reach stricli's flag parser. Only a bare
@@ -207,9 +225,14 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
   // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
-  // call; the announcement is the only output.
+  // call; its title and announcement are the only output.
   if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
     return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
+  }
+  // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
+  // selects and activates files through this terminal's control client.
+  if (argv[0] === VIEW_FOLDER_ARGV && argv.length === 2) {
+    return { stdout: await runFolderViewer(argv[1], requireControlClient(options, TOOL_TIMEOUT_MS)), stderr: '', exitCode: 0 };
   }
 
   const helpTarget = getHelpTarget(argv);

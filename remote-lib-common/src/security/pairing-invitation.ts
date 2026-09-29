@@ -10,6 +10,7 @@
  */
 
 import { base64UrlLength, fromBase64Url, isExactBase64Url } from './bytes.js';
+import { parseLinkFragment, type LinkUrlShape } from './link-url.js';
 import { NOISE_KEY_LENGTH } from './noise.js';
 import { e2ePairingPrologue } from './noise-transport.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
@@ -38,16 +39,6 @@ const EXPIRY_PATTERN = new RegExp(`^[0-9]{${EXPIRY_DIGITS}}$`);
 /** The largest epoch-seconds value a uint32 expiry may carry. */
 const MAX_UINT32 = 0xffff_ffff;
 
-/**
- * The three origins the documented dev loop serves Pocket from, and the whole
- * of the parser's HTTPS exemption. **Matched by exact host, and deliberately
- * narrower than the platform's own secure-context rule**, which also trusts
- * `*.localhost` and all of `127.0.0.0/8`: this is a policy list, not a
- * re-derivation, so widening it is a decision rather than a correction.
- * `URL.hostname` spells the IPv6 loopback bracketed, so that is the form here.
- */
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
-
 /** How many dot-delimited fields the fragment carries. */
 const FRAGMENT_FIELD_COUNT = 6;
 
@@ -74,6 +65,13 @@ export const PAIRING_FRAGMENT_LENGTH =
  */
 export const PAIRING_QR_URL_MAX_LENGTH = 256;
 
+/** Where a pairing URL carries its fragment: at the root, after {@link PAIRING_HASH_PREFIX}. */
+const PAIRING_LINK_SHAPE: LinkUrlShape = {
+  maxLength: PAIRING_QR_URL_MAX_LENGTH,
+  pathname: '/',
+  hashPrefix: PAIRING_HASH_PREFIX,
+};
+
 /** One invitation, as the Burrow holds it and the Client reads it back. */
 export interface PairingInvitation {
   /** The relay destination, base64url of 16 bytes. */
@@ -88,19 +86,6 @@ export interface PairingInvitation {
   readonly ephPub: Uint8Array;
   /** The same key as it appears in the fragment and the prologue. */
   readonly ephPubBase64Url: string;
-}
-
-/**
- * `new URL`, or `null`. Written as a helper rather than a `let url: URL` so the
- * type is inferred: this package compiles with `"types": []`, where `URL` is a
- * value without a global type name.
- */
-function parseUrl(text: string) {
-  try {
-    return new URL(text);
-  } catch {
-    return null;
-  }
 }
 
 /** Epoch seconds as the fragment spells them: exactly ten digits, zero-padded. */
@@ -171,14 +156,11 @@ export function formatPairingInvitationUrl(origin: string, invitation: PairingIn
  * runs last. Nothing here is an error a caller can distinguish; a code is
  * either usable or it is not.
  *
- * `appOrigin` is the origin the running app is served from, and the URL's must
- * equal it exactly: a fragment is invisible to the Relay, so the only thing
- * that keeps a code from bootstrapping a *different* deployment's Pocket is
- * this compare.
- *
- * **HTTPS, or plain HTTP on one of {@link LOOPBACK_HOSTS}.** Every one of those
- * is a secure context by the platform's own rule, so the exemption admits no
- * origin WebAuthn or a service worker would refuse to run on.
+ * The URL around the fragment — the length cap, HTTPS or loopback HTTP, no
+ * credentials, the root path, no query, and `appOrigin` exactly — is
+ * {@link parseLinkFragment}'s: a fragment is invisible to the Relay, so the
+ * only thing that keeps a code from bootstrapping a *different* deployment's
+ * Pocket is that origin compare.
  */
 export async function parsePairingInvitationUrl(
   text: unknown,
@@ -186,24 +168,8 @@ export async function parsePairingInvitationUrl(
   now: number = Date.now(),
   crypto: WebCryptoLike = getWebCrypto(),
 ): Promise<PairingInvitation | null> {
-  // Before `new URL`: a megabyte of text must cost a length compare, not a parse.
-  if (typeof text !== 'string' || text.length > PAIRING_QR_URL_MAX_LENGTH) return null;
-  const url = parseUrl(text);
-  if (!url) return null;
-  // The origin compare below still has to pass, so this widens nothing a
-  // remote code could reach — see {@link LOOPBACK_HOSTS}.
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) {
-    return null;
-  }
-  // Credentials in the authority would let a code name an origin the compare
-  // below accepts while the browser navigates somewhere else entirely.
-  if (url.username !== '' || url.password !== '') return null;
-  if (url.pathname !== '/' || url.search !== '') return null;
-  if (url.origin !== appOrigin) return null;
-  if (!url.hash.startsWith(PAIRING_HASH_PREFIX)) return null;
-
-  const fragment = url.hash.slice(PAIRING_HASH_PREFIX.length);
-  if (fragment.length !== PAIRING_FRAGMENT_LENGTH) return null;
+  const fragment = parseLinkFragment(text, appOrigin, PAIRING_LINK_SHAPE);
+  if (fragment === null || fragment.length !== PAIRING_FRAGMENT_LENGTH) return null;
   const fields = fragment.split(FIELD_SEPARATOR);
   if (fields.length !== FRAGMENT_FIELD_COUNT) return null;
   const [version, burrowId, inviteId, expiryText, setupToken, ephPubBase64Url] = fields as [

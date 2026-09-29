@@ -152,7 +152,7 @@ pub enum QuitPhase {
 pub struct WindowQuit {
     /// The webview's listener answered, so the ack watchdog stands down.
     pub acked: bool,
-    /// It has decided to quit (its confirmation and archive gates are done).
+    /// It has decided to quit (its confirmation is done).
     pub voted: bool,
     /// Bumped at each teardown phase boundary; the watchdog treats a bump as
     /// progress and refreshes its budget.

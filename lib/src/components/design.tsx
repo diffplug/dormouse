@@ -43,6 +43,10 @@ export const DOOR_TAB_CLASS = clsx(
  *  (`docs/specs/layout.md` → "Workspace names"). */
 export const AUTO_NAME_CLASS = 'italic';
 
+/** A preview slot's label in its Pane header and Door, italic as an editor's
+ *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
+export const PREVIEW_LABEL_CLASS = 'italic';
+
 /** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
  *  reason about a tab's size without a rendered element (the cross-window tab
  *  drag). Tailwind needs the arbitrary values spelled literally above, so these
@@ -126,9 +130,26 @@ export const FOCUS_MOTION_MS = 220;
 export const HEADER_PALETTE_TRANSITION_CLASS =
   'transition-colors duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none';
 
+/** A Pane header's root: the drag handle in the header palette. The
+ *  active/inactive swap crossfades in step with the focus ring's travel;
+ *  children inherit via `text-inherit`. */
+export const paneHeader = tv({
+  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
+  variants: {
+    state: {
+      active: 'bg-header-active-bg text-header-active-fg',
+      inactive: 'bg-header-inactive-bg text-header-inactive-fg',
+    },
+  },
+});
+
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
+
+// A header's bordered pill button in its own foreground: the TODO pill and the
+// preview slot's mark.
+export const HEADER_PILL_CLASS = `shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`;
 
 // Letter-spacing for the alarm overlay's `SPEAKING` / `SPOKEN` labels — wider
 // tracking keeps the small all-caps label legible over the wash.
@@ -474,6 +495,9 @@ export const UNDER_SWITCH_INDENT = 'ml-18';
 export const SUBTLE_ACTION_REST_COLOR_CLASS = 'text-[color:color-mix(in_srgb,var(--color-link)_35%,var(--color-muted))]';
 export const SUBTLE_ACTION_COLOR_CLASS = `${SUBTLE_ACTION_REST_COLOR_CLASS} enabled:not-aria-disabled:hover:text-link enabled:focus-visible:text-link`;
 export const SUBTLE_ACTION_INTERACTION_CLASS = 'enabled:not-aria-disabled:hover:bg-current/10 focus-visible:outline focus-visible:outline-focus-ring';
+/** Both of the above, hover and focus included, for a wrapper whose focusable control is a
+ *  transparent child (a native `<select>` over a label). The caller drops it while busy. */
+export const SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS = 'hover:bg-current/10 hover:text-link has-[:focus-visible]:text-link has-[:focus-visible]:outline has-[:focus-visible]:outline-focus-ring';
 
 /**
  * The app's boolean control: compact track (off left, on right) and one state

@@ -40,9 +40,7 @@ import {
   hostSupportsBrowser,
   isHeadedMode,
   offeredRenderModes,
-  launchBinaryPath,
   providerUnavailable,
-  rememberLaunchBinaryPath,
   surfaceProvider,
   type BrowserHandle,
 } from './browser-automation';
@@ -350,6 +348,9 @@ export class AgentBrowserSurfaceController {
   private pendingParams = new Map<string, unknown>();
   private pendingTitle: string | null = null;
   private pendingLaunchFailure: string | null = null;
+  // `prepareForPlacement`'s waiter: why the first launch failed, else null
+  // (up, or released).
+  private launchSettled: ((error: string | null) => void) | null = null;
   // The value this controller last wrote to each field it also takes from
   // params, until params show it back. Params predating the write — buffered
   // while detached, then fed by a remounted view before the flush, or a render
@@ -400,19 +401,6 @@ export class AgentBrowserSurfaceController {
         this.setSyncEngaged(true);
         this.setBrowserViewport({ mode: 'pane-sync' });
         this.syncToPane();
-      },
-      applyDevice: (name) => {
-        const browser = this.driver();
-        if (!browser) return;
-        this.viewportIntentEpoch += 1;
-        this.pendingViewportWrites += 1;
-        void browser.device(name, this.syncEngagement).then(async (result) => {
-          if (!result.ok) { console.warn(`[${this.provider}] set device ${name} failed:`, result.error); return; }
-          this.forgetFixedViewport();
-          this.setSyncEngaged(false);
-          const measured = await browser.measure();
-          if (measured.ok && measured.viewport) this.adoptMeasuredViewport(measured.viewport);
-        }).finally(() => { this.pendingViewportWrites -= 1; });
       },
       applyViewport: (width, height, dpr) => this.fixViewport({ width, height, dpr }),
       applyViewportSetting: (setting) => this.applyViewportSetting(setting),
@@ -508,6 +496,31 @@ export class AgentBrowserSurfaceController {
   }
 
   // --- one-time start (from the first attach; keeps side effects out of render) ---
+
+  /** Start a context launch without a leaf or view. Buffered params become the
+   * initial leaf metadata on success; mounting adopts this same controller. */
+  async prepareForPlacement(): Promise<
+    | { status: 'ready'; params: Record<string, unknown> }
+    | { status: 'failed'; error: string }
+    | { status: 'cancelled' }
+  > {
+    const error = await new Promise<string | null>((resolve) => {
+      this.launchSettled = resolve;
+      this.ensureStarted();
+    });
+    if (this.released) return { status: 'cancelled' };
+    if (error) return { status: 'failed', error };
+    // Handed to the leaf, so the first attach has nothing to flush.
+    const params = Object.fromEntries(this.pendingParams);
+    this.pendingParams.clear();
+    return { status: 'ready', params };
+  }
+
+  private settleLaunch(error: string | null): void {
+    const settle = this.launchSettled;
+    this.launchSettled = null;
+    settle?.(error);
+  }
 
   private ensureStarted(): void {
     if (this.phase.k !== 'idle') return;
@@ -634,6 +647,11 @@ export class AgentBrowserSurfaceController {
         this.updateParkState();
       },
     };
+  }
+
+  /** The attached view's frame canvas; null with no view attached. */
+  frameCanvas(): HTMLCanvasElement | null {
+    return this.sink?.canvas ?? null;
   }
 
   // --- params ---
@@ -781,15 +799,14 @@ export class AgentBrowserSurfaceController {
    * Open this Surface's page in a new browser — in `launchSession` when params
    * name one — and bind the session the host answers with. Every GUI-created
    * browser Surface starts here, and so does one restored before its launch
-   * landed. Resolves once the browser is up, never waiting for the page; the
-   * Wall's `whenBrowserLaunched` hears the outcome.
+   * landed. Resolves once the browser is up, never waiting for the page;
+   * `prepareForPlacement` hears the outcome.
    */
   private launch(): void {
     const url = this.launchUrl();
     const session = this.launchSession;
     const headed = this.headed;
-    // No creation site has to remember the binary a `dor agent-browser` surface resolved.
-    const binaryPath = this.binaryPath ?? launchBinaryPath(this.provider);
+    const binaryPath = this.binaryPath;
     const browser = browserHandle(this.provider, { session, cwd: this.cwd, binaryPath });
     const phase: Phase = { k: 'launching', ...(session && browser ? { named: { session, browser } } : {}) };
     this.setPhase(phase);
@@ -821,11 +838,10 @@ export class AgentBrowserSurfaceController {
         if (!res.ok || !res.session) {
           const error = res.error ?? `Could not open ${this.label}`;
           this.setPhase({ k: 'ended', error });
-          settleLaunch(this.id, error);
+          this.settleLaunch(error);
           this.reportLaunchFailure(error);
           return;
         }
-        rememberLaunchBinaryPath(this.provider, res.binaryPath);
         this.session = res.session;
         if (res.cwd !== undefined) this.cwd = res.cwd;
         this.binaryPath = allowedBinaryPath(res.binaryPath, this.provider) ?? allowedBinaryPath(binaryPath, this.provider);
@@ -842,7 +858,7 @@ export class AgentBrowserSurfaceController {
         this.openedByHost(url);
         if (res.stream) this.goLive(res.stream);
         else this.attach(false);
-        settleLaunch(this.id, null);
+        this.settleLaunch(null);
       });
   }
 
@@ -862,6 +878,9 @@ export class AgentBrowserSurfaceController {
       if (response?.status === 'error') throw new Error(response.message);
       const config = response?.status === 'browser-config' ? response.config : defaultBrowserViewportConfig();
       this.setBrowserViewport(resolveBrowserViewport(config));
+      // Configured pane-sync must follow the first attached view too, when a
+      // deferred launch resolved its initial dimensions without a pane.
+      this.setSyncEngaged(this.browserViewport.mode === 'pane-sync');
       return concrete();
     });
   }
@@ -1687,7 +1706,7 @@ export class AgentBrowserSurfaceController {
     // A launch in flight lands on a released controller, which closes a
     // session the host minted for it; whoever awaited one hears that the
     // Surface is gone.
-    settleLaunch(this.id, null);
+    this.settleLaunch(null);
     if (this.parkTimer) { clearTimeout(this.parkTimer); this.parkTimer = undefined; }
     this.teardownPaneSizeObserver();
     this.paneSize = null;
@@ -1742,8 +1761,7 @@ export function getAgentBrowserSurfaceController(id: string): AgentBrowserSurfac
 export function disposeAgentBrowserSurfaceController(id: string): void {
   const controller = registry.get(id);
   registry.delete(id);
-  if (controller) controller.dispose();
-  else settleLaunch(id, null);
+  controller?.dispose();
 }
 
 /**
@@ -1819,30 +1837,10 @@ function closeBrowserSessionFromParams(params: unknown): Promise<void> {
 export function closeBrowserSurface(id: string, params: unknown): Promise<void> {
   const controller = registry.get(id);
   registry.delete(id);
-  if (!controller) settleLaunch(id, null);
   const closed = controller?.close();
   const closing = [closed?.done ?? Promise.resolve()];
   if (agentBrowserSessionFromParams(params) !== (closed?.session ?? null)) closing.push(closeBrowserSessionFromParams(params));
   return Promise.all(closing).then(() => {});
-}
-
-// --- first-launch outcomes (the Wall's side of a controller-owned launch) ---
-
-const launchWaiters = new Map<string, (error: string | null) => void>();
-
-/**
- * The outcome of the first launch of the session-less Surface `id` the caller
- * just created: `null` once it streams — or once the Surface is gone — else why
- * it failed. Register before the Surface can mount, and at most once per id.
- */
-export function whenBrowserLaunched(id: string): Promise<string | null> {
-  return new Promise((resolve) => launchWaiters.set(id, resolve));
-}
-
-function settleLaunch(id: string, error: string | null): void {
-  const settle = launchWaiters.get(id);
-  launchWaiters.delete(id);
-  settle?.(error);
 }
 
 /** For tests: controllers now outlive panel unmount, so a suite reusing a

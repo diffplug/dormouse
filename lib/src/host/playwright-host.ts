@@ -47,10 +47,10 @@ class SessionNotOpenError extends Error {
 }
 
 /** `key` is the native identity: installation, CLI workspace and session. */
-type Binding = { session: string; cwd: string; install: PlaywrightInstall; workspace: string | undefined; key: string };
-function bind(session: string, cwd: string, install: PlaywrightInstall): Binding {
+type Binding = { env?: NodeJS.ProcessEnv; session: string; cwd: string; install: PlaywrightInstall; workspace: string | undefined; key: string };
+function bind(session: string, cwd: string, install: PlaywrightInstall, env?: NodeJS.ProcessEnv): Binding {
   const workspace = playwrightWorkspace(cwd);
-  return { session, cwd, install, workspace, key: JSON.stringify([install.libraryPath, workspace ?? '', session]) };
+  return { session, cwd, install, workspace, env, key: JSON.stringify([install.libraryPath, workspace ?? '', session]) };
 }
 /** One viewer socket's hold on a browser: headed ones get no frames. */
 type Subscriber = { sink: ViewerSink; headed: boolean };
@@ -60,8 +60,6 @@ type Viewer = Binding & {
   instance: number;
   subscribers: Set<Subscriber>;
   controls: Map<Page, Promise<CDPSession>>;
-  /** Pages whose touch and user agent a device set over their control. */
-  devices: WeakSet<Page>;
   page?: Page;
   cdp?: CDPSession;
   timer?: ReturnType<typeof setTimeout>;
@@ -92,8 +90,8 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS, initialViewport?: BrowserViewportSetting) {
     const r = await spawnAndCapture(b.install.binary, [...BROWSER_PROVIDERS.playwright.sessionArgs(b.session), ...args], {
       cwd: b.cwd,
+      env: initialViewport?.mode === 'fixed' ? { ...(b.env ?? process.env), PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } : b.env,
       ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
-      ...(initialViewport?.mode === 'fixed' ? { env: { ...process.env, PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } } : {}),
     });
     if (!r.ok) throw new Error(r.error.message);
     return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
@@ -298,7 +296,6 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
         instance: ++instances,
         subscribers: new Set(),
         controls: new Map(),
-        devices: new WeakSet(),
         disposed: false,
         queue: Promise.resolve(),
         queued: 0,
@@ -331,7 +328,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   return {
     pollMs: 200,
 
-    bind: (binding) => bind(binding.session, binding.cwd ?? process.cwd(), resolvePlaywrightInstall(binding.binaryPath)),
+    bind: (binding) => bind(binding.session, binding.cwd ?? process.cwd(), resolvePlaywrightInstall(binding.binaryPath, binding.env), binding.env),
 
     // Installation, CLI project scope and session: a raw `--session` shares it
     // across one project's subdirectories.
@@ -405,29 +402,15 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
           await refresh(v);
           return r.exitCode === 0 ? { ok: true } : { ok: false, error: exited(r) };
         }
-        case 'viewport':
-        case 'device': {
-          const devices = b.install.library.devices;
-          const device = act.op === 'device' && Object.prototype.hasOwnProperty.call(devices, act.name) ? devices[act.name] : undefined;
-          const size = act.op === 'viewport' ? act : device?.viewport;
-          if (!size) throw new Error('Invalid viewport/device');
-          if (act.op === 'viewport' && act.dpr !== undefined) {
+        case 'viewport': {
+          if (act.dpr !== undefined) {
             const measured = measuredViewport(await page.evaluate(() => ({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio })));
             if (!measured || Math.abs(measured.devicePixelRatio - act.dpr) > 0.001) throw new Error(`playwright cannot change DPR on an existing context (requested ${act.dpr}, effective ${measured?.devicePixelRatio ?? 'unknown'})`);
           }
           // Playwright's own writer, alone, which keeps the browser context's
           // ratio: a CDP metrics override from this connection would be a
           // second writer Chrome re-applies on every navigation (rationale).
-          await page.setViewportSize({ width: size.width, height: size.height });
-          // A device's touch and user agent ride this connection's CDP, and
-          // any other viewport leaves them.
-          if (device || v.devices.has(page)) {
-            const cdp = await control(v, page);
-            await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: device?.hasTouch ?? false });
-            await cdp.send('Emulation.setUserAgentOverride', { userAgent: device?.userAgent ?? '' });
-            if (device) v.devices.add(page);
-            else v.devices.delete(page);
-          }
+          await page.setViewportSize({ width: act.width, height: act.height });
           // Landed: the next poll measures it, begun after (`refreshNow`).
           return { ok: true };
         }

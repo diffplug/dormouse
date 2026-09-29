@@ -166,6 +166,20 @@ A generic outer error ends the ceremony on the Relay's pipe without naming
 which of the handshake, the challenge, or the ACL was the reason — and without
 letting a flood of `init` frames buy a reply each.
 
+## One-time connection
+
+**Why the one-time label comes from a closed set.** The direction of the code is
+the control only while the digits the person types come off the phone's screen.
+A one-time request is authorized by holding the link, so its sender can be any
+client, and it chooses the label as well as the digits; the modal draws the
+label right above the code input, so a label such as "iPhone · code 58" reads as
+an instruction and the laptop user types the sender's own digits. The page only
+ever sends one of four coarse names, so mapping everything else to "Phone
+browser" costs an honest phone nothing. Pairing's modal shows a free-text label
+the same way, but a pairing request reaches it only after a presence proof from
+a passkey on the owner's account, so only the owner's own devices can put text
+there.
+
 ## Push sealing
 
 **Why a push needs a construction of its own.** The Burrow is awake, the phone is

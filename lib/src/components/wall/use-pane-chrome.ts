@@ -10,11 +10,15 @@ export function usePaneChrome(id: string, elRef: RefObject<HTMLDivElement | null
   const { elements: paneElements, bumpVersion } = useContext(PaneElementsContext);
 
   useEffect(() => {
-    if (!elRef.current) return;
-    paneElements.set(id, elRef.current);
+    const element = elRef.current;
+    if (!element) return;
+    paneElements.set(id, element);
     bumpVersion();
     return () => {
-      paneElements.delete(id);
+      // A preview slot switch mounts the next body beside its ghost, which
+      // must not unregister it on leaving (`docs/specs/dor-tool.md` ->
+      // Switching the slot).
+      if (paneElements.get(id) === element) paneElements.delete(id);
       bumpVersion();
     };
   }, [id, paneElements, bumpVersion, elRef]);

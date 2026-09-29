@@ -19,9 +19,13 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
   assertConnectSrcBaked,
+  assertOneTimeOriginBaked,
   CONNECT_SRC_PLACEHOLDER,
+  ONE_TIME_ORIGIN_PLACEHOLDER,
+  resolveOneTimeOrigin,
   resolveRemoteConnectSrc,
 } from '../../scripts/csp-defaults.mjs';
+import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const libHost = path.resolve(here, '../../lib/src/host');
@@ -30,6 +34,9 @@ const sidecar = path.resolve(here, '../sidecar');
 // Where the Burrow may reach a Relay. The Burrow runs in the sidecar,
 // so this is the enforcement point — there is no webview CSP in front of it.
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
+// Where the Burrow opens a one-time connection's rendezvous, fenced by the
+// allowlist above at runtime (docs/specs/one-time.md).
+const oneTimeOrigin = resolveOneTimeOrigin(process.env, 'sidecar');
 
 // What the sidecar installs at runtime, read from the manifest that installs
 // it: `node-datachannel` resolves its platform package and `detect-libc`
@@ -72,46 +79,14 @@ const bundles = [
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'burrow.cjs',
-    define: { [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc) },
+    define: {
+      [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
+      [ONE_TIME_ORIGIN_PLACEHOLDER]: JSON.stringify(oneTimeOrigin),
+    },
     assertBaked: true,
     external: NATIVE_DIRECT,
   },
 ];
-
-/**
- * Fail the build if esbuild inlined a package the sidecar installs at runtime.
- *
- * `native-direct-peer.ts` calls `require('<specifier>')` by literal, so an
- * external specifier stays a `require-call` edge out of the bundle while a
- * bundled one becomes an input of it. That difference is the whole check: an
- * inlined addon produces a `burrow.cjs` that loads and then cannot find the
- * addon's `.node` file, which nothing before the first `direct-offer` on a real
- * machine would notice.
- */
-function assertNothingInlined(metafile, outfile, names) {
-  // esbuild keys `metafile.outputs` by path relative to the process cwd, with
-  // `/` separators on every platform.
-  const outputKey = path.relative(process.cwd(), outfile).split(path.sep).join('/');
-  const output = metafile.outputs[outputKey];
-  if (!output) {
-    throw new Error(
-      `sidecar: esbuild metafile has no output for "${outputKey}" — cannot check what it bundled.`,
-    );
-  }
-  for (const name of names) {
-    // Every layout a package manager resolves through ends in this segment,
-    // pnpm's content-addressed store included.
-    const inlined = Object.keys(output.inputs).find((input) =>
-      input.includes(`node_modules/${name}/`),
-    );
-    if (!inlined) continue;
-    throw new Error(
-      `sidecar: ${outputKey} inlined "${inlined}" — "${name}" is a sidecar runtime dependency, and ` +
-        'the addon would look for its platform package beside the bundle instead of inside ' +
-        'sidecar/node_modules.',
-    );
-  }
-}
 
 // `tauri.conf.json`'s `bundle.resources` globs this whole directory, so a
 // pre-rename `remote-host.cjs` left in an older checkout would ship inside the
@@ -140,7 +115,10 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     // Only the bundle with externals to check reads one.
     ...(external ? { metafile: true } : {}),
   });
-  if (assertBaked) assertConnectSrcBaked(outfile, remoteSrc);
-  if (external) assertNothingInlined(result.metafile, outfile, SIDECAR_RUNTIME_DEPS);
+  if (assertBaked) {
+    assertConnectSrcBaked(outfile, remoteSrc);
+    assertOneTimeOriginBaked(outfile, oneTimeOrigin);
+  }
+  if (external) assertNothingInlined(result.metafile, SIDECAR_RUNTIME_DEPS, `sidecar ${out}`);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }

@@ -110,8 +110,7 @@ const SELECTION: Omit<Selection, 'startedInScrollback'> = {
 };
 
 // Desktop: all three buttons carry their keyboard shortcuts and, for a downward
-// drag, sit below the selection. The fake adapter has an in-memory notepad
-// archive, so Add to notepad is present here as it is in every real desktop host.
+// drag, sit below the selection.
 export const Desktop: Story = {
   args: {
     id: 'selection-popup-desktop',

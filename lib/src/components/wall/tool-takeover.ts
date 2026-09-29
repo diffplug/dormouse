@@ -35,6 +35,8 @@ export interface ToolTakeoverGate {
   explicitSurface: boolean;
   /** `--minimize`: a request for a background Surface, which the caller is not. */
   minimized: boolean;
+  /** `--preview`: a request for the preview slot, which always gets its own pane. */
+  preview: boolean;
   /** Whether the answering Workspace is the active one — a pane a human is
    *  typing in is on screen. */
   workspaceActive: boolean;
@@ -73,6 +75,7 @@ export function toolTakesOverCaller(gate: ToolTakeoverGate): boolean {
   return gate.workspaceActive
     && !gate.explicitSurface
     && !gate.minimized
+    && !gate.preview
     && callerStillPlaceable(gate)
     && callerTypedTool(gate);
 }

@@ -1,4 +1,5 @@
 import { clearToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
+import { UNSAVED_TOOL_MOVE_REFUSAL } from 'dormouse-lib/lib/tool-editor';
 import { dismissWorkspaceUi } from 'dormouse-lib/lib/workspace-ui-store';
 import { restoreToolParams } from 'dormouse-lib/components/wall/tool-transfer';
 import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
@@ -9,7 +10,6 @@ import { collectLivePtys, resumeOrRestoreFrom } from "dormouse-lib/lib/reconnect
 import { REPLAY_MODE_RESET, writeReplay } from "dormouse-lib/lib/terminal-report-filter";
 import { restoreTransferredTerminalState, removeTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 import { registry as terminalRegistry } from "dormouse-lib/lib/terminal-store";
-import { hydrateNotepadFromVolatile, removeSurface } from "dormouse-lib/lib/notepad/notepad-store";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { collapseWorkspace } from "dormouse-lib/components/workspace-motion";
 import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from "dormouse-lib/components/wall/workspace-boot-plans";
@@ -105,8 +105,8 @@ interface InFlightMove {
  *
  * **Nothing is released at the invoke.** The target can refuse the arrival, or
  * close before it takes it, and Rust hands the shells straight back — so the
- * Wall stays mounted, the notes stay put, and the only thing that changed here
- * is that the Workspace is in no snapshot (`markWorkspaceTransferring`).
+ * Wall stays mounted, and the only thing that changed here is that the
+ * Workspace is in no snapshot (`markWorkspaceTransferring`).
  */
 const inFlight = new Map<WorkspaceId, InFlightMove>();
 
@@ -124,14 +124,22 @@ async function startMove(
   workspaceId: WorkspaceId,
   command: string,
   args: (payload: WorkspaceTransferPayload) => Record<string, unknown>,
+  discardedEditors: readonly string[],
 ): Promise<MoveOutcome> {
   if (isWorkspaceTransferPending(workspaceId)) return { moved: false, reason: "Workspace is already in flight" };
   const handle = getWallHandle(workspaceId);
   if (!handle) return { moved: false, reason: `no mounted Wall for '${workspaceId}'` };
+  const hasUnsaved = () => handle.dirtyToolIds().some(id => !discardedEditors.includes(id));
+  if (hasUnsaved()) return { moved: false, reason: UNSAVED_TOOL_MOVE_REFUSAL };
   setWorkspaceTransferPending(workspaceId, true);
   let prepared: PreparedWorkspaceTransfer;
   try {
     prepared = await handle.prepareWorkspaceTransfer();
+    // Preparation awaits CWD probes; an editor can become dirty during them.
+    if (hasUnsaved()) {
+      setWorkspaceTransferPending(workspaceId, false);
+      return { moved: false, reason: UNSAVED_TOOL_MOVE_REFUSAL };
+    }
   } catch (error) {
     setWorkspaceTransferPending(workspaceId, false);
     return { moved: false, reason: reasonOf(error) };
@@ -249,6 +257,7 @@ export async function transferWorkspaceTo(
   to: string,
   at?: { x: number; y: number },
   index?: number,
+  discardedEditors: readonly string[] = [],
 ): Promise<MoveOutcome> {
   return startMove(workspaceId, "transfer_workspace", (payload) => ({
     to,
@@ -257,7 +266,7 @@ export async function transferWorkspaceTo(
       ...(at ? { at } : {}),
       ...(index === undefined ? {} : { index }),
     } satisfies MovePayload,
-  }));
+  }), discardedEditors);
 }
 
 /** Tear this Workspace out into a new window under the cursor. Resolves once
@@ -265,16 +274,17 @@ export async function transferWorkspaceTo(
 export async function tearOutWorkspace(
   workspaceId: WorkspaceId,
   grab: { x: number; y: number },
+  discardedEditors: readonly string[] = [],
 ): Promise<MoveOutcome> {
   return startMove(workspaceId, "open_workspace_window", (payload) => ({
     payload: { ...payload, grab } satisfies MovePayload,
-  }));
+  }), discardedEditors);
 }
 
 /**
  * The target adopted it: **the point of no return**. Detach every Session (never
- * kill one — they are running in the other Window now), drop the notes, and take
- * the Workspace out of the strip.
+ * kill one — they are running in the other Window now), and take the Workspace
+ * out of the strip.
  */
 async function handleDeparted(workspaceId: WorkspaceId): Promise<void> {
   const move = inFlight.get(workspaceId);
@@ -286,8 +296,8 @@ async function handleDeparted(workspaceId: WorkspaceId): Promise<void> {
   await collapseWorkspace(workspaceId);
   move.prepared.commit();
   move.settle({ moved: true });
-  // Moving a Window's last Workspace away closes it — without confirming,
-  // archiving or killing, because nothing ended: the Surfaces are alive
+  // Moving a Window's last Workspace away closes it — without confirming or
+  // killing, because nothing ended: the Surfaces are alive
   // somewhere else (`docs/specs/standalone.md` → "Transfer").
   if (getWorkspacesSnapshot().workspaces.length <= 1) {
     forgetWorkspaceSession(workspaceId);
@@ -437,11 +447,7 @@ async function planArrival(
     terminalGrids,
   });
   if (payload.tools) restoreToolParams(result, payload.tools);
-  // The notes travelled in the payload rather than through the archive: a move
-  // is not a closure (`docs/specs/notepad.md` → "Closure").
-  hydrateNotepadFromVolatile(payload.notepad, payload.allIds);
   // Finish parsing at the source grid before the Wall can fit the target pane.
-  // Notes survive, but source markers belong to the disposed xterm instance.
   await Promise.all([...ptyIds].map((id) => flushTerminal(id)));
   return wallBootFromResult(result);
 }
@@ -449,12 +455,12 @@ async function planArrival(
 /**
  * Take an arrival this window will not keep back out, whether or not its Wall
  * mounted: Sessions released, **never killed** (the shells are the source's
- * again), notes and helpers dropped, the record and parked plan forgotten.
+ * again), helpers dropped, the record and parked plan forgotten.
  * **Never removes the host's alert entry**, which the source goes on showing.
  */
 function discardArrival(payload: MovePayload): void {
   dismissWorkspaceUi(payload.workspaceId);
-  for (const id of payload.allIds) { removeSurface(id); forgetHelper(id); }
+  for (const id of payload.allIds) forgetHelper(id);
   for (const id of new Set([...payload.terminalIds, ...payload.workspace.session.panes.map((pane) => pane.id)])) {
     if (terminalRegistry.has(id)) releaseSession(id);
     clearTerminalActivity(id);

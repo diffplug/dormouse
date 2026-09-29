@@ -7,10 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/platform', () => ({
   IS_MAC: false,
-  // An archive port present ⇒ this host has a notepad, which is what puts the
-  // button on a Door that has notes.
-  getPlatform: () => ({ alertPublishSettings: vi.fn(), notepadArchive: {} }),
-  getPlatformOrNull: () => ({ alertPublishSettings: vi.fn(), notepadArchive: {} }),
+  getPlatform: () => ({ alertPublishSettings: vi.fn() }),
+  getPlatformOrNull: () => ({ alertPublishSettings: vi.fn() }),
 }));
 
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
@@ -28,10 +26,10 @@ import {
   type DormouseTheme,
 } from '../lib/themes';
 import { resetShellStore, seedShellStore } from '../lib/shell-store';
-import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
+import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -386,6 +384,33 @@ describe('Baseboard settings controls', () => {
   });
 });
 
+describe('Baseboard one-time connection', () => {
+  it('shows a connected phone in the measured right cluster, after the notice', async () => {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      burrow: makeStubBurrowLink({ oneTime: { status: 'connected', label: 'Pixel 9', since: 1 } }),
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+
+    await act(async () => root.render(
+      <Baseboard items={[]} onReattach={() => {}} notice={<span data-notice>update</span>} />,
+    ));
+
+    const end = container.querySelector('button[aria-label="End the one-time connection"]');
+    expect(end).not.toBeNull();
+    // Inside the cluster the Door fit subtracts, between the host's notice and
+    // the Settings buttons (docs/specs/layout.md -> Baseboard).
+    const notice = container.querySelector('[data-notice]')!;
+    const cluster = notice.parentElement!;
+    expect(cluster.contains(end)).toBe(true);
+    expect(notice.compareDocumentPosition(end!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      end!.compareDocumentPosition(container.querySelector('[data-alarm-setting="speech"]')!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
 describe('Baseboard browser Doors', () => {
   it('keeps the browser display icon and page label instead of deriving a terminal idle title', () => {
     act(() => root.render(
@@ -403,42 +428,6 @@ describe('Baseboard browser Doors', () => {
     expect(door?.getAttribute('aria-label')).toBe(
       'localhost:5173/app, agent-browser fixed size',
     );
-  });
-});
-
-describe('Baseboard Door notepad', () => {
-  afterEach(() => {
-    act(() => clearAllNotepads());
-  });
-
-  it('opens the popover on the Door with notes without reattaching it', () => {
-    addPlainNote('pane-a', 'from the door');
-    const onReattach = vi.fn();
-    act(() => root.render(
-      <Baseboard
-        items={[
-          { id: 'pane-a', kind: 'terminal', title: 'noted' },
-          { id: 'pane-b', kind: 'terminal', title: 'quiet' },
-        ]}
-        onReattach={onReattach}
-      />,
-    ));
-
-    // Only the Door holding notes grows the button.
-    expect(container.querySelectorAll('[data-door-notepad-for]')).toHaveLength(1);
-
-    const notepad = container.querySelector<HTMLButtonElement>('[data-door-notepad-for="pane-a"]')!;
-    act(() => { notepad.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-
-    const popover = document.querySelector('[data-notepad-popover-for="pane-a"]');
-    expect(popover).not.toBeNull();
-    expect(popover?.querySelector('textarea')?.value).toBe('from the door');
-    expect(onReattach).not.toHaveBeenCalled();
-
-    // Escape dismisses it, and still nothing reattached.
-    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-    expect(document.querySelector('[data-notepad-popover-for="pane-a"]')).toBeNull();
-    expect(onReattach).not.toHaveBeenCalled();
   });
 });
 
@@ -496,6 +485,22 @@ describe('Baseboard overflow alerts', () => {
     act(() => setTerminalActivity('c', { todo: true }));
     expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
     expect(arrow('right')?.getAttribute('aria-label')).toBe('2 more, 1 TODO');
+  });
+});
+
+describe('Baseboard preview slot', () => {
+  it('marks a preview slot\'s Door with italics alone and names it Preview', () => {
+    const door = (id: string) => container.querySelector<HTMLElement>(`[data-door-id="${id}"]`)!;
+    renderBaseboard([{ id: 'slot', kind: 'tool', title: 'viewer', preview: true }]);
+    // A Tool Door's label is header-derived: `<idle>` with no Session state.
+    expect(door('slot').title).toBe('<idle> — Preview');
+    expect(door('slot').getAttribute('aria-label')).toBe('<idle>, Preview');
+    expect(door('slot').querySelector('.italic')?.textContent).toBe('<idle>');
+    // The italic label is the whole mark.
+    expect(door('slot').textContent).toBe('<idle>');
+    renderBaseboard([{ id: 'kept', kind: 'tool', title: 'viewer' }]);
+    expect(door('kept').title).toBe('<idle>');
+    expect(door('kept').querySelector('.italic')).toBeNull();
   });
 });
 

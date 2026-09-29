@@ -387,6 +387,25 @@ it('recovers Tool metadata from pane rows when its layout is unusable', () => {
   expect(restored?.lathLayout?.leafMeta.tool.params?.url).toBeUndefined();
 });
 
+it('restores the preview slot mark and open target from pane rows when its layout is unusable', () => {
+  const restored = restoreSession(createPlatform({ version: 3, panes: [
+    { id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view /repo/a.md',
+      tool: { render: 'iframe', port: 'announced', name: 'viewer', argv: ['view', '/repo/a.md'], preview: true, target: '/repo/a.md' } },
+  ] }));
+  expect(restored?.lathLayout?.leafMeta.slot.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+});
+
+it.each([
+  ['a control-bearing target', { target: '/repo/a\x1b.md' }],
+  ['a non-string target', { target: 7 }],
+  ['a false mark', { preview: false }],
+])('rejects a saved Tool row with %s before any terminal is restored', (_case, fields) => {
+  const saved = { version: 3, panes: [{ id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view',
+    tool: { render: 'iframe', port: 'announced', ...fields } }] } as unknown as PersistedSession;
+  expect(restoreSession(createPlatform(saved))).toBeNull();
+  expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
+});
+
 describe('restoreSession alert seeding', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -11,12 +11,12 @@ import {
   BurrowsView,
   PUSH_RELAY_DISABLED,
   SCAN_LABEL,
-  PairingCodeView,
   SetupOrSignin,
   pushNoticeState,
   type BurrowView,
   type PushConfigStatus,
 } from './App';
+import { PairingCodeView } from './views';
 import type { PushAvailability } from '../client/push-subscribe';
 import {
   BURROWS,

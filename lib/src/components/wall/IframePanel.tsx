@@ -16,7 +16,10 @@ import {
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
-import { isToolParams } from './browser-surface';
+import { isToolParams, toolScopeFromParams } from './browser-surface';
+import { builtinFor } from 'dor/file-viewer-format';
+import { connectIframeTheme } from '../../lib/themes/iframe-theme';
+import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor';
 import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 
@@ -45,6 +48,10 @@ const IFRAME_ALLOW = 'autoplay; clipboard-write; fullscreen';
 // from the start is working, not lost.
 const SHIM_REPORT_TIMEOUT_MS = 1000;
 const SHIM_REPORT_LEAD_MS = 250;
+// A frame is hidden until its first document loads, so the pane's themed
+// background shows instead of the frame's white canvas; one whose load never
+// fires shows after this (docs/specs/dor-browser.md → "Iframe Renderer").
+const FIRST_PAINT_FALLBACK_MS = 1000;
 
 type Resolution =
   | { kind: 'empty' }
@@ -100,7 +107,10 @@ function upstreamUrlFromFrameLocation(frameUrl: unknown, targetUrl: string, prox
   }
 }
 
-export function IframePanel({ id, title, params }: PaneProps) {
+export function IframePanel({ id, title, params, onReady }: PaneProps & {
+  /** A frame after a document loads. */
+  onReady?: () => void;
+}) {
   const actions = useContext(WallActionsContext);
   const paneWrite = useContext(PaneWriteContext);
   const elRef = useRef<HTMLDivElement>(null);
@@ -193,6 +203,15 @@ export function IframePanel({ id, title, params }: PaneProps) {
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
   useEffect(() => {
+    if (!isTool || resolution.kind !== 'proxied' || !iframeRef.current) return;
+    return connectIframeTheme(iframeRef.current, resolution.origin);
+  }, [isTool, resolution]);
+  useEffect(() => {
+    if (!isTool || params.toolName !== builtinFor(false).kind || toolScopeFromParams(params) !== 'builtin'
+      || resolution.kind !== 'proxied' || !iframeRef.current) return;
+    return connectToolEditor(id, String(params.toolTarget ?? title), iframeRef.current, resolution.origin);
+  }, [id, isTool, params?.toolName, params?.toolScope, params?.toolTarget, title, resolution]);
+  useEffect(() => {
     if (!sourceUrl) {
       setResolution({ kind: 'empty' });
       return;
@@ -242,7 +261,6 @@ export function IframePanel({ id, title, params }: PaneProps) {
   const agentBrowserCapable = renderModes.includes('agent-browser-screencast');
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {},
-    applyDevice() {},
     applyViewport() {},
     openModal() { openAgentBrowserScreenModal(id); },
     // iframe is the current backend; every other offered mode swaps to an
@@ -257,12 +275,17 @@ export function IframePanel({ id, title, params }: PaneProps) {
   }), [id, swapCapable, renderModes]);
   const setRenderMode = screenActions.setRenderMode;
   const openInAgentBrowser = setRenderMode && agentBrowserCapable ? () => setRenderMode('agent-browser-screencast') : undefined;
+  // A Tool's header offers no navigation (`ToolPaneHeader`); reload is its one
+  // chrome action that replaces the document.
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) { commitUrl(next); },
     back() { goToHistoryIndex(historyIndexRef.current - 1); },
     forward() { goToHistoryIndex(historyIndexRef.current + 1); },
-    reload() { setReloadNonce((n) => n + 1); },
-  }), [commitUrl, goToHistoryIndex]);
+    reload() {
+      const reload = () => setReloadNonce((n) => n + 1);
+      if (isTool) withToolEditorConsent(id, reload); else reload();
+    },
+  }), [id, isTool, commitUrl, goToHistoryIndex]);
   const registrationRef = useRef<ScreenRegistration | null>(null);
   // Register the screen controller unconditionally so the browser chrome (URL +
   // far-left chip) shows for every iframe surface, on every host — `dor iframe`
@@ -398,6 +421,26 @@ export function IframePanel({ id, title, params }: PaneProps) {
 
   const src = resolution.kind === 'proxied' || resolution.kind === 'raw' ? resolution.src : '';
 
+  // Shown from the first load on: navigation, reload, and history re-resolve
+  // the proxy and mount a new frame, which must not hide again. Only losing the
+  // URL starts over.
+  const [painted, setPainted] = useState(false);
+  useEffect(() => {
+    if (!sourceUrl) setPainted(false);
+  }, [sourceUrl]);
+  useEffect(() => {
+    if (painted || !src) return;
+    const timer = setTimeout(() => setPainted(true), FIRST_PAINT_FALLBACK_MS);
+    return () => clearTimeout(timer);
+  }, [painted, src]);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  const onLoad = useCallback(() => {
+    onFrameLoad();
+    setPainted(true);
+    requestAnimationFrame(() => onReadyRef.current?.());
+  }, [onFrameLoad]);
+
   return (
     <div
       ref={elRef}
@@ -417,14 +460,15 @@ export function IframePanel({ id, title, params }: PaneProps) {
       {src ? (
         <iframe
           ref={iframeRef}
-          className="block h-full w-full border-0 bg-white"
+          // White for pages that assume a white canvas, once one has loaded.
+          className={`block h-full w-full border-0 bg-white${painted ? '' : ' opacity-0'}`}
           src={src}
           title={title ?? liveUrl}
           allow={IFRAME_ALLOW}
           sandbox={IFRAME_SANDBOX}
           {...(resolution.kind === 'proxied' ? { 'data-dormouse-proxy': 'true' } : {})}
           referrerPolicy="strict-origin-when-cross-origin"
-          onLoad={onFrameLoad}
+          onLoad={onLoad}
         />
       ) : (
         <PanelMessage resolution={resolution} url={sourceUrl} onOpenInAgentBrowser={openInAgentBrowser} />

@@ -185,7 +185,12 @@ function toolMetadataFromParams(params: Record<string, unknown> | undefined): Pe
     ? params.toolKey as string[]
     : undefined;
   const argv = isToolCommandArgv(params.toolArgv) ? [...params.toolArgv] : undefined;
-  return { ...(argv ? { argv } : {}), ...(name ? { name } : {}), ...(isToolKeyScope(params.toolScope) ? { scope: params.toolScope } : {}), render, port, ...(key ? { key } : {}), ...(isBrowserViewportSetting(params.browserViewport) ? { viewport: params.browserViewport } : {}) };
+  return {
+    ...(argv ? { argv } : {}), ...(name ? { name } : {}), ...(isToolKeyScope(params.toolScope) ? { scope: params.toolScope } : {}),
+    render, port, ...(key ? { key } : {}), ...(isBrowserViewportSetting(params.browserViewport) ? { viewport: params.browserViewport } : {}),
+    ...(params.toolPreview === true ? { preview: true as const } : {}),
+    ...(typeof params.toolTarget === 'string' ? { target: params.toolTarget } : {}),
+  };
 }
 
 function persistedVisiblePaneTitle(title: string): string {

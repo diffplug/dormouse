@@ -2,7 +2,6 @@ import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers
 import type { WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
 import type { PreparedWorkspaceTransfer } from './workspace-transfer';
-import type { CloseSurfaceMode } from './wall-types';
 import type { DorControlRequest } from './use-dor-control';
 
 /**
@@ -32,6 +31,8 @@ export interface WallHandle {
    *  gate, alongside `runningCount`). */
   hasTouchedSurfaces(): boolean;
   runningCount(): number;
+  /** Dirty reports consumed only by Tool-designated members, including Doors. */
+  dirtyToolIds(): string[];
   /** Leave command selection on chrome and focus a live pane. */
   enterSelectedPane(): void;
   enterCommandMode(): void;
@@ -54,8 +55,8 @@ export interface WallHandle {
   prepareWorkspaceTransfer(): Promise<PreparedWorkspaceTransfer>;
   /** Close every member Surface through the closure coordinator. Resolves null
    *  once the Wall is empty, else the first refusal's message with the Workspace
-   *  left as it was. */
-  closeAll(mode?: CloseSurfaceMode): Promise<string | null>;
+   *  left as it was. `editors` are the dirty Tools whose close was consented. */
+  closeAll(editors?: readonly string[]): Promise<string | null>;
   handleDorControl(detail: DorControlRequest): void;
 }
 
@@ -109,6 +110,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     browserSessions: () => [],
     hasTouchedSurfaces: () => false,
     runningCount: () => 0,
+    dirtyToolIds: () => [],
     enterSelectedPane: () => {},
     enterCommandMode: () => {},
     selectWorkspaceTab: () => {},
@@ -119,7 +121,6 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
       payload: {
         workspaceId,
         workspace: { id: workspaceId, name: '', nameIsAuto: false, session: { version: 3, panes: [] } },
-        notepad: { surfaces: [], stagedDeletions: {} },
         terminalIds: [],
         allIds: [],
       },
