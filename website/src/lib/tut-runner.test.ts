@@ -10,6 +10,7 @@ import {
 } from "./tut-items";
 import { BUSY_DEMO_INTERVAL_MS, TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
+import { BOLD, RESET, fg } from "dormouse-lib/lib/ansi";
 
 type TutRunnerOptions = ConstructorParameters<typeof TutRunner>[0];
 
@@ -86,6 +87,7 @@ function mountRunner(
   return {
     adapter,
     state,
+    runner,
     sendKeys: (data: string) => adapter.writePty(id, data),
     lastFrame: () => {
       const all = frames.join("");
@@ -102,6 +104,102 @@ function mountRunner(
 }
 
 describe("TutRunner snapshots", () => {
+  it("marks needed arrows bold white with yellow dots and sent arrows normal white with green checks", () => {
+    const { runner, lastFrame, dispose } = mountRunner(["gn-scroll"], { profile: POCKET_TUTORIAL_PROFILE });
+    const needed = (direction: string) => `${fg(33)}●${RESET}${fg(37)}${BOLD}${direction}${RESET}`;
+    const sent = (direction: string) => `${fg(32)}✓${RESET}${fg(37)}${direction}${RESET}`;
+    try {
+      for (const direction of ["up", "down", "left", "right"] as const) {
+        expect(lastFrame()).toContain(needed(direction));
+        runner.handleGestureInput(direction);
+        expect(lastFrame()).toContain(sent(direction));
+        expect(lastFrame()).not.toContain(needed(direction));
+      }
+      for (const direction of ["up", "down", "left", "right"]) {
+        expect(lastFrame()).toContain(sent(direction));
+      }
+    } finally {
+      dispose();
+    }
+  });
+
+  it("credits Pocket gestures in order, requiring both scroll directions and all four later arrows", () => {
+    const { runner, state, sendKeys, dispose } = mountRunner([], { profile: POCKET_TUTORIAL_PROFILE });
+    const arrows = ["up", "down", "left", "right"] as const;
+    arrows.forEach((key) => runner.handleGestureInput(key));
+    runner.handleGestureInput("enter");
+    runner.handleGestureInput("esc");
+    // Wheel/keyboard input alone does not count as a gesture.
+    sendKeys("\x1b[<64;2;2M\x1b[<65;2;2M\x1b[A\x1b[B\x1b[C\x1b[D\r");
+    expect(state.sectionProgress("gesture").done).toBe(0);
+    runner.handleGestureScroll(3);
+    runner.handleGestureScroll(4);
+    expect(state.isComplete("gn-scroll")).toBe(false);
+    runner.handleGestureScroll(-2);
+    expect(state.isComplete("gn-scroll")).toBe(true);
+    runner.handleGestureInput("enter");
+    runner.handleGestureInput("esc");
+    expect(state.sectionProgress("gesture").done).toBe(1);
+    ["up", "up", "down", "left"].forEach((key) => runner.handleGestureInput(key as typeof arrows[number]));
+    expect(state.isComplete("gn-arrows")).toBe(false);
+    runner.handleGestureInput("right");
+    expect(state.isComplete("gn-arrows")).toBe(true);
+    runner.handleGestureInput("esc");
+    expect(state.isComplete("gn-esc")).toBe(false);
+    runner.handleGestureInput("enter");
+    runner.handleGestureInput("esc");
+    expect(state.sectionProgress("gesture")).toEqual({ done: 4, total: 4 });
+    dispose();
+  });
+
+  it("moves only the Pocket background in either direction and stops animation and capture on leaving", () => {
+    vi.useFakeTimers();
+    const { sendKeys, lastFrame, dispose } = mountRunner([], { profile: POCKET_TUTORIAL_PROFILE });
+    try {
+      const foreground = (frame: string) => frame.slice(frame.indexOf("\x1b[2;1H\x1b[0m"));
+      const original = lastFrame();
+      sendKeys("\x1b[<64;2;2M");
+      const up = lastFrame();
+      expect(up).not.toBe(original);
+      expect(foreground(up)).toBe(foreground(original));
+      sendKeys("\x1b[<65;2;2M");
+      expect(lastFrame()).toBe(original);
+      // Wrap the periodic field repeatedly without reaching a scroll boundary.
+      sendKeys("\x1b[<64;2;2M".repeat(512));
+      expect(lastFrame()).toBe(original);
+      vi.advanceTimersByTime(160);
+      expect(lastFrame()).not.toBe(original);
+      expect(foreground(lastFrame())).toBe(foreground(original));
+      sendKeys(ESC);
+      const menu = lastFrame();
+      vi.advanceTimersByTime(1000);
+      expect(lastFrame()).toBe(menu);
+      sendKeys("\x1b[<64;2;2M");
+      expect(lastFrame()).toBe(menu);
+    } finally {
+      dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears partial Pocket gesture progress when the tutorial is reset", () => {
+    const { runner, sendKeys, state, dispose } = mountRunner([], { profile: POCKET_TUTORIAL_PROFILE });
+    runner.handleGestureScroll(-1);
+    sendKeys(extraRow("reset", POCKET_TUTORIAL_PROFILE.sections) + ENTER + "reset" + ENTER);
+    runner.handleGestureScroll(1);
+    expect(state.isComplete("gn-scroll")).toBe(false);
+    runner.handleGestureScroll(-1);
+    runner.handleGestureInput("up");
+    sendKeys(extraRow("reset", POCKET_TUTORIAL_PROFILE.sections) + ENTER + "reset" + ENTER);
+    runner.handleGestureScroll(1);
+    runner.handleGestureScroll(-1);
+    runner.handleGestureInput("down");
+    runner.handleGestureInput("left");
+    runner.handleGestureInput("right");
+    expect(state.isComplete("gn-arrows")).toBe(false);
+    dispose();
+  });
+
   it.each([1_000, 60_000])("uses the configured %i ms timeout for demo timers and countdowns", (inactivityTimeoutMs) => {
     vi.useFakeTimers();
     // Semantic timestamps are monotonic across parsers, so later cases must
@@ -237,7 +335,7 @@ describe("TutRunner snapshots", () => {
     });
 
     expect(lastFrame()).toContain("Gesture navigation");
-    expect(lastFrame()).toContain("Switch between Select and Gestures");
+    expect(lastFrame()).toContain("Scroll up and down");
     expect(lastFrame()).not.toContain("Dormouse Pocket Tutorial");
     dispose();
   });
@@ -334,7 +432,7 @@ describe("TutRunner snapshots", () => {
     expect(state.isComplete("gn-arrows")).toBe(false);
     expect(state.isStarPromptResolved()).toBe(false);
     expect(lastFrame()).toContain("Gesture navigation");
-    expect(lastFrame()).toContain("Switch between Select and Gestures");
+    expect(lastFrame()).toContain("Scroll up and down");
     expect(lastFrame()).not.toContain("Dormouse Pocket Tutorial");
     dispose();
   });

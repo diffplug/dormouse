@@ -2,7 +2,7 @@
 const THEME_ITEM_IDS = ["th-theme"] as const;
 
 const GESTURE_ITEM_IDS = [
-  "gn-touch-mode",
+  "gn-scroll",
   "gn-arrows",
   "gn-enter",
   "gn-esc",
@@ -71,24 +71,24 @@ const GESTURE_NAVIGATION_SECTION: Section = {
   title: 'Gesture navigation',
   items: [
     {
-      id: 'gn-touch-mode',
-      title: 'Switch between Select and Gestures',
-      hint: 'Tap `Select`, then tap `Gestures` again. This mode determines what happens when you touch the terminal.',
+      id: 'gn-scroll',
+      title: 'Scroll up and down',
+      hint: 'Glide up and down along either edge of the terminal. The background scrolls; these instructions stay put.',
     },
     {
       id: 'gn-arrows',
-      title: 'Use Gestures to send an arrow key',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Then drag directly up, down, left, or right past the circle.',
+      title: 'Send all four arrow keys',
+      hint: 'Touch away from either edge to open the compass. Drag up, down, left, and right past the circle. Try all four.',
     },
     {
       id: 'gn-enter',
-      title: 'Use Gestures to press Enter',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Drag towards the diagonal that has `Enter`, and then drag back in the other direction to choose which `kind` of Enter.',
+      title: 'Send Enter',
+      hint: 'Touch away from either edge to open the gesture compass. Drag towards the diagonal that has `Enter`, and then drag back in the other direction to choose which `kind` of Enter.',
     },
     {
       id: 'gn-esc',
-      title: 'Use Gestures to press Esc',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Drag towards the diagonal that has `Esc`, and then drag back in the other direction to choose which `kind` of Esc.',
+      title: 'Send Escape',
+      hint: 'Touch away from either edge to open the gesture compass. Drag towards the diagonal that has `Esc`, and then drag back in the other direction to choose which `kind` of Esc.',
     },
   ],
 };
