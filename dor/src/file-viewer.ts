@@ -13,7 +13,7 @@ type Resource = { file: FileHandle; mime: string };
 /** A bound on the grant itself: fatal even when reached through an optional asset. */
 class ViewerLimitError extends Error {}
 const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!);
+export const escapeHtml = (s: string) => s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!);
 
 async function textSize(file: FileHandle): Promise<number> {
   const { size } = await file.stat();
