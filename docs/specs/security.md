@@ -15,9 +15,13 @@ Dormouse holds shells, source trees, credentials, and local files. Its
 
 **Only the self-hosted remote-control deployment ships.** Hosted account code is
 implemented with production provisioning pending ([Hosted accounts](./hosted.md));
-it grants no terminal access. The relay runs on hardware the user
-owns and is private to their tailnet by default, but its application boundary
-assumes the HTTPS origin is public ([SELF_HOST.md](../../SELF_HOST.md)).
+it grants no terminal access. Hosted also forwards a one-time connection's
+handshake ciphertext and authorizes nothing
+([Hosted rendezvous](./one-time.md#hosted-rendezvous)); its deploy pipeline and
+Cloudflare account are part of a one-time connection's trust base. The relay
+runs on hardware the user owns and is private to their tailnet by default, but
+its application boundary assumes the HTTPS origin is public
+([SELF_HOST.md](../../SELF_HOST.md)).
 **Nothing about remote control applies to a Burrow (a Standalone or VS Code
 Dormouse) that never enrolls with a Relay**: enrollment is where the relay, the
 phone, and push begin.
@@ -154,7 +158,7 @@ packages Hosted consumes in its own repository.
 | Domain | Specs | Covers |
 | --- | --- | --- |
 | `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md) | local boundaries, remote control, and everything no other domain claims |
-| `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts and the pgstencil provenance link |
+| `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts, the one-time rendezvous, and the pgstencil provenance link |
 | `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
 | `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
 

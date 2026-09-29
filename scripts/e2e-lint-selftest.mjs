@@ -18,8 +18,8 @@
  * proves that scope resolves — a `trees` rule whose filter excluded every file
  * would stay green.
  *
- * Every rule also names a line of `SECURITY_SPEC`, and the lint checks that
- * line still exists. That check is proved here too, by deleting the line: a rule
+ * Every rule also names a line of its spec (`SECURITY_SPEC` unless it names
+ * another), and the lint checks that line still exists. That check is proved here too, by deleting the line: a rule
  * whose prose was removed is a rule nobody agreed to, and it must not go on
  * passing quietly. Once per *line*, not once per rule — several rules cite the
  * same sentence, and re-deleting it proves nothing new.
@@ -181,7 +181,40 @@ for (const [file, violation] of [
   selftest.withAppended(file, violation, `a store in ${file} stays green: ${violation.trim()}`);
 }
 
-const security = readFileSync(join(repoRoot, SECURITY_SPEC), 'utf8');
+// These rules reach Hosted's server as well as their own trees, and the loop
+// above appends only inside those: each must redden in Hosted too. Named
+// rather than derived from `trees`, so a rule narrowed back is reported.
+const HOSTED_ROUTE = 'hosted/server/one-time.ts';
+for (const name of [
+  'Neither the Relay nor Hosted names a protocol-v1 plaintext type',
+  'Neither the Relay nor Hosted names a direct-path signal or an SDP',
+  'No STUN or TURN URL in shipped source',
+  'No non-empty `iceServers` list anywhere',
+]) {
+  const rule = RULES.find((rule) => rule.rule === name);
+  if (!rule || !filesFor(rule).includes(HOSTED_ROUTE)) {
+    selftest.weak.push(`${name}\n      no longer scans ${HOSTED_ROUTE}`);
+    continue;
+  }
+  selftest.withAppended(HOSTED_ROUTE, rule.violation, `${name}\n      the same violation in ${HOSTED_ROUTE} stays green`);
+}
+
+// Every spelling the room rule names must redden it, not just the parse the
+// loop appends: a decode, a log, or a stored frame is the same leak.
+for (const violation of [
+  '\nconst __selftest = (ct: string) => fromBase64Url(ct);\n',
+  '\nconst __selftest = (ct: string) => atob(ct);\n',
+  '\nconst __selftest = (frame: string) => console.log(frame);\n',
+  "\nconst __selftest = (frame: string) => this.#ctx.storage.put('frame', frame);\n",
+  "\nconst __selftest = (frame: string) => this.#ctx.storage.sql.exec('SELECT ?', frame);\n",
+]) {
+  selftest.withAppended(
+    'hosted/server/one-time-room.ts',
+    violation,
+    `a forbidden read in hosted/server/one-time-room.ts stays green: ${violation.trim()}`,
+  );
+}
+
 // A file-scoped storage exception must not become a directory-scoped escape.
 selftest.withAppended(
   'lib/src/remote/client/pocket-db.ts',
@@ -189,15 +222,21 @@ selftest.withAppended(
   'AES-GCM in the module beside the at-rest wrapper stays green',
 );
 
-for (const line of new Set(RULES.map((rule) => rule.security))) {
-  if (!security.includes(line)) {
-    selftest.weak.push(`${SECURITY_SPEC} does not contain the line a rule names: "${line}"`);
+const cited = new Map();
+for (const rule of RULES) {
+  const spec = rule.spec ?? SECURITY_SPEC;
+  cited.set(`${spec}\0${rule.security}`, { spec, line: rule.security });
+}
+for (const { spec, line } of cited.values()) {
+  const text = readFileSync(join(repoRoot, spec), 'utf8');
+  if (!text.includes(line)) {
+    selftest.weak.push(`${spec} does not contain the line a rule names: "${line}"`);
     continue;
   }
   selftest.withMutation(
-    SECURITY_SPEC,
-    (path) => writeFileSync(path, security.replace(line, '')),
-    `deleting "${line}" from ${SECURITY_SPEC} stays green — a rule would outlive the prose`,
+    spec,
+    (path) => writeFileSync(path, text.replace(line, '')),
+    `deleting "${line}" from ${spec} stays green — a rule would outlive the prose`,
   );
 }
 

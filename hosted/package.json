@@ -13,6 +13,7 @@
     "deploy": "pnpm build && wrangler deploy",
     "preview:worker": "wrangler dev --local --local-protocol https",
     "test:deploy": "node --test scripts/*.test.mjs",
+    "test:one-time": "vitest run server/tests/one-time.test.ts",
     "preview:deploy": "node scripts/preview.mjs deploy",
     "preview:cleanup": "node scripts/preview.mjs cleanup",
     "preview:smoke": "node scripts/preview-smoke.mjs"
@@ -24,7 +25,8 @@
     "hono": "^4.13.8",
     "@hono/node-server": "^2.0.10",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "remote-lib-common": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.13.6",

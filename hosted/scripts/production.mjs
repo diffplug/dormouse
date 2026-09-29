@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { required, cloudflare, hyperdriveOrigin } from "./preview.mjs";
 import { smoke } from "./preview-smoke.mjs";
+import { oneTimeSmoke } from "./one-time-smoke.mjs";
 import { providerIds } from "../server/providers.js";
 
 const root = new URL("../", import.meta.url);
@@ -115,7 +116,10 @@ if (
           .map((s) => s.trim())
           .filter(Boolean),
       );
-      console.log("Hosted production revision and auth boundary verified.");
+      await oneTimeSmoke(config.vars.APP_ORIGIN);
+      console.log(
+        "Hosted production revision, auth boundary, and one-time rendezvous verified.",
+      );
     } else if (action === "preflight" || action === "deploy") {
       await verifyPackages();
       await preflight(process.env, config);

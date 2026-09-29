@@ -4,6 +4,8 @@ import type { Hono } from "hono";
 export function secureHeaders(app: Hono<any>) {
   app.use("*", async (c, next) => {
     await next();
+    // A WebSocket upgrade carries no document, and its headers are the runtime's.
+    if (c.res.status === 101) return;
     // Vite emits content-hashed files under /assets/, so they are safe to cache forever,
     // but the SPA fallback answers an unknown /assets/ path with the HTML shell: cache
     // only a 200 whose type is not HTML, and leave everything else uncached.
@@ -23,7 +25,7 @@ export function secureHeaders(app: Hono<any>) {
     c.header("Strict-Transport-Security", "max-age=31536000");
     c.header(
       "Content-Security-Policy",
-      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'",
+      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; worker-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'",
     );
   });
 }

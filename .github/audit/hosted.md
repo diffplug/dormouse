@@ -6,14 +6,17 @@
 
 **Output file:** `audit-hosted.md`
 
-This is a code-and-specs audit of the Hosted account application. You need no
+This is a code-and-specs audit of the Hosted account application and the
+one-time rendezvous it serves. You need no
 PAT — do not use one. The two pgstencil provenance checks below do read the
 GitHub API, but only a public repository, which the workflow's default
 `GITHUB_TOKEN` and the operator's own `gh` login both reach; if that API is
 unreachable, report those two checks as `UNVERIFIABLE`.
 
-Read `docs/specs/hosted.md`, `hosted/server/`, `hosted/src/`, `hosted/scripts/`,
-`hosted/wrangler.jsonc`, and `.github/workflows/hosted-preview.yml` and
+Read `docs/specs/hosted.md`, `docs/specs/one-time.md` (its "Wire contract" and
+"Hosted rendezvous"), `hosted/server/`, `hosted/src/`, `hosted/scripts/`,
+`hosted/wrangler.jsonc`, `remote-lib-common/src/remote/one-time-wire.ts`, and
+`.github/workflows/hosted-preview.yml` and
 `.github/workflows/hosted-production.yml` — `docs/specs/security-hosted.md`'s
 Deployment boundary quantifies over the preview and production paths, which
 live in those scripts and workflows rather than in the Worker.
@@ -81,7 +84,16 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   else's?** `authPolicy` must keep explicit linking and independent logins; a
   callback whose initiating login was revoked must fail; an unused or unknown
   provider credential must enable nothing. No Hosted endpoint may mint a Burrow
-  ACL grant or stand in for the encrypted pairing and presence proof.
+  ACL grant or stand in for the encrypted pairing and presence proof, and the
+  rendezvous authorizes nothing.
+- **Can the rendezvous become more than a handshake pipe?** Trace a frame
+  through `OneTimeRoom`: nothing may read, keep, or log it, and the length,
+  type, and count bounds must close both ends before a byte past them is
+  forwarded. Look for a second phone admitted across an await or a hibernation,
+  a room that outlives its alarm, a web page that can mint a room, a join from
+  another origin, a room id a caller can choose, and a limit a caller can step
+  around. Account cookies ride the phone's upgrade to this same origin: no
+  one-time route or the room may read them or reach auth.
 - **Does anything from the test or preview build reach production?** The
   production Worker must not export the captured-email inbox, the deterministic
   clock, or the testing injection module; preview must not copy production

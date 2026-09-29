@@ -10,6 +10,8 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "lib/src/theme-colors.css",
     "lib/src/lib/themes/bundled.json",
     "lib/src/lib/css-color.ts",
+    "remote-lib-common/src/remote/one-time-wire.ts",
+    "remote-lib-common/src/security/bytes.ts",
   ])
     assert.equal(touchesHosted([path]), true, path);
   for (const path of [
@@ -17,6 +19,7 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "standalone/src/main.tsx",
     "docs/specs/layout.md",
     ".github/workflows/ci.yml",
+    "remote-lib-common/test/one-time-wire.test.mjs",
   ])
     assert.equal(touchesHosted([path]), false, path);
   assert.equal(touchesHosted([]), false);

@@ -2,6 +2,7 @@ import { Hono, type ExecutionContext } from "hono";
 import type { Env } from "./worker";
 import { queryDatabase } from "pgstencil/postgres";
 import { secureHeaders } from "./headers";
+import { oneTimeRoutes } from "./one-time";
 
 export function workerApp(
   fetchAuth: (
@@ -26,6 +27,7 @@ export function workerApp(
       return c.json({ message: "Unknown origin." }, 421);
     await next();
   });
+  oneTimeRoutes(app);
   configure?.(app);
   app.get("/api/health", (c) =>
     c.json({ ok: true, revision: c.env.BUILD_SHA ?? null }),

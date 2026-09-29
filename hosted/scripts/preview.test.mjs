@@ -50,6 +50,15 @@ test("preview configuration isolates the origin and excludes production bindings
   assert.equal(config.d1_databases, undefined);
   assert.equal(config.vars.GOOGLE_CLIENT_SECRET, undefined);
   assert.equal(config.assets.run_worker_first, true);
+  assert.deepEqual(config.durable_objects, base.durable_objects);
+  assert.deepEqual(config.migrations, base.migrations);
+  assert.deepEqual(
+    config.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+    base.ratelimits.map(({ name, namespace_id }) => [
+      name,
+      String(Number(namespace_id) + 1000),
+    ]),
+  );
   for (const bad of ["0", "-1", "42/../../production", "main", "42\n"])
     assert.throws(() => previewName(bad));
   assert.throws(() =>

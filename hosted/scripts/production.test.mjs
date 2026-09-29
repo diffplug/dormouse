@@ -25,6 +25,23 @@ test("production config keeps canonical domain and production entry, excludes pu
   assert.throws(() => productionConfig(base, { ...env, BUILD_SHA: "main" }));
   assert.throws(() => productionConfig({ ...base, workers_dev: true }, env));
 });
+test("production config keeps the rendezvous Durable Object, its append-only migrations, and its rate limits", () => {
+  assert.deepEqual(config.durable_objects, {
+    bindings: [{ name: "ONE_TIME_ROOM", class_name: "OneTimeRoom" }],
+  });
+  // Durable Object migrations are append-only: a deployed tag is never edited.
+  assert.deepEqual(config.migrations[0], {
+    tag: "v1",
+    new_sqlite_classes: ["OneTimeRoom"],
+  });
+  assert.deepEqual(
+    config.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+    [
+      ["ONE_TIME_MINT_LIMIT", "1"],
+      ["ONE_TIME_JOIN_LIMIT", "2"],
+    ],
+  );
+});
 function provider({
   host = "ep-production.neon.tech",
   database = "neondb",

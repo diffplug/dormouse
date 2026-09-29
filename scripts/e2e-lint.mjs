@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
  * Mechanical check for the structural half of the end-to-end boundary in
- * `docs/specs/security-remote.md` ("Remote Control"). Runs from the repo
+ * `docs/specs/security-remote.md` ("Remote Control"), and of the Hosted room
+ * that forwards a one-time handshake in `docs/specs/security-hosted.md`
+ * ("Rendezvous boundary"). Runs from the repo
  * root via `pnpm test` (see the root package.json). Exits non-zero with a
  * per-violation report naming the rule that was broken and the spec line it
  * enforces.
@@ -9,11 +11,12 @@
  * Why this exists: the properties the trust boundary rests on are *absences* —
  * one Noise suite and no way to select another, no JavaScript curve, no
  * plaintext relay route, no legacy frame discriminant left to answer, no
- * Relay-side view of protocol-v1 or of the direct path's signaling, no ICE
- * server, no checked-in service worker shadowing the built one, no one-time
- * frame the Relay or `BurrowRuntime` could read, no grant a one-time
- * connection could leave behind, and no store a one-time phone could keep
- * anything in. An absence is exactly what a
+ * Relay-side or Hosted-side view of protocol-v1 or of the direct path's
+ * signaling, no ICE server, no checked-in service worker shadowing the built
+ * one, no one-time frame the Relay or `BurrowRuntime` could read, no parse in
+ * the Hosted room that forwards one, no grant a one-time connection could
+ * leave behind, and no store a one-time phone could keep anything in. An
+ * absence is exactly what a
  * reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
  * thorough but probabilistic. This makes the cheap half deterministic, so
@@ -57,8 +60,11 @@ import { readRepoFile, repoRoot, trackedFiles } from './lint-kit.mjs';
  */
 const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
 
-/** The spec whose "Remote Control" lines every rule below pins. */
+/** The spec whose "Remote Control" lines the rules below pin, unless a rule names its own. */
 export const SECURITY_SPEC = 'docs/specs/security-remote.md';
+
+/** The spec whose "Rendezvous boundary" lines the Hosted room's rule pins. */
+export const HOSTED_SECURITY_SPEC = 'docs/specs/security-hosted.md';
 
 /**
  * The modules that carry the end-to-end boundary. Scoped explicitly rather than
@@ -162,6 +168,12 @@ const ONE_TIME_NAME = /[Oo]neTime|ONE_TIME_|['"`]one-time/g;
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
 
 /**
+ * The two services that carry ciphertext they must not read: the Relay, and
+ * Hosted, whose one-time room forwards a handshake.
+ */
+const ROUTING_TREES = ['relay/src/', 'hosted/server/'];
+
+/**
  * The one file the AES-GCM ban excuses, as `docs/specs/security-remote.md` ->
  * "Credentials at rest" names it. Excused by path rather than dropped from the
  * scan, so a rename that leaves the cipher behind turns the rule red.
@@ -169,10 +181,10 @@ const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
 const AT_REST_KEY_WRAPPER = 'lib/src/remote/client/pocket-private-key.ts';
 
 /**
- * One entry per structural property. Every rule states the `SECURITY_SPEC`
- * line it enforces in `security`, which must still appear in that file — as a
- * substring of the raw text, so the phrase has to sit on one line: reflow the
- * spec paragraph around it rather than let a hard wrap split it.
+ * One entry per structural property. Every rule states the line it enforces in
+ * `security`, which must still appear in its `spec` (`SECURITY_SPEC` when
+ * omitted) — as a substring of the raw text, so the phrase has to sit on one
+ * line: reflow the spec paragraph around it rather than let a hard wrap split it.
  *
  * Rule kinds:
  *   - `forbid`   — the pattern must not match in any file of `files`. `allow`
@@ -280,13 +292,14 @@ export const RULES = [
     violation: "\nconst __selftest = { t: 'connect2' };\n",
   },
   {
-    rule: 'The Relay never names a protocol-v1 plaintext type',
+    rule: 'Neither the Relay nor Hosted names a protocol-v1 plaintext type',
     security: 'Relay-side type import from the protocol-v1 half',
     kind: 'forbid',
-    trees: ['relay/src/'],
+    trees: ROUTING_TREES,
     // Naming one is not itself a read, but it is the only reason a relay would
-    // have to: the Relay routes an opaque envelope, so a file that knows what
-    // a `DirectoryEntry` is has started to care what it is carrying.
+    // have to: the Relay and Hosted's one-time room route opaque frames, so a
+    // file that knows what a `DirectoryEntry` is has started to care what it is
+    // carrying.
     pattern:
       /\b(?:RemoteRequest|RemoteResponse|RemoteEventMsg|DirectoryEntry|DirectorySnapshot|TerminalDataEvent|TerminalClosedEvent|TerminalSemanticEvent|AttachParams|TerminalAttachResult|TerminalWriteParams|TerminalResizeParams|HelloParams|HelloResult|REMOTE_METHODS|REMOTE_EVENTS|MAX_TERMINAL_DIMENSION|clampTerminalDimension)\b/g,
     violationFile: 'relay/src/relay.ts',
@@ -296,7 +309,7 @@ export const RULES = [
     rule: 'No STUN or TURN URL in shipped source',
     security: 'any ICE server reaches shipped source',
     kind: 'forbid',
-    trees: SOURCE_TREES,
+    trees: [...SOURCE_TREES, 'hosted/server/'],
     // Anchored on the quote that opens the literal, because the bare scheme is
     // a substring of ordinary prose: `// ... early return:` and `Saturn:` both
     // contain `turn:`, and a rule that reddened on those would be deleted.
@@ -308,7 +321,7 @@ export const RULES = [
     rule: 'No non-empty `iceServers` list anywhere',
     security: 'any ICE server reaches shipped source',
     kind: 'forbid',
-    trees: SOURCE_TREES,
+    trees: [...SOURCE_TREES, 'hosted/server/'],
     // The empty array is the shipped value at both ends and must keep passing,
     // so the pattern demands a first element: anything after `[` that is
     // neither whitespace nor the closing bracket. A server assembled at runtime
@@ -319,17 +332,31 @@ export const RULES = [
     violation: '\nconst __selftest = { iceServers: [{ urls: [] }] };\n',
   },
   {
-    rule: 'The Relay never names a direct-path signal or an SDP',
+    rule: 'Neither the Relay nor Hosted names a direct-path signal or an SDP',
     security: 'any signaling leaves the ciphertext',
     kind: 'forbid',
-    trees: ['relay/src/'],
+    trees: ROUTING_TREES,
     // The signals ride as `control` messages inside the session, so the Relay
-    // routes them without knowing they exist. Naming one is the leading
-    // indicator that a route, a guard, or a frame type has started to care —
-    // the same reasoning as the protocol-v1 rule above.
+    // and the one-time room route them without knowing they exist. Naming one
+    // is the leading indicator that a route, a guard, or a frame type has
+    // started to care — the same reasoning as the protocol-v1 rule above.
     pattern: /\b(?:direct-offer|direct-answer|direct-decline|direct-switch|RTCPeerConnection|sdp)\b/gi,
     violationFile: 'relay/src/relay.ts',
     violation: "\nconst __selftest = { sdp: '' };\n",
+  },
+  {
+    rule: "Hosted's one-time room never parses, decodes, stores, or logs a frame",
+    spec: HOSTED_SECURITY_SPEC,
+    security: 'parses, decodes, stores, or logs a forwarded frame',
+    kind: 'forbid',
+    files: ['hosted/server/one-time-room.ts'],
+    // The room forwards a frame verbatim and bounds it by raw length and count
+    // alone, so it has no reason to read one: a parse is the first step toward
+    // a room that acts on what a handshake says, and a log or a stored frame
+    // is handshake ciphertext kept past the handshake.
+    pattern: /\bJSON\.parse\b|\bfromBase64Url\b|\batob\b|\bconsole\.|\bstorage\.(?:put|sql|kv)\b/g,
+    violationFile: 'hosted/server/one-time-room.ts',
+    violation: '\nconst __selftest = (frame: string) => JSON.parse(frame);\n',
   },
   {
     rule: 'The Relay never names the one-time family',
@@ -506,15 +533,16 @@ export function check() {
     return text;
   };
 
-  const security = existsSync(join(repoRoot, SECURITY_SPEC)) ? read(SECURITY_SPEC) : '';
+  const specText = (spec) => (existsSync(join(repoRoot, spec)) ? read(spec) : '');
 
   for (const rule of RULES) {
     // A rule whose spec line is gone is a rule nobody agreed to. Checked first,
     // so a deleted invariant is reported as that rather than as whatever the
     // pattern happens to find.
-    if (!security.includes(rule.security)) {
+    const spec = rule.spec ?? SECURITY_SPEC;
+    if (!specText(spec).includes(rule.security)) {
       failures.push(
-        `${rule.rule}\n    ${SECURITY_SPEC} no longer says "${rule.security}" — the rule and its prose must move together`,
+        `${rule.rule}\n    ${spec} no longer says "${rule.security}" — the rule and its prose must move together`,
       );
     }
 
@@ -582,7 +610,8 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     console.error(`e2e-lint: the end-to-end boundary no longer holds what ${SECURITY_SPEC} requires\n`);
     for (const failure of failures) console.error(`  ${failure}\n`);
     console.error(
-      `Each line above maps to the "Remote Control" section of ${SECURITY_SPEC}. If a\n` +
+      `Each line above maps to the "Remote Control" section of ${SECURITY_SPEC}, or to the\n` +
+        `"Rendezvous boundary" section of ${HOSTED_SECURITY_SPEC}. If a\n` +
         'control moved rather than disappeared, update the rule in scripts/e2e-lint.mjs\n' +
         'in the same commit — and add the self-test case that proves it load-bearing.',
     );

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 export function touchesHosted(paths) {
   return paths.some(
     (path) =>
-      /^(hosted\/|lib\/src\/(theme|lib\/(themes\/|(?:local-json-store|is-record|css-color)\.ts$))|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
+      /^(hosted\/|remote-lib-common\/src\/|lib\/src\/(theme|lib\/(themes\/|(?:local-json-store|is-record|css-color)\.ts$))|\.github\/workflows\/hosted-[^/]+\.yml$)/.test(
         path,
       ) ||
       ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"].includes(path),

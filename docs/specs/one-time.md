@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary; this spec uses them bare.
 > Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection".
-> The shared contract, the Burrow runtime, and the phone client are built; the service commands, the rendezvous, and both interfaces are the **one-time-connection** scope under `## Future`.
+> The shared contract, the Burrow runtime, the phone client, and the Hosted rendezvous are built; the service commands and both interfaces are the **one-time-connection** scope under `## Future`.
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
@@ -205,6 +205,59 @@ Source of truth: `OneTimeClient` in `lib/src/remote/client/one-time-client.ts`;
 `lib/src/remote/client/one-time-client.test.ts` and, against the real runtime,
 `lib/src/remote/client/one-time-e2e.test.ts`.
 
+## Hosted rendezvous
+
+Hosted's Worker serves both routes, and one `OneTimeRoom` Durable Object per
+room carries the frames. **Never parse, store, or log a forwarded frame**: the
+room bounds a frame by its raw length and its count alone, and forwards the
+string verbatim (rationale).
+
+| Route | Admits | Refuses |
+| --- | --- | --- |
+| `ONE_TIME_WS_ROUTES.burrow` | an upgrade with no `Origin` header | 426 without an upgrade, 403 on any `Origin`, 429 past `ONE_TIME_MINT_LIMIT` |
+| `ONE_TIME_WS_ROUTES.client` | an upgrade whose `Origin` is exactly `APP_ORIGIN`, naming exactly one E2E id as `room` | 426 without an upgrade, 403 on any other or no `Origin`, 400 on a missing, repeated, or malformed room, 429 past `ONE_TIME_JOIN_LIMIT` |
+
+- **Must mount after the bindings mapper and the 421 gate, before the account
+  API**, and never read a cookie, reach Hyperdrive, or call auth. The Worker
+  mints each room id from 16 random bytes and hands the room a fresh request
+  carrying only the upgrade and the room id, never the caller's headers.
+- **The `Origin` rules are abuse control, never authorization** (rationale):
+  the handshake against the link's one-use key and the laptop's confirmation
+  authorize a session.
+- **Both limits key on `cf-connecting-ip`**, an IPv6 address by its /64 and a
+  missing one as `local` (rationale); `hosted/wrangler.jsonc` sets 10 mints and
+  30 joins per 60 seconds.
+- **The room's state is the Burrow socket's hibernation attachment** —
+  `expiresAt`, `joined`, and a count of every frame received — never memory, so
+  a hibernated room keeps its join and its count. `ONE_TIME_PING` is answered by
+  the runtime's auto-response and never wakes, forwards, or counts.
+
+A room's life, each step one event on the object:
+
+1. **Open.** The Burrow's upgrade arms one alarm at `expiresAt +
+   ONE_TIME_EXPIRY_GRACE_MS`, with `expiresAt` `ONE_TIME_LINK_TTL_MS` from now,
+   accepts the socket tagged `burrow`, and sends `OneTimeRoomFrame`.
+2. **Join, decided synchronously**, check and set with no await between: no
+   open Burrow socket answers 4012, a joined room 4011, a join past `expiresAt`
+   4010; otherwise the socket is accepted tagged `client`. **A refusal accepts
+   outside hibernation and closes at once**, so its close never reaches the
+   room's handlers (rationale).
+3. **Forward.** Every text frame counts, and goes verbatim to the other end's
+   open socket, or nowhere before a phone joins. A binary frame, one longer than
+   `MAX_ONE_TIME_FRAME_LENGTH`, or one past `MAX_ONE_TIME_FORWARDED` closes both
+   ends with 4015.
+4. **Leave.** Either end closing or erroring closes the room's sockets with
+   4013, the leaving end's included as its reply.
+5. **Deadline.** The alarm closes what remains with 4010 if no phone joined,
+   4014 if one did.
+
+**Every ending deletes the alarm and the room's storage**, so a finished room
+holds nothing.
+
+Source of truth: `oneTimeRoutes` / `rateLimitKey` in
+`hosted/server/one-time.ts`; `OneTimeRoom` in `hosted/server/one-time-room.ts`;
+`hosted/wrangler.jsonc`. Pinned by `hosted/server/tests/one-time.test.ts`.
+
 ## Future
 
 **Scope: one-time-connection** — the feature on top of the contract, in build
@@ -212,11 +265,9 @@ order, each stage promoting its part above the fold:
 
 1. **Service commands and host glue** — `BurrowService` commands and event, the
    baked origin, the `serving` gate, approval `kind`, standalone and VS Code.
-2. **Hosted rendezvous** — the routes, the `OneTimeRoom` Durable Object, its
-   configuration and headers, a Miniflare suite in the root test.
-3. **Phone page** — Pocket's shared views and wall mount moved out of its App,
-   the `/connect/` entry, its build and staging, the dev loop.
-4. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
+2. **Phone page** — Pocket's shared views and wall mount moved out of its App,
+   the `/connect/` entry, its build, staging, and CSP, the dev loop.
+3. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
    enabled.
 
 **Scope: one-time-anywhere** — reach past one network, for paid users: STUN and
@@ -276,26 +327,9 @@ limit.
   invalid, expired, or unsupported → Connect → code → "Connecting directly…" →
   the wall with the laptop's label and End → ended. **It persists nothing**; its
   origin is shared with accounts.
-
-### Hosted rendezvous
-
-- **Routes mount after the bindings mapper and the 421 gate**, before the
-  account API, and never touch Hyperdrive, cookies, or auth. The Burrow route
-  requires an upgrade, answers **any `Origin` header with 403**, and limits
-  mints per IP (per /64 for IPv6) with 429. The client route requires `Origin`
-  to equal the app origin and `room` to be an E2E id, under a join limit.
-- **`OneTimeRoom`**, a hibernating Durable Object: a synchronous single-join
-  check-and-set; refusal by accept-then-close with a code; strings forwarded
-  **verbatim, never parsed or logged**, counted toward the message cap;
-  a violation closes both with 4015; either close sends the peer 4013 and
-  deletes the room; one alarm at the hard deadline (4010 unjoined, 4014 joined);
-  ping answered by auto-response.
 - **`/connect/` gets its own CSP** — scripts from its own assets, `connect-src`
-  the client route only, sandboxed — and the origin gains `worker-src 'none'`.
-- **Deploy**: Durable Object migrations are append-only, and a desktop release
-  enabling the button ships only after Hosted production serves this link
-  version. `dev:one-time` runs the rendezvous on loopback as a `one-time` Dor
-  Tool.
+  the client route only, sandboxed. `dev:one-time` runs the rendezvous on
+  loopback as a `one-time` Dor Tool.
 
 ### Laptop UI
 
@@ -309,6 +343,8 @@ limit.
   it running.
 - **`OneTimeIndicator` in the Baseboard's right cluster** reads "Phone connected
   · End" while connected.
+- **A desktop release enabling the button ships only after Hosted production
+  serves this link version.**
 
 ### Security model remainder
 

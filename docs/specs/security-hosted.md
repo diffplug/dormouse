@@ -8,7 +8,7 @@
 
 - **FAIL IF** Hosted accepts a request URL outside configured `APP_ORIGIN`, grants marketing-origin credentialed CORS, or permits a state-changing auth request without exact Origin and CSRF checks; inspect `hosted/server/worker-app.ts` and the packed adapter.
 - **FAIL IF** authentication cookies have a Domain attribute, lack `__Host-`, Secure, HttpOnly, or Path=/ in HTTPS, or session tokens appear in browser JSON or persistent browser storage; inspect the adapter and `hosted/src/api.ts`.
-- **FAIL IF** the production HTML permits third-party scripts, framing, or inline script execution, any response bypasses `secureHeaders` including a misconfigured deployment's error, or anything but a content-hashed `/assets/` file is cacheable, the SPA fallback's shell included; inspect `secureHeaders` in `hosted/server/headers.ts`, binding resolution in `hosted/server/worker-app.ts`, and asset routing in `hosted/wrangler.jsonc`.
+- **FAIL IF** the production HTML permits third-party scripts, framing, inline script execution, or any worker (`worker-src 'none'` origin-wide), any response but a 101 WebSocket upgrade bypasses `secureHeaders` including a misconfigured deployment's error, or anything but a content-hashed `/assets/` file is cacheable, the SPA fallback's shell included; inspect `secureHeaders` in `hosted/server/headers.ts`, binding resolution in `hosted/server/worker-app.ts`, and asset routing in `hosted/wrangler.jsonc`.
 - **FAIL IF** marketing scripts, analytics, provider avatars, or remote fonts enter the Hosted frontend; inspect the frontend import graph and deployed response when available.
 
 Pinned by `hosted/server/tests/workers.test.ts`.
@@ -17,9 +17,24 @@ Pinned by `hosted/server/tests/workers.test.ts`.
 
 - **FAIL IF** the consumer changes `authPolicy` away from explicit linking or multiple independent logins, or accepts an explicit connection callback after its initiating login was revoked; inspect `hosted/server/policy.ts` and the packed adapter.
 - **FAIL IF** an unused provider credential enables login, an unknown provider name is accepted, or incomplete enabled credentials silently degrade; inspect `providerBindings` in `hosted/server/policy.ts`.
-- **FAIL IF** Hosted account login mints a Burrow ACL grant or substitutes for the existing encrypted pairing/presence proof. No Hosted endpoint currently implements terminal access.
+- **FAIL IF** Hosted account login mints a Burrow ACL grant or substitutes for the existing encrypted pairing/presence proof. The one-time rendezvous carries only handshake ciphertext and authorizes nothing; the ends' handshake and the laptop's confirmation do.
 
 Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.test.ts`.
+
+## Rendezvous boundary
+
+**The one-time room is a counter with two sockets**: `docs/specs/one-time.md` -> "Hosted rendezvous" owns its routes and lifecycle; these are the checks on them.
+
+- **FAIL IF** `OneTimeRoom` in `hosted/server/one-time-room.ts` parses, decodes, stores, or logs a forwarded frame; it bounds one by raw length and count alone. `scripts/e2e-lint.mjs` holds it textually.
+- **FAIL IF** a binary frame, one longer than `MAX_ONE_TIME_FRAME_LENGTH`, or one past `MAX_ONE_TIME_FORWARDED` is forwarded rather than closing both ends with 4015, the count omits a frame the room received, or either bound is redeclared rather than imported from `remote-lib-common`.
+- **FAIL IF** a second phone can join: the join must read and set `joined` with no await between, in the Burrow socket's hibernation attachment rather than memory.
+- **FAIL IF** a room can outlive `expiresAt + ONE_TIME_EXPIRY_GRACE_MS`, or admit a phone after `expiresAt`: the alarm is set before the Burrow socket is accepted, and closes every socket.
+- **FAIL IF** the Burrow route admits a request carrying any `Origin` header, or the client route an `Origin` other than exactly `APP_ORIGIN`; inspect `oneTimeRoutes` in `hosted/server/one-time.ts`.
+- **FAIL IF** a room id comes from anything but 16 fresh random bytes the Worker mints per Burrow socket, the Burrow route takes a room from the request, or a room opens twice.
+- **FAIL IF** either route reaches the room before its per-address rate limit (`cf-connecting-ip`, IPv6 by /64), or a production rate-limit `namespace_id` reaches `PREVIEW_RATELIMIT_OFFSET` in `hosted/scripts/preview.mjs`.
+- **FAIL IF** a one-time route or the room reads a cookie, reaches Hyperdrive or auth, mounts ahead of the 421 gate, or hands the room any header of the caller's but the upgrade.
+
+`scripts/e2e-lint.mjs` also holds `hosted/server/` to the Relay's absences: no protocol-v1 type, no direct-path signal or SDP, no ICE server (`docs/specs/security-remote.md` -> "Direct path"). Pinned by `hosted/server/tests/one-time.test.ts` and `hosted/scripts/production.test.mjs`.
 
 ## Deployment boundary
 
