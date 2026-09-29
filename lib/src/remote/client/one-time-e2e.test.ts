@@ -60,7 +60,7 @@ import { createEphemeralBurrowStateStore } from '../../host/remote/burrow-state-
 import { BurrowService } from '../../host/remote/service';
 import type { OneTimeEvent, PairingQueueEvent } from '../../host/remote/service-protocol';
 import { FakePtyAdapter, setPlatform, type PlatformAdapter } from '../../lib/platform';
-import { clearSizeHold, getSizeHold } from '../../lib/size-hold-store';
+import { clearSizeHold, getSizeHolds } from '../../lib/size-hold-store';
 import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { installPeerSurfaceResponder } from '../burrow/peer-surfaces';
 import { takeBackSize } from '../burrow/take-back';
@@ -529,7 +529,7 @@ describe('size authority across a one-time connection, end to end', () => {
     // its own box no longer sizes it, so a local refit leaves the phone's
     // wrapping alone.
     expect(terminal.resize).toHaveBeenLastCalledWith(51, 14);
-    expect(getSizeHold(SURFACE_ID)).toMatchObject({ label: PHONE_LABEL });
+    expect(getSizeHolds(SURFACE_ID)).toMatchObject([{ label: PHONE_LABEL }]);
 
     await takeBackSize(SURFACE_ID);
     // The whole one-time connection ended, as its End would.
@@ -537,16 +537,16 @@ describe('size authority across a one-time connection, end to end', () => {
     await settleUntil(() => ended.length > 0);
     expect(ended).toEqual([ONE_TIME_ENDED_MESSAGE]);
     // And the pane is its own again, for its next fit.
-    expect(getSizeHold(SURFACE_ID)).toBeNull();
+    expect(getSizeHolds(SURFACE_ID)).toEqual([]);
   });
 
   it('gives the pane back when the laptop ends the connection', async () => {
     const { ended } = await attachedPhone();
-    expect(getSizeHold(SURFACE_ID)).not.toBeNull();
+    expect(getSizeHolds(SURFACE_ID)).toHaveLength(1);
 
     await command('oneTimeEnd');
-    await settleUntil(() => getSizeHold(SURFACE_ID) === null);
-    expect(getSizeHold(SURFACE_ID)).toBeNull();
+    await settleUntil(() => getSizeHolds(SURFACE_ID).length === 0);
+    expect(getSizeHolds(SURFACE_ID)).toEqual([]);
     await settleUntil(() => ended.length > 0);
     expect(ended).toEqual([ONE_TIME_ENDED_MESSAGE]);
   });
@@ -555,11 +555,11 @@ describe('size authority across a one-time connection, end to end', () => {
     registry.set('surface-2', { terminal: { ...terminal, resize: vi.fn() } } as unknown as TerminalEntry);
     const { phone } = await attachedPhone();
     await phone.attach('surface-2', 51, 14, { onData: () => {} });
-    await settleUntil(() => getSizeHold(SURFACE_ID) === null);
-    expect(getSizeHold('surface-2')).toMatchObject({ label: PHONE_LABEL });
+    await settleUntil(() => getSizeHolds(SURFACE_ID).length === 0);
+    expect(getSizeHolds('surface-2')).toMatchObject([{ label: PHONE_LABEL }]);
 
     await phone.detach('surface-2');
-    await settleUntil(() => getSizeHold('surface-2') === null);
+    await settleUntil(() => getSizeHolds('surface-2').length === 0);
     registry.delete('surface-2');
   });
 });

@@ -10,7 +10,7 @@ import { createLathWallStore, type LathWallStore } from './wall/lath-wall-store'
 import { leaf, split, tree } from '../lib/lath/test-util';
 import { PANE_HEADER_HEIGHT_PX } from './design';
 import { WorkspaceActiveContext, WorkspaceVisibleContext } from './wall/wall-context';
-import { clearSizeHold, getSizeHold, holdSize, releaseSizeHold } from '../lib/size-hold-store';
+import { clearSizeHold, getSizeHolds, holdSize, releaseSizeHold } from '../lib/size-hold-store';
 import { setPlatform, type PlatformAdapter } from '../lib/platform';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -384,13 +384,26 @@ describe('a pane a remote session holds', () => {
   it('re-fits to its own box the moment the hold goes, and not while a later holder keeps it', () => {
     mount();
     holdAtPhoneSize('b');
-    // A later holder took it: the earlier session's release frees nothing.
+    // A later holder took it: the earlier session's release frees only its own.
     const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
     act(() => holdSize('b', later));
     act(() => void releaseSizeHold('b', PHONE));
     expect(registry.fits).not.toHaveBeenCalledWith('b');
 
     act(() => void releaseSizeHold('b', later));
+    expect(registry.resizes).toEqual([{ id: 'b', cols: 39, rows: 28 }]);
+  });
+
+  it('stays held for an earlier session still attached when a later one lets go', () => {
+    mount();
+    holdAtPhoneSize('b');
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
+    act(() => holdSize('b', later));
+    act(() => void releaseSizeHold('b', later));
+    expect(registry.fits).not.toHaveBeenCalledWith('b');
+    expect(strip()!.textContent).toContain('Sized for iPhone');
+
+    act(() => void releaseSizeHold('b', PHONE));
     expect(registry.resizes).toEqual([{ id: 'b', cols: 39, rows: 28 }]);
   });
 
@@ -404,6 +417,19 @@ describe('a pane a remote session holds', () => {
     );
     act(() => void releaseSizeHold('b', PHONE));
     expect(strip()).toBeNull();
+  });
+
+  it('names the newest holder and counts the rest', () => {
+    mount();
+    holdAtPhoneSize('b');
+    act(() => holdSize('b', { holder: 'session-b', label: 'Pixel', lease: '1' }));
+    expect(strip()!.textContent).toContain('Sized for Pixel +1');
+    expect(strip()!.querySelector('button')!.getAttribute('aria-label')).toBe(
+      'Disconnect iPhone, Pixel and resize this pane',
+    );
+    // A resize makes its session the newest again: the pane is at its size.
+    act(() => holdSize('b', PHONE));
+    expect(strip()!.textContent).toContain('Sized for iPhone +1');
   });
 
   it('renders the label as text, never markup', () => {
@@ -434,7 +460,36 @@ describe('a pane a remote session holds', () => {
       strip()!.querySelector('button')!.click();
     });
     expect(commands).toEqual([{ cmd: 'takeBack', params: { holder: 'session-a' } }]);
-    expect(getSizeHold('b')).toBeNull();
+    expect(getSizeHolds('b')).toEqual([]);
+    expect(strip()).toBeNull();
+    expect(registry.resizes).toEqual([{ id: 'b', cols: 39, rows: 28 }]);
+  });
+
+  it('takes the pane back from every session holding it, then re-fits', async () => {
+    const commands: Array<{ cmd: string; params: unknown }> = [];
+    setPlatform({
+      burrow: {
+        command: async (cmd: string, params?: unknown) => {
+          commands.push({ cmd, params });
+          return { ended: true };
+        },
+        respond: () => {},
+        notify: () => {},
+        on: () => () => {},
+      },
+    } as unknown as PlatformAdapter);
+    mount();
+    holdAtPhoneSize('b');
+    act(() => holdSize('b', { holder: 'session-b', label: 'Pixel', lease: '1' }));
+
+    await act(async () => {
+      strip()!.querySelector('button')!.click();
+    });
+    expect(commands).toEqual([
+      { cmd: 'takeBack', params: { holder: 'session-a' } },
+      { cmd: 'takeBack', params: { holder: 'session-b' } },
+    ]);
+    expect(getSizeHolds('b')).toEqual([]);
     expect(strip()).toBeNull();
     expect(registry.resizes).toEqual([{ id: 'b', cols: 39, rows: 28 }]);
   });

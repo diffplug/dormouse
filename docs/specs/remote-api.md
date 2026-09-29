@@ -283,12 +283,12 @@ Source of truth: `RemoteApiSession.#attach` / `#beginAttach` in `lib/src/remote/
 
 #### Size authority: last-attach-wins
 
-A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records before the size moves.
+A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records before the size moves. **A pane keeps one hold per holder**, the newest writer's last; another viewer's release leaves the rest.
 
 - **Never re-fit a held pane locally** — box resize, layout settle, remount, focus, or keystroke (rationale).
-- **Must show the strip on a held pane, and only there** ([layout.md](./layout.md) → "Pane body"): the ACL record's label bounded again by `boundedPairingLabel`, or the one-time device label, as text.
-- **Take back ends the holding session**, never resizes the phone: `takeBack { holder }` runs the end the session's runtime supplied — End for a one-time connection, goodbye and dispose for a Pocket session, which stays paired (rationale). **The pane then clears that hold whatever the answer.**
-- **Must release on every end of an attachment** — detach, a newer attach, exit, a failed or superseded attach, disposal. **An attach whose resolve answered nothing or failed releases at every owner** (`releaseSurface`): an owner that answered past `ASK_BUDGET_MS` took the hold with no handle left to carry it. **The owner re-fits only while the released holder and lease are still the pane's hold.**
+- **Must show the strip on a held pane, and only there** ([layout.md](./layout.md) → "Pane body"): the newest holder's label — the ACL record's, bounded again by `boundedPairingLabel`, or the one-time device label — as text, with `+N` for the other holders.
+- **Take back ends every session holding the pane**, never resizes a phone: one `takeBack { holder }` per hold runs the end that session's runtime supplied — End for a one-time connection, goodbye and dispose for a Pocket session, which stays paired (rationale). **The pane then clears each hold it asked about whatever the answer.**
+- **Must release on every end of an attachment** — detach, a newer attach, exit, a failed or superseded attach, disposal. **An attach whose resolve answered nothing or failed releases at every owner** (`releaseSurface`): an owner that answered past `ASK_BUDGET_MS` took the hold with no handle left to carry it. **A release clears only its holder's hold, and only while its lease is still that hold's; the owner re-fits once no hold remains.**
 - **Must answer `release` with nothing and ignore an unknown op**; an attach naming no hold (an older Burrow) sizes without holding.
 - **Holds live in webview memory**: a reload or a Workspace transfer drops them, and the pane fits its box under a phone still attached.
 

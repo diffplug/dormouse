@@ -11,7 +11,7 @@ import { SelectionOverlay } from './SelectionOverlay';
 import { SelectionPopup } from './SelectionPopup';
 import { MouseOverrideBanner } from './wall/MouseOverrideBanner';
 import { SizeHoldStrip } from './wall/SizeHoldStrip';
-import { getSizeHold, subscribeToSizeHolds } from '../lib/size-hold-store';
+import { getSizeHolds, subscribeToSizeHolds } from '../lib/size-hold-store';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from './design';
 import { TerminalResizeContext, WorkspaceActiveContext, WorkspaceVisibleContext } from './wall/wall-context';
 
@@ -55,15 +55,15 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
       clearTimeout(timer);
       if (!container.isConnected || (resize && !resize.canFit(id))) return;
       // A remote session holds this pane's size: its box is not the authority
-      // until the hold goes (docs/specs/remote-api.md → "Size authority").
-      if (getSizeHold(id)) return;
+      // until the last hold goes (docs/specs/remote-api.md → "Size authority").
+      if (getSizeHolds(id).length > 0) return;
       const { width, height } = container.getBoundingClientRect();
       if (width > 0 && height > 0) refitSession(id);
     };
-    // Released: re-fit to the box through the same guarded path.
-    let held = getSizeHold(id) !== null;
+    // Released by its last holder: re-fit to the box through the same guarded path.
+    let held = getSizeHolds(id).length > 0;
     const unsubscribeHold = subscribeToSizeHolds(() => {
-      const holding = getSizeHold(id) !== null;
+      const holding = getSizeHolds(id).length > 0;
       if (held && !holding) fit();
       held = holding;
     });

@@ -20,7 +20,7 @@ vi.mock('./platform', async () => {
 });
 
 import * as platformModule from './platform';
-import { getSizeHold, holdSize } from './size-hold-store';
+import { getSizeHolds, holdSize } from './size-hold-store';
 import type { FakePtyAdapter } from './platform';
 import {
   disposeSession,
@@ -76,11 +76,11 @@ describe('a size hold', () => {
     getOrCreateTerminal('pane-1');
     holdSize('pane-1', hold);
     disposeSession('pane-1');
-    expect(getSizeHold('pane-1')).toBeNull();
+    expect(getSizeHolds('pane-1')).toEqual([]);
 
     getOrCreateTerminal('pane-2');
     holdSize('pane-2', hold);
     releaseSession('pane-2');
-    expect(getSizeHold('pane-2')).toBeNull();
+    expect(getSizeHolds('pane-2')).toEqual([]);
   });
 });
