@@ -65,7 +65,8 @@ describe('configured browser launch shells', () => {
   });
 });
 
-describe.skipIf(process.platform !== 'win32')('native Windows browser shell', () => {
+// Real cmd.exe and PowerShell cold starts on CI runners exceed Vitest's 5 s default.
+describe.skipIf(process.platform !== 'win32')('native Windows browser shell', { timeout: 30_000 }, () => {
   async function fixture() {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'dor launch spaces & '));
     roots.push(dir);
