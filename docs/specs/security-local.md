@@ -148,9 +148,11 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 
 **FAIL IF** the folder viewer returns file contents, lists or opens anything outside its canonical root, or renders an entry name as markup. `resolveInside` refuses `.`, `..`, and empty segments, backslashes, and controls, then requires the realpath at or under the root; a symlink whose target leaves it lists as `other`. A listing carries names, kinds, and ignore flags only, and `folderViewerPage` sets names through `textContent`, since script in the page could POST as it.
 
+**FAIL IF** either viewer's `OSC 2` title keeps a C0, DEL, or C1 character. `viewerTitle` in `dor/src/viewer-server.ts` strips them from the target's basename, which would otherwise write terminal escapes such as a forged `OSC 367 serve`.
+
 **FAIL IF** `gitIgnored` runs git by bare name or lets `core.fsmonitor` run, which the browsed folder's own `.git/config` can name.
 
-Source of truth: `startCapabilityViewer` / `isInsideRoot` / `pathSegments` in `dor/src/viewer-server.ts`; `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `startFolderViewer` / `resolveInside` / `gitIgnored` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `dor/test/folder-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
+Source of truth: `startCapabilityViewer` / `isInsideRoot` / `pathSegments` / `viewerTitle` in `dor/src/viewer-server.ts`; `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `startFolderViewer` / `resolveInside` / `gitIgnored` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `dor/test/folder-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
 
 ## Persisted state
 
