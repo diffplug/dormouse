@@ -46,7 +46,7 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 ### Pane header
 
-**Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. Never replace Kill with it. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
+**Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. In a Pane, replace Kill’s glyph with the dot, revealing Kill on button hover or keyboard focus. Keep the same action and hit target, with an accessible unsaved-state description. When Kill is hidden by the header tier or rename editor, show the dot at the right edge. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
 
 **Must mark the Workspace's preview slot with an italic label alone in its Pane header and Door**, naming it Preview in the label's tooltip and the Door's accessible name (rationale). **Must keep the slot on a double-click of its Pane header whose first press lands in the header itself, off its controls** (every button, and an open rename; rationale). **Must offer Keep open in its terminal context too**, beside the Tool status and only while it is the slot: the keyboard path to the same pin. Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
 
@@ -54,7 +54,7 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold begins a Lath pane drag**; below the threshold the header's own click behavior stands. It uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, the shared terminal top radius from `lib/src/components/design.tsx`, and the `--color-header-active-*` / `--color-header-inactive-*` token pairs (VSCode file-tree list colors).
 
-**Never give a Tool navigation, an address, or a dev-server chip** (rationale). **Must keep every Tool header control inside the header's palette**, Terminal Context included. A serving Tool's header, left to right: unsaved-change dot; Display (`docs/specs/dor-browser.md` → Browser Chrome); Terminal Context; its name (`docs/specs/dor-tool.md` → Naming), renamed as a terminal label is; flexible gap; split buttons (full only); the pane-action group. A port conflict's terminal header leads with Terminal Context; the terminal face, which shows that terminal, has none. Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
+**Never give a Tool navigation, an address, or a dev-server chip** (rationale). **Must keep every Tool header control inside the header's palette**, Terminal Context included. A serving Tool's header, left to right: Display (`docs/specs/dor-browser.md` → Browser Chrome); Terminal Context; its name (`docs/specs/dor-tool.md` → Naming), renamed as a terminal label is; flexible gap; split buttons (full only); the pane-action group. A port conflict's terminal header leads with Terminal Context; the terminal face, which shows that terminal, has none. Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
 A terminal header's elements left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
 
@@ -161,7 +161,7 @@ A browser header collapses by border-box width:
 | 180px | Chrome moves into a viewport-clamped popover behind one trigger. |
 | 94px | Minimize and kill join the popover. |
 
-A serving Tool's header has no popover; each boundary reserves the unsaved-change dot and the widest Display glyph (rationale):
+A serving Tool's header has no popover; each boundary reserves the widest Display glyph and space for the name (rationale):
 
 | Below | Change |
 |---|---|

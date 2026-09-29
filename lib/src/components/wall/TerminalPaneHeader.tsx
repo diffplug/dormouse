@@ -156,7 +156,6 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
         context.open(id, { origin: { x: e.clientX, y: e.clientY } });
       }}
     >
-      <ToolDirtyIndicator dirty={dirty} />
       {terminalContext && <TerminalContextButton surfaceId={id} />}
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
         {rename.renaming ? rename.editor(label.primary) : (
@@ -232,7 +231,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
           {/* The title region clips via `overflow-hidden` so this group
               never has to (`docs/specs/layout.md` → "Pane header responsive
               sizing"). */}
-          <PaneActionGroup surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
+          <PaneActionGroup dirty={dirty} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={!tiny} />
         </>
       )}
       {todoPreviewRect && activity.notification && context.id !== id && (
@@ -242,6 +241,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
           anchorRect={todoPreviewRect}
         />
       )}
+      {rename.renaming && <ToolDirtyIndicator dirty={dirty} />}
       {rename.warning}
     </div>
   );

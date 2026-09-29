@@ -80,7 +80,6 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
         context.open(id, { origin: { x: e.clientX, y: e.clientY } });
       }}
     >
-      <ToolDirtyIndicator dirty={dirty} />
       {(tier === 'full' || tier === 'compact') && (
         <BrowserDisplayButton mode={displayMode} onOpen={screen ? () => screen.actions.openModal() : undefined} />
       )}
@@ -100,9 +99,10 @@ function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switc
       {!rename.renaming && (
         <>
           {tier === 'full' && <SplitButtons surfaceId={id} />}
-          <PaneActionGroup surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={tier !== 'tiny'} />
+          <PaneActionGroup dirty={dirty} surfaceId={id} zoomed={zoomed} activeHeader={isActiveHeader} showMinimizeKill={tier !== 'tiny'} />
         </>
       )}
+      {rename.renaming && <ToolDirtyIndicator dirty={dirty} />}
       {rename.warning}
     </div>
   );

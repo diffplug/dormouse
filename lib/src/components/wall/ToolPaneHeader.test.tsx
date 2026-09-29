@@ -281,6 +281,30 @@ describe('ToolPaneHeader — other faces', () => {
     expect(indicator()).toBeNull();
   });
 
+  it.each([
+    ['terminal', {}],
+    ['port conflict', { toolPortConflict: [3000, 4000] }],
+    ['browser', { url: STUB_CHROME.url }],
+  ])('keeps the dirty %s face’s Kill target stable through reports and rename', (_face, params) => {
+    const actions = stubActions();
+    const toolParams = { surfaceType: 'tool', command: 'pnpm dev', ...params };
+    renderHeader(toolParams, actions);
+    const kill = labelled('Kill')!;
+    act(() => recordToolDirty(ID, true));
+    expect(labelled('Kill')).toBe(kill);
+    expect(kill.contains(labelled('Unsaved changes'))).toBe(true);
+    expect(kill.getAttribute('aria-description')).toBe('Unsaved changes');
+    act(() => kill.click());
+    expect(actions.onKill).toHaveBeenCalledWith(ID);
+    renderHeader(toolParams, actions, { renaming: true });
+    expect(labelled('Kill')).toBeNull();
+    expect(labelled('Unsaved changes')).not.toBeNull();
+    renderHeader(toolParams, actions);
+    act(() => recordToolDirty(ID, false));
+    expect(labelled('Kill')!.getAttribute('aria-description')).toBeNull();
+    expect(labelled('Unsaved changes')).toBeNull();
+  });
+
   it('leads a port conflict\'s derived label with Terminal Context, inside the header', () => {
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev', toolPortConflict: [3000, 4000] });
     const button = labelled('Terminal context')!;

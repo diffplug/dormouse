@@ -11,7 +11,7 @@ export function useToolDirty(surfaceId: string, params: unknown): boolean {
   return useSyncExternalStore(tool ? subscribeToToolDirty : noSubscription, () => tool && getToolDirty(surfaceId) === true);
 }
 
-/** The dot beside a Tool's title, independent of Activity alarms. */
+/** The unsaved-state dot in Tool chrome, independent of Activity alarms. */
 export function ToolDirtyIndicator({ dirty }: { dirty: boolean }) {
   return dirty ? (
     <span role="img" aria-label="Unsaved changes" title="Unsaved changes"

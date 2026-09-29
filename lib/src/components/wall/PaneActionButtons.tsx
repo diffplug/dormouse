@@ -1,5 +1,6 @@
 import { useContext } from 'react';
 import { ArrowLineDownIcon, ArrowsInIcon, ArrowsOutIcon, SplitHorizontalIcon, SplitVerticalIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
+import { ToolDirtyIndicator } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { chromeButton, paneZoomButtonClass } from '../design';
 import { TerminalContextContext, WallActionsContext } from './wall-context';
@@ -14,8 +15,9 @@ export type FocusHandlers = { onFocus?: () => void; onBlur?: () => void };
  * browser header can render the pair on its own inside the popover.
  * `beforeAct` is that header's popover dismissal; the terminal passes none.
  */
-export function MinimizeKillButtons({ surfaceId, beforeAct, onFocus, onBlur }: {
+export function MinimizeKillButtons({ surfaceId, dirty = false, beforeAct, onFocus, onBlur }: {
   surfaceId: string;
+  dirty?: boolean;
   beforeAct?: () => void;
 } & FocusHandlers) {
   const actions = useContext(WallActionsContext);
@@ -28,11 +30,15 @@ export function MinimizeKillButtons({ surfaceId, beforeAct, onFocus, onBlur }: {
         tooltip="Minimize [m] or [d]"
       ><ArrowLineDownIcon size={14} /></HeaderActionButton>
       <HeaderActionButton
-        className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
+        className="group/kill flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-error/10 hover:text-error"
         onClick={(e) => { e.stopPropagation(); beforeAct?.(); actions.onKill(surfaceId); }}
         ariaLabel="Kill"
-        tooltip="Kill [k] or [x]"
-      ><XIcon size={14} /></HeaderActionButton>
+        ariaDescription={dirty ? 'Unsaved changes' : undefined}
+        tooltip={dirty ? 'Unsaved changes · Kill [k] or [x]' : 'Kill [k] or [x]'}
+      >
+        {dirty && <span className="flex group-hover/kill:hidden group-focus-visible/kill:hidden"><ToolDirtyIndicator dirty /></span>}
+        <XIcon size={14} className={dirty ? 'hidden group-hover/kill:block group-focus-visible/kill:block' : undefined} />
+      </HeaderActionButton>
     </div>
   );
 }
@@ -44,9 +50,10 @@ export function MinimizeKillButtons({ surfaceId, beforeAct, onFocus, onBlur }: {
  * when `showMinimizeKill` goes false and where that pair ends up.
  */
 export function PaneActionGroup({
-  surfaceId, zoomed, activeHeader, showMinimizeKill, className = 'ml-1', beforeAct, minimizeKillFocus,
+  surfaceId, zoomed, activeHeader, showMinimizeKill, dirty = false, className = 'ml-1', beforeAct, minimizeKillFocus,
 }: {
   surfaceId: string;
+  dirty?: boolean;
   zoomed: boolean;
   activeHeader: boolean;
   showMinimizeKill: boolean;
@@ -63,7 +70,8 @@ export function PaneActionGroup({
         ariaLabel={zoomed ? 'Unzoom' : 'Zoom'}
         tooltip={zoomed ? 'Unzoom' : 'Zoom [z]'}
       >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
-      {showMinimizeKill && <MinimizeKillButtons surfaceId={surfaceId} beforeAct={beforeAct} {...minimizeKillFocus} />}
+      {!showMinimizeKill && <ToolDirtyIndicator dirty={dirty} />}
+      {showMinimizeKill && <MinimizeKillButtons surfaceId={surfaceId} dirty={dirty} beforeAct={beforeAct} {...minimizeKillFocus} />}
     </div>
   );
 }
