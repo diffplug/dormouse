@@ -137,11 +137,17 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 
 **FAIL IF** `dor/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own case-insensitive loopback `Host`, an absent or same-listener `Origin`, and a GET/HEAD method. Compare capability prefixes by SHA-256 then `timingSafeEqual`, including malformed lengths. `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
 
-**FAIL IF** the local-file viewer exposes directory listings, arbitrary path reads, writes, or a file outside its opened-document grant. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains descriptors so later path replacement cannot widen the grant. Viewer resource loads are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; escaped text previews execute no document markup. The viewer opts into the proxy's upstream-policy preservation (`docs/specs/dor-browser.md` → Iframe Renderer).
+**FAIL IF** the file viewer exposes directory listings, arbitrary path reads, writes, or a file outside its opened-document grant. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains descriptors so later path replacement cannot widen the grant. Viewer resource loads are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; escaped text previews execute no document markup. The viewer opts into the proxy's upstream-policy preservation (`docs/specs/dor-browser.md` → Iframe Renderer).
 
 **Must not describe the viewer CSP as confining active documents' navigation.** HTML/SVG scripts can navigate their frame to external URLs, including with granted contents; the resource policy is not a no-egress boundary. (rationale)
 
-Source of truth: `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
+**FAIL IF** the folder viewer, `dor/src/folder-viewer.ts`, serves any request without the capability, `Host`, `Origin`, and response-header rules above, or accepts a POST whose `Origin` is absent, `null`, or not its own. `allowsFileViewerRequest` with `post` gates every route; a POST runs `dor open` as the user.
+
+**FAIL IF** the folder viewer returns file contents, lists or opens anything outside its canonical root, or renders an entry name as markup. `resolveInside` refuses `.`, `..`, and empty segments, backslashes, and controls, then requires the realpath at or under the root; a symlink whose target leaves it lists as `other`. A listing carries names, kinds, and ignore flags only, and `folderViewerPage` sets names through `textContent`, since script in the page could POST as it.
+
+**FAIL IF** `gitIgnored` runs git by bare name or lets `core.fsmonitor` run, which the browsed folder's own `.git/config` can name.
+
+Source of truth: `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `startFolderViewer` / `resolveInside` / `gitIgnored` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `dor/test/folder-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
 
 ## Persisted state
 
