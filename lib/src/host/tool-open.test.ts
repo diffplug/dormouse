@@ -1,8 +1,12 @@
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { pathToFileURL } from 'node:url';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createToolHost } from './tool-host';
+
+const hostname = vi.hoisted(() => vi.fn(() => 'Dev-Box.local'));
+vi.mock('node:os', async importOriginal => ({ ...await importOriginal<typeof import('node:os')>(), hostname }));
 
 let root: string;
 let config: string;
@@ -227,5 +231,37 @@ ${rules.map(rule => `  - ${rule}\n`).join('')}`;
     expect(await open('docs/README.md', { preview: true })).toMatchObject({ status: 'ok', scope: 'builtin', name: 'file' });
     await writeConfig(folderConfig("{match: '*.📁', tool: browse}"));
     expect(await open('docs', { preview: true })).toMatchObject({ status: 'ok', name: 'browse' });
+  });
+});
+
+describe('terminal links', () => {
+  let target: string;
+  /** The `file:` URL a terminal link carries for `path`, naming `host`. */
+  const link = (path: string, host: string) => `file://${host}${pathToFileURL(path).pathname}`;
+  beforeEach(async () => {
+    await writeConfig(viewerConfig('*.md'));
+    target = join(root, 'docs', 'my notes.md');
+    await writeFile(target, 'hi');
+  });
+
+  it.each(['', 'localhost', 'dev-box.local', 'DEV-BOX.LOCAL', 'dev-box'])('opens the decoded path of a file URL on host %j', async name => {
+    expect(await host().handle({ op: 'open', target: link(target, name), cwd: root, fileUri: true }))
+      .toMatchObject({ status: 'ok', run: ['view', target], target });
+  });
+
+  it('accepts this machine\'s full name when it reports only the short one', async () => {
+    hostname.mockReturnValueOnce('dev-box');
+    expect(await host().handle({ op: 'open', target: link(target, 'dev-box.local'), cwd: root, fileUri: true }))
+      .toMatchObject({ status: 'ok', target });
+  });
+
+  it.each(['elsewhere.example', 'dev-box.example', '127.0.0.1'])('refuses a file URL on host %j', async name => {
+    expect(await host().handle({ op: 'open', target: link(target, name), cwd: root, fileUri: true }))
+      .toEqual({ status: 'error', message: 'not a local file link' });
+  });
+
+  it('refuses a link that is not a file URL, even on this machine', async () => {
+    expect(await host().handle({ op: 'open', target: link(target, 'dev-box.local').replace(/^file:/, 'https:'), cwd: root, fileUri: true }))
+      .toEqual({ status: 'error', message: 'not a local file link' });
   });
 });

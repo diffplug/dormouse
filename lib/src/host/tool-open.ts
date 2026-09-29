@@ -1,20 +1,48 @@
 import { realpath } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { basename, relative, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import picomatch from 'picomatch';
 import type { ToolLookupResult } from '../lib/platform/tool-types';
 import {
   BUILTIN_FILE_TOOL, BUILTIN_FOLDER_TOOL, FOLDER_MATCH_SUFFIX, VIEW_FILE_ARGV, VIEW_FOLDER_ARGV, fileViewerFormat,
 } from 'dor/file-viewer-format';
 import { resolveLocalToolTarget } from './tool-input';
+import { ToolFileError } from './tool-registry';
 import { readUserToolFile, resolveUserTool } from './tool-user-config';
+
+/** A terminal link's `file:` URL as a local path: only a URL whose host is
+ * empty, `localhost`, or this machine's name — whole or before its first dot —
+ * names a file here (`docs/specs/dor-tool.md` -> Terminal links). */
+function localFileUrlPath(uri: string): string {
+  let url: URL | null = null;
+  try {
+    url = new URL(uri);
+  } catch {
+    // Not a URL at all: refused below.
+  }
+  if (url?.protocol !== 'file:' || !namesThisHost(url.hostname)) throw new ToolFileError('not a local file link');
+  url.hostname = '';
+  return fileURLToPath(url);
+}
+
+/** The URL parser already turned `localhost` into the empty host. */
+function namesThisHost(host: string): boolean {
+  if (host === '') return true;
+  const own = hostname().toLowerCase();
+  const name = host.toLowerCase();
+  const short = (value: string) => value.split('.')[0];
+  return name === own || name === short(own) || short(name) === own;
+}
 
 /** Dispatch is entirely user-owned. Never discover a project file here, even
  * when its Tool name shadows the rule's selected user Tool. */
 export async function resolveOpenTool(
-  request: { target: string; cwd: string; tool?: string; preview?: boolean },
+  request: { target: string; cwd: string; tool?: string; preview?: boolean; fileUri?: boolean },
   path: string,
 ): Promise<ToolLookupResult> {
-  const { path: target, directory } = await resolveLocalToolTarget(request.target, request.cwd);
+  const input = request.fileUri ? localFileUrlPath(request.target) : request.target;
+  const { path: target, directory } = await resolveLocalToolTarget(input, request.cwd);
   const file = await readUserToolFile(path);
   const relativeBase = await realpath(request.cwd).catch(() => request.cwd);
   // A directory matches as its name suffixed with FOLDER_MATCH_SUFFIX, and only
@@ -36,7 +64,7 @@ export async function resolveOpenTool(
     warnings: file ? [...file.warnings] : [], target,
   });
   if (directory ? name === BUILTIN_FILE_TOOL : name === BUILTIN_FOLDER_TOOL) return { status: 'error',
-    message: `${name} cannot open the ${directory ? 'folder' : 'file'} '${request.target}'; use ${directory ? BUILTIN_FOLDER_TOOL : BUILTIN_FILE_TOOL}` };
+    message: `${name} cannot open the ${directory ? 'folder' : 'file'} '${input}'; use ${directory ? BUILTIN_FOLDER_TOOL : BUILTIN_FILE_TOOL}` };
   if (directory && (!name || name === BUILTIN_FOLDER_TOOL)) return builtin('folder', VIEW_FOLDER_ARGV);
   if ((!name || name === BUILTIN_FILE_TOOL) && fileViewerFormat(target)) return builtin('file', VIEW_FILE_ARGV);
   if (name === BUILTIN_FILE_TOOL) return { status: 'error',
@@ -44,7 +72,7 @@ export async function resolveOpenTool(
   const entry = name && file?.tools.get(name);
   if (!file || !entry) return { status: 'error', message: request.tool
     ? `no user Tool '${request.tool}' in ${path}`
-    : `no Tool matches '${request.target}'; add an open rule to ${path}, or use dor open --tool <name> <file>` };
+    : `no Tool matches '${input}'; add an open rule to ${path}, or use dor open --tool <name> <file>` };
   const resolved = await resolveUserTool(file, path, entry, request.cwd, [target]);
   return resolved.status === 'ok' ? { ...resolved, target } : resolved;
 }

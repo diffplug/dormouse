@@ -79,13 +79,19 @@ Directories match through a name suffix rather than a new rule field, so folder 
 
 ## Preview slot
 
-Customizable viewers are the point of `dor open`, so previews trade speed for flexibility. A design considered on 2026-09-28 previewed inside one long-lived built-in viewer with a folder-scoped grant: every selection was an in-page navigation, but user Tools never saw a preview. Retargeting the slot instead costs an interrupt, a process start, and a port scan for a serving Tool, which its `serve` announcement now starts at once ([Serving](#serving)); terminal-only viewers skip the scan. A rule's `preview` handler and the speed items in scope **open-folder** narrow that cost without bypassing the open rules.
+Customizable viewers are the point of `dor open`, so previews trade speed for flexibility. A design considered on 2026-09-28 previewed inside one long-lived built-in viewer with a folder-scoped grant: every selection was an in-page navigation, but user Tools never saw a preview. Retargeting the slot instead costs an interrupt, a process start, and a port scan for a serving Tool, which its `serve` announcement now starts at once ([Serving](#serving)); terminal-only viewers skip the scan. A rule's `preview` handler and the speed item in scope **open-folder** narrow that cost without bypassing the open rules.
 
 Most slot occupants are viewers scrolled with the keyboard (`less`, `glow`), so pinning on keyboard input would pin nearly every preview. Editors report `OSC 367 state`; one that does not loses unsaved work on the next selection.
 
 Splitting the pinned pane keeps a double-clicked file visible, the intent of the gesture. Minimizing it to a Door, the closer analogue of a VS Code tab left behind the preview, was rejected for that reason. Without latest-wins supersession, the Tool launch queue would run one restart per click in order.
 
 Supersession stops once a retarget has typed its command. A newer preview interrupting a line the shell has not yet reported could send its Ctrl+C before the shell reads that line, and its own command would then be typed into the old command's input (reasoned 2026-09-28, not reproduced). The wait it keeps is the command's startup report, normally milliseconds.
+
+## Terminal links
+
+xterm.js 6.1.0-beta.304 activates a link on every `mouseup` whose press began on that link, passing the `mouseup`. A two-press double-click sent to Chromium over CDP activated with `detail` 1, then 2 (2026-09-28). `agent-browser dblclick` sends a single press with click count 2, so it activates once and cannot probe this. A triple-click's third activation would be another `dor open`, starting an unkeyed Tool twice.
+
+The display-text rule replaces the dialog's consent: the path the click opens is the text clicked. Output that can run `dor open` gains nothing from a link; output that cannot, such as a remote shell over ssh, names its own host in `ls --hyperlink`, which the host check refuses.
 
 ## Take-over
 

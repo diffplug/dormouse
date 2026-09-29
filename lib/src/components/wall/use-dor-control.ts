@@ -68,6 +68,7 @@ import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import { toolCommandFromParams } from '../../lib/session-save';
+import { PREVIEW_SUPERSEDED_ERROR } from '../../lib/terminal-link-activation';
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { DooredItem } from './wall-types';
 
@@ -111,6 +112,7 @@ export type DorControlParams = {
   setting?: unknown;
   initialViewport?: unknown;
   preview?: unknown;
+  fileUri?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -1079,7 +1081,7 @@ export function useDorControl({
           if (previewSignal?.aborted !== true || detail.signal?.aborted) return false;
           const slot = findPreviewSlot();
           if (slot) respondStanding('superseded', slot.id, !slot.minimized);
-          else detail.respond({ ok: false, error: 'superseded by a newer preview' });
+          else detail.respond({ ok: false, error: PREVIEW_SUPERSEDED_ERROR });
           return true;
         };
         if (answeredSuperseded()) return;
@@ -1096,7 +1098,12 @@ export function useDorControl({
             return;
           }
           const lookup = await platform.toolControl(opening
-            ? { op: 'open', target: openFile, cwd, tool: stringParam(params.tool), ...(previewSignal ? { preview: true } : {}) }
+            ? {
+              op: 'open', target: openFile, cwd, tool: stringParam(params.tool),
+              ...(previewSignal ? { preview: true } : {}),
+              // Only a terminal link sets it (`activateTerminalLink`): the target is its `file:` URL.
+              ...(booleanParam(params.fileUri) ? { fileUri: true } : {}),
+            }
             : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable() || answeredSuperseded()) return;
           switch (lookup.status) {

@@ -18,6 +18,8 @@ import * as terminalRegistry from '../../lib/terminal-registry';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
 import { mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall-test-utils';
+import { getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
+import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import type { LathNode } from '../../lib/lath/model';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -563,5 +565,23 @@ describe('a folder in the slot', () => {
     expect(await paramsOf(result.surfaceId)).toMatchObject({ toolPreview: true, toolTarget: '/repo/docs/a.md' });
     expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
     startTool(result.surfaceId, result.command);
+  });
+});
+
+describe('a terminal link', () => {
+  it('previews a local file link on a click and pins it on a double-click', async () => {
+    const toolControl = await mountSlot();
+    // The host resolves a link's URL to the file it names.
+    toolControl.mockImplementation(async request => openLookup(new URL(request.target!).pathname.slice('/repo/'.length)));
+    const click = (detail: number) => act(async () => activateTerminalLink('pane-a', { detail }, 'file:///repo/a.md', 'a.md'));
+    await click(1);
+    await click(2);
+    await waitUntil(() => container.querySelector('[data-preview-pill-for="slot"]') === null);
+    expect(toolControl.mock.calls.map(([request]) => request)).toEqual([
+      { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined, preview: true, fileUri: true },
+      { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined, fileUri: true },
+    ]);
+    expect(typed.slot).toEqual([]);
+    expect(getExternalLinkConfirmationSnapshot()).toBeNull();
   });
 });

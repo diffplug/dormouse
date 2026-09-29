@@ -221,6 +221,16 @@ A preview is answered by the first of:
 
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `decidePreviewSlot` / `retargetToolLeaf` / `usePreviewSlotPin` in `lib/src/components/wall/preview-slot.ts`; `matchesToolKey` / `isPreviewSlotParams` / `TOOL_IDENTITY_PARAMS` in `lib/src/components/wall/browser-surface.ts`; `revealSurface` / `createSplitSurface` in `lib/src/components/Wall.tsx`; `retireToolRun` in `lib/src/components/wall/use-tool-serving.ts`. Tests: `lib/src/components/wall/preview-slot.test.tsx`; `a preview retarget` in `lib/src/components/wall/use-tool-serving.test.tsx`; `lib/src/host/tool-open.test.ts`; `dor/test/cli-output.test.mjs`.
 
+### Terminal links
+
+**Must open a local `file:` `OSC 8` link as a `dor open` from the Session showing it**: a click previews, a double-click's second click (`MouseEvent.detail` 2) pins, and later clicks of that burst do nothing (rationale). The request carries the URL marked `fileUri` and the Session's local CWD, else the target's directory.
+
+- **Must send a link to the confirmation dialog unless its display text names its target**: trimmed, with at most one trailing `ls -F` classifier removed, the text equals the decoded path or a whole-component suffix of it, case-sensitively — `x/README.md` names `/x/README.md`, `EADME.md` does not. A host that is not a plain name, or a control character in the decoded path, sends it there too. The dialog belongs to `docs/specs/terminal-escapes.md` -> "OSC 8 hyperlinks".
+- **Must open a `fileUri` target only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot), converting it with the host platform's `fileURLToPath`; any other host answers `not a local file link`. Resolution then follows [Opening local files](#opening-local-files); `dor` never sends `fileUri`, so a typed URL stays rejected.
+- **Must fall back to the dialog when the open fails**, a superseded preview excepted — its status, or its error while there is no slot. A host without Tool operations sends every link to the dialog.
+
+Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`; `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`; `localFileUrlPath` in `lib/src/host/tool-open.ts`. Tests: `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `terminal links` in `lib/src/host/tool-open.test.ts`, `a terminal link` in `lib/src/components/wall/preview-slot.test.tsx`.
+
 ## Take-over
 
 **Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. (rationale)
@@ -329,10 +339,7 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
   terminal flash grates. `--has terminal` / `--has browser` *filter flags* for
   `dor list`, whose rows already carry the fields.
 
-**Scope: open-folder** — links on the [Preview slot](#preview-slot) and its speed, in implementation order; the link design is [Terminal links](#terminal-links).
-
-1. Local `OSC 8` file links: click previews, double-click pins.
-2. Speed within the open rules: opt-in retarget without restart (built-in viewer first).
+**Scope: open-folder** — the [Preview slot](#preview-slot)'s speed within the open rules: opt-in retarget without restart, built-in viewer first.
 
 ### Dehydrate and rehydrate
 
@@ -364,7 +371,3 @@ default; whether `persist` belongs in the announce or the file (currently the
 announce — self-knowledge, like a runtime re-key); the final marketing noun
 ("Dor Tools" carries the LLM-tool-use collision-avoidance; the spec says
 "tool" throughout).
-
-### Terminal links
-
-A local `file://` `OSC 8` link previews on click and pins on a second click within the double-click interval. **Must keep the confirmation dialog when the link's path-shaped display text is not a suffix of its target path**, and for non-local hosts. The dialog contract belongs to `docs/specs/terminal-escapes.md` → OSC 8 hyperlinks.

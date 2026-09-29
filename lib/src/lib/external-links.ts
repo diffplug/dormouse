@@ -78,6 +78,42 @@ export function classifyDisplayMatch(uri: string, displayText: string): DisplayM
   return shapedHost === actualHost ? 'plain' : 'deceptive';
 }
 
+// A host the URL parser left as a plain DNS-style name: no IP literal brackets,
+// no port. Whether it names this machine is the host's decision.
+const PLAIN_HOSTNAME_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/i;
+// One `ls -F` classifier, which may follow a name inside its link.
+const LS_CLASSIFIER_RE = /[/*@=|>]$/;
+
+/**
+ * The decoded absolute path of a `file:` link whose display text names its
+ * target, or null for every link that must go to the confirmation dialog
+ * (`docs/specs/dor-tool.md` -> Terminal links). The text, trimmed and with at
+ * most one trailing `ls -F` classifier removed, must equal the path or be a
+ * whole-component suffix of it: `x/README.md` names `/x/README.md`,
+ * `EADME.md` does not.
+ */
+export function localFileLinkPreviewPath(uri: string, displayText: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'file:' || (url.host !== '' && !PLAIN_HOSTNAME_RE.test(url.host))) return null;
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+  if (/[\x00-\x1f\x7f-\x9f]/.test(path)) return null;
+  // A folder's URI may end in `/`; its name never does.
+  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  const names = (text: string) => text !== '' && (path === text || path.endsWith(`/${text}`));
+  const text = displayText.trim();
+  return names(text) || names(text.replace(LS_CLASSIFIER_RE, '')) ? path : null;
+}
+
 function normalizeForMatch(value: string): string {
   let v = value.trim().toLowerCase();
   // Drop a trailing slash so `https://x.com` and `https://x.com/` match.
