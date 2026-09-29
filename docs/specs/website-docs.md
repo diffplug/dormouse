@@ -264,7 +264,8 @@ Exempt: `/` with its anchors, and the `/docs` entrypoint, which names no page.
 ## Reference page chrome
 
 `DOCS_PAGES` pages use `DocsLayout` for header, rail, `h1`, intro, and
-prev/next. `/hosted` follows `/self-host`. **Must place “Compatible agents”
+prev/next. `/hosted` follows `/self-host`. **Must place privacy and terms directly
+after Hosted.** **Must place “Compatible agents”
 immediately after “dor CLI reference”.**
 
 **Each page's `linkedFrom` names every document owing it a link** — the two
