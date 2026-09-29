@@ -309,6 +309,42 @@ export interface ToolSurfaceResponse {
   warnings?: string[];
 }
 
+/** `dor tool --list`: the Tools `dor tool <name>` would resolve from `cwd`. */
+export interface ToolListRequest {
+  cwd: string;
+  /** Skip project discovery, as `dor tool --global <name>` does. */
+  global: boolean;
+}
+
+/** One declared Tool, as `dor tool --list` reports it. */
+export interface ToolListEntry {
+  name: string;
+  scope: 'project' | 'user';
+  run: string | string[];
+  render: 'iframe' | 'agent-browser-screencast' | 'playwright-screencast';
+  port: 'announced' | 'auto';
+  /** Declares `prespawn_dedupe`, so a rerun reveals the running Tool. */
+  keyed: boolean;
+  /** The comment block directly above the entry, raw: control characters are
+   *  escaped by whatever prints it. Null when there is none. Repo text: it
+   *  describes, it never authorizes. */
+  description: string | null;
+  /** A user Tool hidden from `dor tool <name>` by a project Tool of that name. */
+  shadowed: boolean;
+}
+
+export interface ToolListResponse {
+  /** The nearest project `dormouse.yml`, and whether the user has approved it;
+   *  null when there is none or the request was `global`. */
+  project: { path: string; approved: boolean } | null;
+  /** Where user Tools are read from, whether or not that file exists. */
+  user: { path: string; found: boolean };
+  /** Project Tools, then user Tools, each in file order. */
+  tools: ToolListEntry[];
+  /** Non-fatal `dormouse.yml` lint output, printed to stderr by the CLI. */
+  warnings: string[];
+}
+
 export interface SendSurfaceRequest extends WorkspaceScopedRequest {
   surface: string;
   input: string;
@@ -490,6 +526,7 @@ export interface ControlClient {
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
   toolSurface(request: ToolSurfaceRequest): Promise<ToolSurfaceResponse>;
+  toolList(request: ToolListRequest): Promise<ToolListResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;

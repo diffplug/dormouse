@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
+  TOOL_DESCRIPTION_LIMIT,
   ToolFileError,
   parseToolFile,
   resolveDedupeKey,
@@ -14,6 +15,41 @@ const USER = { path: '/home/me/.config/dormouse/tools.yml', dir: '/home/me/.conf
 function parse(text: string, opts = REPO) {
   return parseToolFile(text, opts);
 }
+
+describe('Tool descriptions', () => {
+  const descriptions = (text: string) => new Map([...parse(text).tools.values()].map(entry => [entry.name, entry.description]));
+
+  const TEXT = `# About this file, not a Tool.
+tools:
+  # The first entry's comment, which yaml hangs on the map.
+  # Second line.
+  first:
+    run: echo 1
+    # A field comment describes the field, not the Tool.
+    port: auto
+
+  # A later entry's, on its key.
+  second:
+    run: echo 2
+  third:
+    run: echo 3
+`;
+
+  it('takes the comment block directly above each entry', () => {
+    expect(Object.fromEntries(descriptions(TEXT))).toEqual({
+      first: "The first entry's comment, which yaml hangs on the map.\nSecond line.",
+      second: "A later entry's, on its key.",
+      third: null,
+    });
+  });
+
+  it('turns tabs into spaces and bounds the length, leaving escaping to the printer', () => {
+    const found = descriptions(`tools:\n  # a\tb \u009b31m c\n  x:\n    run: echo\n  # ${'y'.repeat(TOOL_DESCRIPTION_LIMIT + 10)}\n  z:\n    run: echo\n`);
+    expect(found.get('x')).toBe('a b \u009b31m c');
+    expect(found.get('z')).toHaveLength(TOOL_DESCRIPTION_LIMIT);
+    expect(found.get('z')!.endsWith('…')).toBe(true);
+  });
+});
 
 describe('parseToolFile', () => {
   it.each([REPO, USER])('reserves builtin: tool names in $scope configuration', opts => {
@@ -36,6 +72,7 @@ tools:
       render: 'iframe',
       port: 'announced',
       dedupeTemplate: ['storybook', '$PROJECT_ROOT'],
+      description: null,
     });
   });
 
@@ -191,17 +228,26 @@ describe("this repo's own dormouse.yml", () => {
     expect(file.warnings).toEqual([]);
   });
 
-  it('declares the two shipped tools', () => {
-    expect([...file.tools.keys()].sort()).toEqual(['standalone-harness', 'storybook']);
+  it('declares the shipped tools', () => {
+    expect([...file.tools.keys()].sort()).toEqual(['hosted', 'innerdogfood', 'relay', 'storybook', 'website']);
     expect(file.tools.get('storybook')?.run).toBe('pnpm storybook');
-    expect(file.tools.get('standalone-harness')?.run).toBe('pnpm innerdogfood');
-    // The harness is the agent-drivable one; storybook only needs framing.
-    expect(file.tools.get('standalone-harness')?.render).toBe('agent-browser-screencast');
+    expect(file.tools.get('innerdogfood')?.run).toBe('pnpm innerdogfood');
+    // storybook only needs framing; the rest are agent-drivable, and the
+    // Relay and Hosted sign-ins need the cookies an iframe drops.
     expect(file.tools.get('storybook')?.render).toBe('iframe');
-    // storybook autobinds (it never announces); the harness announces, because
-    // its dev bridge binds before vite.
-    expect(file.tools.get('storybook')?.port).toBe('auto');
-    expect(file.tools.get('standalone-harness')?.port).toBe('announced');
+    for (const name of ['innerdogfood', 'website', 'relay', 'hosted']) {
+      expect(file.tools.get(name)?.render).toBe('agent-browser-screencast');
+    }
+    // innerdogfood announces, because its dev bridge binds before vite; the
+    // rest autobind the one port they open.
+    expect(file.tools.get('innerdogfood')?.port).toBe('announced');
+    for (const name of ['storybook', 'website', 'relay', 'hosted']) {
+      expect(file.tools.get(name)?.port).toBe('auto');
+    }
+  });
+
+  it('documents every Tool with the comment `dor tool --list` shows', () => {
+    for (const entry of file.tools.values()) expect(entry.description, entry.name).toBeTruthy();
   });
 
   it('scopes every key to the checkout, so parallel worktrees stay distinct', () => {

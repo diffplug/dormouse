@@ -47,10 +47,10 @@ class SessionNotOpenError extends Error {
 }
 
 /** `key` is the native identity: installation, CLI workspace and session. */
-type Binding = { session: string; cwd: string; install: PlaywrightInstall; workspace: string | undefined; key: string };
-function bind(session: string, cwd: string, install: PlaywrightInstall): Binding {
+type Binding = { env?: NodeJS.ProcessEnv; session: string; cwd: string; install: PlaywrightInstall; workspace: string | undefined; key: string };
+function bind(session: string, cwd: string, install: PlaywrightInstall, env?: NodeJS.ProcessEnv): Binding {
   const workspace = playwrightWorkspace(cwd);
-  return { session, cwd, install, workspace, key: JSON.stringify([install.libraryPath, workspace ?? '', session]) };
+  return { session, cwd, install, workspace, env, key: JSON.stringify([install.libraryPath, workspace ?? '', session]) };
 }
 /** One viewer socket's hold on a browser: headed ones get no frames. */
 type Subscriber = { sink: ViewerSink; headed: boolean };
@@ -92,8 +92,8 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   async function cli(b: Binding, args: string[], timeoutMs: number | null = CLI_TIMEOUT_MS, initialViewport?: BrowserViewportSetting) {
     const r = await spawnAndCapture(b.install.binary, [...BROWSER_PROVIDERS.playwright.sessionArgs(b.session), ...args], {
       cwd: b.cwd,
+      env: initialViewport?.mode === 'fixed' ? { ...(b.env ?? process.env), PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } : b.env,
       ...(timeoutMs === null ? {} : { timeoutMs: Math.max(0, timeoutMs) }),
-      ...(initialViewport?.mode === 'fixed' ? { env: { ...process.env, PLAYWRIGHT_MCP_VIEWPORT_SIZE: `${initialViewport.width}x${initialViewport.height}` } } : {}),
     });
     if (!r.ok) throw new Error(r.error.message);
     return { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr };
@@ -331,7 +331,7 @@ export function createPlaywrightProvider(deps: { log?(text: string): void } = {}
   return {
     pollMs: 200,
 
-    bind: (binding) => bind(binding.session, binding.cwd ?? process.cwd(), resolvePlaywrightInstall(binding.binaryPath)),
+    bind: (binding) => bind(binding.session, binding.cwd ?? process.cwd(), resolvePlaywrightInstall(binding.binaryPath, binding.env), binding.env),
 
     // Installation, CLI project scope and session: a raw `--session` shares it
     // across one project's subdirectories.

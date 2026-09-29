@@ -20,10 +20,10 @@ import { API_ROUTES, formatPairingInvitationUrl, generateNoiseKeyPair } from 're
 
 import { SetupPasswordStore } from '../dist/state.js';
 import { FakeBurrow } from '../test/harness/fake-burrow.mjs';
-import { DEV_STATE_DIR } from './dev-paths.mjs';
+import { devStateDir } from './dev-paths.mjs';
 
 const relayUrl = (process.argv[2] ?? 'http://localhost:3000').replace(/\/$/, '');
-const stateDir = process.env.DORMOUSE_STATE_DIR ?? DEV_STATE_DIR;
+const stateDir = devStateDir(process.env);
 
 const label = process.env.FAKE_BURROW_LABEL ?? 'Fake Burrow (script)';
 

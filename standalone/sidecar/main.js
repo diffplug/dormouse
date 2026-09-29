@@ -20,7 +20,7 @@ const { gitInfo } = require('./git-info.cjs');
 // browser automation, run here exactly as the VS Code extension host runs it,
 // over the providers in lib/src/host/agent-browser-host.ts and
 // playwright-host.ts. See docs/specs/dor-browser.md → "Browser Host".
-const { createBrowserHost } = require('./browser-host.cjs');
+const { createBrowserHost, browserLaunchEnv } = require('./browser-host.cjs');
 const { createAgentBrowserProvider } = require('./agent-browser-host.cjs');
 // Same pattern again: lib/src/host/remote/sidecar-entry.ts is the Burrow —
 // the relay socket, the enrollment, the ACL, and remote-api v1 — running next to
@@ -36,6 +36,10 @@ const { captureAgentRecovery, createRecoveryStore, sliceSince } = require('./rec
 
 const browserLog = (m) => console.error(m);
 const browserHost = createBrowserHost({
+  launchEnv: (cwd) => browserLaunchEnv(cwd, {
+    node: process.env.DORMOUSE_NODE || process.execPath,
+    cli: process.env.DORMOUSE_CLI_JS,
+  }),
   writeClipboardText: (text) => clipboard.writeClipboardText(text),
   log: browserLog,
   providers: {
