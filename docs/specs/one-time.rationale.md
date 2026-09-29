@@ -70,8 +70,12 @@ names its install mode, "Dormouse Pocket (browser)" or "(Home Screen)", because
 one phone can hold two Client identities. The one-time page holds none, and the
 end-to-end run (standalone harness, 2026-09) showed the laptop's approval modal
 calling a one-time phone "Dormouse Pocket (browser)", an app it never opened.
-The platform string the codebase already reads gives a coarse name without a
-user-agent parser; a platform it does not name falls to "Phone browser".
+The platform string gives a coarse name without a user-agent parser, with two
+exceptions it cannot see: iPadOS Safari reports a Mac's `MacIntel` (desktop-class
+browsing, the default since iPadOS 13), which only its touch points tell apart,
+and Firefox for Android has no `userAgentData` and reports a `Linux` platform,
+while its user agent names Android. A device none of these name falls to "Phone
+browser", which is also what the Burrow shows for any label outside the set.
 
 ## Laptop UI
 
@@ -92,6 +96,5 @@ opened between the two commands.
 **Why the indicator starts at `connecting`.** The modal has been answered by
 then, so the phone is authorized, and with Settings closed the Baseboard is the
 only place to stop it during the direct deadline. The label is a tooltip because
-it is the phone's own choice, up to the pairing label limit, and the right
-cluster's width comes out of the Doors' budget. It carries no phone glyph, which
+the right cluster's width comes out of the Doors' budget. It carries no phone glyph, which
 would read as the push toggle's slashed phone beside it.

@@ -61,7 +61,7 @@ import { createTestClock, type TestClock } from '../test-timers';
 
 const WS_ORIGIN = 'wss://hosted.example';
 const START = 1_700_000_000_000;
-const LABEL = 'iPhone Safari';
+const LABEL = 'iPhone';
 
 const VISIBLE: PageVisibility = { isVisible: () => true, subscribe: () => () => {} };
 

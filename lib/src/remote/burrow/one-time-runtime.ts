@@ -31,7 +31,6 @@ import {
   WS_CLOSE_ONE_TIME_PEER_GONE,
   WS_CLOSE_ONE_TIME_VIOLATION,
   boundedBurrowLabel,
-  boundedPairingLabel,
   constantTimeEqual,
   createNoiseResponder,
   formatOneTimeLinkUrl,
@@ -40,6 +39,7 @@ import {
   isOneTimeClientFrame,
   isOneTimeRequestV1,
   isOneTimeRoomFrame,
+  knownOneTimeDeviceLabel,
   oneTimeLinkExpired,
   oneTimeLinkPrologue,
   toBase64Url,
@@ -50,6 +50,7 @@ import {
   type OneTimeBurrowFrame,
   type OneTimeClientFrame,
   type OneTimeDenialCode,
+  type OneTimeDeviceLabel,
   type OneTimeLink,
   type OneTimeOutcomeV1,
   type OneTimeRoomFrame,
@@ -127,8 +128,8 @@ export type OneTimeState =
  * the person types what the phone shows, and the runtime compares.
  */
 export interface OneTimeApprovalRequest {
-  /** The phone's own name for itself, already bounded and stripped. */
-  readonly label: string;
+  /** The device, as a member of the closed set whatever the phone sent. */
+  readonly label: OneTimeDeviceLabel;
   readonly requestedAt: number;
   /** Confirm with the digits the phone is showing: **exactly one attempt**. */
   approve(code: string): void;
@@ -178,7 +179,7 @@ export interface OneTimeRuntimeOptions {
 interface ReservedPhone {
   readonly session: NoiseTransportSession;
   /** Set once its first control message parsed; until then there is nothing to confirm. */
-  request: { readonly code: string; readonly label: string } | null;
+  request: { readonly code: string; readonly label: OneTimeDeviceLabel } | null;
   /** **Exactly one attempt**: set before anything else an approval does. */
   attempted: boolean;
 }
@@ -515,9 +516,10 @@ export class OneTimeRuntime {
       this.#deny(reserved, 'link-expired');
       return;
     }
-    // Phone-chosen free text rendered in the approval modal: bounded and
-    // stripped once, here, so every consumer sees the same safe value.
-    const request = { code: receipt.value.code, label: boundedPairingLabel(receipt.value.label) };
+    // **The modal never shows text the phone chose**: it picks the digits too,
+    // and a label drawn above their input could name them. Mapped once, here,
+    // so the modal, the panel, and the indicator see the same member.
+    const request = { code: receipt.value.code, label: knownOneTimeDeviceLabel(receipt.value.label) };
     reserved.request = request;
     this.#setState({ status: 'confirming', label: request.label, expiresAt: link.expiry * 1000 });
     this.#requestApproval({

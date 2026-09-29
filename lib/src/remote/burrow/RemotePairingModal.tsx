@@ -46,7 +46,10 @@ export function RemotePairingModal({
 }: {
   /** Which ceremony is asking; a pairing unless told otherwise. */
   kind?: ApprovalKind;
-  /** The Client's own name for itself, already bounded by the Burrow. */
+  /**
+   * The Client's own name for itself, already bounded by the Burrow; for a
+   * one-time request, a member of `ONE_TIME_DEVICE_LABELS` whatever the phone sent.
+   */
   label: string;
   onApprove: (code: string) => void;
   onDeny: () => void;

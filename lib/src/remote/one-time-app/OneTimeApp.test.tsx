@@ -11,6 +11,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  ONE_TIME_DEVICE_LABELS,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
   formatOneTimeLinkUrl,
@@ -75,7 +76,7 @@ vi.mock('../../lib/terminal-registry', () => ({
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-/** The label jsdom's empty platform string gets; see `oneTimeDeviceLabel`. */
+/** The label jsdom's navigator gets; see `oneTimeDeviceLabel`. */
 const DEVICE_LABEL = 'Phone browser';
 
 let container: HTMLDivElement;
@@ -293,12 +294,31 @@ describe('the gate', () => {
     expect(expiresInText(1)).toBe('Expires in 1 s.');
   });
 
-  it('names the device coarsely from its platform string, never as Pocket', () => {
-    expect(oneTimeDeviceLabel('iPhone')).toBe('iPhone');
-    expect(oneTimeDeviceLabel('iPad')).toBe('iPad');
-    expect(oneTimeDeviceLabel('Android')).toBe('Android phone');
-    expect(oneTimeDeviceLabel('Linux aarch64')).toBe('Phone browser');
-    expect(oneTimeDeviceLabel('')).toBe('Phone browser');
+  it('names the device coarsely, only ever from the closed set, never as Pocket', () => {
+    const cases: Array<[Parameters<typeof oneTimeDeviceLabel>[0], string]> = [
+      [{ platform: 'iPhone' }, 'iPhone'],
+      [{ platform: 'iPad' }, 'iPad'],
+      // iPadOS Safari reports a Mac; a real Mac has no touch points.
+      [{ platform: 'MacIntel', maxTouchPoints: 5 }, 'iPad'],
+      [{ platform: 'MacIntel', maxTouchPoints: 0 }, 'Phone browser'],
+      [{ platform: 'Linux armv81', userAgentData: { platform: 'Android' } }, 'Android phone'],
+      // Firefox for Android: no `userAgentData`, and a Linux platform.
+      [
+        {
+          platform: 'Linux armv8l',
+          userAgent: 'Mozilla/5.0 (Android 14; Mobile; rv:131.0) Gecko/131.0 Firefox/131.0',
+        },
+        'Android phone',
+      ],
+      // Where `userAgentData` answers, the user agent is not asked.
+      [{ userAgentData: { platform: 'Linux' }, userAgent: 'Android' }, 'Phone browser'],
+      [{ platform: 'Linux aarch64' }, 'Phone browser'],
+      [{}, 'Phone browser'],
+    ];
+    for (const [hints, label] of cases) {
+      expect(oneTimeDeviceLabel(hints), JSON.stringify(hints)).toBe(label);
+      expect(ONE_TIME_DEVICE_LABELS).toContain(oneTimeDeviceLabel(hints));
+    }
   });
 });
 

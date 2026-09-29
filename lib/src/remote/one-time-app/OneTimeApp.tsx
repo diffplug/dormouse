@@ -12,9 +12,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
+  ONE_TIME_UNKNOWN_DEVICE_LABEL,
   oneTimeLinkExpired,
   parseOneTimeLinkUrl,
   probeNoiseSupport,
+  type OneTimeDeviceLabel,
   type OneTimeLink,
 } from 'remote-lib-common';
 
@@ -26,7 +28,6 @@ import {
 } from '../client/one-time-client';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import type { RemoteWebSocket } from '../ws';
-import { PLATFORM_STRING } from '../../lib/platform';
 import { disposeAllSessions } from '../../lib/terminal-registry';
 import { PocketWall } from '../pocket-app/PocketWall';
 import { PK, pkButton } from '../pocket-app/pocket-chrome';
@@ -64,17 +65,34 @@ const ONE_TIME_CONNECTING_BODY =
 
 export const ONE_TIME_END_LABEL = 'End';
 
+/** What {@link oneTimeDeviceLabel} reads of the browser; `navigator` satisfies it. */
+export interface DeviceHints {
+  readonly platform?: string;
+  readonly userAgent?: string;
+  readonly maxTouchPoints?: number;
+  readonly userAgentData?: { readonly platform?: string };
+}
+
 /**
- * The label this page suggests, which the laptop's approval modal shows beside
- * the digits: a coarse name for the device from the browser's platform string.
- * Never Pocket's `deviceLabel` — this page is not Pocket, and it holds no Client
- * identity for a Home Screen install to be told apart from.
+ * The label this page sends, which the laptop's approval modal shows beside
+ * the digits: a coarse name for the device, always a member of
+ * `ONE_TIME_DEVICE_LABELS` — the Burrow shows nothing else. Never Pocket's
+ * `deviceLabel` — this page is not Pocket, and it holds no Client identity for
+ * a Home Screen install to be told apart from.
  */
-export function oneTimeDeviceLabel(platform: string = PLATFORM_STRING): string {
+export function oneTimeDeviceLabel(
+  hints: DeviceHints = typeof navigator === 'undefined' ? {} : navigator,
+): OneTimeDeviceLabel {
+  const platform = hints.userAgentData?.platform ?? hints.platform ?? '';
   if (/iPhone/i.test(platform)) return 'iPhone';
-  if (/iPad/i.test(platform)) return 'iPad';
+  // iPadOS Safari reports a Mac; only the touch screen tells them apart.
+  if (/iPad/i.test(platform) || (platform === 'MacIntel' && (hints.maxTouchPoints ?? 0) > 1)) {
+    return 'iPad';
+  }
+  // Without `userAgentData` (Firefox, Safari) Android's platform reads `Linux …`.
   if (/Android/i.test(platform)) return 'Android phone';
-  return 'Phone browser';
+  if (!hints.userAgentData && /Android/i.test(hints.userAgent ?? '')) return 'Android phone';
+  return ONE_TIME_UNKNOWN_DEVICE_LABEL;
 }
 
 /** How long a live link has left, to the minute and then to the second. */

@@ -316,6 +316,9 @@ runtime that carries these rules out ("Burrow runtime").
   [Pairing](#pairing) does, and gets **exactly one attempt** — spent before the
   expiry check and the constant-time comparison. No ACL record, `deliveryId`,
   or Burrow static results, and the Burrow persists nothing.
+- **The one-time modal never renders text the phone chose.** The phone picks
+  the digits and the label both, so the Burrow shows a label only as a member
+  of `ONE_TIME_DEVICE_LABELS`, and any other as `Phone browser` (rationale).
 - **One padded outcome.** `OneTimeOutcomeV1` success carries only the Burrow
   label — no Burrow static, no `deliveryId` — and a denial only one of
   `ONE_TIME_DENIAL_CODES` (`docs/specs/one-time.md` -> "Wire contract"), in the
@@ -342,7 +345,8 @@ Source of truth: `OneTimeRuntime` in
 `lib/src/remote/client/one-time-client.ts`, `oneTimeLinkPrologue` in
 `remote-lib-common/src/security/one-time-link.ts`, `e2eOneTimePrologue` in
 `remote-lib-common/src/security/noise-transport.ts`, `OneTimeRequestV1` /
-`OneTimeOutcomeV1` in `remote-lib-common/src/security/e2e-ceremony.ts`. Pinned
+`OneTimeOutcomeV1` / `knownOneTimeDeviceLabel` in
+`remote-lib-common/src/security/e2e-ceremony.ts`. Pinned
 by `remote-lib-common/test/one-time-link.test.mjs`,
 `remote-lib-common/test/e2e-ceremony.test.mjs`,
 `lib/src/remote/burrow/one-time-runtime.test.ts`, and

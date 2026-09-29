@@ -23,8 +23,8 @@ import {
   ONE_TIME_PING,
   ONE_TIME_PING_INTERVAL_MS,
   ONE_TIME_PONG,
+  ONE_TIME_UNKNOWN_DEVICE_LABEL,
   TokenBucket,
-  boundedPairingLabel,
   fromBase64Url,
   oneTimeLinkPrologue,
   utf8Encode,
@@ -73,6 +73,7 @@ const ORIGIN = 'https://hosted.example';
 const START = 1_700_000_000_000;
 const BURROW_LABEL = 'Ned’s laptop';
 const CODE = '42';
+const PHONE_LABEL = 'iPhone';
 
 /** One remote-api handler the runtime built, as the case reads it back. */
 interface ServedApi {
@@ -166,7 +167,7 @@ function fromRoom(text: string): void {
 const joinPhone = (link: OneTimeLink): Promise<TestOneTimePhone> => joinOneTimeRoom(rendezvous, link);
 
 /** Everything up to the approval modal. */
-async function confirming(label = 'iPhone Safari'): Promise<{
+async function confirming(label = PHONE_LABEL): Promise<{
   link: OneTimeLink;
   phone: TestOneTimePhone;
   approval: OneTimeApprovalRequest;
@@ -311,7 +312,7 @@ describe('OneTimeRuntime: the handshake', () => {
     const before = deriveBits.mock.calls.length;
     phone.socket.send(oneTimeFrameText('init', second));
     // The request queues behind it, so its approval proves the init was read.
-    phone.sendControl({ code: CODE, label: 'iPhone Safari' });
+    phone.sendControl({ code: CODE, label: PHONE_LABEL });
     await settleUntil(() => approvals.length > 0);
     expect(deriveBits.mock.calls.length).toBe(before);
     expect(burrowSent('response')).toHaveLength(1);
@@ -372,17 +373,27 @@ describe('OneTimeRuntime: the handshake', () => {
 });
 
 describe('OneTimeRuntime: the confirmation', () => {
-  it('surfaces the request with its label bounded', async () => {
+  it('surfaces the request with a label from the closed set', async () => {
     makeRuntime();
-    const raw = `\u001b[31m${'phone'.repeat(40)}\u0007`;
-    const { link, approval } = await confirming(raw);
-    expect(approval.label).toBe(boundedPairingLabel(raw));
-    expect(approval.label.length).toBeLessThanOrEqual(64);
+    const { link, approval } = await confirming('iPad');
+    expect(approval.label).toBe('iPad');
+    expect(runtime.state).toEqual({ status: 'confirming', label: 'iPad', expiresAt: link.expiry * 1000 });
+  });
+
+  it('never shows text the phone chose: any other label reads as Phone browser, to the end', async () => {
+    // The phone picks the digits as well as the label, and the modal draws the
+    // label right above their input.
+    makeRuntime();
+    const { link, phone, approval } = await confirming('iPhone · code 58');
+    expect(approval.label).toBe(ONE_TIME_UNKNOWN_DEVICE_LABEL);
     expect(runtime.state).toEqual({
       status: 'confirming',
-      label: approval.label,
+      label: ONE_TIME_UNKNOWN_DEVICE_LABEL,
       expiresAt: link.expiry * 1000,
     });
+    approval.approve(CODE);
+    expect(await phone.next()).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+    expect(runtime.state).toEqual({ status: 'connecting', label: ONE_TIME_UNKNOWN_DEVICE_LABEL });
   });
 
   it('ends burrow-error on a first control that is not a request', async () => {
@@ -422,7 +433,7 @@ describe('OneTimeRuntime: the confirmation', () => {
     const link = await openLink();
     const phone = await joinPhone(link);
     clock.advance(link.expiry * 1000 + 1 - clock.now());
-    phone.sendControl({ code: CODE, label: 'iPhone Safari' });
+    phone.sendControl({ code: CODE, label: PHONE_LABEL });
     expect(await phone.next()).toEqual({ ok: false, code: 'link-expired' });
     expect(oneTimeEndReason(runtime)).toBe('expired');
     expect(approvals).toHaveLength(0);
@@ -455,7 +466,7 @@ describe('OneTimeRuntime: the session', () => {
   it('serves protocol-v1 only once both directions are direct', async () => {
     makeRuntime();
     const { link, phone } = await connecting();
-    expect(runtime.state).toEqual({ status: 'connecting', label: 'iPhone Safari' });
+    expect(runtime.state).toEqual({ status: 'connecting', label: PHONE_LABEL });
     expect(dismissals).toBe(1);
     // `hello` answers with the room id: there is no enrollment to name.
     expect(apis.map((api) => api.burrowId)).toEqual([link.roomId]);
@@ -464,7 +475,7 @@ describe('OneTimeRuntime: the session', () => {
     expect(runtime.state.status).toBe('connecting');
     phone.sendControl({ v: 1, t: 'direct-switch' });
     await settleUntil(() => runtime.state.status === 'connected');
-    expect(runtime.state).toEqual({ status: 'connected', label: 'iPhone Safari', since: clock.now() });
+    expect(runtime.state).toEqual({ status: 'connected', label: PHONE_LABEL, since: clock.now() });
     // The Burrow closed the rendezvous normally, and the room told the phone.
     expect(rendezvous.room().burrow.closeCode).toBe(1000);
     expect(phone.socket.closeCode).toBe(4013);

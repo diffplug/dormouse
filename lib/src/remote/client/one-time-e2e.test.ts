@@ -58,7 +58,7 @@ import { createTestClock, type TestClock } from '../test-timers';
 const ORIGIN = 'https://hosted.example';
 const START = 1_700_000_000_000;
 const BURROW_LABEL = 'Ned’s laptop';
-const PHONE_LABEL = 'iPhone Safari';
+const PHONE_LABEL = 'iPhone';
 const SURFACE_ID = 'surface-1';
 const PTY_ID = 'pty-1';
 
@@ -314,7 +314,7 @@ describe('one-time connection, end to end', () => {
     const link = await openLink();
     const first = await tapConnect(makePhone(), link);
     // The first phone holds the room: the second is refused at the join.
-    expect(await makePhone().connectOnce(link, 'Pixel Chrome', () => {})).toEqual({
+    expect(await makePhone().connectOnce(link, 'Android phone', () => {})).toEqual({
       ok: false,
       message: ONE_TIME_LINK_USED_MESSAGE,
     });
@@ -324,7 +324,7 @@ describe('one-time connection, end to end', () => {
     expect((await first.result).ok).toBe(true);
     await settleUntil(() => runtime.state.status === 'connected');
     // The room is gone once both ends switched.
-    expect(await makePhone().connectOnce(link, 'Pixel Chrome', () => {})).toEqual({
+    expect(await makePhone().connectOnce(link, 'Android phone', () => {})).toEqual({
       ok: false,
       message: ONE_TIME_LINK_USED_MESSAGE,
     });

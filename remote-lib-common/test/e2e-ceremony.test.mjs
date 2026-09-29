@@ -16,6 +16,8 @@ import {
   CEREMONY_FIELD_LIMIT,
   NoiseTransportSession,
   ONE_TIME_DENIAL_CODES,
+  ONE_TIME_DEVICE_LABELS,
+  ONE_TIME_UNKNOWN_DEVICE_LABEL,
   PAIRING_CODE_LENGTH,
   createNoiseInitiator,
   createNoiseResponder,
@@ -30,6 +32,7 @@ import {
   isPairingOutcomeV1,
   isPairingRequestV1,
   isPresenceProofV1,
+  knownOneTimeDeviceLabel,
   presenceChallenge,
   samplePairingCode,
   toBase64Url,
@@ -441,6 +444,18 @@ test('isOneTimeRequestV1 wants a code and a bounded label, and no proof', () => 
     ['an over-long label', { ...request, label: 'a'.repeat(CEREMONY_FIELD_LIMIT + 1) }],
   ]) {
     assert.equal(isOneTimeRequestV1(value), false, why);
+  }
+});
+
+test('a one-time label shows only as a member of the closed set', () => {
+  assert.deepEqual([...ONE_TIME_DEVICE_LABELS], ['iPhone', 'iPad', 'Android phone', 'Phone browser']);
+  assert.equal(Object.isFrozen(ONE_TIME_DEVICE_LABELS), true);
+  assert.equal(ONE_TIME_UNKNOWN_DEVICE_LABEL, 'Phone browser');
+  for (const label of ONE_TIME_DEVICE_LABELS) assert.equal(knownOneTimeDeviceLabel(label), label);
+  // The phone chooses the label and the digits: text that could name digits,
+  // a near miss, and a non-string all read as the one fallback.
+  for (const label of ['iPhone · code 58', 'iphone', ' iPad', 'iPad\u0000', 'Dormouse Pocket (browser)', '', 42, null]) {
+    assert.equal(knownOneTimeDeviceLabel(label), ONE_TIME_UNKNOWN_DEVICE_LABEL, String(label));
   }
 });
 

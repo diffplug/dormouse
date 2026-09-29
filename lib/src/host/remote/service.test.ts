@@ -1296,7 +1296,7 @@ describe('one-time connection', () => {
 
   /** Send the request, and answer the item the modal would show for it. */
   async function request(phone: TestOneTimePhone, code = '42'): Promise<PairingQueueItem> {
-    phone.sendControl({ code, label: 'iPhone Safari' });
+    phone.sendControl({ code, label: 'iPhone' });
     const event = await flushUntil(() =>
       queueEvents().findLast((e) => e.queue.some((item) => item.kind === 'one-time')),
     );
@@ -1448,10 +1448,10 @@ describe('one-time connection', () => {
       kind: 'one-time',
       clientId: '',
       pairingId: expect.any(String),
-      label: 'iPhone Safari',
+      label: 'iPhone',
       requestedAt: expect.any(Number),
     });
-    expect(oneTimeStates().at(-1)).toMatchObject({ status: 'confirming', label: 'iPhone Safari' });
+    expect(oneTimeStates().at(-1)).toMatchObject({ status: 'confirming', label: 'iPhone' });
     // The digits the phone shows are not in anything the webviews heard.
     expect(JSON.stringify(uiEvents())).not.toContain('"42"');
 
@@ -1473,7 +1473,7 @@ describe('one-time connection', () => {
     expect((await approve(item)).result).toEqual({});
     // Un-enrolled, the phone is told the name the enrollment form would suggest.
     expect(await phone.next()).toEqual({ ok: true, burrowLabel: `${hostname()} (VS Code)` });
-    expect(oneTimeStates().at(-1)).toEqual({ status: 'connecting', label: 'iPhone Safari' });
+    expect(oneTimeStates().at(-1)).toEqual({ status: 'connecting', label: 'iPhone' });
     expect(queueEvents().at(-1)!.queue).toEqual([]);
   });
 
@@ -1515,7 +1515,7 @@ describe('one-time connection', () => {
 
     expect((await command('oneTimeOpen')).error).toMatch(/already/);
     await switchDirect(phone);
-    expect(oneTimeStates().at(-1)).toMatchObject({ status: 'connected', label: 'iPhone Safari' });
+    expect(oneTimeStates().at(-1)).toMatchObject({ status: 'connected', label: 'iPhone' });
     expect((await command('oneTimeOpen')).error).toMatch(/already/);
     expect(rendezvous.rooms).toHaveLength(1);
 

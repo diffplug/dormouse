@@ -102,7 +102,8 @@ counts no answer.
   direct path has `ONE_TIME_DIRECT_DEADLINE_MS` (15 s) after the outcome.
 - **The ceremony's messages are padded `control` messages** on the Noise session
   (`docs/specs/relay.md` -> "E2E framing"): `OneTimeRequestV1 {code, label}`
-  phone → Burrow, then one `OneTimeOutcomeV1` — `{ok: true, burrowLabel}`, or
+  phone → Burrow, `label` one of `ONE_TIME_DEVICE_LABELS`, then one
+  `OneTimeOutcomeV1` — `{ok: true, burrowLabel}`, or
   `{ok: false, code}` with `code` one of `ONE_TIME_DENIAL_CODES`
   (`user-denied`, `confirmation-mismatch`, `link-expired`, `burrow-error`).
 
@@ -154,8 +155,11 @@ decides them; a runtime never enters either.
   read before the room's report that the phone left.
 - **Must spend an `E2E_INIT_BURST` `TokenBucket` token before an `init`'s
   WebCrypto.** The first non-keepalive transport message must be
-  `OneTimeRequestV1`, else `burrow-error`; its label passes
-  `boundedPairingLabel` before the approval request carries it.
+  `OneTimeRequestV1`, else `burrow-error`. **Its label passes
+  `knownOneTimeDeviceLabel` before the approval request or any state carries
+  it**, so anything not exactly a member of `ONE_TIME_DEVICE_LABELS` is
+  `Phone browser` (the rule: `docs/specs/remote-security-model.md` ->
+  "One-time connection").
 - **Promotion reuses the same Noise session** in an `EstablishedE2eSession`
   whose `hello.burrowId` is the room id, and arms the direct deadline. A
   decline the Burrow sends reaches the phone before the rendezvous closes.
@@ -310,9 +314,11 @@ on Pocket's screens, chrome, and mobile wall.
 - **Mounts the wall only on `ok`**, through `mountRemoteWall`. End, Cancel, a
   reported ending, a failed mount, or a failed attachment closes the client and
   releases the adapter; the first ending's copy stays.
-- **The label the modal shows is `oneTimeDeviceLabel`, never Pocket's
-  `deviceLabel`**: `iPhone`, `iPad`, or `Android phone` from the platform
-  string, else `Phone browser` (rationale).
+- **The label the page sends is `oneTimeDeviceLabel`, never Pocket's
+  `deviceLabel`**, and always a member of `ONE_TIME_DEVICE_LABELS`: `iPhone`;
+  `iPad`, a `MacIntel` platform with more than one touch point included;
+  `Android phone` from the platform, or from the user agent where there is no
+  `userAgentData`; else `Phone browser` (rationale).
 
 **Build.** `build:one-time` in `lib/package.json` builds `lib/one-time/` with
 `lib/vite.one-time.config.ts` (base `ONE_TIME_PAGE_PATH`, Pocket's resolution,

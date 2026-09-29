@@ -315,7 +315,10 @@ export function isConnectionOutcomeV1(value: unknown): value is ConnectionOutcom
 export interface OneTimeRequestV1 {
   /** The two digits the phone is displaying; the person types them on the Burrow. */
   readonly code: string;
-  /** The phone's own name for itself, shown in the approval modal. */
+  /**
+   * The page's name for the device, one of {@link ONE_TIME_DEVICE_LABELS}. The
+   * guard admits any bounded string; the Burrow shows only a member.
+   */
   readonly label: string;
 }
 
@@ -323,6 +326,32 @@ export function isOneTimeRequestV1(value: unknown): value is OneTimeRequestV1 {
   if (!value || typeof value !== 'object') return false;
   const request = value as Record<string, unknown>;
   return isPairingCode(request.code) && bounded(request.label);
+}
+
+/**
+ * Every label the one-time phone page sends, and the only ones a Burrow shows
+ * (`docs/specs/remote-security-model.md` -> "One-time connection"). **The phone
+ * chooses both the digits and the label**, and the approval modal draws the
+ * label right above the input the digits go in, so free text there could tell
+ * the person which digits to type. Frozen, so no importer can widen it.
+ */
+export const ONE_TIME_DEVICE_LABELS = Object.freeze([
+  'iPhone',
+  'iPad',
+  'Android phone',
+  'Phone browser',
+] as const);
+
+export type OneTimeDeviceLabel = (typeof ONE_TIME_DEVICE_LABELS)[number];
+
+/** A device the page cannot name, and what a Burrow shows for any label outside the set. */
+export const ONE_TIME_UNKNOWN_DEVICE_LABEL: OneTimeDeviceLabel = 'Phone browser';
+
+/** `label` when it is exactly a member of {@link ONE_TIME_DEVICE_LABELS}, else {@link ONE_TIME_UNKNOWN_DEVICE_LABEL}. */
+export function knownOneTimeDeviceLabel(label: unknown): OneTimeDeviceLabel {
+  return includesCode(ONE_TIME_DEVICE_LABELS, label)
+    ? (label as OneTimeDeviceLabel)
+    : ONE_TIME_UNKNOWN_DEVICE_LABEL;
 }
 
 /**
