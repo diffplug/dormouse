@@ -44,7 +44,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 | `port` | `announced` by default, or `auto`; [Serving](#serving) owns selection |
 | `prespawn_dedupe` | Optional scalar or list of literal key elements with substitutions |
 
-- **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file input. (rationale)
+- **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file or directory input. (rationale)
 - **Must deliver the parsed file's warnings on the untrusted answer and on a built-in open**, not only on an already-trusted lookup — those are the paths a Tool's first run takes.
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never interpret it as a command to execute. Reserve separate fields for future computed keys. (rationale)
 - **Must reject an empty `prespawn_dedupe` list, and `$TARGET` in a `prespawn_dedupe` whose `run` is a shell-command string** — a string `run` takes no inputs, so there is no target to key on.
@@ -53,7 +53,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments. Without `$ARGS` or `$TARGET` in the list, append the inputs. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for reruns.
 
-**Must require exactly one existing regular local file when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, directories, and missing files. Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
+**Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, missing paths, and every other file kind (fifo, socket, device). Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
 Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
 
@@ -157,13 +157,15 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 ## Opening local files
 
-**Must accept exactly one existing local regular file for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools).
+**Must accept exactly one existing local regular file or directory for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools); [Folders](#folders) owns directories.
 
-**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or `builtin:file`. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
+**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or the built-in handler of its kind. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
+
+**Must use a matching rule's optional `preview` handler for a `--preview` request**, validated as `tool` is, and its `tool` otherwise; an explicit `--tool` overrides both.
 
 **Must use the supplied CWD when canonicalization fails**, and never let matching change the Tool's run directory or `$CWD`. A miss names the user config path and suggests `--tool`. (rationale)
 
-**Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over), and `--preview` follows [Preview slot](#preview-slot).
+**Must pass the canonical path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over), and `--preview` follows [Preview slot](#preview-slot).
 
 **Must reject declared Tool names beginning with `builtin:` in either configuration scope.** Built-in handler names cannot be shadowed.
 
@@ -178,6 +180,20 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 **Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
 
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `fileViewerFormat` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`, `dor/test/file-viewer.test.mjs`.
+
+## Folders
+
+**Must match a directory as its name suffixed with `.📁` (U+1F4C1)**, in the filename and both path forms. **A pattern ending in `.📁` matches only directories, and a directory matches only such patterns**, so a catch-all file rule never captures one (rationale). Dot-directories follow the dotfile rule: `*.📁` skips them and `.*.📁` names them.
+
+**Must open `builtin:folder` for a directory no rule matches.** **Never let `builtin:file` open a directory or `builtin:folder` a file**: a rule naming the other kind fails the configuration, and `--tool` fails the open, naming the handler that fits.
+
+A folder viewer is any Tool that selects on single-click and activates on double-click through the [Preview slot](#preview-slot) invocations. `builtin:folder`, the default, is a Tool-owned `dor` process:
+
+- **Must list names and entry types only, loading one directory at a time, and never serve file contents** (rationale). Previews reach files only through the slot, so the one-file grant in [Opening local files](#opening-local-files) is unchanged. The listener's audited rules are `docs/specs/security-local.md` → Local-file viewer.
+- **Must list dotfiles.** Entries git ignores are listed by default, with a show/hide checkbox.
+- **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which invokes `dor open --preview` or `dor open` over the control socket.
+
+Source of truth: `FOLDER_MATCH_SUFFIX` in `dor/src/file-viewer-format.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseOpenRules` in `lib/src/host/tool-registry.ts`; `startFolderViewer` / `runFolderViewer` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`. Tests: `folders` in `lib/src/host/tool-open.test.ts`, `folder rules and preview handlers` in `lib/src/host/tool-registry.test.ts`, `dor/test/folder-viewer.test.mjs`, `a folder in the slot` in `lib/src/components/wall/preview-slot.test.tsx`.
 
 ## Preview slot
 
@@ -313,11 +329,10 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
   terminal flash grates. `--has terminal` / `--has browser` *filter flags* for
   `dor list`, whose rows already carry the fields.
 
-**Scope: open-folder** — folders and links on the [Preview slot](#preview-slot), in implementation order; the design is [Folders and the preview slot](#folders-and-the-preview-slot).
+**Scope: open-folder** — links on the [Preview slot](#preview-slot) and its speed, in implementation order; the link design is [Terminal links](#terminal-links).
 
-1. Directory open rules and `builtin:folder`.
-2. Local `OSC 8` file links: click previews, double-click pins.
-3. Speed within the open rules: an announce-triggered port scan, an optional per-rule `preview:` Tool, and opt-in retarget without restart (built-in viewer first).
+1. Local `OSC 8` file links: click previews, double-click pins.
+2. Speed within the open rules: an announce-triggered port scan and opt-in retarget without restart (built-in viewer first).
 
 ### Dehydrate and rehydrate
 
@@ -350,15 +365,6 @@ announce — self-knowledge, like a runtime re-key); the final marketing noun
 ("Dor Tools" carries the LLM-tool-use collision-avoidance; the spec says
 "tool" throughout).
 
-### Folders and the preview slot
+### Terminal links
 
-A folder viewer is any Tool that selects on single-click and activates on double-click through the invocations in [Preview slot](#preview-slot).
-
-**Folders.** **Must accept a directory in `dor open`**, matched against the same `open` list and passed to a user Tool as the canonical `$TARGET`; without a match it opens `builtin:folder`.
-
-- **Must match a directory as its name suffixed with `.📁` (U+1F4C1)**, in both the filename and path forms: `*.📁` selects every directory. **A pattern ending in `.📁` matches only directories, and a directory matches only such patterns**, so a catch-all file rule never captures one (rationale). Dot-directories follow the dotfile rule: `.*.📁` names them.
-- **`builtin:folder` must list names and entry types only, loading one directory at a time, and never serve file contents** (rationale). Previews reach files only through the slot, so the one-file viewer grant in [Opening local files](#opening-local-files) is unchanged.
-- **Must list dotfiles.** Entries git ignores are listed by default, with a show/hide checkbox.
-- **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which invokes `dor open` over the control socket. The listener's audited rules join `docs/specs/security-local.md` → Local-file viewer when built.
-
-**Terminal links.** A local `file://` `OSC 8` link previews on click and pins on a second click within the double-click interval. **Must keep the confirmation dialog when the link's path-shaped display text is not a suffix of its target path**, and for non-local hosts. The dialog contract belongs to `docs/specs/terminal-escapes.md` → OSC 8 hyperlinks.
+A local `file://` `OSC 8` link previews on click and pins on a second click within the double-click interval. **Must keep the confirmation dialog when the link's path-shaped display text is not a suffix of its target path**, and for non-local hosts. The dialog contract belongs to `docs/specs/terminal-escapes.md` → OSC 8 hyperlinks.

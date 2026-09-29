@@ -518,3 +518,50 @@ describe('a serving slot', () => {
     for (const field of ['url', 'renderMode', 'toolAnnouncedPort', 'toolAnnouncedPath']) expect(params?.[field]).toBeUndefined();
   });
 });
+
+describe('a folder in the slot', () => {
+  /** The host's built-in folder viewer answer for a directory, else a file's. */
+  function installFolderHost() {
+    const toolControl = vi.fn(async (request: { op: string; target?: string; tool?: string; preview?: boolean }) => {
+      if (request.target !== 'docs') return openLookup(request.target!, request.tool);
+      const target = '/repo/docs';
+      return { status: 'ok' as const, scope: 'builtin' as const, projectRoot: '/repo', path: '<built-in>', name: 'folder',
+        run: ['dor', '__view-folder', target], key: [target], render: 'iframe' as const, port: 'announced' as const, warnings: [], target };
+    });
+    Object.assign(fake, { toolControl });
+    return toolControl;
+  }
+
+  it('shows a previewed folder in the slot through the folder viewer', async () => {
+    const toolControl = installFolderHost();
+    await mountWall([{ id: 'slot', params: viewerParams('a.md') }]);
+    shell('pane-a', null);
+    shell('slot', 'view /repo/a.md');
+    const result = await answer(await request({ file: 'docs', preview: true }));
+    expect(toolControl).toHaveBeenCalledWith({ op: 'open', target: 'docs', cwd: '/repo', tool: undefined, preview: true });
+    expect(result).toMatchObject({ status: 'retargeted', surfaceId: 'slot', command: 'dor __view-folder /repo/docs' });
+    await waitUntil(() => terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine === 'dor __view-folder /repo/docs');
+    expect(await paramsOf('slot')).toMatchObject({
+      toolScope: 'builtin', toolName: 'folder', toolTarget: '/repo/docs', toolKey: ['folder', '/repo/docs'], toolPreview: true,
+    });
+  });
+
+  it('pins a folder viewer in the slot when it selects a file, previewing that file in a new slot beside it', async () => {
+    installFolderHost();
+    const folder = {
+      surfaceType: 'tool', command: 'dor __view-folder /repo/docs', toolArgv: ['dor', '__view-folder', '/repo/docs'], cwd: '/repo',
+      toolName: 'folder', toolScope: 'builtin', toolRender: 'iframe', toolPort: 'announced', toolKey: ['folder', '/repo/docs'],
+      toolTarget: '/repo/docs', toolPreview: true,
+    };
+    await mountWall([{ id: 'slot', params: folder }]);
+    shell('pane-a', null);
+    shell('slot', 'dor __view-folder /repo/docs');
+    const result = await answer(await request({ file: 'docs/a.md', preview: true, cwd: '/repo/docs' }, 'slot'));
+    expect(result).toMatchObject({ status: 'created', command: 'view /repo/docs/a.md' });
+    expect(typed.slot).toEqual([]);
+    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+    expect(await paramsOf(result.surfaceId)).toMatchObject({ toolPreview: true, toolTarget: '/repo/docs/a.md' });
+    expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
+    startTool(result.surfaceId, result.command);
+  });
+});

@@ -2100,6 +2100,16 @@ test('open --preview refuses --fresh and --minimize before asking the host', asy
   }
 });
 
+test('open forwards a folder to Tool dispatch as it forwards a file', async () => {
+  const client = fixtureClient();
+  const result = await runCli(['open', '--preview', 'docs/'], { client, env: { PWD: '/repo' } });
+  assert.equal(result.exitCode, 0);
+  client.requests[0].request.cwd = smudgeWindowsPaths(client.requests[0].request.cwd);
+  assert.deepEqual(client.requests[0], { method: 'toolSurface', request: {
+    file: 'docs/', cwd: '/repo', fresh: false, minimized: false, surface: undefined, tool: undefined, preview: true,
+  } });
+});
+
 test('open requires exactly one file', async () => {
   for (const args of [['open'], ['open', 'one.md', 'two.md']]) {
     const client = fixtureClient();

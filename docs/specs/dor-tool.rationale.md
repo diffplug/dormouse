@@ -69,9 +69,15 @@ Keeping the built-in viewer in the Tool's process tree reuses port discovery, ki
 
 The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity. Canonicalizing only the target mixed physical and logical paths under a symlinked CWD, so relative slash patterns missed files inside that directory. An absolute target can still be opened after its caller's CWD disappears; matching falls back to the supplied directory in that case.
 
+## Folders
+
+A names-only folder viewer leaves file contents behind the existing one-file grant. A content-serving folder grant cannot hold descriptors for a whole tree from launch, so it would need open-per-request containment and a rewrite of the Local-file viewer checks.
+
+Directories match through a name suffix rather than a new rule field, so folder rules share the ordered `open` list and picomatch syntax. The suffix alone would let `*` or `**` file rules capture directories, and a regular file literally named `x.📁` capture a folder rule; making suffixed patterns and directories match only each other closes both.
+
 ## Preview slot
 
-Customizable viewers are the point of `dor open`, so previews trade speed for flexibility. A design considered on 2026-09-28 previewed inside one long-lived built-in viewer with a folder-scoped grant: every selection was an in-page navigation, but user Tools never saw a preview. Retargeting the slot instead costs an interrupt, a process start, and up to one 1.5-second port-scan tick (`POLL_MS` in `lib/src/components/wall/use-tool-serving.ts`) for a serving Tool; terminal-only viewers skip the scan. The speed items in scope **open-folder** narrow that cost without bypassing the open rules.
+Customizable viewers are the point of `dor open`, so previews trade speed for flexibility. A design considered on 2026-09-28 previewed inside one long-lived built-in viewer with a folder-scoped grant: every selection was an in-page navigation, but user Tools never saw a preview. Retargeting the slot instead costs an interrupt, a process start, and up to one 1.5-second port-scan tick (`POLL_MS` in `lib/src/components/wall/use-tool-serving.ts`) for a serving Tool; terminal-only viewers skip the scan. A rule's `preview` handler and the speed items in scope **open-folder** narrow that cost without bypassing the open rules.
 
 Most slot occupants are viewers scrolled with the keyboard (`less`, `glow`), so pinning on keyboard input would pin nearly every preview. Editors report `OSC 367 state`; one that does not loses unsaved work on the next selection.
 
@@ -102,9 +108,3 @@ A derived URL or browser daemon binding belongs to one execution. Reusing it aft
 Routing `dor tool` to a native editor on one host would change its result from a Surface handle to a host-specific side effect. Native file opening remains a separate operation.
 
 A Workspace transfer carries the live browser binding separately from its durable record. The arrival record can reach disk while the windows coordinate, whereas the content channel stays in memory; reusing the saved-record projection alone would reopen a Tool browser and lose its current page state. Pending approvals and unfinished browser startup still own asynchronous work in the source window, so the move waits for the user to resolve the approval or retry after startup.
-
-## Folders and the preview slot
-
-A names-only folder viewer leaves file contents behind the existing one-file grant. A content-serving folder grant cannot hold descriptors for a whole tree from launch, so it would need open-per-request containment and a rewrite of the Local-file viewer checks.
-
-Directories match through a name suffix rather than a new rule field, so folder rules share the ordered `open` list and picomatch syntax. The suffix alone would let `*` or `**` file rules capture directories, and a regular file literally named `x.📁` capture a folder rule; making suffixed patterns and directories match only each other closes both.

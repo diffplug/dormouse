@@ -10,26 +10,27 @@ export interface ToolInput {
   readonly key: string[] | null;
 }
 
-/** A target is one existing regular file on this host. Resolve symlinks before
- * keying, so two paths to the same document reveal the same Tool. */
-export async function resolveLocalToolTarget(input: string, cwd: string): Promise<string> {
+/** A target is one existing regular file or directory on this host. Resolve
+ * symlinks before keying, so two paths to the same document reveal the same Tool. */
+export async function resolveLocalToolTarget(input: string, cwd: string): Promise<{ path: string; directory: boolean }> {
   if (hasShellInputControls(input) || hasShellInputControls(cwd)) {
-    throw new ToolFileError('local file paths cannot contain terminal control characters');
+    throw new ToolFileError('local paths cannot contain terminal control characters');
   }
   if (!input || (!isAbsolute(input) && /^[a-z][a-z\d+.-]*:/i.test(input))) {
-    throw new ToolFileError('expected a local file path, not a URL or Surface handle');
+    throw new ToolFileError('expected a local path, not a URL or Surface handle');
   }
-  let target: string;
+  let path: string;
   try {
-    target = await realpath(resolve(cwd, input));
+    path = await realpath(resolve(cwd, input));
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') throw new ToolFileError(`no such file: ${input}`);
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw new ToolFileError(`no such file or folder: ${input}`);
     throw error;
   }
-  if (hasShellInputControls(target)) throw new ToolFileError('local file paths cannot contain terminal control characters');
-  if (!(await stat(target)).isFile()) throw new ToolFileError(`not a regular file: ${input}`);
-  return target;
+  if (hasShellInputControls(path)) throw new ToolFileError('local paths cannot contain terminal control characters');
+  const stats = await stat(path);
+  if (!stats.isFile() && !stats.isDirectory()) throw new ToolFileError(`not a regular file or folder: ${input}`);
+  return { path, directory: stats.isDirectory() };
 }
 
 export async function resolveToolInput(
@@ -43,8 +44,8 @@ export async function resolveToolInput(
   const runList = typeof entry.run === 'string' ? [] : entry.run;
   const runHasTarget = usesTarget(runList);
   const needsTarget = runHasTarget || usesTarget(entry.dedupeTemplate ?? []);
-  if (needsTarget && args.length !== 1) throw new ToolFileError('$TARGET requires exactly one local file argument');
-  const target = needsTarget ? await resolveLocalToolTarget(args[0], context.cwd) : undefined;
+  if (needsTarget && args.length !== 1) throw new ToolFileError('$TARGET requires exactly one local file or folder argument');
+  const target = needsTarget ? (await resolveLocalToolTarget(args[0], context.cwd)).path : undefined;
   const substitution = { ...context, target };
   const key = resolveDedupeKey(entry, substitution);
   if (typeof entry.run === 'string') {

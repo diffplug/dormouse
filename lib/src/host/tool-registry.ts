@@ -7,7 +7,7 @@
  * bundle.
  */
 import { isMap, isScalar, parseDocument as parseYamlDocument, type Document } from 'yaml';
-import { BUILTIN_FILE_TOOL } from 'dor/file-viewer-format';
+import { BUILTIN_FILE_TOOL, BUILTIN_FOLDER_TOOL, FOLDER_MATCH_SUFFIX } from 'dor/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { truncateText } from '../lib/osc-sanitize';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
@@ -46,7 +46,12 @@ export interface ToolEntry {
   readonly description: string | null;
 }
 
-export interface OpenRule { readonly match: string; readonly tool: string }
+export interface OpenRule {
+  readonly match: string;
+  readonly tool: string;
+  /** The handler `dor open --preview` uses instead of `tool`. */
+  readonly preview?: string;
+}
 
 export interface ToolFile {
   readonly browser?: BrowserConfigLayer;
@@ -291,7 +296,7 @@ export function substituteToolTokens(element: string, context: SubstitutionConte
   return element.replace(SUBSTITUTION_TOKEN, (token) => {
     if (token === '$CWD') return context.cwd;
     if (token === '$TARGET') {
-      if (!context.target) throw new ToolFileError(`tool '${toolName}': $TARGET requires one local file argument`);
+      if (!context.target) throw new ToolFileError(`tool '${toolName}': $TARGET requires one local file or folder argument`);
       return context.target;
     }
     if (token === '$PROJECT_ROOT') {
@@ -304,23 +309,38 @@ export function substituteToolTokens(element: string, context: SubstitutionConte
   });
 }
 
+const OPEN_RULE_FIELDS = ['match', 'tool', 'preview'];
+
+/** A rule's `tool` and `preview` each name an argument-list Tool in this file
+ * or the built-in handler for the rule's kind: a pattern ending in
+ * `FOLDER_MATCH_SUFFIX` matches only directories (`docs/specs/dor-tool.md` -> Folders). */
 function parseOpenRules(node: unknown, tools: ReadonlyMap<string, ToolEntry>, path: string): OpenRule[] {
   if (node === undefined) return [];
   if (!Array.isArray(node)) throw new ToolFileError(`${path}: 'open' must be an ordered list`);
   return node.map((rule: unknown) => {
-    const entry = isRecord(rule) && typeof rule.tool === 'string' ? tools.get(rule.tool) : undefined;
-    const builtin = isRecord(rule) && rule.tool === BUILTIN_FILE_TOOL;
-    if (!isRecord(rule) || (!builtin && !entry) || typeof rule.match !== 'string' || !rule.match) {
+    if (!isRecord(rule) || typeof rule.match !== 'string' || !rule.match) {
       throw new ToolFileError(`${path}: each open rule needs a match pattern and a tool defined in this user file`);
     }
-    const unknown = Object.keys(rule).find(key => key !== 'match' && key !== 'tool');
+    const unknown = Object.keys(rule).find(key => !OPEN_RULE_FIELDS.includes(key));
     if (unknown !== undefined) {
-      throw new ToolFileError(`${path}: open rule for '${rule.tool}' has an unknown field '${unknown}' (known: match, tool)`);
+      throw new ToolFileError(`${path}: open rule for '${String(rule.tool)}' has an unknown field '${unknown}' (known: ${OPEN_RULE_FIELDS.join(', ')})`);
     }
-    if (entry && typeof entry.run === 'string') {
-      throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the file`);
-    }
-    return { match: rule.match, tool: builtin ? BUILTIN_FILE_TOOL : entry!.name };
+    const folder = rule.match.endsWith(FOLDER_MATCH_SUFFIX);
+    const handler = (field: 'tool' | 'preview'): string => {
+      const name = rule[field];
+      if (name === BUILTIN_FILE_TOOL || name === BUILTIN_FOLDER_TOOL) {
+        if ((name === BUILTIN_FOLDER_TOOL) === folder) return name;
+        throw new ToolFileError(`${path}: open rule '${rule.match}' names ${name} as its ${field}, which opens ${folder ? 'files' : 'folders'}, `
+          + (folder ? `but a pattern ending in ${FOLDER_MATCH_SUFFIX} matches only folders` : `but only a pattern ending in ${FOLDER_MATCH_SUFFIX} matches folders`));
+      }
+      const entry = typeof name === 'string' ? tools.get(name) : undefined;
+      if (!entry) throw new ToolFileError(`${path}: open rule '${rule.match}' needs a ${field} defined in this user file`);
+      if (typeof entry.run === 'string') {
+        throw new ToolFileError(`${path}: open rule for '${entry.name}' needs an argument-list run to receive the path`);
+      }
+      return entry.name;
+    };
+    return { match: rule.match, tool: handler('tool'), ...(rule.preview !== undefined ? { preview: handler('preview') } : {}) };
   });
 }
 

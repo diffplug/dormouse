@@ -1,8 +1,9 @@
-import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { resolveToolInput } from './tool-input';
+import { resolveLocalToolTarget, resolveToolInput } from './tool-input';
 import { parseToolFile } from './tool-registry';
 
 const context = { cwd: '/repo', projectRoot: '/repo', args: [] as string[] };
@@ -41,6 +42,23 @@ describe('Tool argv safety', () => {
       await symlink(target, join(dir, 'safe-name.txt'));
       await expect(resolveToolInput({ ...entry, run: ['viewer', '$TARGET'] }, { ...context, cwd: dir, args: ['safe-name.txt'] }))
         .rejects.toThrow('terminal control characters');
+    } finally { await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe('local targets', () => {
+  it.skipIf(process.platform === 'win32')('accepts a regular file or a folder, canonically, and rejects every other kind', async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'dor-input-kinds-')));
+    try {
+      await writeFile(join(dir, 'file.txt'), 'hi');
+      await mkdir(join(dir, 'folder'));
+      await symlink(join(dir, 'folder'), join(dir, 'alias'));
+      execFileSync('mkfifo', [join(dir, 'pipe')]);
+      expect(await resolveLocalToolTarget('file.txt', dir)).toEqual({ path: join(dir, 'file.txt'), directory: false });
+      expect(await resolveLocalToolTarget('alias', dir)).toEqual({ path: join(dir, 'folder'), directory: true });
+      await expect(resolveLocalToolTarget('pipe', dir)).rejects.toThrow('not a regular file or folder: pipe');
+      await expect(resolveToolInput({ ...entry, run: ['viewer', '$TARGET'] }, { ...context, cwd: dir, args: ['alias'] }))
+        .resolves.toMatchObject({ run: ['viewer', join(dir, 'folder')] });
     } finally { await rm(dir, { recursive: true, force: true }); }
   });
 });

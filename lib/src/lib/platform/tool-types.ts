@@ -10,7 +10,8 @@ import type { BrowserViewportConfig, BrowserViewportSetting } from 'dor-lib-comm
 import type { ToolListRequest, ToolListResponse } from 'dor/commands/types';
 
 export type ToolHostRequest =
-  | { op: 'open'; target: string; cwd: string; tool?: string }
+  /** `preview` selects a matching rule's `preview:` handler (`dor open --preview`). */
+  | { op: 'open'; target: string; cwd: string; tool?: string; preview?: boolean }
   | { op: 'lookup'; name: string; cwd: string; args?: string[]; global?: boolean }
   | { op: 'trust'; kind: 'upstream' | 'folder'; projectRoot: string }
   | { op: 'browser-config'; cwd: string }

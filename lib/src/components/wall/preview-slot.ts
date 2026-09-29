@@ -21,7 +21,7 @@ import { becomeToolMeta, type LathWallEngine } from './lath-wall-engine';
 import type { LeafMeta } from './lath-wall-store';
 import { retireToolRun } from './use-tool-serving';
 
-/** The canonical file an `open` gave this Tool, or null for a named Tool. */
+/** The canonical path an `open` gave this Tool, or null for a named Tool. */
 export function toolTargetFromParams(params: unknown): string | null {
   return stringParam((params as { toolTarget?: unknown } | null | undefined)?.toolTarget) ?? null;
 }
@@ -54,7 +54,7 @@ export function decidePreviewSlot(launch: {
   fresh: boolean;
   callerId: string | undefined;
   tool: ResolvedTool;
-  /** The canonical file an `open` resolved. */
+  /** The canonical path an `open` resolved. */
   target: string | undefined;
   /** A pinned Tool with this launch's key; read only for a preview. */
   keyedMatch: () => { id: string } | null;

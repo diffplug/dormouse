@@ -16,9 +16,12 @@ const TEXT = new Set(['txt', 'md', 'mdx', 'log', 'csv', 'tsv', 'json', 'jsonl', 
  * shares both through the `dor/*` alias; this module stays free of Node APIs. */
 export const BUILTIN_FILE_TOOL = 'builtin:file';
 export const VIEW_FILE_ARGV = '__view-file';
-/** The same pair for the folder viewer (docs/specs/dor-tool.md -> Folders and the preview slot). */
+/** The same pair for the folder viewer (docs/specs/dor-tool.md -> Folders). */
 export const BUILTIN_FOLDER_TOOL = 'builtin:folder';
 export const VIEW_FOLDER_ARGV = '__view-folder';
+/** An `open` rule whose pattern ends in this suffix (U+1F4C1) matches only
+ * directories, tested as their names suffixed with it. */
+export const FOLDER_MATCH_SUFFIX = '.📁';
 
 export function fileViewerFormat(path: string): { mime: string; text: boolean } | null {
   const name = path.replace(/\\/g, '/').split('/').pop()!.toLowerCase();

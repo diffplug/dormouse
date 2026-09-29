@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createToolHost } from './tool-host';
 
 let root: string;
@@ -55,7 +55,7 @@ it.skipIf(process.platform === 'win32')('keys symlink aliases on the same canoni
   expect(second).toEqual(first);
 });
 
-it.each(['https://example.com/file.md', 'file:///etc/passwd', 'surface:3', 'docs', 'missing.md'])('rejects %s as a local regular-file target', async target => {
+it.each(['https://example.com/file.md', 'file:///etc/passwd', 'surface:3', 'missing.md'])('rejects %s as a local target', async target => {
   expect(await host().handle({ op: 'open', target, cwd: root })).toMatchObject({ status: 'error' });
 });
 
@@ -155,4 +155,77 @@ it('reports the canonical target an open resolved, for the preview slot, and non
   const named = await host().handle({ op: 'lookup', name: 'markdown', cwd: root, args: [spelled], global: true });
   expect(named).toMatchObject({ status: 'ok', run: ['markdown', target] });
   expect(named).not.toHaveProperty('target');
+});
+
+describe('folders', () => {
+  const folderConfig = (...rules: string[]) => `tools:
+  browse:
+    run: [browse, $TARGET]
+  quick:
+    run: [quick, $TARGET]
+  viewer:
+    run: [view, $TARGET]
+open:
+${rules.map(rule => `  - ${rule}\n`).join('')}`;
+  const open = (target: string, extra: { tool?: string; preview?: boolean; cwd?: string } = {}) =>
+    host().handle({ op: 'open', target, cwd: root, ...extra });
+
+  it('matches a folder rule against the name and both path forms, suffixed', async () => {
+    const docs = join(root, 'docs');
+    await writeConfig(folderConfig("{match: 'docs.📁', tool: browse}"));
+    expect(await open('docs')).toMatchObject({ status: 'ok', name: 'browse', run: ['browse', docs], key: null, target: docs });
+    await mkdir(join(root, 'docs', 'sub'));
+    await writeConfig(folderConfig("{match: 'docs/sub.📁', tool: browse}"));
+    expect(await open(join(root, 'docs', 'sub'))).toMatchObject({ status: 'ok', name: 'browse' });
+    await mkdir(join(root, 'work'));
+    await writeConfig(folderConfig(`{match: '${docs.replace(/\\/g, '/')}.📁', tool: browse}`));
+    expect(await open('../docs', { cwd: join(root, 'work') })).toMatchObject({ status: 'ok', name: 'browse' });
+  });
+
+  it('never lets a file rule capture a folder, or a folder rule a file', async () => {
+    await writeConfig(folderConfig("{match: '*', tool: viewer}", "{match: '**', tool: viewer}", "{match: '**/*', tool: viewer}"));
+    expect(await open('docs')).toMatchObject({ status: 'ok', name: 'folder', scope: 'builtin' });
+    const named = join(root, 'x.📁');
+    await writeFile(named, 'a file');
+    await writeConfig(folderConfig("{match: '*.📁', tool: browse}", "{match: '**/*.📁', tool: browse}", "{match: '*', tool: viewer}"));
+    expect(await open('x.📁')).toMatchObject({ status: 'ok', name: 'viewer', run: ['view', named] });
+  });
+
+  it('follows the dotfile rule: *.📁 skips a dot-directory, .*.📁 names it', async () => {
+    const config = join(root, '.config');
+    await mkdir(config);
+    await writeConfig(folderConfig("{match: '*.📁', tool: browse}"));
+    expect(await open('.config')).toMatchObject({ status: 'ok', name: 'folder', scope: 'builtin' });
+    expect(await open('docs')).toMatchObject({ status: 'ok', name: 'browse' });
+    await writeConfig(folderConfig("{match: '.*.📁', tool: browse}"));
+    expect(await open('.config')).toMatchObject({ status: 'ok', name: 'browse', run: ['browse', config] });
+  });
+
+  it.each(['no rule', 'builtin:folder'] as const)('opens the built-in folder viewer by %s', async selection => {
+    const docs = join(root, 'docs');
+    if (selection === 'builtin:folder') await writeConfig(folderConfig("{match: '*.📁', tool: 'builtin:folder'}"));
+    expect(await open('docs')).toEqual({
+      status: 'ok', projectRoot: root, path: '<built-in>', name: 'folder', scope: 'builtin',
+      run: ['dor', '__view-folder', docs], key: [docs], render: 'iframe', port: 'announced', target: docs, warnings: [],
+    });
+    expect(await open('docs', { tool: 'builtin:folder' })).toMatchObject({ status: 'ok', scope: 'builtin', name: 'folder' });
+  });
+
+  it('refuses the built-in handler of the other kind, naming the one that fits', async () => {
+    expect(await open('docs', { tool: 'builtin:file' })).toEqual({ status: 'error', message: "builtin:file cannot open the folder 'docs'; use builtin:folder" });
+    expect(await open('docs/README.md', { tool: 'builtin:folder' }))
+      .toEqual({ status: 'error', message: "builtin:folder cannot open the file 'docs/README.md'; use builtin:file" });
+  });
+
+  it('uses a rule\'s preview handler only for a preview, and never over --tool', async () => {
+    const docs = join(root, 'docs');
+    await writeConfig(folderConfig("{match: '*.📁', tool: browse, preview: quick}", "{match: '*.md', tool: viewer, preview: 'builtin:file'}"));
+    expect(await open('docs')).toMatchObject({ status: 'ok', name: 'browse', run: ['browse', docs] });
+    expect(await open('docs', { preview: true })).toMatchObject({ status: 'ok', name: 'quick', run: ['quick', docs] });
+    expect(await open('docs', { preview: true, tool: 'browse' })).toMatchObject({ status: 'ok', name: 'browse' });
+    expect(await open('docs/README.md')).toMatchObject({ status: 'ok', name: 'viewer' });
+    expect(await open('docs/README.md', { preview: true })).toMatchObject({ status: 'ok', scope: 'builtin', name: 'file' });
+    await writeConfig(folderConfig("{match: '*.📁', tool: browse}"));
+    expect(await open('docs', { preview: true })).toMatchObject({ status: 'ok', name: 'browse' });
+  });
 });

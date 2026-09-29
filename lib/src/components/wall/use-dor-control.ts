@@ -1096,7 +1096,7 @@ export function useDorControl({
             return;
           }
           const lookup = await platform.toolControl(opening
-            ? { op: 'open', target: openFile, cwd, tool: stringParam(params.tool) }
+            ? { op: 'open', target: openFile, cwd, tool: stringParam(params.tool), ...(previewSignal ? { preview: true } : {}) }
             : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable() || answeredSuperseded()) return;
           switch (lookup.status) {
