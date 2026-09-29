@@ -16,16 +16,19 @@ import type {
 } from 'dor/commands/types';
 import { hasBrowser, hasTerminal, PREVIEW_SUPERSEDED_ERROR } from 'dor/commands/types';
 import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
-import type { OpenPort } from '../../lib/platform/types';
+import type { OpenPort, PtyDataDetail } from '../../lib/platform/types';
 import type { ToolKeyScope, ToolRender } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
+import { viewerTitle } from 'dor/file-viewer-format';
 import {
   getDefaultShellOpts,
   getTerminalInstance,
   getTerminalPaneState,
   getTerminalShellKind,
   isPaneOscDriven,
+  subscribeToTerminalPaneState,
 } from '../../lib/terminal-registry';
+import { stripTerminalControls } from '../../lib/terminal-controls';
 import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../../lib/terminal-state';
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getHelper } from '../../lib/helper-terminal';
@@ -63,7 +66,7 @@ import {
   type ToolPending,
 } from './browser-surface';
 import { decidePreviewSlot, retargetToolLeaf, type PreviewSlotPin } from './preview-slot';
-import { beginSlotSwitch, targetLabel } from './preview-transition';
+import { beginSlotSwitch } from './preview-transition';
 import { commitPreviewTransition, endPreviewTransition } from '../../lib/preview-transition-store';
 import { retireToolRun } from './use-tool-serving';
 
@@ -359,6 +362,49 @@ export function waitForNewToolCommand(id: string, command: string, cwd: string, 
   return waitForTerminalState(id, state => surfaceRunsCommand(state, command, cwd)
     || completedCommandMatches(state, command, cwd),
   COMMAND_START_TIMEOUT_MS, signal);
+}
+
+/** A terminal-only Tool is ready once its output has been quiet this long. */
+export const PREVIEW_OUTPUT_QUIET_MS = 250;
+
+/**
+ * Call `onReady` when the command just typed into `id` (at its prompt when this
+ * starts) has finished, or has printed visible text and then been quiet for
+ * `PREVIEW_OUTPUT_QUIET_MS` while `terminalFace` holds: a preview slot switch's
+ * terminal ready signal (docs/specs/dor-tool.md -> Switching the slot). Text is
+ * visible when something other than controls, OSC payloads, whitespace, and the
+ * echo of `command` remains: a built-in viewer prints only OSC, and the echo can
+ * share the chunk that starts the command. Returns its stop.
+ */
+export function watchTerminalReady(
+  id: string,
+  command: string,
+  terminalFace: () => boolean,
+  onReady: () => void,
+): () => void {
+  const platform = getPlatform();
+  const before = getTerminalPaneState(id).lastCommand?.id ?? null;
+  const echo = command.replace(/\s+/g, '');
+  let quiet: ReturnType<typeof setTimeout> | undefined;
+  const onData = (detail: PtyDataDetail) => {
+    if (detail.id !== id || getTerminalPaneState(id).currentCommand === null) return;
+    const text = stripTerminalControls(detail.textData ?? detail.data).replace(/[\s\p{Cc}]+/gu, '');
+    if (text.replace(echo, '') === '') return;
+    clearTimeout(quiet);
+    quiet = setTimeout(() => { if (terminalFace()) onReady(); }, PREVIEW_OUTPUT_QUIET_MS);
+  };
+  const onState = (changed?: string) => {
+    if (changed !== undefined && changed !== id) return;
+    const state = getTerminalPaneState(id);
+    if (state.currentCommand === null && (state.lastCommand?.id ?? null) !== before) onReady();
+  };
+  platform.onPtyData(onData);
+  const unsubscribe = subscribeToTerminalPaneState(onState);
+  return () => {
+    clearTimeout(quiet);
+    platform.offPtyData(onData);
+    unsubscribe();
+  };
 }
 
 const RESTART_CANCELLED: ParseResult<undefined> = { ok: false, message: 'restart was cancelled' };
@@ -812,7 +858,7 @@ export function useDorControl({
   const beginPreviewSwitch = useCallback((callerId: string | undefined): { id: string; token: number } | null => {
     const slot = findSurfaceByParams(isPreviewSlotParams);
     if (!slot || slot.minimized || slot.id === callerId) return null;
-    const token = beginSlotSwitch(slot.id, () => lath.getMeta(slot.id));
+    const token = beginSlotSwitch(slot.id, () => lath.getMeta(slot.id)?.params);
     return token === null ? null : { id: slot.id, token };
   }, [findSurfaceByParams, lath]);
   // Slot id -> the run a retarget interrupted and never replaced, because a
@@ -993,17 +1039,12 @@ export function useDorControl({
       // waits there or while it interrupts the slot.
       const previewSignal = booleanParam(params.preview) ? supersedePreviews(detail.signal) : null;
       // Acknowledged at once, before lookup: the slot holds what it shows as a
-      // ghost. This request's retarget commits the switch; any other answer
-      // ends it, which is a no-op once a newer preview has taken it over
-      // (docs/specs/dor-tool.md -> Switching the slot).
+      // ghost. This request's retarget commits the switch; anything else ends
+      // it, which is a no-op once it has committed or a newer preview has
+      // taken it over (docs/specs/dor-tool.md -> Switching the slot).
       const slotSwitch = previewSignal ? beginPreviewSwitch(detail.surfaceId) : null;
-      let switchCommitted = false;
       const settleSwitch = () => {
-        if (slotSwitch && !switchCommitted) endPreviewTransition(slotSwitch.id, slotSwitch.token);
-      };
-      const respond: DorControlRequest['respond'] = (response) => {
-        settleSwitch();
-        detail.respond(response);
+        if (slotSwitch) endPreviewTransition(slotSwitch.id, slotSwitch.token);
       };
       // Serialize every tool request behind the last one. Each `dor`
       // invocation is its own socket connection, so two handlers otherwise
@@ -1016,20 +1057,20 @@ export function useDorControl({
           : isClosingWorkspace() ? 'this workspace is closing' : null;
         const unavailable = () => {
           const error = detail.signal?.aborted ? 'tool launch cancelled' : workspaceGone();
-          if (error) respond({ ok: false, error });
+          if (error) detail.respond({ ok: false, error });
           return error !== null;
         };
         if (unavailable()) return;
         const cwd = stringParam(params.cwd)?.trim();
         if (!cwd) {
-          respond({ ok: false, error: 'cwd is required' });
+          detail.respond({ ok: false, error: 'cwd is required' });
           return;
         }
         let toolName = stringParam(params.name)?.trim();
         const openFile = stringParam(params.file);
         const opening = openFile !== undefined;
         if (opening && (params.name !== undefined || params.command !== undefined || params.args !== undefined)) {
-          respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
+          detail.respond({ ok: false, error: 'open accepts a file and optional tool, not a command' });
           return;
         }
         let command: string;
@@ -1049,14 +1090,14 @@ export function useDorControl({
         /** Approval and spawn both require an OSC 633-integrated shell. */
         const refuseCmdShell = (): boolean => {
           if (!toolShell || shellCommandKind(toolShell, PLATFORM_STRING) !== 'cmd') return false;
-          respond({ ok: false, error: missingIntegrationError(toolShell) });
+          detail.respond({ ok: false, error: missingIntegrationError(toolShell) });
           return true;
         };
         // `key` and `warnings` are read when called, after the lookup fills them.
         const respondTool = (
           status: ToolSurfaceResponse['status'],
           surface: { surfaceId: string; surfaceRef?: string; command: string; cwd: string; minimized: boolean },
-        ) => respond({
+        ) => detail.respond({
           ok: true,
           result: {
             status,
@@ -1108,7 +1149,7 @@ export function useDorControl({
           if (previewSignal?.aborted !== true || detail.signal?.aborted) return false;
           const slot = findPreviewSlot();
           if (slot) respondStanding('superseded', slot.id, !slot.minimized);
-          else respond({ ok: false, error: PREVIEW_SUPERSEDED_ERROR });
+          else detail.respond({ ok: false, error: PREVIEW_SUPERSEDED_ERROR });
           return true;
         };
         if (answeredSuperseded()) return;
@@ -1121,7 +1162,7 @@ export function useDorControl({
           // through `this`.
           const platform = getPlatform();
           if (!platform.toolControl) {
-            respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
+            detail.respond({ ok: false, error: 'this host cannot read a dormouse.yml; use `dor tool -- <command>`' });
             return;
           }
           const lookup = await platform.toolControl(opening
@@ -1136,7 +1177,7 @@ export function useDorControl({
             case 'browser-config':
             case 'list':
               // Only the ops that ask for these produce them; a lookup never does.
-              respond({ ok: false, error: 'unexpected tool host response' });
+              detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
             case 'ok':
               toolRun = lookup.run;
@@ -1154,10 +1195,10 @@ export function useDorControl({
               openTarget = lookup.target;
               break;
             case 'no-file':
-              respond({ ok: false, error: `no dormouse.yml found in '${cwd}' or any parent directory` });
+              detail.respond({ ok: false, error: `no dormouse.yml found in '${cwd}' or any parent directory` });
               return;
             case 'unknown-tool':
-              respond({
+              detail.respond({
                 ok: false,
                 error: lookup.names.length > 0
                   ? `no tool '${toolName}' in ${lookup.path} (has: ${lookup.names.join(', ')})`
@@ -1235,7 +1276,7 @@ export function useDorControl({
                 }),
               });
               if (!pending.ok) {
-                respond({ ok: false, error: pending.message });
+                detail.respond({ ok: false, error: pending.message });
                 return;
               }
               respondTool('pending', {
@@ -1248,18 +1289,18 @@ export function useDorControl({
               return;
             }
             default:
-              respond({ ok: false, error: lookup.message });
+              detail.respond({ ok: false, error: lookup.message });
               return;
           }
         } else {
           const argv = stringArrayParam(params.command);
           if (argv?.some(hasShellInputControls)) {
-            respond({ ok: false, error: 'tool arguments cannot contain terminal control characters' });
+            detail.respond({ ok: false, error: 'tool arguments cannot contain terminal control characters' });
             return;
           }
           command = dorCommandString(argv) ?? '';
           if (!command) {
-            respond({ ok: false, error: 'command cannot be empty' });
+            detail.respond({ ok: false, error: 'command cannot be empty' });
             return;
           }
           toolRun = argv!;
@@ -1310,12 +1351,12 @@ export function useDorControl({
           }
           if (answeredSuperseded()) return true;
           if (!interrupted.ok) {
-            respond({ ok: false, error: `surface '${surfaceRefForId(slotId)}' ${interrupted.message}` });
+            detail.respond({ ok: false, error: `surface '${surfaceRefForId(slotId)}' ${interrupted.message}` });
             return true;
           }
           const gone = workspaceGone();
           if (gone) {
-            respond({ ok: false, error: gone });
+            detail.respond({ ok: false, error: gone });
             return true;
           }
           if (!previous || !isTargetable(slotId)) return false;
@@ -1324,10 +1365,9 @@ export function useDorControl({
           if (slotSwitch?.id === slotId) {
             // The header names the new target at once, unless the user named the slot.
             const renamed = !!getTerminalPaneState(slotId).titleCandidates.user?.title.trim();
-            switchCommitted = commitPreviewTransition(slotId, slotSwitch.token, {
-              label: openTarget === undefined || renamed ? null : targetLabel(openTarget),
-              command: slotCommand,
-              terminalFace: () => toolFace(lath.getMeta(slotId)?.params) === 'terminal',
+            commitPreviewTransition(slotId, slotSwitch.token, {
+              label: openTarget === undefined || renamed ? null : viewerTitle(openTarget),
+              arm: ready => watchTerminalReady(slotId, slotCommand, () => toolFace(lath.getMeta(slotId)?.params) === 'terminal', ready),
             });
           }
           retargetToolLeaf(lath, slotId, { title: toolName ?? slotCommand, identity: { ...identity, command: slotCommand } }, pin ? previewSlot.pin : undefined);
@@ -1373,12 +1413,12 @@ export function useDorControl({
         }
         if (decision.kind === 'retarget') {
           if (await retargetPreviewSlot(decision.id, decision.rerun ? 'adopted' : 'retargeted')) return;
-          // Kept or gone meanwhile: the launch goes elsewhere, which can wait
-          // on a new shell's integration.
-          settleSwitch();
         } else if (decision.pin) {
           previewSlot.pin(decision.pin);
         }
+        // The slot is not retargeted: the launch goes elsewhere, which can
+        // wait on a new shell's integration or answer and keep waiting.
+        settleSwitch();
 
         // Spawn-time dedupe, and only for a tool that was given an identity
         // (docs/specs/dor-tool.md -> Identity and dedupe). A preview's pinned
@@ -1409,7 +1449,7 @@ export function useDorControl({
                 // invocation alone, and there is no survivor to reveal — the
                 // user is sitting in it. Say so instead of reporting a tool
                 // that is not running as `existing`.
-                respond({
+                detail.respond({
                   ok: false,
                   error: `surface '${surfaceRefForId(match.id)}' is this tool's own pane and its command is not running; re-run it by typing the invocation alone at its prompt`,
                 });
@@ -1433,7 +1473,7 @@ export function useDorControl({
             if (idle) {
               const restarted = await restartSurfaceInPlace(match.id, matchedCommand, matchedCwd, detail.signal, { acceptCompletedRun: true });
               if (!restarted.ok) {
-                respond({
+                detail.respond({
                   ok: false,
                   error: `surface '${surfaceRefForId(match.id)}' ${restarted.message}`,
                 });
@@ -1498,7 +1538,7 @@ export function useDorControl({
           leafMeta: toolLeafMeta(toolName ?? command, previewSignal ? { ...toolParams, toolPreview: true } : toolParams),
         });
         if (!created.ok) {
-          respond({ ok: false, error: created.message });
+          detail.respond({ ok: false, error: created.message });
           return;
         }
         const toolIntegrated = await waitForTerminalState(
@@ -1509,7 +1549,7 @@ export function useDorControl({
         );
         if (detail.signal?.aborted || toolIntegrated !== 'ready') {
           const refused = await closeSurface(created.value.id);
-          respond({ ok: false, error: refused ?? (detail.signal?.aborted ? 'tool launch cancelled' : missingIntegrationError(toolShell)) });
+          detail.respond({ ok: false, error: refused ?? (detail.signal?.aborted ? 'tool launch cancelled' : missingIntegrationError(toolShell)) });
           return;
         }
         respondTool('created', {

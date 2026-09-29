@@ -1,3 +1,4 @@
+import { isHelperSession } from '../../lib/terminal-store';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
@@ -36,9 +37,10 @@ import {
   buildAppTitleResolver,
   createTerminalPaneState,
   COMMAND_FAIL_GLYPH,
+  deriveHeader,
+  resolveDisplayPrimary,
 } from '../../lib/terminal-state';
-import { useHeldHeader } from './preview-transition';
-import { headerPeerStates, terminalHeaderLabel } from './terminal-header-label';
+import { useHeldWhile, usePreviewSlotView } from './preview-transition';
 import {
   TerminalContextContext,
   ModeContext,
@@ -94,15 +96,29 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const actions = useContext(WallActionsContext);
   const activity = activityStates.get(id) ?? DEFAULT_ACTIVITY_STATE;
   const paneState = terminalStates.get(id) ?? createTerminalPaneState();
-  const allPaneStates = useMemo(() => headerPeerStates(terminalStates), [terminalStates]);
+  const allPaneStates = useMemo(() => [...terminalStates].filter(([surfaceId]) => !isHelperSession(surfaceId)).map(([, state]) => state), [terminalStates]);
+  const visiblePaneStates = allPaneStates.length > 0 ? allPaneStates : [paneState];
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
     [terminalStates, activityStates],
   );
-  // A preview slot switch on this face holds the label it showed
-  // (`docs/specs/layout.md` -> Pane header).
-  const held = useHeldHeader(id, 'terminal');
-  const label = held ?? terminalHeaderLabel(paneState, allPaneStates, appTitleForPane, title);
+  const derivedHeader = deriveHeader(paneState, visiblePaneStates, { appTitleForPane });
+  const displayTitle = resolveDisplayPrimary(derivedHeader.primary, title);
+  // The failure glyph rides at the end of the title string (so tabs/OS titles
+  // carry it too). `lastCommandFailed` tells us authoritatively that it's there,
+  // so we can color it red and strip it from the editing/rename base without
+  // guessing from the string (a user title ending in "✗" would fool a match).
+  const showsFailGlyph = derivedHeader.lastCommandFailed === true;
+  // A preview slot switch on this face holds the label it showed, then names
+  // the new target once it commits (`docs/specs/layout.md` -> Pane header).
+  const { transition } = usePreviewSlotView(id);
+  const holding = transition?.ghost.kind === 'terminal';
+  const heldLabel = useHeldWhile({
+    primary: showsFailGlyph ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length) : displayTitle,
+    secondary: derivedHeader.secondary ?? null,
+    failed: showsFailGlyph,
+  }, holding);
+  const label = holding && transition.label !== null ? { primary: transition.label, secondary: null, failed: false } : heldLabel;
   const inOverride = mouseOverride !== 'off';
   const mouseIconTooltip: string | null = mouseOverride === 'permanent'
     ? "You're overriding the TUI's mouse capture. Click to restore."

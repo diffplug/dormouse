@@ -154,7 +154,8 @@ describe('SurfacePaneHeader — preview slot', () => {
       const address = () => container.querySelector<HTMLElement>('[role="button"].italic');
       const shown = chip();
       expect(shown?.textContent).toBe('a.md:5173');
-      const token = beginSlotSwitch(id, () => ({ params: serving, title: 'viewer' }))!;
+      let token!: number;
+      act(() => { token = beginSlotSwitch(id, () => serving)!; });
       // Retired: the browser re-registers empty, and the slot has no URL.
       act(() => {
         registration.dispose();
@@ -165,7 +166,7 @@ describe('SurfacePaneHeader — preview slot', () => {
       expect(chip()?.textContent).toBe('a.md:5173');
       expect(address()?.textContent).toBe('/app');
       expect(address()?.title).toBe(`Preview — ${CHROME.title}`);
-      act(() => { commitPreviewTransition(id, token, { label: 'b.md', command: 'view b.md', terminalFace: () => false }); });
+      act(() => { commitPreviewTransition(id, token, { label: 'b.md', arm: () => () => {} }); });
       expect(chip()).toBe(shown);
       expect(chip()?.textContent).toBe('b.md:5173');
       expect(address()?.textContent).toBe('/app');
@@ -188,13 +189,15 @@ describe('SurfacePaneHeader — preview slot', () => {
       const label = () => container.querySelector(`[data-pane-title-for="${id}"]`)?.textContent;
       const shown = label();
       expect(shown).toContain('less a.md');
-      const token = beginSlotSwitch(id, () => ({ params, title: 'viewer' }))!;
+      let token!: number;
+      act(() => { token = beginSlotSwitch(id, () => params)!; });
       act(() => applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 130 }, { type: 'promptStart' }]));
       expect(label()).toBe(shown);
-      act(() => { commitPreviewTransition(id, token, { label: 'b.md', command: 'less b.md', terminalFace: () => true }); });
+      act(() => { commitPreviewTransition(id, token, { label: 'b.md', arm: () => () => {} }); });
       expect(label()).toBe('b.md');
       act(() => resetPreviewTransitions());
-      expect(label()).not.toBe('b.md');
+      // Derived live again: neither the held label nor the committed name.
+      expect([shown, 'b.md']).not.toContain(label());
     } finally {
       removeTerminalPaneState(id);
     }

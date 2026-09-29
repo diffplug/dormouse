@@ -22,7 +22,8 @@ import { getExternalLinkConfirmationSnapshot } from '../../lib/external-link-con
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import type { LathNode } from '../../lib/lath/model';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
-import { PREVIEW_OUTPUT_QUIET_MS, PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import { PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import { PREVIEW_OUTPUT_QUIET_MS } from './use-dor-control';
 import { setDevServerResolution } from './agent-browser-ports';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -803,6 +804,25 @@ describe('a switching slot', () => {
     act(() => returnToPrompt('slot'));
     await waitUntil(() => leafCount() === 3);
     const ghostsWhileWaiting = inSlot('.preview-ghost-static').length;
+    integrated = true;
+    const created = newLeaf();
+    startTool(created, 'view /repo/b.md');
+    expect(await answer(respond)).toMatchObject({ status: 'created', surfaceId: created });
+    expect(ghostsWhileWaiting).toBe(0);
+  });
+
+  it('ends the hold once the slot is kept during its lookup, before the new slot answers', async () => {
+    let integrated = false;
+    vi.mocked(terminalRegistry.isPaneOscDriven).mockImplementation(id => id === 'pane-a' || id === 'slot' || integrated);
+    const toolControl = await mountServingSlot();
+    const lookup = Promise.withResolvers<void>();
+    const answerLookup = toolControl.getMockImplementation()!;
+    toolControl.mockImplementationOnce(async (call) => { await lookup.promise; return answerLookup(call); });
+    const respond = await request({ file: 'b.md', preview: true });
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]')!.click());
+    await act(async () => lookup.resolve());
+    await waitUntil(() => leafCount() === 3);
+    const ghostsWhileWaiting = inSlot('.preview-ghost').length;
     integrated = true;
     const created = newLeaf();
     startTool(created, 'view /repo/b.md');

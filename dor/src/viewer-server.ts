@@ -1,11 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { basename, isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, relative, sep } from 'node:path';
+import { CONTROLS, viewerTitle } from './file-viewer-format.js';
 import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
 
 const TEXT = 'text/plain; charset=utf-8';
-/** C0, DEL, and C1 controls. */
-const CONTROLS = /[\x00-\x1f\x7f-\x9f]/;
 const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 
 /** `s` as HTML text or a quoted attribute value. */
@@ -86,13 +85,6 @@ export async function startCapabilityViewer({ csp, post = false, chunked = false
       server.closeAllConnections();
     }),
   };
-}
-
-/** The Session title naming a viewer's canonical `target`: its basename, or
- * the whole path for a filesystem root. Controls are stripped, since a file
- * name can carry an OSC terminator; the terminal parser bounds its length. */
-export function viewerTitle(target: string): string {
-  return Array.from(basename(target) || target).filter(c => !CONTROLS.test(c)).join('');
 }
 
 /** Stops `viewer` on SIGINT or SIGTERM, and returns what the `dor __view-*`

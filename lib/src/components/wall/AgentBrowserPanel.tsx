@@ -17,7 +17,6 @@ import {
 // park delay from here even though it now lives on the controller.
 export { HIDDEN_PARK_DELAY_MS } from './agent-browser-surface-controller';
 import type { PaneProps } from './pane-props';
-import { SCREENCAST_CANVAS_ATTRIBUTE } from './preview-transition';
 import { usePaneChrome } from './use-pane-chrome';
 import { useSurfaceVisibility } from './use-surface-visibility';
 import {
@@ -413,8 +412,6 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
             — just hidden under the stub while a headed window renders instead. */}
         <canvas
           ref={canvasRef}
-          // A preview slot switch snapshots it (`capturePreviewGhost`).
-          {...{ [SCREENCAST_CANVAS_ATTRIBUTE]: id }}
           className={clsx('block max-h-full max-w-full select-none', (!hasFrame || poppedOut) && 'hidden')}
           onMouseDown={onCanvasMouseDown}
           onMouseUp={onCanvasMouseUp}

@@ -50,7 +50,7 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 **Must mark the Workspace's preview slot with an italic derived label in its Pane header and Door** (a serving Tool's dev-server chip label and address), naming it Preview in the label's tooltip and the Door's accessible name, **and a Preview pill whose click pins the slot** ("Keep open"). Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
 
-**Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face, dev-server chip, address, and page-title tooltip stay until the new view is ready, the chip never unmounting. The label keeps its name until the retarget, then shows the new target's basename unless the user named the slot; derivation resumes once ready.
+**Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face, dev-server chip, address, and page-title tooltip stay until the new view is ready, the chip never unmounting. The label keeps its name until the retarget, then shows the new target's basename as a built-in viewer titles it, unless the user named the slot; derivation resumes once ready.
 
 A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold begins a Lath pane drag**; below the threshold the header's own click behavior stands. It uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, the shared terminal top radius from `lib/src/components/design.tsx`, and the `--color-header-active-*` / `--color-header-inactive-*` token pairs (VSCode file-tree list colors).
 
@@ -60,7 +60,7 @@ Elements left to right: derived label; Preview pill (compact+); TODO pill (compa
 
 The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames/pins; right-click — or `>` in command mode — opens the header context menu.
 
-Source of truth: `useHeldHeader` in `lib/src/components/wall/preview-transition.ts`; `terminalHeaderLabel` in `lib/src/components/wall/terminal-header-label.ts`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`. Tests: `holds the chip and address through a switch` in `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `in its header chip` in `lib/src/components/wall/preview-slot.test.tsx`.
+Source of truth: `useHeldWhile` in `lib/src/components/wall/preview-transition.ts`; `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`. Tests: `holds the chip and address through a switch` in `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `in its header chip` in `lib/src/components/wall/preview-slot.test.tsx`.
 
 #### Header context menu
 

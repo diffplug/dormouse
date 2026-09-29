@@ -181,7 +181,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
 
-Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `fileViewerFormat` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`; `viewerTitle` / `announceViewer` in `dor/src/viewer-server.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`, `dor/test/file-viewer.test.mjs`.
+Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `fileViewerFormat` / `viewerTitle` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`; `announceViewer` in `dor/src/viewer-server.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`, `dor/test/file-viewer.test.mjs`.
 
 ## Folders
 
@@ -227,15 +227,15 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 ### Switching the slot
 
-**Must hold a preview's slot as a ghost from the moment `dor open --preview` reaches the renderer**, before its queue or lookup: what a visible slot last fully showed, never a Door's, and never for a preview from the slot's own Session, which never retargets it. The newest preview takes a switch over, keeping its ghost rather than capturing a half-switched pane. Its retarget holds the ghost until the new view is ready; any other answer ends the switch at once, and one taken over ends nothing.
+**Must hold a preview's slot as a ghost from the moment `dor open --preview` reaches the renderer**, before its queue or lookup: what a visible slot last fully showed, never a Door's, and never for a preview from the slot's own Session, which never retargets it. The newest preview takes a switch over, keeping its ghost rather than capturing a half-switched pane. Its retarget holds the ghost until the new view is ready; the switch ends at once when the request places the Tool elsewhere or answers otherwise, and one taken over ends nothing.
 
 - **Never reload or reconnect a ghost.** An iframe keeps its frame on the params it had, the new frame mounting beside it laid out and transparent; a screencast is held as a snapshot of its canvas; a terminal face blurs in place. Under a browser ghost the terminal face shows only as the switch ends (rationale).
-- **Must blur the ghost 2px at once, easing out to 8px over 600ms, and never dim it** (rationale); instant motion (`motionIsInstant`) holds a static 8px blur. The ghost takes no input.
+- **Must blur the ghost 2px at once, easing out to 8px over 600ms, and never dim it** (rationale); instant motion (`motionIsInstant`) holds a static 8px blur. The ghost takes no input; a press on it selects the pane.
 - **Must count the new view ready** a frame after its browser layer's first document load or screencast frame; for a terminal-only Tool, after visible output (neither OSC nor its command's echo) then 250ms of quiet on the terminal face, or once its command finishes, so a failure shows; and 3s after the retarget regardless. It fades in over the ghost in 120ms, at once under instant motion. Session disposal ends a switch.
 
 The header holds as `docs/specs/layout.md` → Pane header states.
 
-Source of truth: `beginPreviewTransition` / `commitPreviewTransition` / `watchTerminalReady` in `lib/src/lib/preview-transition-store.ts`; `beginSlotSwitch` / `capturePreviewGhost` in `lib/src/components/wall/preview-transition.ts`; `beginPreviewSwitch` in `lib/src/components/wall/use-dor-control.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `.preview-ghost` in `lib/src/theme.css`. Tests: `a switching slot` in `lib/src/components/wall/preview-slot.test.tsx`; `lib/src/lib/preview-transition-store.test.ts`; `a preview slot switch` in `lib/src/components/wall/ToolPanel.test.tsx`; `lib/src/components/wall/preview-transition.test.ts`.
+Source of truth: `beginPreviewTransition` / `commitPreviewTransition` / `endPreviewTransition` in `lib/src/lib/preview-transition-store.ts`; `beginSlotSwitch` / `capturePreviewGhost` in `lib/src/components/wall/preview-transition.ts`; `beginPreviewSwitch` / `watchTerminalReady` in `lib/src/components/wall/use-dor-control.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `.preview-ghost` in `lib/src/theme.css`. Tests: `a switching slot` in `lib/src/components/wall/preview-slot.test.tsx`; `lib/src/lib/preview-transition-store.test.ts`; `a preview slot switch` in `lib/src/components/wall/ToolPanel.test.tsx`; `lib/src/components/wall/preview-transition.test.ts`; `lib/src/components/wall/use-dor-control.test.ts`.
 
 ### Terminal links
 

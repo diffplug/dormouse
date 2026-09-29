@@ -32,6 +32,20 @@ export function builtinFor(folder: boolean) {
     : { kind: 'file', argv: VIEW_FILE_ARGV, own: BUILTIN_FILE_TOOL, other: BUILTIN_FOLDER_TOOL } as const;
 }
 
+/** C0, DEL, and C1 controls. */
+export const CONTROLS = /[\x00-\x1f\x7f-\x9f]/;
+
+/** The title naming a viewer's canonical `target`, `/` or `\` separated: its
+ * basename, or the whole path for a filesystem root. Controls are stripped,
+ * since a file name can carry an OSC terminator; the terminal parser bounds its
+ * length. A preview slot switch names its new target with it too. */
+export function viewerTitle(target: string): string {
+  const trimmed = target.replace(/[\\/]+$/, '');
+  const root = /^([A-Za-z]:)?$/.test(trimmed);
+  const title = root ? target : trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1);
+  return Array.from(title).filter(c => !CONTROLS.test(c)).join('');
+}
+
 export function fileViewerFormat(path: string): { mime: string; text: boolean } | null {
   const name = path.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop()! : '';

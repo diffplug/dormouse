@@ -4,52 +4,42 @@
  * is pinned by `lib/src/components/wall/preview-slot.test.tsx`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FakePtyAdapter } from './platform/fake-adapter';
-import { setPlatform } from './platform';
 import {
   beginPreviewTransition,
   clearPreviewTransition,
   commitPreviewTransition,
   endPreviewTransition,
   getPreviewSlotView,
-  PREVIEW_OUTPUT_QUIET_MS,
   PREVIEW_READY_FALLBACK_MS,
   PREVIEW_REVEAL_MS,
   previewLayerReady,
   resetPreviewTransitions,
-  watchTerminalReady,
   type PreviewGhost,
 } from './preview-transition-store';
-import { applyTerminalSemanticEvents, removeTerminalPaneState } from './terminal-state-store';
 
 const ghost: PreviewGhost = { kind: 'layer', generation: 0, params: { url: 'http://localhost:6006/' } };
-const commit = { label: 'b.md', command: 'view b.md', terminalFace: () => false };
-
-let fake: FakePtyAdapter;
+const commit = { label: 'b.md', arm: () => () => {} };
 
 beforeEach(() => {
-  fake = new FakePtyAdapter();
-  setPlatform(fake);
   vi.useFakeTimers();
 });
 
 afterEach(() => {
   resetPreviewTransitions();
-  removeTerminalPaneState('slot');
   vi.useRealTimers();
 });
 
-const begin = (instant = false) => beginPreviewTransition('slot', () => ({ ghost, header: 'held' }), instant)!;
+const begin = (instant = false) => beginPreviewTransition('slot', () => ghost, instant)!;
 const transition = () => getPreviewSlotView('slot').transition;
 
 describe('ownership', () => {
   it('lets a newer preview take over, keeping the ghost, so only it can end or commit', () => {
     const first = begin();
-    const capture = vi.fn(() => ({ ghost: { kind: 'terminal' } as const, header: 'half-switched' }));
+    const capture = vi.fn((): PreviewGhost => ({ kind: 'terminal' }));
     const second = beginPreviewTransition('slot', capture, false)!;
     expect(second).not.toBe(first);
     expect(capture).not.toHaveBeenCalled();
-    expect(transition()).toMatchObject({ token: second, ghost, header: 'held', phase: 'holding' });
+    expect(transition()).toMatchObject({ token: second, ghost, phase: 'holding' });
     // The superseded request's answer.
     endPreviewTransition('slot', first);
     expect(commitPreviewTransition('slot', first, commit)).toBe(false);
@@ -63,12 +53,22 @@ describe('ownership', () => {
     expect(getPreviewSlotView('slot')).toEqual({ generation: 0, transition: null });
   });
 
+  it('ends nothing for its owner once committed', () => {
+    const token = begin();
+    commitPreviewTransition('slot', token, commit);
+    endPreviewTransition('slot', token);
+    expect(transition()?.phase).toBe('committed');
+  });
+
   it('returns a takeover to holding, cancelling the committed switch\'s signals', () => {
     const first = begin();
-    commitPreviewTransition('slot', first, commit);
-    const stopWatching = vi.spyOn(fake, 'offPtyData');
+    const stopWatching = vi.fn();
+    const arm = vi.fn<(ready: () => void) => () => void>(() => stopWatching);
+    commitPreviewTransition('slot', first, { ...commit, arm });
     const second = begin();
     expect(stopWatching).toHaveBeenCalledOnce();
+    // The stopped signal, had it fired anyway, reveals nothing.
+    arm.mock.calls[0][0]();
     expect(transition()).toMatchObject({ token: second, phase: 'holding', label: 'b.md' });
     previewLayerReady('slot', 1);
     vi.advanceTimersByTime(PREVIEW_READY_FALLBACK_MS);
@@ -99,6 +99,14 @@ describe('readiness', () => {
     expect(getPreviewSlotView('slot')).toEqual({ generation: 1, transition: null });
   });
 
+  it('reveals on the signal its committer armed', () => {
+    let ready!: () => void;
+    commitPreviewTransition('slot', begin(), { ...commit, arm: signal => { ready = signal; return () => {}; } });
+    expect(transition()?.phase).toBe('committed');
+    ready();
+    expect(transition()?.phase).toBe('revealing');
+  });
+
   it('swaps at once when motion is instant', () => {
     commitPreviewTransition('slot', begin(true), commit);
     previewLayerReady('slot', 1);
@@ -117,48 +125,5 @@ describe('readiness', () => {
     begin();
     previewLayerReady('slot', 0);
     expect(transition()?.phase).toBe('holding');
-  });
-});
-
-describe('a terminal-only Tool', () => {
-  function watch(terminalFace = true) {
-    fake.spawnPty('slot');
-    applyTerminalSemanticEvents('slot', [{ type: 'commandFinish', exitCode: 130 }]);
-    const onReady = vi.fn();
-    const stop = watchTerminalReady('slot', 'less /repo/b.md', () => terminalFace, onReady);
-    applyTerminalSemanticEvents('slot', [
-      { type: 'commandLine', commandLine: 'less /repo/b.md' }, { type: 'commandStart', source: 'osc633_boundaries' },
-    ]);
-    return { onReady, stop };
-  }
-
-  it('is ready once visible output goes quiet, but not on its echo or OSC alone', () => {
-    const { onReady, stop } = watch();
-    fake.sendOutput('slot', 'less /repo/b.md\r\n\x1b]2;b.md\x07\x1b[?1049h');
-    vi.advanceTimersByTime(PREVIEW_OUTPUT_QUIET_MS);
-    expect(onReady).not.toHaveBeenCalled();
-    fake.sendOutput('slot', '# b\r\n');
-    vi.advanceTimersByTime(PREVIEW_OUTPUT_QUIET_MS - 1);
-    fake.sendOutput('slot', 'more\r\n');
-    vi.advanceTimersByTime(PREVIEW_OUTPUT_QUIET_MS - 1);
-    expect(onReady).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    expect(onReady).toHaveBeenCalledOnce();
-    stop();
-  });
-
-  it('waits on a browser face, however quiet the terminal', () => {
-    const { onReady, stop } = watch(false);
-    fake.sendOutput('slot', 'Serving on :7007\r\n');
-    vi.advanceTimersByTime(PREVIEW_OUTPUT_QUIET_MS);
-    expect(onReady).not.toHaveBeenCalled();
-    stop();
-  });
-
-  it('is ready when its command finishes', () => {
-    const { onReady, stop } = watch();
-    applyTerminalSemanticEvents('slot', [{ type: 'commandFinish', exitCode: 1 }]);
-    expect(onReady).toHaveBeenCalledOnce();
-    stop();
   });
 });

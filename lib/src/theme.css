@@ -155,18 +155,16 @@ body {
 
 /* Preview slot switch (docs/specs/dor-tool.md → "Switching the slot"). The ghost of the
  * slot's last view blurs at once and eases deeper, never dimming; the new view
- * fades in over it. `motionIsInstant` picks the static blur and skips the fade. */
-/* A preview switch's ghost blurs through a backdrop overlay rather than its
- * own `filter`: a filter samples transparent pixels past the pane edge and rims
- * a light page dark, where the backdrop's edges clamp. Isolated, so the overlay
+ * fades in over it. `motionIsInstant` adds `preview-ghost-static`, a static blur,
+ * and skips the fade. The blur is a backdrop overlay rather than the ghost's own
+ * `filter`: a filter samples transparent pixels past the pane edge and rims a
+ * light page dark, where the backdrop's edges clamp. Isolated, so the overlay
  * stays above anything the ghost positions inside it. */
-.preview-ghost,
-.preview-ghost-static {
+.preview-ghost {
   isolation: isolate;
 }
 
-.preview-ghost::after,
-.preview-ghost-static::after {
+.preview-ghost::after {
   content: '';
   position: absolute;
   inset: 0;
@@ -174,10 +172,11 @@ body {
   pointer-events: none;
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
+  animation: preview-ghost-blur 600ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
-.preview-ghost::after {
-  animation: preview-ghost-blur 600ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+.preview-ghost-static::after {
+  animation: none;
 }
 
 .preview-reveal {
@@ -192,11 +191,6 @@ body {
 @keyframes preview-reveal {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .preview-ghost::after { animation: none; }
-  .preview-reveal { animation: none; }
 }
 
 /* TODO dismiss flourish. Sequence across 500ms:

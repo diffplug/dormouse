@@ -8,17 +8,11 @@
  * Every `dor open --preview` owns the transition through a token; a newer one
  * takes it over, keeping the ghost, so an older request's end is a no-op.
  */
-import { getPlatform } from './platform';
-import type { PtyDataDetail } from './platform/types';
-import { stripTerminalControls } from './terminal-controls';
-import { getTerminalPaneState, subscribeToTerminalPaneState } from './terminal-state-store';
 
 /** End a committed switch regardless after this long. */
 export const PREVIEW_READY_FALLBACK_MS = 3_000;
 /** The new view's fade-in over the ghost. */
 export const PREVIEW_REVEAL_MS = 120;
-/** A terminal-only Tool is ready once its output has been quiet this long. */
-export const PREVIEW_OUTPUT_QUIET_MS = 250;
 
 export interface GhostRect { left: number; top: number; width: number; height: number }
 
@@ -27,9 +21,9 @@ export interface GhostRect { left: number; top: number; width: number; height: n
 export type PreviewGhost =
   /** The iframe browser layer of `generation`, kept mounted on these params. */
   | { kind: 'layer'; generation: number; params: Readonly<Record<string, unknown>> }
-  /** A snapshot of a screencast canvas, at its place in the browser half;
+  /** A copy of a screencast canvas's frame, at its place in the browser half;
    *  null when it had no frame to take. */
-  | { kind: 'image'; src: string | null; rect: GhostRect | null }
+  | { kind: 'image'; frame: { canvas: HTMLCanvasElement; rect: GhostRect } | null }
   /** The terminal half itself. */
   | { kind: 'terminal' };
 
@@ -40,9 +34,6 @@ export type PreviewTransitionPhase = 'holding' | 'committed' | 'revealing';
 export interface PreviewTransition {
   readonly token: number;
   readonly ghost: PreviewGhost;
-  /** What the pane header showed at the start; its shape belongs to the
-   *  renderer that captured it. */
-  readonly header: unknown;
   /** The name a committed retarget gave the header; null keeps the held one. */
   readonly label: string | null;
   readonly phase: PreviewTransitionPhase;
@@ -78,12 +69,11 @@ function stop(entry: Entry): void {
   entry.stopWatch = undefined;
 }
 
-function write(id: string, view: PreviewSlotView): Entry {
-  let entry = entries.get(id);
+function write(id: string, view: PreviewSlotView): void {
+  const entry = entries.get(id);
   if (entry) entry.view = view;
-  else entries.set(id, entry = { view });
+  else entries.set(id, { view });
   emit();
-  return entry;
 }
 
 function owned(id: string, token: number): { entry: Entry; transition: PreviewTransition } | null {
@@ -109,7 +99,7 @@ export function subscribeToPreviewTransitions(listener: () => void): () => void 
  */
 export function beginPreviewTransition(
   id: string,
-  capture: () => { ghost: PreviewGhost; header: unknown } | null,
+  capture: () => PreviewGhost | null,
   instant: boolean,
 ): number | null {
   const entry = entries.get(id);
@@ -120,12 +110,12 @@ export function beginPreviewTransition(
     write(id, { ...entry.view, transition: { ...current, token, phase: 'holding' } });
     return token;
   }
-  const captured = capture();
-  if (!captured) return null;
+  const ghost = capture();
+  if (!ghost) return null;
   const token = nextToken++;
   write(id, {
     generation: entry?.view.generation ?? 0,
-    transition: { token, ghost: captured.ghost, header: captured.header, label: null, phase: 'holding', instant },
+    transition: { token, ghost, label: null, phase: 'holding', instant },
   });
   return token;
 }
@@ -133,13 +123,13 @@ export function beginPreviewTransition(
 /**
  * The owner's retarget committed: a new browser generation, the header's new
  * name, and the ready signals armed — the new layer's (`previewLayerReady`),
- * the terminal's (`watchTerminalReady`), and the fallback. False, doing
- * nothing, for a request that no longer owns it.
+ * the committer's own (`arm`, which returns its stop), and the fallback. False,
+ * doing nothing, for a request that no longer owns it.
  */
 export function commitPreviewTransition(
   id: string,
   token: number,
-  commit: { label: string | null; command: string; terminalFace: () => boolean },
+  commit: { label: string | null; arm: (ready: () => void) => () => void },
 ): boolean {
   const current = owned(id, token);
   if (!current) return false;
@@ -150,7 +140,7 @@ export function commitPreviewTransition(
     transition: { ...transition, phase: 'committed', label: commit.label ?? transition.label },
   });
   entry.timer = setTimeout(() => revealPreviewTransition(id, token), PREVIEW_READY_FALLBACK_MS);
-  entry.stopWatch = watchTerminalReady(id, commit.command, commit.terminalFace, () => revealPreviewTransition(id, token));
+  entry.stopWatch = commit.arm(() => revealPreviewTransition(id, token));
   return true;
 }
 
@@ -175,11 +165,11 @@ function revealPreviewTransition(id: string, token: number): void {
   }, PREVIEW_REVEAL_MS);
 }
 
-/** The owner's request ended without committing: unblur now. A request a
- *  newer one took over ends nothing. */
+/** The owner's request ended without committing: unblur now. A committed
+ *  switch, or one a newer request took over, ends nothing. */
 export function endPreviewTransition(id: string, token: number): void {
   const current = owned(id, token);
-  if (!current) return;
+  if (current?.transition.phase !== 'holding') return;
   stop(current.entry);
   write(id, { ...current.entry.view, transition: null });
 }
@@ -198,43 +188,4 @@ export function resetPreviewTransitions(): void {
   for (const entry of entries.values()) stop(entry);
   entries.clear();
   emit();
-}
-
-/**
- * Call `onReady` when the command just typed into `id` (at its prompt when this
- * starts) has finished, or has printed visible text and then been quiet for
- * `PREVIEW_OUTPUT_QUIET_MS` while `terminalFace` holds. Text is visible when
- * something other than controls, OSC payloads, whitespace, and the echo of
- * `command` remains: a built-in viewer prints only OSC, and the echo can share
- * the chunk that starts the command.
- */
-export function watchTerminalReady(
-  id: string,
-  command: string,
-  terminalFace: () => boolean,
-  onReady: () => void,
-): () => void {
-  const platform = getPlatform();
-  const before = getTerminalPaneState(id).lastCommand?.id ?? null;
-  const echo = command.replace(/\s+/g, '');
-  let quiet: ReturnType<typeof setTimeout> | undefined;
-  const onData = (detail: PtyDataDetail) => {
-    if (detail.id !== id || getTerminalPaneState(id).currentCommand === null) return;
-    const text = stripTerminalControls(detail.textData ?? detail.data).replace(/[\s\p{Cc}]+/gu, '');
-    if (text.replace(echo, '') === '') return;
-    clearTimeout(quiet);
-    quiet = setTimeout(() => { if (terminalFace()) onReady(); }, PREVIEW_OUTPUT_QUIET_MS);
-  };
-  const onState = (changed?: string) => {
-    if (changed !== undefined && changed !== id) return;
-    const state = getTerminalPaneState(id);
-    if (state.currentCommand === null && (state.lastCommand?.id ?? null) !== before) onReady();
-  };
-  platform.onPtyData(onData);
-  const unsubscribe = subscribeToTerminalPaneState(onState);
-  return () => {
-    clearTimeout(quiet);
-    platform.offPtyData(onData);
-    unsubscribe();
-  };
 }

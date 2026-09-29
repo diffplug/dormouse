@@ -3,10 +3,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolPanel } from './ToolPanel';
-import { setPlatform } from '../../lib/platform';
-import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
+import * as browserController from './agent-browser-surface-controller';
 import { commitPreviewTransition, PREVIEW_READY_FALLBACK_MS, PREVIEW_REVEAL_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
 import { beginSlotSwitch } from './preview-transition';
+import { WallActionsContext, type WallActions } from './wall-context';
+import { stubWallActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -14,10 +15,10 @@ vi.mock('./TerminalPanel', () => ({
   TerminalPanel: () => <div data-testid="terminal">terminal</div>,
 }));
 vi.mock('./BrowserPanel', () => ({
-  BrowserPanel: ({ id, parked, params, onReady }: { id: string; parked?: boolean; params?: Record<string, unknown>; onReady?: () => void }) => (
+  BrowserPanel: ({ parked, params, onReady }: { parked?: boolean; params?: Record<string, unknown>; onReady?: () => void }) => (
     // A click stands in for the renderer's first paint.
     <div data-testid="browser" data-parked={String(parked === true)} data-url={String(params?.url ?? '')} onClick={() => onReady?.()}>
-      {params?.renderMode === 'agent-browser-screencast' && <canvas data-screencast-canvas-for={id} />}
+      {params?.renderMode === 'agent-browser-screencast' && <canvas />}
       browser
     </div>
   ),
@@ -40,9 +41,10 @@ afterEach(() => {
   container.remove();
 });
 
-function show(params: Record<string, unknown>) {
+function show(params: Record<string, unknown>, actions?: WallActions) {
+  const panel = <ToolPanel id="p1" title="t" params={params} />;
   act(() => {
-    root.render(<ToolPanel id="p1" title="t" params={params} />);
+    root.render(actions ? <WallActionsContext.Provider value={actions}>{panel}</WallActionsContext.Provider> : panel);
   });
 }
 
@@ -188,20 +190,20 @@ describe('a preview slot switch', () => {
   /** Begin on what `params` shows, with motion that is not instant. */
   const begin = (params: Record<string, unknown>) => {
     let token!: number;
-    act(() => { token = beginSlotSwitch('p1', () => ({ params, title: 't' }))!; });
+    act(() => { token = beginSlotSwitch('p1', () => params)!; });
     return token;
   };
   const commit = (token: number) => act(() => {
-    commitPreviewTransition('p1', token, { label: 'b.md', command: 'view b.md', terminalFace: () => true });
+    commitPreviewTransition('p1', token, { label: 'b.md', arm: () => () => {} });
   });
 
   beforeEach(() => {
-    setPlatform(new FakePtyAdapter());
     vi.useFakeTimers();
   });
   afterEach(() => {
     act(() => resetPreviewTransitions());
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('ramps the ghost\'s blur, then fades the new layer in over it', () => {
@@ -258,19 +260,33 @@ describe('a preview slot switch', () => {
     expect(half('browser').style.visibility).toBe('hidden');
   });
 
-  it('holds a screencast as a blurred snapshot of its canvas', () => {
+  it('holds a screencast as a blurred copy of its controller\'s canvas', () => {
     const screencast = { ...serving, renderMode: 'agent-browser-screencast' };
     show(screencast);
     const canvas = container.querySelector('canvas')!;
     Object.assign(canvas, { width: 640, height: 360 });
-    canvas.toDataURL = vi.fn(() => 'data:image/jpeg;base64,AAAA');
     canvas.getBoundingClientRect = () => ({ left: 10, top: 20, width: 320, height: 180 }) as DOMRect;
+    vi.spyOn(browserController, 'getAgentBrowserSurfaceController')
+      .mockImplementation(id => (id === 'p1' ? { frameCanvas: () => canvas } : null) as never);
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as RenderingContext);
     begin(screencast);
-    const img = container.querySelector('img')!;
-    expect(img.getAttribute('src')).toBe('data:image/jpeg;base64,AAAA');
-    expect(img.style.width).toBe('320px');
-    expect(img.parentElement!.className).toContain('preview-ghost');
+    const copy = Array.from(container.querySelectorAll('canvas')).find(candidate => candidate !== canvas)!;
+    expect(drawImage).toHaveBeenCalledWith(canvas, 0, 0);
+    expect(copy.parentElement!.style.width).toBe('320px');
+    expect(copy.parentElement!.parentElement!.className).toContain('preview-ghost');
     // The live screencast is hidden beneath it, not kept as the ghost.
     expect(layerOf(canvas).className).toContain('opacity-0');
+  });
+
+  it('selects the pane on a press over a ghost, which takes no input', () => {
+    const actions = stubWallActions();
+    show(booting, actions);
+    const press = () => act(() => { half('terminal').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    press();
+    expect(actions.onClickPanel).not.toHaveBeenCalled();
+    begin(booting);
+    press();
+    expect(actions.onClickPanel).toHaveBeenCalledExactlyOnceWith('p1');
   });
 });
