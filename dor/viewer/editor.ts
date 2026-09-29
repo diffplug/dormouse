@@ -32,7 +32,7 @@ const error = el('error');
 const state = el('state');
 let editor: monaco.editor.IStandaloneCodeEditor;
 let model: monaco.editor.ITextModel;
-let savedText = '';
+let savedRevision = 0;
 let version = '';
 let saving: Promise<void> | null = null;
 let parentOrigin: string | null = null;
@@ -59,7 +59,7 @@ function fail(reason: unknown) {
 function post(data: Record<string, unknown>) {
   if (parentOrigin) window.parent.postMessage({ __dormouse: 'editor', connection, ...data }, parentOrigin);
 }
-function dirty() { return !!model && model.getValue() !== savedText; }
+function dirty() { return !!model && model.getAlternativeVersionId() !== savedRevision; }
 function report() {
   const changed = dirty();
   saveButton.disabled = !model || !changed || saving !== null;
@@ -75,11 +75,13 @@ function report() {
 async function save() {
   if (saving) return saving;
   if (!dirty()) return;
+  model.pushStackElement(); // Further typing must be undoable back to this save.
   const text = model.getValue();
+  const revision = model.getAlternativeVersionId();
   error.hidden = true;
   saving = request('save', { text, version }).then(result => {
     version = result.version;
-    savedText = text; // A newer edit during the request must stay dirty.
+    savedRevision = revision; // Undo restores this revision; newer edits stay dirty.
   }).finally(() => { saving = null; report(); });
   report();
   return saving;
@@ -109,7 +111,6 @@ function applyTheme() {
 }
 async function load() {
   const source = await request('source');
-  savedText = source.text;
   version = source.version;
   const language = monaco.languages.getLanguages().find(l => l.filenames?.includes(source.name)
     || l.extensions?.some(ext => source.name.toLowerCase().endsWith(ext)))?.id ?? 'plaintext';
@@ -126,7 +127,7 @@ async function load() {
   } else model.setValue(source.text);
   el('language').textContent = language === 'plaintext' ? 'Plain Text' : language;
   el('encoding').textContent = `UTF-8 · ${model.getEOL() === '\r\n' ? 'CRLF' : 'LF'}`;
-  savedText = model.getValue();
+  savedRevision = model.getAlternativeVersionId();
   applyTheme();
   report();
   post({ kind: 'ready', dirty: dirty() });
