@@ -21,6 +21,7 @@ export default defineConfig({
       // `lib/vite.config.ts` and standalone use.
       dor: fileURLToPath(new URL('../dor/src', import.meta.url)),
       'dor-tools-builtin': fileURLToPath(new URL('../dor-tools-builtin/src', import.meta.url)),
+      'dor-tools-lib': fileURLToPath(new URL('../dor-tools-lib/src', import.meta.url)),
     },
   },
   test: {

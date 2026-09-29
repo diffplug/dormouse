@@ -253,6 +253,9 @@ importers:
       dor-lib-common:
         specifier: workspace:*
         version: link:../dor-lib-common
+      dor-tools-lib:
+        specifier: workspace:*
+        version: link:../dor-tools-lib
       monaco-editor:
         specifier: 0.55.1
         version: 0.55.1
@@ -263,6 +266,12 @@ importers:
       esbuild:
         specifier: ^0.28.0
         version: 0.28.2
+      typescript:
+        specifier: ^7.0.0
+        version: 7.0.2
+
+  dor-tools-lib:
+    devDependencies:
       typescript:
         specifier: ^7.0.0
         version: 7.0.2
@@ -363,6 +372,9 @@ importers:
       dor-lib-common:
         specifier: workspace:*
         version: link:../dor-lib-common
+      dor-tools-lib:
+        specifier: workspace:*
+        version: link:../dor-tools-lib
       fflate:
         specifier: 0.8.3
         version: 0.8.3

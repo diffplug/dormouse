@@ -19,12 +19,13 @@
     }
   },
   "scripts": {
-    "prebuild": "pnpm --filter dor-lib-common build",
+    "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter dor-tools-lib build",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.viewer.json && node scripts/build-viewer.mjs",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
     "dor-lib-common": "workspace:*",
+    "dor-tools-lib": "workspace:*",
     "monaco-editor": "0.55.1"
   },
   "devDependencies": {

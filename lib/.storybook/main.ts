@@ -46,6 +46,8 @@ const config: StorybookConfig = {
       dor: path.resolve(here, '..', '..', 'dor', 'src'),
       // Same reason: `Wall` → `IframePanel` names the built-in viewers' formats.
       'dor-tools-builtin': path.resolve(here, '..', '..', 'dor-tools-builtin', 'src'),
+      // And the Tool protocol the terminal parser and `IframePanel` speak.
+      'dor-tools-lib': path.resolve(here, '..', '..', 'dor-tools-lib', 'src'),
       // Same reason: `Wall` → `RemotePairingModalHost` pulls in the remote host
       // modules, which import `remote-lib-common`. Its package `exports` point
       // at a `dist` the Storybook/Argos job never builds, so alias the bare

@@ -36,6 +36,7 @@ The Tool shows the harness in its own pane and prints the command to drive it
 - **`remote-lib-common/`** — Security primitives + remote wire contract shared by `relay`, the Burrow module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
 - **`dor-tools-builtin/`** — The built-in Tools (`builtin:file` viewer and Monaco editor, `builtin:folder`), bundled into `dor`; lib and the hosts import its pure format module.
+- **`dor-tools-lib/`** — The Tool integration protocol (OSC 367 and the iframe save channel) for Tools and their hosts; MIT, no runtime dependencies, private until 1.0.
 - **`canopy/`** — Experimental 3D/WebXR terminal-rendering lab (Storybook-only, not in the production build). Consumes `@diffplug/xterm-addon-webgl-sdf` — the webgl addon from our [xterm.js fork](https://github.com/diffplug/xterm.js) (`sdf` branch).
 
 **Burrow, Client, Relay** — the three remote-control roles — are defined in `docs/specs/glossary.md` -> "Roles". *Host* is reserved for the platform host, the `Host` header, hostnames, and self-hosting; *server* for HTTP servers and dev servers.
@@ -62,6 +63,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/dor-browser.md`** — The browser surface: `BrowserPanel` with swappable `renderMode`, browser chrome, the agent-browser stack, the iframe proxy and CSP boundaries.
 - **`docs/specs/dor-tool.md`** — Dor Tools: the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs, OSC 367 contract, designation, trust, serving, and persistence.
 - **`docs/specs/dor-tools-builtin.md`** — The built-in Tools `builtin:file` (local-file viewer and text editor) and `builtin:folder`: formats, grants, disk saves, listings, and their packaging into `dor`.
+- **`docs/specs/dor-tools-lib.md`** — `dor-tools-lib`, the MIT Tool-protocol package: its license and dependency boundary, entry points, consumers, and the road to publishing 1.0.
 - **`docs/specs/vscode.md`** — VS Code host: webview hosting, webview ↔ Workspace mapping, persistence ordering, theme integration, CSP, the build/dogfood pipeline.
 - **`docs/specs/standalone.md`** — Tauri host: the Rust ↔ Node-sidecar bridge, boot sequence, AppBar, persistence, shutdown ordering, the build/dev workflow.
 - **`docs/specs/auto-update.md`** — Standalone auto-update: check → approved download → install-on-quit, the Baseboard notice, Windows sidecar teardown, per-platform quit behavior.

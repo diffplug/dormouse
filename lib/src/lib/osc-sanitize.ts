@@ -1,8 +1,9 @@
 /**
  * The shared sanitizer for untrusted OSC payload text — OSC 9/99/777
- * notifications, the OSC 367 tool announcement, and the shell-reported command
- * line, all arbitrary process output that reaches UI (`docs/specs/alert.md` ->
- * notification protocols, `docs/specs/terminal-escapes.md`).
+ * notifications and the shell-reported command line, all arbitrary process
+ * output that reaches UI (`docs/specs/alert.md` -> notification protocols,
+ * `docs/specs/terminal-escapes.md`). The OSC 367 parsers in dor-tools-lib carry
+ * their own copy of `sanitizeText`, since that package imports nothing.
  */
 
 /** Clamp by code point, so a truncation cannot split a surrogate pair. */

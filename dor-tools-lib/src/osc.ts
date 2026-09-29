@@ -1,6 +1,7 @@
 /**
  * OSC 367 — the Dor Tool announcement (`docs/specs/dor-tool.md` -> OSC 367).
  * `DOR` on a phone keypad; registered in `docs/specs/terminal-escapes.md`.
+ * A Tool writes these sequences to its terminal; its host parses them.
  *
  * **The announcement never mints a tool.** `port` selects among the ports the
  * scan already sees; an announced port that nothing bound frames nothing.
@@ -10,8 +11,7 @@
  * it is sanitized and size-capped like OSC 9/99/777 (`docs/specs/alert.md`).
  */
 
-import { isRecord } from './is-record';
-import { sanitizeText } from './osc-sanitize';
+import { isRecord, sanitizeText } from './sanitize.js';
 
 /** Cap on the whole payload before parsing. A tool's announcement is a handful
  *  of fields; anything larger is a mistake or an attack, and JSON.parse on
@@ -104,3 +104,29 @@ export function validToolServePath(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 2048 && value.startsWith('/')
     && !value.startsWith('//') && !/[\\\u0000-\u0020\u007f]/.test(value);
 }
+
+export interface ToolState { dirty: boolean }
+
+/** Parse a `state` report; `content` is everything after `367;`. State is
+ * independent of serving metadata. Reject unsupported versions and non-booleans
+ * rather than treating absent or invalid data as clean. */
+export function parseToolState(content: string): ToolState | null {
+  const record = parseToolPayload(content, 'state');
+  return record && record.v === 1 && typeof record.dirty === 'boolean' ? { dirty: record.dirty } : null;
+}
+
+/** The `serve` announcement a Tool writes once its server listens: the port to
+ * frame and, optionally, the same-origin path to open on it. Throws on a value
+ * the host would ignore. */
+export function serveSequence({ port, path }: { port: number; path?: string }): string {
+  if (readPort(port) === null) throw new RangeError(`not a TCP port: ${port}`);
+  if (path !== undefined && !validToolServePath(path)) throw new RangeError(`not a same-origin path: ${JSON.stringify(path)}`);
+  return sequence('serve', path === undefined ? { port, v: 1 } : { port, path, v: 1 });
+}
+
+/** The `state` report a Tool writes whenever its unsaved state changes. */
+export function stateSequence({ dirty }: ToolState): string {
+  return sequence('state', { v: 1, dirty });
+}
+
+const sequence = (verb: string, payload: object) => `\x1b]367;${verb};${JSON.stringify(payload)}\x07`;

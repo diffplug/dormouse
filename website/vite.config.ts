@@ -66,6 +66,8 @@ export default defineConfig(({ mode }) => ({
       dor: path.resolve(import.meta.dirname, "../dor/src"),
       // And the built-in viewers' format registry, which `IframePanel` imports.
       "dor-tools-builtin": path.resolve(import.meta.dirname, "../dor-tools-builtin/src"),
+      // And the Tool protocol, which the terminal parser and `IframePanel` speak.
+      "dor-tools-lib": path.resolve(import.meta.dirname, "../dor-tools-lib/src"),
       "ascii-splash-internal": path.resolve(
         import.meta.dirname,
         "node_modules/ascii-splash/dist",

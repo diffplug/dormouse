@@ -3,6 +3,7 @@ packages:
   - dor
   - dor-lib-common
   - dor-tools-builtin
+  - dor-tools-lib
   - hosted
   - lib
   - relay

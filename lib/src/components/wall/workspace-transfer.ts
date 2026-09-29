@@ -1,7 +1,7 @@
 import { getToolDirty } from '../../lib/tool-dirty-store';
 import type { TransferredTools } from './tool-transfer';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
-import type { ToolAnnounce } from '../../lib/tool-announce';
+import type { ToolAnnounce } from 'dor-tools-lib/osc';
 import { snapshotTerminalState, type TransferredTerminalState } from '../../lib/terminal-state-store';
 import { dismissWorkspaceUi } from '../../lib/workspace-ui-store';
 import type { TerminalGrid } from '../../lib/terminal-transfer';

@@ -191,7 +191,7 @@ as a subtraction rather than as two named subdirectories, which is the shape
 to prefer when you find the next one.
 
 Today the remainder is `lib/`, `relay/`, `remote-lib-common/`, `standalone/`,
-`vscode-ext/`, `dor/`, `dor-lib-common/`, `dor-tools-builtin/`, `canopy/`,
+`vscode-ext/`, `dor/`, `dor-lib-common/`, `dor-tools-builtin/`, `dor-tools-lib/`, `canopy/`,
 `deploy/`, `docs/`, `.impeccable/`, and the root files — but treat that as a description of the
 current tree, not as your scope. Your scope is the remainder.
 

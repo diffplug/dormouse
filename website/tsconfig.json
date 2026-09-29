@@ -16,7 +16,8 @@
       "ascii-splash-internal/*": ["./node_modules/ascii-splash/dist/*"],
       "dormouse-lib/*": ["../lib/src/*"],
       "dor/*": ["../dor/src/*"],
-      "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"]
+      "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"],
+      "dor-tools-lib/*": ["../dor-tools-lib/src/*"]
     },
     "strict": true,
     "noUnusedLocals": true,

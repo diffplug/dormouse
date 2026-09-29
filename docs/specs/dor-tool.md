@@ -1,7 +1,7 @@
 # Dor Tools
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
-> Owns tool designation, configuration, trust workflow, serving, naming, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`; the built-in Tools themselves to `docs/specs/dor-tools-builtin.md`.
+> Owns tool designation, configuration, trust workflow, serving, naming, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`; the built-in Tools themselves to `docs/specs/dor-tools-builtin.md`; the integration library to `docs/specs/dor-tools-lib.md`.
 
 ## Files
 
@@ -284,7 +284,7 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 - Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
 - Reserved: **Never assign an OSC 367 verb beyond `serve`, `state`, and `dehydrate`**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
 
-Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` in `lib/src/lib/tool-announce.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`. Tests: `lib/src/lib/tool-announce.test.ts`, `lib/src/host/remote/sidecar-entry.test.ts`, `vscode-ext/test/message-router.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
+Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` in `dor-tools-lib/src/osc.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`. Tests: `dor-tools-lib/test/osc.test.mjs`, `lib/src/lib/tool-announce.test.ts`, `lib/src/host/remote/sidecar-entry.test.ts`, `vscode-ext/test/message-router.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
 
 ## Unsaved changes
 
@@ -296,22 +296,22 @@ Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/
 
 **Never treat a dirty-state report as a save acknowledgement or permission to reap.** Close handling and the save channel belong to [Closing unsaved Tools](#closing-unsaved-tools).
 
-A Tool writes reports to its terminal output, for example:
+A Tool writes reports to its terminal output (`stateSequence` in `dor-tools-lib/src/osc.ts` builds them), for example:
 
 ```sh
 printf '\033]367;state;{"v":1,"dirty":true}\033\\'
 printf '\033]367;state;{"v":1,"dirty":false}\033\\'
 ```
 
-Source of truth: `parseToolState` in `lib/src/lib/tool-state.ts`; `getToolDirty` / `recordToolDirty` in `lib/src/lib/tool-dirty-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `ToolDirtyIndicator` in `lib/src/components/ToolDirtyIndicator.tsx`. Tests: `lib/src/lib/tool-state.test.ts`, `lib/src/components/wall/SurfacePaneHeader.test.tsx`, `lib/src/components/Baseboard.test.tsx`.
+Source of truth: `parseToolState` in `dor-tools-lib/src/osc.ts`; `getToolDirty` / `recordToolDirty` in `lib/src/lib/tool-dirty-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `ToolDirtyIndicator` in `lib/src/components/ToolDirtyIndicator.tsx`. Tests: `dor-tools-lib/test/osc.test.mjs`, `lib/src/lib/tool-state.test.ts`, `lib/src/components/wall/SurfacePaneHeader.test.tsx`, `lib/src/components/Baseboard.test.tsx`.
 
 ### Closing unsaved Tools
 
-The iframe save channel, connected only to a `builtin:file` frame (`docs/specs/dor-tools-builtin.md` → Editing files), binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure.
+The iframe save channel, connected only to a `builtin:file` frame (`docs/specs/dor-tools-builtin.md` → Editing files), binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure. **Must ignore a save-channel message naming another `dorTool` version or malformed for its kind**; a save error reaches the prompt control-stripped and bounded.
 
 **Must offer Save / Discard / Cancel before closing dirty Tools through Dormouse**: Pane closure, standalone window/app teardown, iframe reload or renderer change, and Workspace movement to another Window; **a Workspace close asks once, before any Surface closes.** Discard authorizes that action without declaring the edit clean; Save proceeds only after successful acknowledgement and no newer edits. A Tool without a connected save handler must be saved in its own UI or discarded. **Never prompt for a command close or move**: `dor kill`, `dor workspace close` (even `--force`), and cross-window `dor workspace move` (even `--dangerously-destroy-iframe-page-state`) refuse a dirty Tool. VS Code webview/host closure, forced termination, and crashes cannot be vetoed; drafts are not persisted.
 
-Source of truth: `confirmToolEditorsClose` / `connectToolEditor` in `lib/src/lib/tool-editor.ts`; `IframePanel` in `lib/src/components/wall/IframePanel.tsx`; `ToolEditorCloseModalHost` in `lib/src/components/ToolEditorCloseModalHost.tsx`; `closeSurface` in `lib/src/components/Wall.tsx`; `closeWorkspaceWithSurfaces` in `lib/src/components/wall/workspace-lifecycle.ts`; `createTeardownFlow` in `standalone/src/teardown-flow.ts`; `startMove` in `standalone/src/workspace-move.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`. Tests: `lib/src/lib/tool-editor.test.ts`, `lib/src/components/wall/workspace-lifecycle.test.ts`, `standalone/src/teardown-arbiter.test.ts`, `standalone/src/workspace-drag.test.ts`, `standalone/src/workspace-move.test.ts`, `lib/src/components/wall/workspace-control.test.ts`.
+Source of truth: `readHostMessage` / `readFrameMessage` in `dor-tools-lib/src/protocol.ts`; `connectToolFrame` in `dor-tools-lib/src/frame.ts`; `confirmToolEditorsClose` / `connectToolEditor` in `lib/src/lib/tool-editor.ts`; `IframePanel` in `lib/src/components/wall/IframePanel.tsx`; `ToolEditorCloseModalHost` in `lib/src/components/ToolEditorCloseModalHost.tsx`; `closeSurface` in `lib/src/components/Wall.tsx`; `closeWorkspaceWithSurfaces` in `lib/src/components/wall/workspace-lifecycle.ts`; `createTeardownFlow` in `standalone/src/teardown-flow.ts`; `startMove` in `standalone/src/workspace-move.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`. Tests: `dor-tools-lib/test/protocol.test.mjs`, `dor-tools-lib/test/frame.test.mjs`, `lib/src/lib/tool-editor.test.ts`, `lib/src/components/wall/workspace-lifecycle.test.ts`, `standalone/src/teardown-arbiter.test.ts`, `standalone/src/workspace-drag.test.ts`, `standalone/src/workspace-move.test.ts`, `lib/src/components/wall/workspace-control.test.ts`.
 
 ## Security
 
@@ -343,11 +343,10 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 
 **Scope: dor-tools** — remaining design, in implementation order.
 
-- **Save coordination for third-party Tools.** Extend the built-in iframe editor's save channel to other Tool renderers. Establish an explicit safe-to-stop contract before automatic reaping; clean or unknown state alone is insufficient.
-
 - **D1 — reaping without cooperation.** Idle-threshold reap +
   rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,
-  no Windows question.
+  no Windows question. Establish an explicit safe-to-stop contract first;
+  clean or unknown state alone is insufficient.
 - **D2 — dehydrate/rehydrate.** The `367;dehydrate` verb +
   `DORMOUSE_DEHYDRATE`, opted into by the `dehydrate` flag the shipped `serve`
   payload already reserves. The Windows graceful-stop is needed here only.

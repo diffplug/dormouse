@@ -18,7 +18,8 @@
     "paths": {
       "dormouse-lib/*": ["./src/*"],
       "dor/*": ["../dor/src/*"],
-      "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"]
+      "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"],
+      "dor-tools-lib/*": ["../dor-tools-lib/src/*"]
     }
   },
   "include": ["src"],

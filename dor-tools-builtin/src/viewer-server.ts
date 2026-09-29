@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { isAbsolute, relative, sep } from 'node:path';
+import { serveSequence } from 'dor-tools-lib/osc';
 import { CONTROLS, viewerTitle } from './file-viewer-format.js';
 import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
 
@@ -110,5 +111,5 @@ export function announceViewer(viewer: { port: number; path: string; close(): Pr
   const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  return `\x1b]2;${viewerTitle(target)}\x07\x1b]367;serve;${JSON.stringify({ port: viewer.port, path: viewer.path, v: 1 })}\x07`;
+  return `\x1b]2;${viewerTitle(target)}\x07${serveSequence(viewer)}`;
 }

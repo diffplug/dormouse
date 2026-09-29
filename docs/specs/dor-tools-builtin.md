@@ -21,6 +21,7 @@
 - **Must stage the editor assets beside the bundle**, since `viewerAsset` reads them relative to the running module: `dor-tools-builtin/scripts/build-viewer.mjs` bundles Monaco into the package's `dist/viewer`, and `dor/scripts/stage-builtin-viewer.mjs` copies it to `dor/dist/viewer`.
 - **Must keep `file-viewer-format` free of Node runtime dependencies**: lib's renderer and host modules import it, and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles it for a browser.
 - `dor/src/cli.ts` dispatches the private argv verbs (`VIEW_FILE_ARGV` / `VIEW_FOLDER_ARGV`) and supplies the folder viewer's `FolderOpenRequest`.
+- **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
 
 Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `runCli` / `openThroughControl` in `dor/src/cli.ts`. Tests: `dor/test/builtin-viewers.test.mjs`, `dor-tools-builtin/test/browser-shared.test.mjs`.
 
@@ -44,7 +45,7 @@ Source of truth: `fileViewerFormat` / `viewerTitle` in `dor-tools-builtin/src/fi
 
 **Must save only on Save or Cmd/Ctrl+S, to the opened canonical file.** Preserve UTF-8 BOM, the dominant line ending (mixed endings are normalized), and permissions. Bound text to 8 MiB; reject invalid UTF-8. Atomically replace only after comparing the submitted revision with current disk bytes and file identity; a conflict or write failure keeps the edit dirty. New edits during a save remain dirty after that save succeeds. Reload asks before discarding edits and reads the current file at the authorized path, including atomic replacements.
 
-**Must report dirty state immediately to the containing iframe and in order through OSC 367** (`docs/specs/dor-tool.md` → Unsaved changes), and answer the host's iframe save channel (`docs/specs/dor-tool.md` → Closing unsaved Tools).
+**Must report dirty state immediately to the containing iframe and in order through OSC 367** (`docs/specs/dor-tool.md` → Unsaved changes), and answer the host's iframe save channel (`docs/specs/dor-tool.md` → Closing unsaved Tools) with `connectToolFrame`.
 
 Source of truth: `readEditableFile` / `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`; `editorPage` in `dor-tools-builtin/src/editor-page.ts`; `dor-tools-builtin/viewer/editor.ts`; `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`. Tests: `dor-tools-builtin/test/editable-file.test.mjs`, `dor-tools-builtin/test/file-viewer.test.mjs`.
 

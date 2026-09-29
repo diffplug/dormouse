@@ -19,6 +19,7 @@
       "dormouse-lib/*": ["../lib/src/*"],
       "dor/*": ["../dor/src/*"],
       "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"],
+      "dor-tools-lib/*": ["../dor-tools-lib/src/*"],
       "remote-lib-common": ["../remote-lib-common/src/index.ts"],
       "dor-lib-common": ["../dor-lib-common/src/index.ts"],
       "dor-lib-common/browser-providers": ["../dor-lib-common/src/browser-providers.ts"],
