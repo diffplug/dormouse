@@ -67,20 +67,31 @@ const GESTURE_ARROWS: readonly MobileGestureInputId[] = ["up", "down", "left", "
 export const GESTURE_BACKGROUND_PERIOD = 256;
 export const GESTURE_BACKGROUND_TICK_MS = 33;
 const STARFIELD_WIDTH = 128;
-const GESTURE_STARS = (() => {
+function createGestureStarfield() {
   let seed = 42;
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     return seed / 2 ** 32;
   };
-  return Array.from({ length: 768 }, () => ({
+  const stars = Array.from({ length: 1152 }, () => ({
     x: Math.floor(random() * STARFIELD_WIDTH),
     y: Math.floor(random() * GESTURE_BACKGROUND_PERIOD),
     depth: random(),
-    phase: random() * Math.PI * 2,
-    pulseSeconds: 5 + random() * 5,
+    phase: random(),
+    pulseSeconds: (5 + random() * 5) / 1.5,
+    cycle: 0,
   }));
-})();
+  return {
+    stars,
+    respawn(star: typeof stars[number]) {
+      const area = STARFIELD_WIDTH * GESTURE_BACKGROUND_PERIOD;
+      // Choose uniformly among every world cell except this star's old one.
+      const position = (star.y * STARFIELD_WIDTH + star.x + 1 + Math.floor(random() * (area - 1))) % area;
+      star.x = position % STARFIELD_WIDTH;
+      star.y = Math.floor(position / STARFIELD_WIDTH);
+    },
+  };
+}
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
 const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
@@ -206,6 +217,7 @@ export class TutRunner implements InteractiveProgram {
   private gestureArrows = new Set<MobileGestureInputId>();
   private backgroundOffset = 0;
   private backgroundFrame = 0;
+  private starfield = createGestureStarfield();
   private backgroundTimer: ReturnType<typeof setInterval> | null = null;
   private capturingMouse = false;
 
@@ -751,11 +763,22 @@ export class TutRunner implements InteractiveProgram {
     const background = parseColorRgb(theme.background);
     const seconds = this.backgroundFrame * GESTURE_BACKGROUND_TICK_MS / 1000;
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
-    for (const star of GESTURE_STARS) {
+    for (const star of this.starfield.stars) {
+      const age = seconds / star.pulseSeconds + star.phase;
+      const cycle = Math.floor(age);
+      // Cycle boundaries fall inside the dark interval, so relocation never
+      // moves a visible star. Advance offscreen stars too, independent of scroll.
+      if (cycle !== star.cycle) {
+        star.cycle = cycle;
+        this.starfield.respawn(star);
+      }
       const y = (star.y - this.backgroundOffset + GESTURE_BACKGROUND_PERIOD) % GESTURE_BACKGROUND_PERIOD;
       if (y >= rows) continue;
-      const pulse = (1 + Math.sin(seconds * Math.PI * 2 / star.pulseSeconds + star.phase)) / 2;
-      const opacity = 0.16 + star.depth * 0.16 + pulse * 0.2;
+      const pulse = (1 - Math.cos((age - cycle) * Math.PI * 2)) / 2;
+      // Keep a short dark interval, easing both ends of each fade to rest.
+      const visibility = Math.max(0, (pulse - 0.15) / 0.85);
+      if (visibility === 0) continue;
+      const opacity = (0.36 + star.depth * 0.16) * visibility * visibility * (3 - 2 * visibility);
       const color = foreground && background
         ? `\x1b[38;2;${background.map((channel, i) => Math.round(channel + (foreground[i] - channel) * opacity)).join(";")}m`
         : `${DIM}${FG_DEFAULT}`;

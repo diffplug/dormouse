@@ -52,9 +52,9 @@ direction counts on tutorial reset.** Keyboard and native wheels never
 grant gesture credit.
 
 **Must capture the mouse only here and render an infinitely scrollable starfield
-in either vertical direction.** Stars twinkle in place, pulsing out of phase
-with terminal-theme foreground blended into background. Only vertical wheels
-translate stars; instructions retain absolute rows.
+in either vertical direction.** Stars respawn randomly while invisible, fading
+through terminal-theme foreground/background blends. Only vertical wheels
+translate visible stars; instructions retain absolute rows.
 **Must stop animation and release capture on leaving or disposal.** Reduced
 motion disables idle animation, retaining scroll movement.
 
