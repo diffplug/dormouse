@@ -51,14 +51,16 @@ white with green checks, retained after completion.** **Must clear partial
 direction counts on tutorial reset.** Keyboard input and native wheels never
 grant gesture credit.
 
-**Must capture the mouse only on this Pocket screen and animate a periodic
-background that scrolls indefinitely in either direction.** Wheel reports move
-only that background; foreground instructions retain absolute row positions.
-**Must stop animation and release capture on leaving or disposal**, and honor
-reduced motion by disabling idle animation while retaining scroll movement.
+**Must capture the mouse only here and scroll an endless starfield with vertical
+wheels**; instructions keep absolute rows. **Must relocate stars randomly and
+only while dark**, blending terminal-theme background toward foreground and
+following theme changes.
+**Must stop animation and release capture on leaving or disposal.** Reduced
+motion disables idle animation, retaining scroll movement.
 
-Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`;
-`GESTURE_NAVIGATION_SECTION` in `website/src/lib/tut-items.ts`.
+Source of truth: `TutRunner` and `GestureStarfield` in
+`website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in
+`website/src/lib/tut-items.ts`.
 Tests: `website/src/lib/tut-runner.test.ts`.
 
 ## Menu and navigation behavior

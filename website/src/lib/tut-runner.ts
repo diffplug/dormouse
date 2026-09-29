@@ -15,6 +15,7 @@ import {
 import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { MobileGestureInputId } from "dormouse-lib/lib/mobile-gesture-menu";
+import { parseColorRgb } from "dormouse-lib/lib/css-color";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import type { InteractiveProgram } from "./tutorial-shell";
 import {
@@ -60,9 +61,98 @@ const ACTIVE_ITEM_GLYPH = "●";
 const DONE_MARK = `${fg(32)}✓${RESET}`;
 const ACTIVE_MARK = `${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}`;
 const GESTURE_ARROWS: readonly MobileGestureInputId[] = ["up", "down", "left", "right"];
-/** Rows before the Pocket gesture background repeats: a multiple of its 32-row wave. */
-export const GESTURE_BACKGROUND_PERIOD = 256;
-export const GESTURE_BACKGROUND_TICK_MS = 160;
+/** The starfield world, independent of the viewport so scrolling and resizing
+ *  never regenerate its stars. */
+export const STARFIELD_HEIGHT = 256;
+const STARFIELD_WIDTH = 128;
+const STAR_COUNT = 1152;
+/** Share of each twinkle cycle a star spends fully dark. */
+const STAR_DARK_SHARE = 0.15;
+export const GESTURE_BACKGROUND_TICK_MS = 33;
+
+interface Star {
+  x: number;
+  y: number;
+  glyph: string;
+  /** Opacity at the height of each twinkle. */
+  peak: number;
+  phase: number;
+  pulseSeconds: number;
+  cycle: number;
+  opacity: number;
+}
+
+/** Each star twinkles through one cosine cycle and relocates at the cycle
+ *  boundary, which falls inside its dark interval, so relocation never moves a
+ *  visible star. Offscreen stars advance too, independent of scroll. */
+class GestureStarfield {
+  private seed = 42;
+  private frame = 0;
+  readonly stars: readonly Star[] = Array.from({ length: STAR_COUNT }, () => {
+    const x = Math.floor(this.random() * STARFIELD_WIDTH);
+    const y = Math.floor(this.random() * STARFIELD_HEIGHT);
+    const depth = this.random();
+    return {
+      x,
+      y,
+      glyph: depth > 0.85 ? "✦" : depth > 0.6 ? "+" : "·",
+      peak: 0.36 + depth * 0.16,
+      phase: this.random(),
+      pulseSeconds: (10 + this.random() * 10) / 3,
+      cycle: 0,
+      opacity: 0,
+    };
+  });
+
+  constructor() {
+    this.settle();
+  }
+
+  /** Steps one background tick. */
+  advance(): void {
+    this.frame++;
+    this.settle();
+  }
+
+  private settle(): void {
+    const seconds = this.frame * GESTURE_BACKGROUND_TICK_MS / 1000;
+    for (const star of this.stars) {
+      const age = seconds / star.pulseSeconds + star.phase;
+      const cycle = Math.floor(age);
+      if (cycle !== star.cycle) {
+        star.cycle = cycle;
+        this.respawn(star);
+      }
+      const pulse = (1 - Math.cos((age - cycle) * Math.PI * 2)) / 2;
+      // Smoothstep eases both ends of each fade to rest.
+      const visibility = Math.max(0, (pulse - STAR_DARK_SHARE) / (1 - STAR_DARK_SHARE));
+      star.opacity = star.peak * visibility * visibility * (3 - 2 * visibility);
+    }
+  }
+
+  private respawn(star: Star): void {
+    const area = STARFIELD_WIDTH * STARFIELD_HEIGHT;
+    // Choose uniformly among every world cell except this star's old one.
+    const position = (star.y * STARFIELD_WIDTH + star.x + 1 + Math.floor(this.random() * (area - 1))) % area;
+    star.x = position % STARFIELD_WIDTH;
+    star.y = Math.floor(position / STARFIELD_WIDTH);
+  }
+
+  private random(): number {
+    this.seed = (Math.imul(this.seed, 1664525) + 1013904223) >>> 0;
+    return this.seed / 2 ** 32;
+  }
+}
+
+/** SGR foregrounds for 256 opacity levels, blending the terminal background
+ *  toward its foreground; dim default text when either color is unreadable. */
+function starPalette(theme: Record<string, string> | undefined): readonly string[] {
+  const foreground = theme && parseColorRgb(theme.foreground);
+  const background = theme && parseColorRgb(theme.background);
+  return Array.from({ length: 256 }, (_, level) => foreground && background
+    ? `\x1b[38;2;${background.map((channel, i) => Math.round(channel + (foreground[i] - channel) * level / 255)).join(";")}m`
+    : `${DIM}${FG_DEFAULT}`);
+}
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
 const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
@@ -139,6 +229,9 @@ interface TutRunnerOptions {
   /** Current Pocket touch mode, used for live non-progress tutorial prompts. */
   getPocketTouchMode?: () => PocketTutorialTouchMode;
   subscribeToPocketTouchMode?: (listener: () => void) => () => void;
+  /** Terminal colors the Pocket gesture starfield blends between. */
+  getTerminalTheme?: () => Record<string, string>;
+  subscribeToTerminalTheme?: (listener: () => void) => () => void;
 }
 
 type Screen = "menu" | "section" | "reset" | "flappy";
@@ -162,6 +255,8 @@ export class TutRunner implements InteractiveProgram {
   private onNotifyPocket?: () => void;
   private getPocketTouchMode?: () => PocketTutorialTouchMode;
   private subscribeToPocketTouchMode?: (listener: () => void) => () => void;
+  private getTerminalTheme?: () => Record<string, string>;
+  private subscribeToTerminalTheme?: (listener: () => void) => () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -175,6 +270,7 @@ export class TutRunner implements InteractiveProgram {
   private stateUnsub: (() => void) | null = null;
   private pocketTouchModeUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
+  private themeUnsub: (() => void) | null = null;
   private busyDemoStart: number | null = null;
   private busyDemoDurationMs = 0;
   /** How long the fake `longtask` runs — the countdown and the re-press guard.
@@ -186,7 +282,9 @@ export class TutRunner implements InteractiveProgram {
   private gestureScrollDirections = new Set<number>();
   private gestureArrows = new Set<MobileGestureInputId>();
   private backgroundOffset = 0;
-  private backgroundFrame = 0;
+  private starfield: GestureStarfield | null = null;
+  /** Rebuilt on the first paint after entering the screen or a theme change. */
+  private starColors: readonly string[] | null = null;
   private backgroundTimer: ReturnType<typeof setInterval> | null = null;
   private capturingMouse = false;
 
@@ -206,6 +304,8 @@ export class TutRunner implements InteractiveProgram {
     this.onNotifyPocket = options.onNotifyPocket;
     this.getPocketTouchMode = options.getPocketTouchMode;
     this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
+    this.getTerminalTheme = options.getTerminalTheme;
+    this.subscribeToTerminalTheme = options.subscribeToTerminalTheme;
     this.returnToInitialScreen();
   }
 
@@ -253,7 +353,7 @@ export class TutRunner implements InteractiveProgram {
   private startBackgroundTicks(): void {
     if (this.backgroundTimer) return;
     this.backgroundTimer = setInterval(() => {
-      this.backgroundFrame++;
+      this.starfield?.advance();
       this.render();
     }, GESTURE_BACKGROUND_TICK_MS);
   }
@@ -401,7 +501,7 @@ export class TutRunner implements InteractiveProgram {
           if (this.isPocketGestureScreen()) {
             // A periodic field has no top or bottom; only its origin moves.
             const step = wheel[1] === "4" ? -1 : 1;
-            this.backgroundOffset = (this.backgroundOffset + step + GESTURE_BACKGROUND_PERIOD) % GESTURE_BACKGROUND_PERIOD;
+            this.backgroundOffset = (this.backgroundOffset + step + STARFIELD_HEIGHT) % STARFIELD_HEIGHT;
             this.render();
           }
           i += wheel[0].length;
@@ -716,23 +816,38 @@ export class TutRunner implements InteractiveProgram {
     if (gestureScreen !== this.capturingMouse) {
       this.capturingMouse = gestureScreen;
       this.write(gestureScreen ? MOUSE_ENABLE : MOUSE_DISABLE);
-      if (gestureScreen && !prefersReducedMotion()) this.startBackgroundTicks();
-      else this.stopBackgroundTicks();
+      this.starColors = null;
+      if (gestureScreen) {
+        this.themeUnsub = this.subscribeToTerminalTheme?.(() => {
+          this.starColors = null;
+          this.render();
+        }) ?? null;
+        if (!prefersReducedMotion()) this.startBackgroundTicks();
+      } else {
+        this.themeUnsub?.();
+        this.themeUnsub = null;
+        this.stopBackgroundTicks();
+      }
     }
     return gestureScreen;
   }
 
   private renderGestureBackground(lines: string[]): void {
     const { cols, rows } = this.adapter.getPtySize(this.terminalId);
+    const starfield = (this.starfield ??= new GestureStarfield());
+    const colors = (this.starColors ??= starPalette(this.getTerminalTheme?.()));
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
-    for (let row = 0; row < rows; row++) {
-      const worldRow = (row + this.backgroundOffset) % GESTURE_BACKGROUND_PERIOD;
-      const shift = Math.round(4 * Math.sin(worldRow * Math.PI / 16));
-      const glyph = (worldRow + this.backgroundFrame) % 7 === 0 ? "+" : "·";
-      let pattern = "";
-      for (let col = 0; col < cols; col++) pattern += (col + shift) % 12 === 0 ? glyph : " ";
-      out += `${moveTo(row + 1, 1)}${DIM}${fg(36)}${pattern}${RESET}`;
+    for (const star of starfield.stars) {
+      const y = (star.y - this.backgroundOffset + STARFIELD_HEIGHT) % STARFIELD_HEIGHT;
+      if (y >= rows || star.x >= cols || star.opacity === 0) continue;
+      const color = colors[Math.round(star.opacity * (colors.length - 1))];
+      for (let row = y; row < rows; row += STARFIELD_HEIGHT) {
+        for (let col = star.x; col < cols; col += STARFIELD_WIDTH) {
+          out += `${moveTo(row + 1, col + 1)}${color}${star.glyph}`;
+        }
+      }
     }
+    out += RESET;
     // Absolute cursor positions keep the foreground fixed and prevent a final
     // newline at the bottom of the viewport from scrolling the whole screen.
     lines.slice(0, rows).forEach((line, row) => {

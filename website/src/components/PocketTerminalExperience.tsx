@@ -113,6 +113,7 @@ export function PocketTerminalExperience({
       const registry = await import("dormouse-lib/lib/terminal-registry");
       const mouseSelection = await import("dormouse-lib/lib/mouse-selection");
       const themes = await import("dormouse-lib/lib/themes");
+      const terminalTheme = await import("dormouse-lib/lib/terminal-theme");
       const scenarios = await import("dormouse-lib/lib/platform/fake-scenarios");
       const asciiSplash = await import("../lib/ascii-splash-runner");
       await import("dormouse-lib/index.css");
@@ -151,6 +152,8 @@ export function PocketTerminalExperience({
               onNotifyPocket: handleNotifyPocket,
               getPocketTouchMode,
               subscribeToPocketTouchMode,
+              getTerminalTheme: terminalTheme.getTerminalTheme,
+              subscribeToTerminalTheme: terminalTheme.onTerminalThemeChange,
             });
             if (terminalId === POCKET_TUTORIAL_PANE) tutorialRunnerRef.current = runner;
             return runner;

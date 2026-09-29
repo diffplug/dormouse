@@ -8,7 +8,7 @@ import {
   type ItemId,
   type TutorialProfile,
 } from "./tut-items";
-import { BUSY_DEMO_INTERVAL_MS, GESTURE_BACKGROUND_PERIOD, GESTURE_BACKGROUND_TICK_MS, TutRunner } from "./tut-runner";
+import { BUSY_DEMO_INTERVAL_MS, GESTURE_BACKGROUND_TICK_MS, STARFIELD_HEIGHT, TutRunner } from "./tut-runner";
 import { TutorialState } from "./tutorial-state";
 import { BOLD, RESET, fg } from "dormouse-lib/lib/ansi";
 
@@ -83,6 +83,7 @@ function mountRunner(
         pocketTouchModeListeners.delete(listener);
       };
     },
+    getTerminalTheme: () => ({ foreground: "#cccccc", background: "#1e1e1e" }),
   });
   adapter.setInputHandler(id, (data) => runner.handleInput(data));
   runner.start();
@@ -167,7 +168,7 @@ describe("TutRunner snapshots", () => {
       sendKeys(WHEEL_DOWN);
       expect(lastFrame()).toBe(original);
       // Wrap the periodic field repeatedly without reaching a scroll boundary.
-      sendKeys(WHEEL_UP.repeat(2 * GESTURE_BACKGROUND_PERIOD));
+      sendKeys(WHEEL_UP.repeat(2 * STARFIELD_HEIGHT));
       expect(lastFrame()).toBe(original);
       vi.advanceTimersByTime(GESTURE_BACKGROUND_TICK_MS);
       expect(lastFrame()).not.toBe(original);
