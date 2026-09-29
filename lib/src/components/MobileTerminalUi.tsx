@@ -783,7 +783,8 @@ export function MobileTerminalUi({
   }, []);
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    stopEdgeScroll();
+    // A second finger may stop a coast, but must not steal a live edge drag.
+    if (edgeMomentumFrameRef.current !== null) stopEdgeScroll();
     if (isGestureDialogTarget(event.target)) return;
     // A tap acknowledges the active Session, a drag or swipe never
     // (`docs/specs/alert.md` -> Engagement): judged on release, and tracked in

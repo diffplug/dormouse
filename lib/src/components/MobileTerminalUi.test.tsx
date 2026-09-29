@@ -449,13 +449,14 @@ describe('MobileTerminalUi edge scroll', () => {
     expect(scrollLines.mock.calls).toEqual([[2]]);
   });
 
-  it.each(['touch', 'session', 'mode', 'disabled', 'unmount', 'hidden', 'boundary', 'missing terminal'])('stops a running coast on %s', (stop) => {
+  it.each(['touch', 'second finger', 'session', 'mode', 'disabled', 'unmount', 'hidden', 'boundary', 'missing terminal'])('stops a running coast on %s', (stop) => {
     startClock();
     const { pointer, scrollLines, props, renderWith } = setup();
     flick(pointer);
     act(() => vi.advanceTimersByTime(150));
     expect(scrollLines.mock.calls.length).toBeGreaterThan(1);
     if (stop === 'touch') pointer('pointerdown', 100, 200);
+    if (stop === 'second finger') pointer('pointerdown', 100, 200, { pointerId: 8, isPrimary: false });
     if (stop === 'session') renderWith({ ...props, sessions: [{ id: 'other', title: 'other', active: true, episode: null }] });
     if (stop === 'mode') renderWith({ ...props, activeTouchMode: 'selection' });
     if (stop === 'disabled') renderWith({ ...props, interactive: false });
@@ -497,6 +498,19 @@ describe('MobileTerminalUi edge scroll', () => {
     pointer('pointerup', 100, 118);
     pointer('pointermove', 100, 200);
     expect(scrollLines).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a live edge drag owned by the first finger when a second finger presses', () => {
+    const { pointer, scrollLines, onSendInput } = setup();
+    pointer('pointerdown', 10, 200);
+    pointer('pointermove', 10, 164);
+    pointer('pointerdown', 100, 200, { pointerId: 8, isPrimary: false });
+    pointer('pointermove', 100, 100, { pointerId: 8, isPrimary: false });
+    pointer('pointerup', 100, 100, { pointerId: 8, isPrimary: false });
+    pointer('pointermove', 10, 146);
+    expect(scrollLines.mock.calls).toEqual([[2], [1]]);
+    expect(onSendInput).not.toHaveBeenCalled();
+    pointer('pointercancel', 10, 146);
   });
 
   it.each([[0, 1], [380, 369]])('routes synthesized wheels from x=%i into the capturing terminal at x=%i', (edgeX, cellX) => {
