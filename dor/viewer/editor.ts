@@ -39,6 +39,7 @@ let parentOrigin: string | null = null;
 let connection = '';
 let lastDirty: boolean | undefined;
 let stateQueue = Promise.resolve();
+let appliedTheme = '';
 
 (self as typeof self & { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
   getWorker: () => new Worker(new URL('./editor.worker.js', import.meta.url), { type: 'module' }),
@@ -95,10 +96,16 @@ function applyTheme() {
     const value = css.getPropertyValue('--vscode-' + key.replaceAll('.', '-')).trim();
     if (/^#[\da-f]{3,8}$/i.test(value)) colors[key] = value;
   }
-  monaco.editor.defineTheme('workbench', { base: light ? 'vs' : 'vs-dark', inherit: true, rules: [], colors });
+  const base = light ? 'vs' : 'vs-dark';
+  const fontFamily = css.getPropertyValue('--vscode-editor-font-family').trim() || undefined;
+  const fontSize = parseFloat(css.getPropertyValue('--vscode-editor-font-size')) || 13;
+  // Load delivers the same theme several times; each defineTheme rebuilds Monaco's styles.
+  const key = JSON.stringify([base, colors, fontFamily, fontSize, !!editor]);
+  if (key === appliedTheme) return;
+  appliedTheme = key;
+  monaco.editor.defineTheme('workbench', { base, inherit: true, rules: [], colors });
   monaco.editor.setTheme('workbench');
-  editor?.updateOptions({ fontFamily: css.getPropertyValue('--vscode-editor-font-family').trim() || undefined,
-    fontSize: parseFloat(css.getPropertyValue('--vscode-editor-font-size')) || 13 });
+  editor?.updateOptions({ fontFamily, fontSize });
 }
 async function load() {
   const source = await request('source');
@@ -116,7 +123,6 @@ async function load() {
     editor.onDidChangeCursorPosition(({ position }) => {
       el('position').textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
     });
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => { void save().catch(fail); });
   } else model.setValue(source.text);
   el('language').textContent = language === 'plaintext' ? 'Plain Text' : language;
   el('encoding').textContent = `UTF-8 · ${model.getEOL() === '\r\n' ? 'CRLF' : 'LF'}`;
@@ -126,9 +132,10 @@ async function load() {
   post({ kind: 'ready', dirty: dirty() });
 }
 saveButton.addEventListener('click', () => { void save().catch(fail); });
+// Capture phase: runs before Monaco, and outside it too.
 window.addEventListener('keydown', event => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-    event.preventDefault(); if (model) void save().catch(fail);
+    event.preventDefault(); void save().catch(fail);
   }
 }, true);
 reloadButton.addEventListener('click', async () => {

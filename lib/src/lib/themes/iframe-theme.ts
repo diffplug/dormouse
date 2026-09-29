@@ -1,3 +1,9 @@
+import { inferVscodeThemeKind } from './vscode-color-resolver';
+
+const WEBVIEW_THEME_CLASS = {
+  light: 'vscode-light', dark: 'vscode-dark', hcLight: 'vscode-high-contrast-light', hcDark: 'vscode-high-contrast',
+} as const;
+
 /** The public CSS surface a Tool receives, using VS Code's webview names. */
 export function captureIframeTheme() {
   const style = getComputedStyle(document.body);
@@ -6,14 +12,12 @@ export function captureIframeTheme() {
     const key = style[i];
     if (key.startsWith('--vscode-')) vars[key] = style.getPropertyValue(key).trim();
   }
-  const classes = document.body.classList;
-  const kind = classes.contains('vscode-high-contrast-light') ? 'vscode-high-contrast-light'
-    : classes.contains('vscode-high-contrast') ? 'vscode-high-contrast'
-    : classes.contains('vscode-light') ? 'vscode-light' : 'vscode-dark';
+  const kind = WEBVIEW_THEME_CLASS[inferVscodeThemeKind()];
   return { __dormouse: 'theme', vars, kind, scheme: kind.endsWith('light') ? 'light' : 'dark' };
 }
 
-/** One subscription per live frame; updates never navigate or reload it. */
+/** One subscription per live frame; updates never navigate or reload it. The
+ * shim asks again at each document load, so a load needs no send of its own. */
 export function connectIframeTheme(frame: HTMLIFrameElement, origin: string): () => void {
   let queued = 0;
   const send = () => frame.contentWindow?.postMessage(captureIframeTheme(), origin);
@@ -28,12 +32,10 @@ export function connectIframeTheme(frame: HTMLIFrameElement, origin: string): ()
     observer.observe(target, { attributes: true, attributeFilter: ['class', 'style'] });
   }
   window.addEventListener('message', receive);
-  frame.addEventListener('load', send);
   send();
   return () => {
     observer.disconnect();
     cancelAnimationFrame(queued);
     window.removeEventListener('message', receive);
-    frame.removeEventListener('load', send);
   };
 }

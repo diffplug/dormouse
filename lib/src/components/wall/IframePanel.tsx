@@ -16,7 +16,8 @@ import {
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
-import { isToolParams } from './browser-surface';
+import { isToolParams, toolScopeFromParams } from './browser-surface';
+import { builtinFor } from 'dor/file-viewer-format';
 import { connectIframeTheme } from '../../lib/themes/iframe-theme';
 import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor';
 import { offeredRenderModes } from './browser-automation';
@@ -206,7 +207,7 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
     return connectIframeTheme(iframeRef.current, resolution.origin);
   }, [isTool, resolution]);
   useEffect(() => {
-    if (!isTool || params.toolName !== 'file' || params.toolScope !== 'builtin'
+    if (!isTool || params.toolName !== builtinFor(false).kind || toolScopeFromParams(params) !== 'builtin'
       || resolution.kind !== 'proxied' || !iframeRef.current) return;
     return connectToolEditor(id, String(params.toolTarget ?? title), iframeRef.current, resolution.origin);
   }, [id, isTool, params?.toolName, params?.toolScope, params?.toolTarget, title, resolution]);
@@ -274,15 +275,17 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   }), [id, swapCapable, renderModes]);
   const setRenderMode = screenActions.setRenderMode;
   const openInAgentBrowser = setRenderMode && agentBrowserCapable ? () => setRenderMode('agent-browser-screencast') : undefined;
-  const withConsent = useCallback((action: () => void) => {
-    if (isTool) withToolEditorConsent(id, action); else action();
-  }, [id, isTool]);
+  // A Tool's header offers no navigation (`ToolPaneHeader`); reload is its one
+  // chrome action that replaces the document.
   const chromeActions = useMemo<ChromeActions>(() => ({
-    navigate(next) { withConsent(() => commitUrl(next)); },
-    back() { withConsent(() => goToHistoryIndex(historyIndexRef.current - 1)); },
-    forward() { withConsent(() => goToHistoryIndex(historyIndexRef.current + 1)); },
-    reload() { withConsent(() => setReloadNonce((n) => n + 1)); },
-  }), [withConsent, commitUrl, goToHistoryIndex]);
+    navigate(next) { commitUrl(next); },
+    back() { goToHistoryIndex(historyIndexRef.current - 1); },
+    forward() { goToHistoryIndex(historyIndexRef.current + 1); },
+    reload() {
+      const reload = () => setReloadNonce((n) => n + 1);
+      if (isTool) withToolEditorConsent(id, reload); else reload();
+    },
+  }), [id, isTool, commitUrl, goToHistoryIndex]);
   const registrationRef = useRef<ScreenRegistration | null>(null);
   // Register the screen controller unconditionally so the browser chrome (URL +
   // far-left chip) shows for every iframe surface, on every host — `dor iframe`

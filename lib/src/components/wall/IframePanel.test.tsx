@@ -79,7 +79,7 @@ describe('IframePanel', () => {
     window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, origin: 'http://localhost:4555',
       data: { __dormouse: 'editor', connection: command.connection, kind: 'ready', dirty: true } }));
     const close = confirmToolEditorsClose(['edit']);
-    expect(getEditorClosePrompt()?.labels).toEqual(['/project/example.ts']);
+    expect(getEditorClosePrompt()?.items.map(item => item.label)).toEqual(['/project/example.ts']);
     await decideEditorClose('cancel'); expect(await close).toBe(false);
   });
   // The raw fallback is the case with no proxy in front of it at all — the

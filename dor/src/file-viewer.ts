@@ -2,12 +2,11 @@ import { constants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { fileViewerFormat } from './file-viewer-format.js';
-import { announceViewer, HttpError, isInsideRoot, pathSegments, reply, startCapabilityViewer } from './viewer-server.js';
+import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 import { editorPage } from './editor-page.js';
-import { EDITOR_LIMIT, readEditableFile, saveEditableFile } from './editable-file.js';
+import { readEditableFile, readUpTo, saveEditableFile, TEXT_LIMIT } from './editable-file.js';
 import { viewerAsset } from './viewer-assets.js';
 
-const TEXT_LIMIT = 8 * 1024 * 1024;
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
 const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'";
@@ -23,15 +22,9 @@ async function textSize(file: FileHandle): Promise<number> {
 
 async function readText(file: FileHandle): Promise<string> {
   const size = await textSize(file);
-  const bytes = Buffer.allocUnsafe(size + 1);
-  let offset = 0;
-  while (offset < bytes.length) {
-    const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
-    if (!bytesRead) break;
-    offset += bytesRead;
-  }
-  if (offset > size) throw new Error('file changed while preparing preview; open it again');
-  return bytes.subarray(0, offset).toString('utf8');
+  const bytes = await readUpTo(file, size);
+  if (bytes.length > size) throw new Error('file changed while preparing preview; open it again');
+  return bytes.toString('utf8');
 }
 
 /** Static local dependencies only. No directory browsing, arbitrary fetch API,
@@ -115,16 +108,8 @@ export async function startFileViewer(input: string, { onDirty = () => {} }: { o
         if (!pathSegments(route)) throw new HttpError(403);
         if (req.method === 'POST') {
           if (!format.text || (route !== 'save' && route !== 'state')) throw new HttpError(404);
-          if ((req.headers['content-type'] ?? '').split(';')[0] !== 'application/json') throw new HttpError(415);
-          const chunks: Buffer[] = [];
-          let length = 0;
-          for await (const chunk of req) {
-            length += chunk.length;
-            if (length > EDITOR_LIMIT * 6 + 1024) throw new HttpError(413);
-            chunks.push(chunk);
-          }
-          let data;
-          try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400); }
+          // JSON escapes a byte as at most six (`\u00XX`).
+          const data = await readJsonBody(req, TEXT_LIMIT * 6 + 1024) as { dirty?: unknown; text?: unknown; version?: unknown } | null;
           if (route === 'state') {
             if (typeof data?.dirty !== 'boolean') throw new HttpError(400);
             onDirty(data.dirty);
@@ -139,9 +124,8 @@ export async function startFileViewer(input: string, { onDirty = () => {} }: { o
           return;
         }
         if (format.text && route.startsWith('assets/')) {
-          const asset = await viewerAsset(route.slice(7));
-          res.writeHead(200, { 'Content-Type': asset.mime, 'Content-Length': asset.bytes.length });
-          res.end(asset.bytes);
+          const asset = await viewerAsset(route.slice('assets/'.length));
+          reply(res, 200, asset.bytes, asset.mime);
           return;
         }
         if (format.text && route === 'source') {

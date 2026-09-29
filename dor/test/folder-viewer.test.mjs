@@ -290,7 +290,6 @@ async function runPage(names) {
     closest() { return this; }
   }
   const elements = { tree: new Element(), show: new Element(), status: new Element(), refresh: new Element(), collapse: new Element() };
-  elements.show.checked = true;
   const items = [];
   const document = {
     getElementById: id => elements[id],

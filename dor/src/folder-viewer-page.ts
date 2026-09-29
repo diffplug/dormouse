@@ -37,7 +37,7 @@ const SCRIPT = `(function () {
   'use strict';
   var tree = document.getElementById('tree');
   var show = document.getElementById('show');
-  show.checked = true;
+  var showIgnored = true;
   var status = document.getElementById('status');
   var root = { path: '', kind: 'dir', level: 0, parent: null, children: [], group: tree, expanded: true, loaded: false };
   var nodes = new WeakMap();
@@ -54,7 +54,7 @@ const SCRIPT = `(function () {
     return false;
   }
   function hidden(node) {
-    for (var n = node; n && n !== root; n = n.parent) if (n.ignored && !show.checked) return true;
+    for (var n = node; n && n !== root; n = n.parent) if (n.ignored && !showIgnored) return true;
     return false;
   }
   function setIgnored(node, ignored) {
@@ -218,7 +218,7 @@ const SCRIPT = `(function () {
     var out = [];
     (function walk(parent) {
       parent.children.forEach(function (child) {
-        if (child.ignored && !show.checked) return;
+        if (child.ignored && !showIgnored) return;
         out.push(child);
         if (child.expanded) walk(child);
       });
@@ -272,9 +272,9 @@ const SCRIPT = `(function () {
     if (next && next !== selected) select(next, 'settle');
   });
   show.addEventListener('click', function () {
-    show.checked = !show.checked;
-    show.setAttribute('aria-pressed', String(show.checked));
-    tree.classList.toggle('hide-ignored', !show.checked);
+    showIgnored = !showIgnored;
+    show.setAttribute('aria-pressed', String(showIgnored));
+    tree.classList.toggle('hide-ignored', !showIgnored);
     if (selected && hidden(selected)) select(null, false);
   });
   document.getElementById('refresh').addEventListener('click', function () {

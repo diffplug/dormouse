@@ -156,6 +156,10 @@ describe('the shim addresses the grant and app, not the world', () => {
     expect(frame.properties.has('--vscode-editor-background')).toBe(false);
     expect(frame.classes).toEqual(new Set(['vscode-light']));
     expect(frame.root.style.colorScheme).toBe('light');
+    // A repeated load request delivering the same theme restyles nothing.
+    frame.emit('message', { source: frame.parent, origin: APP, data: {
+      ...data, kind: 'vscode-light', scheme: 'light', vars: { '--vscode-editor-foreground': '#111111' },
+    } });
     expect(frame.dispatched).toEqual(['dormouse:theme', 'dormouse:theme']);
   });
 

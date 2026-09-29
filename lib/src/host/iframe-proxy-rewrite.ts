@@ -121,22 +121,26 @@ export function iframeShim(embedderOrigin: string): string {
   // Only the embedding app can publish a theme. These are data values passed
   // to CSSOM, never a stylesheet or executable markup. A Tool's own selectors
   // and controls remain its own; only the webview variable surface is exposed.
-  var themeKeys=[];
+  var KINDS=['vscode-light','vscode-dark','vscode-high-contrast','vscode-high-contrast-light'];
+  var VAR=/^--vscode-[a-zA-Z0-9-]+$/;
+  var themeKeys=[],themeApplied='';
   addEventListener('message',function(e){
     var d=e.data;
     if(e.source!==P||e.origin!==TARGET||!d||d.__dormouse!=='theme'||!d.vars)return;
-    if(['vscode-light','vscode-dark','vscode-high-contrast','vscode-high-contrast-light'].indexOf(d.kind)<0)return;
-    if(d.scheme!=='light'&&d.scheme!=='dark')return;
+    if(KINDS.indexOf(d.kind)<0||(d.scheme!=='light'&&d.scheme!=='dark'))return;
+    var keys=Object.keys(d.vars).filter(function(k){return VAR.test(k)&&typeof d.vars[k]==='string';});
     var roots=[document.documentElement,document.body].filter(Boolean);
+    // Load repeats the request; restyle only when the theme or the roots change.
+    var applied=roots.length+JSON.stringify([d.kind,d.scheme,keys.map(function(k){return [k,d.vars[k]];})]);
+    if(applied===themeApplied)return;
+    themeApplied=applied;
     roots.forEach(function(root){
       themeKeys.forEach(function(k){root.style.removeProperty(k);});
-      Object.keys(d.vars).forEach(function(k){
-        if(/^--vscode-[a-zA-Z0-9-]+$/.test(k)&&typeof d.vars[k]==='string')root.style.setProperty(k,d.vars[k]);
-      });
-      ['vscode-light','vscode-dark','vscode-high-contrast','vscode-high-contrast-light'].forEach(function(k){root.classList.toggle(k,k===d.kind);});
+      keys.forEach(function(k){root.style.setProperty(k,d.vars[k]);});
+      KINDS.forEach(function(k){root.classList.toggle(k,k===d.kind);});
       root.style.colorScheme=d.scheme;
     });
-    themeKeys=Object.keys(d.vars).filter(function(k){return /^--vscode-[a-zA-Z0-9-]+$/.test(k);});
+    themeKeys=keys;
     dispatchEvent(new CustomEvent('dormouse:theme'));
   });
   post('theme-request');

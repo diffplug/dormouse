@@ -5,11 +5,15 @@ import { isToolParams } from './wall/browser-surface';
 
 const noSubscription = () => () => {};
 
-/** Whether a Tool's last report says it has unsaved changes. Ordinary Surfaces
- *  never subscribe: a report from a plain terminal stays inert. */
+/** Whether a Tool's last report says it has unsaved changes. A report from a
+ *  plain terminal stays inert. */
+export function isToolDirty(surfaceId: string, params: unknown): boolean {
+  return isToolParams(params) && getToolDirty(surfaceId) === true;
+}
+
+/** `isToolDirty`, subscribed. Ordinary Surfaces never subscribe. */
 export function useToolDirty(surfaceId: string, params: unknown): boolean {
-  const tool = isToolParams(params);
-  return useSyncExternalStore(tool ? subscribeToToolDirty : noSubscription, () => tool && getToolDirty(surfaceId) === true);
+  return useSyncExternalStore(isToolParams(params) ? subscribeToToolDirty : noSubscription, () => isToolDirty(surfaceId, params));
 }
 
 /** The name, tooltip, and description of a Tool's unsaved state, wherever it shows. */

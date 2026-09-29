@@ -13,8 +13,8 @@ import { revealWorkspaceTab, workspaceTabElement } from './workspace-tab-element
 import { collapseWorkspace, restoreWorkspaceMotion, workspaceIsCollapsed } from './workspace-motion';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
 import { ToolEditorCloseModalHost } from './ToolEditorCloseModalHost';
-import { confirmToolEditorsClose } from '../lib/tool-editor';
-import { getToolDirty } from '../lib/tool-dirty-store';
+import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
+import { isToolDirty } from './ToolDirtyIndicator';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 // Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
 // console hook) is loaded and mounted only when the embedding runtime opts in
@@ -745,15 +745,19 @@ export function Wall({
 
   /**
    * A permanent Surface closure checks helper work before teardown
-   * (`docs/specs/terminal-context.md` → "Promotion and source closure").
+   * (`docs/specs/terminal-context.md` → "Promotion and source closure"), then a
+   * dirty Tool's consent (`docs/specs/dor-tool.md` → Editing files): a gesture
+   * passes `ask`, a Workspace close the ids it already asked about, and a
+   * command is refused.
    */
-  const closeSurface = useCallback(async (id: string): Promise<string | null> => {
+  const closeSurface = useCallback(async (id: string, editors: 'ask' | readonly string[] = []): Promise<string | null> => {
     if (pendingSurfaceCloses.current.has(id)) return 'This terminal is already closing';
     pendingSurfaceCloses.current.add(id);
     try {
       const refused = await helperRefusal(id);
       if (refused) { revealRefusal(id, refused); return refused; }
-      if (isToolParams(lath.getMeta(id)?.params) && !await confirmToolEditorsClose([id])) return 'Unsaved changes were kept open';
+      if (isToolDirty(id, lath.getMeta(id)?.params)
+        && !(editors === 'ask' ? await confirmToolEditorsClose([id]) : editors.includes(id))) return UNSAVED_TOOL_REFUSAL;
       killPaneImmediately(id);
       return null;
     } finally {
@@ -803,7 +807,7 @@ export function Wall({
     // `isDying` guard in killPaneImmediately is the second line of defense.)
     confirmKillRef.current = staged;
     setConfirmKill(staged);
-    void closeSurface(ck.id);
+    void closeSurface(ck.id, 'ask');
     confirmTimerRef.current = setTimeout(() => setConfirmKill(null), KILL_CONFIRM_MS);
   }, [closeSurface]);
 
@@ -1065,7 +1069,7 @@ export function Wall({
    * empty and safe to unmount, or the first refusal's message with the Workspace left as
    * it was — the strip then reveals it so the refusal is visible.
    */
-  const closeAll = useCallback(async (): Promise<string | null> => {
+  const closeAll = useCallback(async (editors: readonly string[] = []): Promise<string | null> => {
     closingWorkspaceRef.current = true;
     cancelContextPortLaunches();
     await collapseWorkspace(effectiveWorkspaceId);
@@ -1084,7 +1088,7 @@ export function Wall({
         // Re-checked per iteration: an earlier closure can take a Surface with it
         // (a helper's source, a replaced leaf).
         if (!ownsSurface(id)) continue;
-        const refusal = await closeSurfaceRef.current(id);
+        const refusal = await closeSurfaceRef.current(id, editors);
         if (refusal) {
           cancelClose();
           return refusal;
@@ -1763,7 +1767,7 @@ export function Wall({
       return getTerminalInstance(id) !== null && !isReplaceableShell(id);
     }),
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
-    dirtyToolIds: () => memberSurfaceIds().filter(id => isToolParams(lath.getMeta(id)?.params) && getToolDirty(id) === true),
+    dirtyToolIds: () => memberSurfaceIds().filter(id => isToolDirty(id, lath.getMeta(id)?.params)),
     enterSelectedPane: () => {
       const id = livePaneId();
       if (id) enterTerminalMode(id);
@@ -1935,7 +1939,6 @@ export function Wall({
       setRenamingPaneId(null);
     },
     onSwapRenderMode: async (id, mode, viewport) => {
-      if (isToolParams(lath.getMeta(id)?.params) && getToolDirty(id) === true && !await confirmToolEditorsClose([id])) return;
       const visible = nav.hasPane(id);
       if (!visible) return;
       const params = nav.paneParams(id);
@@ -1963,6 +1966,8 @@ export function Wall({
         const url = browserUrlFromParams(params);
         const toolProvider = parseRenderMode(mode).provider;
         if (!url || (toolProvider && !hostSupportsBrowser(toolProvider))) return;
+        // Consent just before the document goes; any change while asking abandons the swap.
+        if (!await confirmToolEditorsClose([id]) || lath.getMeta(id)?.params !== params) return;
         closeBrowserSurface(id, params);
         // The Tool's browser launches itself, in the Tool's own session.
         lath.store.updateParams(id, toolProvider

@@ -34,7 +34,7 @@ import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activ
 import { createAlertEpisode } from '../lib/alert-episode';
 import { resetTerminalPaneState, setTerminalUserTitle } from '../lib/terminal-state-store';
 import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
-import { cancelEditorClose, getEditorClosePrompt } from '../lib/tool-editor';
+import { cancelEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import { setWindowLabel } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -119,6 +119,9 @@ describe('Wall on the Lath engine', () => {
     });
     expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.dirtyToolIds()).toEqual(['tool-door']);
     await act(async () => { await dispatchKill('pane-a'); });
+    expect(getEditorClosePrompt()).toBeNull();
+    // A command close refuses a dirty Tool rather than raising the prompt.
+    expect(await dispatchKill('tool-door')).toEqual({ ok: false, error: UNSAVED_TOOL_REFUSAL });
     expect(getEditorClosePrompt()).toBeNull();
   });
 

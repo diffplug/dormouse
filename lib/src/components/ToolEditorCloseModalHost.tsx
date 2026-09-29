@@ -12,7 +12,7 @@ export function ToolEditorCloseModalHost() {
     onEscape={() => { void decideEditorClose('cancel'); }} padding="spacious">
     <h2 id="save-tool-title" className="text-sm font-semibold">Save changes before closing?</h2>
     <ul className="my-3 max-w-lg break-words text-sm">
-      {pending.labels.map((label, i) => <li key={pending.ids[i]}>{label}</li>)}
+      {pending.items.map(({ id, label }) => <li key={id}>{label}</li>)}
     </ul>
     {pending.error && <p role="alert" className="mb-3 text-sm">{pending.error}</p>}
     <div className="flex justify-end gap-2">

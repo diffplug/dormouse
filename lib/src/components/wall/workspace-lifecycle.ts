@@ -7,6 +7,7 @@ import { dismissWorkspaceUi, setPendingWorkspaceClose, setRenamingWorkspace } fr
 import { closeWorkspace, getActiveWorkspaceId, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { WorkspaceCloseMode } from './wall-types';
+import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-editor';
 
 /**
  * The Workspace close and rename verbs, outside any component: the strip's
@@ -82,7 +83,11 @@ export async function closeWorkspaceWithSurfaces(
       // untouched Workspace whose close skips the confirmation.
       flushSync(() => { setActiveWorkspace(id); handle.selectWorkspaceTab(); });
     }
-    const refusal = await handle.closeAll();
+    // One question for every dirty Tool, before any Surface closes; a command
+    // close refuses instead (`docs/specs/dor-tool.md` → Editing files).
+    const editors = handle.dirtyToolIds();
+    if (editors.length && (mode === 'silent' || !await confirmToolEditorsClose(editors))) return UNSAVED_TOOL_REFUSAL;
+    const refusal = await handle.closeAll(editors);
     if (refusal) {
       // A refusal returns to its prompt if the user navigated away during close.
       if (mode === 'prompt') setActiveWorkspace(id);

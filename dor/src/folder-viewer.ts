@@ -5,7 +5,7 @@ import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 import { errorMessage } from './commands/shared.js';
 import type { ControlClient } from './commands/types.js';
 import { folderViewerPage } from './folder-viewer-page.js';
-import { announceViewer, HttpError, isInsideRoot, pathSegments, reply, startCapabilityViewer } from './viewer-server.js';
+import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 
 /** Entries one listing returns. */
 const ENTRY_LIMIT = 5000;
@@ -96,7 +96,6 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
       Promise.all(kept.map(item => kindOf(dir, item.entry))), gitIgnored(git, dir, kept.map(item => item.entry.name)),
     ]);
     const keyed = kept.map((item, i) => ({ ...item, dir: kinds[i] === 'dir', kind: kinds[i] })).sort(byDisplayOrder);
-    const entries: FolderEntry[] = [];
     // Inspect at most two real entries per hop: ignored/hidden siblings still
     // stop compaction. Never follow a symlink as a compacted child, and bound
     // both depth and concurrent directory handles for huge/generated trees.
@@ -119,27 +118,20 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
       }
       return display;
     }
-    for (let i = 0; i < keyed.length; i += 16) {
-      entries.push(...await Promise.all(keyed.slice(i, i + 16).map(async ({ entry, kind }) => ({
-        name: await compact(entry.name, kind), kind, ignored: ignored.has(entry.name),
-      }))));
-    }
+    // Sixteen workers share the queue, so one deep chain never idles the rest.
+    const entries: FolderEntry[] = new Array(keyed.length);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(16, keyed.length) }, async () => {
+      for (let i = next++; i < keyed.length; i = next++) {
+        const { entry, kind } = keyed[i];
+        entries[i] = { name: await compact(entry.name, kind), kind, ignored: ignored.has(entry.name) };
+      }
+    }));
     return { entries, truncated };
   }
 
   async function requestedPath(req: IncomingMessage): Promise<string> {
-    if ((req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') throw new HttpError(415);
-    const chunks: Buffer[] = [];
-    let size = 0;
-    await new Promise<void>((done, fail) => {
-      req.on('data', (chunk: Buffer) => { size += chunk.length; if (size <= BODY_LIMIT) chunks.push(chunk); });
-      req.on('end', done);
-      req.on('error', fail);
-    });
-    if (size > BODY_LIMIT) throw new HttpError(413);
-    let body: unknown;
-    try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400); }
-    const path = (body as { path?: unknown } | null)?.path;
+    const path = (await readJsonBody(req, BODY_LIMIT) as { path?: unknown } | null)?.path;
     if (typeof path !== 'string' || !path) throw new HttpError(400);
     return path;
   }
