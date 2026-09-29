@@ -165,7 +165,7 @@ bounds).
 
 **One peer connection per session**, created at the offer, closed on every
 disposal path, never existing before promotion. **Both ends build it through an
-injected factory** — `PocketClientDeps.createDirectPeer`,
+injected factory** — `ClientSessionCoreDeps.createDirectPeer` (Pocket's through `PocketClientDeps`),
 `BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions` —
 `null` where a runtime has none, so neither end reaches a WebRTC global.
 **Pocket shows which path carries the session**, and where it stayed relayed
@@ -179,7 +179,7 @@ their guard, the constants, the `DirectFrameQueue` both queues are, and the
 `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts` (the whole
 direct-path policy, one per authorized session; `onRelayFrame` is both ends' only
 way in from the relay and `send` their only way out; constructed at promotion by
-`PocketClient.#directEndpoint` in `lib/src/remote/client/pocket-client.ts` and
+`ClientSessionCore.establish` in `lib/src/remote/client/session-core.ts` and
 `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`, built
 by `BurrowRuntime.#promoteConnection` in
 `lib/src/remote/burrow/burrow-runtime.ts`); pinned by

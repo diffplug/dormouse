@@ -87,6 +87,7 @@ const E2E_MODULES = [
   'lib/src/remote/burrow/established-session.ts',
   'lib/src/remote/burrow/push-delivery.ts',
   'lib/src/remote/client/pocket-client.ts',
+  'lib/src/remote/client/session-core.ts',
   'lib/src/remote/pocket-app/sw.ts',
 ];
 

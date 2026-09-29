@@ -461,8 +461,8 @@ their guard, and `DirectCutover`), `lib/src/remote/direct/direct-peer.ts`
 switch, created at promotion by `EstablishedE2eSession` in
 `lib/src/remote/burrow/established-session.ts`, which
 `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`
-constructs, and by `PocketClient.#directEndpoint` in
-`lib/src/remote/client/pocket-client.ts`). The audited rows are
+constructs, and by `ClientSessionCore.establish` in
+`lib/src/remote/client/session-core.ts`). The audited rows are
 `docs/specs/security-remote.md` -> "Direct path".
 
 ## Noise suite

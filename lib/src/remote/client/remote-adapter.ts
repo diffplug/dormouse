@@ -17,11 +17,12 @@ import {
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
 import type { PlatformAdapter, PtyDataDetail, PtyInfo, OpenPort } from '../../lib/platform/types';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
-import type { TerminalHandlers } from './pocket-client';
+import type { TerminalHandlers } from './session-core';
 
 /**
- * The slice of {@link PocketClient} the adapter drives. A connected
- * `PocketClient` satisfies it structurally; tests pass a network-free fake.
+ * The slice of an established session the adapter drives. `ClientSessionCore`
+ * implements it, a connected `PocketClient` satisfies it structurally, and
+ * tests pass a network-free fake.
  */
 export interface RemoteAdapterClient {
   watchDirectory(onSnapshot: (entries: DirectoryEntry[]) => void): Promise<string>;

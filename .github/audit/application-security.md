@@ -34,7 +34,8 @@ run — `docs/specs/security-remote.md` -> "Direct path");
 and `established-session.ts` (an authorized session's decrypt, idle clock, and
 direct path);
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
-and `lib/src/remote/pocket-app/sw.ts` (the phone, and the render sink);
+and `session-core.ts` (the phone's ceremonies, and the established session they
+promote) and `lib/src/remote/pocket-app/sw.ts` (the render sink);
 `relay/src/relay.ts` and `relay/src/app.ts` (which must know none of it). The
 harnesses that already exercise this are
 `lib/src/remote/burrow/burrow-bounds.test.ts`,

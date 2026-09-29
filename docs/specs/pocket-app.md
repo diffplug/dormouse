@@ -147,8 +147,10 @@ delivery id before deleting the record; the list carries **Scan a setup code**.
 Pairing continues into connecting.
 
 Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`;
-`SetupOrSignin` / `PairingCodeView` / `BurrowsView` / `ConnectedView` and the
-`probeNoiseSupport` gate in `lib/src/remote/pocket-app/App.tsx`;
+`SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
+gate in `lib/src/remote/pocket-app/App.tsx`; `PairingCodeView` in
+`lib/src/remote/pocket-app/views.tsx`; `mountRemoteWall` in
+`lib/src/remote/pocket-app/remote-wall.ts`;
 `lib/src/remote/pocket-app/PocketWall.tsx`;
 `lib/src/remote/pocket-app/pair-link.ts`;
 `lib/src/remote/pocket-app/ScanInvitation.tsx`; `PocketClient.pair` in
@@ -273,7 +275,7 @@ Source of truth: `lib/pocket/public/manifest.webmanifest`;
 `registerPushServiceWorker` in `lib/src/remote/pocket-app/service-worker.ts`;
 `PASSKEY_UNAVAILABLE_MESSAGE` / `PocketClient.signin` in
 `lib/src/remote/client/pocket-client.ts`; `deviceLabel` in
-`lib/src/remote/pocket-app/App.tsx`.
+`lib/src/remote/pocket-app/views.tsx`.
 
 ### Detecting install state, and what cannot be detected
 
@@ -520,8 +522,9 @@ and before every request, and reports burrow loss when it passes. **A reap sends
 nothing** — there is no frame to send — and this Client's relay socket is to the
 *Relay*, so it stays open. (rationale)
 
-Source of truth: `PocketClient.sendKeepalive` / `#reapedByBurrow` and the injected
-timer, clock, and visibility seams in `lib/src/remote/client/pocket-client.ts`.
+Source of truth: `ClientSessionCore.sendKeepalive` / `#reapedByBurrow` and the
+injected timer, clock, and visibility seams in
+`lib/src/remote/client/session-core.ts`.
 
 ## The path the session takes
 
@@ -555,10 +558,11 @@ leaves the wall exactly as it does for a `burrow-gone`, and returning costs a
 fresh handshake and one WebAuthn prompt. Before the switch a failed channel
 costs nothing.
 
-Source of truth: `PocketClient.connect` / `transportPath` /
-`setOnTransportChanged` in `lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` /
+Source of truth: `PocketClient.connect` in
+`lib/src/remote/client/pocket-client.ts`; `ClientSessionCore.transportPath` /
+`setOnTransportChanged` in `lib/src/remote/client/session-core.ts`; `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in
-`lib/src/remote/pocket-app/App.tsx`.
+`lib/src/remote/pocket-app/views.tsx`.
 
 ## An expired session drops to sign-in
 

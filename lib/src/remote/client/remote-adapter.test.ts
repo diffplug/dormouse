@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MAX_TERMINAL_DIMENSION, toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 
 import { RemotePtyAdapter, type RemoteAdapterClient } from './remote-adapter';
-import type { TerminalHandlers } from './pocket-client';
+import type { TerminalHandlers } from './session-core';
 import type { PtyDataDetail, PtyInfo } from '../../lib/platform/types';
 
 interface AttachCall {

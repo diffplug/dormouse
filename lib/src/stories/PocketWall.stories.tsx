@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 import { toBase64Url, utf8Encode, type DirectoryEntry } from 'remote-lib-common';
 import { ConnectedView } from '../remote/pocket-app/App';
 import { RemotePtyAdapter, type RemoteAdapterClient } from '../remote/client/remote-adapter';
-import type { TerminalHandlers } from '../remote/client/pocket-client';
+import type { TerminalHandlers } from '../remote/client/session-core';
 import { setPlatform } from '../lib/platform';
 import { disposeAllSessions, initAlertStateReceiver } from '../lib/terminal-registry';
 import { settleTerminals } from './settle-terminals';
@@ -73,8 +73,9 @@ class FakeRemoteClient implements RemoteAdapterClient {
 function PocketWallStory() {
   const adapterRef = useRef<RemotePtyAdapter | null>(null);
   if (!adapterRef.current) {
-    // Mirror App.tsx's onConnect: stand up the adapter as the platform, prep a
-    // clean registry, then start the directory watch.
+    // Mirror `mountRemoteWall` in remote-wall.ts, minus its `hello`: stand up
+    // the adapter as the platform, prep a clean registry, then start the
+    // directory watch.
     const adapter = new RemotePtyAdapter(new FakeRemoteClient(SINGLE_SESSION));
     setPlatform(adapter);
     disposeAllSessions();

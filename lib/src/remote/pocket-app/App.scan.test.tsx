@@ -20,10 +20,12 @@ import App, {
   BURROWS_EMPTY,
   BURROWS_TITLE,
   SCAN_LABEL,
+} from './App';
+import {
   TRANSPORT_PATH_LABELS,
   TRANSPORT_RELAY_CAUSES,
   UNSUPPORTED_BROWSER_TITLE,
-} from './App';
+} from './views';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import {
   PAIRING_DENIAL_MESSAGES,
