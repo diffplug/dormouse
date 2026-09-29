@@ -688,7 +688,10 @@ test('the forwarded payload is the sealed envelope and nothing else', async () =
 
   const burrowStatic = await generateNoiseKeyPair();
   const clientStatic = await generateNoiseKeyPair();
-  const plaintext = utf8Encode(JSON.stringify({ title: 'build finished', body: 'zsh', tag: 'pty-1' }));
+  // Each field carries a space, which neither base64url nor the envelope's
+  // JSON punctuation can produce, so the absence check below cannot collide
+  // with the random ciphertext, as a bare three-letter `zsh` once did in CI.
+  const plaintext = utf8Encode(JSON.stringify({ title: 'build finished', body: 'zsh exited', tag: 'pty 1' }));
   const sealed = await sealPush({
     burrowStaticPrivateKey: burrowStatic.privateKey,
     clientStaticPublicKey: clientStatic.publicKey,
@@ -699,7 +702,7 @@ test('the forwarded payload is the sealed envelope and nothing else', async () =
   const payload = sender.sent[0].payload;
   assert.equal(payload, JSON.stringify({ burrowId: burrow.burrowId, ...sealed }));
   // The whole point: none of the notification text survives to this boundary.
-  for (const secret of ['build finished', 'zsh', 'pty-1']) {
+  for (const secret of ['build finished', 'zsh exited', 'pty 1']) {
     assert.equal(payload.includes(secret), false, secret);
   }
   // And what did arrive still opens on the recipient's key.
