@@ -48,18 +48,19 @@ navigation screen**, through `MobileTerminalUi.onGestureScroll` and
 complete**; an arrow sent before scrolling completes does not count.
 **Must render needed arrows bold white with yellow dots; sent arrows normal-weight
 white with green checks, retained after completion.** **Must clear partial
-direction counts on tutorial reset.** Keyboard and native wheels never
+direction counts on tutorial reset.** Keyboard input and native wheels never
 grant gesture credit.
 
-**Must capture the mouse only here and render an infinitely scrollable starfield
-in either vertical direction.** Stars respawn randomly while invisible, fading
-through terminal-theme foreground/background blends. Only vertical wheels
-translate visible stars; instructions retain absolute rows.
+**Must capture the mouse only here and scroll an endless starfield with vertical
+wheels**; instructions keep absolute rows. **Must relocate stars randomly and
+only while dark**, blending terminal-theme background toward foreground and
+following theme changes.
 **Must stop animation and release capture on leaving or disposal.** Reduced
 motion disables idle animation, retaining scroll movement.
 
-Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`;
-`GESTURE_NAVIGATION_SECTION` in `website/src/lib/tut-items.ts`.
+Source of truth: `TutRunner` and `GestureStarfield` in
+`website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in
+`website/src/lib/tut-items.ts`.
 Tests: `website/src/lib/tut-runner.test.ts`.
 
 ## Menu and navigation behavior

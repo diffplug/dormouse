@@ -16,7 +16,6 @@ import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { MobileGestureInputId } from "dormouse-lib/lib/mobile-gesture-menu";
 import { parseColorRgb } from "dormouse-lib/lib/css-color";
-import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import type { InteractiveProgram } from "./tutorial-shell";
 import {
@@ -62,35 +61,97 @@ const ACTIVE_ITEM_GLYPH = "●";
 const DONE_MARK = `${fg(32)}✓${RESET}`;
 const ACTIVE_MARK = `${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}`;
 const GESTURE_ARROWS: readonly MobileGestureInputId[] = ["up", "down", "left", "right"];
-/** World dimensions stay independent of the viewport so scrolling and resizing
- *  never regenerate the stars. */
-export const GESTURE_BACKGROUND_PERIOD = 256;
-export const GESTURE_BACKGROUND_TICK_MS = 33;
+/** The starfield world, independent of the viewport so scrolling and resizing
+ *  never regenerate its stars. */
+export const STARFIELD_HEIGHT = 256;
 const STARFIELD_WIDTH = 128;
-function createGestureStarfield() {
-  let seed = 42;
-  const random = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed / 2 ** 32;
-  };
-  const stars = Array.from({ length: 1152 }, () => ({
-    x: Math.floor(random() * STARFIELD_WIDTH),
-    y: Math.floor(random() * GESTURE_BACKGROUND_PERIOD),
-    depth: random(),
-    phase: random(),
-    pulseSeconds: (5 + random() * 5) / 1.5,
-    cycle: 0,
-  }));
-  return {
-    stars,
-    respawn(star: typeof stars[number]) {
-      const area = STARFIELD_WIDTH * GESTURE_BACKGROUND_PERIOD;
-      // Choose uniformly among every world cell except this star's old one.
-      const position = (star.y * STARFIELD_WIDTH + star.x + 1 + Math.floor(random() * (area - 1))) % area;
-      star.x = position % STARFIELD_WIDTH;
-      star.y = Math.floor(position / STARFIELD_WIDTH);
-    },
-  };
+const STAR_COUNT = 1152;
+/** Share of each twinkle cycle a star spends fully dark. */
+const STAR_DARK_SHARE = 0.15;
+export const GESTURE_BACKGROUND_TICK_MS = 33;
+
+interface Star {
+  x: number;
+  y: number;
+  glyph: string;
+  /** Opacity at the height of each twinkle. */
+  peak: number;
+  phase: number;
+  pulseSeconds: number;
+  cycle: number;
+  opacity: number;
+}
+
+/** Each star twinkles through one cosine cycle and relocates at the cycle
+ *  boundary, which falls inside its dark interval, so relocation never moves a
+ *  visible star. Offscreen stars advance too, independent of scroll. */
+class GestureStarfield {
+  private seed = 42;
+  private frame = 0;
+  readonly stars: readonly Star[] = Array.from({ length: STAR_COUNT }, () => {
+    const x = Math.floor(this.random() * STARFIELD_WIDTH);
+    const y = Math.floor(this.random() * STARFIELD_HEIGHT);
+    const depth = this.random();
+    return {
+      x,
+      y,
+      glyph: depth > 0.85 ? "✦" : depth > 0.6 ? "+" : "·",
+      peak: 0.36 + depth * 0.16,
+      phase: this.random(),
+      pulseSeconds: (10 + this.random() * 10) / 3,
+      cycle: 0,
+      opacity: 0,
+    };
+  });
+
+  constructor() {
+    this.settle();
+  }
+
+  /** Steps one background tick. */
+  advance(): void {
+    this.frame++;
+    this.settle();
+  }
+
+  private settle(): void {
+    const seconds = this.frame * GESTURE_BACKGROUND_TICK_MS / 1000;
+    for (const star of this.stars) {
+      const age = seconds / star.pulseSeconds + star.phase;
+      const cycle = Math.floor(age);
+      if (cycle !== star.cycle) {
+        star.cycle = cycle;
+        this.respawn(star);
+      }
+      const pulse = (1 - Math.cos((age - cycle) * Math.PI * 2)) / 2;
+      // Smoothstep eases both ends of each fade to rest.
+      const visibility = Math.max(0, (pulse - STAR_DARK_SHARE) / (1 - STAR_DARK_SHARE));
+      star.opacity = star.peak * visibility * visibility * (3 - 2 * visibility);
+    }
+  }
+
+  private respawn(star: Star): void {
+    const area = STARFIELD_WIDTH * STARFIELD_HEIGHT;
+    // Choose uniformly among every world cell except this star's old one.
+    const position = (star.y * STARFIELD_WIDTH + star.x + 1 + Math.floor(this.random() * (area - 1))) % area;
+    star.x = position % STARFIELD_WIDTH;
+    star.y = Math.floor(position / STARFIELD_WIDTH);
+  }
+
+  private random(): number {
+    this.seed = (Math.imul(this.seed, 1664525) + 1013904223) >>> 0;
+    return this.seed / 2 ** 32;
+  }
+}
+
+/** SGR foregrounds for 256 opacity levels, blending the terminal background
+ *  toward its foreground; dim default text when either color is unreadable. */
+function starPalette(theme: Record<string, string> | undefined): readonly string[] {
+  const foreground = theme && parseColorRgb(theme.foreground);
+  const background = theme && parseColorRgb(theme.background);
+  return Array.from({ length: 256 }, (_, level) => foreground && background
+    ? `\x1b[38;2;${background.map((channel, i) => Math.round(channel + (foreground[i] - channel) * level / 255)).join(";")}m`
+    : `${DIM}${FG_DEFAULT}`);
 }
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
@@ -168,6 +229,9 @@ interface TutRunnerOptions {
   /** Current Pocket touch mode, used for live non-progress tutorial prompts. */
   getPocketTouchMode?: () => PocketTutorialTouchMode;
   subscribeToPocketTouchMode?: (listener: () => void) => () => void;
+  /** Terminal colors the Pocket gesture starfield blends between. */
+  getTerminalTheme?: () => Record<string, string>;
+  subscribeToTerminalTheme?: (listener: () => void) => () => void;
 }
 
 type Screen = "menu" | "section" | "reset" | "flappy";
@@ -191,6 +255,8 @@ export class TutRunner implements InteractiveProgram {
   private onNotifyPocket?: () => void;
   private getPocketTouchMode?: () => PocketTutorialTouchMode;
   private subscribeToPocketTouchMode?: (listener: () => void) => () => void;
+  private getTerminalTheme?: () => Record<string, string>;
+  private subscribeToTerminalTheme?: (listener: () => void) => () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -216,8 +282,9 @@ export class TutRunner implements InteractiveProgram {
   private gestureScrollDirections = new Set<number>();
   private gestureArrows = new Set<MobileGestureInputId>();
   private backgroundOffset = 0;
-  private backgroundFrame = 0;
-  private starfield = createGestureStarfield();
+  private starfield: GestureStarfield | null = null;
+  /** Rebuilt on the first paint after entering the screen or a theme change. */
+  private starColors: readonly string[] | null = null;
   private backgroundTimer: ReturnType<typeof setInterval> | null = null;
   private capturingMouse = false;
 
@@ -237,6 +304,8 @@ export class TutRunner implements InteractiveProgram {
     this.onNotifyPocket = options.onNotifyPocket;
     this.getPocketTouchMode = options.getPocketTouchMode;
     this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
+    this.getTerminalTheme = options.getTerminalTheme;
+    this.subscribeToTerminalTheme = options.subscribeToTerminalTheme;
     this.returnToInitialScreen();
   }
 
@@ -246,9 +315,6 @@ export class TutRunner implements InteractiveProgram {
     this.pocketTouchModeUnsub = this.subscribeToPocketTouchMode?.(() => this.render()) ?? null;
     this.resizeUnsub = this.adapter.onPtyResize((d) => {
       if (d.id === this.terminalId) this.render();
-    });
-    this.themeUnsub = onTerminalThemeChange(() => {
-      if (this.isPocketGestureScreen()) this.render();
     });
     this.render();
   }
@@ -287,7 +353,7 @@ export class TutRunner implements InteractiveProgram {
   private startBackgroundTicks(): void {
     if (this.backgroundTimer) return;
     this.backgroundTimer = setInterval(() => {
-      this.backgroundFrame++;
+      this.starfield?.advance();
       this.render();
     }, GESTURE_BACKGROUND_TICK_MS);
   }
@@ -435,7 +501,7 @@ export class TutRunner implements InteractiveProgram {
           if (this.isPocketGestureScreen()) {
             // A periodic field has no top or bottom; only its origin moves.
             const step = wheel[1] === "4" ? -1 : 1;
-            this.backgroundOffset = (this.backgroundOffset + step + GESTURE_BACKGROUND_PERIOD) % GESTURE_BACKGROUND_PERIOD;
+            this.backgroundOffset = (this.backgroundOffset + step + STARFIELD_HEIGHT) % STARFIELD_HEIGHT;
             this.render();
           }
           i += wheel[0].length;
@@ -750,45 +816,38 @@ export class TutRunner implements InteractiveProgram {
     if (gestureScreen !== this.capturingMouse) {
       this.capturingMouse = gestureScreen;
       this.write(gestureScreen ? MOUSE_ENABLE : MOUSE_DISABLE);
-      if (gestureScreen && !prefersReducedMotion()) this.startBackgroundTicks();
-      else this.stopBackgroundTicks();
+      this.starColors = null;
+      if (gestureScreen) {
+        this.themeUnsub = this.subscribeToTerminalTheme?.(() => {
+          this.starColors = null;
+          this.render();
+        }) ?? null;
+        if (!prefersReducedMotion()) this.startBackgroundTicks();
+      } else {
+        this.themeUnsub?.();
+        this.themeUnsub = null;
+        this.stopBackgroundTicks();
+      }
     }
     return gestureScreen;
   }
 
   private renderGestureBackground(lines: string[]): void {
     const { cols, rows } = this.adapter.getPtySize(this.terminalId);
-    const theme = getTerminalTheme();
-    const foreground = parseColorRgb(theme.foreground);
-    const background = parseColorRgb(theme.background);
-    const seconds = this.backgroundFrame * GESTURE_BACKGROUND_TICK_MS / 1000;
+    const starfield = (this.starfield ??= new GestureStarfield());
+    const colors = (this.starColors ??= starPalette(this.getTerminalTheme?.()));
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
-    for (const star of this.starfield.stars) {
-      const age = seconds / star.pulseSeconds + star.phase;
-      const cycle = Math.floor(age);
-      // Cycle boundaries fall inside the dark interval, so relocation never
-      // moves a visible star. Advance offscreen stars too, independent of scroll.
-      if (cycle !== star.cycle) {
-        star.cycle = cycle;
-        this.starfield.respawn(star);
-      }
-      const y = (star.y - this.backgroundOffset + GESTURE_BACKGROUND_PERIOD) % GESTURE_BACKGROUND_PERIOD;
-      if (y >= rows) continue;
-      const pulse = (1 - Math.cos((age - cycle) * Math.PI * 2)) / 2;
-      // Keep a short dark interval, easing both ends of each fade to rest.
-      const visibility = Math.max(0, (pulse - 0.15) / 0.85);
-      if (visibility === 0) continue;
-      const opacity = (0.36 + star.depth * 0.16) * visibility * visibility * (3 - 2 * visibility);
-      const color = foreground && background
-        ? `\x1b[38;2;${background.map((channel, i) => Math.round(channel + (foreground[i] - channel) * opacity)).join(";")}m`
-        : `${DIM}${FG_DEFAULT}`;
-      const glyph = star.depth > 0.85 ? "✦" : star.depth > 0.6 ? "+" : "·";
-      for (let row = y; row < rows; row += GESTURE_BACKGROUND_PERIOD) {
+    for (const star of starfield.stars) {
+      const y = (star.y - this.backgroundOffset + STARFIELD_HEIGHT) % STARFIELD_HEIGHT;
+      if (y >= rows || star.x >= cols || star.opacity === 0) continue;
+      const color = colors[Math.round(star.opacity * (colors.length - 1))];
+      for (let row = y; row < rows; row += STARFIELD_HEIGHT) {
         for (let col = star.x; col < cols; col += STARFIELD_WIDTH) {
-          out += `${moveTo(row + 1, col + 1)}${color}${glyph}${RESET}`;
+          out += `${moveTo(row + 1, col + 1)}${color}${star.glyph}`;
         }
       }
     }
+    out += RESET;
     // Absolute cursor positions keep the foreground fixed and prevent a final
     // newline at the bottom of the viewport from scrolling the whole screen.
     lines.slice(0, rows).forEach((line, row) => {
@@ -1183,8 +1242,6 @@ export class TutRunner implements InteractiveProgram {
     this.pocketTouchModeUnsub = null;
     this.resizeUnsub?.();
     this.resizeUnsub = null;
-    this.themeUnsub?.();
-    this.themeUnsub = null;
     this.write(LEAVE_ALT_SCREEN);
     if (notifyExit) this.onExit();
   }
