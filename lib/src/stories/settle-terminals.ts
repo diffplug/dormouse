@@ -1,6 +1,11 @@
 import { getActivitySnapshot, getTerminalInstance } from '../lib/terminal-registry';
 import type { Terminal } from '@xterm/xterm';
 
+/** A wrapper class holding a TODO landing spotlight (`TodoSpotlight`) at its
+ *  peak as a still, since the snapshot runner finishes every finite animation
+ *  before it captures (Playwright's `animations: "disabled"`). */
+export const TODO_SPOTLIGHT_HELD_CLASS = '[&_.todo-spotlight]:!animate-none [&_.todo-spotlight]:!opacity-100';
+
 /** How long each gate below waits before it gives up. */
 const DEFAULT_TIMEOUT_MS = 4000;
 
@@ -40,6 +45,24 @@ export async function settleTerminals(opts?: { timeoutMs?: number }): Promise<vo
       ? 'no terminal ever mounted'
       : `${terms.filter((t) => !hasContent(t)).length} of ${terms.length} terminals never wrote content`);
   }
+}
+
+/**
+ * Hold until an open terminal context has settled: its helper's autorun has
+ * finished (the status row's spinner is gone) and every terminal, the helper's
+ * included, has painted. The helper steps through "Waiting for shell…" and
+ * "Running …" on timers, so a capture without this lands on whichever step a
+ * loaded runner happened to reach.
+ */
+export async function settleTerminalContext(opts?: { timeoutMs?: number }): Promise<void> {
+  await requireElement('[data-terminal-context]', 'terminal context');
+  const settled = () => {
+    const status = document.querySelector('[data-terminal-context] [aria-label$="terminal status"]');
+    return !!status && !status.querySelector('.animate-spin');
+  };
+  await waitForCondition(settled, opts);
+  if (!settled()) throw new Error('terminal context autorun never finished');
+  await settleTerminals(opts);
 }
 
 /**

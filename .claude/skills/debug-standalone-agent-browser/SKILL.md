@@ -21,7 +21,7 @@ The harness:
 - starts the standalone Node sidecar directly
 - starts a localhost HTTP/SSE bridge for browser-side `PlatformAdapter` calls, gated by a per-run token it bakes into the bridge URL the page is built against (`VITE_DORMOUSE_BROWSER_DEV_HOST`) — not into the page's own address, so there is no `?t=` in the address bar to look for. Nothing to pass yourself, but the bridge answers `404` to anything without it, so drive the app through `agent-browser` at the Vite port and not the bridge port. To poke the bridge by hand, use the `bridge token:` and ready-made `curl` the harness prints at startup.
 - starts Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`
-- opens the app in `agent-browser`
+- opens the app in `agent-browser`, or, run as `dor tool innerdogfood`, leaves it to the Tool's own browser
 - mirrors browser console logs as `[browser log] ...` in the harness terminal
 
 Port and session overrides are documented in `docs/specs/standalone.md` → "Standalone browser-dev harness".
@@ -35,7 +35,7 @@ agent-browser --session <outer-session> close
 agent-browser --session <outer-session> open "http://localhost:<vite-port>/"
 ```
 
-Never use `close --all` or a global process-name kill: other worktrees may have live harnesses. If testing nested browser surfaces, give their `dor ab --key` a test-specific name and close only that session afterward.
+Never use `close --all` or a global process-name kill: other worktrees may have live harnesses. If testing nested browser surfaces, give their `dor agent-browser --key` a test-specific name and close only that session afterward.
 
 If the first `open` lands on `about:blank`, issue it again and poll until the URL sticks and the xterm input exists:
 
@@ -46,11 +46,11 @@ agent-browser --session <outer-session> eval '(()=>(!!document.querySelector("te
 
 Browser console mirroring (`[browser log] ...`) keeps working after a manual re-open, so you don't lose log visibility.
 
-Parallel worktrees are isolated automatically (`docs/specs/standalone.md` → "Standalone browser-dev harness"). Inside Dormouse, use `dor ensure -- pnpm innerdogfood`; the harness opens its browser pane. Stop only your own harness with Ctrl-C after a timing run.
+Parallel worktrees are isolated automatically (`docs/specs/standalone.md` → "Standalone browser-dev harness"). Inside Dormouse, use `dor tool innerdogfood`; the Tool shows the harness in its own pane. Stop only your own harness with Ctrl-C after a timing run.
 
 ## Driving Dormouse
 
-Use the outer harness session printed by `innerdogfood`:
+Use the browser command printed by `innerdogfood` — `dor agent-browser --surface surface:N` under `dor tool innerdogfood`, or the outer harness session otherwise:
 
 ```sh
 agent-browser --session <outer-session> snapshot -i
@@ -60,10 +60,10 @@ agent-browser --session <outer-session> screenshot /private/tmp/dormouse.png
 
 ### Run `dor` by typing into Dormouse — never from your own shell
 
-`dor` commands (`dor ab open`, `dor split`, …) must be **typed into the Dormouse terminal under test** (the xterm — see *Typing into xterm* and *Submitting (Enter)* below), exactly as a user would. Do **not** run the staged `dor` (or `node .../dor.js`) from your own shell, even if you point it at the harness's `DORMOUSE_CONTROL_SOCKET`/`DORMOUSE_CONTROL_TOKEN`. Two ways it breaks:
+`dor` commands (`dor agent-browser open`, `dor split`, …) must be **typed into the Dormouse terminal under test** (the xterm — see *Typing into xterm* and *Submitting (Enter)* below), exactly as a user would. Do **not** run the staged `dor` (or `node .../dor.js`) from your own shell, even if you point it at the harness's `DORMOUSE_CONTROL_SOCKET`/`DORMOUSE_CONTROL_TOKEN`. Two ways it breaks:
 
 - **Wrong instance.** Your dev shell is often itself running *inside the installed Dormouse*, so it inherits that app's `DORMOUSE_SURFACE_ID`, `DORMOUSE_CONTROL_SOCKET`, and `DORMOUSE_CONTROL_TOKEN`. A bare `dor` then drives (or errors against) the **installed** app, not the harness — e.g. `Warning: could not open the Dormouse browser surface: surface '<stale-id>' was not found`.
-- **Wrong / missing caller surface.** `dor` resolves its target from `DORMOUSE_SURFACE_ID` (the pane it runs in), then the focused surface. Typed into the xterm, that variable is the harness pane, so surface targeting *and the split-vs-replace behavior match real usage*: `dor ab open` **splits** next to a **touched** terminal but **replaces** an **untouched** one (`createContentSurface`'s `replaceUntouchedShell`). Any input into a terminal touches it, so a user who typed the command gets a split — but an externally-run `dor` leaves the terminal untouched (and has no caller pane), so you get a replace and the flow no longer matches what the user sees.
+- **Wrong / missing caller surface.** `dor` resolves its target from `DORMOUSE_SURFACE_ID` (the pane it runs in), then the focused surface. Typed into the xterm, that variable is the harness pane, so surface targeting *and the split-vs-replace behavior match real usage*: `dor agent-browser open` **splits** next to a **touched** terminal but **replaces** an **untouched** one (`createContentSurface`'s `replaceUntouchedShell`). Any input into a terminal touches it, so a user who typed the command gets a split — but an externally-run `dor` leaves the terminal untouched (and has no caller pane), so you get a replace and the flow no longer matches what the user sees.
 
 So to reproduce a user flow faithfully: `keyboard inserttext` the `dor …` line into the xterm, submit it with the synthetic Enter, then watch the harness log / DOM for the result.
 
@@ -74,11 +74,11 @@ So to reproduce a user flow faithfully: `keyboard inserttext` the `dor …` line
 
 ### Typing into xterm
 
-`keyboard type "..."` simulates per-keystroke events and **reorders characters under load** (you get `dor ab opne dormouse.sh`). Use `keyboard inserttext` (atomic) instead, and always read the input line back to verify before submitting:
+`keyboard type "..."` simulates per-keystroke events and **reorders characters under load** (you get `dor agent-browser opne dormouse.sh`). Use `keyboard inserttext` (atomic) instead, and always read the input line back to verify before submitting:
 
 ```sh
 agent-browser --session <outer-session> eval '(()=>{document.querySelector("textarea.xterm-helper-textarea")?.focus();return"f"})()'
-agent-browser --session <outer-session> keyboard inserttext "dor ab open dormouse.sh"
+agent-browser --session <outer-session> keyboard inserttext "dor agent-browser open dormouse.sh"
 # verify the line, then clear with raw Ctrl-U ($'\025') and retype if it is wrong
 agent-browser --session <outer-session> eval '(()=>{var r=document.querySelector(".xterm-rows");return r?r.innerText.split("\n").filter(l=>l.trim()).slice(-1)[0]:""})()'
 ```
@@ -122,7 +122,7 @@ Install a page-local timing probe with `agent-browser eval` before the action un
 
 Useful marks:
 
-- `command-enter-start`: immediately before submitting `dor ab open ...`
+- `command-enter-start`: immediately before submitting `dor agent-browser open ...`
 - `first-visible-canvas`: first visible non-zero canvas frame
 - `page-title-loaded`: a `[title]` attribute equals the page's real `<title>`
 - `github-click-start`: immediately before clicking the GitHub link
@@ -138,26 +138,26 @@ For click targeting, see **Clicking a link inside the screencast** above (1:1 ca
 
 ## What To Watch
 
-The high-rate `[ab-panel]`/`[agent-browser]` stream and screenshot console
-diagnostics are now **off by default** — they fire per frame (~20Hz). Enable them
-before a run and reload (the flag is read once at module load):
+The high-rate `[ab-panel]` viewer-socket console diagnostics are **off by
+default** — they fire per stream event. Enable them before a run and reload (the
+flag is read once, on the first log); the same flag has the host log each viewer
+socket's rates every 5 s:
 
 ```js
 localStorage.setItem('dormouse.flags.abDebugLogs', 'true'); // then reload
 ```
 
-The connection's always-on `debugSnapshot()` ring is unaffected, and the
-`stalled`/`failed`/`error` screenshot warnings stay unconditional.
+The connection's always-on `debugSnapshot()` ring is unaffected.
 
 In the harness terminal, correlate (with the flag on):
 
 - `[sidecar] ...` for sidecar behavior
-- `[browser log] [ab-panel] connecting stream ...`
+- `[browser-viewer] {"perSecond":{"framesIn":…,"provisional":…,"crisp":…,"captures":…,"kbOut":…},"captureAvgMs":…,"eventLoopDelayMs":…}` — the host's per-socket rates and its event-loop delay (sidecar stderr)
+- `[browser log] [ab-panel] connecting viewer ...`
 - `[browser log] [ab-panel] tabs msg ...`
-- `[browser log] [agent-browser] screenshot start/done ...`
 - `[browser log] [measure] ...`
 
-For a clean `dor ab open dormouse.sh`, the first tab snapshot should look like one active tab:
+For a clean `dor agent-browser open dormouse.sh`, the first tab snapshot should look like one active tab:
 
 ```text
 [ab-panel] tabs msg {"t":["t1:A:https://dormouse.sh/"]}
@@ -165,15 +165,15 @@ For a clean `dor ab open dormouse.sh`, the first tab snapshot should look like o
 
 If the first snapshot already contains GitHub or multiple Dormouse tabs, clear the nested session and rerun.
 
-### Static-page screenshot churn (diagnosed + fixed)
+### Static-page capture churn (diagnosed + fixed)
 
-A *static* page should produce **zero** `screenshot start/done` and **zero** `tabs msg` once it settles. If you see them repeating (~20/sec) with unchanged tab snapshots, that is the known churn bug.
+A *static* page should settle to **zero** `framesIn`, `crisp` and `captures` in the `[browser-viewer]` line, and **zero** `tabs msg`. If they stay near 20/sec with unchanged tab snapshots, that is the known churn bug.
 
-Root cause: the external agent-browser **daemon re-broadcasts the current frame and tab list on a ~20Hz heartbeat even when nothing changes**. Each forwarded frame triggers a device-resolution screenshot — *a child-process spawn* (`agent-browser screenshot`) — which pokes the daemon into emitting again: a self-perpetuating feedback loop. Each redundant `tabs` message also forces a `setTabs` React re-render.
+Root cause: the external agent-browser **daemon re-broadcasts the current frame and tab list on a ~20Hz heartbeat even when nothing changes**. Each forwarded frame triggers a device-resolution capture — *a child-process spawn* (`agent-browser screenshot`) — which pokes the daemon into emitting again: a self-perpetuating feedback loop. Each redundant `tabs` message also forces a `setTabs` React re-render.
 
-Fix (in `lib/src/components/wall/agent-browser-connection.ts`): drop **byte-identical** frame and tab re-broadcasts (djb2 hash of the payload) before emitting `frame-pulse` / `tabs`, resetting the dedupe sentinels on reconnect. A genuine change (animation, navigation, new/closed/focused tab, title) alters the bytes and flows through. See `agent-browser-connection.test.ts` for the dedupe + reconnect-reprime tests.
+Fix (host-side, `viewStream` in `lib/src/host/agent-browser-host.ts`): drop frame and tab re-broadcasts **byte-identical** to the last before they reach the viewer socket, per upstream connection, so a reconnect re-primes. A genuine change (animation, navigation, new/closed/focused tab, title) alters the bytes and flows through. See the `agent-browser host viewer` tests in `lib/src/host/agent-browser-host.test.ts`.
 
-**Regression check:** open `dormouse.sh`, let it settle ~4s, then over 10s of idle confirm `grep -c "screenshot start"` and `grep -c "tabs msg"` are both **0**. To re-measure the daemon's raw vs. forwarded rate, temporarily add a 2s-window counter in the connection (count frames/tabs seen vs. dropped-as-duplicate) — on a static page it reads ~39 seen / 39 dropped per 2s before the dedupe takes effect.
+**Regression check:** open `dormouse.sh`, let it settle ~4s, then over 10s of idle confirm the `[browser-viewer]` line reads `framesIn: 0` and `captures: 0`, and `grep -c "tabs msg"` is **0**.
 
 ## Validation
 
@@ -185,7 +185,7 @@ pnpm --filter dormouse-standalone test
 pnpm --filter dormouse-standalone build
 ```
 
-After changing webview/lib code under `lib/src` (e.g. the agent-browser connection, panel, or screenshot loop), run from `lib/`:
+After changing webview/lib code under `lib/src` (e.g. the agent-browser connection, panel, or controller), run from `lib/`:
 
 ```sh
 npx tsc --noEmit -p tsconfig.json

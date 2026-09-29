@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { XIcon } from '@phosphor-icons/react';
 import type { DormouseTheme } from '../../lib/themes';
 import { themePreviewButton } from '../design';
+import { ScrollFades } from '../ScrollFades';
 import { getThemePreview, ThemePreview } from './ThemePreview';
 
 /** The preview list shared by every ThemePicker placement. */
@@ -86,21 +87,7 @@ export function ThemeList({
           })}
         </div>
       </div>
-      {/* Painted in the list background over the edge entries scroll past, so a
-          fade appears only toward the direction that still holds entries. */}
-      {[
-        { edge: 'above', shown: above, side: 'top-0', direction: 'to bottom' },
-        { edge: 'below', shown: below, side: 'bottom-0', direction: 'to top' },
-      ].map(({ edge, shown, side, direction }) => shown ? (
-        <div
-          key={edge}
-          aria-hidden="true"
-          data-scroll-fade={edge}
-          // 32px: at least twice the gap, or a fade reads as a row divider.
-          className={`pointer-events-none absolute inset-x-0 h-8 ${side}`}
-          style={{ background: `linear-gradient(${direction}, ${backgroundColor}, transparent)` }}
-        />
-      ) : null)}
+      <ScrollFades above={above} below={below} backgroundColor={backgroundColor} />
     </div>
   );
 }

@@ -29,8 +29,8 @@ const sessionB: PersistedSession = {
 const twoWorkspaces: PersistedWindow = {
   version: 1,
   workspaces: [
-    { id: 'ws-1', name: 'One', session: sessionA },
-    { id: 'ws-2', name: 'Two', session: sessionB },
+    { id: 'ws-1', name: 'One', nameIsAuto: false, session: sessionA },
+    { id: 'ws-2', name: 'Two', nameIsAuto: false, session: sessionB },
   ],
   activeWorkspaceId: 'ws-2',
 };
@@ -46,7 +46,7 @@ describe('window-persistence', () => {
     const store = memoryStore(JSON.stringify(sessionA));
     expect(loadWindowState(store, 'k')).toEqual({
       version: 1,
-      workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME, session: sessionA }],
+      workspaces: [{ id: DEFAULT_WORKSPACE_ID, name: DEFAULT_WORKSPACE_NAME, nameIsAuto: true, session: sessionA }],
       activeWorkspaceId: DEFAULT_WORKSPACE_ID,
     });
     expect(loadWindowState(store, 'k')).toEqual(wrapSessionInWindow(sessionA));

@@ -7,6 +7,7 @@ import {
   type ApplicationText,
   type StricliProcess,
 } from '@stricli/core';
+import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -18,13 +19,15 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
-import { toolCommand } from './commands/tool.js';
+import { TOOL_TIMEOUT_MS, toolCommand } from './commands/tool.js';
 import { openCommand } from './commands/open.js';
+import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
-import { errorLine, errorMessage, fail } from './commands/shared.js';
-import { VIEW_FILE_ARGV } from './file-viewer-format.js';
+import { errorLine, errorMessage, fail, requireControlClient } from './commands/shared.js';
+import { VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from './file-viewer-format.js';
 import { runFileViewer } from './file-viewer.js';
+import { runFolderViewer } from './folder-viewer.js';
 import type {
   CliEnv,
   CliOptions,
@@ -35,16 +38,16 @@ import type {
 } from './commands/types.js';
 
 export type {
-  AgentBrowserExec,
-  AgentBrowserExecResult,
-  AgentBrowserSurfaceRequest,
-  AgentBrowserSurfaceResponse,
   AppRestartResponse,
   AwaitCause,
   AwaitSurfaceOutcome,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
   AwaitUntil,
+  BrowserExec,
+  BrowserExecResult,
+  BrowserSurfaceRequest,
+  BrowserSurfaceResponse,
   CliEnv,
   CliOptions,
   CliResult,
@@ -104,6 +107,7 @@ const COMMANDS = [
   killCommand,
   iframeCommand,
   agentBrowserCommand,
+  playwrightCommand,
   listCommand,
   workspaceCommand,
   appCommand,
@@ -122,6 +126,7 @@ const ROUTES = {
   kill: killCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
+  playwright: playwrightCommand.command,
   list: listCommand.command,
   workspace: workspaceCommand.command,
   app: appCommand.command,
@@ -192,19 +197,42 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const argv = normalizeAgentBrowserAlias(normalizeVersionAlias(rawArgv));
+  const argv = normalizeVersionAlias(rawArgv);
+  // Private host helper: stdout stays on a host-owned pipe, never a terminal
+  // or control-socket response. The marker separates shell startup chatter.
+  if (argv[0] === '__launch-env' && argv.length === 2 && /^[a-f0-9]{32}$/.test(argv[1])) {
+    const env = { ...(options.env ?? process.env) };
+    delete env.ELECTRON_RUN_AS_NODE;
+    // A JSON copy loses process.env's case-insensitive Windows lookup.
+    if (process.platform === 'win32') {
+      for (const key of Object.keys(env)) {
+        const canonical = key.toUpperCase();
+        if ((canonical === 'PATH' || canonical === 'PATHEXT') && key !== canonical) {
+          env[canonical] = env[key];
+          delete env[key];
+        }
+      }
+    }
+    return { stdout: `\n${argv[1]}:${Buffer.from(JSON.stringify(env)).toString('base64')}\n`, stderr: '', exitCode: 0 };
+  }
 
-  // `dor ab <args...>` forwards args verbatim to agent-browser, so they must
-  // never reach stricli's flag parser. Only a bare `--help`/`-h` (or
-  // `dor help agent-browser`, normalized above) falls through to stricli.
-  if (argv[0] === 'agent-browser' && !isAgentBrowserHelpInvocation(argv)) {
-    return runAgentBrowserCli(argv.slice(1), options);
+  // `dor agent-browser <args...>` and `dor playwright <args...>` forward args verbatim to the
+  // provider's CLI, so they must never reach stricli's flag parser. Only a bare
+  // `--help`/`-h` (or `dor help agent-browser`, normalized above) falls through
+  // to stricli.
+  if (isBrowserProvider(argv[0]) && !isPassthroughHelpInvocation(argv)) {
+    return BROWSER_CLIS[argv[0]](argv.slice(1), options);
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
   // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
-  // call; the announcement is the only output.
+  // call; its title and announcement are the only output.
   if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
     return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
+  }
+  // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
+  // selects and activates files through this terminal's control client.
+  if (argv[0] === VIEW_FOLDER_ARGV && argv.length === 2) {
+    return { stdout: await runFolderViewer(argv[1], requireControlClient(options, TOOL_TIMEOUT_MS)), stderr: '', exitCode: 0 };
   }
 
   const helpTarget = getHelpTarget(argv);
@@ -248,14 +276,13 @@ function normalizeVersionAlias(argv: string[]): string[] {
   return argv;
 }
 
-/** `ab` is the documented short alias for `agent-browser`, in any help form. */
-function normalizeAgentBrowserAlias(argv: string[]): string[] {
-  if (argv[0] === 'ab') return ['agent-browser', ...argv.slice(1)];
-  if (argv[0] === 'help' && argv[1] === 'ab') return ['help', 'agent-browser', ...argv.slice(2)];
-  return argv;
-}
+/** Each browser provider's passthrough, run under its id as the command. */
+const BROWSER_CLIS: Record<BrowserAutomationProvider, (args: string[], options: CliOptions) => Promise<CliResult>> = {
+  'agent-browser': runAgentBrowserCli,
+  playwright: runPlaywrightCli,
+};
 
-function isAgentBrowserHelpInvocation(argv: string[]): boolean {
+function isPassthroughHelpInvocation(argv: string[]): boolean {
   return argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h');
 }
 

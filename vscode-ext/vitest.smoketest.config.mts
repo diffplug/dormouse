@@ -10,7 +10,7 @@ import unitConfig from './vitest.config.mts';
  * `getWebviewHtml`, so it needs `Uri.file` for exactly the same reason.
  */
 export default defineConfig({
-  // Both run getWebviewHtml and its shared notepad schema imports.
+  // Both run getWebviewHtml and its shared imports.
   resolve: unitConfig.resolve,
   test: {
     environment: 'node',

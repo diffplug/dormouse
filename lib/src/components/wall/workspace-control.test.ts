@@ -14,6 +14,7 @@ import {
   resetWorkspaceIdPool,
 } from '../../lib/workspace-store';
 import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-activity-store';
+import { createAlertEpisode } from '../../lib/alert-episode';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { resetWindowSessionAggregator } from '../../lib/window-session-aggregator';
 import { setPlatform } from '../../lib/platform';
@@ -61,7 +62,7 @@ describe('workspace.list', () => {
     const second = createWorkspace({ id: 'ws-2', name: 'build', activate: false }).id;
     setWorkspaceSurfaces(first, ['a']);
     setWorkspaceSurfaces(second, ['b', 'c']);
-    setTerminalActivity('b', { status: 'ALERT_RINGING' });
+    setTerminalActivity('b', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     setTerminalActivity('c', { todo: true });
 
     const detail = request('workspace.list');
@@ -70,8 +71,8 @@ describe('workspace.list', () => {
     expect(answer(detail)).toEqual({
       windowRef: 'window:1',
       workspaces: [
-        { ref: 'workspace:1', id: first, name: 'Workspace 1', active: true, ringing: false, todo: false, count: 0 },
-        { ref: 'workspace:2', id: 'ws-2', name: 'build', active: false, ringing: true, todo: true, count: 2 },
+        { ref: 'workspace:1', id: first, name: 'Workspace 1', auto: true, active: true, ringing: false, todo: false, count: 0 },
+        { ref: 'workspace:2', id: 'ws-2', name: 'build', auto: false, active: false, ringing: true, todo: true, count: 2 },
       ],
     });
     expect(workspaceRows()).toHaveLength(2);
@@ -107,6 +108,14 @@ describe('workspace mutation verbs', () => {
     await handleWorkspaceControl(switched);
     expect(answer(switched)).toMatchObject({ status: 'active', workspaceId: 'ws-2' });
     expect(getWorkspacesSnapshot().activeId).toBe('ws-2');
+  });
+
+  it('hands a name back to auto-naming with auto', async () => {
+    createWorkspace({ id: 'ws-2', name: 'build', activate: false });
+    const detail = request('workspace.rename', { workspace: 'workspace:2', auto: true });
+    await handleWorkspaceControl(detail);
+    expect(answer(detail)).toMatchObject({ status: 'renamed', workspaceId: 'ws-2' });
+    expect(getWorkspacesSnapshot().workspaces[1].nameIsAuto).toBe(true);
   });
 
   it('refuses an ambiguous name instead of picking, and lists the candidates', async () => {
@@ -157,6 +166,22 @@ describe('workspace.move', () => {
     const neither = request('workspace.move', { workspace: 'workspace:7' });
     await handleWorkspaceControl(neither);
     expect(answer(neither)).toMatch(/needs a window, an index, or both/);
+  });
+
+  it('refuses cross-window moves of dirty Tools even with the iframe destruction flag', async () => {
+    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    handleFor(second, { dirtyToolIds: () => ['editor'], iframeSurfaceRefs: () => ['surface:4'] });
+    const transferWorkspace = vi.fn(async () => {});
+    setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
+    for (const dangerouslyDestroyIframePageState of [false, true]) {
+      const move = request('workspace.move', { workspace: 'workspace:7', toWindow: 'new', dangerouslyDestroyIframePageState });
+      await handleWorkspaceControl(move);
+      expect(answer(move)).toMatch(/unsaved changes/);
+    }
+    expect(transferWorkspace).not.toHaveBeenCalled();
+    const reorder = request('workspace.move', { workspace: 'workspace:7', index: 0 });
+    await handleWorkspaceControl(reorder);
+    expect(answer(reorder)).toMatchObject({ status: 'moved' });
   });
 
   it('refuses to move a Workspace holding iframes unless told to destroy their page state', async () => {
@@ -244,8 +269,7 @@ describe('workspace.close', () => {
     expect(answer(forced)).toEqual({
       status: 'closed', workspaceId: second, workspaceRef: 'workspace:2', name: 'build',
     });
-    // A command close raises no pane prompt, exactly like `dor kill`.
-    expect(closeAll).toHaveBeenCalledWith('silent');
+    expect(closeAll).toHaveBeenCalled();
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
   });
 

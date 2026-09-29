@@ -6,7 +6,7 @@ import {
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
-import { TODO_PILL_TRACKING_CLASS } from './design';
+import { HEADER_PILL_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { MobileTerminalSessionItem } from './MobileTerminalUi';
 import {
@@ -16,7 +16,6 @@ import {
   getActivitySnapshot,
   getOrCreateTerminal,
   getTerminalPaneStateSnapshot,
-  markSessionAttention,
   setTerminalUserTitle,
   subscribeToActivity,
   subscribeToTerminalPaneState,
@@ -154,14 +153,9 @@ export function MobileWall({
         onKill={() => killSession(activeItem.id)}
         showKillButton={showKillButton}
       />
-      {/* Touching the pane attends it, which is what puts a ring out here:
-          mobile has no terminal context and no right-click
-          (`docs/specs/alert.md` -> Pane Header). Keystrokes already attend
-          through `wireXtermHandlers`. */}
-      <div
-        className="min-h-0 flex-1 overflow-hidden bg-terminal-bg"
-        onPointerDown={() => markSessionAttention(activeItem.id)}
-      >
+      {/* `MobileTerminalUi` acknowledges a touch or keystroke on this pane —
+          the only way a ring goes out here (`docs/specs/alert.md` -> Pane Header). */}
+      <div className="min-h-0 flex-1 overflow-hidden bg-terminal-bg">
         <TerminalPane id={activeItem.id} isFocused />
       </div>
     </div>
@@ -196,7 +190,7 @@ function MobileWallHeader({
           type="button"
           data-session-todo-for={session.id}
           data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-          className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
+          className={`todo-pill-shell ${HEADER_PILL_CLASS}`}
           aria-label="Dismiss TODO"
           aria-hidden={todoPill.flourishing ? true : undefined}
           onClick={(event) => {

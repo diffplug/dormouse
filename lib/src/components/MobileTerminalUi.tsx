@@ -30,6 +30,7 @@ import {
   finishMobileGesture,
   MOBILE_GESTURE_COMPLETE_MS,
   MOBILE_GESTURE_IDLE_STATE,
+  RADIUS_FADE_START,
   updateMobileGesture,
   type MobileGestureAction,
   type MobileGestureInputId,
@@ -37,12 +38,15 @@ import {
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { isEditableTarget } from '../lib/dom';
+import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
-import type { SessionStatus } from '../lib/terminal-registry';
+import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
+import { EDGE_SCROLL_LINE_PX, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobileTerminal } from '../lib/mobile-terminal-scroll';
+import { acknowledgeSession } from '../lib/session-activity-store';
 import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
+import { TERMINAL_TAP_EVENT, type TerminalTapDetail } from '../lib/terminal-mouse-router';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
@@ -128,6 +132,7 @@ export interface MobileTerminalUiProps {
   cursorTouchAvailable?: boolean;
   onSendInput?: (data: string) => void;
   onGestureInput?: (input: MobileGestureInputId, data: string) => void;
+  onGestureScroll?: (lines: number) => void;
   onPaste?: () => void | Promise<void>;
   onFocusInput?: () => void;
   sessions?: MobileTerminalSessionItem[];
@@ -405,11 +410,26 @@ function localPointerPoint(event: PointerEvent<HTMLElement>): MobileGesturePoint
   };
 }
 
+/** A press that may yet end as a tap, and the Session it would acknowledge. */
+interface PendingTap {
+  pointerId: number;
+  clientX: number;
+  clientY: number;
+  sessionId: string;
+}
+
+/** Whether a press's pointer is still where a tap stays: inside the radial
+ *  menu's `RADIUS_FADE_START`, before any direction has begun to steer. */
+function withinTapSlop(tap: PendingTap, event: PointerEvent<HTMLElement>): boolean {
+  return Math.hypot(event.clientX - tap.clientX, event.clientY - tap.clientY) <= RADIUS_FADE_START;
+}
+
 function isGestureDialogTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[data-mobile-gesture-dialog]') !== null;
 }
 
 function consumeNativeTouchOrScrollEvent(event: Event): void {
+  if (isMobileScrollWheel(event)) return;
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
@@ -484,6 +504,7 @@ export function MobileTerminalUi({
   cursorTouchAvailable = false,
   onSendInput,
   onGestureInput,
+  onGestureScroll,
   onPaste,
   onFocusInput,
   sessions = [],
@@ -499,14 +520,17 @@ export function MobileTerminalUi({
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
   const keyboardMode = activeKeyboardMode ?? internalKeyboardMode;
   const touchMode = activeTouchMode ?? internalTouchMode;
+  const activeSessionId = sessions.find((session) => session.active)?.id;
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
+  const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; y: number; remainder: number } | null>(null);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const completedGesturePointerIdRef = useRef<number | null>(null);
   const gestureCompletionTimerRef = useRef<number | null>(null);
   const cursorPointerIdRef = useRef<number | null>(null);
   const cursorPointerTargetRef = useRef<EventTarget | null>(null);
+  const pendingTapRef = useRef<PendingTap | null>(null);
   // Cancelled on unmount, including after test DOM teardown.
   const [blurRetries] = useState(() => new RetrySchedule());
   const [focusRetries] = useState(() => new RetrySchedule());
@@ -624,8 +648,9 @@ export function MobileTerminalUi({
     if (!action) return;
     if (action.kind === 'input') {
       const data = MOBILE_TERMINAL_KEY_SEQUENCES[action.input];
-      sendInput(data);
+      // Before sending: the input may leave the screen that credits it.
       onGestureInput?.(action.input, data);
+      sendInput(data);
       return;
     }
     if (action.kind === 'text') {
@@ -701,7 +726,12 @@ export function MobileTerminalUi({
   }, [configurePaneTextInputs, terminal]);
 
   useEffect(() => {
+    if (edgeScrollRef.current?.sessionId !== activeSessionId) edgeScrollRef.current = null;
+  }, [activeSessionId]);
+
+  useEffect(() => {
     if (touchMode === 'gestures' && interactive) return;
+    edgeScrollRef.current = null;
     clearGestureCompletionTimer();
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
     setPendingGestureConfirmation(null);
@@ -711,8 +741,30 @@ export function MobileTerminalUi({
 
   useEffect(() => blurRetries.cancel, [blurRetries]);
 
+  // Select mode's router owns a touch on the terminal and consumes its release,
+  // so it reports the tap itself.
+  useEffect(() => {
+    const host = terminalHostRef.current;
+    if (!host) return;
+    const onTap = (event: Event) => {
+      const tap = pendingTapRef.current;
+      if (tap?.pointerId !== (event as CustomEvent<TerminalTapDetail>).detail?.pointerId) return;
+      pendingTapRef.current = null;
+      acknowledgeSession(tap.sessionId);
+    };
+    host.addEventListener(TERMINAL_TAP_EVENT, onTap);
+    return () => host.removeEventListener(TERMINAL_TAP_EVENT, onTap);
+  }, []);
+
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     if (isGestureDialogTarget(event.target)) return;
+    // A tap acknowledges the active Session, a drag or swipe never
+    // (`docs/specs/alert.md` -> Engagement): judged on release, and tracked in
+    // capture on the host, before any mode below consumes the press.
+    const sessionId = interactive ? activeSessionId : undefined;
+    pendingTapRef.current = sessionId
+      ? { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, sessionId }
+      : null;
     blurPaneTextInputs();
     if (interactive && touchMode === 'cursor' && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
@@ -724,7 +776,7 @@ export function MobileTerminalUi({
       return;
     }
     if (!interactive || touchMode !== 'gestures') return;
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -733,14 +785,19 @@ export function MobileTerminalUi({
     completedGesturePointerIdRef.current = null;
 
     const origin = localPointerPoint(event);
-    commitGestureState(beginMobileGesture(
-      event.pointerId,
-      origin,
-      displayOriginAwayFromThumb(origin, event.currentTarget.getBoundingClientRect()),
-    ));
-  }, [blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
+    const rect = event.currentTarget.getBoundingClientRect();
+    // The starting point owns the whole drag, even if it later leaves the edge.
+    if (sessionId && isEdgeScrollOrigin(origin.x, rect.width)) {
+      edgeScrollRef.current = { pointerId: event.pointerId, sessionId, y: event.clientY, remainder: 0 };
+      commitGestureState(MOBILE_GESTURE_IDLE_STATE);
+      return;
+    }
+    commitGestureState(beginMobileGesture(event.pointerId, origin, displayOriginAwayFromThumb(origin, rect)));
+  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const tap = pendingTapRef.current;
+    if (tap?.pointerId === event.pointerId && !withinTapSlop(tap, event)) pendingTapRef.current = null;
     if (touchMode === 'cursor' && cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
@@ -750,6 +807,22 @@ export function MobileTerminalUi({
       return;
     }
 
+    const scroll = edgeScrollRef.current;
+    if (scroll?.pointerId === event.pointerId) {
+      event.preventDefault();
+      event.stopPropagation();
+      scroll.remainder += scroll.y - event.clientY;
+      scroll.y = event.clientY;
+      // Natural scrolling: content follows the finger.
+      const lines = Math.trunc(scroll.remainder / EDGE_SCROLL_LINE_PX);
+      scroll.remainder -= lines * EDGE_SCROLL_LINE_PX;
+      const terminal = lines && scroll.sessionId === activeSessionId ? getTerminalInstance(scroll.sessionId) : undefined;
+      if (terminal) {
+        scrollMobileTerminal(terminal, lines, event.clientX, event.clientY);
+        onGestureScroll?.(lines);
+      }
+      return;
+    }
     const state = gestureStateRef.current;
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -765,9 +838,24 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(nextState);
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode]);
+  }, [activeSessionId, commitGestureState, executeGestureAction, onGestureScroll, scheduleGestureCompletionClear, touchMode]);
+
+  const endEdgeScroll = useCallback((event: PointerEvent<HTMLDivElement>): boolean => {
+    if (edgeScrollRef.current?.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    edgeScrollRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    return true;
+  }, []);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const tap = pendingTapRef.current;
+    if (tap?.pointerId === event.pointerId) {
+      pendingTapRef.current = null;
+      if (withinTapSlop(tap, event)) acknowledgeSession(tap.sessionId);
+    }
+    if (endEdgeScroll(event)) return;
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
@@ -805,13 +893,15 @@ export function MobileTerminalUi({
     commitGestureState(completionState ?? result.state);
     executeGestureAction(result.action);
     if (completionState) scheduleGestureCompletionClear();
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
+  }, [commitGestureState, endEdgeScroll, executeGestureAction, scheduleGestureCompletionClear]);
 
   const handlePaneFocusStartCapture = useCallback(() => {
     blurPaneTextInputs();
   }, [blurPaneTextInputs]);
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (pendingTapRef.current?.pointerId === event.pointerId) pendingTapRef.current = null;
+    if (endEdgeScroll(event)) return;
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
@@ -834,7 +924,7 @@ export function MobileTerminalUi({
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
-  }, [commitGestureState]);
+  }, [commitGestureState, endEdgeScroll]);
 
   return (
     <TouchUiContext.Provider value={true}>
@@ -927,9 +1017,8 @@ export function MobileTerminalUi({
         inputMode="text"
         enterKeyHint="enter"
         onKeyDown={(event) => {
-          // IME navigation and confirmation belong to the composition. Safari
-          // can clear isComposing before its final keydown but still reports 229.
-          if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
+          // IME navigation and confirmation belong to the composition.
+          if (composingRef.current || isComposingKey(event.nativeEvent)) return;
           const sequence = keyDownSequence(event);
           if (!sequence) return;
           event.preventDefault();

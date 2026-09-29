@@ -12,7 +12,7 @@ import type { TeardownConfirmContext } from "./teardown-flow";
  * docs/specs/standalone.md §Quit flow, "Confirmation dialog".
  */
 
-export type QuitConfirmPhase = "open" | "quitting" | "archive-failed";
+export type QuitConfirmPhase = "open" | "quitting";
 
 /**
  * What the dialog is asking about. A quit tears every window down; a
@@ -40,8 +40,6 @@ const QUIT_INTENT: QuitConfirmIntent = { kind: "quit" };
 
 let phase: QuitConfirmPhase | null = null;
 let intent: QuitConfirmIntent = QUIT_INTENT;
-// Why the archive gate refused the quit; only set alongside "archive-failed".
-let archiveError: string | null = null;
 // The orchestrator context for the open request. Nulled the instant a decision
 // is made, so a repeated confirm / a late cancel is a no-op.
 let activeCtx: TeardownConfirmContext | null = null;
@@ -96,11 +94,6 @@ export function getQuitConfirmPhase(): QuitConfirmPhase | null {
   return phase;
 }
 
-/** The archive error backing the "archive-failed" phase; null in every other. */
-export function getQuitArchiveError(): string | null {
-  return archiveError;
-}
-
 /** What the open dialog is asking about. */
 export function getQuitConfirmIntent(): QuitConfirmIntent {
   return intent;
@@ -132,36 +125,13 @@ export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIn
   emit();
 }
 
-/** Own the window before archiving or voting, including an all-idle request. */
+/** Own the window before voting, including an all-idle request. */
 export function beginQuitProgress(next: QuitConfirmIntent): void {
   stopWatchingWorkspaces();
   activeCtx = null;
   intent = next;
-  archiveError = null;
   phase = 'quitting';
   ownDialog();
-  emit();
-}
-
-/**
- * The archive gate refused the quit (docs/specs/notepad.md → "Standalone
- * quit"). Reached either from "quitting" — the user already confirmed and the
- * gate ran behind the dialog — or from no dialog at all, since an all-idle quit
- * archives without ever showing one. So, unlike `openQuitConfirm`, this is not
- * guarded on an empty phase: it is always a transition from a decision already
- * made. `ctx.confirm()` is Quit anyway (notes discarded); `ctx.cancel()` closes.
- */
-export function openQuitArchiveFailure(
-  message: string,
-  ctx: TeardownConfirmContext,
-  next: QuitConfirmIntent = QUIT_INTENT,
-): void {
-  stopWatchingWorkspaces();
-  activeCtx = ctx;
-  intent = next;
-  ownDialog();
-  archiveError = message;
-  phase = "archive-failed";
   emit();
 }
 
@@ -172,7 +142,6 @@ export function confirmQuit(): void {
   if (!ctx) return;
   stopWatchingWorkspaces();
   activeCtx = null;
-  archiveError = null;
   phase = "quitting";
   emit();
   ctx.confirm();
@@ -183,7 +152,6 @@ export function cancelQuit(): void {
   if (!ctx) return;
   releaseDialog();
   activeCtx = null;
-  archiveError = null;
   phase = null;
   emit();
   ctx.cancel();
@@ -201,7 +169,6 @@ export function dismissQuitConfirm(kind?: QuitConfirmIntent["kind"]): void {
   if (kind !== undefined && intent.kind !== kind) return;
   releaseDialog();
   activeCtx = null;
-  archiveError = null;
   phase = null;
   intent = QUIT_INTENT;
   emit();
@@ -215,6 +182,5 @@ export function _resetQuitConfirmForTesting(): void {
   phase = null;
   intent = QUIT_INTENT;
   activeCtx = null;
-  archiveError = null;
   listeners.clear();
 }

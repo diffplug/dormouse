@@ -19,6 +19,13 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 
 ## Release checklist
 
+**Must ship a desktop release that carries, or changes, the one-time link
+version only after Hosted production serves that version** — its rendezvous
+routes and its `/connect/` page (`docs/specs/one-time.md` -> "Link"): run
+`.github/workflows/hosted-production.yml` first and confirm its live
+verification passed, `oneTimeSmoke` included. **Hosted must never stop serving
+a link version a shipped Burrow emits.**
+
 Human-driven, in order:
 
 1. **Update dependency snapshots** — run `node website/scripts/generate-deps.js`, review the diffs in `website/src/data/dependencies-{npm,cargo,runtime}.json`, commit if changed.
@@ -26,7 +33,7 @@ Human-driven, in order:
 3. **Commit and tag** — `git commit -am "Release vX.Y.Z"` then `git tag vX.Y.Z`.
 4. **Push** — `git push && git push origin vX.Y.Z`, which triggers CI (Stage 1).
 5. **Run local signing** — plug in the PIV USB key, then `./scripts/sign-and-deploy.sh all X.Y.Z`: it waits for CI, verifies and signs artifacts, writes the website update manifest, and creates the GitHub Release. Secrets follow [Environment / secrets](#environment--secrets). **Must reject a dirty tree, untracked files, or commits ahead of the configured upstream**; without an upstream the script warns that push status is unknown.
-6. **Deploy website** — commit the updated `website/public/standalone-latest.json` and deploy dormouse.sh so the updater endpoint is live.
+6. **Deploy website** — commit `website/public/standalone-latest.json`. Cloudflare Pages project `mouseterm` deploys `release` to `dormouse.sh`; `main` produces previews. Promote reviewed `main` with `git fetch origin` then `git push origin origin/main:release`, without force.
 7. **Verify the release**
    - GitHub Release assets are correct
    - On a Mac: extract the `.tar.gz`, open the `.app`, no Gatekeeper warning
@@ -93,11 +100,13 @@ Downloaded CI artifacts must pass three checks before any signing step:
 
 **Never select release artifacts with a broad `find | head`** — use strict expected paths or exactly-one matching. Release upload rejects unexpected local files or existing remote asset names.
 
+**Must refuse a published release before spending a stage on it** — every command ending in a release upload checks before it downloads or signs, and the retry path stays open only while the release is a draft (rationale).
+
 **Must repoint the Tauri-generated `.nsi` at local paths before `makensis`** — it is baked with CI-runner absolutes; `rebuild_windows_installer` documents the rewrite.
 
 **Runs on macOS only** — it uses `codesign` / `xcrun notarytool` / `ditto`, and its in-place `sed -i ''` edits are BSD form.
 
-Source of truth: `main` / `verify_downloaded_artifact` / `prepare_artifact` in `scripts/sign-and-deploy.sh`; `verifyInventory` / `restoreExecutables` in `scripts/release-artifact.mjs`; `scripts/patch-nsis-paths.pl`. Regression tests: `scripts/sign-and-deploy.test.mjs`.
+Source of truth: `main` / `verify_downloaded_artifact` / `prepare_artifact` / `require_unpublished_release` in `scripts/sign-and-deploy.sh`; `verifyInventory` / `restoreExecutables` in `scripts/release-artifact.mjs`; `scripts/patch-nsis-paths.pl`. Regression tests: `scripts/sign-and-deploy.test.mjs`.
 
 ### One-time setup
 
@@ -175,7 +184,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scri
 
 ## Hosted account releases
 
-See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/README.md` for provisioning and operator commands.
+See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/README.md` for provisioning and operator commands. A desktop release waits on Hosted for the one-time link version ([Release checklist](#release-checklist)).
 
 ## Future
 

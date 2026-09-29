@@ -20,7 +20,7 @@ import {
   setOverride as setMouseOverride,
   subscribeToMouseSelection,
 } from '../../lib/mouse-selection';
-import { getTerminalInstance, refitSession } from '../../lib/terminal-registry';
+import { getTerminalInstance, refitSession, writeUserInput } from '../../lib/terminal-registry';
 import { doPaste } from '../../lib/clipboard';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import { usePocketTheme } from './pocket-theme';
@@ -31,13 +31,18 @@ import {
   directoryWallSessions,
 } from './wall-model';
 
-export function PocketWall({ adapter, onError }: {
+export function PocketWall({ adapter, onError, restoreTheme }: {
   adapter: RemotePtyAdapter;
   onError?: (error: unknown) => void;
+  /**
+   * How the theme is restored; Pocket's `restorePocketTheme` by default. The
+   * one-time page passes `applyPocketTheme`, which keeps nothing.
+   */
+  restoreTheme?: () => void;
 }): React.ReactElement {
   // App restores the theme before this renders; repeat idempotently so isolated
   // PocketWall consumers receive the same theme contract too.
-  usePocketTheme();
+  usePocketTheme(restoreTheme);
   const [entries, setEntries] = useState<DirectoryEntry[]>(() => adapter.getDirectoryEntries());
   const [activePaneId, setActivePaneId] = useState<string | null>(null);
   const [touchMode, setTouchMode] = useState<MobileTerminalTouchMode>('gestures');
@@ -100,9 +105,9 @@ export function PocketWall({ adapter, onError }: {
 
   const handleSendInput = useCallback(
     (data: string) => {
-      if (activePaneId) adapter.writePty(activePaneId, data);
+      if (activePaneId) writeUserInput(activePaneId, data);
     },
-    [adapter, activePaneId],
+    [activePaneId],
   );
 
   const handlePaste = useCallback(async () => {

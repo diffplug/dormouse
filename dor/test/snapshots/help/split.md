@@ -19,7 +19,7 @@ Focus depends only on whether you pass --. A bare "dor split" (no --) moves focu
 
 split creates terminal Surfaces. Compose browser content commands through the initial command:
 
-  dor split --right -- dor iframe https://example.com
+  dor split --right -- dor iframe :5173
   dor split --auto -- dor agent-browser open https://example.com
 
 Text output:

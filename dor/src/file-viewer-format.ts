@@ -16,6 +16,35 @@ const TEXT = new Set(['txt', 'md', 'mdx', 'log', 'csv', 'tsv', 'json', 'jsonl', 
  * shares both through the `dor/*` alias; this module stays free of Node APIs. */
 export const BUILTIN_FILE_TOOL = 'builtin:file';
 export const VIEW_FILE_ARGV = '__view-file';
+/** The same pair for the folder viewer (docs/specs/dor-tool.md -> Folders). */
+export const BUILTIN_FOLDER_TOOL = 'builtin:folder';
+export const VIEW_FOLDER_ARGV = '__view-folder';
+/** An `open` rule whose pattern ends in this suffix (U+1F4C1) matches only
+ * directories, tested as their names suffixed with it. */
+export const FOLDER_MATCH_SUFFIX = '.📁';
+
+/** The built-in handler for a folder or a file (`own`), its result `name` and
+ * argv verb, and the other kind's handler, which never opens it
+ * (docs/specs/dor-tool.md -> Folders). */
+export function builtinFor(folder: boolean) {
+  return folder
+    ? { kind: 'folder', argv: VIEW_FOLDER_ARGV, own: BUILTIN_FOLDER_TOOL, other: BUILTIN_FILE_TOOL } as const
+    : { kind: 'file', argv: VIEW_FILE_ARGV, own: BUILTIN_FILE_TOOL, other: BUILTIN_FOLDER_TOOL } as const;
+}
+
+/** C0, DEL, and C1 controls. */
+export const CONTROLS = /[\x00-\x1f\x7f-\x9f]/;
+
+/** The title naming a viewer's canonical `target`, `/` or `\` separated: its
+ * basename, or the whole path for a filesystem root. Controls are stripped,
+ * since a file name can carry an OSC terminator; the terminal parser bounds its
+ * length. A preview slot switch names its new target with it too. */
+export function viewerTitle(target: string): string {
+  const trimmed = target.replace(/[\\/]+$/, '');
+  const root = /^([A-Za-z]:)?$/.test(trimmed);
+  const title = root ? target : trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1);
+  return Array.from(title).filter(c => !CONTROLS.test(c)).join('');
+}
 
 export function fileViewerFormat(path: string): { mime: string; text: boolean } | null {
   const name = path.replace(/\\/g, '/').split('/').pop()!.toLowerCase();

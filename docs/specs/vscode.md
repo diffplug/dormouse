@@ -26,12 +26,13 @@ The webview is the shared `lib/` frontend, unmodified for this host (`docs/specs
 
 ### Invariants (VS Code-specific)
 
-- **Capture, then save, then kill.** `deactivate()` runs the agent-recovery capture *first* and both kills *last*, the state flush and live-PTY refresh in between. Source of truth: `deactivate()` in `vscode-ext/src/extension.ts`.
-- **Alert state is global.** One module-level `AlertManager` in `message-router.ts` is shared across all routers, survives router disposal, and is fed by PTY data regardless of webview visibility.
-- **WATCHING rules are host-authoritative.** The first webview after extension-host startup seeds the shared host rule set and **no later webview may replace it**.
+- Shutdown ordering follows Serialization and restore.
+- **Alert state is global.** One module-level alert host (`createAlertHost`) in `message-router.ts` is shared across all routers, survives router disposal, and is fed by PTY data regardless of webview visibility.
+- **Each router is one realm of it**, under its `routerId` (`docs/specs/alert.md` → Engagement). **Must end the realm on router disposal and on a `dormouse:init` re-init** (`endRealm`): recreated content is a new realm. Pinned by `engagement viewers` and `await requests` in `vscode-ext/test/message-router.test.ts`.
 - **Never let a resuming router steal another webview's PTYs.** Each router tracks its PTYs in `ownedPtyIds`; a module-level `globalOwnedPtyIds` set enforces it.
 - **Every save path must merge current alert states through the shared persistence projection.** The frontend periodic save (`onSaveState`) and the backend deactivate refresh (`refreshSavedSessionStateFromPtys`) both narrow alerts with `toPersistedAlertState`; missing the merge reverts alert state on restore, while passing live state through persists transient fields.
-- **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during archive/CWD work; pinned by `vscode-ext/test/message-router.test.ts`.
+- **A Session's alert state follows its PTY**: `pty:spawn` claims the id before starting its alert state over from `options.alert`, so the seeded state reaches the claiming webview, and **every kill removes the entry**. **Must reserve a closing router's PTYs until its deferred kills finish**, so another router cannot claim them during CWD work. Pinned by `vscode-ext/test/message-router.test.ts`.
+- **Every webview and Client write and resize goes through `alertedPty`**, a remote Client's from either Burrow tier included (`writeClientInput`), so input is acknowledged and a resize's grace opened first (`docs/specs/alert.md` → Engagement).
 - **retainContextWhenHidden.** Set on both `WebviewPanel` and `WebviewView` so xterm.js DOM, scrollback, and PTY subscriptions survive panel hide/show without a resume.
 - **Two save sources must produce consistent state**: the frontend's periodic `dormouse:saveState` and the backend's deactivate flush-then-refresh.
 - **Every host → webview send carries the message token**, and **never add a `message` listener that skips `isHostMessage`**.
@@ -53,11 +54,9 @@ router owns its own PTY ids. Consequences:
 - Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
 - **Closing an editor-tab `WebviewPanel` is not hiding it.** `setupPanel` attaches
   its router with `killOnDispose: true`, so disposal kills that panel's owned PTYs
-  and VS Code discards the tab's per-panel state — and archives that router's
-  mirrored notepad notes, since no close coordinator will run
-  (`docs/specs/notepad.md` → "VS Code lifecycle"). **The `WebviewView` router is
+  and VS Code discards the tab's per-panel state. **The `WebviewView` router is
   attached without that flag**: its `onDidDispose` releases the router, leaves the
-  PTYs alive, and **leaves its mirrored notes in place for the next resolve**.
+  PTYs alive.
 - Each VS Code window gets its own extension host, and therefore its own pty-host child process.
 
 ### Workspaces
@@ -82,15 +81,23 @@ Each hosting primitive uses the chrome it has, following the in-app `<title> [TO
 Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim` / `release`. Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`, `notifyUnion` in `vscode-ext/src/message-router.ts`, `workspaceTitle` / `workspaceBadge` in `vscode-ext/src/workspace-chrome.ts`, `setupPanel` in `vscode-ext/src/extension.ts`, `DormouseViewProvider` in `vscode-ext/src/webview-view-provider.ts`.
 
 WATCHING rules and the alarm settings (`docs/specs/alert.md` → Alarm settings)
-are app-global rather than per-Workspace, so both ride the host-authoritative
-seed / mutate / broadcast channel `docs/specs/transport.md` → Message protocol
-specifies. One thing is this host's: **the seeding offer is the first one
-after extension-host startup**. The settings a shared `AlertManager` consumes
-are `AlertManager.applySettings`'s own list, not this host's choice.
+are app-global rather than per-Workspace, riding the seed / mutate / broadcast
+channel of `docs/specs/transport.md` → Message protocol; the settings the
+shared manager consumes are `AlertManager.applySettings`'s own list.
+
+**`alert:speak` goes only to a connected router whose `ownedPtyIds` hold its
+Session**; a due push goes to `pushAlert`: this window's service, else the
+broker's as an unanswered `push` peer frame, else dropped, never held. **This
+window is one more alert viewer, with no focus, present while `WindowState`
+reports it `focused` and `active`**; one that never reports `active` adds none
+(rationale).
 
 Source of truth: `WatchedCommandHost` in `lib/src/lib/watched-command-host.ts`,
-`AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the alert cases in
-`vscode-ext/src/message-router.ts`.
+`AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the `alert:command`
+case, `connectWebview`, and `reportWindowPresence` in
+`vscode-ext/src/message-router.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`.
+Pinned by `alarm delivery` in `vscode-ext/test/message-router.test.ts` and
+`vscode-ext/test/burrow.test.ts`.
 
 ### Shell selection
 
@@ -110,86 +117,32 @@ A `WebviewPanelSerializer` registered under the `dormouse` view type restores ed
 
 **On deactivate**, in this order (`extension.ts:deactivate()`):
 
-1. Kick off `closePoppedOutSessions()` — started here, joined after step 2, so its
-   external-process time overlaps the capture. **Its rejections are absorbed:** a
+1. Kick off `closeBrowserSessions()` — started here, joined after step 2, so its
+   external-process time overlaps the capture. **The browser host's cleanup
+   gets one 1.5 s deadline**, as in the sidecar's shutdown, so a hung launch
+   cannot hold the join (`vscode-ext/test/agent-browser-host.test.ts`). **Its rejections are absorbed:** a
    throw out of the join would skip the flush, the refresh, and both kills.
 2. `captureAgentRecoveryCommands(context, 1200)`.
-3. Refresh the mirror's process CWDs against the still-live PTYs, then archive
-   the volatile notepad mirror, both bounded — the last chance for notes no
-   close coordinator will ever reach (`docs/specs/notepad.md` → "VS Code
-   lifecycle").
+3. Refresh the mirror's process CWDs against the still-live PTYs.
 4. `flushAllSessions(1000)` — ask every webview to save now, bounded.
 5. `refreshSavedSessionStateFromPtys()` — re-read CWD while the processes are alive.
 6. `gracefulKillAll(2000)` (SIGTERM, wait), then `killAll()` (force).
 
-**Recovery must go first** — the resume hint exists only between the interrupt and
-the kill, and the shutdown budget is not ours (rationale), so the one step whose
-data cannot be reconstructed afterwards runs before the ones that can (cwd
-re-reads, alert merges). `captureAgentRecoveryCommands` writes `^C` into every
-live PTY, waits bounded, scans those buffers, and records the invocation to
-`recovery.json` under `context.storageUri`, **written synchronously, owner-only,
-and replaced temp-then-rename**. **Never `workspaceState`**, whose SQLite flush is already
-tearing down (rationale), and **never `PersistedPane.resumeCommand`**, which the
-step-4 flush would overwrite with the webview's stale copy. **The record is
-rewritten the moment each command is found and every wait is bounded**, so being
-killed mid-poll costs at most a late agent's command and a timeout loses a
-recovery command rather than delaying shutdown.
-
-**Live notepad notes are never in any of this.** They ride a volatile in-memory
-mirror the extension host keeps per webview, archived by the disposals above and
-handed back on a live resume through its own boot global beside the recovery
-commands — **a `WebviewView` re-resolve only, never a deserialized panel and never
-a cold restore** (`docs/specs/notepad.md` → "Live resume").
+**Must capture before the session flush and PTY kills** (rationale). Shared capture and durability follow `docs/compatible-agents.md`.
 
 **On activate**, saved state loads through `readPersistedSession()`
-(`docs/specs/transport.md` → "Persisted session types") and is passed to routers
-for cold-start restore. The WebviewView and each deserialized WebviewPanel then
+(`docs/specs/transport.md` → "Persisted session types") and is injected into
+the webview for cold-start restore. The WebviewView and each deserialized WebviewPanel then
 claim their own pane ids' recovery commands out of the single record, under
-`docs/specs/transport.md` → "Consuming it". **A panel's pane ids come from the
+`docs/compatible-agents.md` → "Recovery record". **A panel's pane ids come from the
 `vscode.setState()` blob returned at `deserializeWebviewPanel`**, so recovery
 needs no host-side per-panel store.
 
 #### Capturing agent recovery
 
-**Both halves are shared with the Tauri sidecar.** The press-wait-press machine
-is `captureAgentRecovery` (`lib/src/host/recovery-capture.ts`), over four
-primitives each host supplies — the live id set, interrupt, a monotonic received
-count, and the output since a mark — and the record itself is
-`createRecoveryStore` (`docs/specs/standalone.md` → "Agent recovery"), so one
-format, one destructive read, and one set of file modes serve both. Its timings,
-its gates and the arguments for each are in that module's comments; the rules
-that constrain a host are:
+**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture. Shared behavior follows `docs/compatible-agents.md`.
 
-- **Write `^C` into the pty; never signal it** — the agents print their resume
-  invocation when interrupted, not when signalled (rationale).
-- **Interrupt every live PTY, not just recognized agents** — `detectResumeCommand`
-  filters the recovery invocations (rationale) — but **exclude exited PTYs**,
-  which can yield no hint and would permanently defeat the "nothing left to wait
-  for" early exit.
-- **Never finish early on quiet**, and **never simplify to a single gesture**:
-  claude prints only on a second press, codex only on the first and at no
-  constant latency, so a blanket second press destroys codex's idle case and an
-  ask-gated one never fires for codex at all (rationale).
-- **Only post-interrupt bytes count, and never widen that scan.** Each pane's
-  received-count mark (`getScrollbackReceived`, `docs/specs/transport.md` →
-  Universal invariants) is taken before the first `^C` — a correctness boundary,
-  since the command auto-runs on the next restore without confirmation
-  (`docs/specs/transport.md` → "Consuming it") and only bytes produced in
-  response to Dormouse's own interrupt may become executable state (rationale).
-- **Clear any previous record before the first early return** — consumption
-  happens only when a container actually resolves, so a session where the
-  Dormouse view is never opened would otherwise auto-run a week-old invocation on
-  some much later restore. A missing hint is ordinary (rationale).
-
-What stays this host's is which PTYs the extension host offers the machine and
-which directory the store writes into: `storageUri`, falling back to
-`globalStorageUri`. It is a plain file written synchronously because
-`workspaceState` batches its flush and `deactivate()` outruns it (rationale).
-
-Source of truth: `captureAgentRecoveryCommands` and `takeRecoveryCommands` in
-`vscode-ext/src/session-state.ts`, `captureAgentRecovery` in
-`lib/src/host/recovery-capture.ts`, `createRecoveryStore` in
-`lib/src/host/recovery-store.ts`, `interrupt` in `vscode-ext/src/pty-manager.ts`.
+Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `interrupt` in `vscode-ext/src/pty-manager.ts`.
 
 ### Theme integration
 
@@ -226,7 +179,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 **`frame-src` is loopback-only** — `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port; without the override `default-src 'none'` blocks the frame and leaves a blank white pane (`docs/specs/dor-browser.md`).
 
-**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the agent-browser stream relay only — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Burrow: a service in the extension host").
+**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the host's guarded browser viewer sockets (`docs/specs/dor-browser.md` → Viewer Socket) — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Burrow: a service in the extension host").
 
 **That allowlist is a build-time constant, never a runtime value**: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`. The default, the replace-not-add override rule, and the two build-time guards are `docs/specs/relay.md` → "Where a Burrow may reach a Relay".
 
@@ -272,15 +225,17 @@ A webview is a **surface responder plus UI** (`docs/specs/relay.md` → "Burrow 
 
 The service reads both **in-process**, through the async `BurrowStateStore`. **The enrollment is memoized, and that memo must be invalidated across windows** — the store drops it on any `secrets.onDidChange` for the enrollment key, an event every window receives (rationale). **The ACL is not memoized**, `globalState` being in-process and free. All mutations ride the shared serial queue under the store contract (`docs/specs/relay.md` → "Burrow side"); a failed write rejects its caller without wedging later mutations. **That same subscription lets a window un-enrolled at activation join a Burrow a sibling just created** — `initBurrow` re-checks and contends then, with no reload.
 
+**The one-time serving marker is the one `SecretStorage` entry that is not a credential.** While the broker's one-time connection is serving (`docs/specs/one-time.md` -> "Service and hosts") it keeps `dormouse.burrow.one-time-serving` present, and a window that reads it — at activation or on `secrets.onDidChange` — contends as an enrolled one would, so an un-enrolled sibling joins the peer net and its terminals reach the phone. **The broker writes it only on a flip, and clears it when serving stops, when its window deactivates holding it, and whenever a service starts** (retiring a crashed broker's); **a window that never set it never clears it**, and clearing an absent marker writes nothing.
+
 **Import `ENROLLMENT_KEY`, never mirror it** (`lib/src/remote/burrow/store.ts`) — a key that drifted between the two sides would strand an enrollment still on disk. The ACL prefix is this store's own, one entry per `burrowId` so a re-enrollment inherits no stale ACL. **A record written before the end-to-end cutover is dropped by `isBurrowAclRecord`**, which is the whole of the Burrow-state version: the window offers enrollment again and every phone pairs once more.
 
-Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `BurrowStateStore` in `lib/src/host/remote/burrow-state-store.ts`.
+Source of truth: `VsCodeBurrowStateStore` and `ONE_TIME_SERVING_KEY` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`, `BurrowStateStore` in `lib/src/host/remote/burrow-state-store.ts`.
 
 **Which window: bind-as-lease.** One extension host runs per window, so unarbitrated they would all start a Burrow against the same enrollment and fight endlessly over the one `/ws/burrow` socket (rationale). Arbitration is the socket itself: **the bind is the lease**. Every contending window tries to bind one fixed path — `<hash>.sock` inside a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — the hash derived from `context.globalStorageUri.fsPath`: **derived rather than random** because it must be *the same* in every window, **hashed rather than joined** because of the platform path cap (rationale). The winner is the broker and runs the service; everyone else connects to it as a client. The invariants, each with its mechanism at the code:
 
 - **Roles never flip downward.** There is no `onRole(false)` after a `true`, and a client only ever changes role *upward*, which makes a TTL lease's mid-transition races unrepresentable rather than handled (rationale).
 - **Contend on broker death, not on a timer.** When the broker exits, every client's socket closes and they all race to bind; exactly one wins, because `bind` is the arbiter. No TTL, no heartbeat file, no filesystem watcher.
-- **A corpse is cleared, then the bind is re-checked.** **Never unlink on the first refusal**, and **`stillOurs` compares full filesystem identity — device, inode, and nanosecond change timestamp, never inode alone**. A window whose socket identity was replaced, **or whose path has gone entirely**, stands down and the loop re-runs (jitter, re-dial and per-platform reasoning at `attempt` and `stillOurs`; rationale).
+- **A corpse is cleared, then the bind is re-checked.** **Never unlink on the first refusal**, and **`stillOurs` compares full filesystem identity — device, inode, and nanosecond change timestamp, never inode alone, anchored at our own bind rather than a later read of the path**. A window whose socket identity was replaced, **or whose path has gone entirely**, stands down and the loop re-runs (jitter, re-dial and per-platform reasoning at `attempt` and `stillOurs`; rationale).
 - **A bind is not a role until it is believed.** Everything that answers "is this window the broker" — `ensurePeerNet`'s shortcut, `isPeerBroker`, `isPeerLinkSettled`, `remoteNotifyPeerChange` — reads `brokerConfirmed`, set only where `settle(true)` runs and cleared by `closeServer`. **Unverified reads as unsettled**, so a command landing in the `RECLAIM_VERIFY_MS` window (an `enroll`, a `secrets.onDidChange`) is held for the verdict rather than told "broker" (rationale).
 - **Attempts are spaced.** The loop waits `RETRY_MS` between rounds so a refused hello cannot spin, and a bind or connect landing after disposal is undone rather than left to outlive its window.
 - **Errors after `listen` are logged, not thrown** — an `EventEmitter` with no `'error'` listener rethrows out of a libuv callback and takes the extension host down, so `listenServer` installs a permanent logging listener the moment the bind succeeds (rationale).
@@ -297,9 +252,9 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 
 **Domain-separate the two proofs (`client:` / `server:`)** — without it a fake server could reflect the client's own proof back as its welcome. **The client verifies the welcome before it sends or answers anything else** (until then it forwards no notifies — they queue — answers no requests, streams no PTY, forwards no commands), and a welcome it cannot verify closes the socket, so squatting the path buys nothing (rationale). **Fresh nonces per connection** make a captured proof worthless on the next one. **Parseable JSON values that are not frame objects are rejected on both ends**, a first frame that is not a valid hello drops the socket, and **each side bounds the opening handshake to `HANDSHAKE_BUDGET_MS`**.
 
-**Nothing starts until there is a Burrow to run.** Contention begins when activation finds an enrollment in `SecretStorage`, when `secrets.onDidChange` reports that another window created one, or on the first `enroll` / `enrollOffer` command from any webview — the bootstrap for an un-enrolled machine, so a user who never enrolls never sees a socket. **The service runs independently of webview lifetime**: a broker window with zero Dormouse webviews still relays, contributing an empty directory.
+**Nothing starts until there is a Burrow to run.** Contention begins when activation finds an enrollment or the serving marker in `SecretStorage`, when `secrets.onDidChange` reports that another window wrote one, or on the first `enroll` / `enrollOffer` / `oneTimeOpen` command from any webview — the bootstrap for an un-enrolled machine, so a user who never enrolls or opens a link never sees a socket. **The service runs independently of webview lifetime**: a broker window with zero Dormouse webviews still relays, contributing an empty directory.
 
-**A command that arrives mid-contention is held, not refused** (rationale). Commands queue (bounded at a dozen, oldest refused on overflow) and drain when a role settles — to the service if this window brokered, over the link if it did not. **Each carries its own deadline, under the adapter's 15 s timeout**, so a contention that never settles produces a reason rather than a timeout. `enroll` and `enrollOffer` are the only two that may *start* the contention; everything else refuses only where there is genuinely nothing to reach.
+**A command that arrives mid-contention is held, not refused** (rationale). Commands queue (bounded at a dozen, oldest refused on overflow) and drain when a role settles — to the service if this window brokered, over the link if it did not. **Each carries its own deadline, under the adapter's 15 s timeout**, so a contention that never settles produces a reason rather than a timeout. `enroll`, `enrollOffer`, and `oneTimeOpen` are the only commands that may *start* the contention; everything else refuses only where there is genuinely nothing to reach.
 
 Source of truth: `vscode-ext/src/burrow.ts` (service glue, provider, command routing), `ensurePeerNet` / `attempt` / `stillOurs` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
 
@@ -307,13 +262,21 @@ Source of truth: `vscode-ext/src/burrow.ts` (service glue, provider, command rou
 
 Results are **broadcast to every webview in the window** rather than replied to one (`docs/specs/transport.md`), and one correlation id serves both the in-window fan-out and the cross-window forward below.
 
-Two events are pushed rather than answered: `pairing-queue` (the complete snapshot; the service is authoritative, so **the mirror replaces rather than merges**) and `status { enrolled }`. The queue is pushed only when it *changes*, so **the webview asks for it once on every transition to enrolled** — joining a Burrow already mid-pairing would otherwise show no modal until that pairing was answered somewhere else.
+Events are pushed rather than answered: `pairing-queue` (the complete snapshot; the service is authoritative, so **the mirror replaces rather than merges**), `status { enrolled, serving, serviceId }`, and `one-time` (`docs/specs/one-time.md`). The queue is pushed only when it *changes*, so **the webview asks for it once on every transition to serving** — joining a Burrow already mid-pairing would otherwise show no modal until that pairing was answered somewhere else.
 
-**Volunteering is enrollment-gated; answering is not.** Announcing costs a crossing per pane-state, activity, and focus change plus an activity-store subscription, on a machine whose owner may never enroll, so `armWhileEnrolled` (`lib/src/remote/burrow/enrolled-gate.ts`) arms the outbound half only while a Burrow exists, driven by the `{ name: 'status', enrolled }` the service announces on every lifecycle change and seeded by one `status` command at install time. **The seed cannot lose a race with the event**: both travel the same ordered channel.
+**Volunteering is serving-gated; answering is not.** Announcing costs a crossing per pane-state, activity, and focus change plus an activity-store subscription, on a machine whose owner may never enroll, so `armWhile` (`lib/src/remote/burrow/enrolled-gate.ts`) arms the outbound half only while something can reach these terminals — `serving`, which a one-time connection sets without an enrollment — and the push device list only while `enrolled`, driven by the `status` event the service announces whenever either changes (and once as it starts) and seeded by one `status` command at install time, whatever the number of gates. **The seed cannot lose a race with the event**: both travel the same ordered channel.
 
-**The relay socket.** The supported `engines.vscode` range (`^1.85.0`) spans the Node boundary where `globalThis.WebSocket` appeared (rationale), so the service **must be constructed with a factory**: prefer `globalThis.WebSocket`, fall back to the bundled `ws`, whose socket satisfies exactly the surface `BurrowRuntime` reads (`send`, `close`, `readyState`, `addEventListener`, `message` events with `.data`, `close` events with `.code`). esbuild inlines `ws` lazily; **its optional native accelerators `bufferutil` / `utf-8-validate` are marked external and neither installed nor shipped** — a `.node` addon cannot be bundled — so `ws` falls through its own `try`/`catch` to the JS paths. Source of truth: `createRelaySocket` in `vscode-ext/src/burrow.ts`, the `external` list in `vscode-ext/scripts/esbuild.mjs`.
+**The relay socket.** The supported `engines.vscode` range (`^1.85.0`) spans the Node boundary where `globalThis.WebSocket` appeared (rationale), so the service **must be constructed with a factory**: prefer `globalThis.WebSocket`, fall back to the bundled `ws`, whose socket satisfies exactly the surface `BurrowRuntime` reads (`send`, `close`, `readyState`, `addEventListener`, `message` events with `.data`, `close` events with `.code`). esbuild inlines `ws` lazily; **its optional native accelerators `bufferutil` / `utf-8-validate` are marked external and neither installed nor shipped** — a `.node` addon cannot be bundled — so `ws` falls through its own `try`/`catch` to the JS paths. **The same factory opens the one-time rendezvous, which must carry no `Origin` header** — neither implementation sends one. Source of truth: `createRelaySocket` in `vscode-ext/src/burrow.ts`, the `external` list in `vscode-ext/scripts/esbuild.mjs`.
 
 **Lifetime.** Hiding a panel keeps its terminals answerable (`retainContextWhenHidden`), and closing every Dormouse view does not take the Burrow offline.
+
+#### The direct path
+
+**The broker's extension host answers a `direct-offer`** (`docs/specs/remote-api.md` → Transport → "Direct path") over the same lazily loaded `node-datachannel` polyfill as the sidecar, in-process (rationale), so a native crash there takes down that window's extension host and every extension in it. **Tear the addon down only at deactivation**: the teardown is terminal for the process, and a window that later wins the lease again still needs a factory that loads.
+
+**One universal VSIX carries every platform's addon.** pnpm installs only the host's platform package, so the build has `pnpm deploy` the extension's production closure for every os and cpu, fetched and verified against `pnpm-lock.yaml` by pnpm (rationale), and stages the addon, its dependencies, and the platform packages `vscode-ext/package.json` declares under `optionalDependencies` into `dist/node_modules`. `node-pty` needs no staging: its one package carries every platform's prebuild. **Keep the addon `external` to `dist/extension.js`**, which the build asserts.
+
+Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `startService` and `initBurrow` in `vscode-ext/src/burrow.ts`, pinned by `vscode-ext/test/burrow.test.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `assertNothingInlined` in `scripts/assert-not-inlined.mjs`.
 
 ### Peer surfaces
 
@@ -347,7 +310,7 @@ Directory answers are snapshots, so `notifyDirectoryChanged` coalesces a fresh
 collect rather than retaining the old one, and the webview coalesces its source
 bursts on one microtask (a focus move alone emits `focusout` plus `focusin`).
 
-**Attach-is-the-resize is answered by the owning webview's live xterm, never the PTY directly**, under `docs/specs/remote-api.md` → "Size authority: last-attach-wins". **Cross-window attach fans out a read-only `resolve` first**, selects its first answer, then sends the mutating `attach` only to that answer's tier and peer, so duplicated cold-restored windows do not both resize. The owner replies with the size it settled at plus the `ptyId`; the service then streams that PTY. **There is no `detach` op** — the service stops streaming on its side and the pane keeps its last size.
+**Attach-is-the-resize is answered by the owning webview's live xterm, never the PTY directly**, under `docs/specs/remote-api.md` → "Size authority: last-attach-wins". **Cross-window attach fans out a read-only `resolve` first**, selects its first answer, then sends the mutating `attach` only to that answer's tier and peer, so duplicated cold-restored windows do not both resize. The owner replies with the size it settled at plus the `ptyId`; the service then streams that PTY. **`release` goes where the attach went** — to both tiers and every window when no answer selected one (`releaseSurface`) — and is answered with nothing; a window older than holds reads it as a same-size resize, which changes nothing. Take back is an ordinary command, forwarded to the broker.
 
 **Which webview owns a pane never reaches the protocol layer.** `resolveSurface` / `SurfaceHandle` are `docs/specs/remote-api.md`'s and the ask-backed half of the provider is shared with standalone (`createAskSurfaceProvider`); VS Code's part is that **the first read-only resolve answer is the answer**, and the mutating attach plus every later handle resize are addressed only to that selected tier/window. Missing resize answers follow `docs/specs/remote-api.md` → "Attachment invariants".
 
@@ -372,9 +335,9 @@ Once an answer names a `ptyId`, the broker replaces that owner-local id with a s
 
 **Pairing UI events are the opposite: unaddressed and broadcast to every window's webviews**, because the approval modal must appear wherever the user happens to be looking.
 
-**A window with no Burrow at all still answers the read-only commands** — reaching the terminal refusal is the ordinary un-enrolled state, not a failure. `status`, `pushDevices`, and `pairingQueue` answer exactly what an idle service returns (`unenrolledStatus`, the service's own exported builder, then `null`, `[]`), each caller reading the difference: `pushDevices` answers `null` for "nowhere to push" and rejects only when the Relay could not be asked (rationale), and `enrolled-gate.ts` seeds itself from `status`. That `status` reads the installer's offer file from this same process — a file read, not a socket — so the one-click card renders on a machine no window has a Burrow for, and its `enrollOffer` bootstraps the contention. **Everything else refuses with an error rather than dropping it**, so the console hook fails fast instead of hanging for its whole timeout.
+**A window with no Burrow at all still answers the read-only commands** — reaching the terminal refusal is the ordinary un-enrolled state, not a failure. `status`, `pushDevices`, `pairingQueue`, `oneTimeStatus`, `oneTimeEnd`, and `takeBack` answer exactly what an idle service returns (`unenrolledStatus`, `null`, `[]`, `idleOneTimeState`, `{}`, `{ ended: false }` — the two builders the service's own exports), each caller reading the difference: `pushDevices` answers `null` for "nowhere to push" and rejects only when the Relay could not be asked (rationale), and `enrolled-gate.ts` seeds itself from `status`. That `status` reads the installer's offer file from this same process — a file read, not a socket — so the one-click card renders on a machine no window has a Burrow for, and its `enrollOffer` bootstraps the contention. **Everything else refuses with an error rather than dropping it**, so the console hook fails fast instead of hanging for its whole timeout.
 
-One UI event *is* addressed: **when a window completes the handshake the broker sends it the current `{ name: 'status', enrolled }`** — `status` is emitted only when the Burrow's lifecycle changes it, so a window opened after the enrollment would otherwise sit disarmed until reloaded.
+Two UI events *are* addressed: **when a window completes the handshake the broker sends it the current `status` and `one-time` events** — each is emitted only when it changes and once as the service starts, so a window opened after the enrollment or the link would otherwise sit disarmed until reloaded.
 
 **Socket bind errors reject startup** and are handled as an unavailable peer link; they never leave the listen promise pending or surface as an uncaught extension host error.
 
@@ -384,7 +347,7 @@ Source of truth: `vscode-ext/src/peer-link.ts` (sockets, arbitration, `HANDSHAKE
 
 `pnpm --filter dormouse test` typechecks and runs the suites under `vscode-ext/test/`; the socket tests use real local sockets, and `vitest.config.mts` supplies only the minimal `vscode` stub required outside an editor. **Never widen that stub to make an editor-dependent test pass** — command registration, webview hosting, and the theme observer require a real Extension Development Host.
 
-`webview-boot.smoketest.ts` is separate: `pnpm --filter dormouse test:smoke` runs the shipped webview under Chromium against a prebuilt `media/`, in its own CI job. **It must stub `acquireVsCodeApi`** so the VS Code-only lazy import executes. **Must share the unit config's resolver aliases**, including the shared notepad schema's CLI imports.
+`webview-boot.smoketest.ts` is separate: `pnpm --filter dormouse test:smoke` runs the shipped webview under Chromium against a prebuilt `media/`, in its own CI job. **It must stub `acquireVsCodeApi`** so the VS Code-only lazy import executes. **Must share the unit config's resolver aliases**.
 
 ### Build and development
 

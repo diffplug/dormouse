@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MODAL_LAYERS, ModalFrame, SELECTION_RING_Z_INDEX } from './design';
 import { ensureResizeObserver } from './wall/wall-test-utils';
 
@@ -41,4 +41,26 @@ describe('ModalOverlay', () => {
     act(() => root.render(null));
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
+});
+
+
+it.each([{ isComposing: true }, { keyCode: 229 }])('leaves modal Escape and Tab to IME input with %j', imeState => {
+  const onEscape = vi.fn();
+  act(() => root.render(<ModalFrame titleId="title" onEscape={onEscape}>
+    <h2 id="title">Title</h2><input /><button>Action</button>
+  </ModalFrame>));
+  const dialog = document.querySelector('[role="dialog"]')!;
+  const input = dialog.querySelector('input')!;
+  input.focus();
+  for (const key of ['Tab', 'Escape']) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...imeState });
+    act(() => input.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(input);
+    expect(onEscape).not.toHaveBeenCalled();
+  }
+  act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
+  expect(document.activeElement).toBe(dialog.querySelector('button'));
+  act(() => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(onEscape).toHaveBeenCalledOnce();
 });

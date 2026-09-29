@@ -34,9 +34,8 @@ import {
   TerminalProtocolParser,
 } from '../terminal-protocol';
 import { HOST_MESSAGE_TOKEN_FIELD, HOST_MESSAGE_TOKEN_GLOBAL } from '../vscode-message-token';
-import { NOTEPAD_VOLATILE_GLOBAL } from '../vscode-notepad-global';
-import type { NotepadArchiveV1, VolatileNotepadSnapshot } from '../notepad/types';
 import { VSCodeAdapter } from './vscode-adapter';
+import { BROWSER_REQUEST_TIMEOUT_MS } from './browser-automation';
 
 /** Stand-in for the per-boot token the extension host injects at webview boot. */
 const BURROW_TOKEN = 'test-host-message-token';
@@ -157,81 +156,39 @@ describe('VSCodeAdapter PTY exit handling', () => {
     });
   });
 
-  it('sends watched-command initialization and mutations as distinct messages', () => {
+  // The shared client's own suite covers what each verb sends; this is the
+  // transport: one `alert:command` message out, the host's events back in.
+  it('carries every alert verb as one alert:command and hands the host\'s events to the client', async () => {
     const adapter = new VSCodeAdapter();
-
-    adapter.alertSetWatchedCommands(['claude']);
-    adapter.alertSetCommandWatched('npm', true);
-
-    expect(postMessage).toHaveBeenCalledWith({
-      type: 'alert:initializeWatchedCommands',
-      names: ['claude'],
-    });
-    expect(postMessage).toHaveBeenCalledWith({
-      type: 'alert:setCommandWatched',
-      name: 'npm',
-      watched: true,
-    });
-  });
-
-  // The AlertManager lives in the extension host, so `dor await` parks there
-  // and only the outcome crosses back (docs/specs/alert.md → Await).
-  it('parks an await in the extension host and settles it from the result message', async () => {
-    const adapter = new VSCodeAdapter();
+    const states: unknown[] = [];
+    adapter.onAlertState((detail) => void states.push(detail));
 
     const handle = adapter.alertAwait('pane-1', { until: 'quiet', timeoutMs: 600_000 });
-    const [request] = postMessage.mock.calls[0] as [{ type: string; requestId: string }];
-    expect(request).toMatchObject({
-      type: 'alert:await',
-      id: 'pane-1',
-      until: 'quiet',
-      timeoutMs: 600_000,
-    });
+    const [request] = postMessage.mock.calls[0] as [{ type: string; command: { op: string; awaitId: string } }];
+    expect(request).toMatchObject({ type: 'alert:command', command: { op: 'await', id: 'pane-1', until: 'quiet' } });
 
     windowTarget.dispatchEvent(hostMessage({
       type: 'alert:awaitResult',
-      requestId: request.requestId,
+      awaitId: request.command.awaitId,
       outcome: { kind: 'resolved', cause: 'quiet', waitedMs: 12_345 },
     }));
-
     expect(await handle.promise).toEqual({ kind: 'resolved', cause: 'quiet', waitedMs: 12_345 });
-  });
 
-  it('asks the host to cancel and still takes the outcome from the result message', async () => {
-    const adapter = new VSCodeAdapter();
-
-    const handle = adapter.alertAwait('pane-1', { until: 'exit', timeoutMs: 1_000 });
-    const [request] = postMessage.mock.calls[0] as [{ requestId: string }];
-    handle.cancel();
-
-    expect(postMessage).toHaveBeenCalledWith({ type: 'alert:awaitCancel', requestId: request.requestId });
-
-    // The host answers the cancel through the same channel, so a claim is never
-    // released locally and then again remotely.
-    windowTarget.dispatchEvent(hostMessage({
-      type: 'alert:awaitResult',
-      requestId: request.requestId,
-      outcome: { kind: 'cancelled', waitedMs: 40 },
-    }));
-    expect(await handle.promise).toEqual({ kind: 'cancelled', waitedMs: 40 });
-  });
-
-  it('forwards the host canonical watched-command snapshot', () => {
-    const adapter = new VSCodeAdapter();
-    const snapshots: string[][] = [];
-    adapter.onWatchedCommands((names) => snapshots.push(names));
-
-    windowTarget.dispatchEvent(hostMessage({ type: 'alert:watchedCommands', names: ['claude', 'npm'] }));
-
-    expect(snapshots).toEqual([['claude', 'npm']]);
+    // Handed over without the envelope: neither the type nor the host token.
+    windowTarget.dispatchEvent(hostMessage({ type: 'alert:state', id: 'pane-1', status: 'ALERT_RINGING', todo: true }));
+    expect(states).toEqual([{ id: 'pane-1', status: 'ALERT_RINGING', todo: true }]);
   });
 
   it('receives dirty state/reset messages and retains ordered replay reports through the semantic batch', () => {
     new VSCodeAdapter();
     const id = 'dirty-vscode';
-    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolState', id, dirty: true }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id, events: [
+      { kind: 'toolState', state: { dirty: true } },
+    ] }));
     expect(getToolDirty(id)).toBe(true);
-    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolState', id, dirty: null }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id, events: [
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+    ] }));
     expect(getToolDirty(id)).toBeNull();
     const before = postMessage.mock.calls.length;
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id, data: '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07\x1b]633;D;0\x07' }));
@@ -246,9 +203,17 @@ describe('VSCodeAdapter PTY exit handling', () => {
   it('receives owner-parsed Tool announcements and reconstructs them on replay', () => {
     resetToolAnnounces();
     const adapter = new VSCodeAdapter();
-    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolAnnounce', id: 'tool-1', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } }));
+    // In stream order: a start retires the run before it, and a report later
+    // in the same batch belongs to the new run.
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id: 'tool-1', events: [
+      { kind: 'toolAnnounce', announce: { port: 6005, name: null, key: null, dehydrate: false, persist: null } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolAnnounce', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } },
+    ] }));
     expect(getToolAnnounce('tool-1')?.port).toBe(6006);
-    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolAnnounce', id: 'tool-1', announce: null }));
+    windowTarget.dispatchEvent(hostMessage({ type: 'terminal:toolEvents', id: 'tool-1', events: [
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+    ] }));
     expect(getToolAnnounce('tool-1')).toBeNull();
     const repliesBeforeReplay = postMessage.mock.calls.length;
     windowTarget.dispatchEvent(hostMessage({ type: 'pty:replay', id: 'tool-1', data: '\x1b]367;serve;{"port":6007}\x1b\\' }));
@@ -484,127 +449,48 @@ describe('VSCodeAdapter PTY exit handling', () => {
 });
 
 
-// The archive lives in the extension host's `globalState` — nothing in the
-// webview can reach it — so the port is a request/response bridge
-// (docs/specs/notepad.md). What is covered here is what this transport adds: the
-// compare-and-swap shape on the wire, failures that reject rather than resolve,
-// and the boot mirror being consumable exactly once.
-describe('VSCodeAdapter notepad archive', () => {
+describe('VSCodeAdapter browser requests', () => {
   beforeEach(stubWebviewEnv);
-
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
-  const EMPTY: NotepadArchiveV1 = { version: 1, batches: [] };
-
-  /** The last archive request posted, whatever its type. */
-  function lastRequest(): { type: string; requestId: string; [key: string]: unknown } {
-    const posted = postMessage.mock.calls.map((call) => call[0]);
-    const request = [...posted].reverse().find((message) => String(message.type).startsWith('notepad:'));
-    if (!request) throw new Error('no notepad request was posted');
-    return request;
-  }
-
-  function answer(ok: boolean, extra: Record<string, unknown> = {}): void {
-    windowTarget.dispatchEvent(hostMessage({
-      type: 'notepad:result', requestId: lastRequest().requestId, ok, ...extra,
-    }));
-  }
-
-  it('loads the stored archive with the revision that names it', async () => {
-    const adapter = new VSCodeAdapter();
-    const pending = adapter.notepadArchive!.load();
-
-    expect(lastRequest()).toMatchObject({ type: 'notepad:load' });
-    answer(true, { result: { raw: JSON.stringify(EMPTY), revision: 'r3' } });
-
-    expect(await pending).toEqual({ raw: JSON.stringify(EMPTY), revision: 'r3' });
+  it('declares both providers', () => {
+    expect(new VSCodeAdapter().browserProviders).toEqual(['agent-browser', 'playwright']);
   });
 
-  it('sends the whole archive and the revision it was built on', async () => {
-    const adapter = new VSCodeAdapter();
-    const pending = adapter.notepadArchive!.save(EMPTY, 'r3');
-
-    // The host stores bytes and compares revisions; it never parses or merges.
-    expect(lastRequest()).toMatchObject({
-      type: 'notepad:save', state: JSON.stringify(EMPTY), baseRevision: 'r3',
-    });
-    answer(true, { result: 'conflict' });
-
-    // A conflict is an outcome, not a failure — the shared service re-reads and retries.
-    expect(await pending).toBe('conflict');
-  });
-
-  it('rejects a failed request rather than resolving it as an empty archive', async () => {
-    // `null` legitimately means "nothing archived yet", so a failure that
-    // resolved like one would let the next save overwrite an archive nobody read.
-    const adapter = new VSCodeAdapter();
-    const pending = adapter.notepadArchive!.load();
-    answer(false, { error: 'globalState is gone' });
-    await expect(pending).rejects.toThrow('globalState is gone');
-  });
-
-  it('rejects rather than hanging when the host never answers', async () => {
-    const adapter = new VSCodeAdapter();
+  // A command queued behind a page-loading `open` answers only after the
+  // CLI's 25s action timeout, and a launch the host bounds to answer inside
+  // the same wait; giving up sooner makes the webview ask again.
+  it('waits out a daemon command held behind a page load', async () => {
     vi.useFakeTimers();
-    try {
-      const pending = adapter.notepadArchive!.load();
-      const rejected = expect(pending).rejects.toThrow(/timed out/);
-      await vi.advanceTimersByTimeAsync(10_000);
-      await rejected;
-    } finally {
-      vi.useRealTimers();
+    const adapter = new VSCodeAdapter();
+    const binding = { session: 'sess' };
+    for (const request of [
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'launch', url: 'https://example.com/', headed: true }),
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'history', dir: 'reload' }),
+      () => adapter.browser({ provider: 'agent-browser', binding, op: 'edit', edit: 'copy' }),
+    ]) {
+      let settled: unknown;
+      void request().then((result) => { settled = result; });
+      await vi.advanceTimersByTimeAsync(BROWSER_REQUEST_TIMEOUT_MS - 1);
+      expect(settled).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toEqual({ ok: false, error: expect.stringMatching(/timed out/) });
     }
   });
 
-  it('asks the host to move an unreadable archive aside', async () => {
+  it('carries the typed request out and keeps everything the host answers with', async () => {
     const adapter = new VSCodeAdapter();
-    const pending = adapter.notepadArchive!.resetUnreadable();
-    expect(lastRequest()).toMatchObject({ type: 'notepad:reset' });
-    answer(true, {});
-    await expect(pending).resolves.toBeUndefined();
-  });
-
-  it('mirrors live notes to the extension host without waiting on it', () => {
-    // Fire and forget: the mirror is what lets a teardown archive from a webview
-    // VS Code has already destroyed.
-    const adapter = new VSCodeAdapter();
-    const snapshot: VolatileNotepadSnapshot = {
-      surfaces: [{
-        surfaceId: 'pane-1', surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null,
-        notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'hi' } }],
-      }],
-      stagedDeletions: { deleteBatchIds: [], deleteNotes: [] },
-    };
-
-    adapter.notepadArchive!.syncVolatile!(snapshot);
-
-    expect(postMessage).toHaveBeenCalledWith({ type: 'notepad:volatile', snapshot });
-  });
-
-  it('hands the boot mirror over exactly once', () => {
-    const snapshot: VolatileNotepadSnapshot = {
-      surfaces: [{
-        surfaceId: 'pane-1', surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null,
-        notes: [{ id: 'n1', createdAt: 1, content: { kind: 'plain', text: 'hi' } }],
-      }],
-      stagedDeletions: { deleteBatchIds: [], deleteNotes: [] },
-    };
-    vi.stubGlobal(NOTEPAD_VOLATILE_GLOBAL, snapshot);
-
-    const adapter = new VSCodeAdapter();
-    expect(adapter.notepadArchive!.loadVolatile!()).toEqual(snapshot);
-    // A second read would be a later restore's, and a restore must never
-    // hydrate live notes.
-    expect(adapter.notepadArchive!.loadVolatile!()).toBeNull();
-  });
-
-  it('gives a cold restore no mirror at all', () => {
-    // The global is absent on every boot but a live resume.
-    const adapter = new VSCodeAdapter();
-    expect(adapter.notepadArchive!.loadVolatile!()).toBeNull();
+    const attached = adapter.browser({ provider: 'agent-browser', binding: { session: 'sess' }, op: 'attach', url: 'https://example.com/' });
+    const request = postMessage.mock.calls.map(([message]) => message).find((message) => message.type === 'browser:request');
+    expect(request.request).toEqual({ provider: 'agent-browser', binding: { session: 'sess' }, op: 'attach', url: 'https://example.com/' });
+    windowTarget.dispatchEvent(hostMessage({
+      type: 'browser:result', requestId: request.requestId, result: { ok: true, stream: 4321, relaunched: true, headed: true, nativeIdentity: 'id' },
+    }));
+    expect(await attached).toEqual({ ok: true, stream: 4321, relaunched: true, headed: true, nativeIdentity: 'id' });
   });
 });
 

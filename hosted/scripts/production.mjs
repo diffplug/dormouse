@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { required, cloudflare, hyperdriveOrigin } from "./preview.mjs";
 import { smoke } from "./preview-smoke.mjs";
+import { oneTimeSmoke } from "./one-time-smoke.mjs";
 import { providerIds } from "../server/providers.js";
 
 const root = new URL("../", import.meta.url);
@@ -31,31 +31,30 @@ export function productionConfig(base, env) {
   };
 }
 export async function verifyPackages() {
-  const manifest = JSON.parse(
-    await readFile(new URL("../../vendor/build.json", import.meta.url), "utf8"),
-  );
-  assert.equal(
-    manifest.dirty,
-    false,
-    "Production requires accepted, clean pgstencil provenance; refresh the vendored packages first",
-  );
-  assert.match(manifest.commit, /^[a-f0-9]{40}$/);
-  assert.deepEqual(
-    manifest.files.map((entry) => entry.filename).sort(),
-    ["pgstencil-0.1.0.tgz", "pgstencil-auth-0.1.0.tgz"],
-    "Expected both pinned pgstencil archives",
-  );
-  for (const entry of manifest.files) {
-    assert.match(entry.filename, /^pgstencil(?:-auth)?-[\w.-]+\.tgz$/);
-    const bytes = await readFile(
-      new URL(`../../vendor/${entry.filename}`, import.meta.url),
+  const commits = [];
+  for (const name of ["pgstencil", "@pgstencil/auth/better-auth"]) {
+    // Resolve the installed entrypoint, then read the provenance beside it.
+    const entry = import.meta.resolve(name);
+    const provenance = JSON.parse(
+      await readFile(new URL("./provenance.json", entry), "utf8"),
     );
-    assert.equal(
-      createHash("sha256").update(bytes).digest("hex"),
-      entry.sha256,
-      "Vendored archive checksum mismatch",
+    assert.match(
+      provenance.commit,
+      /^[a-f0-9]{40}$/,
+      "Production requires accepted, clean pgstencil provenance",
     );
+    assert.notEqual(
+      provenance.dirty,
+      true,
+      "Production requires accepted, clean pgstencil provenance",
+    );
+    commits.push(provenance.commit);
   }
+  assert.equal(
+    commits[0],
+    commits[1],
+    "Production requires accepted, clean pgstencil provenance",
+  );
 }
 export async function preflight(env, config, api = cloudflare(env)) {
   const origin = hyperdriveOrigin(required(env, "DATABASE_URL"));
@@ -121,7 +120,10 @@ if (
           .map((s) => s.trim())
           .filter(Boolean),
       );
-      console.log("Hosted production revision and auth boundary verified.");
+      await oneTimeSmoke(config.vars.APP_ORIGIN);
+      console.log(
+        "Hosted production revision, auth boundary, and one-time rendezvous verified.",
+      );
     } else if (action === "preflight" || action === "deploy") {
       await verifyPackages();
       await preflight(process.env, config);

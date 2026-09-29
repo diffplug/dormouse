@@ -1,16 +1,18 @@
-import type { AlertRuntimeSnapshot } from '../alert-manager';
+import type { BrowserAutomationProvider, BrowserRequest, BrowserResult } from './browser-automation';
 import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AlertState, AwaitHandle, AwaitOptions } from '../alert-manager';
+import type { AlertState, AwaitHandle, AwaitOptions, Engagement, EngagementLapse } from '../alert-manager';
 import type { AlertSettings } from '../alert-settings';
+import type { AlertSessionInfo, AlertSpeak } from '../../host/alert-protocol';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 import type { ShellEntry } from '../shell-defaults';
 // Defined in its own dependency-free file so the Node proxy in lib/src/host can
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
+import type { GitInfoResult } from './git-types';
 
 export type { ToolControlResult, ToolHostRequest, ToolLookupResult } from './tool-types';
-import type { NotepadArchivePort } from '../notepad/types';
+export type { GitDirInfo, GitInfoResult } from './git-types';
 import type { PersistedAlertState, PersistedWindow } from '../session-types';
 
 export interface PtyInfo {
@@ -86,79 +88,7 @@ export function openPortRequestTimeoutMs(count: number, hops = 1): number {
 
 export type AlertStateDetail = { id: string } & AlertState;
 
-export interface AgentBrowserCommandResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-/** Subcommands the host will run on the webview's behalf — this is a narrow
- * channel for tab actions, screen-mode resizing (`set viewport` / `set
- * device`), HiDPI frame capture (`screenshot`), navigation (`open <url>`,
- * `reload` / `back` / `forward`), and session teardown, not a general exec
- * path. `get` is limited host-side to `get cdp-url` for CDP event
- * subscription while a browser is popped out. */
-export const AGENT_BROWSER_ALLOWED_SUBCOMMANDS = ['tab', 'set', 'screenshot', 'open', 'reload', 'back', 'forward', 'close', 'get'] as const;
-
-export interface AgentBrowserScreenshotResult {
-  ok: boolean;
-  /** Raw image bytes (transferred over the host↔webview channel via structured
-   *  clone, so no base64 round-trip); present iff ok. */
-  bytes?: Uint8Array;
-  /** e.g. 'image/jpeg' | 'image/png'. */
-  mime?: string;
-  error?: string;
-}
-
-/** Native editing operations that the stream's input_keyboard path cannot
- * trigger on macOS (CDP drops the `commands` field — see
- * docs/specs/dor-browser.md and the upstream issue). The host owns the
- * exact JS for each; the webview only picks one of these names, so this stays
- * a purpose-built channel rather than an arbitrary-eval one. */
-export type AgentBrowserEditOp = 'selectAll' | 'copy' | 'cut';
-
-export interface AgentBrowserEditResult {
-  ok: boolean;
-  /** Text the host placed on the OS clipboard (copy/cut); omitted for selectAll. */
-  text?: string;
-  error?: string;
-}
-
 export type { IframeProxyResult };
-
-/** Result of asking the host for the current stream status of an existing
- *  session. Used to recover persisted panels whose saved wsPort went stale
- *  across VS Code/webview reloads without exposing a generic `stream` exec
- *  channel to the webview. */
-export interface AgentBrowserStreamStatusResult {
-  ok: boolean;
-  wsPort?: number;
-  error?: string;
-}
-
-/** Result of spawning a managed agent-browser session for a render swap
- *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). */
-export interface AgentBrowserOpenResult {
-  ok: boolean;
-  /** The resolved/namespaced session name the new surface should bind to. */
-  session?: string;
-  /** The session's stream WebSocket port. */
-  wsPort?: number;
-  /** The binary path the host resolved, threaded back so later host commands
-   *  (close, screenshot…) reuse it. */
-  binaryPath?: string;
-  error?: string;
-}
-
-/** Result of a headed/headless relaunch (docs/specs/dor-browser.md →
- *  "Pop-Out"). The Chrome process is replaced, so the stream port
- *  changes; the session name is preserved. */
-export interface AgentBrowserPopResult {
-  ok: boolean;
-  /** The new stream WebSocket port after the relaunch. */
-  wsPort?: number;
-  error?: string;
-}
 
 /**
  * The webview end of a Node-resident Burrow
@@ -224,9 +154,22 @@ export interface SessionFlushRequest {
   probeCwd?: boolean;
 }
 
+export interface SpawnPtyOptions {
+  cols?: number;
+  rows?: number;
+  cwd?: string;
+  shell?: string;
+  args?: string[];
+  helper?: HelperIdentity;
+  alert?: PersistedAlertState;
+}
+
 export interface WritePtyOptions {
   /** Deliver at typing pace (`docs/specs/transport.md` → "Paced input"). */
   paced?: boolean;
+  /** A human typed, pasted, or dropped this: the host acknowledges it with
+   *  input before writing (`docs/specs/alert.md` -> Engagement). */
+  userInput?: true;
 }
 
 export interface PlatformAdapter {
@@ -248,7 +191,12 @@ export interface PlatformAdapter {
   terminalContext?(request: TerminalContextRequest): Promise<TerminalContextInfo>;
 
   // PTY operations
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void;
+  /**
+   * `alert` is a cold-restored pane's persisted TODO: the host starts the id's
+   * alert state over at every spawn, then seeds it from this
+   * (`docs/specs/alert.md` -> "Persist only").
+   */
+  spawnPty(id: string, options?: SpawnPtyOptions): void;
   writePty(id: string, data: string, options?: WritePtyOptions): void;
   resizePty(id: string, cols: number, rows: number): void;
   killPty(id: string): void;
@@ -280,7 +228,7 @@ export interface PlatformAdapter {
    * Deliberately *not* part of the persisted session: it is host-owned and
    * single-use, and a webview that could save it back would replay a stale
    * invocation on a later restore. Absent on adapters whose host captures
-   * nothing (docs/specs/transport.md -> "Consuming it").
+   * nothing (docs/compatible-agents.md -> "Cold restore").
    */
   getRecoveryCommands?(): Record<string, string>;
 
@@ -299,22 +247,6 @@ export interface PlatformAdapter {
    */
   requestAppRestart?(requester?: string): Promise<boolean>;
 
-  /** Explicit live Workspace handoff, never a persistence reader. */
-  alertPauseForTransfer?(id: string): AlertRuntimeSnapshot | null;
-  /** `replayRequestId` names the one since-mark `pty:replay` whose notification
-   *  events and visible output count as live; every other replay stays silent. */
-  alertResumeFromTransfer?(id: string, snapshot: AlertRuntimeSnapshot, replayRequestId?: string): void;
-  /**
-   * Seed a cold-restored Surface's persisted TODO/alert into the host's
-   * `AlertManager`, so the freshly spawned PTY inherits the state its saved pane
-   * carried (`docs/specs/alert.md` -> "Persist only").
-   *
-   * Present only where the adapter owns the manager: standalone runs it in the
-   * webview, so the restore path is the only thing that can seed it. VS Code
-   * omits it — its extension host seeds its own manager while answering the
-   * webview's boot (`vscode-ext/src/message-router.ts`).
-   */
-  alertSeed?(id: string, state: PersistedAlertState): void;
 
   // PTY queries
   getCwd(id: string): Promise<string | null>;
@@ -355,33 +287,12 @@ export interface PlatformAdapter {
   // VS Code-only escape hatch for mirrored workbench shortcuts from webviews.
   runWorkbenchCommand?(command: VSCodeWorkbenchCommand): void;
 
-  // agent-browser surface support (see docs/specs/dor-browser.md).
-  // Runs the user's agent-browser binary against a session; the host validates
-  // args[0] against AGENT_BROWSER_ALLOWED_SUBCOMMANDS. `binaryPath` is the
-  // absolute path resolved by `dor ab` in the invoking terminal — the host's
-  // own PATH (e.g. a GUI-launched extension host) may not find the binary.
-  agentBrowserCommand?(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult>;
-  // Performs a native editing operation (select-all/copy/cut) the stream input
-  // path can't, via the daemon's CDP-backed eval. The host owns the JS and,
-  // for copy/cut, writes the result to the OS clipboard. Absent on hosts that
-  // can't run the binary (degrades to plain key forwarding).
-  agentBrowserEdit?(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult>;
-  // Captures a single device-resolution (HiDPI) frame via the user's
-  // agent-browser `screenshot` command and returns the raw image bytes. The
-  // stream's screencast is CSS-resolution only (a Chromium limitation —
-  // Page.startScreencast ignores deviceScaleFactor), so the panel settles on
-  // these crisp screenshots, painting stream frames provisionally for latency.
-  // Absent on hosts that can't run the binary — the panel then keeps every
-  // changed stream frame as its final, lower-resolution image.
-  agentBrowserScreenshot?(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult>;
-  // Reads the current stream port for an already-running session. This is a
-  // purpose-built status channel, not part of agentBrowserCommand's allowlist,
-  // so restored panels can recover from a stale persisted wsPort after reload.
-  agentBrowserStreamStatus?(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult>;
-  // The WebSocket URL for a session's stream port. Hosts whose webview origin
-  // the agent-browser stream server rejects (VS Code) return a tokenized relay
-  // URL; absent or null falls back to ws://127.0.0.1:<port>.
-  getAgentBrowserStreamUrl?(port: number): Promise<string | null>;
+  // Browser automation (docs/specs/dor-browser.md → "Browser Host"): the
+  // providers this host can drive, and the one typed
+  // request every browser operation of theirs rides. Both present or both
+  // absent; a host without them (the web demo) offers no automated renderer.
+  browserProviders?: readonly BrowserAutomationProvider[];
+  browser?(request: BrowserRequest): Promise<BrowserResult>;
 
   // iframe surface support (see docs/specs/dor-browser.md → "Iframe
   // Renderer"). Stands up a loopback proxy in front of a `dor iframe` target and
@@ -398,25 +309,10 @@ export interface PlatformAdapter {
   // needs none of it and works everywhere.
   toolControl?(request: ToolHostRequest): Promise<ToolControlResult>;
 
-  // Render-swap support (docs/specs/dor-browser.md → "Display Modal And Render Swaps";
-  // docs/specs/dor-browser.md → "Pop-Out"). All optional
-  // so hosts degrade: the modal hides whatever isn't backed by a capability.
-  //
-  // Spawn a managed agent-browser session and open <url> — backs swapping an
-  // iframe embed up to a live screencast (`headed: false`) or straight to a
-  // popped-out window (`headed: true`, so embed→popout is one spawn, not a
-  // headless launch immediately torn down). `binaryPath` is the last one a
-  // `dor ab` surface resolved (a GUI-launched host's own PATH may miss the
-  // binary); the host falls back to PATH / DORMOUSE_AGENT_BROWSER_BIN.
-  agentBrowserOpen?(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult>;
-  // Relaunch a session's browser headed as a native OS window, reopening `url`
-  // (headed/headless is fixed at launch, so this is a close+relaunch — v1
-  // preserves the active tab URL). Best-effort positioned over `rect` (CSS px
-  // in screen space). Returns the new stream port. Absent ⇒ pop-out hidden.
-  agentBrowserPopOut?(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
-  // Relaunch headless (pop back in) reopening `url`, resuming the screencast;
-  // returns the new stream port. Pairs with agentBrowserPopOut.
-  agentBrowserPopIn?(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult>;
+  // The repository holding each local directory, for Workspace auto-naming
+  // (docs/specs/layout.md → "Workspace names"). Absent on a host with no local
+  // filesystem, which names every Workspace by directory.
+  gitInfo?(paths: string[]): Promise<GitInfoResult>;
 
   // PTY event listeners
   onPtyData(handler: (detail: PtyDataDetail) => void): void;
@@ -451,8 +347,8 @@ export interface PlatformAdapter {
   offRequestSessionFlush(handler: (detail: SessionFlushRequest) => void): void;
   notifySessionFlushComplete(requestId: string): void;
 
-  // Alert management
-  alertRemove(id: string): void;
+  // Alert management: a Session's alert state follows its PTY — `writePty`'s
+  // `userInput` acknowledges, a resize opens its grace window, a kill removes it.
   /** Offer persisted WATCHING rules as the host's startup seed. */
   alertSetWatchedCommands(names: string[]): void;
   /** Mutate one bare-command WATCHING rule without replacing unrelated rules. */
@@ -464,11 +360,21 @@ export interface PlatformAdapter {
    */
   alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void;
   alertDismiss(id: string): void;
-  alertAttend(id: string): void;
-  alertResize(id: string): void;
-  alertClearAttention(id?: string): void;
+  /**
+   * This renderer realm's presence and focus (`docs/specs/alert.md` ->
+   * Engagement), sent only when it changes; `lapse` says why presence ended.
+   */
+  alertEngagement(state: Engagement, lapse?: EngagementLapse): void;
+  /**
+   * Every Session this realm shows, with its Pane label and its Workspace's
+   * sparse delivery overrides, for the host's delivery scheduler
+   * (`docs/specs/alert.md` -> Alarm settings). Replaces what this realm
+   * published before.
+   */
+  alertPublishSessions(sessions: Record<string, AlertSessionInfo>): void;
+  /** A human gesture reached the Session without input; input rides `writePty`'s `userInput`. */
+  alertAcknowledge(id: string): void;
   alertToggleTodo(id: string): void;
-  alertMarkTodo(id: string): void;
   alertClearTodo(id: string): void;
   /**
    * Park until the Session finishes what it is doing (`docs/specs/alert.md` ->
@@ -488,6 +394,8 @@ export interface PlatformAdapter {
   onWatchedCommands(handler: (names: string[]) => void): void;
   /** Receive the host's canonical alarm settings. */
   onAlertSettings(handler: (settings: AlertSettings) => void): void;
+  /** Receive each spoken alarm the host scheduled, to speak. */
+  onAlertSpeak(handler: (speak: AlertSpeak) => void): () => void;
 
   // State persistence
   saveState(state: unknown): void;
@@ -503,20 +411,4 @@ export interface PlatformAdapter {
   getWindowState?(): PersistedWindow | null;
   saveWindowState?(snapshot: PersistedWindow): void;
 
-  /**
-   * The Surface notepad's archive store (docs/specs/notepad.md). Present on
-   * every host that has a notepad — standalone (owner-only JSON under app
-   * data), VS Code (`globalState`), the website demo (memory). Absent means no
-   * notepad at all: Pocket omits it and the header icon, popup action, and
-   * Settings entry all stay hidden.
-   */
-  notepadArchive?: NotepadArchivePort;
-
-  /**
-   * Whether the browser hosting this webview reserves the notepad chord
-   * (Cmd/Ctrl+N opens a new window, unpreventable), so Dormouse shows no
-   * shortcut and binds none. Absent reads as `false`; the website's demo
-   * adapter sets it `true`.
-   */
-  browserReservesNotepadChord?: boolean;
 }

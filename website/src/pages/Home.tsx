@@ -830,9 +830,9 @@ export default function Home() {
               Dormouse-operated cloud. The Relay stays on your own
               machine, inside your tailnet. Your laptop decides which phones get
               notified — the Relay isn't allowed to choose for it, and the{" "}
-              <a href={sitePath("/docs/security")} className={SITE_LINK_CLASS}>security spec</a>{" "}
+              <a href={sitePath("/security")} className={SITE_LINK_CLASS}>security spec</a>{" "}
               says exactly what that guarantees. The{" "}
-              <a href={sitePath("/docs/self-host")} className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
+              <a href={sitePath("/self-host")} className={SITE_LINK_CLASS}>self-host runbook</a>{" "}
               walks the whole install. If you would rather skip running it,
               {" "}<a href={`${sitePath("/hosted")}#remote-control`} className={SITE_LINK_CLASS}>Dormouse Hosted</a>{" "}
               is coming soon.
@@ -894,7 +894,7 @@ export default function Home() {
           <div className="overflow-x-auto rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04] p-4 font-mono text-sm leading-relaxed">
             <div><span className="opacity-40">$ </span>dor ensure -- pnpm dev</div>
             <div className="opacity-60">created surface:3&nbsp;&nbsp;&quot;pnpm dev&quot;</div>
-            <div className="mt-3"><span className="opacity-40">$ </span>dor ab open surface:3</div>
+            <div className="mt-3"><span className="opacity-40">$ </span>dor agent-browser open surface:3</div>
             <div className="opacity-60">&#8594; <span className="text-[var(--color-caramel)]">http://localhost:5173/</span></div>
           </div>
           <div className="overflow-hidden rounded-lg border border-[var(--color-text)]/15 bg-[var(--color-text)]/[0.04]">
@@ -929,7 +929,7 @@ export default function Home() {
               alt-tab and no second monitor.
             </p>
             <p className="text-lg leading-relaxed opacity-70 mb-4">
-              <code className={SITE_CODE_CLASS}>dor ab open surface:2</code>{" "}
+              <code className={SITE_CODE_CLASS}>dor agent-browser open surface:2</code>{" "}
               aims a browser at the port that terminal is serving — the one from
               the section above. Your agents run the same command, so when an
               agent wants to see what it just built, it opens a pane you're
@@ -942,9 +942,9 @@ export default function Home() {
               you already have installed — it doesn't ship a browser of its own.
             </p>
             <p className="text-base leading-relaxed opacity-60">
-              <a href={`${sitePath("/docs/dor")}#agent-browser`} className={SITE_LINK_CLASS}>CLI reference</a>
+              <a href={`${sitePath("/dor")}#agent-browser`} className={SITE_LINK_CLASS}>CLI reference</a>
               {" · "}
-              <a href={sitePath("/docs/agent-skill")} className={SITE_LINK_CLASS}>Agent skill</a>
+              <a href={sitePath("/agent-skill")} className={SITE_LINK_CLASS}>Agent skill</a>
             </p>
           </div>
         </section>
@@ -1102,11 +1102,13 @@ export default function Home() {
 
         <footer className="border-t border-[var(--color-text)]/20 py-10">
           <div className="mx-auto max-w-5xl px-4 md:px-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-base text-center opacity-50">
-            <a href={sitePath("/docs/dor")} className="underline hover:opacity-100">CLI reference</a>
-            <a href={sitePath("/docs/agent-skill")} className="underline hover:opacity-100">Agent skill</a>
-            <a href={sitePath("/docs/self-host")} className="underline hover:opacity-100">How to self-host</a>
+            <a href={sitePath("/dor")} className="underline hover:opacity-100">CLI reference</a>
+            <a href={sitePath("/agent-skill")} className="underline hover:opacity-100">Agent skill</a>
+            <a href={sitePath("/self-host")} className="underline hover:opacity-100">How to self-host</a>
             <a href={sitePath("/hosted")} className="underline hover:opacity-100">Dormouse Hosted</a>
-            <a href={sitePath("/docs/security")} className="underline hover:opacity-100">Security</a>
+            <a href={sitePath("/security")} className="underline hover:opacity-100">Security</a>
+            <a href={sitePath("/privacy")} className="underline hover:opacity-100">Hosted privacy</a>
+            <a href={sitePath("/terms")} className="underline hover:opacity-100">Hosted terms</a>
             <a href={sitePath("/supply-chain")} className="underline hover:opacity-100">Supply Chain</a>
             <a href="https://github.com/diffplug/dormouse/issues" className="underline hover:opacity-100">Report an issue</a>
             <p>

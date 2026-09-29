@@ -129,6 +129,14 @@ Source of truth: `applyTheme()` in `lib/src/lib/themes/apply.ts`;
 `lib/src/lib/themes/vscode-color-observer.ts`; `RESOLUTION_RULES` in
 `lib/src/lib/themes/vscode-color-registry.ts`.
 
+## Tool iframe themes
+
+**Must publish the workbench's resolved `--vscode-*` variables, theme class, and `color-scheme` to proxied Tool iframes**, initially, after document loads, and on host theme changes, without reloading. **Never override third-party page backgrounds, fonts, or controls**; tools consume the variables themselves. Remove previously published variables absent from the next snapshot. Ordinary browser Surfaces and uninstrumented frames receive no theme.
+
+**Must address only the current frame's proxy origin and verify its window identity for theme requests.** The shim accepts theme data only from its parent at the configured app origin, sets properties through CSSOM, and emits `dormouse:theme` after applying them to `html` and `body`.
+
+Source of truth: `captureIframeTheme` / `connectIframeTheme` in `lib/src/lib/themes/iframe-theme.ts`; `iframeShim` in `lib/src/host/iframe-proxy-rewrite.ts`; `IframePanel` in `lib/src/components/wall/IframePanel.tsx`. Tests: `lib/src/lib/themes/iframe-theme.test.ts`, `lib/src/host/iframe-proxy-rewrite.test.ts`.
+
 ## Terminal color contract
 
 Terminal content is orthogonal to the chrome: xterm.js reads terminal colors
@@ -283,6 +291,14 @@ outside a full Wall — doors, focus rings, alarm insets — still get the runti
 picks. `PREFERRED_STORYBOOK_THEME` in `lib/.storybook/preview.ts` names
 the default simulated host theme, **falling back to the first bundled theme** so
 a renamed or removed bundle cannot leave stories without theme vars.
+
+**Must name `DejaVu Sans` before generic `monospace` as the symbol fallback in
+visual snapshots in both browsers, and install `fonts-dejavu-core` in the Argos job** (rationale).
+Primary families retain precedence. The `TerminalContext` and
+`MobileTerminalUi` stories pin prompt and gesture-label glyphs.
+
+Source of truth: `SNAPSHOT_EDITOR_FONT_FAMILY` in `lib/.storybook/themes.ts`;
+`applyStorybookTheme` in `lib/.storybook/preview.ts`; `.github/workflows/argos.yml`.
 
 ## Theme debugger
 

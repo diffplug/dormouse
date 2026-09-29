@@ -7,32 +7,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * (`docs/specs/transport.md` → "Transferring a Workspace").
  */
 
-vi.mock('@xterm/addon-fit', () => ({
-  FitAddon: class {
-    fit(): void {}
-    proposeDimensions(): { cols: number; rows: number } { return { cols: 80, rows: 24 }; }
-  },
-}));
-vi.mock('@xterm/addon-image', () => ({ ImageAddon: class {} }));
-vi.mock('@xterm/addon-serialize', () => ({ SerializeAddon: class { serialize(): string { return ''; } } }));
-vi.mock('@xterm/addon-unicode-graphemes', () => ({ UnicodeGraphemesAddon: class {} }));
-vi.mock('@xterm/xterm', () => ({
-  Terminal: class {
-    parser = { registerCsiHandler: () => ({ dispose: () => {} }) };
-    modes = { mouseTrackingMode: 'none' as const, bracketedPasteMode: false };
-    unicode = { activeVersion: '11' };
-    disposed = false;
-    loadAddon(): void {}
-    open(): void {}
-    write(): void {}
-    focus(): void {}
-    blur(): void {}
-    onData(): { dispose: () => void } { return { dispose: () => {} }; }
-    onResize(): { dispose: () => void } { return { dispose: () => {} }; }
-    onRender(): { dispose: () => void } { return { dispose: () => {} }; }
-    dispose(): void { this.disposed = true; }
-  },
-}));
+vi.mock('@xterm/xterm', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-fit', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-image', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-serialize', () => import('./xterm-test-mock'));
+vi.mock('@xterm/addon-unicode-graphemes', () => import('./xterm-test-mock'));
 
 vi.mock('./platform', async () => {
   const actual = await vi.importActual<typeof import('./platform')>('./platform');
@@ -41,13 +20,8 @@ vi.mock('./platform', async () => {
 });
 
 import * as platformModule from './platform';
+import { getSizeHolds, holdSize } from './size-hold-store';
 import type { FakePtyAdapter } from './platform';
-import {
-  addPlainNote,
-  addTerminalNote,
-  getNotes,
-  removeSurface,
-} from './notepad/notepad-store';
 import {
   disposeSession,
   getOrCreateTerminal,
@@ -59,23 +33,16 @@ const platform = (platformModule as unknown as { __fakePlatform: FakePtyAdapter 
 
 let killed: string[];
 
-/** A pin, without a real xterm buffer behind it: what the notepad holds is two
- *  markers it must be able to dispose. */
-function fakeSource(terminalId: string) {
-  return {
-    terminalId,
-    startMarker: { line: 0, dispose: vi.fn() },
-    endMarker: { line: 0, dispose: vi.fn() },
-  } as unknown as Parameters<typeof addTerminalNote>[2];
-}
-
 beforeEach(() => {
   killed = [];
   vi.spyOn(platform, 'killPty').mockImplementation((id: string) => void killed.push(id));
-  for (const id of ['pane-1', 'pane-2']) removeSurface(id);
 });
 
 describe('releaseSession', () => {
+  // The kill is also what removes the host's alert entry, which is the
+  // Session's, not this Window's: a departure or a refused arrival that removed
+  // it would wipe a ring or TODO the other Window is showing
+  // (docs/specs/alert.md → Live Workspace transfer).
   it('never kills the PTY, unlike disposeSession', () => {
     getOrCreateTerminal('pane-1');
     releaseSession('pane-1');
@@ -95,23 +62,25 @@ describe('releaseSession', () => {
     expect(getTerminalInstance('pane-1')).toBeNull();
   });
 
-  it('leaves the notes for the transfer payload but drops their pins', () => {
-    getOrCreateTerminal('pane-1');
-    addPlainNote('pane-1', 'keep me');
-    addTerminalNote('pane-1', [{ text: 'captured' }], fakeSource('pane-1'));
-
-    releaseSession('pane-1');
-
-    const notes = getNotes('pane-1');
-    expect(notes).toHaveLength(2);
-    expect(notes.map((note) => note.content.kind)).toEqual(['plain', 'terminal']);
-    // A pin is a marker in the xterm instance this release disposed, so it
-    // cannot survive the move; the note itself rides the payload.
-    expect(notes.every((note) => note.source === undefined)).toBe(true);
-  });
-
   it('is a no-op for an id the registry does not hold', () => {
     expect(() => releaseSession('never-existed')).not.toThrow();
     expect(killed).toEqual([]);
+  });
+});
+
+describe('a size hold', () => {
+  // A remote session holding a pane that goes away must not leave a strip for a
+  // later Session reusing the id (docs/specs/remote-api.md → "Size authority").
+  it('goes with the Session, however it leaves this webview', () => {
+    const hold = { holder: 'session-a', label: 'iPhone', lease: '1', cols: 51, rows: 14 };
+    getOrCreateTerminal('pane-1');
+    holdSize('pane-1', hold);
+    disposeSession('pane-1');
+    expect(getSizeHolds('pane-1')).toEqual([]);
+
+    getOrCreateTerminal('pane-2');
+    holdSize('pane-2', hold);
+    releaseSession('pane-2');
+    expect(getSizeHolds('pane-2')).toEqual([]);
   });
 });

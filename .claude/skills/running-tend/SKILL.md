@@ -9,12 +9,6 @@ No project-specific tend preferences yet beyond the notes below. Add guidance he
 
 When asking permission to file an issue upstream (e.g. at `max-sixty/tend`), do **not** include the standing-exception offer ("I can treat this target as file-directly going forward"). nedtwigg wants to keep approving each cross-repo issue individually — keep asking each time, and skip the offer. ([diffplug/dormouse#168](https://github.com/diffplug/dormouse/issues/168#issuecomment-4836133002))
 
-## The Chromatic `UI Tests` check is human-gated — don't wait it out in a gated-approval poll
-
-After approving a visually-changing PR the approval is gated, so the CI Monitoring poll runs to dismiss-on-red. One status context — **`UI Tests`** (Chromatic, `target_url` → `chromatic.com/build...`) — stays `PENDING` for the entire poll because Chromatic holds it open until a maintainer accepts or rejects the visual diffs in the Chromatic UI; it does **not** auto-terminalize in-session. Its sibling **`Storybook Publish`** (also Chromatic) *does* terminalize normally, so this applies only to `UI Tests`.
-
-When `UI Tests` is the only non-terminal check and every automated check is green (Build & Test, Visual Regression Tests, verify, Standalone Smoketest, Cloudflare Pages, Storybook Publish), treat it as human-gated: stop polling, confirm nothing flipped to FAILURE, and keep the approval standing — don't wait out the poll cap. Polling it to the cap wastes ~9–17 job-minutes per visually-changing PR with no added signal. (Observed on #203, #289, #317.)
-
 ## A restart starts clean — don't carry a superseded PR's findings forward
 
 Long-running work here is often closed and reopened as a fresh PR ("Supersedes #N"), and that restart is deliberate — nedtwigg: *"When I start over, I usually **want** to start over. The original conversation grew too unfocused and out of hand."* So review the successor on its own terms: don't fetch the predecessor's bot comments and reviews in order to re-raise findings from them, and don't treat a finding dropped that way as a gap in the review machinery. Carrying the closed thread's context forward is the thing the restart was for.

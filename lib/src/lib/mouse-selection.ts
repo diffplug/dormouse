@@ -41,10 +41,7 @@ export interface TokenHint {
   text: string;
 }
 
-/** `'notepad'` rides the same flash as the two copies: capturing a selection
- *  confirms in place and dismisses the popup, it does not open the notepad
- *  (docs/specs/notepad.md → Capture). */
-export type CopyFlashKind = 'raw' | 'rewrapped' | 'notepad';
+export type CopyFlashKind = 'raw' | 'rewrapped';
 
 export interface MouseSelectionState {
   mouseReporting: MouseTrackingMode;
@@ -251,7 +248,7 @@ export function setDragAlt(id: string, altKey: boolean): void {
 }
 
 /**
- * Trigger the confirmation flash ("Copied!", or "Added" for a notepad capture).
+ * Trigger the copy confirmation flash ("Copied!").
  * The popup reads `copyFlash` and renders a confirmation state; after
  * `durationMs` the flash clears along with the selection, dismissing the popup.
  */

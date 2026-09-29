@@ -57,7 +57,7 @@ export default defineConfig(({ mode }) => ({
       // build never compiles. Alias it to source, exactly like `dormouse-lib`.
       "remote-lib-common": path.resolve(import.meta.dirname, "../remote-lib-common/src"),
       // Same story for `dor-lib-common`: `Wall` → `useDorControl` → `connect-port`
-      // imports its `./agent-browser` subpath. The directory alias covers both
+      // imports its `./browser-providers` subpath. The directory alias covers both
       // that subpath and the bare specifier.
       "dor-lib-common": path.resolve(import.meta.dirname, "../dor-lib-common/src"),
       // Wall also imports `dor/*` (protocol + command types); `dor` has no

@@ -1,6 +1,7 @@
 import type { LathWallEngine } from './lath-wall-engine';
 import type { RestoredSession } from '../../lib/session-restore';
 import { isToolParams, toolPendingFromParams } from './browser-surface';
+import { parseRenderMode } from 'dor-lib-common/browser-providers';
 
 /** Live browser bindings travel only in the volatile transfer content, never
  * in the saved Workspace record. Cold restore must rediscover its own port. */
@@ -14,7 +15,7 @@ export function captureToolParams(lath: LathWallEngine, ids: readonly string[]):
     // Approval and browser startup own asynchronous work in this webview. Let
     // them settle before moving their UI and ownership to another one.
     if (toolPendingFromParams(params)) throw new Error('Approve or decline pending Tools before moving this Workspace');
-    if (params.renderMode === 'ab-screencast' && !params.session) {
+    if (parseRenderMode(params.renderMode).provider && !params.session) {
       throw new Error('Wait for the Tool browser to connect before moving this Workspace');
     }
     tools[id] = { ...params };

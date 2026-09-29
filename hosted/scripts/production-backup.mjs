@@ -10,7 +10,7 @@ import { required, hyperdriveOrigin } from "./preview.mjs";
 // Only the encrypted archive leaves the runner, after decrypt-and-restore succeeds.
 const temporary = await mkdtemp(join(tmpdir(), "hosted-backup-"));
 const container = `hosted-restore-${randomUUID()}`;
-const image = "postgres:17.11-alpine";
+const image = "postgres:18.6-alpine";
 function run(step, command, args, env = process.env) {
   const result = spawnSync(command, args, {
     env,

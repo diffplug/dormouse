@@ -91,6 +91,7 @@ describe('inline', () => {
   it('rejects a non-https absolute img src', () => {
     expect(() => parseInline('<img src="http://x.test/a.png" />')).toThrow(/relative or https/);
     expect(() => parseInline('<img src="data:image/gif;base64,AA" />')).toThrow(/relative or https/);
+    expect(() => parseInline('<img src="//x.test/a.png" />')).toThrow(/relative or https/);
   });
 
   it('rejects every other raw HTML tag', () => {
@@ -168,6 +169,17 @@ describe('blocks', () => {
     expect(() => parseMarkdown('> quoted\n<div>\n')).toThrow(/raw HTML <div>/);
   });
 
+  it('drops an HTML comment block, even one that interrupts a paragraph', () => {
+    const { blocks } = parseMarkdown('text\n<!-- TODO: an image\nof two lines -->\n\nafter\n');
+    expect(blocks.map((b) => inlineToText(b.children))).toEqual(['text', 'after']);
+  });
+
+  it('rejects an HTML comment that shares a line with content', () => {
+    expect(() => parseMarkdown('<!-- note --> text\n')).toThrow(/stand on its own lines/);
+    expect(() => parseMarkdown('text <!-- note -->\n')).toThrow(/stand on its own lines/);
+    expect(() => parseMarkdown('<!-- never closed\n')).toThrow(/unterminated HTML comment/);
+  });
+
   it('keeps a standalone <img> line inside the paragraph it follows', () => {
     const { blocks } = parseMarkdown('text\n<img src="a.png" alt="a">\n');
     expect(blocks).toHaveLength(1);
@@ -176,6 +188,19 @@ describe('blocks', () => {
 
   it('rejects a setext underline inside a list item too', () => {
     expect(() => parseMarkdown('- item\n  Title\n  =====\n')).toThrow(/setext heading underline/);
+  });
+
+  it('parses a fence under a list item as the item\'s code block, not its text', () => {
+    const { blocks } = parseMarkdown('1. Run:\n   ```sh\n   pnpm install\n   ```\n2. Done\n');
+    const [first, second] = blocks[0].items;
+    expect(first.children.map((c) => c.type)).toEqual(['paragraph', 'code']);
+    expect(first.children[1]).toMatchObject({ lang: 'sh', value: 'pnpm install' });
+    expect(second.children[0].children).toEqual([{ type: 'text', value: 'Done' }]);
+  });
+
+  it('parses an indented heading under a list item as the item\'s child', () => {
+    const { blocks } = parseMarkdown('- item\n  # Heading\n');
+    expect(blocks[0].items[0].children.map((c) => c.type)).toEqual(['paragraph', 'heading']);
   });
 
   it('ends a list item at a thematic break in its continuation', () => {

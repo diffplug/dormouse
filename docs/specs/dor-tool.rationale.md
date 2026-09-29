@@ -2,6 +2,10 @@
 
 > Informative evidence for `docs/specs/dor-tool.md`, keyed by its headings.
 
+## The tool capability set
+
+Before the Display modal read the Surface's own render modes (2026-09), it offered a Tool Playwright screencast and popout wherever the host wired Playwright. `onSwapRenderMode`'s Tool branch then wrote `toolRender: 'pw-*'`, cleared the session and launched only for `agent-browser-screencast`, so the pane sat on its placeholder until the next save coerced it to `iframe`; `playwright-popout` also popped out a Tool. The Wall refuses independently because the in-controller popout never reaches it.
+
 ## Declaring tools
 
 YAML authors naturally collapse one-element lists to scalars. Overloading a scalar dedupe key as a command would make `prespawn_dedupe: storybook` execute instead of identify. Separate future fields avoid that ambiguity.
@@ -38,6 +42,8 @@ Successive startup listeners can appear in different scan ticks. One unchanged t
 
 A hardcoded Storybook port can disagree with the port it obtains under contention, while Vite with strict-port behavior can fail entirely. Discovery therefore checks the Session process tree. An OSC can cross SSH, but the current host scan still requires a locally discoverable listener.
 
+Every preview-slot retarget of a serving Tool (the built-in file viewer, `builtin:folder`, a web viewer) otherwise waits up to one 1.5-second poll before its browser frames (2026-09). The `serve` announcement already names the port, so scanning when it arrives removes most of that wait without trusting it any further. Its first form ran a full tick per announcement (2026-09-28): every unbound Tool was scanned again milliseconds after the poll, which autobind counted as its unchanged tick, so a boot's first listener could frame before the next one bound.
+
 ## Lifecycle
 
 ### September 2026 innerdogfood QC record
@@ -55,6 +61,10 @@ rendering, Windows shells, or cold restore. The reusable recipe is
 
 The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's automatic refresh, Reset, and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
 
+## Naming
+
+A name read from a browser or terminal passes through whatever those show mid-switch: the dev-server chip that named serving Tools went chip, bare address, chip on every preview retarget (`docs/specs/layout.rationale.md` → Pane header, 2026-09-29). The dedupe key is what tells two Surfaces of one Tool apart, so its elements beyond the name are what the name adds; an absolute path's last component is usually the checkout or file it scopes to.
+
 ## Opening local files
 
 Innerdogfood QC in Chromium (2026-09) showed the native PDF plugin failing inside the normal iframe sandbox. PDFs use configured user Tools; the built-in viewer carries no PDF renderer dependency.
@@ -63,7 +73,49 @@ A CSS source preview escapes its contents, so its URLs cannot load assets. Scann
 
 Keeping the built-in viewer in the Tool's process tree reuses port discovery, kill, restart, and Workspace transfer. An OSC path carries the per-run URL capability without saving that secret in the restart command. Holding the selected file descriptors bounds what the server can read after launch; it trades automatic replacement-file refresh for a grant whose contents cannot widen through path replacement.
 
+Without a title, a viewer's header falls back to its running command, `dor __view-file <path>`, where an editor would show the file name. The title strips controls because a file name can carry an OSC terminator, C1 ST included, that would end the sequence early.
+
 The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity. Canonicalizing only the target mixed physical and logical paths under a symlinked CWD, so relative slash patterns missed files inside that directory. An absolute target can still be opened after its caller's CWD disappears; matching falls back to the supplied directory in that case.
+
+## Folders
+
+A names-only folder viewer leaves file contents behind the existing one-file grant. A content-serving folder grant cannot hold descriptors for a whole tree from launch, so it would need open-per-request containment and a rewrite of the Local-file viewer checks.
+
+Directories match through a name suffix rather than a new rule field, so folder rules share the ordered `open` list and picomatch syntax. The suffix alone would let `*` or `**` file rules capture directories, and a regular file literally named `x.📁` capture a folder rule; making suffixed patterns and directories match only each other closes both.
+
+Each page POST is its own control connection. In a live run (2026-09-28) a double-click's activate reached the renderer before its select, so the file opened as an ordinary split beside the folder viewer instead of pinning the slot the select was creating. Selects stay concurrent because supersession needs a newer select to reach the renderer while an older one is still in flight.
+
+## Preview slot
+
+Customizable viewers are the point of `dor open`, so previews trade speed for flexibility. A design considered on 2026-09-28 previewed inside one long-lived built-in viewer with a folder-scoped grant: every selection was an in-page navigation, but user Tools never saw a preview. Retargeting the slot instead costs an interrupt, a process start, and a port scan for a serving Tool, which its `serve` announcement now starts at once ([Serving](#serving)); terminal-only viewers skip the scan. A rule's `preview` handler and the speed item in scope **open-folder** narrow that cost without bypassing the open rules.
+
+Measured in the innerdogfood harness (Chromium, macOS, 2026-09-28), a built-in viewer retarget took 255–285 ms from issuing the click to the new document's `load`, about 100 ms of it the automation round trip. That left retarget without restart, the remaining speed item, unbuilt.
+
+Most slot occupants are viewers scrolled with the keyboard (`less`, `glow`), so pinning on keyboard input would pin nearly every preview. Editors report `OSC 367 state`; one that does not loses unsaved work on the next selection.
+
+Splitting the pinned pane keeps a double-clicked file visible, the intent of the gesture. Minimizing it to a Door, the closer analogue of a VS Code tab left behind the preview, was rejected for that reason. Without latest-wins supersession, the Tool launch queue would run one restart per click in order.
+
+`less` without `-K`, vim, nvim, and hx ignore Ctrl+C. Waiting out the 15s prompt timeout for one held the serial Tool queue on every click after the first, then failed, and a terminal link then fell back to its dialog. Considered on 2026-09-28: signalling the foreground process group with SIGTERM needs new plumbing in every host's PTY owner and has no Windows equivalent; typing `q` risks inserting it into an editor's buffer; killing the Session could lose editor state. Keeping the slot as it stands costs a pane, and its occupant never agreed to exit.
+
+At the 1s mark an ignored Ctrl+C looks the same as a slow exit: a serving Tool's shutdown work, or a prompt hook that reports late, such as a git-status prompt in a large repository (reasoned 2026-09-28). Watching for that late prompt off the queue gives a kept pane its content back, and a marked slot its viewer, without holding the queue past the 1s; 15s is the prompt timeout the interrupt waited before the grace existed. A Surface typed into since the interrupt is the user's again, and a retyped command would land in their line.
+
+Supersession stops once a retarget has typed its command. A newer preview interrupting a line the shell has not yet reported could send its Ctrl+C before the shell reads that line, and its own command would then be typed into the old command's input (reasoned 2026-09-28, not reproduced). The wait it keeps is the command's startup report, normally milliseconds.
+
+## Switching the slot
+
+Observed live in the innerdogfood harness (2026-09-28), a retarget without a hold went: the old browser retired at once, the pane flipped to its terminal face (`^C`, a prompt, the typed command), the new frame appeared as a white blank, then the new document painted, while the header label passed through the terminal's derived titles and the dev-server chip came and went.
+
+A screenshot of the old view is not the ghost for an iframe: a cross-origin frame's pixels cannot be read from the parent. None is needed either, since a loaded document stays painted after its server exits and CSS blurs a cross-origin frame. The blur is a `backdrop-filter` overlay, not the ghost's own `filter`: live in Chromium (2026-09-28), `filter: blur` sampled transparent pixels past the pane edge and rimmed a white page dark, while the backdrop's edges stayed clean. WebKit's edge handling is unobserved. A screencast's last frame is copied canvas to canvas, so nothing is encoded on the main thread as the preview arrives (a JPEG `toDataURL` of the device-resolution frame did that) and no pixels are read; keeping its live view would hold a session the retarget has closed.
+
+Dimming was rejected (Ned, 2026-09-28): a dim reads differently on light and dark themes, and on a dark theme a dimmed page barely changes. Blur alone reads the same on both.
+
+A built-in viewer prints only its `OSC 2` title and `OSC 367 serve`, so OSC-only output never ends a switch before its browser paints. The shell's echo of the typed command can arrive in the chunk that starts it, so the echo does not count as output either.
+
+## Terminal links
+
+xterm.js 6.1.0-beta.304 activates a link on every `mouseup` whose press began on that link, passing the `mouseup`. A two-press double-click sent to Chromium over CDP activated with `detail` 1, then 2 (2026-09-28). `agent-browser dblclick` sends a single press with click count 2, so it activates once and cannot probe this. A triple-click's third activation would be another `dor open`, starting an unkeyed Tool twice.
+
+The display-text rule replaces the dialog's consent: the path the click opens is the text clicked. Output that can run `dor open` gains nothing from a link; output that cannot, such as a remote shell over ssh, names its own host in `ls --hyperlink`, which the host check refuses. OSC 7 locality (`isRemoteFileHost` in `lib/src/lib/terminal-state.ts`) differs: it treats every named host as remote, this machine's name included, while a link naming this machine opens, since `ls --hyperlink` names the local host too.
 
 ## Take-over
 

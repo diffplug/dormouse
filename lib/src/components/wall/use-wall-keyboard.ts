@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { handleDualTap } from './keyboard/handle-dual-tap';
+import { handleContextCopy } from './keyboard/handle-context-copy';
 import { handleEditableClipboard } from './keyboard/handle-editable-clipboard';
 import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys';
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
@@ -13,7 +14,7 @@ import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
 // Keystrokes an active Wall has already answered. A key that activates another
 // Workspace commits that Wall's `active` in the microtask checkpoint the browser
 // runs between listeners, so without this claim its listener would answer the
-// same key too — `n` switching straight back, `Enter` activating then renaming.
+// same key too.
 const answeredKeys = new WeakSet<KeyboardEvent>();
 
 export function useWallKeyboard(ctx: WallKeyboardCtx): void {
@@ -40,8 +41,12 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       if (!c.activeRef.current || answeredKeys.has(e)) return;
       answeredKeys.add(e);
 
+      // Any other key cancels a pending leader: a left-Shift capital, a word,
+      // then a right-Shift capital is typing, not the gesture.
+      if (e.key !== 'Meta' && e.key !== 'Shift') lastCmdSide.current = lastShiftSide.current = null;
       const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
+        if (handleContextCopy(e)) return;
         if (handleEditableClipboard(e)) return;
         const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
         const helperId = terminalElement?.dataset.helperTerminal ?? terminalElement?.dataset.contextTerminal;

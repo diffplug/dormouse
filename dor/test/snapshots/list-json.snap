@@ -45,7 +45,7 @@ stdout:
       "kind": "browser",
       "has_terminal": false,
       "has_browser": true,
-      "render_mode": "ab-screencast",
+      "render_mode": "agent-browser-screencast",
       "view": "paned",
       "title": "Dormouse",
       "focused": false,

@@ -3,10 +3,13 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import type { PlatformAdapter } from '../../lib/platform/types';
+import { rememberBrowserProvider, preferredBrowserProvider } from './BrowserProviderSwitch';
 import { AgentBrowserScreenModal } from './AgentBrowserScreenModal';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
-import { registerStubScreen, STUB_SCREEN } from './wall-test-utils';
+import { installBrowserHost, registerStubScreen, STUB_SCREEN } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -14,6 +17,8 @@ let container: HTMLDivElement;
 let root: Root;
 
 beforeEach(() => {
+  rememberBrowserProvider('agent-browser');
+  setPlatform(new FakePtyAdapter());
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -22,12 +27,76 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  setPlatform(new FakePtyAdapter());
 });
 
 describe('AgentBrowserScreenModal', () => {
+  it('applies a fixed preset without linking the browser to pane size', () => {
+    installBrowserHost();
+    const registration = registerStubScreen('preset', { snapshot: { ...STUB_SCREEN, syncEngaged: false } });
+    const controller = getAgentBrowserScreenController('preset')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:3" onClose={() => {}} />));
+    const select = document.body.querySelector<HTMLSelectElement>('select')!;
+    act(() => { select.value = 'phone'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    act(() => [...document.body.querySelectorAll('button')].find((button) => button.textContent === 'Apply')!.click());
+    expect(vi.mocked(controller.actions.applyViewportSetting)).toHaveBeenCalledWith({ mode: 'fixed', width: 390, height: 844 });
+    registration.dispose();
+  });
+
+  it('fills preset dimensions, then edits them as Custom without pinning measured DPR', () => {
+    installBrowserHost();
+    const registration = registerStubScreen('editable', {
+      snapshot: { ...STUB_SCREEN, syncEngaged: false, viewport: { w: 1440, h: 900, dpr: 2 } },
+    });
+    const controller = getAgentBrowserScreenController('editable')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:3" onClose={() => {}} />));
+    const select = document.body.querySelector<HTMLSelectElement>('select')!;
+    const field = (name: string) => document.body.querySelector<HTMLInputElement>(`input[aria-label="${name}"]`)!;
+    const edit = (name: string, value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field(name), value);
+      field(name).dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const apply = () => act(() => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Apply')!.click());
+    act(() => { select.value = 'phone'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(field('W').value).toBe('390');
+    expect(field('H').value).toBe('844');
+    expect(field('DPR').value).toBe('2.00');
+    act(() => field('W').focus());
+    expect(select.value).toBe('phone');
+    edit('W', '400');
+    expect(select.value).toBe('');
+    expect(document.body.querySelector('input[name="screen-target"]:checked')?.closest('label')?.textContent).toContain('Fixed size');
+    apply();
+    expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844 });
+    act(() => field('DPR').focus());
+    edit('DPR', '1.5');
+    expect(field('DPR').value).toBe('1.5');
+    act(() => field('DPR').blur());
+    expect(field('DPR').value).toBe('1.50');
+    apply();
+    expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844, dpr: 1.5 });
+    edit('DPR', '1.25');
+    apply();
+    expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844, dpr: 1.25 });
+    registration.dispose();
+  });
+
+  it('reopens at the saved phone size without selecting desktop', () => {
+    installBrowserHost();
+    const registration = registerStubScreen('phone', {
+      snapshot: { ...STUB_SCREEN, syncEngaged: false, viewport: { w: 390, h: 844, dpr: 1 } },
+      viewportSetting: () => ({ mode: 'fixed', width: 390, height: 844 }),
+    });
+    const controller = getAgentBrowserScreenController('phone')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
+    expect(document.body.querySelector<HTMLSelectElement>('select')?.value).toBe('phone');
+    expect(document.body.querySelector<HTMLInputElement>('input[name="screen-target"]:checked')?.closest('label')?.textContent).toContain('Fixed size');
+    registration.dispose();
+  });
+
   it('composes compact capability and presentation glyphs through the modal hierarchy', () => {
     const registration = registerStubScreen('browser-1', {
-      snapshot: { ...STUB_SCREEN, renderMode: 'ab-screencast' },
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
     });
     const controller = getAgentBrowserScreenController('browser-1');
     expect(controller).not.toBeNull();
@@ -64,12 +133,104 @@ describe('AgentBrowserScreenModal', () => {
     registration.dispose();
   });
 
+  it('offers Playwright sizing without emulation and dispatches the selected provider', () => {
+    installBrowserHost();
+    const registration = registerStubScreen('playwright', { snapshot: { ...STUB_SCREEN, renderMode: 'playwright-screencast' } });
+    const controller = getAgentBrowserScreenController('playwright')!;
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
+    expect(document.body.textContent).toContain('playwright screencast');
+    expect(document.body.querySelectorAll('input[name="screen-target"]')).toHaveLength(2);
+    expect(document.body.textContent).not.toContain('Emulate');
+    expect(document.body.textContent).not.toContain('Galaxy S25');
+    const popout = [...document.body.querySelectorAll('label')].find(label => label.textContent === 'playwright popout')!;
+    act(() => popout.querySelector<HTMLInputElement>('input')!.click());
+    act(() => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Apply')!.click());
+    expect(controller.actions.setRenderMode).toHaveBeenCalledWith('playwright-popout');
+    registration.dispose();
+  });
+
+  it('switches providers without duplicating presentations or applying before confirmation', () => {
+    installBrowserHost();
+    rememberBrowserProvider('playwright');
+    const registration = registerStubScreen('switch-provider', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-popout' },
+    });
+    const controller = getAgentBrowserScreenController('switch-provider')!;
+    const close = vi.fn();
+    act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:8" onClose={close} />));
+    expect(document.body.querySelector('button[aria-label="switch to playwright"]')).not.toBeNull();
+    expect(document.body.querySelectorAll('input[name="render-mode"]')).toHaveLength(3);
+    act(() => document.body.querySelector<HTMLButtonElement>('button[aria-label="switch to playwright"]')!.click());
+    expect(controller.actions.setRenderMode).not.toHaveBeenCalled();
+    act(() => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Apply')!.click());
+    expect(controller.actions.setRenderMode).toHaveBeenCalledWith('playwright-popout');
+    expect(preferredBrowserProvider(['agent-browser', 'playwright'])).toBe('playwright');
+    expect(close).toHaveBeenCalledOnce();
+    registration.dispose();
+  });
+
+  it('offers only the render modes the controller declares, whatever the host supports', () => {
+    // A tool on a host with every provider: Playwright and popout would strand it.
+    installBrowserHost();
+    const registration = registerStubScreen('tool', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
+      renderModes: ['agent-browser-screencast', 'iframe'],
+    });
+    act(() => root.render(
+      <AgentBrowserScreenModal controller={getAgentBrowserScreenController('tool')!} label="surface:5" onClose={() => {}} />,
+    ));
+    const options = [...document.body.querySelectorAll('input[name="render-mode"]')]
+      .map((input) => input.closest('label')?.textContent);
+    expect(options).toEqual(['agent-browser screencast', 'iframe embed']);
+    registration.dispose();
+  });
+
+  it('tells the user the embed drops logins, and refuses it for an https:// page on a proxying host', () => {
+    const platform: PlatformAdapter = new FakePtyAdapter();
+    platform.createIframeProxyUrl = async () => ({ ok: true, url: 'http://127.0.0.1:61234/' });
+    setPlatform(platform);
+    const iframeRow = () => [...document.body.querySelectorAll('label')].find((label) => label.textContent?.includes('iframe embed'))!;
+
+    const secure = registerStubScreen('secure', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
+      chrome: { url: 'https://example.com/account', displayUrl: 'example.com/account', title: null, key: null },
+    });
+    act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('secure')!} label="surface:5" onClose={() => {}} />));
+    expect(document.body.textContent).toContain('no logins/cookies');
+    expect(iframeRow().querySelector('input')!.disabled).toBe(true);
+    expect(iframeRow().textContent).toContain('the embedded view frames http:// pages only');
+    secure.dispose();
+
+    // Nothing but http(s) is framed at all.
+    const file = registerStubScreen('file', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
+      chrome: { url: 'file:///tmp/report.html', displayUrl: 'report.html', title: null, key: null },
+    });
+    act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('file')!} label="surface:7" onClose={() => {}} />));
+    expect(iframeRow().querySelector('input')!.disabled).toBe(true);
+    file.dispose();
+
+    const local = registerStubScreen('local', {
+      snapshot: { ...STUB_SCREEN, renderMode: 'agent-browser-screencast' },
+      chrome: { url: 'http://localhost:5173/', displayUrl: 'localhost:5173/', title: null, key: null },
+    });
+    act(() => root.render(<AgentBrowserScreenModal controller={getAgentBrowserScreenController('local')!} label="surface:6" onClose={() => {}} />));
+    expect(iframeRow().querySelector('input')!.disabled).toBe(false);
+    // The page can move to https after iframe was picked: Apply then stands down.
+    act(() => iframeRow().querySelector<HTMLInputElement>('input')!.click());
+    const apply = () => [...document.body.querySelectorAll('button')].find((button) => button.textContent === 'Apply')!;
+    expect(apply().disabled).toBe(false);
+    act(() => local.updateChrome({ url: 'https://example.com/', displayUrl: 'example.com/', title: null, key: null }));
+    expect(apply().disabled).toBe(true);
+    local.dispose();
+  });
+
   it('keeps resize selected while an engaged sync is transiently scaled', () => {
     const registration = registerStubScreen('browser-transient', {
       snapshot: {
         ...STUB_SCREEN,
         state: 'SCALED',
-        renderMode: 'ab-screencast',
+        renderMode: 'agent-browser-screencast',
         syncEngaged: true,
       },
     });

@@ -14,7 +14,7 @@
 #
 #   macOS swaps the bundle in place and leaves a running Dormouse alone; run
 #   `dor app restart` in any Dormouse terminal to switch to the new build and
-#   resume your Claude and Codex sessions. Windows cannot replace files the
+#   resume your supported agent sessions. Windows cannot replace files the
 #   running app holds, so it still kills Dormouse before copying.
 #
 # Launch mode (--no-install):
@@ -109,7 +109,7 @@ if [[ "${1:-}" != "--no-install" ]]; then
       # Dormouse terminal the running app and its sidecar are exactly that.
       if pgrep -a -f "$INSTALL_DIR/Contents/MacOS/" >/dev/null 2>&1; then
         echo "  Dormouse is still running the previous build. To switch, run this in any"
-        echo "  Dormouse terminal (Claude and Codex sessions resume):"
+        echo "  Dormouse terminal (supported agent sessions resume):"
         echo ""
         echo "    dor app restart"
       fi

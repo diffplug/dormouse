@@ -1,4 +1,5 @@
 import spawn from 'cross-spawn';
+import path from 'node:path';
 
 export interface SpawnCaptureSuccess {
   readonly ok: true;
@@ -14,6 +15,28 @@ export interface SpawnCaptureFailure {
 }
 
 export type SpawnCaptureResult = SpawnCaptureSuccess | SpawnCaptureFailure;
+
+/** The `error.code` of a spawn that `timeoutMs` ended. */
+export const SPAWN_TIMEOUT_CODE = 'ETIMEDOUT';
+
+/**
+ * How a timed-out child is ended, or null for a plain SIGKILL of the child.
+ * Windows ends the whole tree: cross-spawn runs a `.cmd` shim through
+ * `cmd.exe`, so the child is the shell and the real CLI is its descendant,
+ * which killing the shell would leave running. `taskkill` is named by its
+ * absolute path for the same reason every other spawn is (a bare name is
+ * searched in the cwd first). Takes `isWindows` so both branches are testable
+ * off Windows.
+ */
+export function treeKillCommand(
+  pid: number,
+  env: { readonly [key: string]: string | undefined },
+  isWindows: boolean,
+): { binary: string; args: string[] } | null {
+  if (!isWindows) return null;
+  const systemRoot = env.SystemRoot || env.SYSTEMROOT || 'C:\\Windows';
+  return { binary: path.win32.join(systemRoot, 'System32', 'taskkill.exe'), args: ['/PID', String(pid), '/T', '/F'] };
+}
 
 // Grace window for 'close' to win after 'exit' before we resolve anyway. Long
 // enough that a normal command's stdio drains (its output is written before the
@@ -35,12 +58,28 @@ const CLOSE_GRACE_MS = 250;
  *    daemon's post-exit scribbles would otherwise leak into the captured output.
  *
  * Never throws: a spawn-level failure resolves as `{ ok: false, error }`.
+ *
+ * `timeoutMs` bounds the whole call: past it the child is killed (its tree on
+ * Windows, `treeKillCommand`) and the call resolves `{ ok: false }` with
+ * `SPAWN_TIMEOUT_CODE`, without waiting for the kill. Past `maxOutputBytes` of
+ * combined stdout/stderr it is killed the same way and resolves `{ ok: false }`
+ * with `ENOBUFS` and none of the output, which may hold secrets.
+ *
+ * `input` is written to the child's stdin, which is then closed; without it
+ * stdin is ignored.
+ *
+ * Explicit cmd.exe /s /c callers must set windowsVerbatimArguments: Node's
+ * default MSVCRT escaping inserts backslashes that cmd.exe does not decode.
  */
-export function spawnAndCapture(binary: string, args: readonly string[]): Promise<SpawnCaptureResult> {
+export function spawnAndCapture(
+  binary: string,
+  args: readonly string[],
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number; windowsVerbatimArguments?: boolean; input?: string } = {},
+): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+      child = spawn(binary, args, { stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
     } catch (error) {
       // Invalid argv (for example a NUL in an eval string) throws before a child
       // exists; preserve the same result contract as an asynchronous ENOENT.
@@ -48,16 +87,25 @@ export function spawnAndCapture(binary: string, args: readonly string[]): Promis
       resolve({ ok: false, error: { code: cause.code, message: cause.message } });
       return;
     }
+    if (options.input !== undefined) {
+      // A child that exits without reading all its input fails our write with
+      // EPIPE; its exit status is the answer, and an unheard stream error would
+      // throw out of this never-throwing call.
+      child.stdin?.on('error', () => {});
+      child.stdin?.end(options.input);
+    }
     let stdout = '';
     let stderr = '';
     // Latch on the first terminal event so the error-vs-exit/close race can't
     // double-resolve; clearTimeout drops the grace timer once we've settled.
     let settled = false;
     let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     const settle = (apply: () => void): void => {
       if (settled) return;
       settled = true;
       if (graceTimer !== undefined) clearTimeout(graceTimer);
+      if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
       // Capture is over. In the grace fallback a daemon still owns the write
       // ends: leaving our readers open retains both the caller's event loop and
       // the data listeners that keep accumulating ignored output.
@@ -65,11 +113,30 @@ export function spawnAndCapture(binary: string, args: readonly string[]): Promis
       child.stderr?.destroy();
       apply();
     };
+    const killChild = () => {
+      const killer = child.pid === undefined ? null : treeKillCommand(child.pid, options.env ?? process.env, process.platform === 'win32');
+      if (!killer) {
+        child.kill('SIGKILL');
+        return;
+      }
+      const taskkill = spawn(killer.binary, killer.args, { stdio: 'ignore', windowsHide: true });
+      // Best effort: a failed tree kill still leaves the shell to end.
+      taskkill.on('error', () => child.kill('SIGKILL'));
+    };
     // Decode across pipe chunks so a split UTF-8 sequence stays one character.
     child.stdout?.setEncoding('utf8');
     child.stderr?.setEncoding('utf8');
-    child.stdout?.on('data', (chunk: string) => { stdout += chunk; });
-    child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+    let outputBudget = options.maxOutputBytes;
+    const capture = (chunk: string, stderrChunk: boolean) => {
+      if (settled) return;
+      if (outputBudget !== undefined && (outputBudget -= Buffer.byteLength(chunk)) < 0) {
+        settle(() => resolve({ ok: false, error: { code: 'ENOBUFS', message: 'Child output exceeded the capture limit' } }));
+        killChild();
+      } else if (stderrChunk) stderr += chunk;
+      else stdout += chunk;
+    };
+    child.stdout?.on('data', (chunk: string) => capture(chunk, false));
+    child.stderr?.on('data', (chunk: string) => capture(chunk, true));
     child.on('error', (error: NodeJS.ErrnoException) =>
       settle(() => resolve({ ok: false, error: { code: error.code, message: error.message } })));
     const finish = (code: number | null, out: string, err: string): void =>
@@ -78,6 +145,15 @@ export function spawnAndCapture(binary: string, args: readonly string[]): Promis
     // 'exit' for the daemon-holds-the-pipe case where 'close' never fires; the
     // grace lets 'close' win first so a normal command's full output flushes, and
     // the exit-time snapshot keeps post-exit daemon noise out of the result.
+    if (options.timeoutMs !== undefined) {
+      timeoutTimer = setTimeout(() => {
+        settle(() => resolve({
+          ok: false,
+          error: { code: SPAWN_TIMEOUT_CODE, message: `${binary} did not finish within ${options.timeoutMs} ms` },
+        }));
+        killChild();
+      }, Math.max(0, options.timeoutMs));
+    }
     child.on('close', (code: number | null) => finish(code, stdout, stderr));
     child.on('exit', (code: number | null) => {
       const out = stdout;

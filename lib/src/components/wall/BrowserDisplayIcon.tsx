@@ -5,23 +5,26 @@ import {
   type Icon,
   PictureInPictureIcon,
 } from '@phosphor-icons/react';
-import type { BrowserDisplayMode } from './agent-browser-screen';
+import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS } from 'dor-lib-common/browser-providers';
+import { chromeButton } from '../design';
+import { BROWSER_VIEWS, displayModeFor, displayView, type BrowserDisplayMode, type BrowserView } from './agent-browser-screen';
 
-export const BROWSER_DISPLAY_LABEL: Record<BrowserDisplayMode, string> = {
-  'ab-resize': 'agent-browser resizes with pane',
-  'ab-fixed': 'agent-browser fixed size',
-  'ab-popout': 'agent-browser popout',
-  iframe: 'iframe embed',
-};
-
-/** How the human view is presented, keyed like `BROWSER_DISPLAY_LABEL` so a new
- *  mode is a compile error in both rather than a silent fall-through. */
-const PRESENTATION_ICON: Record<BrowserDisplayMode, Icon> = {
-  'ab-resize': FrameCornersIcon,
-  'ab-fixed': PictureInPictureIcon,
-  'ab-popout': ArrowSquareOutIcon,
+const VIEW_LABEL: Record<BrowserView, string> = { resize: 'resizes with pane', fixed: 'fixed size', popout: 'popout' };
+/** How the human view is presented: one glyph per view, the embed framed like
+ *  a pane-sized screencast. */
+const VIEW_ICON: Record<BrowserView | 'iframe', Icon> = {
+  resize: FrameCornersIcon,
+  fixed: PictureInPictureIcon,
+  popout: ArrowSquareOutIcon,
   iframe: FrameCornersIcon,
 };
+
+/** Every display mode's label: `<provider> <view>`, and the embed. */
+export const BROWSER_DISPLAY_LABEL = Object.fromEntries([
+  ...BROWSER_PROVIDER_IDS.flatMap((provider) => BROWSER_VIEWS.map((view) =>
+    [displayModeFor(provider, view), `${BROWSER_PROVIDERS[provider].label} ${VIEW_LABEL[view]}`])),
+  ['iframe', 'iframe embed'],
+]) as Record<BrowserDisplayMode, string>;
 
 /** Compact custom robot whose wide silhouette survives the 12–14px chrome. */
 export function AgentRobotIcon({
@@ -62,7 +65,7 @@ export function BrowserPresentationIcon({
   size: number;
   className?: string;
 }) {
-  const Glyph = PRESENTATION_ICON[mode];
+  const Glyph = VIEW_ICON[displayView(mode)];
   return <Glyph size={size} className={className} />;
 }
 
@@ -87,5 +90,28 @@ export function BrowserDisplayIcon({
       {mode !== 'iframe' && <AgentRobotIcon size={size} />}
       <BrowserPresentationIcon mode={mode} size={size} />
     </span>
+  );
+}
+
+/** The widest a header's Display trigger gets — robot, 2px gap, presentation
+ *  glyph — with the header's 6px gap before it. */
+export const BROWSER_DISPLAY_SLOT_PX = 36;
+
+/** A browser header's Display trigger: its glyph is the Surface's display
+ *  identity, and a press opens the Display modal (`docs/specs/dor-browser.md`
+ *  -> Browser Chrome). */
+export function BrowserDisplayButton({ mode, onOpen }: { mode: BrowserDisplayMode | null; onOpen?: () => void }) {
+  const label = mode ? `${BROWSER_DISPLAY_LABEL[mode]} — change display` : 'Change display';
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
+      aria-label={label}
+      title={label}
+      data-browser-display-trigger="true"
+      className={chromeButton({ class: 'shrink-0' })}
+    >
+      {mode && <BrowserDisplayIcon mode={mode} size={14} />}
+    </button>
   );
 }

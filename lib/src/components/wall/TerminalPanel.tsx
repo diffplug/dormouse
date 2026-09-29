@@ -1,23 +1,21 @@
 import { useContext, useRef } from 'react';
 import { TerminalPane } from '../TerminalPane';
-import { NotepadPanel } from '../NotepadPanel';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
 import { getMouseSelectionState } from '../../lib/mouse-selection';
 import type { PaneProps } from './pane-props';
 import { usePaneChrome } from './use-pane-chrome';
 import {
-  ModeContext,
+  PassthroughPaneIdContext,
   TerminalContextContext,
   WallActionsContext,
-  SelectedIdContext,
 } from './wall-context';
 
-export function TerminalPanel(props: PaneProps & { renderNotepad?: boolean; renderTerminal?: boolean }) {
+export function TerminalPanel(props: PaneProps & { renderTerminal?: boolean }) {
   const context = useContext(TerminalContextContext);
-  const mode = useContext(ModeContext);
-  const selectedId = useContext(SelectedIdContext);
+  const passthroughPaneId = useContext(PassthroughPaneIdContext);
   const actions = useContext(WallActionsContext);
-  const isFocused = !props.parked && mode === 'passthrough' && selectedId === props.id && context.id !== props.id;
+  // The context's source gives the keyboard to the context instead.
+  const isFocused = !props.parked && passthroughPaneId === props.id && context.id !== props.id;
   const elRef = useRef<HTMLDivElement>(null);
   usePaneChrome(props.id, elRef);
 
@@ -30,7 +28,6 @@ export function TerminalPanel(props: PaneProps & { renderNotepad?: boolean; rend
       context.open(props.id, { origin: { x: event.clientX, y: event.clientY } });
     }}>
       {props.renderTerminal !== false && <TerminalPane id={props.id} isFocused={isFocused} />}
-      {props.renderNotepad !== false && context.mounted?.id !== props.id && <NotepadPanel surfaceId={props.id} />}
     </div>
   );
 }

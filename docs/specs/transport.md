@@ -41,9 +41,10 @@ Platform host (always running while the adapter is active)
     └── message-router: owns pty-3
 ```
 
-**Every host is multi-webview.** Ownership is what keeps one webview's traffic
-out of another's, and each host owns the map: `docs/specs/vscode.md` → "Peer
-surfaces across windows", `docs/specs/standalone.md` → Routing.
+**Every host is multi-webview**, and **a router never takes a PTY another
+owns**: ownership keeps one webview's traffic out of another's, and each host
+owns the map (`docs/specs/vscode.md` → "Peer surfaces across windows",
+`docs/specs/standalone.md` → Routing).
 
 - **Hiding a webview does not kill its PTYs**, and becoming visible again resumes over the still-owned ones ("Reconnection protocol").
 - **A naturally exited PTY may stay mounted as an exited pane**; frontend semantic state — CWD, title candidates, last command — is retained until the Session is disposed.
@@ -108,8 +109,6 @@ nothing holds first paint for 500 ms, not the whole budget. Source of truth:
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
 
-**Must follow `docs/specs/notepad.md` → "Live resume" for browser-only resumes.**
-
 #### Transferring a Workspace
 
 A Workspace can move from one webview to another with its Sessions still
@@ -117,8 +116,8 @@ running (`docs/specs/standalone.md` → Transfer). It is a resume, not a restore
 with these transfer rules:
 
 - **Release, never dispose, and only once the target has adopted the Workspace.**
-  The source detaches its half of each Session — the alert, the pins, the
-  listeners, the element, the xterm instance — and **does not kill the PTY**
+  The source detaches its half of each Session — the pins, the listeners, the
+  element, the xterm instance — and **never kills the PTY**
   (`releaseSession` in `lib/src/lib/terminal-lifecycle.ts`). **Never reachable
   from a webview unmount**: a Wall unmounts on a reload and on a StrictMode
   double-mount, and releasing there would strand every PTY the window still owns.
@@ -153,12 +152,11 @@ with these transfer rules:
   the target Wall**, then fit the target pane. **Must preserve mouse encoding
   as well as tracking**, including SGR and SGR-pixel encoding omitted by xterm's
   serializer. Pinned by `preserves mouse tracking and encoding %i through real xterm parsing`
-  in `lib/src/lib/terminal-transfer.test.ts` and `drains replay before adopting even when no note has a pin`
+  in `lib/src/lib/terminal-transfer.test.ts` and `drains replay before adopting`
   in `standalone/src/workspace-move.test.ts`.
 - Tool browser bindings and announcements follow `docs/specs/dor-tool.md` → Persistence and hosts.
-- Live Activity and delivery handoff follows `docs/specs/alert.md` → Live Workspace transfer.
+- Alert state and alarm delivery follow `docs/specs/alert.md` → Live Workspace transfer.
 - Semantic-state transfer follows `docs/specs/terminal-state.md` → Core Model.
-- Source-pin limitations belong to `docs/specs/notepad.md` → Source links.
 
 Source of truth: `captureTransferContent` in
 `lib/src/components/wall/workspace-transfer.ts`; `serializeTransferTerminal` in
@@ -201,14 +199,17 @@ Transport constraints:
 | Host → webview | `pty:openPorts` | `ports: OpenPort[]` (`{ protocol, family, address, port, pid, processName }`), de-duplicated by `(family, address, port)`, sorted by port then address. Empty when the PTY is gone or enumeration fails. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. **Carries an optional `textData`** (string-control payloads removed, for the prompt heuristic), **omitted when it would equal `data`**. |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
-| Host → webview | `terminal:protocolEvents` | Standalone notification/progress delivery and ordered Tool announcements/state/resets (`docs/specs/dor-tool.md` → OSC 367). VS Code keeps its `AlertManager` in the extension host. |
+| Host → webview | `terminal:toolEvents` | Ordered Tool announcements, state, and command-start resets (`docs/specs/dor-tool.md` → OSC 367). |
+| Webview → host | `pty:spawn` | `options.alert`: a cold-restored pane's persisted alert state (`docs/specs/alert.md` → Public State). |
 | Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, so the owner's parser can answer OSC 10/11/12. |
 | Host → webview | `pty:replay` | Buffered raw output since spawn; the webview runs a one-shot parser over it, the only re-parse there is. |
 | Host → webview | `dormouse:newTerminal` | May carry `shell`, `args`, display `name`, `replaceUntouched`, `announce`. The webview replaces the selected untouched terminal in place only when `replaceUntouched` is true, otherwise spawns a new pane. |
 
-**Two app-global stores relay on one pattern**: WATCHING rules (`alert:initializeWatchedCommands`, `alert:setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`alert:initializeSettings`, `alert:updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a startup seed, and **a multi-webview host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**. **In standalone both directions ride one opaque passthrough**, the `alert_command` invoke to a `alert:command` sidecar line, where the stores live so N windows share one answer; the snapshot comes back as a broadcast `alert:settings` / `alert:watchedCommands` (`docs/specs/standalone.md` → "Windows").
+**Every `alert*` verb is one `alert:command { command }` to the host** — in standalone the `alert_command` invoke, stamped with its window (`docs/specs/standalone.md` → "Alerts") — and **every answer one of the `alert:*` events, named and shaped alike in both hosts** (`AlertCommand` / `AlertEvents` in `lib/src/host/alert-protocol.ts`). **The host revalidates every command**, the settings blob that becomes its timers included (`normalizeAlertSettings`). An await's messages are `docs/specs/alert.md` → Await. **`sync` re-sends only the realm its named Sessions' `alert:state` and both stores' snapshots, ending nothing.**
 
-**The host must revalidate renderer-supplied settings, never trust them** — they become host timers. `AlertSettingsHost` runs every inbound blob through `normalizeAlertSettings`, which drops unknown keys, defaults missing ones, and clamps each delay into range. Both directions share one adapter method, `alertPublishSettings(settings, { seed })`: seed vs replace picks a message type, not a payload.
+**Two app-global stores relay on one pattern**: WATCHING rules (`initializeWatchedCommands`, `setCommandWatched` → host; `alert:watchedCommands` → webview) and alarm settings (`initializeSettings`, `updateSettings` → host; `alert:settings` → webview; `docs/specs/alert.md` → Alarm settings). An `initialize*` offers the renderer's persisted copy as a seed, and **a host accepts only the first seed of its lifetime**. A mutation replaces the host's copy — `setCommandWatched` adds or removes one bare command key without touching unrelated rules, `updateSettings` sends the whole blob, renderer-only fields included, so every webview agrees. Either way the host broadcasts a canonical snapshot, and **every renderer replaces and persists its local mirror from it**. **A host sends no snapshot before the first seed**, so a `sync` never pushes defaults over a renderer's persisted copy.
+
+Both settings directions share one adapter method, `alertPublishSettings(settings, { seed })`: seed vs replace picks an op, not a payload.
 
 **Never add a third app-global store on this pattern** — a third collapses them into one keyed channel with a host-side key→normalizer registry (rationale).
 
@@ -224,7 +225,7 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 **Surface kinds in the snapshot.** Each `PersistedPane` records a `surfaceType` (`docs/specs/glossary.md`): `'terminal'` — the default, **omitted from the row** so terminal snapshots stay byte-identical — `'browser'`, or `'tool'`, whose extra `command` and `tool` fields are `docs/specs/dor-tool.md` → Persistence and hosts. It routes restore/resume, and **a pane lacking it reads as `'terminal'`**. `restoreSession` skips terminal restoration for a browser pane rather than minting a stray PTY + xterm per browser pane id, and the resume plan keeps browser panes and minimized browser doors despite their having no live PTY, so the saved layout's leaf set still matches and is not discarded. A browser pane rebuilds from the persisted layout (visible) or `PersistedDoor.params` (minimized) — its render params (`renderMode`, `url`, agent-browser `session`) live there, not in `PersistedPane`. **Must reject a layout whose leaves differ from the visible pane set during restore or resume, and omit visible browser ids from the terminal fallback.** Browser doors retain their independent render params; pinned by `lib/src/lib/session-restore.test.ts` and `lib/src/lib/reconnect.test.ts`.
 
-**Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and writes the whole Window through one debounced writer the host installs at boot. **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a snapshot taken mid-boot cannot replace a restored Workspace with a blank one. **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace. **Reordering, renaming, or switching the active Workspace writes too**: each changes the blob with no Session changing. A `PersistedWorkspace` is a `WorkspaceId`, a user-facing `name`, and that Workspace's `PersistedSession`. The top-level snapshot is a `PersistedWindow` (its own `version: 1`) wrapping v3 sessions: the ordered `PersistedWorkspace` list plus the active `WorkspaceId`. **VS Code does not use it** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
+**Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and writes the whole Window through one debounced writer the host installs at boot. **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a snapshot taken mid-boot cannot replace a restored Workspace with a blank one. **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace. **Reordering, renaming, or switching the active Workspace writes too**: each changes the blob with no Session changing. A `PersistedWorkspace` is a `WorkspaceId`, a `name`, `nameIsAuto`, and that Workspace's `PersistedSession`. **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto. The top-level snapshot is a `PersistedWindow` (its own `version: 1`) wrapping v3 sessions: the ordered `PersistedWorkspace` list plus the active `WorkspaceId`. **VS Code does not use it** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 
 **The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code.** `window-persistence.ts` owns the JSON and the storage slot over a `SessionKeyValueStore` synchronous slot (`docs/specs/standalone.md` → Persistence); the shared save/restore code still operates on a bare `PersistedSession`, which the boot hands it per Workspace. **A Window-persisting adapter answers through `getWindowState` / `saveWindowState`, and answers nothing on the bare-Session `getState` / `saveState` pair** — its blob is a Window and every shared reader of `getState` wants a Session. **A blob written before standalone persisted Windows is wrapped as the window's one Workspace**; that is the only migration.
 
@@ -234,26 +235,15 @@ Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessi
 
 **A corrupt save must never block startup.** Every read goes through `readPersistedSession()` / `readPersistedWindow()`, which accept the canonical parsed object *or* a JSON-stringified blob (host state APIs may hand back the inner serialized string) and log-and-discard anything present but unreadable. `readPersistedWindow` additionally drops Workspaces whose inner session is unreadable and repairs a dangling `activeWorkspaceId` to the first Workspace.
 
-**The recovery command.** One agent resume invocation per surface (`claude --resume <id>`, `claude --continue`, `codex resume <id>`) survives teardown alongside the persisted structure.
+**Must keep recovery commands outside `PersistedPane`.** `normalizeSessionV3` strips legacy `resumeCommand` fields. Capture, records, and execution follow `docs/compatible-agents.md`.
 
-*It is not part of the persisted session.* `PersistedPane` carries no `resumeCommand`, and `normalizeSessionV3` strips one out of a pre-upgrade blob as it strips a transcript. **Host-owned and single-use, it travels out of band**: the host puts `surfaceId -> invocation` on the webview's boot payload, the renderer reads it through `PlatformAdapter.getRecoveryCommands()`, and an adapter whose host captures nothing omits the method (rationale).
-
-*One writer per host, exactly one read.* The writer is that host's teardown — the VS Code extension host's `deactivate()` (`docs/specs/vscode.md` → "Capturing agent recovery") and the Tauri sidecar's quit capture (`docs/specs/standalone.md` → "Agent recovery"); the renderer save path never derives one. Both run the same detection machine, `captureAgentRecovery` in `lib/src/host/recovery-capture.ts`, over their own PTY buffers, and keep the record through the same `createRecoveryStore`. **Cold restore is the one reader — resume never reads it**, the agent there still being Live. The record is read and unlinked on the first claim of a host process, **destructively even on a parse failure**, so the durable copy is gone before any webview is served; within that process **each container claims only the entries matching its own saved pane ids** (rationale). **A record older than 7 days is discarded unread.**
-
-*Detection.* Executable-string constraints; the grammars that implement them, and their edge cases, are in the comments at the two modules below.
-
-- **Only a known invocation plus an opaque id.** The command is *rebuilt* as label + captured id, never sliced from the buffer; the id grammar is alphanumeric/hyphen/underscore only, so shell punctuation cannot enter executable state. The invocation must end on a word break but nothing stronger (rationale).
-- **The scan window is stripped as a whole, in one pass, and an unterminated control swallows the rest of it** — the string controls (OSC, DCS, SOS, PM, APC) **in either introducer form, `ESC` or bare C1**, and equally a CSI the window was cut off *inside* (rationale). **Match every escape by its full ECMA-48 shape**, never by the Fe range (rationale). **One implementation**: `stripTerminalControls` removes string controls by running `TerminalControlStreamFilter`, so the batch and streaming readers cannot disagree.
-- **Stripping runs in boundary mode, whose rule is inverted**: *every* control becomes a newline rather than vanishing, except SGR and charset designators, the two classes that neither move the cursor nor erase (rationale).
-- **Rightmost match in the last 50 lines wins**, newest *by position* and never by pattern order (rationale). **Restore revalidates through `normalizeResumeCommand` before typing**, against a snapshot written by an older detector.
-
-Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceRefs` in `lib/src/components/Wall.tsx`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; the resume plan in `lib/src/lib/reconnect.ts`; `captureAgentRecovery` in `lib/src/host/recovery-capture.ts`; `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `getRecoveryCommands` in `lib/src/lib/platform/vscode-adapter.ts`; `detectResumeCommand` / `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts`; `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`.
+Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceRefs` in `lib/src/components/Wall.tsx`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; the resume plan in `lib/src/lib/reconnect.ts`.
 
 ## Persistence policy
 
 ### What is persisted
 
-Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs and delivery overrides. **Scrollback is never persisted by any writer**, and neither is the recovery command (above). **Live notepad notes are never persisted here either** — the notepad archive is a separate per-host store written only by a closure (`docs/specs/notepad.md` → "Live resume").
+Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs and delivery overrides. **Scrollback is never persisted by any writer**, and neither is the recovery command (above).
 
 ### Retiring the transcripts already on disk
 
@@ -274,7 +264,7 @@ something ends it:
 | --- | --- | --- |
 | Standalone quit or restart — idle, confirmed, or update-install | No — window state is the app's contract | Restore structure + auto-resume agents |
 | Standalone window reload | No | Live resume over sidecar PTYs, per Workspace |
-| Standalone per-window close, one of several | Yes | Fresh: that window's notes archived, its PTYs killed, its snapshot removed |
+| Standalone per-window close, one of several | Yes | Fresh: its PTYs killed, its snapshot removed |
 | Standalone Workspace transfer between windows | Neither — nothing ended | The same Sessions, resumed in the other window |
 | Standalone crash / force-kill | No, and the last save stands | Restore structure, no agent resume |
 | VS Code panel hide/show | No | Live resume over host PTYs, unchanged |
@@ -283,35 +273,11 @@ something ends it:
 | VS Code editor-tab close (`killOnDispose: true`) | Yes | Fresh for that panel |
 | VS Code extension-host crash | No, and the last periodic save stands | Restore structure, no agent resume — `deactivate()` never ran |
 
-Ending something deliberately is also what *keeps* its notes: **a deliberate closure archives the Surface's notepad before teardown** (`docs/specs/notepad.md` → "Closure"), so the one thing a user asked to hold on to survives the boundary that discards everything else.
-
 **Standalone persists one `PersistedWindow` per window**, every Workspace in it, and
 restores them on the next launch (rationale). Quitting ends the processes, not the
 window: the layout, cwds, titles, doors, and TODO/alert blobs come back, and the
-agents that were running come back with them ("Consuming it"). Nothing else does —
+agents that were running come back with them (`docs/compatible-agents.md` → "Cold restore"). Nothing else does —
 scrollback is never persisted, so a cold-restored pane opens empty.
-
-### Consuming it
-
-**A pane carrying a recovery command runs it automatically on the next cold
-activation** — no prompt, no button. **Auto-run holds only while both guarantees
-above do**: a rebuilt label plus a fail-closed id (*Detection*), and provenance that
-is structural — only the bytes a pane emitted after Dormouse's own interrupt, never a
-scan of arbitrary saved history (`docs/specs/vscode.md` → "Capturing agent
-recovery"). Weaken either and the confirmation gate has to come back (rationale).
-
-Two consumption rules, shared with `dor split` launches. **Type the command only
-once the fresh shell reaches a prompt** — the platform write bypasses xterm's
-keystroke fallback, and shell startup swallows keystrokes. **Seed `commandLine` +
-`commandStart(user_input)` synchronously first** (`docs/specs/terminal-state.md`), so
-a restored Workspace immediately counts its agents in `countRunningSessions` — and
-the quit-confirmation dialog counts sessions the user did not start by hand. The pane
-shows a passive resumed-session notice (`docs/specs/layout.md` → "Agent resume on
-cold restore").
-
-Known cost: every cold activation spawns every agent that was running, and Reload
-Window is frequent. **If it becomes a complaint, the mitigation is a setting, not a
-prompt** (rationale).
 
 ## Universal invariants
 
@@ -324,7 +290,6 @@ prompt** (rationale).
 - **Replay drops terminal replies only** — never a user keyboard escape sequence (`docs/specs/terminal-escapes.md` → "Report filtering on the input side").
 - **Replaying a dead pane resets its modes; replaying a live one does not** — the `REPLAY_MODE_RESET` tail (`docs/specs/terminal-escapes.md` → Replay-time mode-reset tail).
 - **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
-- **PTY ownership.** Each message router tracks the PTY ids it owns. A PTY routed to one webview must not be stolen by another router; new routers attaching to a host must respect existing ownership.
 - **Replay filtering does not re-fire alerts**, quiesce-detector events, or protocol notifications (`docs/specs/terminal-escapes.md` → "`pty:data` strip semantics").
 
 Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/src/pty-manager.ts`; the replay filter in `lib/src/lib/terminal-report-filter.ts`.

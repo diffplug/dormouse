@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
+import { expect, fireEvent, userEvent, within } from 'storybook/test';
 import { Baseboard } from '../components/Baseboard';
+import { WorkspaceIdContext } from '../components/wall/wall-context';
 import type { DoorChip } from '../components/Wall';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 
@@ -74,9 +76,9 @@ const extremeTitleWithBothIndicatorsItems = [
   makeItem('p3', 'another'),
 ];
 const browserSurfaceItems: DoorChip[] = [
-  { id: 'browser-resize', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'ab-resize' },
-  { id: 'browser-fixed', kind: 'browser', title: 'mobile checkout', browserDisplay: 'ab-fixed' },
-  { id: 'browser-popout', kind: 'browser', title: 'docs.example.com', browserDisplay: 'ab-popout' },
+  { id: 'browser-resize', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'agent-browser-resize' },
+  { id: 'browser-fixed', kind: 'browser', title: 'mobile checkout', browserDisplay: 'agent-browser-fixed' },
+  { id: 'browser-popout', kind: 'browser', title: 'docs.example.com', browserDisplay: 'agent-browser-popout' },
   { id: 'browser-iframe', kind: 'browser', title: 'localhost:6006', browserDisplay: 'iframe' },
 ];
 
@@ -99,7 +101,7 @@ export const OneSpeakingDoor: Story = {
   },
   parameters: {
     ...withState(oneRingingDoorItems, {
-      p1: { status: 'ALERT_RINGING', todo: true },
+      p1: { status: 'ALERT_RINGING' },
     }),
     primedAlertSpeech: { p1: 'speaking' },
   },
@@ -111,6 +113,23 @@ export const AlarmOutputsEnabled: Story = {
   },
   parameters: {
     primedAlertSettings: { speakEnabled: true, pushEnabled: true },
+  },
+};
+
+export const WorkspaceAlertSettings: Story = {
+  args: { items: [] },
+  parameters: {
+    primedWorkspaces: { workspaces: [{ id: 'workspace-alert-story', name: 'Builds', alertDelivery: { speakEnabled: true } }] },
+  },
+  decorators: [(Story) => <WorkspaceIdContext.Provider value="workspace-alert-story"><Story /></WorkspaceIdContext.Provider>],
+  play: async ({ canvasElement }) => {
+    const body = within(canvasElement.ownerDocument.body);
+    fireEvent.contextMenu(body.getByRole('button', { name: 'Spoken alarms' }));
+    const dialog = body.getByRole('dialog', { name: 'Workspace alert settings' });
+    await expect(within(dialog).getByRole('combobox', { name: 'Voice for this workspace' })).toBeVisible();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Use application defaults' }));
+    await expect(within(dialog).getByRole('combobox', { name: 'Speech for this workspace' })).toHaveValue('inherit');
+    await expect(within(dialog).queryByRole('searchbox')).not.toBeInTheDocument();
   },
 };
 
@@ -219,4 +238,32 @@ export const ExtremeTitleWithBothIndicators: Story = {
       </div>
     ),
   ],
+};
+
+/**
+ * A phone on a one-time connection: "Phone connected · End" joins the measured
+ * right cluster, so the Doors fit around it, and End needs no trip to Settings
+ * (`docs/specs/one-time.md` -> "Laptop UI"). Its own frame on a docs page: the
+ * indicator reads a module store that captures the stub link on its first
+ * subscriber, which inline siblings with no Burrow would otherwise share.
+ */
+export const OneTimePhoneConnected: Story = {
+  args: { items: overflowWithRingingDoorItems },
+  parameters: {
+    ...withState(overflowWithRingingDoorItems, {}),
+    primedBurrow: { oneTime: { status: 'connected', label: 'Android phone', since: BASE_TIME } },
+    docs: { story: { inline: false, height: '80px' } },
+  },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 640 }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('Phone connected');
+    await expect(canvas.getByRole('button', { name: 'End the one-time connection' })).toBeVisible();
+  },
 };

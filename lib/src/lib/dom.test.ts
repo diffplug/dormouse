@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, expect, it } from 'vitest';
-import { isEditableTarget } from './dom';
+import { isComposingKey, isEditableTarget } from './dom';
 
 describe('isEditableTarget', () => {
   it('is true for input, textarea, and contentEditable elements', () => {
@@ -25,5 +25,15 @@ describe('isEditableTarget', () => {
     const helper = document.createElement('textarea');
     helper.classList.add('xterm-helper-textarea');
     expect(isEditableTarget(helper)).toBe(true);
+  });
+});
+
+describe('isComposingKey', () => {
+  it('counts WebKit\'s composition-ending key, which reports keyCode 229 without isComposing', () => {
+    const ending = new KeyboardEvent('keydown', { key: 'Escape' });
+    Object.defineProperty(ending, 'keyCode', { value: 229 });
+    expect(isComposingKey(ending)).toBe(true);
+    expect(isComposingKey(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true }))).toBe(true);
+    expect(isComposingKey(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(false);
   });
 });

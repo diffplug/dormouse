@@ -4,7 +4,7 @@
  *
  * ```sh
  * dor ensure -- pnpm exec node scripts/direct-interop/run.mjs
- * dor ab --key direct-interop open "$(cat "$TMPDIR/dormouse-direct-interop.url")"
+ * dor agent-browser --key direct-interop open "$(cat "$TMPDIR/dormouse-direct-interop.url")"
  * ```
  *
  * The URL carries a per-run token, so it is written to that file as well as
@@ -216,7 +216,7 @@ server.listen(0, '127.0.0.1', () => {
   const url = `http://127.0.0.1:${port}/?t=${token}`;
   void writeFile(URL_FILE, url);
   console.log(`listening on 127.0.0.1:${port}`);
-  console.log(`  dor ab --key direct-interop open "$(cat ${URL_FILE})"`);
+  console.log(`  dor agent-browser --key direct-interop open "$(cat ${URL_FILE})"`);
 });
 
 setTimeout(

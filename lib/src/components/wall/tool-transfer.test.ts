@@ -4,9 +4,9 @@ import { captureToolParams, restoreToolParams } from './tool-transfer';
 import type { RestoredSession } from '../../lib/session-restore';
 
 const params = {
-  surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'ab-screencast',
-  url: 'http://localhost:6006/edited', renderMode: 'ab-screencast',
-  session: 'dormouse.1.tool-one', wsPort: 9222, toolAnnouncedPort: 6006, toolAnnouncedPath: '/token/view',
+  surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'agent-browser-screencast',
+  url: 'http://localhost:6006/edited', renderMode: 'agent-browser-screencast',
+  session: 'dormouse.1.tool-one', stream: 9222, toolAnnouncedPort: 6006, toolAnnouncedPath: '/token/view',
 };
 
 function engine(initial = params) {
@@ -32,6 +32,15 @@ describe('Tool Workspace transfer', () => {
     expect(lath.getMeta('tool')!.params).toEqual(params);
   });
 
+  it('keeps a preview slot the slot, in the live binding and the durable record alike', () => {
+    const slot = { ...params, toolPreview: true, toolTarget: '/repo/a.md' };
+    const lath = engine(slot);
+    const plan: RestoredSession = { paneIds: ['tool'], lathLayout: lath.serializeLayout(), doors: [] };
+    expect(plan.lathLayout!.leafMeta.tool.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+    restoreToolParams(plan, captureToolParams(lath, ['tool']));
+    expect(plan.lathLayout!.leafMeta.tool.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+  });
+
   it('refuses while approval or browser startup still owns work in the source', () => {
     const lath = engine();
     lath.store.updateParams('tool', { session: undefined });
@@ -42,6 +51,11 @@ describe('Tool Workspace transfer', () => {
     } });
     expect(() => captureToolParams(lath, ['tool'])).toThrow('Approve or decline');
     expect(lath.store.has('tool')).toBe(true);
+  });
+
+  it('waits for a playwright Tool browser to bind before transfer', () => {
+    const lath = engine({ ...params, renderMode: 'playwright-screencast', toolRender: 'playwright-screencast', session: undefined });
+    expect(() => captureToolParams(lath, ['tool'])).toThrow('connect');
   });
 
   it('never overlays a binding on a terminal or an absent Surface', () => {

@@ -47,13 +47,13 @@ export function alarmPulseClass(bounded: boolean): string {
 /** Starts a CSS animation on a clock that began at `startedAt`, so an element
  *  mounted later lands where that animation already is — past its end when it
  *  has already finished. */
-function animationClockStyle(startedAt: number): CSSProperties {
+export function animationClockStyle(startedAt: number): CSSProperties {
   return { animationDelay: `${-Math.max(0, Date.now() - startedAt)}ms` };
 }
 
 interface AlertRingBurstProps {
   /** A fresh episode is a fresh summons, so remounting on it replays the burst;
-   *  a second track latching inside one keeps the key and only enriches. */
+   *  a second source joining the ring inside one keeps the key and only enriches. */
   key: string;
   className: string;
   style?: CSSProperties;

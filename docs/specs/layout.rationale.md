@@ -2,19 +2,29 @@
 
 > Informative companion to [layout.md](layout.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Pane header
+
+Italics alone mark a VS Code preview tab, and a double-click on that tab keeps it; the slot mirrors both. A Preview pill beside the italic label repeated the mark and cost a pill's width in every header from compact width up, and header width is the scarcest space Dormouse has (product decision, 2026-09-28).
+
+The keep is judged by the burst's first press, so a double-click inside a rename opened earlier still selects a word. A preview's label opens no rename because the double-click's first click would open the field under the second.
+
+Tools carry no navigation, address, or dev-server chip (Ned, 2026-09-29): a Tool is named for what it is, and a page it serves is not somewhere to navigate from, so that chrome stays with plain browser Surfaces. Its Terminal Context button had sat beside the header, outside its palette, and showed a different background.
+
+A serving preview's header changed size on every switch (standalone, 2026-09-29) because its name was the dev-server chip. The chip names a pane only once the Window's port scan resolves the page's loopback port: 600 ms of debounce, then a scan at idle. Each retarget starts a viewer on a new port, and the switch's hold ended when the new document loaded, before that scan. The chip unmounted and the address, in `text-sm font-medium` where the chip is `text-xs`, widened to the whole `localhost:<port>/<path>`; once the scan landed the chip returned and the address shrank to its path. The Wall harness in `lib/src/components/wall/preview-slot.test.tsx`, run against that header, stepped through `chip(b.md:6006) + url(/)`, `url(localhost:7007)`, then `chip(… :7007) + url(/)`. A name from params changes once, with the retarget, so nothing needs holding.
+
 ## Pane header responsive sizing
 
-A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Tool headers have even less browser width because Terminal Context occupies its own button. Measuring the header and moving fixed controls together keeps long keys, note buttons, and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
+A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Measuring the header and moving fixed controls together keeps long keys and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
 
 In the same run, real clicks exposed premature popup dismissal before the action ran. After repair, Zoom reached 716×403 pixels, Unzoom returned to the compact header, Reload worked, and Display retained modal focus. Header buttons stayed within their panes at the final 1200×800 viewport.
 
 Terminal border-box thresholds of 293/173 pixels preserve the former 280/160 content-box thresholds plus 13 pixels of horizontal padding. A content box can clamp to zero in a visible tiny leaf; treating that as hidden retained the full tier. Positive border-box width distinguishes that case from a hidden leaf.
 
-The terminal's three lowest boundaries are where the pane-action group stops fitting with its 5-pixel right padding intact. The group is 68 pixels (a 4-pixel `ml-1`, three 20-pixel buttons, two 2-pixel gaps) and the header root puts its own 6-pixel `gap-1.5` before it, so a bare header needs 8 + 6 + 68 + 5 = 87, one carrying a notepad icon another 6 + 24 = 117, and either one another 6 + 6 = 12 when a Tool's unsaved-change dot is showing, since that dot is a root-level sibling outside the region that clips. Measured in Storybook at 1-pixel steps (2026-09): the group sits flush at 82 and 112 respectively and clips only below that, so the published boundaries buy back padding rather than avert a clip — but a flush width is one pixel from real clipping, which is no margin against a font or icon change.
+The minimal boundary keeps the pane-action group and its 5-pixel right padding intact. The group is 68 pixels (a 4-pixel `ml-1`, three 20-pixel buttons, two 2-pixel gaps); the header root adds a 6-pixel gap, and an unsaved-change dot adds 12 pixels. The 98-pixel threshold originally reserved that dot even when absent. Since the dot moved into Kill (2026-09-29), those 12 pixels leave more room for the name; the boundaries stay stable across unsaved-state changes. The group sits flush below this threshold, leaving no margin against font or icon changes (measured in Storybook, 2026-09).
 
-Only the notepad boundary is a dirty-aware band (117–128). The group's own dot band, 87–98, sits entirely below the 100-pixel `minLeaf`, so reserving the dot's 12 pixels unconditionally there costs nothing reachable and saves a tier; erring early also errs safe, since the invariant is that the group never clips.
+The browser's 94-pixel boundary is the former 72 plus the zoom button and its gap, zoom having moved into the group. Its collapsed root is `gap-0.5 px-1`, already counted, so it needs no equivalent correction. A 102-pixel variant reserved an unsaved-change dot, which only a Tool reports; it went with the Tool's own header (2026-09-29).
 
-The browser's 94/102 pair is the former 72/80 pair plus the zoom button and its gap, zoom having moved into the group; the 8-pixel spread is the unsaved-change dot and its gap. Its collapsed root is `gap-0.5 px-1`, already counted, so it needs no equivalent correction.
+A serving Tool's boundaries follow the same rule over its elements (derived 2026-09-29): 13 pixels of padding, 12 for the dot where the tiny tier hides Kill (elsewhere the dot rides in Kill and the 12 go to the name), Display up to 36 (robot, 2-pixel gap, presentation glyph, then its gap), Terminal Context 26, and the group's 74 with its gap. Display yields at 161, where those leave the name no width; minimize and kill at 125, 36 narrower. Full is the terminal's 293 plus both leading controls, 355. The tiny header needs 81 pixels, inside Lath's 100-pixel minimum leaf. Without a popover the Tool reaches everything it drops through zoom, as a terminal does.
 
 ## Pane body
 
@@ -43,6 +53,16 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 **Why the close confirmation anchors to the Wall, not the tab.** `ModalOverlay` centers inside the target's box and does not clamp to the viewport, so a 24px tab at the top of the window left the dialog clipped. Every Wall shares one grid cell, so the anchor lands in the same place whether or not that Workspace is visible.
 
 **Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
+
+## Workspace tabs
+
+**Why the tab's TODO pill enters passthrough and the tab does not.** Clicking the pill is a focused task, going to deal with one TODO, so it lands where a click on that Surface would, with the keys there. A tab click is an arrival in a Workspace: it stays in command mode, where the user looks around and confirms with `Enter` (product decision, 2026-09). The pill first shipped as selection only, in command mode, which left an `Enter` between the click and the TODO (2026-09).
+
+## Workspace names
+
+**Why the name holds while git is unanswered.** Naming by directory first would flash the folder name for one round trip, then flip to `repo @ branch`, on every new directory. The hold is bounded because a mount that stays hung is durable, not slow: its `realpath` never returns, so an unbounded hold froze the name for the life of the Window and drowned out the Workspace's healthy members (found in review, 2026-09).
+
+**Why a command finish re-asks git.** `git switch` changes the branch without moving the cwd, and there is no filesystem watcher; the prompt after it is the first boundary that can notice. An agent switching branches inside a long-running command is not seen until that command exits — accepted over watching every repository's `HEAD` (2026-09).
 
 ## Mode switching
 

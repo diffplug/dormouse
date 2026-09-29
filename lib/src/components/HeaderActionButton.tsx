@@ -5,6 +5,7 @@ import { PopupButtonRow, renderShortcuts } from './design';
 export interface HeaderActionButtonProps {
   className: string;
   ariaLabel: string;
+  ariaDescription?: string;
   tooltip?: string | null;
   onMouseDown?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -14,6 +15,7 @@ export interface HeaderActionButtonProps {
 export function HeaderActionButton({
   className,
   ariaLabel,
+  ariaDescription,
   tooltip,
   onMouseDown,
   onClick,
@@ -65,6 +67,7 @@ export function HeaderActionButton({
           onClick(e);
         }}
         aria-label={ariaLabel}
+        aria-description={ariaDescription}
         onMouseEnter={() => setIsVisible(true)}
         onMouseLeave={() => setIsVisible(false)}
         onFocus={() => setIsVisible(true)}

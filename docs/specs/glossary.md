@@ -24,17 +24,19 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 |---|---|---|
 | `terminal` | — | a PTY + xterm.js instance — a **Session** |
 | `tool` | — | a PTY and an optional browser on the same Session |
-| `browser` | `iframe`, `ab-screencast`, `ab-popout` | an iframe proxy grant, or an agent-browser daemon session (`docs/specs/dor-browser.md`) |
+| `browser` | `iframe`, `agent-browser-screencast`, `agent-browser-popout`, `playwright-screencast`, `playwright-popout` | an iframe proxy grant, or an automation-provider session (`docs/specs/dor-browser.md`) |
 
 **For a browser Surface `renderMode` is canonical**; the CLI `render_mode` is derived from it and never stored.
 
 | Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `kind` | CLI `render_mode` |
 |---|---|---|---|---|
-| tool Session | `'tool'` | `iframe` or `ab-screencast` when serving | `tool` | renderer or `null` |
+| tool Session | `'tool'` | `iframe`, `agent-browser-screencast` or `playwright-screencast` when serving | `tool` | renderer or `null` |
 | terminal Session | `'terminal'` (default, omitted) | — | `terminal` | `null` |
 | browser · iframe | `'browser'` | `iframe` | `browser` | `iframe` |
-| browser · screencast | `'browser'` | `ab-screencast` | `browser` | `ab-screencast` |
-| browser · popped out | `'browser'` | `ab-popout` | `browser` | `ab-popout` |
+| browser · screencast | `'browser'` | `agent-browser-screencast` | `browser` | `agent-browser-screencast` |
+| browser · popped out | `'browser'` | `agent-browser-popout` | `browser` | `agent-browser-popout` |
+| browser · playwright screencast | `'browser'` | `playwright-screencast` | `browser` | `playwright-screencast` |
+| browser · playwright popout | `'browser'` | `playwright-popout` | `browser` | `playwright-popout` |
 
 **Kinds are capability sets, not exclusive categories** — terminal and browser carry one capability each, `tool` both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
 
@@ -93,8 +95,10 @@ Remote control has exactly three roles. `docs/specs/remote-security-model.md` ow
 | Role | What it is | What it decides |
 |---|---|---|
 | **Burrow** | The app that owns terminal Surfaces and the processes behind them: the Standalone app, or the VS Code extension. **Two on one machine are two Burrows**, enrolled and paired separately, and Pocket lists them as two rows. | Every remote-access grant. Pairing approval and the ACL live here and nowhere else. |
-| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); Canopy is a future one (`## Future`). | Nothing on its own — a Client asks. |
+| **Client** | What controls a Burrow from somewhere else. **Pocket** is the phone Client (`docs/specs/pocket-app.md`); the **one-time page** Hosted serves is a Client for one session (`docs/specs/one-time.md`); Canopy is a future one (`## Future`). | Nothing on its own — a Client asks. |
 | **Relay** | The coordinating server: accounts, presence, push fan-out, and an encrypted byte pipe between Client and Burrow (`docs/specs/relay.md`). **Dormouse Hosted** is the managed Relay; `SELF_HOST.md` runs your own. | Routing. It holds no terminal and no authorization. |
+
+**Hosted's one-time room is a rendezvous, not a fourth role**: it forwards only a one-time connection's handshake frames, then closes (`docs/specs/one-time.md` -> "Hosted rendezvous").
 
 **A Burrow *is* a platform host** — the process behind the webview that owns the PTYs — seen from the side a Client pairs with. *Host* stays the implementation word for that side (`lib/src/host/`, webview↔host messages, `pty-host`, VS Code's extension host) and keeps its `Host`-header, hostname, and self-host senses; **never use *Host* for the remote-control role, or *Server* for the Relay.**
 
@@ -117,7 +121,7 @@ A Wall is always in exactly one input mode; `docs/specs/layout.md` owns the swit
 | **Registry** | xterm.js Terminal + persistent DOM element | `lib/src/lib/terminal-registry.ts` facade over `terminal-store.ts`, `terminal-lifecycle.ts` |
 | **View** | Where and how a Surface renders | `lib/src/components/Wall.tsx` plus `lib/src/components/wall/` |
 | **Link** | Webview ↔ host relationship | `lib/src/lib/reconnect.ts` |
-| **Activity** | Alert / attention state machine + renderer cache | `lib/src/lib/alert-manager.ts`, `lib/src/lib/session-activity-store.ts` |
+| **Activity** | Alert / engagement state machine + renderer cache | `lib/src/lib/alert-manager.ts`, `lib/src/lib/session-activity-store.ts` |
 | **Snapshot** | Persisted-to-disk projection: cwd, title, `untouched`, alert — never scrollback (`docs/specs/transport.md`) | `lib/src/lib/session-save.ts` / `session-restore.ts` |
 
 A **Session** is the tuple of its `SessionId` plus one state per layer (I1).
@@ -198,7 +202,7 @@ A user verb is an intentional action that produces a single observable change.
 | `closeWorkspace` | `kill` each member Surface, then remove the Workspace; closing the last Workspace atomically creates a fresh replacement. |
 | `renameWorkspace` | Update a Workspace's `name`; touches no Session |
 | `moveWorkspace` | Reorder a Workspace within its Window; a minted ref renames nothing (a host with no registry still numbers by position) and touches no Session |
-| `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing and archives nothing — not a `closeWorkspace`. |
+| `transferWorkspace` | Move a Workspace to another Window, Surfaces and Sessions intact: `release` each member Session (detached, Process still Live) and resume it there. Kills nothing — not a `closeWorkspace`. |
 | `tearOut` | `transferWorkspace` into a Window created for it. A Window whose last Workspace leaves closes itself. |
 
 Source of truth: `setActiveWorkspace` / `createWorkspace` / `closeWorkspace` / `renameWorkspace` / `moveWorkspace` in `lib/src/lib/workspace-store.ts`; `closeAll` in `lib/src/components/Wall.tsx`; `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
@@ -245,7 +249,7 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
 - I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch reattaches terminal elements but resumes and restores nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
 - I9: A Workspace's union status is a pure projection of its members' Activity: no independent state, destroyed with the Workspace.
-- I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must transfer the `surface:N` CLI ref when replacing a browser Surface**, minting a new id in the same layout slot with its target URL. An `ab-screencast` ⇄ `ab-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
+- I10: **Must preserve a terminal Surface's `SessionId`** (I1). **Must transfer the `surface:N` CLI ref when replacing a browser Surface**, minting a new id in the same layout slot with its target URL. An `agent-browser-screencast` ⇄ `agent-browser-popout` relaunch keeps the Surface id; render-mode changes do not universally imply replacement (rationale; `docs/specs/dor-browser.md` → Display Modal And Render Swaps).
 
 ## Retired / overloaded terms
 
@@ -257,14 +261,14 @@ Use glossary names instead. A left-column term retains meaning only where noted.
 | **reconnect** | Retired: live-PTY case → **resume**; cold start → **restore**. |
 | **restore** | Keeps its cold-start rehydrate meaning. Never for Door→Pane (**reattach**) or alert-manager seeding (**seed**). |
 | **attach** | Retired at the DOM layer (`attachTerminal`) → **mount**; user-level **reattach** (Door→Pane) keeps the `re-` prefix. |
-| **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for the agent-browser daemon's lowercase `session` string (`dormouse.<workspace>.<key>`) — not a Dormouse durable unit. |
+| **session** | The durable identity of a **terminal Surface**. Never for the Activity projection (`ActivityState`, not `SessionUiState`), nor for a browser provider's lowercase `session` string (`dormouse.<scope>.<key>`) — not a Dormouse durable unit. |
 | **terminal** | Keeps its meaning for the `xterm.Terminal` instance; prose meaning "the whole thing" is **Session**. |
 | **surface** | Not retired. **Session** names only the terminal kind; **Surface** covers both. |
 | **panel / pane / leaf** | Prefer **pane** for the layout slot; **leaf** is Lath's tree node for it (1:1). "panel" survives only in React component names (`TerminalPanel`, `BrowserPanel`, `IframePanel`, `AgentBrowserPanel`). |
 | **face** | Retired — capabilities are named by the kinds: "console face" → **terminal**, "web face" → **browser**. Gate with `hasTerminal` / `hasBrowser`, never a face-set. |
 | **Host** | Retired as the remote-control role → **Burrow** ([Roles](#roles)). Keeps the platform sense — the process behind the webview — plus the `Host` header, hostnames, and "self-host". |
 | **Server** | Retired for the coordinating server → **Relay**. Keeps HTTP servers, `net.Server`, dev servers, and "self-host". |
-| **tether** | Remote-control only (`docs/specs/remote-api.md`): a display showing "tethering to \<device\>" has ceded terminal size authority to a remote viewer — the semantics hold today, the display is staged. Never a layout term, never for Pane/Door relationships. |
+| **tether** | Remote-control only (`docs/specs/remote-api.md`): a pane whose size a remote viewer holds has ceded terminal size authority to it — the Burrow's own pane shows the holder in its strip; another viewer's "tethering to \<device\>" display is staged. Never a layout term, never for Pane/Door relationships. |
 
 Remote-only vocabulary (**Viewer**, and the wire-level `DirectoryEntry` projection of a pane) is defined in `docs/specs/remote-api.md`.
 

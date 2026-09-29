@@ -1,7 +1,7 @@
 import { getToolDirtySnapshot, subscribeToToolDirty } from '../lib/tool-dirty-store';
 import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
-import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode, type Ref, type KeyboardEvent, type MouseEvent } from 'react';
 import {
   DeviceMobileSlashIcon,
   CaretLeftIcon,
@@ -11,23 +11,19 @@ import {
   SpeakerSlashIcon,
   VibrateIcon,
 } from '@phosphor-icons/react';
-import { chromeButton } from './design';
-import { SettingsDialog, type AlarmSink } from './SettingsDialog';
+import { clsx } from 'clsx';
+import { chromeButton, DOOR_TAB_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from './design';
+import { AlertRingInset } from './alert-ring';
+import { TODO_PILL_BODY } from './TodoPillBody';
+import { SettingsDialog } from './SettingsDialog';
+import { WorkspaceAlarmSettingsDialog } from './WorkspaceAlarmSettings';
+import type { AlertSink } from '../lib/alert-delivery-model';
 import { SettingsPreview } from './SettingsPreview';
 import { Door } from './Door';
-import { DoorNotepadPopover } from './DoorNotepadPopover';
-import { sourceNoticeFor, type SourceNotice } from './NoteList';
+import { OneTimeIndicator } from './OneTimeIndicator';
 import { DoorElementsContext, SelectedIdContext, useDialogKeyboardOwner } from './wall/wall-context';
 import type { DoorChip, DooredItem } from './wall/wall-types';
-import { hasTerminal } from 'dor/commands/types';
 import { IS_MAC } from '../lib/platform';
-import { hasNotepadArchive } from '../lib/notepad/archive-service';
-import {
-  getNotepadSnapshot,
-  setOpenNotepadId,
-  subscribeToNotepad,
-} from '../lib/notepad/notepad-store';
-import { revealNoteSource } from '../lib/notepad/pin';
 import {
   buildAppTitleResolver,
   DEFAULT_ACTIVITY_STATE,
@@ -39,17 +35,71 @@ import {
   subscribeToTerminalPaneState,
   updateAlertSettings,
 } from '../lib/terminal-registry';
-import { createTerminalPaneState, deriveSurfaceLabel } from '../lib/terminal-state';
+import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
 
-/** Shared look for every baseboard-level button (DESIGN.md -> Navigation). */
+/** Shared by every baseboard-level button (DESIGN.md -> Navigation). */
+const BASEBOARD_BUTTON_BASE_CLASS = 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono';
 const BASEBOARD_BUTTON_CLASS = chromeButton({
   kind: 'labeled',
-  className: 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono text-muted hover:text-foreground',
+  className: `${BASEBOARD_BUTTON_BASE_CLASS} text-muted hover:text-foreground`,
+});
+/** An overflow arrow hiding a ringing or TODO Door stands in for it, so it
+ *  wears a Door's shape and ground — the one its alarm inset is contrast-picked
+ *  for — and, like a Door, no hover wash. */
+const FLAGGED_OVERFLOW_BUTTON_CLASS = chromeButton({
+  kind: 'labeled',
+  className: clsx(BASEBOARD_BUTTON_BASE_CLASS, DOOR_TAB_CLASS, 'rounded-b-none bg-door-bg text-door-fg hover:bg-door-bg'),
 });
 const SETTINGS_BUTTON_CLASS = chromeButton({
   kind: 'icon',
   className: 'h-6 w-6 shrink-0 pb-px hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-focus-ring',
 });
+
+/** What the Doors behind one overflow arrow owe the user. */
+interface OverflowAlerts {
+  ringing: number;
+  todo: number;
+}
+
+/**
+ * `← N more` / `N more →`. A ringing or TODO Door scrolled out of view must not
+ * vanish from the baseboard, so the arrow carries a static alarm inset and a
+ * TODO mark for what it hides, and says so in its name
+ * (`docs/specs/layout.md` → Baseboard responsive sizing).
+ */
+function OverflowArrow({ direction, count, alerts, onClick, measureRef }: {
+  direction: 'left' | 'right';
+  count: number;
+  alerts: OverflowAlerts;
+  onClick?: () => void;
+  /** Set on the hidden measurement copy, which the fitting pass reads. */
+  measureRef?: Ref<HTMLButtonElement>;
+}) {
+  const flagged = alerts.ringing > 0 || alerts.todo > 0;
+  const label = [
+    `${count} more`,
+    alerts.ringing > 0 && `${alerts.ringing} ringing`,
+    alerts.todo > 0 && `${alerts.todo} TODO`,
+  ].filter(Boolean).join(', ');
+  const Caret = direction === 'left' ? CaretLeftIcon : CaretRightIcon;
+  return (
+    <button
+      ref={measureRef}
+      className={flagged ? FLAGGED_OVERFLOW_BUTTON_CLASS : BASEBOARD_BUTTON_CLASS}
+      data-overflow-arrow={measureRef ? undefined : direction}
+      aria-label={label}
+      tabIndex={measureRef ? -1 : undefined}
+      title={flagged ? label : undefined}
+      onClick={onClick}
+    >
+      {direction === 'left' && <Caret size={10} weight="bold" />}
+      {count} more
+      {alerts.todo > 0 && <span className={`todo-pill-shell text-xs font-semibold ${TODO_PILL_TRACKING_CLASS}`}>{TODO_PILL_BODY}</span>}
+      {direction === 'right' && <Caret size={10} weight="bold" />}
+      {alerts.ringing > 0 && <AlertRingInset ground="door" burst={null} className={TERMINAL_TOP_RADIUS_CLASS} />}
+    </button>
+  );
+}
 
 export interface BaseboardProps {
   items: DoorChip[];
@@ -67,11 +117,6 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const speechStates = useSyncExternalStore(subscribeToAlertSpeech, getAlertSpeechSnapshot);
   const { workspaceId, overrides, policy: settings } = useWorkspaceAlertPolicy();
   const terminalStates = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
-  // One subscription for every Door's note count, like the activity one above.
-  // A host with no notepad reports zero everywhere, so the Door stays a pure
-  // props component and never asks the platform anything.
-  const notepadNotes = useSyncExternalStore(subscribeToNotepad, getNotepadSnapshot);
-  const notepadAvailable = hasNotepadArchive();
   const dirtyTools = useSyncExternalStore(subscribeToToolDirty, getToolDirtySnapshot);
   const appTitleForPane = useMemo(
     () => buildAppTitleResolver(terminalStates, activityStates),
@@ -92,17 +137,12 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   const rightClusterEl = useRef<HTMLDivElement>(null);
   const [rightClusterWidth, setRightClusterWidth] = useState(0);
   const layoutMetrics = useRef({ doorGap: 0, arrowWidth: 0 });
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  // Which Door's notepad popover is open, with the rect it was anchored on. The
-  // rect is kept rather than re-read: a pin reattaches the Surface, so the Door
-  // may be gone by the time the popover reopens to report a dead source.
-  const [doorNotepad, setDoorNotepad] = useState<
-    { id: string; rect: DOMRect; sourceNotice: SourceNotice | null } | null
-  >(null);
-  const [settingsPreview, setSettingsPreview] = useState<{ sink: AlarmSink; anchor: HTMLElement; sequence: number } | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState<'application' | 'workspace' | null>(null);
+  const workspaceSettingsTrigger = useRef<HTMLButtonElement | null>(null);
+  const [settingsPreview, setSettingsPreview] = useState<{ sink: AlertSink; anchor: HTMLElement; sequence: number } | null>(null);
   const previewSequence = useRef(0);
   const closeSettingsPreview = useCallback(() => setSettingsPreview(null), []);
-  const toggleAlarm = (sink: AlarmSink, anchor: HTMLElement) => {
+  const toggleAlarm = (sink: AlertSink, anchor: HTMLElement) => {
     const patch = sink === 'speech'
       ? { speakEnabled: !settings.speakEnabled }
       : { pushEnabled: !settings.pushEnabled };
@@ -113,7 +153,23 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
 
   // Suppress command-mode key dispatch while the Settings dialog owns the
   // keyboard, so typing a timeout doesn't trigger pane shortcuts.
-  useDialogKeyboardOwner(settingsOpen);
+  useDialogKeyboardOwner(settingsOpen !== null);
+  const openWorkspaceSettings = (event: MouseEvent<HTMLButtonElement> | KeyboardEvent<HTMLButtonElement>) => {
+    if (!workspaceId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    workspaceSettingsTrigger.current = event.currentTarget;
+    closeSettingsPreview();
+    setSettingsOpen('workspace');
+  };
+  const workspaceSettingsActions = {
+    onContextMenu: openWorkspaceSettings,
+    onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => {
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openWorkspaceSettings(event);
+    },
+    'aria-description': workspaceId ? 'Right-click or press Shift+F10 for workspace alert settings.' : undefined,
+  };
+  const workspaceSettingsHint = workspaceId ? '. Right-click for workspace alert settings.' : '';
 
   useLayoutEffect(() => {
     const el = containerRef.current;
@@ -160,7 +216,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     if (arrowMeasureEl.current) {
       layoutMetrics.current.arrowWidth = arrowMeasureEl.current.offsetWidth;
     }
-  }, [items, activityStates, speechStates, terminalStates, notepadNotes, dirtyTools]);
+  }, [items, activityStates, speechStates, terminalStates, dirtyTools]);
 
   const itemKey = useMemo(() => items.map(i => i.id).join('\0'), [items]);
   const previousItems = useRef(itemKey);
@@ -175,8 +231,16 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   let visibleCount = 0;
   let usedWidth = 0;
 
+  const activityOf = (item: DoorChip) => activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
+  const overflowAlerts = (hidden: DoorChip[]): OverflowAlerts => ({
+    ringing: hidden.filter((item) => activityOf(item).status === 'ALERT_RINGING').length,
+    todo: hidden.filter((item) => activityOf(item).todo).length,
+  });
+
   if (items.length > 0) {
     const widths = doorWidths;
+    // Every arrow reserves the widest one's width, so what it hides never
+    // changes the fit.
     const { doorGap, arrowWidth } = layoutMetrics.current;
     const hasLeftOverflow = startIndex > 0;
     const budget = availableWidth
@@ -247,52 +311,18 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
   // measure the visible one, so the two must draw a Door identically or the
   // widths it feeds go stale.
   const doorProps = (item: DoorChip) => {
-    const activity = activityStates.get(item.id) ?? DEFAULT_ACTIVITY_STATE;
+    const activity = activityOf(item);
     return {
-      // Only a terminal-backed Surface has shell state to derive a label from;
-      // anything else keeps the store-backed title it already carries.
-      title: hasTerminal(item.kind)
-        ? deriveSurfaceLabel(terminalStates.get(item.id) ?? createTerminalPaneState(), appTitleForPane, item.title)
-        : item.title,
+      title: deriveDisplayedSurfaceLabel(item.kind, item.id, item.title, terminalStates, appTitleForPane),
       browserDisplay: item.browserDisplay,
       toolDirty: item.kind === 'tool' && dirtyTools.get(item.id) === true,
+      preview: item.preview === true,
       status: activity.status,
       todo: activity.todo,
       speechState: speechStates.get(item.id),
       episode: activity.episode ?? null,
-      noteCount: notepadAvailable ? (notepadNotes.get(item.id)?.length ?? 0) : 0,
     };
   };
-
-  // Opening a Door's notepad closes the attached one: a Wall shows a single
-  // notepad, whichever Surface it belongs to (`docs/specs/notepad.md`).
-  const openDoorNotepad = useCallback((item: DoorChip, anchor: HTMLElement) => {
-    setOpenNotepadId(null);
-    setDoorNotepad((current) => current?.id === item.id
-      ? null
-      : { id: item.id, rect: anchor.getBoundingClientRect(), sourceNotice: null });
-  }, []);
-
-  const closeDoorNotepad = useCallback(() => setDoorNotepad(null), []);
-
-  /**
-   * A pin in a Door's popover: close it, reattach the Surface, then follow the
-   * source. The reveal waits a frame because it resolves against the live
-   * terminal the reattach is only now mounting; a source that cannot be shown
-   * brings the popover back to say so.
-   */
-  const revealDoorSource = useCallback((noteId: string) => {
-    const open = doorNotepad;
-    if (!open) return;
-    const item = items.find((candidate) => candidate.id === open.id);
-    setDoorNotepad(null);
-    if (item) onReattach(item);
-    requestAnimationFrame(() => {
-      const sourceNotice = sourceNoticeFor(noteId, revealNoteSource(open.id, noteId));
-      if (!sourceNotice) return;
-      setDoorNotepad({ ...open, sourceNotice });
-    });
-  }, [doorNotepad, items, onReattach]);
 
   const scrollLeft = () => setStartIndex(Math.max(0, startIndex - 1));
   const scrollRight = () => setStartIndex(Math.min(items.length - 1, startIndex + 1));
@@ -302,13 +332,13 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       ref={containerRef}
       className="flex h-7 shrink-0 items-end gap-1.5 bg-app-bg px-1.75 pt-1"
     >
-      {/* Hidden measurement pass — doors + overflow arrow */}
+      {/* Hidden measurement pass — doors + the widest overflow arrow */}
       <div ref={measureEl} className="absolute -left-[9999px] flex gap-1.5" aria-hidden>
         {items.map(item => <Door key={item.id} {...doorProps(item)} />)}
       </div>
-      <button ref={arrowMeasureEl} className={`absolute -left-[9999px] ${BASEBOARD_BUTTON_CLASS}`} aria-hidden tabIndex={-1}>
-        9 more <CaretRightIcon size={10} weight="bold" />
-      </button>
+      <div className="absolute -left-[9999px] flex" aria-hidden>
+        <OverflowArrow measureRef={arrowMeasureEl} direction="right" count={9} alerts={{ ringing: 0, todo: 9 }} />
+      </div>
 
       {items.length === 0 && showHint && (
         <span className="truncate pb-1 text-sm font-mono text-muted">
@@ -317,13 +347,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       )}
 
       {hiddenLeft > 0 && (
-        <button
-          className={BASEBOARD_BUTTON_CLASS}
-          onClick={scrollLeft}
-        >
-          <CaretLeftIcon size={10} weight="bold" />
-          {hiddenLeft} more
-        </button>
+        <OverflowArrow direction="left" count={hiddenLeft} alerts={overflowAlerts(items.slice(0, startIndex))} onClick={scrollLeft} />
       )}
 
       {items.slice(startIndex, endIndex).map(item => (
@@ -333,7 +357,6 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           {...doorProps(item)}
           onClick={() => onReattach(item)}
           onDragPress={onDoorDragStart ? (press) => onDoorDragStart(item, press) : undefined}
-          onOpenNotepad={(anchor) => openDoorNotepad(item, anchor)}
         />
       ))}
 
@@ -344,24 +367,21 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
           depends on the fitting result it feeds. */}
       <div className="ml-auto flex shrink-0 items-end gap-1.5">
         {hiddenRight > 0 && (
-          <button
-            className={BASEBOARD_BUTTON_CLASS}
-            onClick={scrollRight}
-          >
-            {hiddenRight} more
-            <CaretRightIcon size={10} weight="bold" />
-          </button>
+          <OverflowArrow direction="right" count={hiddenRight} alerts={overflowAlerts(items.slice(endIndex))} onClick={scrollRight} />
         )}
 
         <div ref={rightClusterEl} className="flex shrink-0 items-end gap-1.5">
           {notice}
+
+          <OneTimeIndicator />
 
           <div className="flex items-center gap-0.5">
             <button
               className={`${SETTINGS_BUTTON_CLASS} ${settings.speakEnabled ? 'text-app-fg' : 'text-muted'}`}
               aria-label="Spoken alarms"
               aria-pressed={settings.speakEnabled}
-              title={`${settings.speakEnabled ? 'Disable' : 'Enable'} spoken alarms`}
+              title={`${settings.speakEnabled ? 'Disable' : 'Enable'} spoken alarms${workspaceSettingsHint}`}
+              {...workspaceSettingsActions}
               data-alarm-setting="speech"
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => toggleAlarm('speech', event.currentTarget)}
@@ -375,7 +395,8 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               className={`${SETTINGS_BUTTON_CLASS} ${settings.pushEnabled ? 'text-app-fg' : 'text-muted'}`}
               aria-label="Push notifications"
               aria-pressed={settings.pushEnabled}
-              title={`${settings.pushEnabled ? 'Disable' : 'Enable'} push notifications`}
+              title={`${settings.pushEnabled ? 'Disable' : 'Enable'} push notifications${workspaceSettingsHint}`}
+              {...workspaceSettingsActions}
               data-alarm-setting="push"
               onMouseDown={(event) => event.preventDefault()}
               onClick={(event) => toggleAlarm('push', event.currentTarget)}
@@ -393,7 +414,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
               data-open-settings="true"
               onClick={() => {
                 closeSettingsPreview();
-                setSettingsOpen(true);
+                setSettingsOpen('application');
               }}
             >
               <SlidersHorizontalIcon size={16} weight="bold" />
@@ -402,15 +423,6 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         </div>
       </div>
 
-      {doorNotepad && (
-        <DoorNotepadPopover
-          surfaceId={doorNotepad.id}
-          anchorRect={doorNotepad.rect}
-          sourceNotice={doorNotepad.sourceNotice}
-          onClose={closeDoorNotepad}
-          onRevealSource={revealDoorSource}
-        />
-      )}
       {settingsPreview && (
         <SettingsPreview
           key={settingsPreview.sequence}
@@ -420,10 +432,16 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
         />
       )}
 
-      {settingsOpen && (
+      {settingsOpen === 'application' && (
         <SettingsDialog
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => setSettingsOpen(null)}
         />
+      )}
+      {settingsOpen === 'workspace' && (
+        <WorkspaceAlarmSettingsDialog onClose={() => {
+          setSettingsOpen(null);
+          workspaceSettingsTrigger.current?.focus();
+        }} />
       )}
     </div>
   );

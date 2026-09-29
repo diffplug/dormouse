@@ -15,6 +15,17 @@ import { detectTokenInBufferLine } from './smart-token';
 import { extractSelectionText } from './selection-text';
 import type { TerminalOverlayDims } from './terminal-store';
 
+/**
+ * Dispatched on a terminal's element, bubbling, when a touch or pen press the
+ * router owns ends where it began without becoming a selection drag. The router
+ * consumes such a press's moves and release at `window`, so this is how a
+ * composition around the terminal learns of the tap (`MobileTerminalUi`).
+ */
+export const TERMINAL_TAP_EVENT = 'dormouse:terminal-tap';
+export interface TerminalTapDetail {
+  pointerId: number;
+}
+
 const OVERRIDE_MOUSE_EVENTS = ['mousemove', 'mouseup', 'wheel', 'click', 'dblclick', 'auxclick', 'contextmenu'] as const;
 
 function consumePointerEvent(ev: MouseEvent | PointerEvent, stopImmediate = false): void {
@@ -198,6 +209,14 @@ export function attachTerminalMouseRouter({
       // so the next press can be recognized as a double-tap (block selection).
       if (pendingDrag.touchLike) {
         lastTouchTap = { time: Date.now(), x: ev.clientX, y: ev.clientY };
+        const dx = ev.clientX - pendingDrag.clientX;
+        const dy = ev.clientY - pendingDrag.clientY;
+        if ('pointerId' in ev && dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) {
+          element.dispatchEvent(new CustomEvent<TerminalTapDetail>(TERMINAL_TAP_EVENT, {
+            bubbles: true,
+            detail: { pointerId: ev.pointerId },
+          }));
+        }
       }
       clearTemporaryOverrideAfterMouseDispatch(id);
       pendingDrag = null;

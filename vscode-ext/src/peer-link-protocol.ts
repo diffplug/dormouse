@@ -36,7 +36,9 @@ export type PeerLinkResponse =
   | { kind: 'data'; ptyId: string; data: string; textData?: string }
   | { kind: 'exit'; ptyId: string; exitCode: number }
   | { kind: 'notify' }
-  | { kind: 'command'; payload: BurrowCommand };
+  | { kind: 'command'; payload: BurrowCommand }
+  /** A due alarm push for the broker's Burrow to send; nothing answers it. */
+  | { kind: 'push'; sessionId: string; title: string };
 
 export type PeerLinkFrame = PeerLinkRequest | PeerLinkResponse;
 

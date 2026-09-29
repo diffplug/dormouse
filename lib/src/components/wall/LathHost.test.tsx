@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
-import { createLathWallEngine } from './lath-wall-engine';
+import { type ContextHelper, createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
@@ -438,6 +438,28 @@ describe('LathHost — empty tree', () => {
   });
 });
 
+describe('LathHost — terminal context placement', () => {
+  it('places the context from each painted frame before notifying chrome', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    const { engine } = mount(store);
+    const element = document.createElement('div');
+    const placedWidths: number[] = [];
+    const seen: (ContextHelper | null)[] = [];
+    const unsubscribe = engine.subscribeFrames(() => seen.push(engine.contextHelper()));
+    act(() => engine.setContextPlacer(paint => {
+      placedWidths.push(paint.get('a')!.rect.width);
+      return { sourceId: 'a', element, side: 'right' };
+    }));
+    expect(seen.at(-1)).toEqual({ sourceId: 'a', element, side: 'right' });
+    expect(`${placedWidths.at(-1)}px`).toBe(leafDiv('a')!.style.width);
+    act(() => store.addLeaf('c', leafMeta({ title: 'C' }), { refId: 'b', edge: 'right' }));
+    expect(`${placedWidths.at(-1)}px`).toBe(leafDiv('a')!.style.width);
+    act(() => engine.setContextPlacer(null));
+    expect(seen.at(-1)).toBeNull();
+    unsubscribe();
+  });
+});
+
 describe('LathHost — imperative animation frames', () => {
   const DUR = 400;
   let clock: number;
@@ -838,6 +860,31 @@ describe('LathHost — pane / Door drag', () => {
     act(() => up());
     expect(onDragStart).not.toHaveBeenCalled();
     expect(onProposeMove).not.toHaveBeenCalled();
+  });
+
+  it('swallows the click and dblclick a drag\'s release fires, never a sub-threshold press\'s', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mountDrag(store);
+    const seen: string[] = [];
+    const record = (e: Event) => seen.push(`${e.type}:${(e as MouseEvent).detail}`);
+    header('a').addEventListener('click', record);
+    header('a').addEventListener('dblclick', record);
+    // A double-click's second press: the browser fires both on its release.
+    const release = () => {
+      up();
+      header('a').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }));
+      header('a').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+    };
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(120, 15));
+    act(release);
+    expect(seen).toEqual([]);
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(102, 16));
+    act(release);
+    expect(seen).toEqual(['click:2', 'dblclick:2']);
   });
 
   it('does not start a drag from a header button', () => {

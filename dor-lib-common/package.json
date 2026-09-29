@@ -9,9 +9,13 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./agent-browser": {
-      "types": "./dist/agent-browser.d.ts",
-      "default": "./dist/agent-browser.js"
+    "./browser-viewports": {
+      "types": "./dist/browser-viewports.d.ts",
+      "default": "./dist/browser-viewports.js"
+    },
+    "./browser-providers": {
+      "types": "./dist/browser-providers.d.ts",
+      "default": "./dist/browser-providers.js"
     }
   },
   "scripts": {
@@ -23,6 +27,6 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.0"
   }
 }

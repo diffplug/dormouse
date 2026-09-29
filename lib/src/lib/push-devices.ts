@@ -42,6 +42,8 @@ const EMPTY: PushDevicesState = { status: 'no-burrow', devices: [] };
 
 let state: PushDevicesState = EMPTY;
 let refresh: (() => void) | null = null;
+/** Bumped by every refresh and every clear; a refresh commits only while it is current. */
+let refreshSequence = 0;
 const listeners = new Set<() => void>();
 
 /** Stable-identity snapshot for `useSyncExternalStore`. */
@@ -81,20 +83,47 @@ export function refreshPushDevicesNow(): void {
 }
 
 /**
+ * Run `load` and publish its result, fenced on request order: overlapping
+ * refreshes are latest-request-wins, so a slow startup refresh cannot overwrite
+ * a newer dialog refresh, and a {@link clearPushDevices} since the request
+ * discards it. `load` is the Burrow's `pushDevices` command
+ * (`lib/src/remote/burrow/activation.ts`), which answers `null` when no Burrow
+ * is running — "nowhere to push", rendered `no-burrow`, not an empty list. A
+ * failure is `error`: "we could not ask" and "no devices are subscribed" are
+ * different things to show a user.
+ */
+export async function commitPushDevices(load: () => Promise<PushDevice[] | null>): Promise<void> {
+  const sequence = ++refreshSequence;
+  const commit = (next: PushDevicesState) => {
+    if (refreshSequence === sequence) setPushDevices(next);
+  };
+  commit({ status: 'loading', devices: [] });
+  try {
+    const devices = await load();
+    commit(devices ? { status: 'ready', devices } : { status: 'no-burrow', devices: [] });
+  } catch {
+    commit({ status: 'error', devices: [] });
+  }
+}
+
+/**
  * Back to `no-burrow`, keeping the refresher: the enrolled gate's disarm when the
  * Burrow goes away, where the dialog must stop naming devices nothing can reach
  * but may still be opened and told `no-burrow` (`lib/src/remote/burrow/activation.ts`).
+ * Every refresh in flight is discarded too: one already on the wire would
+ * otherwise land afterwards and name phones the Burrow behind them is gone for.
  */
 export function clearPushDevices(): void {
+  refreshSequence += 1;
   setPushDevices(EMPTY);
 }
 
 /**
- * Full teardown: back to `no-burrow` *and* no refresher — a story or a test that
- * finished, where the closure that would answer is going away too. Anything that
- * only means "the Burrow is gone" wants {@link clearPushDevices}.
+ * Full teardown: {@link clearPushDevices} *and* no refresher — a story or a test
+ * that finished, where the closure that would answer is going away too. Anything
+ * that only means "the Burrow is gone" wants {@link clearPushDevices}.
  */
 export function resetPushDevices(): void {
   refresh = null;
-  setPushDevices(EMPTY);
+  clearPushDevices();
 }

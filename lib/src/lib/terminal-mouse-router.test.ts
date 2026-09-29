@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { attachTerminalMouseRouter } from './terminal-mouse-router';
+import { attachTerminalMouseRouter, TERMINAL_TAP_EVENT } from './terminal-mouse-router';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
@@ -35,6 +35,7 @@ class FakeElement extends ListenerHost {
   setPointerCapture = vi.fn();
   releasePointerCapture = vi.fn();
   querySelector = vi.fn();
+  dispatchEvent = vi.fn();
 
   getBoundingClientRect(): Pick<DOMRect, 'left' | 'top'> {
     return { left: 0, top: 0 };
@@ -284,6 +285,27 @@ describe('terminal-mouse-router: override suppression', () => {
     // A hardware keyboard event must not unlatch the touch gesture's shape.
     windowHost.emit('keydown', mouseEvent({ altKey: false }));
     expect(getMouseSelectionState('t1').selection?.shape).toBe('block');
+    cleanup();
+  });
+
+  it('announces a touch press it owns that ends as a tap, and never a drag', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    const taps = () => element.dispatchEvent.mock.calls
+      .map(([event]) => event as CustomEvent)
+      .filter((event) => event.type === TERMINAL_TAP_EVENT)
+      .map((event) => [event.bubbles, event.detail]);
+
+    element.emit('pointerdown', pointerEvent({ pointerId: 3, clientX: 5, clientY: 5 }));
+    windowHost.emit('pointerup', pointerEvent({ pointerId: 3, clientX: 6, clientY: 5 }));
+    expect(taps()).toEqual([[true, { pointerId: 3 }]]);
+
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointermove', pointerEvent({ clientX: 25, clientY: 15 }));
+    windowHost.emit('pointerup', pointerEvent({ clientX: 25, clientY: 15 }));
+    // Released away with no move reported between.
+    element.emit('pointerdown', pointerEvent({ clientX: 5, clientY: 5 }));
+    windowHost.emit('pointerup', pointerEvent({ clientX: 25, clientY: 15 }));
+    expect(taps()).toHaveLength(1);
     cleanup();
   });
 

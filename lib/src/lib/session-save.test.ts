@@ -45,15 +45,12 @@ function createPlatform(savedState: PersistedSession | null): PlatformAdapter {
     onRequestSessionFlush: () => {},
     offRequestSessionFlush: () => {},
     notifySessionFlushComplete: () => {},
-    alertRemove: () => {},
     alertSetWatchedCommands: () => {},
     alertSetCommandWatched: () => {},
     alertDismiss: () => {},
-    alertAttend: () => {},
-    alertResize: () => {},
-    alertClearAttention: () => {},
+    alertEngagement: () => {},
+    alertAcknowledge: () => {},
     alertToggleTodo: () => {},
-    alertMarkTodo: () => {},
     alertClearTodo: () => {},
     onAlertState: () => {},
     onWatchedCommands: () => {},
@@ -235,7 +232,7 @@ describe('saveSession', () => {
         surfaceType: 'tool',
         command: 'pnpm storybook',
         toolName: 'storybook',
-        toolRender: 'ab-screencast',
+        toolRender: 'agent-browser-screencast',
         toolPort: 'auto',
         toolKey: ['storybook', '/repo'],
         // Derived state must stay in the Lath projection, never this row.
@@ -250,11 +247,27 @@ describe('saveSession', () => {
       command: 'pnpm storybook',
       tool: {
         name: 'storybook',
-        render: 'ab-screencast',
+        render: 'agent-browser-screencast',
         port: 'auto',
         key: ['storybook', '/repo'],
       },
     });
+  });
+
+  it('persists the preview slot mark and open target for panes and Doors, and omits them otherwise', async () => {
+    const platform = createPlatform(null);
+    const params = { surfaceType: 'tool', command: 'view /repo/a.md', toolArgv: ['view', '/repo/a.md'], toolTarget: '/repo/a.md', toolPreview: true };
+    await saveSession(platform, [
+      { id: 'slot', title: 'viewer', surfaceType: 'tool', params },
+      { id: 'named', title: 'storybook', surfaceType: 'tool', params: { surfaceType: 'tool', command: 'pnpm storybook' } },
+    ], [{ id: 'pinned', title: 'viewer', component: 'tool', params: { ...params, toolPreview: undefined } }]);
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    const tool = (id: string) => saved.panes.find(pane => pane.id === id)?.tool;
+    expect(tool('slot')).toMatchObject({ preview: true, target: '/repo/a.md' });
+    expect(tool('pinned')).toMatchObject({ target: '/repo/a.md' });
+    expect(tool('pinned')).not.toHaveProperty('preview');
+    expect(tool('named')).not.toHaveProperty('preview');
+    expect(tool('named')).not.toHaveProperty('target');
   });
 
   it('keeps resolved argv independently of the live shell command for panes and Doors', async () => {
@@ -275,7 +288,7 @@ describe('saveSession', () => {
     // rather than the session. This pins the second half — a save must not
     // reintroduce the field, because a carried-forward value would outlive the
     // destructive read of the recovery record and be re-run on a later restore
-    // (docs/specs/transport.md -> "Consuming it").
+    // (docs/compatible-agents.md -> "Cold restore").
     const platform = createPlatform(null);
 
     await saveSession(platform, [{ id: 'pane-a', title: 'Pane A' }]);

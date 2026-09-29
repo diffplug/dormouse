@@ -9,8 +9,9 @@
  *
  * Raw HTML is rejected with one exception: a narrow `<img>` allowlist, because
  * the canonical README uses inline 22px alert-state icons and portable Markdown
- * has no image-sizing syntax (docs/specs/website-docs.md -> /docs rendering
- * contract).
+ * has no image-sizing syntax (docs/specs/website-docs.md -> Markdown rendering
+ * contract). A block-level HTML comment is dropped, since GitHub and the
+ * Marketplace render it as nothing; an inline one is rejected.
  *
  * No dependencies, by design. Runs in Node during codegen and its output is
  * plain JSON consumed by the website.
@@ -105,7 +106,7 @@ function parseImgTag(raw, line) {
   // GitHub renders it natively) or an absolute https URL. Anything else --
   // http, protocol-relative, data: -- is rejected here; the public-doc lint
   // additionally requires relative files to exist and bans third-party hosts.
-  if (hasScheme(attrs.src) && !/^https:\/\//i.test(attrs.src)) {
+  if ((hasScheme(attrs.src) && !/^https:\/\//i.test(attrs.src)) || isProtocolRelative(attrs.src)) {
     throw new UnsupportedMarkdownError(`<img> src must be relative or https: "${attrs.src}"`, line);
   }
   return {
@@ -169,6 +170,11 @@ export function parseInline(text, line) {
       nodes.push(parseImgTag(text.slice(i, end + 1), line));
       i = end + 1;
       continue;
+    }
+
+    // A comment is only dropped on a line of its own (see parseMarkdown).
+    if (text.startsWith('<!--', i)) {
+      throw new UnsupportedMarkdownError('an HTML comment must stand on its own lines', line);
     }
 
     // Any other raw HTML is rejected outright.
@@ -302,10 +308,10 @@ function closesFence(line, marker, length) {
  * continuation — ends before it instead of swallowing it. `next` supplies the
  * single line of lookahead a table needs; `startsTable` holds the test.
  *
- * Six of the seven block starts are here: ATX heading, list item, blockquote,
- * fence, table, and block-level raw HTML. A standalone `<img>` is deliberately
+ * Seven of the eight block starts are here: ATX heading, list item, blockquote,
+ * fence, table, HTML comment, and block-level raw HTML. A standalone `<img>` is deliberately
  * absent — it is inline-level, so GitHub keeps it in the paragraph and so do
- * we. The seventh, the thematic break, is tested separately at each call site
+ * we. The eighth, the thematic break, is tested separately at each call site
  * because `---` is also a setext underline, which has to raise first.
  */
 function interruptsParagraph(line, next) {
@@ -314,6 +320,7 @@ function interruptsParagraph(line, next) {
     || /^\s*>\s?/.test(line)
     || /^(\s*)(`{3,}|~{3,})/.test(line)
     || startsTable(line, next ?? '')
+    || /^\s*<!--/.test(line)
     || (/^\s*<\/?[a-zA-Z]/.test(line) && !/^\s*<img\b/i.test(line));
 }
 
@@ -492,6 +499,18 @@ export function parseMarkdown(markdown, options = {}) {
       continue;
     }
 
+    // HTML comment block: dropped, as GitHub and the Marketplace render it.
+    if (/^\s*<!--/.test(raw)) {
+      let end = i;
+      while (end < lines.length && !lines[end].includes('-->')) end++;
+      if (end === lines.length) throw new UnsupportedMarkdownError('unterminated HTML comment', lineNo);
+      if (!/-->\s*$/.test(lines[end])) {
+        throw new UnsupportedMarkdownError('an HTML comment must stand on its own lines', end + 1);
+      }
+      i = end + 1;
+      continue;
+    }
+
     // Standalone <img> block
     if (/^\s*<img\b/i.test(raw)) {
       blocks.push({ type: 'paragraph', children: markStandalone(parseInline(raw.trim(), lineNo)) });
@@ -588,7 +607,9 @@ function parseList(lines, start, slug) {
       if (SETEXT_UNDERLINE.test(lines[i])) {
         throw new UnsupportedMarkdownError('setext heading underline — use an ATX `#` heading', i + 1);
       }
-      if (THEMATIC_BREAK.test(lines[i])) break;
+      // A fence, heading, quote, table, or HTML line starts a block of its
+      // own, which the indented-body branch above parses as the item's child.
+      if (THEMATIC_BREAK.test(lines[i]) || interruptsParagraph(lines[i].trimStart(), lines[i + 1])) break;
       contentLines.push(lines[i].trim());
       i++;
     }

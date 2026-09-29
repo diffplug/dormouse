@@ -5,7 +5,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { RemotePairingModal } from './RemotePairingModal';
+import { RemotePairingModalHost } from './RemotePairingModalHost';
+import { enqueuePairingApproval, resolvePairingApproval } from './pairing-approval';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -14,10 +17,11 @@ let root: Root;
 let approved: string[];
 let denied: number;
 
-async function render(label = 'Ned’s iPhone') {
+async function render(label = 'Ned’s iPhone', kind?: 'pairing' | 'one-time') {
   await act(async () => {
     root.render(
       <RemotePairingModal
+        kind={kind}
         label={label}
         onApprove={(code) => approved.push(code)}
         onDeny={() => denied++}
@@ -79,6 +83,33 @@ describe('RemotePairingModal', () => {
     expect(text()).toContain('Ned’s iPhone');
   });
 
+  it('tells a one-time request what it grants, and keeps the same warning', async () => {
+    // A one-time connection writes nothing, so the pairing's "adds it to this
+    // machine" would be false; what the person is deciding is full control
+    // for as long as it lasts (docs/specs/one-time.md).
+    await render('iPhone Safari', 'one-time');
+    expect(text()).toContain('Allow a one-time connection');
+    expect(text()).toContain(
+      'Only authorize if your phone is showing a two-digit code. If it shows an error or no code, cancel this request.',
+    );
+    expect(text()).toContain(
+      'This phone gets full control of every terminal here until it disconnects or you end it. Nothing is saved.',
+    );
+    expect(text()).not.toContain('Pair a new device');
+    expect(text()).not.toContain('adds it to this machine');
+
+    await type('47');
+    await act(async () => buttonLabelled('Confirm and allow').click());
+    expect(approved).toEqual(['47']);
+  });
+
+  it('is a pairing unless told otherwise', async () => {
+    await render();
+    expect(text()).toContain('Pair a new device');
+    expect(text()).toContain('Approving adds it to this machine only.');
+    expect(buttonLabelled('Confirm and authorize')).toBeTruthy();
+  });
+
   it('says (unnamed) rather than nothing for a Client with no label', async () => {
     // A blank row would read as a rendering failure, and the device line is
     // half of what the user is deciding about.
@@ -127,5 +158,30 @@ describe('RemotePairingModal', () => {
     expect(denied).toBe(2);
     // Denying never writes the ACL, so neither path may approve.
     expect(approved).toEqual([]);
+  });
+});
+
+describe('RemotePairingModalHost', () => {
+  it('shows the head of the queue in the copy its kind names', async () => {
+    // A host with no Burrow service: the console hook installs nothing, and
+    // the queue is driven by hand.
+    setPlatform(new FakePtyAdapter());
+    const request = { kind: 'one-time' as const, clientId: '' };
+    enqueuePairingApproval({
+      ...request,
+      pairingId: 't1',
+      label: 'iPhone Safari',
+      requestedAt: 1,
+      approve: () => {},
+      deny: () => {},
+    });
+    try {
+      await act(async () => root.render(<RemotePairingModalHost />));
+      expect(text()).toContain('Allow a one-time connection');
+      expect(text()).toContain('iPhone Safari');
+    } finally {
+      await act(async () => resolvePairingApproval(request));
+    }
+    expect(text()).not.toContain('Allow a one-time connection');
   });
 });

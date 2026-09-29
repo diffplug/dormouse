@@ -7,20 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { RenamingIdContext, WallActionsContext, type WallActions } from './wall-context';
-import { ensureResizeObserver, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
+import { doubleClick, ensureResizeObserver, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
 import { setNativeFieldValue } from '../../lib/dom';
 import { clearTerminalActivity, removeTerminalPaneState, setTerminalActivity } from '../../lib/terminal-registry';
+import { createAlertEpisode } from '../../lib/alert-episode';
 import { removeMouseSelectionState, setMouseReporting } from '../../lib/mouse-selection';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
-import {
-  addPlainNote,
-  clearAllNotepads,
-  getOpenNotepadId,
-  setOpenNotepadId,
-} from '../../lib/notepad/notepad-store';
-
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
@@ -73,7 +67,7 @@ describe('TerminalPaneHeader — alert state', () => {
     renderHeader(stubActions(), null);
     const quiet = container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!.className;
 
-    act(() => { setTerminalActivity('term-1', { status: 'ALERT_RINGING' }); });
+    act(() => { setTerminalActivity('term-1', { status: 'ALERT_RINGING', episode: createAlertEpisode() }); });
 
     const header = container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!;
     expect(header.className).toBe(quiet);
@@ -170,167 +164,69 @@ describe('TerminalPaneHeader — inline rename', () => {
   });
 });
 
-describe('TerminalPaneHeader — notepad icon', () => {
-  // The tier is ResizeObserver-driven, so the suite's inert stub can only ever
-  // show `full`. This one reports a width the test picks.
-  let resizeHeader: (width: number) => void;
+describe('TerminalPaneHeader — preview slot', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const PREVIEW: Partial<PaneProps> = { params: { surfaceType: 'tool', toolPreview: true } };
+  const header = () => container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!;
+  const label = () => container.querySelector<HTMLElement>('[data-pane-title-for="term-1"]')!;
 
-  beforeEach(() => {
-    resizeHeader = stubResizeObserver(400);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-    // Still mounted at this point (the outer hook unmounts), so both stores
-    // notify a live header.
-    act(() => {
-      clearAllNotepads();
-      removeMouseSelectionState('term-1');
-      resetToolDirty();
-    });
-  });
-
-  function notepadButton(): HTMLButtonElement | null {
-    return container.querySelector<HTMLButtonElement>('[aria-label^="Notepad"]');
-  }
-
-  it('sits after the mouse-override icon and before the split controls', () => {
-    setMouseReporting('term-1', 'any');
-    renderHeader(stubActions(), null);
-
-    const labels = Array.from(container.querySelectorAll<HTMLElement>('button[aria-label]'))
-      .map((button) => button.getAttribute('aria-label'));
-    expect(labels).toEqual([
-      'Override mouse capture',
-      'Notepad',
-      'Split left/right',
-      'Split top/bottom',
-      'Zoom',
-      'Minimize',
-      'Kill',
-    ]);
-  });
-
-  it('fills the icon and names the count once the Surface has notes', () => {
-    renderHeader(stubActions(), null);
-    const empty = notepadButton()!.innerHTML;
-    expect(notepadButton()!.getAttribute('aria-label')).toBe('Notepad');
-
-    act(() => { addPlainNote('term-1', 'a note'); });
-
-    expect(notepadButton()!.getAttribute('aria-label')).toBe('Notepad · 1 note');
-    expect(notepadButton()!.innerHTML).not.toBe(empty);
-
-    act(() => { addPlainNote('term-1', 'another'); });
-    expect(notepadButton()!.getAttribute('aria-label')).toBe('Notepad · 2 notes');
-  });
-
-  it('keeps its place at the compact tier, yields it at minimal when empty, and below that even for notes', () => {
-    renderHeader(stubActions(), null);
-    act(() => resizeHeader(200));
-    expect(notepadButton()).not.toBeNull();
-
-    act(() => resizeHeader(150));
-    expect(notepadButton()).toBeNull();
-
-    // Notes are never invisible — until the notepad would push the pane-action
-    // group off the right edge, which is what the `bare` tier exists to stop.
-    act(() => { addPlainNote('term-1', 'a note'); });
-    expect(notepadButton()).not.toBeNull();
-    act(() => resizeHeader(116));
-    expect(notepadButton()).toBeNull();
-    act(() => resizeHeader(117));
-    expect(notepadButton()).not.toBeNull();
-  });
-
-  it('gives the notepad band back to an unsaved-change dot', () => {
-    // 117–128px holds the notepad only while the header carries no dot; the dot
-    // is a root-level sibling outside the clipping region, so it costs the same
-    // 12px the notepad would. Above the band both fit.
-    renderHeader(stubActions(), null, { params: { surfaceType: 'tool' } });
-    act(() => { addPlainNote('term-1', 'a note'); });
-    act(() => resizeHeader(120));
-    expect(notepadButton()).not.toBeNull();
-    act(() => recordToolDirty('term-1', true));
-    expect(notepadButton()).toBeNull();
-    act(() => resizeHeader(129));
-    expect(notepadButton()).not.toBeNull();
-  });
-
-  it('preserves visual breakpoints and the previous tier while hidden', () => {
-    renderHeader(stubActions(), null);
-    const split = () => container.querySelector('[aria-label="Split left/right"]');
-    act(() => resizeHeader(293));
-    expect(split()).toBeNull();
-    expect(notepadButton()).not.toBeNull();
-    act(() => resizeHeader(0));
-    expect(split()).toBeNull();
-    expect(notepadButton()).not.toBeNull();
-    act(() => resizeHeader(294));
-    expect(split()).not.toBeNull();
-    act(() => resizeHeader(173));
-    expect(notepadButton()).toBeNull();
-    act(() => resizeHeader(174));
-    expect(notepadButton()).not.toBeNull();
-  });
-
-  it('keeps zoom to the last, dropping minimize and kill at the tiny tier', () => {
-    renderHeader(stubActions(), null);
-    const label = (name: string) => container.querySelector(`[aria-label="${name}"]`);
-    // Zoom left the split group, so it now outlives the splits it used to ride
-    // with, and then outlives minimize and kill too.
-    for (const width of [294, 200, 120, 99, 40]) {
-      act(() => resizeHeader(width));
-      expect(label('Zoom'), `${width}px`).not.toBeNull();
+  it('marks the slot with its italic label alone, named Preview, at every width', () => {
+    const resize = stubResizeObserver(400);
+    renderHeader(stubActions(), null, PREVIEW);
+    for (const width of [400, 250, 150]) {
+      act(() => resize(width));
+      expect(label().title).toBe('Preview');
+      expect(label().querySelector('.italic')).not.toBeNull();
+      expect(header().textContent).not.toContain('Preview');
     }
-    act(() => resizeHeader(99));
-    expect(label('Minimize')).not.toBeNull();
-    expect(label('Kill')).not.toBeNull();
-    act(() => resizeHeader(98));
-    expect(label('Minimize')).toBeNull();
-    expect(label('Kill')).toBeNull();
   });
 
-  it('measures the initial border width before ResizeObserver delivers', () => {
-    stubResizeObserver(0);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 293, 30));
-    renderHeader(stubActions(), null);
-    expect(container.querySelector('[aria-label="Split left/right"]')).toBeNull();
-    expect(notepadButton()).not.toBeNull();
+  it('keeps the slot on a double-click of its label or empty header, never of a button or the rename field', () => {
+    stubResizeObserver(400);
+    const onPinPreview = vi.fn();
+    renderHeader(stubActions({ onPinPreview }), null, PREVIEW);
+    const buttons = header().querySelectorAll('button');
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) doubleClick(button);
+    expect(onPinPreview).not.toHaveBeenCalled();
+    doubleClick(label().querySelector('.italic')!);
+    doubleClick(header());
+    expect(onPinPreview.mock.calls).toEqual([['term-1'], ['term-1']]);
+    // Command-mode rename still opens on a preview; a double-click in it selects a word.
+    renderHeader(stubActions({ onPinPreview }), 'term-1', PREVIEW);
+    doubleClick(renameInput());
+    expect(onPinPreview).toHaveBeenCalledTimes(2);
   });
 
-  it.each([true, false])('handles zero content width with borderBoxSize available=%s', (hasBorderBox) => {
-    let resize: (width: number) => void;
-    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 400, 30));
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(private readonly callback: ResizeObserverCallback) {}
-      observe(target: Element) {
-        resize = (width) => this.callback([{
-          target,
-          borderBoxSize: hasBorderBox ? [{ inlineSize: width, blockSize: 30 }] : undefined,
-          contentRect: { width: Math.max(0, width - 13) },
-        } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
-      }
-      disconnect() {}
-    });
-    renderHeader(stubActions(), null);
-    expect(container.querySelector('[aria-label="Split left/right"]')).not.toBeNull();
-    rect.mockReturnValue(new DOMRect(0, 0, 8, 30));
-    act(() => resize(8));
-    expect(container.querySelector('[aria-label="Split left/right"]')).toBeNull();
-    expect(notepadButton()).toBeNull();
+  it('starts no rename from a preview\'s label click, selecting the pane instead; kept, the label renames', () => {
+    const onStartRename = vi.fn();
+    const onClickPanel = vi.fn();
+    renderHeader(stubActions({ onStartRename, onClickPanel }), null, PREVIEW);
+    act(() => { label().dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); label().click(); });
+    expect(onStartRename).not.toHaveBeenCalled();
+    expect(onClickPanel).toHaveBeenCalledExactlyOnceWith('term-1');
+    renderHeader(stubActions({ onStartRename, onClickPanel }), null, { params: { surfaceType: 'tool' } });
+    act(() => { label().dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); label().click(); });
+    expect(onStartRename).toHaveBeenCalledExactlyOnceWith('term-1');
+    expect(onClickPanel).toHaveBeenCalledOnce();
   });
 
-  it('toggles the one open notepad', () => {
+  it('marks nothing once the Tool is pinned, and a double-click keeps nothing', () => {
+    const onPinPreview = vi.fn();
+    renderHeader(stubActions({ onPinPreview }), null, { params: { surfaceType: 'tool', toolTarget: '/repo/a.md' } });
+    expect(container.querySelector('[data-pane-title-for="term-1"] .italic')).toBeNull();
+    expect(label().title).toBe('');
+    doubleClick(header());
+    expect(onPinPreview).not.toHaveBeenCalled();
+  });
+});
+
+describe('TerminalPaneHeader — unsaved changes', () => {
+  afterEach(() => resetToolDirty());
+
+  it('ignores dirty reports on an ordinary terminal', () => {
+    act(() => recordToolDirty('term-1', true));
     renderHeader(stubActions(), null);
-
-    act(() => { notepadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(getOpenNotepadId()).toBe('term-1');
-
-    act(() => { notepadButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-    expect(getOpenNotepadId()).toBeNull();
-
-    setOpenNotepadId(null);
+    expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
   });
 });

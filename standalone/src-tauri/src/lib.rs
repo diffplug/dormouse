@@ -1,7 +1,7 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 mod log_tail;
+mod panic_policy;
 mod quit_state;
 mod routing;
 mod workspaces;
@@ -10,6 +10,8 @@ mod workspaces;
 // interception).
 #[cfg(target_os = "macos")]
 mod macos_terminate;
+#[cfg(target_os = "macos")]
+mod macos_siri_affordance;
 use quit_state::{ArrivalQueue, CleanupGate, CloseMachine, QuitAction, QuitIntent, QuitMachine};
 use routing::{Route, RouteView};
 use std::{
@@ -72,14 +74,15 @@ fn guard<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
 // The sidecar has no window concept, so Rust keeps the map from PTY to window
 // and routes every stdout line through `routing::route`.
 
-/// The three maps a sidecar line is routed against, behind **one** lock: they
-/// are always read together, so a PTY chunk costs one acquisition rather than
-/// three, and every label the routing table hands back stays borrowed out of
+/// The maps a sidecar line is routed against, behind **one** lock: they are
+/// always read together, so a PTY chunk costs one acquisition rather than one
+/// per map, and every label the routing table hands back stays borrowed out of
 /// this guard instead of being cloned per line.
 #[derive(Default)]
 struct RoutingState {
     /// ptyId -> window label. Minted only in `pty_spawn`, dropped by
-    /// `pty_kill`, an exit, or a window going away; reassigned by a transfer.
+    /// `pty_kill` or a window going away — never by an exit; reassigned by a
+    /// transfer.
     owners: HashMap<String, String>,
     /// Ids whose output is suppressed until the replay their new owner is about
     /// to be sent has been emitted, each with the instant it began.
@@ -87,10 +90,6 @@ struct RoutingState {
     /// dor requestId -> the window handling it, so a cancel reaches the window
     /// holding the subscription, watch or completion claim it releases.
     dor_targets: HashMap<String, String>,
-    /// Protocol events that arrived while their id was suppressed, delivered
-    /// to the new owner behind its replay (`routing::Route::Hold`). Only ever
-    /// emptied together with `awaiting_replay` (`lift_suppression`).
-    held: HashMap<String, Vec<routing::HeldEvent>>,
     /// Ids between a transfer's invoke and the sidecar's `marked` line, each
     /// with the source still consuming (`routing::RouteView::marking`).
     marking: HashMap<String, String>,
@@ -107,10 +106,15 @@ impl RoutingState {
         }
     }
 
-    /// `routing::lift_suppression` over this state's two halves. The caller
-    /// republishes `WindowState::suppressed` after it, still under the lock.
-    fn lift_suppression(&mut self, id: &str) -> Vec<routing::HeldEvent> {
-        routing::lift_suppression(&mut self.awaiting_replay, &mut self.held, id)
+    /// What `routing::route` reads, borrowed out of this state.
+    fn view<'a>(&'a self, registry: &'a workspaces::Registry) -> RouteView<'a> {
+        RouteView {
+            owners: &self.owners,
+            awaiting_replay: &self.awaiting_replay,
+            dor_targets: &self.dor_targets,
+            registry,
+            marking: &self.marking,
+        }
     }
 }
 
@@ -172,8 +176,7 @@ impl WindowState {
         let mut routing = guard(&self.routing);
         routing.owners.insert(id.to_string(), label.to_string());
         routing.transfer_marks.remove(id);
-        // Whatever was held belonged to the PTY that never arrived, not this one.
-        routing.lift_suppression(id);
+        routing.awaiting_replay.remove(id);
         self.suppressed
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
@@ -196,42 +199,55 @@ impl WindowState {
             if let Some(owner) = routing.owners.get_mut(id) {
                 *owner = target.to_string();
             }
-            routing.lift_suppression(id);
+            routing.awaiting_replay.remove(id);
             routing.transfer_marks.remove(id);
             routing.marking.insert(id.clone(), source.to_string());
         }
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Drain the source cuts and return only still-live ownership. An exited
-    /// id gets its retained replay by explicit address, never a phantom owner.
+    /// Give every id back to `source` that no kill dropped — an exited one too,
+    /// and one whose target window went away (`drop_window` drops its owner,
+    /// never its transfer records) — suppressed behind a replay of its cut when
+    /// it has one, otherwise straight back. Returns the cuts it drained, by id.
     fn hand_back(&self, ids: &[String], source: &str) -> JsonValue {
         let mut routing = guard(&self.routing);
         let mut marks = serde_json::Map::new();
         for id in ids {
             let mark = routing.transfer_marks.remove(id);
             if let Some(mark) = mark { marks.insert(id.clone(), JsonValue::from(mark)); }
-            routing.marking.remove(id);
-            if let Some(owner) = routing.owners.get_mut(id) {
-                *owner = source.to_string();
-                if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
-                else { routing.lift_suppression(id); }
-            }
+            let transferring = routing.marking.remove(id).is_some() || mark.is_some();
+            // A kill drops the owner and the transfer records alike.
+            if !transferring && !routing.owners.contains_key(id) { continue; }
+            routing.owners.insert(id.clone(), source.to_string());
+            if mark.is_some() { routing.awaiting_replay.insert(id.clone(), Instant::now()); }
+            else { routing.awaiting_replay.remove(id); }
         }
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
         JsonValue::Object(marks)
     }
 
-    fn forget_pty(&self, id: &str) { self.remove_pty(id, false); }
-    fn exited_pty(&self, id: &str) { self.remove_pty(id, true); }
-
-    fn remove_pty(&self, id: &str, keep_cut: bool) {
+    /// The Session is gone (`pty_kill`, or its window went away): ownership and
+    /// every transfer record with it, the cut included, since a kill discards
+    /// the buffer it indexes.
+    fn forget_pty(&self, id: &str) {
         let mut routing = guard(&self.routing);
         routing.owners.remove(id);
-        routing.lift_suppression(id);
+        routing.transfer_marks.remove(id);
+        routing.awaiting_replay.remove(id);
         routing.marking.remove(id);
-        // Natural exit retains the sidecar buffer; explicit kill discards it.
-        if !keep_cut { routing.transfer_marks.remove(id); }
+        self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
+    }
+
+    /// The PTY exited on its own. **Ownership stays until the Session is
+    /// killed**: the pane still shows it, and the sidecar's `alert:state` for it
+    /// — a dismiss, a TODO cleared — must still reach that window (§Alerts). The
+    /// cut stays too: the sidecar retains the buffer a replay reads. **So does
+    /// a transfer's marking phase**: the sidecar marks an exited id like a live
+    /// one, and that `pty:marked` belongs to the source serializing the pane.
+    fn exited_pty(&self, id: &str) {
+        let mut routing = guard(&self.routing);
+        routing.awaiting_replay.remove(id);
         self.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
@@ -241,7 +257,7 @@ impl WindowState {
     fn clear_suppression(&self, ids: &[String]) {
         let mut routing = guard(&self.routing);
         for id in ids {
-            routing.lift_suppression(id);
+            routing.awaiting_replay.remove(id);
             routing.transfer_marks.remove(id);
             routing.marking.remove(id);
         }
@@ -255,8 +271,9 @@ impl WindowState {
     /// ids it owned outright, which the caller reaps.
     fn drop_window(&self, label: &str) -> (Vec<routing::Arrival>, Vec<String>) {
         // Taken first, and their ids dropped from `owners` before `owned_by`
-        // reads it: an arriving shell belongs to its source again, and reaping
-        // it here would kill a terminal the source is still showing.
+        // reads it: an arriving shell belongs to its source again, which
+        // `hand_back` returns it to, and reaping it here would kill a terminal
+        // the source is still showing.
         let lost = {
             let mut arrivals = guard(&self.arrivals);
             arrivals.forget_deferred_close(label);
@@ -266,7 +283,7 @@ impl WindowState {
             let mut routing = guard(&self.routing);
             for id in lost.iter().flat_map(|arrival| &arrival.terminal_ids) {
                 routing.owners.remove(id);
-                routing.lift_suppression(id);
+                routing.awaiting_replay.remove(id);
             }
             let owned = routing.owned_by(label);
             for id in &owned {
@@ -326,8 +343,6 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     };
 
     let mut released: Vec<String> = Vec::new();
-    // Held events an expired suppression releases, flushed to the owner below.
-    let mut flushed: Vec<(String, Vec<routing::HeldEvent>)> = Vec::new();
     let delivery = {
         // Before the routing lock, never inside it (§`arrivals`). Nothing is
         // transferring in the steady state, so this second acquisition is paid
@@ -346,43 +361,19 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         };
         let mut routing = guard(&state.routing);
         if state.suppressed.load(Ordering::Relaxed) > 0 {
-            let RoutingState { awaiting_replay, held, .. } = &mut *routing;
-            let swept = routing::sweep_awaiting(
-                awaiting_replay,
-                held,
+            released = routing::sweep_awaiting(
+                &mut routing.awaiting_replay,
                 Instant::now(),
                 routing::AWAITING_REPLAY_MAX,
                 &arriving,
             );
-            if !swept.is_empty() {
+            if !released.is_empty() {
                 state.suppressed.store(routing.awaiting_replay.len(), Ordering::Relaxed);
-                for (id, queue) in swept {
-                    if let (false, Some(label)) = (queue.is_empty(), routing.owners.get(&id)) {
-                        flushed.push((label.clone(), queue));
-                    }
-                    released.push(id);
-                }
             }
         }
 
-        match routing::route(
-            event,
-            &data,
-            &RouteView {
-                owners: &routing.owners,
-                awaiting_replay: &routing.awaiting_replay,
-                dor_targets: &routing.dor_targets,
-                registry: &registry,
-                marking: &routing.marking,
-            },
-        ) {
+        match routing::route(event, &data, &routing.view(registry)) {
             Route::Drop => Delivery::Nowhere,
-            Route::Hold => {
-                if let Some(id) = data.get("id").and_then(JsonValue::as_str) {
-                    routing::hold_event(&mut routing.held, id, event, data.clone());
-                }
-                Delivery::Nowhere
-            }
             Route::Broadcast => Delivery::Broadcast,
             Route::EmitTo(label) => Delivery::To(label.to_string()),
             // Resolved here, where the focus order is a sibling of the map the
@@ -400,12 +391,6 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
             },
         }
     };
-
-    for (label, queue) in flushed {
-        for (held_event, held_data) in queue {
-            let _ = app.emit_to(label.as_str(), held_event.as_str(), &held_data);
-        }
-    }
 
     let mut delivered: Option<&str> = None;
     match &delivery {
@@ -438,8 +423,8 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
     }
 
     // Bookkeeping strictly after the emit, so a replay lifts its own suppression
-    // only once the new owner has actually been sent it. Only these four events
-    // pay a second acquisition; a PTY chunk takes the lock once and is done.
+    // only once the new owner has actually been sent it. Only these events pay
+    // a second acquisition; a PTY chunk takes the lock once and is done.
     let id = || data.get("id").and_then(JsonValue::as_str);
     let request_id = || data.get("requestId").and_then(JsonValue::as_str);
     match event {
@@ -463,21 +448,11 @@ fn dispatch_sidecar_event(app: &AppHandle, event: &str, data: JsonValue) {
         }
         "pty:replay" => {
             if let Some(id) = id() {
-                let queue = {
-                    let mut routing = guard(&state.routing);
-                    let queue = routing.lift_suppression(id);
-                    state
-                        .suppressed
-                        .store(routing.awaiting_replay.len(), Ordering::Relaxed);
-                    queue
-                };
-                // Behind the replay, to the window that just received it: the
-                // events describe bytes the replay carried.
-                if let Some(label) = delivered {
-                    for (held_event, held_data) in queue {
-                        let _ = app.emit_to(label, held_event.as_str(), &held_data);
-                    }
-                }
+                let mut routing = guard(&state.routing);
+                routing.awaiting_replay.remove(id);
+                state
+                    .suppressed
+                    .store(routing.awaiting_replay.len(), Ordering::Relaxed);
             }
         }
         "dor:controlRequest" => {
@@ -842,7 +817,8 @@ fn finish_window_close(app: &AppHandle, label: &str) {
     }
 }
 
-/// SIGTERM the PTYs a window left behind.
+/// SIGTERM the PTYs a window left behind, and drop their Sessions' alert
+/// entries with them: no window will ever show those Sessions again.
 ///
 /// Reached whenever a window goes away still owning shells — the close
 /// ack-timeout path ran no teardown at all, and a teardown that overran its
@@ -859,14 +835,13 @@ fn reap_orphaned_ptys(app: &AppHandle, label: &str, ids: Vec<String>) {
         "[window] {label} left {} PTY(s) with no owner; killing them",
         ids.len()
     ));
-    send_to_sidecar(
-        &sidecar,
-        serde_json::json!({
-            "event": "pty:gracefulKill",
-            "data": { "ids": ids, "timeout": 2000 },
-        })
-        .to_string(),
-    );
+    send_to_sidecar(&sidecar, pty_reap_message(&ids));
+}
+
+/// The `pty:reap` line `reap_orphaned_ptys` sends. Not `pty:gracefulKill`,
+/// which the quit teardown sends for PTYs whose windows still show them.
+fn pty_reap_message(ids: &[String]) -> String {
+    sidecar_line("pty:reap", serde_json::json!({ "ids": ids, "timeout": 2000 }))
 }
 
 const LOG_FILE_ENV: &str = "DORMOUSE_LOG_FILE";
@@ -982,6 +957,9 @@ struct PtySpawnOptions {
     cwd: Option<String>,
     shell: Option<String>,
     args: Option<Vec<String>>,
+    /// A cold restore's persisted alert state, seeded by the sidecar's
+    /// AlertManager behind the spawn. Opaque here, like `helper`.
+    alert: Option<JsonValue>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1005,6 +983,17 @@ fn send_to_sidecar(state: &SidecarState, line: String) {
     let _ = state.tx.send(line);
 }
 
+/// One sidecar line, `{event, data}`, serialized straight from `data`: no
+/// intermediate `JsonValue`, so a payload is never deep-cloned on its way out.
+fn sidecar_line(event: &str, data: impl Serialize) -> String {
+    #[derive(Serialize)]
+    struct Line<'a, T> {
+        event: &'a str,
+        data: T,
+    }
+    serde_json::to_string(&Line { event, data }).expect("a sidecar line is plain JSON")
+}
+
 fn request_from_sidecar(
     state: &SidecarState,
     event: &str,
@@ -1017,7 +1006,7 @@ fn request_from_sidecar(
 /// must be declared `#[tauri::command(async)]` (or be an `async fn`). Tauri runs
 /// a plain sync command on the **main thread**, where the `recv_timeout` below
 /// stops the webview from painting for the whole round trip — up to
-/// `AGENT_BROWSER_TIMEOUT` (30s) for a hung agent-browser, and a visible ~3s
+/// `BROWSER_REQUEST_TIMEOUT` (40s) for a hung browser host, and a visible ~3s
 /// freeze on a cold `agent-browser open`, which is long enough to look like a
 /// pane that never appeared. `(async)` moves the same blocking body onto a
 /// runtime worker, so the UI keeps rendering while the sidecar works.
@@ -1084,21 +1073,60 @@ fn pty_spawn(
     options: Option<PtySpawnOptions>,
 ) {
     windows.mint(&id, window.label());
-    let msg = serde_json::json!({
-        "event": "pty:spawn",
-        "data": { "id": id, "options": options }
-    });
-    send_to_sidecar(&state, msg.to_string());
+    send_to_sidecar(&state, pty_spawn_message(&id, options.as_ref()));
+}
+
+/// One `pty:spawn` line. The options ride whole, a persisted `alert` included.
+fn pty_spawn_message(id: &str, options: Option<&PtySpawnOptions>) -> String {
+    sidecar_line("pty:spawn", serde_json::json!({ "id": id, "options": options }))
 }
 
 #[tauri::command]
-fn pty_write(state: tauri::State<'_, SidecarState>, id: String, data: String, paced: Option<bool>) {
-    let mut input = serde_json::json!({ "id": id, "data": data });
-    if paced == Some(true) {
-        input["paced"] = true.into();
+fn pty_write(
+    state: tauri::State<'_, SidecarState>,
+    id: String,
+    data: String,
+    paced: Option<bool>,
+    user_input: Option<bool>,
+) {
+    send_to_sidecar(&state, pty_input_message(&id, &data, paced, user_input));
+}
+
+/// One `pty:input` line. **Human input carries `userInput` on the write itself**,
+/// never a separate alert command racing it: the sidecar acknowledges it and
+/// opens the echo window before the bytes reach the PTY (docs/specs/alert.md
+/// → Engagement). Each flag is present only when true.
+fn pty_input_message(id: &str, data: &str, paced: Option<bool>, user_input: Option<bool>) -> String {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PtyInput<'a> {
+        id: &'a str,
+        data: &'a str,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        paced: bool,
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        user_input: bool,
     }
-    let msg = serde_json::json!({ "event": "pty:input", "data": input });
-    send_to_sidecar(&state, msg.to_string());
+    sidecar_line(
+        "pty:input",
+        PtyInput { id, data, paced: paced == Some(true), user_input: user_input == Some(true) },
+    )
+}
+
+/// Forward a webview's opaque command to the sidecar as `event`, stamped with
+/// the invoking window (`stamped_message`).
+fn forward_stamped(state: &SidecarState, label: &str, event: &str, payload: JsonValue) {
+    send_to_sidecar(state, stamped_message(label, event, payload));
+}
+
+/// A webview's opaque command with the invoking window's label stamped on it
+/// as `window`, over any it claimed: the one field Rust adds, because a
+/// webview cannot name itself to the sidecar.
+fn stamped_message(label: &str, event: &str, mut payload: JsonValue) -> String {
+    if let Some(command) = payload.as_object_mut() {
+        command.insert("window".to_string(), JsonValue::String(label.to_string()));
+    }
+    sidecar_line(event, payload)
 }
 
 #[tauri::command]
@@ -1175,33 +1203,25 @@ fn pty_request_init(
 fn burrow_command(
     window: tauri::Window,
     state: tauri::State<'_, SidecarState>,
-    mut payload: JsonValue,
+    payload: JsonValue,
 ) {
-    // The one field Rust adds: which webview this came from. An ask fans out to
-    // every window and settles on having heard from each, and a webview cannot
-    // name itself to the Burrow (§Burrow service).
-    if let Some(command) = payload.as_object_mut() {
-        command.insert(
-            "window".to_string(),
-            JsonValue::String(window.label().to_string()),
-        );
-    }
-    let msg = serde_json::json!({
-        "event": "burrow:command",
-        "data": payload,
-    });
-    send_to_sidecar(&state, msg.to_string());
+    // Which webview this came from: an ask fans out to every window and settles
+    // on having heard from each (§Burrow service).
+    forward_stamped(&state, window.label(), "burrow:command", payload);
 }
 
-// The two app-global alert stores live in the sidecar so N windows share one
-// answer (docs/specs/alert.md -> "Alarm settings"). One opaque passthrough, like
-// `burrow_command`: the payload names its own op, and the shape belongs to
-// `lib/src/host/alert-store-host.ts` at the other end. The canonical snapshot
-// comes back as a broadcast `alert:settings` / `alert:watchedCommands`.
+// The app's one AlertManager lives in the sidecar, and every window is one of
+// its viewers (§Alerts). One opaque passthrough, like `burrow_command`: the
+// payload names its own op, and the shape belongs to
+// `lib/src/host/alert-protocol.ts`. The window label is stamped, because it is
+// the viewer id engagement is kept under and the owner of the awaits it parks.
 #[tauri::command]
-fn alert_command(state: tauri::State<'_, SidecarState>, payload: JsonValue) {
-    let msg = serde_json::json!({ "event": "alert:command", "data": payload });
-    send_to_sidecar(&state, msg.to_string());
+fn alert_command(
+    window: tauri::Window,
+    state: tauri::State<'_, SidecarState>,
+    payload: JsonValue,
+) {
+    forward_stamped(&state, window.label(), "alert:command", payload);
 }
 
 #[tauri::command]
@@ -1431,6 +1451,24 @@ fn iframe_create_proxy_url(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
+// The repository holding each directory, for Workspace auto-naming, answered by
+// the sidecar (shared lib/src/host/git-info.ts; docs/specs/layout.md ->
+// "Workspace names"). Bridge only. The host lookups time out sooner, so this
+// bound is only for a sidecar that stopped answering.
+#[tauri::command(async)]
+fn git_info(
+    state: tauri::State<'_, SidecarState>,
+    paths: JsonValue,
+) -> Result<JsonValue, String> {
+    let response = request_from_sidecar_timeout(
+        &state,
+        "git:info",
+        serde_json::json!({ "paths": paths }),
+        Duration::from_secs(5),
+    )?;
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
+}
+
 // Resolves a `dor tool <name>` against the nearest dormouse.yml, or records a
 // trust decision, in the sidecar (shared lib/src/host/tool-host.ts). Bridge
 // only — the parsing, the closed substitution set, and the trust record all
@@ -1449,149 +1487,30 @@ fn tool_control(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-// ── agent-browser host (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
+// ── Browser automation (docs/specs/dor-browser.md → "Browser Host").
 // Thin forwarders to the Node sidecar, which runs the shared
-// lib/src/host/agent-browser-host.ts — the very same module the VS Code
-// extension host runs. Mirrors iframe_create_proxy_url; the logic lives in lib,
-// not here, so the two hosts can't drift. ──────────────────────────────────────
+// lib/src/host/browser-host.ts — the very same module the VS Code extension
+// host runs, and the one place a request is validated. Mirrors
+// iframe_create_proxy_url; the logic lives in lib, not here, so the two hosts
+// can't drift. ────────────────────────────────────────────────────────────────
 
-// agent-browser launches Chrome (slow on first run), and pop-out is a
-// close + relaunch, so allow a generous window before a forward times out.
-const AGENT_BROWSER_TIMEOUT: Duration = Duration::from_secs(30);
-
-fn agent_browser_forward(
-    state: &SidecarState,
-    event: &str,
-    data: JsonValue,
-) -> Result<JsonValue, String> {
-    let response = request_from_sidecar_timeout(state, event, data, AGENT_BROWSER_TIMEOUT)?;
-    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
-}
+// BROWSER_REQUEST_TIMEOUT_MS in dor-lib-common/src/browser-providers.ts: the
+// host bounds a launch (slow on a first Chrome run, and pop-out is a close +
+// relaunch) to answer inside it.
+const BROWSER_REQUEST_TIMEOUT: Duration = Duration::from_secs(40);
 
 #[tauri::command(async)]
-fn agent_browser_command(
+fn browser_request(
     state: tauri::State<'_, SidecarState>,
-    session: String,
-    args: Vec<String>,
-    binary_path: Option<String>,
+    request: JsonValue,
 ) -> Result<JsonValue, String> {
-    agent_browser_forward(
+    let response = request_from_sidecar_timeout(
         &state,
-        "agentBrowser:command",
-        serde_json::json!({ "session": session, "args": args, "binaryPath": binary_path }),
-    )
-}
-
-#[tauri::command(async)]
-fn agent_browser_edit(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    op: String,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:edit",
-        serde_json::json!({ "session": session, "op": op, "binaryPath": binary_path }),
-    )
-}
-
-#[tauri::command(async)]
-fn agent_browser_stream_status(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:streamStatus",
-        serde_json::json!({ "session": session, "binaryPath": binary_path }),
-    )
-}
-
-#[tauri::command(async)]
-fn agent_browser_open(
-    state: tauri::State<'_, SidecarState>,
-    url: String,
-    headed: Option<bool>,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:open",
-        serde_json::json!({ "url": url, "headed": headed, "binaryPath": binary_path }),
-    )
-}
-
-// `rect` is accepted by the adapter but unused — no window positioning today.
-#[tauri::command(async)]
-fn agent_browser_pop_out(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    url: Option<String>,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:popOut",
-        serde_json::json!({ "session": session, "url": url, "binaryPath": binary_path }),
-    )
-}
-
-#[tauri::command(async)]
-fn agent_browser_pop_in(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    url: Option<String>,
-    binary_path: Option<String>,
-) -> Result<JsonValue, String> {
-    agent_browser_forward(
-        &state,
-        "agentBrowser:popIn",
-        serde_json::json!({ "session": session, "url": url, "binaryPath": binary_path }),
-    )
-}
-
-// The sidecar hands back the screenshot's temp-file PATH (bytes no longer ride
-// the JSON-lines stdio shared with PTY traffic). Read the file here and return a
-// raw tauri::ipc::Response so the webview gets an ArrayBuffer (the path the panel
-// decodes with createImageBitmap). A base64 `bytesBase64` field is kept as a
-// fallback for a stale sidecar bundle (dev-time version skew), but the path
-// branch is preferred.
-#[tauri::command(async)]
-fn agent_browser_screenshot(
-    state: tauri::State<'_, SidecarState>,
-    session: String,
-    format: Option<String>,
-    quality: Option<u32>,
-    binary_path: Option<String>,
-) -> Result<tauri::ipc::Response, String> {
-    let result = agent_browser_forward(
-        &state,
-        "agentBrowser:screenshot",
-        serde_json::json!({ "session": session, "format": format, "quality": quality, "binaryPath": binary_path }),
+        "browser:request",
+        serde_json::json!({ "request": request }),
+        BROWSER_REQUEST_TIMEOUT,
     )?;
-    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
-        return Err(result
-            .get("error")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("screenshot failed")
-            .to_string());
-    }
-    if let Some(path) = result.get("path").and_then(JsonValue::as_str) {
-        let bytes = std::fs::read(path)
-            .map_err(|err| format!("could not read screenshot file '{path}': {err}"))?;
-        return Ok(tauri::ipc::Response::new(bytes));
-    }
-    // Fallback: an older sidecar bundle still base64s the bytes over stdio.
-    let b64 = result
-        .get("bytesBase64")
-        .and_then(JsonValue::as_str)
-        .ok_or("screenshot returned no path or bytes")?;
-    let bytes = BASE64
-        .decode(b64)
-        .map_err(|err| format!("bad screenshot base64: {err}"))?;
-    Ok(tauri::ipc::Response::new(bytes))
+    Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
 // Clipboard reads run natively on Windows (see clipboard_win) to avoid the
@@ -1681,8 +1600,8 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 /// Per-build window and recovery state. The supported dev wrapper already uses
 /// a worktree-specific identifier; this subtree also protects raw `tauri dev`
-/// launches that retain the installed identifier. Archive and Burrow stores stay
-/// at the identifier's app-data root, not shared across different identifiers.
+/// launches that retain the installed identifier. Burrow stores stay at the
+/// identifier's app-data root, not shared across different identifiers.
 fn state_root_from(app_data: PathBuf) -> PathBuf {
     if cfg!(debug_assertions) {
         app_data.join("dev")
@@ -1889,12 +1808,8 @@ fn ensure_parent_with(
 
 /// Write `contents` to `path` atomically and owner-only.
 ///
-/// The one implementation behind both machine-local stores this app owns — the
-/// per-window session snapshot and the notepad archive — because both carry user
-/// text and both must survive a crash mid-write
-/// (docs/specs/security-local.md -> "Persisted state"). Owner-only before any
-/// bytes are written, and atomic-replace, both live here
-/// (docs/specs/standalone.md -> "Persistence").
+/// Session snapshots are written owner-only and atomically so they survive a
+/// crash mid-write (`docs/specs/standalone.md` -> "Persistence").
 fn write_file_atomically(path: &Path, contents: &str) -> Result<(), String> {
     write_file_with_permissions(path, contents, restrict_to_owner)
 }
@@ -2319,242 +2234,6 @@ fn note_geometry(app: &AppHandle, label: &str, origin: Option<(i32, i32)>, size:
     });
 }
 
-// --- Notepad archive (docs/specs/notepad.md) ---------------------------------
-//
-// One machine-local archive per host, kept as `<app_data_dir>/notepad-archive-v1.json`
-// — outside `sessions/`, and outside the state root, so dev and the installed app
-// share it. A Surface's notes outlive the window whose closure archived them, so
-// they must not ride the per-window session blob or be swept with that directory.
-//
-// The port is compare-and-swap (`NotepadArchivePort` in
-// lib/src/lib/notepad/types.ts): the webview reads the bytes plus an opaque
-// revision, applies its mutation, and writes back naming the revision it read.
-// A stale revision answers "conflict" and the webview retries against a fresh
-// read, so two overlapping mutations cannot drop one another's batches.
-//
-// The revision is a hash of the stored bytes, and every load, save and reset
-// runs under an exclusive lock on a sidecar lock file. Both are needed because
-// `app_data_dir()` is keyed by the Tauri identifier and nothing enforces one
-// launch per identifier: two launches of the installed app share a data
-// directory, as do two `pnpm dev:standalone` runs in one worktree, whose
-// identifier is per-worktree and stable. A hash is the only revision two
-// processes agree on without talking to each other: a counter only ever
-// tracked this process's own writes, so the loser of an overlapping load→save
-// silently overwrote the winner's batches. The lock makes read-compare-rename
-// one step, so the loser is told "conflict" and retries instead. `None` means
-// nothing is stored — what a first save names as its base, and what a reset
-// leaves behind.
-
-const NOTEPAD_ARCHIVE_FILE: &str = "notepad-archive-v1.json";
-
-#[derive(Default)]
-struct NotepadArchiveState {
-    /// Serializes this process's own load / save / reset, ahead of the
-    /// interprocess file lock those take: the intra-process path is then
-    /// ordered regardless of how a platform scopes an advisory lock, and two
-    /// threads here can never queue on each other through the filesystem.
-    gate: Mutex<()>,
-}
-
-fn notepad_archive_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app_data_dir(app)?.join(NOTEPAD_ARCHIVE_FILE))
-}
-
-/// The lock guarding every access to `path`, derived from its name so the two
-/// can never drift apart.
-///
-/// A *separate* file, never renamed: the archive itself is replaced by rename on
-/// every save, so its inode is a new one each time and cannot carry a lock.
-fn notepad_archive_lock_path(path: &Path) -> PathBuf {
-    path.with_extension("lock")
-}
-
-/// Exclusive access to the archive, released when it drops.
-///
-/// Taken gate first, then the interprocess file lock. The fields are declared
-/// in the reverse of that on purpose — Rust drops them in declaration order, and
-/// a gate released ahead of the file lock would let the next thread through only
-/// to block on the filesystem, which is the one thing the gate exists to prevent
-/// (`NotepadArchiveState::gate`).
-struct ArchiveLock<'a> {
-    _file: File,
-    _gate: MutexGuard<'a, ()>,
-}
-
-/// The one way in: no caller may take either half on its own.
-fn lock_archive<'a>(gate: &'a Mutex<()>, path: &Path) -> Result<ArchiveLock<'a>, String> {
-    let gate = gate
-        .lock()
-        .map_err(|_| "failed to lock the notepad archive".to_string())?;
-    let file = lock_notepad_archive(path)?;
-    Ok(ArchiveLock {
-        _file: file,
-        _gate: gate,
-    })
-}
-
-/// Take the interprocess lock, blocking until it is ours; released when the
-/// returned handle drops.
-///
-/// Reported rather than swallowed: this lock is what makes the compare-and-swap
-/// correct across processes, so carrying on without it would silently reinstate
-/// the overwrite it exists to close. Blocking is safe because every caller is a
-/// `#[tauri::command(async)]` off the event loop, and each holder does one small
-/// read or write.
-fn lock_notepad_archive(path: &Path) -> Result<File, String> {
-    ensure_parent_with(path, restrict_to_owner)?;
-    let lock_path = notepad_archive_lock_path(path);
-    let file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        // Never truncated: the file is a lock, and its bytes (none) are not
-        // state anyone reads.
-        .truncate(false)
-        .open(&lock_path)
-        .map_err(|e| format!("open notepad archive lock: {e}"))?;
-    // Carries no bytes, but it names the archive and sits beside it, so it gets
-    // the same owner-only mode the archive does.
-    let _ = restrict_to_owner(&lock_path, 0o600);
-    file.lock()
-        .map_err(|e| format!("lock notepad archive: {e}"))?;
-    Ok(file)
-}
-
-/// The compare-and-swap token: a hash of exactly the bytes on disk.
-///
-/// `DefaultHasher::new()` is fixed-key rather than randomly seeded, which is the
-/// property that matters — two processes, and two runs of one process, must
-/// derive the same token from the same file or every save after a restart would
-/// read as a conflict.
-fn archive_revision(contents: &str) -> String {
-    use std::hash::{DefaultHasher, Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    contents.hash(&mut hasher);
-    format!("{}-{:016x}", contents.len(), hasher.finish())
-}
-
-/// The stored bytes and their revision, with the lock already held.
-fn read_notepad_archive_locked(path: &Path) -> Result<Option<(String, String)>, String> {
-    match std::fs::read_to_string(path) {
-        Ok(contents) => {
-            let revision = archive_revision(&contents);
-            Ok(Some((contents, revision)))
-        }
-        // Nothing stored — including after a reset moved it aside — so the next
-        // save must name a null base revision.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(format!("read notepad archive: {e}")),
-    }
-}
-
-fn read_notepad_archive_from(
-    path: &Path,
-    gate: &Mutex<()>,
-) -> Result<Option<(String, String)>, String> {
-    let _lock = lock_archive(gate, path)?;
-    read_notepad_archive_locked(path)
-}
-
-fn write_notepad_archive_to(
-    path: &Path,
-    gate: &Mutex<()>,
-    state: &str,
-    base_revision: Option<&str>,
-) -> Result<String, String> {
-    // Held across the whole compare-and-write: the comparison is worth nothing
-    // if another save — this process's or another Dormouse's — can land between
-    // it and the rename.
-    let _lock = lock_archive(gate, path)?;
-    // Re-read under the lock rather than trusting anything cached: a revision
-    // nobody minted (a garbled one, or one whose bytes another process has since
-    // replaced) then reads as a conflict rather than as an error the caller
-    // would have to handle separately.
-    let current = read_notepad_archive_locked(path)?.map(|(_, revision)| revision);
-    if current.as_deref() != base_revision {
-        return Ok("conflict".to_string());
-    }
-    write_file_atomically(path, state)?;
-    Ok("ok".to_string())
-}
-
-/// Move an unreadable archive aside, never delete it.
-///
-/// The recovery that calls this knows only that the stored bytes do not parse;
-/// they are still the user's notes, so they are renamed to
-/// `notepad-archive-v1.unreadable-<unix-millis>.json` beside the original and
-/// left for whoever wants to salvage them (docs/specs/notepad.md).
-fn reset_notepad_archive_at(path: &Path, gate: &Mutex<()>) -> Result<(), String> {
-    let _lock = lock_archive(gate, path)?;
-    let dir = path
-        .parent()
-        .ok_or_else(|| format!("no parent directory for {}", path.display()))?;
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis());
-    // Derived from the archive's own name so the two can never drift apart.
-    let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-    // The name is per-millisecond; on the vanishing chance two recoveries land
-    // inside one, disambiguate rather than let the rename overwrite the earlier
-    // quarantine — surviving is the entire point of this file.
-    let mut target = dir.join(format!("{stem}.unreadable-{millis}.json"));
-    let mut nth = 2;
-    while target.exists() {
-        target = dir.join(format!("{stem}.unreadable-{millis}-{nth}.json"));
-        nth += 1;
-    }
-    match std::fs::rename(path, &target) {
-        Ok(()) => {}
-        // Nothing stored is the desired end state, not a failure.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("quarantine notepad archive: {e}")),
-    }
-    // A temp file left by a crash before its rename was never a readable
-    // archive, so unlike the file above it is dropped rather than kept.
-    let tmp = temp_write_path(path);
-    match std::fs::remove_file(&tmp) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("remove notepad archive temp: {e}")),
-    }
-    Ok(())
-}
-
-// Async like the session commands: the read, and the save's two fsyncs, run off
-// the main/event-loop thread.
-#[tauri::command(async)]
-fn load_notepad_archive(
-    app: AppHandle,
-    archive: tauri::State<'_, NotepadArchiveState>,
-) -> Result<Option<(String, String)>, String> {
-    read_notepad_archive_from(&notepad_archive_path(&app)?, &archive.gate)
-}
-
-/// `"ok"` or `"conflict"` — the stored archive moved since `base_revision` was
-/// read, and the caller owes it a retry.
-#[tauri::command(async)]
-fn save_notepad_archive(
-    app: AppHandle,
-    archive: tauri::State<'_, NotepadArchiveState>,
-    state: String,
-    base_revision: Option<String>,
-) -> Result<String, String> {
-    write_notepad_archive_to(
-        &notepad_archive_path(&app)?,
-        &archive.gate,
-        &state,
-        base_revision.as_deref(),
-    )
-}
-
-#[tauri::command(async)]
-fn reset_notepad_archive(
-    app: AppHandle,
-    archive: tauri::State<'_, NotepadArchiveState>,
-) -> Result<(), String> {
-    reset_notepad_archive_at(&notepad_archive_path(&app)?, &archive.gate)
-}
-
 // ── Window lifecycle (docs/specs/standalone.md §Windows) ─────────────────────
 
 /// Every file name in the sessions directory, for the boot enumeration.
@@ -2602,21 +2281,15 @@ fn restore_windows(app: &AppHandle, dir: &Path, labels: &[String]) {
 }
 
 
-/// Open a window cloned from `tauri.conf.json`'s first window config, so
-/// `titleBarStyle`, `hiddenTitle`, `dragDropEnabled` and the CSP carry across
-/// without a second copy of any of them.
-fn build_window(
-    app: &AppHandle,
+/// A later window's config: a clone of `tauri.conf.json`'s first window, so
+/// `titleBarStyle`, `hiddenTitle`, `dragDropEnabled`, `backgroundThrottling`
+/// and the CSP carry across without a second copy of any of them.
+fn window_config(
+    first: &tauri::utils::config::WindowConfig,
     label: &str,
     geometry: Option<WindowGeometry>,
-) -> Result<(), String> {
-    let mut config = app
-        .config()
-        .app
-        .windows
-        .first()
-        .cloned()
-        .ok_or_else(|| "no window config to clone".to_string())?;
+) -> tauri::utils::config::WindowConfig {
+    let mut config = first.clone();
     config.label = label.to_string();
     if let Some(geometry) = geometry {
         config.x = Some(geometry.x);
@@ -2626,6 +2299,22 @@ fn build_window(
         // An explicit position and a centering request are contradictory.
         config.center = false;
     }
+    config
+}
+
+/// Open a window from `window_config`.
+fn build_window(
+    app: &AppHandle,
+    label: &str,
+    geometry: Option<WindowGeometry>,
+) -> Result<(), String> {
+    let first = app
+        .config()
+        .app
+        .windows
+        .first()
+        .ok_or_else(|| "no window config to clone".to_string())?;
+    let config = window_config(first, label, geometry);
     let window = WebviewWindowBuilder::from_config(app, &config)
         .map_err(|err| format!("configure window {label}: {err}"))?
         .build()
@@ -3068,10 +2757,9 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
 /// From its mark to now every byte went to the target, or nowhere, and the
 /// source's xterm stands at the mark; so the sidecar is asked for
 /// `outputSince(mark)` scoped to the source, and that replay lifts the
-/// suppression on its way out (`dispatch_sidecar_event`), the held protocol
-/// events behind it. Marks come from the routing state at `pty:marked`, never
-/// from the later serialized content. Only an id the sidecar never stamped
-/// goes straight back.
+/// suppression on its way out (`dispatch_sidecar_event`). Marks come from the
+/// routing state at `pty:marked`, never from the later serialized content. Only
+/// an id the sidecar never stamped goes straight back.
 ///
 /// The record must already be out of the queue; the caller took it.
 fn hand_back_arrival(
@@ -3544,8 +3232,8 @@ fn quit_ack(window: tauri::Window, state: tauri::State<'_, QuitState>) {
     guard(&state.machine).ack(window.label());
 }
 
-// This window is ready to be torn down: its confirmation and archive gates are
-// done. The last vote starts the walk.
+// This window is ready to be torn down: its confirmation is done. The last vote
+// starts the walk.
 #[tauri::command]
 fn quit_vote(app: AppHandle, window: tauri::Window, state: tauri::State<'_, QuitState>) {
     let actions = guard(&state.machine).vote(window.label());
@@ -3629,8 +3317,7 @@ fn window_close_ack(window: tauri::Window, state: tauri::State<'_, QuitState>) {
     guard(&state.close).ack(window.label());
 }
 
-// The user declined the close, or its archive gate refused it. The window stays
-// exactly as it was.
+// The user declined the close. The window stays exactly as it was.
 #[tauri::command]
 fn window_close_cancel(
     window: tauri::Window,
@@ -3641,8 +3328,8 @@ fn window_close_cancel(
     guard(&state.close).clear(window.label());
 }
 
-// This window is done with itself: its close orchestrator archived, removed the
-// snapshot and killed its PTYs, or its last Workspace moved away and there was
+// This window is done with itself: its close orchestrator removed the snapshot
+// and killed its PTYs, or its last Workspace moved away and there was
 // nothing to end at all. Rust's half is the same either way; what separates the
 // two is what the webview did first, so the intent lives at the call sites
 // (standalone/src/window-close.ts, standalone/src/workspace-move.ts).
@@ -4162,6 +3849,7 @@ const QUIT_MENU_ITEM_ID: &str = "dormouse-quit";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    panic_policy::abort_on_panic();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -4378,12 +4066,6 @@ pub fn run() {
                 Err(e) => append_log(format!("[session] {e}")),
             }
 
-            // Serializes this process's notepad-archive access (§Notepad
-            // archive); the revision itself is read off the stored bytes and
-            // the cross-process exclusion is a lock file, so there is no
-            // starting state to seed here.
-            app.manage(NotepadArchiveState::default());
-
             // On non-macOS, remove native decorations for a fully custom title bar.
             // macOS uses titleBarStyle "Overlay" from config instead, which preserves
             // rounded corners and native traffic-light buttons.
@@ -4443,6 +4125,7 @@ pub fn run() {
             take_recovery_commands,
             iframe_create_proxy_url,
             tool_control,
+            git_info,
             pty_request_init,
             dor_control_response,
             burrow_command,
@@ -4478,16 +4161,7 @@ pub fn run() {
             read_update_log,
             load_session,
             save_session,
-            load_notepad_archive,
-            save_notepad_archive,
-            reset_notepad_archive,
-            agent_browser_command,
-            agent_browser_edit,
-            agent_browser_screenshot,
-            agent_browser_stream_status,
-            agent_browser_open,
-            agent_browser_pop_out,
-            agent_browser_pop_in,
+            browser_request,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Dormouse")
@@ -4497,6 +4171,7 @@ pub fn run() {
                 set_macos_dock_icon();
                 // The delegate exists by now, which is what this splices onto.
                 macos_terminate::install(app);
+                macos_siri_affordance::install(app);
             }
             // A window-level exit request (§Trigger interception). The flow's own
             // app.exit(0) re-enters here with approved=true and passes; `code`
@@ -4531,13 +4206,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        arrivals_path, find_node_binary, forget_arrival_on_disk, notepad_archive_lock_path,
-        open_ports_many_timeout, read_arrivals_from, read_notepad_archive_from,
-        read_session_from, record_arrival_on_disk, reset_notepad_archive_at,
+        arrivals_path, find_node_binary, forget_arrival_on_disk,
+        open_ports_many_timeout, read_arrivals_from,
+        read_session_from, record_arrival_on_disk,
         resolve_dor_cli_paths, resolve_sidecar_path, restore_arrivals, session_file_name,
         session_file_names, state_root_from, strip_windows_verbatim_prefix,
-        sweep_orphan_session_temps, temp_write_path, write_notepad_archive_to,
-        write_session_to, JsonValue, NOTEPAD_ARCHIVE_FILE, OPEN_PORT_TIMEOUT_MS,
+        sweep_orphan_session_temps, temp_write_path,
+        write_session_to, JsonValue, OPEN_PORT_TIMEOUT_MS,
         OPEN_PORT_TIMEOUT_PER_ID_MS, OPEN_PORT_ROUND_TRIP_MARGIN_MS, SESSION_TEMP_SUFFIX,
     };
     use super::routing;
@@ -4557,6 +4232,23 @@ mod tests {
         let twenty = open_ports_many_timeout(20).as_millis() as u64;
         assert_eq!(one, 2 * OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS + OPEN_PORT_ROUND_TRIP_MARGIN_MS);
         assert_eq!(twenty - one, 19 * OPEN_PORT_TIMEOUT_PER_ID_MS);
+    }
+
+    /// docs/specs/standalone.md -> "Windows": spoken alarms play in the
+    /// renderer, so no window's webview may be throttled or suspended while
+    /// minimized — neither `main` nor a later window cloned from it.
+    #[test]
+    fn every_window_disables_background_throttling() {
+        use tauri::utils::config::{BackgroundThrottlingPolicy, Config};
+        let conf: Config = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let first = conf.app.windows.first().unwrap();
+        assert_eq!(first.background_throttling, Some(BackgroundThrottlingPolicy::Disabled));
+        let geometry = super::WindowGeometry { x: 10.0, y: 20.0, width: 640.0, height: 480.0 };
+        for geometry in [None, Some(geometry)] {
+            let later = super::window_config(first, "ws-2", geometry);
+            assert_eq!(later.label, "ws-2");
+            assert_eq!(later.background_throttling, Some(BackgroundThrottlingPolicy::Disabled));
+        }
     }
 
     // RAII guard so a failing assert doesn't leak the temp dir.
@@ -4722,6 +4414,32 @@ mod tests {
         );
     }
 
+    /// The target going away drops the arriving shells' owner so they are not
+    /// reaped with it; the hand-back must give them to the source again, or the
+    /// panes it still shows receive no output, exit or alert state. A shell
+    /// killed mid-transfer stays unowned.
+    #[test]
+    fn a_target_closing_mid_arrival_hands_its_shells_back() {
+        let windows = super::WindowState::default();
+        let ids = ["t1".to_string(), "t2".to_string(), "t3".to_string()];
+        for id in &ids { windows.mint(id, "main"); }
+        windows.begin_transfer(&ids, "main", "ws-2");
+        guard(&windows.routing).mark_transfer("t1", 42);
+        windows.forget_pty("t3");
+        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        arrival.terminal_ids = ids.to_vec();
+        guard(&windows.arrivals).push(arrival);
+
+        let (lost, orphaned) = windows.drop_window("ws-2");
+        assert!(orphaned.is_empty());
+        assert_eq!(windows.hand_back(&lost[0].terminal_ids, "main")["t1"], 42);
+        let routing = guard(&windows.routing);
+        assert_eq!(routing.owners.get("t1").map(String::as_str), Some("main"));
+        assert!(routing.awaiting_replay.contains_key("t1"));
+        assert_eq!(routing.owners.get("t2").map(String::as_str), Some("main"));
+        assert!(!routing.owners.contains_key("t3"));
+    }
+
     #[test]
     fn a_pty_exit_keeps_its_cut_until_the_arrival_settles() {
         let windows = super::WindowState::default();
@@ -4733,8 +4451,106 @@ mod tests {
         assert_eq!(windows.hand_back(&["t1".to_string()], "main")["t1"], 42);
         let routing = guard(&windows.routing);
         assert!(!routing.transfer_marks.contains_key("t1"));
-        assert!(!routing.owners.contains_key("t1"));
-        assert!(!routing.awaiting_replay.contains_key("t1"));
+        // The source shows the exited pane again, behind the replay of its cut.
+        assert_eq!(routing.owners.get("t1").map(String::as_str), Some("main"));
+        assert!(routing.awaiting_replay.contains_key("t1"));
+    }
+
+    /// An exit between a transfer's invoke and its mark belongs to the source,
+    /// which still shows the pane and is about to serialize it, and so does the
+    /// mark behind it: the target lists an exited id only when it has a cut.
+    #[test]
+    fn an_exit_before_the_mark_leaves_the_transfer_to_finish() {
+        let windows = super::WindowState::default();
+        let registry = super::workspaces::Registry::default();
+        let exit = serde_json::json!({"id": "t1", "exitCode": 0});
+        let marked = serde_json::json!({"id": "t1", "mark": 42});
+        windows.mint("t1", "main");
+        windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
+        let routed = |event: &str, data: &JsonValue| {
+            let state = guard(&windows.routing);
+            super::routing::route(event, data, &state.view(&registry)) == super::routing::Route::EmitTo("main")
+        };
+        assert!(routed("pty:exit", &exit));
+        windows.exited_pty("t1");
+        assert!(routed("pty:marked", &marked));
+        guard(&windows.routing).mark_transfer("t1", 42);
+        assert_eq!(guard(&windows.routing).transfer_marks.get("t1"), Some(&42));
+    }
+
+    /// An exited Session is still on screen, and a dismiss or a TODO cleared on
+    /// it comes back as `alert:state`: dropped as unowned, the pane would ring
+    /// forever. Only a kill forgets the owner.
+    #[test]
+    fn an_exited_pty_stays_owned_until_it_is_killed() {
+        let windows = super::WindowState::default();
+        windows.mint("t1", "main");
+        windows.exited_pty("t1");
+        {
+            let state = guard(&windows.routing);
+            let registry = super::workspaces::Registry::default();
+            assert_eq!(
+                super::routing::route("alert:state", &serde_json::json!({"id": "t1"}), &state.view(&registry)),
+                super::routing::Route::EmitTo("main")
+            );
+        }
+        windows.forget_pty("t1");
+        assert!(!guard(&windows.routing).owners.contains_key("t1"));
+    }
+
+    fn parse_line(line: &str) -> JsonValue {
+        serde_json::from_str(line).expect("a sidecar line is JSON")
+    }
+
+    /// The window label is the alert viewer id and the owner of the awaits a
+    /// window parks, and a webview cannot name itself: Rust stamps it on the
+    /// opaque command, over anything the payload claimed.
+    #[test]
+    fn a_forwarded_command_carries_the_invoking_window_over_its_claim() {
+        let forged = serde_json::json!({ "op": "hello", "window": "main" });
+        assert_eq!(
+            parse_line(&super::stamped_message("ws-2", "alert:command", forged)),
+            serde_json::json!({ "event": "alert:command", "data": { "op": "hello", "window": "ws-2" } })
+        );
+    }
+
+    /// Human input is acknowledged by the sidecar before it writes, so the flag
+    /// rides the write itself rather than a second message that could lose the race.
+    #[test]
+    fn user_input_rides_the_write_it_describes() {
+        assert_eq!(
+            parse_line(&super::pty_input_message("t1", "y", None, Some(true))),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "y", "userInput": true } })
+        );
+        assert_eq!(
+            parse_line(&super::pty_input_message("t1", "\x1b[I", Some(true), Some(false))),
+            serde_json::json!({ "event": "pty:input", "data": { "id": "t1", "data": "\x1b[I", "paced": true } })
+        );
+    }
+
+    /// A window gone for good takes its Sessions' alert entries with its shells,
+    /// unlike the quit teardown's `pty:gracefulKill`, sent while windows still
+    /// show their PTYs.
+    #[test]
+    fn an_orphan_reap_removes_the_sessions_it_kills() {
+        assert_eq!(
+            parse_line(&super::pty_reap_message(&["t1".to_string(), "t2".to_string()])),
+            serde_json::json!({ "event": "pty:reap", "data": { "ids": ["t1", "t2"], "timeout": 2000 } })
+        );
+    }
+
+    /// A cold restore seeds the pane's persisted alert through its spawn, so
+    /// the sidecar starts the Session over and seeds it in one step.
+    #[test]
+    fn a_spawn_carries_its_persisted_alert_to_the_sidecar() {
+        let alert = serde_json::json!({ "status": "ALERT_RINGING", "todo": true, "notification": null });
+        let options: super::PtySpawnOptions =
+            serde_json::from_value(serde_json::json!({ "cols": 80, "rows": 24, "alert": alert })).unwrap();
+        let line = parse_line(&super::pty_spawn_message("t1", Some(&options)));
+        assert_eq!(line["event"], "pty:spawn");
+        assert_eq!(line["data"]["id"], "t1");
+        assert_eq!(line["data"]["options"]["cols"], 80);
+        assert_eq!(line["data"]["options"]["alert"], alert);
     }
 
     #[test]
@@ -4751,11 +4567,7 @@ mod tests {
         assert!(state.awaiting_replay.is_empty());
         assert!(state.transfer_marks.is_empty());
         let registry = super::workspaces::Registry::default();
-        let view = super::RouteView {
-            owners: &state.owners, awaiting_replay: &state.awaiting_replay,
-            dor_targets: &state.dor_targets, registry: &registry, marking: &state.marking,
-        };
-        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "live"}), &view), super::routing::Route::EmitTo("ws-2")));
+        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "live"}), &state.view(&registry)), super::routing::Route::EmitTo("ws-2")));
     }
 
     #[test]
@@ -4764,13 +4576,9 @@ mod tests {
         windows.mint("t1", "main");
         windows.begin_transfer(&["t1".to_string()], "main", "ws-2");
         let state = guard(&windows.routing);
-        let view = super::RouteView {
-            owners: &state.owners, awaiting_replay: &state.awaiting_replay,
-            dor_targets: &state.dor_targets, registry: &super::workspaces::Registry::default(),
-            marking: &state.marking,
-        };
+        let registry = super::workspaces::Registry::default();
         assert_eq!(state.owners.get("t1").map(String::as_str), Some("ws-2"));
-        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "before-mark"}), &view), super::routing::Route::EmitTo("main")));
+        assert!(matches!(super::routing::route("pty:data", &serde_json::json!({"id": "t1", "data": "before-mark"}), &state.view(&registry)), super::routing::Route::EmitTo("main")));
     }
 
     #[test]
@@ -4790,7 +4598,7 @@ mod tests {
         state.mark_transfer("t1", 42);
         assert!(state.awaiting_replay.contains_key("t1"));
         assert_eq!(state.transfer_marks.get("t1"), Some(&42));
-        state.lift_suppression("t1");
+        state.awaiting_replay.remove("t1"); // what the target's replay lifts
         assert_eq!(state.transfer_marks.get("t1"), Some(&42));
         state.mark_transfer("t2", 99); // a late mark after hand-back is inert
         assert!(!state.transfer_marks.contains_key("t2"));
@@ -5599,54 +5407,35 @@ mod tests {
         queue_test_suppression(&state, "pane-a");
         assert_eq!(state.suppressed.load(Ordering::Relaxed), 1);
 
-        super::routing::hold_event(
-            &mut guard(&state.routing).held,
-            "pane-a",
-            "terminal:protocolEvents",
-            serde_json::json!({"n": 1}),
-        );
-
         state.mint("pane-a", "main");
         assert!(guard(&state.routing).awaiting_replay.is_empty());
-        // Nothing held for the PTY that never arrived survives under its id.
-        assert!(guard(&state.routing).held.is_empty());
         assert_eq!(state.suppressed.load(Ordering::Relaxed), 0);
         assert_eq!(state.owned_by("main"), vec!["pane-a".to_string()]);
     }
 
-    /// Every way out of a suppression takes the held queue with it: a queue
-    /// left behind would be flushed ahead of the *next* transfer's own gap.
+    /// Every way out of a suppression lifts it and republishes the count the
+    /// hot path reads: an id left in `awaiting_replay` stays silent until the
+    /// sweep, and a stale count sends every chunk through the sweep.
     #[test]
-    fn every_lift_of_a_suppression_takes_its_held_queue() {
+    fn every_way_out_of_a_suppression_lifts_it() {
         let state = super::WindowState::default();
         let ids = ["pane-a".to_string()];
-        let queue_up = || {
-            queue_test_suppression(&state, "pane-a");
-            super::routing::hold_event(
-                &mut guard(&state.routing).held,
-                "pane-a",
-                "terminal:protocolEvents",
-                serde_json::json!({"n": 1}),
-            );
-            assert_eq!(state.suppressed.load(Ordering::Relaxed), 1);
-        };
         let lifted = || {
-            let routing = guard(&state.routing);
-            routing.awaiting_replay.is_empty() && routing.held.is_empty()
+            guard(&state.routing).awaiting_replay.is_empty()
+                && state.suppressed.load(Ordering::Relaxed) == 0
         };
 
-        queue_up();
+        queue_test_suppression(&state, "pane-a");
         state.clear_suppression(&ids);
         assert!(lifted());
-        assert_eq!(state.suppressed.load(Ordering::Relaxed), 0);
 
-        queue_up();
-        // An unmarked hand-back releases its queue without requesting replay.
+        queue_test_suppression(&state, "pane-a");
+        // An unmarked hand-back goes straight back, with no replay to wait for.
         guard(&state.routing).transfer_marks.remove("pane-a");
         state.hand_back(&ids, "main");
         assert!(lifted());
 
-        queue_up();
+        queue_test_suppression(&state, "pane-a");
         state.forget_pty("pane-a");
         assert!(lifted());
     }
@@ -5730,7 +5519,6 @@ mod tests {
         fs::write(legacy.join("main.json.tmp"), "secret").unwrap();
         fs::write(active.join("main.json.tmp"), "secret").unwrap();
         fs::write(legacy.join("main.geometry.json"), "geometry").unwrap();
-        fs::write(dir.path().join(NOTEPAD_ARCHIVE_FILE), "captured note").unwrap();
         assert!(super::sweep_session_roots(dir.path()).is_empty());
         let mut expected_session = session.clone();
         expected_session["panes"][0].as_object_mut().unwrap().remove("scrollback");
@@ -5743,7 +5531,6 @@ mod tests {
         assert!(!legacy.join("main.json.tmp").exists());
         assert!(!active.join("main.json.tmp").exists());
         assert_eq!(fs::read_to_string(legacy.join("main.geometry.json")).unwrap(), "geometry");
-        assert_eq!(fs::read_to_string(dir.path().join(NOTEPAD_ARCHIVE_FILE)).unwrap(), "captured note");
     }
 
     #[test]
@@ -5765,274 +5552,6 @@ mod tests {
         assert_eq!(session_file_name("../../evil"), "______evil.json");
         assert_eq!(session_file_name("main"), "main.json");
         assert_eq!(session_file_name("a/b"), "a_b.json");
-    }
-
-    // ── Notepad archive (docs/specs/notepad.md) ─────────────────────────────
-    //
-    // A compare-and-swap store, so what is worth pinning is the pair the webview
-    // leans on: a save lands only on the revision it read, and no failure path —
-    // a stale save, a crash mid-write, a recovery from an unreadable file — may
-    // cost the user notes.
-
-    struct Archive {
-        dir: PathBuf,
-        // `None` for a second process over a directory the first one owns: only
-        // the owner's drop may remove it.
-        _owned: Option<TempDir>,
-        // The process-local gate — so two of these over one directory are two
-        // Dormouse processes, sharing only what is on disk.
-        gate: Mutex<()>,
-    }
-
-    impl Archive {
-        fn new(name: &str) -> Self {
-            let dir = TempDir::new(name);
-            Archive {
-                dir: dir.path().to_path_buf(),
-                _owned: Some(dir),
-                gate: Mutex::new(()),
-            }
-        }
-        /// A second Dormouse over the same `app_data_dir()` — two launches of the
-        /// installed app, or two `pnpm dev:standalone` runs in one worktree.
-        fn second_process(&self) -> Self {
-            Archive {
-                dir: self.dir.clone(),
-                _owned: None,
-                gate: Mutex::new(()),
-            }
-        }
-        fn dir(&self) -> &Path {
-            &self.dir
-        }
-        fn path(&self) -> PathBuf {
-            self.dir.join(NOTEPAD_ARCHIVE_FILE)
-        }
-        fn load(&self) -> Option<(String, String)> {
-            read_notepad_archive_from(&self.path(), &self.gate).unwrap()
-        }
-        /// The bytes alone, for a test asserting only what is stored.
-        fn bytes(&self) -> Option<String> {
-            self.load().map(|(bytes, _)| bytes)
-        }
-        /// The token a save must quote. Opaque: the tests assert only that it
-        /// moves with the bytes, never its shape.
-        fn revision(&self) -> Option<String> {
-            self.load().map(|(_, revision)| revision)
-        }
-        fn save(&self, state: &str, base: Option<&str>) -> String {
-            write_notepad_archive_to(&self.path(), &self.gate, state, base).unwrap()
-        }
-        fn reset(&self) {
-            reset_notepad_archive_at(&self.path(), &self.gate).unwrap()
-        }
-        /// Every file in the archive directory bar the lock, sorted — so a test
-        /// can assert what was left behind as well as what was written. The lock
-        /// exists from the first operation onward and is nothing these
-        /// assertions are about; `notepad_archive_is_owner_only_on_disk` is what
-        /// pins it.
-        fn entries(&self) -> Vec<String> {
-            let lock = notepad_archive_lock_path(&self.path());
-            let lock = lock.file_name().unwrap().to_string_lossy().into_owned();
-            let mut names: Vec<String> = fs::read_dir(self.dir())
-                .unwrap()
-                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-                .filter(|name| *name != lock)
-                .collect();
-            names.sort();
-            names
-        }
-    }
-
-    #[test]
-    fn notepad_archive_round_trips_and_moves_its_revision() {
-        let archive = Archive::new("notepad-roundtrip");
-
-        // Nothing archived yet: the load reports absence, and the first save
-        // names a null base revision.
-        assert_eq!(archive.load(), None);
-        assert_eq!(archive.save(r#"{"version":1,"batches":[]}"#, None), "ok");
-
-        let (bytes, first) = archive.load().expect("archived");
-        assert_eq!(bytes, r#"{"version":1,"batches":[]}"#);
-        // Re-reading unchanged bytes reproduces the token — the property a
-        // retry-after-conflict leans on.
-        assert_eq!(archive.revision().as_deref(), Some(first.as_str()));
-
-        // Each accepted save moves it, so the next one must quote what it read.
-        assert_eq!(
-            archive.save(r#"{"version":1,"batches":["b1"]}"#, Some(&first)),
-            "ok",
-        );
-        let (bytes, second) = archive.load().expect("archived");
-        assert_eq!(bytes, r#"{"version":1,"batches":["b1"]}"#);
-        assert_ne!(second, first);
-
-        // Atomic replace, not append — and the temp file it went through is gone.
-        assert_eq!(archive.entries(), vec![NOTEPAD_ARCHIVE_FILE.to_string()]);
-    }
-
-    #[test]
-    fn notepad_archive_refuses_a_save_against_a_stale_revision() {
-        let archive = Archive::new("notepad-conflict");
-        assert_eq!(archive.save(r#"{"version":1,"batches":["a"]}"#, None), "ok");
-        let stale = archive.revision().expect("archived");
-        assert_eq!(
-            archive.save(r#"{"version":1,"batches":["b"]}"#, Some(&stale)),
-            "ok",
-        );
-
-        // A second writer still holding the earlier token is refused rather than
-        // silently overwriting the batches it never saw.
-        assert_eq!(
-            archive.save(r#"{"version":1,"batches":["c"]}"#, Some(&stale)),
-            "conflict",
-        );
-        // So does a token nothing ever minted, and so does a first-save null
-        // base once something is stored.
-        assert_eq!(archive.save("{}", Some("not-a-revision")), "conflict");
-        assert_eq!(archive.save("{}", None), "conflict");
-        // …and no refusal touched the file.
-        assert_eq!(
-            archive.bytes().as_deref(),
-            Some(r#"{"version":1,"batches":["b"]}"#),
-        );
-        assert_eq!(archive.entries(), vec![NOTEPAD_ARCHIVE_FILE.to_string()]);
-    }
-
-    /// The revision is a hash of the stored bytes, not a count of this process's
-    /// own writes, so a write it never made is still seen.
-    #[test]
-    fn notepad_archive_conflicts_with_a_write_it_did_not_make() {
-        let archive = Archive::new("notepad-foreign");
-        assert_eq!(archive.save(r#"{"version":1,"batches":["a"]}"#, None), "ok");
-        let base = archive.revision().expect("archived");
-
-        // Straight at the file, as another process's rename leaves it.
-        fs::write(archive.path(), r#"{"version":1,"batches":["a","yours"]}"#).unwrap();
-
-        assert_eq!(
-            archive.save(r#"{"version":1,"batches":["a","mine"]}"#, Some(&base)),
-            "conflict",
-        );
-        // The refusal kept the bytes it found instead of overwriting them.
-        assert_eq!(
-            archive.bytes().as_deref(),
-            Some(r#"{"version":1,"batches":["a","yours"]}"#),
-        );
-    }
-
-    /// Two Dormouse processes share `app_data_dir()` — two launches of the
-    /// installed app, or two dev runs in one worktree — so the loser of an
-    /// overlapping load→save must retry rather than drop the winner's batches.
-    #[test]
-    fn notepad_archive_conflicts_across_two_processes() {
-        let first = Archive::new("notepad-two-processes");
-        let second = first.second_process();
-
-        assert_eq!(first.save(r#"{"version":1,"batches":["a"]}"#, None), "ok");
-        // Both load; the token is the file's, so both read the same one.
-        let base_first = first.revision().expect("archived");
-        let base_second = second.revision().expect("archived");
-        assert_eq!(base_first, base_second);
-
-        assert_eq!(
-            first.save(
-                r#"{"version":1,"batches":["a","first"]}"#,
-                Some(&base_first)
-            ),
-            "ok",
-        );
-        // A process-local counter never observed that save; the hash does.
-        assert_eq!(
-            second.save(
-                r#"{"version":1,"batches":["a","second"]}"#,
-                Some(&base_second)
-            ),
-            "conflict",
-        );
-
-        // And the retry the conflict asks for lands, carrying both batches.
-        let fresh = second.revision().expect("archived");
-        assert_eq!(
-            second.save(
-                r#"{"version":1,"batches":["a","first","second"]}"#,
-                Some(&fresh)
-            ),
-            "ok",
-        );
-        assert_eq!(
-            first.bytes().as_deref(),
-            Some(r#"{"version":1,"batches":["a","first","second"]}"#),
-        );
-    }
-
-    #[test]
-    fn notepad_archive_reset_renames_the_unreadable_file_rather_than_deleting_it() {
-        let archive = Archive::new("notepad-reset");
-        assert_eq!(archive.save("{ not json", None), "ok");
-        // A crash before a rename could have left this; it was never a readable
-        // archive, so it is the one thing reset may drop.
-        let tmp = archive.dir().join("notepad-archive-v1.json.tmp");
-        fs::write(&tmp, b"partial").unwrap();
-
-        archive.reset();
-
-        // The partial write is gone and the archive is not where it was — what
-        // is left is one quarantined copy.
-        assert!(!tmp.exists());
-        let entries = archive.entries();
-        assert_eq!(entries.len(), 1, "expected one quarantined copy: {entries:?}");
-        let quarantined = &entries[0];
-        assert!(
-            quarantined.starts_with("notepad-archive-v1.unreadable-")
-                && quarantined.ends_with(".json"),
-            "unexpected quarantine name: {quarantined}",
-        );
-        // The user's bytes survive the recovery — that is the whole point.
-        assert_eq!(
-            fs::read_to_string(archive.dir().join(quarantined)).unwrap(),
-            "{ not json",
-        );
-
-        // And the archive starts empty again: the next save is a first save,
-        // naming a null base.
-        assert_eq!(archive.load(), None);
-        assert_eq!(archive.save(r#"{"version":1,"batches":[]}"#, None), "ok");
-        assert_eq!(
-            archive.bytes().as_deref(),
-            Some(r#"{"version":1,"batches":[]}"#)
-        );
-    }
-
-    #[test]
-    fn notepad_archive_reset_without_a_file_succeeds() {
-        // Nothing to move aside is the desired end state, not a failure.
-        let archive = Archive::new("notepad-reset-missing");
-        archive.reset();
-        assert_eq!(archive.load(), None);
-        assert!(archive.entries().is_empty());
-    }
-
-    /// The unix half of the guarantee `restrict_to_owner_leaves_one_owner_only_ace`
-    /// pins on Windows: the archive carries captured terminal excerpts, so it and
-    /// its directory are the owner's alone
-    /// (docs/specs/security-local.md -> "Persisted state").
-    #[test]
-    #[cfg(unix)]
-    fn notepad_archive_is_owner_only_on_disk() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let archive = Archive::new("notepad-modes");
-        assert_eq!(archive.save(r#"{"version":1,"batches":[]}"#, None), "ok");
-
-        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(archive.dir()), 0o700);
-        // 0600 survives because the temp file was tightened *before* the rename.
-        assert_eq!(mode(&archive.path()), 0o600);
-        // The lock carries no bytes, but it names the archive and sits beside it
-        // in the same directory, so it is owner-only on the same terms.
-        assert_eq!(mode(&notepad_archive_lock_path(&archive.path())), 0o600);
     }
 
     // Enforces the INVARIANT documented above `request_from_sidecar_timeout`:
@@ -6124,14 +5643,12 @@ mod tests {
                 }
             }
 
-            // Match direct callers of the blocking helper *and* the
-            // agent-browser commands, which reach it transitively through the
-            // `agent_browser_forward` wrapper (their bodies never name
-            // `request_from_sidecar` directly). That family carries the longest
-            // timeout (AGENT_BROWSER_TIMEOUT = 30s), so it's the worst case to
-            // let slip plain-sync.
+            // Match direct callers of the blocking helper *and* anything that
+            // reaches it transitively through `browser_request`, which carries
+            // the longest timeout (BROWSER_REQUEST_TIMEOUT = 40s), so it's the
+            // worst case to let slip plain-sync.
             let reaches_blocking = [
-                "request_from_sidecar", "agent_browser_forward", "ARRIVAL_DISK_LOCK",
+                "request_from_sidecar", "browser_request", "ARRIVAL_DISK_LOCK",
                 "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",
                 "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
                 "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",

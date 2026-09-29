@@ -14,6 +14,8 @@ const config: StorybookConfig = {
   // a story since Storybook 7).
   stories: ['../src/**/*.stories.@(ts|tsx)', '../../docs/stories/**/*.mdx'],
   addons: [
+    // Runs the stories as Vitest tests for Argos (`lib/vitest.argos.config.ts`).
+    '@storybook/addon-vitest',
     {
       name: '@storybook/addon-docs',
       // MDX is CommonMark only out of the box, so a GFM table renders as its own
@@ -44,11 +46,11 @@ const config: StorybookConfig = {
       dor: path.resolve(here, '..', '..', 'dor', 'src'),
       // Same reason: `Wall` → `RemotePairingModalHost` pulls in the remote host
       // modules, which import `remote-lib-common`. Its package `exports` point
-      // at a `dist` the Storybook/Chromatic job never builds, so alias the bare
+      // at a `dist` the Storybook/Argos job never builds, so alias the bare
       // specifier to source too.
       'remote-lib-common': path.resolve(here, '..', '..', 'remote-lib-common', 'src'),
       // And `Wall` → `useDorControl` → `connect-port` imports
-      // `dor-lib-common/agent-browser`, whose `exports` point at the same kind of
+      // `dor-lib-common/browser-providers`, whose `exports` point at the same kind of
       // unbuilt `dist`. The directory alias covers the subpath and the bare
       // specifier both.
       'dor-lib-common': path.resolve(here, '..', '..', 'dor-lib-common', 'src'),

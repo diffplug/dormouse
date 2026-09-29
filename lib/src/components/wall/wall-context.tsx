@@ -15,6 +15,8 @@ export interface PaneElementsState {
 
 export const ModeContext = createContext<WallMode>('command');
 export const SelectedIdContext = createContext<string | null>(null);
+/** The pane whose Surface takes the keyboard in passthrough, else null. */
+export const PassthroughPaneIdContext = createContext<string | null>(null);
 
 /** The last visible ring frame, carried between active Walls in one Window. */
 export const RingHandoffContext = createContext<RefObject<RingFrame | null> | null>(null);
@@ -45,9 +47,16 @@ export interface WallActions {
   onSplitH: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onSplitV: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onZoom: (id: string) => void;
+  /** A click on a pane's body or header: enter passthrough on it, acknowledging
+   *  its Session (`docs/specs/alert.md` -> Engagement). */
   onClickPanel: (id: string) => void;
-  /** Jump to/focus an arbitrary pane by id (visible or minimized). Used by the
-   *  browser header's dev-server chip to surface the terminal serving a port. */
+  /** DOM focus reached a pane with no gesture seen — a raw cross-origin frame:
+   *  enter passthrough on it, acknowledging nothing. */
+  onEnterPanel: (id: string) => void;
+  /** Jump to/focus an arbitrary pane by id (visible or minimized) as a click on
+   *  it would: passthrough, reattaching a Door, acknowledging its Session
+   *  without input. Used by the browser header's dev-server chip to surface the
+   *  terminal serving a port, and by a Workspace tab's TODO pill. */
   onFocusPane: (id: string) => void;
   onStartRename: (id: string) => void;
   onFinishRename: (id: string, value: string) => SetTerminalUserTitleResult;
@@ -56,18 +65,25 @@ export interface WallActions {
    *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). agent-browser ↔ iframe is a
    *  surface-type replacement; screencast ↔ popout is handled inside the
    *  agent-browser panel and does not route here. */
-  onSwapRenderMode: (id: string, mode: RenderMode) => void;
-  /** Open a URL as a new iframe browser pane, split next to `id`. The iframe
+  onSwapRenderMode: (id: string, mode: RenderMode, viewport?: import('dor-lib-common/browser-viewports').BrowserViewportSetting) => void;
+  /** Open a URL as a new browser pane, split next to `id` — an iframe, or an
+   *  agent-browser screencast for a page the iframe cannot show. The iframe
    *  renderer is single-frame, so a page's new-tab request (target=_blank /
    *  window.open, surfaced by the proxy shim) becomes a new pane
    *  (docs/specs/dor-browser.md → "Iframe Shim"). */
   onOpenBrowserPane?: (id: string, url: string) => void;
+  /** A browser Surface's first launch failed: apply its `launchFallback`. */
+  onBrowserLaunchFailed?: (id: string, error: string) => void;
   /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
    *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
   resolveSurfaceRef: (id: string) => string;
   /** Resolve a pending tool's approval: grant and start it, or close its pane
    *  (docs/specs/dor-tool.md -> Trust). */
   onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
+  /** Keep a preview slot open: clear its mark (`docs/specs/dor-tool.md` ->
+   *  Preview slot). A double-click on its Pane header, or Keep open in its
+   *  terminal context. */
+  onPinPreview?: (id: string) => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
@@ -78,6 +94,7 @@ export const WallActionsContext = createContext<WallActions>({
   onSplitV: () => {},
   onZoom: () => {},
   onClickPanel: () => {},
+  onEnterPanel: () => {},
   onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),

@@ -24,8 +24,15 @@ export const cfg = {
     needsAttentionConfirm: 3_000,
     /** ms — ignore resize redraw noise. */
     resizeDebounce: 500,
-    /** ms — attention idle expiry. How long before "looking at this pane" wears off. */
-    userAttention: 15_000,
+    /** ms — default inactivity timeout: presence lapses this long after the last typing, mouse, or scroll input. */
+    inactivityTimeout: 15_000,
+    /** ms — shared grace period for keystroke echo AND fast command completions.
+     * Both are intentionally suppressed: completions inside it neither ring nor
+     * wait to ring on inactivity. Keep these effects coupled; there is no separate
+     * minimum command runtime (product decision, 2026-09-24). */
+    echoWindow: 750,
+    /** ms — longest a terminal notification may wait behind animation before it rings anyway. */
+    deferCeiling: 30_000,
     /** When true, the ALERT_RINGING alarm pulse animations are frozen at T=0 (for deterministic Chromatic snapshots). */
     ringingPaused: false,
   },
@@ -58,6 +65,12 @@ export const cfg = {
      *  clipped (`user@dormouse:~$` → `user@do`) even after the geometry settles.
      *  Snapping straight to the final geometry removes that whole race. */
     animate: true,
+  },
+  killConfirm: {
+    /** The letter a kill confirmation asks for; null draws one at random per
+     *  prompt. Pinned under visual snapshots, where a random letter would
+     *  change the capture on every run. */
+    char: null as string | null,
   },
   overlays: {
     /** ms before the illegal-rename warning dismisses itself. 0 disables the

@@ -153,7 +153,7 @@ const SECTIONS: readonly SupplyChainSection[] = [
 /**
  * The security spec's rows and bullets for what reaches a user's machine,
  * rendered from `docs.security.json` rather than restated here
- * (docs/specs/website-docs.md -> `/docs/security` spec).
+ * (docs/specs/website-docs.md -> `/security` spec).
  */
 const CONTRACT = security.audiences["supply-chain"];
 
@@ -200,13 +200,13 @@ export default function SupplyChain() {
       <AnchoredHeading id="guarantees">Supply-chain guarantees</AnchoredHeading>
       <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
         What reaches a machine, and how it gets there, is governed by these rows of the{" "}
-        <a href={sitePath("/docs/security")} className={link()}>
+        <a href={sitePath("/security")} className={link()}>
           security spec
         </a>
         , rendered from the same source the nightly audit reads. Each row names the spec
         that states the rule and what pins it on every build; the audit that checks all of
         them is described under{" "}
-        <a href={`${sitePath("/docs/security")}#how-the-guarantees-are-checked`} className={link()}>
+        <a href={`${sitePath("/security")}#how-the-guarantees-are-checked`} className={link()}>
           how the guarantees are checked
         </a>
         .
@@ -223,7 +223,7 @@ export default function SupplyChain() {
       <p className={`text-base mb-2 ${MUTED_TEXT_CLASS}`}>
         The optional Relay — needed only for phone push notifications,
         installed by the{" "}
-        <a href={`${sitePath("/docs/self-host")}#what-the-installer-does`} className={link()}>
+        <a href={`${sitePath("/self-host")}#what-the-installer-does`} className={link()}>
           self-host runbook
         </a>{" "}
         — is included in the inventory below.

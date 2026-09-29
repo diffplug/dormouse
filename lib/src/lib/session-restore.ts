@@ -78,13 +78,14 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
         params: { surfaceType: 'tool', command: pane.command, cwd: pane.cwd,
           ...(pane.tool?.argv ? { toolArgv: pane.tool.argv } : {}),
           toolScope: pane.tool?.scope, toolName: pane.tool?.name, toolRender: pane.tool?.render ?? 'iframe',
-          toolPort: pane.tool?.port ?? 'announced', toolKey: pane.tool?.key },
+          toolPort: pane.tool?.port ?? 'announced', toolKey: pane.tool?.key,
+          browserViewport: pane.tool?.viewport, toolPreview: pane.tool?.preview, toolTarget: pane.tool?.target },
       } : { component: 'terminal', tabComponent: 'terminal', title: pane.title }])),
     };
   }
   // Host-owned and single-use, and read here rather than off the pane: the
   // session blob the webview saves must never carry one, or a later restore
-  // would replay it (docs/specs/transport.md -> "Consuming it"). Restore-only —
+  // would replay it (docs/compatible-agents.md -> "Cold restore"). Restore-only —
   // the live-resume path in reconnect.ts never reaches here, because there the
   // agent is still Live and has nothing to resume.
   const recoveryCommands = platform.getRecoveryCommands?.() ?? {};
@@ -103,17 +104,16 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
       shell: shellOpts?.shell,
       args: shellOpts?.args,
       untouched: pane.untouched,
+      // The fresh PTY inherits the pane's persisted TODO: the host seeds it at
+      // the spawn. Restore-only: a live resume still has the host's own state
+      // (docs/specs/alert.md -> "Persist only").
+      alert: pane.alert,
       // A tool command is durable, approved Session state and wins over the
       // host's unrelated single-use agent recovery channel.
       ...(pane.surfaceType === 'tool'
         ? { command: pane.command ?? null, requireIntegration: true, resumeCommand: null }
         : { resumeCommand: recoveryCommands[pane.id] ?? null }),
     });
-    // The fresh PTY inherits the pane's persisted TODO/alert, on the hosts whose
-    // AlertManager lives in the webview. Seeded after `restoreTerminal` so the
-    // state change lands on a registered pane. Restore-only: a live resume still
-    // has the manager's own state (docs/specs/alert.md -> "Persist only").
-    if (pane.alert) platform.alertSeed?.(pane.id, pane.alert);
   }
 
   return {

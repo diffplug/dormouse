@@ -8,7 +8,8 @@ USAGE
   dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
   dor tool [--global] [--json] [--minimize] [--fresh] [--surface id|ref] [--cwd path] [--workspace ref] <name> [args...]
   dor tool [--json] [--minimize] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
-  dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] <file>
+  dor tool --list [--global] [--cwd path] [--json]
+  dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] [--preview] <path>
   dor version [--json]
   dor skill [--install] [--json]
   dor send <surface> ([--text value] [--key value] | --stdin | --sequence json) [--json] [--raw] [--workspace ref]
@@ -17,6 +18,7 @@ USAGE
   dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]
   dor iframe [--json] [--minimize] [--surface id|ref] [--workspace ref] <target>
   dor agent-browser [--key name|--session name|--surface handle] [--workspace ref] [args...]
+  dor playwright [--key name] [--session name] [--surface handle] [--workspace ref] <args>...
   dor list [--all] [--command text] [--cwd path] [--id-format refs|ids|both] [--json] [--kind terminal|browser|tool] [--port number] [--ports] [--view paned|zoomed|minimized] [--workspace ref] [--workspaces] [--window label]
   dor workspace new|rename|close|switch|move [args...] [flags...]
   dor app restart [--json]
@@ -32,7 +34,7 @@ COMMANDS
   split          Create a new terminal surface by splitting an existing surface.
   ensure         Ensure one surface is running a command.
   tool           Run a command as a Dor Tool.
-  open           Open a local file with a Dor Tool.
+  open           Open a local file or folder with a Dor Tool.
   version        Print the dor CLI version.
   skill          Print the Dormouse agent skill, or install its bootstrap stub.
   send           Send text or key input to a terminal surface.
@@ -40,9 +42,10 @@ COMMANDS
   await          Wait until a terminal surface finishes.
   kill           Kill a surface.
   iframe         Open a target in an iframe surface.
-  agent-browser  Drive a browser surface via your agent-browser install (alias: dor ab).
+  agent-browser  Drive a browser surface via your agent-browser install.
+  playwright     Drive a browser surface via your playwright CLI install.
   list           List Dormouse Surfaces.
   workspace      Create, rename, close, switch, or move Workspaces.
-  app            Restart Dormouse Standalone, resuming Claude and Codex sessions.
+  app            Restart Dormouse Standalone, resuming supported agent sessions.
 
 ```

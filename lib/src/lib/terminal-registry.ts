@@ -15,9 +15,9 @@ export type {
 } from './terminal-state';
 
 export {
+  acknowledgeSession,
   clearLocalSurfaceActivity,
   clearTerminalActivity,
-  clearSessionAttention,
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
   dismissSessionAlert,
@@ -25,8 +25,6 @@ export {
   getActivitySnapshot,
   getLivePersistedAlertState,
   initAlertStateReceiver,
-  markSessionAttention,
-  markSessionTodo,
   setTerminalActivity,
   restoreBrowserSurfaceTodo,
   subscribeToActivity,
@@ -41,9 +39,10 @@ export {
   getTerminalShellKind,
   getTerminalInstance,
   getTerminalOverlayDims,
+  getSessionInputVersion,
   isUntouched,
-  markSessionTouched,
   mountElement,
+  writeUserInput,
   refitSession,
   registerSurfaceFocusHandle,
   releaseSession,
@@ -59,9 +58,9 @@ export type { SurfaceFocusHandle } from './terminal-lifecycle';
 export { setDefaultShellOpts, getDefaultShellOpts } from './shell-defaults';
 
 export {
+  getRunningCommandWatchRule,
   getWatchedCommands,
   getWatchedCommandsSnapshot,
-  isCommandWatched,
   setCommandWatched,
   subscribeToWatchedCommands,
 } from './watched-commands';
@@ -99,7 +98,7 @@ export {
   countRunningSessionsIn,
   ensureTerminalPaneState,
   fillTerminalProcessCwd,
-  getRunningCommandArgv0,
+  getRunningCommandWatchKey,
   getInheritableCwd,
   getTerminalPaneState,
   getTerminalPaneStateSnapshot,

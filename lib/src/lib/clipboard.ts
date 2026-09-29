@@ -4,7 +4,7 @@ import { rewrap } from './rewrap';
 import { extractSelectionText } from './selection-text';
 import { getPlatform, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
-import { getDefaultShellOpts, getTerminalInstance, getTerminalShellKind, markSessionTouched } from './terminal-registry';
+import { getDefaultShellOpts, getTerminalInstance, getTerminalShellKind, writeUserInput } from './terminal-registry';
 
 /** Report failure without throwing so callers retain the selection for retry. */
 export async function writeTextToClipboard(text: string): Promise<boolean> {
@@ -48,10 +48,9 @@ function writePasteToPty(terminalId: string, text: string): void {
   if (!text) return;
   const bracketed = getMouseSelectionState(terminalId).bracketedPaste;
   const payload = bracketed ? `\x1b[200~${defangPasteEscapes(text)}\x1b[201~` : text;
-  // Paste and file-drop input bypass xterm's onData handler, so the touch has to
-  // be marked here rather than by the keystroke path.
-  markSessionTouched(terminalId);
-  getPlatform().writePty(terminalId, payload);
+  // Paste and file-drop input bypass xterm's onData handler, so they take the
+  // keystroke path's write here: touched, acknowledged, then written.
+  writeUserInput(terminalId, payload);
 }
 
 /**

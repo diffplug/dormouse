@@ -8,6 +8,7 @@ import {
   cloudflare,
   findHyperdrives,
   cleanup,
+  previewRatelimitNamespace,
 } from "./preview.mjs";
 import { smoke } from "./preview-smoke.mjs";
 
@@ -52,6 +53,15 @@ test("preview configuration isolates the origin and excludes production bindings
   assert.equal(config.d1_databases, undefined);
   assert.equal(config.vars.GOOGLE_CLIENT_SECRET, undefined);
   assert.equal(config.assets.run_worker_first, true);
+  assert.deepEqual(config.durable_objects, base.durable_objects);
+  assert.deepEqual(config.migrations, base.migrations);
+  assert.deepEqual(
+    config.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+    base.ratelimits.map(({ name, namespace_id }) => [
+      name,
+      String(Number(namespace_id) + 1000),
+    ]),
+  );
   for (const bad of ["0", "-1", "42/../../production", "main", "42\n"])
     assert.throws(() => previewName(bad));
   assert.throws(() =>
@@ -61,6 +71,33 @@ test("preview configuration isolates the origin and excludes production bindings
       "c".repeat(32),
     ),
   );
+});
+
+test("preview configuration keeps its own Durable Objects and rate-limit namespaces", () => {
+  const durable_objects = {
+    bindings: [{ name: "ROOM", class_name: "Room" }],
+  };
+  const migrations = [{ tag: "v1", new_sqlite_classes: ["Room"] }];
+  const config = previewConfig(
+    {
+      compatibility_date: "2026-01-01",
+      assets: {},
+      durable_objects,
+      migrations,
+      ratelimits: [
+        { name: "LIMIT", namespace_id: "7", simple: { limit: 1, period: 60 } },
+      ],
+    },
+    env,
+    "c".repeat(32),
+  );
+  assert.deepEqual(config.durable_objects, durable_objects);
+  assert.deepEqual(config.migrations, migrations);
+  assert.deepEqual(config.ratelimits, [
+    { name: "LIMIT", namespace_id: "1007", simple: { limit: 1, period: 60 } },
+  ]);
+  for (const bad of ["0", "1000", "-3", "x", "1.5"])
+    assert.throws(() => previewRatelimitNamespace(bad));
 });
 
 test("Hyperdrive uses a direct URL and decodes credentials without logging them", () => {
@@ -165,11 +202,14 @@ test("Cloudflare auth diagnostics expose numeric codes, never provider messages 
 
 test("cleanup only deletes this PR's resources and can run twice", async (t) => {
   const removed = [];
+  const forced = [];
   let existing = true;
   t.mock.method(globalThis, "fetch", async (url, options) => {
     const path = new URL(url).pathname;
     if (options.method === "DELETE") {
       removed.push(path);
+      if (path.includes("/workers/scripts/"))
+        forced.push(new URL(url).searchParams.get("force") === "true");
       return existing ? result({}) : new Response("missing", { status: 404 });
     }
     if (path.endsWith("hyperdrive/configs"))
@@ -198,6 +238,11 @@ test("cleanup only deletes this PR's resources and can run twice", async (t) => 
   assert.deepEqual(
     removed.map((path) => path.split("/").pop()),
     ["dormouse-hosted-pr-42", "ours", "br-ours", "dormouse-hosted-pr-42"],
+  );
+  assert.deepEqual(
+    forced,
+    [true, true],
+    "a Worker implementing a Durable Object is deleted with force",
   );
 });
 
@@ -256,7 +301,7 @@ test("preview cleanup runs the base branch's script, never the closed PR's", asy
   assert.match(cleanup, /\n {10}persist-credentials: false\n/);
 });
 
-test("deployment smoke fails on a stale revision before making any auth requests", async () => {
+test("deployment smoke rejects malformed health before making any auth requests", async () => {
   let requests = 0;
   await assert.rejects(
     smoke(

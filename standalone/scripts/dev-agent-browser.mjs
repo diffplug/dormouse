@@ -2,9 +2,9 @@
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { mkdtempSync } from 'node:fs';
+import { AGENT_BROWSER_SOCKET_DIR_ENV, sessionForKey } from 'dor-lib-common/browser-providers';
 // cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
 // can't resolve (ENOENT) and Node >=22 won't run directly (EINVAL). cross-spawn
@@ -49,6 +49,12 @@ let viteOrigin;
 // The Burrow persists its enrollment + ACL here, under the harness's own
 // temp dir so a dev run never touches the installed app's state.
 const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
+// The inner app's own agent-browser daemons. It names managed sessions
+// `dormouse.<workspace>.<key>` exactly as the installed app does, and every
+// agent-browser shares one socket directory by default, so without this the
+// inner app's workspace-1 `default` browser is the installed app's. Under the
+// short `/tmp`, not macOS's long `os.tmpdir()`: socket paths cap near 104 bytes.
+const agentBrowserDir = mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'dab-'));
 
 const pending = new Map();
 const sseClients = new Set();
@@ -100,9 +106,14 @@ function requestSidecar(event, data, responseEvent, pick, timeoutMs = 10000) {
   });
 }
 
+/** The one window this harness simulates: its alert viewer id and registry label. */
+const HARNESS_WINDOW = 'main';
+
 const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
-  pty_write: ({ id, data, paced }) => writeSidecar('pty:input', { id, data, paced }),
+  // `userInput` rides the write, as `pty_write` in src-tauri/src/lib.rs carries it.
+  pty_write: ({ id, data, paced, userInput }) =>
+    writeSidecar('pty:input', { id, data, paced, ...(userInput === true ? { userInput: true } : {}) }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
@@ -111,14 +122,17 @@ const fireAndForget = {
   // The Burrow's whole bridge rides one passthrough, exactly as it does
   // through Rust (`burrow_command` in src-tauri/src/lib.rs).
   burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
-  // The app-global alert stores live in the sidecar; their broadcasts come back
-  // over the event stream like every other sidecar line (`alert_command` in
-  // src-tauri/src/lib.rs).
-  alert_command: ({ payload }) => writeSidecar('alert:command', payload),
+  // The app's one AlertManager lives in the sidecar; its answers come back over
+  // the event stream like every other sidecar line. Stamped with the one window
+  // label this harness simulates, as Rust stamps the invoking window's
+  // (`alert_command` in src-tauri/src/lib.rs).
+  alert_command: ({ payload }) => writeSidecar('alert:command', { ...payload, window: HARNESS_WINDOW }),
   kill_sidecar_now: () => shutdown(),
 };
 
 const invokeMap = {
+  // BROWSER_REQUEST_TIMEOUT_MS in dor-lib-common/src/browser-providers.ts.
+  browser_request: ({ request }) => requestSidecar('browser:request', { request }, 'browser:result', (data) => data.result, 40000),
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
   pty_get_cwds: ({ ids }) => requestSidecar('pty:getCwds', { ids }, 'pty:cwds', (data) => data.cwds ?? {}),
@@ -129,26 +143,10 @@ const invokeMap = {
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
   iframe_create_proxy_url: ({ target, embedderOrigins }) => requestSidecar('iframe:createProxyUrl', { target, embedderOrigins }, 'iframe:proxyUrl', (data) => data.result),
-  agent_browser_command: ({ session, args, binaryPath }) => requestSidecar('agentBrowser:command', { session, args, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_edit: ({ session, op, binaryPath }) => requestSidecar('agentBrowser:edit', { session, op, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_screenshot: async ({ session, format, quality, binaryPath }) => {
-    const result = await requestSidecar('agentBrowser:screenshot', { session, format, quality, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000);
-    // The sidecar now returns a temp-file PATH (bytes stay off the stdio pipe).
-    // Production reads that file in Rust; this dev bridge has no Rust, so read it
-    // in Node and re-encode to the base64 the browser-sidecar adapter expects —
-    // the base64 travels in the HTTP invoke response, outside the event stream.
-    if (result && result.ok && typeof result.path === 'string') {
-      const bytes = await readFile(result.path);
-      return { ok: true, mime: result.mime, bytesBase64: bytes.toString('base64') };
-    }
-    return result;
-  },
-  agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
   tool_control: ({ request }) =>
     requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
-  agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  git_info: ({ paths }) =>
+    requestSidecar('git:info', { paths }, 'git:infoResult', (data) => data.result),
   // Agent recovery (docs/specs/standalone.md -> "Agent recovery"). The harness
   // mirrors the persistence answer, so it claims exactly as Rust does, over the
   // identical sidecar half. There is no `capture_agent_recovery` here: capture
@@ -194,7 +192,7 @@ function registrySnapshot() {
     name: entry.name,
     active: Boolean(entry.active),
   }));
-  return { revision: registryRevision, windows: [{ label: 'main', workspaces }] };
+  return { revision: registryRevision, windows: [{ label: HARNESS_WINDOW, workspaces }] };
 }
 
 async function readJson(req) {
@@ -297,11 +295,15 @@ function startSidecar() {
       // the same agent-recovery record the app's quit writes — under this run's
       // own temp state, never the installed app's.
       DORMOUSE_RECOVERY_DIR: stateDir,
+      // Reaches the inner host and, through it, every inner terminal's `dor`;
+      // this harness's own browser keeps the caller's directory.
+      [AGENT_BROWSER_SOCKET_DIR_ENV]: agentBrowserDir,
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
   log(`burrow state dir: ${stateDir}`);
   log(`recovery state dir: ${stateDir}`);
+  log(`inner agent-browser socket dir: ${agentBrowserDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;
@@ -352,7 +354,7 @@ async function openAgentBrowser() {
   const identity = insideDormouse && !process.env.DORMOUSE_BROWSER_DEV_AB_SESSION
     ? ['--key', worktreeKey]
     : ['--session', browserSession];
-  const args = insideDormouse ? ['ab', ...identity] : identity;
+  const args = insideDormouse ? ['agent-browser', ...identity] : identity;
   const command = `${binary} ${args.join(' ')}`;
   if (process.env.DORMOUSE_BROWSER_DEV_HEADED === '1') args.push('--headed');
   args.push('open', viteOrigin);
@@ -365,12 +367,35 @@ async function openAgentBrowser() {
       ? resolve()
       : reject(new Error(`${binary} exited code=${code} signal=${signal}`)));
   });
-  // Name what was actually passed. `dor ab --key` is namespaced by the Workspace
+  // Name what was actually passed. `dor agent-browser --key` is namespaced by the Workspace
   // that will hold the browser, which only the host can resolve
   // (docs/specs/dor-browser.md -> "Managed identity"), so printing a
   // `sessionForKey` guess here would name a bare-Wall session nothing created.
   log(`agent-browser ${identity[0] === '--key' ? 'key' : 'session'}: ${identity[1]}`);
   log(`try: ${command} snapshot -i`);
+}
+
+/**
+ * The caller's ref when this harness runs as a Dor Tool, else undefined. The
+ * Tool frames the announced port in its own pane (docs/specs/dor-tool.md ->
+ * Serving), so a keyed browser opened on top would split off a second copy of
+ * the app. `--kind tool` leaves the caller in the list only when it is a Tool.
+ */
+async function callerToolRef() {
+  if (!insideDormouse || process.env.DORMOUSE_BROWSER_DEV_AB_SESSION) return undefined;
+  const list = spawn('dor', ['list', '--kind', 'tool', '--json'], { cwd: repoRoot, stdio: ['ignore', 'pipe', 'ignore'] });
+  let stdout = '';
+  list.stdout.on('data', (chunk) => { stdout += chunk; });
+  const code = await new Promise((resolve) => {
+    list.once('error', () => resolve(-1));
+    list.once('close', resolve);
+  });
+  if (code !== 0) return undefined;
+  try {
+    return JSON.parse(stdout).caller_surface_ref ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function shutdown(code = 0) {
@@ -415,7 +440,9 @@ try {
   process.stdout.write(
     `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,
   );
-  await openAgentBrowser();
+  const toolRef = await callerToolRef();
+  if (toolRef) log(`Tool ${toolRef} shows the app; try: dor agent-browser --surface ${toolRef} snapshot -i`);
+  else await openAgentBrowser();
   log('running; Ctrl-C to stop');
 } catch (err) {
   console.error(err);

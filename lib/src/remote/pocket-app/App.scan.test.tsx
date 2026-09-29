@@ -20,10 +20,12 @@ import App, {
   BURROWS_EMPTY,
   BURROWS_TITLE,
   SCAN_LABEL,
+} from './App';
+import {
   TRANSPORT_PATH_LABELS,
   TRANSPORT_RELAY_CAUSES,
   UNSUPPORTED_BROWSER_TITLE,
-} from './App';
+} from './views';
 import type { ConnectResult, PairingResult } from '../client/pocket-client';
 import {
   PAIRING_DENIAL_MESSAGES,
@@ -81,10 +83,11 @@ vi.mock('remote-lib-common', async (importOriginal) => ({
   probeNoiseSupport: () => Promise.resolve(fake.noiseSupported),
 }));
 
+vi.mock('../client/install-state', () => ({ isInstalledWebApp: () => true }));
+
 vi.mock('../client/push-subscribe', () => ({
   getPushAvailability: () => Promise.resolve('unsupported'),
   hasCurrentPushSubscription: () => Promise.resolve(false),
-  isInstalledWebApp: () => true,
   needsHomeScreenInstall: () => false,
   subscribeToPushInBrowser: () => Promise.reject(new Error('not under test')),
 }));

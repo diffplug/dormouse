@@ -1,11 +1,18 @@
 bot_name: dormouse-bot
+merge: restricted
 
 secrets:
   allowed:
     - CHROMATIC_PROJECT_TOKEN
+    - ARGOS_TOKEN
 
 workflows:
+  weekly:
+    # After the Sunday 15:00 UTC reset of the org's weekly Claude quota.
+    # GitHub only ever delays a scheduled run, so the default 09:17 slot
+    # has always started before the reset.
+    cron: "17 15 * * 0"
   ci-fix:
     watched_workflows:
       - CI
-      - Chromatic
+      - Argos

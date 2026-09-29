@@ -1,6 +1,6 @@
 /**
  * The boot global carrying agent recovery commands from the VS Code extension
- * host into the webview (`docs/specs/transport.md` → "The recovery command").
+ * host into the webview (`docs/compatible-agents.md` → "Recovery record").
  *
  * The name and the read live here, together, because the writer and the reader
  * sit in different packages — `vscode-ext/src/webview-html.ts` injects it,

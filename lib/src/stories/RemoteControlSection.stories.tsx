@@ -6,7 +6,6 @@ import {
   enrolledStatus,
   OFFER_STATUS,
   UNENROLLED_STATUS,
-  setupQrResult,
 } from '../host/remote/test-burrow-link';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
@@ -32,9 +31,18 @@ function RemoteControlStory() {
   );
 }
 
+/** The clock every story here reads. A setup code encodes its expiry, so a real
+ *  clock would draw a different QR on every run. */
+const STORY_NOW = Date.UTC(2026, 0, 1);
+
 const meta: Meta<typeof RemoteControlStory> = {
   title: 'Modals/RemoteControlSection',
   component: RemoteControlStory,
+  beforeEach: () => {
+    const realNow = Date.now;
+    Date.now = () => STORY_NOW;
+    return () => { Date.now = realNow; };
+  },
   // Embedded in a docs page, each of these needs its own frame. The section
   // reads a module-singleton store (`burrow-status-store.ts`: `state` is module
   // scope, and the link is captured only when `listeners.size === 1`), so N
@@ -43,7 +51,7 @@ const meta: Meta<typeof RemoteControlStory> = {
   // `undefined` underneath them. Separate realms is the only fix short of
   // rebuilding the store around a docs page. An iframe does not grow to its
   // content, hence the explicit height; stories taller than this override it.
-  parameters: { docs: { story: { inline: false, height: '250px' } } },
+  parameters: { docs: { story: { inline: false, height: '410px' } } },
 };
 
 export default meta;
@@ -70,13 +78,39 @@ function setupPanel(text: string | RegExp) {
   };
 }
 
-/** A machine that has never enrolled: server, setup password, name. */
+/** Unfold Persistent Relay the way a user does; un-enrolled with no offer, it starts folded. */
+async function openPersistent(canvasElement: HTMLElement) {
+  await userEvent.click(
+    await within(canvasElement).findByRole('button', { name: 'Persistent Relay' }),
+  );
+}
+
+/**
+ * What a machine that has never enrolled opens on: a one-time connection and a
+ * folded Persistent Relay.
+ */
+export const Choices: Story = {
+  parameters: {
+    primedBurrow: { status: UNENROLLED_STATUS },
+    docs: { story: { height: '310px' } },
+  },
+  play: settled('Persistent Relay'),
+};
+
+/**
+ * A machine that has never enrolled, Persistent Relay unfolded: hosted.dormouse.sh
+ * (coming soon), then the typed form for a Relay you run — server, setup
+ * password, name.
+ */
 export const Unenrolled: Story = {
   parameters: {
     primedBurrow: { status: UNENROLLED_STATUS },
-    docs: { story: { height: '390px' } },
+    docs: { story: { height: '690px' } },
   },
-  play: settled('Connect'),
+  play: async ({ canvasElement }) => {
+    await openPersistent(canvasElement);
+    await within(canvasElement).findByRole('button', { name: 'Connect' });
+  },
 };
 
 /**
@@ -92,7 +126,7 @@ export const EnrollRefused: Story = {
       enrollError:
         'This build will not connect to https://ned-mac.tail9c2f1.ts.net. Allowed: https://*.dormouse.sh wss://*.dormouse.sh',
     },
-    docs: { story: { height: '440px' } },
+    docs: { story: { height: '760px' } },
   },
   // `fireEvent.change` rather than `userEvent.type`: these are controlled
   // inputs, so per-character typing costs a render each — ten seconds to fill
@@ -105,6 +139,7 @@ export const EnrollRefused: Story = {
     const fill = (label: string, value: string) =>
       fireEvent.change(canvas.getByLabelText(label), { target: { value } });
 
+    await openPersistent(context.canvasElement);
     await canvas.findByLabelText('Relay');
     fill('Relay', 'https://ned-mac.tail9c2f1.ts.net');
     fill('Setup password', TEST_SETUP_PASSWORD);
@@ -115,8 +150,9 @@ export const EnrollRefused: Story = {
 };
 
 /**
- * The installer ran on this machine, so there is nothing to type: the offer
- * card leads with the origin it found and a name already filled in, and the
+ * The installer ran on this machine, so once Persistent Relay is unfolded there
+ * is nothing to type: the offer card leads with the origin it found and a name
+ * already filled in, and the
  * three-field form folds away behind "Enroll with a different Relay…". The
  * refusal {@link EnrollRefused} shows reaches this card in the same words —
  * `RemoteControlSection.test.tsx` pins that.
@@ -124,9 +160,12 @@ export const EnrollRefused: Story = {
 export const OfferAvailable: Story = {
   parameters: {
     primedBurrow: { status: OFFER_STATUS },
-    docs: { story: { height: '300px' } },
+    docs: { story: { height: '650px' } },
   },
-  play: settled('A Dormouse Relay is installed on this machine.'),
+  play: async ({ canvasElement }) => {
+    await openPersistent(canvasElement);
+    await within(canvasElement).findByText('A Dormouse Relay is installed on this machine.');
+  },
 };
 
 /** Enrolled, relay socket still opening. No event fires for this → the 2 s poll. */
@@ -168,7 +207,7 @@ export const ConnectedManyDevices: Story = {
 export const Displaced: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus({ connection: 'displaced', pairedClients: 1 }) },
-    docs: { story: { height: '280px' } },
+    docs: { story: { height: '410px' } },
   },
   play: settled(/Another Dormouse instance took/),
 };
@@ -190,12 +229,18 @@ export const ConfirmingDisconnect: Story = {
  */
 export const SetupPhoneQr: Story = {
   parameters: {
-    primedBurrow: { status: enrolledStatus(), setupQr: setupQrResult() },
-    docs: { story: { height: '520px' } },
+    // No `setupQr`: the stub's default mints at request time, under the frozen
+    // clock, where one built here would read the real clock at import.
+    primedBurrow: { status: enrolledStatus() },
+    docs: { story: { height: '720px' } },
   },
   // The one setup-panel story that settles on the QR's accessible name rather
   // than on text, so it cannot use {@link setupPanel}.
   play: async (context) => {
+    // The QR is a lazily-imported chunk. Fetched cold after the click, it can
+    // outlast `findByRole`'s 1 s on a loaded WebKit runner; loaded here first,
+    // the panel's own import resolves from the module cache.
+    await import('../components/QrCode');
     const canvas = within(context.canvasElement);
     await userEvent.click(await canvas.findByRole('button', { name: 'Set up a phone' }));
     await canvas.findByRole('img', { name: 'Setup code for this machine' });
@@ -210,7 +255,7 @@ export const SetupPhoneQr: Story = {
 export const SetupPhoneRedeemed: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupInvitation: 'reserved' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '540px' } },
   },
   play: setupPanel(/This code is used up/),
 };
@@ -227,7 +272,7 @@ export const SetupPhoneFinished: Story = {
       status: enrolledStatus({ pairedClients: 1 }),
       setupInvitation: 'consumed',
     },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '500px' } },
   },
   play: setupPanel(/This setup code is finished/),
 };
@@ -240,7 +285,7 @@ export const SetupPhoneFinished: Story = {
 export const SetupPhoneDropped: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupInvitation: 'dropped' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '530px' } },
   },
   play: setupPanel(/no longer valid/),
 };
@@ -249,7 +294,7 @@ export const SetupPhoneDropped: Story = {
 export const SetupPhoneExpired: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupInvitation: 'expired' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '500px' } },
   },
   play: setupPanel(/This code expired/),
 };
@@ -265,7 +310,7 @@ export const SetupPhoneExpired: Story = {
 export const PairingOutcomePaired: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus({ pairedClients: 1 }), setupOutcome: 'paired' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '480px' } },
   },
   play: setupPanel(/This phone is paired/),
 };
@@ -274,7 +319,7 @@ export const PairingOutcomePaired: Story = {
 export const PairingOutcomeCodeMismatch: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupOutcome: 'code-mismatch' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '520px' } },
   },
   play: setupPanel(/The two digits did not match/),
 };
@@ -282,7 +327,7 @@ export const PairingOutcomeCodeMismatch: Story = {
 export const PairingOutcomeCancelled: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupOutcome: 'cancelled' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '520px' } },
   },
   play: setupPanel(/You cancelled this request/),
 };
@@ -290,7 +335,7 @@ export const PairingOutcomeCancelled: Story = {
 export const PairingOutcomeExpired: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupOutcome: 'expired' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '520px' } },
   },
   play: setupPanel(/The request ran out of time/),
 };
@@ -298,7 +343,7 @@ export const PairingOutcomeExpired: Story = {
 export const PairingOutcomeSuperseded: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupOutcome: 'superseded' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '520px' } },
   },
   play: setupPanel(/Another pairing request replaced this one/),
 };
@@ -306,7 +351,7 @@ export const PairingOutcomeSuperseded: Story = {
 export const PairingOutcomeBurrowError: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupOutcome: 'burrow-error' },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '520px' } },
   },
   play: setupPanel(/could not finish pairing/),
 };
@@ -319,7 +364,7 @@ export const PairingOutcomeBurrowError: Story = {
 export const PairingOutcomeWithPanelClosed: Story = {
   parameters: {
     primedBurrow: { status: enrolledStatus(), setupOutcome: 'code-mismatch' },
-    docs: { story: { height: '260px' } },
+    docs: { story: { height: '440px' } },
   },
   play: settled(/The two digits did not match/),
 };
@@ -334,7 +379,7 @@ export const SetupPhoneRefused: Story = {
       status: enrolledStatus(),
       setupQrError: 'could not mint a setup code (503)',
     },
-    docs: { story: { height: '340px' } },
+    docs: { story: { height: '480px' } },
   },
   play: setupPanel('could not mint a setup code (503)'),
 };
@@ -346,4 +391,113 @@ export const SetupPhoneRefused: Story = {
 export const BurrowServiceError: Story = {
   parameters: { primedBurrow: { statusError: 'It did not answer.' } },
   play: settled(/Could not reach this machine’s remote-control service/),
+};
+
+/**
+ * A one-time link waiting for its phone: the code for the phone's camera, the
+ * link as text to send it, and New link and Cancel — no auto-refresh, since a
+ * link is single-use (`docs/specs/one-time.md` -> "Laptop UI"). Reached by the
+ * button, like {@link SetupPhoneQr}, so the stub mints the link under the frozen
+ * clock and the code draws the same every run.
+ */
+export const OneTimeWaiting: Story = {
+  parameters: {
+    primedBurrow: { status: UNENROLLED_STATUS },
+    docs: { story: { height: '720px' } },
+  },
+  play: async (context) => {
+    await import('../components/QrCode');
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'One-time connection' }));
+    await canvas.findByRole('img', { name: 'One-time link for this machine' });
+  },
+};
+
+/** The same panel on a machine that also enrolled with a Relay. */
+export const OneTimeWaitingEnrolled: Story = {
+  parameters: {
+    primedBurrow: { status: enrolledStatus({ pairedClients: 1 }) },
+    docs: { story: { height: '800px' } },
+  },
+  play: OneTimeWaiting.play,
+};
+
+/** A phone used the link and its request is up in the approval modal. */
+export const OneTimeConfirming: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'confirming', label: 'Android phone', expiresAt: STORY_NOW + 60_000 },
+    },
+    docs: { story: { height: '380px' } },
+  },
+  play: settled('Type the two digits your phone shows into the dialog.'),
+};
+
+/** Confirmed; the phone is setting up the direct path on the same Wi-Fi. */
+export const OneTimeConnecting: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'connecting', label: 'Android phone' },
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: settled('Connecting directly…'),
+};
+
+/** Live: the phone has every terminal here until either end stops it. */
+export const OneTimeConnected: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'connected', label: 'Android phone', since: STORY_NOW },
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: settled('Android phone has full control of your terminals.'),
+};
+
+/**
+ * The failure this feature is likeliest to hit: the phone is on another
+ * network, or one that keeps devices apart, so no direct path formed. The
+ * sentence names the fix.
+ */
+export const OneTimeEndedDirectFailed: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'ended', reason: 'direct-failed' },
+    },
+    docs: { story: { height: '380px' } },
+  },
+  play: settled(/couldn’t reach this computer directly/),
+};
+
+/** The one attempt was spent on digits the phone was not showing. */
+export const OneTimeEndedMismatch: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'ended', reason: 'confirmation-mismatch' },
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: settled('The two digits did not match, so nothing connected.'),
+};
+
+/**
+ * A build whose allowed remote addresses leave the rendezvous out — a
+ * self-host build that narrowed them, say — offers the button disabled, and
+ * says why.
+ */
+export const OneTimeUnavailable: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'unavailable', reason: 'origin-not-allowed' },
+    },
+    docs: { story: { height: '330px' } },
+  },
+  play: settled(/it isn’t allowed to reach hosted\.dormouse\.sh/),
 };

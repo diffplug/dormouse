@@ -9,14 +9,12 @@ import { useWallKeyboard } from '../use-wall-keyboard';
 import type { WallKeyboardCtx } from './types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
+  acknowledgeSession: vi.fn(),
   dismissSessionAlert: vi.fn(),
   toggleSessionTodo: vi.fn(),
 }));
 
-vi.mock('../../../lib/terminal-registry', () => ({
-  dismissSessionAlert: terminalRegistryMocks.dismissSessionAlert,
-  toggleSessionTodo: terminalRegistryMocks.toggleSessionTodo,
-}));
+vi.mock('../../../lib/terminal-registry', () => terminalRegistryMocks);
 
 vi.mock('./handle-mouse-selection-keys', () => ({ handleMouseSelectionKeys: () => false }));
 
@@ -82,6 +80,25 @@ describe('handlePaneShortcuts kill behavior', () => {
 
     expect(ctx.requestKill).toHaveBeenCalledWith('pane-a');
     expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+/** Entering passthrough is a human gesture; `d` only reattaches
+ *  (`docs/specs/alert.md` -> Engagement). */
+describe('handlePaneShortcuts acknowledgement', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each(['pane', 'door'] as const)('acknowledges the Session Enter takes a %s into', (selectedType) => {
+    const ctx = makeCtx({ selectedTypeRef: { current: selectedType } });
+    expect(handlePaneShortcuts(keydown('Enter'), ctx, { current: null })).toBe(true);
+    expect(terminalRegistryMocks.acknowledgeSession.mock.calls).toEqual([['pane-a']]);
+  });
+
+  it('acknowledges nothing for `d` bringing a Door back in command mode', () => {
+    const ctx = makeCtx({ selectedTypeRef: { current: 'door' } });
+    expect(handlePaneShortcuts(keydown('d'), ctx, { current: null })).toBe(true);
+    expect(ctx.handleReattachRef.current).toHaveBeenCalledWith(expect.objectContaining({ id: 'pane-a' }), { enterPassthrough: false });
+    expect(terminalRegistryMocks.acknowledgeSession).not.toHaveBeenCalled();
   });
 });
 

@@ -21,7 +21,7 @@ import { layout, sashes } from '../../lib/lath/layout';
 import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from '../../lib/lath/animator';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { ELEVATED_PANE_SHADOW, PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
@@ -29,12 +29,13 @@ import { type DragController, createDragController } from './lath-drag-controlle
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
 import { ToolPanel } from './ToolPanel';
-import { isToolParams } from './browser-surface';
+import { isPreviewSlotParams, isToolParams } from './browser-surface';
 import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { AlertRingIndicator } from './AlertRingIndicator';
-import { TerminalContext } from './TerminalContext';
+import { TerminalContextOverlay } from './TerminalContextOverlay';
+import type { ContextSide } from './terminal-context-placement';
 import { TerminalContextContext, TerminalResizeContext } from './wall-context';
 
 /** Widened pointer target over each (thin) sash band, in px. */
@@ -51,7 +52,7 @@ const Z_PREVIEW = 45;
 /** Reveal half a pane header of tiled layout around an elevated zoomed pane. */
 export const LATH_ZOOM_MARGIN = PANE_HEADER_HEIGHT_PX / 2;
 /** Soft app-chrome halo separates the elevated pane from tiled content below. */
-export const LATH_ZOOM_SHADOW = '0 0 5px 5px var(--color-app-bg)';
+export const LATH_ZOOM_SHADOW = ELEVATED_PANE_SHADOW;
 
 const PANE_HEADER_STYLE: CSSProperties = {
   flex: `0 0 ${PANE_HEADER_HEIGHT_PX}px`,
@@ -108,17 +109,9 @@ const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   tool: ToolPaneHeader,
 };
 
-/** For a terminal Surface the pane id is its session id (docs/specs/layout.md).
- *  The terminal context floats over the whole leaf, so it lives here rather than
- *  in the body, whose clipping box it must escape. */
-function TerminalLeafOverlay({ id, title, params }: PaneProps) {
-  const { mounted } = useContext(TerminalContextContext);
-  return (
-    <>
-      <AlertRingIndicator sessionId={id} />
-      {mounted?.id === id && <TerminalContext {...mounted} title={title} tool={isToolParams(params)} />}
-    </>
-  );
+/** Alerts stay attached to their source leaf; context lives above the Wall. */
+function TerminalLeafOverlay({ id }: PaneProps) {
+  return <AlertRingIndicator sessionId={id} />;
 }
 
 // Whole-leaf overlays keyed by `leafMeta.component`: chrome spanning header *and*
@@ -305,10 +298,17 @@ export function LathHost({
   onExternalDrop?: (target: DropTarget | null) => void;
   componentsOverride?: LathComponentsOverride;
 }) {
+  const { mounted: terminalContext } = useContext(TerminalContextContext);
+  const contextPreferences = useRef(new Map<string, ContextSide>());
   const store = lath.store;
   const animator = lath.animator;
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
 
+  useEffect(() => {
+    for (const id of contextPreferences.current.keys()) {
+      if (!snapshot.leafMeta.has(id)) contextPreferences.current.delete(id);
+    }
+  }, [snapshot.leafMeta]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
@@ -458,6 +458,8 @@ export function LathHost({
 
   const activeTree = preview ?? snapshot.tree;
   const { targets: frames, layers } = presentationTargets(activeTree, rect, snapshot.zoomedId);
+  const contextSource = terminalContext && frames.get(terminalContext.id);
+  const contextMeta = terminalContext && snapshot.leafMeta.get(terminalContext.id);
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
 
   // DOM order is sorted-by-id and STABLE across layout changes; z-index (not DOM
@@ -522,17 +524,22 @@ export function LathHost({
   }, [externalDragId]);
 
   // Swallow the one click the browser synthesizes after a real drag (so a drop over a
-  // header/button/door does not also fire its click). Capture phase, so React's own
-  // bubble-phase onClick never runs.
+  // header/button/door does not also fire its click), and the dblclick after it when
+  // the drag was a burst's second press (so it never keeps a preview slot). Capture
+  // phase, so React's own bubble-phase handlers never run.
   useEffect(() => {
     const onClickCapture = (e: MouseEvent): void => {
       if (!suppressNextClickRef.current) return;
-      suppressNextClickRef.current = false;
+      if (e.type === 'dblclick' || e.detail !== 2) suppressNextClickRef.current = false;
       e.stopPropagation();
       e.preventDefault();
     };
     window.addEventListener('click', onClickCapture, true);
-    return () => window.removeEventListener('click', onClickCapture, true);
+    window.addEventListener('dblclick', onClickCapture, true);
+    return () => {
+      window.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('dblclick', onClickCapture, true);
+    };
   }, []);
 
   // --- Animation: imperatively apply the animator's interpolated frames to the leaf
@@ -560,8 +567,9 @@ export function LathHost({
         // pane inert while it fades.
         el.style.pointerEvents = animator.isDying(id) ? 'none' : '';
       }
+      lath.placeContext(paint);
     },
-    [animator],
+    [animator, lath],
   );
 
   // The single tick body and the loop's entry point (from the retarget effects and the
@@ -730,6 +738,13 @@ export function LathHost({
           />
         );
       })}
+
+      {contextSource && (
+        <TerminalContextOverlay key={terminalContext!.id} context={terminalContext!}
+          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)} preview={isPreviewSlotParams(contextMeta?.params)}
+          lath={lath} wall={rect} source={contextSource}
+          multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
+      )}
 
       {/* Drop-preview overlay: the exact rect the current candidate would commit to,
           painted in the selection color (translucent fill + solid border). */}

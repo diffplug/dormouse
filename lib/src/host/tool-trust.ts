@@ -225,6 +225,17 @@ export async function findToolFile(
   }
 }
 
+/** The nearest project `dormouse.yml`, parsed; throws `ToolFileError` for an
+ *  oversized or malformed file. */
+export async function loadProjectToolFile(
+  cwd: string,
+  readTextFile?: (path: string) => Promise<string>,
+): Promise<{ path: string; dir: string; file: ToolFile } | null> {
+  const found = await findToolFile(cwd, readTextFile);
+  if (!found) return null;
+  return { path: found.path, dir: found.dir, file: parseToolFile(found.text, { path: found.path, dir: found.dir, scope: 'repo' }) };
+}
+
 export type ToolLookup =
   | { status: 'no-file' }
   | { status: 'unknown-tool'; projectRoot: string; path: string; names: string[] }
@@ -266,21 +277,14 @@ export async function lookupTool(
   const { args = [], readTextFile, resolveUpstream = resolveUpstreamUrl } = options;
   let found;
   try {
-    found = await findToolFile(cwd, readTextFile);
+    found = await loadProjectToolFile(cwd, readTextFile);
   } catch (error) {
-    // An oversized file: report it rather than letting it reach the parser.
+    // Oversized or malformed: report it, as the file's own problem.
     if (error instanceof ToolFileError) return { status: 'error', message: error.message };
     throw error;
   }
   if (!found) return { status: 'no-file' };
-
-  let file: ToolFile;
-  try {
-    file = parseToolFile(found.text, { path: found.path, dir: found.dir, scope: 'repo' });
-  } catch (error) {
-    if (error instanceof ToolFileError) return { status: 'error', message: error.message };
-    throw error;
-  }
+  const { file } = found;
 
   const entry = file.tools.get(name);
   if (!entry) {
@@ -299,24 +303,32 @@ export async function lookupTool(
     return { status: 'error', message: error instanceof Error ? error.message : String(error) };
   }
 
-  // Either grant covers this project: this folder alone, or the upstream every
-  // worktree shares. The folder key is free, so it is checked first — a granted
-  // folder answers without spawning git at all.
-  const ok = { status: 'ok', projectRoot: found.dir, path: found.path, file, entry, input } as const;
-  if (await trust.isTrusted([folderGrantKey(found.dir)])) return ok;
-
-  // Only now pay for git, which the untrusted answer needs anyway so the
-  // approval UI can offer the upstream grant.
-  const upstreamUrl = await resolveUpstream(found.dir);
-  if (upstreamUrl && await trust.isTrusted([upstreamGrantKey(upstreamUrl)])) return ok;
-
+  const grant = await projectGrant(found.dir, trust, resolveUpstream);
+  if (grant.trusted) return { status: 'ok', projectRoot: found.dir, path: found.path, file, entry, input };
   return {
     status: 'untrusted',
     projectRoot: found.dir,
     path: found.path,
     name: entry.name,
     run: input.run,
-    upstreamUrl,
+    upstreamUrl: grant.upstreamUrl,
     warnings: [...file.warnings],
   };
+}
+
+/**
+ * Whether a recorded grant covers the project rooted at `dir`: this folder
+ * alone, or the upstream every worktree shares. The folder key is free, so it
+ * is checked first — a granted folder answers without spawning git at all. An
+ * untrusted answer carries the upstream so the approval UI can offer it.
+ */
+export async function projectGrant(
+  dir: string,
+  trust: ToolTrustStore,
+  resolveUpstream: (dir: string) => Promise<string | null> = resolveUpstreamUrl,
+): Promise<{ trusted: true } | { trusted: false; upstreamUrl: string | null }> {
+  if (await trust.isTrusted([folderGrantKey(dir)])) return { trusted: true };
+  const upstreamUrl = await resolveUpstream(dir);
+  if (upstreamUrl && await trust.isTrusted([upstreamGrantKey(upstreamUrl)])) return { trusted: true };
+  return { trusted: false, upstreamUrl };
 }

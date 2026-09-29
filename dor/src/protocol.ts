@@ -23,9 +23,10 @@ export const SURFACE_CONTROL_METHODS = {
   await: 'surface.await',
   kill: 'surface.kill',
   iframe: 'surface.iframe',
-  agentBrowser: 'surface.agentBrowser',
+  browser: 'surface.browser',
+  browserViewport: 'surface.browserViewport',
+  resolveBrowser: 'surface.resolveBrowser',
   resolveOpen: 'surface.resolveOpen',
-  resolveAgentBrowser: 'surface.resolveAgentBrowser',
 } as const;
 
 export type SurfaceControlMethod = (typeof SURFACE_CONTROL_METHODS)[keyof typeof SURFACE_CONTROL_METHODS];
@@ -57,11 +58,23 @@ export const APP_CONTROL_METHODS = {
 
 export type AppControlMethod = (typeof APP_CONTROL_METHODS)[keyof typeof APP_CONTROL_METHODS];
 
+/**
+ * The wire identifier for each read of the Tool configuration
+ * (`docs/specs/dor-tool.md` → CLI). Launching a Tool places a Surface, so it
+ * is `surface.tool` instead.
+ */
+export const TOOL_CONTROL_METHODS = {
+  list: 'tool.list',
+} as const;
+
+export type ToolControlMethod = (typeof TOOL_CONTROL_METHODS)[keyof typeof TOOL_CONTROL_METHODS];
+
 /** Every method the control channel carries. */
-export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod;
+export type DorControlMethod = SurfaceControlMethod | WorkspaceControlMethod | AppControlMethod | ToolControlMethod;
 
 const WORKSPACE_METHOD_SET: ReadonlySet<string> = new Set(Object.values(WORKSPACE_CONTROL_METHODS));
 const APP_METHOD_SET: ReadonlySet<string> = new Set(Object.values(APP_CONTROL_METHODS));
+const TOOL_METHOD_SET: ReadonlySet<string> = new Set(Object.values(TOOL_CONTROL_METHODS));
 
 /**
  * A host's refusal of a method it does not know. **Frozen text:** a newer `dor`
@@ -74,6 +87,11 @@ export function unsupportedControlMethodMessage(method: string): string {
 /** Whether this method acts on the running app rather than on any Workspace. */
 export function isAppControlMethod(method: string): method is AppControlMethod {
   return APP_METHOD_SET.has(method);
+}
+
+/** Whether this method reads the Tool configuration rather than any Workspace. */
+export function isToolControlMethod(method: string): method is ToolControlMethod {
+  return TOOL_METHOD_SET.has(method);
 }
 
 /** Whether this method is a container verb — answered by the Window rather than

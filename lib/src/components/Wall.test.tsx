@@ -10,26 +10,31 @@ import { act } from 'react';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { Wall } from './Wall';
 import * as helpers from '../lib/helper-terminal';
+import * as agentBrowserScreen from './wall/agent-browser-screen';
 import { getAgentBrowserScreenController } from './wall/agent-browser-screen';
-import { setPlatform } from '../lib/platform';
+import { disposeAllAgentBrowserSurfaceControllers, getAgentBrowserSurfaceController } from './wall/agent-browser-surface-controller';
+import * as browserAutomation from './wall/browser-automation';
+import { setDevServerResolution } from './wall/agent-browser-ports';
+import { IS_MAC, setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { PlatformAdapter } from '../lib/platform/types';
+import type { BrowserRequest, BrowserResult } from '../lib/platform/browser-automation';
 import type { PersistedSession } from '../lib/session-types';
 import * as terminalRegistry from '../lib/terminal-registry';
 import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 import { pendingShellOpts } from '../lib/terminal-store';
-import { __resetArchiveServiceForTests } from '../lib/notepad/archive-service';
-import { addPlainNote, beginClosing, clearAllNotepads, getNotes, setOpenNotepadId } from '../lib/notepad/notepad-store';
-import type { NotepadArchiveV1 } from '../lib/notepad/types';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
-import { getWallHandle, listWallHandles } from './wall/wall-handles';
-import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
+import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
+import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
-import { resetTerminalPaneState } from '../lib/terminal-state-store';
+import { createAlertEpisode } from '../lib/alert-episode';
+import { resetTerminalPaneState, setTerminalUserTitle } from '../lib/terminal-state-store';
+import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
+import { cancelEditorClose, getEditorClosePrompt, UNSAVED_TOOL_REFUSAL } from '../lib/tool-editor';
 import { setWindowLabel } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -56,8 +61,6 @@ function leafCount(): number {
 }
 
 beforeEach(() => {
-  __resetArchiveServiceForTests();
-  clearAllNotepads();
   fake = new FakePtyAdapter();
   setPlatform(fake);
   harness = mountWallHarness();
@@ -65,24 +68,20 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cancelEditorClose();
+  resetToolDirty();
   harness.dispose();
   vi.clearAllMocks();
   vi.restoreAllMocks();
-  __resetArchiveServiceForTests();
-  clearAllNotepads();
   // The activity store is Window-global, so a ring or TODO left on a pane id
   // would wear its alarm overlay in every later test that renders that id.
   clearTerminalActivity();
+  // Browser controllers outlive the Wall that mounted them, like the ring above.
+  disposeAllAgentBrowserSurfaceControllers();
 });
 
 const flush = (): Promise<void> => harness.flush();
-
-/** Wait out the host's own 100ms state polls (a tool taking over a pane, a
- *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
-const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
-  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
-  expect(ready()).toBe(true);
-}, { timeout: 2_000, interval: 25 });
+const flushFrame = (): Promise<void> => harness.flushFrame();
 
 /** The host's answer for an approved `storybook` tool. */
 const okToolLookup = (key: string[] | null) => ({
@@ -97,20 +96,35 @@ const okToolLookup = (key: string[] | null) => ({
   warnings: [],
 });
 
-/** The integrated shell in `id` reports `line` as its running command. */
-const reportRunning = (id: string, line: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [
-  { type: 'commandLine', commandLine: line },
-  { type: 'commandStart', source: 'osc633_boundaries' },
-]);
-
 /** The shell in `id` is back at its prompt. */
 const promptBack = (id: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
 
-async function flushFrame(): Promise<void> {
-  await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); });
+/** `installBrowserHost`, on the adapter this file's tests read as `fake`. */
+function hostBrowsers(...args: Parameters<typeof installBrowserHost>): ReturnType<typeof installBrowserHost> {
+  const host = installBrowserHost(...args);
+  fake = host.platform;
+  return host;
 }
 
 describe('Wall on the Lath engine', () => {
+  it('consumes dirty reports only for Tool-designated members, including minimized Tools', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialDoors={[{
+      id: 'tool-door', title: 'storybook', component: 'tool', tabComponent: 'tool',
+      params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announced' },
+    }]} />));
+    await flush();
+    await act(async () => {
+      recordToolDirty('pane-a', true);
+      recordToolDirty('tool-door', true);
+    });
+    expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.dirtyToolIds()).toEqual(['tool-door']);
+    await act(async () => { await dispatchKill('pane-a'); });
+    expect(getEditorClosePrompt()).toBeNull();
+    // A command close refuses a dirty Tool rather than raising the prompt.
+    expect(await dispatchKill('tool-door')).toEqual({ ok: false, error: UNSAVED_TOOL_REFUSAL });
+    expect(getEditorClosePrompt()).toBeNull();
+  });
+
   /** The alarm treatment is the leaf overlay, so it must reach a ringing terminal
    *  through the engine's overlay slot and leave a quiet neighbour alone. */
   it('mounts the alarm overlay on a ringing terminal leaf', async () => {
@@ -118,7 +132,7 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(container.querySelector('[data-alert-ring-state]')).toBeNull();
 
-    await act(async () => { setTerminalActivity('pane-a', { status: 'ALERT_RINGING' }); });
+    await act(async () => { setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: createAlertEpisode() }); });
 
     const overlays = container.querySelectorAll('[data-alert-ring-state="ringing"]');
     expect(overlays).toHaveLength(1);
@@ -267,93 +281,6 @@ describe('Wall on the Lath engine', () => {
     await flush();
     expect(leafCount()).toBe(1);
     expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-  });
-
-  it('reuses a running Surface while another archive caller holds its notes freeze', async () => {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-    await flush();
-    const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
-    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockReturnValue(createTerminalPaneState({
-      cwd,
-      currentCommand: { id: 'run', rawCommandLine: 'pnpm dev', displayCommand: 'pnpm dev', cwdAtStart: cwd, startedAt: 0, source: 'osc633_E' },
-    }));
-    const release = beginClosing(['pane-a']);
-    const respond = vi.fn();
-    try {
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.ensure, params: { command: ['pnpm', 'dev'], cwd: '/repo' }, respond,
-        } }));
-      });
-      expect(respond).toHaveBeenCalledWith({ ok: true, result: expect.objectContaining({ status: 'existing', surfaceId: 'pane-a' }) });
-      expect(leafCount()).toBe(1);
-    } finally { release(); }
-  });
-
-  it('does not reuse a running Surface while its own close is archiving', async () => {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-    await flush();
-    const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
-    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockReturnValue(createTerminalPaneState({
-      cwd,
-      currentCommand: { id: 'run', rawCommandLine: 'pnpm dev', displayCommand: 'pnpm dev', cwdAtStart: cwd, startedAt: 0, source: 'osc633_E' },
-    }));
-    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
-    act(() => { addPlainNote('pane-a', 'keep this note'); });
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
-    const saveOriginal = fake.notepadArchive.save.bind(fake.notepadArchive);
-    const save = vi.spyOn(fake.notepadArchive, 'save').mockImplementation(async (...args) => { await gate; return saveOriginal(...args); });
-    const killed = vi.fn();
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.kill, params: { surface: 'surface:1', confirmation: { mode: 'dangerously' } }, respond: killed,
-      } }));
-    });
-    await flush();
-    expect(save).toHaveBeenCalled();
-    const respond = vi.fn();
-    try {
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.ensure, params: { command: ['pnpm', 'dev'], cwd: '/repo' }, respond,
-        } }));
-      });
-      expect(respond).toHaveBeenCalledWith({ ok: true, result: expect.objectContaining({ status: 'created' }) });
-      expect(killed).not.toHaveBeenCalled();
-    } finally { release(); await flush(); }
-    expect(killed).toHaveBeenCalledWith({ ok: true, result: expect.objectContaining({ status: 'killed', surfaceId: 'pane-a' }) });
-  });
-
-  it.each([false, true])('preserves notes entered in a cancelled ensure pane (archive fails: %s)', async fails => {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-    await flush();
-    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(false);
-    vi.spyOn(terminalRegistry, 'getDefaultShellOpts').mockReturnValue({ shell: '/bin/bash' });
-    const controller = new AbortController();
-    const respond = vi.fn();
-    await act(async () => {
-      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-        method: SURFACE_CONTROL_METHODS.ensure, params: { command: ['pnpm', 'dev'], cwd: '/repo', surface: 'surface:1' }, signal: controller.signal, respond,
-      } }));
-    });
-    const temporaryId = Array.from(container.querySelectorAll('[data-lath-leaf]')).map(el => el.getAttribute('data-lath-leaf')!).find(id => id !== 'pane-a')!;
-    expect(temporaryId).toBeTruthy();
-    act(() => { addPlainNote(temporaryId, 'written while integration is pending'); });
-    if (fails) vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
-    await act(async () => controller.abort());
-    await flush();
-    if (fails) {
-      expect(respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('temporary surface kept open: notepad archive failed: disk full') });
-      expect(getNotes(temporaryId)).toHaveLength(1);
-      expect(container.querySelector(`[data-lath-leaf="${temporaryId}"]`)).not.toBeNull();
-    } else {
-      expect(respond).toHaveBeenCalledWith({ ok: false, error: 'ensure was cancelled' });
-      expect(container.querySelector(`[data-lath-leaf="${temporaryId}"]`)).toBeNull();
-      const archive = (await fake.notepadArchive.load())?.raw as NotepadArchiveV1;
-      expect(archive.batches.flatMap(batch => batch.notes)).toEqual([expect.objectContaining({ content: { kind: 'plain', text: 'written while integration is pending' } })]);
-      expect(getNotes(temporaryId)).toEqual([]);
-    }
   });
 
   it('renders a pane through LathHost, splits via wallActions, kills, and persists the Lath layout on save', async () => {
@@ -512,6 +439,7 @@ describe('Wall on the Lath engine', () => {
   // this realm cannot (`DORMOUSE_AGENT_BROWSER_BIN` matches by exact value, and
   // only the host reads its own environment).
   it('drops a binaryPath that is not an agent-browser without failing the request', async () => {
+    const { requests } = hostBrowsers();
     await act(async () => {
       root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
     });
@@ -521,8 +449,8 @@ describe('Wall on the Lath engine', () => {
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
-          method: SURFACE_CONTROL_METHODS.agentBrowser,
-          params: { session: 'dormouse.1.gate', binaryPath: '/usr/bin/curl' },
+          method: SURFACE_CONTROL_METHODS.browser,
+          params: { provider: 'agent-browser', session: 'dormouse.1.gate', binaryPath: '/usr/bin/curl' },
           respond: (r: typeof response) => { response = r; },
         },
       }));
@@ -533,6 +461,63 @@ describe('Wall on the Lath engine', () => {
     expect(response?.ok).toBe(true);
     expect(response?.error).toBeUndefined();
     expect(response?.result?.surfaceId).toBeTruthy();
+    expect(requests('attach')[0]).toEqual({ provider: 'agent-browser', binding: { session: 'dormouse.1.gate' }, op: 'attach' });
+  });
+
+  it('streams from a port `dor agent-browser` read itself, asking the host nothing; a Playwright port is the host\'s to report', async () => {
+    // An agent-browser that writes no state files, or keeps them in a socket
+    // directory of its own, is one the host cannot find
+    // (docs/specs/dor-browser.md → "agent-browser").
+    const { browser, requests } = hostBrowsers({ attach: async () => ({ ok: false, error: 'not running' }) });
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+    await flush();
+    const bind = async (params: Record<string, unknown>) => {
+      let response: { ok: boolean; error?: string; result?: { surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: { method: SURFACE_CONTROL_METHODS.browser, params, respond: (r: typeof response) => { response = r; } },
+        }));
+      });
+      await flush();
+      return response;
+    };
+
+    const bound = await bind({ provider: 'agent-browser', session: 'mine', wsPort: 61218 });
+    expect(bound?.ok).toBe(true);
+    expect(requests('attach')).toEqual([]);
+    expect(browser).toHaveBeenCalledWith(expect.objectContaining({ op: 'view', stream: 61218 }));
+
+    expect((await bind({ provider: 'playwright', session: 'dormouse.pw.x', cwd: '/project', wsPort: 61219 }))?.ok).toBe(false);
+    expect(requests('attach')).toEqual([{ provider: 'playwright', binding: { session: 'dormouse.pw.x', cwd: '/project' }, op: 'attach' }]);
+  });
+
+  it('reports the measured browser viewport and persists an explicit fixed size', async () => {
+    let actual = { width: 1440, height: 900, dpr: 1 };
+    const { requests } = hostBrowsers({
+      measure: async () => ({ ok: true, viewport: actual }),
+      viewport: async (request) => {
+        actual = { width: request.width, height: request.height, dpr: request.dpr ?? actual.dpr };
+        return { ok: true };
+      },
+    });
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+    await flush();
+    const id = await dispatchAgentBrowser({ session: 'viewport-session', wsPort: 4321 });
+    const control = async (setting?: unknown) => {
+      let response: { ok: boolean; result?: { requested: unknown; actual: unknown }; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          method: SURFACE_CONTROL_METHODS.browserViewport,
+          params: { provider: 'agent-browser', surface: id, ...(setting ? { setting } : {}) },
+          respond: (value: typeof response) => { response = value; },
+        } }));
+      });
+      return response;
+    };
+    expect((await control())?.result?.actual).toEqual(actual);
+    const result = await control({ mode: 'fixed', width: 390, height: 844 });
+    expect(result).toMatchObject({ ok: true, result: { requested: { mode: 'fixed', width: 390, height: 844 }, actual: { width: 390, height: 844, dpr: 1 } } });
+    expect(requests('viewport')).toEqual([expect.objectContaining({ width: 390, height: 844 })]);
   });
 
   // The control socket is a wire protocol, not the CLI: `dor iframe` validates
@@ -708,19 +693,359 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it.each(['playwright', 'agent-browser'] as const)('never binds a %s key to a session a Surface in another Workspace still holds', async (provider) => {
+    const { requests } = hostBrowsers({ attach: async () => ({ ok: true, stream: 4555 }) });
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const disposers: Array<() => void> = [];
+    try {
+      await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+      await flush();
+      const control = async (method: string, params: Record<string, unknown>) => {
+        let response: { ok: boolean; result?: { binding?: { session: string }; surfaceId?: string } } | undefined;
+        await act(async () => {
+          window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+            detail: { method, params, surfaceId: 'pane-a', respond: (r: typeof response) => { response = r; } },
+          }));
+        });
+        await flush();
+        return response;
+      };
+      // `dor --key foo open` binds a pane here…
+      const first = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider, key: 'foo', proposed: { cwd: '/project' } }))?.result?.binding;
+      const bound = await control(SURFACE_CONTROL_METHODS.browser, { provider, key: 'foo', session: first!.session, cwd: '/project' });
+      expect(bound?.ok).toBe(true);
+      // …which moves to another Workspace, still bound to that session.
+      expect((await dispatchKill(bound!.result!.surfaceId!))?.ok).toBe(true);
+      disposers.push(registerWallHandle(stubWallHandle('ws-elsewhere', {
+        browserSessions: (asked) => (asked === provider ? [first!.session] : []),
+      })));
+
+      // The same command here opens a browser of its own, so neither pane's
+      // close ends the other's.
+      const again = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider, key: 'foo', proposed: { cwd: '/project' } }))?.result?.binding;
+      expect(again?.session).toBe(`${first!.session}.2`);
+      expect(requests('attach')).toHaveLength(1);
+    } finally {
+      disposers.forEach((dispose) => dispose());
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('keeps a Playwright key on its session when no viewer can attach to the browser it opened', async () => {
+    const { requests } = hostBrowsers({
+      attach: async () => ({ ok: false, error: 'Dormouse currently views Chromium Playwright sessions only. The native CLI command still ran.' }),
+    });
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+    await flush();
+    const control = async (method: string, params: Record<string, unknown>) => {
+      let response: { ok: boolean; result?: { binding?: { session: string; cwd?: string } | null } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: { method, params, surfaceId: 'pane-a', respond: (r: typeof response) => { response = r; } },
+        }));
+      });
+      await flush();
+      return response;
+    };
+    // `dor playwright --key app open --browser=firefox :5173`: resolve, run natively, bind.
+    const first = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider: 'playwright', key: 'app', proposed: { cwd: '/project' } }))?.result?.binding;
+    expect(first).toMatchObject({ cwd: '/project' });
+    expect((await control(SURFACE_CONTROL_METHODS.browser, { provider: 'playwright', key: 'app', session: first!.session, cwd: '/project' }))?.ok).toBe(false);
+    expect(requests('attach')).toEqual([{ provider: 'playwright', binding: { session: first!.session, cwd: '/project' }, op: 'attach' }]);
+
+    // Past the two minutes an unbound first launch is held for.
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 10 * 60_000);
+    try {
+      const later = (await control(SURFACE_CONTROL_METHODS.resolveBrowser, { provider: 'playwright', key: 'app', proposed: { cwd: '/elsewhere' } }))?.result?.binding;
+      expect(later).toEqual(first);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  async function openPortContext(provider = 'agent-browser') {
+    // The mocked TerminalPane registers no terminal, so a real helper would
+    // report its parent closed — an alert the context shows ahead of a port error.
+    vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
+    if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
+    fake.setOpenPorts('pane-a', [{ protocol: 'tcp', family: 'IPv4', address: '127.0.0.1', port: 5173, pid: 100, processName: 'vite' }]);
+    await act(async () => {
+      container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true, clientX: 10, clientY: 10,
+      }));
+    });
+    await flush();
+    await act(async () => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="switch to ${provider}"]`)?.click());
+  }
+  const contextButton = (label: string) => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="${label}"]`)!;
+
+  it('reveals a restored context-port browser instead of opening a second', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const { requests } = hostBrowsers({ launch: async () => ({ ok: true, session: 'second', stream: 1 }) });
+    try {
+      // The key a pre-Playwright build persisted for this port's agent-browser pane.
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" initialDoors={[{
+          id: 'restored-ab', title: 'localhost:5173', component: 'browser', tabComponent: 'surface',
+          params: { surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'restored', url: 'http://localhost:5173/', contextPortKey: 'pane-a:5173:agent' },
+        }]} />);
+      });
+      await flush();
+      await openPortContext();
+      await act(async () => contextButton('Open in agent-browser screencast').click());
+      await flush();
+
+      expect(requests('launch')).toEqual([]);
+      expect(container.querySelector('[data-lath-leaf="restored-ab"]')).not.toBeNull();
+      expect(leafCount()).toBe(2);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('pops out a reused context-port browser at the port, never navigating into the relaunch', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    // A relaunch of the named session hangs; a mint answers at once.
+    const { browser, requests } = hostBrowsers({
+      launch: (request) => request.binding.session ? new Promise<never>(() => {}) : Promise.resolve({ ok: true, session: 'second', stream: 1 }),
+      attach: async () => ({ ok: true, stream: 4321 }),
+    });
+    try {
+      // The port's browser, navigated away from the port's page since.
+      await act(async () => {
+        root.render(<Wall initialMode="command" restoredLathLayout={{
+          version: 1,
+          tree: { root: { kind: 'split', dir: 'row', children: [
+            { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 },
+            { node: { kind: 'leaf', id: 'port-ab' }, weight: 0.5 },
+          ] } },
+          leafMeta: {
+            'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+            'port-ab': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'restored', url: 'http://localhost:5173/elsewhere', contextPortKey: 'pane-a:5173:agent',
+            } },
+          },
+        }} />);
+      });
+      await flush();
+      await openPortContext();
+      browser.mockClear();
+      await act(async () => contextButton('Open in agent-browser popout').click());
+      await flush();
+
+      // One relaunch, at the port — not at the page it was on, with the port's
+      // `open` queued behind it.
+      expect(leafCount()).toBe(2);
+      expect(requests('launch')).toEqual([{
+        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
+      }]);
+      expect(requests('navigate')).toEqual([]);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('pops out a restored context-port Door at the port', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    // A relaunch of the named session hangs; a mint answers at once.
+    const { requests } = hostBrowsers({
+      launch: (request) => request.binding.session ? new Promise<never>(() => {}) : Promise.resolve({ ok: true, session: 'second', stream: 1 }),
+      attach: async () => ({ ok: true, stream: 4321 }),
+    });
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" initialDoors={[{
+          id: 'restored-ab', title: 'localhost:5173', component: 'browser', tabComponent: 'surface',
+          params: { surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'restored', url: 'http://localhost:5173/elsewhere', contextPortKey: 'pane-a:5173:agent' },
+        }]} />);
+      });
+      await flush();
+      await openPortContext();
+      await act(async () => contextButton('Open in agent-browser popout').click());
+      await flush();
+
+      expect(requests('launch')).toEqual([{
+        provider: 'agent-browser', binding: { session: 'restored' }, op: 'launch', url: 'http://localhost:5173/', headed: true,
+      }]);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('names Playwright when a context-menu Playwright launch fails', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    // A launch the host answers without a session or a reason of its own.
+    const { browser } = hostBrowsers({
+      launch: async (request) => request.provider === 'playwright' ? { ok: false } : { ok: true, session: 'ab', stream: 1 },
+    });
+    try {
+      await act(async () => {
+        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
+      });
+      await flush();
+      await openPortContext('playwright');
+      await act(async () => contextButton('Open in playwright screencast').click());
+      await flush();
+
+      expect(browser).toHaveBeenCalledWith(expect.objectContaining({ provider: 'playwright', op: 'launch', url: 'http://localhost:5173/' }));
+      expect(document.querySelector('[data-terminal-context] [role="alert"]')?.textContent).toBe('Could not open playwright');
+      // No pane is created for a failed startup.
+      expect(leafCount()).toBe(1);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ['agent-browser', 'screencast'], ['agent-browser', 'popout'], ['playwright', 'screencast'], ['playwright', 'popout'],
+  ] as const)('defers %s %s port placement until startup succeeds', async (provider, presentation) => {
+    const launch = Promise.withResolvers<BrowserResult>();
+    const { requests } = hostBrowsers({ launch: () => launch.promise });
+    const events = vi.fn();
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
+    await flush();
+    await openPortContext(provider);
+    const button = contextButton(`Open in ${provider} ${presentation}`);
+    events.mockClear();
+    await act(async () => { button.focus(); button.click(); });
+    await flush();
+    expect(button.textContent).toContain('opening…');
+    expect(button.getAttribute('aria-busy')).toBe('true');
+    expect(document.activeElement).toBe(button);
+    expect(leafCount()).toBe(1);
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(0);
+    expect(events).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'split' }));
+    await act(async () => button.click());
+    expect(requests('launch')).toHaveLength(1);
+    expect(requests('launch')[0]).toMatchObject({ provider, headed: presentation === 'popout' });
+    await act(async () => launch.resolve({ ok: true, session: `${provider}-${presentation}`, stream: 4321 }));
+    await flush();
+    expect(leafCount()).toBe(2);
+    expect(events.mock.calls.filter(([event]) => event.type === 'split')).toHaveLength(1);
+    expect(requests('launch')).toHaveLength(1);
+    expect(requests('navigate')).toHaveLength(0);
+    const browser = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).find(leaf => leaf.dataset.lathLeaf !== 'pane-a')!;
+    expect(getAgentBrowserSurfaceController(browser.dataset.lathLeaf!)?.snapshot().phase).toBe('live');
+  });
+
+  it.each(['agent-browser', 'playwright'] as const)('keeps a failed %s launch in context without any split, and retries', async provider => {
+    const launch = Promise.withResolvers<BrowserResult>();
+    const { requests } = hostBrowsers({ launch: () => launch.promise });
+    const events = vi.fn();
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
+    await flush();
+    await openPortContext(provider);
+    const button = contextButton(`Open in ${provider} screencast`);
+    events.mockClear();
+    await act(async () => { button.focus(); button.click(); });
+    await flush();
+    expect(leafCount()).toBe(1);
+    await act(async () => launch.resolve({ ok: false, error: 'binary not found' }));
+    await flush();
+    expect(leafCount()).toBe(1);
+    expect(events).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'split' }));
+    expect(document.activeElement).toBe(button);
+    expect(document.querySelector('[data-context-diagnostic]')?.textContent).toBe('binary not found');
+    expect(button.hasAttribute('aria-busy')).toBe(false);
+    await act(async () => button.click());
+    await flush();
+    expect(requests('launch')).toHaveLength(2);
+  });
+
+  it.each(['dismiss', 'minimize', 'kill', 'closeWorkspace', 'deactivate', 'unmount'] as const)('cancels pending placement on %s and closes a late browser', async action => {
+    const launch = Promise.withResolvers<BrowserResult>();
+    const { requests } = hostBrowsers({ launch: () => launch.promise });
+    const events = vi.fn();
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
+    await flush();
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    events.mockClear();
+    await act(async () => {
+      if (action === 'dismiss') contextButton('Close terminal context').click();
+      else if (action === 'minimize') container.querySelector<HTMLButtonElement>('[data-lath-leaf="pane-a"] [aria-label="Minimize"]')!.click();
+      else if (action === 'kill') await dispatchKill('pane-a');
+      else if (action === 'closeWorkspace') await getWallHandle(DEFAULT_WORKSPACE_ID)!.closeAll();
+      else if (action === 'deactivate') root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} active={false} />);
+      else root.render(null);
+    });
+    await flush();
+    await act(async () => launch.resolve({ ok: true, session: 'late-browser', stream: 4321 }));
+    await flush();
+    expect(events).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'split' }));
+    expect(requests('close')).toEqual([expect.objectContaining({ binding: { session: 'late-browser' } })]);
+  });
+
+  it('routes diagnostic DOM copy through the Wall without sending terminal input', async () => {
+    hostBrowsers({ launch: async () => ({ ok: false, error: 'agent-browser binary not found' }) });
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+    await flush();
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    const diagnostic = document.querySelector<HTMLElement>('[data-context-diagnostic]')!;
+    const write = vi.fn(async () => {});
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: write } });
+    const input = vi.spyOn(fake, 'writePty');
+    try {
+      diagnostic.focus();
+      const range = document.createRange();
+      range.selectNodeContents(diagnostic);
+      window.getSelection()!.removeAllRanges();
+      window.getSelection()!.addRange(range);
+      expect(document.activeElement).toBe(diagnostic);
+      expect(window.getSelection()!.toString()).toBe('agent-browser binary not found');
+      const key = new KeyboardEvent('keydown', { key: 'c', metaKey: IS_MAC, ctrlKey: !IS_MAC, bubbles: true, cancelable: true });
+      await act(async () => diagnostic.dispatchEvent(key));
+      expect(key.defaultPrevented).toBe(true);
+      expect(write).toHaveBeenCalledExactlyOnceWith('agent-browser binary not found');
+      expect(input).not.toHaveBeenCalled();
+    } finally {
+      window.getSelection()!.removeAllRanges();
+      if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      else delete (navigator as Partial<Navigator>).clipboard;
+    }
+  });
+
+  it('ignores an old launch after the context is closed and reopened', async () => {
+    const old = Promise.withResolvers<BrowserResult>();
+    const fresh = Promise.withResolvers<BrowserResult>();
+    let attempts = 0;
+    const { requests } = hostBrowsers({ launch: () => ++attempts === 1 ? old.promise : fresh.promise });
+    await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />); });
+    await flush();
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    await act(async () => contextButton('Close terminal context').click());
+    await openPortContext();
+    await act(async () => contextButton('Open in agent-browser screencast').click());
+    await flush();
+    expect(requests('launch')).toHaveLength(2);
+    await act(async () => old.resolve({ ok: true, session: 'old', stream: 4321 }));
+    await flush();
+    expect(leafCount()).toBe(1);
+    expect(contextButton('Open in agent-browser screencast').getAttribute('aria-busy')).toBe('true');
+    await act(async () => fresh.resolve({ ok: true, session: 'fresh', stream: 4321 }));
+    await flush();
+    expect(leafCount()).toBe(2);
+    expect(requests('close')).toEqual([expect.objectContaining({ binding: { session: 'old' } })]);
+  });
+
   it('reuses and closes a parked browser that gains its session after minimization', async () => {
     const defaultSession = sessionForKey('default');
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    let resolveOpen!: (result: { ok: boolean; session: string; wsPort: number }) => void;
-    const openResult = new Promise<{ ok: boolean; session: string; wsPort: number }>((resolve) => {
+    let resolveOpen!: (result: { ok: boolean; session: string; stream: number }) => void;
+    const openResult = new Promise<{ ok: boolean; session: string; stream: number }>((resolve) => {
       resolveOpen = resolve;
     });
-    const agentBrowserCommand = vi.fn(async (_session: string, args: string[]) => {
-      return { exitCode: 0, stdout: '', stderr: '' };
+    const { requests } = hostBrowsers({
+      launch: () => openResult,
+      attach: async () => ({ ok: true, stream: 4321 }),
     });
-    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
-    (fake as PlatformAdapter).agentBrowserStreamStatus = vi.fn(async () => ({ ok: true, wsPort: 4321 }));
 
     try {
       await act(async () => {
@@ -737,22 +1062,10 @@ describe('Wall on the Lath engine', () => {
         processName: 'vite',
       }]);
 
-      // The context-menu path creates an eager, session-less browser before its
-      // asynchronous daemon boot completes.
-      const header = container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!;
-      await act(async () => {
-        header.dispatchEvent(new MouseEvent('contextmenu', {
-          bubbles: true,
-          cancelable: true,
-          clientX: 10,
-          clientY: 10,
-        }));
-      });
-      await flush();
-      const portRow = document.querySelector<HTMLButtonElement>(
-        '[data-terminal-context] button[aria-label="Open in agent-browser screencast"]',
-      )!;
-      await act(async () => { portRow.click(); });
+      // Renderer swaps still create their replacement before launch. Exercise
+      // parking during startup through that entry point, not context Connect.
+      const iframe = await dispatchIframe('http://localhost:5173/');
+      await act(async () => { getAgentBrowserScreenController(iframe.id)?.actions.setRenderMode?.('agent-browser-screencast'); });
       await flush();
 
       const browserLeaf = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]'))
@@ -764,7 +1077,7 @@ describe('Wall on the Lath engine', () => {
       await flush();
       expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(true);
 
-      // Until the boot names it, `dor ab --surface` has nothing to drive.
+      // Until the boot names it, `dor agent-browser --surface` has nothing to drive.
       expect(await dispatchResolveAgentBrowser(browserId)).toEqual({
         ok: false,
         error: `surface 'surface:2' has no agent-browser session yet`,
@@ -773,7 +1086,7 @@ describe('Wall on the Lath engine', () => {
       // Boot completion writes `session` only to live parked metadata. The Door
       // record is intentionally still the session-less minimize-time snapshot.
       await act(async () => {
-        resolveOpen({ ok: true, session: defaultSession, wsPort: 4321 });
+        resolveOpen({ ok: true, session: defaultSession, stream: 4321 });
         await openResult;
       });
       await flush();
@@ -782,8 +1095,8 @@ describe('Wall on the Lath engine', () => {
       await act(async () => {
         window.dispatchEvent(new CustomEvent('dormouse:control-request', {
           detail: {
-            method: SURFACE_CONTROL_METHODS.agentBrowser,
-            params: { session: defaultSession, surface: 'surface:1' },
+            method: SURFACE_CONTROL_METHODS.browser,
+            params: { provider: 'agent-browser', session: defaultSession, surface: 'surface:1' },
             respond: (r: typeof reused) => { reused = r; },
           },
         }));
@@ -793,7 +1106,81 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
 
       expect((await dispatchKill(browserId))?.ok).toBe(true);
-      expect(agentBrowserCommand).toHaveBeenCalledWith(defaultSession, ['close'], undefined);
+      expect(requests('close')).toContainEqual({ provider: 'agent-browser', binding: { session: defaultSession }, op: 'close' });
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('binds a minimized pane restored after a failed provider swap to a live controller', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    const pwOpen = Promise.withResolvers<{ ok: boolean; error?: string }>();
+    const { requests } = hostBrowsers({
+      launch: (request) => request.provider === 'playwright' ? pwOpen.promise : Promise.resolve({ ok: true, session: 'relaunched', stream: 4321 }),
+    });
+    try {
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'ab-pane' } }, leafMeta: {
+            'ab-pane': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: 'ab-live', url: 'http://localhost:5173/',
+            } },
+          } }}
+          initialMode="command"
+        />);
+      });
+      await flush();
+      await act(async () => { getAgentBrowserScreenController('ab-pane')?.actions.setRenderMode?.('playwright-screencast'); });
+      await flush();
+      const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
+      const eagerId = eagerLeaf.dataset.lathLeaf!;
+      expect(eagerId).not.toBe('ab-pane');
+      await act(async () => { eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click(); });
+      await flush();
+
+      // Playwright is not installed: the Door comes back as agent-browser, in
+      // the session it had.
+      await act(async () => { pwOpen.resolve({ ok: false, error: 'playwright-cli is not installed' }); });
+      await flush();
+      expect(requests('launch')).toContainEqual(expect.objectContaining({
+        provider: 'agent-browser', binding: { session: 'ab-live' }, op: 'launch', url: 'http://localhost:5173/', headed: false,
+      }));
+      expect(getAgentBrowserSurfaceController(eagerId)?.provider).toBe('agent-browser');
+      expect(getAgentBrowserScreenController(eagerId)?.snapshot().renderMode).toBe('agent-browser-screencast');
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('gives a pane restored mid-launch its creator\'s fallback when the launch fails', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
+    hostBrowsers({ launch: async () => ({ ok: false, error: 'agent-browser binary not found' }) });
+    try {
+      // Persisted before either launch answered: a new-tab pane, and a swap
+      // away from the embed.
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{ version: 1, tree: { root: { kind: 'split', dir: 'row', children: [
+            { node: { kind: 'leaf', id: 'new-tab' }, weight: 0.5 },
+            { node: { kind: 'leaf', id: 'swapped' }, weight: 0.5 },
+          ] } }, leafMeta: {
+            'new-tab': { component: 'browser', tabComponent: 'surface', title: 'accounts.example', params: {
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', url: 'https://accounts.example/', launchFallback: 'close',
+            } },
+            'swapped': { component: 'browser', tabComponent: 'surface', title: 'localhost:5173', params: {
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', url: 'http://localhost:5173/',
+              launchFallback: { restore: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/' } },
+            } },
+          } }}
+          initialMode="command"
+        />);
+      });
+      await flush();
+      await flush();
+
+      expect(container.querySelector('[data-lath-leaf="new-tab"]')).toBeNull();
+      expect(container.querySelector('[data-lath-leaf="swapped"]')).not.toBeNull();
+      expect(getAgentBrowserScreenController('swapped')?.snapshot().renderMode).toBe('iframe');
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -801,13 +1188,11 @@ describe('Wall on the Lath engine', () => {
 
   it('hands an eager render-swap session to a Surface minimized during launch', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
-    let resolveOpen!: (result: { ok: boolean; session?: string; wsPort?: number; binaryPath?: string }) => void;
-    const openResult = new Promise<{ ok: boolean; session?: string; wsPort?: number; binaryPath?: string }>((resolve) => {
+    let resolveOpen!: (result: { ok: boolean; session?: string; stream?: number; binaryPath?: string }) => void;
+    const openResult = new Promise<{ ok: boolean; session?: string; stream?: number; binaryPath?: string }>((resolve) => {
       resolveOpen = resolve;
     });
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
-    const agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
+    const { requests } = hostBrowsers({ launch: () => openResult });
 
     try {
       await act(async () => {
@@ -817,7 +1202,7 @@ describe('Wall on the Lath engine', () => {
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
 
       await act(async () => {
-        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('agent-browser-screencast');
       });
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
@@ -831,20 +1216,13 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
 
       await act(async () => {
-        resolveOpen({ ok: true, session: 'dormouse.1.gui-minimized', wsPort: 4321, binaryPath: '/usr/bin/agent-browser' });
+        resolveOpen({ ok: true, session: 'dormouse.1.gui-minimized', stream: 4321, binaryPath: '/usr/bin/agent-browser' });
         await openResult;
       });
       await flush();
 
-      expect(await dispatchResolveAgentBrowser(eagerId)).toEqual({
-        ok: true,
-        result: { surfaceId: eagerId, surfaceRef: 'surface:1', session: 'dormouse.1.gui-minimized' },
-      });
-      expect(agentBrowserCommand).not.toHaveBeenCalledWith(
-        'dormouse.1.gui-minimized',
-        ['close'],
-        '/usr/bin/agent-browser',
-      );
+      expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-minimized' }, fresh: false } });
+      expect(requests('close').filter((request) => request.binding.session === 'dormouse.1.gui-minimized')).toEqual([]);
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -856,7 +1234,7 @@ describe('Wall on the Lath engine', () => {
     const openResult = new Promise<{ ok: boolean; error?: string }>((resolve) => {
       resolveOpen = resolve;
     });
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(() => openResult);
+    hostBrowsers({ launch: () => openResult });
 
     try {
       await act(async () => {
@@ -866,11 +1244,12 @@ describe('Wall on the Lath engine', () => {
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
 
       await act(async () => {
-        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('agent-browser-screencast');
       });
       await flush();
       const eagerLeaf = container.querySelector<HTMLElement>('[data-lath-leaf]')!;
       const eagerId = eagerLeaf.dataset.lathLeaf!;
+      expect(eagerId).not.toBe(iframeId);
       await act(async () => {
         eagerLeaf.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
       });
@@ -885,8 +1264,92 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
       expect(await dispatchResolveAgentBrowser(eagerId)).toEqual({
         ok: false,
-        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe)",
+        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/",
       });
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('restores a failed provider swap minimized meanwhile in place, reopening the previous browser under its own key', async () => {
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    const defaultSession = sessionForKey('default');
+    const events: string[] = [];
+    let failPlaywright!: (result: { ok: boolean; error?: string }) => void;
+    let landClose!: () => void;
+    // Every agent-browser command and launch, in order; attaching, the stream
+    // URL and captures are not what this test watches.
+    const { browser } = hostBrowsers();
+    browser.mockImplementation(async (request: BrowserRequest) => {
+      if (request.op === 'attach') return { ok: true, stream: 4321 };
+      if (request.provider === 'playwright') {
+        return request.op === 'launch' ? new Promise((resolve) => { failPlaywright = resolve; }) : { ok: true };
+      }
+      if (request.op === 'view') return { ok: true, url: `ws://127.0.0.1:${request.stream}` };
+      if (request.op === 'launch') {
+        events.push(`launch ${request.binding.session} ${request.url}`);
+        return { ok: true, session: request.binding.session, stream: 5555 };
+      }
+      events.push(`${request.op} ${request.binding.session}`);
+      if (request.op === 'close') {
+        await new Promise<void>((resolve) => { landClose = resolve; });
+        events.push('close landed');
+      }
+      return { ok: true };
+    });
+    try {
+      await act(async () => {
+        root.render(<Wall initialMode="command" restoredLathLayout={{
+          version: 1,
+          tree: { root: { kind: 'split', dir: 'row', children: [
+            { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 },
+            { node: { kind: 'leaf', id: 'keyed-ab' }, weight: 0.5 },
+          ] } },
+          leafMeta: {
+            'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+            'keyed-ab': { component: 'browser', tabComponent: 'surface', title: 'default', params: {
+              surfaceType: 'browser', renderMode: 'agent-browser-screencast', session: defaultSession, key: 'default', url: 'http://localhost:5173/',
+            } },
+          },
+        }} />);
+      });
+      await flush();
+
+      await act(async () => { getAgentBrowserScreenController('keyed-ab')?.actions.setRenderMode?.('playwright-screencast'); });
+      await flush();
+      const eagerId = Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]'))
+        .map((leaf) => leaf.dataset.lathLeaf!).find((leafId) => leafId !== 'pane-a')!;
+      expect(eagerId).not.toBe('keyed-ab');
+      await act(async () => {
+        container.querySelector<HTMLElement>(`[data-lath-leaf="${eagerId}"]`)!.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.click();
+      });
+      await flush();
+
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await act(async () => { failPlaywright({ ok: false, error: 'playwright-cli was not found' }); });
+      await flush();
+      warn.mockRestore();
+      // Back to agent-browser in the Door it was minimized to, reopened in the
+      // session its key names once the swap's close of it has been answered…
+      expect(container.querySelector(`[data-door-id="${eagerId}"]`)).not.toBeNull();
+      expect(events).toEqual([`close ${defaultSession}`]);
+      await act(async () => { landClose(); });
+      await flush();
+      expect(events).toEqual([`close ${defaultSession}`, 'close landed', `launch ${defaultSession} http://localhost:5173/`]);
+      expect(await dispatchResolveAgentBrowser(eagerId)).toMatchObject({ ok: true, result: { binding: { session: defaultSession } } });
+      // …so `dor agent-browser --key default` drives it rather than opening a second pane.
+      let reused: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.browser,
+            params: { provider: 'agent-browser', key: 'default', session: defaultSession, wsPort: 5555, surface: 'surface:1' },
+            respond: (r: typeof reused) => { reused = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(reused).toMatchObject({ ok: true, result: { status: 'existing', surfaceId: eagerId } });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -894,9 +1357,7 @@ describe('Wall on the Lath engine', () => {
 
   it('restores an eager render swap to iframe when launch rejects', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
-    (fake as PlatformAdapter).agentBrowserOpen = vi.fn(async () => {
-      throw new Error('transport failed');
-    });
+    hostBrowsers({ launch: async () => { throw new Error('transport failed'); } });
 
     try {
       await act(async () => {
@@ -906,7 +1367,7 @@ describe('Wall on the Lath engine', () => {
       const iframeId = (await dispatchIframe('http://localhost:5173/')).id;
 
       await act(async () => {
-        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('agent-browser-screencast');
       });
       await flush();
 
@@ -915,17 +1376,124 @@ describe('Wall on the Lath engine', () => {
       expect(getAgentBrowserScreenController(restoredId)?.snapshot().renderMode).toBe('iframe');
       expect(await dispatchResolveAgentBrowser('surface:1')).toEqual({
         ok: false,
-        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe)",
+        error: "surface 'surface:1' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/",
       });
     } finally {
       untouchedSpy.mockRestore();
     }
   });
 
-  it('refuses a render swap away from an iframe surface holding a non-http(s) URL', async () => {
+  it('allows a Tool to use playwright screencast but refuses popouts', async () => {
+    const offered = vi.spyOn(browserAutomation, 'offeredRenderModes')
+      .mockReturnValue(['agent-browser-screencast', 'agent-browser-popout', 'playwright-screencast', 'playwright-popout', 'iframe']);
+    const { browser, requests } = hostBrowsers({
+      launch: async (request) => request.provider === 'playwright'
+        ? { ok: true, session: 'gui-pw', stream: 4321 }
+        : { ok: true, session: 'gui-ab', stream: 4322 },
+    });
+    const playwrightRequests = () => browser.mock.calls.filter(([request]) => request.provider === 'playwright');
+    // Serving: a Tool whose command is not running retires its browser.
+    terminalRegistry.applyTerminalSemanticEvents('tool-a', [
+      { type: 'commandLine', commandLine: 'pnpm storybook' },
+      { type: 'commandStart' },
+    ]);
+    try {
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{
+            version: 1,
+            tree: { root: { kind: 'leaf', id: 'tool-a' } },
+            leafMeta: {
+              'tool-a': {
+                component: 'tool',
+                tabComponent: 'tool',
+                title: 'storybook',
+                params: {
+                  surfaceType: 'tool',
+                  command: 'pnpm storybook',
+                  cwd: '/repo',
+                  toolName: 'storybook',
+                  toolRender: 'iframe',
+                  toolPort: 'announced',
+                  renderMode: 'iframe',
+                  url: 'http://localhost:6006/',
+                },
+              },
+            },
+          }}
+          initialMode="command"
+        />);
+      });
+      await flush();
+      const controller = () => getAgentBrowserScreenController('tool-a');
+      expect(controller()?.snapshot().renderMode).toBe('iframe');
+
+      for (const mode of ['playwright-popout', 'agent-browser-popout'] as const) {
+        await act(async () => { controller()?.actions.setRenderMode?.(mode); });
+        await flush();
+      }
+      expect(playwrightRequests()).toEqual([]);
+      expect(requests('launch')).toEqual([]);
+      expect(controller()?.snapshot().renderMode).toBe('iframe');
+
+      await act(async () => { controller()?.actions.setRenderMode?.('playwright-screencast'); });
+      await flush();
+      expect(requests('launch')).toEqual([expect.objectContaining({
+        provider: 'playwright', binding: { session: 'dormouse.1.tool.tool-a', cwd: '/repo' }, op: 'launch', url: 'http://localhost:6006/', headed: false,
+      })]);
+    } finally {
+      offered.mockRestore();
+      act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
+    }
+  });
+
+  it('gives a Tool its embed back when its swap to agent-browser cannot launch', async () => {
+    const { requests } = hostBrowsers({ launch: async () => ({ ok: false, error: 'agent-browser binary not found' }) });
+    terminalRegistry.applyTerminalSemanticEvents('tool-a', [
+      { type: 'commandLine', commandLine: 'pnpm storybook' },
+      { type: 'commandStart' },
+    ]);
+    try {
+      await act(async () => {
+        root.render(<Wall
+          restoredLathLayout={{
+            version: 1,
+            tree: { root: { kind: 'leaf', id: 'tool-a' } },
+            leafMeta: {
+              'tool-a': {
+                component: 'tool', tabComponent: 'tool', title: 'storybook',
+                params: {
+                  surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook',
+                  toolRender: 'iframe', toolPort: 'announced', renderMode: 'iframe', url: 'http://localhost:6006/',
+                },
+              },
+            },
+          }}
+          initialMode="command"
+        />);
+      });
+      await flush();
+      await act(async () => { getAgentBrowserScreenController('tool-a')?.actions.setRenderMode?.('agent-browser-screencast'); });
+      await flush();
+      expect(requests('launch')).toEqual([expect.objectContaining({
+        provider: 'agent-browser', binding: { session: 'dormouse.1.tool.tool-a', cwd: '/repo' }, op: 'launch', url: 'http://localhost:6006/', headed: false,
+      })]);
+      expect(getAgentBrowserScreenController('tool-a')?.snapshot().renderMode).toBe('iframe');
+    } finally {
+      act(() => terminalRegistry.removeTerminalPaneState('tool-a'));
+    }
+  });
+
+  it.each([
+    ['agent-browser-screencast', 'agent-browser'],
+    ['playwright-screencast', 'playwright'],
+  ] as const)('refuses a render swap to %s away from an iframe surface holding a non-http(s) URL', async (mode, provider) => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(true);
-    const open = vi.fn(async () => ({ ok: true, session: 'dormouse.1.gui-a1b2c3', wsPort: 4321 }));
-    (fake as PlatformAdapter).agentBrowserOpen = open;
+    const { requests } = hostBrowsers({
+      launch: async (request) => request.provider === 'playwright'
+        ? { ok: true, session: 'gui-pw', stream: 4322 }
+        : { ok: true, session: 'dormouse.1.gui-a1b2c3', stream: 4321 },
+    });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
@@ -946,16 +1514,16 @@ describe('Wall on the Lath engine', () => {
       await flush();
 
       await act(async () => {
-        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.('ab-screencast');
+        getAgentBrowserScreenController(iframeId)?.actions.setRenderMode?.(mode);
       });
       await flush();
 
-      expect(open).not.toHaveBeenCalled();
+      expect(requests('launch')).toEqual([]);
       expect(getAgentBrowserScreenController(iframeId)?.snapshot().renderMode).toBe('iframe');
       // The Display modal closes itself on Apply, so the console is the only
       // channel this refusal has of its own.
       expect(warn).toHaveBeenCalledWith(
-        `[dormouse] cannot swap surface '${iframeId}' to agent-browser: `
+        `[dormouse] cannot swap surface '${iframeId}' to ${provider}: `
         + "'data:text/html,<script>alert(1)</script>' is not an http(s) URL",
       );
     } finally {
@@ -966,7 +1534,7 @@ describe('Wall on the Lath engine', () => {
 
   it('resolves a browser surface handle to its agent-browser session, and gates the rest', async () => {
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    hostBrowsers();
 
     try {
       await act(async () => {
@@ -979,10 +1547,7 @@ describe('Wall on the Lath engine', () => {
       const abId = await dispatchAgentBrowser({ session: 'dormouse.1.gui-a1b2c3', surface: 'surface:1' });
       const iframeRef = (await dispatchIframe('http://localhost:5173/')).ref;
 
-      expect(await dispatchResolveAgentBrowser(abId)).toEqual({
-        ok: true,
-        result: { surfaceId: abId, surfaceRef: 'surface:2', session: 'dormouse.1.gui-a1b2c3' },
-      });
+      expect(await dispatchResolveAgentBrowser(abId)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-a1b2c3' }, fresh: false } });
       // A parked ab surface keeps its daemon session, so a minimized target resolves.
       await act(async () => {
         container.querySelector<HTMLButtonElement>(`[data-lath-leaf="${abId}"] [aria-label="Minimize"]`)!.click();
@@ -998,15 +1563,39 @@ describe('Wall on the Lath engine', () => {
       // Gate 2: an iframe renderer has a browser but no agent-browser session.
       expect(await dispatchResolveAgentBrowser(iframeRef)).toEqual({
         ok: false,
-        error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe)`,
+        error: `surface '${iframeRef}' is not agent-browser rendered (render_mode: iframe) — an iframe cannot be driven; open its page with dor agent-browser open http://localhost:5173/`,
       });
 
-      // A managed `--key` names no Surface, and a bare Wall — VS Code, the
-      // website — keeps the unscoped session names it always had.
-      expect(await dispatchResolveAgentBrowserKey('storybook')).toEqual({
-        ok: true,
-        result: { session: sessionForKey('storybook') },
+      // A managed `--key` no Surface holds is the key's own session. A bare
+      // Wall — a VS Code webview, the website — has no Workspace id, so it
+      // mints a scope of its own: two webviews' `--key default` are two
+      // browsers, and a Wall mounted afresh is another scope again.
+      const keyed = await dispatchResolveAgentBrowserKey('storybook') as { ok: boolean; result: { binding: { session: string } } };
+      expect(keyed.result.binding.session).toMatch(/^dormouse\.w[0-9a-f]{8}\.storybook$/);
+      expect(await dispatchResolveAgentBrowserKey('storybook')).toEqual(keyed);
+      await act(async () => {
+        root.render(<Wall key="remounted" initialPaneIds={['pane-a']} initialMode="command" />);
       });
+      await flush();
+      const remounted = await dispatchResolveAgentBrowserKey('storybook') as { ok: boolean; result: { binding: { session: string } } };
+      expect(remounted.result.binding.session).toMatch(/^dormouse\.w[0-9a-f]{8}\.storybook$/);
+      expect(remounted.result.binding.session).not.toBe(keyed.result.binding.session);
+
+      // A key a Surface holds keeps the session it was bound to — a pane saved
+      // under the old bare-Wall name included — through the merged pair.
+      await dispatchAgentBrowser({ key: 'app', session: 'dormouse.1.app', surface: 'surface:1' });
+      let resolved: unknown;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.resolveBrowser,
+            params: { provider: 'agent-browser', key: 'app', proposed: { cwd: '/elsewhere' } },
+            respond: (r: unknown) => { resolved = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(resolved).toEqual({ ok: true, result: { binding: { session: 'dormouse.1.app' }, fresh: false } });
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -1026,8 +1615,7 @@ describe('Wall on the Lath engine', () => {
       toJSON() {},
     }) as DOMRect;
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
-    const agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-    (fake as PlatformAdapter).agentBrowserCommand = agentBrowserCommand;
+    const { requests } = hostBrowsers();
 
     try {
       await act(async () => {
@@ -1074,11 +1662,9 @@ describe('Wall on the Lath engine', () => {
       expect(container.querySelector(`[data-lath-leaf="${browserId}"]`)?.hasAttribute('data-lath-parked')).toBe(false);
 
       await dispatchKill(browserId);
-      expect(agentBrowserCommand).toHaveBeenCalledWith(
-        'browser-session',
-        ['close'],
-        '/new/agent-browser',
-      );
+      expect(requests('close')).toContainEqual({
+        provider: 'agent-browser', binding: { session: 'browser-session', binaryPath: '/new/agent-browser' }, op: 'close',
+      });
     } finally {
       untouchedSpy.mockRestore();
       HTMLElement.prototype.getBoundingClientRect = originalRect;
@@ -1624,6 +2210,23 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
+  it('calls the host toolControl as a method, which an adapter may need for `this`', async () => {
+    Object.assign(fake, {
+      async toolControl(this: unknown) {
+        if (this !== fake) throw new Error('toolControl called detached');
+        return { status: 'no-file' as const };
+      },
+    });
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    await flush();
+    const respond = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      method: SURFACE_CONTROL_METHODS.tool, params: { name: 'viewer', cwd: '/repo' }, respond,
+    } })));
+    await waitUntil(() => respond.mock.calls.length > 0);
+    expect(respond).toHaveBeenCalledWith({ ok: false, error: "no dormouse.yml found in '/repo' or any parent directory" });
+  });
+
   it('retries failed post-grant lookup without recording permission again', async () => {
     let calls = 0;
     const toolControl = vi.fn(async (request: { op: string }) => {
@@ -1791,92 +2394,6 @@ describe('Wall on the Lath engine', () => {
         pendingShellOpts.delete(id);
         act(() => terminalRegistry.removeTerminalPaneState(id!));
       }
-    }
-  });
-
-  it.each([
-    { fresh: false, archiveFails: false, idle: false },
-    { fresh: true, archiveFails: false, idle: false },
-    { fresh: false, archiveFails: false, idle: true },
-    { fresh: false, archiveFails: true, idle: true },
-  ])('serializes approval key reuse and preserves fresh/notes: %j', async ({ fresh, archiveFails, idle }) => {
-    const ids: string[] = [];
-    const cwd = { path: '/repo', pathKind: 'posix', isRemote: false, source: 'osc633', updatedAt: 0 } as const;
-    const idleState = createTerminalPaneState({ cwd });
-    const runningState = createTerminalPaneState({ cwd, currentCommand: {
-      id: 'run-tool', rawCommandLine: 'pnpm storybook', displayCommand: 'pnpm storybook',
-      cwdAtStart: cwd, startedAt: 0, source: 'osc633_E',
-    } });
-    let firstState = idleState;
-    vi.spyOn(terminalRegistry, 'getTerminalPaneState').mockImplementation(id =>
-      id === ids[0] ? firstState : ids.includes(id) ? runningState : idleState);
-    vi.spyOn(terminalRegistry, 'isPaneOscDriven').mockReturnValue(true);
-    const write = vi.spyOn(fake, 'writePty').mockImplementation((id, data) => {
-      if (id === ids[0] && data === 'pnpm storybook\r') firstState = runningState;
-    });
-    let trusted = false;
-    const toolControl = vi.fn(async (request: { op: 'lookup' | 'trust' }) => {
-      const config = { projectRoot: '/repo', path: '/repo/dormouse.yml', name: 'storybook', run: 'pnpm storybook' };
-      if (request.op === 'trust') { trusted = true; return { status: 'trust-recorded' as const }; }
-      return trusted
-        ? { ...config, status: 'ok' as const, render: 'iframe' as const, port: 'announced' as const, key: ['/repo'], warnings: [] }
-        : { ...config, status: 'untrusted' as const, upstreamUrl: null, warnings: [] };
-    });
-    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = toolControl;
-    try {
-      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-      await flush();
-      for (const launchCwd of ['/repo', fresh ? '/repo' : '/repo/subdir']) {
-        const respond = vi.fn();
-        await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'storybook', cwd: launchCwd, fresh }, respond,
-        } })));
-        ids.push(respond.mock.calls[0][0].result.surfaceId);
-      }
-      expect(ids[0]).not.toBe(ids[1]);
-      act(() => addPlainNote(ids[1], 'keep this approval note'));
-      if (archiveFails) vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
-      const approvals = Array.from(container.querySelectorAll('button')).filter(button => button.textContent?.includes('Always allow for folder'));
-      vi.useFakeTimers();
-      await act(async () => {
-        approvals[0].click();
-        if (!idle) approvals[1].click();
-      });
-      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(1);
-      expect(pendingShellOpts.has(ids[0])).toBe(true);
-      expect(pendingShellOpts.has(ids[1])).toBe(false);
-      const queuedLaunch = vi.fn();
-      if (!fresh && !idle) {
-        await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
-          method: SURFACE_CONTROL_METHODS.tool, params: { name: 'storybook', cwd: '/repo' }, respond: queuedLaunch,
-        } })));
-        expect(queuedLaunch).not.toHaveBeenCalled();
-      }
-      firstState = runningState;
-      await act(async () => vi.advanceTimersByTimeAsync(100));
-      if (idle) {
-        firstState = idleState;
-        await act(async () => approvals[1].click());
-      }
-      await act(async () => vi.advanceTimersByTimeAsync(100));
-      expect(toolControl.mock.calls.filter(([request]) => request.op === 'trust')).toHaveLength(2);
-      if (!fresh && !idle) expect(queuedLaunch).toHaveBeenCalledWith(expect.objectContaining({
-        ok: true, result: expect.objectContaining({ status: 'existing', surfaceId: ids[0] }),
-      }));
-      expect(pendingShellOpts.has(ids[1])).toBe(fresh);
-      expect(write.mock.calls.filter(([, data]) => data === 'pnpm storybook\r')).toHaveLength(idle && !archiveFails ? 1 : 0);
-      if (fresh || archiveFails) {
-        expect(container.querySelector(`[data-lath-leaf="${ids[1]}"]`)).not.toBeNull();
-        expect(getNotes(ids[1])).toHaveLength(1);
-        if (archiveFails) expect(document.body.querySelector('[aria-labelledby="notepad-archive-failure-title"]')).not.toBeNull();
-      } else {
-        expect(container.querySelector(`[data-lath-leaf="${ids[1]}"]`)).toBeNull();
-        const archive = (await fake.notepadArchive.load())?.raw as NotepadArchiveV1;
-        expect(archive.batches.flatMap(batch => batch.notes)).toEqual([expect.objectContaining({ content: { kind: 'plain', text: 'keep this approval note' } })]);
-      }
-    } finally {
-      vi.useRealTimers();
-      ids.forEach(id => pendingShellOpts.delete(id));
     }
   });
 
@@ -2413,14 +2930,13 @@ describe('Wall on the Lath engine', () => {
   // than splitting (docs/specs/dor-tool.md -> Take-over). The handshake is the
   // point — `dor` is the pane's foreground process when the host answers, so the
   // command may only be typed once its own shell is back at a prompt.
-  it.each(['cancelled', 'helper opened', 'cwd changed', 'closing'] as const)('abandons takeover if the caller becomes %s while returning to its prompt', async (change) => {
+  it.each(['cancelled', 'helper opened', 'cwd changed'] as const)('abandons takeover if the caller becomes %s while returning to its prompt', async (change) => {
     const controller = new AbortController();
     const typed: string[] = [];
-    let releaseClosing: (() => void) | undefined;
     try {
       await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
       await flush();
-      act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Preserve me'); });
+      act(() => { fake.spawnPty('pane-a'); });
       fake.setInputHandler('pane-a', data => typed.push(data));
       terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
       reportRunning('pane-a', 'dor tool -- pnpm dev');
@@ -2434,17 +2950,15 @@ describe('Wall on the Lath engine', () => {
       if (change === 'cancelled') controller.abort();
       if (change === 'helper opened') vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' } : undefined);
       if (change === 'cwd changed') terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/elsewhere')! }]);
-      if (change === 'closing') releaseClosing = beginClosing(['pane-a']);
       act(() => promptBack('pane-a'));
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); });
       expect(typed).toEqual([]);
       expect(leafCount()).toBe(1);
-      expect(getNotes('pane-a')).toHaveLength(1);
       await act(async () => window.dispatchEvent(new Event('pagehide')));
       await flush();
       expect((fake.getState() as { panes: Array<{ surfaceType?: string }> }).panes[0]?.surfaceType).not.toBe('tool');
     } finally {
-      controller.abort(); releaseClosing?.(); fake.clearInputHandler('pane-a');
+      controller.abort(); fake.clearInputHandler('pane-a');
       act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
     }
   });
@@ -2580,128 +3094,6 @@ describe('Wall on the Lath engine', () => {
       await act(async () => { controller.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
       fake.clearInputHandler(id);
       act(() => terminalRegistry.removeTerminalPaneState(id));
-    }
-  });
-
-  it('takes over the calling pane when `dor tool` is typed alone at a prompt', async () => {
-    const typed: string[] = [];
-    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(['/repo']));
-
-    try {
-      await act(async () => {
-        root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-      });
-      await flush();
-      act(() => { fake.spawnPty('pane-a'); addPlainNote('pane-a', 'Keep my takeover notes'); });
-      fake.setInputHandler('pane-a', (data) => typed.push(data));
-      terminalRegistry.seedTerminalManualCwd('pane-a', '/repo');
-      reportRunning('pane-a', 'dor tool storybook');
-
-      let response: { ok: boolean; result?: { status: string; surfaceId: string; minimized: boolean } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.tool,
-            surfaceId: 'pane-a',
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
-            respond: (result: typeof response) => { response = result; },
-          },
-        }));
-      });
-      await flush();
-
-      // Answered before the tool starts, and nothing typed while `dor` still owns
-      // the shell: waiting for the prompt first would deadlock.
-      expect(response).toMatchObject({
-        ok: true,
-        result: { status: 'takeover', surfaceId: 'pane-a', minimized: false },
-      });
-      expect(leafCount()).toBe(1);
-      expect(typed).toEqual([]);
-
-      // `dor` exits; the shell reports its prompt back and the command lands.
-      act(() => promptBack('pane-a'));
-      await waitUntil(() => typed.length > 0);
-      expect(typed).toEqual(['pnpm storybook\r']);
-      expect(leafCount()).toBe(1);
-      expect(getNotes('pane-a').some(note => note.content.kind === 'plain' && note.content.text === 'Keep my takeover notes')).toBe(true);
-
-      // The tool goes live, which releases the spawn lock, and then exits. The
-      // host learns that from its own 100ms state poll, so the live state has to
-      // outlast one tick.
-      act(() => reportRunning('pane-a', 'pnpm storybook'));
-      await act(async () => { await new Promise((r) => setTimeout(r, 150)); });
-      act(() => promptBack('pane-a'));
-
-      // Retyped in the tool's own pane: a key match on the caller re-runs there
-      // through the same handshake, never an interrupt — Ctrl+C would kill the
-      // `dor` still waiting for the answer.
-      act(() => reportRunning('pane-a', 'dor tool storybook'));
-      let rerun: { ok: boolean; result?: { status: string; surfaceId: string } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.tool,
-            surfaceId: 'pane-a',
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
-            respond: (result: typeof rerun) => { rerun = result; },
-          },
-        }));
-      });
-      await waitUntil(() => rerun !== undefined);
-      expect(rerun).toMatchObject({ ok: true, result: { status: 'adopted', surfaceId: 'pane-a' } });
-      act(() => promptBack('pane-a'));
-      await waitUntil(() => typed.length > 1);
-      expect(typed).toEqual(['pnpm storybook\r', 'pnpm storybook\r']);
-      expect(leafCount()).toBe(1);
-
-      // The re-run starts and dies inside one 100ms sample, so no poll ever sees
-      // it live: the lock has to release on the finished run instead. Without
-      // that, the request below waits out the 15s timeout and `settle` gives up.
-      act(() => {
-        terminalRegistry.applyTerminalSemanticEvents('pane-a', [
-          { type: 'commandLine', commandLine: 'pnpm storybook' },
-          { type: 'commandStart', source: 'osc633_boundaries' },
-          { type: 'commandFinish', exitCode: 1 },
-          { type: 'promptStart' },
-        ]);
-      });
-
-      // A line the host cannot type behind says so, rather than reporting a tool
-      // that is not running as `existing` back into the pane it is sitting in.
-      act(() => reportRunning('pane-a', 'dor tool storybook && open http://localhost:6006'));
-      let compound: { ok: boolean; error?: string } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.tool,
-            surfaceId: 'pane-a',
-            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
-            respond: (result: typeof compound) => { compound = result; },
-          },
-        }));
-      });
-      await waitUntil(() => compound !== undefined);
-      expect(compound?.ok).toBe(false);
-      expect(compound?.error).toContain("is this tool's own pane");
-      expect(typed).toHaveLength(2);
-      act(() => promptBack('pane-a'));
-
-      // Same Surface throughout: the leaf changed kind without changing id, so
-      // the session persists as one.
-      await act(async () => { window.dispatchEvent(new Event('pagehide')); });
-      await flush();
-      await flush();
-      const saved = fake.getState() as {
-        panes?: Array<{ id: string; surfaceType?: string; command?: string }>;
-      } | null;
-      expect(saved?.panes?.find((pane) => pane.id === 'pane-a')).toMatchObject({
-        surfaceType: 'tool',
-        command: 'pnpm storybook',
-      });
-    } finally {
-      fake.clearInputHandler('pane-a');
-      act(() => terminalRegistry.removeTerminalPaneState('pane-a'));
     }
   });
 
@@ -2977,8 +3369,8 @@ describe('Wall on the Lath engine', () => {
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
-          method: SURFACE_CONTROL_METHODS.agentBrowser,
-          params,
+          method: SURFACE_CONTROL_METHODS.browser,
+          params: { provider: 'agent-browser', ...params },
           respond: (r: typeof response) => { response = r; },
         },
       }));
@@ -3005,15 +3397,15 @@ describe('Wall on the Lath engine', () => {
     return { id: response!.result!.surfaceId, ref: response!.result!.surfaceRef };
   }
 
-  /** `dor ab --surface <handle>`'s host half; returns the raw control response. */
-  /** `dor ab --key <name>` asking this Wall what that key's session is called. */
+  /** `dor agent-browser --surface <handle>`'s host half; returns the raw control response. */
+  /** `dor agent-browser --key <name>` asking this Wall what that key's session is called. */
   async function dispatchResolveAgentBrowserKey(key: string): Promise<unknown> {
     let response: unknown;
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
-          method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
-          params: { key },
+          method: SURFACE_CONTROL_METHODS.resolveBrowser,
+          params: { provider: 'agent-browser', key },
           respond: (r: unknown) => { response = r; },
         },
       }));
@@ -3027,8 +3419,8 @@ describe('Wall on the Lath engine', () => {
     await act(async () => {
       window.dispatchEvent(new CustomEvent('dormouse:control-request', {
         detail: {
-          method: SURFACE_CONTROL_METHODS.resolveAgentBrowser,
-          params: { surface },
+          method: SURFACE_CONTROL_METHODS.resolveBrowser,
+          params: { provider: 'agent-browser', surface },
           respond: (r: unknown) => { response = r; },
         },
       }));
@@ -3071,6 +3463,7 @@ describe('Wall on the Lath engine', () => {
 
   it('keeps dor agent-browser focus-neutral but enters passthrough for a user port activation', async () => {
     const defaultSession = sessionForKey('default');
+    hostBrowsers();
     const onEvent = vi.fn();
     const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
 
@@ -3098,8 +3491,8 @@ describe('Wall on the Lath engine', () => {
       });
       await flush();
 
-      (fake as PlatformAdapter).agentBrowserCommand = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
-      (fake as PlatformAdapter).agentBrowserOpen = vi.fn(async () => ({ ok: true, session: 'context-browser', wsPort: 4321 }));
+      let launch = Promise.withResolvers<{ ok: true; session: string; stream: number }>();
+      const { requests } = hostBrowsers({ launch: () => launch.promise });
       if (!fake.hasPty('pane-a')) fake.spawnPty('pane-a');
       fake.setOpenPorts('pane-a', [{
         protocol: 'tcp',
@@ -3127,17 +3520,31 @@ describe('Wall on the Lath engine', () => {
       );
       expect(portRow).not.toBeNull();
       const contextMenu = portRow!.closest('[data-terminal-context]')!;
-      expect(contextMenu.closest('[data-lath-leaf]')).toBe(header.closest('[data-lath-leaf]'));
+      expect(contextMenu.closest('[data-lath-leaf]')).toBeNull();
+      expect(contextMenu.closest('.lath-host')).toBe(header.closest('.lath-host'));
       expect(contextMenu.closest('.lath-leaf-body')).toBeNull();
       await act(async () => {
         portRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       });
       await flush();
 
+      expect(document.querySelector('[data-terminal-context]:not([aria-hidden="true"])')).not.toBeNull();
+      await act(async () => launch.reject(new Error('Browser unavailable')));
+      await flush();
+      expect(document.querySelector('[data-terminal-context]:not([aria-hidden="true"])')).not.toBeNull();
+      launch = Promise.withResolvers<{ ok: true; session: string; stream: number }>();
+      await act(async () => portRow!.click());
+      await act(async () => launch.resolve({ ok: true, session: 'context-browser', stream: 4321 }));
+      await flush();
+
       expect(onEvent).toHaveBeenCalledWith({ type: 'selectionChange', id: expect.any(String), kind: 'pane' });
       expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
       expect(onEvent).toHaveBeenCalledWith({ type: 'modeChange', mode: 'passthrough' });
-      expect((fake as PlatformAdapter).agentBrowserOpen).toHaveBeenCalledWith('http://localhost:5173/', { headed: false }, undefined);
+      expect(requests('launch')).toContainEqual(expect.objectContaining({
+        provider: 'agent-browser', binding: {}, op: 'launch', url: 'http://localhost:5173/', headed: false,
+      }));
+      expect(document.querySelector('[data-terminal-context]:not([aria-hidden="true"])')).toBeNull();
+      expect(focusOf('pane-a')).toBe('false');
     } finally {
       untouchedSpy.mockRestore();
     }
@@ -3158,34 +3565,6 @@ describe('Wall on the Lath engine', () => {
     expect(focusOf(newId)).toBe('false');
   });
 
-  // --- Notepad closure (docs/specs/notepad.md → "Closure") ---
-
-  /** What the host actually stored. */
-  async function storedArchive(): Promise<NotepadArchiveV1> {
-    const loaded = await fake.notepadArchive.load();
-    return (loaded?.raw ?? { version: 1, batches: [] }) as NotepadArchiveV1;
-  }
-
-  /** The Keep open / Close anyway prompt, when it is up. */
-  function archiveFailureModal(): HTMLElement | null {
-    return document.body.querySelector<HTMLElement>('[aria-labelledby="notepad-archive-failure-title"]');
-  }
-
-  /** Answer the prompt and settle the closure it starts. `Close anyway` runs an async
-   *  chain that ends on the two-phase kill's deferred removal timer, so the click's
-   *  own async work is awaited BEFORE `flush()` registers the timer that has to fire
-   *  after it. A bare `act(click)` leaves the two `setTimeout(0)`s racing: the
-   *  removal is registered while the test awaits `flush()`, so it lands second and
-   *  the leaf is still mid-fade when the assertion runs. (`Keep open` only shifts the
-   *  prompt queue, so it needs no ordering — one helper still covers both.) */
-  async function clickButton(label: string): Promise<void> {
-    const button = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
-      .find((candidate) => candidate.textContent?.trim() === label);
-    expect(button, `no "${label}" button`).toBeDefined();
-    await act(async () => { button!.click(); });
-    await flush();
-  }
-
   /** A pane header control; Kill is a user-visible closure, which does prompt.
    *  `isUntouched` short-circuits the kill confirmation so a kill is one click. */
   async function clickHeaderControl(paneId: string, label: 'Kill' | 'Minimize'): Promise<void> {
@@ -3203,46 +3582,6 @@ describe('Wall on the Lath engine', () => {
       untouched.mockRestore();
     }
   }
-
-  /** A Helper on pane-a whose host work inspection answers `busy`, switchable mid-test. */
-  function spyOnHelper(): { dispose: ReturnType<typeof vi.spyOn>; setBusy: (value: boolean) => void } {
-    let helper: helpers.HelperTerminal | undefined = { id: 'helper-a', parentId: 'pane-a', command: '', status: 'off' };
-    let busy = false;
-    vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'pane-a' ? helper : undefined);
-    vi.spyOn(helpers, 'helperHasWork').mockImplementation(async () => busy);
-    vi.spyOn(helpers, 'openHelper').mockImplementation(async () => helper!);
-    const dispose = vi.spyOn(helpers, 'closeHelperParent').mockImplementation(() => { helper = undefined; });
-    return { dispose, setBusy: (value) => { busy = value; } };
-  }
-
-  async function renderNotedPane(): Promise<void> {
-    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
-    await flush();
-    act(() => { addPlainNote('pane-a', 'shared helper note'); });
-  }
-
-  it('closes an idle Helper with its source and archives the shared notes once', async () => {
-    const { dispose } = spyOnHelper();
-    await renderNotedPane();
-    expect((await dispatchKill('surface:1'))?.ok).toBe(true);
-    await flush();
-    expect(getNotes('pane-a')).toEqual([]);
-    expect(dispose).toHaveBeenCalledWith('pane-a');
-    expect((await storedArchive()).batches).toHaveLength(1);
-  });
-
-  it('refuses a source whose Helper has running work before touching the archive', async () => {
-    const { dispose, setBusy } = spyOnHelper();
-    const save = vi.spyOn(fake.notepadArchive, 'save');
-    setBusy(true);
-    await renderNotedPane();
-    expect((await dispatchKill('surface:1'))?.ok).toBe(false);
-    await flush();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(dispose).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(save).not.toHaveBeenCalled();
-  });
 
   // The kill gesture (`requestKill`): docs/specs/layout.md → "Kill confirmation".
   const confirmKillOverlay = () => Array.from(document.body.querySelectorAll('h2')).find(h => h.textContent === 'Confirm kill') ?? null;
@@ -3340,12 +3679,12 @@ describe('Wall on the Lath engine', () => {
     });
     expect(inspections).toHaveLength(1);
     // A `dor kill` lands while the gesture's inspection is still pending and
-    // closes the pane first (its own two inspections answered idle).
+    // closes the pane first (its own inspection answered idle).
     let killed: { ok: boolean } | undefined;
     window.dispatchEvent(new CustomEvent('dormouse:control-request', {
       detail: { method: SURFACE_CONTROL_METHODS.kill, params: { surface: 'surface:1', confirmation: { mode: 'dangerously' } }, respond: (r: typeof killed) => { killed = r; } },
     }));
-    for (const index of [1, 2]) {
+    for (const index of [1]) {
       await act(async () => { while (inspections.length <= index) await new Promise(r => setTimeout(r, 0)); });
       await act(async () => { inspections[index](false); });
     }
@@ -3354,200 +3693,6 @@ describe('Wall on the Lath engine', () => {
     await act(async () => { inspections[0](false); });
     await flush();
     expect(confirmKillOverlay()).toBeNull();
-  });
-
-  it('keeps the notes and pending batch when Helper work starts during the write, replacing the batch on retry', async () => {
-    const { dispose, setBusy } = spyOnHelper();
-    const saveOriginal = fake.notepadArchive.save.bind(fake.notepadArchive);
-    const save = vi.spyOn(fake.notepadArchive, 'save').mockImplementation(async (...args) => {
-      const result = await saveOriginal(...args);
-      setBusy(true);
-      return result;
-    });
-    await renderNotedPane();
-    expect((await dispatchKill('surface:1'))?.ok).toBe(false);
-    await flush();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(dispose).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect((await storedArchive()).batches).toHaveLength(1);
-    setBusy(false);
-    save.mockImplementation(saveOriginal);
-    expect((await dispatchKill('surface:1'))?.ok).toBe(true);
-    expect((await storedArchive()).batches).toHaveLength(1);
-    expect(getNotes('pane-a')).toEqual([]);
-  });
-
-  it('runs the Helper guard again before Close anyway discards the notes', async () => {
-    const { dispose, setBusy } = spyOnHelper();
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk full'));
-    await renderNotedPane();
-    await clickHeaderControl('pane-a', 'Kill');
-    expect(archiveFailureModal()).not.toBeNull();
-    setBusy(true);
-    await clickButton('Close anyway');
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(dispose).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-  });
-
-  it('archives a closing Surface\'s notes before tearing it down', async () => {
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'ssh key is in 1password'); });
-
-    expect((await dispatchKill('surface:1'))?.ok).toBe(true);
-    await flush();
-
-    const archive = await storedArchive();
-    expect(archive.batches).toHaveLength(1);
-    expect(archive.batches[0].notes[0].content).toEqual({ kind: 'plain', text: 'ssh key is in 1password' });
-    // The metadata resolver the Wall installs supplies the derived pane label.
-    expect(archive.batches[0].surfaceKind).toBe('terminal');
-    expect(getNotes('pane-a')).toEqual([]);
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).toBeNull();
-  });
-
-  it('keeps the Surface and asks when the archive refuses the write', async () => {
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'keep me'); });
-
-    await clickHeaderControl('pane-a', 'Kill');
-
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(archiveFailureModal()).not.toBeNull();
-  });
-
-  it('answers a refused `dor kill` with the error and raises no prompt', async () => {
-    // The caller is a command, not someone looking at the Wall: a modal here
-    // would block a Wall nobody is watching (docs/specs/notepad.md → "Closure").
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'keep me'); });
-
-    const response = await dispatchKill('surface:1');
-    await flush();
-
-    expect(response?.ok).toBe(false);
-    expect((response as { error?: string }).error).toContain('notepad archive failed');
-    expect((response as { error?: string }).error).toContain('disk is full');
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    expect(archiveFailureModal()).toBeNull();
-  });
-
-  it('Keep open dismisses the prompt and leaves everything alone', async () => {
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'keep me'); });
-    await clickHeaderControl('pane-a', 'Kill');
-
-    await clickButton('Keep open');
-
-    expect(archiveFailureModal()).toBeNull();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(getNotes('pane-a')).toHaveLength(1);
-  });
-
-  it('Close anyway discards the notes and removes the Surface without a batch', async () => {
-    vi.spyOn(fake.notepadArchive, 'save').mockRejectedValue(new Error('disk is full'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    act(() => { addPlainNote('pane-a', 'expendable'); });
-    await clickHeaderControl('pane-a', 'Kill');
-
-    await clickButton('Close anyway');
-
-    expect(archiveFailureModal()).toBeNull();
-    await vi.waitFor(async () => {
-      await flush();
-      expect(container.querySelector('[data-lath-leaf="pane-a"]')).toBeNull();
-    });
-    expect(getNotes('pane-a')).toEqual([]);
-    expect((await storedArchive()).batches).toEqual([]);
-  });
-
-  it('queues a second refused closure behind the first prompt', async () => {
-    // One slot would leave pane-a waiting forever: its prompt is replaced, and
-    // nothing is left to answer for it.
-    // Distinct messages are how the prompt on screen names its Surface.
-    vi.spyOn(fake.notepadArchive, 'save')
-      .mockRejectedValueOnce(new Error('a could not be written'))
-      .mockRejectedValueOnce(new Error('b could not be written'));
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />);
-    });
-    await flush();
-    act(() => {
-      addPlainNote('pane-a', 'from a');
-      addPlainNote('pane-b', 'from b');
-    });
-
-    await clickHeaderControl('pane-a', 'Kill');
-    await clickHeaderControl('pane-b', 'Kill');
-
-    // A's prompt is the one on screen; B's is behind it.
-    expect(archiveFailureModal()?.textContent).toContain('a could not be written');
-    await clickButton('Keep open');
-
-    expect(archiveFailureModal()?.textContent).toContain('b could not be written');
-    await clickButton('Close anyway');
-
-    expect(archiveFailureModal()).toBeNull();
-    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
-    expect(getNotes('pane-a')).toHaveLength(1);
-    await vi.waitFor(async () => {
-      await flush();
-      expect(container.querySelector('[data-lath-leaf="pane-b"]')).toBeNull();
-    });
-  });
-
-  it('migrates a notepad to the new id when a replacement mints one', async () => {
-    await act(async () => {
-      root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
-    });
-    await flush();
-    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockImplementation((id) => id === 'pane-a');
-
-    try {
-      act(() => { addPlainNote('pane-a', 'survives the swap'); });
-
-      let response: { ok: boolean; result?: { surfaceId: string } } | undefined;
-      await act(async () => {
-        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
-          detail: {
-            method: SURFACE_CONTROL_METHODS.iframe,
-            params: { url: 'http://localhost:5173/' },
-            respond: (r: typeof response) => { response = r; },
-          },
-        }));
-      });
-      await flush();
-
-      const newId = response!.result!.surfaceId;
-      expect(newId).not.toBe('pane-a');
-      expect(getNotes('pane-a')).toEqual([]);
-      expect(getNotes(newId).map((note) => note.content)).toEqual([{ kind: 'plain', text: 'survives the swap' }]);
-      // A replacement is not a closure, so nothing was archived.
-      expect((await storedArchive()).batches).toEqual([]);
-    } finally {
-      untouchedSpy.mockRestore();
-    }
   });
 
   it('seeds multiple initial panes with the aspect-aware layout (geometry is measured before the seed)', async () => {
@@ -3618,6 +3763,249 @@ describe('Wall on the Lath engine', () => {
     // The handle deregisters, so nothing addresses the gone Wall — but the
     // Sessions it held are untouched.
     expect(getWallHandle(DEFAULT_WORKSPACE_ID)).toBeNull();
+  });
+
+  /** docs/specs/layout.md -> "Workspace tabs": what a tab's TODO pill does, and
+   *  the destination its tooltip names before each click. */
+  it('enters each TODO member in turn as a click on it would, reattaching a Door, never clearing a TODO', async () => {
+    const onEvent = vi.fn();
+    await act(async () => root.render(<Wall
+      restoredLathLayout={{
+        version: 1,
+        tree: { root: { kind: 'split', dir: 'row', children: [
+          { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.25 },
+          { node: { kind: 'leaf', id: 'pane-b' }, weight: 0.25 },
+          { node: { kind: 'leaf', id: 'browser-a' }, weight: 0.5 },
+        ] } },
+        leafMeta: {
+          'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'shell' },
+          'pane-b': { component: 'terminal', tabComponent: 'terminal', title: 'build' },
+          'browser-a': {
+            component: 'browser',
+            tabComponent: 'surface',
+            title: 'example.com',
+            params: { surfaceType: 'browser', renderMode: 'iframe', url: 'https://example.com' },
+          },
+        },
+      }}
+      initialDoors={[{ id: 'door-a', title: 'A' }]}
+      initialMode="command"
+      onEvent={onEvent}
+    />));
+    await flush();
+    const handle = getWallHandle(DEFAULT_WORKSPACE_ID)!;
+    expect(handle.peekNextTodo()).toBeNull();
+    expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
+    setTerminalActivity('pane-b', { todo: true });
+    setTerminalActivity('door-a', { todo: true });
+    // A browser Surface's TODO is the renderer's own.
+    terminalRegistry.toggleSessionTodo('browser-a');
+    // A terminal is named as its header or Door shows it, over the stored title.
+    await act(async () => { setTerminalUserTitle('pane-b', 'deploy watcher'); });
+    try {
+      const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+      const clearing = [
+        vi.spyOn(fake, 'alertDismiss'), vi.spyOn(fake, 'alertClearTodo'), vi.spyOn(fake, 'alertToggleTodo'),
+        vi.spyOn(terminalRegistry, 'dismissSessionAlert'), vi.spyOn(terminalRegistry, 'clearSessionTodo'),
+        vi.spyOn(terminalRegistry, 'toggleSessionTodo'),
+      ];
+      const focus = vi.spyOn(terminalRegistry, 'focusSession');
+      const last = (type: string) => onEvent.mock.calls.filter(([event]) => event.type === type).at(-1)?.[0];
+      const selection = () => last('selectionChange');
+      const next = async () => {
+        let found: string | null = null;
+        await act(async () => { found = handle.enterNextTodo(); });
+        await flush();
+        await flushFrame();
+        return found;
+      };
+      /** Passthrough on `id` with DOM focus asked for, as its click leaves it. */
+      const entered = (id: string) => {
+        expect(selection()).toEqual({ type: 'selectionChange', id, kind: 'pane' });
+        expect(last('modeChange')).toEqual({ type: 'modeChange', mode: 'passthrough' });
+        expect(focus).toHaveBeenLastCalledWith(id, true);
+        expect(acknowledge).toHaveBeenLastCalledWith(id);
+      };
+
+      // The peek names what the click then enters, as its header or Door shows it.
+      expect(handle.peekNextTodo()).toBe('deploy watcher');
+      expect(container.querySelector('[data-pane-title-for="pane-b"]')!.textContent).toContain('deploy watcher');
+      expect(await next()).toBe('pane-b');
+      entered('pane-b');
+      expect(container.querySelector('[data-session-id="pane-b"][data-focused="true"]')).not.toBeNull();
+      // From a passthrough pane the next is the one after it.
+      expect(handle.peekNextTodo()).toBe('example.com');
+      expect(await next()).toBe('browser-a');
+      // Its acknowledgement has no host entry to reach: the TODO stays.
+      entered('browser-a');
+      // A Door is reattached into passthrough, as its click does.
+      // An idle terminal is `<idle>` on screen, so in the tooltip too.
+      expect(handle.peekNextTodo()).toBe('<idle>');
+      expect(container.querySelector('[data-door-id="door-a"]')!.textContent).toContain('<idle>');
+      expect(await next()).toBe('door-a');
+      entered('door-a');
+      expect(container.querySelector('[data-door-id="door-a"]')).toBeNull();
+      expect(container.querySelector('[data-session-id="door-a"][data-focused="true"]')).not.toBeNull();
+      // Now a pane beside the one it left, it cycles on from where it stands.
+      expect(handle.surfaceIds()).toEqual(['pane-a', 'pane-b', 'browser-a', 'door-a']);
+      expect(await next()).toBe('pane-b');
+      entered('pane-b');
+
+      for (const verb of clearing) expect(verb).not.toHaveBeenCalled();
+      const activity = terminalRegistry.getActivitySnapshot();
+      expect(['pane-b', 'browser-a', 'door-a'].map((id) => activity.get(id)?.todo)).toEqual([true, true, true]);
+
+      // With no TODO left it answers null and leaves mode and selection alone.
+      setTerminalActivity('pane-b', {});
+      setTerminalActivity('door-a', {});
+      terminalRegistry.clearLocalSurfaceActivity('browser-a');
+      const before = onEvent.mock.calls.length;
+      acknowledge.mockClear();
+      expect(handle.peekNextTodo()).toBeNull();
+      expect(await next()).toBeNull();
+      expect(onEvent.mock.calls.slice(before)).toEqual([]);
+      expect(acknowledge).not.toHaveBeenCalled();
+    } finally {
+      terminalRegistry.clearLocalSurfaceActivity('browser-a');
+      resetTerminalPaneState('pane-b');
+    }
+  });
+
+  it('names the command that drives a browser run by the other provider', async () => {
+    hostBrowsers({ attach: async (request) => request.provider === 'playwright' ? { ok: true, stream: 4555 } : { ok: true } });
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+      await flush();
+      let created: { ok: boolean; result?: { surfaceRef: string } } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.browser,
+            params: { provider: 'playwright', session: 'dormouse.pw.abc', cwd: '/tmp/project' },
+            respond: (r: typeof created) => { created = r; },
+          },
+        }));
+      });
+      await flush();
+      const pwRef = created!.result!.surfaceRef;
+      expect(await dispatchResolveAgentBrowser(pwRef)).toEqual({
+        ok: false,
+        error: `surface '${pwRef}' is not agent-browser rendered (render_mode: playwright-screencast) — drive it with dor playwright --surface ${pwRef}`,
+      });
+
+      const abId = await dispatchAgentBrowser({ session: 'dormouse.1.default', wsPort: 4321 });
+      let resolved: unknown;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.resolveBrowser,
+            params: { provider: 'playwright', surface: abId },
+            respond: (r: unknown) => { resolved = r; },
+          },
+        }));
+      });
+      await flush();
+      expect(resolved).toEqual({
+        ok: false,
+        error: expect.stringMatching(/^surface '(surface:\d+)' is not playwright rendered \(render_mode: agent-browser-screencast\) — drive it with dor agent-browser --surface \1$/),
+      });
+    } finally {
+      untouchedSpy.mockRestore();
+    }
+  });
+
+  it('refuses an https:// surface.iframe on a host that proxies, naming dor agent-browser open', async () => {
+    const respond = async (url: string) => {
+      let response: { ok: boolean; error?: string } | undefined;
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: { method: SURFACE_CONTROL_METHODS.iframe, params: { url }, respond: (r: typeof response) => { response = r; } },
+        }));
+      });
+      await flush();
+      return response;
+    };
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+    await flush();
+
+    // Without the proxy the raw frame shows it, so only a proxying host refuses.
+    expect((await respond('https://example.com/'))?.ok).toBe(true);
+    (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
+    expect(await respond('https://example.com/')).toEqual({
+      ok: false,
+      error: 'the embedded view frames http:// pages only — open it with dor agent-browser open https://example.com/',
+    });
+    expect((await respond('http://localhost:5173/'))?.ok).toBe(true);
+  });
+
+  it('opens a new https:// tab from an iframe as an agent-browser pane bound to its launch', async () => {
+    const launches: Array<(result: { ok: boolean; session?: string; stream?: number; error?: string }) => void> = [];
+    const { requests } = hostBrowsers({ launch: () => new Promise((resolve) => { launches.push(resolve); }) });
+    (fake as PlatformAdapter).createIframeProxyUrl = vi.fn(async () => ({ ok: true as const, url: 'http://127.0.0.1:61234/' }));
+    const untouchedSpy = vi.spyOn(terminalRegistry, 'isUntouched').mockReturnValue(false);
+    try {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+      await flush();
+      const iframe = await dispatchIframe('http://localhost:5173/');
+      const leafIds = () => Array.from(container.querySelectorAll<HTMLElement>('[data-lath-leaf]')).map((leaf) => leaf.dataset.lathLeaf!);
+      const openTab = async (url: string) => {
+        await act(async () => {
+          window.dispatchEvent(new MessageEvent('message', { origin: 'http://127.0.0.1:61234', data: { __dormouse: 'open-window', url } }));
+        });
+        const button = Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent === 'Open in agent-browser')!;
+        await act(async () => { button.click(); });
+        await flush();
+      };
+
+      const before = leafIds();
+      await openTab('https://accounts.example/login');
+      const [tab] = leafIds().filter((id) => !before.includes(id));
+      expect(tab).toBeTruthy();
+      expect(requests('launch')).toEqual([expect.objectContaining({
+        provider: 'agent-browser', binding: {}, op: 'launch', url: 'https://accounts.example/login', headed: false,
+      })]);
+      // The pane is there at once; `dor agent-browser --surface` has nothing to drive until the launch names it.
+      expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: false });
+      await act(async () => { launches[0]({ ok: true, session: 'dormouse.1.gui-abc', stream: 4321 }); });
+      await flush();
+      expect(await dispatchResolveAgentBrowser(tab)).toMatchObject({ ok: true, result: { binding: { session: 'dormouse.1.gui-abc' } } });
+
+      // Nor can it be swapped back into an iframe that would refuse it.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await act(async () => { getAgentBrowserScreenController(tab)?.actions.setRenderMode?.('iframe'); });
+      await flush();
+      expect(leafIds()).toContain(tab);
+      expect(getAgentBrowserScreenController(tab)?.snapshot().renderMode).toBe('agent-browser-screencast');
+      expect(warn).toHaveBeenCalledWith(`[dormouse] cannot swap surface '${tab}' to iframe: the embedded view frames http:// pages only`);
+
+      // The swap judges the page on screen, as the Display modal does — here a
+      // local http:// page, though params.url still names the https login.
+      const real = getAgentBrowserScreenController(tab)!;
+      const lookup = agentBrowserScreen.getAgentBrowserScreenController;
+      // Stable objects, as the ScreenController contract requires.
+      const shownChrome = { ...real.chrome(), url: 'http://localhost:5173/report' };
+      const shownController = { ...real, chrome: () => shownChrome };
+      const shown = vi.spyOn(agentBrowserScreen, 'getAgentBrowserScreenController').mockImplementation((id) => (
+        id === tab ? shownController : lookup(id)));
+      const beforeSwap = leafIds();
+      await act(async () => { real.actions.setRenderMode?.('iframe'); });
+      await flush();
+      shown.mockRestore();
+      const [framed] = leafIds().filter((id) => !beforeSwap.includes(id));
+      expect(getAgentBrowserScreenController(framed)?.chrome().url).toBe('http://localhost:5173/report');
+
+      // A launch that fails takes its pane with it.
+      const beforeFailure = leafIds();
+      await openTab('https://other.example/');
+      const [failed] = leafIds().filter((id) => !beforeFailure.includes(id));
+      await act(async () => { launches[1]({ ok: false, error: 'agent-browser binary not found' }); });
+      await flush();
+      expect(leafIds()).not.toContain(failed);
+      expect(leafIds()).toContain(iframe.id);
+    } finally {
+      untouchedSpy.mockRestore();
+    }
   });
 
   it('names the Window that answered `dor list`, once the host has named it', async () => {
@@ -3742,59 +4130,336 @@ describe('Wall session persistence: ownership filtering', () => {
   });
 });
 
-
-it('shares one primary terminal and notepad between a Tool pane and Terminal Context', async () => {
-  const openHelper = vi.spyOn(helpers, 'openHelper');
-  const params = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'announced' };
-  await act(async () => root.render(<Wall restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'tool-context' } }, leafMeta: {
-    'tool-context': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params },
-  } }} initialMode="command" />));
-  await flush();
-  act(() => { addPlainNote('tool-context', 'Keep this note'); setOpenNotepadId('tool-context'); });
-  expect(container.querySelectorAll('[data-notepad-panel-for="tool-context"]')).toHaveLength(1);
-  act(() => setOpenNotepadId(null));
-  act(() => container.querySelector('[data-lath-leaf="tool-context"] .lath-leaf-header')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
-  // The header's terminal label is the context entry point.
-  if (!container.querySelector('[data-terminal-context]')) {
-    act(() => container.querySelector('[data-session-id="tool-context"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+/**
+ * Engagement (`docs/specs/alert.md` -> Engagement): the Wall reports which
+ * terminal Session it points the realm at, and which gestures acknowledge.
+ */
+describe('engagement', () => {
+  function reportedFocus(report: ReturnType<typeof vi.spyOn>): string | null | undefined {
+    return (report.mock.calls.at(-1)?.[0] as { focusId: string | null } | undefined)?.focusId;
   }
-  await flush();
-  expect(openHelper).not.toHaveBeenCalled();
-  expect(container.querySelector('[data-context-terminal="tool-context"]')).not.toBeNull();
-  expect(container.querySelectorAll('[data-session-id="tool-context"]')).toHaveLength(1);
-  act(() => setOpenNotepadId('tool-context'));
-  expect(container.querySelectorAll('[data-notepad-panel-for="tool-context"]')).toHaveLength(1);
-  act(() => setOpenNotepadId(null));
-  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
-  await flush();
-  expect(container.querySelectorAll('[data-session-id="tool-context"]')).toHaveLength(1);
-  expect(getNotes('tool-context').map(note => note.content)).toEqual([{ kind: 'plain', text: 'Keep this note' }]);
-  let mountedDuringRefit = false;
-  const refit = vi.spyOn(terminalRegistry, 'refitSession').mockImplementation(() => {
-    mountedDuringRefit = container.querySelector('[data-context-terminal="tool-context"] [data-session-id="tool-context"]') !== null;
-  });
-  act(() => {
-    window.dispatchEvent(new CustomEvent('dormouse:reveal-note-source', { detail: { surfaceId: 'tool-context' } }));
-    // Pin resolution follows synchronously, before the React event returns.
-    expect(refit).toHaveBeenCalledExactlyOnceWith('tool-context');
-    expect(mountedDuringRefit).toBe(true);
+
+  /** A human at the window: the reporter sends focus only while present. */
+  async function present(): Promise<void> {
+    await act(async () => { window.dispatchEvent(new Event('pointermove')); });
+  }
+
+  async function key(name: string): Promise<void> {
+    await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true })); });
+  }
+
+  async function commandMode(): Promise<void> {
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 1, bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', location: 2, bubbles: true }));
+    });
+  }
+
+  beforeEach(() => {
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
   });
 
+  it('points at the passthrough pane, and at nothing from command mode or a Door', async () => {
+    const report = vi.spyOn(fake, 'alertEngagement');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="passthrough" />));
+    await flush();
+    await present();
+    expect(reportedFocus(report)).toBe('pane-a');
+
+    await commandMode();
+    expect(reportedFocus(report)).toBeNull();
+
+    await act(async () => {
+      container.querySelector('[data-lath-leaf="pane-b"] [data-session-id="pane-b"]')!
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(reportedFocus(report)).toBe('pane-b');
+
+    await key('m');
+    await commandMode();
+    await key('m');
+    await flush();
+    expect(container.querySelector('[data-door-id="pane-b"]')).not.toBeNull();
+    expect(reportedFocus(report)).toBeNull();
+  });
+
+  it('points at the source while its terminal context is open, even from command mode', async () => {
+    const report = vi.spyOn(fake, 'alertEngagement');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />));
+    await flush();
+    await present();
+    expect(reportedFocus(report)).toBeNull();
+
+    const header = container.querySelector<HTMLElement>('[data-pane-header-for="pane-a"]')!;
+    await act(async () => { header.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 120, clientY: 90 })); });
+    expect(reportedFocus(report)).toBe('pane-a');
+  });
+
+  it('points at nothing from a browser Surface in passthrough', async () => {
+    const report = vi.spyOn(fake, 'alertEngagement');
+    await act(async () => root.render(<Wall
+      restoredLathLayout={{
+        version: 1,
+        tree: { root: { kind: 'leaf', id: 'browser-a' } },
+        leafMeta: {
+          'browser-a': {
+            component: 'browser',
+            tabComponent: 'surface',
+            title: 'example.com',
+            params: { surfaceType: 'browser', renderMode: 'iframe', url: 'https://example.com' },
+          },
+        },
+      }}
+      initialMode="passthrough"
+    />));
+    await flush();
+    await present();
+    expect(reportedFocus(report)).toBeNull();
+  });
+
+  it('points at nothing from a hidden Workspace', async () => {
+    const report = vi.spyOn(fake, 'alertEngagement');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" active={false} />));
+    await flush();
+    await present();
+    expect(reportedFocus(report)).toBeNull();
+  });
+
+  it('acknowledges a click on a pane and a Door, but not a `d` reattach', async () => {
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    await act(async () => root.render(
+      <Wall initialPaneIds={['pane-a']} initialDoors={[{ id: 'door-a', title: 'A' }]} initialMode="command" />,
+    ));
+    await flush();
+
+    await act(async () => {
+      container.querySelector('[data-session-id="pane-a"]')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+    expect(acknowledge.mock.calls).toEqual([['pane-a']]);
+
+    await act(async () => { container.querySelector<HTMLElement>('[data-door-id="door-a"] button')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="door-a"]')).not.toBeNull();
+    expect(acknowledge.mock.calls.at(-1)).toEqual(['door-a']);
+
+    // `m` leaves the new Door selected in command mode; `d` brings it back there.
+    await commandMode();
+    await key('m');
+    await flush();
+    expect(container.querySelector('[data-door-id="door-a"]')).not.toBeNull();
+    acknowledge.mockClear();
+    await key('d');
+    await flush();
+    expect(container.querySelector('[data-door-id="door-a"]')).toBeNull();
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges Enter into a pane or through its Door, and zoom', async () => {
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="command" />));
+    await flush();
+
+    await key('Enter');
+    expect(acknowledge.mock.calls).toEqual([['pane-a']]);
+
+    // `m` leaves the new Door selected; `Enter` reattaches it into passthrough.
+    await commandMode();
+    await key('m');
+    await flush();
+    expect(container.querySelector('[data-door-id="pane-a"]')).not.toBeNull();
+    acknowledge.mockClear();
+    await key('Enter');
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="pane-a"]')).not.toBeNull();
+    expect(acknowledge.mock.calls).toEqual([['pane-a']]);
+
+    await commandMode();
+    acknowledge.mockClear();
+    await key('z');
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')).not.toBeNull();
+    expect(acknowledge.mock.calls).toEqual([['pane-a']]);
+  });
+
+  it('acknowledges a zoom and an unzoom from the pane already in passthrough', async () => {
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} initialMode="passthrough" />));
+    await flush();
+
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="pane-a"] button[aria-label="Zoom"]')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')).not.toBeNull();
+    expect(acknowledge.mock.calls).toEqual([['pane-a']]);
+
+    await act(async () => { container.querySelector<HTMLElement>('[data-lath-leaf="pane-a"] button[aria-label="Unzoom"]')!.click(); });
+    await flush();
+    expect(container.querySelector('[data-lath-leaf="pane-a"] button[aria-label="Zoom"]')).not.toBeNull();
+    expect(acknowledge.mock.calls).toEqual([['pane-a'], ['pane-a']]);
+  });
+
+  it('acknowledges the dev-server chip jumping to the terminal it names', async () => {
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    await act(async () => root.render(<Wall
+      restoredLathLayout={{
+        version: 1,
+        tree: { root: { kind: 'split', dir: 'row', children: [
+          { node: { kind: 'leaf', id: 'pane-a' }, weight: 0.5 },
+          { node: { kind: 'leaf', id: 'browser-a' }, weight: 0.5 },
+        ] } },
+        leafMeta: {
+          'pane-a': { component: 'terminal', tabComponent: 'terminal', title: 'pnpm dev' },
+          'browser-a': {
+            component: 'browser',
+            tabComponent: 'surface',
+            title: 'localhost:5173',
+            params: { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:5173/' },
+          },
+        },
+      }}
+      initialMode="command"
+    />));
+    await flush();
+    await act(async () => { setDevServerResolution(5173, { paneId: 'pane-a', fallbackTitle: 'pnpm dev' }); });
+    try {
+      const chip = container.querySelector<HTMLButtonElement>('button[aria-label^="Focus pnpm dev"]');
+      expect(chip).not.toBeNull();
+
+      await act(async () => { chip!.click(); });
+      expect(acknowledge.mock.calls).toEqual([['pane-a']]);
+    } finally {
+      setDevServerResolution(5173, null);
+    }
+  });
+
+  it('acknowledges no spawn, no split, and no raw frame taking focus', async () => {
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    await act(async () => root.render(<Wall
+      restoredLathLayout={{
+        version: 1,
+        tree: { root: { kind: 'leaf', id: 'browser-a' } },
+        leafMeta: {
+          'browser-a': {
+            component: 'browser',
+            tabComponent: 'surface',
+            title: 'example.com',
+            params: { surfaceType: 'browser', renderMode: 'iframe', url: 'https://example.com' },
+          },
+        },
+      }}
+      initialMode="command"
+    />));
+    await flush();
+
+    // Focus alone reaching a frame with no shim enters it, and is no gesture.
+    const frame = container.querySelector('iframe')!;
+    const activeElement = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(frame);
+    await act(async () => { window.dispatchEvent(new Event('blur')); });
+    activeElement.mockRestore();
+    expect(container.querySelector('[data-lath-leaf="browser-a"]')).not.toBeNull();
+    await commandMode();
+
+    await key('|');
+    await flush();
+    await act(async () => { window.dispatchEvent(new CustomEvent('dormouse:new-terminal', { detail: {} })); });
+    await flush();
+    expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(3);
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+
+  it('moves focus to a Surface `dor` reveals without acknowledging it', async () => {
+    const toolId = 'tool-revealed';
+    terminalRegistry.applyTerminalSemanticEvents(toolId, [
+      { type: 'commandLine', commandLine: 'pnpm storybook' },
+      { type: 'commandStart' },
+    ]);
+    (fake as FakePtyAdapter & Pick<PlatformAdapter, 'toolControl'>).toolControl = vi.fn(async () => okToolLookup(['/repo']));
+    const acknowledge = vi.spyOn(terminalRegistry, 'acknowledgeSession');
+    const report = vi.spyOn(fake, 'alertEngagement');
+    try {
+      await act(async () => root.render(
+        <Wall
+          initialPaneIds={['pane-a']}
+          initialDoors={[{
+            id: toolId,
+            title: 'storybook',
+            component: 'tool',
+            tabComponent: 'tool',
+            params: {
+              surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook',
+              toolRender: 'iframe', toolPort: 'announced', toolKey: ['storybook', '/repo'],
+            },
+          }]}
+          initialMode="command"
+        />,
+      ));
+      await flush();
+      await present();
+      await act(async () => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', {
+          detail: {
+            method: SURFACE_CONTROL_METHODS.tool,
+            params: { name: 'storybook', cwd: '/repo', minimized: false, fresh: false },
+            respond: () => {},
+          },
+        }));
+      });
+      await flush();
+
+      expect(container.querySelector(`[data-lath-leaf="${toolId}"]`)).not.toBeNull();
+      expect(reportedFocus(report)).toBe(toolId);
+      expect(acknowledge).not.toHaveBeenCalled();
+    } finally {
+      act(() => terminalRegistry.removeTerminalPaneState(toolId));
+    }
+  });
 });
 
-it('leaves a reveal for a hidden Workspace unanswered', async () => {
-  // A hidden Wall consumes no window input (docs/specs/layout.md →
-  // "Workspaces"): opening the context here would mount chrome nobody can see
-  // and refit a terminal whose element is detached.
-  const params = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'iframe', toolPort: 'announced' };
-  await act(async () => root.render(<Wall active={false} restoredLathLayout={{ version: 1, tree: { root: { kind: 'leaf', id: 'tool-hidden' } }, leafMeta: {
-    'tool-hidden': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params },
-  } }} initialMode="command" />));
+it('moves a retained helper without resizing or replacing its source, and remembers the manual side', async () => {
+  const retained: helpers.HelperTerminal = { id: 'placement-helper', parentId: 'placement-source', command: '', status: 'preserved' };
+  vi.spyOn(helpers, 'getHelper').mockImplementation(id => id === 'placement-source' ? retained : undefined);
+  const openHelper = vi.spyOn(helpers, 'openHelper').mockResolvedValue(retained);
+  await act(async () => root.render(<Wall initialPaneIds={['placement-source']} />));
   await flush();
-  const refit = vi.spyOn(terminalRegistry, 'refitSession');
-  act(() => {
-    window.dispatchEvent(new CustomEvent('dormouse:reveal-note-source', { detail: { surfaceId: 'tool-hidden' } }));
+  const source = container.querySelector<HTMLElement>('[data-lath-leaf="placement-source"]')!;
+  const sourceStyle = source.getAttribute('style');
+  const open = async () => {
+    act(() => container.querySelector('[data-pane-header-for="placement-source"]')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    await flush();
+  };
+  await open();
+  const menu = container.querySelector<HTMLElement>('[data-terminal-context]')!;
+  const terminal = menu.querySelector('[data-helper-terminal]');
+  expect(terminal).not.toBeNull();
+  act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Place helper at bottom"]')!.click());
+  expect(menu.dataset.contextSide).toBe('bottom');
+  expect(menu.querySelector('[data-helper-terminal]')).toBe(terminal);
+  expect(openHelper).toHaveBeenCalledTimes(1);
+  expect(source.getAttribute('style')).toBe(sourceStyle);
+  expect(container.querySelector('[data-lath-leaf="placement-source"]')).toBe(source);
+  act(() => menu.querySelector<HTMLButtonElement>('[aria-label="Close terminal context"]')!.click());
+  await flush();
+  await open();
+  expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('bottom');
+  act(() => container.querySelector<HTMLButtonElement>('[aria-label="Place helper at top"]')!.click());
+  expect(container.querySelector<HTMLElement>('[data-terminal-context]')!.dataset.contextSide).toBe('top');
+});
+
+
+it.each(['Shift', 'Meta'])('cancels an interrupted %s leader without leaving passthrough', async modifier => {
+  await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialMode="passthrough" />));
+  await flush();
+  const press = (key: string, location = 0) => act(async () => {
+    (document.activeElement ?? window).dispatchEvent(new KeyboardEvent('keydown', {
+      key, location, bubbles: true, cancelable: true,
+      shiftKey: modifier === 'Shift', metaKey: modifier === 'Meta',
+    }));
   });
-  expect(refit).not.toHaveBeenCalled();
-  expect(container.querySelector('[data-terminal-context]')).toBeNull();
+  await press(modifier, 1);
+  await press('I');
+  await press(modifier, 2);
+  expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('true');
+  // Cancellation only drops the pending gesture; a fresh pair still works.
+  await press(modifier, 1);
+  await press(modifier, 2);
+  expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
 });

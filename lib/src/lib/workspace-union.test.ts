@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION } from './workspace-union';
+import { computeWorkspaceUnion, nextTodoMember, type WorkspaceUnion } from './workspace-union';
 import type { ActivityState } from './session-activity-store';
 
 function activity(entries: Record<string, Partial<ActivityState>>): Map<string, ActivityState> {
@@ -15,10 +15,12 @@ function activity(entries: Record<string, Partial<ActivityState>>): Map<string, 
 
 const episode = (id: string, startedAt: number) => ({ id, startedAt });
 
+const EMPTY: WorkspaceUnion = { ringing: false, todo: false, count: 0, ringingSince: null };
+
 describe('computeWorkspaceUnion', () => {
   it('is empty when no surface owes attention', () => {
     const union = computeWorkspaceUnion(['a', 'b'], activity({ a: {}, b: { status: 'BUSY' } }));
-    expect(union).toEqual(EMPTY_WORKSPACE_UNION);
+    expect(union).toEqual(EMPTY);
   });
 
   it('reports ringing when any terminal Session is ALERT_RINGING', () => {
@@ -78,6 +80,28 @@ describe('computeWorkspaceUnion', () => {
   });
 
   it('is empty for an empty surface set', () => {
-    expect(computeWorkspaceUnion([], activity({ a: { todo: true } }))).toEqual(EMPTY_WORKSPACE_UNION);
+    expect(computeWorkspaceUnion([], activity({ a: { todo: true } }))).toEqual(EMPTY);
+  });
+});
+
+describe('nextTodoMember', () => {
+  const order = ['a', 'b', 'c', 'd'];
+  const todos = activity({ a: {}, b: { todo: true }, c: { status: 'ALERT_RINGING' }, d: { todo: true } });
+
+  it('starts from the first member when nothing, or no member, is selected', () => {
+    expect(nextTodoMember(order, null, todos)).toBe('b');
+    expect(nextTodoMember(order, 'gone', todos)).toBe('b');
+  });
+
+  it('moves past the selection to the next TODO, skipping a ring without one, and wraps', () => {
+    expect(nextTodoMember(order, 'a', todos)).toBe('b');
+    expect(nextTodoMember(order, 'b', todos)).toBe('d');
+    expect(nextTodoMember(order, 'd', todos)).toBe('b');
+  });
+
+  it('stays on the only TODO, and finds none when no member has one', () => {
+    expect(nextTodoMember(order, 'b', activity({ b: { todo: true } }))).toBe('b');
+    expect(nextTodoMember(order, 'b', activity({ c: { status: 'ALERT_RINGING' } }))).toBeNull();
+    expect(nextTodoMember([], null, todos)).toBeNull();
   });
 });

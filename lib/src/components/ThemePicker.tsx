@@ -192,8 +192,10 @@ export function ThemePicker({
         </div>
       ) : null}
 
-      <ThemeStoreDialog open={storeOpen} onClose={() => setStoreOpen(false)} onThemesChanged={refreshThemes} />
-      <ThemeDebuggerDialog open={debuggerOpen} onClose={() => setDebuggerOpen(false)} />
+      {storeOpen ? (
+        <ThemeStoreDialog onClose={() => setStoreOpen(false)} onThemesChanged={refreshThemes} />
+      ) : null}
+      {debuggerOpen ? <ThemeDebuggerDialog onClose={() => setDebuggerOpen(false)} /> : null}
     </div>
   );
 }

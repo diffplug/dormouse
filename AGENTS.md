@@ -9,12 +9,9 @@ pnpm install     # install deps
 pnpm build       # build lib, vscode extension, Pocket, and website
 ```
 
-**Inside Dormouse, run `innerdogfood`** — `dor ensure -- pnpm innerdogfood`.
-The harness opens its browser pane and prints its URL and browser command
+**Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`.
+The Tool shows the harness in its own pane and prints the command to drive it
 (`docs/specs/standalone.md` → "Standalone browser-dev harness").
-
-**Open every PR as a draft.** Chromatic bills per snapshot and skips drafts, so
-marking a PR ready for review is what spends them.
 
 ## Worktrees
 
@@ -27,11 +24,11 @@ marking a PR ready for review is what spends them.
 - **`lib/`** — Shared React + TailwindCSS frontend library: components, tests, Storybook.
   - `lib/src/lib/platform/` — platform abstraction (`PlatformAdapter` interface, fake + VSCode adapters)
   - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `BurrowService` that runs in the Tauri sidecar and the VS Code extension host)
-  - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `direct/` (the WebRTC direct path both ends run), `ws.ts` (shared socket surface)
+  - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `one-time-app/` (the one-time phone page Hosted serves), `direct/` (the WebRTC direct path both ends run), `ws.ts` (shared socket surface)
 - **`standalone/`** — Tauri desktop app (Rust + Vite frontend).
   - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty, direct-path WebRTC via node-datachannel), bundled as the Tauri sidecar
   - `standalone/src-tauri/` — Rust backend bridging webview ↔ sidecar
-- **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process)
+- **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process; direct-path WebRTC via node-datachannel, every platform's addon in one VSIX)
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
 - **`relay/`** — Selfhost coordinating Relay for remote control (Hono): accounts + passkey auth in local JSON files (no database), WebSocket routing between Clients and Burrows, serves the built Pocket app
 - **`hosted/`** — Separate Hosted account frontend and Hono Worker; packed pgstencil Better Auth, Postgres, and provider configuration.
@@ -56,9 +53,9 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/terminal-state.md`** — Per-Session semantic state: CWD, prompt/command lifecycle, title candidates and header derivation, grouping keys.
 - **`docs/specs/terminal-context.md`** — Unified terminal context and helper terminal: lifecycle, promotion, source closure, and global autorun settings.
 - **`docs/specs/terminal-escapes.md`** — Registry of every escape sequence parsed, answered, or ignored, each row pointing at its owning spec. Read before touching OSC/CSI parsing.
+- **`docs/compatible-agents.md`** — Public agent guide plus the hidden recovery contract: shutdown capture, detection, single-use records, and cold-restore execution.
 - **`docs/specs/transport.md`** — Adapter-agnostic webview ↔ host protocol: PTY lifecycle and buffering, reconnection, message contracts, persisted-session types, the invariants every adapter honors.
 - **`docs/specs/mouse-and-clipboard.md`** — Terminal-owned selection, copy (Raw / Rewrapped), paste tiers, smart URL/path extension, the mouse-ownership state matrix.
-- **`docs/specs/notepad.md`** — The per-Surface notepad: the note model and host archive port, capture from a terminal selection, source pins back to scrollback, the panel/Door/Archive UI, and every closure path that archives notes.
 - **`docs/specs/theme.md`** — The two-layer CSS variable strategy, consumed-token resolver, terminal color contract, theme debugger.
 - **`docs/specs/dor-cli.md`** — The `dor` CLI on every Dormouse terminal's `PATH`: bundling and env contract, `spawnAndCapture` rules, control-socket plumbing, the Surface handle model, the command set.
 - **`docs/specs/dor-browser.md`** — The browser surface: `BrowserPanel` with swappable `renderMode`, browser chrome, the agent-browser stack, the iframe proxy and CSP boundaries.
@@ -74,11 +71,12 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
 - **`docs/specs/relay.md`** — The selfhost coordinating Relay and shared Burrow-service runtime: env config, JSON-file state, WebAuthn without a library, HTTP API, relay flow, enrollment, running it end to end.
 - **`docs/specs/hosted.md`** — Hosted accounts: application boundary, login/linking policy, local development, and staged paid services.
+- **`docs/specs/one-time.md`** — One-time connection: the link a laptop shows, its Settings panel and Baseboard indicator, the Hosted rendezvous wire that carries only its handshake, the phone page Hosted serves, and the direct-only session; no account, nothing saved.
 - **`docs/specs/security-hosted.md`** — Hosted account origin, identity, and deployment security checks.
 - **`SELF_HOST.md`** (repo root) — Self-host deployment: the assistant-run install runbook plus the Installer contract that `docs/specs/security-remote.md`'s `FAIL IF` lines and `scripts/deploy-lint.mjs` audit.
 - **`docs/specs/pocket-app.md`** — Pocket: the remote session is a `PlatformAdapter` (`RemotePtyAdapter`), so Pocket is auth screens plus the mobile composition; owns the same-origin deployment rule.
 - **`docs/specs/deploy.md`** — Release process: artifact matrix, release checklist, two-stage sign-and-release pipeline, updater manifest, changelog flow.
-- **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published at `/docs/security`, rows split by audience. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
+- **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published at `/security`, rows split by audience. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
 - **`docs/specs/security-local.md`** — The boundaries a user of the local application has: terminal output, browser panes, the `dor` control socket, loopback listeners, persisted state.
 - **`docs/specs/security-remote.md`** — The audited checks on remote control: trust boundary, relay allowlist, credentials at rest, the setup password, cross-origin access, network posture, what crosses the boundary, revocation.
 - **`docs/specs/security-supply-chain.md`** — Disclosure of everything that reaches a user's machine, the bundled runtime pin, dependency cooldown and alerts.
@@ -108,7 +106,7 @@ Specs are written ahead of the code: a new component's spec starts as a full des
 - **Reservations.** Unbuilt design that constrains present code — a reserved wire field, a reserved ref grammar, an additive-evolution guarantee — is stated in the body, marked `Reserved:`, pointing at the `## Future` item it serves. Test: if deleting the sentence would let someone break future compatibility today, it belongs in the body.
 - **Promotion is part of done.** A staged item is finished only when its text moves above the fold — "will" rewritten to "is", `Source of truth:` added — and the built portion is deleted from `## Future`. Never leave completed plan text (build orders, phase lists) below the fold; git keeps the record.
 
-`scripts/spec-lint.mjs` (`pnpm lint:specs`, the first step of the root `pnpm test`) enforces the mechanically checkable conventions above — its header comment lists the checks — and ratchets size: every spec, this file, `SECURITY.md`, and `SELF_HOST.md` carry a word budget in `scripts/spec-word-budgets.json`, its size rounded up to the nearest 50. Rationale files carry none; evidence may grow without limit. Over budget: cut to fit, or re-baseline with `node scripts/spec-lint.mjs --ratchet <spec>` in the same PR. `SECURITY.md` and `SELF_HOST.md` ride the same checks. Advisory prose reviews follow `docs/prose-audit.md` (`pnpm audit:prose`).
+`scripts/spec-lint.mjs` (`pnpm lint:specs`, the first step of the root `pnpm test`) enforces the mechanically checkable conventions above — its header comment lists the checks — and ratchets size: every spec, this file, `SECURITY.md`, and `SELF_HOST.md` carry a word budget in `scripts/spec-word-budgets.json`, its size rounded up to the nearest 50. Rationale files carry none; evidence may grow without limit. Over budget: cut to fit, or re-baseline with `node scripts/spec-lint.mjs --ratchet <spec>` in the same PR. `SECURITY.md`, `SELF_HOST.md`, and `docs/compatible-agents.md` ride the same checks. Advisory prose reviews follow `docs/prose-audit.md` (`pnpm audit:prose`).
 
 Six sibling lints run in `pnpm test`. Five enforce one invariant a spec states in prose and name the line they enforce; only `public-docs-lint` and `e2e-lint` read that prose and fail when the line is gone. `ps1-cmdlet-lint` guards the one shipped file nothing else can parse:
 
@@ -119,7 +117,7 @@ Six sibling lints run in `pnpm test`. Five enforce one invariant a spec states i
 | `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) | `docs/specs/security-local.md` -> "Loopback Listeners": a loopback bind is not an access control — a new listener references a guard module or is allowlisted with a reason. |
 | `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) | `docs/specs/security-remote.md` -> "Credentials at rest" and "Network posture (self-hosted)": the installer controls binding all three of `deploy/local/install-{macos,windows,linux}`. |
 | `scripts/ps1-cmdlet-lint.mjs` (`pnpm lint:deploy`) | Every `Verb-Noun` call in `deploy/local/install-windows.ps1` uses an approved verb and a noun that is not this project's vocabulary. No job has a PowerShell, so this is the Windows installer's only syntax gate. |
-| `scripts/e2e-lint.mjs` (`pnpm lint:e2e`) | The structural half of `docs/specs/security-remote.md` -> "Remote Control": one Noise suite with no selector, no JavaScript curve, no legacy relay discriminant, no Relay-side protocol-v1 type, no checked-in service worker, no optional field on a ciphertext or transcript. |
+| `scripts/e2e-lint.mjs` (`pnpm lint:e2e`) | The structural half of `docs/specs/security-remote.md` -> "Remote Control": one Noise suite with no selector, no JavaScript curve, no legacy relay discriminant, no Relay-side protocol-v1 type, no one-time reader in the Relay or `BurrowRuntime`, no store in the one-time phone, no checked-in service worker, no optional field on a ciphertext or transcript; and `docs/specs/security-hosted.md` -> "Rendezvous boundary": no frame read in Hosted's one-time room. |
 
 `scripts/spec-lint-selftest.mjs` plants one defect per finding check in the spec lint. The `deploy`, `e2e`, and `loopback` lints carry self-tests that mutate each rule in whichever direction it points: a present-control rule has its control deleted (and, for exact-count rules, a copy added), a `forbidden` rule has the banned text appended. `scripts/e2e-lint-selftest.mjs` is mostly the second kind; `scripts/deploy-lint-selftest.mjs` mostly the first. Either way the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share plumbing, and only that, through `scripts/lint-kit.mjs`. `scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) runs the installer shell helpers lint can only read, extracted from the shipped files; `scripts/ps1-cmdlet-lint-selftest.mjs` carries the `ps1-cmdlet` lint's mutations. `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs`, the test for `scripts/clamp-issue-body.mjs` (the helper the audit workflows use to keep an issue body postable); it lives at the repo root because its callers do.
 
@@ -143,21 +141,10 @@ the token files are split; `DESIGN.md` → "Don't" owns what adding one costs.
 <!-- dor-skill:begin — managed by `dor skill --install`; edits inside are overwritten -->
 ## Running inside Dormouse
 
-If the `DORMOUSE_SURFACE_ID` environment variable is set, this terminal is
-hosted by [Dormouse](https://dormouse.sh) and the `dor` CLI is on your `PATH`.
-**Run `dor skill` first and do what it says** — it teaches you to use the
-terminal fully (visible panes, browser surfaces, sub-agents). Two rules are
-mandatory whether or not you have read it:
+If the `DORMOUSE_SURFACE_ID` environment variable is set, this terminal is hosted by [Dormouse](https://dormouse.sh) and the `dor` CLI is on your `PATH`. **Run `dor skill` first and do what it says** — it teaches you to use the terminal fully (visible panes, browser surfaces, sub-agents). Two rules are mandatory whether or not you have read it:
 
-- **NEVER start a long-running process — a dev server, a `--watch`, any daemon
-  — as a background subprocess.** It would be invisible to the user and die with
-  your shell. ALWAYS run it with `dor ensure -- <command>` (e.g.
-  `dor ensure -- npm run dev`), which puts it in a visible pane that outlives
-  you and is reused instead of duplicated on re-runs.
-- **NEVER use a built-in, native, or bundled browser tool to open, view, or
-  drive a web page.** ALWAYS use `dor ab` (agent-browser) — `dor ab open
-  <url>`, `dor ab click @e3`, and so on — so the page renders in a Dormouse
-  pane the user can watch.
+- **NEVER start a long-running process — a dev server, a `--watch`, any daemon — as a background subprocess.** It would be invisible to the user and die with your shell. ALWAYS run it with `dor ensure -- <command>` (e.g. `dor ensure -- npm run dev`), which puts it in a visible pane that outlives you and is reused instead of duplicated on re-runs.
+- **NEVER use a built-in, native, or bundled browser tool to open, view, or drive a web page.** ALWAYS use `dor agent-browser` (agent-browser) — `dor agent-browser open <url>`, `dor agent-browser click @e3`, and so on — so the page renders in a Dormouse pane the user can watch.
 
 If `DORMOUSE_SURFACE_ID` is not set, ignore this section — `dor` is not here.
 <!-- dor-skill:end -->

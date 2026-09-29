@@ -5,7 +5,7 @@
  * actually emits and leaves everything else as ordered prose. Semantic parsing
  * may fall back to prose, but it may never silently discard source text — every
  * node keeps the exact source slice it came from, and `reconstruct()` rebuilds
- * the original help byte for byte. `docs/specs/website-docs.md` -> /docs/dor.
+ * the original help byte for byte. `docs/specs/website-docs.md` -> /dor.
  *
  * No dependencies.
  */

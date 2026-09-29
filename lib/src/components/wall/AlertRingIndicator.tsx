@@ -40,8 +40,8 @@ export function AlertRingIndicator({ sessionId }: { sessionId: string }) {
   );
   const row = alertRingRow(activity.status, speech);
   const burst = useAlertRingBurst(row, activity.episode);
-  // `setTerminalActivity` opens an episode on every ringing transition, so a row
-  // always arrives with one; the pair is what the treatment renders from.
+  // The host's ringing state always carries its episode, so a row arrives with
+  // one; the pair is what the treatment renders from.
   if (!row || !burst) return null;
 
   const speaking = row === 'speaking';

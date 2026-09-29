@@ -1,19 +1,18 @@
-import { isAlertDeliveryPaused, markAlertConsumed } from './alert-delivery-state';
 import { getSessionAlertPolicy, subscribeToAlertDeliveryPolicy } from './alert-delivery-policy';
 import { speechQueue } from './speech-queue';
-import { watchUnattendedRings } from './alert-ring-watch';
 import {
   clearAlertSpeechState,
   clearAllAlertSpeechStates,
   getAlertSpeechSnapshot,
   setAlertSpeechState,
 } from './alert-speech-state';
-import { getActivity } from './session-activity-store';
+import { getActivity, subscribeToActivity } from './session-activity-store';
 import { deriveSessionLabel } from './session-label';
 import { redactHighEntropyTokens } from './redact-high-entropy';
 
-// Speech sink and sanitizer; alert-ring-watch owns ring timing/cancellation.
-// Engine callbacks publish transient renderer-local delivery state.
+// The speech sink and its sanitizer. The host decides when to speak
+// (`alert-delivery-scheduler.ts`); this performs it, publishing transient
+// renderer-local delivery state from the engine's callbacks.
 
 /** Longest utterance we will produce. A pane title has no useful upper bound. */
 const SPEECH_LIMIT = 120;
@@ -47,50 +46,50 @@ export function speakTestUtterance(voice?: string | null): boolean {
   });
 }
 
-/** One coordinator per renderer; Workspace policy is resolved per originating Session. */
-export function startAlertSpeech(): () => void {
+/** This realm's speech performer (`docs/specs/alert.md` -> Spoken alarms). */
+export interface AlertSpeaker {
+  /** Queue the Session's label for the episode the host scheduled. */
+  speak(id: string, episodeId: string): void;
+  stop(): void;
+}
+
+/** One per renderer; the voice and the enable are the Session's Workspace policy. */
+export function startAlertSpeech(): AlertSpeaker {
   clearAllAlertSpeechStates();
   const renderedEpisodes = new Map<string, string>();
   const eligible = (id: string, episodeId: string): boolean =>
-    !isAlertDeliveryPaused(id) && getActivity(id).episode?.id === episodeId && getSessionAlertPolicy(id).speakEnabled;
-  const stopRingWatch = watchUnattendedRings({
-    sink: 'speech',
-    enabled: (id) => getSessionAlertPolicy(id).speakEnabled,
-    delayMs: (id) => getSessionAlertPolicy(id).speakDelayMs,
-    subscribe: subscribeToAlertDeliveryPolicy,
-    fire: (id, episode) => {
-      const queued = speechQueue.enqueue({
-        key: episode.id,
+    getActivity(id).episode?.id === episodeId && getSessionAlertPolicy(id).speakEnabled;
+  // Drop pending work the ring clearing or the policy just resolved, cutting
+  // the current utterance off, and un-render speech whose episode ended.
+  const refresh = (): void => {
+    speechQueue.refresh();
+    for (const id of getAlertSpeechSnapshot().keys()) {
+      if (getActivity(id).episode?.id !== renderedEpisodes.get(id)) {
+        renderedEpisodes.delete(id);
+        clearAlertSpeechState(id);
+      }
+    }
+  };
+  const stops = [subscribeToActivity(refresh), subscribeToAlertDeliveryPolicy(refresh)];
+  return {
+    speak(id, episodeId) {
+      speechQueue.enqueue({
+        key: episodeId,
         text: () => toSpokenText(deriveSessionLabel(id)),
         voice: () => getSessionAlertPolicy(id).speakVoice,
-        eligible: () => eligible(id, episode.id),
-        // Consumed at admission: no acknowledgement ties audible sound to ownership (rationale).
-        onAdmit: () => markAlertConsumed('speech', id, episode.id),
-        onStart: () => { renderedEpisodes.set(id, episode.id); setAlertSpeechState(id, 'speaking'); },
+        eligible: () => eligible(id, episodeId),
+        onStart: () => { renderedEpisodes.set(id, episodeId); setAlertSpeechState(id, 'speaking'); },
         onFinish: (started) => {
-          if (!started) markAlertConsumed('speech', id, episode.id);
-          if (started && eligible(id, episode.id)) { setAlertSpeechState(id, 'spoken'); return; }
+          if (started && eligible(id, episodeId)) { setAlertSpeechState(id, 'spoken'); return; }
           renderedEpisodes.delete(id);
           clearAlertSpeechState(id);
         },
       });
-      if (!queued) markAlertConsumed('speech', id, episode.id);
     },
-    // Same notifications as the scan: drop pending work the scan just resolved,
-    // and un-render speech whose episode ended.
-    afterScan: () => {
-      speechQueue.refresh();
-      for (const id of getAlertSpeechSnapshot().keys()) {
-        if (getActivity(id).episode?.id !== renderedEpisodes.get(id)) {
-          renderedEpisodes.delete(id);
-          clearAlertSpeechState(id);
-        }
-      }
+    stop() {
+      stops.forEach((stop) => stop());
+      speechQueue.clear();
+      clearAllAlertSpeechStates();
     },
-  });
-  return () => {
-    stopRingWatch();
-    speechQueue.clear();
-    clearAllAlertSpeechStates();
   };
 }

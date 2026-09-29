@@ -1,5 +1,6 @@
 import { clearToolAnnounce } from './tool-announce-store';
 import { clearToolDirty } from './tool-dirty-store';
+import { clearPreviewTransition } from './preview-transition-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -11,18 +12,19 @@ import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quot
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
 import type { PtyDataDetail } from './platform/types';
 import type { HelperIdentity } from './terminal-context-types';
+import type { PersistedAlertState } from './session-types';
 import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
-import { requestExternalLinkConfirmation } from './external-link-confirmation';
+import { activateTerminalLink } from './terminal-link-activation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
+import { xtermVtExtensions } from './xterm-options';
 import {
   bumpRenderTick,
   getMouseSelectionState,
   removeMouseSelectionState,
   setSelection as setMouseSelection,
 } from './mouse-selection';
-import { dropSourcesForTerminal } from './notepad/notepad-store';
 import { extractSelectionText } from './selection-text';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
@@ -32,10 +34,10 @@ import {
   type TerminalEntry,
   type TerminalOverlayDims,
 } from './terminal-store';
-import { clearTerminalActivity, getActivity, notifyActivityListeners } from './session-activity-store';
+import { clearTerminalActivity, notifyActivityListeners } from './session-activity-store';
+import { clearSizeHold } from './size-hold-store';
 import { attachTerminalMouseRouter } from './terminal-mouse-router';
 import {
-  inputContainsEnter,
   inputIsReplayTerminalReport,
   inputIsSyntheticTerminalReport,
   REPLAY_MODE_RESET,
@@ -116,9 +118,10 @@ function seedProcessCwdAfterSpawn(id: string): void {
 
 // Reconstructs the visible text from an OSC 8 hyperlink's buffer range. xterm
 // passes the URL as the second arg to linkHandler.activate but not the rendered
-// link text; we read it ourselves so the dialog can tell the user whether the
-// label they clicked matched the URL. Wrapped lines concatenate without a
-// separator (the wrap is visual, not a semantic break).
+// link text; we read it ourselves so a local file link can be checked against
+// the path it names, and the dialog can tell the user whether the label they
+// clicked matched the URL. Wrapped lines concatenate without a separator (the
+// wrap is visual, not a semantic break).
 function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): string {
   try {
     const buffer = terminal.buffer.active;
@@ -136,7 +139,7 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
-function createXtermHost(grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
+function createXtermHost(id: string, grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
@@ -149,19 +152,12 @@ function createXtermHost(grid?: TerminalGrid): { terminal: Terminal; fit: FitAdd
     fontFamily: editorFontFamily,
     cursorBlink: cfg.terminal.cursorBlink,
     theme,
-    // kittyKeyboard disambiguates Shift+Enter from Enter for TUIs that read
-    // raw VT (Claude Code everywhere; Codex on macOS/Linux). win32InputMode
-    // covers Windows TUIs that read via the Console API behind ConPTY (Codex),
-    // which can't negotiate the kitty protocol there: when conhost enables it
-    // (CSI ? 9001 h), xterm sends faithful Win32 INPUT_RECORD key events so
-    // Shift+Enter and Ctrl+J reach the app intact. Both are opt-in/negotiated,
-    // so they coexist — each program turns on whichever it understands.
-    vtExtensions: { kittyKeyboard: true, win32InputMode: IS_WINDOWS },
+    vtExtensions: xtermVtExtensions(),
     linkHandler: {
       activate: (event, uri, range) => {
         event.preventDefault();
         // Closure capture: `terminal` is defined by the time a click fires.
-        requestExternalLinkConfirmation(uri, readDisplayTextFromBuffer(terminal, range));
+        activateTerminalLink(id, event, uri, readDisplayTextFromBuffer(terminal, range));
       },
       allowNonHttpProtocols: true,
     },
@@ -251,29 +247,25 @@ function wireXtermHandlers(
 
     if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
 
-    // Forwarded mouse interaction still counts as touched for kill confirmation.
-    if (!isReplayTerminalReport) markSessionTouched(id);
-
     // Inside programs can request hover and wheel reports. Mouse-only chunks
-    // are not keystrokes; actual clicks attend through the Pane's DOM handler.
-    if (!isReplayTerminalReport && withoutMouseReports.length > 0) {
-      // CSI/SS3 can encode real keys. The broader filter protects the prompt
-      // recorder only; terminal replies must neither record input nor attend.
-      if (!inputIsSyntheticTerminalReport(input)) {
-        recordTerminalUserInput(id, input, makePromptLineReader(terminal));
-      }
-      const hadTodo = getActivity(id).todo;
-      getPlatform().alertAttend(id);
-      if (hadTodo && inputContainsEnter(input)) {
-        getPlatform().alertClearTodo(id);
-      }
+    // are not keystrokes; actual clicks acknowledge through the Pane's DOM
+    // handler. Terminal replies are never keystrokes either.
+    if (isReplayTerminalReport || withoutMouseReports.length === 0) {
+      // Forwarded mouse interaction still counts as touched for kill confirmation.
+      if (!isReplayTerminalReport) markSessionTouched(id);
+      getPlatform().writePty(id, input);
+      return;
     }
 
-    getPlatform().writePty(id, input);
+    // CSI/SS3 can encode real keys. The broader filter protects the prompt
+    // recorder only.
+    if (!inputIsSyntheticTerminalReport(input)) {
+      recordTerminalUserInput(id, input, makePromptLineReader(terminal));
+    }
+    writeUserInput(id, input);
   });
 
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
-    getPlatform().alertResize(id);
     getPlatform().resizePty(id, cols, rows);
     bumpRenderTick();
     if (getMouseSelectionState(id).selection) setMouseSelection(id, null);
@@ -305,10 +297,10 @@ function wireXtermHandlers(
 interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid }
 
 function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
-  const { terminal, fit, serialize, element } = createXtermHost(options.grid);
+  const { terminal, fit, serialize, element } = createXtermHost(id, options.grid);
   const selectionBaselineRef = { current: null as string | null };
   // Every module that finalizes a selection arms the render handler through
-  // this one setter: the mouse router at drag end, a note's pin on reveal.
+  // this one setter at drag end.
   const setSelectionBaseline = (baseline: string | null) => {
     selectionBaselineRef.current = baseline;
   };
@@ -501,6 +493,8 @@ export function restoreTerminal(
     resumeCommand?: string | null;
     command?: string | null;
     requireIntegration?: boolean;
+    /** The pane's persisted TODO, seeded by the host at the spawn. */
+    alert?: PersistedAlertState | null;
   },
 ): TerminalEntry {
   const existing = registry.get(id);
@@ -524,6 +518,7 @@ export function restoreTerminal(
     cwd: opts.cwd ?? undefined,
     shell: opts.shell,
     args: opts.args,
+    ...(opts.alert ? { alert: opts.alert } : {}),
   });
   seedProcessCwdAfterSpawn(id);
 
@@ -621,20 +616,19 @@ export function disposeAllSessions(): void {
 }
 
 /**
- * Tear this webview's half of a Session down: the alert, the notepad pins, the
- * listeners, the element and the xterm instance, plus the registry, pane,
- * selection and activity state keyed to it.
+ * Tear this webview's half of a Session down: the listeners,
+ * the element and the xterm instance, plus the registry, pane, selection and
+ * activity state keyed to it.
  *
  * `kill` is the only difference between the two verbs below, and it is the
- * whole difference between ending a Session and letting another Window take it.
+ * whole difference between ending a Session and letting another Window take it:
+ * the host removes a killed Session's alert entry, and keeps a released one's
+ * for the Window that takes the Session over (`docs/specs/alert.md` → Live
+ * Workspace transfer).
  */
 function teardownSession(id: string, { kill }: { kill: boolean }): void {
   const entry = registry.get(id);
   if (!entry) return;
-  getPlatform().alertRemove(id);
-  // Before the xterm instance goes: its markers are what notepad pins hold, and
-  // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
-  dropSourcesForTerminal(id);
   entry.cleanup();
   if (kill) getPlatform().killPty(id);
   // Detach before releasing: unlike a minimize, nothing here has to survive, so the
@@ -648,7 +642,9 @@ function teardownSession(id: string, { kill }: { kill: boolean }): void {
   removeMouseSelectionState(id);
   clearToolAnnounce(id);
   clearToolDirty(id);
+  clearPreviewTransition(id);
   clearTerminalActivity(id);
+  clearSizeHold(id);
 }
 
 /** End a Session: the process goes with it. */
@@ -718,6 +714,22 @@ export function isUntouched(id: string): boolean {
   return registry.get(id)?.untouched ?? false;
 }
 
+/** Counts the human input a Session has received (`markSessionTouched`), so a
+ *  caller can tell whether the user touched it since an earlier read. */
+export function getSessionInputVersion(id: string): number {
+  return registry.get(id)?.inputVersion ?? 0;
+}
+
+/**
+ * Write human-originated input — a keystroke, a paste, a file drop, the mobile
+ * input bar — so every path acknowledges alike (`docs/specs/alert.md` ->
+ * Engagement): the host acknowledges it with input as it writes it.
+ */
+export function writeUserInput(id: string, data: string): void {
+  markSessionTouched(id);
+  getPlatform().writePty(id, data, { userInput: true });
+}
+
 export function markSessionTouched(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
@@ -759,10 +771,8 @@ export function focusSession(id: string, focused: boolean, target: 'surface' | '
   const entry = registry.get(id);
   if (!entry) return;
 
-  if (focused) {
-    entry.terminal.focus();
-  } else {
-    entry.terminal.blur();
-    getPlatform().alertClearAttention(id);
-  }
+  // DOM focus is never engagement: the Wall reports that from its mode and
+  // selection (`docs/specs/alert.md` -> Engagement).
+  if (focused) entry.terminal.focus();
+  else entry.terminal.blur();
 }

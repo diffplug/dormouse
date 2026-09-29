@@ -71,7 +71,7 @@ Both are rule-free, and both obey the same attention rule as Beat 2.
 | id | title | hint |
 |---|---|---|
 | `al-notif` | A program can ring on its own | Press `n` for a fake build that sends a notification. No rule needed — any program that asks for attention gets it, and its message rides along on the TODO tag. |
-| `al-cmd-exit` | A long command finished while you were away | Dormouse noticed you watched this command start, then left. Anything that ran longer than 15 seconds and finished after you walked away is worth a word. |
+| `al-cmd-exit` | A command finished while you were away | Dormouse noticed you watched this command start, then left. Anything that finished after you walked away is worth a word. |
 
 ## Beat 4 — Nothing gets lost
 

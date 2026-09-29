@@ -7,6 +7,7 @@ import type {
   WorkspaceRow,
 } from 'dor/commands/types';
 import { getPlatformOrNull } from '../../lib/platform';
+import { UNSAVED_TOOL_MOVE_REFUSAL } from '../../lib/tool-editor';
 import { getActivitySnapshot } from '../../lib/session-activity-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import {
@@ -16,6 +17,7 @@ import {
   isWindowRef,
   moveWorkspace,
   renameWorkspace,
+  resumeAutoWorkspaceName,
   resolveWorkspaceRef,
   setActiveWorkspace,
   workspaceRefFor,
@@ -46,6 +48,7 @@ export type WindowControlParams = DorControlParams & {
   toWindow?: unknown;
   index?: unknown;
   dangerouslyDestroyIframePageState?: unknown;
+  auto?: unknown;
 };
 
 /** This Window's Workspaces in strip order, each with its union status. */
@@ -59,6 +62,7 @@ export function workspaceRows(): WorkspaceRow[] {
       ref: workspaceRefFor(workspace.id),
       id: workspace.id,
       name: workspace.name,
+      auto: workspace.nameIsAuto,
       active: workspace.id === activeId,
       ringing: union.ringing,
       todo: union.todo,
@@ -208,6 +212,13 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     case WORKSPACE_CONTROL_METHODS.rename: {
       const target = requireWorkspace(detail);
       if (!target) return;
+      if (params.auto === true) {
+        // Answers the outgoing name: the derived one is computed afterwards
+        // (`docs/specs/dor-cli.md` → "dor workspace").
+        resumeAutoWorkspaceName(target.id);
+        respondMutation('renamed', target);
+        return;
+      }
       if (!name) {
         detail.respond({ ok: false, error: 'name is required' });
         return;
@@ -239,6 +250,10 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         const handle = await awaitWallHandle(target.id);
         if (!handle) {
           detail.respond({ ok: false, error: mountingRefusal(target.ref) });
+          return;
+        }
+        if (handle.dirtyToolIds().length) {
+          detail.respond({ ok: false, error: UNSAVED_TOOL_MOVE_REFUSAL });
           return;
         }
         const platform = getPlatformOrNull();

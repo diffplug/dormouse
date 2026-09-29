@@ -13,6 +13,9 @@ export interface Env extends BetterAuthWorkerBindings {
   ELEVENLABS_API_KEY?: string;
   OAUTH_PROVIDERS?: string;
   BUILD_SHA?: string;
+  ONE_TIME_ROOM: DurableObjectNamespace;
+  ONE_TIME_MINT_LIMIT: RateLimit;
+  ONE_TIME_JOIN_LIMIT: RateLimit;
 }
 
 const auth = createBetterAuthWorker<Env>({
@@ -34,10 +37,15 @@ export function hostedWorker({ sweepDelayMs }: { sweepDelayMs?: number } = {}) {
       POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
       ELEVENLABS_API_KEY: env.ELEVENLABS_API_KEY,
       BUILD_SHA: env.BUILD_SHA,
+      ONE_TIME_ROOM: env.ONE_TIME_ROOM,
+      ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
+      ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
       ...providerBindings(env as unknown as Record<string, unknown>),
     }),
     { sweepDelayMs },
   );
 }
+
+export { OneTimeRoom } from "./one-time-room";
 
 export default hostedWorker();

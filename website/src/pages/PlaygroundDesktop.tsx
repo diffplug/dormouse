@@ -145,10 +145,6 @@ function PlaygroundDesktopExperience() {
       if (cancelled) return;
 
       const adapter = platform.initPlatform("fake");
-      // The demo gets the notepad — its archive is the fake adapter's in-memory
-      // one — but no keyboard shortcut for it: a browser tab cannot take
-      // Cmd/Ctrl+N (docs/specs/notepad.md).
-      adapter.browserReservesNotepadChord = true;
       registry.initAlertStateReceiver();
       adapterRef.current = adapter;
 
@@ -227,8 +223,8 @@ function PlaygroundDesktopExperience() {
                   "\x1b]777;notify;Build finished;3 packages rebuilt\x07",
                 );
               },
-              // An unwatched command, so the command-exit track owns the ring:
-              // the user attends the pane, leaves, and the exit rings.
+              // An unwatched command, so its exit, not WATCHING, raises the ring:
+              // the user clicks into the pane, clicks away, and the exit rings.
               onTriggerCommandExitDemo: (durationMs) => {
                 if (commandExitDemoFinishTimerRef.current !== null) {
                   window.clearTimeout(commandExitDemoFinishTimerRef.current);

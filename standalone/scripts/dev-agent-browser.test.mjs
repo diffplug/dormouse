@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { get } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
+import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { cleanEnv, devWorkspace, runner, writeShims } from './dev-fixture.mjs';
 
 const scripts = path.dirname(fileURLToPath(import.meta.url));
@@ -19,9 +19,11 @@ async function fixture(t) {
   await Promise.all(['dev-agent-browser.mjs', 'dev-host-guard.mjs', 'dev-run.mjs'].map(name =>
     copyFile(path.join(scripts, name), path.join(standalone, 'scripts', name))));
   await writeFile(path.join(standalone, 'sidecar/main.js'), `
+    console.error('SIDECAR_AB_DIR ' + process.env.AGENT_BROWSER_SOCKET_DIR);
     const { createInterface } = require('node:readline');
     createInterface({ input: process.stdin }).on('line', line => {
       const { event, data } = JSON.parse(line);
+      if (event === 'alert:command' || event === 'pty:input') console.error('SIDECAR_LINE ' + line);
       if (event === 'pty:getCwd') console.log(JSON.stringify({
         event: 'pty:cwd', data: { requestId: data.requestId, cwd: process.env.VITE_DORMOUSE_BROWSER_DEV_HOST || process.cwd() }
       }));
@@ -29,7 +31,12 @@ async function fixture(t) {
   `);
   const cli = path.join(bin, 'cli.cjs');
   await writeFile(cli, `
+    if (process.argv[2] === 'list' && process.env.TEST_DOR_LIST) {
+      console.log(process.env.TEST_DOR_LIST);
+      process.exit(0);
+    }
     console.log('BROWSER_ARGS ' + JSON.stringify(process.argv.slice(2)));
+    console.log('BROWSER_AB_DIR ' + (process.env.AGENT_BROWSER_SOCKET_DIR || ''));
     if (process.env.TEST_BROWSER_HANG) {
       process.on('SIGTERM', () => {});
       setInterval(() => {}, 1000);
@@ -85,6 +92,14 @@ async function invoke(run, token = run.token, origin = run.app, cmd = 'pty_get_c
   });
 }
 
+async function send(run, cmd, args) {
+  return fetch(`${run.bridge}/__dormouse_dev_host/send?t=${run.token}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', origin: run.app },
+    body: JSON.stringify({ cmd, args }),
+    signal: AbortSignal.timeout(5000),
+  });
+}
+
 async function assertClosed(run) {
   for (const url of [run.app, run.bridge]) {
     await assert.rejects(fetch(url, { signal: AbortSignal.timeout(1000) }));
@@ -101,7 +116,7 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   assert.notEqual(one.token, two.token);
   const key = one.args[2];
   assert.match(key, /^innerdogfood-[a-f0-9]{16}$/);
-  assert.deepEqual(one.args, ['ab', '--key', key, 'open', one.app]);
+  assert.deepEqual(one.args, ['agent-browser', '--key', key, 'open', one.app]);
   // Inside Dormouse the harness names the key, not a session: the Workspace that
   // takes the browser is what namespaces it, so `sessionForKey`'s bare-Wall scope
   // would be a session nothing ever created.
@@ -154,6 +169,22 @@ test('parallel worktrees own ports, browser identities and bridges; stopping one
   assert.equal(restarted.session, sessionForKey(one.session));
 });
 
+// The harness speaks the same sidecar protocol Rust does: one fixed window
+// label stamped on every alert command, over anything the page claimed, and a
+// write's `userInput` riding the write (docs/specs/standalone.md -> "Alerts").
+test('stamps its one window on alert commands and carries userInput on the write', { timeout: 60000 }, async t => {
+  const run = await (await fixture(t)).start().ready();
+  const line = async (pattern) => JSON.parse((await run.wait(pattern))[1]);
+  assert.equal((await send(run, 'alert_command', { payload: { op: 'hello', window: 'ws-9' } })).status, 200);
+  assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"alert:command".*\})/), {
+    event: 'alert:command', data: { op: 'hello', window: 'main' },
+  });
+  assert.equal((await send(run, 'pty_write', { id: 'p1', data: 'y', userInput: true })).status, 200);
+  assert.deepEqual(await line(/SIDECAR_LINE (\{"event":"pty:input".*\})/), {
+    event: 'pty:input', data: { id: 'p1', data: 'y', userInput: true },
+  });
+});
+
 test('explicit ports and raw browser sessions are honored; occupied ports fail without adopting a peer', { timeout: 60000 }, async t => {
   const a = await fixture(t);
   const one = await a.start().ready();
@@ -177,7 +208,27 @@ test('explicit ports and raw browser sessions are honored; occupied ports fail w
   }).ready();
   assert.equal(pinned.app, one.app);
   assert.equal(pinned.bridge, one.bridge);
-  assert.deepEqual(pinned.args, ['ab', '--session', 'explicit-session', 'open', pinned.app]);
+  assert.deepEqual(pinned.args, ['agent-browser', '--session', 'explicit-session', 'open', pinned.app]);
+});
+
+test('the inner app gets its own agent-browser socket dir; the harness browser keeps the caller\'s', { timeout: 60000 }, async t => {
+  const harness = await fixture(t);
+  const run = await harness.start({ AGENT_BROWSER_SOCKET_DIR: '/outer/agent-browser' }).ready();
+  const inner = (await run.wait(/SIDECAR_AB_DIR (\S+)/))[1];
+  assert.notEqual(inner, '/outer/agent-browser');
+  await access(inner);
+  assert.equal((await run.wait(/BROWSER_AB_DIR (\S+)/))[1], '/outer/agent-browser');
+});
+
+test('run as a Tool, leaves the browser to the Tool instead of opening a second', { timeout: 60000 }, async t => {
+  const harness = await fixture(t);
+  const run = harness.start({
+    DORMOUSE_SURFACE_ID: 'outer-pane',
+    TEST_DOR_LIST: JSON.stringify({ caller_surface_ref: 'surface:4', surfaces: [] }),
+  });
+  await run.wait(/running; Ctrl-C to stop/);
+  assert.match(run.output, /Tool surface:4 shows the app; try: dor agent-browser --surface surface:4 snapshot -i/);
+  assert.doesNotMatch(run.output, /BROWSER_ARGS/);
 });
 
 test('browser startup failure closes the harness listeners and sidecar', { timeout: 30000 }, async t => {

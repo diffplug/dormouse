@@ -77,7 +77,6 @@ import {
   resetWorkspaceBootPlans,
 } from "dormouse-lib/components/wall/workspace-boot-plans";
 import { createWorkspace, getWorkspacesSnapshot, resetWorkspaces } from "dormouse-lib/lib/workspace-store";
-import { getNotes, clearAllNotepads } from "dormouse-lib/lib/notepad/notepad-store";
 import {
   getWindowSnapshot,
   isWorkspaceTransferPending,
@@ -88,9 +87,7 @@ import { getTerminalInstance } from "dormouse-lib/lib/terminal-registry";
 import { setPlatform } from "dormouse-lib/lib/platform";
 import { disposeAllSessions, getOrCreateTerminal } from "dormouse-lib/lib/terminal-registry";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
-import { AlertManager } from "dormouse-lib/lib/alert-manager";
-import { getAlertDeliveryReceipts, isAlertDeliveryPaused } from "dormouse-lib/lib/alert-delivery-state";
-import { watchUnattendedRings } from "dormouse-lib/lib/alert-ring-watch";
+import { createAlertEpisode } from "dormouse-lib/lib/alert-episode";
 import { clearTerminalActivity, getActivitySnapshot, setTerminalActivity } from "dormouse-lib/lib/session-activity-store";
 
 const WORKSPACE_ID = "ws-moving";
@@ -110,20 +107,11 @@ function payload(overrides: Partial<WorkspaceTransferPayload> = {}): WorkspaceTr
     workspace: {
       id: WORKSPACE_ID,
       name: "Deploys",
+      nameIsAuto: false,
       session: {
         version: 3,
         panes: [{ id: "pane-a", title: "a", cwd: "/tmp", untouched: false, alert: null }],
       },
-    },
-    notepad: {
-      surfaces: [{
-        surfaceId: "pane-a",
-        surfaceTitle: "a",
-        surfaceKind: "terminal",
-        cwd: null,
-        notes: [{ id: "n1", createdAt: 1, content: { kind: "plain", text: "keep me" } }],
-      }],
-      stagedDeletions: {},
     },
     terminalIds: ["pane-a"],
     allIds: ["pane-a"],
@@ -176,9 +164,6 @@ function fakePlatform(
   vi.spyOn(platform, "requestInit").mockImplementation(() => {
     throw new Error("an arrival must never ask for the whole Window");
   });
-  // The fake adapter has no AlertManager, so give it the optional hook the
-  // arrival seeds a persisted TODO through.
-  (platform as unknown as { alertSeed: unknown }).alertSeed = vi.fn();
   mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
     order.push(cmd);
     const workspaceId = (args as { workspaceId?: string; payload?: { workspaceId?: string } } | undefined)?.workspaceId
@@ -237,7 +222,6 @@ beforeEach(() => {
   resetWorkspaceBootPlans();
   resetWorkspaces();
   resetWindowSessionAggregator();
-  clearAllNotepads();
   clearTerminalActivity();
   _resetWorkspaceMovesForTesting();
 });
@@ -250,6 +234,35 @@ const emit = async (event: string, data: unknown) => {
 };
 
 describe("the source half", () => {
+  it.each([true, false])("refuses dirty editors without explicit discard (existing window: %s)", async (existing) => {
+    const prepare = vi.fn(async () => prepared());
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      dirtyToolIds: () => ["editor"], prepareWorkspaceTransfer: prepare,
+    }));
+    const moving = existing ? transferWorkspaceTo(WORKSPACE_ID, "ws-2")
+      : tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
+    await expect(moving).resolves.toMatchObject({ moved: false, reason: expect.stringContaining("unsaved changes") });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
+  });
+
+  it("rechecks editors after asynchronous preparation, allowing only explicit discards", async () => {
+    let dirty: string[] = ["discarded"];
+    let finish!: (value: PreparedWorkspaceTransfer) => void;
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      dirtyToolIds: () => dirty,
+      prepareWorkspaceTransfer: () => new Promise(resolve => { finish = resolve; }),
+    }));
+    const moving = transferWorkspaceTo(WORKSPACE_ID, "ws-2", undefined, undefined, ["discarded"]);
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
+    dirty = ["discarded", "new-edit"];
+    finish(prepared());
+    await expect(moving).resolves.toMatchObject({ moved: false, reason: expect.stringContaining("unsaved changes") });
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
+  });
+
   it('collapses only after adoption and keeps the source until its animation finishes', async () => {
     createWorkspace({ id: WORKSPACE_ID });
     const commit = vi.fn();
@@ -274,9 +287,10 @@ describe("the source half", () => {
     }
   });
 
-  it("prepares the Workspace, tells the host, and commits only when it lands", async () => {
+  it.each([false, true])("prepares and commits only on adoption (explicit discard: %s)", async (discard) => {
     const order: string[] = [];
     registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      dirtyToolIds: () => discard ? ["editor"] : [],
       prepareWorkspaceTransfer: async () => {
         order.push("prepare");
         return prepared(() => order.push("commit"));
@@ -284,7 +298,7 @@ describe("the source half", () => {
     }));
     initWorkspaceMoves(fakePlatform(order));
 
-    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 }, undefined, discard ? ["editor"] : []);
     await contentSent();
 
     // The record is built while the Sessions are live. Nothing is released at
@@ -510,7 +524,7 @@ describe("the source half", () => {
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).toContain("ws-b");
   });
 
-  it("recovers serialization failure through host hand-back before resuming delivery or another move", async () => {
+  it("recovers serialization failure through host hand-back before another move", async () => {
     initWorkspaceMoves(fakePlatform());
     getOrCreateTerminal("pane-a");
     createWorkspace({ id: WORKSPACE_ID });
@@ -526,7 +540,6 @@ describe("the source half", () => {
     await vi.waitFor(() => expect(mocks.serialize).toHaveBeenCalled());
     await settle();
     expect(finished).toBe(false);
-    expect(isAlertDeliveryPaused("pane-a")).toBe(true);
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
     expect(getWindowSnapshot().workspaces.map(w => w.id)).not.toContain(WORKSPACE_ID);
     expect(mocks.invoke).not.toHaveBeenCalledWith("transfer_workspace_content", expect.anything());
@@ -539,7 +552,6 @@ describe("the source half", () => {
     });
     deliverReplay({ id: "pane-a", data: "missed output", requestId: `handback-${WORKSPACE_ID}` });
     await expect(moving).resolves.toEqual({ moved: false, reason: "arrival timed out" });
-    expect(isAlertDeliveryPaused("pane-a")).toBe(false);
     expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
     expect(getWindowSnapshot().workspaces.map(w => w.id)).toContain(WORKSPACE_ID);
     expect(mocks.writes).toContain("missed output");
@@ -620,73 +632,22 @@ describe("the source half", () => {
 });
 
 describe("the target half", () => {
-  it("arms its collector, asks by Workspace, mounts, and only then releases the source", async () => {
-    const order: string[] = [];
-    const platform = fakePlatform(order);
-    arrivals = [payload()];
-    initWorkspaceMoves(platform);
-    await settle();
 
-    // The `adopt_ready` hop is what removes the "arrived before armed" bug
-    // class: nothing is listed or replayed until the collector is listening.
-    // `adopt_done` is last, because it is what tells the source to let go.
-    expect(order).toEqual(["take_arrivals", "adopt_ready", `answered:${WORKSPACE_ID}`, "adopt_done"]);
-    expect(mocks.invoke).toHaveBeenCalledWith("adopt_ready", expect.objectContaining({ workspaceId: WORKSPACE_ID }));
-    // The plan is parked before the Workspace exists, because creating it
-    // mounts the Wall that reads it.
-    expect(getWorkspaceBootPlan(WORKSPACE_ID)).toBeTruthy();
-    const { workspaces, activeId } = getWorkspacesSnapshot();
-    expect(workspaces.map((workspace) => workspace.name)).toContain("Deploys");
-    expect(activeId).toBe(WORKSPACE_ID);
-    // The notes travelled in the payload; nothing was archived.
-    expect(getNotes("pane-a").map((note) => note.content)).toEqual([{ kind: "plain", text: "keep me" }]);
-  });
-
-  it("seeds the persisted alert before asking for the replay that rebuilds WATCHING", async () => {
-    const order: string[] = [];
-    const platform = fakePlatform(order);
-    vi.mocked(platform.alertSeed!).mockImplementation(() => { order.push("seed"); });
+  // The Sessions' alert state never left the sidecar's one manager, which
+  // re-sends it to whichever window collects them. A spawn starts it over and a
+  // kill removes it, so an arrival that did either would overwrite a live ring
+  // or TODO (docs/specs/alert.md → Live Workspace transfer).
+  it("never spawns or kills over an arrival's live Sessions", async () => {
+    const platform = fakePlatform();
+    const spawn = vi.spyOn(platform, "spawnPty");
+    const kill = vi.spyOn(platform, "killPty");
     arrivals = [payload()];
     arrivals[0].workspace.session.panes[0].alert = { status: "WATCHING_DISABLED", todo: true, notification: null };
     initWorkspaceMoves(platform);
     await settle();
-    expect(order.indexOf("seed")).toBeGreaterThan(-1);
-    expect(order.indexOf("seed")).toBeLessThan(order.indexOf("adopt_ready"));
-  });
-
-  it("resumes each of two simultaneous arrivals over its own PTYs", async () => {
-    // A tear-out with a second tab dropped on it moments later. A window-wide
-    // answer would let each collector finish on the other's shells.
-    const order: string[] = [];
-    const platform = fakePlatform(order);
-    arrivals = [
-      payload({ workspaceId: "ws-a", terminalIds: ["pane-a"], allIds: ["pane-a"] }),
-      payload({
-        workspaceId: "ws-b",
-        workspace: {
-          id: "ws-b",
-          name: "Builds",
-          session: {
-            version: 3,
-            panes: [{ id: "pane-b", title: "b", cwd: "/tmp", untouched: false, alert: null }],
-          },
-        },
-        notepad: { surfaces: [], stagedDeletions: {} },
-        terminalIds: ["pane-b"],
-        allIds: ["pane-b"],
-      }),
-    ];
-    arrivals[0]!.workspace = { ...arrivals[0]!.workspace, id: "ws-a" };
-
-    initWorkspaceMoves(platform);
-    await settle();
-
-    expect(order.filter((entry) => entry.startsWith("answered")))
-      .toEqual(["answered:ws-a", "answered:ws-b"]);
-    expect(getWorkspaceBootPlan("ws-a")?.initialPaneIds).toEqual(["pane-a"]);
-    expect(getWorkspaceBootPlan("ws-b")?.initialPaneIds).toEqual(["pane-b"]);
-    // Both settled, so Rust is holding nothing.
-    expect(arrivals).toEqual([]);
+    expect(getWorkspaceBootPlan(WORKSPACE_ID)?.initialPaneIds).toEqual(["pane-a"]);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
   });
 
   it("mounts a browser-only arrival, which names no PTYs at all", async () => {
@@ -727,19 +688,6 @@ describe("the target half", () => {
     expect(getWorkspacesSnapshot().workspaces[0]?.id).toBe(WORKSPACE_ID);
   });
 
-  it("seeds a persisted TODO into this window's own AlertManager", async () => {
-    const platform = fakePlatform();
-    const alert = { kind: "todo" } as never;
-    const moving = payload();
-    moving.workspace.session.panes[0]!.alert = alert;
-    arrivals = [moving];
-
-    initWorkspaceMoves(platform);
-    await settle();
-
-    expect(platform.alertSeed).toHaveBeenCalledWith("pane-a", alert);
-  });
-
   it("hands the Workspace back when the host never answers, rather than restarting live shells", async () => {
     // A timed-out collection is not a collection that found no PTYs: those
     // shells are still running, and a cold restore would start a second set.
@@ -747,15 +695,15 @@ describe("the target half", () => {
     try {
       const platform = fakePlatform([], { answer: false });
       const moving = payload();
-      const alert = { kind: "todo" } as never;
-      moving.workspace.session.panes.push({ ...moving.workspace.session.panes[0]!, id: "browser-1", alert });
+      moving.workspace.session.panes.push({ ...moving.workspace.session.panes[0]!, id: "browser-1", surfaceType: "browser" });
       moving.allIds.push("browser-1");
-      const removeAlert = vi.spyOn(platform, "alertRemove");
+      const kill = vi.spyOn(platform, "killPty");
       arrivals = [moving];
       initWorkspaceMoves(platform);
       await vi.advanceTimersByTimeAsync(5000);
-      expect(platform.alertSeed).toHaveBeenCalledWith("browser-1", alert);
-      expect(removeAlert).toHaveBeenCalledWith("browser-1");
+      // The source still shows these Sessions: their processes and alert
+      // entries are its.
+      expect(kill).not.toHaveBeenCalled();
 
       expect(getWorkspacesSnapshot().workspaces.map((w) => w.name)).not.toContain("Deploys");
       expect(getWorkspaceBootPlan(WORKSPACE_ID)).toEqual({});
@@ -802,61 +750,30 @@ describe("the target half", () => {
     expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
   });
 
-  it("discards imported alert state when adopt_done is refused before the Wall mounts", async () => {
-    const platform = fakePlatform();
-    platform.onAlertState((detail) => setTerminalActivity(detail.id, detail));
+  it("discards this window's copy of the alert state when adopt_done is refused before the Wall mounts", async () => {
+    // The source's live ring, as the sidecar's snapshot delivers it to the
+    // collecting window.
+    const episode = createAlertEpisode();
+    const platform = fakePlatform([], {
+      beforeReplay: () => setTerminalActivity("pane-a", {
+        status: "ALERT_RINGING", episode, notification: { source: "OSC 9", title: "Done", body: null },
+      }),
+    });
+    const kill = vi.spyOn(platform, "killPty");
     const host = mocks.invoke.getMockImplementation()!;
     mocks.invoke.mockImplementation(async (cmd: string, args?: unknown) => {
       if (cmd === "adopt_done") arrivals = [];
       return host(cmd, args);
     });
-    // The source's live ring and its still-pending speech receipt ride along.
-    const source = new AlertManager();
-    source.notifyFromProtocol("pane-a", { source: "OSC 9", title: "Done", body: null });
-    const episode = source.getState("pane-a").episode!;
-    const alertRuntime = source.pauseForTransfer("pane-a")!;
-    const fire = vi.fn();
-    const stopWatch = watchUnattendedRings({ sink: "speech", subscribe: () => () => {}, enabled: () => true, delayMs: () => 0, fire });
-    arrivals = [payload({
-      terminals: { "pane-a": { serialized: "", alertRuntime, alertDelivery: { speech: { episodeId: episode.id, dueAt: 0, phase: "pending" } } } },
-    } as Partial<WorkspaceTransferPayload>)];
-    try {
-      // No Wall handle: React never mounted the arrival before the refusal.
-      initWorkspaceMoves(platform);
-      await settle();
-      await settle();
-      expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
-      expect(getActivitySnapshot().has("pane-a")).toBe(false);
-      expect(isAlertDeliveryPaused("pane-a")).toBe(false);
-      expect(getAlertDeliveryReceipts("speech").has("pane-a")).toBe(false);
-      await settle();
-      expect(fire).not.toHaveBeenCalled();
-    } finally {
-      stopWatch();
-      source.dispose();
-    }
-  });
-
-  it("closes the window when its last Workspace leaves, instead of emptying it", async () => {
-    initWorkspaceMoves(fakePlatform());
-    const workspaceId = getWorkspacesSnapshot().activeId;
-    registerWallHandle(stubWallHandle(workspaceId, {
-      prepareWorkspaceTransfer: async () => prepared(() => {}, { workspaceId }),
-    }));
-    const moved = transferWorkspaceTo(workspaceId, "ws-2", { x: 0, y: 0 });
-    await contentSent();
-    const order: string[] = [];
-    void moved.then(() => order.push("answered"));
-    mocks.invoke.mockImplementation(async (cmd: string) => void order.push(cmd));
-
-    await emit("dormouse://workspace-departed", { workspaceId });
-
-    // Nothing ended — the Surfaces are alive in another window — so this is a
-    // close with no confirmation, no archive and no kill. The caller's answer
-    // goes first: Rust destroys the window on `close_window`, and a `dor
-    // workspace move` that emptied it still has `moved` to say.
-    expect(order).toEqual(["answered", "close_window"]);
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
+    arrivals = [payload({ terminals: { "pane-a": { serialized: "" } } } as Partial<WorkspaceTransferPayload>)];
+    // No Wall handle: React never mounted the arrival before the refusal.
+    initWorkspaceMoves(platform);
+    await settle();
+    await settle();
+    expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
+    expect(getActivitySnapshot().has("pane-a")).toBe(false);
+    // The ring is the source's again, still live in the sidecar.
+    expect(kill).not.toHaveBeenCalled();
   });
 });
 
@@ -891,17 +808,6 @@ describe("a transfer's content", () => {
     expect(isPaneOscDriven("pane-a")).toBe(true);
     const state = getTerminalPaneState("pane-a");
     expect((finished ? state.lastCommand : state.currentCommand)?.rawCommandLine).toBe("ascii-splash");
-  });
-
-  it("drains replay before adopting even when no note has a pin", async () => {
-    arrivals = [payload()];
-    mocks.deferWrites = true;
-    const boot = bootFromTearOut(fakePlatform());
-    await vi.waitFor(() => expect(mocks.writeCallbacks).toHaveLength(2));
-    expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_done", expect.anything());
-    mocks.writeCallbacks.splice(0).forEach(callback => callback());
-    await boot;
-    expect(mocks.invoke).toHaveBeenCalledWith("adopt_done", { workspaceId: WORKSPACE_ID });
   });
 
 
@@ -948,7 +854,6 @@ describe("a torn-out window's boot", () => {
     expect(Object.keys(plans ?? {})).toEqual([WORKSPACE_ID]);
     // The window has no snapshot yet; its Workspace comes from the payload.
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.name)).toEqual(["Deploys"]);
-    expect(getNotes("pane-a")).toHaveLength(1);
   });
 
   it("boots fresh without installing a refused tear-out or retaining its Sessions", async () => {
@@ -963,7 +868,6 @@ describe("a torn-out window's boot", () => {
     expect(await bootFromTearOut(platform)).toBeNull();
     expect(getWorkspacesSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
     expect(getWindowSnapshot().workspaces.map((w) => w.id)).not.toContain(WORKSPACE_ID);
-    expect(getNotes("pane-a")).toHaveLength(0);
     expect(getTerminalInstance("pane-a")).toBeNull();
     expect(kill).not.toHaveBeenCalled();
   });
@@ -1054,13 +958,13 @@ describe("workspaceDropTarget", () => {
 it.each([true, false])('restores volatile Tool browser/dirty state (%s) without publishing it in the durable Workspace', async dirty => {
   resetToolAnnounces();
   const move = payload();
-  const stable = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'ab-screencast', toolPort: 'announced' };
+  const stable = { surfaceType: 'tool', command: 'pnpm storybook', toolRender: 'agent-browser-screencast', toolPort: 'announced' };
   move.workspace.session.panes[0] = { ...move.workspace.session.panes[0], surfaceType: 'tool', command: 'pnpm storybook' };
   move.workspace.session.lathLayout = {
     version: 1, tree: { root: { kind: 'leaf', id: 'pane-a' } },
     leafMeta: { 'pane-a': { component: 'tool', tabComponent: 'tool', title: 'Storybook', params: stable } },
   };
-  const browser = { ...stable, url: 'http://localhost:6006/edited', session: 'browser-to-keep', renderMode: 'ab-screencast', toolAnnouncedPort: 6006 };
+  const browser = { ...stable, url: 'http://localhost:6006/edited', session: 'browser-to-keep', renderMode: 'agent-browser-screencast', toolAnnouncedPort: 6006 };
   const announce = { port: 6006, name: null, key: null, dehydrate: false, persist: null };
   arrivals = [Object.assign(move, { tools: { 'pane-a': browser }, terminals: { 'pane-a': { serialized: '', toolAnnounce: announce, toolDirty: dirty } } })];
   const plans = await bootFromTearOut(fakePlatform());

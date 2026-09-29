@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { AgentBrowserScreenModal } from '../components/wall/AgentBrowserScreenModal';
-import type { RenderMode, ScreenController, ScreenSnapshot, ScreenState } from '../components/wall/agent-browser-screen';
+import type { ChromeSnapshot, RenderMode, ScreenController, ScreenSnapshot, ScreenState } from '../components/wall/agent-browser-screen';
 
 interface StoryArgs {
   /** Render backend — `embed` greys out the Screen (viewport) section. */
   renderMode: RenderMode;
-  /** Whether the host can pop out (gates the "Pop out to window" button). */
+  /** Whether the host can pop out (adds `agent-browser-popout` to the offered render modes). */
   canPopOut: boolean;
   state: ScreenState;
   /** Browser CSS viewport + inferred DPR. */
@@ -23,9 +23,17 @@ interface StoryArgs {
   hostCapable: boolean;
 }
 
-// A standalone controller backed by a fixed snapshot — no registry, no live
-// updates. `snapshot()` must return a stable reference for useSyncExternalStore,
-// so it's memoised per args.
+const CHROME: ChromeSnapshot = {
+  url: 'http://localhost:5173/',
+  displayUrl: 'localhost:5173',
+  title: 'Vite + React',
+  key: null,
+};
+
+// A standalone controller backed by fixed snapshots — no registry, no live
+// updates. `snapshot()` and `chrome()` must return stable references for
+// useSyncExternalStore, so the screen snapshot is memoised per args and the
+// chrome one is a constant.
 function useMockController(args: StoryArgs): ScreenController {
   return useMemo<ScreenController>(() => {
     const snapshot: ScreenSnapshot = {
@@ -41,12 +49,7 @@ function useMockController(args: StoryArgs): ScreenController {
       subscribe: () => () => {},
       snapshot: () => snapshot,
       subscribeChrome: () => () => {},
-      chrome: () => ({
-        url: 'http://localhost:5173/',
-        displayUrl: 'localhost:5173',
-        title: 'Vite + React',
-        key: null,
-      }),
+      chrome: () => CHROME,
       chromeActions: {
         navigate: (url) => console.log('[story] navigate', url),
         back: () => console.log('[story] back'),
@@ -54,10 +57,9 @@ function useMockController(args: StoryArgs): ScreenController {
         reload: () => console.log('[story] reload'),
       },
       hostCapable: args.hostCapable,
-      canPopOut: args.canPopOut,
+      renderModes: ['agent-browser-screencast', ...(args.canPopOut ? ['agent-browser-popout' as const] : []), 'playwright-screencast', ...(args.canPopOut ? ['playwright-popout' as const] : []), 'iframe'],
       actions: {
         engageSync: () => console.log('[story] engageSync'),
-        applyDevice: (name) => console.log('[story] applyDevice', name),
         applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
         openModal: () => {},
         setRenderMode: (mode) => console.log('[story] setRenderMode', mode),
@@ -80,7 +82,7 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   title: 'Modals/AgentBrowserScreenModal',
   component: AgentBrowserScreenModalStory,
   argTypes: {
-    renderMode: { control: 'inline-radio', options: ['ab-screencast', 'ab-popout', 'iframe'] },
+    renderMode: { control: 'inline-radio', options: ['agent-browser-screencast', 'agent-browser-popout', 'iframe'] },
     canPopOut: { control: 'boolean' },
     state: { control: 'inline-radio', options: ['SYNCED', 'SCALED'] },
     vpW: { control: 'number' },
@@ -95,7 +97,7 @@ const meta: Meta<typeof AgentBrowserScreenModalStory> = {
   // Defaults shared by every story (each story overrides the viewport knobs);
   // a swap-capable, pop-out-capable surface so both new affordances show.
   args: {
-    renderMode: 'ab-screencast',
+    renderMode: 'agent-browser-screencast',
     canPopOut: true,
   },
 };
@@ -129,7 +131,7 @@ export const ScaledCustom: Story = {
 };
 
 // Host can't drive the viewport (Tauri) ⇒ Apply is disabled and a note points
-// the user at `dor ab set …`.
+// the user at `dor agent-browser set …`.
 export const HostIncapable: Story = {
   args: {
     state: 'SCALED',
@@ -146,7 +148,7 @@ export const HostIncapable: Story = {
 // its own size).
 export const Popout: Story = {
   args: {
-    renderMode: 'ab-popout',
+    renderMode: 'agent-browser-popout',
     state: 'SYNCED',
     vpW: 980, vpH: 560, vpDpr: 2,
     paneW: 980, paneH: 560,

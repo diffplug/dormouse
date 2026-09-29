@@ -67,7 +67,6 @@ function fakePlatform(ptys: PtyInfo[], saved: PersistedWindow | null) {
     offPtyReplay: (handler: (detail: { id: string; data: string }) => void) => { replayHandlers.delete(handler); },
     spawnPty: vi.fn(),
     killPty: vi.fn(),
-    alertSeed: vi.fn(),
   } as unknown as PlatformAdapter;
   setPlatform(platform);
   return { platform, saves };
@@ -83,8 +82,8 @@ describe("routeUnownedPtys", () => {
     const saved: PersistedWindow = {
       version: 1,
       workspaces: [
-        { id: "ws-a", name: "A", session: sessionOver("a1") },
-        { id: "ws-b", name: "B", session: sessionOver("b1") },
+        { id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1") },
+        { id: "ws-b", name: "B", nameIsAuto: false, session: sessionOver("b1") },
       ],
       activeWorkspaceId: "ws-a",
     };
@@ -104,7 +103,7 @@ describe("routeUnownedPtys", () => {
   it("leaves a helper whose source is itself unowned to the active Workspace", () => {
     const saved: PersistedWindow = {
       version: 1,
-      workspaces: [{ id: "ws-a", name: "A", session: sessionOver("a1") }],
+      workspaces: [{ id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1") }],
       activeWorkspaceId: "ws-a",
     };
     const ptys: PtyInfo[] = [
@@ -127,8 +126,8 @@ describe("restoreWindowOrFresh", () => {
     const saved: PersistedWindow = {
       version: 1,
       workspaces: [
-        { id: "ws-a", name: "A", session: sessionOver("a1", "a2") },
-        { id: "ws-b", name: "B", session: sessionOver("b1") },
+        { id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1", "a2") },
+        { id: "ws-b", name: "B", nameIsAuto: false, session: sessionOver("b1") },
       ],
       activeWorkspaceId: "ws-a",
     };
@@ -161,8 +160,8 @@ describe("restoreWindowOrFresh", () => {
     const duplicated: PersistedWindow = {
       version: 1,
       workspaces: [
-        { id: "ws-a", name: "A", session: sessionOver("a1") },
-        { id: "ws-a", name: "A again", session: sessionOver("a2") },
+        { id: "ws-a", name: "A", nameIsAuto: false, session: sessionOver("a1") },
+        { id: "ws-a", name: "A again", nameIsAuto: false, session: sessionOver("a2") },
       ],
       activeWorkspaceId: "ws-a",
     };

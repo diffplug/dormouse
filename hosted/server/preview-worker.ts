@@ -17,6 +17,9 @@ export default workerApp(
     APP_ORIGIN: env.APP_ORIGIN,
     AUTH_SECRET: env.AUTH_SECRET,
     BUILD_SHA: env.BUILD_SHA,
+    ONE_TIME_ROOM: env.ONE_TIME_ROOM,
+    ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
+    ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
     EMAIL_FROM: "",
     POSTMARK_SERVER_TOKEN: "",
   }),
@@ -41,3 +44,4 @@ export default workerApp(
     },
   },
 );
+export { OneTimeRoom } from "./one-time-room";

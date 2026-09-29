@@ -5,7 +5,7 @@
  * and writes one gitignored data file per document. Browser code never imports
  * Dor implementation modules (they use Node APIs) or reads Markdown at runtime
  * — everything it needs is in the generated JSON, split per document so
- * /docs/dor does not ship the agent skill along with it.
+ * /dor does not ship the agent skill along with it.
  *
  * The guide half of this pipeline has no page of its own right now (see
  * docs/specs/website-docs.md -> Canonical product guide), so it is parsed and
@@ -94,8 +94,9 @@ export const REPO_BLOB_BASE = 'https://github.com/diffplug/dormouse/blob/main';
 /** Trailing slash: the form the host serves, as everywhere else in-site (see
  *  `sitePath` in website/src/lib/site-meta.ts). */
 export const SITE_ROUTES = {
-  'SELF_HOST.md': '/docs/self-host/',
-  'docs/specs/security.md': '/docs/security/',
+  'docs/compatible-agents.md': '/compatible-agents/',
+  'SELF_HOST.md': '/self-host/',
+  'docs/specs/security.md': '/security/',
 };
 /** Where the unpublished half of SELF_HOST.md is still readable. */
 const SELF_HOST_CANONICAL_URL = `${REPO_BLOB_BASE}/SELF_HOST.md`;
@@ -121,6 +122,29 @@ const DOCS_DELTA = [DROP_DOCUMENT_TITLE];
 
 /** Match the one heading whose text is exactly `text`. */
 const headingNamed = (text) => (block) => block.type === 'heading' && block.text === text;
+
+/** The public guide and its recovery contract share one canonical file. */
+const COMPATIBLE_AGENTS_DELTA = [
+  DROP_DOCUMENT_TITLE,
+  {
+    id: 'drop-front-matter',
+    reason: 'Spec ownership and glossary references are for maintainers.',
+    match: (block) => block.type === 'blockquote',
+    operation: 'remove',
+  },
+  {
+    id: 'drop-recovery-contract',
+    reason: 'The shared recovery implementation contract is maintainer documentation.',
+    match: headingNamed('Recovery contract (maintainers)'),
+    operation: 'remove-section',
+  },
+  {
+    id: 'drop-future',
+    reason: 'Unbuilt behavior is not part of the public guide.',
+    match: headingNamed('Future'),
+    operation: 'remove-section',
+  },
+];
 
 /**
  * The complete self-host delta, per docs/specs/website-docs.md.
@@ -183,12 +207,12 @@ const SECURITY_DELTA = [
  *
  * Each entry is the prefix its heading starts with — skill headings carry
  * descriptive suffixes ("Targeting: three ways to name a surface") — and is
- * also the section's title and, slugged, its anchor on /docs/dor.
+ * also the section's title and, slugged, its anchor on /dor.
  */
 const CLI_INTRO_SECTIONS = ['Targeting', 'Surface handles'];
 
 /**
- * The heading every command section sits under on /docs/dor.
+ * The heading every command section sits under on /dor.
  *
  * Emitted rather than spelled in the page, because the table of contents nests
  * every command under it and a parent whose id is not on the page links
@@ -526,7 +550,7 @@ async function buildGuide() {
 }
 
 /**
- * `/docs/self-host` from SELF_HOST.md, minus the halves the delta withholds.
+ * `/self-host` from SELF_HOST.md, minus the halves the delta withholds.
  *
  * The file stays canonical: an assistant reads it in a checkout, and
  * `scripts/deploy-lint.mjs` audits its Installer contract against
@@ -537,7 +561,7 @@ const buildSelfHost = () =>
   buildDocument({
     file: 'SELF_HOST.md',
     delta: SELF_HOST_DELTA,
-    label: '/docs/self-host',
+    label: '/self-host',
     fallbackTitle: 'Self-host',
     canonicalUrl: SELF_HOST_CANONICAL_URL,
   });
@@ -545,7 +569,7 @@ const buildSelfHost = () =>
 /**
  * Which page carries which of the security spec's rows and bullets.
  *
- * `/docs/security`, `/docs/self-host`, and `/supply-chain` each show the part
+ * `/security`, `/self-host`, and `/supply-chain` each show the part
  * of the spec a reader there relies on, rendered from this data rather than
  * restated — the spec is what the nightly audit reads, and a hand-written copy
  * in a page is the one that rots. The umbrella page is one audience among
@@ -591,7 +615,7 @@ function securitySections(page) {
   return SECURITY_AUDIENCE_SECTIONS.map(({ key, title, block: type, entries }) => {
     const heading = findExactlyOneHeading(headings, (h) => h.text === title, title);
     const block = sectionBlocks(page.blocks, heading).find((b) => b.type === type);
-    if (!block) throw new Error(`/docs/security: "${title}" has no ${type} to split by audience`);
+    if (!block) throw new Error(`/security: "${title}" has no ${type} to split by audience`);
     return { key, title, block, entries };
   });
 }
@@ -601,7 +625,7 @@ export function securityAudiences(page) {
   for (const { key, title, block, entries } of securitySections(page)) {
     const split = new Map(Object.keys(out).map((a) => [a, []]));
     block[entries].forEach((entry, i) => {
-      split.get(audienceOf(entry, `/docs/security: "${title}" entry ${i + 1}`)).push(entry);
+      split.get(audienceOf(entry, `/security: "${title}" entry ${i + 1}`)).push(entry);
     });
     for (const [audience, mine] of split) out[audience][key] = { ...block, [entries]: mine };
   }
@@ -615,7 +639,7 @@ export function audienceBlocks(page, audiences, audience) {
 }
 
 /**
- * `/docs/security` from docs/specs/security.md, every section of it.
+ * `/security` from docs/specs/security.md, every section of it.
  *
  * The file stays canonical in `docs/specs/`: it is a spec, so
  * `scripts/spec-lint.mjs` budgets it and the nightly audit reads it. No
@@ -628,7 +652,7 @@ const buildSecurity = async () => {
   const page = await buildDocument({
     file: 'docs/specs/security.md',
     delta: SECURITY_DELTA,
-    label: '/docs/security',
+    label: '/security',
     fallbackTitle: 'Security',
   });
   const audiences = securityAudiences(page);
@@ -714,7 +738,7 @@ async function buildCli(skill) {
   const rootSection = toSection(root);
   const commands = inventory.map((name) => toSection(snapshots.get(name)));
 
-  // Every id addressable on /docs/dor, from all of its sources: the intro
+  // Every id addressable on /dor, from all of its sources: the intro
   // sections, the root section, the Commands heading, the command sections,
   // and any heading inside a lifted intro block. Nothing else may collide with
   // a command anchor that SKILL_REFERENCES links into.
@@ -725,7 +749,7 @@ async function buildCli(skill) {
     CLI_COMMANDS_SECTION.id,
     ...commands.map((c) => c.id),
   ];
-  assertUniqueIds(anchors, '/docs/dor');
+  assertUniqueIds(anchors, '/dor');
 
   // Emitted, not assembled in the page: every docs page reads `toc` off its own
   // data file, so the table of contents has one owner for all three. The
@@ -752,10 +776,10 @@ async function buildCli(skill) {
 /**
  * An assertion, not a rewrite: the skill ships inside an installed CLI and must
  * stay self-contained, so it names no website URL at all
- * (docs/specs/website-docs.md -> `/docs/agent-skill` guide). Running
+ * (docs/specs/website-docs.md -> `/agent-skill` guide). Running
  * `localizeSiteLinks` over it would quietly repair a violation instead of
  * reporting it — and buildCli lifts these same block objects, so a site URL
- * here would reach /docs/dor too.
+ * here would reach /dor too.
  *
  * Exported so a test can feed it a violating block tree: `dor/skill.md` is
  * clean, so nothing else ever drives this check red.
@@ -789,7 +813,7 @@ async function buildSkill() {
  * command section is any skill heading whose backticked tokens name a `dor`
  * subcommand, so documenting a new command in dor/skill.md earns its link with
  * no table to remember. A heading that names a subcommand with no section on
- * /docs/dor fails the build rather than publishing silently unlinked — the one
+ * /dor fails the build rather than publishing silently unlinked — the one
  * failure a hardcoded list could not see.
  */
 function linkSkillHeadings(skill, cli) {
@@ -798,7 +822,7 @@ function linkSkillHeadings(skill, cli) {
   const links = {};
 
   // Trailing slash: the served form, as everywhere else in-site.
-  const CLI_PAGE = '/docs/dor/';
+  const CLI_PAGE = '/dor/';
   for (const prefix of CLI_INTRO_SECTIONS) {
     const anchor = slugify(prefix);
     if (!anchors.has(anchor)) {
@@ -809,7 +833,7 @@ function linkSkillHeadings(skill, cli) {
   }
 
   for (const heading of headings) {
-    // A heading may name a command more than one way ("`dor ab` /
+    // A heading may name a command more than one way ("`dor agent-browser` /
     // `dor agent-browser`"). It is labelled by the spelling it leads with and
     // linked to the first that has a section.
     const named = headingCodeTokens(heading)
@@ -832,7 +856,14 @@ export async function generateDocs() {
   const guide = await buildGuide();
   const selfhost = await buildSelfHost();
   const security = await buildSecurity();
-  assertRouteFragments([guide, selfhost, security]);
+  const agents = await buildDocument({
+    file: 'docs/compatible-agents.md',
+    delta: COMPATIBLE_AGENTS_DELTA,
+    canonicalUrl: `${REPO_BLOB_BASE}/docs/compatible-agents.md`,
+    label: '/compatible-agents',
+    fallbackTitle: 'Compatible agents',
+  });
+  assertRouteFragments([guide, selfhost, security, agents]);
   const skill = await buildSkill();
   const cli = await buildCli(skill);
   const references = linkSkillHeadings(skill, cli);
@@ -841,6 +872,7 @@ export async function generateDocs() {
     guide,
     selfhost,
     security,
+    agents,
     cli,
     skill: {
       source: skill.source,
@@ -861,7 +893,7 @@ export async function generateDocs() {
 const BUILD_ONLY_FIELDS = ['delta', 'withheldLinks', 'repoLinks', 'localizedLinks'];
 
 /** The pages with a component; the guide has none (`Scope: guide-page-return`). */
-const PUBLISHED_PAGES = ['selfhost', 'security', 'cli', 'skill'];
+const PUBLISHED_PAGES = ['selfhost', 'security', 'cli', 'skill', 'agents'];
 
 function publishable(value) {
   const out = { ...value };
@@ -880,14 +912,15 @@ async function main() {
     ),
     syncGuideMedia(data.guide.media.available),
   ]);
-  const { guide, selfhost, security, cli, skill } = data;
-  const markdownPages = [guide, selfhost, security];
+  const { guide, selfhost, security, cli, skill, agents } = data;
+  const markdownPages = [guide, selfhost, security, agents];
   console.log(
     `Wrote docs data: guide ${guide.headings.length} headings (parsed, not written), ` +
       `self-host ${selfhost.headings.length} headings (${selfhost.delta.length} delta rules), ` +
       `security ${security.headings.length} headings (${security.delta.length} delta rules), ` +
       `cli ${cli.commands.length} commands + ${cli.intro.length} intro sections, ` +
       `skill ${Object.keys(skill.references).length} reference links, ` +
+      `agents ${agents.headings.length} headings, ` +
       `${guide.media.available.length} media file(s), ` +
       `${markdownPages.reduce((n, page) => n + page.repoLinks.length, 0)} link(s) sent to the repository, ` +
       `${markdownPages.reduce((n, page) => n + page.localizedLinks.length, 0)} link(s) localized`,

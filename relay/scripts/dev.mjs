@@ -23,12 +23,12 @@ import { once } from 'node:events';
 
 import { loadConfig } from '../dist/config.js';
 import { startRelay } from '../dist/start.js';
-import { DEV_STATE_DIR } from './dev-paths.mjs';
+import { devStateDir } from './dev-paths.mjs';
 
 const env = {
   ...process.env,
   DORMOUSE_BIND_HOST: process.env.DORMOUSE_BIND_HOST?.trim() || '127.0.0.1',
-  DORMOUSE_STATE_DIR: process.env.DORMOUSE_STATE_DIR ?? DEV_STATE_DIR,
+  DORMOUSE_STATE_DIR: devStateDir(process.env),
 };
 // Only dev reads unset, blank or `0` as "any free port"; anything else goes
 // through the production parser first, so a bad one fails before the bind.

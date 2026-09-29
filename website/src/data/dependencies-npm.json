@@ -92,10 +92,17 @@
   },
   {
     "name": "@tauri-apps/plugin-updater",
-    "version": "2.11.0",
+    "version": "2.12.0",
     "license": "MIT OR Apache-2.0",
     "author": "Tauri Apps Contributors",
     "homepage": "https://github.com/tauri-apps/plugins-workspace"
+  },
+  {
+    "name": "@types/trusted-types",
+    "version": "2.0.7",
+    "license": "MIT",
+    "author": "Jakub Vrana, Damien Engels, Emanuel Tesar, Bjarki, Sebastian Silbermann",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/trusted-types"
   },
   {
     "name": "@xterm/addon-fit",
@@ -217,6 +224,13 @@
     "homepage": "https://github.com/lovell/detect-libc"
   },
   {
+    "name": "dompurify",
+    "version": "3.2.7",
+    "license": "(MPL-2.0 OR Apache-2.0)",
+    "author": "Dr.-Ing. Mario Heiderich, Cure53 <mario@cure53.de> (https://cure53.de/)",
+    "homepage": "https://github.com/cure53/DOMPurify"
+  },
+  {
     "name": "ecdsa-sig-formatter",
     "version": "1.0.11",
     "license": "Apache-2.0",
@@ -232,7 +246,7 @@
   },
   {
     "name": "hono",
-    "version": "4.13.8",
+    "version": "4.13.9",
     "license": "MIT",
     "author": "Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)",
     "homepage": "https://hono.dev"
@@ -287,6 +301,13 @@
     "homepage": "https://github.com/brianloveswords/node-jws"
   },
   {
+    "name": "marked",
+    "version": "14.0.0",
+    "license": "MIT",
+    "author": "Christopher Jeffrey",
+    "homepage": "https://marked.js.org"
+  },
+  {
     "name": "minimalistic-assert",
     "version": "1.0.1",
     "license": "ISC",
@@ -299,6 +320,13 @@
     "license": "MIT",
     "author": "James Halliday",
     "homepage": "https://github.com/minimistjs/minimist"
+  },
+  {
+    "name": "monaco-editor",
+    "version": "0.55.1",
+    "license": "MIT",
+    "author": "Microsoft Corporation",
+    "homepage": "https://github.com/microsoft/monaco-editor"
   },
   {
     "name": "ms",

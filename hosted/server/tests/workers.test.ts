@@ -1,7 +1,5 @@
 import { test, expect, vi } from "vitest";
 import { digest } from "@pgstencil/auth/security";
-import { build } from "esbuild";
-import { builtinModules } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
   Miniflare,
@@ -24,39 +22,24 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
+import { bundleWorker, wrangler } from "./bundle";
 
 const origin = "https://hosted.dormouse.sh";
 const bundle = (production: boolean | "preview") =>
-  build({
-    entryPoints: [
-      production === "preview"
-        ? "server/preview-worker.ts"
-        : production
-          ? "server/worker.ts"
-          : "server/tests/worker-entry.ts",
-    ],
-    inject: production
+  bundleWorker(
+    production === "preview"
+      ? "server/preview-worker.ts"
+      : production
+        ? "server/worker.ts"
+        : "server/tests/worker-entry.ts",
+    production
       ? []
       : [
           fileURLToPath(
             import.meta.resolve("@pgstencil/auth/better-auth-testing"),
           ),
         ],
-    bundle: true,
-    write: false,
-    format: "esm",
-    platform: "node",
-    conditions: ["workerd", "worker"],
-    external: ["node:*", "cloudflare:*"],
-    alias: Object.fromEntries(
-      builtinModules
-        .filter((name) => !name.startsWith("node:"))
-        .map((name) => [name, `node:${name}`]),
-    ),
-    banner: {
-      js: "import { createRequire } from 'node:module'; const require = createRequire('/worker.js');",
-    },
-  });
+  );
 const testBundle = bundle(false);
 const productionBundle = bundle(true);
 const previewBundle = bundle("preview");
@@ -81,8 +64,8 @@ const workerOptions = ({
   convertV4MiniflareOptions({
     modules: true,
     script,
-    compatibilityDate: "2026-09-08",
-    compatibilityFlags: ["nodejs_compat"],
+    compatibilityDate: wrangler.compatibility_date,
+    compatibilityFlags: wrangler.compatibility_flags,
     hyperdrives: { HYPERDRIVE: database },
     serviceBindings: { ASSETS: assets },
     ...rest,

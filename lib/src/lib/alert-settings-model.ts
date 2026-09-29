@@ -11,17 +11,17 @@ import { cfg } from '../cfg';
  * drag in. `alert-settings.ts` is the renderer's own mirror over the top.
  */
 export interface AlertSettings {
-  /** ms — how long "looking at this pane" lasts before the user counts as away. */
+  /** ms — how long without typing, pointer, or wheel input before the user counts as away (the renderer's presence window). */
   inactivityTimeoutMs: number;
   /** Delay terminal-notification rings behind confirmed animation. */
   deferAlertsUntilQuiet: boolean;
-  /** Speak an unattended alarm out loud after `speakDelayMs`. */
+  /** Speak a ring out loud after `speakDelayMs`, unless its pane is the one being looked at. */
   speakEnabled: boolean;
-  /** ms after a ring before speaking, if the ring is still unattended. */
+  /** ms after a ring starts before speaking, if it is still ringing. */
   speakDelayMs: number;
-  /** Push an unattended alarm to paired phones after `pushDelayMs`. */
+  /** Push a ring to paired phones after `pushDelayMs`, if the user is away from Dormouse. */
   pushEnabled: boolean;
-  /** ms after a ring before pushing, if the ring is still unattended. */
+  /** ms after a ring starts before pushing, if it is still ringing. */
   pushDelayMs: number;
 }
 
@@ -31,7 +31,7 @@ export const MAX_DELAY_MS = 600_000;
 
 export const DEFAULT_ALERT_SETTINGS: AlertSettings = {
   // cfg.ts stays the single source of the shipped default.
-  inactivityTimeoutMs: cfg.alert.userAttention,
+  inactivityTimeoutMs: cfg.alert.inactivityTimeout,
   deferAlertsUntilQuiet: true,
   speakEnabled: false,
   speakDelayMs: 10_000,

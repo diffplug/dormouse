@@ -2,9 +2,9 @@ import type { WorkspaceId } from './session-types';
 
 /**
  * The Workspace strip's transient UI states, held outside it because the
- * command-mode `$` and `&` are heard inside a Wall while the strip lives in the
- * app bar (`docs/specs/layout.md` → "Workspaces"). The strip renders from this;
- * the selection ring observes rename state. Nothing mounted is required to write it.
+ * Workspace verbs open them from outside any component (`docs/specs/layout.md`
+ * → "Workspaces"). The strip renders from this; the selection ring observes
+ * rename state. Nothing mounted is required to write it.
  */
 export interface WorkspaceUiState {
   /** The Workspace whose inline rename editor is open. */

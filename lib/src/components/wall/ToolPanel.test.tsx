@@ -3,6 +3,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolPanel } from './ToolPanel';
+import * as browserController from './agent-browser-surface-controller';
+import { commitPreviewTransition, PREVIEW_READY_FALLBACK_MS, PREVIEW_REVEAL_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import { beginSlotSwitch } from './preview-transition';
+import { WallActionsContext, type WallActions } from './wall-context';
+import { stubWallActions } from './wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -10,8 +15,12 @@ vi.mock('./TerminalPanel', () => ({
   TerminalPanel: () => <div data-testid="terminal">terminal</div>,
 }));
 vi.mock('./BrowserPanel', () => ({
-  BrowserPanel: ({ parked }: { parked?: boolean }) => (
-    <div data-testid="browser" data-parked={String(parked === true)}>browser</div>
+  BrowserPanel: ({ parked, params, onReady }: { parked?: boolean; params?: Record<string, unknown>; onReady?: () => void }) => (
+    // A click stands in for the renderer's first paint.
+    <div data-testid="browser" data-parked={String(parked === true)} data-url={String(params?.url ?? '')} onClick={() => onReady?.()}>
+      {params?.renderMode === 'agent-browser-screencast' && <canvas />}
+      browser
+    </div>
   ),
 }));
 
@@ -32,17 +41,18 @@ afterEach(() => {
   container.remove();
 });
 
-function show(params: Record<string, unknown>) {
+function show(params: Record<string, unknown>, actions?: WallActions) {
+  const panel = <ToolPanel id="p1" title="t" params={params} />;
   act(() => {
-    root.render(<ToolPanel id="p1" title="t" params={params} />);
+    root.render(actions ? <WallActionsContext.Provider value={actions}>{panel}</WallActionsContext.Provider> : panel);
   });
 }
 
 /** The wrapper the visibility is applied to. */
 function half(testId: string): HTMLElement {
-  const el = container.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
-  if (!el?.parentElement) throw new Error(`no ${testId}`);
-  return el.parentElement;
+  const el = container.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.closest<HTMLElement>('[data-tool-half]');
+  if (!el) throw new Error(`no ${testId}`);
+  return el;
 }
 
 describe('ToolPanel', () => {
@@ -58,7 +68,7 @@ describe('ToolPanel', () => {
   it.each([
     ['terminal', booting],
     ['iframe', serving],
-    ['agent-browser', { ...serving, renderMode: 'ab-screencast' }],
+    ['agent-browser', { ...serving, renderMode: 'agent-browser-screencast' }],
   ])('hides the %s face with its Workspace or parked leaf and restores only the foreground face', (_face, params) => {
     show(params);
     const terminal = half('terminal');
@@ -170,5 +180,113 @@ describe('the pending-approval face', () => {
     const labels = [...container.querySelectorAll('button')].map((b) => b.textContent ?? '');
     expect(labels.some((l) => l.includes('upstream'))).toBe(false);
     expect(labels.some((l) => l.includes('folder'))).toBe(true);
+  });
+});
+
+describe('a preview slot switch', () => {
+  const next = { ...serving, url: 'http://localhost:7007/' };
+  const browsers = () => Array.from(container.querySelectorAll<HTMLElement>('[data-testid="browser"]'));
+  const layerOf = (element: Element) => element.closest<HTMLElement>('[data-browser-layer]')!;
+  /** Begin on what `params` shows, with motion that is not instant. */
+  const begin = (params: Record<string, unknown>) => {
+    let token!: number;
+    act(() => { token = beginSlotSwitch('p1', () => params)!; });
+    return token;
+  };
+  const commit = (token: number) => act(() => {
+    commitPreviewTransition('p1', token, () => () => {});
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    act(() => resetPreviewTransitions());
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('ramps the ghost\'s blur, then fades the new layer in over it', () => {
+    show(serving);
+    const [old] = browsers();
+    const token = begin(serving);
+    expect(layerOf(old).className).toContain('preview-ghost');
+    expect(layerOf(old).className).not.toContain('preview-ghost-static');
+    commit(token);
+    show(booting);
+    // Retired, the ghost keeps its frozen params and the terminal stays hidden.
+    expect(old.dataset.url).toBe(serving.url);
+    expect(half('terminal').style.visibility).toBe('hidden');
+    show(next);
+    const [ghost, incoming] = browsers();
+    expect(ghost).toBe(old);
+    expect(layerOf(incoming).className).toContain('opacity-0');
+    act(() => incoming.click());
+    expect(layerOf(incoming).className).toContain('preview-reveal');
+    expect(old.isConnected).toBe(true);
+    act(() => { vi.advanceTimersByTime(PREVIEW_REVEAL_MS); });
+    expect(browsers()).toEqual([incoming]);
+    expect(layerOf(incoming).className).not.toMatch(/opacity-0|preview-reveal/);
+  });
+
+  it('blurs the terminal face in place and fades a new browser in over it', () => {
+    show(booting);
+    const token = begin(booting);
+    expect(half('terminal').className).toContain('preview-ghost');
+    expect(half('terminal').hasAttribute('inert')).toBe(true);
+    commit(token);
+    show(next);
+    expect(half('terminal').style.visibility).toBe('');
+    expect(half('browser').style.visibility).toBe('');
+    const [incoming] = browsers();
+    expect(layerOf(incoming).className).toContain('opacity-0');
+    act(() => incoming.click());
+    act(() => { vi.advanceTimersByTime(PREVIEW_REVEAL_MS); });
+    expect(half('terminal').style.visibility).toBe('hidden');
+    expect(half('terminal').className).not.toContain('preview-ghost');
+  });
+
+  it('reveals the terminal over a browser ghost when the fallback ends a switch that never served', () => {
+    show(serving);
+    const [old] = browsers();
+    commit(begin(serving));
+    show(booting);
+    act(() => { vi.advanceTimersByTime(PREVIEW_READY_FALLBACK_MS); });
+    expect(half('terminal').className).toContain('preview-reveal');
+    expect(half('terminal').style.visibility).toBe('');
+    expect(old.isConnected).toBe(true);
+    act(() => { vi.advanceTimersByTime(PREVIEW_REVEAL_MS); });
+    expect(old.isConnected).toBe(false);
+    expect(half('browser').style.visibility).toBe('hidden');
+  });
+
+  it('holds a screencast as a blurred copy of its controller\'s canvas', () => {
+    const screencast = { ...serving, renderMode: 'agent-browser-screencast' };
+    show(screencast);
+    const canvas = container.querySelector('canvas')!;
+    Object.assign(canvas, { width: 640, height: 360 });
+    canvas.getBoundingClientRect = () => ({ left: 10, top: 20, width: 320, height: 180 }) as DOMRect;
+    vi.spyOn(browserController, 'getAgentBrowserSurfaceController')
+      .mockImplementation(id => (id === 'p1' ? { frameCanvas: () => canvas } : null) as never);
+    const drawImage = vi.fn();
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage } as unknown as RenderingContext);
+    begin(screencast);
+    const copy = Array.from(container.querySelectorAll('canvas')).find(candidate => candidate !== canvas)!;
+    expect(drawImage).toHaveBeenCalledWith(canvas, 0, 0);
+    expect(copy.parentElement!.style.width).toBe('320px');
+    expect(copy.parentElement!.parentElement!.className).toContain('preview-ghost');
+    // The live screencast is hidden beneath it, not kept as the ghost.
+    expect(layerOf(canvas).className).toContain('opacity-0');
+  });
+
+  it('selects the pane on a press over a ghost, which takes no input', () => {
+    const actions = stubWallActions();
+    show(booting, actions);
+    const press = () => act(() => { half('terminal').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    press();
+    expect(actions.onClickPanel).not.toHaveBeenCalled();
+    begin(booting);
+    press();
+    expect(actions.onClickPanel).toHaveBeenCalledExactlyOnceWith('p1');
   });
 });

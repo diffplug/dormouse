@@ -13,6 +13,7 @@ vi.mock('../lib/platform', () => ({
 }));
 
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
+import { stubSpeechSynthesis } from '../lib/speech-synthesis-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,19 +46,12 @@ afterEach(async () => {
 
 describe('SpeakTestButton', () => {
   it('speaks and says so when the webview has a speech engine', async () => {
-    const speak = vi.fn();
-    vi.stubGlobal('speechSynthesis', { speak, cancel: vi.fn() });
-    vi.stubGlobal(
-      'SpeechSynthesisUtterance',
-      class {
-        constructor(public text: string) {}
-      },
-    );
+    const engine = stubSpeechSynthesis();
 
     await act(async () => root.render(<SpeakTestButton />));
     await act(async () => button().click());
 
-    expect(speak).toHaveBeenCalledTimes(1);
+    expect(engine.spoken).toHaveLength(1);
     expect(text()).toContain('Test sound queued');
   });
 

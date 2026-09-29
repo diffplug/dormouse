@@ -27,7 +27,7 @@ const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
 // Mirrors ITERM2_COMPAT_VERSION in lib/src/lib/terminal-protocol.ts — pinned by
 // lib/src/lib/mirrored-constants.test.ts (terminal-escapes.md: one
 // compatibility version across env and device responses).
-const ITERM2_COMPAT_VERSION = '3.5.0';
+const ITERM2_COMPAT_VERSION = '3.6.6';
 
 // bash flags that merely select an interactive and/or login shell. When the args
 // are only these, OSC 633 injection can safely replace them: it spawns an
@@ -135,11 +135,35 @@ function withPrependedPath(env, dir, platform = process.platform) {
   };
 }
 
+// Another terminal's identity, inherited when the host was launched from it.
+// Dormouse is the pane's terminal now, and tools read these to decide what to
+// emit (docs/specs/terminal-escapes.md -> "iTerm2 identity"). Names match
+// case-insensitively on win32, like its environment.
+const FOREIGN_TERMINAL_ENV = new RegExp(`^(?:${[
+  'VTE_VERSION', 'WT_SESSION', 'WT_PROFILE_ID', 'TERM_FEATURES', 'TERM_SESSION_ID',
+  'ITERM_SESSION_ID', 'ITERM_PROFILE', 'ConEmu.*', 'KONSOLE_VERSION', 'KONSOLE_DBUS_SERVICE',
+  'KONSOLE_DBUS_SESSION', 'KONSOLE_DBUS_WINDOW', 'PTYXIS_VERSION', 'KITTY_WINDOW_ID', 'KITTY_PID',
+  'KITTY_PUBLIC_KEY', 'KITTY_INSTALLATION_DIR', 'GHOSTTY_RESOURCES_DIR', 'GHOSTTY_BIN_DIR',
+  'GHOSTTY_SHELL_FEATURES', 'WEZTERM_.*', 'ALACRITTY_WINDOW_ID', 'ALACRITTY_SOCKET', 'ALACRITTY_LOG',
+  'TERMINAL_EMULATOR', 'TERMINATOR_UUID', 'TILIX_ID', 'TMUX', 'TMUX_PANE', 'STY', 'COLORFGBG',
+  'CURSOR_TRACE_ID',
+].join('|')})$`);
+const FOREIGN_TERMINAL_ENV_WIN32 = new RegExp(FOREIGN_TERMINAL_ENV.source, 'i');
+
+function withoutForeignTerminalEnv(env, platform) {
+  const foreign = platform === 'win32' ? FOREIGN_TERMINAL_ENV_WIN32 : FOREIGN_TERMINAL_ENV;
+  return Object.fromEntries(Object.entries(env).filter(([key]) => !foreign.test(key)));
+}
+
 function withoutInternalDormouseEnv(env) {
   const next = { ...env };
   delete next.DORMOUSE_CLI_BIN;
   delete next.DORMOUSE_GUI_NODE_DIR;
   delete next.DORMOUSE_SHELL_INTEGRATION_DIR;
+  // The sidecar's own storage roots: a dev server run in a pane (the dev Relay
+  // reads DORMOUSE_STATE_DIR) must never write into the running app's state.
+  delete next.DORMOUSE_STATE_DIR;
+  delete next.DORMOUSE_RECOVERY_DIR;
   return next;
 }
 
@@ -291,11 +315,11 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
 
 function resolveSpawnConfig(options, runtime = {}) {
   const { cols = 80, rows = 30, cwd: requestedCwd, shell: explicitShell, args: explicitArgs, surfaceId } = options || {};
+  const platform = runtime.platform || process.platform;
   const env = {
     ...(runtime.env || process.env),
     ...(options?.env || {}),
   };
-  const platform = runtime.platform || process.platform;
   const osModule = runtime.osModule || os;
   const fsModule = runtime.fsModule || fs;
   // Normalize the requested cwd into a native spelling before it reaches the OS,
@@ -320,7 +344,7 @@ function resolveSpawnConfig(options, runtime = {}) {
     platform,
   );
   const childEnv = {
-    ...envWithCliPath,
+    ...withoutForeignTerminalEnv(envWithCliPath, platform),
     TERM_PROGRAM: 'iTerm.app',
     TERM_PROGRAM_VERSION: ITERM2_COMPAT_VERSION,
     LC_TERMINAL: 'iTerm2',
@@ -1245,7 +1269,11 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // which reaches this process only as the generated `recovery.cjs` bundle. Taking
 // it as an option keeps this file — and its `node --test` suite — free of any
 // build artifact. `main.js` supplies the real one.
-module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null } = {}) {
+//
+// `onHelper(id, isHelper)` hears every helper decision — each spawn and each
+// promotion that succeeds — so the host's alerts, which keep a helper inert,
+// read this map's answer rather than keeping their own (docs/specs/alert.md).
+module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null, onHelper = () => {} } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1331,6 +1359,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
       send("exit", { id, exitCode: 1 });
       return;
     } else helpers.delete(id);
+    onHelper(id, helpers.has(id));
 
     let p;
     try {
@@ -1597,6 +1626,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
           if (!sessions.has(request.id) || !validHelperOwner(request.id, request.restore)) throw new Error('Invalid helper owner');
           helpers.set(request.id, { parentId: request.restore.parentId, command: request.restore.command });
         } else helpers.delete(request.id);
+        onHelper(request.id, helpers.has(request.id));
       } else if (request.op === 'openDirectory') {
         if (typeof request.path !== 'string' || !path.isAbsolute(request.path) || request.path.includes('\0') || !directoryExists(request.path)) throw new Error('Directory is unavailable');
         const nativePath = fs.realpathSync(request.path);
@@ -1671,7 +1701,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
 
   // Send ONE ^C to the given PTYs (all live ones when `ids` is omitted), so an
   // agent prints its resume invocation before the host tears the process down
-  // (docs/specs/vscode.md -> "Capturing agent recovery"). Writes ^C into
+  // (docs/compatible-agents.md -> "Capture"). Writes ^C into
   // the pty rather than signalling a pid: the tty line discipline delivers SIGINT
   // to the foreground process group itself, so this needs neither tcgetpgrp nor
   // the master fd node-pty does not expose, and it is the one mechanism both
@@ -1684,7 +1714,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   // press landing in that window aborts the print entirely ("Shutting down...^C"
   // and nothing else). Claude needs the second press and prints nothing without
   // it. Only the host can tell them apart, because only the host sees what came
-  // back (docs/specs/vscode.md -> "Capturing agent recovery").
+  // back (docs/compatible-agents.md -> "Capture").
   //
   // "Omitted" therefore means omitted, never "an empty list": a caller that
   // forwards a computed set that happened to come out empty must get a no-op, not

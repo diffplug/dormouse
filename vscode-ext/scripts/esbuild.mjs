@@ -17,15 +17,31 @@ import { fileURLToPath } from 'node:url';
 
 import * as esbuild from 'esbuild';
 
+import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 import {
   assertConnectSrcBaked,
+  assertOneTimeOriginBaked,
   CONNECT_SRC_PLACEHOLDER,
+  ONE_TIME_ORIGIN_PLACEHOLDER,
+  resolveOneTimeOrigin,
   resolveRemoteConnectSrc,
 } from '../../scripts/csp-defaults.mjs';
 
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'esbuild');
+// The one-time rendezvous, baked beside the allowlist that fences it
+// (docs/specs/one-time.md): `DORMOUSE_ONE_TIME_ORIGIN`, same as the sidecar's.
+const oneTimeOrigin = resolveOneTimeOrigin(process.env, 'esbuild');
 
 const watch = process.argv.includes('--watch');
+
+// Staged into `dist/node_modules` by `stage-native-direct.mjs`, so it must stay
+// a runtime `require` (`requireNative` in `native-direct-peer.ts`).
+const NATIVE_DIRECT = ['node-datachannel'];
+const assertBuilt = ({ metafile }) => {
+  assertConnectSrcBaked('dist/extension.js', remoteSrc);
+  assertOneTimeOriginBaked('dist/extension.js', oneTimeOrigin);
+  assertNothingInlined(metafile, NATIVE_DIRECT, 'esbuild dist/extension.js');
+};
 
 const common = {
   bundle: true,
@@ -35,7 +51,7 @@ const common = {
   // They are not installed and must not be — a `.node` addon cannot be bundled
   // and would have to be shipped per platform — so they stay as runtime
   // `require`s that `ws` already catches and falls back from.
-  external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate'],
+  external: ['vscode', 'node-pty', 'bufferutil', 'utf-8-validate', ...NATIVE_DIRECT.flatMap((name) => [name, `${name}/*`])],
   alias: {
     // Shared `lib/` modules the extension host bundles reach the `dor` CLI's
     // types through the `dor/*` tsconfig path. esbuild picks the tsconfig
@@ -51,7 +67,11 @@ const builds = [
     ...common,
     entryPoints: ['src/extension.ts'],
     outdir: 'dist',
-    define: { [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc) },
+    define: {
+      [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
+      [ONE_TIME_ORIGIN_PLACEHOLDER]: JSON.stringify(oneTimeOrigin),
+    },
+    metafile: true,
   },
   {
     ...common,
@@ -67,12 +87,13 @@ if (watch) {
     // lost `define` compiles green, and a watch loop (`pnpm dogfood:vscode`)
     // is exactly where one plausibly goes missing — skipping it here left the
     // check absent from the build people actually iterate in.
-    await ctx.rebuild();
+    const result = await ctx.rebuild();
+    // Only the extension build asks for a metafile.
+    if (options.metafile) assertBuilt(result);
     await ctx.watch();
   }
-  assertConnectSrcBaked('dist/extension.js', remoteSrc);
   console.error('[esbuild] watching');
 } else {
-  await Promise.all(builds.map((options) => esbuild.build(options)));
-  assertConnectSrcBaked('dist/extension.js', remoteSrc);
+  const [extension] = await Promise.all(builds.map((options) => esbuild.build(options)));
+  assertBuilt(extension);
 }

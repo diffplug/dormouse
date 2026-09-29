@@ -4,7 +4,6 @@ export interface SpeechJob {
   text: () => string;
   voice?: () => string | null;
   eligible: () => boolean;
-  onAdmit?: () => void;
   onStart?: () => void;
   onFinish?: (started: boolean) => void;
 }
@@ -104,7 +103,7 @@ export class SpeechQueue {
           job.onStart?.();
         };
         utterance.onend = utterance.onerror = () => this.finish(attempt);
-        try { job.onAdmit?.(); synth.speak(utterance); }
+        try { synth.speak(utterance); }
         catch { this.finish(attempt); }
         // Synchronous completion clears active; loop advances without recursion.
       }

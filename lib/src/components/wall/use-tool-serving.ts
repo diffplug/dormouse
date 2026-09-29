@@ -14,15 +14,14 @@ import {
   isToolParams,
   namespacedToolKey,
   toolKeysEqual,
+  toolBrowserLaunchParams,
   toolPortConflictFromParams,
 } from './browser-surface';
-import { attachAgentBrowserSession } from './tool-browser-session';
 import { listenerUrlsByPort } from './port-url';
-import { getToolAnnounce } from '../../lib/tool-announce-store';
+import { getToolAnnounce, subscribeToToolAnnounces } from '../../lib/tool-announce-store';
+import { forgetToolReports } from '../../lib/tool-events';
 import { validToolServePath } from '../../lib/tool-announce';
-import { sessionForKey } from 'dor-lib-common/agent-browser';
-import { markAgentBrowserSessionClosed } from './agent-browser-sessions';
-import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
+import { closeBrowserSurface } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';
 import type { CommandRun } from '../../lib/terminal-state';
@@ -55,6 +54,36 @@ function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
   return leaves;
 }
 
+/** Retire a Tool's browser half and the serving state that framed it, leaving
+ *  the terminal forward; false, doing nothing, when nothing is framed. The
+ *  browser panel remains mounted behind the terminal half, so its controller
+ *  must be released explicitly rather than waiting for an unmount that will not
+ *  happen — closing its session with it. */
+export function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): boolean {
+  if (browserUrlFromParams(params) === null && toolPortConflictFromParams(params) === null) return false;
+  closeBrowserSurface(id, params);
+  lath.store.updateParams(id, {
+    url: undefined,
+    toolAnnouncedPort: undefined,
+    toolAnnouncedPath: undefined,
+    toolPortConflict: undefined,
+    session: undefined,
+    launchSession: undefined,
+    launchFallback: undefined,
+    renderMode: undefined,
+    syncEngaged: undefined,
+  });
+  return true;
+}
+
+/** Retire a Session's previous Tool run before another is typed into it: its
+ *  browser, announcement, and unsaved state are not the next run's. */
+export function retireToolRun(lath: LathWallEngine, id: string): void {
+  const params = lath.getMeta(id)?.params;
+  if (params) retireToolBrowser(lath, id, params);
+  forgetToolReports(id);
+}
+
 export function useToolServing({
   lath,
   doorsRef,
@@ -77,7 +106,9 @@ export function useToolServing({
     if (!platform.getOpenPorts) return;
     let cancelled = false;
 
-    const tick = async () => {
+    /** One scan pass over every tool leaf, or over `only` — the leaves an
+     *  announcement named, leaving every other leaf's settle state alone. */
+    const tick = async (only?: ReadonlySet<string>) => {
       if (paused()) return;
       const leaves = toolLeaves(lath, doorsRef.current);
       // A killed tool never reaches the exit branch below, so prune by absence.
@@ -94,6 +125,7 @@ export function useToolServing({
       // no leaf can be retired out from under a later one.
       const scanning: { leaf: ToolLeaf; run: CommandRun; announcedPort: number | null; announcedPath: string }[] = [];
       for (const leaf of leaves) {
+        if (only && !only.has(leaf.id)) continue;
         const run = getTerminalPaneState(leaf.id).currentCommand;
         const runId = run?.id ?? null;
         const runChanged = observedRuns.current.has(leaf.id) && observedRuns.current.get(leaf.id) !== runId;
@@ -125,31 +157,7 @@ export function useToolServing({
         // the regression the settle window exists to prevent.
         if (!running || runChanged) seenPorts.current.delete(leaf.id);
 
-        if ((hasUrl || hasConflict) && (!running || runChanged)) {
-          const session = typeof leaf.params.session === 'string' ? leaf.params.session : null;
-          if (session) {
-            const binaryPath = typeof leaf.params.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
-            // Mark before close so a popped-out/stream-loss callback cannot
-            // auto-relaunch a browser the command exit is retiring.
-            markAgentBrowserSessionClosed(session);
-            void platform.agentBrowserCommand?.(session, ['close'], binaryPath).catch(() => {});
-          }
-          // The browser panel remains mounted behind the terminal half, so its
-          // controller must be disposed explicitly rather than waiting for an
-          // unmount that will not happen.
-          disposeAgentBrowserSurfaceController(leaf.id);
-          lath.store.updateParams(leaf.id, {
-            url: undefined,
-            toolAnnouncedPort: undefined,
-            toolAnnouncedPath: undefined,
-            toolPortConflict: undefined,
-            session: undefined,
-            wsPort: undefined,
-            renderMode: undefined,
-            syncEngaged: undefined,
-          });
-          continue;
-        }
+        if ((!running || runChanged) && retireToolBrowser(lath, leaf.id, leaf.params)) continue;
         // An announcement outranks whatever autobind decided, framed or
         // refused: a conflict is a verdict about *guessing*, not a final state,
         // so a tool that names its port after autobind refused must still be
@@ -165,6 +173,10 @@ export function useToolServing({
           && (leaf.params.toolAnnouncedPort !== announcedPort || appliedPath !== announcedPath);
         if (!running) continue;
         if ((hasUrl || hasConflict) && !announcementChanged) continue;
+        // `announced` never guesses: no announcement, nothing to scan for. An
+        // announcement's own scan never counts as an autobind settle tick,
+        // which two scans milliseconds apart would make meaningless.
+        if (announcedPort === null && (only || leaf.params.toolPort !== 'auto')) continue;
         scanning.push({ leaf, run, announcedPort, announcedPath });
       }
 
@@ -194,13 +206,10 @@ export function useToolServing({
           // announced port that nothing bound frames nothing.
           entry = entries.find((candidate) => candidate.port === announcedPort);
           if (!entry) continue;
-        } else if (leaf.params.toolPort !== 'auto') {
-          // `announced`: never guess. No announcement, no browser.
-          continue;
         } else {
           // Autobind. Do not commit on first sighting: ports appear one at a
           // time during boot, so framing the first one seen would frame
-          // whichever bound earliest — for the standalone harness that is the
+          // whichever bound earliest — for the innerdogfood harness that is the
           // dev bridge, not vite. Wait for the set to stop changing, which
           // costs one tick and never has to retract a framed browser.
           const found = entries.map((candidate) => candidate.port);
@@ -221,74 +230,72 @@ export function useToolServing({
           entry = entries[0];
         }
 
-        // Frame it, under whichever renderer the tool declared. Show the
-        // destination immediately even for `ab-screencast`: the panel's
-        // session-less branch renders `Connecting to browser session…` while
-        // the daemon boots, and cannot race it (see docs/specs/dor-browser.md
-        // -> Instant create). `toolFace` tests the conflict before the url, so
-        // a stale verdict would keep the conflict forward over the browser.
-        const agentDrivable = leaf.params.toolRender === 'ab-screencast';
+        // Frame it, under whichever renderer the tool declared. `toolFace`
+        // tests the conflict before the url, so a stale verdict would keep the
+        // conflict forward over the browser.
+        //
+        // An agent-drivable tool needs a real browser behind it, bound to the
+        // tool's *own* Surface rather than a second one: a tool's browser is a
+        // param of its own leaf, which is what keeps its id stable while its
+        // capabilities come and go. Its controller launches it — reusing the
+        // session it had, which a changed destination just navigates — and
+        // binds the session once it is up; until then the pane shows the
+        // destination and Workspace transfer waits (docs/specs/dor-browser.md
+        // -> "Browser Connection").
         const url = new URL(announcedPath, entry.url).href;
-        const session = typeof leaf.params.session === 'string' ? leaf.params.session : sessionForKey(`tool.${leaf.id}`);
-        const binaryPath = typeof leaf.params.binaryPath === 'string' ? leaf.params.binaryPath : undefined;
         lath.store.updateParams(leaf.id, {
-          url,
-          renderMode: agentDrivable ? 'ab-screencast' : 'iframe',
+          ...(leaf.params.toolRender === 'agent-browser-screencast' || leaf.params.toolRender === 'playwright-screencast'
+            ? toolBrowserLaunchParams(leaf.id, leaf.params, url, leaf.params.toolRender === 'playwright-screencast' ? 'playwright' : 'agent-browser')
+            : { url, renderMode: 'iframe' }),
           toolPortConflict: undefined,
           toolAnnouncedPort: announcedPort ?? undefined,
           toolAnnouncedPath: announcedPort === null ? undefined : announcedPath,
-          // Reopening an existing browser is also an in-flight connection:
-          // withhold its binding until open settles so a Workspace move cannot
-          // capture the old stream while this webview still owns the launch.
-          ...(agentDrivable ? { session: undefined, wsPort: undefined } : {}),
         });
-        if (!agentDrivable) continue;
-
-        // An agent-drivable tool needs a real browser behind it. Bind the
-        // session to the tool's *own* Surface rather than creating a second
-        // one: a tool's browser is a param of its own leaf, which is what keeps
-        // its id stable while its capabilities come and go.
-        await attachAgentBrowserSession({
-          url,
-          platform,
-          session,
-          surfaceId: leaf.id,
-          binaryPath,
-          refreshSurface: (id, patch) => {
-            if (!cancelled && getTerminalPaneState(id).currentCommand?.id === run.id) lath.store.updateParams(id, patch);
-          },
-        });
-        // The Surface can be killed while the daemon boots. Param writes no-op
-        // on a dead leaf, but the daemon would keep running with nothing bound
-        // to it and no teardown path — `closeAgentBrowserSession` reads a
-        // `session` param this leaf no longer has. Close it here instead
-        // (docs/specs/dor-tool.md -> Lifecycle: kill reaps the browser's
-        // resources).
-        if (cancelled || !lath.getMeta(leaf.id) || getTerminalPaneState(leaf.id).currentCommand?.id !== run.id) {
-          void platform.agentBrowserCommand?.(session, ['close'], binaryPath).catch(() => {});
-        }
       }
     };
 
-    // `getOpenPorts` shells out (lsof / PowerShell) and an agent-browser launch
-    // is seconds, either of which can outrun the interval. Without this guard a
-    // second tick re-enters a leaf whose `url` is not written yet and issues a
-    // duplicate `agent-browser open`.
+    // `getOpenPorts` shells out (lsof / PowerShell) and can outrun the
+    // interval. Without this guard a second tick re-enters a leaf whose `url`
+    // is not written yet and frames it twice. A poll that lands mid-tick is
+    // dropped; an announcement is not, since the tick in flight decided its
+    // scans before the announcement existed: its leaf waits in `pending` for
+    // a run of its own once the tick settles.
     let ticking = false;
-    const runTick = async () => {
-      if (ticking) return;
+    const pending = new Set<string>();
+    const runTick = async (full: boolean) => {
+      if (ticking || (!full && pending.size === 0)) return;
       ticking = true;
       try {
-        await tick();
+        if (full) {
+          // A full tick reads every announcement recorded so far.
+          pending.clear();
+          await tick();
+        }
+        while (pending.size > 0 && !cancelled) {
+          const only = new Set(pending);
+          pending.clear();
+          await tick(only);
+        }
       } finally {
         ticking = false;
       }
     };
 
-    void runTick();
-    const timer = setInterval(() => void runTick(), POLL_MS);
+    // An announcement names the port the next poll would find, so scan that
+    // Tool now rather than up to a poll interval later. It still only selects:
+    // the announced port must appear in the scan. The run waits for a
+    // microtask, since the announcement is recorded mid-chunk and a later event
+    // in that chunk (a command start) can retire it.
+    const unsubscribe = subscribeToToolAnnounces((id) => {
+      if (!toolLeaves(lath, doorsRef.current).some((leaf) => leaf.id === id)) return;
+      pending.add(id);
+      queueMicrotask(() => void runTick(false));
+    });
+    void runTick(true);
+    const timer = setInterval(() => void runTick(true), POLL_MS);
     return () => {
       cancelled = true;
+      unsubscribe();
       clearInterval(timer);
     };
   }, [lath, doorsRef, paused]);

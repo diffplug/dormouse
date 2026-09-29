@@ -121,7 +121,7 @@ export function installWindowPersistence(
   seedWindowSession(saved);
   if (saved) {
     setWorkspaces({
-      workspaces: saved.workspaces.map(({ id, name, session }) => ({ id, name, ...(session.alertDelivery ? { alertDelivery: session.alertDelivery } : {}) })),
+      workspaces: saved.workspaces.map(({ id, name, nameIsAuto, session }) => ({ id, name, nameIsAuto, ...(session.alertDelivery ? { alertDelivery: session.alertDelivery } : {}) })),
       activeId: saved.activeWorkspaceId,
     });
   } else {
@@ -132,7 +132,7 @@ export function installWindowPersistence(
     // (`docs/specs/standalone.md` → "Persistence"). A bare Wall, which is one
     // Window's whole application, keeps the default id.
     const id = generateWorkspaceId();
-    setWorkspaces({ workspaces: [{ id, name: DEFAULT_WORKSPACE_NAME }], activeId: id });
+    setWorkspaces({ workspaces: [{ id, name: DEFAULT_WORKSPACE_NAME, nameIsAuto: true }], activeId: id });
   }
   // After `setWorkspaces`, so installing does not immediately write back what was
   // just read.

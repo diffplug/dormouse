@@ -1,7 +1,7 @@
 import { recordToolDirty } from './tool-dirty-store';
 import { registry } from './terminal-store';
 import {
-  commandArgv0,
+  commandWatchKey,
   createTerminalPaneState,
   cwdFromManualPath,
   cwdFromProcessPath,
@@ -73,15 +73,13 @@ export function getInheritableCwd(id: string): string | undefined {
 }
 
 /**
- * The bare program name of the pane's foreground command, or null when the pane
- * is at a prompt (or its shell reported no command line). This is the key the
- * WATCHING rule set is stored under, so the terminal context and the alert
- * dialog both use it to decide which rule they are toggling — see
- * `docs/specs/alert.md`.
+ * The `commandWatchKey` of the pane's foreground command, or null when the pane
+ * is at a prompt (or its shell reported no command line) — the key the WATCHING
+ * rule set is stored under (`docs/specs/alert.md`).
  */
-export function getRunningCommandArgv0(id: string): string | null {
+export function getRunningCommandWatchKey(id: string): string | null {
   const raw = paneStates.get(id)?.currentCommand?.rawCommandLine;
-  return raw ? commandArgv0(raw) : null;
+  return raw ? commandWatchKey(raw) : null;
 }
 
 // Count sessions whose latest activity is a live/running command (not an idle

@@ -5,6 +5,7 @@ import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
+import { isComposingKey } from '../lib/dom';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -13,6 +14,12 @@ import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 /** Desktop pane-header height. Geometry derived from the header (such as the
  * elevated zoom inset) must use this constant so the chrome stays proportional. */
 export const PANE_HEADER_HEIGHT_PX = 30;
+
+/** Soft app-ground halo separates zoomed panes and context popups from content below. */
+export const ELEVATED_PANE_SHADOW = '0 0 5px 5px var(--color-app-bg)';
+
+/** Theme and shell pickers share a hairline that follows their foreground. */
+export const PICKER_INSET_BORDER = 'inset 0 0 0 1px color-mix(in srgb, currentColor 25%, transparent)';
 
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
@@ -31,6 +38,14 @@ export const DOOR_TAB_CLASS = clsx(
   'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden text-sm font-medium font-mono',
   TERMINAL_TOP_RADIUS_CLASS,
 );
+
+/** A Workspace name the app derived rather than one a user set
+ *  (`docs/specs/layout.md` → "Workspace names"). */
+export const AUTO_NAME_CLASS = 'italic';
+
+/** A preview slot's label in its Pane header and Door, italic as an editor's
+ *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
+export const PREVIEW_LABEL_CLASS = 'italic';
 
 /** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
  *  reason about a tab's size without a rendered element (the cross-window tab
@@ -115,9 +130,26 @@ export const FOCUS_MOTION_MS = 220;
 export const HEADER_PALETTE_TRANSITION_CLASS =
   'transition-colors duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none';
 
+/** A Pane header's root: the drag handle in the header palette. The
+ *  active/inactive swap crossfades in step with the focus ring's travel;
+ *  children inherit via `text-inherit`. */
+export const paneHeader = tv({
+  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
+  variants: {
+    state: {
+      active: 'bg-header-active-bg text-header-active-fg',
+      inactive: 'bg-header-inactive-bg text-header-inactive-fg',
+    },
+  },
+});
+
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
+
+// A header's bordered pill button in its own foreground: the TODO pill and the
+// preview slot's mark.
+export const HEADER_PILL_CLASS = `shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`;
 
 // Letter-spacing for the alarm overlay's `SPEAKING` / `SPOKEN` labels — wider
 // tracking keeps the small all-caps label legible over the wash.
@@ -463,6 +495,9 @@ export const UNDER_SWITCH_INDENT = 'ml-18';
 export const SUBTLE_ACTION_REST_COLOR_CLASS = 'text-[color:color-mix(in_srgb,var(--color-link)_35%,var(--color-muted))]';
 export const SUBTLE_ACTION_COLOR_CLASS = `${SUBTLE_ACTION_REST_COLOR_CLASS} enabled:not-aria-disabled:hover:text-link enabled:focus-visible:text-link`;
 export const SUBTLE_ACTION_INTERACTION_CLASS = 'enabled:not-aria-disabled:hover:bg-current/10 focus-visible:outline focus-visible:outline-focus-ring';
+/** Both of the above, hover and focus included, for a wrapper whose focusable control is a
+ *  transparent child (a native `<select>` over a label). The caller drops it while busy. */
+export const SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS = 'hover:bg-current/10 hover:text-link has-[:focus-visible]:text-link has-[:focus-visible]:outline has-[:focus-visible]:outline-focus-ring';
 
 /**
  * The app's boolean control: compact track (off left, on right) and one state
@@ -615,6 +650,8 @@ export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVaria
   overlayClassName?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
   onEscape?: () => void;
+  /** Opt-in dismissal; clicks within the surface (including menus) stay inside. */
+  onOutsideClick?: () => void;
 };
 
 export function ModalFrame({
@@ -626,6 +663,7 @@ export function ModalFrame({
   overlayClassName,
   initialFocusRef,
   onEscape,
+  onOutsideClick,
   padding,
   align,
   elevation,
@@ -633,6 +671,7 @@ export function ModalFrame({
   ...props
 }: ModalFrameProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const startedOnBackdrop = useRef(false);
   useModalFocusTrap(surfaceRef, { initialFocusRef, onEscape });
 
   return (
@@ -641,6 +680,16 @@ export function ModalFrame({
       layer={layer}
       backdrop={backdrop}
       className={overlayClassName}
+      onPointerDownCapture={(event) => {
+        startedOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onPointerCancel={() => { startedOnBackdrop.current = false; }}
+      onClick={(event) => {
+        // A drag out of the surface also produces a click on the overlay.
+        const outside = startedOnBackdrop.current && event.target === event.currentTarget;
+        startedOnBackdrop.current = false;
+        if (outside) onOutsideClick?.();
+      }}
     >
       <ModalSurface
         ref={surfaceRef}
@@ -659,13 +708,40 @@ export function ModalFrame({
   );
 }
 
+/**
+ * A native modal `<dialog>`, shown on mount. Mount it only while open: closing
+ * unmounts it, which discards everything its owner held, so no reset-on-close
+ * logic is needed and no in-flight work can reach the next open.
+ */
+export function NativeModalDialog({
+  onClose,
+  className,
+  children,
+}: {
+  onClose: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    // StrictMode runs this twice on one element, and a second showModal throws.
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+  return (
+    <dialog ref={dialogRef} onClose={onClose} className={className}>
+      {children}
+    </dialog>
+  );
+}
+
 const MODAL_FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
+  '[tabindex]',
 ].join(',');
 
 function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElement>(
@@ -687,7 +763,7 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
       const modal = modalRef.current;
       if (!modal) return;
 
-      if (event.key !== 'Escape' && event.key !== 'Tab') return;
+      if ((event.key !== 'Escape' && event.key !== 'Tab') || isComposingKey(event)) return;
 
       // A native modal <dialog> (ThemeStoreDialog, ThemeDebuggerDialog) sits in
       // the browser's top layer and owns the keyboard with its own Tab/Escape
@@ -711,7 +787,10 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
 
       event.preventDefault();
       stepFocus(
-        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)),
+        // Mounted but hidden controls and negative tab indices are not Tab stops.
+        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)).filter(
+          (element) => element.tabIndex >= 0 && !element.closest('[hidden], [inert]'),
+        ),
         event.shiftKey ? -1 : 1,
       );
     };

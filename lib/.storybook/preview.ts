@@ -25,13 +25,14 @@ import {
   type PushDevicesState,
   type TerminalPaneState,
 } from '../src/lib/terminal-registry';
+import { createAlertEpisode } from '../src/lib/alert-episode';
 import { computeDynamicPalette } from '../src/lib/themes/dynamic-palette';
 import {
   clearAllAlertSpeechStates,
   setAlertSpeechState,
   type AlertSpeechState,
 } from '../src/lib/alert-speech-state';
-import { VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
+import { SNAPSHOT_EDITOR_FONT_FAMILY, VSCODE_THEMES, VSCODE_THEME_TYPES } from './themes';
 import {
   makeStubBurrowLink,
   type PrimedBurrow,
@@ -81,15 +82,21 @@ const FRAME_FALLBACK_MS = 100;
 // Initialize fake platform once at module scope
 const fakePlatform = initPlatform('fake');
 
-// Pin animations at T=0 for deterministic Chromatic snapshots.
-//
-// Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
-// its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
-// with a `chromatic=true` query parameter instead. A UA sniff therefore left
-// every guard below OFF in Safari — an alarm pulsing on a 650ms infinite loop, a
-// blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
-// what made the Safari snapshots unstable while Chrome's stayed clean.
-if (isChromatic()) {
+/** Defined only by `lib/vitest.argos.config.ts`; absent in the real Storybook. */
+declare const __ARGOS_SNAPSHOT__: true | undefined;
+
+/** A visual-snapshot run — Chromatic or Argos — that must render deterministically.
+ *
+ *  Ask `isChromatic()`, never the user agent: Chromatic only rewrites the UA on
+ *  its Chrome runner, and identifies every other browser (Safari, Firefox, Edge)
+ *  with a `chromatic=true` query parameter instead. A UA sniff therefore left
+ *  every guard below OFF in Safari — an alarm pulsing on a 650ms infinite loop, a
+ *  blinking cursor, terminals on WebGL, and mid-tween pane geometry — which is
+ *  what made the Safari snapshots unstable while Chrome's stayed clean. */
+const visualSnapshot = isChromatic() || typeof __ARGOS_SNAPSHOT__ !== 'undefined';
+
+// Pin animations at T=0 for deterministic snapshots.
+if (visualSnapshot) {
   cfg.marchingAnts.paused = true;
   cfg.alert.ringingPaused = true;
   // A blinking cursor is captured on-or-off depending on the frame; freeze it to a
@@ -109,6 +116,8 @@ if (isChromatic()) {
   // seconds after it appears, which a play function cannot outrun: whether it is
   // still on screen at capture time depends on how loaded the runner is.
   cfg.overlays.warningAutoDismissMs = 0;
+  // One kill-confirm letter rather than a random one per prompt.
+  cfg.killConfirm.char = 'q';
   // Zero every CSS transition. Unlike the keyframe animations above, each of
   // which has a static substitute, transitions are started by state that lands
   // AFTER first paint — the primed-state decorator applies two rAFs in, which
@@ -118,10 +127,14 @@ if (isChromatic()) {
   // `!important` outranks even inline transition declarations (the selection ring's
   // unfocus-saturate fade), so a snapshot showing such a fade already finished
   // is expected, not a regression.
-  const instantTransitions = document.createElement('style');
-  instantTransitions.textContent =
-    '*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }';
-  document.head.appendChild(instantTransitions);
+  const snapshotStyles = document.createElement('style');
+  snapshotStyles.textContent =
+    '*, *::before, *::after { transition-duration: 0s !important; transition-delay: 0s !important; }' +
+    // xterm's custom scrollbar auto-reveals after input, focus, or resize and
+    // fades on a timer. Its visibility at capture time says nothing about the
+    // story. Hide only its paint; retain the scrollable element and its layout.
+    '.xterm .xterm-scrollable-element > .xterm-scrollbar { visibility: hidden !important; }';
+  document.head.appendChild(snapshotStyles);
 }
 
 // Collect all CSS variable names across all themes for cleanup
@@ -197,8 +210,11 @@ function applyStorybookTheme(themeName: string) {
 
   if (theme) {
     for (const [key, value] of Object.entries(theme)) {
-      root.style.setProperty(key, value);
-      body.style.setProperty(key, value);
+      const resolvedValue = visualSnapshot && key === '--vscode-editor-font-family'
+        ? SNAPSHOT_EDITOR_FONT_FAMILY
+        : value;
+      root.style.setProperty(key, resolvedValue);
+      body.style.setProperty(key, resolvedValue);
     }
   }
 
@@ -216,9 +232,27 @@ function resolveStorybookTheme(requestedThemeName: string | undefined) {
   return DEFAULT_STORYBOOK_THEME;
 }
 
+/**
+ * Prime one Session's Activity as its host would publish it: ringing always
+ * carries an episode. An id already ringing keeps its own, so a re-prime does
+ * not restart the arrival burst.
+ */
+function primeActivity(id: string, state: Partial<ActivityState>): void {
+  const current = getActivity(id);
+  const next = { ...current, ...state };
+  const episode = next.status !== 'ALERT_RINGING'
+    ? null
+    : state.episode ?? (current.status === 'ALERT_RINGING' ? current.episode : null) ?? createAlertEpisode();
+  setTerminalActivity(id, { ...next, episode });
+}
+
 const preview: Preview = {
   parameters: {
     layout: 'fullscreen',
+    // Argos otherwise shrinks the body to fit-content at 2x zoom, collapsing every
+    // fullscreen layout into a sliver; capture the page at the viewport width,
+    // as Chromatic does.
+    argos: { fitToContent: false },
   },
   globalTypes: {
     theme: {
@@ -394,14 +428,14 @@ const preview: Preview = {
           }
 
           for (const [id, state] of Object.entries(primedSessionState?.byId ?? {})) {
-            setTerminalActivity(id, { ...getActivity(id), ...state });
+            primeActivity(id, state);
           }
 
           const sessionIds = [...getActivitySnapshot().keys()];
           primedSessionState?.byIndex?.forEach((state, index) => {
             const id = sessionIds[index];
             if (id) {
-              setTerminalActivity(id, { ...getActivity(id), ...state });
+              primeActivity(id, state);
             }
           });
 

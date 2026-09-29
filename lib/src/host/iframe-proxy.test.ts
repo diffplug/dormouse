@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as http from 'node:http';
 import * as net from 'node:net';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { createIframeProxyUrl } from './iframe-proxy';
 
 // The app's own ancestor chain, as `lib/src/lib/embedder-origins.ts` reports it
@@ -90,6 +91,17 @@ function request(url: string, init: { method?: string; headers?: Record<string, 
   });
 }
 const get = (url: string) => request(url);
+
+function requestBytes(url: string): Promise<{ headers: http.IncomingHttpHeaders; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    http.get(url, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('error', reject);
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => resolve({ headers: res.headers, body: Buffer.concat(chunks) }));
+    }).on('error', reject);
+  });
+}
 
 async function frame(target: string, opts = NO_LOG): Promise<string> {
   const r = await createIframeProxyUrl(target, opts);
@@ -201,6 +213,109 @@ describe('iframe proxy — serving', () => {
     // Instrumentation changes length → chunked, not a (now-wrong) content-length.
     expect(res.headers['content-length']).toBeUndefined();
     expect(res.headers['transfer-encoding']).toBe('chunked');
+  });
+
+  it('keeps the upstream content-type, charset included', async () => {
+    const body = Buffer.concat([Buffer.from('<html><head><title>'), Buffer.from([0x93, 0xfa, 0x96, 0x7b]), Buffer.from('</title></head><body>x</body></html>')]);
+    const port = await upstream((_q, s) => { s.writeHead(200, { 'content-type': 'text/html; charset=Shift_JIS' }); s.end(body); });
+    const res = await requestBytes(await frame(`http://127.0.0.1:${port}/`));
+
+    expect(res.headers['content-type']).toBe('text/html; charset=Shift_JIS');
+    expect(res.body.toString('latin1')).toContain('__dormouse');
+    // The Shift_JIS bytes pass through as sent.
+    expect(res.body.includes(Buffer.from([0x93, 0xfa, 0x96, 0x7b]))).toBe(true);
+  });
+
+  it('passes a compressed or UTF-16 HTML body through rather than splicing the shim into it', async () => {
+    const html = '<html><head><title>t</title></head><body>hello</body></html>';
+    const gzipped = gzipSync(html);
+    const bom = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(html, 'utf16le')]);
+    const port = await upstream((q, s) => {
+      if (q.url === '/utf16') {
+        s.writeHead(200, { 'content-type': 'text/html; charset=UTF-16LE' });
+        s.end(Buffer.from(html, 'utf16le'));
+        return;
+      }
+      if (q.url === '/unicode') {
+        s.writeHead(200, { 'content-type': 'text/html; charset="unicode"' });
+        s.end(Buffer.from(html, 'utf16le'));
+        return;
+      }
+      if (q.url === '/bom') {
+        // No charset at all: the BOM alone makes it UTF-16 to the browser.
+        s.writeHead(200, { 'content-type': 'text/html' });
+        s.write(bom.subarray(0, 1));
+        setTimeout(() => s.end(bom.subarray(1)), 5);
+        return;
+      }
+      // Compresses whatever the request asked for.
+      s.writeHead(200, { 'content-type': 'text/html', 'content-encoding': 'gzip' });
+      s.end(gzipped);
+    });
+    const url = await frame(`http://127.0.0.1:${port}/`);
+
+    const compressed = await requestBytes(url);
+    expect(compressed.headers['content-encoding']).toBe('gzip');
+    expect(gunzipSync(compressed.body).toString('utf8')).toBe(html);
+    // Still framed on the proxy's terms, only uninstrumented.
+    expect(compressed.headers['content-security-policy'])
+      .toBe("frame-ancestors 'self' vscode-webview://abc-123 vscode-file://vscode-app");
+
+    const origin = new URL(url).origin;
+    expect((await requestBytes(`${origin}/utf16`)).body.toString('utf16le')).toBe(html);
+    expect((await requestBytes(`${origin}/unicode`)).body.toString('utf16le')).toBe(html);
+    expect((await requestBytes(`${origin}/bom`)).body.equals(bom)).toBe(true);
+  });
+
+  it('asks for an identity body only when loading a document', async () => {
+    const port = await upstream((q, s) => s.end(q.headers['accept-encoding'] ?? '(none)'));
+    const url = await frame(`http://127.0.0.1:${port}/`);
+    const ask = (dest?: string) => request(url, {
+      headers: { 'accept-encoding': 'gzip, br', ...(dest ? { 'sec-fetch-dest': dest } : {}) },
+    });
+
+    expect((await ask('script')).body).toBe('gzip, br');
+    expect((await ask('style')).body).toBe('gzip, br');
+    expect((await ask('iframe')).body).toBe('(none)');
+    expect((await ask('document')).body).toBe('(none)');
+    // An engine that sends no Sec-Fetch-Dest cannot say, so it gets identity.
+    expect((await ask()).body).toBe('(none)');
+  });
+
+  it('keys caches on Sec-Fetch-Dest, since the encoding asked for depends on it', async () => {
+    const port = await upstream((q, s) => {
+      if (q.url === '/star') { s.writeHead(200, { 'content-type': 'text/plain', vary: '*' }); s.end('x'); return; }
+      s.writeHead(200, { 'content-type': q.url === '/page' ? 'text/html' : 'application/javascript', vary: 'Accept-Language' });
+      s.end(q.url === '/page' ? '<html><head></head><body>x</body></html>' : 'x');
+    });
+    const origin = new URL(await frame(`http://127.0.0.1:${port}/`)).origin;
+
+    expect((await get(`${origin}/page`)).headers.vary).toBe('Accept-Language, Sec-Fetch-Dest');
+    expect((await get(`${origin}/app.js`)).headers.vary).toBe('Accept-Language, Sec-Fetch-Dest');
+    expect((await get(`${origin}/star`)).headers.vary).toBe('*');
+  });
+
+  it('streams the instrumented head as soon as a marker split across chunks completes', async () => {
+    let finish: () => void = () => {};
+    const port = await upstream(async (_q, s) => {
+      s.writeHead(200, { 'content-type': 'text/html' });
+      for (const part of ['<html><head><title>x</ti', 'tle></he', 'ad>']) { s.write(part); await delay(5); }
+      // The body is slow to come; the head must not wait for it.
+      await new Promise<void>((resolve) => { finish = resolve; });
+      s.end('<body>late</body></html>');
+    });
+    const u = new URL(await frame(`http://127.0.0.1:${port}/`));
+    const first = await new Promise<string>((resolve, reject) => {
+      const req = http.request({ hostname: u.hostname, port: u.port, path: u.pathname }, (res) => {
+        res.once('data', (c: Buffer) => resolve(c.toString('latin1')));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    finish();
+
+    expect(first).toContain('__dormouse');
+    expect(first).toMatch(/<\/script><\/head>$/);
   });
 
   it('passes non-HTML through untouched (no shim), still stripping framing headers', async () => {

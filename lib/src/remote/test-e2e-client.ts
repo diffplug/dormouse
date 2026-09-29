@@ -18,6 +18,7 @@ import {
   NoiseTransportSession,
   concatBytes,
   createNoiseInitiator,
+  createNoiseResponder,
   e2eConnectionPrologue,
   ecdsaRawToDer,
   fromBase64Url,
@@ -26,8 +27,10 @@ import {
   presenceChallenge,
   randomBase64Url,
   toBase64Url,
+  utf8Decode,
   utf8Encode,
   type NoiseKeyPair,
+  type NoiseSession,
   type PairingInvitation,
   type PasskeyAssertion,
   type PresenceBinding,
@@ -479,3 +482,50 @@ export async function openDirectPath(options: {
   await settle();
   return { peer, inbound, signals };
 }
+
+// --- One established session, with no socket around it ----------------------
+
+/**
+ * A completed connection IK handshake over the shipped suite: the Client's
+ * transport, and the Burrow's — for a case that drives one established session
+ * on its own, with neither a Relay nor a runtime in the way.
+ */
+export async function noiseSessionPair(): Promise<{
+  client: NoiseTransportSession;
+  /**
+   * The raw `Split` state `client` wraps, so a case can put a frame on the wire
+   * the wrapper would never write. The counters stay shared.
+   */
+  clientNoise: NoiseSession;
+  burrow: NoiseTransportSession;
+}> {
+  const prologue = e2eConnectionPrologue('burrow', 'connection');
+  const burrowStatic = await generateNoiseKeyPair();
+  const initiator = await createNoiseInitiator({
+    prologue,
+    staticKeyPair: await generateNoiseKeyPair(),
+    remoteStaticPublicKey: burrowStatic.publicKey,
+  });
+  const responder = await createNoiseResponder({ prologue, staticKeyPair: burrowStatic });
+  await responder.readMessage(await initiator.writeMessage());
+  await initiator.readMessage(await responder.writeMessage());
+  return {
+    client: new NoiseTransportSession(initiator.session),
+    clientNoise: initiator.session,
+    burrow: new NoiseTransportSession(responder.session),
+  };
+}
+
+/**
+ * What one ciphertext opens to on the receiving `session`: a control message's
+ * value, an application receipt's messages as JSON, or else the receipt's kind.
+ */
+export function openReceipt(session: NoiseTransportSession, ciphertext: Uint8Array): unknown {
+  const receipt = session.receive(ciphertext);
+  if (receipt.kind === 'control') return receipt.value;
+  if (receipt.kind === 'app') return receipt.messages.map((m) => JSON.parse(utf8Decode(m)));
+  return receipt.kind;
+}
+
+/** Bytes that decode as a `ct` and authenticate as nothing. */
+export const FORGED_CT = toBase64Url(new Uint8Array(64));

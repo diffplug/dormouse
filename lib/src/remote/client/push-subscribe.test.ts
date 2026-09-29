@@ -6,10 +6,10 @@ vi.mock('../pocket-app/service-worker', () => ({
   getPushServiceWorkerRegistration: () => getRegistration(),
 }));
 
+import { isInstalledWebApp } from './install-state';
 import {
   getPushAvailability,
   hasCurrentPushSubscription,
-  isInstalledWebApp,
   requiresInstallForPush,
   subscribeToPushInBrowser,
 } from './push-subscribe';

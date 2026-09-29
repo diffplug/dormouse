@@ -11,6 +11,8 @@ import { ensureResizeObserver } from './wall/wall-test-utils';
 import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
+import { createAlertEpisode } from '../lib/alert-episode';
+import { getTodoSpotlight, resetTodoSpotlight } from '../lib/todo-spotlight';
 import { resetWindowSessionAggregator, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
 import {
   getWorkspaceUiSnapshot,
@@ -25,6 +27,7 @@ import {
   getActiveWorkspaceId,
   getWorkspacesSnapshot,
   resetWorkspaces,
+  setAutoWorkspaceName,
 } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -54,6 +57,15 @@ function activateButton(id: string): HTMLButtonElement {
   return tabFor(id).querySelector<HTMLButtonElement>('button')!;
 }
 
+function todoPill(id: string): HTMLButtonElement | null {
+  return tabFor(id).querySelector<HTMLButtonElement>('[data-workspace-tab-todo]');
+}
+
+/** What React synthesizes `onMouseEnter` from. */
+function hover(element: Element): void {
+  element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+}
+
 async function render(node = <WorkspaceStrip />): Promise<void> {
   await act(async () => root.render(node));
 }
@@ -78,6 +90,7 @@ beforeEach(() => {
   resetWallHandles();
   resetChromeKeyboardLeases();
   clearTerminalActivity();
+  resetTodoSpotlight();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -116,22 +129,49 @@ describe('WorkspaceStrip', () => {
     expect(tabFor('ws-2').querySelector('[data-workspace-tab-close]')).toBeNull();
   });
 
-  it('shows indicators for a hidden Workspace only, counting them in its label', async () => {
+  it('shows the TODO pill on every tab and the alarm inset on hidden ones, counting them in the label', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
-    setWorkspaceSurfaces('ws-2', ['pane-c']);
-    setTerminalActivity('pane-a', { status: 'ALERT_RINGING' });
+    setWorkspaceSurfaces('ws-2', ['pane-c', 'pane-d']);
+    setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     setTerminalActivity('pane-b', { todo: true });
-    setTerminalActivity('pane-c', { status: 'ALERT_RINGING' });
+    setTerminalActivity('pane-c', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
     await render();
 
     expect(activateButton(first).getAttribute('aria-label')).toBe('Workspace 1, 2 needing attention');
     expect(tabFor(first).querySelector('.todo-pill-shell')).not.toBeNull();
     expect(tabFor(first).querySelector('[data-alert-ring-inset]')).not.toBeNull();
-    // The visible Workspace shows its Surfaces, so its tab stays plain.
+    // The visible Workspace's panes ring for it, so its tab wears no inset, and
+    // with no TODO it shows nothing at all.
     expect(tabFor('ws-2').querySelector('.todo-pill-shell')).toBeNull();
     expect(tabFor('ws-2').querySelector('[data-alert-ring-inset]')).toBeNull();
+    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Workspace 2');
+
+    // A TODO shows on the visible tab as on a hidden one.
+    await act(async () => { setTerminalActivity('pane-d', { todo: true }); });
+    expect(tabFor('ws-2').querySelector('.todo-pill-shell')).not.toBeNull();
+    expect(tabFor('ws-2').querySelector('[data-alert-ring-inset]')).toBeNull();
+    expect(activateButton('ws-2').getAttribute('aria-label')).toBe('Workspace 2, 2 needing attention');
+  });
+
+  /** Nothing else on screen appears or disappears with selection, so neither
+   *  does the tab's TODO pill. */
+  it('keeps the TODO pill through activating and leaving its Workspace', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    await render();
+    const pill = tabFor(first).querySelector('.todo-pill-shell');
+    expect(pill).not.toBeNull();
+
+    await act(async () => { activateButton(first).click(); });
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(tabFor(first).querySelector('.todo-pill-shell')).toBe(pill);
+
+    await act(async () => { activateButton('ws-2').click(); });
+    expect(tabFor(first).querySelector('.todo-pill-shell')).toBe(pill);
   });
 
   /** The inset is the ring's only presence on a tab, so a Workspace whose
@@ -194,6 +234,130 @@ describe('WorkspaceStrip', () => {
     expect(inset.style.animationDelay).toBe('-100ms');
   });
 
+  /** The visible tab wears no inset, so a ring attended while it was visible
+   *  must not anchor the summons its tab shows once left. */
+  it('clocks the burst on leaving from the rings still sounding', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a', 'pane-b']);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(2_000);
+    await render();
+    await act(async () => { activateButton(first).click(); });
+    await act(async () => {
+      setTerminalActivity('pane-a', { status: 'ALERT_RINGING', episode: { id: 'older', startedAt: 1_000 } });
+      setTerminalActivity('pane-b', { status: 'ALERT_RINGING', episode: { id: 'newer', startedAt: 2_000 } });
+    });
+    await act(async () => { setTerminalActivity('pane-a', { status: 'NOTHING_TO_SHOW' }); });
+
+    now.mockReturnValue(2_100);
+    await act(async () => { activateButton('ws-2').click(); });
+    const inset = tabFor(first).querySelector<HTMLElement>('[data-alert-ring-inset]')!;
+    expect(inset.style.animationDelay).toBe('-100ms');
+  });
+
+  /** docs/specs/layout.md -> "Workspace tabs": the pill is its own click
+   *  target, beside the tab's button rather than inside it. */
+  it('enters the next TODO from its own pill, activating the Workspace and never renaming it', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    const handle = stubHandle(first, { enterNextTodo: vi.fn(() => 'pane-a'), enterCommandMode: vi.fn() });
+    await render();
+
+    const pill = todoPill(first)!;
+    expect(pill.tagName).toBe('BUTTON');
+    expect(activateButton(first).contains(pill)).toBe(false);
+    expect(pill.getAttribute('aria-label')).toBe('Next TODO in Workspace 1');
+    expect(activateButton(first).getAttribute('aria-label')).toBe('Workspace 1, 1 needing attention');
+
+    await act(async () => { pill.click(); });
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(handle.enterNextTodo).toHaveBeenCalledTimes(1);
+    expect(handle.enterCommandMode).not.toHaveBeenCalled();
+    // On the visible tab it moves on to the next TODO, where the tab renames.
+    await act(async () => { todoPill(first)!.click(); });
+    expect(handle.enterNextTodo).toHaveBeenCalledTimes(2);
+    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+  });
+
+  /** A TODO cleared between render and click leaves nothing to enter. */
+  it('activates in command mode from a pill with no TODO behind it, and never renames', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    const handle = stubHandle(first, { enterNextTodo: () => null, enterCommandMode: vi.fn() });
+    await render();
+
+    await act(async () => { todoPill(first)!.click(); });
+    expect(getActiveWorkspaceId()).toBe(first);
+    expect(handle.enterCommandMode).toHaveBeenCalledTimes(1);
+    await act(async () => { todoPill(first)!.click(); });
+    expect(handle.enterCommandMode).toHaveBeenCalledTimes(2);
+    expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
+    // Nothing entered, so nothing to spotlight.
+    expect(getTodoSpotlight()).toBeNull();
+  });
+
+  /** docs/specs/layout.md -> "Workspace tabs": borderless text on a rounded hit
+   *  area that washes on hover and harder under the press, with a pointer and a
+   *  keyboard focus ring. */
+  it('draws the pill borderless, with hover, press, pointer, and focus-visible states', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    await render();
+
+    const pill = todoPill(first)!.className.split(/\s+/);
+    for (const token of ['rounded', 'text-xs', 'font-semibold', 'transition-colors', 'hover:bg-current/10',
+      'active:bg-current/20', 'cursor-pointer', 'focus-visible:outline', 'focus-visible:outline-current']) {
+      expect(pill).toContain(token);
+    }
+    expect(pill.filter((token) => /(^|:)border/.test(token))).toEqual([]);
+    // Nothing that changes the pill's size with its state, which would move the tab.
+    expect(pill.filter((token) => /^(hover|active|focus-visible):(p[xytrbl]?|m[xytrbl]?|text|font)-/.test(token))).toEqual([]);
+  });
+
+  /** docs/specs/alert.md -> Pane Header: the landing spotlight is raised on the
+   *  Surface the click entered, and a repeat is a new signal. */
+  it('spotlights the Surface the pill lands on, again on a repeat click', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    stubHandle(first, { enterNextTodo: () => 'pane-a' });
+    await render();
+
+    await act(async () => { todoPill(first)!.click(); });
+    expect(getTodoSpotlight()).toMatchObject({ surfaceId: 'pane-a', seq: 1 });
+    await act(async () => { todoPill(first)!.click(); });
+    expect(getTodoSpotlight()).toMatchObject({ surfaceId: 'pane-a', seq: 2 });
+  });
+
+  it('ignores the click a drag from the pill ends with', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await act(async () => { createWorkspace({ id: 'ws-2' }); });
+    setWorkspaceSurfaces(first, ['pane-a']);
+    setTerminalActivity('pane-a', { todo: true });
+    const handle = stubHandle(first, { enterNextTodo: vi.fn(() => 'pane-a') });
+    await render();
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      { left: 0, right: 100, width: 100, top: 0, bottom: 24, height: 24, x: 0, y: 0, toJSON: () => ({}) } as DOMRect,
+    );
+    Object.defineProperty(tabFor(first), 'setPointerCapture', { configurable: true, value: () => {} });
+    Object.defineProperty(tabFor(first), 'releasePointerCapture', { configurable: true, value: () => {} });
+
+    await act(async () => { todoPill(first)!.dispatchEvent(pointer('pointerdown', { button: 0, clientX: 50, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointermove', { clientX: 90, clientY: 12 })); });
+    await act(async () => { window.dispatchEvent(pointer('pointerup', { clientX: 90, clientY: 12 })); });
+    await act(async () => { todoPill(first)!.click(); });
+    expect(handle.enterNextTodo).not.toHaveBeenCalled();
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    await act(async () => { todoPill(first)!.click(); });
+    expect(handle.enterNextTodo).toHaveBeenCalledTimes(1);
+  });
+
   it('renames the active tab on click, holding the chrome keyboard lease while the editor is open', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
@@ -213,6 +377,31 @@ describe('WorkspaceStrip', () => {
     expect(chromeKeyboardHeld()).toBe(false);
   });
 
+  it('italicizes an auto-name until a rename changes it, and an empty rename hands it back', async () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    await render();
+    const nameSpan = () => tabFor(first).querySelector('span')!;
+    const rename = async (value: string | null) => {
+      await act(async () => { activateButton(first).click(); });
+      const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
+      await act(async () => {
+        if (value !== null) typeInto(input, value);
+        input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      });
+    };
+    expect(nameSpan().classList.contains('italic')).toBe(true);
+
+    await rename(null); // opened and blurred: the editor submits, but nothing changed
+    expect(nameSpan().classList.contains('italic')).toBe(true);
+
+    await rename('Deploys');
+    expect(tabNames()).toEqual(['Deploys']);
+    expect(nameSpan().classList.contains('italic')).toBe(false);
+
+    await rename('');
+    expect(nameSpan().classList.contains('italic')).toBe(true);
+  });
+
   it('shows the close button with one Workspace and closes an untouched one outright', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await render();
@@ -224,34 +413,8 @@ describe('WorkspaceStrip', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-workspace-tab-close="ws-2"]')!.click();
     });
-    expect(closed).toHaveBeenCalledWith('prompt');
+    expect(closed).toHaveBeenCalledWith([]);
     expect(getWorkspacesSnapshot().workspaces.map((workspace) => workspace.id)).toEqual([first]);
-  });
-
-  it('confirms before closing a Workspace holding work, and a refusal reveals it', async () => {
-    const first = getWorkspacesSnapshot().workspaces[0].id;
-    await act(async () => { createWorkspace({ id: 'ws-2' }); });
-    stubHandle('ws-2', { hasTouchedSurfaces: () => true, closeAll: async () => 'notepad archive failed' });
-    await render();
-    // Close the INACTIVE one so the reveal is observable.
-    await act(async () => { activateButton(first).click(); });
-
-    await act(async () => {
-      tabFor('ws-2').dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true }));
-    });
-    expect(getActiveWorkspaceId()).toBe('ws-2');
-    expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
-    expect(chromeKeyboardHeld()).toBe(true);
-    const char = document.body.querySelector('.text-xl')!.textContent!;
-
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: char, bubbles: true }));
-    });
-    await act(async () => { await Promise.resolve(); });
-    // Refused: the Workspace survives and is revealed so its prompt is visible.
-    expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
-    expect(getActiveWorkspaceId()).toBe('ws-2');
-    expect(chromeKeyboardHeld()).toBe(false);
   });
 
   it('reorders on a drag past the threshold, and Escape restores the original index', async () => {

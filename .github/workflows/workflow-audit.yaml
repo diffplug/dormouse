@@ -13,8 +13,8 @@ name: workflow-audit
 # successful run's API timestamp, so a failed run leaves the lower bound
 # unchanged rather than skipping commits.
 #
-# Reports the *unexplained*. Two routine sources are classified and
-# skipped on independently checked provenance and content (see the
+# Reports the *unexplained*. Four routine sources are classified and
+# skipped on independently checked provenance or content (see the
 # classifier comments for the trust boundary):
 #
 #   - Renovate pin bumps — a valid GitHub-signed commit authored by
@@ -30,8 +30,16 @@ name: workflow-audit
 #     .config/tend.yaml — which the commit must leave untouched, or
 #     "reproducible" is true by construction. The config being in the
 #     window is what closes the same trick split across two commits.
+#   - clean merges — a merge commit whose window paths are exactly what
+#     `git merge-tree` produces from its parents, so it introduced nothing
+#     the parents (each audited on its own) did not already carry.
+#   - admin pushes — the earliest server-recorded push that made the
+#     commit reachable was by a repository admin, and neither its author
+#     nor committer claims to be a bot. The pusher is GitHub's record of
+#     the authenticated credential, which `TEND_BOT_TOKEN` cannot forge;
+#     the commit's own author fields are only a further refusal.
 #
-# Both classifiers fail open: any error, ambiguity, or unparseable input
+# Every classifier fails open: any error, ambiguity, or unparseable input
 # reports the commit. A silent run is the healthy steady state and keeps
 # the 48-hour liveness check in docs/specs/security-ci.md green — that check keys on a
 # successful *run*, not on an issue existing.
@@ -89,11 +97,11 @@ jobs:
           # what each one is told to check, and the rule that keeps the
           # orchestrator from ending its turn. A bot that edits those changes
           # what gets audited without touching a single workflow file, which is
-          # exactly the persistence this job exists to catch. Neither
+          # exactly the persistence this job exists to catch. Neither content
           # classifier can explain such a commit (a Renovate bump touches only
           # `uses:` refs; a tend regen reproduces from `uvx tend init`, which
-          # does not generate this directory), so anything landing here is
-          # reported on its own content, which is the intent.
+          # does not generate this directory); only a clean merge or an admin's
+          # own push, neither of which a bot can produce alone, is explained.
           #
           # .vscode/ is in the window because `tasks.json` can carry
           # `"runOn": "folderOpen"`, which executes when a maintainer opens the
@@ -117,11 +125,14 @@ jobs:
           # passes the same-commit guard in is_tend_regen, and reproduces
           # byte-for-byte against a config nothing ever looked at. Widening the
           # window makes the config edit an auditable commit reported on its own
-          # content. Both classifiers refuse any commit that touches the config,
-          # so nothing in the widened window can be swallowed by an arm that
-          # doesn't inspect it — that pairing is the invariant, not either half.
+          # content. Both content classifiers refuse any commit that touches the
+          # config, so nothing in the widened window can be swallowed by an arm
+          # that doesn't inspect it — that pairing is the invariant, not either
+          # half. The clean-merge and admin-push arms vouch for the whole commit
+          # rather than a slice of it, so they need no refusal.
           # ONE definition of the window. Every consumer below — the commit
-          # list, `own_changes`, and both classifiers' refusals — must use this
+          # list, `own_changes`, `is_clean_merge`, and both content classifiers'
+          # refusals — must use this
           # same set, or a path that is in the window for one and out of it for
           # another goes silently unreported: `git log` matches the commit,
           # `own_changes` returns nothing for it, and the empty-list `continue`
@@ -132,7 +143,7 @@ jobs:
           # unquoted scalar is correct here only because this step runs bash,
           # and silently matches nothing under a shell that does not word-split.
           # `"${WINDOW[@]}"` means the same thing everywhere and needs no
-          # shellcheck exemption.
+          # exemption from shellcheck.
           WINDOW=(.github/workflows/ .config/tend.yaml .github/audit/ .vscode/)
           # DERIVED, never hand-maintained: element 0 is the workflows tree, and
           # this is everything else — the half both classifiers must refuse
@@ -277,9 +288,150 @@ jobs:
             return $rc
           }
 
+          # A merge that `git merge-tree` reproduces on every window path. Its
+          # parents are audited on their own, so a merge adding nothing beyond
+          # their mechanical combination has nothing left to explain. A conflict
+          # outside the window is irrelevant; one inside it leaves markers in
+          # the reproduced tree, so its hand resolution is reported. Only a
+          # two-parent merge qualifies.
+          is_clean_merge() {
+            local sha="$1" parents out rc
+            read -r -a parents <<< "$(git rev-list --parents -n1 "$sha" | cut -d' ' -f2-)"
+            [ "${#parents[@]}" -eq 2 ] || return 1
+            # Exit 1 is "conflicted", with the tree still on the first line;
+            # anything higher is an error.
+            out=$(git merge-tree --write-tree "${parents[0]}" "${parents[1]}" 2>/dev/null) && rc=0 || rc=$?
+            [ "$rc" -le 1 ] || return 1
+            git diff --quiet "${out%%$'\n'*}" "$sha" -- "${WINDOW[@]}"
+          }
+
+          # Repository admin per the collaborator API. Admin is the role the
+          # `Merge access` and `Tag operations` rulesets exempt, so anyone this
+          # accepts can already push to `main` directly.
+          is_admin() {
+            local login="$1" permission
+            [[ "$login" =~ ^[A-Za-z0-9-]+$ ]] || return 1
+            permission=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$login/permission" \
+              --jq '.permission' 2>/dev/null) || return 1
+            [ "$permission" = admin ]
+          }
+
+          # Index `$ACTIVITY` once so each lookup is one `for-each-ref`: every
+          # resolvable tip is pinned as `refs/audit/{after,before}/<row>`, a tip
+          # missing from the clone is fetched by SHA first (a force-push leaves
+          # the tip it replaced on no branch), and each actor is asked about
+          # admin once. `$ROWS` holds `<row>\t<activity_type>\t<actor>\t<state>`,
+          # `state` being `ok`, or `after-lost` when the new tip cannot be
+          # fetched. A lost `before` just gets no ref. `git fetch` is all-or-nothing, so a failed batch
+          # retries one SHA at a time rather than losing its neighbours.
+          prepare_activity() {
+            local row=0 type actor before after state missing
+            ROWS=$(mktemp)
+            ADMIN_LOGINS=" "
+            missing=$(cut -f4,5 "$ACTIVITY" | tr '\t' '\n' | grep -E '^[0-9a-f]{40}$' | grep -vE '^0+$' | sort -u \
+              | git cat-file --batch-check='%(objectname) %(objecttype)' | awk '$2 == "missing" { print $1 }') || true
+            if [ -n "$missing" ]; then
+              # shellcheck disable=SC2016 # the inner shell expands `$@`
+              printf '%s\n' "$missing" | xargs -n 100 sh -c \
+                'git fetch -q origin "$@" 2>/dev/null || for sha; do git fetch -q origin "$sha" 2>/dev/null; done' _ || true
+            fi
+            while IFS= read -r actor; do
+              if is_admin "$actor"; then ADMIN_LOGINS="$ADMIN_LOGINS$actor "; fi
+            done < <(cut -f3 "$ACTIVITY" | sort -u)
+            while IFS=$'\t' read -r _ type actor before after; do
+              row=$((row + 1))
+              state=ok
+              if git cat-file -e "$after^{commit}" 2>/dev/null; then
+                echo "update refs/audit/after/$row $after"
+              else
+                state="after-lost"
+              fi
+              if [[ ! "$before" =~ ^0+$ ]]; then
+                if git cat-file -e "$before^{commit}" 2>/dev/null; then
+                  echo "update refs/audit/before/$row $before"
+                fi
+              fi
+              printf '%s\t%s\t%s\t%s\n' "$row" "$type" "$actor" "$state" >> "$ROWS"
+            done < "$ACTIVITY" | git update-ref --stdin
+          }
+
+          # The earliest activity row whose range contains the commit, as
+          # `<activity_type>\t<actor>\t<row>`; nothing if no retained row does.
+          # A row whose new tip is lost might be the introduction, and ends the
+          # walk as `unresolved`, with one exception: an admin's plain push or
+          # branch creation is skipped, since it replaces nothing and the worst
+          # case is that a later row decides. A `force_push` is never skipped,
+          # as it may be a rewrite whose replaced commits cannot be checked.
+          first_introduction() {
+            local after before row type actor state
+            after=" $(git for-each-ref --contains "$1" --format='%(refname:lstrip=3)' refs/audit/after/ | tr '\n' ' ')"
+            before=" $(git for-each-ref --contains "$1" --format='%(refname:lstrip=3)' refs/audit/before/ | tr '\n' ' ')"
+            while IFS=$'\t' read -r row type actor state; do
+              if [ "$state" = after-lost ]; then
+                [[ "$type" != force_push && "$ADMIN_LOGINS" = *" $actor "* ]] && continue
+                printf 'unresolved\t-\t%s\n' "$row"
+                return
+              fi
+              [[ "$after" = *" $row "* && "$before" != *" $row "* ]] || continue
+              printf '%s\t%s\t%s\n' "$type" "$actor" "$row"
+              return
+            done < "$ROWS"
+          }
+
+          # Introduced by an admin: the commit's first introduction is a push or
+          # branch creation by an admin, or an admin's force-push whose replaced
+          # window commits were each admin-introduced too. That last clause is
+          # the rebase case: an admin rewriting a bot branch re-pushes the bot's
+          # content under new SHAs, which its self-declared author cannot flag.
+          # A PR merge as the first introduction means the real push is missing
+          # from the log, so it is reported.
+          admin_introduced() {
+            local type actor row replaced old
+            IFS=$'\t' read -r type actor row < <(first_introduction "$1") || return 1
+            [[ "$ADMIN_LOGINS" = *" $actor "* ]] || return 1
+            case "$type" in
+              push|branch_creation) ;;
+              force_push)
+                # A lost `before` has no ref, so this fails and is reported.
+                replaced=$(git rev-list "refs/audit/before/$row" --not "refs/audit/after/$row" -- "${WINDOW[@]}") || return 1
+                for old in $replaced; do
+                  admin_introduced "$old" || return 1
+                done
+                ;;
+              *) return 1 ;;
+            esac
+          }
+
+          # Also reports a commit whose author or committer claims a bot, even
+          # if an admin introduced it: a rebased bot commit is still bot content.
+          is_admin_first_push() {
+            if git show -s --format='%ae%n%ce%n%an%n%cn' "$1" | grep -qiE '(\[bot\]|-bot)(@|$)'; then
+              return 1
+            fi
+            admin_introduced "$1"
+          }
+
           REPORT=$(mktemp)
           SKIPPED=$(mktemp)
           COUNT=0
+
+          # The last quarter of ref updates (the API's longest `time_period`
+          # short of a year), oldest first by GitHub's own timestamp. Any
+          # failure empties the file, which `is_admin_first_push` refuses. A
+          # null field is `-`, never empty: tab is IFS whitespace, so `read`
+          # would merge an empty column and shift every later one left.
+          ACTIVITY=$(mktemp)
+          if ! gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/activity?per_page=100&time_period=quarter" \
+            --jq '.[] | select(.activity_type != "branch_deletion")
+              | [.timestamp, .activity_type, (.actor.login // "-"), (.before // "-"), (.after // "-")] | @tsv' \
+            | sort > "$ACTIVITY.unsorted"; then
+            echo "Activity log unavailable; the admin-push classifier explains nothing this run." \
+              | tee -a "$GITHUB_STEP_SUMMARY" >&2
+            : > "$ACTIVITY.unsorted"
+          fi
+          mv "$ACTIVITY.unsorted" "$ACTIVITY"
+          prepare_activity
 
           # What this commit itself changed under .github/workflows/.
           #
@@ -326,8 +478,17 @@ jobs:
               echo "- \`${sha:0:7}\` — $SUBJECT (reproduces from the tend generator)" >> "$SKIPPED"
               continue
             fi
+            if is_clean_merge "$sha"; then
+              echo "- \`${sha:0:7}\` — $SUBJECT (clean merge: reproduces from its parents)" >> "$SKIPPED"
+              continue
+            fi
+            if is_admin_first_push "$sha"; then
+              echo "- \`${sha:0:7}\` — $SUBJECT (first pushed by an admin)" >> "$SKIPPED"
+              continue
+            fi
 
             COUNT=$((COUNT + 1))
+            PUSHER=$(first_introduction "$sha" | awk -F'\t' '{ print $2 " (" $1 ")" }')
             AUTHOR=$(git show -s --format='%an <%ae>' "$sha")
             DATE=$(git show -s --format='%ci' "$sha")
             REFS=$(git branch -a --contains "$sha" 2>/dev/null \
@@ -337,9 +498,11 @@ jobs:
               echo "### \`${sha:0:7}\` — $SUBJECT"
               echo ""
               echo "- **Author:** $AUTHOR (self-declared; not proof of origin)"
+              echo "- **First pushed by:** ${PUSHER:-not in the activity log}"
               echo "- **Date:** $DATE"
               echo "- **Refs:** ${REFS:-none — unreferenced commit}"
               echo "- **Files:**"
+              # shellcheck disable=SC2016 # `$` is sed's end-of-line anchor
               echo "$FILES" | sed 's|^|  - `|; s|$|`|'
               echo "- [View diff](https://github.com/$GITHUB_REPOSITORY/commit/$sha)"
               echo ""
@@ -369,8 +532,9 @@ jobs:
           {
             echo "$COUNT unexplained commit(s) in the audit window (\`${WINDOW[*]}\`) since \`$SINCE\`."
             echo ""
-            echo "Routine Renovate pin bumps and reproducible tend regenerations are"
-            echo "classified and omitted — see the run summary for what was skipped."
+            echo "Renovate pin bumps, reproducible tend regenerations, clean merges, and"
+            echo "commits first pushed by an admin are classified and omitted — see the"
+            echo "run summary for what was skipped."
             echo "Everything below needs a human to account for it."
             echo ""
             cat "$REPORT"

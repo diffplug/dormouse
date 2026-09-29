@@ -1,9 +1,15 @@
 import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './alert-delivery-model';
 import { isRecord } from './is-record';
-import { isToolKeyScope, type ToolKeyScope } from './platform/tool-types';
+import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
+import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { SessionStatus } from './alert-manager';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
-import { ACTIVITY_NOTIFICATION_SOURCES, type ActivityNotification, type TodoState } from './alert-manager';
+import {
+  ACTIVITY_NOTIFICATION_SOURCES,
+  type ActivityNotification,
+  type ActivityNotificationSource,
+  type TodoState,
+} from './alert-manager';
 
 /** Only TODO/detail restore; `status` is diagnostic and never resurrects a ring. */
 export interface PersistedAlertState {
@@ -23,9 +29,14 @@ export interface PersistedToolMetadata {
   argv?: string[];
   scope?: ToolKeyScope;
   name?: string;
-  render: 'iframe' | 'ab-screencast';
+  render: ToolRender;
+  viewport?: BrowserViewportSetting;
   port: 'announced' | 'auto';
   key?: string[];
+  /** The Workspace's preview slot mark (`docs/specs/dor-tool.md` -> Preview slot). */
+  preview?: true;
+  /** The canonical file an `open` gave this Tool. */
+  target?: string;
 }
 
 /** Durable pane structure, never scrollback. Single-use recovery commands travel
@@ -45,16 +56,30 @@ export interface PersistedPane {
 }
 
 /**
+ * The notification sources a build from before the tolerant reader knows. Such
+ * a build rejects a whole session that carries any other, so the writer keeps
+ * to these until no strict pre-tolerant build reads the file
+ * (`docs/specs/alert.md` -> Public State).
+ */
+const STRICT_READER_NOTIFICATION_SOURCES: readonly ActivityNotificationSource[] = Object.freeze([
+  'OSC 9', 'OSC 9;4', 'OSC 99', 'OSC 777', 'BEL', 'COMMAND_EXIT',
+]);
+
+/**
  * Narrow Activity down to what may reach disk. The parameter deliberately uses
  * the persisted shape: live `AlertState` is structurally assignable to it, and
  * this explicit projection keeps `JSON.stringify` from writing extra live or
- * stale fields (`docs/specs/alert.md` -> Public State, "Persist only").
+ * stale fields (`docs/specs/alert.md` -> Public State, "Persist only"). A ring
+ * no one has looked at is written as the TODO a look would have left.
  */
 export function toPersistedAlertState(state: PersistedAlertState): PersistedAlertState {
+  const notification = state.notification ?? null;
   return {
     status: state.status,
-    todo: state.todo,
-    notification: state.notification ?? null,
+    todo: state.todo || state.status === 'ALERT_RINGING',
+    notification: notification !== null && STRICT_READER_NOTIFICATION_SOURCES.includes(notification.source)
+      ? notification
+      : null,
   };
 }
 
@@ -111,6 +136,9 @@ export type WorkspaceId = string;
 export interface PersistedWorkspace {
   id: WorkspaceId;
   name: string;
+  /** Always written. A blob from before auto-naming lacks it, and reads a
+   *  default name as auto, any other as user-set. */
+  nameIsAuto: boolean;
   session: PersistedSession;
 }
 
@@ -124,6 +152,11 @@ export interface PersistedWindow {
 /** Default id/name for the single Workspace a fresh Window is created with. */
 export const DEFAULT_WORKSPACE_ID: WorkspaceId = 'workspace-1';
 export const DEFAULT_WORKSPACE_NAME = 'Workspace 1';
+
+/** Whether a name is one `Workspace <n>` the app assigned, not one a user typed. */
+export function isDefaultWorkspaceName(name: string): boolean {
+  return /^Workspace \d+$/.test(name);
+}
 
 type PersistedPaneInput = Omit<PersistedPane, 'untouched'> & { untouched?: boolean };
 
@@ -139,12 +172,19 @@ interface PersistedSessionV3Input {
 
 // --- Validation guards (reject untrusted blobs) ---
 
+// `status` is diagnostic and `notification` optional detail: an unknown value
+// of either — a newer build's — never rejects the pane (`normalizePersistedAlert`).
 function isPersistedAlertShape(value: unknown): boolean {
   if (value === null) return true;
   if (!isRecord(value)) return false;
-  if (typeof value.status !== 'string') return false;
-  if (typeof value.todo !== 'boolean') return false;
-  return value.notification === undefined || value.notification === null || isActivityNotificationShape(value.notification);
+  return typeof value.status === 'string' && typeof value.todo === 'boolean';
+}
+
+/** Read a notification this build cannot validate as none, keeping the TODO. */
+function normalizePersistedAlert(alert: PersistedAlertState): PersistedAlertState {
+  const notification: unknown = alert.notification;
+  if (notification === undefined || notification === null || isActivityNotificationShape(notification)) return alert;
+  return { ...alert, notification: null };
 }
 
 function isActivityNotificationShape(value: unknown): boolean {
@@ -179,9 +219,12 @@ function isPersistedToolMetadataShape(value: unknown): boolean {
     (value.argv === undefined || isToolCommandArgv(value.argv)) &&
     (value.name === undefined || typeof value.name === 'string') &&
     (value.scope === undefined || isToolKeyScope(value.scope)) &&
-    (value.render === 'iframe' || value.render === 'ab-screencast') &&
+    isToolRender(value.render) &&
+    (value.viewport === undefined || isBrowserViewportSetting(value.viewport)) &&
     (value.port === 'announced' || value.port === 'auto') &&
-    (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string')))
+    (value.key === undefined || (Array.isArray(value.key) && value.key.every((part) => typeof part === 'string'))) &&
+    (value.preview === undefined || value.preview === true) &&
+    (value.target === undefined || (typeof value.target === 'string' && !hasShellInputControls(value.target)))
   );
 }
 
@@ -264,7 +307,11 @@ function normalizeSessionV3(session: PersistedSessionV3Input): PersistedSession 
       resumeCommand: _retiredResumeCommand,
       ...carried
     } = pane as PersistedPaneInput & { scrollback?: unknown; resumeCommand?: unknown };
-    return { ...carried, untouched: pane.untouched ?? false };
+    return {
+      ...carried,
+      untouched: pane.untouched ?? false,
+      ...(carried.alert ? { alert: normalizePersistedAlert(carried.alert) } : {}),
+    };
   });
   return {
     ...(rest as Omit<PersistedSession, 'panes' | 'surfaceRefs' | 'surfaceRefsNext'>),
@@ -309,7 +356,7 @@ export function wrapSessionInWindow(
   id: WorkspaceId = DEFAULT_WORKSPACE_ID,
   name: string = DEFAULT_WORKSPACE_NAME,
 ): PersistedWindow {
-  return { version: 1, workspaces: [{ id, name, session }], activeWorkspaceId: id };
+  return { version: 1, workspaces: [{ id, name, nameIsAuto: isDefaultWorkspaceName(name), session }], activeWorkspaceId: id };
 }
 
 /** Parse a Window, dropping invalid Workspaces and repairing a dangling active id. */
@@ -334,7 +381,8 @@ export function readPersistedWindow(raw: unknown): PersistedWindow | null {
       const session = readPersistedSession(ws.session);
       if (!session) return null;
       seen.add(ws.id);
-      return { id: ws.id, name: ws.name, session };
+      const nameIsAuto = typeof ws.nameIsAuto === 'boolean' ? ws.nameIsAuto : isDefaultWorkspaceName(ws.name);
+      return { id: ws.id, name: ws.name, nameIsAuto, session };
     })
     .filter((ws): ws is PersistedWorkspace => ws !== null);
   if (workspaces.length === 0) return null;

@@ -5,7 +5,7 @@
 > knows about, and how all of it is checked. Defers every mechanism to the spec
 > that owns it, and every audited check to the specs under
 > [How the guarantees are checked](#how-the-guarantees-are-checked). Published
-> at `https://dormouse.sh/docs/security`, whole but for the three blocks split
+> at `https://dormouse.sh/security`, whole but for the three blocks split
 > by audience; `docs/specs/website-docs.md` owns the page.
 
 Dormouse holds shells, source trees, credentials, and local files. Its
@@ -13,14 +13,20 @@ Dormouse holds shells, source trees, credentials, and local files. Its
 **remote control** admits an authorized phone as a person at the keyboard;
 **loopback listeners** receive requests from pages in the user's browser.
 
-**Only the self-hosted remote-control deployment ships.** Hosted account code is
-implemented with production provisioning pending ([Hosted accounts](./hosted.md));
-it grants no terminal access. The relay runs on hardware the user
-owns and is private to their tailnet by default, but its application boundary
-assumes the HTTPS origin is public ([SELF_HOST.md](../../SELF_HOST.md)).
+**Remote control ships two ways: through a self-hosted Relay, and as a one-time
+connection that needs no Relay.** Hosted account code is implemented with
+production provisioning pending ([Hosted accounts](./hosted.md)); it grants no
+terminal access. Hosted also serves the one-time phone page and forwards a
+one-time connection's handshake ciphertext, authorizing nothing
+([Hosted rendezvous](./one-time.md#hosted-rendezvous)); its deploy pipeline and
+Cloudflare account are part of a one-time session's trust base. The relay
+runs on hardware the user owns and is private to their tailnet by default, but
+its application boundary assumes the HTTPS origin is public
+([SELF_HOST.md](../../SELF_HOST.md)).
 **Nothing about remote control applies to a Burrow (a Standalone or VS Code
-Dormouse) that never enrolls with a Relay**: enrollment is where the relay, the
-phone, and push begin.
+Dormouse) that never enrolls with a Relay and never opens a one-time link**:
+enrollment is where the relay, the phone, and push begin, and a link admits
+one phone for one session.
 Cloud-hosted operation is staged, and its boundary is re-analyzed before that
 code ships ([security-remote.md](./security-remote.md#future)).
 
@@ -33,12 +39,13 @@ last column means nothing cheaper does.
 
 | Guarantee | Rule | Pinned by |
 | --- | --- | --- |
-| **A program printing to your terminal cannot write your clipboard, read a file, or steal focus.** It can raise an alert, set a title, or mark a prompt; an OSC 8 link requires confirmation, and a deceptive link has no open action. | [Terminal output](./security-local.md#terminal-output) | `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/external-links.test.ts`, `lib/src/components/ExternalLinkModalHost.test.tsx` |
+| **A program printing to your terminal cannot write your clipboard, read a file, or steal focus.** It can raise an alert, set a title, or mark a prompt; an OSC 8 link requires confirmation unless it is a local file link naming its target, which previews, and a deceptive link has no open action. | [Terminal output](./security-local.md#terminal-output) | `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `lib/src/components/ExternalLinkModalHost.test.tsx` |
 | **A page in a browser pane cannot forge a host message.** In VS Code every host message carries a per-boot token it cannot read, and the standalone adapters have no inbox for it to post to. | [Browser panes](./security-local.md#browser-panes) | `lib/src/lib/platform/vscode-adapter.test.ts` |
 | **Only your own account can drive your terminals through `dor`.** The socket sits in a directory only you can open, and its token never crosses the wire. | [The dor control socket](./security-local.md#the-dor-control-socket) | `standalone/sidecar/dor-control-server.test.js` |
 | **A loopback listener grants a stranger nothing it could not get from the upstream directly.** | [Loopback Listeners](./security-local.md#loopback-listeners) | `scripts/loopback-lint.mjs` |
-| **Current persistence writers never save terminal scrollback.** Standalone snapshots are owner-only; VS Code controls access to its own storage. Older snapshots may contain transcripts. Explicitly captured notepad excerpts, titles, and working directories are archived on Surface closure. | [Persisted state](./security-local.md#persisted-state) | `cargo test` in `standalone/src-tauri` (the owner-only half); audit |
+| **Current persistence writers never save terminal scrollback.** Standalone snapshots are owner-only; VS Code controls access to its own storage. Older snapshots may contain transcripts. | [Persisted state](./security-local.md#persisted-state) | `cargo test` in `standalone/src-tauri` (the owner-only half); audit |
 | **Nothing but a human at the laptop can authorize a phone.** The only path into a Burrow's ACL is typing, on that Burrow, the two digits the phone shows, and the Burrow makes every access decision. | [Pairing](./remote-security-model.md#pairing), [Burrow Authorization](./remote-security-model.md#burrow-authorization) | `remote-lib-common/test/security-guarantees.test.mjs` |
+| **A one-time connection is one session, confirmed at the laptop.** Only typing, on the laptop, the two digits that phone shows authorizes it; nothing is saved at either end, and its terminal traffic runs only directly between the two devices; Hosted carries the handshake alone. | [One-time connection](./remote-security-model.md#one-time-connection), [its checks](./security-remote.md#one-time-connection) | `lib/src/remote/client/one-time-e2e.test.ts`, `scripts/e2e-lint.mjs` |
 | **The Relay cannot read ceremony or terminal content or grant terminal access.** One end-to-end channel per ceremony carries content under keys the Relay never holds; account data and routing metadata remain visible. | [Trust Model](./remote-security-model.md#trust-model), [Residual metadata](./remote-security-model.md#residual-metadata) | `scripts/e2e-lint.mjs` |
 | **Push notifications are opt-in, and a push is sealed to the one phone that receives it.** | [Push sealing](./remote-security-model.md#push-sealing) | `remote-lib-common/test/push-seal.test.mjs` |
 | **A stolen or synced passkey buys sign-in, not a terminal.** Every connection also needs the phone's own paired key and a fresh presence proof bound to that connection. | [Passkeys](./remote-security-model.md#passkeys), [Presence proofs](./remote-security-model.md#presence-proofs) | `remote-lib-common/test/security-guarantees.test.mjs` |
@@ -49,7 +56,7 @@ last column means nothing cheaper does.
 | **Push, when enabled, cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-remote.md#what-crosses-the-boundary) | `relay/test/push-endpoint.test.mjs` |
 | **Every dependency that reaches a machine is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. | [Disclosure](./security-supply-chain.md#disclosure) | `.github/workflows/ci.yml` |
 | **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. | [Bundled runtime](./security-supply-chain.md#bundled-runtime) | `standalone/src-tauri/build.rs` |
-| **No newly published dependency is adopted for 24 hours**, security fixes included. | [Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts) | audit |
+| **Dependencies wait 24 hours**, except audited pgstencil releases approved with 2FA. | [Cooldown and alerts](./security-supply-chain.md#cooldown-and-alerts) | audit |
 | **Merging to `main` and creating a tag are admin-only**, and every workflow this repository authors pins its actions by commit. | [GitHub Actions Policies](./security-ci.md#github-actions-policies) | audit |
 | **The bot maintainer cannot merge, tag, or read a release secret**, and its token never enters its own environment. | [Automated Maintainer (tend)](./security-ci.md#automated-maintainer-tend) | `.github/workflows/workflow-audit.yaml`, nightly |
 | **Publishing the extension takes a second human's approval.** | [VS Code Extension Releases](./security-ci.md#vs-code-extension-releases) | audit |
@@ -74,13 +81,16 @@ run this knows what they are taking on.
   the Pocket origin can use the phone's key and, with encrypted fallback storage,
   extract its private bytes ([Client statics](./remote-security-model.md#client-statics)). Exactly
   two endpoints are trusted: the distributed Burrow binaries and the exact Pocket
-  artifact the origin serves ([Trust Model](./remote-security-model.md#trust-model)).
+  artifact the origin serves ([Trust Model](./remote-security-model.md#trust-model));
+  a one-time session also trusts the page Hosted serves
+  ([One-time connection](./remote-security-model.md#one-time-connection)).
 - **Traffic analysis.** The Relay sees who talks to whom, when, how often, and
   how large each ciphertext is, and keystroke timing, never keystroke values
   ([Residual metadata](./remote-security-model.md#residual-metadata)). An
   authorized session may move onto a direct connection between the two devices,
   after which the Relay sees that the session exists and nothing about its
-  traffic ([Direct path](./remote-security-model.md#direct-path)).
+  traffic ([Direct path](./remote-security-model.md#direct-path)). Hosted's
+  one-time rendezvous sees a handshake's timing, addresses, and frame sizes.
 - **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Relay that
   kept an envelope can re-deliver it ([Push sealing](./remote-security-model.md#push-sealing)).
 - **Per-Burrow unlinkability, when push is enabled.** One push endpoint per browser lets the Relay see
@@ -93,8 +103,8 @@ run this knows what they are taking on.
 - **The bot's upstream is pinned by tag, not commit**, so a hostile upstream
   could change what the bot runs without a diff here. Accepted: the trust equals
   what the harness already holds ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
-- **The Chromatic token is reachable by any workflow the bot can author.**
-  Accepted with rotation; abuse is visible in Chromatic's dashboard
+- **The Chromatic and Argos tokens are reachable by any workflow the bot can author.**
+  Accepted with rotation; each dashboard shows abuse
   ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 
 ## Known gaps
@@ -118,7 +128,7 @@ Gaps rather than accepted risks: we intend to close them.
   writes ([same](./security-remote.md#revocation-and-the-audit-trail)).
 - **The workflow audit's window has two evasions**, both in how the window is
   computed ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
-- **The audit's three subagents share one credential.** Their contexts are
+- **The audit's four subagents share one credential.** Their contexts are
   separate; `AUDIT_PAT` is not ([Domains](./security-audit.md#domains)).
 - **The notarization password sits on a command line for up to half an hour**
   per architecture; the remedy is known and not yet done
@@ -140,19 +150,21 @@ lints can only read.
 
 **Every night at 04:21 UTC, and before every VS Code release**,
 `.github/workflows/security-audit.yaml` audits the repository against these
-specs. Three subagents, each owning the specs below, run every `FAIL IF` as a
+specs. Four subagents, each owning the specs below, run every `FAIL IF` as a
 mechanical check with evidence, then read their domain adversarially for what
-no check names. A failure, or a run that reaches no verdict, files a public
+no check names. A failure, or a run reaching no verdict, files a public
 issue labeled
 [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure)
 and holds the release; a later pass closes it. Open issues are live; closed
-ones are the record of what tripped and what changed.
+ones record what tripped and changed.
 `scripts/security-audit-local.sh` runs the same prompts locally.
-[security-audit.md](./security-audit.md) is the contract.
+[security-audit.md](./security-audit.md) is the contract. pgstencil audits the
+packages Hosted consumes in its own repository.
 
 | Domain | Specs | Covers |
 | --- | --- | --- |
-| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md), [security-hosted.md](./security-hosted.md) | local boundaries, remote control, Hosted accounts, and every path no other domain claims |
+| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md) | local boundaries, remote control, and everything no other domain claims |
+| `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts, the one-time rendezvous, and the pgstencil provenance link |
 | `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
 | `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
 

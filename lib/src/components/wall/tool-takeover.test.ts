@@ -16,7 +16,7 @@ describe('isNakedToolInvocation', () => {
     expect(isNakedToolInvocation('dor tool --fresh storybook')).toBe(true);
     expect(isNakedToolInvocation('/usr/local/bin/dor tool storybook')).toBe(true);
     expect(isNakedToolInvocation('dor.cmd tool storybook')).toBe(true);
-    // The shared tokenizer skips a leading assignment, as `commandArgv0` does.
+    // The shared tokenizer skips a leading assignment, as `commandWatchKey` does.
     expect(isNakedToolInvocation('DEBUG=1 dor tool storybook')).toBe(true);
   });
 
@@ -48,6 +48,7 @@ describe.each(['tool', 'open'] as const)('toolTakesOverCaller for dor %s', (verb
     verb,
     explicitSurface: false,
     minimized: false,
+    preview: false,
     workspaceActive: true,
     visible: true,
     kind: 'terminal',
@@ -65,6 +66,7 @@ describe.each(['tool', 'open'] as const)('toolTakesOverCaller for dor %s', (verb
     const splits: Array<[string, Partial<ToolTakeoverGate>]> = [
       ['--surface named a reference', { explicitSurface: true }],
       ['--minimize asked for a background surface', { minimized: true }],
+      ['--preview asked for the preview slot', { preview: true }],
       ['the caller is minimized', { visible: false }],
       ['another Workspace is active', { workspaceActive: false }],
       ['the caller has an auxiliary helper', { helperPresent: true }],
@@ -105,6 +107,7 @@ describe('after the prompt wait', () => {
     verb: 'tool',
     explicitSurface: false,
     minimized: false,
+    preview: false,
     workspaceActive: true,
     visible: true,
     kind: 'terminal',

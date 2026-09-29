@@ -35,28 +35,28 @@ const SENTINEL = '<!-- END OF REPORT -->';
 
 const reporting = runBlock('Surface result, file or close issue');
 const cases = [
-  { name: 'all checks pass', status: 'PASS\n', verdicts: ['PASS', 'PASS', 'PASS'], expected: 'PASS' },
-  { name: 'missing merged verdict', verdicts: ['PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'embedded whitespace is not PASS', status: 'P A\nSS\n', verdicts: ['PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'PASS prefix with a suffix is unreadable', status: 'PASS', verdicts: ['PASS but unfinished', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'missing fragment', status: 'PASS', verdicts: [null, 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'unverifiable checks override merged PASS', status: 'PASS', verdicts: ['INCONCLUSIVE', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
-  { name: 'dissent overrides missing merged verdict', verdicts: ['FAIL', 'PASS', 'PASS'], expected: 'FAIL' },
-  { name: 'FAIL with explanation overrides merged PASS', status: 'PASS', verdicts: ['FAIL — credential leaked', 'PASS', 'PASS'], expected: 'FAIL' },
-  { name: 'FAIL with explanation overrides missing merged verdict', verdicts: ['FAIL — credential leaked', 'PASS', 'PASS'], expected: 'FAIL' },
-  { name: 'FAIL records every incomplete condition', status: 'FAIL', verdicts: [null, 'garbled', 'INCONCLUSIVE'], expected: 'FAIL', notes: ['left no report', 'could not be read', 'could not determine every check'] },
-  { name: 'dissent and incomplete domains coexist', status: 'PASS', verdicts: ['FAIL', null, 'INCONCLUSIVE'], expected: 'FAIL', notes: ['returned `FAIL`', 'left no report', 'could not determine every check'] },
+  { name: 'all checks pass', status: 'PASS\n', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'PASS' },
+  { name: 'missing merged verdict', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
+  { name: 'embedded whitespace is not PASS', status: 'P A\nSS\n', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
+  { name: 'PASS prefix with a suffix is unreadable', status: 'PASS', verdicts: ['PASS but unfinished', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
+  { name: 'missing fragment', status: 'PASS', verdicts: [null, 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
+  { name: 'unverifiable checks override merged PASS', status: 'PASS', verdicts: ['INCONCLUSIVE', 'PASS', 'PASS', 'PASS'], expected: 'INCONCLUSIVE' },
+  { name: 'dissent overrides missing merged verdict', verdicts: ['FAIL', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
+  { name: 'FAIL with explanation overrides merged PASS', status: 'PASS', verdicts: ['FAIL — credential leaked', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
+  { name: 'FAIL with explanation overrides missing merged verdict', verdicts: ['FAIL — credential leaked', 'PASS', 'PASS', 'PASS'], expected: 'FAIL' },
+  { name: 'FAIL records every incomplete condition', status: 'FAIL', verdicts: [null, 'garbled', 'INCONCLUSIVE', 'PASS'], expected: 'FAIL', notes: ['left no report', 'could not be read', 'could not determine every check'] },
+  { name: 'dissent and incomplete domains coexist', status: 'PASS', verdicts: ['FAIL', null, 'INCONCLUSIVE', 'PASS'], expected: 'FAIL', notes: ['returned `FAIL`', 'left no report', 'could not determine every check'] },
   // A domain cut off between rewriting its verdict line and writing its
   // sentinel reads as a clean PASS on line 1. Without the sentinel guard that
   // is a merged PASS over a report that stopped early, and PASS opens the
   // release gate.
-  { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'] },
-  { name: 'a cut-off FAIL is still a finding', status: 'PASS', verdicts: ['PASS', 'PASS', 'FAIL'], unfinished: [2], expected: 'FAIL', notes: ['returned `FAIL`', 'cut off mid-report'] },
-  { name: 'a trailing blank line still ends a report', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS'], trailingBlank: true, expected: 'PASS' },
+  { name: 'PASS without a sentinel is a cut-off domain', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['cut off mid-report'] },
+  { name: 'a cut-off FAIL is still a finding', status: 'PASS', verdicts: ['PASS', 'PASS', 'FAIL', 'PASS'], unfinished: [2], expected: 'FAIL', notes: ['returned `FAIL`', 'cut off mid-report'] },
+  { name: 'a trailing blank line still ends a report', status: 'PASS', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], trailingBlank: true, expected: 'PASS' },
   // The no-verdict note is the reader's index into the merged report, so it
   // names every marker the merge can leave there. Drop one and the reader is
   // told to look for two shapes in a report that has three.
-  { name: 'the no-verdict note names every report marker', verdicts: ['PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['`UNVERIFIABLE`', '`_Incomplete …_`', '`_No report …_`'] },
+  { name: 'the no-verdict note names every report marker', verdicts: ['PASS', 'PASS', 'PASS', 'PASS'], unfinished: [2], expected: 'INCONCLUSIVE', notes: ['`UNVERIFIABLE`', '`_Incomplete …_`', '`_No report …_`'] },
   // Run 34581574869 ended its turn before §3, so no merged report existed and
   // this arm published a single line — while two domains' finished `VERDICT:
   // PASS` fragments sat in the working directory and reached a human only
@@ -71,10 +71,50 @@ const cases = [
   // satisfied by the marker appearing anywhere: dropping the sentinel test
   // marks every fragment and inverting it marks the finished one, and both
   // read as a pass. Those are the inverse of the bug this arm fixes.
-  { name: 'no merged report publishes the fragments, marking cut-off and absent domains', report: null, verdicts: ['PASS', 'PASS', null], unfinished: [1], expected: 'INCONCLUSIVE',
+  { name: 'no merged report publishes the fragments, marking cut-off and absent domains', report: null, verdicts: ['PASS', 'PASS', null, 'PASS'], unfinished: [1], expected: 'INCONCLUSIVE',
     notes: ['the merge never ran', '## audit-supply-chain.md', 'VERDICT: PASS', '## audit-application.md', '_No report — this domain produced no fragment._',
       '## audit-ci-secrets.md\n\n_Incomplete — this domain never closed its report'],
     counts: { '_Incomplete — this domain never closed its report': 1 } },
+  // Run 35842217451 composed a 226,302-character body; the clamp keeps the
+  // head, so what reached the issue was `VERDICT: INCONCLUSIVE` for
+  // `audit-ci-secrets.md` without the one `UNVERIFIABLE` line the note sends
+  // the reader to, and without two later domains' sections at all. Every
+  // verdict and non-passing finding is lifted into the head ahead of the
+  // report, where the clamp cannot reach it.
+  { name: 'the lines that decided the verdict outlive truncation', status: 'PASS',
+    verdicts: ['PASS', 'INCONCLUSIVE', 'PASS', 'PASS'],
+    evidence: [null, '- UNVERIFIABLE: token scope needs a live credential', null, null],
+    report: `# Fixture report\n${'filler paragraph. '.repeat(3000)}\n`,
+    expected: 'INCONCLUSIVE', clamped: true,
+    notes: ['- `audit-ci-secrets.md`: - UNVERIFIABLE: token scope needs a live credential',
+      '- `audit-hosted.md`: VERDICT: PASS'] },
+  // The lift reads line starts, so the `FAIL IF` vocabulary every fragment is
+  // written in must not read as a finding: a passing clause quoting one, and
+  // the heading the list sits under, are both PASS evidence.
+  { name: 'a passing FAIL IF clause is not lifted as a finding', status: 'PASS',
+    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
+    evidence: ['### FAIL IF results\n- PASS: **FAIL IF** a secret leaks — none does.', null, null, null],
+    unfinished: [0], expected: 'INCONCLUSIVE',
+    counts: { 'FAIL IF': 0 } },
+  // A fragment carrying no marker line at all — the unreadable-verdict state
+  // the guard loop above already reports. The lift's `grep` matches nothing
+  // and exits 1; without `|| true` this step's `set -eo pipefail` ends it
+  // before the body is composed, so the reader gets a red run and an artifact
+  // instead of a truncated report. `raw` bypasses the verdict-line prefix
+  // every other fixture fragment carries.
+  { name: 'a fragment with no marker line still gets reported', status: 'PASS',
+    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
+    raw: [null, null, '# audit-application.md\n\nI reviewed the specs but could not finish.\n', null],
+    expected: 'INCONCLUSIVE', posts: true,
+    notes: ["A domain's verdict could not be read", '- `audit-hosted.md`: VERDICT: PASS'] },
+  // The cap falls on the findings alone, so one domain's findings cannot push
+  // a later domain's verdict out of the head — the loss the lift exists to
+  // prevent. 42 findings in the first fragment is two past the cap.
+  { name: 'findings past the cap do not push out a later verdict', status: 'PASS',
+    verdicts: ['PASS', 'PASS', 'PASS', 'PASS'],
+    evidence: [Array.from({ length: 42 }, (_, i) => `WARNING: finding ${i}`).join('\n'), null, null, null],
+    unfinished: [0], expected: 'INCONCLUSIVE',
+    notes: ['- `audit-hosted.md`: VERDICT: PASS', 'more findings; read them in the transcript'] },
 ];
 for (const scenario of cases) {
   test(`reporting: ${scenario.name}`, (t) => {
@@ -86,21 +126,30 @@ for (const scenario of cases) {
       if (args[0] === 'issue' && args[1] === 'list') process.stdout.write('23\\n');
     `);
     if (scenario.status !== undefined) writeFileSync(join(dir, 'audit-status.txt'), scenario.status);
-    if (scenario.report !== null) writeFileSync(join(dir, 'audit-report.md'), '# Fixture report\n');
+    if (scenario.report !== null) writeFileSync(join(dir, 'audit-report.md'), scenario.report ?? '# Fixture report\n');
     scenario.verdicts.forEach((verdict, i) => {
       if (verdict === null) return;
       const sentinel = scenario.unfinished?.includes(i)
         ? ''
         : `${SENTINEL}\n${scenario.trailingBlank ? '\n' : ''}`;
-      writeFileSync(join(dir, fragments[i]), `VERDICT: ${verdict}\nEvidence\n${sentinel}`);
+      const evidence = scenario.evidence?.[i] ?? 'Evidence';
+      writeFileSync(join(dir, fragments[i]),
+        scenario.raw?.[i] ?? `VERDICT: ${verdict}\n${evidence}\n${sentinel}`);
     });
     const result = spawnSync('bash', ['-c', reporting], { cwd: dir, env, encoding: 'utf8' });
     assert.equal(result.status, scenario.expected === 'PASS' ? 0 : 1, result.stderr);
     const calls = readFileSync(join(dir, 'gh-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(calls.some((args) => args[0] === 'issue' && args[1] === 'close'), scenario.expected === 'PASS');
+    // The step aborting before it posts leaves every `notes` assertion below
+    // unreachable, so name the post itself.
+    if (scenario.posts) {
+      assert.ok(calls.some((args) => args[0] === 'issue' && args[1] === 'comment'), 'no issue comment was posted');
+    }
     if (scenario.expected !== 'PASS') {
       const body = readFileSync(join(dir, 'audit-comment.md'), 'utf8');
       assert.match(body, scenario.expected === 'FAIL' ? /Audit failed/ : /Audit reached no usable verdict/);
+      // Without this the truncation case passes vacuously on a body that fit.
+      if (scenario.clamped) assert.match(body, /_Truncated to fit: the full body is \d+ characters\./);
       for (const note of scenario.notes ?? []) assert.ok(body.includes(note), `missing note: ${note}`);
       for (const [note, n] of Object.entries(scenario.counts ?? {})) {
         assert.equal(body.split(note).length - 1, n, `wrong occurrence count for: ${note}`);
@@ -139,7 +188,7 @@ for (const [verdict, cliExit, expected, sentinel = true] of [['PASS', 0, 0], ['F
     const { dir, env } = fixture(t);
     copyFileSync(join(repo, 'scripts/security-audit-local.sh'), join(dir, 'scripts/security-audit-local.sh'));
     mkdirSync(join(dir, '.github/audit'), { recursive: true });
-    for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'application-security']) {
+    for (const name of ['_preamble', 'orchestrator', 'supply-chain', 'ci-and-secrets', 'application-security', 'hosted']) {
       copyFileSync(join(repo, `.github/audit/${name}.md`), join(dir, `.github/audit/${name}.md`));
     }
     stub(dir, 'claude', `
@@ -297,6 +346,17 @@ test('orchestrator wait: fragments still being written keep the wait going', (t)
   assert.deepEqual(lines.slice(0, -1), [`${first}: finished`, ...rest.map((f) => `${f}: still writing`)]);
 });
 
+// One domain still writing keeps the wait going, whichever one it is. The
+// wait block's per-domain status lines are pinned to `AUDIT_FRAGMENTS`; its
+// `until` predicate is not, so a fragment dropped from that predicate would
+// let the orchestrator merge and publish while that domain was still writing.
+for (const held of fragments) {
+  test(`orchestrator wait: ${held} alone unfinished keeps the wait going`, (t) => {
+    const { answer } = runWait(t, { finished: fragments.filter((f) => f !== held), writing: [held] });
+    assert.equal(answer, 'STILL WAITING');
+  });
+}
+
 test('orchestrator wait: a re-issued call reads back the persisted deadline', (t) => {
   const deadline = now() + 600;
   const { answer, persisted } = runWait(t, { deadline });
@@ -323,6 +383,7 @@ test('merge distinguishes finished, cut-off, and absent domains', (t) => {
   // exact `tail -n1` this finished domain is published under the cut-off caveat.
   writeFileSync(join(dir, 'audit-supply-chain.md'), `VERDICT: PASS\nsupply evidence\n\n${SENTINEL}\n\n`);
   writeFileSync(join(dir, 'audit-ci-secrets.md'), 'VERDICT: INCONCLUSIVE\nci evidence\n');
+  writeFileSync(join(dir, 'audit-hosted.md'), `VERDICT: PASS\nhosted evidence\n${SENTINEL}\n`);
   const result = spawnSync('bash', ['-c', merge], { cwd: dir, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   const report = readFileSync(join(dir, 'audit-report.md'), 'utf8');
@@ -335,4 +396,7 @@ test('merge distinguishes finished, cut-off, and absent domains', (t) => {
   assert.equal(report.match(/_Incomplete —/g).length, 1);
   // A domain that never wrote anything is neither.
   assert.match(report, /## Application security\n\n_No report —/);
+  // The fourth domain is emitted too — a heading dropped from `emit` would
+  // silently publish a report missing a domain that did report.
+  assert.match(report, /## Hosted accounts\n\nVERDICT: PASS\nhosted evidence/);
 });

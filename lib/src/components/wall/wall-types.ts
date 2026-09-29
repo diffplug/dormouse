@@ -22,6 +22,8 @@ export type DoorChip = DooredItem & {
   kind: SurfaceKind;
   /** Browser-only presentation identity. Terminals omit it. */
   browserDisplay?: BrowserDisplayMode;
+  /** The Workspace's preview slot (`docs/specs/dor-tool.md` -> Preview slot). */
+  preview?: boolean;
 };
 
 /** The visible-pane projection (`lath.listPanes()`). Shared by the Wall helpers,
@@ -39,10 +41,9 @@ export const isWorkspaceSelection = (kind: WallSelectionKind): boolean => kind =
 export const workspaceIdOfSelection = (kind: WallSelectionKind, id: string | null): string | null =>
   kind === 'workspace-new' ? null : id;
 
-/** How a Surface closure answers the archive: `prompt` raises the Keep open /
- *  Close anyway prompt on refusal, `silent` only returns the refusal, `discard`
- *  drops the notes instead of archiving them (docs/specs/notepad.md → "Closure"). */
-export type CloseSurfaceMode = 'prompt' | 'silent' | 'discard';
+/** How a Workspace close was started: `prompt` for a user gesture, `silent` for
+ *  `dor workspace close`. */
+export type WorkspaceCloseMode = 'prompt' | 'silent';
 
 export type DoorAfterRestoreAction =
   | 'confirm-kill'

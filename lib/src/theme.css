@@ -153,6 +153,46 @@ body {
   .terminal-context-enter .terminal-context-content { animation: none; }
 }
 
+/* Preview slot switch (docs/specs/dor-tool.md → "Switching the slot"). The ghost of the
+ * slot's last view blurs at once and eases deeper, never dimming; the new view
+ * fades in over it. `motionIsInstant` adds `preview-ghost-static`, a static blur,
+ * and skips the fade. The blur is a backdrop overlay rather than the ghost's own
+ * `filter`: a filter samples transparent pixels past the pane edge and rims a
+ * light page dark, where the backdrop's edges clamp. Isolated, so the overlay
+ * stays above anything the ghost positions inside it. */
+.preview-ghost {
+  isolation: isolate;
+}
+
+.preview-ghost::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2147483647;
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  animation: preview-ghost-blur 600ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.preview-ghost-static::after {
+  animation: none;
+}
+
+.preview-reveal {
+  animation: preview-reveal 120ms ease-out both;
+}
+
+@keyframes preview-ghost-blur {
+  from { -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+  to { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+}
+
+@keyframes preview-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* TODO dismiss flourish. Sequence across 500ms:
  *   0–30%  letters fade out while the check springs in (with a small overshoot)
  *  30–55%  check settles, pill is visually still
@@ -211,4 +251,24 @@ body {
     animation: none;
     opacity: 0;
   }
+}
+
+/* TODO landing spotlight (docs/specs/alert.md → Pane Header): a Workspace tab's
+ * pill entered this Surface, so its header pill takes one wash of its own colour —
+ * rising, held while the focus ring lands, then fading. Not the flourish (no
+ * check, no dissolve) and not the alarm (no edge, no alarm colour, no repeat).
+ * Resting opacity is 0, so a finished pulse, or one reduced motion drops,
+ * leaves nothing on screen. TodoSpotlight remounts the overlay per signal. */
+.todo-spotlight {
+  opacity: 0;
+  animation: todo-spotlight 480ms ease-out;
+}
+@keyframes todo-spotlight {
+  0%       { opacity: 0; }
+  30%, 45% { opacity: 1; }
+  100%     { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-spotlight { animation: none; }
 }

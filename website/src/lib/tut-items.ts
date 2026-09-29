@@ -2,7 +2,7 @@
 const THEME_ITEM_IDS = ["th-theme"] as const;
 
 const GESTURE_ITEM_IDS = [
-  "gn-touch-mode",
+  "gn-scroll",
   "gn-arrows",
   "gn-enter",
   "gn-esc",
@@ -66,29 +66,33 @@ export interface TutorialProfile {
   initialSectionId?: string;
 }
 
+const OPEN_COMPASS = 'Touch away from either edge to open the gesture compass.';
+const diagonalHint = (key: string) =>
+  `${OPEN_COMPASS} Drag towards the diagonal that has \`${key}\`, and then drag back in the other direction to choose which \`kind\` of ${key}.`;
+
 const GESTURE_NAVIGATION_SECTION: Section = {
   id: 'gesture',
   title: 'Gesture navigation',
   items: [
     {
-      id: 'gn-touch-mode',
-      title: 'Switch between Select and Gestures',
-      hint: 'Tap `Select`, then tap `Gestures` again. This mode determines what happens when you touch the terminal.',
+      id: 'gn-scroll',
+      title: 'Scroll up and down',
+      hint: 'Glide up and down along either edge of the terminal. The background scrolls; these instructions stay put.',
     },
     {
       id: 'gn-arrows',
-      title: 'Use Gestures to send an arrow key',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Then drag directly up, down, left, or right past the circle.',
+      title: 'Send all four arrow keys',
+      hint: `${OPEN_COMPASS} Drag up, down, left, and right past the circle. Try all four.`,
     },
     {
       id: 'gn-enter',
-      title: 'Use Gestures to press Enter',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Drag towards the diagonal that has `Enter`, and then drag back in the other direction to choose which `kind` of Enter.',
+      title: 'Send Enter',
+      hint: diagonalHint('Enter'),
     },
     {
       id: 'gn-esc',
-      title: 'Use Gestures to press Esc',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Drag towards the diagonal that has `Esc`, and then drag back in the other direction to choose which `kind` of Esc.',
+      title: 'Send Escape',
+      hint: diagonalHint('Esc'),
     },
   ],
 };
@@ -208,16 +212,16 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
         id: 'al-ring',
         title: 'It rings when the command goes quiet',
         hint:
-          `Don't type! If you type, Dormouse will think you are paying attention to this task and the pane will not ring. It waits until you attend another pane or stop interacting for the inactivity timeout in Alarm settings.`,
+          `It rings when the command goes quiet, unless you are looking at that pane. The pane you are typing in or clicked into counts as looked at while you keep using Dormouse; stop for the inactivity timeout in Alarm settings and it rings.`,
       },
       {
         id: 'al-todo-auto',
         title: 'Dismissing a ringing alert leaves a TODO behind',
-        hint: 'Interact with the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
+        hint: 'Click the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
       },
       {
         id: 'al-todo-clear',
-        title: 'Press `Enter` inside the pane to clear the TODO',
+        title: 'Type anything inside the pane to clear the TODO',
       },
       {
         id: 'al-todo-manual',
@@ -227,17 +231,16 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'al-notif',
         title: 'A program can ring on its own',
-        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and its message shows on the TODO tag.',
+        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and once you look its message stays on the TODO tag.',
       },
       {
         id: 'al-cmd-exit',
-        title: 'A long command that finished while you were away',
-        hint:
-          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than the inactivity timeout in Alarm settings and finished after you walked away — again, no rule needed.`,
+        title: 'A command that finished while you were away',
+        hint: 'Press `x` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command you looked at that finished after you walked away — again, no rule needed.',
       },
     ],
     prose: [
-      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are actually looking at the pane.',
+      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a command finishing while you were elsewhere. None of them ring while you are looking at the pane — they wait until you go idle.',
     ],
   },
   COPY_PASTE_SECTION,

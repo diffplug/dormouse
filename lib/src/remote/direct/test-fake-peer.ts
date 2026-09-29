@@ -73,6 +73,18 @@ export type ChannelDefect = 'unordered' | 'lossy' | 'expiring' | 'mislabeled';
 export const flushMicrotasks = (): Promise<unknown> =>
   new Promise((resolve) => setTimeout(resolve, 0));
 
+/**
+ * A peer factory that keeps what it builds, so a case can close or inspect the
+ * far end by hand. Both ends of a session get their own array.
+ */
+export function collect<T>(into: T[], build: () => T): () => T {
+  return () => {
+    const peer = build();
+    into.push(peer);
+    return peer;
+  };
+}
+
 export class FakeDirectNetwork {
   readonly #options: FakeDirectNetworkOptions;
   readonly #peers = new Map<FakePeerRole, FakePeer>();

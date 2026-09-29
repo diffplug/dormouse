@@ -3,12 +3,15 @@ import type {
   CommandContext,
   StricliProcess,
 } from '@stricli/core';
+import type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode } from 'dor-lib-common/browser-providers';
+import type { BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
+
+export type { BrowserAutomationProvider, BrowserBinding, SurfaceRenderMode };
 
 export type IdFormat = 'refs' | 'ids' | 'both';
 export type SplitDirection = 'left' | 'right' | 'up' | 'down' | 'auto';
 export type ResolvedSplitDirection = 'left' | 'right' | 'up' | 'down';
 export type SurfaceKind = 'terminal' | 'browser' | 'tool';
-export type SurfaceRenderMode = 'iframe' | 'ab-screencast' | 'ab-popout';
 
 /** What each kind is backed by (`docs/specs/glossary.md` → Panes and Surfaces).
  *  The single source of capability gating; kind switches elsewhere go through
@@ -84,6 +87,8 @@ export interface Surface {
   /** At least one `dor await` is parked on this Surface. Never persisted — a
    *  wait cannot outlive the process blocking on it. */
   awaited: boolean;
+  /** The Workspace's preview slot (`dor open --preview`); omitted otherwise. */
+  preview?: boolean;
   /** Listening ports opened by this terminal Surface. Present only when the
    *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
   ports?: SurfacePort[];
@@ -142,6 +147,8 @@ export interface WorkspaceRow {
   ref: string;
   id: string;
   name: string;
+  /** Derived from its terminals rather than set by a user. */
+  auto: boolean;
   active: boolean;
   ringing: boolean;
   todo: boolean;
@@ -166,7 +173,9 @@ export interface NewWorkspaceRequest {
 
 export interface RenameWorkspaceRequest {
   workspace: string;
-  name: string;
+  /** The name to keep; omitted with `auto`, which hands it back to auto-naming. */
+  name?: string;
+  auto?: true;
   window?: string;
 }
 
@@ -261,7 +270,7 @@ export interface EnsureSurfaceResponse {
  * authorized it (`docs/specs/dor-tool.md` -> Trust).
  */
 export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
-  /** Local-file dispatch; never eligible for caller takeover. */
+  /** Local-file dispatch (`dor open`). */
   file?: string;
   tool?: string;
   /** Registered tool name (`dor tool <name>`). */
@@ -277,6 +286,8 @@ export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
   cwd: string;
   /** Surface to split when creating. */
   surface?: string;
+  /** Show `file` in the Workspace's preview slot (`dor open --preview`). */
+  preview?: boolean;
 }
 
 export interface ToolSurfaceResponse {
@@ -288,8 +299,14 @@ export interface ToolSurfaceResponse {
    * for the same reason `takeover` is. `takeover` is the calling pane itself
    * becoming the tool, answered before the command is typed — `dor` has to exit
    * before its own shell is free to run it.
+   *
+   * `retargeted` is the preview slot running the newly resolved Tool in place,
+   * answered once the command is typed; the slot re-running the Tool and
+   * target it already had, after its command exited, is `adopted`.
+   * `superseded` is a preview a newer one replaced before it ran; the handle is
+   * the slot's.
    */
-  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover';
+  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover' | 'retargeted' | 'superseded';
   surfaceId: string;
   surfaceRef: string;
   /** The rendered command, as typed into the shell. */
@@ -300,6 +317,46 @@ export interface ToolSurfaceResponse {
   key: string[] | null;
   /** Non-fatal `dormouse.yml` lint output, printed to stderr by the CLI. */
   warnings?: string[];
+}
+
+/** The error a preview answers with when a newer one replaced it while no
+ *  slot exists: superseded, as the `superseded` status is, not failed. */
+export const PREVIEW_SUPERSEDED_ERROR = 'superseded by a newer preview';
+
+/** `dor tool --list`: the Tools `dor tool <name>` would resolve from `cwd`. */
+export interface ToolListRequest {
+  cwd: string;
+  /** Skip project discovery, as `dor tool --global <name>` does. */
+  global: boolean;
+}
+
+/** One declared Tool, as `dor tool --list` reports it. */
+export interface ToolListEntry {
+  name: string;
+  scope: 'project' | 'user';
+  run: string | string[];
+  render: 'iframe' | 'agent-browser-screencast' | 'playwright-screencast';
+  port: 'announced' | 'auto';
+  /** Declares `prespawn_dedupe`, so a rerun reveals the running Tool. */
+  keyed: boolean;
+  /** The comment block directly above the entry, raw: control characters are
+   *  escaped by whatever prints it. Null when there is none. Repo text: it
+   *  describes, it never authorizes. */
+  description: string | null;
+  /** A user Tool hidden from `dor tool <name>` by a project Tool of that name. */
+  shadowed: boolean;
+}
+
+export interface ToolListResponse {
+  /** The nearest project `dormouse.yml`, and whether the user has approved it;
+   *  null when there is none or the request was `global`. */
+  project: { path: string; approved: boolean } | null;
+  /** Where user Tools are read from, whether or not that file exists. */
+  user: { path: string; found: boolean };
+  /** Project Tools, then user Tools, each in file order. */
+  tools: ToolListEntry[];
+  /** Non-fatal `dormouse.yml` lint output, printed to stderr by the CLI. */
+  warnings: string[];
 }
 
 export interface SendSurfaceRequest extends WorkspaceScopedRequest {
@@ -401,48 +458,73 @@ export interface ResolveOpenTargetResponse {
   port: number;
 }
 
-/** The two ways `dor ab` asks the host to name a session: a Surface handle whose
- *  bound session it wants, or a managed `--key`, whose session name is the
- *  answering Workspace's (`docs/specs/dor-browser.md` → Managed identity). Never
- *  both — a key names no Surface, and a Surface's session was minted long ago. */
-export type ResolveAgentBrowserSessionRequest = WorkspaceScopedRequest & (
+/** The two ways a browser command asks the host for its binding: a Surface
+ *  handle, or a managed `--key`, which only the answering Workspace can
+ *  namespace (`docs/specs/dor-browser.md` → Managed identity). Never both — a
+ *  key names no Surface, and a Surface's session was minted long ago. */
+export type ResolveBrowserRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider } & (
   | {
     /** A Surface handle (surface:N, surface:<stable-id>, surface:self,
      *  surface:focused, title:<title>) naming the browser Surface to drive. */
     surface: string;
     key?: undefined;
+    proposed?: undefined;
   }
   | {
-    /** A managed browser key (`dor ab --key`), which only the answering
-     *  Workspace can namespace. */
     key: string;
     surface?: undefined;
+    /** The caller's cwd and executable, offered for a key's first command
+     *  that may bind a Surface; the host mints the session. */
+    proposed?: Omit<BrowserBinding, 'session'>;
   }
 );
 
-export interface ResolveAgentBrowserSessionResponse {
-  /** The Surface the handle named; absent when the request named a `key`, which
-   *  is answered whether or not a Surface holds that session yet. */
-  surfaceId?: string;
-  surfaceRef?: string;
-  /** The agent-browser session — what `dor ab` forwards as `--session`. Includes
-   *  GUI-minted sessions, which no `--key` can name. */
-  session: string;
+export interface ResolveBrowserResponse {
+  /** The key's or Surface's binding; a key no Surface holds yet gets the
+   *  session the host minted for it. */
+  binding: BrowserBinding;
+  /** A new managed session that needs viewport preparation before navigation. */
+  fresh?: boolean;
+  initialViewport?: BrowserViewportSetting;
+  launchViewport?: { width: number; height: number; dpr?: number };
 }
 
-export interface AgentBrowserSurfaceRequest extends WorkspaceScopedRequest {
+/** After a browser command succeeds: open or reuse the Surface bound to its
+ *  session. The binding fields are what the command ran with. */
+export interface BrowserSurfaceRequest extends WorkspaceScopedRequest {
+  provider: BrowserAutomationProvider;
   /** Managed workspace-scoped key; absent when attaching via raw --session. */
   key?: string;
-  /** Resolved agent-browser session name — the join key for the surface. */
   session: string;
-  /** Session stream WebSocket port from `stream status --json`. */
-  wsPort?: number;
-  /** Absolute path of the agent-browser binary, resolved with the invoking
-   * terminal's PATH so the host (which may lack it) can run tab/close. */
+  /** The directory the command ran in. */
+  cwd?: string;
+  /** Absolute path of the provider's binary, resolved with the invoking
+   * terminal's PATH so the host (which may lack it) can drive the browser. */
   binaryPath?: string;
+  /** agent-browser only: the stream port `dor agent-browser` read itself after the
+   * command; the Surface streams from it instead of asking the host. */
+  wsPort?: number;
+  minimized?: boolean;
+  initialViewport?: BrowserViewportSetting;
 }
 
-export interface AgentBrowserSurfaceResponse {
+export type BrowserViewportRequest = WorkspaceScopedRequest & { provider: BrowserAutomationProvider; setting?: BrowserViewportSetting | { preset: string; dpr?: number } } & (
+  | { key: string; surface?: undefined; session?: undefined }
+  | { surface: string; key?: undefined; session?: undefined }
+  | { session: string; key?: undefined; surface?: undefined }
+);
+
+export interface BrowserViewportResponse {
+  surfaceId: string;
+  surfaceRef: string;
+  provider: BrowserAutomationProvider;
+  renderMode: SurfaceRenderMode;
+  requested: BrowserViewportSetting;
+  actual?: { width: number; height: number; dpr: number };
+  ready: boolean;
+}
+
+export interface BrowserSurfaceResponse {
   status: 'created' | 'existing' | 'replaced';
   surfaceId: string;
   surfaceRef: string;
@@ -451,20 +533,20 @@ export interface AgentBrowserSurfaceResponse {
 }
 
 export interface ControlClient {
+  browserSurface(request: BrowserSurfaceRequest): Promise<BrowserSurfaceResponse>;
+  browserViewport(request: BrowserViewportRequest): Promise<BrowserViewportResponse>;
+  resolveBrowser(request: ResolveBrowserRequest): Promise<ResolveBrowserResponse>;
   listSurfaces(request: ListSurfacesRequest): Promise<ListSurfacesResponse>;
   splitSurface(request: SplitSurfaceRequest): Promise<SplitSurfaceResponse>;
   ensureSurface(request: EnsureSurfaceRequest): Promise<EnsureSurfaceResponse>;
   toolSurface(request: ToolSurfaceRequest): Promise<ToolSurfaceResponse>;
+  toolList(request: ToolListRequest): Promise<ToolListResponse>;
   sendSurface(request: SendSurfaceRequest): Promise<SendSurfaceResponse>;
   readSurface(request: ReadSurfaceRequest): Promise<ReadSurfaceResponse>;
   awaitSurface(request: AwaitSurfaceRequest): Promise<AwaitSurfaceResponse>;
   killSurface(request: KillSurfaceRequest): Promise<KillSurfaceResponse>;
   iframeSurface(request: IframeSurfaceRequest): Promise<IframeSurfaceResponse>;
-  agentBrowserSurface(request: AgentBrowserSurfaceRequest): Promise<AgentBrowserSurfaceResponse>;
   resolveOpenTarget(request: ResolveOpenTargetRequest): Promise<ResolveOpenTargetResponse>;
-  resolveAgentBrowserSession(
-    request: ResolveAgentBrowserSessionRequest,
-  ): Promise<ResolveAgentBrowserSessionResponse>;
   listWorkspaces(request: ListWorkspacesRequest): Promise<ListWorkspacesResponse>;
   newWorkspace(request: NewWorkspaceRequest): Promise<WorkspaceMutationResponse>;
   renameWorkspace(request: RenameWorkspaceRequest): Promise<WorkspaceMutationResponse>;
@@ -474,14 +556,15 @@ export interface ControlClient {
   restartApp(): Promise<AppRestartResponse>;
 }
 
-export interface AgentBrowserExecResult {
+export interface BrowserExecResult {
   exitCode: number;
   stdout: string;
   stderr: string;
 }
 
-/** Runs the user's agent-browser binary; injectable so CLI tests stay hermetic. */
-export type AgentBrowserExec = (binary: string, args: string[]) => Promise<AgentBrowserExecResult>;
+/** Runs the user's browser CLI binary, in `cwd` when given; injectable so CLI
+ *  tests stay hermetic. */
+export type BrowserExec = (binary: string, args: string[], cwd?: string, env?: Record<string, string>) => Promise<BrowserExecResult>;
 
 export interface CliEnv {
   [key: string]: string | undefined;
@@ -492,7 +575,8 @@ export interface CliOptions {
   client?: ControlClient;
   readStdin?: () => Promise<string>;
   versionMetadata?: VersionMetadata;
-  execAgentBrowser?: AgentBrowserExec;
+  execAgentBrowser?: BrowserExec;
+  execPlaywright?: BrowserExec;
 }
 
 export interface CliResult {

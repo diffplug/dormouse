@@ -1,5 +1,4 @@
-import { getToolDirty, resetToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 // The in-process session-flush handshake and drain wrappers on TauriAdapter are
 // pure webview-side logic — they never invoke Tauri — so we only need to stub the
@@ -17,8 +16,7 @@ vi.mock("@tauri-apps/plugin-shell", () => ({
 
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { NotepadArchiveV1 } from "dormouse-lib/lib/notepad/types";
-import type { AlertStateDetail, PtyDataDetail } from "dormouse-lib/lib/platform/types";
+import type { AlertStateDetail } from "dormouse-lib/lib/platform/types";
 import { getTerminalPaneState } from "dormouse-lib/lib/terminal-state-store";
 import { TauriAdapter } from "./tauri-adapter";
 
@@ -109,6 +107,25 @@ describe("TauriAdapter cwd probing", () => {
   });
 });
 
+describe("TauriAdapter browser requests", () => {
+  it("sends every request through one browser_request, and answers a failure as a result", async () => {
+    // Frames never cross this IPC: the webview takes them over the host's
+    // viewer socket.
+    const adapter = new TauriAdapter();
+    vi.mocked(rawInvoke).mockImplementation(async (cmd: string) => (cmd === "browser_request" ? { ok: true, stream: 4321 } : undefined));
+    const binding = { session: "sess" };
+
+    const attached = await adapter.browser({ provider: "playwright", binding, op: "attach" });
+    expect(attached).toEqual({ ok: true, stream: 4321 });
+    expect(vi.mocked(rawInvoke).mock.calls.filter(([cmd]) => cmd.startsWith("browser_"))).toEqual([
+      ["browser_request", { request: { provider: "playwright", binding, op: "attach" } }],
+    ]);
+
+    vi.mocked(rawInvoke).mockRejectedValueOnce(new Error("sidecar gone"));
+    expect(await adapter.browser({ provider: "agent-browser", binding, op: "close" })).toEqual({ ok: false, error: "sidecar gone" });
+  });
+});
+
 describe("TauriAdapter port probing", () => {
   it("sends one pty_get_open_ports_many for a whole listing, and fails soft", async () => {
     // `dor list --ports` across Workspaces asks once for every terminal: the
@@ -142,7 +159,7 @@ describe("TauriAdapter window persistence", () => {
   const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
   const windowBlob = {
     version: 1 as const,
-    workspaces: [{ id: "ws-1", name: "One", session }],
+    workspaces: [{ id: "ws-1", name: "One", nameIsAuto: false, session }],
     activeWorkspaceId: "ws-1",
   };
 
@@ -213,72 +230,6 @@ describe("TauriAdapter window persistence", () => {
     await expect(adapter.captureAgentRecovery(1300)).resolves.toBeUndefined();
     expect(invoke).toHaveBeenCalledWith("capture_agent_recovery", { timeout: 1300 });
     adapter.shutdown();
-  });
-});
-
-// The archive port is a thin bridge to three Rust commands (docs/specs/notepad.md).
-// What is covered here is exactly what this side owns: the None → null mapping,
-// serialization, and passing the stored string through unparsed — the
-// compare-and-swap itself is Rust's, and validation is the shared layer's.
-describe("TauriAdapter notepad archive", () => {
-  const archive: NotepadArchiveV1 = { version: 1, batches: [] };
-
-  function invoking(impl: (cmd: string, args?: Record<string, unknown>) => unknown) {
-    const invoke = vi.mocked(rawInvoke);
-    invoke.mockClear();
-    invoke.mockImplementation((async (cmd: string, args?: Record<string, unknown>) =>
-      impl(cmd, args)) as unknown as typeof rawInvoke);
-    return { adapter: new TauriAdapter(), invoke };
-  }
-
-  it("reads a missing archive as null", async () => {
-    const { adapter } = invoking(() => null);
-    expect(await adapter.notepadArchive.load()).toBeNull();
-  });
-
-  it("hands the stored string through unparsed, with its revision", async () => {
-    // Deliberately not valid JSON: an unreadable archive has to reach the shared
-    // validator as-is, not fail here (its recovery is a user decision).
-    const { adapter } = invoking(() => ["{ not an archive", "7"]);
-    expect(await adapter.notepadArchive.load()).toEqual({
-      raw: "{ not an archive",
-      revision: "7",
-    });
-  });
-
-  it("serializes a save and names the revision it read", async () => {
-    const { adapter, invoke } = invoking(() => "ok");
-    expect(await adapter.notepadArchive.save(archive, "3")).toBe("ok");
-    expect(invoke).toHaveBeenCalledWith("save_notepad_archive", {
-      state: JSON.stringify(archive),
-      baseRevision: "3",
-    });
-
-    // Nothing stored yet: the base revision is null, not omitted.
-    await adapter.notepadArchive.save(archive, null);
-    expect(invoke).toHaveBeenLastCalledWith("save_notepad_archive", {
-      state: JSON.stringify(archive),
-      baseRevision: null,
-    });
-  });
-
-  it("reports a conflict rather than throwing, so the caller can retry", async () => {
-    const { adapter } = invoking(() => "conflict");
-    expect(await adapter.notepadArchive.save(archive, "0")).toBe("conflict");
-  });
-
-  it("moves an unreadable archive aside through the Rust command", async () => {
-    const { adapter, invoke } = invoking(() => undefined);
-    await adapter.notepadArchive.resetUnreadable();
-    expect(invoke).toHaveBeenCalledWith("reset_notepad_archive");
-  });
-
-  it("rejects when the host cannot store the archive", async () => {
-    // A closure that cannot archive its notes must take the failure path.
-    const { adapter } = invoking(() => {
-      throw new Error("disk full");
-    });
-    await expect(adapter.notepadArchive.save(archive, null)).rejects.toThrow("disk full");
   });
 });
 
@@ -375,9 +326,9 @@ describe("TauriAdapter remote host link", () => {
 // The sidecar owns the parse (docs/specs/terminal-escapes.md → "Parsing
 // location"), so this adapter forwards what it is given and never re-derives
 // it. What is covered here is exactly that boundary.
+// The parse boundary both sidecar adapters share is pinned once, for both, in
+// `sidecar-adapters.test.ts`; what is Tauri's alone is here.
 describe("TauriAdapter terminal stream", () => {
-  afterEach(resetToolDirty);
-
   async function listening() {
     const handlers = new Map<string, (event: { payload: unknown }) => void>();
     vi.mocked(listen).mockImplementation((async (
@@ -402,50 +353,8 @@ describe("TauriAdapter terminal stream", () => {
     };
   }
 
-  it("applies dirty live/replay reports in order and preserves explicit clean across exit", async () => {
-    const { deliver } = await listening();
-    const id = 'dirty-stream';
-    deliver('terminal:protocolEvents', { id, events: [
-      { kind: 'toolState', state: { dirty: true } },
-      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
-      { kind: 'toolState', state: { dirty: false } },
-    ] });
-    deliver('terminal:semanticEvents', { id, events: [{ type: 'commandStart', source: 'osc633_boundaries' }] });
-    expect(getToolDirty(id)).toBe(false);
-    deliver('pty:exit', { id, exitCode: 0 });
-    expect(getToolDirty(id)).toBe(false);
-    deliver('pty:replay', { id, data: '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":true}\x07' });
-    expect(getToolDirty(id)).toBe(true);
-    deliver('pty:replay', { id, data: 'since-mark output without a new command' });
-    expect(getToolDirty(id)).toBe(true);
-    deliver('pty:replay', { id, data: '\x1b]633;C\x07' });
-    expect(getToolDirty(id)).toBeNull();
-  });
-
-  it("forwards the projection pair it was handed, parsing nothing again", async () => {
+  it("applies the semantic and Tool events the sidecar derived, and no report", async () => {
     const { adapter, deliver, invoke } = await listening();
-    const seen: PtyDataDetail[] = [];
-    adapter.onPtyData((detail) => void seen.push(detail));
-
-    // An image sequence: a second parse here would strip nothing but would
-    // answer the query below twice.
-    deliver("pty:data", {
-      id: "t1",
-      data: "pre\x1b]1337;File=inline=1:AAAA\x07post",
-      textData: "prepost",
-    });
-    deliver("pty:data", { id: "t1", data: "\x1b]11;?\x07" });
-
-    expect(seen).toEqual([
-      { id: "t1", data: "pre\x1b]1337;File=inline=1:AAAA\x07post", textData: "prepost" },
-      { id: "t1", data: "\x1b]11;?\x07", textData: undefined },
-    ]);
-    // No reply written back: the owner answered, or deliberately did not.
-    expect(invoke.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
-  });
-
-  it("applies the semantic and alert events the sidecar derived", async () => {
-    const { adapter, deliver } = await listening();
     const alerts: AlertStateDetail[] = [];
     adapter.onAlertState((detail) => void alerts.push(detail));
 
@@ -464,7 +373,8 @@ describe("TauriAdapter terminal stream", () => {
         },
       ],
     });
-    deliver("terminal:protocolEvents", {
+    // A report reaching this window is inert: the sidecar's manager judged it.
+    deliver("terminal:toolEvents", {
       id: "sem-pty",
       events: [
         { kind: "notification", notification: { source: "OSC 9", title: null, body: "done" } },
@@ -472,71 +382,17 @@ describe("TauriAdapter terminal stream", () => {
     });
 
     expect(getTerminalPaneState("sem-pty").cwd?.path).toBe("/tmp/here");
-    expect(alerts.some((detail) => detail.id === "sem-pty")).toBe(true);
+    expect(alerts).toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
   });
 
-  // A transferred pane's new window sees nothing but the replay: Rust drops the
-  // gap's semantic events because this path re-derives them, so it must rebuild
-  // both halves — pane state and the AlertManager's watch.
-  it("rebuilds alert state from a replay, not only pane state", async () => {
-    const { adapter, deliver } = await listening();
-    const alerts: AlertStateDetail[] = [];
-    adapter.onAlertState((detail) => void alerts.push(detail));
-    // The rule set is the sidecar's; this window hears it as a broadcast.
-    deliver("alert:watchedCommands", { names: ["sleep"] });
-
-    deliver("pty:replay", {
-      id: "replay-pty",
-      data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
-    });
-
-    expect(getTerminalPaneState("replay-pty").currentCommand?.rawCommandLine).toBe("sleep 5");
-    expect(alerts.some((detail) => detail.id === "replay-pty" && detail.watchingEnabled)).toBe(true);
-  });
-
-  it("applies notification side effects only to the marked live handoff replay", async () => {
-    const { adapter, deliver } = await listening();
-    const alerts: AlertStateDetail[] = [];
-    adapter.onAlertState((detail) => void alerts.push(detail));
-    adapter.alertSeed('marked-alert', { status: 'WATCHING_DISABLED', todo: false, notification: null });
-    const runtime = adapter.alertPauseForTransfer('marked-alert')!;
-    adapter.alertResumeFromTransfer('marked-alert', runtime, 'init-live');
-    // A historical replay racing the since-mark one carries another token: inert, and it does not consume the permission.
-    deliver('pty:replay', { id: 'marked-alert', data: '\x1b]9;Historical replay\x07', requestId: 'init-boot' });
-    expect(alerts[alerts.length - 1]?.status).not.toBe('ALERT_RINGING');
-    deliver('pty:replay', { id: 'marked-alert', data: '\x1b]9;Finished in transit\x07', requestId: 'init-live' });
-    expect(alerts[alerts.length - 1]?.status).toBe('ALERT_RINGING');
-    adapter.alertDismiss('marked-alert');
-    deliver('pty:replay', { id: 'marked-alert', data: '\x1b]9;Later replay\x07', requestId: 'init-live' });
-    expect(alerts[alerts.length - 1]?.status).not.toBe('ALERT_RINGING');
-  });
-
-  it("settles the replayed watch when a marked buffer belongs to an exited PTY", async () => {
-    const { adapter, deliver } = await listening();
-    const alerts: AlertStateDetail[] = [];
-    adapter.onAlertState((detail) => void alerts.push(detail));
-    deliver("alert:watchedCommands", { names: ["sleep"] });
+  it("settles the replayed command when a marked buffer belongs to an exited PTY", async () => {
+    const { deliver } = await listening();
     deliver("pty:list", { ptys: [{ id: "exited-replay", alive: false, exitCode: 7 }], requestId: "handback-1" });
     deliver("pty:replay", {
       id: "exited-replay", requestId: "handback-1",
       data: "\x1b]633;E;sleep 5\x07\x1b]633;C\x07",
     });
     expect(getTerminalPaneState("exited-replay").currentCommand).toBeNull();
-    expect(alerts[alerts.length - 1]?.watchingEnabled).toBe(false);
-  });
-
-  it("pushes the resolved theme so the sidecar can answer a colour query", async () => {
-    const { adapter, invoke } = await listening();
-    adapter.requestInit();
-
-    const pushed = invoke.mock.calls.filter(([cmd]) => cmd === "pty_theme_colors");
-    expect(pushed).toHaveLength(1);
-    expect(pushed[0]![1]).toEqual({
-      colors: {
-        foreground: expect.any(String),
-        background: expect.any(String),
-        cursor: expect.any(String),
-      },
-    });
   });
 });

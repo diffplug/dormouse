@@ -6,7 +6,7 @@
  * the loopback port it's showing in the shared store (`useDevServerMatch`) and
  * this module resolves it: scan every terminal Surface's listening ports
  * (`getOpenPorts`), find the single one serving that port, and publish back
- * `{ paneId, label }`.
+ * `{ paneId, fallbackTitle }`; the header derives the label live.
  *
  * **One loop per WINDOW, over every mounted Wall's Surfaces.** The wanted-port
  * store and the resolutions are window-wide, so a per-Wall loop would answer
@@ -35,7 +35,6 @@
 import { useEffect } from 'react';
 import { getPlatform } from '../../lib/platform';
 import { createRefCount } from '../../lib/ref-count';
-import { deriveSessionLabel } from '../../lib/session-label';
 import {
   getWantedDevServerPorts,
   setDevServerResolution,
@@ -178,7 +177,7 @@ function startCorrelationLoop(): () => void {
         // (e.g. the dev server is still starting up).
         if (list.length === 1) {
           settled.add(port);
-          setDevServerResolution(port, { paneId: list[0], label: deriveSessionLabel(list[0], titles.get(list[0]) ?? null) });
+          setDevServerResolution(port, { paneId: list[0], fallbackTitle: titles.get(list[0]) ?? null });
         } else {
           setDevServerResolution(port, null);
         }

@@ -4,24 +4,12 @@
 
 - `docs/specs/security-local.md`
 - `docs/specs/security-remote.md`
-- `docs/specs/security-hosted.md`
 
 **Output file:** `audit-application.md`
 
 This is a code-and-specs audit of the product's own boundaries — the remote
 control stack, and the local application. You need no GitHub API access and no
 PAT — do not use one.
-
-For Hosted accounts, read `docs/specs/hosted.md`, `hosted/server/`,
-`hosted/src/`, `hosted/scripts/`, `hosted/wrangler.jsonc`, the packed core/auth
-modules in `vendor/`, and `.github/workflows/hosted-preview.yml` and
-`.github/workflows/hosted-production.yml` — `docs/specs/security-hosted.md`'s
-Deployment boundary quantifies over the preview and production paths, which
-live in those scripts and workflows rather than in the Worker. Verify the
-archive hashes against `vendor/build.json`. Distinguish tested code from
-pending production configuration; do not treat local provider simulations as
-live OAuth acceptance, and treat a checked-in placeholder as no evidence about
-an external control.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/relay.md`,
@@ -37,17 +25,32 @@ in one and quietly absent from another is a finding.
 The end-to-end boundary is where the depth goes. Its modules are
 `remote-lib-common/src/security/noise.ts`, `noise-transport.ts`,
 `e2e-ceremony.ts`, `e2e-bounds.ts`, `token-bucket.ts`, `push-seal.ts`,
-`pairing-invitation.ts`, `presence.ts`, `acl.ts` and `direct-path.ts`;
-`remote-lib-common/src/remote/wire.ts` (the frame shapes and their guards);
+`pairing-invitation.ts`, `one-time-link.ts`, `link-url.ts`, `presence.ts`, `acl.ts` and
+`direct-path.ts`; `remote-lib-common/src/remote/wire.ts` (the frame shapes and their
+guards) and `one-time-wire.ts` (the one-time rendezvous family, which neither the
+Relay nor `BurrowRuntime` may read);
 `lib/src/remote/direct/direct-endpoint.ts` and `direct-peer.ts` (the data
 channel the same session may move onto, and the one switching policy both ends
 run — `docs/specs/security-remote.md` -> "Direct path");
-`lib/src/remote/burrow/burrow-runtime.ts` (both ceremonies, every Burrow bound);
+`lib/src/remote/burrow/burrow-runtime.ts` (both ceremonies, every Burrow bound),
+`established-session.ts` (an authorized session's decrypt, idle clock, and
+direct path), and `one-time-runtime.ts` (the one-time ceremony, which grants
+nothing and must reach the direct path — `docs/specs/security-remote.md` ->
+"One-time connection"); `lib/src/host/remote/one-time-origin.ts` and the
+one-time half of `service.ts` (the baked rendezvous origin, its gate before any
+socket, the single runtime, and the approval routed by `kind`);
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
-and `lib/src/remote/pocket-app/sw.ts` (the phone, and the render sink);
+and `session-core.ts` (the phone's ceremonies, and the established session they
+promote), `one-time-client.ts` (the one-time phone, which keeps nothing and
+sends no protocol-v1 before the direct switch), and
+`lib/src/remote/one-time-rendezvous.ts` (the frame bound both one-time ends
+read the room under); `lib/src/remote/pocket-app/sw.ts` (the render sink);
 `relay/src/relay.ts` and `relay/src/app.ts` (which must know none of it). The
 harnesses that already exercise this are
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
+`lib/src/remote/burrow/one-time-runtime.test.ts`,
+`lib/src/remote/client/one-time-e2e.test.ts`,
+`lib/src/host/remote/service.test.ts`,
 `relay/test/malicious-relay.test.mjs`,
 `remote-lib-common/test/security-guarantees.test.mjs`,
 `remote-lib-common/test/noise.test.mjs`, and `remote-lib-common/test/push-seal.test.mjs`
@@ -60,18 +63,22 @@ The lint scans all tracked JavaScript and TypeScript. Search the same files for
 `createServer`, `.listen(`, `serve(` and `WebSocket` too, because a new API or a
 host built at runtime can escape its patterns.
 The Local-file viewer subsection adds a tokenized file grant: read
-`dor/src/file-viewer.ts` and `dor/src/file-viewer-loopback-guard.ts`, including
-its static asset discovery, descriptor lifetime, and every request gate.
+`dor/src/file-viewer.ts`, `dor/src/viewer-server.ts`, and
+`dor/src/file-viewer-loopback-guard.ts`, including its static asset discovery,
+descriptor lifetime, and every request gate. Also read `dor/src/editable-file.ts`,
+`dor/src/viewer-assets.ts`, and `dor/viewer/editor.ts`: writes must target only
+the opened text file, compare disk revisions, reject substituted symlinks,
+and never expose arbitrary assets or execute the source document. The folder viewer shares that
+listener and guard: read `dor/src/folder-viewer.ts` and
+`dor/src/folder-viewer-page.ts` for path containment, the POST gate, how names
+reach the page, and the git invocation.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,
 `docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message
-authentication", `docs/specs/standalone.md` -> "Persistence",
-`docs/specs/notepad.md` -> "Archive" — then the parser, the iframe shim, the
+authentication", `docs/specs/standalone.md` -> "Persistence" — then the parser, the iframe shim, the
 control-socket code, and the persistence paths they point at. `## Persisted
-state` now covers two stores that hold user text on purpose: the session
-snapshot and the notepad archive, both written through
-`write_file_atomically` on standalone, the archive in `globalState` on VS Code.
+state` covers session snapshots, written through `write_file_atomically` on standalone and through VS Code storage in the extension.
 The attacker there is a program printing to the terminal, a page in a browser
 pane, or another local account, never the network.
 
@@ -152,23 +159,6 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   reconstruct and relay only the registered pane-level shapes, never relay a
   nested document's location, and target only that origin plus the validated
   app origin—never a wildcard or foreign origin.
-- **Is the Hosted origin the only one that can drive Hosted?** Trace a request
-  from `hosted/server/worker.ts` through `workerApp`'s origin gate and
-  `secureHeaders`: a foreign `Host`, a preview hostname, a misconfigured
-  deployment's error path, and the SPA fallback must each answer without
-  credentialed CORS, without a cacheable shell, and without inline script.
-  Check that authentication cookies stay `__Host-`, Secure, HttpOnly, `Path=/`
-  and Domain-less, and that no session token reaches browser JSON or storage.
-- **Can a Hosted login become terminal access, or an account become someone
-  else's?** `authPolicy` must keep explicit linking and independent logins; a
-  callback whose initiating login was revoked must fail; an unused or unknown
-  provider credential must enable nothing. No Hosted endpoint may mint a Burrow
-  ACL grant or stand in for the encrypted pairing and presence proof.
-- **Does anything from the test or preview build reach production?** The
-  production Worker must not export the captured-email inbox, the deterministic
-  clock, or the testing injection module; preview must not copy production
-  routes, bindings, or credentials, must not call real mail or OAuth, and its
-  cleanup must check out the base branch rather than the closed PR's.
 - Does the shipped code still match what the specs and this section claim? Spec
   drift is a finding; say which side is wrong. The newest sections are the ones
   most likely to have drifted: `remote-security-model.md`'s Presence proofs,
@@ -181,11 +171,11 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   look for what a *textual* lint cannot see.
 
 You are also the **catch-all** domain, and this is defined by subtraction, not
-by a list: you own everything in the repository that `supply-chain.md` and
-`ci-and-secrets.md` do not explicitly claim. Run `ls -A` and work out the
-remainder rather than trusting any enumeration — an enumeration goes stale the
-moment someone adds a directory, which is exactly how `.vscode/` and
-`.impeccable/` ended up owned by nobody.
+by a list: you own everything in the repository that `supply-chain.md`,
+`ci-and-secrets.md`, and `hosted.md` do not explicitly claim. Run `ls -A` and
+work out the remainder rather than trusting any enumeration — an enumeration
+goes stale the moment someone adds a directory, which is exactly how `.vscode/`
+and `.impeccable/` ended up owned by nobody.
 
 Subtraction is **recursive, not top-level**. Where another domain claims a
 subdirectory rather than a whole tree, the rest of that tree is yours — so
@@ -197,10 +187,9 @@ as a subtraction rather than as two named subdirectories, which is the shape
 to prefer when you find the next one.
 
 Today the remainder is `lib/`, `relay/`, `remote-lib-common/`, `standalone/`,
-`vscode-ext/`, `dor/`, `dor-lib-common/`, `hosted/`, `vendor/`, `canopy/`,
-`deploy/`, `docs/`, `.impeccable/`, and the root files — but treat that as a
-description of the current tree, not as your scope. Your scope is the
-remainder.
+`vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`, `docs/`,
+`.impeccable/`, and the root files — but treat that as a description of the
+current tree, not as your scope. Your scope is the remainder.
 
 Remote control is where the depth goes; the rest is a sweep for anything that
 would be a security hole in a terminal that runs local shells — command

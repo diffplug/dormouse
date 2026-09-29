@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { isAllowedAgentBrowserBinary } from './agent-browser-binary';
+import { isAllowedAgentBrowserBinary, isAllowedPlaywrightBinary } from './agent-browser-binary';
 
 // `binaryPath` reaches the host from the webview realm and off the persisted
 // session blob, and the host hands it to `spawnAndCapture`. The predicate is
 // what keeps that from being an arbitrary-exec channel, so its edges are the
-// test (docs/specs/dor-browser.md → "Agent-Browser Host Capabilities").
+// test (docs/specs/dor-browser.md → "Browser Host").
 describe('isAllowedAgentBrowserBinary', () => {
   it('accepts the bare name and an absolute path to an agent-browser', () => {
     expect(isAllowedAgentBrowserBinary('agent-browser')).toBe(true);
@@ -48,4 +48,10 @@ describe('isAllowedAgentBrowserBinary', () => {
       expect(isAllowedAgentBrowserBinary(bad)).toBe(false);
     }
   });
+});
+
+ it('validates Playwright executable hints independently of agent-browser', () => {
+  for (const candidate of ['playwright-cli', '/opt/bin/playwright-cli', 'C:\\tools\\playwright-cli.cmd']) expect(isAllowedPlaywrightBinary(candidate)).toBe(true);
+  for (const candidate of ['agent-browser', '/bin/sh', './playwright-cli', '/opt/../playwright-cli', '/opt/playwright-cli\n']) expect(isAllowedPlaywrightBinary(candidate)).toBe(false);
+  expect(isAllowedPlaywrightBinary('/opt/custom-wrapper', '/opt/custom-wrapper')).toBe(true);
 });

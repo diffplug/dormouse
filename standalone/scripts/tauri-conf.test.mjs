@@ -49,6 +49,14 @@ test('the first window is labelled main', () => {
   assert.equal(conf.app.windows[0].label, 'main');
 });
 
+// Spoken alarms play in the renderer, and a minimized window's throttled or
+// suspended webview delayed them (docs/specs/standalone.md -> "Windows"); every
+// later window inherits this from the clone. Pinned for the clone by
+// `every_window_disables_background_throttling` in src-tauri/src/lib.rs.
+test('the first window is never throttled in the background', () => {
+  assert.equal(conf.app.windows[0].backgroundThrottling, 'disabled');
+});
+
 // Least privilege, and it is what structurally enforces that the update
 // install runs in the window the quit walk tears down last
 // (docs/specs/auto-update.md).

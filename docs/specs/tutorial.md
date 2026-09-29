@@ -31,13 +31,37 @@ Browser-side xterm alt-screen behind `FakePtyAdapter`, **never Node `terminal-ki
 
 ## Layout
 
-- Desktop `SiteHeader` at top, `themeAware` so `--vscode-*` variables drive its chrome, **carrying no controls**: **the page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (`website/src/lib/website-theme.ts`), which also declares the host fallback the Settings picker re-resolves through (rationale). `th-theme` walks the user to the Wall's Settings dialog (`docs/specs/theme.md` → "Where the user picks a theme"); Pocket renders the `compact` picker over the mobile terminal or in the desktop marketing header.
+- Desktop `SiteHeader` at top, `themeAware` so `--vscode-*` variables drive its chrome, **carrying no controls**: **the page must restore its own theme** with `useRestoredTheme(WEBSITE_DEFAULT_THEME_ID)` (`website/src/lib/website-theme.ts`), which also declares the host fallback the Settings picker re-resolves through (rationale). `th-theme` walks the user to the Wall's Settings dialog (`docs/specs/theme.md` → "Where the user picks a theme"); Pocket renders the `compact` picker in the keyboard reserve or in the desktop marketing header.
 - `<main>` is a flex container so Wall's `flex-1 min-h-0` root gets a real height.
 - `/playground/desktop` runs `Wall` (`FakePtyAdapter`, `initialMode="passthrough"`). **Must seed its three-pane L-shape as an explicit Lath snapshot** — `restoredLathLayout` from `DESKTOP_PLAYGROUND_LAYOUT` — never the synchronous `initialPaneIds` path (rationale); `website/src/lib/playground-desktop-layout.test.ts` pins it. `DESKTOP_PANES` in the same file owns each seed's id, command, and title; **`tut-boxed` is the Copy Rewrapped + `cp-override` target** (rationale). **Titles are seeded as pending shell opts** (`setPendingShellOpts(id, { title })`) before the Wall mounts; the lib pins each at first spawn, after the pane's state reset, and a user-pin outranks the engine fallback (`docs/specs/terminal-state.md` → "Header Derivation").
 
 Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensureShell` must stay idempotent** — `paneAdded` covers every pane that becomes visible, and `FakePtyAdapter.onPtySpawn` covers the seed panes again, auto-launching each seed's command exactly once (rationale). The page’s `startProgram` factory dispatches: `tut` → `TutRunner`, `ascii-splash`/`splash` → `AsciiSplashRunner`, `changelog` → `ChangelogRunner`. **Spawned terminals use `SCENARIO_SHELL_PROMPT`; seed panes get an empty scenario**, so no delayed `user@dormouse:~$` write lands inside a runner's alt-screen.
 
-`/playground/pocket` runs `MobileWall` with **`pocket-tut`** ("tutorial", active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** ("changelog", `ChangelogRunner`), and starts a `TutDetector` over the same shared stores. Pocket gesture detections are wired in `website/src/components/PocketTerminalExperience.tsx`: `gn-touch-mode` needs a Select → Gestures round trip (not any mode change), and `MobileTerminalUi.onGestureInput` completes `gn-arrows`/`gn-enter`/`gn-esc` only for radial-menu-generated inputs.
+`/playground/pocket` runs `MobileWall` with **`pocket-tut`** ("tutorial", active, `TutRunner` on `POCKET_TUTORIAL_PROFILE`) and **`pocket-changelog`** ("changelog", `ChangelogRunner`), and starts a `TutDetector` over the same shared stores. **Must credit Pocket gesture items only on the active tutorial Session’s Gesture
+navigation screen**, through `MobileTerminalUi.onGestureScroll` and
+`onGestureInput`, wired in `website/src/components/PocketTerminalExperience.tsx`.
+
+### Pocket gesture opening screen
+
+**Must credit both edge-scroll directions (`gn-scroll`), then all four arrows
+(`gn-arrows`), then Enter, then Escape, each only once its predecessor is
+complete**; an arrow sent before scrolling completes does not count.
+**Must render needed arrows bold white with yellow dots; sent arrows normal-weight
+white with green checks, retained after completion.** **Must clear partial
+direction counts on tutorial reset.** Keyboard input and native wheels never
+grant gesture credit.
+
+**Must capture the mouse only here and scroll an endless starfield with vertical
+wheels**; instructions keep absolute rows. **Must relocate stars randomly and
+only while dark**, blending terminal-theme background toward foreground and
+following theme changes.
+**Must stop animation and release capture on leaving or disposal.** Reduced
+motion disables idle animation, retaining scroll movement.
+
+Source of truth: `TutRunner` and `GestureStarfield` in
+`website/src/lib/tut-runner.ts`; `GESTURE_NAVIGATION_SECTION` in
+`website/src/lib/tut-items.ts`.
+Tests: `website/src/lib/tut-runner.test.ts`.
 
 ## Menu and navigation behavior
 
@@ -50,8 +74,8 @@ Extras: `Starred on GitHub` (persisted separately, `onOpenGithub`), `🐭 Flappy
 **`TutRunner` intercepts four keys while a specific section is open; they are not real Dormouse shortcuts.** The three alert demos report fake commands as `OSC 633 ; E / C / D` through `FakePtyAdapter.sendOutput`, which the real `TerminalProtocolParser` strips from visible output (rationale). **Must snapshot the live inactivity timeout at demo launch; the run outlasts it and the BUSY-confirm floor.** Each demo's countdown, page timer, and re-press guard run the same snapshotted duration — longer for `s`, whose fake command must outlive WATCHING's silence chain. Pinned by `website/src/lib/tut-runner.test.ts`.
 
 - **`s`** (Alerts) — reports `longtask` on both alert panes so command-keyed WATCHING demonstrates `al-spreads`, pumping only the quiet `tut-boxed` (rationale), keeping the command alive through WATCHING’s silence chain. **A press while that command is still running is ignored**, and **the page cancels any prior pump and exit timer** — the runner's guard is per instance, so a re-run `tut` would otherwise stack them; on exit `TutorialShell.reportRunningCommand()` restores each pane's real command.
-- **`n`** (Alerts) — writes a raw `OSC 777` notification to `tut-boxed`, exercising the terminal-report track, which needs no WATCHING rule.
-- **`x`** (Alerts) — starts a fake `slowbuild` on `tut-splash` and reports its exit after the captured duration. **The command name must stay unwatched**, so the command-exit track rather than WATCHING owns the ring (rationale). **The page must cancel the prior exit timer across runner instances.**
+- **`n`** (Alerts) — writes a raw `OSC 777` notification to `tut-boxed`, exercising a terminal report, which needs no WATCHING rule.
+- **`x`** (Alerts) — starts a fake `slowbuild` on `tut-splash` and reports its exit after the captured duration. **The command name must stay unwatched**, so a command exit rather than WATCHING raises the ring (rationale). **The page must cancel the prior exit timer across runner instances.**
 - **`p`** (Copy paste) — toggles the **Place To Paste** scratch modal (`website/src/components/PlaceToPaste.tsx`) via `onTogglePlaceToPaste`. Desktop only — Pocket omits the callback, and the runner hides the prompt line without it.
 
 ### Pocket Copy paste specifics
@@ -89,8 +113,9 @@ Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observabili
 - **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert manager for a fixed duration with no data output (the `s` demo). Returns a cancel handle; stops on its own if the pty dies mid-duration.
 - **`FakePtyAdapter.sendOutput(id, data, { skipActivity })`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.** `TutRunner` passes `skipActivity: true` for every frame.
 - **`FakePtyAdapter.onPtySpawn`** — fires synchronously inside `spawnPty`, before the scenario plays, so a page attaches a shell without racing `TerminalPane`'s mount.
-- **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set, watched to credit `al-watch-cmd`.
-- **`MobileTerminalUi.onGestureInput(input, data)`** — optional, fired only for radial-menu actions, so Pocket credits gesture items without mistaking native keyboard input for a gesture.
+- **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set; **must credit `al-watch-cmd` only once `longtask` is watched**.
+- **`MobileTerminalUi.onGestureInput(input, data)`** — optional, reports radial-menu input only; **must fire before the input is sent**, so the final Escape is credited before it leaves the tutorial screen. Pinned by `lib/src/components/MobileTerminalUi.test.tsx`.
+- **`MobileTerminalUi.onGestureScroll(lines)`** — optional, reports signed line counts only for edge scrolling.
 - **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, watched to credit `th-theme`. **Must seed the detector’s previous theme at `start()` and compare consecutive ids**, so boot-time restore cannot grant the item and choosing the startup theme after a reset still can. Pinned by `website/src/lib/tut-detector.test.ts` (rationale).
 
 ## Mouse and Clipboard Feature Coverage

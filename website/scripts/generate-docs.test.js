@@ -11,7 +11,8 @@ import {
   resolveRepoLinks,
   securityAudiences,
 } from './generate-docs.js';
-import { createSlugger, parseMarkdown, visit } from './docs-parser.js';
+import { createSlugger, inlineToText, parseMarkdown, visit } from './docs-parser.js';
+import { CODING_AGENTS } from '../../lib/src/lib/coding-agents.ts';
 
 const data = await generateDocs();
 
@@ -29,9 +30,46 @@ function generatedHrefs() {
   collect(data.selfhost.blocks);
   collect(data.security.blocks);
   collect(data.skill.blocks);
+  collect(data.agents.blocks);
   for (const section of data.cli.intro) collect(section.blocks);
   return hrefs;
 }
+
+describe('compatible agents', () => {
+  it('publishes the guide while withholding the recovery contract and future', () => {
+    expect(data.agents.delta.map((rule) => rule.id)).toEqual([
+      'drop-document-title', 'drop-front-matter', 'drop-recovery-contract', 'drop-future',
+    ]);
+    expect(data.agents.source).toBe('docs/compatible-agents.md');
+    expect(data.agents.headings.map((heading) => heading.text)).toEqual([
+      'Supported agents', 'How recovery and watching work', 'Conversation recovery',
+      'Watching for attention', 'Adding an agent', 'Add the definition and fixture',
+      'Verify the integration',
+    ]);
+    expect(data.agents.blocks.some((block) => block.type === 'blockquote')).toBe(false);
+    const body = JSON.stringify(data.agents.blocks);
+    expect(body).not.toContain('Must use the shared');
+    expect(body).not.toContain('If automatic agent startup becomes disruptive');
+  });
+
+  it('sends the contributor link to the withheld contract on GitHub', () => {
+    expect(data.agents.withheldLinks).toEqual([{
+      from: '#recovery-contract-maintainers',
+      to: `${REPO_BLOB_BASE}/docs/compatible-agents.md#recovery-contract-maintainers`,
+    }]);
+    expect(generatedHrefs()).toContain(data.agents.withheldLinks[0].to);
+  });
+
+  it('keeps the supported-agent table aligned with executable and resume definitions', () => {
+    const table = data.agents.blocks.find((block) => block.type === 'table');
+    expect(table.header.map(inlineToText)).toEqual(['Agent', 'Command', 'Resume command', 'Watch by default']);
+    expect(table.rows.map((row) => row.map(inlineToText))).toEqual(
+      CODING_AGENTS.flatMap((agent) => agent.commands.map((command) => [
+        agent.name, command, `${command} ${agent.resume} <id>`, agent.watchByDefault ? 'Yes' : 'No',
+      ])),
+    );
+  });
+});
 
 describe('product guide', () => {
   it('drops exactly the document title and records the delta', () => {
@@ -43,8 +81,8 @@ describe('product guide', () => {
   it('has unique, stable heading ids', () => {
     const ids = data.guide.headings.map((h) => h.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain('alerts-and-todos');
     expect(ids).toContain('browsers-for-you-and-your-agents');
+    expect(ids).toContain('select-and-copy-paste-like-you-meant');
   });
 });
 
@@ -178,10 +216,10 @@ describe('security spec', () => {
     for (const { to } of data.security.repoLinks) {
       expect(to.startsWith(REPO_BLOB_BASE) || routes.has(to.split('#')[0])).toBe(true);
     }
-    expect(data.security.repoLinks).toContainEqual({ from: '../../SELF_HOST.md', to: '/docs/self-host/' });
+    expect(data.security.repoLinks).toContainEqual({ from: '../../SELF_HOST.md', to: '/self-host/' });
     expect(data.security.repoLinks).toContainEqual({
       from: '../../SELF_HOST.md#keeping-the-relay-up-while-the-laptop-sleeps',
-      to: '/docs/self-host/#keeping-the-relay-up-while-the-laptop-sleeps',
+      to: '/self-host/#keeping-the-relay-up-while-the-laptop-sleeps',
     });
   });
 
@@ -237,10 +275,10 @@ describe('security spec', () => {
   it('fails on a link into a published page whose fragment names no heading there', () => {
     const target = { source: 'SELF_HOST.md', headings: [{ id: 'prerequisites' }], blocks: [] };
     const link = (href) => ({ source: 'docs/specs/security.md', headings: [], blocks: [{ type: 'link', href }] });
-    expect(() => assertRouteFragments([target, link('/docs/self-host/#prerequisites')])).not.toThrow();
-    expect(() => assertRouteFragments([target, link('/docs/self-host/#nowhere')])).toThrow(/names no heading/);
+    expect(() => assertRouteFragments([target, link('/self-host/#prerequisites')])).not.toThrow();
+    expect(() => assertRouteFragments([target, link('/self-host/#nowhere')])).toThrow(/names no heading/);
     // A route nobody generated, and a fragment on this page, are not this check's.
-    expect(() => assertRouteFragments([target, link('/docs/dor/#nowhere')])).not.toThrow();
+    expect(() => assertRouteFragments([target, link('/dor/#nowhere')])).not.toThrow();
   });
 
   it('keeps the fragment on a link into another spec', () => {
@@ -266,7 +304,7 @@ describe('repository links', () => {
     const rewritten = resolveRepoLinks(blocks, 'docs/specs/security.md');
     expect(hrefs(blocks)).toEqual([
       `${REPO_BLOB_BASE}/docs/specs/security-ci.md#domains`,
-      '/docs/self-host/',
+      '/self-host/',
     ]);
     expect(rewritten).toHaveLength(2);
   });
@@ -365,7 +403,7 @@ describe('agent skill', () => {
     // dor/skill.md is clean, so the build never drives this check red; a
     // finding check that cannot fail is a claim rather than a control.
     const offending = [
-      { type: 'paragraph', children: [{ type: 'link', href: `${SITE_ORIGIN}/docs/dor/` }] },
+      { type: 'paragraph', children: [{ type: 'link', href: `${SITE_ORIGIN}/dor/` }] },
     ];
     expect(() => assertNoSiteLinks(offending, 'dor/skill.md')).toThrow(SITE_ORIGIN);
     expect(() => assertNoSiteLinks(data.skill.blocks, 'dor/skill.md')).not.toThrow();
@@ -377,7 +415,7 @@ describe('agent skill', () => {
     // If this ever finds nothing the derivation has silently stopped matching.
     expect(refs.length).toBeGreaterThan(0);
     for (const ref of refs) {
-      expect(anchors).toContain(ref.href.replace('/docs/dor/#', ''));
+      expect(anchors).toContain(ref.href.replace('/dor/#', ''));
     }
   });
 
@@ -403,15 +441,15 @@ describe('same-site links', () => {
     // ever finds nothing the rewrite has silently stopped matching.
     expect(data.guide.localizedLinks.length).toBeGreaterThan(0);
     expect(data.guide.localizedLinks).toContainEqual({
-      from: 'https://dormouse.sh/docs/dor',
-      to: '/docs/dor/',
+      from: 'https://dormouse.sh/dor',
+      to: '/dor/',
     });
   });
 
   it('keeps the fragment on a localized deep link', () => {
     expect(data.guide.localizedLinks).toContainEqual({
-      from: 'https://dormouse.sh/docs/dor#agent-browser',
-      to: '/docs/dor/#agent-browser',
+      from: 'https://dormouse.sh/dor#agent-browser',
+      to: '/dor/#agent-browser',
     });
     // A bare origin still has to address the homepage, not the empty string.
     for (const { to } of data.guide.localizedLinks) expect(to.startsWith('/')).toBe(true);

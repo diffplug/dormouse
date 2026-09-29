@@ -1,4 +1,4 @@
-/** Target normalization shared by `dor iframe` and `dor ab open`; see
+/** Target normalization shared by `dor iframe` and `dor agent-browser open`; see
  * docs/specs/dor-cli.md → "Browser Open Target Resolution". */
 
 import { errorMessage, workspaceParam } from './shared.js';
@@ -33,7 +33,7 @@ export function inferredHttpUrl(target: string): string | null {
     const hostPort = HOST_PORT.exec(target);
     // A purely numeric "host" (e.g. `800`) is never a hostname — `new URL` packs
     // it into a bogus IPv4 (`http://800:600` → `http://0.0.3.32:600/`). Reject it
-    // so `dor ab open`'s shape-scan can't rewrite a stray `n:n`-shaped flag value
+    // so `dor agent-browser open`'s shape-scan can't rewrite a stray `n:n`-shaped flag value
     // into a URL. A real IPv4 (`192.168.1.5`) has dots and is kept.
     if (hostPort && !/^\d+$/.test(hostPort[1])) prefixed = `http://${target}`;
   }

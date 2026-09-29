@@ -6,6 +6,12 @@
 
 **What a sync blocking command cost.** A cold `agent-browser open` froze the webview for ~3 s — long enough to look like a pane that never appeared — and a hung one would have held it for the full 30 s `AGENT_BROWSER_TIMEOUT`; `(async)` moves the same blocking body onto a runtime worker. The incident is recorded at the `request_from_sidecar_timeout` invariant comment in `standalone/src-tauri/src/lib.rs`.
 
+## Alerts
+
+**Why one manager per host process, beside the PTYs.** Each window used to run its own `AlertManager` in its webview, fed from events the sidecar had already parsed. Three failures followed from where it lived (audit, 2026-09-23): WKWebView throttles a background window's timers, so the detector, deferral and await timers of a window the user was not looking at ran late — exactly the window a completion should summon them back to; a reload started the webview with an empty manager and a live resume seeds nothing, so every ring and TODO in the window vanished; and a Workspace transfer had to snapshot the ring, its episode, the detector deadlines and the deferred notification into the transfer content, resume them in the target, and bind a replay token so the since-mark replay's reports fired once. VS Code never had these, because its manager lives in the extension host beside the PTYs and the parse. Moving standalone's there made the two hosts one shape, now one module (`createAlertHost`): the parse feeds one manager in stream order, the Burrow's remote writes reach it in the same process, and a window is only a viewer whose state is routed to it.
+
+**Why an await's answer names its window.** Routed by the Session's `id` it would reach the Session's owner, not the window that parked it, and a `requestId` is what Rust's invoke matcher swallows. It was broadcast at first, each adapter matching its own random `awaitId`; `forWindow` routes it the way `pty:list` is routed, so no other window sees it (2026-09).
+
 ## Windows node subsystem
 
 **The two Windows Node variants.** `CREATE_NO_WINDOW`, `DETACHED_PROCESS`, and `STARTUPINFO` hiding all failed to suppress Windows 11's DefTerm handoff from a GUI parent (verified 2026-08): Windows launches Windows Terminal to host the console-subsystem child, flashing a stray WT window behind Dormouse. Should a current spawn-time option suppress it, both variants collapse back to the stock console-subsystem Node under `DORMOUSE_NODE`. `dor`'s opposite requirement comes from running inside a shell's ConPTY, where its stdout/stderr are console handles rather than pipes.
@@ -28,6 +34,25 @@
 
 **Why a failed read must not be memoized.** The read errors that are neither `ENOENT` nor a parse failure — EACCES, EIO, a handle held open on Windows — say nothing about what the file holds; answering them empty, or caching that emptiness, lets the next save overwrite unseen state with nothing, since every change is a read-modify-write of the whole file.
 
+## Siri affordance
+
+**What it cost.** On 2026-09-28 the unified log showed Dormouse dwelling 707 times and building the affordance's host window 478 times in one day; no other app did either more than once. The same `NSCampoLightweightUIController` raised the assertion behind that week's macOS 27.0 crashes: a mouse-entered event reaching a tracking area it had just torn down.
+
+**Why a per-view override.** Eligibility is process-wide: `+[NSCampoLightweightUIController isEligible]` is the `WritingTools/LightweightUI_macOS` feature flag, `isEnhancedSiriAvailable`, and a bundle identifier outside Apple's own services, so no Info.plist or bundle setting opts out. Its "zero-to-one" mode targets a caret with no selection, which is all xterm's textarea ever holds. The per-view gate is `allowsWritingToolsAffordance`, which WebKit answers YES for any editable focus. Measured with a `WKWebView` probe holding an xterm-shaped textarea through 20 s of synthetic typing (macOS 27.0, 2026-09-28):
+
+| Variant | Affordance built |
+|---|---|
+| Baseline | 11 |
+| `writingsuggestions="false"` on the textarea | 11 |
+| `WKWebViewConfiguration.writingToolsBehavior = none` | 12 |
+| `allowsWritingToolsAffordance` answering NO on a `WKWebView` subclass | 0 |
+
+In a real build the same day, with the xterm textarea focused and typed into, a build without the override built the affordance, and a build with it answered NO and built none. The live webview's `object_getClass` there is KVO's `NSKVONotifying_` subclass, which is why the override asks the object for `class`.
+
+## Windows
+
+**Why no window is throttled in the background.** The alert host moved into the sidecar (§Alerts), but a due spoken alarm still plays in the renderer of the window showing its Session (`docs/specs/alert.md` → Spoken alarms), on that window's timers and Web Speech engine. Tauri's default leaves WebKit's policy in force: a minimized or hidden window's timers are throttled and the view may be suspended after roughly five minutes, pausing everything until it is visible again (tauri-utils 2.9.3, `BackgroundThrottlingPolicy`). That delayed the speech for exactly the window a spoken alarm exists to reach — the one the user minimized. The policy cannot be set per state, so every window pays a hidden window's timer cost for it (2026-09).
+
 ## Routing
 
 Rust routes rather than the webview filtering, because a webview cannot be
@@ -47,15 +72,9 @@ minted in `pty_spawn`, so an unowned id is one whose window went away, and the
 broadcast reached every sibling's AlertManager — which rang, and offered a TODO,
 for a pane none of them showed.
 
-The first hold queued both derived streams, on the premise that neither is in
-any replay. Semantic events are: the replay is the raw bytes, OSCs included, and
-the target's replay listener re-parses them. The flushed queue then re-applied
-`commandStart` on top of state the replay had just rebuilt, and `commandStart`
-is not idempotent — it mints a fresh id and consumes the pending command line —
-so a transfer that split a command's `commandLine` from its `commandStart` left
-the arriving window with a derived title for a command whose real line the
-replay had already recovered. What the replay path genuinely did not rebuild was
-the AlertManager's copy, and that is a listener fix, not a routing one.
+**Why an exited PTY stays owned.** Ownership used to end at the exit, since nothing more was emitted for a dead PTY. The sidecar's manager publishes `alert:state` for it whenever the user acts on the exited pane — a dismiss, a TODO cleared — and a line for an unowned id is dropped, so the pane would ring until it was closed. An exit before a transfer's mark used to end the marking phase and go to the target, so the `pty:marked` behind it went there too, and the source — which serializes the pane at that line — never saw its mark (2026-09).
+
+**Why the derived streams are dropped, never held.** The first hold queued both, on the premise that neither is in any replay. They are: the replay is the raw bytes, OSCs included, and the receiving window re-parses them. The flushed queue re-applied `commandStart` on top of state the replay had just rebuilt, and `commandStart` is not idempotent — it mints a fresh id and consumes the pending command line — so a transfer that split a command's `commandLine` from its `commandStart` left the arriving window with a derived title for a command whose real line the replay had already recovered. A hold kept for the Tool events alone served only the fail-open sweep, which fires only for suppressions no arrival claims (§Arrival queue), and it went (2026-09).
 
 ## What a window's `Destroyed` settles
 
@@ -215,7 +234,7 @@ stays the webview's throughout and no polling loop is needed.
 
 **Why the aggregator debounces on top of the Wall's own debounce.** Each Wall already coalesces its own record; the second stage coalesces *across* Walls, so one window-wide event (a store change, a theme push, a burst of output in two Workspaces) becomes one host write rather than one per Workspace.
 
-**Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including separate archive and Burrow stores. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s archive and enrollment live. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
+**Why debug keeps a state subtree as well as the wrapper identifier.** The native dev wrapper already selects a stable per-worktree Tauri identifier, including a separate Burrow store. Raw Tauri dev bypasses that wrapper and can use the installed identifier; the subtree protects its session and recovery files without changing where that identifier’s enrollment lives. Older debug builds used the identifier root directly, so their snapshots need targeted transcript migration after the split. Deleting those snapshots could remove installed layouts for a raw-dev launch.
 
 ## Trigger interception
 
@@ -247,9 +266,7 @@ whichever dialog was open — including a close's — without telling its flow.
 
 Arbitrating fixed the dialog and left the vote: a quit meeting a *committed*
 close acked and stopped, which is the same unbounded wait reached by a different
-route. Voting is right because the window really is ending — and the one case
-where it is not, a committed close retreating to `archive-failed` and being
-declined, is why the intent is kept rather than dropped.
+route. Voting is right because the window really is ending.
 
 **Why the walk ends on `main`, and why the grant to every window was reverted.**
 Widening `updater:*` to every window was meant to cover a session whose `main`
@@ -283,6 +300,18 @@ and the Vite server it loads from. `tauri::process::restart` just calls `exit(0)
 when `current_binary` fails — on macOS, for a path through a symlink
 (`tauri-utils-2.9.3/src/platform/starting_binary.rs`) — so the check turns a
 silent quit into an answer.
+
+## Objective-C exceptions
+
+**The crash.** Six aborts of installed 1.1.0 builds, 2026-09-21 to 2026-09-28 on macOS 27.0 (26A428), all `EXC_CRASH (SIGABRT)` on the main thread with one stack shape. The binary is stripped, so the frame was matched by disassembly: tao's `sendEvent:` override (the `NSKeyUp` + Command test), whose LSDA maps the landing pad taken to its `objc_msgSendSuper(sendEvent:)` call, the pad calling `panic_cannot_unwind`. For each crash still in log retention (three), the unified log shows `[com.apple.AppKit:CampoLightweightUI] Mouse entered.` then `*** Assertion failure in NSCampoLightweightUIController.m:1429` about 1 ms before the abort: an AppKit race in the Siri affordance for selected text, raised beneath `[super sendEvent:]`. An abort in the landing pad, rather than an uncaught-exception report, means the unwinder's search phase had found a handler above the frame, so AppKit would have caught it.
+
+**Why both halves.** Measured 2026-09-28 (rustc 1.96, tao 0.35.2) with an `NSException` raised beneath `[super sendEvent:]`: stock tao aborts under both strategies; patched tao aborts under `abort` and survives under `unwind`; with the abort hook the exception is survived and a Rust panic still exits by SIGABRT. The rustc rule is `fn_can_unwind`: under `panic=abort` every Rust-defined function is non-unwinding, whatever its ABI. The hook keeps today's fail-fast, so no Rust panic unwinds past a lock. End to end on the same day: a release build of the change, with a dylib swizzling `-[NSApplication sendEvent:]` to raise on an injected application-defined event, logged the raise beneath `TaoApp`'s override and was still running 3 s later. Cost: the arm64 release binary grew from 8.4 MB (the installed 1.1.0 `abort` build) to 10.4 MB.
+
+**Handler path.** Measured the same day, under the fork and `unwind`: an `NSException` raised inside the tao event handler aborts with "Rust cannot catch foreign exceptions" at `stop_app_on_panic`'s `catch_unwind`. Calling the handler without `catch_unwind` kept the process alive but wedged the loop, so the handler never ran again: tao's loop state is not exception-safe, and a clean abort beats a hung window.
+
+**Dead approach.** `objc2::exception::catch` around the super call: the closure it runs is a Rust frame, so under `abort` the unwind dies before reaching its `@catch`.
+
+**Not patched.** wry's `define_class!` callbacks are already `C-unwind`. Its URL-scheme `start_task` / `stop_task` are `extern "C"`, but they are outside the AppKit event path and nothing catches above them.
 
 ## Standalone browser-dev harness
 

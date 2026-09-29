@@ -1,17 +1,17 @@
-import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
-import { ToolDirtyIndicator } from './ToolDirtyIndicator';
+import { type PointerEvent as ReactPointerEvent } from 'react';
+import { TOOL_DIRTY_LABEL, ToolDirtyIndicator } from './ToolDirtyIndicator';
 import { clsx } from 'clsx';
-import { NotepadIcon, SpeakerHighIcon } from '@phosphor-icons/react';
+import { SpeakerHighIcon } from '@phosphor-icons/react';
 import type { AlertSpeechState, SessionStatus, TodoState } from '../lib/terminal-registry';
 import type { BrowserDisplayMode } from './wall/agent-browser-screen';
 import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './wall/BrowserDisplayIcon';
 import { useTodoPillContent } from './TodoPillBody';
-import { notepadLabel } from './use-notepad';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { ALERT_RING_LABEL, AlertRingInset, alarmPulseClass, alertRingRow, useAlertRingBurst } from './alert-ring';
 import {
   ALERT_SPEECH_TRACKING_CLASS,
   DOOR_TAB_CLASS,
+  PREVIEW_LABEL_CLASS,
   TERMINAL_TOP_RADIUS_CLASS,
   TODO_PILL_TRACKING_CLASS,
 } from './design';
@@ -25,47 +25,39 @@ export interface DoorProps {
   browserDisplay?: BrowserDisplayMode;
   /** Set only for a Tool whose last report says it has unsaved changes. */
   toolDirty?: boolean;
+  /** The Workspace's preview slot (`docs/specs/dor-tool.md` -> Preview slot). */
+  preview?: boolean;
   status?: SessionStatus;
   todo?: TodoState;
   speechState?: AlertSpeechState;
   /** `ActivityState.episode` — the Session's current ringing interval. A new one
    *  replays the alarm ring's arrival burst; `null` while the Session is quiet. */
   episode: AlertEpisode | null;
-  /** Live notes on the minimized Surface. Above zero the Door grows its second
-   *  button; a Door with no notes needs none (`docs/specs/notepad.md`). The
-   *  Baseboard reports zero on a host that has no notepad at all. */
-  noteCount?: number;
   onClick?: () => void;
   /** When provided, a primary-button press reports its start point and the Wall begins
    *  an (inactive) LathHost drag — LathHost owns the threshold, click suppression, and
    *  hit-testing from there. A sub-threshold press-release still fires `onClick`
    *  (reattach). Absent → Door stays click-only. */
   onDragPress?: (press: { clientX: number; clientY: number }) => void;
-  /** Opens the Door's notepad popover, anchored on the whole Door. Neither this
-   *  press nor its click reattaches the Surface. */
-  onOpenNotepad?: (anchor: HTMLElement) => void;
 }
 
 /**
  * A minimized Surface on the baseboard. The outer element carries the Door's
  * identity, geometry, and palette — it is what the selection ring and the
- * baseboard's fitting pass measure — and holds one or two buttons: the title,
- * which reattaches and starts the drag, and (with notes) the notepad, which
- * does neither.
+ * baseboard's fitting pass measure. Its button reattaches and starts the drag.
  */
 export function Door({
   doorId,
   title,
   browserDisplay,
   toolDirty = false,
+  preview = false,
   status = 'WATCHING_DISABLED',
   todo = false,
   speechState,
   episode,
-  noteCount = 0,
   onClick,
   onDragPress,
-  onOpenNotepad,
 }: DoorProps) {
   const row = alertRingRow(status, speechState);
   const burst = useAlertRingBurst(row, episode);
@@ -77,29 +69,23 @@ export function Door({
   const insetRing = row === 'ringing' || spoken;
   const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
   const extras = [
+    preview && 'Preview',
     detail,
     row ? ALERT_RING_LABEL[row].door : undefined,
-    toolDirty && 'Unsaved changes',
+    toolDirty && TOOL_DIRTY_LABEL,
   ].filter(Boolean);
   const nameParts = [title, ...extras];
-  const doorRef = useRef<HTMLDivElement>(null);
-  const showNotepad = noteCount > 0;
 
   const onPointerDown = onDragPress
     ? (e: ReactPointerEvent<HTMLDivElement>): void => {
         if (e.button !== 0) return;
-        // The notepad button sits inside the Door's pill but drags nothing.
-        if (e.target instanceof Element && e.target.closest('[data-door-notepad-for]')) return;
         onDragPress({ clientX: e.clientX, clientY: e.clientY });
       }
     : undefined;
 
   return (
     <div
-      ref={doorRef}
       data-door-id={doorId}
-      // A labelled group rather than a bare div: with two buttons inside, the
-      // display/speech detail belongs to the Door, not to either button.
       role="group"
       className={clsx(
         DOOR_TAB_CLASS,
@@ -119,17 +105,16 @@ export function Door({
       <button
         type="button"
         className={clsx(
-          'flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden pl-2.5',
-          showNotepad ? 'pr-1' : 'pr-2.5',
+          'flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden pl-2.5 pr-2.5',
         )}
         onClick={onClick}
       >
         <ToolDirtyIndicator dirty={toolDirty} />
         {browserDisplay && <BrowserDisplayIcon mode={browserDisplay} size={12} />}
-        <span className="min-w-0 flex-1 truncate">
+        <span className={clsx('min-w-0 flex-1 truncate', preview && PREVIEW_LABEL_CLASS)}>
           {title}
         </span>
-        {/* `spoken` is unbounded (it lasts until the ring is attended), so it joins
+        {/* `spoken` is unbounded (it lasts until the ring clears), so it joins
             the badge cluster instead of replacing it — see docs/specs/layout.md. */}
         {speaking ? (
           <span className={clsx('flex shrink-0 items-center gap-1 text-xs font-bold', ALERT_SPEECH_TRACKING_CLASS)}>
@@ -152,24 +137,6 @@ export function Door({
           </span>
         )}
       </button>
-      {showNotepad && (
-        <button
-          type="button"
-          data-door-notepad-for={doorId}
-          className="flex h-full shrink-0 items-center rounded pl-0.5 pr-2 hover:bg-current/10"
-          aria-label={notepadLabel(noteCount)}
-          title={notepadLabel(noteCount)}
-          // Keep the press to itself: the popover's own outside-click dismissal
-          // would otherwise close it on the very press that opens it.
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (doorRef.current) onOpenNotepad?.(doorRef.current);
-          }}
-        >
-          <NotepadIcon size={12} weight="fill" />
-        </button>
-      )}
       {insetRing && <AlertRingInset ground="door" burst={burst} className={TERMINAL_TOP_RADIUS_CLASS} />}
     </div>
   );

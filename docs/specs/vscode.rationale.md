@@ -2,6 +2,10 @@
 
 > Informative companion to [vscode.md](vscode.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Workspaces
+
+**Why this window counts as a viewer, and only when `active`.** Only Dormouse webviews were viewers, so a push reached the phone while the user worked in VS Code outside the webview — the editor, VS Code's own terminal (2026-09-23). Focus alone never lapses: a user who walked away from a focused VS Code would never be pushed. `WindowState.active`, which lapses after a short time without input, was finalized in VS Code 1.89 (April 2024); the supported range starts at 1.85, where only the webviews' own presence counts.
+
 ## Surfacing union status on native chrome
 
 **Why `view.title` cannot carry the status.** The view's own title never surfaces on a single-view bottom-panel container, which leaves the badge as the only runtime indicator this hosting primitive exposes — hence presence-only where the editor tab can spell out `🔔` and `[TODO]`.
@@ -10,37 +14,9 @@
 
 **The shutdown budget is not ours.** VS Code kills the extension host on a deadline the extension does not control, and in practice it has never once let `[deactivate] done` print (2026-08).
 
-**Why the recovery record is not `workspaceState`.** Writing it there was tried and measured (2026-08): detection completed and the record was never written — the state store's SQLite flush is already tearing down while `deactivate()` runs.
-
 ## Capturing agent recovery
 
-**Why `^C` and not a signal.** SIGTERM to the pty leader is inert against both claude and codex, and the foreground-process-group signal that does reach claude leaves codex silent (2026-08). `^C` is the one gesture both agents answer; it needs no `tcgetpgrp` and no master fd node-pty does not expose, takes the same path on ConPTY, and leaves the shell alive.
-
-**Why every live PTY is interrupted.** Gating on "is this pane running an agent" would need per-pane foreground-command knowledge the host does not have, and every one of these processes is killed seconds later regardless.
-
-**Why the clocks start at the ack.** The ~600 ms fallback and the ~200 ms silence window are statements about the agent, not about the round trip; measuring from step entry folds the interrupt's own latency into the window and shortens it by an amount that varies with load.
-
-**Why the ask gate keys on an English UI string.** `Press Ctrl-C again` is claude's wording and could change. That failure is visible and recoverable — claude's recovery is lost for that shutdown — where a mistimed second press destroys codex's hint every single time.
-
-**Two settle-on-quiet heuristics died on the same fact.** Codex says nothing for ~250 ms and then prints its entire shutdown at once, so a poll that treats silence as completion exits before codex has spoken; both attempts to settle early on quiet lost the hint that way. Polling to the ceiling instead costs nothing, the record being written the moment each command is found.
-
-**Why widening the scan is not a free optimisation.** Scanning the whole buffer let a stale hint or an old launch echo win. The narrow scan also fails in the safe direction: buffer eviction can only discard fresh output, never promote stale output as fresh.
-
-**Where a missing hint comes from.** A Dormouse launched from inside a Claude Code session inherits `CLAUDE_CODE_CHILD_SESSION`, which disables transcript saving in claude, so it legitimately prints nothing to record.
-
-**The timing measurements** (real pty, codex, 2026-08). Codex is the constraining case because its `^C` is consumed by the input line first:
-
-| State when interrupted | Gesture | Hint | At |
-| --- | --- | --- | --- |
-| idle after a pause | one `^C` | yes | 262 ms |
-| idle after a pause | two `^C`, 150 ms apart | **no** | — |
-| idle after a pause | `^C`, 800 ms, `^C` | yes | 855 ms |
-| unsent text in the input | one `^C` | **no** | — |
-| unsent text in the input | two `^C`, 150 ms apart | yes | 464 ms |
-| unsent text in the input | `^C`, 800 ms, `^C` | yes | 1061 ms |
-| freshly launched, no conversation | one `^C` | no — correctly, nothing to resume | — |
-
-Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was absent from every codex cell, so an ask-gated second press can only ever serve claude. The 262 ms idle case leaves the retry set before the ~600 ms fallback fires. Confirmed end to end in a real pane: fallback press at +625 ms, hint at +789 ms, applied on the next activation.
+**Why the recovery record is not `workspaceState`.** Writing it there was tried and measured (2026-08): detection completed and the record was never written — the state store's SQLite flush is already tearing down while `deactivate()` runs.
 
 ## CSP policy
 
@@ -76,7 +52,7 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why the reclaim is jittered and re-dialled.** Every client of a dead broker reaches the `ECONNREFUSED` at the same instant. Unlinking immediately means several of them unlink, and unlinking a *live* broker's socket — one that rebound the path while we waited — strands every window dialling it.
 
-**Why `stillOurs` compares full filesystem identity.** Two windows can find the same corpse, both unlink, and the second bind silently displaces the first, leaving the loser serving a socket no client can reach; nothing on the bind path detects that. Inode alone is reused too readily to distinguish "still ours" from "replaced".
+**Why `stillOurs` compares full filesystem identity.** Two windows can find the same corpse, both unlink, and the second bind silently displaces the first, leaving the loser serving a socket no client can reach; nothing on the bind path detects that. Inode alone is reused too readily to distinguish "still ours" from "replaced". And the identity has to be anchored to our own bind rather than to a first read of the path: the displacing unlink and rebind can land before that read, so both windows read the winner's socket, both find it unchanged, and both confirm — two brokers, which is what `settles two windows racing for one corpse into a broker and a client` caught intermittently (observed 2026-09-22). `listen` binds inside the call and resolves on a nextTick, so a `statSync` before the next `await` runs ahead of anything queued on this process's thread pool. The competitor is another extension host, so its unlink and rebind can still land in the microseconds between our `bind` and that `statSync`: the anchor narrows the race rather than closing it. Closing it would take an atomic create-only publish — bind a unique path, then `link()` it onto the fixed one, which fails `EEXIST` instead of displacing — a redesign of the arbitration.
 
 **What an unverified bind would cost.** During `RECLAIM_VERIFY_MS` the socket is bound but may still be given up. A command landing inside that window and told "broker" would start a service the stand-down path never tears down — two Burrows under one burrowId, and the endless relay displacement above.
 
@@ -91,6 +67,27 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 **Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Burrow seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
 
 **Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.85 — the floor `engines.vscode` declares — shipped Node 18, so an older extension host has no global to use.
+
+## The direct path
+
+macOS library validation decides which process may load the addon. Run under
+VS Code's main `Code` binary (`ELECTRON_RUN_AS_NODE=1`), `dlopen` of
+`node_datachannel.node` fails with "mapping process and mapped file
+(non-platform) have different Team IDs". Under `Code Helper (Plugin)` — the
+binary extension hosts run in, entitled
+`com.apple.security.cs.disable-library-validation` — the same file loads and
+two in-process peers complete a data-channel round trip, both from the
+installed package and from the staged `dist/node_modules` tree (measured on
+VS Code with Electron 42.10.0, macOS arm64, 2026-09).
+
+The platform packages come from a scoped `pnpm deploy` because the wider
+switches reach too far: `supportedArchitectures` in `pnpm-workspace.yaml` is
+workspace-wide, and `pnpm install --os/--cpu` in the release job would fetch
+every platform's esbuild, lightningcss, workerd, and sharp as well. A first
+version fetched the tarballs from the registry itself and checked them against
+a regex over `pnpm-lock.yaml`; it ignored the configured registry, which pnpm 12
+does not export to scripts. `--libc glibc` did not drop the musl packages on a
+macOS host, hence copying only the declared platform packages.
 
 ## Peer surfaces
 

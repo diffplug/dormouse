@@ -44,15 +44,12 @@ function createPlatform(
     onRequestSessionFlush: vi.fn(),
     offRequestSessionFlush: vi.fn(),
     notifySessionFlushComplete: vi.fn(),
-    alertRemove: vi.fn(),
     alertSetWatchedCommands: vi.fn(),
     alertSetCommandWatched: vi.fn(),
     alertDismiss: vi.fn(),
-    alertAttend: vi.fn(),
-    alertResize: vi.fn(),
-    alertClearAttention: vi.fn(),
+    alertEngagement: vi.fn(),
+    alertAcknowledge: vi.fn(),
     alertToggleTodo: vi.fn(),
-    alertMarkTodo: vi.fn(),
     alertClearTodo: vi.fn(),
     onAlertState: vi.fn(),
     onWatchedCommands: vi.fn(),
@@ -390,6 +387,25 @@ it('recovers Tool metadata from pane rows when its layout is unusable', () => {
   expect(restored?.lathLayout?.leafMeta.tool.params?.url).toBeUndefined();
 });
 
+it('restores the preview slot mark and open target from pane rows when its layout is unusable', () => {
+  const restored = restoreSession(createPlatform({ version: 3, panes: [
+    { id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view /repo/a.md',
+      tool: { render: 'iframe', port: 'announced', name: 'viewer', argv: ['view', '/repo/a.md'], preview: true, target: '/repo/a.md' } },
+  ] }));
+  expect(restored?.lathLayout?.leafMeta.slot.params).toMatchObject({ toolPreview: true, toolTarget: '/repo/a.md' });
+});
+
+it.each([
+  ['a control-bearing target', { target: '/repo/a\x1b.md' }],
+  ['a non-string target', { target: 7 }],
+  ['a false mark', { preview: false }],
+])('rejects a saved Tool row with %s before any terminal is restored', (_case, fields) => {
+  const saved = { version: 3, panes: [{ id: 'slot', title: 'viewer', cwd: '/repo', untouched: false, surfaceType: 'tool', command: 'view',
+    tool: { render: 'iframe', port: 'announced', ...fields } }] } as unknown as PersistedSession;
+  expect(restoreSession(createPlatform(saved))).toBeNull();
+  expect(terminalRegistryMocks.restoreTerminal).not.toHaveBeenCalled();
+});
+
 describe('restoreSession alert seeding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -397,7 +413,11 @@ describe('restoreSession alert seeding', () => {
 
   const alert = { status: 'WATCHING_DISABLED' as const, todo: true, notification: null };
 
-  it('seeds a terminal pane\'s persisted TODO and leaves browser panes to the todo restore', () => {
+  /** What each restored terminal's spawn will carry as its persisted alert. */
+  const spawnedAlerts = () => terminalRegistryMocks.restoreTerminal.mock.calls
+    .map(([id, options]) => [id, (options as { alert?: unknown }).alert]);
+
+  it('spawns a terminal pane with its persisted TODO and leaves browser panes to the todo restore', () => {
     const saved: PersistedSession = {
       version: 3,
       panes: [
@@ -407,22 +427,31 @@ describe('restoreSession alert seeding', () => {
       ],
     };
     const platform = createPlatform(saved);
-    const alertSeed = vi.fn();
-    platform.alertSeed = alertSeed;
 
     restoreSession(platform);
 
-    // Only the terminal pane that carried one, and only that pane's blob.
-    expect(alertSeed.mock.calls).toEqual([['shell', alert]]);
+    // Only the terminal pane that carried one, and only that pane's blob: the
+    // host seeds it at the spawn.
+    expect(spawnedAlerts()).toEqual([['shell', alert], ['quiet', undefined]]);
   });
 
-  it('restores without a seeding host', () => {
-    const saved: PersistedSession = {
+  it('keeps a pane whose notification this build cannot read, seeding its TODO without the detail', () => {
+    const saved = {
       version: 3,
-      panes: [{ id: 'shell', title: 'Shell', cwd: '/tmp', untouched: false, alert }],
-    };
-    // VS Code omits `alertSeed`; its extension host seeds its own manager.
-    expect(restoreSession(createPlatform(saved))?.paneIds).toEqual(['shell']);
+      panes: [
+        {
+          id: 'newer',
+          title: 'Newer',
+          cwd: '/tmp',
+          untouched: false,
+          alert: { status: 'ALERT_RINGING', todo: true, notification: { source: 'FROM_A_NEWER_BUILD', title: 'x', body: null } },
+        },
+      ],
+    } as unknown as PersistedSession;
+    const platform = createPlatform(saved);
+
+    expect(restoreSession(platform)?.paneIds).toEqual(['newer']);
+    expect(spawnedAlerts()).toEqual([['newer', { status: 'ALERT_RINGING', todo: true, notification: null }]]);
   });
 
   it('restores the record it is handed with the commands it is handed', () => {

@@ -5,18 +5,17 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
-import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
-import { ToolPaneHeader } from './ToolPaneHeader';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
-import { addPlainNote, clearAllNotepads, getOpenNotepadId } from '../../lib/notepad/notepad-store';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
   type ScreenSnapshot,
 } from './agent-browser-screen';
 import { setDevServerResolution } from './agent-browser-ports';
+import { removeTerminalPaneState, setTerminalUserTitle } from '../../lib/terminal-state-store';
+import * as terminalState from '../../lib/terminal-state';
 import {
   ModeContext,
   WorkspaceActiveContext,
@@ -35,9 +34,8 @@ const SCREEN = STUB_SCREEN;
 const CHROME = STUB_CHROME;
 
 // Header widths landing in each collapsed browser tier (`browserHeaderTier`).
-const OVERFLOW_PX = 102; // chrome behind the trigger, minimize/kill still inline
-const TIGHT_PX = 94;     // a dirty report moves minimize/kill into the popover
-const TINY_PX = 80;      // zoom alone beside the trigger
+const OVERFLOW_PX = 94; // chrome behind the trigger, minimize/kill still inline
+const TINY_PX = 93;     // zoom alone beside the trigger
 
 function register(id: string, chrome: ChromeSnapshot = CHROME, snapshot: ScreenSnapshot = SCREEN) {
   return registerStubScreen(id, { chrome, snapshot });
@@ -53,7 +51,6 @@ let resizeHeader: (width: number) => void;
 
 beforeEach(() => {
   setPlatform(new FakePtyAdapter());
-  clearAllNotepads();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -64,14 +61,13 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
-  resetToolDirty();
   vi.restoreAllMocks();
 });
 
 function renderHeader(
   props: PaneProps,
   actions: WallActions,
-  state: { active?: boolean; zoomedId?: string | null; tool?: boolean; workspaceActive?: boolean } = {},
+  state: { active?: boolean; zoomedId?: string | null; workspaceActive?: boolean } = {},
 ) {
   act(() => {
     root.render(
@@ -82,7 +78,7 @@ function renderHeader(
               <WindowFocusedContext.Provider value={true}>
                 <ZoomedIdContext.Provider value={state.zoomedId ?? null}>
                   <WallActionsContext.Provider value={actions}>
-                    {state.tool ? <ToolPaneHeader {...props} /> : <SurfacePaneHeader {...props} />}
+                    <SurfacePaneHeader {...props} />
                   </WallActionsContext.Provider>
                 </ZoomedIdContext.Provider>
               </WindowFocusedContext.Provider>
@@ -96,7 +92,7 @@ function renderHeader(
 
 /** The compact header's popover, portaled to `document.body`. */
 const popup = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Browser controls"]');
-/** The compact header's trigger; its label grows a note count. */
+/** The compact header's trigger. */
 const overflowTrigger = () => container.querySelector<HTMLButtonElement>('[aria-label^="Browser controls"]')!;
 const inPopup = (selector: string) => popup()?.querySelector<HTMLElement>(selector) ?? null;
 /** Click, then let the popover's deferred dismissal (a 0ms task) run. */
@@ -109,129 +105,6 @@ function openPopup() {
 }
 
 describe('SurfacePaneHeader — browser chrome', () => {
-  it.each([
-    ['terminal', {}],
-    ['port conflict', { toolPortConflict: [3000, 4000] }],
-    ['browser', { url: CHROME.url }],
-  ])('shows live unsaved changes on the Tool %s face at narrow widths', (_face, params) => {
-    const id = 'dirty-tool-header';
-    const registration = register(id);
-    try {
-      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', ...params } }, stubActions(), { tool: true });
-      act(() => resizeHeader(120));
-      const indicator = () => container.querySelector('[role="img"][aria-label="Unsaved changes"]');
-      expect(indicator()).toBeNull();
-      act(() => recordToolDirty(id, true));
-      expect(indicator()).not.toBeNull();
-      expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
-      act(() => addPlainNote(id, 'Keep this note'));
-      expect(indicator()).not.toBeNull();
-      act(() => recordToolDirty(id, false));
-      expect(indicator()).toBeNull();
-      act(() => recordToolDirty(id, true));
-      expect(indicator()).not.toBeNull();
-      act(() => recordToolDirty(id, null));
-      expect(indicator()).toBeNull();
-    } finally {
-      registration.dispose();
-    }
-  });
-
-  it('keeps the dirty dot outside the browser overflow menu that Kill joins at the tight tier', () => {
-    // A 118px Tool has only 94px of browser chrome: the dot stays inline and
-    // essential controls join the menu before overflowing.
-    const id = 'dirty-tool-header-narrow';
-    const registration = register(id);
-    try {
-      recordToolDirty(id, true);
-      addPlainNote(id, 'Keep this note');
-      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
-      act(() => resizeHeader(TIGHT_PX));
-      const indicator = () => container.querySelector('[role="img"][aria-label="Unsaved changes"]');
-      expect(indicator()).not.toBeNull();
-      expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
-      // Zoom never joins the menu: it is the last control the header keeps.
-      expect(container.querySelector('[aria-label="Zoom"]')).not.toBeNull();
-      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Browser controls, 1 note"]')!.click());
-      expect(document.querySelector('[role="dialog"] [aria-label="Kill"]')).not.toBeNull();
-      expect(container.contains(indicator())).toBe(true);
-    } finally {
-      registration.dispose();
-    }
-  });
-
-  it.each([TIGHT_PX, 100, OVERFLOW_PX])('repositions essential actions on dirty updates at a fixed %spx width', width => {
-    const id = 'dirty-fixed-width';
-    const registration = register(id);
-    try {
-      renderHeader({ ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
-      act(() => resizeHeader(width));
-      const inlineKill = container.querySelector<HTMLButtonElement>('[aria-label="Kill"]')!;
-      act(() => inlineKill.focus());
-      expect(document.activeElement).toBe(inlineKill);
-      act(() => recordToolDirty(id, true));
-      expect(container.querySelector('[aria-label="Unsaved changes"]')).not.toBeNull();
-      if (width < OVERFLOW_PX) {
-        expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
-        expect(document.activeElement).toBe(overflowTrigger());
-        openPopup();
-        expect(inPopup('[aria-label="Kill"]')).not.toBeNull();
-        act(() => inPopup('[aria-label="Kill"]')!.focus());
-        expect(document.activeElement).toBe(inPopup('[aria-label="Kill"]'));
-      } else {
-        expect(document.activeElement).toBe(inlineKill);
-      }
-      act(() => recordToolDirty(id, false));
-      expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
-      expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
-      expect(inPopup('[aria-label="Kill"]')).toBeNull();
-      if (width < OVERFLOW_PX) {
-        expect(popup()).toBeNull();
-        expect(document.activeElement).toBe(overflowTrigger());
-      }
-    } finally {
-      registration.dispose();
-    }
-  });
-
-  it.each([null, false].flatMap(initial =>
-    (['inline', 'elsewhere', 'hidden'] as const).map(focus => ({ initial, focus })),
-  ))('handles $initial → dirty with $focus focus at a fixed narrow width', ({ initial, focus }) => {
-    const id = 'dirty-inline-focus';
-    const registration = register(id);
-    const props = { ...headerProps(id, 'Tool'), params: { surfaceType: 'tool', url: CHROME.url } };
-    const actions = stubActions();
-    const other = document.createElement('button');
-    document.body.appendChild(other);
-    try {
-      recordToolDirty(id, initial);
-      renderHeader(props, actions, { tool: true });
-      act(() => resizeHeader(TIGHT_PX));
-      act(() => container.querySelector<HTMLButtonElement>('[aria-label="Minimize"]')!.focus());
-      if (focus === 'elsewhere') act(() => other.focus());
-      if (focus === 'hidden') renderHeader(props, actions, { tool: true, workspaceActive: false });
-      act(() => recordToolDirty(id, true));
-      expect(container.querySelector('[aria-label="Minimize"]')).toBeNull();
-      expect(popup()).toBeNull();
-      expect(document.activeElement).toBe(focus === 'inline' ? overflowTrigger() : focus === 'elsewhere' ? other : document.body);
-    } finally {
-      other.remove();
-      registration.dispose();
-    }
-  });
-
-  it.each(['terminal', 'browser'] as const)('ignores dirty reports on an ordinary %s', kind => {
-    const id = 'dirty-non-tool-header';
-    const registration = register(id);
-    try {
-      act(() => recordToolDirty(id, true));
-      renderHeader({ ...headerProps(id, 'Ordinary'), params: { surfaceType: kind, url: CHROME.url } }, stubActions(), { tool: kind === 'terminal' });
-      expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
-    } finally {
-      registration.dispose();
-    }
-  });
-
   it.each(['workspace', 'parked'] as const)('dismisses compact controls without stealing focus when hidden by %s', hiddenBy => {
     const id = 'pane-hidden-controls';
     const registration = register(id);
@@ -256,12 +129,11 @@ describe('SurfacePaneHeader — browser chrome', () => {
     }
   });
 
-  it('collapses chrome by its own width, excluding the Tool context button', () => {
+  it('collapses chrome by its own width', () => {
     const registration = register('pane-resize', { ...CHROME, key: 'a'.repeat(300) });
-    renderHeader({ ...headerProps('pane-resize', 'Browser'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
+    renderHeader({ ...headerProps('pane-resize', 'Browser'), params: { surfaceType: 'browser', url: CHROME.url } }, stubActions());
     const split = () => container.querySelector('[aria-label="Split left/right"]');
     const zoom = () => container.querySelector('[aria-label="Zoom"]');
-    expect(container.querySelector('[aria-label="Terminal context"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Back"]')).not.toBeNull();
     expect(split()).not.toBeNull();
     // Zoom outlives every other control, so every step below re-asserts it.
@@ -272,7 +144,6 @@ describe('SurfacePaneHeader — browser chrome', () => {
     act(() => resizeHeader(340));
     expect(container.querySelector('[aria-label="Back"]')).toBeNull();
     expect(zoom()).not.toBeNull();
-    // A 126px Tool leaves 102px beside its Terminal Context button.
     act(() => resizeHeader(OVERFLOW_PX));
     expect(overflowTrigger()).not.toBeNull();
     expect(container.querySelector('[aria-label="Kill"]')).not.toBeNull();
@@ -373,16 +244,14 @@ describe('SurfacePaneHeader — browser chrome', () => {
     }
   });
 
-  it('names notes on the trigger and opens the notepad from the popover', async () => {
-    const registration = register('pane-notes');
-    renderHeader(headerProps('pane-notes', 'Browser'), stubActions());
+  it('hands focus to the trigger when a resize moves a focused Kill into the popover', () => {
+    const registration = register('pane-kill-focus');
+    renderHeader(headerProps('pane-kill-focus', 'Browser'), stubActions());
     act(() => resizeHeader(OVERFLOW_PX));
-    act(() => addPlainNote('pane-notes', 'A saved note'));
-    expect(overflowTrigger().getAttribute('aria-label')).toBe('Browser controls, 1 note');
-    openPopup();
-    expect(inPopup('input')).toBeNull();
-    await clickAndSettle(inPopup('button[aria-label^="Notepad"]')!);
-    expect(getOpenNotepadId()).toBe('pane-notes');
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Kill"]')!.focus());
+    act(() => resizeHeader(TINY_PX));
+    expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
+    expect(document.activeElement).toBe(overflowTrigger());
     registration.dispose();
   });
 
@@ -417,7 +286,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     const openModal = vi.fn(() => { stillOwnsFocus(); modalControl.focus(); });
     const registration = registerAgentBrowserScreen('pane-popup-actions', {
       snapshot: SCREEN, chrome: CHROME, hostCapable: true,
-      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal },
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal },
       chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload },
     });
     try {
@@ -442,9 +311,9 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
   it('uses the shared capability-first icon pair for every browser display mode', () => {
     const cases = [
-      [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: true }, 'ab-resize', 2],
-      [{ ...SCREEN, renderMode: 'ab-screencast', syncEngaged: false }, 'ab-fixed', 2],
-      [{ ...SCREEN, renderMode: 'ab-popout', syncEngaged: false }, 'ab-popout', 2],
+      [{ ...SCREEN, renderMode: 'agent-browser-screencast', syncEngaged: true }, 'agent-browser-resize', 2],
+      [{ ...SCREEN, renderMode: 'agent-browser-screencast', syncEngaged: false }, 'agent-browser-fixed', 2],
+      [{ ...SCREEN, renderMode: 'agent-browser-popout', syncEngaged: false }, 'agent-browser-popout', 2],
       [{ ...SCREEN, renderMode: 'iframe', syncEngaged: false }, 'iframe', 1],
     ] as const;
 
@@ -505,7 +374,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
   it('renders the dev-server chip and focuses the serving pane on click', () => {
     const reg = register('pane-dev');
-    setDevServerResolution(5173, { paneId: 'term-9', label: 'pnpm dev' });
+    setDevServerResolution(5173, { paneId: 'term-9', fallbackTitle: 'pnpm dev' });
     const onFocusPane = vi.fn();
     renderHeader(headerProps('pane-dev', 'x'), stubActions({ onFocusPane }));
 
@@ -526,6 +395,45 @@ describe('SurfacePaneHeader — browser chrome', () => {
     reg.dispose();
   });
 
+  it('labels the chip from the serving pane\'s live state, so a retitle shows at once', () => {
+    const reg = register('pane-live');
+    setDevServerResolution(5173, { paneId: 'term-live', fallbackTitle: 'stored' });
+    try {
+      renderHeader(headerProps('pane-live', 'x'), stubActions());
+      const chipLabel = () => container.querySelector('button[aria-label$="serves this localhost port"]')?.getAttribute('aria-label');
+      expect(chipLabel()).toBe('Focus stored — serves this localhost port');
+      act(() => { setTerminalUserTitle('term-live', 'first.md'); });
+      expect(chipLabel()).toBe('Focus first.md — serves this localhost port');
+      // Another pane's state change leaves the label underived.
+      const derive = vi.spyOn(terminalState, 'deriveSurfaceLabel');
+      act(() => { setTerminalUserTitle('term-other', 'elsewhere'); });
+      expect(derive).not.toHaveBeenCalled();
+      act(() => { setTerminalUserTitle('term-live', 'second.md'); });
+      expect(chipLabel()).toBe('Focus second.md — serves this localhost port');
+    } finally {
+      reg.dispose();
+      setDevServerResolution(5173, null);
+      removeTerminalPaneState('term-live');
+      removeTerminalPaneState('term-other');
+    }
+  });
+
+  it('lets the URL give up all its width before the chip truncates', () => {
+    // jsdom has no layout: the URL grows from a zero basis up to its text, and
+    // the space it leaves goes to an auto margin rather than a flexible spacer.
+    const reg = register('pane-width');
+    setDevServerResolution(5173, { paneId: 'term-9', fallbackTitle: 'pnpm dev' });
+    try {
+      renderHeader(headerProps('pane-width', 'x'), stubActions());
+      const url = container.querySelector<HTMLElement>('span[title="Vite + React"]')!;
+      expect([...url.classList]).toEqual(expect.arrayContaining(['basis-0', 'grow', 'max-w-max', 'min-w-0']));
+      expect(url.nextElementSibling?.className).toBe('ml-auto');
+    } finally {
+      reg.dispose();
+      setDevServerResolution(5173, null);
+    }
+  });
+
   it('exposes back/forward/reload nav controls', () => {
     const reg = register('pane-nav');
     renderHeader(headerProps('pane-nav', 'x'), stubActions());
@@ -539,7 +447,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     const navigate = vi.fn();
     const registration = registerAgentBrowserScreen('pane-url-edit', {
       snapshot: SCREEN,
-      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
       chrome: CHROME,
       chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
       hostCapable: true,
@@ -566,11 +474,42 @@ describe('SurfacePaneHeader — browser chrome', () => {
     registration.dispose();
   });
 
+  it('refuses a non-http(s) address visibly instead of navigating to it', () => {
+    const navigate = vi.fn();
+    const registration = registerAgentBrowserScreen('pane-url-refuse', {
+      snapshot: SCREEN,
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      chrome: CHROME,
+      chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
+      hostCapable: true,
+    });
+    renderHeader(headerProps('pane-url-refuse', 'x'), stubActions());
+
+    for (const typed of ['file:///tmp/report.html', 'about:blank']) {
+      act(() => {
+        (container.querySelector('span[title="Vite + React"]') as HTMLElement)
+          .dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const input = container.querySelector<HTMLInputElement>('[data-url-input-for="pane-url-refuse"]')!;
+      act(() => {
+        setNativeFieldValue(input, typed);
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      });
+      const warning = document.querySelector('[data-url-refusal-for="pane-url-refuse"]');
+      expect(warning?.textContent).toContain(typed);
+      expect(warning?.textContent).toContain('http:// and https:// pages only');
+      act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); });
+    }
+    expect(navigate).not.toHaveBeenCalled();
+
+    registration.dispose();
+  });
+
   it('cancels URL editing on Escape without navigating', () => {
     const navigate = vi.fn();
     const registration = registerAgentBrowserScreen('pane-url-esc', {
       snapshot: SCREEN,
-      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
       chrome: CHROME,
       chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
       hostCapable: true,
