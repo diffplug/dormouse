@@ -191,7 +191,7 @@ export function useToolServing({
         } else {
           // Autobind. Do not commit on first sighting: ports appear one at a
           // time during boot, so framing the first one seen would frame
-          // whichever bound earliest — for the standalone harness that is the
+          // whichever bound earliest — for the innerdogfood harness that is the
           // dev bridge, not vite. Wait for the set to stop changing, which
           // costs one tick and never has to retract a framed browser.
           const found = entries.map((candidate) => candidate.port);

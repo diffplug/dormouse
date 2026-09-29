@@ -11,7 +11,7 @@
  * loop that replaces them.
  */
 import { createServer, type Server } from 'node:http';
-import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
+import { monitorEventLoopDelay, type ELDHistogram } from 'node:perf_hooks';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
   VIEWER_TEXT_INPUT_MAX,
@@ -448,7 +448,7 @@ export class BrowserView implements ViewerSink {
   }
 }
 
-let lagMonitor: IntervalHistogram | null = null;
+let lagMonitor: ELDHistogram | null = null;
 /** The host's event-loop delay, sampled once any viewer logs its rates. */
 function startLagMonitor(): void {
   if (lagMonitor) return;

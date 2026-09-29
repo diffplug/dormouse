@@ -75,6 +75,27 @@ test('resolveSpawnConfig prepends dor CLI bin and injects surface id', () => {
   assert.equal(config.env.DORMOUSE_SURFACE_ID, 'pane-1');
 });
 
+test('resolveSpawnConfig keeps the sidecar storage roots out of the pane', () => {
+  const config = resolveSpawnConfig(
+    { surfaceId: 'pane-1' },
+    {
+      platform: 'linux',
+      env: {
+        PATH: '/usr/bin',
+        DORMOUSE_STATE_DIR: '/Users/me/Library/Application Support/sh.dormouse.standalone',
+        DORMOUSE_RECOVERY_DIR: '/Users/me/Library/Application Support/sh.dormouse.standalone',
+      },
+      osModule: {
+        homedir: () => '/home/tester',
+        tmpdir: () => '/tmp/fallback',
+      },
+    },
+  );
+
+  assert.equal(config.env.DORMOUSE_STATE_DIR, undefined);
+  assert.equal(config.env.DORMOUSE_RECOVERY_DIR, undefined);
+});
+
 test('resolveSpawnConfig applies per-spawn dor CLI env overrides', () => {
   const config = resolveSpawnConfig(
     {

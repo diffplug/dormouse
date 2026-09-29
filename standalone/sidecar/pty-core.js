@@ -160,6 +160,10 @@ function withoutInternalDormouseEnv(env) {
   delete next.DORMOUSE_CLI_BIN;
   delete next.DORMOUSE_GUI_NODE_DIR;
   delete next.DORMOUSE_SHELL_INTEGRATION_DIR;
+  // The sidecar's own storage roots: a dev server run in a pane (the dev Relay
+  // reads DORMOUSE_STATE_DIR) must never write into the running app's state.
+  delete next.DORMOUSE_STATE_DIR;
+  delete next.DORMOUSE_RECOVERY_DIR;
   return next;
 }
 

@@ -53,6 +53,22 @@ vi.mock('../../lib/src/host/remote/enroll-offer', async (importOriginal) => ({
   readEnrollmentOffer: () => Promise.resolve(offer),
 }));
 
+/**
+ * The direct path's addon. The glue owes the service a factory and the process
+ * a teardown; loading the native library itself is
+ * `lib/src/host/remote/native-direct-peer.test.ts`'s concern.
+ */
+const nativeDirect = vi.hoisted(() => ({ created: 0, disposed: 0 }));
+vi.mock('../../lib/src/host/remote/native-direct-peer', () => ({
+  createNativeDirectPeerFactory: () => {
+    nativeDirect.created += 1;
+    return () => null;
+  },
+  disposeNativeDirectPeers: () => {
+    nativeDirect.disposed += 1;
+  },
+}));
+
 const OFFER: EnrollmentOffer = {
   origin: 'https://ned-mac.tail9c2f1.ts.net',
   token: 'a'.repeat(64),
@@ -519,6 +535,29 @@ describe('burrow service glue', () => {
       burrowRequestId: 'rh-1',
       error: expect.stringContaining('allowed remote sources'),
     });
+  });
+
+  it('gives the service a direct-path factory, and tears the addon down only at deactivation', async () => {
+    nativeDirect.created = 0;
+    nativeDirect.disposed = 0;
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const activation = mod.initBurrow(fakeContext().context);
+
+    mod.handleBurrowCommand({
+      burrowRequestId: 'rh-1',
+      cmd: 'enroll',
+      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+    });
+    await waitFor(() => results(bound.posted).length > 0);
+    // Built with the service, so a Pocket offering a direct path gets an answer
+    // rather than a decline.
+    expect(nativeDirect.created).toBe(1);
+    expect(nativeDirect.disposed).toBe(0);
+
+    activation.dispose();
+    expect(nativeDirect.disposed).toBe(1);
   });
 
   it('bootstraps the contention on enrollOffer too, or the card cannot be pressed', async () => {

@@ -5,7 +5,7 @@
 > knows about, and how all of it is checked. Defers every mechanism to the spec
 > that owns it, and every audited check to the specs under
 > [How the guarantees are checked](#how-the-guarantees-are-checked). Published
-> at `https://dormouse.sh/docs/security`, whole but for the three blocks split
+> at `https://dormouse.sh/security`, whole but for the three blocks split
 > by audience; `docs/specs/website-docs.md` owns the page.
 
 Dormouse holds shells, source trees, credentials, and local files. Its

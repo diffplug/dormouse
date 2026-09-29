@@ -153,9 +153,10 @@ realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow si
   browser dev harness is *not* this case: its per-run temp directory makes a dev
   enrollment live and die with the run.
 
-**The direct path.** The sidecar is the one Burrow that answers a `direct-offer`
-(`docs/specs/remote-api.md` → Transport → "Direct path"), over
-`node-datachannel`'s W3C polyfill. **A sidecar package's transitive dependencies
+**The direct path.** The sidecar answers a `direct-offer`
+(`docs/specs/remote-api.md` → Transport → "Direct path") over
+`node-datachannel`'s W3C polyfill, as the VS Code extension host does
+(`docs/specs/vscode.md` → "The direct path"). **A sidecar package's transitive dependencies
 do not ship** — the Tauri bundle copies `standalone/sidecar/node_modules` and
 nothing else — so the addon's platform package and `detect-libc` are declared in
 `standalone/sidecar/package.json` directly — the addon's six platform packages
@@ -1328,7 +1329,8 @@ Source of truth: `standalone/package.json` (package scripts),
 `pnpm innerdogfood` starts the standalone sidecar directly, a localhost-only HTTP bridge, and Vite with `VITE_DORMOUSE_BROWSER_DEV_HOST`, then opens the app URL in an `agent-browser` session. The browser build uses `BrowserSidecarAdapter` instead of `TauriAdapter` whenever that env var is present.
 
 - **Must bind OS-assigned ports for Vite and the HTTP bridge by default**, as native dev does; only a direct `pnpm exec tauri dev` keeps `tauri.conf.json`'s `1420` (above).
-- **Must derive the default browser key from the canonical worktree path**, stable across restarts. **Must open through `dor agent-browser` when `DORMOUSE_SURFACE_ID` is set**, otherwise through `agent-browser`; print the actual app URL, the browser identity it passed, and the command to drive it. **Must print a `--key` as a key, never as a session**: only the Workspace that will hold the browser can namespace one (`docs/specs/dor-browser.md` → "Managed identity"). Inside Dormouse, `dor ensure -- pnpm innerdogfood` starts and opens the harness.
+- **Must derive the default browser key from the canonical worktree path**, stable across restarts. **Must open through `dor agent-browser` when `DORMOUSE_SURFACE_ID` is set**, otherwise through `agent-browser`; print the actual app URL, the browser identity it passed, and the command to drive it. **Must print a `--key` as a key, never as a session**: only the Workspace that will hold the browser can namespace one (`docs/specs/dor-browser.md` → "Managed identity"). **Must leave the browser to the Tool when its own terminal is a Tool** and no session is pinned, printing the Tool's handle; the Tool frames the announced Vite port. Inside Dormouse, `dor tool innerdogfood` starts and shows the harness.
+- **Must give its sidecar a private `AGENT_BROWSER_SOCKET_DIR`**, since the inner app names managed sessions as the installed app does; the harness's own browser keeps the caller's.
 - **May pin ports with `DORMOUSE_BROWSER_DEV_VITE_PORT` / `DORMOUSE_BROWSER_DEV_HOST_PORT` and the session with `DORMOUSE_BROWSER_DEV_AB_SESSION`.** An occupied pinned port fails startup; `0` requests an OS-assigned port. Explicit overrides are the caller's isolation responsibility.
 - **Must await Vite's own listener before opening the browser and use the actual ports for bridge authentication and CORS.** **Must close the bridge and Vite and terminate owned sidecar and browser-launch children on startup failure or shutdown**, escalating to SIGKILL after three seconds. Pinned by `standalone/scripts/dev-agent-browser.test.mjs`.
 

@@ -1,11 +1,11 @@
 /**
- * One `dor` command section on /docs/dor.
+ * One `dor` command section on /dor.
  *
  * Renders the semantic nodes the help parser produced, and keeps the original
  * help text available byte for byte in a collapsed disclosure — the parser is
  * deliberately shallow, so the exact source is always one click away.
  *
- * See docs/specs/website-docs.md -> /docs/dor reference.
+ * See docs/specs/website-docs.md -> /dor reference.
  */
 
 import { AnchoredHeading } from "./MarkdownDocument";

@@ -9,8 +9,8 @@ pnpm install     # install deps
 pnpm build       # build lib, vscode extension, Pocket, and website
 ```
 
-**Inside Dormouse, run `innerdogfood`** — `dor ensure -- pnpm innerdogfood`.
-The harness opens its browser pane and prints its URL and browser command
+**Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`.
+The Tool shows the harness in its own pane and prints the command to drive it
 (`docs/specs/standalone.md` → "Standalone browser-dev harness").
 
 ## Worktrees
@@ -28,7 +28,7 @@ The harness opens its browser pane and prints its URL and browser command
 - **`standalone/`** — Tauri desktop app (Rust + Vite frontend).
   - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty, direct-path WebRTC via node-datachannel), bundled as the Tauri sidecar
   - `standalone/src-tauri/` — Rust backend bridging webview ↔ sidecar
-- **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process)
+- **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process; direct-path WebRTC via node-datachannel, every platform's addon in one VSIX)
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
 - **`relay/`** — Selfhost coordinating Relay for remote control (Hono): accounts + passkey auth in local JSON files (no database), WebSocket routing between Clients and Burrows, serves the built Pocket app
 - **`hosted/`** — Separate Hosted account frontend and Hono Worker; packed pgstencil Better Auth, Postgres, and provider configuration.
@@ -75,7 +75,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`SELF_HOST.md`** (repo root) — Self-host deployment: the assistant-run install runbook plus the Installer contract that `docs/specs/security-remote.md`'s `FAIL IF` lines and `scripts/deploy-lint.mjs` audit.
 - **`docs/specs/pocket-app.md`** — Pocket: the remote session is a `PlatformAdapter` (`RemotePtyAdapter`), so Pocket is auth screens plus the mobile composition; owns the same-origin deployment rule.
 - **`docs/specs/deploy.md`** — Release process: artifact matrix, release checklist, two-stage sign-and-release pipeline, updater manifest, changelog flow.
-- **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published at `/docs/security`, rows split by audience. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
+- **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published at `/security`, rows split by audience. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
 - **`docs/specs/security-local.md`** — The boundaries a user of the local application has: terminal output, browser panes, the `dor` control socket, loopback listeners, persisted state.
 - **`docs/specs/security-remote.md`** — The audited checks on remote control: trust boundary, relay allowlist, credentials at rest, the setup password, cross-origin access, network posture, what crosses the boundary, revocation.
 - **`docs/specs/security-supply-chain.md`** — Disclosure of everything that reaches a user's machine, the bundled runtime pin, dependency cooldown and alerts.
@@ -140,21 +140,10 @@ the token files are split; `DESIGN.md` → "Don't" owns what adding one costs.
 <!-- dor-skill:begin — managed by `dor skill --install`; edits inside are overwritten -->
 ## Running inside Dormouse
 
-If the `DORMOUSE_SURFACE_ID` environment variable is set, this terminal is
-hosted by [Dormouse](https://dormouse.sh) and the `dor` CLI is on your `PATH`.
-**Run `dor skill` first and do what it says** — it teaches you to use the
-terminal fully (visible panes, browser surfaces, sub-agents). Two rules are
-mandatory whether or not you have read it:
+If the `DORMOUSE_SURFACE_ID` environment variable is set, this terminal is hosted by [Dormouse](https://dormouse.sh) and the `dor` CLI is on your `PATH`. **Run `dor skill` first and do what it says** — it teaches you to use the terminal fully (visible panes, browser surfaces, sub-agents). Two rules are mandatory whether or not you have read it:
 
-- **NEVER start a long-running process — a dev server, a `--watch`, any daemon
-  — as a background subprocess.** It would be invisible to the user and die with
-  your shell. ALWAYS run it with `dor ensure -- <command>` (e.g.
-  `dor ensure -- npm run dev`), which puts it in a visible pane that outlives
-  you and is reused instead of duplicated on re-runs.
-- **NEVER use a built-in, native, or bundled browser tool to open, view, or
-  drive a web page.** ALWAYS use `dor agent-browser` (agent-browser) — `dor agent-browser open
-  <url>`, `dor agent-browser click @e3`, and so on — so the page renders in a Dormouse
-  pane the user can watch.
+- **NEVER start a long-running process — a dev server, a `--watch`, any daemon — as a background subprocess.** It would be invisible to the user and die with your shell. ALWAYS run it with `dor ensure -- <command>` (e.g. `dor ensure -- npm run dev`), which puts it in a visible pane that outlives you and is reused instead of duplicated on re-runs.
+- **NEVER use a built-in, native, or bundled browser tool to open, view, or drive a web page.** ALWAYS use `dor agent-browser` (agent-browser) — `dor agent-browser open <url>`, `dor agent-browser click @e3`, and so on — so the page renders in a Dormouse pane the user can watch.
 
 If `DORMOUSE_SURFACE_ID` is not set, ignore this section — `dor` is not here.
 <!-- dor-skill:end -->

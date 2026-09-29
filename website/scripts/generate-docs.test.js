@@ -81,8 +81,8 @@ describe('product guide', () => {
   it('has unique, stable heading ids', () => {
     const ids = data.guide.headings.map((h) => h.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids).toContain('alerts-and-todos');
     expect(ids).toContain('browsers-for-you-and-your-agents');
+    expect(ids).toContain('select-and-copy-paste-like-you-meant');
   });
 });
 
@@ -216,10 +216,10 @@ describe('security spec', () => {
     for (const { to } of data.security.repoLinks) {
       expect(to.startsWith(REPO_BLOB_BASE) || routes.has(to.split('#')[0])).toBe(true);
     }
-    expect(data.security.repoLinks).toContainEqual({ from: '../../SELF_HOST.md', to: '/docs/self-host/' });
+    expect(data.security.repoLinks).toContainEqual({ from: '../../SELF_HOST.md', to: '/self-host/' });
     expect(data.security.repoLinks).toContainEqual({
       from: '../../SELF_HOST.md#keeping-the-relay-up-while-the-laptop-sleeps',
-      to: '/docs/self-host/#keeping-the-relay-up-while-the-laptop-sleeps',
+      to: '/self-host/#keeping-the-relay-up-while-the-laptop-sleeps',
     });
   });
 
@@ -275,10 +275,10 @@ describe('security spec', () => {
   it('fails on a link into a published page whose fragment names no heading there', () => {
     const target = { source: 'SELF_HOST.md', headings: [{ id: 'prerequisites' }], blocks: [] };
     const link = (href) => ({ source: 'docs/specs/security.md', headings: [], blocks: [{ type: 'link', href }] });
-    expect(() => assertRouteFragments([target, link('/docs/self-host/#prerequisites')])).not.toThrow();
-    expect(() => assertRouteFragments([target, link('/docs/self-host/#nowhere')])).toThrow(/names no heading/);
+    expect(() => assertRouteFragments([target, link('/self-host/#prerequisites')])).not.toThrow();
+    expect(() => assertRouteFragments([target, link('/self-host/#nowhere')])).toThrow(/names no heading/);
     // A route nobody generated, and a fragment on this page, are not this check's.
-    expect(() => assertRouteFragments([target, link('/docs/dor/#nowhere')])).not.toThrow();
+    expect(() => assertRouteFragments([target, link('/dor/#nowhere')])).not.toThrow();
   });
 
   it('keeps the fragment on a link into another spec', () => {
@@ -304,7 +304,7 @@ describe('repository links', () => {
     const rewritten = resolveRepoLinks(blocks, 'docs/specs/security.md');
     expect(hrefs(blocks)).toEqual([
       `${REPO_BLOB_BASE}/docs/specs/security-ci.md#domains`,
-      '/docs/self-host/',
+      '/self-host/',
     ]);
     expect(rewritten).toHaveLength(2);
   });
@@ -403,7 +403,7 @@ describe('agent skill', () => {
     // dor/skill.md is clean, so the build never drives this check red; a
     // finding check that cannot fail is a claim rather than a control.
     const offending = [
-      { type: 'paragraph', children: [{ type: 'link', href: `${SITE_ORIGIN}/docs/dor/` }] },
+      { type: 'paragraph', children: [{ type: 'link', href: `${SITE_ORIGIN}/dor/` }] },
     ];
     expect(() => assertNoSiteLinks(offending, 'dor/skill.md')).toThrow(SITE_ORIGIN);
     expect(() => assertNoSiteLinks(data.skill.blocks, 'dor/skill.md')).not.toThrow();
@@ -415,7 +415,7 @@ describe('agent skill', () => {
     // If this ever finds nothing the derivation has silently stopped matching.
     expect(refs.length).toBeGreaterThan(0);
     for (const ref of refs) {
-      expect(anchors).toContain(ref.href.replace('/docs/dor/#', ''));
+      expect(anchors).toContain(ref.href.replace('/dor/#', ''));
     }
   });
 
@@ -441,15 +441,15 @@ describe('same-site links', () => {
     // ever finds nothing the rewrite has silently stopped matching.
     expect(data.guide.localizedLinks.length).toBeGreaterThan(0);
     expect(data.guide.localizedLinks).toContainEqual({
-      from: 'https://dormouse.sh/docs/dor',
-      to: '/docs/dor/',
+      from: 'https://dormouse.sh/dor',
+      to: '/dor/',
     });
   });
 
   it('keeps the fragment on a localized deep link', () => {
     expect(data.guide.localizedLinks).toContainEqual({
-      from: 'https://dormouse.sh/docs/dor#agent-browser',
-      to: '/docs/dor/#agent-browser',
+      from: 'https://dormouse.sh/dor#agent-browser',
+      to: '/dor/#agent-browser',
     });
     // A bare origin still has to address the homepage, not the empty string.
     for (const { to } of data.guide.localizedLinks) expect(to.startsWith('/')).toBe(true);

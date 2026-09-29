@@ -10,7 +10,8 @@
  * Raw HTML is rejected with one exception: a narrow `<img>` allowlist, because
  * the canonical README uses inline 22px alert-state icons and portable Markdown
  * has no image-sizing syntax (docs/specs/website-docs.md -> /docs rendering
- * contract).
+ * contract). A block-level HTML comment is dropped, since GitHub and the
+ * Marketplace render it as nothing; an inline one is rejected.
  *
  * No dependencies, by design. Runs in Node during codegen and its output is
  * plain JSON consumed by the website.
@@ -171,6 +172,11 @@ export function parseInline(text, line) {
       continue;
     }
 
+    // A comment is only dropped on a line of its own (see parseMarkdown).
+    if (text.startsWith('<!--', i)) {
+      throw new UnsupportedMarkdownError('an HTML comment must stand on its own lines', line);
+    }
+
     // Any other raw HTML is rejected outright.
     if (ch === '<' && /^<\/?[a-zA-Z]/.test(text.slice(i))) {
       const tag = /^<\/?([a-zA-Z][a-zA-Z0-9-]*)/.exec(text.slice(i));
@@ -302,10 +308,10 @@ function closesFence(line, marker, length) {
  * continuation — ends before it instead of swallowing it. `next` supplies the
  * single line of lookahead a table needs; `startsTable` holds the test.
  *
- * Six of the seven block starts are here: ATX heading, list item, blockquote,
- * fence, table, and block-level raw HTML. A standalone `<img>` is deliberately
+ * Seven of the eight block starts are here: ATX heading, list item, blockquote,
+ * fence, table, HTML comment, and block-level raw HTML. A standalone `<img>` is deliberately
  * absent — it is inline-level, so GitHub keeps it in the paragraph and so do
- * we. The seventh, the thematic break, is tested separately at each call site
+ * we. The eighth, the thematic break, is tested separately at each call site
  * because `---` is also a setext underline, which has to raise first.
  */
 function interruptsParagraph(line, next) {
@@ -314,6 +320,7 @@ function interruptsParagraph(line, next) {
     || /^\s*>\s?/.test(line)
     || /^(\s*)(`{3,}|~{3,})/.test(line)
     || startsTable(line, next ?? '')
+    || /^\s*<!--/.test(line)
     || (/^\s*<\/?[a-zA-Z]/.test(line) && !/^\s*<img\b/i.test(line));
 }
 
@@ -489,6 +496,18 @@ export function parseMarkdown(markdown, options = {}) {
       const { node, next } = parseList(lines, i, slug);
       blocks.push(node);
       i = next;
+      continue;
+    }
+
+    // HTML comment block: dropped, as GitHub and the Marketplace render it.
+    if (/^\s*<!--/.test(raw)) {
+      let end = i;
+      while (end < lines.length && !lines[end].includes('-->')) end++;
+      if (end === lines.length) throw new UnsupportedMarkdownError('unterminated HTML comment', lineNo);
+      if (!/-->\s*$/.test(lines[end])) {
+        throw new UnsupportedMarkdownError('an HTML comment must stand on its own lines', end + 1);
+      }
+      i = end + 1;
       continue;
     }
 

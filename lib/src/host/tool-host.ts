@@ -3,14 +3,15 @@
  * (`docs/specs/dor-tool.md`). Bundled into the standalone sidecar as
  * `tool-host.cjs` and imported directly by the VS Code extension host.
  *
- * Two operations, one method: resolve a tool name against the nearest
- * `dormouse.yml`, and record a trust decision a human made in Dormouse's own
- * chrome. Everything crossing back to the webview is plain JSON — the
- * standalone path goes through Rust.
+ * One method: resolve a tool name against the nearest `dormouse.yml`, list
+ * the Tools there, read browser settings, and record a trust decision a human
+ * made in Dormouse's own chrome. Everything crossing back to the webview is
+ * plain JSON — the standalone path goes through Rust.
  */
 import { dirname } from 'node:path';
 import type { ToolControlResult, ToolHostRequest } from '../lib/platform/tool-types';
 import { resolveUpstreamUrl } from './git-upstream';
+import { listTools } from './tool-list';
 import { resolveOpenTool } from './tool-open';
 import type { ToolInput } from './tool-input';
 import { parseBrowserSection, type ToolEntry } from './tool-registry';
@@ -85,6 +86,7 @@ export function createToolHost(options: { stateDir?: string; userConfigPath?: st
           return { status: 'browser-config', config: await readBrowserConfig(request.cwd, userPath) };
         }
         if (request.op === 'open') return await resolveOpenTool(request, userPath);
+        if (request.op === 'list') return { status: 'list', listing: await listTools(request, { trust, userPath }) };
         const args = request.args ?? [];
         const project = request.global ? null : await lookupTool(request.name, request.cwd, trust, { args });
         if (project?.status === 'ok') {

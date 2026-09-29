@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { once } from "node:events";
 import { getRequestListener } from "@hono/node-server";
-import { createServer as createViteServer } from "vite";
+import { createServer as createViteServer, type ViteDevServer } from "vite";
 import { createAuthApp } from "@pgstencil/auth/better-auth";
 import { developmentDatabase } from "pgstencil/database";
 import { EmailDev, SystemTime } from "pgstencil";
@@ -8,8 +10,40 @@ import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
 
-const port = Number(process.env.PORT ?? 5188);
-const origin = `http://127.0.0.1:${port}`;
+// Bind first, then derive the origin from the port actually bound, so an unset
+// PORT runs beside another checkout's server. `localhost`, not `127.0.0.1`: it
+// is the host Dor Tools and `dor agent-browser open surface:N` put in the URL.
+let ready:
+  | {
+      origin: string;
+      listener: ReturnType<typeof getRequestListener>;
+      vite: ViteDevServer;
+    }
+  | undefined;
+const server = createServer((request, response) => {
+  if (!ready) {
+    response.writeHead(503).end("Starting.");
+    return;
+  }
+  if (!allowedDevRequest(request, ready.origin)) {
+    response.writeHead(403).end("Local development origin required.");
+    return;
+  }
+  if (request.url?.startsWith("/api/")) {
+    void ready.listener(request, response);
+    return;
+  }
+  ready.vite.middlewares(request, response, () =>
+    response.writeHead(404).end(),
+  );
+});
+server.on("upgrade", (request, socket) => {
+  if (!ready || !allowedDevRequest(request, ready.origin)) socket.destroy();
+});
+server.listen(Number(process.env.PORT || 0), "127.0.0.1");
+await once(server, "listening");
+const origin = `http://localhost:${(server.address() as AddressInfo).port}`;
+
 const email = new EmailDev(new SystemTime());
 const auth = createAuthApp({
   ...authPolicy,
@@ -21,35 +55,23 @@ const auth = createAuthApp({
 auth.app.get("/api/dev/emails", (c) =>
   c.json(email.all().map(({ to, text }) => ({ to, text }))),
 );
-const listener = getRequestListener((request) => auth.app.fetch(request));
-const server = createServer((request, response) => {
-  if (!allowedDevRequest(request, origin)) {
-    response.writeHead(403).end("Local development origin required.");
-    return;
-  }
-  if (request.url?.startsWith("/api/")) {
-    void listener(request, response);
-    return;
-  }
-  vite.middlewares(request, response, () => response.writeHead(404).end());
-});
-server.on("upgrade", (request, socket) => {
-  if (!allowedDevRequest(request, origin)) socket.destroy();
-});
 const vite = await createViteServer({
   server: {
     middlewareMode: true,
     hmr: { server },
     cors: { origin },
-    allowedHosts: ["127.0.0.1"],
+    allowedHosts: ["localhost"],
   },
   appType: "spa",
 });
-server.listen(port, "127.0.0.1", () => {
-  console.log(
-    `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.`,
-  );
-});
+ready = {
+  origin,
+  listener: getRequestListener((request) => auth.app.fetch(request)),
+  vite,
+};
+console.log(
+  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.`,
+);
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, async () => {
     server.close();

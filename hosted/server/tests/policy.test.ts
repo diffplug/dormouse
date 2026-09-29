@@ -15,16 +15,16 @@ test("provider allowlist fails closed on typos and partial credentials", () => {
   ).toThrow();
 });
 test("local inbox is guarded against rebinding and cross-origin requests", () => {
-  const origin = "http://127.0.0.1:5188";
+  const origin = "http://localhost:5188";
   const check = (headers: IncomingMessage["headers"]) =>
     allowedDevRequest({ headers } as IncomingMessage, origin);
-  expect(check({ host: "127.0.0.1:5188" })).toBe(true);
+  expect(check({ host: "localhost:5188" })).toBe(true);
   expect(check({ host: "attacker.test:5188" })).toBe(false);
-  expect(check({ host: "127.0.0.1:5188", origin: "https://dormouse.sh" })).toBe(
+  expect(check({ host: "localhost:5188", origin: "https://dormouse.sh" })).toBe(
     false,
   );
   expect(
-    check({ host: "127.0.0.1:5188", "sec-fetch-site": "cross-site" }),
+    check({ host: "localhost:5188", "sec-fetch-site": "cross-site" }),
   ).toBe(false);
 });
 // The account screen and the packed adapter gate on the same window; nothing

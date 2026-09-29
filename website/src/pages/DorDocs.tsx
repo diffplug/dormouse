@@ -1,5 +1,5 @@
 /**
- * `/docs/dor` — exhaustive, lossless CLI reference generated from the help
+ * `/dor` — exhaustive, lossless CLI reference generated from the help
  * snapshots that `dor/test/cli-help.test.mjs` already proves match real output.
  */
 import { type MetaArgs } from "react-router";
@@ -20,7 +20,7 @@ export function meta({ location }: MetaArgs) {
 export default function DorDocs() {
   return (
     <DocsLayout
-      activePath="/docs/dor"
+      activePath="/dor"
       intro="dor is on the PATH of every terminal Dormouse launches. This page is generated from the CLI's own help output."
       toc={cli.toc}
     >

@@ -1,7 +1,8 @@
-import { isAppControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { isAppControlMethod, isToolControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { createRefCount } from '../../lib/ref-count';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
 import { handleAppControl } from './app-control';
+import { handleToolControl } from './tool-control';
 import { errorText, mountingRefusal, ROUTE_RETRIES } from './dor-control-shared';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 import { handleWorkspaceControl, listAllWorkspaceSurfaces, type WindowControlParams } from './workspace-control';
@@ -12,7 +13,8 @@ import { classifySurfaceTarget, type DorControlRequest } from './use-dor-control
  * answers (`docs/specs/dor-cli.md` → "Handle Model"). It replaces the per-Wall
  * listener, which would have every mounted Workspace answer the same request.
  * The container verbs and the cross-Workspace listing are answered here instead,
- * by `workspace-control.ts`, and the app verbs by `app-control.ts`.
+ * by `workspace-control.ts`, the app verbs by `app-control.ts`, and the Tool
+ * configuration reads by `tool-control.ts`.
  */
 
 /** Where one control request lands. */
@@ -21,6 +23,9 @@ export type DorControlRoute =
   /** Answered by the Window before anything is resolved: an `app.*` verb acts
    *  on the running app, so no param of its names a Workspace or Surface. */
   | { kind: 'app' }
+  /** Answered by the Window before anything is resolved: a `tool.*` read of
+   *  the Tool configuration names no Workspace or Surface either. */
+  | { kind: 'tool' }
   /** Answered by the Window itself: a `workspace.*` container verb
    *  (`container: true`), or the `--all` listing that spans them. */
   | { kind: 'window'; container: boolean }
@@ -45,13 +50,14 @@ function wallHandleOwningTarget(target: unknown): WallHandle | null {
 }
 
 /**
- * Resolution order: the app verbs, the Window's own verbs, an explicit
+ * Resolution order: the app verbs, the Tool reads, the Window's own verbs, an explicit
  * container target, a target Surface named by its stable id, else the caller's
  * own Workspace, else the active one. `surface:N` targets are resolved by the
  * chosen Wall, within its own Workspace.
  */
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
   if (isAppControlMethod(detail.method)) return { kind: 'app' };
+  if (isToolControlMethod(detail.method)) return { kind: 'tool' };
   const params: WindowControlParams = detail.params ?? {};
   // Typed before use: `params` is whatever crossed the control socket, and a
   // non-string ref reaching `.trim()` would throw out of the window listener,
@@ -125,9 +131,10 @@ function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
   }
 }
 
-function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'window' | 'handle' }>, detail: DorControlRequest): unknown {
+function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'tool' | 'window' | 'handle' }>, detail: DorControlRequest): unknown {
   switch (route.kind) {
     case 'app': return handleAppControl(detail);
+    case 'tool': return handleToolControl(detail);
     case 'window': return route.container ? handleWorkspaceControl(detail) : listAllWorkspaceSurfaces(detail);
     case 'handle': return route.handle.handleDorControl(callerFor(route.handle, detail));
   }

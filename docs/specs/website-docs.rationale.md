@@ -96,7 +96,7 @@ commit — a busy 5173 silently becomes 5174.
 
 ## Markdown rendering contract
 
-Long paths in prose scrolled `/docs/self-host` sideways on a phone: ten
+Long paths in prose scrolled `/self-host` sideways on a phone: ten
 space-free tokens sit in its paragraphs, the longest 47 characters — about
 404px of monospace against the 343px a 375px phone leaves after padding. One
 unbreakable word to the line breaker, so it widened the article rather than
