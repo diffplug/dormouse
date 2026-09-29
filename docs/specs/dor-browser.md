@@ -217,7 +217,7 @@ The iframe option lists that the embed keeps no logins or cookies (for
   media query `change`.
 - **Each choice of Resize with pane is a new engagement**, named in every size
   sent, which reclaims the viewport even at the size last written.
-- **The host serializes all viewport and device writes per browser**, through the provider's
+- **The host serializes all viewport writes per browser**, through the provider's
   viewport primitive, never while a launch or close settles it; a write in
   flight keeps only the latest pane size, so a drag coalesces.
 - **The host judges a write only by a viewport taken after it landed**, as the
@@ -227,7 +227,7 @@ The iframe option lists that the embed keeps no logins or cookies (for
   later, with no write since, is another writer's**: the host stops that
   browser's sync, reports `off`, and writes no later size of that engagement.
   **A page shown anew (the active tab) is written, never judged.**
-- **A Fixed viewport or device ends the browser's sync**, after its write in
+- **A Fixed viewport ends the browser's sync**, after its write in
   flight; **refused if a launch or close of that browser began meanwhile, or
   the host shut down**. **Must carry the pane's ended engagement to the host,
   which rejects its later socket intents even when none arrived before Fixed.**
@@ -614,7 +614,7 @@ host; standalone runs the bundled copy in the sidecar behind one Rust command.
 | `measure` | Measure the active page's CSS width, height and device-pixel ratio without starting a browser. |
 | `view` | A single-use viewer socket URL for the browser at a `stream`, `headed` for a popped-out pane ([Viewer Socket](#viewer-socket)). |
 | `edit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
-| `navigate`, `history`, `tab`, `viewport`, `device`, `close` | One fixed argv (agent-browser) or client call (Playwright) each. |
+| `navigate`, `history`, `tab`, `viewport`, `close` | One fixed argv (agent-browser) or client call (Playwright) each. |
 
 **Every transport waits `BROWSER_REQUEST_TIMEOUT_MS` (40s) for any reply**, past
 agent-browser's 25s action timeout, so the webview never re-asks while the host
@@ -669,7 +669,7 @@ Pinned by `lib/src/host/browser-host.test.ts`, and against the controller by
 **Host-side validation is the security boundary: `parseBrowserRequest` rebuilds
 every request field by field before a provider sees it** — a known provider and
 operation, an http(s) navigation or new-session URL, bounded dimensions, a tab
-id and device name that cannot read as an option, a session name neither
+id that cannot read as an option, a session name neither
 CLI reads as an option or a path, and request ids of at most 64 `[A-Za-z0-9-]`,
 32 per close (rationale). Pinned by
 `lib/src/host/agent-browser-host.test.ts`.
@@ -753,7 +753,7 @@ A relaunch closes the previous CLI session, and a launch completes when the brow
 
 The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Must drop a frame byte-identical to the last, still acknowledging it** (rationale). **Input waiting on CDP past 256 messages closes the viewer socket.**
 
-**Must write a page's viewport only through Playwright's own `setViewportSize`** — sync, a Fixed size and a device alike — **never a CDP metrics override from the host's session** (rationale). **Must preserve the browser context's measured ratio when DPR is omitted, and reject an explicit different DPR before writing dimensions.** **A device adds only its touch and user agent over the host's CDP session, which the next viewport write resets.**
+**Must write a page's viewport only through Playwright's own `setViewportSize`** — sync and a Fixed size alike — **never a CDP metrics override from the host's session** (rationale). **Must preserve the browser context's measured ratio when DPR is omitted, and reject an explicit different DPR before writing dimensions.**
 
 Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
 

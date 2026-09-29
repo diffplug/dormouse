@@ -15,10 +15,7 @@ vi.mock('dor-lib-common', async importOriginal => ({ ...await importOriginal<typ
 vi.mock('./playwright-install', () => ({
   resolvePlaywrightInstall: () => ({
     binary: '/tools/playwright-cli', libraryPath: process.cwd(),
-    library: {
-      chromium: { connect: mocks.connect },
-      devices: { 'iPhone 15': { viewport: { width: 393, height: 659 }, userAgent: 'iPhone UA', deviceScaleFactor: 3, isMobile: true, hasTouch: true } },
-    },
+    library: { chromium: { connect: mocks.connect } },
   }),
   playwrightWorkspace: () => process.cwd(),
 }));
@@ -88,7 +85,7 @@ test('concurrent captures join one, a concurrent control shares its CDP attachme
   expect(browser.close).toHaveBeenCalledTimes(1);
 });
 
-test('an explicit different DPR is refused before resizing or changing device emulation', async () => {
+test('an explicit different DPR is refused before resizing', async () => {
   page.setViewportSize = vi.fn(async () => {});
   const result = await pw({ op: 'viewport', width: 390, height: 844, dpr: 2 });
   expect(result).toMatchObject({ ok: false, error: expect.stringContaining('cannot change DPR') });
@@ -617,7 +614,7 @@ describe('sync-to-pane', () => {
   /** The poll's next measurement, as a `dor playwright` command's attach runs it. */
   const poll = () => pw({ op: 'attach' });
 
-  test('rejected DPR and device requests leave pane sync engaged and its size unchanged', async () => {
+  test('a rejected DPR request leaves pane sync engaged and its size unchanged', async () => {
     const viewer = await viewSession();
     try {
       viewer.send({ type: 'sync', width: 800, height: 600, dpr: 2, engagement: 'e1' });
@@ -626,7 +623,6 @@ describe('sync-to-pane', () => {
       await vi.waitFor(() => expect(syncStates(viewer).at(-1)).toBe('synced'));
       const writes = vi.mocked(page.setViewportSize).mock.calls.length;
       expect((await pw({ op: 'viewport', width: 390, height: 844, dpr: 2, endsSync: 'e1' })).ok).toBe(false);
-      expect((await pw({ op: 'device', name: 'Unknown Device', endsSync: 'e1' })).ok).toBe(false);
       expect(vi.mocked(page.setViewportSize).mock.calls).toHaveLength(writes);
       expect(syncStates(viewer)).not.toContain('off');
       viewer.send({ type: 'sync', width: 820, height: 600, dpr: 2, engagement: 'e1' });
@@ -636,21 +632,13 @@ describe('sync-to-pane', () => {
     } finally { viewer.socket.terminate(); }
   });
 
-  test('sizes a page only through Playwright\'s own setViewportSize; a device adds only its touch and user agent', async () => {
+  test('sizes a page only through Playwright\'s own setViewportSize', async () => {
     expect((await pw({ op: 'viewport', width: 900, height: 600 })).ok).toBe(true);
     expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 900, height: 600 });
-    expect((await pw({ op: 'device', name: 'iPhone 15' })).ok).toBe(true);
-    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 393, height: 659 });
-    expect((await pw({ op: 'viewport', width: 800, height: 600 })).ok).toBe(true);
     expect((await pw({ op: 'viewport', width: 820, height: 600 })).ok).toBe(true);
+    expect(page.setViewportSize).toHaveBeenLastCalledWith({ width: 820, height: 600 });
     // No metrics override: a second writer Chrome re-applies on navigation.
-    expect(cdp.send.mock.calls.filter(([method]) => method.startsWith('Emulation.'))).toEqual([
-      ['Emulation.setTouchEmulationEnabled', { enabled: true }],
-      ['Emulation.setUserAgentOverride', { userAgent: 'iPhone UA' }],
-      // The next viewport leaves the device; the one after has nothing to leave.
-      ['Emulation.setTouchEmulationEnabled', { enabled: false }],
-      ['Emulation.setUserAgentOverride', { userAgent: '' }],
-    ]);
+    expect(cdp.send.mock.calls.filter(([method]) => method.startsWith('Emulation.'))).toEqual([]);
   });
 
   test('a poll begun before a sync write landed never stops the sync', async () => {

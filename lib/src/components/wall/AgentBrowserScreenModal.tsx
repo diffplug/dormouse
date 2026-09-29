@@ -404,7 +404,6 @@ function DimInput({
   onChange,
   onFocus,
   onBlur,
-  disabled,
   chars = 4,
 }: {
   label: string;
@@ -412,19 +411,17 @@ function DimInput({
   onChange: (next: string) => void;
   onFocus: () => void;
   onBlur?: () => void;
-  disabled?: boolean;
   /** Max digits the field holds — sizes the box so W/H/DPI stay compact. */
   chars?: number;
 }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-xs text-muted ${disabled ? 'opacity-50' : ''}`}>
+    <span className="inline-flex items-center gap-1 text-xs text-muted">
       {label}
       <NumericInput
         aria-label={label}
         value={value}
         onChange={onChange}
         chars={chars}
-        disabled={disabled}
         onFocus={onFocus}
         onBlur={onBlur}
       />

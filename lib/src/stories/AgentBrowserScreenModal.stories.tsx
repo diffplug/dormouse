@@ -60,7 +60,6 @@ function useMockController(args: StoryArgs): ScreenController {
       renderModes: ['agent-browser-screencast', ...(args.canPopOut ? ['agent-browser-popout' as const] : []), 'playwright-screencast', ...(args.canPopOut ? ['playwright-popout' as const] : []), 'iframe'],
       actions: {
         engageSync: () => console.log('[story] engageSync'),
-        applyDevice: (name) => console.log('[story] applyDevice', name),
         applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
         openModal: () => {},
         setRenderMode: (mode) => console.log('[story] setRenderMode', mode),

@@ -402,19 +402,6 @@ export class AgentBrowserSurfaceController {
         this.setBrowserViewport({ mode: 'pane-sync' });
         this.syncToPane();
       },
-      applyDevice: (name) => {
-        const browser = this.driver();
-        if (!browser) return;
-        this.viewportIntentEpoch += 1;
-        this.pendingViewportWrites += 1;
-        void browser.device(name, this.syncEngagement).then(async (result) => {
-          if (!result.ok) { console.warn(`[${this.provider}] set device ${name} failed:`, result.error); return; }
-          this.forgetFixedViewport();
-          this.setSyncEngaged(false);
-          const measured = await browser.measure();
-          if (measured.ok && measured.viewport) this.adoptMeasuredViewport(measured.viewport);
-        }).finally(() => { this.pendingViewportWrites -= 1; });
-      },
       applyViewport: (width, height, dpr) => this.fixViewport({ width, height, dpr }),
       applyViewportSetting: (setting) => this.applyViewportSetting(setting),
       openModal: () => openAgentBrowserScreenModal(this.id),
