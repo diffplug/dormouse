@@ -12,6 +12,11 @@ import { BUSY_DEMO_INTERVAL_MS, GESTURE_BACKGROUND_PERIOD, GESTURE_BACKGROUND_TI
 import { TutorialState } from "./tutorial-state";
 import { BOLD, RESET, fg } from "dormouse-lib/lib/ansi";
 
+vi.mock("dormouse-lib/lib/terminal-theme", async (importOriginal) => ({
+  ...await importOriginal<typeof import("dormouse-lib/lib/terminal-theme")>(),
+  getTerminalTheme: () => ({ foreground: "#cccccc", background: "#1e1e1e" }),
+}));
+
 type TutRunnerOptions = ConstructorParameters<typeof TutRunner>[0];
 
 const WHEEL_UP = "\x1b[<64;2;2M";

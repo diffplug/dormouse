@@ -15,6 +15,8 @@ import {
 import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { MobileGestureInputId } from "dormouse-lib/lib/mobile-gesture-menu";
+import { parseColorRgb } from "dormouse-lib/lib/css-color";
+import { getTerminalTheme, onTerminalThemeChange } from "dormouse-lib/lib/terminal-theme";
 import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import type { InteractiveProgram } from "./tutorial-shell";
 import {
@@ -60,9 +62,25 @@ const ACTIVE_ITEM_GLYPH = "●";
 const DONE_MARK = `${fg(32)}✓${RESET}`;
 const ACTIVE_MARK = `${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}`;
 const GESTURE_ARROWS: readonly MobileGestureInputId[] = ["up", "down", "left", "right"];
-/** Rows before the Pocket gesture background repeats: a multiple of its 32-row wave. */
+/** World dimensions stay independent of the viewport so scrolling and resizing
+ *  never regenerate the stars. */
 export const GESTURE_BACKGROUND_PERIOD = 256;
-export const GESTURE_BACKGROUND_TICK_MS = 160;
+export const GESTURE_BACKGROUND_TICK_MS = 33;
+const STARFIELD_WIDTH = 128;
+const GESTURE_STARS = (() => {
+  let seed = 42;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  return Array.from({ length: 768 }, () => ({
+    x: Math.floor(random() * STARFIELD_WIDTH),
+    y: Math.floor(random() * GESTURE_BACKGROUND_PERIOD),
+    depth: random(),
+    phase: random() * Math.PI * 2,
+    pulseSeconds: 5 + random() * 5,
+  }));
+})();
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
 const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
@@ -175,6 +193,7 @@ export class TutRunner implements InteractiveProgram {
   private stateUnsub: (() => void) | null = null;
   private pocketTouchModeUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
+  private themeUnsub: (() => void) | null = null;
   private busyDemoStart: number | null = null;
   private busyDemoDurationMs = 0;
   /** How long the fake `longtask` runs — the countdown and the re-press guard.
@@ -215,6 +234,9 @@ export class TutRunner implements InteractiveProgram {
     this.pocketTouchModeUnsub = this.subscribeToPocketTouchMode?.(() => this.render()) ?? null;
     this.resizeUnsub = this.adapter.onPtyResize((d) => {
       if (d.id === this.terminalId) this.render();
+    });
+    this.themeUnsub = onTerminalThemeChange(() => {
+      if (this.isPocketGestureScreen()) this.render();
     });
     this.render();
   }
@@ -724,14 +746,25 @@ export class TutRunner implements InteractiveProgram {
 
   private renderGestureBackground(lines: string[]): void {
     const { cols, rows } = this.adapter.getPtySize(this.terminalId);
+    const theme = getTerminalTheme();
+    const foreground = parseColorRgb(theme.foreground);
+    const background = parseColorRgb(theme.background);
+    const seconds = this.backgroundFrame * GESTURE_BACKGROUND_TICK_MS / 1000;
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
-    for (let row = 0; row < rows; row++) {
-      const worldRow = (row + this.backgroundOffset) % GESTURE_BACKGROUND_PERIOD;
-      const shift = Math.round(4 * Math.sin(worldRow * Math.PI / 16));
-      const glyph = (worldRow + this.backgroundFrame) % 7 === 0 ? "+" : "·";
-      let pattern = "";
-      for (let col = 0; col < cols; col++) pattern += (col + shift) % 12 === 0 ? glyph : " ";
-      out += `${moveTo(row + 1, 1)}${DIM}${fg(36)}${pattern}${RESET}`;
+    for (const star of GESTURE_STARS) {
+      const y = (star.y - this.backgroundOffset + GESTURE_BACKGROUND_PERIOD) % GESTURE_BACKGROUND_PERIOD;
+      if (y >= rows) continue;
+      const pulse = (1 + Math.sin(seconds * Math.PI * 2 / star.pulseSeconds + star.phase)) / 2;
+      const opacity = 0.16 + star.depth * 0.16 + pulse * 0.2;
+      const color = foreground && background
+        ? `\x1b[38;2;${background.map((channel, i) => Math.round(channel + (foreground[i] - channel) * opacity)).join(";")}m`
+        : `${DIM}${FG_DEFAULT}`;
+      const glyph = star.depth > 0.85 ? "✦" : star.depth > 0.6 ? "+" : "·";
+      for (let row = y; row < rows; row += GESTURE_BACKGROUND_PERIOD) {
+        for (let col = star.x; col < cols; col += STARFIELD_WIDTH) {
+          out += `${moveTo(row + 1, col + 1)}${color}${glyph}${RESET}`;
+        }
+      }
     }
     // Absolute cursor positions keep the foreground fixed and prevent a final
     // newline at the bottom of the viewport from scrolling the whole screen.
@@ -1127,6 +1160,8 @@ export class TutRunner implements InteractiveProgram {
     this.pocketTouchModeUnsub = null;
     this.resizeUnsub?.();
     this.resizeUnsub = null;
+    this.themeUnsub?.();
+    this.themeUnsub = null;
     this.write(LEAVE_ALT_SCREEN);
     if (notifyExit) this.onExit();
   }
