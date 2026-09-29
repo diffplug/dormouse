@@ -15,7 +15,8 @@
     "paths": {
       "ascii-splash-internal/*": ["./node_modules/ascii-splash/dist/*"],
       "dormouse-lib/*": ["../lib/src/*"],
-      "dor/*": ["../dor/src/*"]
+      "dor/*": ["../dor/src/*"],
+      "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"]
     },
     "strict": true,
     "noUnusedLocals": true,

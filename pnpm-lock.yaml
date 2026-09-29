@@ -221,9 +221,9 @@ importers:
       dor-lib-common:
         specifier: workspace:*
         version: link:../dor-lib-common
-      monaco-editor:
-        specifier: 0.55.1
-        version: 0.55.1
+      dor-tools-builtin:
+        specifier: workspace:*
+        version: link:../dor-tools-builtin
     devDependencies:
       '@types/node':
         specifier: ^24.13.4
@@ -244,6 +244,25 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.0
+      typescript:
+        specifier: ^7.0.0
+        version: 7.0.2
+
+  dor-tools-builtin:
+    dependencies:
+      dor-lib-common:
+        specifier: workspace:*
+        version: link:../dor-lib-common
+      monaco-editor:
+        specifier: 0.55.1
+        version: 0.55.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.4
+        version: 24.19.0
+      esbuild:
+        specifier: ^0.28.0
+        version: 0.28.2
       typescript:
         specifier: ^7.0.0
         version: 7.0.2

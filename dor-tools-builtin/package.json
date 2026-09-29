@@ -1,0 +1,35 @@
+{
+  "name": "dor-tools-builtin",
+  "version": "0.0.0",
+  "license": "FSL-1.1-MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./file-viewer": {
+      "types": "./dist/file-viewer.d.ts",
+      "default": "./dist/file-viewer.js"
+    },
+    "./file-viewer-format": {
+      "types": "./dist/file-viewer-format.d.ts",
+      "default": "./dist/file-viewer-format.js"
+    },
+    "./folder-viewer": {
+      "types": "./dist/folder-viewer.d.ts",
+      "default": "./dist/folder-viewer.js"
+    }
+  },
+  "scripts": {
+    "prebuild": "pnpm --filter dor-lib-common build",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.viewer.json && node scripts/build-viewer.mjs",
+    "test": "pnpm run build && node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "dor-lib-common": "workspace:*",
+    "monaco-editor": "0.55.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.4",
+    "esbuild": "^0.28.0",
+    "typescript": "^7.0.0"
+  }
+}

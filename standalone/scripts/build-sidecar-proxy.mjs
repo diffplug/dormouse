@@ -101,9 +101,9 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     outfile,
     bundle: true,
     platform: 'node', // node builtins (http/net/fs/child_process) stay external
-    // Match the frontend and VS Code host's dor/* source mapping. Host modules
-    // also share the CLI's pure file-format registry.
-    alias: { dor: path.resolve(here, '../../dor/src') },
+    // Match the frontend and VS Code host's dor/* and dor-tools-builtin/* source
+    // mappings. Host modules share the built-in viewers' pure format registry.
+    alias: { dor: path.resolve(here, '../../dor/src'), 'dor-tools-builtin': path.resolve(here, '../../dor-tools-builtin/src') },
     format: 'cjs',
     target: 'node24',
     // `ws`'s optional native accelerators stay unresolved rather than bundled.

@@ -651,7 +651,7 @@ Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 
 ### Transfer
 
-Dirty Tool consent: `docs/specs/dor-tool.md` → Editing files.
+Dirty Tool consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
 **A Workspace moves between windows without ending anything.** No process is killed: a move is not a closure.
 
@@ -1018,7 +1018,7 @@ Source of truth: `pty:captureRecovery` / `recovery:take` in `standalone/sidecar/
 
 ## Quit flow
 
-Tool close consent: `docs/specs/dor-tool.md` → Editing files.
+Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`QuitState`, `request_quit`,
 the `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed` commands, the `CloseRequested` /

@@ -44,6 +44,8 @@ const config: StorybookConfig = {
       // any Wall-importing story fails with "Failed to resolve import 'dor/…'".
       // Safe next to `dormouse-lib`: a string alias only matches `dor` or `dor/…`.
       dor: path.resolve(here, '..', '..', 'dor', 'src'),
+      // Same reason: `Wall` → `IframePanel` names the built-in viewers' formats.
+      'dor-tools-builtin': path.resolve(here, '..', '..', 'dor-tools-builtin', 'src'),
       // Same reason: `Wall` → `RemotePairingModalHost` pulls in the remote host
       // modules, which import `remote-lib-common`. Its package `exports` point
       // at a `dist` the Storybook/Argos job never builds, so alias the bare

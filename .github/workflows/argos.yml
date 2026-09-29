@@ -17,14 +17,15 @@ on:
       # unrelated `lib/**` PR and being accepted as that PR's. Not on
       # `pull_request`, where every dependency PR would bill a full run.
       - 'pnpm-lock.yaml'
-      # `lib/.storybook/main.ts` aliases these three to source, putting them in the
-      # story dependency graph exactly as `lib/src` is: `Wall` reaches all three,
+      # `lib/.storybook/main.ts` aliases these four to source, putting them in the
+      # story dependency graph exactly as `lib/src` is: `Wall` reaches all four,
       # and `PocketWall.stories.tsx` imports `remote-lib-common` directly. Push-only
       # like the lockfile; they nearly always change alongside `lib/**`, so the
       # marginal build count is close to zero.
       - 'dor/**'
       - 'remote-lib-common/**'
       - 'dor-lib-common/**'
+      - 'dor-tools-builtin/**'
   pull_request:
     types: [opened, synchronize, reopened]
     paths:

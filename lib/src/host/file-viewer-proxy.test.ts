@@ -3,7 +3,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { startFileViewer } from '../../../dor/src/file-viewer';
+import { startFileViewer } from '../../../dor-tools-builtin/src/file-viewer';
 import { createIframeProxyUrl } from './iframe-proxy';
 
 const EMBEDDERS = ['vscode-webview://viewer-test', 'vscode-file://vscode-app'];

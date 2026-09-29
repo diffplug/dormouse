@@ -105,7 +105,7 @@ export async function startCapabilityViewer({ csp, post = false, chunked = false
 
 /** Stops `viewer` on SIGINT or SIGTERM, and returns what the `dor __view-*`
  * entry prints for its caller: an OSC 2 title naming `target` and the OSC 367
- * `serve` announcement (docs/specs/dor-tool.md -> Opening local files). */
+ * `serve` announcement (docs/specs/dor-tools-builtin.md -> File viewer). */
 export function announceViewer(viewer: { port: number; path: string; close(): Promise<void> }, target: string): string {
   const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', stop);
