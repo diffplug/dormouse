@@ -191,8 +191,9 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 A folder viewer is any Tool that selects on single-click and activates on double-click through the [Preview slot](#preview-slot) invocations. `builtin:folder`, the default, is a Tool-owned `dor` process, titled as in [Opening local files](#opening-local-files):
 
-- **Must list names and entry types only, loading one directory at a time, and never serve file contents** (rationale). Previews reach files only through the slot, so the one-file grant in [Opening local files](#opening-local-files) is unchanged. The listener's audited rules are `docs/specs/security-local.md` → Local-file viewer.
-- **Must list dotfiles.** Entries git ignores are listed by default, with a show/hide checkbox.
+- **Must list names and entry types only, lazily loading expanded directories and probing compactable chains, and never serve file contents** (rationale). The listener's audited rules are `docs/specs/security-local.md` → Local-file viewer.
+- **Must list dotfiles.** Git-ignored entries are dimmed and shown by default, with a show/hide toggle.
+- **Must compact a directory containing exactly one child directory and nothing else into a slash-separated row**, continuing up to 32 levels per listing; hidden/ignored entries still count as siblings. Never compact through a symlink child. Refresh and Collapse all preserve the ordinary select/activate contract.
 - **Must cut a listing to its first 5,000 entries in display order**, directories first, from at most 100,000 names read.
 - **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which invokes `dor open --preview` or `dor open` over the control socket.
 - **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)

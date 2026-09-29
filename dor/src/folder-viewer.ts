@@ -96,7 +96,35 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
       Promise.all(kept.map(item => kindOf(dir, item.entry))), gitIgnored(git, dir, kept.map(item => item.entry.name)),
     ]);
     const keyed = kept.map((item, i) => ({ ...item, dir: kinds[i] === 'dir', kind: kinds[i] })).sort(byDisplayOrder);
-    return { entries: keyed.map(({ entry, kind }) => ({ name: entry.name, kind, ignored: ignored.has(entry.name) })), truncated };
+    const entries: FolderEntry[] = [];
+    // Inspect at most two real entries per hop: ignored/hidden siblings still
+    // stop compaction. Never follow a symlink as a compacted child, and bound
+    // both depth and concurrent directory handles for huge/generated trees.
+    async function compact(name: string, kind: FolderEntryKind): Promise<string> {
+      if (kind !== 'dir') return name;
+      let path = join(dir, name);
+      let display = name;
+      for (let depth = 0; depth < 32; depth++) {
+        try {
+          if (!isInsideRoot(root, await realpath(path))) break;
+          const children: Dirent[] = [];
+          for await (const child of await opendir(path)) {
+            children.push(child);
+            if (children.length === 2) break;
+          }
+          if (children.length !== 1 || !children[0].isDirectory()) break;
+          display += '/' + children[0].name;
+          path = join(path, children[0].name);
+        } catch { break; }
+      }
+      return display;
+    }
+    for (let i = 0; i < keyed.length; i += 16) {
+      entries.push(...await Promise.all(keyed.slice(i, i + 16).map(async ({ entry, kind }) => ({
+        name: await compact(entry.name, kind), kind, ignored: ignored.has(entry.name),
+      }))));
+    }
+    return { entries, truncated };
   }
 
   async function requestedPath(req: IncomingMessage): Promise<string> {

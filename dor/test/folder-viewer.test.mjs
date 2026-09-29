@@ -251,6 +251,18 @@ test('select and activate hand open the canonical path and reply with its result
   assert.deepEqual(JSON.parse((await post(failing, 'activate', { path: 'sub/a.txt' })).body), { ok: false, error: 'no Tool matches a.txt' });
 });
 
+test('compacts directory-only chains, counting hidden and ignored files as siblings', async () => {
+  await files({ 'src/main/java': null, 'src/main/java/A.java': 'class A {}',
+    'with-file/child': null, 'with-file/.hidden': '',
+    'empty/leaf': null, 'branch/left': null, 'branch/right': null });
+  const viewer = await start();
+  const names = (await list(viewer)).entries.map(row => row.name);
+  assert.deepEqual(names, ['branch', 'empty/leaf', 'src/main/java', 'with-file']);
+  assert.deepEqual((await list(viewer, 'src/main/java')).entries, [entry('A.java', 'file')]);
+  assert.equal((await post(viewer, 'select', { path: 'src/main/java/A.java' })).status, 200);
+  assert.equal(opened[0].path, join(root, 'src/main/java/A.java'));
+});
+
 test('no route returns file contents', async () => {
   await files({ 'secret.txt': 'TOPSECRET', sub: null, 'sub/nested.txt': 'TOPSECRET' });
   const viewer = await start();
@@ -277,7 +289,7 @@ async function runPage(names) {
     scrollIntoView() {}
     closest() { return this; }
   }
-  const elements = { tree: new Element(), show: new Element(), status: new Element(), refresh: new Element() };
+  const elements = { tree: new Element(), show: new Element(), status: new Element(), refresh: new Element(), collapse: new Element() };
   elements.show.checked = true;
   const items = [];
   const document = {
