@@ -120,7 +120,8 @@ async function load() {
       minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, lineNumbersMinChars: 3,
       padding: { top: 10, bottom: 10 }, renderLineHighlight: 'gutter', overviewRulerLanes: 0,
       fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
-    model.onDidChangeContent(report);
+    // Reload reports once after establishing the replacement's saved revision.
+    model.onDidChangeContent(event => { if (!event.isFlush) report(); });
     editor.onDidChangeCursorPosition(({ position }) => {
       el('position').textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
     });
