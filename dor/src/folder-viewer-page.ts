@@ -5,24 +5,30 @@ const STYLE = `
 :root{color-scheme:light dark}
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;display:flex;flex-direction:column;background:Canvas;color:CanvasText;font:13px/1.4 system-ui,sans-serif}
-header{display:flex;align-items:center;gap:8px;padding:3px 8px;border-bottom:1px solid GrayText}
-#root{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-label{display:flex;align-items:center;gap:4px;white-space:nowrap}
-button,input{font:inherit;margin:0}
+body{margin:0;display:flex;flex-direction:column;background:var(--vscode-sideBar-background,Canvas);color:var(--vscode-sideBar-foreground,CanvasText);font:var(--vscode-font-size,13px)/1.4 var(--vscode-font-family,system-ui,sans-serif)}
+header{display:flex;align-items:center;gap:2px;min-height:32px;padding:3px 8px;box-shadow:inset 0 -1px color-mix(in srgb,currentColor 10%,transparent)}
+#root{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+button{font:inherit;margin:0;border:0;border-radius:3px;padding:4px 6px;background:transparent;color:inherit;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+button:hover{background:color-mix(in srgb,currentColor 10%,transparent)}
+button:focus-visible{outline:1px solid var(--vscode-focusBorder,Highlight);outline-offset:-1px}
+button[aria-pressed=false]{opacity:.5}
+svg{width:16px;height:16px;flex:none;fill:currentColor}
 ul{margin:0;padding:0;list-style:none}
 #tree{flex:1;overflow:auto;padding:2px 0;outline:none}
-.row{display:flex;align-items:center;height:22px;padding-right:8px;white-space:nowrap;cursor:default;user-select:none}
-.chev{flex:none;width:16px;text-align:center;font-size:10px}
+.row{display:flex;align-items:center;gap:4px;height:22px;padding-right:8px;white-space:nowrap;cursor:default;user-select:none}
+.row:hover{background:var(--vscode-list-hoverBackground,color-mix(in srgb,currentColor 7%,transparent))}
+.chev{flex:none;width:12px;text-align:center;display:flex}
+.chev svg{width:12px;height:12px}
+.icon{display:flex;width:16px;height:16px;opacity:.8}
 [aria-expanded="true"]>.row>.chev{transform:rotate(90deg)}
 [aria-expanded="false"]>ul{display:none}
 .name{overflow:hidden;text-overflow:ellipsis}
-.ignored>.row,.note{color:GrayText}
+.ignored>.row,.note{opacity:.55}
 .note{height:22px;font-style:italic}
 #tree.hide-ignored .ignored{display:none}
-[aria-selected="true"]>.row{outline:1px solid Highlight;outline-offset:-1px}
-#tree:focus [aria-selected="true"]>.row{outline:none;background:Highlight;color:HighlightText}
-#status{padding:3px 8px;border-top:1px solid GrayText;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[aria-selected="true"]>.row{background:var(--vscode-list-inactiveSelectionBackground,ButtonFace);color:var(--vscode-list-inactiveSelectionForeground,CanvasText)}
+#tree:focus [aria-selected="true"]>.row{outline:1px solid var(--vscode-focusBorder,Highlight);outline-offset:-1px;background:var(--vscode-list-activeSelectionBackground,Highlight);color:var(--vscode-list-activeSelectionForeground,HighlightText)}
+#status{padding:4px 8px;box-shadow:inset 0 1px color-mix(in srgb,currentColor 10%,transparent);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #status:empty{display:none}
 `;
 
@@ -31,6 +37,7 @@ const SCRIPT = `(function () {
   'use strict';
   var tree = document.getElementById('tree');
   var show = document.getElementById('show');
+  var showIgnored = true;
   var status = document.getElementById('status');
   var root = { path: '', kind: 'dir', level: 0, parent: null, children: [], group: tree, expanded: true, loaded: false };
   var nodes = new WeakMap();
@@ -47,7 +54,7 @@ const SCRIPT = `(function () {
     return false;
   }
   function hidden(node) {
-    for (var n = node; n && n !== root; n = n.parent) if (n.ignored && !show.checked) return true;
+    for (var n = node; n && n !== root; n = n.parent) if (n.ignored && !showIgnored) return true;
     return false;
   }
   function setIgnored(node, ignored) {
@@ -71,12 +78,20 @@ const SCRIPT = `(function () {
     name.className = 'name';
     name.textContent = entry.name;
     row.appendChild(chev);
+    var icon = document.createElement('span');
+    icon.className = 'icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.innerHTML = entry.kind === 'dir'
+      ? '<svg viewBox="0 0 16 16"><path d="M1.5 2h4l1.5 2h7.5l.5.5v9l-.5.5h-13l-.5-.5v-11zM2 3v10h12V5H6.5L5 3z"/></svg>'
+      : '<svg viewBox="0 0 16 16"><path d="M3 1h6l4 4v10H3zm1 1v12h8V6H8V2zm5 .5V5h2.5z"/></svg>';
+    row.appendChild(icon);
     row.appendChild(name);
+    row.title = entry.name;
     li.appendChild(row);
     var node = { name: entry.name, path: parent.path ? parent.path + '/' + entry.name : entry.name, kind: entry.kind,
       level: parent.level + 1, parent: parent, li: li, row: row, children: [], group: null, expanded: false, loaded: false };
     if (entry.kind === 'dir') {
-      chev.textContent = '▸';
+      chev.innerHTML = '<svg viewBox="0 0 16 16"><path d="m6 3 5 5-5 5-.7-.7L9.6 8 5.3 3.7z"/></svg>';
       li.setAttribute('aria-expanded', 'false');
       node.group = document.createElement('ul');
       node.group.setAttribute('role', 'group');
@@ -203,7 +218,7 @@ const SCRIPT = `(function () {
     var out = [];
     (function walk(parent) {
       parent.children.forEach(function (child) {
-        if (child.ignored && !show.checked) return;
+        if (child.ignored && !showIgnored) return;
         out.push(child);
         if (child.expanded) walk(child);
       });
@@ -256,13 +271,21 @@ const SCRIPT = `(function () {
     event.preventDefault();
     if (next && next !== selected) select(next, 'settle');
   });
-  show.addEventListener('change', function () {
-    tree.classList.toggle('hide-ignored', !show.checked);
+  show.addEventListener('click', function () {
+    showIgnored = !showIgnored;
+    show.setAttribute('aria-pressed', String(showIgnored));
+    tree.classList.toggle('hide-ignored', !showIgnored);
     if (selected && hidden(selected)) select(null, false);
   });
   document.getElementById('refresh').addEventListener('click', function () {
     status.textContent = '';
     refresh().catch(fail);
+  });
+  document.getElementById('collapse').addEventListener('click', function () {
+    root.children.forEach(function walk(node) {
+      if (node.kind === 'dir') { toggle(node, false); node.children.forEach(walk); }
+    });
+    tree.focus();
   });
   load(root).catch(fail);
 })();`;
@@ -273,6 +296,6 @@ export function folderViewerPage(root: string): string {
   const name = escapeHtml(basename(root) || root);
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${name}</title><style>${STYLE}</style></head>`
     + `<body><header><span id="root" title="${escapeHtml(root)}">${name}</span>`
-    + '<label><input type="checkbox" id="show" checked> Show ignored</label><button type="button" id="refresh">Refresh</button></header>'
+    + '<button type="button" id="show" aria-pressed="true" title="Show ignored files">Ignored</button><button type="button" id="collapse" aria-label="Collapse all folders" title="Collapse all folders"><svg viewBox="0 0 16 16"><path d="M3 1h11l1 1v10h-1V2H3zM1 4h11l1 1v9l-1 1H1l-1-1V5zm0 1v9h11V5zm2 4V8h7v1z"/></svg></button><button type="button" id="refresh" aria-label="Refresh" title="Refresh"><svg viewBox="0 0 16 16"><path d="M13 2v4H9l1.5-1.5A4.5 4.5 0 1 0 12.4 9h1A5.5 5.5 0 1 1 11.2 3.8z"/></svg></button></header>'
     + `<ul id="tree" role="tree" tabindex="0" aria-label="${name}"></ul><div id="status" role="status"></div><script>${SCRIPT}</script></body></html>`;
 }

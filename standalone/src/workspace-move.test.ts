@@ -234,6 +234,35 @@ const emit = async (event: string, data: unknown) => {
 };
 
 describe("the source half", () => {
+  it.each([true, false])("refuses dirty editors without explicit discard (existing window: %s)", async (existing) => {
+    const prepare = vi.fn(async () => prepared());
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      dirtyToolIds: () => ["editor"], prepareWorkspaceTransfer: prepare,
+    }));
+    const moving = existing ? transferWorkspaceTo(WORKSPACE_ID, "ws-2")
+      : tearOutWorkspace(WORKSPACE_ID, { x: 90, y: 12 });
+    await expect(moving).resolves.toMatchObject({ moved: false, reason: expect.stringContaining("unsaved changes") });
+    expect(prepare).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
+  });
+
+  it("rechecks editors after asynchronous preparation, allowing only explicit discards", async () => {
+    let dirty: string[] = ["discarded"];
+    let finish!: (value: PreparedWorkspaceTransfer) => void;
+    registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      dirtyToolIds: () => dirty,
+      prepareWorkspaceTransfer: () => new Promise(resolve => { finish = resolve; }),
+    }));
+    const moving = transferWorkspaceTo(WORKSPACE_ID, "ws-2", undefined, undefined, ["discarded"]);
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
+    dirty = ["discarded", "new-edit"];
+    finish(prepared());
+    await expect(moving).resolves.toMatchObject({ moved: false, reason: expect.stringContaining("unsaved changes") });
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
+  });
+
   it('collapses only after adoption and keeps the source until its animation finishes', async () => {
     createWorkspace({ id: WORKSPACE_ID });
     const commit = vi.fn();
@@ -258,9 +287,10 @@ describe("the source half", () => {
     }
   });
 
-  it("prepares the Workspace, tells the host, and commits only when it lands", async () => {
+  it.each([false, true])("prepares and commits only on adoption (explicit discard: %s)", async (discard) => {
     const order: string[] = [];
     registerWallHandle(stubWallHandle(WORKSPACE_ID, {
+      dirtyToolIds: () => discard ? ["editor"] : [],
       prepareWorkspaceTransfer: async () => {
         order.push("prepare");
         return prepared(() => order.push("commit"));
@@ -268,7 +298,7 @@ describe("the source half", () => {
     }));
     initWorkspaceMoves(fakePlatform(order));
 
-    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 });
+    const moved = transferWorkspaceTo(WORKSPACE_ID, "ws-2", { x: 10, y: 4 }, undefined, discard ? ["editor"] : []);
     await contentSent();
 
     // The record is built while the Sessions are live. Nothing is released at

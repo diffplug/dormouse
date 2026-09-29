@@ -16,9 +16,25 @@ export class HttpError extends Error {
 }
 
 /** Node sends no body on a HEAD response. */
-export function reply(res: ServerResponse, status: number, body = '', type = TEXT): void {
+export function reply(res: ServerResponse, status: number, body: string | Buffer = '', type = TEXT): void {
   res.writeHead(status, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(body) });
   res.end(body);
+}
+
+/** A POST's JSON body: 415 unless typed `application/json`, 413 past `limit`
+ * bytes (read to the end, buffering none past it, so the refusal is delivered),
+ * 400 unparsable. */
+export async function readJsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
+  if ((req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') throw new HttpError(415);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  await new Promise<void>((done, fail) => {
+    req.on('data', (chunk: Buffer) => { size += chunk.length; if (size <= limit) chunks.push(chunk); });
+    req.on('end', done);
+    req.on('error', fail);
+  });
+  if (size > limit) throw new HttpError(413);
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400); }
 }
 
 /** Whether the absolute `path` is `root` or under it. */

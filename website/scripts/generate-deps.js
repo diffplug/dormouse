@@ -307,6 +307,8 @@ const missingLicense = {
   "Solarized & Selenized": "MIT",
 };
 const missingAuthor = {
+  // DefinitelyTyped publishes these names in `contributors`, not `author`.
+  "@types/trusted-types": "Jakub Vrana, Damien Engels, Emanuel Tesar, Bjarki, Sebastian Silbermann",
   "@hono/node-ws": "Hono middleware contributors",
   // The addon ships a `contributors` array rather than npm's singular `author`
   // field, and its prebuilt platform packages carry neither.

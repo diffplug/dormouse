@@ -16,7 +16,10 @@ import {
   type ScreenActions,
   type ScreenRegistration,
 } from './agent-browser-screen';
-import { isToolParams } from './browser-surface';
+import { isToolParams, toolScopeFromParams } from './browser-surface';
+import { builtinFor } from 'dor/file-viewer-format';
+import { connectIframeTheme } from '../../lib/themes/iframe-theme';
+import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor';
 import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 
@@ -200,6 +203,15 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
   useEffect(() => {
+    if (!isTool || resolution.kind !== 'proxied' || !iframeRef.current) return;
+    return connectIframeTheme(iframeRef.current, resolution.origin);
+  }, [isTool, resolution]);
+  useEffect(() => {
+    if (!isTool || params.toolName !== builtinFor(false).kind || toolScopeFromParams(params) !== 'builtin'
+      || resolution.kind !== 'proxied' || !iframeRef.current) return;
+    return connectToolEditor(id, String(params.toolTarget ?? title), iframeRef.current, resolution.origin);
+  }, [id, isTool, params?.toolName, params?.toolScope, params?.toolTarget, title, resolution]);
+  useEffect(() => {
     if (!sourceUrl) {
       setResolution({ kind: 'empty' });
       return;
@@ -263,12 +275,17 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   }), [id, swapCapable, renderModes]);
   const setRenderMode = screenActions.setRenderMode;
   const openInAgentBrowser = setRenderMode && agentBrowserCapable ? () => setRenderMode('agent-browser-screencast') : undefined;
+  // A Tool's header offers no navigation (`ToolPaneHeader`); reload is its one
+  // chrome action that replaces the document.
   const chromeActions = useMemo<ChromeActions>(() => ({
     navigate(next) { commitUrl(next); },
     back() { goToHistoryIndex(historyIndexRef.current - 1); },
     forward() { goToHistoryIndex(historyIndexRef.current + 1); },
-    reload() { setReloadNonce((n) => n + 1); },
-  }), [commitUrl, goToHistoryIndex]);
+    reload() {
+      const reload = () => setReloadNonce((n) => n + 1);
+      if (isTool) withToolEditorConsent(id, reload); else reload();
+    },
+  }), [id, isTool, commitUrl, goToHistoryIndex]);
   const registrationRef = useRef<ScreenRegistration | null>(null);
   // Register the screen controller unconditionally so the browser chrome (URL +
   // far-left chip) shows for every iframe surface, on every host — `dor iframe`

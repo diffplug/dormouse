@@ -651,6 +651,8 @@ Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 
 ### Transfer
 
+Dirty Tool consent: `docs/specs/dor-tool.md` → Editing files.
+
 **A Workspace moves between windows without ending anything.** No process is killed: a move is not a closure.
 
 The protocol and every failure path are §Arrival queue; what a move *is*:
@@ -1015,6 +1017,8 @@ disk persistence.
 Source of truth: `pty:captureRecovery` / `recovery:take` in `standalone/sidecar/main.js`; `TauriAdapter` in `standalone/src/tauri-adapter.ts`.
 
 ## Quit flow
+
+Tool close consent: `docs/specs/dor-tool.md` → Editing files.
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`QuitState`, `request_quit`,
 the `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed` commands, the `CloseRequested` /

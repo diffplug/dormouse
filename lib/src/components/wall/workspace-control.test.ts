@@ -168,6 +168,22 @@ describe('workspace.move', () => {
     expect(answer(neither)).toMatch(/needs a window, an index, or both/);
   });
 
+  it('refuses cross-window moves of dirty Tools even with the iframe destruction flag', async () => {
+    const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
+    handleFor(second, { dirtyToolIds: () => ['editor'], iframeSurfaceRefs: () => ['surface:4'] });
+    const transferWorkspace = vi.fn(async () => {});
+    setPlatform({ transferWorkspace } as unknown as PlatformAdapter);
+    for (const dangerouslyDestroyIframePageState of [false, true]) {
+      const move = request('workspace.move', { workspace: 'workspace:7', toWindow: 'new', dangerouslyDestroyIframePageState });
+      await handleWorkspaceControl(move);
+      expect(answer(move)).toMatch(/unsaved changes/);
+    }
+    expect(transferWorkspace).not.toHaveBeenCalled();
+    const reorder = request('workspace.move', { workspace: 'workspace:7', index: 0 });
+    await handleWorkspaceControl(reorder);
+    expect(answer(reorder)).toMatchObject({ status: 'moved' });
+  });
+
   it('refuses to move a Workspace holding iframes unless told to destroy their page state', async () => {
     const second = createWorkspace({ id: 'workspace-7', name: 'build', activate: false }).id;
     handleFor(getWorkspacesSnapshot().workspaces[0].id);

@@ -65,7 +65,10 @@ host built at runtime can escape its patterns.
 The Local-file viewer subsection adds a tokenized file grant: read
 `dor/src/file-viewer.ts`, `dor/src/viewer-server.ts`, and
 `dor/src/file-viewer-loopback-guard.ts`, including its static asset discovery,
-descriptor lifetime, and every request gate. The folder viewer shares that
+descriptor lifetime, and every request gate. Also read `dor/src/editable-file.ts`,
+`dor/src/viewer-assets.ts`, and `dor/viewer/editor.ts`: writes must target only
+the opened text file, compare disk revisions, reject substituted symlinks,
+and never expose arbitrary assets or execute the source document. The folder viewer shares that
 listener and guard: read `dor/src/folder-viewer.ts` and
 `dor/src/folder-viewer-page.ts` for path containment, the POST gate, how names
 reach the page, and the git invocation.

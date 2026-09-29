@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import type { TauriAdapter } from "./tauri-adapter";
 
 /**
@@ -42,6 +43,8 @@ vi.mock("./updater", () => ({
 import { initQuitFlow, setQuitConfirmGate, _resetForTesting } from "./quit";
 import { initWindowClose, _resetWindowCloseForTesting } from "./window-close";
 import { _resetTeardownArbiterForTesting } from "./teardown-flow";
+import { getToolDirty, recordToolDirty, resetToolDirty } from "dormouse-lib/lib/tool-dirty-store";
+import { decideEditorClose, getEditorClosePrompt } from "dormouse-lib/lib/tool-editor";
 import {
   cancelQuit,
   getQuitConfirmIntent,
@@ -76,6 +79,8 @@ describe("one window, two teardown flows", () => {
     _resetTeardownArbiterForTesting();
     _resetQuitConfirmForTesting();
     listeners.clear();
+    resetWallHandles();
+    registerWallHandle(stubWallHandle("w1", { dirtyToolIds: () => getToolDirty("editor") === true ? ["editor"] : [] }));
     mocks.listen.mockImplementation((event: string, cb: (e: { payload?: unknown }) => void) => {
       listeners.set(event, cb);
       return Promise.resolve(() => {});
@@ -90,8 +95,61 @@ describe("one window, two teardown flows", () => {
   });
 
   afterEach(() => {
+    void decideEditorClose("cancel");
+    resetToolDirty();
+    resetWallHandles();
     setQuitConfirmGate(null);
     _resetTeardownArbiterForTesting();
+  });
+
+  it("ignores dirty reports from a plain terminal during quit", async () => {
+    recordToolDirty("plain-terminal", true);
+    quitRequested();
+    await settle();
+    expect(getEditorClosePrompt()).toBeNull();
+    expect(getQuitConfirmPhase()).toBe("open");
+    cancelQuit();
+  });
+
+  it("acks a quit, then waits for unsaved-file consent before the running-work gate", async () => {
+    recordToolDirty("editor", true);
+    quitRequested();
+    expect(commands()).toContain("quit_ack");
+    expect(getEditorClosePrompt()).not.toBeNull();
+    expect(getQuitConfirmPhase()).toBeNull();
+    expect(commands()).not.toContain("quit_vote");
+    await decideEditorClose("cancel");
+    await settle();
+    expect(commands()).toContain("quit_cancel");
+    expect(commands()).not.toContain("quit_vote");
+  });
+
+  it("a quit takes over an unsaved-file window-close question without leaving either flow waiting", async () => {
+    recordToolDirty("editor", true);
+    closeRequested();
+    quitRequested();
+    await settle();
+    expect(commands()).toContain("window_close_cancel");
+    expect(getEditorClosePrompt()).not.toBeNull();
+    await decideEditorClose("discard");
+    await settle();
+    expect(getQuitConfirmIntent().kind).toBe("quit");
+    expect(commands()).not.toContain("close_window");
+    cancelQuit();
+  });
+
+  it("a refused window close leaves the quit’s unsaved-file question intact", async () => {
+    recordToolDirty("editor", true);
+    quitRequested();
+    const pending = getEditorClosePrompt();
+    closeRequested();
+    await settle();
+    expect(getEditorClosePrompt()).toBe(pending);
+    expect(commands()).toContain("window_close_cancel");
+    expect(commands()).not.toContain("quit_cancel");
+    await decideEditorClose("cancel");
+    await settle();
+    expect(commands()).toContain("quit_cancel");
   });
 
   it("a quit arriving while a close is confirming takes the dialog over", async () => {

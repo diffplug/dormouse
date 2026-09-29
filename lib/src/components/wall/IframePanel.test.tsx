@@ -11,6 +11,8 @@ import { IframePanel } from './IframePanel';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { PaneWriteContext, WallActionsContext, type PaneWriteActions, type WallActions } from './wall-context';
 import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
+import { confirmToolEditorsClose, decideEditorClose, getEditorClosePrompt } from '../../lib/tool-editor';
+import { resetToolDirty } from '../../lib/tool-dirty-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,6 +31,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  void decideEditorClose('cancel');
+  resetToolDirty();
   act(() => root.unmount());
   container.remove();
   vi.restoreAllMocks();
@@ -60,6 +64,24 @@ async function renderPanel(
 }
 
 describe('IframePanel', () => {
+  it('connects the resolved built-in file Tool to save consent', async () => {
+    const platform = new FakePtyAdapter();
+    platform.createIframeProxyUrl = async () => ({ ok: true, url: 'http://localhost:4555/token/view' });
+    setPlatform(platform);
+    const iframe = await renderPanel(stubActions(), { id: 'edit', title: 'example.ts', params: {
+      surfaceType: 'tool', toolName: 'file', toolScope: 'builtin', toolTarget: '/project/example.ts',
+      command: 'dor __view-file /project/example.ts', renderMode: 'iframe', url: 'http://localhost:4000/token/view',
+    } });
+    const post = vi.spyOn(iframe.contentWindow!, 'postMessage');
+    iframe.dispatchEvent(new Event('load'));
+    const command = post.mock.calls.find(([data]) => data.__dormouse === 'editor-command')?.[0];
+    expect(command?.kind).toBe('connect');
+    window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, origin: 'http://localhost:4555',
+      data: { __dormouse: 'editor', connection: command.connection, kind: 'ready', dirty: true } }));
+    const close = confirmToolEditorsClose(['edit']);
+    expect(getEditorClosePrompt()?.items.map(item => item.label)).toEqual(['/project/example.ts']);
+    await decideEditorClose('cancel'); expect(await close).toBe(false);
+  });
   // The raw fallback is the case with no proxy in front of it at all — the
   // website, Storybook, the tutorial — so it is not the trusted one. It used to
   // be framed with no sandbox and a full camera/microphone/geolocation/

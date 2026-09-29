@@ -7,6 +7,7 @@ import type {
   WorkspaceRow,
 } from 'dor/commands/types';
 import { getPlatformOrNull } from '../../lib/platform';
+import { UNSAVED_TOOL_MOVE_REFUSAL } from '../../lib/tool-editor';
 import { getActivitySnapshot } from '../../lib/session-activity-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import {
@@ -249,6 +250,10 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         const handle = await awaitWallHandle(target.id);
         if (!handle) {
           detail.respond({ ok: false, error: mountingRefusal(target.ref) });
+          return;
+        }
+        if (handle.dirtyToolIds().length) {
+          detail.respond({ ok: false, error: UNSAVED_TOOL_MOVE_REFUSAL });
           return;
         }
         const platform = getPlatformOrNull();

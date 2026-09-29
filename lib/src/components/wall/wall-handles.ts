@@ -31,6 +31,8 @@ export interface WallHandle {
    *  gate, alongside `runningCount`). */
   hasTouchedSurfaces(): boolean;
   runningCount(): number;
+  /** Dirty reports consumed only by Tool-designated members, including Doors. */
+  dirtyToolIds(): string[];
   /** Leave command selection on chrome and focus a live pane. */
   enterSelectedPane(): void;
   enterCommandMode(): void;
@@ -53,8 +55,8 @@ export interface WallHandle {
   prepareWorkspaceTransfer(): Promise<PreparedWorkspaceTransfer>;
   /** Close every member Surface through the closure coordinator. Resolves null
    *  once the Wall is empty, else the first refusal's message with the Workspace
-   *  left as it was. */
-  closeAll(): Promise<string | null>;
+   *  left as it was. `editors` are the dirty Tools whose close was consented. */
+  closeAll(editors?: readonly string[]): Promise<string | null>;
   handleDorControl(detail: DorControlRequest): void;
 }
 
@@ -108,6 +110,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     browserSessions: () => [],
     hasTouchedSurfaces: () => false,
     runningCount: () => 0,
+    dirtyToolIds: () => [],
     enterSelectedPane: () => {},
     enterCommandMode: () => {},
     selectWorkspaceTab: () => {},

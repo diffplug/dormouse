@@ -5,6 +5,7 @@ import type { StripDragPoint } from "dormouse-lib/components/workspace-strip-dra
 import { currentWindowLabel } from "./window-label";
 import { tearOutWorkspace, transferWorkspaceTo } from "./workspace-move";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
+import { confirmToolEditorsClose } from "dormouse-lib/lib/tool-editor";
 import { randomKillChar } from "dormouse-lib/components/KillConfirm";
 import { setPendingWorkspaceMove, setWorkspaceMoveError } from "dormouse-lib/lib/workspace-ui-store";
 import { workspaceTabRect } from "./workspace-tabs";
@@ -167,11 +168,18 @@ export function onDropOnOtherWindow(
     // Probed fresh rather than reusing the throttled answer: up to
     // HIT_TEST_THROTTLE_MS of pointer travel could otherwise choose the window.
     const hit = await probe();
+    const handle = getWallHandle(id);
+    const dirtyEditors = handle?.dirtyToolIds() ?? [];
+    if (!await confirmToolEditorsClose(dirtyEditors)) return;
+    // Save must not authorize discarding edits typed later, while the iframe
+    // confirmation or transfer preparation is awaiting. Only Discard leaves
+    // these originally dirty editors dirty after consent.
+    const discardedEditors = dirtyEditors.filter(id => handle?.dirtyToolIds().includes(id));
     const move = () => {
       setWorkspaceMoveError(null);
       const moving = hit && hit.label !== currentWindowLabel()
-        ? transferWorkspaceTo(id, hit.label, { x: hit.x, y: hit.y })
-        : tearOutWorkspace(id, grab);
+        ? transferWorkspaceTo(id, hit.label, { x: hit.x, y: hit.y }, undefined, discardedEditors)
+        : tearOutWorkspace(id, grab, discardedEditors);
       void moving.then(outcome => {
         if (!outcome.moved) setWorkspaceMoveError({ id, reason: outcome.reason });
       }).catch(error => setWorkspaceMoveError({ id, reason: error instanceof Error ? error.message : String(error) }));

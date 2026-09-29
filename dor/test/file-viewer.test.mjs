@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, symlink, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
@@ -37,6 +37,37 @@ async function get(viewer, path = viewer.path, headers = {}, method = 'GET') {
 }
 const asset = (viewer, path) => viewer.path.replace(/\/file\/.*$/, `/file/${path}`);
 
+async function post(viewer, route, data, origin = `http://127.0.0.1:${viewer.port}`) {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port: viewer.port, path: viewer.path.replace(/view$/, route), method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) } }, res => {
+      const chunks = []; res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString() }));
+    });
+    req.on('error', reject); req.end(JSON.stringify(data));
+  });
+}
+
+test('editor saves require same-origin POST and a matching revision, and serve only shipped assets', async () => {
+  const viewer = await start('edit.ts', 'export const a = 1;\n');
+  const source = JSON.parse((await get(viewer, viewer.path.replace(/view$/, 'source'))).body);
+  const data = { text: 'export const a = 2;\n', version: source.version, path: '../unrelated' };
+  for (const origin of ['', 'null', 'https://elsewhere.test']) {
+    assert.equal((await post(viewer, 'save', data, origin)).status, 403);
+  }
+  assert.equal((await post(viewer, 'save', data)).status, 200);
+  assert.equal(await readFile(join(root, 'edit.ts'), 'utf8'), data.text);
+  assert.equal((await post(viewer, 'save', { ...data, text: 'stale' })).status, 409);
+  assert.equal((await post(viewer, 'anything', data)).status, 404);
+  const prefix = viewer.path.replace(/view$/, '');
+  for (const name of ['editor.js', 'editor.css', 'editor.worker.js']) {
+    assert.equal((await get(viewer, prefix + 'assets/' + name)).status, 200);
+  }
+  assert.equal((await get(viewer, prefix + 'assets/package.json')).status, 404);
+  const html = await start('active.html', '<h1>Preview</h1>');
+  assert.equal((await post(html, 'save', data)).status, 403);
+});
+
 test('known formats override source-name heuristics, PDFs never preview, and prototype keys are not formats', () => {
   for (const [name, mime] of [['readme.png', 'image/png'], ['LICENSE.html', 'text/html; charset=utf-8']]) {
     assert.deepEqual(fileViewerFormat(name), { mime, text: false });
@@ -49,11 +80,14 @@ test('known formats override source-name heuristics, PDFs never preview, and pro
   assert.equal(fileViewerFormat('file.constructor'), null);
 });
 
-test('renders text as escaped content and requires the per-run token on every method', async () => {
+test('keeps text out of the editor HTML and requires the per-run token on every method', async () => {
   const viewer = await start('README.md', '<script>bad()</script> & hello');
   const good = await get(viewer);
   assert.equal(good.status, 200);
-  assert.match(good.body, /&lt;script&gt;bad\(\)&lt;\/script&gt; &amp; hello/);
+  assert.ok(!good.body.includes('bad()'));
+  assert.match(good.body, /assets\/editor.js/);
+  const source = await get(viewer, viewer.path.replace(/view$/, 'source'));
+  assert.equal(JSON.parse(source.body).text, '<script>bad()</script> & hello');
   assert.equal(good.headers['referrer-policy'], 'no-referrer');
   assert.equal(good.headers['cache-control'], 'no-store');
   for (const path of ['/', '/wrong/view', viewer.path.replace(/\/[a-f0-9]{64}\//, '/')]) {
@@ -145,7 +179,7 @@ test('previews CSS source without granting dependencies but still bounds HTML-re
   const viewer = await start('source.css', css);
   const response = await get(viewer);
   assert.equal(response.status, 200);
-  assert.match(response.body, /url\(&quot;image255.svg&quot;\)/);
+  assert.equal(JSON.parse((await get(viewer, viewer.path.replace(/view$/, 'source'))).body).text, css);
   const prefix = viewer.path.slice(0, -'view'.length);
   assert.equal((await get(viewer, `${prefix}file/image0.svg`)).status, 404);
   assert.equal((await get(viewer, `${prefix}file/source.css`)).status, 200);
@@ -160,7 +194,8 @@ test('bounds the asset graph and keeps a grant on the opened file after path rep
   const viewer = await start('original.txt', 'original content');
   await rm(join(root, 'original.txt'));
   await writeFile(join(root, 'original.txt'), 'replacement content');
-  assert.match((await get(viewer)).body, /original content/);
+  assert.match((await get(viewer, viewer.path.replace(/view$/, 'file/original.txt'))).body, /original content/);
+  assert.equal(JSON.parse((await get(viewer, viewer.path.replace(/view$/, 'source'))).body).text, 'replacement content');
   const names = Array.from({ length: 256 }, (_, i) => `style${i}.css`);
   await Promise.all(names.map(name => writeFile(join(root, name), '')));
   const html = join(root, 'many.html');
