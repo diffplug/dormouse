@@ -649,6 +649,34 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('New code')).toBeTruthy();
   });
 
+  it('scrolls the setup code into view once, not on every re-mint', async () => {
+    const reveal = vi.fn();
+    const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
+    Element.prototype.scrollIntoView = reveal;
+    try {
+      let mints = 0;
+      const link = makeLink(async (cmd) => {
+        if (cmd !== 'setupQr') return enrolled();
+        mints += 1;
+        return qr({ url: `https://laptop.tailnet.ts.net/#pair?token=code-${mints}`, inviteId: `invite-${mints}` });
+      });
+      platform = { burrow: link };
+      await render();
+      await act(async () => buttonLabelled('Set up a phone')!.click());
+      await settleQrChunk();
+      expect(reveal).toHaveBeenCalledTimes(1);
+
+      // A replacement code is a refresh, not something the person asked for.
+      await act(async () => buttonLabelled('New code')!.click());
+      await settleQrChunk();
+      expect(mints).toBe(2);
+      expect(reveal).toHaveBeenCalledTimes(1);
+    } finally {
+      if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had);
+      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
   it('stops offering the invitation the phone used, and only that one', async () => {
     const link = await openSetupPanel();
     expect(container.querySelector('svg[role="img"]')).toBeTruthy();
@@ -1482,6 +1510,31 @@ describe('One-time connection', () => {
     expect(oneTimeCalls(service.link, 'oneTimeOpen')).toHaveLength(1);
     expect(text()).toContain('https://hosted.dormouse.sh/connect/#link-1');
     expect(text()).not.toContain('#old');
+  });
+
+  it('scrolls each new link into view, and leaves the dialog alone otherwise', async () => {
+    // Settings' Remote control section sits at the bottom of a scrolling
+    // dialog, so the QR arrives below the fold (seen in QC, 2026-09-29).
+    const reveal = vi.fn();
+    const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
+    Element.prototype.scrollIntoView = reveal;
+    try {
+      const service = oneTimeService();
+      await renderOneTime(service);
+      expect(reveal).not.toHaveBeenCalled();
+
+      await act(async () => buttonLabelled('One-time connection')!.click());
+      await settleQrChunk();
+      expect(reveal).toHaveBeenCalledTimes(1);
+      expect(reveal).toHaveBeenLastCalledWith({ block: 'nearest' });
+
+      await act(async () => buttonLabelled('New link')!.click());
+      await settleQrChunk();
+      expect(reveal).toHaveBeenCalledTimes(2);
+    } finally {
+      if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had);
+      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it('goes straight back to the button on Cancel, with nothing to report', async () => {

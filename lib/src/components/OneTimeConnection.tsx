@@ -1,6 +1,12 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ModalReviewBlock, modalActionButton } from './design';
-import { FIELD_HINT, FIELD_LABEL, oneTimeControlSentence, own } from './remote-control-shared';
+import {
+  FIELD_HINT,
+  FIELD_LABEL,
+  oneTimeControlSentence,
+  own,
+  useRevealWhen,
+} from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import { writeTextToClipboard } from '../lib/clipboard';
 import type {
@@ -184,6 +190,9 @@ function OneTimePanel({
   // Cancel and End stay live through an open in flight: a link the user no
   // longer wants must be endable before it finishes arriving.
   const cancel = (label: string) => button(label, onEnd, pending === 'end');
+  const frame = useRef<HTMLDivElement>(null);
+  // Each new link, New link's included, is what the person is about to scan.
+  useRevealWhen(frame, state.status === 'waiting' ? state.url : null);
 
   let body: ReactNode;
   let actions: ReactNode;
@@ -245,7 +254,7 @@ function OneTimePanel({
   }
 
   return (
-    <div className="mt-2 rounded border border-border p-2">
+    <div ref={frame} className="mt-2 rounded border border-border p-2">
       <div className={FIELD_LABEL}>One-time connection</div>
       {body}
       {error ? <div className="mt-1.5 text-sm leading-relaxed text-error">{error}</div> : null}

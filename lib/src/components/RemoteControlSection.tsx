@@ -3,7 +3,7 @@ import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { OneTimeConnection } from './OneTimeConnection';
-import { FIELD_HINT, FIELD_LABEL, own } from './remote-control-shared';
+import { FIELD_HINT, FIELD_LABEL, own, useRevealWhen } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
@@ -863,9 +863,13 @@ function SetupPhonePanel({
 }) {
   const shown = displayedQr(state);
   const terminal = terminalCopy(state);
+  const frame = useRef<HTMLDivElement>(null);
+  // Once, when a code first shows: the panel re-mints while it stays open, and
+  // a refresh must not pull the dialog out from under someone reading it.
+  useRevealWhen(frame, shown ? 'shown' : null);
 
   return (
-    <div className="mt-2 rounded border border-border p-2">
+    <div ref={frame} className="mt-2 rounded border border-border p-2">
       <div className={FIELD_LABEL}>Set up a phone</div>
       {/* The report supersedes `finished`'s deliberately-vague sentence, which
           is the only reason the panel ever draws one (`EnrolledView`). */}
