@@ -55,14 +55,18 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete p
       { message: `Missing Worker secret: ${missing}` },
     );
   }
-  for (const override of [
-    { host: "ep-preview.neon.tech" },
-    { database: "preview" },
-    { user: "migration" },
-    { disabled: false },
-    { secrets: ["AUTH_SECRET"] },
+  // Each case supplies every configured secret, so it fails on its own check.
+  for (const [override, message] of [
+    [{ host: "ep-preview.neon.tech" }, "Migration and runtime databases must use the same host"],
+    [{ database: "preview" }, "Migration and runtime databases must match"],
+    [{ user: "migration" }, "Use separate runtime and migration roles"],
+    [{ disabled: false }, "Production Hyperdrive must disable caching"],
+    [{ secrets: ["AUTH_SECRET"] }, "Missing Worker secret: POSTMARK_SERVER_TOKEN"],
   ])
-    await assert.rejects(preflight(env, config, provider(override)));
+    await assert.rejects(
+      preflight(env, config, provider({ secrets: configuredSecrets, ...override })),
+      { message: new RegExp(`^${message}`) },
+    );
   const oauth = {
     ...config,
     vars: { ...config.vars, OAUTH_PROVIDERS: "github" },
