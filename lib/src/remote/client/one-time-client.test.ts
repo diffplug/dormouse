@@ -452,6 +452,35 @@ describe('OneTimeClient: the confirmation', () => {
     }
   });
 
+  it('reads the computer leaving past the link’s expiry, with no outcome, as the link expiring', async () => {
+    // The computer ends a link nobody confirmed at its expiry; a phone it never
+    // answered hears only that the room closed.
+    for (const code of [WS_CLOSE_ONE_TIME_PEER_GONE, 1006]) {
+      sockets = [];
+      const refused = makeClient();
+      const early = await ScriptedBurrow.create(clock.now() + ONE_TIME_LINK_TTL_MS);
+      const joined = refused.connectOnce(early.link, LABEL, () => {});
+      await flushUntil(() => (sockets[0]?.readyState === 1 ? true : undefined));
+      clock.jump(early.link.expiry * 1000 + 1 - clock.now());
+      phoneSocket().closeWith(code);
+      expect(await joined, `at the join: ${code}`).toEqual({
+        ok: false,
+        message: ONE_TIME_LINK_EXPIRED_MESSAGE,
+      });
+
+      sockets = [];
+      const client = makeClient();
+      const burrow = await ScriptedBurrow.create(clock.now() + ONE_TIME_LINK_TTL_MS);
+      const { result } = await confirming(client, burrow);
+      clock.jump(burrow.link.expiry * 1000 + 1 - clock.now());
+      phoneSocket().closeWith(code);
+      expect(await result, `while confirming: ${code}`).toEqual({
+        ok: false,
+        message: ONE_TIME_LINK_EXPIRED_MESSAGE,
+      });
+    }
+  });
+
   it('reads the outcome it already holds over the room closing behind it', async () => {
     const client = makeClient();
     const burrow = await ScriptedBurrow.create();
@@ -593,6 +622,16 @@ describe('OneTimeClient: the direct path', () => {
       phoneSocket().closeWith(code);
       expect(await result, String(code)).toEqual({ ok: false, message });
     }
+
+    // Past the link's expiry too: confirmed in time, the computer's own direct
+    // failure is what that close carries.
+    sockets = [];
+    const client = makeClient();
+    const burrow = await ScriptedBurrow.create(clock.now() + 1_000);
+    const { result } = await connecting(client, burrow);
+    clock.jump(burrow.link.expiry * 1000 + 1 - clock.now());
+    phoneSocket().closeWith(WS_CLOSE_ONE_TIME_PEER_GONE);
+    expect(await result).toEqual({ ok: false, message: ONE_TIME_DIRECT_FAILED_MESSAGE });
   });
 });
 

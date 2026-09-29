@@ -137,6 +137,8 @@ export class OneTimeClient implements RemoteAdapterClient {
 
   #phase: Phase = 'idle';
   #route: OneTimeRoute | null = null;
+  /** The link `connectOnce` was given, so a close can tell whether it had expired. */
+  #link: OneTimeLink | null = null;
 
   /** The rendezvous socket, while this client still reads it; closed at the switch and at the end. */
   readonly #rendezvous: RendezvousHold;
@@ -220,6 +222,7 @@ export class OneTimeClient implements RemoteAdapterClient {
     if (oneTimeLinkExpired(link, this.#now())) return this.#finish(ONE_TIME_LINK_EXPIRED_MESSAGE);
     const route: OneTimeRoute = { kind: 'one-time', id: link.roomId };
     this.#route = route;
+    this.#link = link;
     // The room's hard deadline: no answer can arrive after it.
     const deadline = link.expiry * 1000 + ONE_TIME_EXPIRY_GRACE_MS;
     try {
@@ -411,7 +414,7 @@ export class OneTimeClient implements RemoteAdapterClient {
         // switch or the end, was detached first.
         if (!rendezvous.reads(ws)) return;
         rendezvous.detach();
-        this.#fail(this.#opened ? closeMessage(closeCode(ev), this.#phase) : ONE_TIME_UNREACHABLE_MESSAGE);
+        this.#fail(this.#opened ? this.#closeMessage(closeCode(ev)) : ONE_TIME_UNREACHABLE_MESSAGE);
       });
     });
   }
@@ -426,6 +429,12 @@ export class OneTimeClient implements RemoteAdapterClient {
     if (!ws) throw new Error('the rendezvous socket is not open');
     const frame: OneTimeClientFrame = { t: 'one-time', step, ct: toBase64Url(ciphertext) };
     ws.send(JSON.stringify(frame));
+  }
+
+  /** {@link closeMessage}, for this client's phase and link, now. */
+  #closeMessage(code: number | undefined): string {
+    const link = this.#link;
+    return closeMessage(code, this.#phase, link !== null && oneTimeLinkExpired(link, this.#now()));
   }
 
   #onMessage(raw: unknown): void {
@@ -515,7 +524,7 @@ export class OneTimeClient implements RemoteAdapterClient {
  * What a room close before the switch reads as. The room is the only party
  * that knows which of its closes happened, so its code picks the copy.
  */
-function closeMessage(code: number | undefined, phase: Phase): string {
+function closeMessage(code: number | undefined, phase: Phase, linkExpired: boolean): string {
   switch (code) {
     case WS_CLOSE_ONE_TIME_TAKEN:
     case WS_CLOSE_ONE_TIME_UNAVAILABLE:
@@ -527,6 +536,9 @@ function closeMessage(code: number | undefined, phase: Phase): string {
       // Confirmed and waiting on the direct path, a room the computer left is
       // how its own direct failure reaches this phone: its answering side gives
       // up before this one's deadline, then ends the connection.
-      return phase === 'connecting' ? ONE_TIME_DIRECT_FAILED_MESSAGE : ONE_TIME_ENDED_MESSAGE;
+      if (phase === 'connecting') return ONE_TIME_DIRECT_FAILED_MESSAGE;
+      // Before the outcome and past the expiry, the computer left because the
+      // link ran out.
+      return linkExpired ? ONE_TIME_LINK_EXPIRED_MESSAGE : ONE_TIME_ENDED_MESSAGE;
   }
 }
