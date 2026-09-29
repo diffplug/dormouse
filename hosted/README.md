@@ -66,6 +66,29 @@ Cloudflare Workers Scripts and Hyperdrive permissions are account-scoped, so
 previews need their own test account. `docs/specs/security-ci.md` -> "Hosted
 Deployments" owns the credential placement the audit checks.
 
+### Production registration identifiers
+
+Public identifiers recorded during provisioning on 2026-09-29; secret values
+remain in the Worker, protected GitHub environments, and Bitwarden.
+
+| Service | Dedicated registration |
+| --- | --- |
+| Cloudflare | Account `0a95e814ccf2b6a95d2dc3bea0a4a2b4`; Worker `dormouse-hosted`; Hyperdrive ID in `wrangler.jsonc` |
+| Neon | Project `young-dust-56119072`; production branch `br-billowing-brook-b4cuf3y4`; database `neondb`; migration role `neondb_owner`; SQL-created runtime role `dormouse_app` |
+| Postmark | Server `21034461`, `dormouse-hosted`; sender `signin@dormouse.sh`; return path `pm-bounces.dormouse.sh` |
+| GitHub OAuth | DiffPlug organization app `3890420`; client ID `Ov23liX1HSz03AAN3Psf` |
+| Google | Project `diffplug-dormouse`; client ID `168454028617-aecm16ka4nodv6a72u2aolgqurkr4gaj.apps.googleusercontent.com` |
+| Microsoft | DiffPlug tenant `cf6a3474-e2f1-498a-9109-706289336d8a`; client ID `be9f84a1-fc52-4a50-afcb-c659c11a1f17` |
+| Apple | Team `LXW8WAGWYX`; primary App ID `sh.dormouse.standalone`; Services ID `sh.dormouse.hosted`; signing key `UFV5N9DWJS` |
+
+The Apple client-secret JWT expires **2027-03-28 05:33 UTC**; renew by
+**2027-02-26** using the signing key in Bitwarden. Microsoft's secret was
+created with a 180-day expiry; its exact expiry is saved with it in Bitwarden.
+The release-tag PAT expires **2026-12-27**; renew it before that date in the
+separately protected `hosted-release-tag` environment. Apple's private relay
+has the exact sender and the Postmark return-path domain registered. Provisioning
+these registrations does not establish acceptance.
+
 ## GitHub setup
 
 Run once from the repository root with the operator's existing `gh` login:
@@ -143,7 +166,11 @@ accounts.
    directly in Cloudflare; replace the zero Hyperdrive ID in `wrangler.jsonc`
    with the resulting public ID for local operator deployment. CI overrides it
    with the `HYPERDRIVE_ID` variable.
-3. Give the runtime role only the auth-table and schema DML permissions plus
+3. Create the runtime role with SQL (`CREATE ROLE ... LOGIN PASSWORD ...`),
+   not Neon’s Console/API role creation, which grants `neon_superuser`.
+   Neon requires the password over the encrypted connection and rejects a
+   precomputed password hash. Keep it out of command arguments and SQL-editor
+   history. Give the runtime role only the auth-table and schema DML permissions plus
    sequence access the shipped tables need, including defaults for future
    migration-created tables and sequences. Keep a separate migration role that
    owns migrations and can dump the database. Supply its `DATABASE_URL` through
@@ -176,18 +203,19 @@ Create Dormouse registrations. Register these exact URLs with no trailing slash:
 | Microsoft | Entra application: personal and work/school accounts; Web platform | `https://hosted.dormouse.sh/api/auth/callback/microsoft` |
 | Apple | Dormouse Services ID associated with a Sign in with Apple primary App ID | `https://hosted.dormouse.sh/api/auth/callback/apple` |
 
-Use `https://hosted.dormouse.sh` as the application origin/homepage where the
-provider requests it. Configure consent branding, support contact, privacy
-policy, and production/test-user settings before testing with ordinary accounts.
-For Google, add the exact callback under authorized redirect URIs, and the
-Hosted origin under authorized JavaScript origins if requested.
+Use `https://hosted.dormouse.sh` as the application origin. Google's consent
+homepage is `https://dormouse.sh/hosted/`, which describes the account service;
+its privacy and terms URLs are `https://dormouse.sh/privacy/` and
+`https://dormouse.sh/terms/`. Publish approved pages before submitting branding.
+Configure consent branding, support contact, and production/test-user settings
+before testing with ordinary accounts. For Google, add the exact callback under
+authorized redirect URIs, and the Hosted origin under authorized JavaScript
+origins if requested.
 
 For Microsoft, request optional ID-token claims `email` and `xms_edov`. Store
-the client-secret **Value**, not its identifier, and record its expiry. Its real
-callback failure is tracked in the separate pgstencil investigation
-(`docs/specs/hosted.md` -> "Future"): prepare the Dormouse registration now, but
-enable Microsoft only after consuming the accepted fix and passing a real
-Dormouse callback.
+the client-secret **Value**, not its identifier, and record its expiry. The
+installed pgstencil release includes the callback fix. Verify real personal
+and work/school callbacks during Dormouse acceptance.
 
 For Apple, register domain `hosted.dormouse.sh` and the return URL above. The
 client ID is the Services ID; the client secret is an ES256 JWT signed with

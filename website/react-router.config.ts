@@ -12,6 +12,8 @@ export default {
       "/playground/desktop",
       "/playground/pocket",
       "/pocket",
+      "/privacy",
+      "/terms",
       ...DOCS_PAGES.map((page) => page.path),
     ];
   },

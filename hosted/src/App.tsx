@@ -376,6 +376,8 @@ export function App() {
         <a href="https://dormouse.sh/security" rel="noreferrer">
           Dormouse security ↗
         </a>
+        <a href="https://dormouse.sh/privacy/" rel="noreferrer">Privacy ↗</a>
+        <a href="https://dormouse.sh/terms/" rel="noreferrer">Terms ↗</a>
         <span>Optional services. Your terminal stays yours.</span>
       </footer>
     </div>
