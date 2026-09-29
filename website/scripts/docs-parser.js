@@ -609,7 +609,7 @@ function parseList(lines, start, slug) {
       }
       // A fence, heading, quote, table, or HTML line starts a block of its
       // own, which the indented-body branch above parses as the item's child.
-      if (THEMATIC_BREAK.test(lines[i]) || interruptsParagraph(lines[i], lines[i + 1])) break;
+      if (THEMATIC_BREAK.test(lines[i]) || interruptsParagraph(lines[i].trimStart(), lines[i + 1])) break;
       contentLines.push(lines[i].trim());
       i++;
     }

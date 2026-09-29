@@ -198,6 +198,11 @@ describe('blocks', () => {
     expect(second.children[0].children).toEqual([{ type: 'text', value: 'Done' }]);
   });
 
+  it('parses an indented heading under a list item as the item\'s child', () => {
+    const { blocks } = parseMarkdown('- item\n  # Heading\n');
+    expect(blocks[0].items[0].children.map((c) => c.type)).toEqual(['paragraph', 'heading']);
+  });
+
   it('ends a list item at a thematic break in its continuation', () => {
     const { blocks } = parseMarkdown('- item\n  ***\n');
     expect(blocks.map((b) => b.type)).toEqual(['list', 'thematicBreak']);
