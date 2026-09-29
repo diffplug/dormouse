@@ -136,6 +136,40 @@ it('moves trailing actions into the dropdown on resize and dispatches hidden act
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
+it('drops the explorer label, and its busy text, before truncating the directory', async () => {
+  let width = 400;
+  const observers = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { observers.add(callback); }
+    observe() {} disconnect() {} unobserve() {}
+  });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-dir') ? width : 0; });
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+  const resize = (next: number) => act(() => { width = next; observers.forEach(notify => notify()); });
+  try {
+    render();
+    expect(button('Open in Finder').textContent).toContain('open in Finder');
+    resize(250);
+    expect(button('Open in Finder').textContent).not.toContain('open in Finder');
+    props.onExplore = vi.fn(() => new Promise<void>(() => {}));
+    render();
+    await click('Open in Finder');
+    expect(button('Open in Finder').getAttribute('aria-busy')).toBe('true');
+    expect(button('Open in Finder').textContent).toBe('');
+    resize(300);
+    expect(button('Open in Finder').textContent).toContain('open in Finder');
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+it('confirms the unlabeled path copy with the check alone, keeping its width', async () => {
+  props.onCopyPath = vi.fn(async () => {});
+  render();
+  await click('Copy absolute path');
+  const copy = button('Copy absolute path');
+  expect(copy.querySelector('[role="status"] svg')).not.toBeNull();
+  expect(copy.textContent).toBe('');
+});
+
 it('opens the overflow list from the keyboard rather than letting keys pick its first entry', () => {
   const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-port-actions') ? 80 : 0; });
   const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);

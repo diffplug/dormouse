@@ -168,9 +168,11 @@ const meta = {
     }
     const panel = canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
     const bounds = panel.getBoundingClientRect();
-    const ports = panel.querySelector<HTMLElement>('[data-context-ports]')!;
-    expect(ports.getBoundingClientRect().height).toBeLessThanOrEqual(28);
-    expect(ports.scrollWidth).toBeLessThanOrEqual(ports.clientWidth);
+    // The Dir and Ports rows each stay on one line at every width.
+    for (const row of panel.querySelectorAll<HTMLElement>('[data-context-dir], [data-context-ports]')) {
+      expect(row.getBoundingClientRect().height).toBeLessThanOrEqual(28);
+      expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
+    }
     // DOM visibility matchers do not catch overflow clipping; check actual bounds.
     for (const element of [within(panel).getByTitle('pnpm dev'), ...panel.querySelectorAll('button')]) {
       const box = element.getBoundingClientRect();

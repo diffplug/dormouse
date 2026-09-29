@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type ReactNode, type RefObject } from 'react';
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, PauseIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
@@ -96,18 +96,21 @@ export function ContextAction({ children, label, onClick, disabled = false, busy
 /** docs/specs/layout.md → "Header context menu" lowercases visible action text only. */
 const actionText = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);
 
-function ContextCopyAction({ children, label, onCopy }: { children: ReactNode; label: string; onCopy: () => Promise<boolean> }) {
-  const [confirmation, setConfirmation] = useState(0);
+const COPIED = <><CheckIcon size={14} weight="bold" />copied</>;
+
+/** `confirmation` replaces the face on a successful copy; an unlabeled button confirms with the check alone. */
+function ContextCopyAction({ children, label, onCopy, confirmation = COPIED }: { children: ReactNode; label: string; onCopy: () => Promise<boolean>; confirmation?: ReactNode }) {
+  const [confirmed, setConfirmed] = useState(0);
   useEffect(() => {
-    if (!confirmation) return;
-    const timer = setTimeout(() => setConfirmation(0), 1400);
+    if (!confirmed) return;
+    const timer = setTimeout(() => setConfirmed(0), 1400);
     return () => clearTimeout(timer);
-  }, [confirmation]);
+  }, [confirmed]);
   return <ContextAction label={label} onClick={() => {
-    setConfirmation(0);
-    void onCopy().then(success => { if (success) setConfirmation(value => value + 1); });
+    setConfirmed(0);
+    void onCopy().then(success => { if (success) setConfirmed(value => value + 1); });
   }}>
-    <ActionFace status={confirmation ? <><CheckIcon size={14} weight="bold" />copied</> : null}>{children}</ActionFace>
+    <ActionFace status={confirmed ? confirmation : null}>{children}</ActionFace>
   </ContextAction>;
 }
 
@@ -119,7 +122,8 @@ function ActionFace({ status, children }: { status: ReactNode; children: ReactNo
   </span>;
 }
 
-const OPENING = <><CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />opening…</>;
+const SPINNER = <CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />;
+const OPENING = <>{SPINNER}opening…</>;
 
 /** Drag-selectable diagnostic text. A press focuses it, so Cmd/Ctrl+C reaches
  *  `handleContextCopy` rather than the helper terminal. */
@@ -128,7 +132,8 @@ function ContextDiagnostic({ className, children }: { className: string; childre
     className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
 }
 
-function ContextOpenAction({ children, label, disabled, onOpen }: { children: ReactNode; label: string; disabled: boolean; onOpen: () => Promise<boolean> }) {
+/** `compact`: the button shows only its icon, so opening shows only the spinner. */
+function ContextOpenAction({ children, label, disabled, compact = false, onOpen }: { children: ReactNode; label: string; disabled: boolean; compact?: boolean; onOpen: () => Promise<boolean> }) {
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState(false);
   const opening = pending || feedback;
@@ -142,8 +147,56 @@ function ContextOpenAction({ children, label, disabled, onOpen }: { children: Re
     setFeedback(true);
     void onOpen().then(success => { setPending(false); if (!success) setFeedback(false); });
   }}>
-    <ActionFace status={opening ? OPENING : null}>{children}</ActionFace>
+    <ActionFace status={opening ? compact ? SPINNER : OPENING : null}>{children}</ActionFace>
   </ContextAction>;
+}
+
+const MEASURER_CLASS = 'pointer-events-none invisible absolute inset-x-0 top-0 flex h-0 overflow-hidden';
+
+/** Runs `fit` with `row`'s width, its column gap, and the widths of `measurer`'s
+ *  children: now, on `deps`, and whenever either resizes. A hidden row reports nothing. */
+function useRowFit(row: RefObject<HTMLElement | null>, measurer: RefObject<HTMLElement | null>, fit: (width: number, gap: number, widths: number[]) => void, deps: DependencyList) {
+  useLayoutEffect(() => {
+    const element = row.current;
+    const hidden = measurer.current;
+    if (!element || !hidden) return;
+    const measure = () => {
+      const width = element.clientWidth;
+      if (width) fit(width, parseFloat(getComputedStyle(element).columnGap) || 0, Array.from(hidden.children, child => (child as HTMLElement).offsetWidth));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    for (const child of hidden.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, deps);
+}
+
+const COPY_ICON = <CopyIcon size={12} />;
+const EXPLORE_ICON = <ArrowSquareOutIcon size={15} />;
+
+/** The directory, its unlabeled copy, and the explorer action on one line. */
+function DirRow({ cwd, explorerLabel, canExplore, onExplore, onCopyPath }: {
+  cwd: string; explorerLabel: string; canExplore: boolean;
+  onExplore(): Promise<boolean>; onCopyPath(): Promise<boolean>;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  const measures = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+  const text = actionText(explorerLabel);
+  // The explorer drops its label before the directory truncates.
+  useRowFit(row, measures, (width, gap, [path, copy, explorer]) => setCompact(path + copy + explorer + 2 * gap > width), [cwd, text]);
+  return <div ref={row} data-context-dir className="relative flex min-h-6 min-w-0 items-center gap-1.5">
+    <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
+      <span className="whitespace-nowrap">{cwd}</span>
+      <span className={ACTION_BOX_CLASS}>{COPY_ICON}</span>
+      <span className={ACTION_BOX_CLASS}>{EXPLORE_ICON}{text}</span>
+    </div>
+    {/* Right-to-left so truncation drops the start; the isolate keeps the path's own order. */}
+    <span className="min-w-0 truncate [direction:rtl]" title={cwd}><bdi>{cwd}</bdi></span>
+    <ContextCopyAction label="Copy absolute path" confirmation={<CheckIcon size={12} weight="bold" />} onCopy={onCopyPath}>{COPY_ICON}</ContextCopyAction>
+    <ContextOpenAction label={canExplore ? explorerLabel : 'Directory unavailable on this host'} disabled={!canExplore} compact={compact} onOpen={onExplore}>{EXPLORE_ICON}{!compact && text}</ContextOpenAction>
+  </div>;
 }
 
 const MORE = <span className="inline-flex items-center gap-1">more…<CaretDownIcon size={10} weight="fill" /></span>;
@@ -172,33 +225,19 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   const windowFocused = useContext(WindowFocusedContext);
   const hiddenPending = pending !== null && actions.findIndex(action => action.mode === pending) >= visible;
   const labels = actions.map(action => action.text).join('|');
-  useLayoutEffect(() => {
-    const row = root.current;
-    const measuring = measures.current;
-    if (!row || !measuring) return;
-    const measure = () => {
-      const width = row.clientWidth;
-      if (!width) return;
-      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
-      // The trigger at rest and while opening, then each action's face; a pending action shows "opening…".
-      const [rest, opening, ...faces] = Array.from(measuring.children, child => (child as HTMLElement).offsetWidth);
-      const widths = faces.map(face => Math.max(face, opening));
-      const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * gap;
-      if (total <= width) { setVisible(widths.length); return; }
-      let used = hiddenPending ? opening : rest;
-      let count = 0;
-      for (const value of widths) {
-        if (used + gap + value > width) break;
-        used += gap + value;
-        count++;
-      }
-      setVisible(count);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(row);
-    for (const child of measuring.children) observer.observe(child);
-    return () => observer.disconnect();
+  // A pending action shows "opening…", so each action reserves at least that.
+  useRowFit(root, measures, (width, gap, [rest, opening, ...faces]) => {
+    const widths = faces.map(face => Math.max(face, opening));
+    const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * gap;
+    if (total <= width) { setVisible(widths.length); return; }
+    let used = hiddenPending ? opening : rest;
+    let count = 0;
+    for (const value of widths) {
+      if (used + gap + value > width) break;
+      used += gap + value;
+      count++;
+    }
+    setVisible(count);
   }, [labels, hiddenPending]);
   const run = async ({ mode, disabled }: PortAction) => {
     if (pending !== null || disabled) return;
@@ -211,7 +250,8 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
   };
   const key = (action: PortAction) => action.mode ?? 'switch';
   return <div ref={root} data-port-actions className="relative flex min-w-8 flex-1 items-center gap-1">
-    <div ref={measures} aria-hidden="true" inert className="pointer-events-none invisible absolute inset-x-0 top-0 flex h-0 overflow-hidden">
+    <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
+      {/* The trigger at rest and while opening, then each action's face. */}
       <span className={ACTION_BOX_CLASS}>{MORE}</span>
       <span className={ACTION_BOX_CLASS}>{OPENING}</span>
       {actions.map(action => <span key={key(action)} className={ACTION_BOX_CLASS}>{action.icon}{action.text}</span>)}
@@ -344,7 +384,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
             </div></div>
           </div>
           <span className="text-muted">Dir</span>
-          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{actionText(p.explorerLabel)}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />copy path</ContextCopyAction></div>
+          <DirRow cwd={p.cwd} explorerLabel={p.explorerLabel} canExplore={p.canExplore} onExplore={() => attempt(p.onExplore)} onCopyPath={() => attempt(p.onCopyPath)} />
           <span className="text-muted">Ports</span>
           <div data-context-ports className="flex min-h-7 min-w-0 items-center gap-2">
             {p.scan.status === 'scanning' ? <span className="truncate text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="truncate text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="truncate text-muted">No listening ports</span> : <>
