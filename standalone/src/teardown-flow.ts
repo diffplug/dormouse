@@ -1,4 +1,6 @@
+import { listWallHandles } from 'dormouse-lib/components/wall/wall-handles';
 import { invoke } from "@tauri-apps/api/core";
+import { confirmToolEditorsClose, cancelEditorClose } from 'dormouse-lib/lib/tool-editor';
 import {
   beginQuitProgress,
   dismissQuitConfirm,
@@ -84,6 +86,8 @@ export function createTeardownFlow(options: {
   // One flow at a time in this window: repeated triggers are ignored while a
   // confirmation is outstanding or this window has committed.
   let phase: "idle" | "confirming" | "committed" = "idle";
+  let decision = 0;
+  let waitingForEditors = false;
 
   const claim: TeardownClaim = {
     kind: options.kind,
@@ -103,6 +107,8 @@ export function createTeardownFlow(options: {
   }
 
   const cancel = (): void => {
+    decision++;
+    if (waitingForEditors) { waitingForEditors = false; cancelEditorClose(); }
     phase = "idle";
     if (holder === claim) holder = null;
     void invoke(options.cancelCommand).catch(() => {});
@@ -138,17 +144,31 @@ export function createTeardownFlow(options: {
         holder.abandon();
       }
 
-      // The registry is per webview, so this is already this window's own work.
-      const gate = options.gate();
-      if (options.mustConfirm(intent) && gate) {
-        enter("confirming");
-        gate({ confirm: () => void proceed(intent), cancel }, intent);
-        return;
-      }
-      void proceed(intent);
+      const askRunning = () => {
+        const gate = options.gate();
+        if (options.mustConfirm(intent) && gate) {
+          enter("confirming");
+          gate({ confirm: () => void proceed(intent), cancel }, intent);
+        } else void proceed(intent);
+      };
+      // Stand the native watchdog down before waiting for file-save consent.
+      // An abandoned close/quit must never resume after its dialog settles.
+      const dirty = listWallHandles().flatMap(wall => wall.dirtyToolIds());
+      if (dirty.length) {
+        enter('confirming');
+        const mine = ++decision;
+        waitingForEditors = true;
+        void confirmToolEditorsClose(dirty).then(accepted => {
+          if (mine !== decision || phase !== 'confirming') return;
+          waitingForEditors = false;
+          if (accepted) askRunning(); else cancel();
+        });
+      } else askRunning();
     },
     cancel,
     reset() {
+      decision++;
+      if (waitingForEditors) { waitingForEditors = false; cancelEditorClose(); }
       phase = "idle";
       if (holder === claim) holder = null;
     },

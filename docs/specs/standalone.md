@@ -1015,6 +1015,8 @@ Source of truth: `pty:captureRecovery` / `recovery:take` in `standalone/sidecar/
 
 ## Quit flow
 
+Tool close consent: `docs/specs/dor-tool.md` → Editing files.
+
 Source of truth: `standalone/src-tauri/src/lib.rs` (`QuitState`, `request_quit`,
 the `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed` commands, the `CloseRequested` /
 `ExitRequested` arms) and `standalone/src/quit.ts` (the webview orchestrator).

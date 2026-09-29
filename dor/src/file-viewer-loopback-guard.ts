@@ -9,7 +9,7 @@ const sha256 = (value: string) => createHash('sha256').update(value).digest();
  * the one `lib/src/host/loopback-guard.ts` states for every loopback listener;
  * `dor` cannot import `lib`, so it is restated here with case-insensitive Host comparison.
  *
- * `post` admits POST for the folder viewer's select/activate, and only with an
+ * `post` admits the folder's select/activate and text editor's save/state, only with an
  * `Origin` naming this listener: every browser sends one on a POST, so an
  * absent, `null`, or foreign one is a caller other than the page we served. */
 export function allowsFileViewerRequest(req: IncomingMessage, port: number, prefix: string, { post = false } = {}): boolean {

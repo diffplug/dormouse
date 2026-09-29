@@ -33,6 +33,8 @@ import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
 import { resetTerminalPaneState, setTerminalUserTitle } from '../lib/terminal-state-store';
+import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
+import { cancelEditorClose, getEditorClosePrompt } from '../lib/tool-editor';
 import { setWindowLabel } from '../lib/workspace-store';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -66,6 +68,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cancelEditorClose();
+  resetToolDirty();
   harness.dispose();
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -103,6 +107,21 @@ function hostBrowsers(...args: Parameters<typeof installBrowserHost>): ReturnTyp
 }
 
 describe('Wall on the Lath engine', () => {
+  it('consumes dirty reports only for Tool-designated members, including minimized Tools', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} initialDoors={[{
+      id: 'tool-door', title: 'storybook', component: 'tool', tabComponent: 'tool',
+      params: { surfaceType: 'tool', command: 'pnpm storybook', cwd: '/repo', toolName: 'storybook', toolRender: 'iframe', toolPort: 'announced' },
+    }]} />));
+    await flush();
+    await act(async () => {
+      recordToolDirty('pane-a', true);
+      recordToolDirty('tool-door', true);
+    });
+    expect(getWallHandle(DEFAULT_WORKSPACE_ID)!.dirtyToolIds()).toEqual(['tool-door']);
+    await act(async () => { await dispatchKill('pane-a'); });
+    expect(getEditorClosePrompt()).toBeNull();
+  });
+
   /** The alarm treatment is the leaf overlay, so it must reach a ringing terminal
    *  through the engine's overlay slot and leave a quiet neighbour alone. */
   it('mounts the alarm overlay on a ringing terminal leaf', async () => {

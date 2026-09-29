@@ -67,10 +67,13 @@ it('preserves the real viewer policy and meta policy through HTML instrumentatio
   expect((await read(new URL('private.txt', url).href)).status).toBe(404);
 });
 
-it('retains the policy for an escaped text preview', async () => {
-  const response = await read(await frame('readme.md', '<script>untrusted()</script>'));
+it('retains the policy and separates source data from editor markup', async () => {
+  const url = await frame('readme.md', '<script>untrusted()</script>');
+  const response = await read(url);
   expectViewerPolicy(response.headers);
-  expect(response.body).toContain('&lt;script&gt;untrusted()&lt;/script&gt;');
+  expect(response.body).not.toContain('untrusted()');
+  const source = await read(new URL('source', url).href);
+  expect(JSON.parse(source.body).text).toBe('<script>untrusted()</script>');
   expect(response.body).toContain('__dormouse');
 });
 

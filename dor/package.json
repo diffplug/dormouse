@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "prebuild": "pnpm --filter dor-lib-common build && node ../scripts/generate-dor-version.mjs && node ../scripts/generate-dor-skill.mjs",
-    "build": "tsc -p tsconfig.json && esbuild src/dor.ts --bundle --format=esm --platform=node --outfile=dist/dor.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.viewer.json && esbuild src/dor.ts --bundle --format=esm --platform=node --outfile=dist/dor.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" && node scripts/build-viewer.mjs",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "devDependencies": {
@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@stricli/core": "^1.2.7",
-    "dor-lib-common": "workspace:*"
+    "dor-lib-common": "workspace:*",
+    "monaco-editor": "0.55.1"
   }
 }

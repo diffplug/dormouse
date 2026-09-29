@@ -31,6 +31,8 @@ export interface WallHandle {
    *  gate, alongside `runningCount`). */
   hasTouchedSurfaces(): boolean;
   runningCount(): number;
+  /** Dirty reports consumed only by Tool-designated members, including Doors. */
+  dirtyToolIds(): string[];
   /** Leave command selection on chrome and focus a live pane. */
   enterSelectedPane(): void;
   enterCommandMode(): void;
@@ -108,6 +110,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     browserSessions: () => [],
     hasTouchedSurfaces: () => false,
     runningCount: () => 0,
+    dirtyToolIds: () => [],
     enterSelectedPane: () => {},
     enterCommandMode: () => {},
     selectWorkspaceTab: () => {},

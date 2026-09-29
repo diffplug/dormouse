@@ -12,6 +12,9 @@ import { Baseboard } from './Baseboard';
 import { revealWorkspaceTab, workspaceTabElement } from './workspace-tab-elements';
 import { collapseWorkspace, restoreWorkspaceMotion, workspaceIsCollapsed } from './workspace-motion';
 import { ExternalLinkModalHost } from './ExternalLinkModalHost';
+import { ToolEditorCloseModalHost } from './ToolEditorCloseModalHost';
+import { confirmToolEditorsClose } from '../lib/tool-editor';
+import { getToolDirty } from '../lib/tool-dirty-store';
 import { AgentBrowserScreenModalHost } from './AgentBrowserScreenModalHost';
 // Remote-host code (relay/WebSocket/enrollment + the window.dormouseBurrow
 // console hook) is loaded and mounted only when the embedding runtime opts in
@@ -750,13 +753,14 @@ export function Wall({
     try {
       const refused = await helperRefusal(id);
       if (refused) { revealRefusal(id, refused); return refused; }
+      if (isToolParams(lath.getMeta(id)?.params) && !await confirmToolEditorsClose([id])) return 'Unsaved changes were kept open';
       killPaneImmediately(id);
       return null;
     } finally {
       if (doorKillReturnRef.current?.id === id) doorKillReturnRef.current = null;
       pendingSurfaceCloses.current.delete(id);
     }
-  }, [killPaneImmediately, helperRefusal, revealRefusal]);
+  }, [killPaneImmediately, helperRefusal, revealRefusal, lath]);
   const closeSurfaceRef = useRef(closeSurface);
   closeSurfaceRef.current = closeSurface;
 
@@ -1759,6 +1763,7 @@ export function Wall({
       return getTerminalInstance(id) !== null && !isReplaceableShell(id);
     }),
     runningCount: () => countRunningSessionsIn(memberSurfaceIds()),
+    dirtyToolIds: () => memberSurfaceIds().filter(id => isToolParams(lath.getMeta(id)?.params) && getToolDirty(id) === true),
     enterSelectedPane: () => {
       const id = livePaneId();
       if (id) enterTerminalMode(id);
@@ -1929,7 +1934,8 @@ export function Wall({
     onCancelRename: () => {
       setRenamingPaneId(null);
     },
-    onSwapRenderMode: (id, mode, viewport) => {
+    onSwapRenderMode: async (id, mode, viewport) => {
+      if (isToolParams(lath.getMeta(id)?.params) && getToolDirty(id) === true && !await confirmToolEditorsClose([id])) return;
       const visible = nav.hasPane(id);
       if (!visible) return;
       const params = nav.paneParams(id);
@@ -2347,6 +2353,7 @@ export function Wall({
             {active ? (
               <>
                 <ExternalLinkModalHost />
+                <ToolEditorCloseModalHost />
                 <AgentBrowserScreenModalHost resolveLabel={surfaceRefForId} />
                 {enableBurrow ? (
                   <Suspense fallback={null}>

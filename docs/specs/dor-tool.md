@@ -171,7 +171,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must fail without fallback on an explicit unknown handler or malformed user configuration**; `builtin:file` named for an unsupported format reports that limitation and suggests a user Tool. Built-in identity is the canonical file path in its own scope, separate from user and project Tools.
 
-**Must prefer known extensions over filename-based text fallbacks; source extensions remain escaped previews.**
+**Must prefer known extensions over filename-based text fallbacks; source extensions open as inert text in the editor.**
 
 **Must run the built-in viewer as a Tool-owned `dor` process.** Text/source previews grant only their opened file and skip dependency inspection. (rationale) Oversized HTML and referenced CSS still stream without dependency inspection. **The grant contains at most 256 files** — the opened document and statically referenced relative HTML/CSS assets within its directory tree — and exceeding that bound fails the open without serving a partial grant. **Never expand the grant through root-relative, external, or dynamic references**; requests can read only granted paths.
 
@@ -179,9 +179,21 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
-**Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
+**Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
 
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `fileViewerFormat` / `viewerTitle` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`; `announceViewer` in `dor/src/viewer-server.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`, `dor/test/file-viewer.test.mjs`.
+
+## Editing files
+
+**Must render supported UTF-8 text in bundled Monaco**, with line numbers, find/replace, undo, selection, and optional wrapping. Use the workbench's editor colors and fonts with Monaco's light/dark syntax defaults; iframe theme delivery belongs to `docs/specs/theme.md` → Tool iframe themes. Never execute source text or load its referenced assets.
+
+**Must save only on Save or Cmd/Ctrl+S, to the opened canonical file.** Preserve UTF-8 BOM, line endings, and permissions. Bound text to 8 MiB; reject invalid UTF-8. Atomically replace only after comparing the submitted revision with current disk bytes and file identity; a conflict or write failure keeps the edit dirty. New edits during a save remain dirty after that save succeeds. Reload asks before discarding edits and reads the current file at the authorized path, including atomic replacements.
+
+**Must report dirty state immediately to the containing iframe and in order through OSC 367.** The iframe save channel binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure.
+
+**Must offer Save / Discard / Cancel before closing dirty Tools through Dormouse**, including Pane/Workspace closure, standalone window/app teardown, and iframe chrome navigation/reload or renderer changes. Discard authorizes that action without declaring the edit clean; Save proceeds only after successful acknowledgement and no newer edits. A Tool without a connected save handler must be saved in its own UI or explicitly discarded. Native VS Code webview/host closure, forced process termination, and crashes cannot be vetoed by this renderer; drafts are not persisted.
+
+Source of truth: `readEditableFile` / `saveEditableFile` in `dor/src/editable-file.ts`; `editorPage` in `dor/src/editor-page.ts`; `dor/viewer/editor.ts`; `confirmToolEditorsClose` / `connectToolEditor` in `lib/src/lib/tool-editor.ts`; `ToolEditorCloseModalHost` in `lib/src/components/ToolEditorCloseModalHost.tsx`; `closeSurface` in `lib/src/components/Wall.tsx`; `createTeardownFlow` in `standalone/src/teardown-flow.ts`. Tests: `dor/test/editable-file.test.mjs`, `dor/test/file-viewer.test.mjs`, `lib/src/lib/tool-editor.test.ts`, `standalone/src/teardown-arbiter.test.ts`.
 
 ## Folders
 
@@ -298,7 +310,7 @@ Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/
 
 **Must retain unsaved state through minimize/reattach, renderer changes, and live Workspace transfer.** Never write it to durable session metadata; a cold-started Tool reports its own new state. Layout owns the Pane and Door indicator under `docs/specs/layout.md` → Pane header.
 
-**Must treat this state as indication only.** It does not write files, acknowledge a save, change kill/close behavior, or authorize automatic reaping. Save coordination and close protection are under [Future](#future).
+**Never treat a dirty-state report as a save acknowledgement or permission to reap.** Close handling and the built-in save channel belong to [Editing files](#editing-files).
 
 A Tool writes reports to its terminal output, for example:
 
@@ -339,7 +351,7 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 
 **Scope: dor-tools** — remaining design, in implementation order.
 
-- **Save coordination and close protection.** Optional save requests with completion/failure and protection against clearing newer edits; dirty-aware Pane/Workspace/app closure. Establish an explicit safe-to-stop contract before automatic reaping; clean or unknown state alone is insufficient.
+- **Save coordination for third-party Tools.** Extend the built-in iframe editor's save channel to other Tool renderers. Establish an explicit safe-to-stop contract before automatic reaping; clean or unknown state alone is insufficient.
 
 - **D1 — reaping without cooperation.** Idle-threshold reap +
   rehydrate-from-args + `persist: "never"`: every stateless tool, no new API,
