@@ -164,6 +164,32 @@ it('drops the explain label, then the Surface ref text, as the title row narrows
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
+it('re-fits the title row when its helper placement buttons change', () => {
+  // Observers here see only the elements they observe, so an unobserved group cannot trigger a re-fit.
+  const observed = new Map<Element, Set<() => void>>();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: () => void) {}
+    observe(element: Element) { observed.set(element, (observed.get(element) ?? new Set()).add(this.callback)); }
+    disconnect() { for (const callbacks of observed.values()) callbacks.delete(this.callback); }
+    unobserve() {}
+  });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? 260 : 0; });
+  // As above; each placement side and the close add a twenty-pixel icon to the actions group.
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
+    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20 + (this.classList.contains('w-[8ch]') ? 80 : 0);
+  });
+  try {
+    props.placement = { side: 'bottom', available: ['bottom'], onChange: vi.fn() };
+    render();
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+    props.placement = { side: 'bottom', available: ['bottom', 'top'], onChange: vi.fn() };
+    render();
+    const actions = container.querySelector('[data-context-header-actions]')!;
+    act(() => observed.get(actions)?.forEach(notify => notify()));
+    expect(button('Copy surface:3').textContent).toBe('');
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
+});
+
 it('drops the explorer label, and its busy text, before truncating the directory', async () => {
   let width = 400;
   const observers = new Set<() => void>();

@@ -154,8 +154,9 @@ function ContextOpenAction({ children, label, disabled, compact = false, onOpen 
 const MEASURER_CLASS = 'pointer-events-none invisible absolute inset-x-0 top-0 flex h-0 overflow-hidden';
 
 /** Runs `fit` with `row`'s width, its column gap, and the widths of `measurer`'s
- *  children: now, on `deps`, and whenever either resizes. A hidden row reports nothing. */
-function useRowFit(row: RefObject<HTMLElement | null>, measurer: RefObject<HTMLElement | null>, fit: (width: number, gap: number, widths: number[]) => void, deps: DependencyList) {
+ *  children: now, on `deps`, and whenever either resizes, or any element in
+ *  `alsoObserve` whose width `fit` reads. A hidden row reports nothing. */
+function useRowFit(row: RefObject<HTMLElement | null>, measurer: RefObject<HTMLElement | null>, fit: (width: number, gap: number, widths: number[]) => void, deps: DependencyList, alsoObserve: readonly RefObject<HTMLElement | null>[] = []) {
   useLayoutEffect(() => {
     const element = row.current;
     const hidden = measurer.current;
@@ -168,6 +169,7 @@ function useRowFit(row: RefObject<HTMLElement | null>, measurer: RefObject<HTMLE
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     for (const child of hidden.children) observer.observe(child);
+    for (const extra of alsoObserve) if (extra.current) observer.observe(extra.current);
     return () => observer.disconnect();
   }, deps);
 }
@@ -192,7 +194,7 @@ function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions }: {
     const rest = (actionsRef.current?.offsetWidth ?? 0) + 3 * gap;
     setExplainCompact(text + explainFull + refFull + rest > width);
     setRefCompact(Math.min(text, least) + explainIcon + refFull + rest > width);
-  }, [title, surfaceRef]);
+  }, [title, surfaceRef], [actionsRef]);
   return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 items-center gap-1.5">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       <span className="whitespace-nowrap">{title}</span>
