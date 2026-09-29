@@ -17,6 +17,22 @@ vi.mock('../lib/platform', () => ({
   getPlatform: () => platform,
 }));
 
+/**
+ * The encoder chunk, held back where a case says so ({@link holdQrChunk}): the
+ * code suspends until it lands, as the lazy import does on a session's first
+ * open. Otherwise it is the real encoder.
+ */
+const qrChunk = vi.hoisted(() => ({ pending: null as Promise<void> | null }));
+vi.mock('./QrCode', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./QrCode')>();
+  return {
+    QrCode(props: Parameters<typeof real.QrCode>[0]) {
+      if (qrChunk.pending) throw qrChunk.pending;
+      return <real.QrCode {...props} />;
+    },
+  };
+});
+
 import { ONE_TIME_ENDED_COPY, ONE_TIME_OUTCOME_LABEL } from './OneTimeConnection';
 import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
 import {
@@ -93,6 +109,45 @@ async function settleQrChunk() {
   await act(async () => {
     await Promise.resolve();
   });
+}
+
+/**
+ * Keep the encoder chunk from landing until the returned call, as on the first
+ * open of a session: the code's `Suspense` fallback is empty meanwhile, so the
+ * panel is short of the QR's height.
+ */
+function holdQrChunk(): () => Promise<void> {
+  let land: () => void = () => {};
+  qrChunk.pending = new Promise<void>((resolve) => {
+    land = resolve;
+  });
+  return async () => {
+    qrChunk.pending = null;
+    await act(async () => {
+      land();
+      await Promise.resolve();
+    });
+  };
+}
+
+/**
+ * Stand in for `scrollIntoView`, recording whether a code was drawn at each
+ * reveal; the returned call restores it.
+ */
+function watchReveals(): { drawnAtReveal: boolean[]; restore: () => void } {
+  const drawnAtReveal: boolean[] = [];
+  const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
+  Element.prototype.scrollIntoView = vi.fn((options?: boolean | ScrollIntoViewOptions) => {
+    expect(options).toEqual({ block: 'nearest' });
+    drawnAtReveal.push(container.querySelector('svg[role="img"]') !== null);
+  });
+  return {
+    drawnAtReveal,
+    restore: () => {
+      if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had);
+      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    },
+  };
 }
 
 /**
@@ -192,6 +247,7 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   platform = {};
+  qrChunk.pending = null;
   vi.clearAllMocks();
 });
 
@@ -649,10 +705,8 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('New code')).toBeTruthy();
   });
 
-  it('scrolls the setup code into view once, not on every re-mint', async () => {
-    const reveal = vi.fn();
-    const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
-    Element.prototype.scrollIntoView = reveal;
+  it('scrolls the setup code into view once it has drawn, not on every re-mint', async () => {
+    const reveals = watchReveals();
     try {
       let mints = 0;
       const link = makeLink(async (cmd) => {
@@ -662,18 +716,33 @@ describe('RemoteControlSection', () => {
       });
       platform = { burrow: link };
       await render();
+      // The code is known before the encoder lands; revealing then would leave
+      // the panel to grow back below the fold when the QR arrives.
+      const land = holdQrChunk();
       await act(async () => buttonLabelled('Set up a phone')!.click());
       await settleQrChunk();
-      expect(reveal).toHaveBeenCalledTimes(1);
+      expect(text()).toContain('Expires in');
+      expect(reveals.drawnAtReveal).toEqual([]);
+      await land();
+      expect(reveals.drawnAtReveal).toEqual([true]);
 
       // A replacement code is a refresh, not something the person asked for.
       await act(async () => buttonLabelled('New code')!.click());
       await settleQrChunk();
       expect(mints).toBe(2);
-      expect(reveal).toHaveBeenCalledTimes(1);
+      expect(reveals.drawnAtReveal).toEqual([true]);
+
+      // A code where none showed — this one was spent — is a first one again.
+      await act(async () => {
+        link.emit('invitation', { name: 'invitation', inviteId: 'invite-2', state: 'reserved' });
+      });
+      expect(container.querySelector('svg[role="img"]')).toBeNull();
+      await act(async () => buttonLabelled('New code')!.click());
+      await settleQrChunk();
+      expect(mints).toBe(3);
+      expect(reveals.drawnAtReveal).toEqual([true, true]);
     } finally {
-      if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had);
-      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      reveals.restore();
     }
   });
 
@@ -1512,28 +1581,30 @@ describe('One-time connection', () => {
     expect(text()).not.toContain('#old');
   });
 
-  it('scrolls each new link into view, and leaves the dialog alone otherwise', async () => {
+  it('scrolls each new link into view once its code has drawn, and leaves the dialog alone otherwise', async () => {
     // Settings' Remote control section sits at the bottom of a scrolling
     // dialog, so the QR arrives below the fold (seen in QC, 2026-09-29).
-    const reveal = vi.fn();
-    const had = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
-    Element.prototype.scrollIntoView = reveal;
+    const reveals = watchReveals();
     try {
       const service = oneTimeService();
       await renderOneTime(service);
-      expect(reveal).not.toHaveBeenCalled();
+      expect(reveals.drawnAtReveal).toEqual([]);
 
+      // A session's first open: the link is there before the encoder chunk.
+      const land = holdQrChunk();
       await act(async () => buttonLabelled('One-time connection')!.click());
       await settleQrChunk();
-      expect(reveal).toHaveBeenCalledTimes(1);
-      expect(reveal).toHaveBeenLastCalledWith({ block: 'nearest' });
+      expect(text()).toContain('#link-1');
+      expect(reveals.drawnAtReveal).toEqual([]);
+      await land();
+      expect(reveals.drawnAtReveal).toEqual([true]);
 
       await act(async () => buttonLabelled('New link')!.click());
       await settleQrChunk();
-      expect(reveal).toHaveBeenCalledTimes(2);
+      expect(text()).toContain('#link-2');
+      expect(reveals.drawnAtReveal).toEqual([true, true]);
     } finally {
-      if (had) Object.defineProperty(Element.prototype, 'scrollIntoView', had);
-      else delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      reveals.restore();
     }
   });
 

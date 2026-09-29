@@ -30,10 +30,13 @@ function makeQrCode() {
 export function ScannableCode({
   url,
   label,
+  onShown,
 }: {
   url: string;
   /** The code's accessible name; the image itself carries no text. */
   label: string;
+  /** Once the code has actually drawn, which is after the encoder chunk lands ({@link QrCode}). */
+  onShown?: () => void;
 }) {
   const [attempt, setAttempt] = useState(0);
   const [QrCode, setQrCode] = useState(makeQrCode);
@@ -65,7 +68,7 @@ export function ScannableCode({
       {/* Nothing while the encoder chunk arrives: it is one import away, and a
           placeholder the size of a QR would flash on every open. */}
       <Suspense fallback={null}>
-        <QrCode value={url} label={label} />
+        <QrCode value={url} label={label} onShown={onShown} />
       </Suspense>
     </QrChunkBoundary>
   );
@@ -80,18 +83,21 @@ export function ExpiringCode({
   label,
   expiresAt,
   noun,
+  onShown,
 }: {
   url: string;
   label: string;
   expiresAt: number;
   /** What the expired line calls it. */
   noun: 'code' | 'link';
+  /** {@link ScannableCode}'s: where a panel reveals itself. */
+  onShown?: () => void;
 }) {
   const minutesLeft = useMinutesLeft(expiresAt) ?? 0;
   return (
     <>
       <div className="mt-2 flex justify-center">
-        <ScannableCode url={url} label={label} />
+        <ScannableCode url={url} label={label} onShown={onShown} />
       </div>
       <div className="mt-1.5 text-center text-xs text-muted">
         {minutesLeft > 0

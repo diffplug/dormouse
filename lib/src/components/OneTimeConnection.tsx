@@ -5,7 +5,7 @@ import {
   FIELD_LABEL,
   oneTimeControlSentence,
   own,
-  useRevealWhen,
+  revealPanel,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import { writeTextToClipboard } from '../lib/clipboard';
@@ -192,7 +192,7 @@ function OneTimePanel({
   const cancel = (label: string) => button(label, onEnd, pending === 'end');
   const frame = useRef<HTMLDivElement>(null);
   // Each new link, New link's included, is what the person is about to scan.
-  useRevealWhen(frame, state.status === 'waiting' ? state.url : null);
+  const reveal = () => revealPanel(frame.current);
 
   let body: ReactNode;
   let actions: ReactNode;
@@ -202,7 +202,7 @@ function OneTimePanel({
       actions = cancel('Cancel');
       break;
     case 'waiting':
-      body = <WaitingLink url={state.url} expiresAt={state.expiresAt} />;
+      body = <WaitingLink url={state.url} expiresAt={state.expiresAt} onShown={reveal} />;
       actions = (
         <>
           <CopyLinkButton url={state.url} />
@@ -264,14 +264,28 @@ function OneTimePanel({
 }
 
 /** The live link: as a code for the phone's camera, and as text to send it. */
-function WaitingLink({ url, expiresAt }: { url: string; expiresAt: number }) {
+function WaitingLink({
+  url,
+  expiresAt,
+  onShown,
+}: {
+  url: string;
+  expiresAt: number;
+  onShown: () => void;
+}) {
   return (
     <>
       <div className="mt-1 text-sm leading-relaxed text-muted">
         Scan this with your phone’s camera, or open the link below on it. Phone and computer must be
         on the same Wi-Fi.
       </div>
-      <ExpiringCode url={url} label="One-time link for this machine" expiresAt={expiresAt} noun="link" />
+      <ExpiringCode
+        url={url}
+        label="One-time link for this machine"
+        expiresAt={expiresAt}
+        noun="link"
+        onShown={onShown}
+      />
       {/* `select-all`: one click takes the whole link, for a person copying it
           by hand where the clipboard is refused. */}
       <ModalReviewBlock className="mt-2 select-all" density="compact" wrap="breakAll">

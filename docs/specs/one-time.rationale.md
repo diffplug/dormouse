@@ -96,6 +96,13 @@ goes out before the keychain read.
 
 ## Laptop UI
 
+**Why the reveal waits for the QR.** The encoder is a lazy chunk. On a
+session's first open the link arrives before the chunk does, the empty
+`Suspense` fallback takes no height, and a panel scrolled into view then grows
+the QR's height back below the fold when the chunk lands (review, 2026-09).
+`QrCode` calls `onShown` from its own layout effect, the first moment the panel
+has its full height.
+
 **Why nothing re-opens on a timer.** The Relay's "Set up a phone" panel
 re-mints shortly before its code expires, because a setup code is replaced
 without anyone noticing. A one-time link cannot be: each open mints a room and a

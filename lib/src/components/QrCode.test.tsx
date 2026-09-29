@@ -3,7 +3,7 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encode } from 'uqr';
 
 import { QrCode } from './QrCode';
@@ -70,5 +70,27 @@ describe('QrCode', () => {
     expect(Math.min(...rows.map(([x]) => x))).toBeGreaterThanOrEqual(4);
     expect(Math.min(...rows.map(([, y]) => y))).toBeGreaterThanOrEqual(4);
     expect(Math.max(...rows.map(([, y]) => y))).toBeLessThanOrEqual(size - 5);
+  });
+
+  it('says once per code that it is drawn, whatever callback a re-render brings', async () => {
+    // Where a panel reveals itself; its countdown re-renders it every minute
+    // with a fresh callback, and that must not scroll the dialog again.
+    const drawn: boolean[] = [];
+    const shown = () => drawn.push(container.querySelector('svg') !== null);
+    await act(async () => {
+      root.render(<QrCode value={URL_UNDER_TEST} label="Setup code" onShown={shown} />);
+    });
+    expect(drawn).toEqual([true]);
+
+    const again = vi.fn();
+    await act(async () => {
+      root.render(<QrCode value={URL_UNDER_TEST} label="Setup code" onShown={again} />);
+    });
+    expect(again).not.toHaveBeenCalled();
+    await act(async () => {
+      root.render(<QrCode value={`${URL_UNDER_TEST}x`} label="Setup code" onShown={again} />);
+    });
+    expect(again).toHaveBeenCalledTimes(1);
+    expect(drawn).toEqual([true]);
   });
 });

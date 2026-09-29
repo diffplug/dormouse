@@ -464,8 +464,9 @@ right cluster (`docs/specs/layout.md` -> "Baseboard").
   the link keeps waiting.
 - **Never open a link on a timer**: only New link replaces one, and the
   countdown re-renders on the minute (rationale).
-- **Scroll each new link into view** (`block: 'nearest'`), New link's
-  included: the section sits at the bottom of Settings' scrolling body.
+- **Scroll each new link into view once its QR has drawn** (`block:
+  'nearest'`), New link's included: the section sits at the bottom of Settings'
+  scrolling body (rationale).
 - **Cancel and End send `oneTimeEnd`; Done sends the one that returns `ended`
   to `idle`. `ended {user-ended}` renders as `idle`** (rationale).
 - **An open the panel started shows as `opening` before any event**, with
@@ -481,7 +482,8 @@ right cluster (`docs/specs/layout.md` -> "Baseboard").
   re-reads on mount.
 
 Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
-`lib/src/components/OneTimeConnection.tsx`; `OneTimeIndicator` in
+`lib/src/components/OneTimeConnection.tsx`; `QrCode` in
+`lib/src/components/QrCode.tsx`; `OneTimeIndicator` in
 `lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime` and
 `openOneTime` in `lib/src/remote/burrow/one-time-store.ts`. Pinned by
 `lib/src/components/RemoteControlSection.test.tsx`,

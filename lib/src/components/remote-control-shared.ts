@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 /**
  * What the Remote control section's two QR panels share: the Relay's "Set up a
@@ -62,13 +62,13 @@ export function useMinutesLeft(expiresAt: number | null): number | null {
 }
 
 /**
- * Scroll `ref`'s element into view whenever `key` becomes a new non-null value —
- * a code panel grows below the fold of the Settings dialog when its QR arrives,
- * so the person who asked for it would otherwise have to go looking.
- * `block: 'nearest'` leaves a panel that is already visible where it is.
+ * Scroll a code panel into view, from its QR's `onShown` (`ExpiringCode`): the
+ * panel grows below the fold of the Settings dialog when its QR arrives, so the
+ * person who asked for it would otherwise have to go looking. From the QR's own
+ * mount rather than when the code is known: the encoder is a lazy chunk, and a
+ * panel revealed before it lands grows back below the fold. `block: 'nearest'`
+ * leaves a panel that is already visible where it is.
  */
-export function useRevealWhen(ref: RefObject<HTMLElement | null>, key: string | null): void {
-  useEffect(() => {
-    if (key !== null) ref.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [ref, key]);
+export function revealPanel(panel: HTMLElement | null): void {
+  panel?.scrollIntoView?.({ block: 'nearest' });
 }

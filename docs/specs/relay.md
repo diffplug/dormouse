@@ -871,7 +871,7 @@ exists to honor:
   - **Must clamp refresh delay to `[30 s, DEFAULT_PAIRING_TTL_MS - 20 s]`.**
   - **The code being replaced stays on screen** until its replacement lands;
     only a first mint blanks.
-  - **Scroll the panel into view once, when its first code shows**; a
+  - **Scroll the panel into view when a code draws where none showed**; a
     re-mint never moves the dialog.
   - **An invitation state change flips only the panel showing that `inviteId`**,
     and **the panel stays subscribed past the QR**: `reserved` spends the code,

@@ -3,7 +3,7 @@ import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { OneTimeConnection } from './OneTimeConnection';
-import { FIELD_HINT, FIELD_LABEL, own, useRevealWhen } from './remote-control-shared';
+import { FIELD_HINT, FIELD_LABEL, own, revealPanel } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
@@ -864,9 +864,18 @@ function SetupPhonePanel({
   const shown = displayedQr(state);
   const terminal = terminalCopy(state);
   const frame = useRef<HTMLDivElement>(null);
-  // Once, when a code first shows: the panel re-mints while it stays open, and
-  // a refresh must not pull the dialog out from under someone reading it.
-  useRevealWhen(frame, shown ? 'shown' : null);
+  // Once, when a code first draws where none showed: the panel re-mints while
+  // it stays open, and a refresh must not pull the dialog out from under
+  // someone reading it.
+  const revealed = useRef(false);
+  useEffect(() => {
+    if (!shown) revealed.current = false;
+  }, [shown]);
+  const reveal = () => {
+    if (revealed.current) return;
+    revealed.current = true;
+    revealPanel(frame.current);
+  };
 
   return (
     <div ref={frame} className="mt-2 rounded border border-border p-2">
@@ -895,6 +904,7 @@ function SetupPhonePanel({
             label="Setup code for this machine"
             expiresAt={shown.expiresAt}
             noun="code"
+            onShown={reveal}
           />
         </>
       ) : state.phase === 'failed' ? (
