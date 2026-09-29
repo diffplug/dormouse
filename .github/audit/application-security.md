@@ -39,11 +39,14 @@ nothing and must reach the direct path — `docs/specs/security-remote.md` ->
 "One-time connection");
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they
-promote) and `lib/src/remote/pocket-app/sw.ts` (the render sink);
+promote), `one-time-client.ts` (the one-time phone, which keeps nothing and
+sends no protocol-v1 before the direct switch), and
+`lib/src/remote/pocket-app/sw.ts` (the render sink);
 `relay/src/relay.ts` and `relay/src/app.ts` (which must know none of it). The
 harnesses that already exercise this are
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
 `lib/src/remote/burrow/one-time-runtime.test.ts`,
+`lib/src/remote/client/one-time-e2e.test.ts`,
 `relay/test/malicious-relay.test.mjs`,
 `remote-lib-common/test/security-guarantees.test.mjs`,
 `remote-lib-common/test/noise.test.mjs`, and `remote-lib-common/test/push-seal.test.mjs`

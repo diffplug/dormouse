@@ -298,9 +298,9 @@ nothing.** `docs/specs/one-time.md` owns the link, the rendezvous wire, and the
 runtime that carries these rules out ("Burrow runtime").
 
 - **IK against the link's one-use key.** The phone is the initiator with a fresh
-  static it **never persists**, the link's `ephPub` as `rs`; both handshake
-  payloads are empty. The link carries no Burrow static, so the phone is left
-  holding nothing to pin.
+  nonextractable static it **never persists**, minted for the one handshake,
+  the link's `ephPub` as `rs`; both handshake payloads are empty. The link
+  carries no Burrow static, so the phone is left holding nothing to pin.
 - **The prologue binds every link field under its own kind** — the E2E domain,
   `one-time`, the room id, then `v`, `expiry`, and `ephPub` in link order — so a
   one-time transcript equals no pairing or connection transcript, and is useless
@@ -320,24 +320,27 @@ runtime that carries these rules out ("Burrow runtime").
   `confirmation-mismatch`, `link-expired`, or `burrow-error`, in the same fixed
   control message as [Pairing](#pairing)'s.
 - **Direct required: application data never crosses the rendezvous.** The
-  outcome promotes the same session, and an application message decrypted off
-  the rendezvous ends it unread; a session with no direct path by
-  `ONE_TIME_DIRECT_DEADLINE_MS` ends, with no relayed fallback.
+  outcome promotes the same session; the phone refuses protocol-v1 until both
+  directions are direct, and an application message the Burrow decrypts off
+  the rendezvous ends the session unread. A session with no direct path by
+  `ONE_TIME_DIRECT_DEADLINE_MS` ends at both ends, with no relayed fallback.
 - **After the switch the direct channel, not the rendezvous, is the lifecycle
   authority** — for this ceremony alone, the carve-out from
   [remote-api.md](./remote-api.md) -> "Direct path"'s rule that the Relay stays
-  the lifecycle authority, since no Relay carries it. The Burrow closes the
-  rendezvous at the switch and ignores its loss; channel loss or the idle
+  the lifecycle authority, since no Relay carries it. Both ends close the
+  rendezvous at the switch and ignore its loss; channel loss or the idle
   deadline ends the session, and nothing resumes.
 
 Source of truth: `OneTimeRuntime` in
-`lib/src/remote/burrow/one-time-runtime.ts`, `oneTimeLinkPrologue` in
+`lib/src/remote/burrow/one-time-runtime.ts`, `OneTimeClient` in
+`lib/src/remote/client/one-time-client.ts`, `oneTimeLinkPrologue` in
 `remote-lib-common/src/security/one-time-link.ts`, `e2eOneTimePrologue` in
 `remote-lib-common/src/security/noise-transport.ts`, `OneTimeRequestV1` /
 `OneTimeOutcomeV1` in `remote-lib-common/src/security/e2e-ceremony.ts`. Pinned
 by `remote-lib-common/test/one-time-link.test.mjs`,
-`remote-lib-common/test/e2e-ceremony.test.mjs`, and
-`lib/src/remote/burrow/one-time-runtime.test.ts`.
+`remote-lib-common/test/e2e-ceremony.test.mjs`,
+`lib/src/remote/burrow/one-time-runtime.test.ts`, and
+`lib/src/remote/client/one-time-e2e.test.ts`.
 
 ## Push sealing
 

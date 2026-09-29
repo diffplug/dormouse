@@ -221,12 +221,12 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * Every ceremony is this shape, so the send and the await share a `try`.
    *
    * **The waiter is registered before the send**, as {@link exchange} does it:
-   * an answer that arrives with no await in between — a relay that delivers
-   * synchronously — would otherwise reach {@link onFrame} with nobody waiting,
-   * be dropped as an answer nobody asked for, and hang the ceremony to its
-   * deadline. Keepalives are accepted and skipped; the first control message is
-   * the outcome, whatever it says, and anything else is a peer this Client does
-   * not speak the same protocol as.
+   * an answer that arrives with no await in between — an owner's socket that
+   * delivers synchronously — would otherwise reach {@link onFrame} with nobody
+   * waiting, be dropped as an answer nobody asked for, and hang the ceremony to
+   * its deadline. Keepalives are accepted and skipped; the first control message
+   * is the outcome, whatever it says, and anything else is a peer this Client
+   * does not speak the same protocol as.
    */
   async exchangeControl(
     route: R,
@@ -430,9 +430,10 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * fail everything in flight, and tell the app — the same three steps a
    * `burrow-gone` frame takes, because from here they are the same event.
    *
-   * **The socket is left alone**, which is the whole difference from the
-   * owner's own teardown: it is the socket to the *Relay*, and reconnecting is
-   * a fresh handshake over the one already open.
+   * **The owner's socket is left alone**, which is the whole difference from
+   * the owner's own teardown: this core never touches that socket, and what the
+   * owner does next — Pocket reconnects with a fresh handshake over the relay
+   * socket already open — is the owner's.
    */
   loseBurrow(reason: string): void {
     this.endSession(reason, { notifyGone: true });
@@ -465,18 +466,16 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    *
    * The Burrow disposes an established session it has not decrypted a Client
    * message on for `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` and sends nothing when it
-   * does — there is no frame to send, and the relay socket this Client holds is
-   * to the *Relay*, so nothing closes. Keepalives pause while the page is
-   * hidden, so a phone in a pocket crosses that line on its own, and without
-   * this check it comes back to a wall whose every request hangs forever with
-   * no error and no way out but a reload
-   * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
+   * does — there is no frame to send, and nothing the owner's socket carries
+   * says so. Keepalives pause while the page is hidden, so a phone in a pocket
+   * crosses that line on its own, and without this check it comes back to a
+   * wall whose every request hangs forever with no error and no way out but a
+   * reload ([pocket-app.md](../../../docs/specs/pocket-app.md)).
    *
    * The Burrow's deadline runs from the message it last decrypted, which is the
    * one this Client last sent, so the same constant answers the question on
-   * both sides. Reports burrow loss and leaves the relay socket alone: what died
-   * is the end-to-end session, and reconnecting is a fresh handshake over the
-   * socket already open.
+   * both sides. Reports burrow loss and leaves the owner's socket alone: what
+   * died is the end-to-end session, and what follows is the owner's.
    */
   #reapedByBurrow(established: EstablishedSession<R>): boolean {
     if (this.#now() - established.lastSentAt < ESTABLISHED_E2E_IDLE_TIMEOUT_MS) return false;
@@ -592,8 +591,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     try {
       receipt = established.session.receive(ciphertext);
     } catch {
-      // The end-to-end session is what died, never the relay socket: it is to
-      // the *Relay*, and the app reconnects with a fresh handshake over it.
+      // The end-to-end session is what died, never the owner's socket, which
+      // this core does not touch; what follows is the owner's.
       this.loseBurrow('the end-to-end session failed');
       return null;
     }

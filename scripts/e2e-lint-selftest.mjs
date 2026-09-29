@@ -159,6 +159,28 @@ for (const violation of [
   );
 }
 
+// Every name the one-time phone's store rule lists must redden it on its own,
+// in the client and in the session core it shares with Pocket — the loop case
+// appends one import to the client alone. A dynamic import and a re-export are
+// the same reach.
+const ONE_TIME_CLIENT = 'lib/src/remote/client/one-time-client.ts';
+const SESSION_CORE = 'lib/src/remote/client/session-core.ts';
+for (const [file, violation] of [
+  [ONE_TIME_CLIENT, '\nconst __selftest = globalThis.indexedDB;\n'],
+  [ONE_TIME_CLIENT, '\nconst __selftest = globalThis.localStorage;\n'],
+  [ONE_TIME_CLIENT, '\nconst __selftest = globalThis.sessionStorage;\n'],
+  [ONE_TIME_CLIENT, '\nconst __selftest = navigator.serviceWorker;\n'],
+  [ONE_TIME_CLIENT, "\nimport { generateClientKeyPair } from './pocket-private-key';\n"],
+  [ONE_TIME_CLIENT, "\nimport { PocketClient } from './pocket-client';\n"],
+  [ONE_TIME_CLIENT, "\nimport type { WebAuthnClient } from './webauthn.ts';\n"],
+  [ONE_TIME_CLIENT, "\nexport { subscribeToPush } from './push-subscribe';\n"],
+  [ONE_TIME_CLIENT, "\nconst __selftest = import('../pocket-app/service-worker');\n"],
+  [SESSION_CORE, "\nimport type { KnownBurrowStore } from './pocket-db';\n"],
+  [SESSION_CORE, '\nconst __selftest = globalThis.indexedDB;\n'],
+]) {
+  selftest.withAppended(file, violation, `a store in ${file} stays green: ${violation.trim()}`);
+}
+
 const security = readFileSync(join(repoRoot, SECURITY_SPEC), 'utf8');
 // A file-scoped storage exception must not become a directory-scoped escape.
 selftest.withAppended(

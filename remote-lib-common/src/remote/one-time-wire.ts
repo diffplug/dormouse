@@ -135,6 +135,9 @@ export function isOneTimeBurrowFrame(value: unknown): value is OneTimeBurrowFram
 export const ONE_TIME_PING = 'ping';
 export const ONE_TIME_PONG = 'pong';
 
+/** How often either end pings its rendezvous socket while it is open. */
+export const ONE_TIME_PING_INTERVAL_MS = 30_000;
+
 // ---------------------------------------------------------------------------
 // Bounds and timings
 

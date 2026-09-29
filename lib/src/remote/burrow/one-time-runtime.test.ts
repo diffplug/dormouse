@@ -22,6 +22,7 @@ import {
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
   ONE_TIME_PING,
+  ONE_TIME_PING_INTERVAL_MS,
   ONE_TIME_PONG,
   TokenBucket,
   boundedPairingLabel,
@@ -39,7 +40,6 @@ import {
 import {
   OneTimeRuntime,
   ONE_TIME_OPEN_TIMEOUT_MS,
-  ONE_TIME_PING_INTERVAL_MS,
   type OneTimeApprovalRequest,
   type OneTimeRuntimeOptions,
   type OneTimeState,

@@ -167,7 +167,7 @@ connection).
 
 **One peer connection per session**, created at the offer, closed on every
 disposal path, never existing before promotion. **Both ends build it through an
-injected factory** — `ClientSessionCoreDeps.createDirectPeer` (Pocket's through `PocketClientDeps`),
+injected factory** — `ClientSessionCoreDeps.createDirectPeer` (Pocket's through `PocketClientDeps`, the one-time phone's through `OneTimeClientDeps`),
 `BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions`, and
 `OneTimeRuntimeOptions.createDirectPeer` —
 `null` where a runtime has none, so neither end reaches a WebRTC global.

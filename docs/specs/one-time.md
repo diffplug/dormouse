@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary; this spec uses them bare.
 > Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection".
-> The shared contract and the Burrow runtime are built; the phone client, the service commands, the rendezvous, and both interfaces are the **one-time-connection** scope under `## Future`.
+> The shared contract, the Burrow runtime, and the phone client are built; the service commands, the rendezvous, and both interfaces are the **one-time-connection** scope under `## Future`.
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
@@ -60,7 +60,9 @@ Each message is one JSON frame with exact keys, forwarded verbatim by the room:
 | `OneTimeBurrowFrame` | Burrow → phone | `{t: 'one-time', step: 'response' \| 'transport', ct}` |
 
 `ct` is one base64url Noise message, bounded as on the relay envelope.
-`ONE_TIME_PING` / `ONE_TIME_PONG` are whole-string keepalives, never JSON.
+`ONE_TIME_PING` / `ONE_TIME_PONG` are whole-string keepalives, never JSON:
+each end pings its open socket every `ONE_TIME_PING_INTERVAL_MS` (30 s) and
+counts no answer.
 
 - **Must measure a frame's raw text against `MAX_ONE_TIME_FRAME_LENGTH` before
   parsing it.** A room forwards at most `MAX_ONE_TIME_FORWARDED` (32) frames,
@@ -113,9 +115,7 @@ this section is how the runtime carries them out.
 decides them; a runtime never enters either.
 
 - **Must open the socket through the host's factory with no `Origin`
-  header**, on the origin's Burrow route with `http` replaced by `ws`. While it
-  is open the runtime sends `ONE_TIME_PING` every `ONE_TIME_PING_INTERVAL_MS`
-  (30 s) and ignores `ONE_TIME_PONG` uncounted.
+  header**, on the origin's Burrow route with `http` replaced by `ws`.
 - **The first message must be one `OneTimeRoomFrame`**, else `unreachable`.
   The link's expiry is the earlier of the runtime's own `now +
   ONE_TIME_LINK_TTL_MS` and the room's `expiresAt`, floored to whole seconds.
@@ -159,20 +159,64 @@ Source of truth: `OneTimeRuntime` in
 Pinned by `lib/src/remote/burrow/one-time-runtime.test.ts`, which drives a real
 Noise initiator through the in-memory room `lib/src/remote/test-rendezvous.ts`.
 
+## Phone client
+
+**`OneTimeClient` is single-use: one `connectOnce`, one rendezvous socket, and
+at most one session**, on `ClientSessionCore`, direct or not at all.
+`connectOnce(link, label, onCode)`:
+
+1. Mints a static with `generateNoiseKeyPair`, writes message 1, then joins the
+   link's room on the client route and completes IK; both payloads are empty.
+2. Hands the two digits to `onCode`, sends `OneTimeRequestV1 {code, label}`,
+   and reads one outcome.
+3. On `ok`, establishes the session and offers the direct path, which has
+   `ONE_TIME_DIRECT_DEADLINE_MS` to carry both directions.
+4. At the switch, closes the rendezvous normally and resolves
+   `{ok: true, burrowLabel}`.
+
+- **Never open a socket outside `connectOnce`**, which runs once per client
+  and opens none for an expired link.
+- **Never persist the static**: nonextractable, minted for this handshake, and
+  dropped with the session; the module imports no store, passkey, push, or
+  worker code.
+- **Never send protocol-v1 before the switch**: every protocol-v1 method
+  refuses until both directions are direct.
+- **Must measure every frame against `MAX_ONE_TIME_FRAME_LENGTH` before
+  `JSON.parse`**, then drop what `isOneTimeBurrowFrame` refuses.
+- **An outcome already read outranks the room's close behind it.**
+- **After the switch the channel is the lifecycle authority**: its loss, the
+  laptop's End, or the idle deadline reaches `setOnEnded` once; `close()`
+  reports nothing.
+
+Every failure resolves `{ok: false, message}` with fixed copy:
+
+| Failure | Copy |
+| --- | --- |
+| a denial | `ONE_TIME_DENIAL_MESSAGES[code]` |
+| room close `4011` or `4012` | `ONE_TIME_LINK_USED_MESSAGE` |
+| an expired link, room close `4010` or `4014`, or no answer by the room's deadline | `ONE_TIME_LINK_EXPIRED_MESSAGE` |
+| between an `ok` outcome and the switch: a decline, a lost session, the deadline, or any other close | `ONE_TIME_DIRECT_FAILED_MESSAGE` |
+| a socket that never opened | `ONE_TIME_UNREACHABLE_MESSAGE` |
+| any other close, `close()`, or a session lost between the switch and the resolve | `ONE_TIME_ENDED_MESSAGE` |
+| a payload on message 2, or an outcome its guard refuses | `ONE_TIME_DENIAL_MESSAGES['burrow-error']` |
+
+Source of truth: `OneTimeClient` in `lib/src/remote/client/one-time-client.ts`;
+`ClientSessionCore` in `lib/src/remote/client/session-core.ts`. Pinned by
+`lib/src/remote/client/one-time-client.test.ts` and, against the real runtime,
+`lib/src/remote/client/one-time-e2e.test.ts`.
+
 ## Future
 
 **Scope: one-time-connection** — the feature on top of the contract, in build
 order, each stage promoting its part above the fold:
 
-1. **Phone client** — `OneTimeClient` on `ClientSessionCore`, proven end to
-   end against the runtime through the in-memory room.
-2. **Service commands and host glue** — `BurrowService` commands and event, the
+1. **Service commands and host glue** — `BurrowService` commands and event, the
    baked origin, the `serving` gate, approval `kind`, standalone and VS Code.
-3. **Hosted rendezvous** — the routes, the `OneTimeRoom` Durable Object, its
+2. **Hosted rendezvous** — the routes, the `OneTimeRoom` Durable Object, its
    configuration and headers, a Miniflare suite in the root test.
-4. **Phone page** — Pocket's shared views and wall mount moved out of its App,
+3. **Phone page** — Pocket's shared views and wall mount moved out of its App,
    the `/connect/` entry, its build and staging, the dev loop.
-5. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
+4. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
    enabled.
 
 **Scope: one-time-anywhere** — reach past one network, for paid users: STUN and
@@ -190,18 +234,13 @@ limit.
 3. The laptop shows the link as a QR code and as copyable text.
 4. The phone page takes and erases the fragment and **opens no socket until the
    person taps Connect**, so a link-preview crawler cannot spend the one join.
-5. The phone joins the client route and runs IK with a fresh, never-persisted
-   static against `ephPub`, reserving the link ([Burrow runtime](#burrow-runtime)).
-6. The phone shows two digits and sends `OneTimeRequestV1`; the laptop's
-   approval modal takes the one attempt.
-7. A match promotes the session. The phone offers the direct path at once
-   (`iceServers: []`) and shows "Connecting directly…".
-8. **The phone sends no protocol-v1 until its path is direct.** When the laptop
-   ends the connection `direct-failed`, the phone reads: "Couldn't reach your
-   laptop directly. Make sure your phone is on the same Wi-Fi, then open a new
-   link."
-9. After the switch the phone closes its rendezvous socket normally too, and
-   the room deletes itself.
+5. The tap runs `connectOnce` ([Phone client](#phone-client)), and its first
+   message 1 reserves the link ([Burrow runtime](#burrow-runtime)).
+6. The page shows the two digits; the laptop's approval modal takes the one
+   attempt.
+7. A match promotes the session; the page shows "Connecting directly…" until
+   the switch.
+8. After the switch both ends have left the room, and it deletes itself.
 
 ### Service and hosts
 
@@ -233,10 +272,6 @@ limit.
 
 ### Phone
 
-- **`OneTimeClient.connectOnce(link, label, onCode)` resolves only once the
-  direct path carries both directions**, then closes the rendezvous socket. It
-  imports no storage and no passkey code; close codes and direct failure map to
-  fixed copy.
 - **The page** (lib/src/remote/one-time-app/, built to Hosted's `/connect/`):
   invalid, expired, or unsupported → Connect → code → "Connecting directly…" →
   the wall with the laptop's label and End → ended. **It persists nothing**; its

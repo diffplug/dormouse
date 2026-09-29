@@ -25,6 +25,7 @@ import {
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
   ONE_TIME_PING,
+  ONE_TIME_PING_INTERVAL_MS,
   ONE_TIME_PONG,
   ONE_TIME_WS_ROUTES,
   TokenBucket,
@@ -68,9 +69,6 @@ import {
 
 /** How long {@link OneTimeRuntime.open} waits for the room to announce itself. */
 export const ONE_TIME_OPEN_TIMEOUT_MS = 8_000;
-
-/** How often the Burrow pings its rendezvous socket while it is open. */
-export const ONE_TIME_PING_INTERVAL_MS = 30_000;
 
 /** The close the Burrow ends its own rendezvous socket with. */
 const NORMAL_CLOSURE = 1000;

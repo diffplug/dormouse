@@ -11,8 +11,9 @@
  * plaintext relay route, no legacy frame discriminant left to answer, no
  * Relay-side view of protocol-v1 or of the direct path's signaling, no ICE
  * server, no checked-in service worker shadowing the built one, no one-time
- * frame the Relay or `BurrowRuntime` could read, and no grant a one-time
- * connection could leave behind. An absence is exactly what a
+ * frame the Relay or `BurrowRuntime` could read, no grant a one-time
+ * connection could leave behind, and no store a one-time phone could keep
+ * anything in. An absence is exactly what a
  * reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
  * thorough but probabilistic. This makes the cheap half deterministic, so
@@ -93,6 +94,7 @@ const E2E_MODULES = [
   'lib/src/remote/burrow/push-delivery.ts',
   'lib/src/remote/client/pocket-client.ts',
   'lib/src/remote/client/session-core.ts',
+  'lib/src/remote/client/one-time-client.ts',
   'lib/src/remote/pocket-app/sw.ts',
 ];
 
@@ -113,10 +115,31 @@ const FRAME_MODULES = [
   'lib/src/remote/burrow/burrow-runtime.ts',
   'lib/src/remote/burrow/one-time-runtime.ts',
   'lib/src/remote/client/pocket-client.ts',
+  'lib/src/remote/client/one-time-client.ts',
 ];
 
 /** The laptop's one-time runtime, which authorizes one session and writes nothing. */
 const ONE_TIME_RUNTIME = 'lib/src/remote/burrow/one-time-runtime.ts';
+
+/**
+ * The phone's one-time client, and the session core it shares with Pocket —
+ * which is why the core is held to the same rule: a store reached through it
+ * is reached through both.
+ */
+const ONE_TIME_PHONE_MODULES = [
+  'lib/src/remote/client/one-time-client.ts',
+  'lib/src/remote/client/session-core.ts',
+];
+
+/**
+ * Every way a phone module could keep something past its page: the browser's
+ * stores and its worker registry by name, or an import of Pocket's own —
+ * the pinned records, the key wrapping, the passkeys, push, the worker, and
+ * `PocketClient`, which holds all of them. Anchored on the import for the
+ * modules, so prose may still name them.
+ */
+const PHONE_PERSISTENCE =
+  /\b(?:indexedDB|localStorage|sessionStorage|serviceWorker)\b|\b(?:from|import)\s*\(?\s*['"][^'"]*\/(?:pocket-db|pocket-private-key|pocket-client|webauthn|push-subscribe|service-worker)(?:\.[cm]?[jt]s)?['"]/g;
 
 /**
  * Every name through which a runtime could grant something that outlives its
@@ -346,6 +369,19 @@ export const RULES = [
     pattern: GRANT_NAME,
     violationFile: ONE_TIME_RUNTIME,
     violation: "\nimport { BurrowAcl } from 'remote-lib-common';\n",
+  },
+  {
+    rule: 'The one-time phone and its session core name no store',
+    security: 'may name no browser store or service worker',
+    kind: 'forbid',
+    files: ONE_TIME_PHONE_MODULES,
+    // A one-time phone keeps nothing: its static is minted for one handshake
+    // and dropped with the session. A store or a Pocket module in either file
+    // is the leading indicator that something has started to outlive it — the
+    // same reasoning as the runtime's grant rule above.
+    pattern: PHONE_PERSISTENCE,
+    violationFile: 'lib/src/remote/client/one-time-client.ts',
+    violation: "\nimport type { KnownBurrowStore } from './pocket-db';\n",
   },
   {
     rule: '`E2eKind` is exactly pairing and connection',
