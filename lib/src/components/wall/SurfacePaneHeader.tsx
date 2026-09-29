@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
+import { clsx } from 'clsx';
 import { POPOVER_FOCUSABLE_SELECTOR, usePopoverFocusTrap } from '../use-popover-focus-trap';
 import { useDismissOverlay } from './use-dismiss-overlay';
 import { useHeaderTier } from './use-header-tier';
@@ -52,7 +53,6 @@ const browserHeaderTier = (width: number): BrowserHeaderTier =>
 export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const dirty = useToolDirty(id, params);
   const preview = isPreviewSlotParams(params);
-  const labelClass = preview ? PREVIEW_LABEL_CLASS : '';
   const visible = useSurfaceVisibility(parked);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -139,133 +139,136 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
     if (!visible) closeMenu(false);
   }, [visible, closeMenu]);
 
-  const renderBrowserControls = (placement: BrowserInlineTier | 'popover') => (
-    <>
-      {screen && screenSnapshot && chrome ? (
-        <>
-          {/* Render/screen chip → far left, out of the way of the nav controls.
-              Opens the Display modal; the glyph reflects reality — frame =
-              embed, and robot + presentation = agent-visible browser. */}
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
-            aria-label={displayLabel}
-            title={displayLabel}
-            data-browser-display-trigger="true"
-            className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
-          >
-            {displayMode && <BrowserDisplayIcon mode={displayMode} size={14} />}
-          </button>
+  const renderBrowserControls = (placement: BrowserInlineTier | 'popover') => {
+    const previewPill = preview && placement !== 'minimal' && <PreviewPill id={id} />;
+    return (
+      <>
+        {screen && screenSnapshot && chrome ? (
+          <>
+            {/* Render/screen chip → far left, out of the way of the nav controls.
+                Opens the Display modal; the glyph reflects reality — frame =
+                embed, and robot + presentation = agent-visible browser. */}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
+              aria-label={displayLabel}
+              title={displayLabel}
+              data-browser-display-trigger="true"
+              className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
+            >
+              {displayMode && <BrowserDisplayIcon mode={displayMode} size={14} />}
+            </button>
 
-          {/* Back / forward / refresh — native agent-browser commands; always
-              enabled (no canGoBack/Forward in the stream). Collapse before the
-              URL but after the splits. */}
-          {placement !== 'minimal' && <div className="flex shrink-0 items-center gap-0.5">
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); screen.chromeActions.back(); }}
-              ariaLabel="Back"
-              tooltip="Back"
-            ><ArrowLeftIcon size={14} /></HeaderActionButton>
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); screen.chromeActions.forward(); }}
-              ariaLabel="Forward"
-              tooltip="Forward"
-            ><ArrowRightIcon size={14} /></HeaderActionButton>
-            <HeaderActionButton
-              className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-              onClick={(e) => { e.stopPropagation(); screen.chromeActions.reload(); triggerDevServerRescan(); }}
-              ariaLabel="Reload"
-              tooltip="Reload"
-            ><ArrowClockwiseIcon size={14} /></HeaderActionButton>
-          </div>}
+            {/* Back / forward / refresh — native agent-browser commands; always
+                enabled (no canGoBack/Forward in the stream). Collapse before the
+                URL but after the splits. */}
+            {placement !== 'minimal' && <div className="flex shrink-0 items-center gap-0.5">
+              <HeaderActionButton
+                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                onClick={(e) => { e.stopPropagation(); screen.chromeActions.back(); }}
+                ariaLabel="Back"
+                tooltip="Back"
+              ><ArrowLeftIcon size={14} /></HeaderActionButton>
+              <HeaderActionButton
+                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                onClick={(e) => { e.stopPropagation(); screen.chromeActions.forward(); }}
+                ariaLabel="Forward"
+                tooltip="Forward"
+              ><ArrowRightIcon size={14} /></HeaderActionButton>
+              <HeaderActionButton
+                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+                onClick={(e) => { e.stopPropagation(); screen.chromeActions.reload(); triggerDevServerRescan(); }}
+                ariaLabel="Reload"
+                tooltip="Reload"
+              ><ArrowClockwiseIcon size={14} /></HeaderActionButton>
+            </div>}
 
-          {/* --key indicator for non-default keys only — the key name inline,
-              small + quiet (hover reveals `--key <name>`), never a prefix on the
-              persisted title. Raw --session surfaces show none. */}
-          {chrome.key && chrome.key !== 'default' && (
-            <span
-              className="min-w-0 max-w-16 truncate text-xs text-current/70"
-              title={`--key ${chrome.key}`}
-            >{chrome.key}</span>
-          )}
-
-          {editingUrl ? (
-            /* Inline URL editor (like renaming a terminal tab): pre-filled with
-               the full URL + all selected, Enter navigates, Escape/blur cancels
-               (browser-omnibox style). Fills the URL+chip+spacer span. */
-            <InlineEditInput
-              data-url-input-for={id}
-              className="min-w-0 flex-1 border-none bg-transparent p-0 font-medium text-inherit outline-none"
-              initialValue={chrome.url}
-              blurAction="cancel"
-              onSubmit={submitUrl}
-              onCancel={closeUrlEditor}
-            />
-          ) : (
-            <>
-              {/* Dev-server connection chip — in front of the URL when the port
-                  maps to a single pane; click focuses that terminal. The full
-                  command shows by default (no fixed cap); it only truncates
-                  after the URL path has, since the URL shrinks far faster.
-                  Absent ⇒ no chip + full host+path. */}
-              {devServer && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
-                  aria-label={`Focus ${devServer.label} — serves this localhost port`}
-                  title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
-                  className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
-                >
-                  <span className="min-w-0 truncate">{devServer.label}</span>
-                  {port != null && <span className="min-w-0 truncate text-current/70">:{port}</span>}
-                </button>
-              )}
-
-              {/* URL is the path only when a chip fronts it (domain is in the
-                  chip), else the full host+path. Click to edit/navigate; HTML
-                  <title> / full URL → tooltip. Gives up width (shrink-[10]) long
-                  before the command does. */}
+            {/* --key indicator for non-default keys only — the key name inline,
+                small + quiet (hover reveals `--key <name>`), never a prefix on the
+                persisted title. Raw --session surfaces show none. */}
+            {chrome.key && chrome.key !== 'default' && (
               <span
-                className={`${placement === 'popover' ? 'basis-full' : ''} min-w-0 shrink-[10] cursor-text truncate font-medium underline-offset-2 hover:underline ${labelClass}`}
-                title={[preview && 'Preview', chrome.title ?? chrome.url].filter(Boolean).join(' — ') || undefined}
-                onMouseDown={(e) => e.stopPropagation()}
-                role="button"
-                tabIndex={0}
-                onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setEditingUrl(true); } }}
-                onClick={(e) => { e.stopPropagation(); setEditingUrl(true); }}
-              >{urlText || title || id}</span>
-              {preview && placement !== 'minimal' && <PreviewPill id={id} />}
+                className="min-w-0 max-w-16 truncate text-xs text-current/70"
+                title={`--key ${chrome.key}`}
+              >{chrome.key}</span>
+            )}
 
-              {/* Flexible spacer keeps the layout buttons right-aligned. */}
-              {placement !== 'popover' && <div className="min-w-0 flex-1" />}
-            </>
-          )}
-        </>
-      ) : (
-        <>
-          <span className={`min-w-0 flex-1 truncate font-medium ${labelClass}`} title={preview ? 'Preview' : undefined}>{title ?? id}</span>
-          {preview && placement !== 'minimal' && <PreviewPill id={id} />}
-        </>
-      )}
+            {editingUrl ? (
+              /* Inline URL editor (like renaming a terminal tab): pre-filled with
+                 the full URL + all selected, Enter navigates, Escape/blur cancels
+                 (browser-omnibox style). Fills the URL+chip+spacer span. */
+              <InlineEditInput
+                data-url-input-for={id}
+                className="min-w-0 flex-1 border-none bg-transparent p-0 font-medium text-inherit outline-none"
+                initialValue={chrome.url}
+                blurAction="cancel"
+                onSubmit={submitUrl}
+                onCancel={closeUrlEditor}
+              />
+            ) : (
+              <>
+                {/* Dev-server connection chip — in front of the URL when the port
+                    maps to a single pane; click focuses that terminal. The full
+                    command shows by default (no fixed cap); it only truncates
+                    after the URL path has, since the URL shrinks far faster.
+                    Absent ⇒ no chip + full host+path. */}
+                {devServer && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
+                    aria-label={`Focus ${devServer.label} — serves this localhost port`}
+                    title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
+                    className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
+                  >
+                    <span className="min-w-0 truncate">{devServer.label}</span>
+                    {port != null && <span className="min-w-0 truncate text-current/70">:{port}</span>}
+                  </button>
+                )}
 
-      {(placement === 'popover' || placement === 'full') && <div className="ml-1 flex shrink-0 items-center gap-0.5">
-        <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={(e) => { e.stopPropagation(); actions.onSplitH(id); }}
-          ariaLabel="Split left/right"
-          tooltip="Split left/right [|] or [%]"
-        ><SplitHorizontalIcon size={14} /></HeaderActionButton>
-        <HeaderActionButton
-          className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-          onClick={(e) => { e.stopPropagation(); actions.onSplitV(id); }}
-          ariaLabel="Split top/bottom"
-          tooltip={'Split top/bottom [-] or ["]'}
-        ><SplitVerticalIcon size={14} /></HeaderActionButton>
-      </div>}
-    </>
-  );
+                {/* URL is the path only when a chip fronts it (domain is in the
+                    chip), else the full host+path. Click to edit/navigate; HTML
+                    <title> / full URL → tooltip. Gives up width (shrink-[10]) long
+                    before the command does. */}
+                <span
+                  className={clsx(placement === 'popover' && 'basis-full', 'min-w-0 shrink-[10] cursor-text truncate font-medium underline-offset-2 hover:underline', preview && PREVIEW_LABEL_CLASS)}
+                  title={[preview && 'Preview', chrome.title ?? chrome.url].filter(Boolean).join(' — ') || undefined}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setEditingUrl(true); } }}
+                  onClick={(e) => { e.stopPropagation(); setEditingUrl(true); }}
+                >{urlText || title || id}</span>
+                {previewPill}
+
+                {/* Flexible spacer keeps the layout buttons right-aligned. */}
+                {placement !== 'popover' && <div className="min-w-0 flex-1" />}
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <span className={clsx('min-w-0 flex-1 truncate font-medium', preview && PREVIEW_LABEL_CLASS)} title={preview ? 'Preview' : undefined}>{title ?? id}</span>
+            {previewPill}
+          </>
+        )}
+
+        {(placement === 'popover' || placement === 'full') && <div className="ml-1 flex shrink-0 items-center gap-0.5">
+          <HeaderActionButton
+            className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+            onClick={(e) => { e.stopPropagation(); actions.onSplitH(id); }}
+            ariaLabel="Split left/right"
+            tooltip="Split left/right [|] or [%]"
+          ><SplitHorizontalIcon size={14} /></HeaderActionButton>
+          <HeaderActionButton
+            className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
+            onClick={(e) => { e.stopPropagation(); actions.onSplitV(id); }}
+            ariaLabel="Split top/bottom"
+            tooltip={'Split top/bottom [-] or ["]'}
+          ><SplitVerticalIcon size={14} /></HeaderActionButton>
+        </div>}
+      </>
+    );
+  };
 
   const minimizeKillFocus = {
     onFocus: () => { minimizeKillFocused.current = true; },

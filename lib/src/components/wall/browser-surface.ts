@@ -10,7 +10,7 @@ import {
   type RenderMode,
 } from './agent-browser-screen';
 import type { BrowserBinding, SurfaceKind } from 'dor/commands/types';
-import { isToolKeyScope, type ToolKeyScope } from '../../lib/platform/tool-types';
+import { isToolKeyScope, type ToolKeyScope, type ToolRender } from '../../lib/platform/tool-types';
 import { parseRenderMode, renderModeFor, sessionForKey } from 'dor-lib-common/browser-providers';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
 import type { BrowserAutomationProvider } from '../../lib/platform/browser-automation';
@@ -66,6 +66,28 @@ export function isAgentBrowserParams(params: unknown): boolean {
 export function isToolParams(params: unknown): params is Record<string, unknown> & { surfaceType: 'tool' } {
   return asParams(params).surfaceType === 'tool';
 }
+
+/** What a Tool launch resolved: the params a preview retarget replaces
+ *  wholesale. The rest of the leaf (its directory, the mark) stays
+ *  (`docs/specs/dor-tool.md` -> Preview slot). */
+export interface ToolIdentityParams {
+  command: string;
+  toolArgv?: string[];
+  toolName?: string;
+  toolScope?: ToolKeyScope;
+  toolRender: ToolRender;
+  toolPort: 'announced' | 'auto';
+  toolKey?: string[];
+  browserViewport?: BrowserViewportSetting;
+  toolTarget?: string;
+}
+
+// Keyed by the interface, so an identity param added there fails to compile until it is listed here.
+const TOOL_IDENTITY_KEYS: Record<keyof ToolIdentityParams, true> = {
+  command: true, toolArgv: true, toolName: true, toolScope: true, toolRender: true,
+  toolPort: true, toolKey: true, browserViewport: true, toolTarget: true,
+};
+export const TOOL_IDENTITY_PARAMS: ReadonlySet<string> = new Set(Object.keys(TOOL_IDENTITY_KEYS));
 
 /** The ports autobind found when it refused to choose among them, or null.
  *  Derived state, never persisted — see `persistableLeafMeta`. */

@@ -1,0 +1,94 @@
+import { randomBytes } from 'node:crypto';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isAbsolute, relative, sep } from 'node:path';
+import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
+
+const TEXT = 'text/plain; charset=utf-8';
+/** C0, DEL, and C1 controls. */
+const CONTROLS = /[\x00-\x1f\x7f-\x9f]/;
+
+/** Thrown by a route to answer with `status` and `message` as plain text. */
+export class HttpError extends Error {
+  constructor(readonly status: number, message = '') { super(message); }
+}
+
+/** Node sends no body on a HEAD response. */
+export function reply(res: ServerResponse, status: number, body = '', type = TEXT): void {
+  res.writeHead(status, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(body) });
+  res.end(body);
+}
+
+/** Whether the absolute `path` is `root` or under it. */
+export function isInsideRoot(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return !(isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`));
+}
+
+/** `path`'s `/` segments; null when its spelling alone could leave a root: a
+ * backslash or a `.` or `..` segment, and when `strict`, an empty segment or a
+ * control character. Containment is decided on the realpath. */
+export function pathSegments(path: string, { strict = false } = {}): string[] | null {
+  const parts = path.split('/');
+  const refused = path.includes('\\') || (strict && CONTROLS.test(path))
+    || parts.some(part => part === '.' || part === '..' || (strict && part === ''));
+  return refused ? null : parts;
+}
+
+export interface CapabilityViewer { port: number; prefix: string; close(): Promise<void> }
+
+/** A loopback listener whose every URL sits under a fresh 256-bit capability
+ * `prefix`: `allowsFileViewerRequest` gates each request before `route` sees it.
+ * The scaffold answers a refused request 403, a route's `HttpError` with its
+ * status, and any other failure 500 `unavailable`; `chunked` answers those
+ * without Content-Length, as the file viewer does. `release` runs once the
+ * server has closed. */
+export async function startCapabilityViewer({ csp, post = false, chunked = false, unavailable, release, route }: {
+  csp: string;
+  post?: boolean;
+  chunked?: boolean;
+  unavailable: string;
+  release?: () => Promise<void>;
+  route(req: IncomingMessage, res: ServerResponse, prefix: string): Promise<void>;
+}): Promise<CapabilityViewer> {
+  // Loaded on demand: this module is bundled into every `dor` invocation.
+  const { createServer } = await import('node:http');
+  const prefix = `/${randomBytes(32).toString('hex')}/`;
+  const answer = (res: ServerResponse, status: number, message = '') => {
+    if (!chunked) { reply(res, status, message); return; }
+    res.writeHead(status, { 'Content-Type': TEXT });
+    res.end(message);
+  };
+  let port = 0;
+  const server = createServer((req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // The iframe proxy must retain this policy on every MIME type.
+    res.setHeader('X-Dormouse-Preserve-CSP', '1');
+    res.setHeader('Content-Security-Policy', csp);
+    if (!allowsFileViewerRequest(req, port, prefix, { post })) { answer(res, 403); return; }
+    route(req, res, prefix).catch(error => {
+      if (res.headersSent) res.destroy();
+      else if (error instanceof HttpError) answer(res, error.status, error.message);
+      else answer(res, 500, unavailable);
+    });
+  });
+  await new Promise<void>((yes, no) => { server.once('error', no); server.listen(0, '127.0.0.1', yes); });
+  port = (server.address() as { port: number }).port;
+  let closing: Promise<void> | undefined;
+  return { port, prefix,
+    close: () => closing ??= new Promise<void>((yes, no) => {
+      server.close(error => { void (release?.() ?? Promise.resolve()).then(() => error ? no(error) : yes(), no); });
+      server.closeAllConnections();
+    }),
+  };
+}
+
+/** Stops `viewer` on SIGINT or SIGTERM, and returns the OSC 367 `serve`
+ * announcement the `dor __view-*` entry prints for its caller. */
+export function announceViewer(viewer: { port: number; path: string; close(): Promise<void> }): string {
+  const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  return `\x1b]367;serve;${JSON.stringify({ port: viewer.port, path: viewer.path, v: 1 })}\x07`;
+}

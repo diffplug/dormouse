@@ -95,43 +95,59 @@ const SCRIPT = `(function () {
     });
   }
 
-  // Lists a directory, keeping the nodes (and expansion) of entries that remain.
-  function load(node) {
-    return request('list?dir=' + encodeURIComponent(node.path)).then(function (listing) {
-      var previous = new Map();
-      node.children.forEach(function (child) { previous.set(child.kind + '/' + child.name, child); });
-      var kept = [];
-      node.children = listing.entries.map(function (entry) {
-        var key = entry.kind + '/' + entry.name;
-        var child = previous.get(key);
-        if (!child) return makeNode(node, entry);
-        previous.delete(key);
-        setIgnored(child, entry.ignored);
-        kept.push(child);
-        return child;
-      });
-      previous.forEach(function (gone) { if (contains(gone, selected)) select(node === root ? null : node, false); });
-      node.group.textContent = '';
-      node.children.forEach(function (child) { node.group.appendChild(child.li); });
-      if (listing.truncated) {
-        var note = document.createElement('li');
-        note.setAttribute('role', 'none');
-        note.className = 'note';
-        note.style.paddingLeft = indent(node.level + 1);
-        note.textContent = 'More entries not shown';
-        node.group.appendChild(note);
-      }
-      node.loaded = true;
-      return kept;
+  function requestList(node) { return request('list?dir=' + encodeURIComponent(node.path)); }
+
+  // Applies a directory's listing, keeping the nodes (and expansion) of entries that remain.
+  function apply(node, listing) {
+    var previous = new Map();
+    node.children.forEach(function (child) { previous.set(child.kind + '/' + child.name, child); });
+    node.children = listing.entries.map(function (entry) {
+      var key = entry.kind + '/' + entry.name;
+      var child = previous.get(key);
+      if (!child) return makeNode(node, entry);
+      previous.delete(key);
+      setIgnored(child, entry.ignored);
+      return child;
     });
+    previous.forEach(function (gone) { if (contains(gone, selected)) select(node === root ? null : node, false); });
+    node.group.textContent = '';
+    node.children.forEach(function (child) { node.group.appendChild(child.li); });
+    if (listing.truncated) {
+      var note = document.createElement('li');
+      note.setAttribute('role', 'none');
+      note.className = 'note';
+      note.style.paddingLeft = indent(node.level + 1);
+      note.textContent = 'More entries not shown';
+      node.group.appendChild(note);
+    }
+    node.loaded = true;
   }
 
-  function refresh(node) {
-    return load(node).then(function (kept) {
-      return Promise.all(kept.filter(function (child) {
+  function load(node) { return requestList(node).then(function (listing) { apply(node, listing); }); }
+
+  // Lists the root and every loaded, expanded directory at once, then applies
+  // the listings top-down, skipping a directory that a failed listing or its
+  // parent's new one left out. A collapsed directory reloads when next expanded.
+  function refresh() {
+    var dirs = [];
+    (function walk(node) {
+      dirs.push(node);
+      node.children.forEach(function (child) {
         if (!child.expanded) child.loaded = false;
-        return child.loaded;
-      }).map(refresh));
+        else if (child.loaded) walk(child);
+      });
+    })(root);
+    return Promise.all(dirs.map(function (node) {
+      return requestList(node).then(function (listing) { return { listing: listing }; }, function (error) { return { error: error }; });
+    })).then(function (results) {
+      var applied = new Set([null]);
+      var error = null;
+      dirs.forEach(function (node, i) {
+        if (!applied.has(node.parent) || (node.parent && node.parent.children.indexOf(node) < 0)) return;
+        if ('error' in results[i]) error = error || results[i].error;
+        else { apply(node, results[i].listing); applied.add(node); }
+      });
+      if (error) throw error;
     });
   }
 
@@ -168,11 +184,12 @@ const SCRIPT = `(function () {
     else previewTimer = setTimeout(function () { send('select', node); }, 150);
   }
 
+  // The walk descends only through shown rows, so a child is hidden by its own flag alone.
   function rows() {
     var out = [];
     (function walk(parent) {
       parent.children.forEach(function (child) {
-        if (hidden(child)) return;
+        if (child.ignored && !show.checked) return;
         out.push(child);
         if (child.expanded) walk(child);
       });
@@ -198,7 +215,9 @@ const SCRIPT = `(function () {
     select(node, false);
     send('activate', node);
   });
+  var NAVIGATION = ['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowRight', 'ArrowLeft', 'Enter'];
   tree.addEventListener('keydown', function (event) {
+    if (NAVIGATION.indexOf(event.key) < 0) return;
     var list = rows();
     var index = list.indexOf(selected);
     var next = null;
@@ -219,7 +238,6 @@ const SCRIPT = `(function () {
         if (selected && selected.kind === 'dir') toggle(selected);
         else if (selected && selected.kind === 'file') { clearTimeout(previewTimer); send('activate', selected); }
         break;
-      default: return;
     }
     event.preventDefault();
     if (next && next !== selected) select(next, 'settle');
@@ -230,7 +248,7 @@ const SCRIPT = `(function () {
   });
   document.getElementById('refresh').addEventListener('click', function () {
     status.textContent = '';
-    refresh(root).catch(fail);
+    refresh().catch(fail);
   });
   load(root).catch(fail);
 })();`;

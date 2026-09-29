@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import { TODO_PILL_TRACKING_CLASS } from '../design';
+import { HEADER_PILL_CLASS } from '../design';
 import { WallActionsContext } from './wall-context';
 
 /** The Pane header's mark for a preview slot, drawn like the TODO pill; a click
@@ -10,7 +10,7 @@ export function PreviewPill({ id }: { id: string }) {
     <button
       type="button"
       data-preview-pill-for={id}
-      className={`shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
+      className={HEADER_PILL_CLASS}
       title="Keep open"
       aria-label="Preview — keep open"
       // A press on the pill is not a press on the pane.

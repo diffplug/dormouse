@@ -28,7 +28,7 @@ import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 import { pendingShellOpts } from '../lib/terminal-store';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
-import { installBrowserHost, mountWallHarness, type WallHarness } from './wall/wall-test-utils';
+import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
@@ -79,13 +79,6 @@ afterEach(() => {
 const flush = (): Promise<void> => harness.flush();
 const flushFrame = (): Promise<void> => harness.flushFrame();
 
-/** Wait out the host's own 100ms state polls (a tool taking over a pane, a
- *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
-const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
-  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
-  expect(ready()).toBe(true);
-}, { timeout: 2_000, interval: 25 });
-
 /** The host's answer for an approved `storybook` tool. */
 const okToolLookup = (key: string[] | null) => ({
   status: 'ok' as const,
@@ -98,12 +91,6 @@ const okToolLookup = (key: string[] | null) => ({
   key,
   warnings: [],
 });
-
-/** The integrated shell in `id` reports `line` as its running command. */
-const reportRunning = (id: string, line: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [
-  { type: 'commandLine', commandLine: line },
-  { type: 'commandStart', source: 'osc633_boundaries' },
-]);
 
 /** The shell in `id` is back at its prompt. */
 const promptBack = (id: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);

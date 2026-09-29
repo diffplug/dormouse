@@ -590,14 +590,19 @@ export function Wall({
       && !getWorkspacesSnapshot().workspaces.some(workspace => workspace.id === selectedIdRef.current)) returnToPane();
   }), [returnToPane]);
 
-  // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
-  // chip from the baseboard and select the now-restored pane.
-  const removeDoorAndSelect = useCallback((id: string) => {
+  /** Drop a Door chip from the baseboard. */
+  const removeDoor = useCallback((id: string) => {
     const nextDoors = doorsRef.current.filter(d => d.id !== id);
     doorsRef.current = nextDoors;
     setDoors(nextDoors);
+  }, []);
+
+  // The shared tail of both reattach paths (click-reattach + drag-out): drop the Door
+  // chip from the baseboard and select the now-restored pane.
+  const removeDoorAndSelect = useCallback((id: string) => {
+    removeDoor(id);
     selectPane(id);
-  }, [selectPane]);
+  }, [removeDoor, selectPane]);
 
   // Swap two panes' surfaces (Cmd-Arrow): swap leaf identities — meta and registry
   // entries follow ids, so there is no companion title swap.
@@ -681,9 +686,7 @@ export function Wall({
       // still-armed typeCommandWhenPromptReady exit via its `!registry.has(id)`
       // check, so a late OSC signal can't type the command into a dead surface.
       disposeSession(id);
-      const nextDoors = doorsRef.current.filter(d => d.id !== id);
-      doorsRef.current = nextDoors;
-      setDoors(nextDoors);
+      removeDoor(id);
       // Guard: no current caller kills a selected door (ensure's throwaway is
       // never selected), but if one did, fall back to a visible pane.
       if (selectedIdRef.current === id && selectedTypeRef.current === 'door') {
@@ -735,7 +738,7 @@ export function Wall({
     }, exitMs);
     clearLocalSurfaceActivity(id);
     fireEvent({ type: 'kill', id });
-  }, [fireEvent, forgetSurfaceRef, selectPane, selectDoor, lath, nav]);
+  }, [fireEvent, forgetSurfaceRef, removeDoor, selectPane, selectDoor, lath, nav]);
 
   /**
    * A permanent Surface closure checks helper work before teardown
@@ -1106,14 +1109,11 @@ export function Wall({
 
   // --- Reattach ---
 
-  /** Put a Door's leaf back in the tree, leaving the Door list to the caller. */
-  const restoreDoorLeaf = useCallback((item: DooredItem) => {
+  /** Lay a leaf out from its restore token, leaving the Door list to the caller:
+   *  a Door reattaching, or a split born beside one. */
+  const restoreFromToken = useCallback((id: string, meta: LeafMeta, token: RestoreToken | undefined) => {
     // Restore through the core token (the real payload): exact tier when the
     // captured context survives, else neighbor, else fallback beside a live ref.
-    // Every Door has store meta; the fallback keeps a reattach from being lost if
-    // some future creation path forgets to register one.
-    const meta = lath.getMeta(item.id) ?? terminalLeafMeta();
-    const token = item.token as RestoreToken | undefined;
     // The enter hint (from the token's edge) is derived inside `restoreLeaf`.
     const sel = selectedIdRef.current;
     const fallbackRef = sel && selectedTypeRef.current === 'pane' && lath.store.has(sel)
@@ -1121,17 +1121,27 @@ export function Wall({
       : lath.listPanes()[0]?.id;
     const r = token ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
     // No token (or no fallback was possible — empty tree): make the leaf the root.
-    if (!r.ok) lath.store.addLeaf(item.id, meta, null);
+    if (!r.ok) lath.store.addLeaf(id, meta, null);
   }, [lath]);
 
   const handleReattach = useCallback((
     item: DooredItem,
-    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction },
+    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction; focusNeutral?: boolean },
   ) => {
     const enterPassthrough = options?.enterPassthrough ?? true;
     const afterRestore = options?.afterRestore;
 
-    restoreDoorLeaf(item);
+    // Every Door has store meta; the fallback keeps a reattach from being lost if
+    // some future creation path forgets to register one.
+    restoreFromToken(item.id, lath.getMeta(item.id) ?? terminalLeafMeta(), item.token as RestoreToken | undefined);
+    if (options?.focusNeutral) {
+      // Mode, selection, and keyboard focus stay put; a selected Door's
+      // selection follows it onto the pane.
+      const selected = selectedTypeRef.current === 'door' && selectedIdRef.current === item.id;
+      removeDoor(item.id);
+      if (selected) selectPane(item.id);
+      return;
+    }
     removeDoorAndSelect(item.id);
     if (enterPassthrough) {
       enterTerminalMode(item.id);
@@ -1159,7 +1169,7 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, removeDoorAndSelect, restoreDoorLeaf, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, removeDoor, removeDoorAndSelect, restoreFromToken, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -1178,34 +1188,23 @@ export function Wall({
    *  human answering it. This is deliberately unlike `dor agent-browser`, whose
    *  agent-initiated control path remains focus-neutral.
    *
+   *  `focusNeutral` is a reveal nobody asked to look at — a preview slot
+   *  (`docs/specs/dor-tool.md` -> Preview slot): a Door reattaches, but mode,
+   *  selection, and keyboard focus stay put.
+   *
    *  Returns whether the Surface ended up visible, so `dor` can report the
    *  outcome without re-querying: the reattach commits to the store before it
    *  returns, and `nav.hasPane` reads the store, not React state. */
-  const revealSurface = useCallback((id: string): boolean => {
+  const revealSurface = useCallback((id: string, options?: { focusNeutral?: boolean }): boolean => {
+    const focusNeutral = options?.focusNeutral === true;
     if (nav.hasPane(id)) {
-      enterTerminalMode(id);
+      if (!focusNeutral) enterTerminalMode(id);
       return true;
     }
     const door = doorsRef.current.find((item) => item.id === id);
-    if (door) handleReattachRef.current(door);
+    if (door) handleReattachRef.current(door, focusNeutral ? { focusNeutral } : undefined);
     return nav.hasPane(id);
   }, [nav, enterTerminalMode]);
-
-  /** `revealSurface` for a reveal nobody asked to look at — a preview slot
-   *  (`docs/specs/dor-tool.md` -> Preview slot): a Door reattaches, but mode,
-   *  selection, and keyboard focus stay put. A selected Door's selection
-   *  follows it onto the pane. */
-  const revealSurfaceQuietly = useCallback((id: string): boolean => {
-    const door = doorsRef.current.find((item) => item.id === id);
-    if (door) {
-      restoreDoorLeaf(door);
-      const nextDoors = doorsRef.current.filter((item) => item.id !== id);
-      doorsRef.current = nextDoors;
-      setDoors(nextDoors);
-      if (selectedTypeRef.current === 'door' && selectedIdRef.current === id) selectPane(id);
-    }
-    return nav.hasPane(id);
-  }, [nav, restoreDoorLeaf, selectPane]);
 
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
@@ -1294,6 +1293,7 @@ export function Wall({
     focusNeutral,
     leafMeta,
     deferTerminal,
+    visible,
   }: {
     command?: string;
     direction: DorResolvedSplitDirection;
@@ -1314,6 +1314,9 @@ export function Wall({
      *  for a pane awaiting approval: nothing from the repo may run until a human
      *  chooses (docs/specs/dor-tool.md -> Trust rule 3). */
     deferTerminal?: boolean;
+    /** Lay the leaf out even beside a Door reference, which otherwise makes it
+     *  a Door: a pending approval, a preview slot. */
+    visible?: boolean;
   }): ParseResult<{
     id: string;
     ref: string;
@@ -1363,6 +1366,8 @@ export function Wall({
     if (referenceDoor) {
       const edge = edgeForDorDirection(direction);
       const ref = surfaceRefForId(newId);
+      // The Door's restore token, which a visible leaf is laid out from as its
+      // reattach would be.
       const token: RestoreToken = {
         leafId: newId,
         weight: 0.5,
@@ -1372,17 +1377,24 @@ export function Wall({
         index: direction === 'left' || direction === 'up' ? 0 : 1,
         fingerprint: null,
       };
+      const splitEvent = () => onEventRef.current?.({
+        type: 'split',
+        direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
+        source: 'dor',
+      });
+      if (visible) {
+        restoreFromToken(newId, leafMeta ?? terminalLeafMeta(), token);
+        settleAddSelection(!!focusNeutral, false, newId);
+        splitEvent();
+        return { ok: true, value: { id: newId, ref, minimized: false } };
+      }
       if (!deferTerminal) getOrCreateTerminal(newId);
       // This Surface is born minimized — it never has a pane to detach — so register
       // its meta directly, keeping the store the authority for EVERY Door
       // (docs/specs/tiling-engine.md → "Parked leaves").
       lath.store.addDoor(newId, leafMeta ?? terminalLeafMeta());
       addMinimizedSplitDoor(referenceId, { id: newId, token }, !focusNeutral);
-      onEventRef.current?.({
-        type: 'split',
-        direction: direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical',
-        source: 'dor',
-      });
+      splitEvent();
       return { ok: true, value: { id: newId, ref, minimized: true } };
     }
 
@@ -1403,7 +1415,7 @@ export function Wall({
       minimizePane(newId, { select: selectedNew });
     }
     return { ok: true, value: { id: newId, ref: surfaceRefForId(newId), minimized } };
-  }, [addMinimizedSplitDoor, generatePaneId, minimizePane, surfaceRefForId, lath, settleAddSelection, nav]);
+  }, [addMinimizedSplitDoor, generatePaneId, minimizePane, restoreFromToken, surfaceRefForId, lath, settleAddSelection, nav]);
 
   /**
    * Create a non-terminal content surface (iframe, agent-browser) next to a
@@ -1588,7 +1600,6 @@ export function Wall({
     isClosingSurface,
     closeSurface,
     revealSurface,
-    revealSurfaceQuietly,
     previewSlot,
     isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
     workspaceRef: useCallback(() => workspaceRefFor(effectiveWorkspaceId), [effectiveWorkspaceId]),

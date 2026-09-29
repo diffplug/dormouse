@@ -134,6 +134,10 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
+// A header's bordered pill button in its own foreground: the TODO pill and the
+// preview slot's mark.
+export const HEADER_PILL_CLASS = `shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`;
+
 // Letter-spacing for the alarm overlay's `SPEAKING` / `SPOKEN` labels — wider
 // tracking keeps the small all-caps label legible over the wash.
 export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';

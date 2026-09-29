@@ -19,6 +19,7 @@ import {
 } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce } from '../../lib/tool-announce-store';
+import { forgetToolReports } from '../../lib/tool-events';
 import { validToolServePath } from '../../lib/tool-announce';
 import { closeBrowserSurface } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
@@ -54,10 +55,12 @@ function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
 }
 
 /** Retire a Tool's browser half and the serving state that framed it, leaving
- *  the terminal forward. The browser panel remains mounted behind the terminal
- *  half, so its controller must be released explicitly rather than waiting for
- *  an unmount that will not happen — closing its session with it. */
-export function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): void {
+ *  the terminal forward; false, doing nothing, when nothing is framed. The
+ *  browser panel remains mounted behind the terminal half, so its controller
+ *  must be released explicitly rather than waiting for an unmount that will not
+ *  happen — closing its session with it. */
+export function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): boolean {
+  if (browserUrlFromParams(params) === null && toolPortConflictFromParams(params) === null) return false;
   closeBrowserSurface(id, params);
   lath.store.updateParams(id, {
     url: undefined,
@@ -70,6 +73,15 @@ export function retireToolBrowser(lath: LathWallEngine, id: string, params: Reco
     renderMode: undefined,
     syncEngaged: undefined,
   });
+  return true;
+}
+
+/** Retire a Session's previous Tool run before another is typed into it: its
+ *  browser, announcement, and unsaved state are not the next run's. */
+export function retireToolRun(lath: LathWallEngine, id: string): void {
+  const params = lath.getMeta(id)?.params;
+  if (params) retireToolBrowser(lath, id, params);
+  forgetToolReports(id);
 }
 
 export function useToolServing({
@@ -142,10 +154,7 @@ export function useToolServing({
         // the regression the settle window exists to prevent.
         if (!running || runChanged) seenPorts.current.delete(leaf.id);
 
-        if ((hasUrl || hasConflict) && (!running || runChanged)) {
-          retireToolBrowser(lath, leaf.id, leaf.params);
-          continue;
-        }
+        if ((!running || runChanged) && retireToolBrowser(lath, leaf.id, leaf.params)) continue;
         // An announcement outranks whatever autobind decided, framed or
         // refused: a conflict is a verdict about *guessing*, not a final state,
         // so a tool that names its port after autobind refused must still be

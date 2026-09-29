@@ -147,7 +147,7 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 
 **FAIL IF** `gitIgnored` runs git by bare name or lets `core.fsmonitor` run, which the browsed folder's own `.git/config` can name.
 
-Source of truth: `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `startFolderViewer` / `resolveInside` / `gitIgnored` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `dor/test/folder-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
+Source of truth: `startCapabilityViewer` / `isInsideRoot` / `pathSegments` in `dor/src/viewer-server.ts`; `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `startFolderViewer` / `resolveInside` / `gitIgnored` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `dor/test/folder-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
 
 ## Persisted state
 

@@ -6,7 +6,7 @@ import {
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
-import { TODO_PILL_TRACKING_CLASS } from './design';
+import { HEADER_PILL_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { MobileTerminalSessionItem } from './MobileTerminalUi';
 import {
@@ -190,7 +190,7 @@ function MobileWallHeader({
           type="button"
           data-session-todo-for={session.id}
           data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-          className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
+          className={`todo-pill-shell ${HEADER_PILL_CLASS}`}
           aria-label="Dismiss TODO"
           aria-hidden={todoPill.flourishing ? true : undefined}
           onClick={(event) => {

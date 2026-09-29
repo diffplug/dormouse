@@ -1,8 +1,9 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { vi } from 'vitest';
+import { expect, vi } from 'vitest';
 import { BROWSER_PROVIDER_IDS, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { applyTerminalSemanticEvents } from '../../lib/terminal-registry';
 import type { BrowserOp, BrowserRequest, BrowserResult } from '../../lib/platform/browser-automation';
 import type { WallActions } from './wall-context';
 import {
@@ -161,6 +162,19 @@ export function mountWallHarness(): WallHarness {
     },
   };
 }
+
+/** Wait out the host's own 100ms state polls (a tool taking over a pane, a
+ *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
+export const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
+  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+  expect(ready()).toBe(true);
+}, { timeout: 2_000, interval: 25 });
+
+/** The integrated shell in `id` reports `line` as its running command. */
+export const reportRunning = (id: string, line: string): void => applyTerminalSemanticEvents(id, [
+  { type: 'commandLine', commandLine: line },
+  { type: 'commandStart', source: 'osc633_boundaries' },
+]);
 
 export const STUB_SCREEN: ScreenSnapshot = {
   state: 'SYNCED',

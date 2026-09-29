@@ -11,7 +11,8 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { recordToolEvents } from '../../lib/tool-events';
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
-import { retireToolBrowser, useToolServing } from './use-tool-serving';
+import { useToolServing } from './use-tool-serving';
+import { retargetToolLeaf } from './preview-slot';
 import { captureToolParams } from './tool-transfer';
 import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
@@ -47,7 +48,8 @@ let root: Root;
 let currentCommand: string | null = 'x';
 let runId = 0;
 
-vi.mock('../../lib/terminal-registry', () => ({
+vi.mock('../../lib/terminal-registry', async () => ({
+  UNNAMED_PANEL_TITLE: (await import('../../lib/terminal-state')).UNNAMED_PANEL_TITLE,
   getTerminalPaneState: () => ({ currentCommand: currentCommand === null ? null : { id: `${runId}-${currentCommand}`, rawCommandLine: currentCommand } }),
 }));
 
@@ -328,10 +330,9 @@ describe('a preview retarget', () => {
     expect(state.params).toMatchObject({ url: 'http://localhost:6006/', renderMode: 'agent-browser-screencast' });
     controllerMocks.closeBrowserSurface.mockClear();
 
-    // The retarget's commit (`retargetPreviewSlot` in use-dor-control.ts): the
-    // browser retires with the old identity, then a new command runs.
-    retireToolBrowser(lath, 'tool-1', state.params);
-    state.set({ command: 'y', toolRender: 'iframe' });
+    // The retarget's commit: the browser retires with the old identity, then a
+    // new command runs.
+    retargetToolLeaf(lath, 'tool-1', { title: 'y', identity: { command: 'y', toolRender: 'iframe', toolPort: 'announced' } });
     currentCommand = 'y';
     runId += 1;
     resetToolAnnounces();

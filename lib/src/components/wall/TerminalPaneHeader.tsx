@@ -1,6 +1,7 @@
 import { isHelperSession } from '../../lib/terminal-store';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { clsx } from 'clsx';
 import { tv } from 'tailwind-variants';
 import {
   CursorClickIcon,
@@ -10,7 +11,7 @@ import {
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { HEADER_PALETTE_TRANSITION_CLASS, HEADER_PILL_CLASS, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import { isPreviewSlotParams } from './browser-surface';
 import { PreviewPill } from './PreviewPill';
 import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
@@ -184,7 +185,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
             title={preview ? 'Preview' : undefined}
           >
-            <span className={`min-w-0 shrink truncate ${preview ? PREVIEW_LABEL_CLASS : ''}`}>{displayTitleBase}</span>
+            <span className={clsx('min-w-0 shrink truncate', preview && PREVIEW_LABEL_CLASS)}>{displayTitleBase}</span>
             {showsFailGlyph && (
               <span className="ml-1 shrink-0 text-error" aria-label="last command failed">{COMMAND_FAIL_GLYPH}</span>
             )}
@@ -199,7 +200,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             type="button"
             data-session-todo-for={id}
             data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-            className={`todo-pill-shell relative shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
+            className={`todo-pill-shell relative ${HEADER_PILL_CLASS}`}
             aria-label={todoNotificationPreview ? `Dismiss TODO: ${todoNotificationPreview}` : 'Dismiss TODO'}
             aria-describedby={todoPreviewRect && activity.notification ? todoPreviewId : undefined}
             aria-hidden={todoPill.flourishing ? true : undefined}

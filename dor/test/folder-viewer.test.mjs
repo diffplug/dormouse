@@ -216,12 +216,11 @@ test('a failing or missing git flags nothing ignored and never fails the listing
   // Git exits 128 on a refused query, possibly after printing some answers.
   await writeFile(join(bin, 'git'), '#!/bin/sh\nprintf "./a.log\\0"\nexit 128\n');
   await chmod(join(bin, 'git'), 0o755);
-  const viewer = await start();
   const path = process.env.PATH;
   try {
     for (const dirs of [bin, join(base, 'missing')]) {
-      process.env.PATH = dirs;
-      assert.deepEqual((await list(viewer)).entries, [entry('a.log', 'file')], dirs);
+      process.env.PATH = dirs; // resolved when the viewer starts
+      assert.deepEqual((await list(await start())).entries, [entry('a.log', 'file')], dirs);
     }
   } finally { process.env.PATH = path; }
 });
