@@ -7,7 +7,6 @@ import {
   MAX_AUDIO_BYTES,
   MANAGED_VOICE_FILE,
   resolveManagedVoiceSpeakUrl,
-  type ManagedVoiceHost,
 } from './managed-voice-host';
 import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
 
@@ -22,9 +21,9 @@ const MANAGED_VOICE_SPEAK_URL = 'https://hosted.dormouse.sh/api/voice/speak';
 const TOKEN = `dmv_${'A'.repeat(43)}`;
 let dir: string;
 let fetchMock: ReturnType<typeof vi.fn>;
-let host: ManagedVoiceHost;
+let host: ReturnType<typeof make>;
 
-function make(options: { timeoutMs?: number; stateDir?: string; speakOrigin?: string } = {}): ManagedVoiceHost {
+function make(options: { timeoutMs?: number; stateDir?: string; speakOrigin?: string } = {}) {
   return createManagedVoiceHost({
     stateDir: 'stateDir' in options ? options.stateDir : dir,
     fetch: fetchMock as unknown as typeof fetch,
@@ -40,7 +39,6 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  host.dispose();
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -95,7 +93,7 @@ describe('speak', () => {
 
   it('sends only the text and voice id, with the bearer token, and returns the audio', async () => {
     fetchMock.mockResolvedValue(audioResponse());
-    const result = await host.handle({ op: 'speak', speakId: 's1', text: 'build finished' });
+    const result = await host.handle({ op: 'speak', text: 'build finished' });
     expect(result).toEqual({ ok: true, audioBase64: Buffer.from([9, 8, 7]).toString('base64') });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(MANAGED_VOICE_SPEAK_URL);
@@ -107,30 +105,30 @@ describe('speak', () => {
 
   it('answers unconfigured without a request', async () => {
     await host.handle({ op: 'configure', update: { token: null } });
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toEqual({ ok: false, reason: 'unconfigured' });
+    expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'unconfigured' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([400, 401, 403, 429, 502])('reports HTTP %i as a failure', async (status) => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ message: 'no' }), { status }));
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toEqual({ ok: false, reason: `HTTP ${status}` });
+    expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: `HTTP ${status}` });
   });
 
   it.each(['text/html', 'audio/wav'])('refuses a %s success body', async (type) => {
     fetchMock.mockResolvedValue(new Response('<html>', { status: 200, headers: { 'content-type': type } }));
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toMatchObject({ ok: false });
+    expect(await host.handle({ op: 'speak', text: 'x' })).toMatchObject({ ok: false });
   });
 
   it('refuses audio over the size cap', async () => {
     fetchMock.mockResolvedValue(new Response(new Uint8Array(MAX_AUDIO_BYTES + 1), {
       status: 200, headers: { 'content-type': 'audio/mpeg' },
     }));
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toMatchObject({ ok: false });
+    expect(await host.handle({ op: 'speak', text: 'x' })).toMatchObject({ ok: false });
   });
 
   it('reports a network failure', async () => {
     fetchMock.mockRejectedValue(new TypeError('getaddrinfo ENOTFOUND hosted.dormouse.sh'));
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toEqual({ ok: false, reason: 'network' });
+    expect(await host.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'network' });
   });
 
   const hangingFetch = () => fetchMock.mockImplementation((_url: string, init: RequestInit) =>
@@ -138,29 +136,15 @@ describe('speak', () => {
       init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
     }));
 
-  it('aborts the request on cancel', async () => {
-    hangingFetch();
-    const pending = host.handle({ op: 'speak', speakId: 's1', text: 'x' });
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    expect(await host.handle({ op: 'cancel', speakId: 's1' })).toEqual({ ok: true });
-    expect(await pending).toEqual({ ok: false, reason: 'cancelled' });
-  });
-
-  it('honours a cancel that overtook its speak', async () => {
-    await host.handle({ op: 'cancel', speakId: 's1' });
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x' })).toEqual({ ok: false, reason: 'cancelled' });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
   it('times out a hung request', async () => {
     hangingFetch();
     const quick = make({ timeoutMs: 5 });
-    expect(await quick.handle({ op: 'speak', speakId: 's1', text: 'x' })).toEqual({ ok: false, reason: 'timeout' });
+    expect(await quick.handle({ op: 'speak', text: 'x' })).toEqual({ ok: false, reason: 'timeout' });
   });
 
   it('refuses empty or over-long text', async () => {
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: '   ' })).toEqual({ ok: false, reason: 'bad-request' });
-    expect(await host.handle({ op: 'speak', speakId: 's1', text: 'x'.repeat(201) })).toEqual({ ok: false, reason: 'bad-request' });
+    expect(await host.handle({ op: 'speak', text: '   ' })).toEqual({ ok: false, reason: 'bad-request' });
+    expect(await host.handle({ op: 'speak', text: 'x'.repeat(201) })).toEqual({ ok: false, reason: 'bad-request' });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -188,7 +172,7 @@ describe('dev Hosted origin override', () => {
     const dev = make({ speakOrigin: 'http://127.0.0.1:5199' });
     await dev.handle({ op: 'configure', update: { token: TOKEN } });
     fetchMock.mockResolvedValue(audioResponse());
-    await dev.handle({ op: 'speak', speakId: 's1', text: 'x' });
+    await dev.handle({ op: 'speak', text: 'x' });
     expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:5199/api/voice/speak');
   });
 
@@ -196,7 +180,7 @@ describe('dev Hosted origin override', () => {
     const dev = make({ speakOrigin: 'http://evil.example' });
     await dev.handle({ op: 'configure', update: { token: TOKEN } });
     fetchMock.mockResolvedValue(audioResponse());
-    await dev.handle({ op: 'speak', speakId: 's1', text: 'x' });
+    await dev.handle({ op: 'speak', text: 'x' });
     expect(fetchMock.mock.calls[0][0]).toBe(MANAGED_VOICE_SPEAK_URL);
   });
 });

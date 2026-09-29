@@ -9,22 +9,24 @@ import { join } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
 import {
   DEFAULT_MANAGED_VOICE_ID,
-  MANAGED_VOICE_ID_PATTERN,
-  MANAGED_VOICE_ORIGIN,
-  MANAGED_VOICE_REQUEST_TIMEOUT_MS,
-  MANAGED_VOICE_SPEAK_PATH,
-  MANAGED_VOICE_TOKEN_PATTERN,
   type ManagedVoiceConfigResult,
+  type ManagedVoiceHostSpeakResult,
   type ManagedVoiceStatus,
 } from '../lib/platform/managed-voice-types';
 
-export { MANAGED_VOICE_REQUEST_TIMEOUT_MS };
 export const MANAGED_VOICE_FILE = 'managed-voice.json';
+const MANAGED_VOICE_ORIGIN = 'https://hosted.dormouse.sh';
+const MANAGED_VOICE_SPEAK_PATH = '/api/voice/speak';
 const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', '[::1]', 'localhost']);
+/** `docs/specs/alert.md` -> "Managed voice"; Rust's `MANAGED_VOICE_TIMEOUT` sits above it. */
+const MANAGED_VOICE_REQUEST_TIMEOUT_MS = 15_000;
+/** Hosted's own `voiceId` grammar. */
+const MANAGED_VOICE_ID_PATTERN = /^[A-Za-z0-9]{1,64}$/;
+/** `dmv_` + base64url of 32 random bytes, unpadded. */
+const MANAGED_VOICE_TOKEN_PATTERN = /^dmv_[A-Za-z0-9_-]{43}$/;
 /** Hosted's own bound on `text`. */
 const MAX_TEXT_LENGTH = 200;
-/** A 200-character clip at 128 kbps is far below this; the cap keeps one
- *  base64 line from hogging the PTY stdio pipe. */
+/** `docs/specs/standalone.md` -> "Rust ↔ sidecar bridge". */
 export const MAX_AUDIO_BYTES = 512 * 1024;
 
 /** Production's speak URL unless `override` is a bare `http:` loopback origin;
@@ -40,26 +42,9 @@ export function resolveManagedVoiceSpeakUrl(override: string | undefined): strin
   return url.origin + MANAGED_VOICE_SPEAK_PATH;
 }
 
-/** One `voice:result`: audio (always `audio/mpeg`) travels as base64 on the JSON-lines pipe. */
-export type ManagedVoiceHostSpeakResult =
-  | { ok: true; audioBase64: string }
-  | { ok: false; reason: string };
-
-export type ManagedVoiceCommand =
-  | { op: 'status' }
-  | { op: 'configure'; update?: unknown }
-  | { op: 'speak'; speakId?: unknown; text?: unknown }
-  | { op: 'cancel'; speakId?: unknown };
-
 interface StoredConfig {
   token: string | null;
   voiceId: string;
-}
-
-export interface ManagedVoiceHost {
-  handle(command: unknown): Promise<ManagedVoiceStatus | ManagedVoiceConfigResult | ManagedVoiceHostSpeakResult | { ok: true } | undefined>;
-  /** Abort every in-flight request (sidecar shutdown). */
-  dispose(): void;
 }
 
 function normalizeStored(value: unknown): StoredConfig {
@@ -79,7 +64,7 @@ export function createManagedVoiceHost(options: {
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
   log?: (message: string) => void;
-}): ManagedVoiceHost {
+}): { handle(command: unknown): Promise<unknown> } {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? MANAGED_VOICE_REQUEST_TIMEOUT_MS;
   const log = options.log ?? (() => {});
@@ -92,7 +77,6 @@ export function createManagedVoiceHost(options: {
       ? '[managed-voice] ignoring DORMOUSE_HOSTED_ORIGIN: not an http loopback origin'
       : `[managed-voice] dev override: speaking via ${speakUrl}`);
   }
-  const inFlight = new Map<string, AbortController>();
   let loaded: Promise<StoredConfig> | null = null;
 
   const load = (): Promise<StoredConfig> => {
@@ -126,25 +110,23 @@ export function createManagedVoiceHost(options: {
       }
       next.voiceId = edit.voiceId.trim();
     }
-    await writeJsonAtomic(store.dir, store.file, next);
+    try {
+      await writeJsonAtomic(store.dir, store.file, next);
+    } catch (error) {
+      log(`[managed-voice] could not save: ${String(error)}`);
+      return { ok: false, reason: 'unavailable' };
+    }
     loaded = Promise.resolve(next);
     return { ok: true, ...status(next) };
   }
 
-  async function request(speakId: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
+  async function request(text: string): Promise<ManagedVoiceHostSpeakResult> {
     const config = await load();
     if (!config.token) return { ok: false, reason: 'unconfigured' };
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) return { ok: false, reason: 'bad-request' };
 
-    // A cancel that arrived first left a tombstone under this id; it must win.
-    if (inFlight.has(speakId)) {
-      inFlight.delete(speakId);
-      return { ok: false, reason: 'cancelled' };
-    }
-    const controller = new AbortController();
-    inFlight.set(speakId, controller);
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
+    const signal = AbortSignal.timeout(timeoutMs);
     try {
       const response = await fetchImpl(speakUrl, {
         method: 'POST',
@@ -166,7 +148,7 @@ export function createManagedVoiceHost(options: {
       }
       const reader = response.body?.getReader();
       if (!reader) return { ok: false, reason: 'audio has no body' };
-      const chunks: Buffer[] = [];
+      const chunks: Uint8Array[] = [];
       let size = 0;
       while (true) {
         const { done, value } = await reader.read();
@@ -176,61 +158,31 @@ export function createManagedVoiceHost(options: {
           await reader.cancel().catch(() => {});
           return { ok: false, reason: `audio over ${MAX_AUDIO_BYTES} bytes` };
         }
-        chunks.push(Buffer.from(value));
+        chunks.push(value);
       }
       if (size === 0) return { ok: false, reason: 'empty audio' };
-      const bytes = Buffer.concat(chunks, size);
-      return { ok: true, audioBase64: bytes.toString('base64') };
+      return { ok: true, audioBase64: Buffer.concat(chunks, size).toString('base64') };
     } catch {
-      if ((signal.reason as Error | undefined)?.name === 'TimeoutError') return { ok: false, reason: 'timeout' };
-      if (controller.signal.aborted) return { ok: false, reason: 'cancelled' };
-      return { ok: false, reason: 'network' };
-    } finally {
-      if (inFlight.get(speakId) === controller) inFlight.delete(speakId);
+      return { ok: false, reason: signal.aborted ? 'timeout' : 'network' };
     }
   }
 
-  async function speak(speakId: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
-    const result = await request(speakId, text);
-    if (!result.ok && result.reason !== 'cancelled' && result.reason !== 'unconfigured') {
-      log(`[managed-voice] speak failed: ${result.reason}`);
-    }
+  async function speak(text: string): Promise<ManagedVoiceHostSpeakResult> {
+    const result = await request(text);
+    if (!result.ok && result.reason !== 'unconfigured') log(`[managed-voice] speak failed: ${result.reason}`);
     return result;
-  }
-
-  function cancel(speakId: string): void {
-    const controller = inFlight.get(speakId);
-    if (controller) { controller.abort(); return; }
-    // The cancel overtook its speak: leave an aborted tombstone for it to find,
-    // swept after the request timeout in case the speak never arrives.
-    const tombstone = new AbortController();
-    tombstone.abort();
-    inFlight.set(speakId, tombstone);
-    setTimeout(() => { if (inFlight.get(speakId) === tombstone) inFlight.delete(speakId); }, timeoutMs).unref?.();
   }
 
   return {
     async handle(command) {
-      const message = command as ManagedVoiceCommand | null;
-      if (!message || typeof message.op !== 'string') return undefined;
+      const message = (command ?? {}) as Record<string, unknown>;
       switch (message.op) {
         case 'status': return status(await load());
         case 'configure': return configure(message.update);
         case 'speak':
-          if (typeof message.speakId !== 'string' || typeof message.text !== 'string') {
-            return { ok: false, reason: 'bad-request' };
-          }
-          return speak(message.speakId, message.text);
-        case 'cancel':
-          if (typeof message.speakId === 'string') cancel(message.speakId);
-          return { ok: true };
-        default:
-          return undefined;
+          return typeof message.text === 'string' ? speak(message.text) : { ok: false, reason: 'bad-request' };
+        default: return undefined;
       }
-    },
-    dispose() {
-      for (const controller of inFlight.values()) controller.abort();
-      inFlight.clear();
     },
   };
 }

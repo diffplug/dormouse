@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 mod log_tail;
@@ -1488,57 +1487,22 @@ fn tool_control(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
-// ── Managed voice (docs/specs/alert.md -> "Managed voice"). Bridge only; the
-// host half is lib/src/host/managed-voice-host.ts in the sidecar. ────────────
+// ── Managed voice (docs/specs/transport.md -> "Managed voice"): one
+// passthrough to the sidecar host (lib/src/host/managed-voice-host.ts), whose
+// JSON answer, speak's base64 audio included, the webview decodes. ──────────
 
-// Above the sidecar's `MANAGED_VOICE_REQUEST_TIMEOUT_MS`
-// (lib/src/lib/platform/managed-voice-types.ts), so its `timeout` answer
-// arrives before this bridge gives up.
-const MANAGED_VOICE_SPEAK_TIMEOUT: Duration = Duration::from_secs(20);
+/// Above the host's `MANAGED_VOICE_REQUEST_TIMEOUT_MS`, so its own `timeout`
+/// answer arrives before this bridge gives up.
+const MANAGED_VOICE_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// `status` / `configure` / `cancel`; speaking has its own command for raw bytes.
 #[tauri::command(async)]
-fn managed_voice_command(
+fn managed_voice(
     state: tauri::State<'_, SidecarState>,
     payload: JsonValue,
 ) -> Result<JsonValue, String> {
-    match payload.get("op").and_then(JsonValue::as_str) {
-        Some("status" | "configure" | "cancel") => {}
-        _ => return Err("unsupported managed voice op".to_string()),
-    }
     let mut response =
-        request_from_sidecar_timeout(&state, "voice:command", payload, Duration::from_secs(5))?;
+        request_from_sidecar_timeout(&state, "voice:command", payload, MANAGED_VOICE_TIMEOUT)?;
     Ok(response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null))
-}
-
-/// Audio as a raw `tauri::ipc::Response` (an ArrayBuffer in the webview); a
-/// failure rejects with the sidecar's diagnostic reason.
-#[tauri::command(async)]
-fn managed_voice_speak(
-    state: tauri::State<'_, SidecarState>,
-    text: String,
-    speak_id: String,
-) -> Result<tauri::ipc::Response, String> {
-    let mut response = request_from_sidecar_timeout(
-        &state,
-        "voice:command",
-        serde_json::json!({ "op": "speak", "speakId": speak_id, "text": text }),
-        MANAGED_VOICE_SPEAK_TIMEOUT,
-    )?;
-    let result = response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null);
-    if result.get("ok").and_then(JsonValue::as_bool) != Some(true) {
-        return Err(result
-            .get("reason")
-            .and_then(JsonValue::as_str)
-            .unwrap_or("unavailable")
-            .to_string());
-    }
-    let b64 = result
-        .get("audioBase64")
-        .and_then(JsonValue::as_str)
-        .ok_or("speak returned no audio")?;
-    let bytes = BASE64.decode(b64).map_err(|err| format!("bad audio base64: {err}"))?;
-    Ok(tauri::ipc::Response::new(bytes))
 }
 
 // ── Browser automation (docs/specs/dor-browser.md → "Browser Host").
@@ -3826,13 +3790,16 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
                 .and_then(|m| m.remove("data"))
                 .unwrap_or(JsonValue::Null);
 
-            if let Some(request_id) = data
+            // Owned, so the reply moves to its waiter uncopied: a managed-voice
+            // answer carries a whole utterance's audio.
+            let request_id = data
                 .get("requestId")
-                .and_then(|request_id| request_id.as_str())
-            {
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned);
+            if let Some(request_id) = request_id {
                 if let Ok(mut pending) = pending_requests_for_task.lock() {
-                    if let Some(response_tx) = pending.remove(request_id) {
-                        let _ = response_tx.send(data.clone());
+                    if let Some(response_tx) = pending.remove(&request_id) {
+                        let _ = response_tx.send(data);
                         continue;
                     }
                 }
@@ -4190,8 +4157,7 @@ pub fn run() {
             take_recovery_commands,
             iframe_create_proxy_url,
             tool_control,
-            managed_voice_command,
-            managed_voice_speak,
+            managed_voice,
             git_info,
             pty_request_init,
             dor_control_response,

@@ -627,10 +627,6 @@ export class TauriAdapter implements PlatformAdapter {
     return this.windowSlot.read();
   }
 
-  readonly managedVoice: ManagedVoicePort = createManagedVoicePort({
-    invoke: rawInvoke,
-    decodeSpeak: (raw) => new Uint8Array(raw as ArrayBuffer),
-    offerSetup: import.meta.env.DEV,
-  });
+  readonly managedVoice: ManagedVoicePort = createManagedVoicePort(rawInvoke);
 
 }

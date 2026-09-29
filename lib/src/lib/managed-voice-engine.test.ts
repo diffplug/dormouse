@@ -6,15 +6,13 @@ import { SPEECH_ENGINE_TIMEOUT_MS, SpeechQueue, type SpeechJob } from './speech-
 
 /**
  * The managed engine behind the shared queue (`docs/specs/alert.md` -> "Spoken
- * alarms"): real playback drives start/end, cancellation reaches both the
- * request and the audio, and a failure before audio falls back to Web Speech.
+ * alarms"): real playback drives start/end, cancellation stops the audio and
+ * ignores a late answer, and a failure before audio falls back to Web Speech.
  */
 
 interface PendingSpeak {
   text: string;
-  signal: AbortSignal;
   resolve: (result: ManagedVoiceSpeakResult) => void;
-  reject: (err: unknown) => void;
 }
 
 class FakeAudio implements ManagedVoiceAudio {
@@ -42,7 +40,7 @@ const port: ManagedVoicePort = {
   offerSetup: true,
   status: async () => ({ configured: true, voiceId: 'v' }),
   configure: async () => ({ ok: true, configured: true, voiceId: 'v' }),
-  speak: (text, signal) => new Promise((resolve, reject) => speaks.push({ text, signal, resolve, reject })),
+  speak: (text) => new Promise((resolve) => speaks.push({ text, resolve })),
 };
 
 const playback: ManagedVoicePlayback = {
@@ -132,10 +130,9 @@ describe('managed voice engine', () => {
     expect(speaks.map(s => s.text)).toEqual(['say a', 'say b']);
   });
 
-  it('aborts the in-flight request when cancelled mid-fetch, and never plays its late audio', async () => {
+  it('never plays the late audio of a request cancelled mid-fetch', async () => {
     queue.enqueue(job('a'));
     queue.clear();
-    expect(speaks[0].signal.aborted).toBe(true);
     expect(events).toEqual(['finish a false']);
 
     speaks[0].resolve(audioBytes);
@@ -174,12 +171,9 @@ describe('managed voice engine', () => {
     expect(audios[0].paused).toBe(true);
   });
 
-  it.each([
-    ['a host failure', (s: PendingSpeak) => s.resolve({ ok: false, reason: 'unauthorized' })],
-    ['a rejected request', (s: PendingSpeak) => s.reject(new Error('ipc down'))],
-  ])('falls back to Web Speech for the same utterance on %s', async (_label, fail) => {
+  it('falls back to Web Speech for the same utterance on a host failure', async () => {
     queue.enqueue(job('a'));
-    fail(speaks[0]);
+    speaks[0].resolve({ ok: false, reason: 'unauthorized' });
     await flush();
     expect(audios).toHaveLength(0);
     expect(fallbackCalls.map(c => c.text)).toEqual(['say a']);
@@ -250,7 +244,6 @@ describe('managed voice engine', () => {
     queue.enqueue(job('a'));
     queue.enqueue(job('b'));
     await vi.advanceTimersByTimeAsync(SPEECH_ENGINE_TIMEOUT_MS);
-    expect(speaks[0].signal.aborted).toBe(true);
     expect(events).toEqual(['finish a false']);
     expect(speaks.map(s => s.text)).toEqual(['say a', 'say b']);
 

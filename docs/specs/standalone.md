@@ -90,7 +90,7 @@ are *not* forwarded:
 | `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
 
-**Managed-voice audio is the one byte payload that rides the pipe**: the sidecar base64s one utterance's audio, bounded by `MAX_AUDIO_BYTES`, into its `voice:result` line, and `managed_voice_speak` decodes it into a raw `tauri::ipc::Response` (rationale; messages in `docs/specs/transport.md` → "Managed voice").
+**Managed-voice audio is the one byte payload that rides the pipe**, as base64 in its `voice:result` line (rationale; `docs/specs/transport.md` → "Managed voice").
 
 Request/response commands block on the sidecar's reply under a timeout.
 `OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
@@ -503,6 +503,7 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`;
 | `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
+| `voice:result` | — | nowhere: only one that outlived its invoke gets here |
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the

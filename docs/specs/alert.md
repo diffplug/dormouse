@@ -354,7 +354,7 @@ Every rule above holds for both engines.
 
 - **Must try managed voice first wherever the adapter exposes `managedVoice`** (`docs/specs/transport.md` → "Managed voice"). With no token saved the host answers `unconfigured`, which falls back like any failure.
 - **Must fall back to Web Speech for the same utterance, inside the same attempt, on any failure before managed audio starts** — no token, offline, non-2xx, host timeout, undecodable or refused playback. **Never play both**: audio that started and then failed ends the attempt instead (rationale). Nothing is retried.
-- `speaking` / `spoken` follow the audio element's `playing` / `ended`. **Cut-off and teardown must stop the audio and abort the in-flight request**, host `fetch` included.
+- `speaking` / `spoken` follow the audio element's `playing` / `ended`. **Cut-off and teardown must stop the audio**; a request still in flight runs out in the host and its answer is ignored.
 - **Never let the voice token reach a renderer.** The host stores it, adds it and the voice id to the request, and answers `configured` and the voice id, never the token; a renderer sends only the sanitized label (rationale). `docs/specs/transport.md` → "Managed voice" owns the messages.
 - **Must bound the host request** at `MANAGED_VOICE_REQUEST_TIMEOUT_MS` (inside `SPEECH_ENGINE_TIMEOUT_MS`, so a fallback still fits) and `MAX_AUDIO_BYTES`, accepting only `audio/mpeg`, and validate the token (`dmv_…`) and voice id grammar before storing either. Where it may go: `docs/specs/security-local.md` → "Persisted state".
 

@@ -217,18 +217,16 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 ### Managed voice
 
-**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in standalone (Tauri and the browser-dev harness); VS Code, Pocket, and the website omit it. Behavior, including the token never reaching a renderer, is `docs/specs/alert.md` → "Managed voice". It is request/response per window, not an app-global store: nothing is broadcast and no renderer mirrors it.
+**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in standalone (Tauri and the browser-dev harness); VS Code, Pocket, and the website omit it. Behavior: `docs/specs/alert.md` → "Managed voice".
 
 | Direction | Standalone carrier | Payload |
 | --- | --- | --- |
-| Webview → host | `managed_voice_command { payload }` → sidecar `voice:command` | `{ op: 'status' }`, `{ op: 'configure', update: { token?: string \| null, voiceId?: string } }`, or `{ op: 'cancel', speakId }` |
-| Host → webview | sidecar `voice:result` → invoke result | `{ configured, voiceId }`, `{ ok: false, reason }` for a refused edit, or `{ ok: true }` for a cancel |
-| Webview → host | `managed_voice_speak { text, speakId }` → sidecar `voice:command { op: 'speak' }` | the sanitized label; the host adds token and voice id |
-| Host → webview | invoke result | `audio/mpeg` bytes (raw `ArrayBuffer`; base64 in the harness's HTTP answer), or a rejection carrying a diagnostic reason |
+| Webview → host | `managed_voice { payload }` → sidecar `voice:command` | op `status`, `configure`, or `speak` |
+| Host → webview | sidecar `voice:result` → invoke result | that op's answer; `speak`'s audio as base64 |
 
-A cancel may arrive before its speak; that speak then answers `cancelled` without a request.
+Shapes: `ManagedVoicePort` and the wire types beside it.
 
-Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `managed_voice_command` / `managed_voice_speak` in `standalone/src-tauri/src/lib.rs`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
+Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `managed_voice` in `standalone/src-tauri/src/lib.rs`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 
 ## Persisted session types
 

@@ -54,13 +54,6 @@ import { BrowserSidecarHost } from "./browser-sidecar-host";
 
 const errMessage = (err: unknown): string => err instanceof Error ? err.message : String(err);
 
-function decodeBase64Bytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-}
-
 /** The `alert*` platform methods, taken from the shared client in the constructor. */
 export interface BrowserSidecarAdapter extends AlertClientMethods {}
 
@@ -315,12 +308,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     return this.windowSlot.read();
   }
 
-  // The harness answers `managed_voice_speak` with base64 where Rust sends raw bytes.
-  readonly managedVoice: ManagedVoicePort = createManagedVoicePort({
-    invoke: (cmd, args) => this.host.invoke(cmd, args),
-    decodeSpeak: (raw) => decodeBase64Bytes((raw as { audioBase64: string }).audioBase64),
-    offerSetup: import.meta.env.DEV,
-  });
+  readonly managedVoice: ManagedVoicePort = createManagedVoicePort((cmd, args) => this.host.invoke(cmd, args));
 
   private handleHostEvent(event: string, data: unknown): void {
     if (event === "dormouse://workspaces") {

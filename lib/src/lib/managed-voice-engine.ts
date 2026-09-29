@@ -40,8 +40,8 @@ export function createManagedVoiceEngine(options: {
   return {
     available: () => options.port() !== undefined,
     prepare(input, callbacks) {
-      const port = options.port();
-      const controller = new AbortController();
+      // Only ever after `available()`, in the same call stack.
+      const port = options.port()!;
       let settled = false;
       let started = false;
       let audio: ManagedVoiceAudio | null = null;
@@ -62,11 +62,13 @@ export function createManagedVoiceEngine(options: {
         report();
       };
       const fail = () => settle(callbacks.onFail);
+      const stop = () => settle(started ? callbacks.onEnd : callbacks.onFail);
 
       return {
         start() {
-          if (!port) { fail(); return; }
-          port.speak(input.text, controller.signal).then((result) => {
+          // A request still in flight at `dispose` runs out in the host; its
+          // answer finds the attempt settled.
+          void port.speak(input.text).then((result) => {
             if (settled) return;
             if (!result.ok) { fail(); return; }
             try {
@@ -75,15 +77,12 @@ export function createManagedVoiceEngine(options: {
             } catch { fail(); return; }
             audio.onplaying = () => { started = true; callbacks.onStart(); };
             audio.onended = () => settle(callbacks.onEnd);
-            audio.onerror = () => settle(started ? callbacks.onEnd : callbacks.onFail);
-            audio.play().catch(() => settle(started ? callbacks.onEnd : callbacks.onFail));
-          }, fail);
+            audio.onerror = stop;
+            audio.play().catch(stop);
+          });
         },
         dispose() {
           settled = true;
-          // After the speak settled the port has already dropped its listener,
-          // so this reaches the host only mid-request.
-          controller.abort();
           release();
         },
       };
