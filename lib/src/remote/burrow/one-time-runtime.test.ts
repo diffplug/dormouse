@@ -18,7 +18,6 @@ import {
   MAX_ONE_TIME_FORWARDED,
   MAX_ONE_TIME_FRAME_LENGTH,
   ONE_TIME_DIRECT_DEADLINE_MS,
-  ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
   ONE_TIME_PING,
   ONE_TIME_PING_INTERVAL_MS,
@@ -428,37 +427,54 @@ describe('OneTimeRuntime: the confirmation', () => {
     expect(dismissals).toBe(1);
   });
 
-  it('surfaces no request that arrives after the link expired', async () => {
+  // A laptop waking from sleep reads its clock before its overdue deadline
+  // runs, so each step checks the expiry itself.
+  it('surfaces no request that arrives after the link expired, before its deadline fires', async () => {
     makeRuntime();
     const link = await openLink();
     const phone = await joinPhone(link);
-    clock.advance(link.expiry * 1000 + 1 - clock.now());
+    clock.jump(link.expiry * 1000 + 1 - clock.now());
     phone.sendControl({ code: CODE, label: PHONE_LABEL });
     expect(await phone.next()).toEqual({ ok: false, code: 'link-expired' });
     expect(oneTimeEndReason(runtime)).toBe('expired');
     expect(approvals).toHaveLength(0);
   });
 
-  it('refuses a confirmation made after the link expired', async () => {
+  it('refuses a confirmation made after the link expired, before its deadline fires', async () => {
     makeRuntime();
     const { link, phone, approval } = await confirming();
-    clock.advance(link.expiry * 1000 + 1 - clock.now());
+    clock.jump(link.expiry * 1000 + 1 - clock.now());
     approval.approve(CODE);
     expect(await phone.next()).toEqual({ ok: false, code: 'link-expired' });
     expect(oneTimeEndReason(runtime)).toBe('expired');
     expect(apis).toHaveLength(0);
   });
 
-  it('tells a phone still holding the link at the room’s deadline, on its own clock', async () => {
+  it('tells a phone still holding the link at its expiry, dismissing the modal, on its own clock', async () => {
     // A room that would stay open longer: the Burrow's own deadline is what fires.
     makeRuntime({ rendezvous: { expiresAt: (now) => now + ONE_TIME_LINK_TTL_MS + 60_000 } });
-    const { link, phone } = await confirming();
-    clock.advance(link.expiry * 1000 + ONE_TIME_EXPIRY_GRACE_MS - 1 - clock.now());
+    const { link, phone, approval } = await confirming();
+    clock.advance(link.expiry * 1000 - clock.now());
     expect(runtime.state.status).toBe('confirming');
     clock.advance(1);
     expect(await phone.next()).toEqual({ ok: false, code: 'link-expired' });
     expect(oneTimeEndReason(runtime)).toBe('expired');
     expect(dismissals).toBe(1);
+    // The modal is gone, and an answer that raced its dismissal does nothing.
+    approval.approve(CODE);
+    await settle();
+    expect(burrowSent('transport')).toHaveLength(1);
+    expect(apis).toHaveLength(0);
+  });
+
+  it('tells a phone that claimed the link but sent no request yet, at its expiry', async () => {
+    makeRuntime({ rendezvous: { expiresAt: (now) => now + ONE_TIME_LINK_TTL_MS + 60_000 } });
+    const link = await openLink();
+    const phone = await joinPhone(link);
+    clock.advance(link.expiry * 1000 + 1 - clock.now());
+    expect(await phone.next()).toEqual({ ok: false, code: 'link-expired' });
+    expect(oneTimeEndReason(runtime)).toBe('expired');
+    expect(approvals).toHaveLength(0);
   });
 });
 

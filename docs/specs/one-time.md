@@ -97,9 +97,9 @@ counts no answer.
   forwards at most `MAX_ONE_TIME_FORWARDED` (32) frames, both directions
   together.
 - **Timings.** An unused link lives `ONE_TIME_LINK_TTL_MS` (the pairing TTL,
-  5 minutes). A room's hard deadline is `expiresAt + ONE_TIME_EXPIRY_GRACE_MS`
-  (30 s): join, confirmation, and the direct switch all finish inside it. The
-  direct path has `ONE_TIME_DIRECT_DEADLINE_MS` (15 s) after the outcome.
+  5 minutes). The join and the confirmation finish by its expiry, and the
+  direct path's `ONE_TIME_DIRECT_DEADLINE_MS` (15 s) after the outcome ends
+  inside the room's hard deadline, `expiresAt + ONE_TIME_EXPIRY_GRACE_MS` (30 s).
 - **The ceremony's messages are padded `control` messages** on the Noise session
   (`docs/specs/relay.md` -> "E2E framing"): `OneTimeRequestV1 {code, label}`
   phone → Burrow, `label` one of `ONE_TIME_DEVICE_LABELS`, then one
@@ -167,9 +167,9 @@ decides them; a runtime never enters either.
   `docs/specs/remote-security-model.md` -> "One-time connection"); before the
   switch a close ends the connection by its code.
 - **Never let a deadline run later than the room's**: each is on the runtime's
-  own clock — an unclaimed link ends the first millisecond past its expiry, and
-  a claimed one gets `ONE_TIME_EXPIRY_GRACE_MS` more, then is told
-  `link-expired`.
+  own clock. A link not yet promoted ends the first millisecond past its
+  expiry — a claimed one telling its phone `link-expired`, which dismisses the
+  modal — and the request and the approval each check the expiry again.
 - **`end()` releases everything**: the session and its peer connection, a
   pending approval, the key, queued work, every timer, and the socket. Nothing
   is written.

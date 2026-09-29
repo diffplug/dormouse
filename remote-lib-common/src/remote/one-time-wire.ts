@@ -161,8 +161,9 @@ export const ONE_TIME_LINK_TTL_MS = DEFAULT_PAIRING_TTL_MS;
 
 /**
  * How long past the link's expiry a joined room may run. The room's hard
- * deadline is `expiresAt + ONE_TIME_EXPIRY_GRACE_MS`: join, confirmation, and
- * the direct switch all finish inside it.
+ * deadline is `expiresAt + ONE_TIME_EXPIRY_GRACE_MS`: the join and the
+ * confirmation finish by the expiry, and the grace holds the direct deadline of
+ * a confirmation made at the link's last second.
  */
 export const ONE_TIME_EXPIRY_GRACE_MS = 30_000;
 

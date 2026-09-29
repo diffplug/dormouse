@@ -76,6 +76,13 @@ export function createTestClock(start: number) {
     rewind(ms: number): void {
       now -= ms;
     },
+    /**
+     * Move the clock forwards and fire nothing, as a laptop waking from sleep
+     * reads its new time before any overdue timer has run.
+     */
+    jump(ms: number): void {
+      now += ms;
+    },
     advance(ms: number): void {
       const target = now + ms;
       // Bounded: a reaper that armed for an instant it does not clear would

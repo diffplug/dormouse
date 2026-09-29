@@ -21,7 +21,6 @@ import {
   NoiseError,
   NoiseTransportSession,
   ONE_TIME_DIRECT_DEADLINE_MS,
-  ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
   ONE_TIME_PONG,
   ONE_TIME_WS_ROUTES,
@@ -672,15 +671,13 @@ export class OneTimeRuntime {
       case 'confirming': {
         if (!link) return [];
         const reserved = this.#reserved;
-        // Unclaimed, a link ends the first millisecond it is expired.
-        if (!reserved) return [{ at: link.expiry * 1000 + 1, expire: () => this.#end('expired') }];
-        // Claimed, it gets the room's grace to finish, and is then told why not.
-        return [
-          {
-            at: link.expiry * 1000 + ONE_TIME_EXPIRY_GRACE_MS,
-            expire: () => this.#deny(reserved, 'link-expired'),
-          },
-        ];
+        // A link not yet promoted ends the first millisecond it is expired;
+        // a claimed one tells its phone why, which dismisses the modal. The
+        // room's grace is for the direct deadline of a promotion, never this.
+        const expire = reserved
+          ? () => this.#deny(reserved, 'link-expired')
+          : () => this.#end('expired');
+        return [{ at: link.expiry * 1000 + 1, expire }];
       }
       case 'connecting':
         return [
