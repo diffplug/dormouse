@@ -273,14 +273,22 @@ export class RemoteApiSession {
     };
     void this.#provider.resolveSurface(params.surfaceId, params, hold).then(
       (handle) => {
-        if (this.#disposed || this.#attachGeneration !== generation) {
-          // The owner took the hold inside the resolve; nothing will attach it.
-          if (handle) this.#release(handle);
-          this.#failAttach(request, params.surfaceId, generation);
+        if (!handle) {
+          // Nobody owns it — or its owner answered past the budget, having
+          // taken the hold all the same.
+          this.#releaseUnresolved(params.surfaceId, hold);
+          this.#failAttach(
+            request,
+            params.surfaceId,
+            generation,
+            `no such surface: ${params.surfaceId}`,
+          );
           return;
         }
-        if (!handle) {
-          this.#fail(request, `no such surface: ${params.surfaceId}`);
+        if (this.#disposed || this.#attachGeneration !== generation) {
+          // The owner took the hold inside the resolve; nothing will attach it.
+          this.#release(handle);
+          this.#failAttach(request, params.surfaceId, generation);
           return;
         }
         try {
@@ -299,6 +307,8 @@ export class RemoteApiSession {
         }
       },
       (error) => {
+        // No handle to release through, and the owner may hold the pane anyway.
+        this.#releaseUnresolved(params.surfaceId, hold);
         this.#failAttach(
           request,
           params.surfaceId,
@@ -536,6 +546,19 @@ export class RemoteApiSession {
   #release(handle: SurfaceHandle): void {
     try {
       handle.release();
+    } catch (error) {
+      console.warn('burrow: releasing a surface failed', error);
+    }
+  }
+
+  /**
+   * Give up `hold` on a surface no handle was resolved for, at every owner
+   * that could have taken it — as safe as {@link #release}, and for the same
+   * reason.
+   */
+  #releaseUnresolved(surfaceId: string, hold: SurfaceHold): void {
+    try {
+      this.#provider.releaseSurface(surfaceId, hold);
     } catch (error) {
       console.warn('burrow: releasing a surface failed', error);
     }

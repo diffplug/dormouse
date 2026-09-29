@@ -141,6 +141,7 @@ function fakeProvider(): BurrowSurfaceProvider {
     collectDirectory: async () => [],
     watchDirectory: () => () => {},
     resolveSurface: async () => null,
+    releaseSurface: () => {},
     writePty: () => {},
     resizePty: () => {},
     streamPty: () => () => {},

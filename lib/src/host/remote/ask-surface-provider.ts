@@ -15,6 +15,7 @@ import type {
   DirectoryEntry,
   BurrowSurfaceProvider,
   SurfaceHandle,
+  SurfaceHold,
 } from '../../remote/burrow/burrow-surface-provider';
 import type { PeerSurfaceParams, PeerSurfaceResult } from '../../remote/burrow/peer-surfaces';
 
@@ -47,6 +48,19 @@ export function createAskSurfaceProvider(
   pty: Pick<BurrowSurfaceProvider, 'writePty' | 'resizePty' | 'streamPty'>,
 ): AskSurfaceProvider {
   const directoryWatchers = new Set<() => void>();
+
+  /**
+   * Give `hold` back at `ownerPtyId`'s owner, or at every answerer when none
+   * was selected. Rejections are swallowed: nothing waits on a release, and a
+   * Burrow process must never carry an unhandled one.
+   */
+  const release = (surfaceId: string, hold: SurfaceHold, ownerPtyId?: string): void => {
+    void ask(
+      'surfaceOp',
+      { surfaceId, op: 'release', hold } satisfies PeerSurfaceParams,
+      ownerPtyId,
+    ).catch(() => {});
+  };
 
   const provider: BurrowSurfaceProvider = {
     async collectDirectory(): Promise<DirectoryEntry[]> {
@@ -116,17 +130,13 @@ export function createAskSurfaceProvider(
           rows = settled.rows;
           return { cols, rows };
         },
-        // Addressed to the owner that took the hold, like a resize. Rejections
-        // are swallowed: nothing waits on a release, and a Burrow process must
-        // never carry an unhandled one.
-        release: () => {
-          void ask(
-            'surfaceOp',
-            { surfaceId, op: 'release', hold } satisfies PeerSurfaceParams,
-            owner.ptyId,
-          ).catch(() => {});
-        },
+        // Addressed to the owner that took the hold, like a resize.
+        release: () => release(surfaceId, hold, owner.ptyId),
       };
+    },
+
+    releaseSurface(surfaceId, hold) {
+      release(surfaceId, hold);
     },
 
     writePty: pty.writePty,

@@ -903,6 +903,7 @@ describe('burrow service glue', () => {
         collectDirectory: async () => [],
         watchDirectory: () => () => {},
         resolveSurface: async () => null,
+        releaseSurface: () => {},
         writePty: () => {},
         resizePty: () => {},
         streamPty: () => () => {},
@@ -1280,6 +1281,20 @@ describe('serving the other windows', () => {
       op: 'surfaceOp',
       params: { surfaceId: 'far-1', op: 'release', hold: HOLD },
     });
+  });
+
+  it('releases a hold no handle carries in every window, this one included', async () => {
+    // An attach whose owner answered past the budget: nothing says which
+    // window took the hold, so every one is told and only that one frees it.
+    const far = fakeWindow({ entries: [{ surfaceId: 'far-1' }] });
+    const { mod, bound } = await brokerWith(far);
+    const provider = mod.createBurrowProvider(bound.deps());
+    const release = { op: 'surfaceOp', params: { surfaceId: 'far-1', op: 'release', hold: HOLD } };
+
+    provider.releaseSurface('far-1', HOLD);
+    await waitFor(() => far.requests.some((r) => (r.params as { op?: string }).op === 'release'));
+    expect(far.requests.at(-1)).toEqual(release);
+    expect(bound.asked.at(-1)).toEqual(release);
   });
 
   it('binds a duplicate restored PTY id to the peer whose surface answer was selected', async () => {

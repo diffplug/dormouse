@@ -101,6 +101,7 @@ class OnePaneProvider implements BurrowSurfaceProvider {
   watchDirectory = (): (() => void) => () => {};
   resolveSurface = async (surfaceId: string): Promise<SurfaceHandle | null> =>
     surfaceId === SURFACE_ID ? this.#handle : null;
+  releaseSurface = (): void => {};
   writePty = (ptyId: string, data: string): void => {
     this.writes.push([ptyId, data]);
     for (const sink of this.#sinks) sink.onData({ data });

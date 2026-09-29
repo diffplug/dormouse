@@ -107,6 +107,16 @@ export interface BurrowSurfaceProvider {
     hold: SurfaceHold,
   ): Promise<SurfaceHandle | null>;
 
+  /**
+   * Give up `hold` on `surfaceId` where no handle carries it: a resolve that
+   * answered nothing, or failed, after an owner may have taken the hold anyway
+   * — its answer missed the budget. No owner was selected, so this reaches
+   * every answerer that could own the surface; the owner re-fits only while this
+   * very hold is on the pane, so the rest ignore it. Fire and forget, like
+   * {@link SurfaceHandle.release}.
+   */
+  releaseSurface(surfaceId: string, hold: SurfaceHold): void;
+
   /** Feed the PTY's input path; the local echo returns through {@link streamPty}. */
   writePty(ptyId: string, data: string): void;
 

@@ -56,6 +56,8 @@ class FakeProvider implements BurrowSurfaceProvider {
   readonly holds: Array<[string, SurfaceHold]> = [];
   /** Every `handle.release`, as the surface and the hold it gives back. */
   readonly releases: Array<[string, SurfaceHold]> = [];
+  /** Every `releaseSurface` — a hold given back with no handle to carry it. */
+  readonly unresolvedReleases: Array<[string, SurfaceHold]> = [];
 
   entries: DirectoryEntry[] = [];
   collects = 0;
@@ -106,6 +108,10 @@ class FakeProvider implements BurrowSurfaceProvider {
     await this.resolveGate;
     if (this.resolveError) throw this.resolveError;
     return surface ? this.#handleFor(surfaceId, surface, hold) : null;
+  };
+
+  releaseSurface = (surfaceId: string, hold: SurfaceHold): void => {
+    this.unresolvedReleases.push([surfaceId, hold]);
   };
 
   writePty = (ptyId: string, data: string): void => {
@@ -1250,6 +1256,60 @@ describe('RemoteApiSession size holds', () => {
     await settle();
 
     expect(provider.releases).toEqual([['surface-slow', heldBy('1')]]);
+  });
+
+  it('gives back, at every owner, the hold of an attach its owner answered too late', async () => {
+    // A resolve that misses the ask budget answers nothing, but the owner took
+    // the hold inside it all the same: no handle is left to release it through.
+    const provider = new FakeProvider();
+    const { session, sent } = makeSession(provider);
+    await attach(session, 51, 14, 'surface-late');
+
+    expect(reply(sent, 'attach-1').error).toBe('no such surface: surface-late');
+    expect(provider.unresolvedReleases).toEqual([['surface-late', heldBy('1')]]);
+    expect(provider.releases).toEqual([]);
+  });
+
+  it('gives back, at every owner, the hold of an attach whose resolve failed', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    provider.resolveError = new Error('owner unavailable');
+    const { session, sent } = makeSession(provider);
+    await attach(session, 51, 14);
+
+    expect(reply(sent, 'attach-1').error).toBe('surface attach failed: owner unavailable');
+    expect(provider.unresolvedReleases).toEqual([['surface-1', heldBy('1')]]);
+  });
+
+  it('gives back the hold of a superseded attach its owner answered too late', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-fast', 'pty-fast', 80, 24);
+    const slow = gate();
+    provider.resolveGate = slow.promise;
+    const { session } = makeSession(provider);
+    session.handle({
+      requestId: 'attach-slow',
+      method: REMOTE_METHODS.surfaceAttach,
+      params: { surfaceId: 'surface-late', cols: 80, rows: 24 },
+    });
+    provider.resolveGate = null;
+    await attach(session, 100, 30, 'surface-fast', 'attach-fast');
+    slow.release();
+    await settle();
+
+    expect(provider.unresolvedReleases).toEqual([['surface-late', heldBy('1')]]);
+    expect(provider.releases).toEqual([]);
+  });
+
+  it('gives no hold back at every owner once a handle carries it', async () => {
+    const provider = new FakeProvider();
+    provider.addSurface('surface-1', 'pty-1', 80, 24);
+    const { session } = makeSession(provider);
+    await attach(session, 100, 30);
+    session.dispose();
+
+    expect(provider.releases).toEqual([['surface-1', heldBy('1')]]);
+    expect(provider.unresolvedReleases).toEqual([]);
   });
 
   it('gives back a hold that resolves after dispose', async () => {

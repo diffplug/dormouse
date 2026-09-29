@@ -75,6 +75,19 @@ describe('createAskSurfaceProvider holds', () => {
     ]);
   });
 
+  it('releases a hold no handle carries at every answerer, naming no owner', () => {
+    const asks: Array<{ op: string; params: unknown; ownerPtyId?: string }> = [];
+    const { provider } = createAskSurfaceProvider(async (op, params, ownerPtyId) => {
+      asks.push({ op, params, ownerPtyId });
+      return [];
+    }, inertPty);
+
+    provider.releaseSurface('pane-1', HOLD);
+    expect(asks).toEqual([
+      { op: 'surfaceOp', params: { surfaceId: 'pane-1', op: 'release', hold: HOLD }, ownerPtyId: undefined },
+    ]);
+  });
+
   it('swallows a release whose ask rejects: nothing waits on one', async () => {
     const { provider } = createAskSurfaceProvider(async (_op, params) => {
       if ((params as { op: string }).op === 'release') throw new Error('window gone');
@@ -86,6 +99,7 @@ describe('createAskSurfaceProvider holds', () => {
     process.on('unhandledRejection', onUnhandled);
     try {
       handle!.release();
+      provider.releaseSurface('pane-1', HOLD);
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(unhandled).toEqual([]);
     } finally {
