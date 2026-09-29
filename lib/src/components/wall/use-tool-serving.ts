@@ -18,7 +18,7 @@ import {
   toolPortConflictFromParams,
 } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
-import { getToolAnnounce } from '../../lib/tool-announce-store';
+import { getToolAnnounce, subscribeToToolAnnounces } from '../../lib/tool-announce-store';
 import { forgetToolReports } from '../../lib/tool-events';
 import { validToolServePath } from '../../lib/tool-announce';
 import { closeBrowserSurface } from './agent-browser-surface-controller';
@@ -252,22 +252,37 @@ export function useToolServing({
 
     // `getOpenPorts` shells out (lsof / PowerShell) and can outrun the
     // interval. Without this guard a second tick re-enters a leaf whose `url`
-    // is not written yet and frames it twice.
+    // is not written yet and frames it twice. A poll that lands mid-tick is
+    // dropped; an announcement is not, since the tick in flight decided its
+    // scans before the announcement existed, so it runs one follow-up tick.
     let ticking = false;
+    let followUp = false;
     const runTick = async () => {
       if (ticking) return;
       ticking = true;
       try {
-        await tick();
+        do {
+          followUp = false;
+          await tick();
+        } while (followUp && !cancelled);
       } finally {
         ticking = false;
       }
     };
 
+    // An announcement names the port the next poll would find, so scan now
+    // rather than up to a poll interval later. It still only selects: the
+    // announced port must appear in the scan.
+    const unsubscribe = subscribeToToolAnnounces((id) => {
+      if (!toolLeaves(lath, doorsRef.current).some((leaf) => leaf.id === id)) return;
+      followUp = true;
+      void runTick();
+    });
     void runTick();
     const timer = setInterval(() => void runTick(), POLL_MS);
     return () => {
       cancelled = true;
+      unsubscribe();
       clearInterval(timer);
     };
   }, [lath, doorsRef, paused]);

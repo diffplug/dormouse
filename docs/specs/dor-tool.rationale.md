@@ -42,6 +42,8 @@ Successive startup listeners can appear in different scan ticks. One unchanged t
 
 A hardcoded Storybook port can disagree with the port it obtains under contention, while Vite with strict-port behavior can fail entirely. Discovery therefore checks the Session process tree. An OSC can cross SSH, but the current host scan still requires a locally discoverable listener.
 
+Every preview-slot retarget of a serving Tool (the built-in file viewer, `builtin:folder`, a web viewer) otherwise waits up to one 1.5-second poll before its browser frames (2026-09). The `serve` announcement already names the port, so scanning when it arrives removes most of that wait without trusting it any further.
+
 ## Lifecycle
 
 ### September 2026 innerdogfood QC record
@@ -77,7 +79,7 @@ Directories match through a name suffix rather than a new rule field, so folder 
 
 ## Preview slot
 
-Customizable viewers are the point of `dor open`, so previews trade speed for flexibility. A design considered on 2026-09-28 previewed inside one long-lived built-in viewer with a folder-scoped grant: every selection was an in-page navigation, but user Tools never saw a preview. Retargeting the slot instead costs an interrupt, a process start, and up to one 1.5-second port-scan tick (`POLL_MS` in `lib/src/components/wall/use-tool-serving.ts`) for a serving Tool; terminal-only viewers skip the scan. A rule's `preview` handler and the speed items in scope **open-folder** narrow that cost without bypassing the open rules.
+Customizable viewers are the point of `dor open`, so previews trade speed for flexibility. A design considered on 2026-09-28 previewed inside one long-lived built-in viewer with a folder-scoped grant: every selection was an in-page navigation, but user Tools never saw a preview. Retargeting the slot instead costs an interrupt, a process start, and a port scan for a serving Tool, which its `serve` announcement now starts at once ([Serving](#serving)); terminal-only viewers skip the scan. A rule's `preview` handler and the speed items in scope **open-folder** narrow that cost without bypassing the open rules.
 
 Most slot occupants are viewers scrolled with the keyboard (`less`, `glow`), so pinning on keyboard input would pin nearly every preview. Editors report `OSC 367 state`; one that does not loses unsaved work on the next selection.
 
