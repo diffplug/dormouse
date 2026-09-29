@@ -8,8 +8,8 @@ import {
   subscribeToSizeHolds,
 } from './size-hold-store';
 
-const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1' };
-const TABLET = { holder: 'session-b', label: 'iPad', lease: '1' };
+const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1', cols: 51, rows: 14 };
+const TABLET = { holder: 'session-b', label: 'iPad', lease: '1', cols: 40, rows: 20 };
 
 afterEach(() => {
   clearSizeHold('pane-1');
@@ -28,6 +28,16 @@ describe('size holds', () => {
     holdSize('pane-1', reattached);
     expect(getSizeHolds('pane-1')).toEqual([TABLET, reattached]);
     expect(getSizeHolds('pane-2')).toEqual([]);
+  });
+
+  it('records the size each holder last set, a resize from the same attachment included', () => {
+    // What the pane goes back to when a newer holder lets go first.
+    holdSize('pane-1', PHONE);
+    const resized = { ...PHONE, cols: 60, rows: 30 };
+    holdSize('pane-1', resized);
+    expect(getSizeHolds('pane-1')).toEqual([resized]);
+    holdSize('pane-1', TABLET);
+    expect(getSizeHolds('pane-1')).toEqual([resized, TABLET]);
   });
 
   it('releases only the named holder’s hold, and only its current attachment', () => {
@@ -49,7 +59,7 @@ describe('size holds', () => {
     holdSize('pane-1', { ...PHONE, serviceId: 'gone' });
     holdSize('pane-1', { ...TABLET, serviceId: 'current' });
     holdSize('pane-2', { ...PHONE, serviceId: 'gone' });
-    const legacy = { holder: 'session-c', label: 'Pixel', lease: '1' };
+    const legacy = { holder: 'session-c', label: 'Pixel', lease: '1', cols: 60, rows: 30 };
     holdSize('pane-2', legacy);
     changed.mockClear();
 

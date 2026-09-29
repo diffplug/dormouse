@@ -283,7 +283,7 @@ Source of truth: `RemoteApiSession.#attach` / `#beginAttach` in `lib/src/remote/
 
 #### Size authority: last-attach-wins
 
-A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records before the size moves. **A pane keeps one hold per holder**, the newest writer's last; another viewer's release leaves the rest.
+A terminal has one size, and **the most recent remote size writer holds it**: an attach with dimensions and `terminal.resize` both resize through the owning xterm under a `SurfaceHold` — an opaque per-session holder id, its label, and a per-attachment lease — which the owning webview records, with the size, before the size moves. **A pane keeps one hold per holder**, the newest writer's last; another viewer's release leaves the rest. **A held pane stands at its newest hold's size**: when that hold goes first, the pane takes the size the holder now newest last set (rationale).
 
 - **Never re-fit a held pane locally** — box resize, layout settle, remount, focus, or keystroke (rationale).
 - **Must show the strip on a held pane, and only there** ([layout.md](./layout.md) → "Pane body"): the newest holder's label — the ACL record's, bounded again by `boundedPairingLabel`, or the one-time device label — as text, with `+N` for the other holders.
@@ -293,7 +293,7 @@ A terminal has one size, and **the most recent remote size writer holds it**: an
 - **Must drop every hold another service instance took** once a `status` event names another `serviceId` — a VS Code broker window closed, a sidecar restarted — since no release will come. Each `BurrowService` mints one, names it in every `status` event (once at start too), and stamps it on its sessions' holds; naming none (an older build) drops nothing (rationale).
 - **Holds live in webview memory**: a reload or a Workspace transfer drops them, and the pane fits its box under a phone still attached.
 
-Source of truth: `RemoteApiSession.#attach` / `#teardownAttachment` in `lib/src/remote/burrow/remote-api.ts`; `driveOwnSurface` / `installPeerSurfaceResponder` in `lib/src/remote/burrow/peer-surfaces.ts`; `holdSize` / `releaseSizeHold` / `dropSizeHoldsFromOtherServices` in `lib/src/lib/size-hold-store.ts`; `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `takeBackSize` in `lib/src/remote/burrow/take-back.ts`; `BurrowService.#takeBack` / `statusEvent` in `lib/src/host/remote/service.ts`. Pinned end to end by `lib/src/remote/client/one-time-e2e.test.ts`.
+Source of truth: `RemoteApiSession.#attach` / `#teardownAttachment` in `lib/src/remote/burrow/remote-api.ts`; `driveOwnSurface` / `standAtNewestHolds` / `installPeerSurfaceResponder` in `lib/src/remote/burrow/peer-surfaces.ts`; `holdSize` / `releaseSizeHold` / `dropSizeHoldsFromOtherServices` in `lib/src/lib/size-hold-store.ts`; `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `takeBackSize` in `lib/src/remote/burrow/take-back.ts`; `BurrowService.#takeBack` / `statusEvent` in `lib/src/host/remote/service.ts`. Pinned end to end by `lib/src/remote/client/one-time-e2e.test.ts`.
 
 ## Input authority and multiple viewers
 

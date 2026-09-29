@@ -11,9 +11,10 @@ import type { BurrowLink } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';
 import {
   dropSizeHoldsFromOtherServices,
+  getSizeHolds,
   holdSize,
   releaseSizeHold,
-  type SizeHold,
+  subscribeToSizeHolds,
 } from '../../lib/size-hold-store';
 import { isHelperSession, registry } from '../../lib/terminal-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
@@ -75,8 +76,8 @@ function answerPeers<K extends keyof PeerOps>(
 }
 
 /** A hold as the wire carries it, or `null` for anything else — a peer window is another build. */
-function holdOf(value: unknown): SizeHold | null {
-  const hold = value as Partial<Record<keyof SizeHold, unknown>> | null | undefined;
+function holdOf(value: unknown): SurfaceHold | null {
+  const hold = value as Partial<Record<keyof SurfaceHold, unknown>> | null | undefined;
   if (typeof hold?.holder !== 'string' || typeof hold.label !== 'string') return null;
   if (typeof hold.lease !== 'string') return null;
   const { holder, label, lease, serviceId } = hold;
@@ -92,10 +93,12 @@ function holdOf(value: unknown): SizeHold | null {
  * operation — attach-is-the-resize
  * (docs/specs/remote-api.md) — and both go through the live xterm rather than
  * the PTY directly, so the owning pane's own view stays consistent with the
- * size the phone asked for; each records its hold first, so the pane stops
- * fitting itself before the size moves. `release` clears the hold it names,
- * and the pane re-fits when that empties it (`TerminalPane`). An op this build
- * does not know — a newer Burrow's — changes nothing and claims nothing.
+ * size the phone asked for; each records its hold first, with that size, so the
+ * pane stops fitting itself before the size moves. `release` clears the hold it
+ * names: the pane goes back to the newest remaining hold's size
+ * ({@link standAtNewestHolds}), or re-fits when none remains (`TerminalPane`).
+ * An op this build does not know — a newer Burrow's — changes nothing and
+ * claims nothing.
  */
 function driveOwnSurface({
   surfaceId,
@@ -113,10 +116,10 @@ function driveOwnSurface({
       break;
     case 'attach':
     case 'resize': {
-      const taken = holdOf(hold);
-      if (taken) holdSize(surfaceId, taken);
       const nextCols = clampTerminalDimension(cols, term.cols);
       const nextRows = clampTerminalDimension(rows, term.rows);
+      const taken = holdOf(hold);
+      if (taken) holdSize(surfaceId, { ...taken, cols: nextCols, rows: nextRows });
       if (term.cols !== nextCols || term.rows !== nextRows) term.resize(nextCols, nextRows);
       break;
     }
@@ -132,6 +135,28 @@ function driveOwnSurface({
   }
   return [{ ptyId: surfaceId, cols: term.cols, rows: term.rows }];
 }
+
+/**
+ * Keep each held pane at its newest hold's size — the holder its strip names
+ * (`SizeHoldStrip`). A release, a Take back, or a dropped service instance can
+ * take away the hold the pane stands at while an older one remains, and nothing
+ * else would give that holder its size back; once none remains the pane re-fits
+ * its box itself (`TerminalPane`). One rule for every change, a hold just taken
+ * included: its size is where its own attach or resize puts the pane anyway.
+ */
+function standAtNewestHolds(): void {
+  for (const [surfaceId, entry] of registry) {
+    const holds = getSizeHolds(surfaceId);
+    const newest = holds[holds.length - 1];
+    const term = entry.terminal;
+    if (newest && (term.cols !== newest.cols || term.rows !== newest.rows)) {
+      term.resize(newest.cols, newest.rows);
+    }
+  }
+}
+
+/** Whether {@link standAtNewestHolds} is subscribed: once per webview, whatever the link. */
+let standing = false;
 
 /**
  * The link the announcing half is already installed against.
@@ -156,6 +181,10 @@ export function installPeerSurfaceResponder(): void {
   // asked, and must work the moment a Burrow starts.
   answerPeers('directory', () => collectDirectorySnapshot());
   answerPeers('surfaceOp', driveOwnSurface);
+  if (!standing) {
+    standing = true;
+    subscribeToSizeHolds(standAtNewestHolds);
+  }
 
   const link = getPlatform().burrow;
   if (!link || link === announcingFor) return;

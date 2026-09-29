@@ -7,10 +7,12 @@
  *
  * Keyed by Session id, which is the surface id the Burrow names. A pane holds
  * one entry per holder, so two sessions attached to one pane each keep theirs
- * until they let go: the pane is its box's again only once the last has.
+ * until they let go: the pane is its box's again only once the last has. Each
+ * records the size its holder set, which the pane goes back to when a newer
+ * holder lets go first (`peer-surfaces.ts`).
  */
 
-/** One hold, exactly as the Burrow named it. */
+/** One hold, as the Burrow named it, with the size it set. */
 export interface SizeHold {
   /** The remote session, opaque here: what Take back names to end it. */
   readonly holder: string;
@@ -20,6 +22,9 @@ export interface SizeHold {
   readonly lease: string;
   /** Which service instance serves that session; absent from an older Burrow. */
   readonly serviceId?: string;
+  /** The size its holder last set, as the pane applied it. */
+  readonly cols: number;
+  readonly rows: number;
 }
 
 const NO_HOLDS: readonly SizeHold[] = Object.freeze([]);
@@ -59,14 +64,18 @@ export function holdSize(id: string, hold: SizeHold): void {
     newest?.holder === hold.holder &&
     newest.lease === hold.lease &&
     newest.label === hold.label &&
-    newest.serviceId === hold.serviceId
+    newest.serviceId === hold.serviceId &&
+    newest.cols === hold.cols &&
+    newest.rows === hold.rows
   ) {
     return;
   }
-  const { holder, label, lease, serviceId } = hold;
+  const { holder, label, lease, serviceId, cols, rows } = hold;
   set(id, [
     ...current.filter((held) => held.holder !== holder),
-    serviceId === undefined ? { holder, label, lease } : { holder, label, lease, serviceId },
+    serviceId === undefined
+      ? { holder, label, lease, cols, rows }
+      : { holder, label, lease, serviceId, cols, rows },
   ]);
 }
 

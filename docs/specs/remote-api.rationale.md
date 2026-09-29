@@ -72,6 +72,8 @@ In September 2026, the Viewer-local 60ms restoration timer could overwrite a lat
 
 **Why a pane keeps a hold per holder.** With one hold per pane (review of the first cut, 2026-09), a second viewer's attach replaced the first's, so the second leaving re-fit the pane under the first phone still attached, and Take back ended only the second.
 
+**Why each hold records its size.** With a hold per holder but no size (review, 2026-09), phone A attached at 51×14, phone B at 40×20, and B leaving left the pane at B's grid under a strip naming A — A's PTY running at a grid A never asked for until A resized. Nothing else carries A's size back: the phone is never told of a resize, and a local re-fit would re-wrap A's screen.
+
 **Why a release names a lease as well as a holder.** A session's own attachments overlap: re-attaching the pane it already holds, or an attach superseded by one to the same pane, sends the earlier attachment's release after the later one took the hold. With the holder alone that release would free the newer hold and re-fit the pane under a phone still attached.
 
 ## Input authority and multiple viewers
