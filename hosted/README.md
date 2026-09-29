@@ -84,8 +84,10 @@ remain in the Worker, protected GitHub environments, and Bitwarden.
 The Apple client-secret JWT expires **2027-03-28 05:33 UTC**; renew by
 **2027-02-26** using the signing key in Bitwarden. Microsoft's secret was
 created with a 180-day expiry; its exact expiry is saved with it in Bitwarden.
-Apple's private relay has the exact sender and the Postmark return-path domain
-registered. Provisioning these registrations does not establish acceptance.
+The release-tag PAT expires **2026-12-27**; renew it before that date in the
+separately protected `hosted-release-tag` environment. Apple's private relay
+has the exact sender and the Postmark return-path domain registered. Provisioning
+these registrations does not establish acceptance.
 
 ## GitHub setup
 
@@ -201,11 +203,14 @@ Create Dormouse registrations. Register these exact URLs with no trailing slash:
 | Microsoft | Entra application: personal and work/school accounts; Web platform | `https://hosted.dormouse.sh/api/auth/callback/microsoft` |
 | Apple | Dormouse Services ID associated with a Sign in with Apple primary App ID | `https://hosted.dormouse.sh/api/auth/callback/apple` |
 
-Use `https://hosted.dormouse.sh` as the application origin/homepage where the
-provider requests it. Configure consent branding, support contact, privacy
-policy, and production/test-user settings before testing with ordinary accounts.
-For Google, add the exact callback under authorized redirect URIs, and the
-Hosted origin under authorized JavaScript origins if requested.
+Use `https://hosted.dormouse.sh` as the application origin. Google's consent
+homepage is `https://dormouse.sh/hosted/`, which describes the account service;
+its privacy and terms URLs are `https://dormouse.sh/privacy/` and
+`https://dormouse.sh/terms/`. Publish approved pages before submitting branding.
+Configure consent branding, support contact, and production/test-user settings
+before testing with ordinary accounts. For Google, add the exact callback under
+authorized redirect URIs, and the Hosted origin under authorized JavaScript
+origins if requested.
 
 For Microsoft, request optional ID-token claims `email` and `xms_edov`. Store
 the client-secret **Value**, not its identifier, and record its expiry. The

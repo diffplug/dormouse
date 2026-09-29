@@ -30,7 +30,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/compatible-agents` | Agent recovery, watching, and contributions | `docs/compatible-agents.md` |
 | `/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | `/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
-| `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
+| `/hosted` | Account-service introduction and prelaunch managed services | `website/src/pages/Hosted.tsx` |
 | `/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
 | `/privacy`, `/terms` | Hosted account policies, labeled as drafts until approved | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
@@ -332,6 +332,9 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 `website/src/components/DocsThemeControl.test.tsx`.
 
 ## `/hosted` preview
+
+**Must describe the account service and link its account app, privacy policy, and terms.**
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`.
 
 **Must mark both services unavailable:** Hosted operates Pocket's Relay;
 optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
