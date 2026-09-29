@@ -281,7 +281,9 @@ Source of truth: `RemoteApiSession.#attach` / `#beginAttach` in `lib/src/remote/
 
 #### Size authority: last-attach-wins
 
-A terminal has one size, and **the most recent size writer owns it**: attaching with dimensions and `terminal.resize` both take authority, and the Burrow user interacting with the pane locally reclaims it. **There is no remote detach at the surface owner** — the Burrow stops streaming on its side and the pane keeps whatever size it was left at. Authority holds at the PTY level today; the Burrow-side tethering display is staged ([Future](#future) item 5).
+A terminal has one size, and **the most recent size writer owns it**: attaching with dimensions and `terminal.resize` both take authority through the owning xterm, and **only a local refit of the owning pane takes it back** — its box changing size, a layout settling, or the pane mounting again (its Workspace shown, a reload). **Focus and keystrokes never do**; interacting to take a pane back is the staged tethering display ([Future](#future) item 5; rationale). **There is no remote detach at the surface owner** — the Burrow stops streaming on its side and the pane keeps whatever size it was left at, after a session ends too, until a local refit. Authority holds at the PTY level today.
+
+Source of truth: `driveOwnSurface` in `lib/src/remote/burrow/peer-surfaces.ts`; `TerminalPane` in `lib/src/components/TerminalPane.tsx`. Pinned by `lib/src/remote/burrow/peer-surfaces.test.ts` and `lib/src/components/TerminalPane.test.tsx`.
 
 ## Input authority and multiple viewers
 

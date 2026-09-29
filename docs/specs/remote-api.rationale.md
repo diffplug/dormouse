@@ -56,6 +56,10 @@ In September 2026, the Viewer-local 60ms restoration timer could overwrite a lat
 
 **Why an in-flight resolution is invalidated rather than allowed to finish.** The two resolve paths differ by orders of magnitude: a sibling window's pane is a round trip away, a local one settles on the next microtask. With one shared epoch the older, slower attach would land last and take the attachment.
 
+## Size authority: last-attach-wins
+
+**What the pane is left at when a session ends.** A one-time connection run end to end (standalone harness, phone page in Chrome, 2026-09) ended with the laptop's PTY at the phone's 53×28, and typing into that pane on the laptop changed nothing: the owning xterm refits only when its box, its layout, or its mount changes. Taking a pane back on focus or a keystroke would steal it from a phone still attached, which is never told (`terminal.resize` is staged), so it waits on the tethering display that would show the steal.
+
 ## Input authority and multiple viewers
 
 **Why concurrent granted sessions need no arbitration.** Interleaved typing from two granted sessions is no worse than two keyboards plugged into one machine — and selfhost is single-user, so both keyboards belong to the same person.
