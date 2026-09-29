@@ -11,23 +11,17 @@ import {
   ArrowClockwiseIcon,
   ArrowLeftIcon,
   ArrowRightIcon,
-  SplitHorizontalIcon,
-  SplitVerticalIcon,
 } from '@phosphor-icons/react';
-import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
-import { isPreviewSlotParams } from './browser-surface';
-import { usePreviewKeep } from './preview-keep';
-import { useHeldWhile, usePreviewSlotView } from './preview-transition';
-import { MinimizeKillButtons, PaneActionGroup } from './PaneActionButtons';
+import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { MinimizeKillButtons, PaneActionGroup, SplitButtons } from './PaneActionButtons';
 import {
   useAgentBrowserChromeSnapshot,
   useAgentBrowserScreenController,
   useAgentBrowserScreenSnapshot,
   browserDisplayMode,
 } from './agent-browser-screen';
-import { BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
+import { BrowserDisplayButton } from './BrowserDisplayIcon';
 import { InlineEditInput } from './InlineEditInput';
 import type { PaneProps } from './pane-props';
 import { browserSurfaceUrl, loopbackPort, pathDisplay } from './browser-url';
@@ -44,16 +38,15 @@ import {
 
 /** What the browser chrome shows inline at a header width (`docs/specs/layout.md`
  *  → "Pane header responsive sizing"). Below `minimal` the chrome moves into the
- *  popover, where it renders at `full`. */
+ *  popover, where it renders at `full`. A Tool has its own header,
+ *  `ToolPaneHeader`. */
 type BrowserInlineTier = 'full' | 'compact' | 'minimal';
-type BrowserHeaderTier = BrowserInlineTier | 'overflow' | 'tight' | 'tiny';
+type BrowserHeaderTier = BrowserInlineTier | 'overflow' | 'tiny';
 // Border-box widths; `docs/specs/layout.rationale.md` derives each boundary.
 const browserHeaderTier = (width: number): BrowserHeaderTier =>
-  width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 102 ? 'overflow' : width >= 94 ? 'tight' : 'tiny';
+  width >= 420 ? 'full' : width >= 360 ? 'compact' : width >= 180 ? 'minimal' : width >= 94 ? 'overflow' : 'tiny';
 
-export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
-  const dirty = useToolDirty(id, params);
-  const preview = isPreviewSlotParams(params);
+export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
   const visible = useSurfaceVisibility(parked);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -69,29 +62,12 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   // whole browser chrome (nav + URL + connection) is strictly scoped to it.
   const screen = useAgentBrowserScreenController(id);
   const screenSnapshot = useAgentBrowserScreenSnapshot(screen);
-  const liveChrome = useAgentBrowserChromeSnapshot(screen);
+  const chrome = useAgentBrowserChromeSnapshot(screen);
   // Dev-server connection: when the active tab is loopback, correlate its port
   // to the Dormouse terminal pane serving it (resolved Wall-side). Hooks run
   // unconditionally; a non-loopback/no-screen surface just yields null.
-  const livePort = liveChrome ? loopbackPort(liveChrome.url) : null;
-  const liveDevServer = useDevServerMatch(livePort);
-  // A preview slot switch holds what this header showed until the next view
-  // is ready, the chip naming the new target once it commits
-  // (`docs/specs/layout.md` -> Pane header).
-  const { transition } = usePreviewSlotView(id);
-  const holding = transition !== null && transition.ghost.kind !== 'terminal';
-  const { chrome, port, devServer: heldDevServer, displayMode } = useHeldWhile({
-    chrome: liveChrome,
-    port: livePort,
-    devServer: liveDevServer,
-    // The far-left chip uses the same capability-first identity as the Display
-    // modal and minimized Door, keyed once so its visible and accessible
-    // meanings cannot drift.
-    displayMode: screenSnapshot ? browserDisplayMode(screenSnapshot) : null,
-  }, holding);
-  const label = holding ? transition.label : null;
-  const devServer = heldDevServer && label !== null ? { ...heldDevServer, label } : heldDevServer;
-  const displayLabel = displayMode ? `${BROWSER_DISPLAY_LABEL[displayMode]} — change display` : undefined;
+  const port = chrome ? loopbackPort(chrome.url) : null;
+  const devServer = useDevServerMatch(port);
 
   // With a dev-server chip in front, the chip already shows host:port, so the
   // URL collapses to just the path; otherwise it's the full host+path.
@@ -120,8 +96,8 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const closeUrlEditor = () => setEditingUrl(false);
 
   // Below the `minimal` tier the chrome lives in a popover behind one trigger;
-  // resizing, moved essential controls, or a hidden Surface closes it, the
-  // last without pulling focus back to a trigger nobody can see. `closeMenu` stays identity-stable
+  // resizing or a hidden Surface closes it, the latter without pulling focus
+  // back to a trigger nobody can see. `closeMenu` stays identity-stable
   // (reading `visibleRef`) so the popover's listeners subscribe once.
   const headerRef = useRef<HTMLDivElement>(null);
   const overflowRef = useRef<HTMLButtonElement>(null);
@@ -132,10 +108,10 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
     if (restoreFocus && visibleRef.current) overflowRef.current?.focus();
   }, []);
   const tier = useHeaderTier(headerRef, browserHeaderTier, { onResize: () => closeMenu(false) });
-  const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tight' || tier === 'tiny' ? null : tier;
-  // Zoom stays in the header at every width, so only its two companions move.
-  // Keep 94–101px distinct so a dirty report can move them without a resize.
-  const inlineMinimizeKill = tier !== 'tiny' && (tier !== 'tight' || !dirty);
+  const inline: BrowserInlineTier | null = tier === 'overflow' || tier === 'tiny' ? null : tier;
+  // Zoom stays in the header at every width, so only its two companions move;
+  // a focused one hands focus to the trigger as it goes.
+  const inlineMinimizeKill = tier !== 'tiny';
   const minimizeKillFocused = useRef(false);
   const previousInlineMinimizeKill = useRef(inlineMinimizeKill);
   useLayoutEffect(() => {
@@ -151,28 +127,15 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
     if (!visible) closeMenu(false);
   }, [visible, closeMenu]);
 
-  // A double-click on the address keeps the preview and closes the URL editor
-  // its first click opened.
-  const keep = usePreviewKeep(id, preview, closeUrlEditor);
-
   const renderBrowserControls = (placement: BrowserInlineTier | 'popover') => {
     return (
       <>
         {screen && screenSnapshot && chrome ? (
           <>
             {/* Render/screen chip → far left, out of the way of the nav controls.
-                Opens the Display modal; the glyph reflects reality — frame =
-                embed, and robot + presentation = agent-visible browser. */}
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); screen.actions.openModal(); }}
-              aria-label={displayLabel}
-              title={displayLabel}
-              data-browser-display-trigger="true"
-              className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
-            >
-              {displayMode && <BrowserDisplayIcon mode={displayMode} size={14} />}
-            </button>
+                The glyph reflects reality — frame = embed, and robot +
+                presentation = agent-visible browser. */}
+            <BrowserDisplayButton mode={browserDisplayMode(screenSnapshot)} onOpen={() => screen.actions.openModal()} />
 
             {/* Back / forward / refresh — native agent-browser commands; always
                 enabled (no canGoBack/Forward in the stream). Collapse before the
@@ -230,13 +193,12 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
                 {devServer && (
                   <button
                     type="button"
-                    data-header-label="true"
                     onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
                     aria-label={`Focus ${devServer.label} — serves this localhost port`}
                     title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
                     className="flex h-5 min-w-0 items-center gap-1 rounded px-1.5 text-xs transition-colors hover:bg-current/10"
                   >
-                    <span className={clsx('min-w-0 truncate', preview && PREVIEW_LABEL_CLASS)}>{devServer.label}</span>
+                    <span className="min-w-0 truncate">{devServer.label}</span>
                     {port != null && <span className="min-w-0 truncate text-current/70">:{port}</span>}
                   </button>
                 )}
@@ -247,8 +209,8 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
                     basis up to its text, so it gives up all its width before the
                     chip shrinks at all. */}
                 <span
-                  className={clsx(placement === 'popover' ? 'basis-full' : 'max-w-max grow basis-0', 'min-w-0 cursor-text truncate font-medium underline-offset-2 hover:underline', preview && PREVIEW_LABEL_CLASS)}
-                  title={[preview && 'Preview', chrome.title ?? chrome.url].filter(Boolean).join(' — ') || undefined}
+                  className={clsx(placement === 'popover' ? 'basis-full' : 'max-w-max grow basis-0', 'min-w-0 cursor-text truncate font-medium underline-offset-2 hover:underline')}
+                  title={chrome.title ?? (chrome.url || undefined)}
                   onMouseDown={(e) => e.stopPropagation()}
                   role="button"
                   tabIndex={0}
@@ -264,23 +226,10 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
             )}
           </>
         ) : (
-          <span className={clsx('min-w-0 flex-1 truncate font-medium', preview && PREVIEW_LABEL_CLASS)} title={preview ? 'Preview' : undefined}>{title ?? id}</span>
+          <span className="min-w-0 flex-1 truncate font-medium">{title ?? id}</span>
         )}
 
-        {(placement === 'popover' || placement === 'full') && <div className="ml-1 flex shrink-0 items-center gap-0.5">
-          <HeaderActionButton
-            className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-            onClick={(e) => { e.stopPropagation(); actions.onSplitH(id); }}
-            ariaLabel="Split left/right"
-            tooltip="Split left/right [|] or [%]"
-          ><SplitHorizontalIcon size={14} /></HeaderActionButton>
-          <HeaderActionButton
-            className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-            onClick={(e) => { e.stopPropagation(); actions.onSplitV(id); }}
-            ariaLabel="Split top/bottom"
-            tooltip={'Split top/bottom [-] or ["]'}
-          ><SplitVerticalIcon size={14} /></HeaderActionButton>
-        </div>}
+        {(placement === 'popover' || placement === 'full') && <SplitButtons surfaceId={id} />}
       </>
     );
   };
@@ -305,9 +254,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
       ref={headerRef}
       className={`flex h-full min-w-0 flex-1 cursor-grab items-center ${inline ? 'gap-1.5 pl-2 pr-[5px]' : 'gap-0.5 px-1'} ${TERMINAL_TOP_RADIUS_CLASS} text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS} ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
       onMouseDown={() => actions.onClickPanel(id)}
-      {...keep}
     >
-      <ToolDirtyIndicator dirty={dirty} />
       {inline ? renderBrowserControls(inline) : (
         <button ref={overflowRef} type="button" aria-label={overflowLabel}
           aria-haspopup="dialog" aria-expanded={popoverOpen}

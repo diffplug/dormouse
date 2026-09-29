@@ -91,3 +91,22 @@ export function BrowserDisplayIcon({
     </span>
   );
 }
+
+/** A browser header's Display trigger: its glyph is the Surface's display
+ *  identity, and a press opens the Display modal (`docs/specs/dor-browser.md`
+ *  -> Browser Chrome). Up to 30px wide: robot, gap, presentation glyph. */
+export function BrowserDisplayButton({ mode, onOpen }: { mode: BrowserDisplayMode | null; onOpen?: () => void }) {
+  const label = mode ? `${BROWSER_DISPLAY_LABEL[mode]} — change display` : 'Change display';
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
+      aria-label={label}
+      title={label}
+      data-browser-display-trigger="true"
+      className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
+    >
+      {mode && <BrowserDisplayIcon mode={mode} size={14} />}
+    </button>
+  );
+}

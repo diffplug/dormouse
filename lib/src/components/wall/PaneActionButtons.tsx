@@ -1,8 +1,8 @@
 import { useContext } from 'react';
-import { ArrowLineDownIcon, ArrowsInIcon, ArrowsOutIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowLineDownIcon, ArrowsInIcon, ArrowsOutIcon, SplitHorizontalIcon, SplitVerticalIcon, TerminalIcon, XIcon } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { paneZoomButtonClass } from '../design';
-import { WallActionsContext } from './wall-context';
+import { chromeButton, paneZoomButtonClass } from '../design';
+import { TerminalContextContext, WallActionsContext } from './wall-context';
 
 const ACTION_BUTTON_CLASS = 'flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10';
 
@@ -67,5 +67,47 @@ export function PaneActionGroup({
       >{zoomed ? <ArrowsInIcon size={14} /> : <ArrowsOutIcon size={14} />}</HeaderActionButton>
       {showMinimizeKill && <MinimizeKillButtons surfaceId={surfaceId} beforeAct={beforeAct} {...minimizeKillFocus} />}
     </div>
+  );
+}
+
+/** Split left/right and top/bottom, which every header shows only at its
+ *  widest tier (`docs/specs/layout.md` -> "Pane header responsive sizing"). */
+export function SplitButtons({ surfaceId }: { surfaceId: string }) {
+  const actions = useContext(WallActionsContext);
+  return (
+    <div className="ml-1 flex shrink-0 items-center gap-0.5">
+      <HeaderActionButton
+        className={ACTION_BUTTON_CLASS}
+        onClick={(e) => { e.stopPropagation(); actions.onSplitH(surfaceId); }}
+        ariaLabel="Split left/right"
+        tooltip="Split left/right [|] or [%]"
+      ><SplitHorizontalIcon size={14} /></HeaderActionButton>
+      <HeaderActionButton
+        className={ACTION_BUTTON_CLASS}
+        onClick={(e) => { e.stopPropagation(); actions.onSplitV(surfaceId); }}
+        ariaLabel="Split top/bottom"
+        tooltip={'Split top/bottom [-] or ["]'}
+      ><SplitVerticalIcon size={14} /></HeaderActionButton>
+    </div>
+  );
+}
+
+/** The width a 20px header control, such as the one below, adds to a header:
+ *  itself and the header's 6px gap. */
+export const HEADER_CONTROL_SLOT_PX = 26;
+
+/** Toggles a Tool's Terminal Context, which shows its primary terminal
+ *  (`docs/specs/terminal-context.md` -> Tool context), from under the button. */
+export function TerminalContextButton({ surfaceId }: { surfaceId: string }) {
+  const context = useContext(TerminalContextContext);
+  const open = context.id === surfaceId;
+  return (
+    <button type="button" className={`${chromeButton()} shrink-0`}
+      title="Terminal context" aria-label="Terminal context" aria-expanded={open}
+      onClick={event => {
+        event.stopPropagation();
+        if (open) context.close();
+        else { const rect = event.currentTarget.getBoundingClientRect(); context.open(surfaceId, { origin: { x: rect.left, y: rect.bottom } }); }
+      }}><TerminalIcon size={14} /></button>
   );
 }

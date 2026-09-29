@@ -23,7 +23,9 @@ import { setDevServerResolution } from '../components/wall/agent-browser-ports';
 
 /**
  * Playground for the agent-browser surface's browser-chrome header
- * (docs/specs/dor-browser.md → "Browser Chrome").
+ * (docs/specs/dor-browser.md → "Browser Chrome"), and for a serving Tool's
+ * header, which drops the navigation and address for the Tool's name
+ * (docs/specs/layout.md → "Pane header").
  *
  * `SurfacePaneHeader` decides "this is a browser surface" purely from the
  * presence of a screen controller for its `api.id`, and reads URL / key from
@@ -71,10 +73,12 @@ interface StoryArgs {
   hostCapable: boolean;
   /** Header width — shrink past 420/360 to watch the splits then nav collapse. */
   width: number;
-  /** Include the Tool Terminal Context button beside the browser header. */
+  /** Render a serving Tool's header instead of a plain browser's. */
   tool: boolean;
+  /** The file a Tool was opened on; '' = a Tool named `storybook`, keyed per checkout. */
+  toolTarget: string;
   dirty: 'unknown' | 'clean' | 'dirty';
-  /** The Tool is the Workspace's preview slot (italic address). */
+  /** The Tool is the Workspace's preview slot (italic name). */
   preview: boolean;
   /** Whether the surface is the selected/active pane (header highlight). */
   selected: boolean;
@@ -153,6 +157,13 @@ function BrowserChromeStory(args: StoryArgs) {
   }, [port, args.devServerLabel]);
 
   const Header = args.tool ? ToolPaneHeader : SurfacePaneHeader;
+  const toolParams = {
+    surfaceType: 'tool', url: args.url, renderMode: args.renderMode, syncEngaged: args.syncEngaged,
+    ...(args.toolTarget
+      ? { command: `view ${args.toolTarget}`, toolName: 'viewer', toolKey: ['viewer', args.toolTarget], toolTarget: args.toolTarget }
+      : { command: 'pnpm storybook', toolName: 'storybook', toolKey: ['storybook', '/Users/me/dormouse.open-folder'] }),
+    ...(args.preview ? { toolPreview: true } : {}),
+  };
   return (
     <ModeContext.Provider value="passthrough">
       <SelectedIdContext.Provider value={args.selected ? surfaceId : null}>
@@ -166,7 +177,7 @@ function BrowserChromeStory(args: StoryArgs) {
                 <Header
                   id={surfaceId}
                   title={args.htmlTitle || hostPathDisplay(args.url)}
-                  params={args.tool ? { surfaceType: 'tool', url: args.url, ...(args.preview ? { toolPreview: true } : {}) } : undefined}
+                  params={args.tool ? toolParams : undefined}
                 />
               </div>
             </div>
@@ -192,6 +203,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     width: { control: { type: 'range', min: 80, max: 900, step: 10 } },
     selected: { control: 'boolean' },
     tool: { control: 'boolean' },
+    toolTarget: { control: 'text', if: { arg: 'tool' } },
     dirty: { control: 'inline-radio', options: ['unknown', 'clean', 'dirty'], if: { arg: 'tool' } },
     preview: { control: 'boolean', if: { arg: 'tool' } },
   },
@@ -206,6 +218,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     hostCapable: true,
     width: 620,
     tool: false,
+    toolTarget: '',
     dirty: 'unknown',
     preview: false,
     selected: true,
@@ -255,26 +268,25 @@ export const Narrow: Story = {
   args: { width: 340 },
 };
 
-/** Real narrow split: the Tool context button leaves 102px for browser chrome,
- *  so the chrome sits behind one trigger while the whole zoom/minimize/kill
- *  group stays inline. */
-export const TinyTool: Story = {
-  args: { width: 126, tool: true, paneKey: 'a-very-long-tool-identity', devServerLabel: 'pnpm --filter a-very-long-project-name dev' },
-};
+/** A serving Tool: Display, then Terminal Context, then its name — no
+ *  navigation, dev-server chip, or address. */
+export const Tool: Story = { args: { tool: true } };
 
-/** Below 94px minimize/kill join the popover; zoom is the last control the
- *  header keeps. */
-export const SmallestTool: Story = {
-  args: { width: 110, tool: true },
-};
+/** Below 356px a Tool's splits go. */
+export const NarrowTool: Story = { args: { tool: true, width: 240 } };
 
+/** Below 161px Display goes too; Terminal Context stays. */
+export const TinyTool: Story = { args: { tool: true, width: 140 } };
+
+/** Below 125px minimize/kill go; zoom and Terminal Context are the last
+ *  controls the header keeps. */
+export const SmallestTool: Story = { args: { tool: true, width: 110 } };
 
 export const DirtyTool: Story = { args: { tool: true, dirty: 'dirty' } };
 // Clean and unknown render the same chrome; the tri-state is pinned by tool-state.test.ts.
 export const CleanTool: Story = { args: { tool: true, dirty: 'clean' } };
-// 118px leaves 94px of chrome — the tight band, where the dot is what pushes
-// minimize/kill into the popover.
-export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 118 } };
+// Every boundary reserves the dot, so it moves no control.
+export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 126 } };
 
-/** A serving Tool in the Workspace's preview slot. */
-export const PreviewTool: Story = { args: { tool: true, preview: true } };
+/** A serving Tool in the Workspace's preview slot, named after its file. */
+export const PreviewTool: Story = { args: { tool: true, preview: true, toolTarget: '/Users/me/project/README.md', renderMode: 'iframe' } };

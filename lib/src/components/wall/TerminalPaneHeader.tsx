@@ -6,8 +6,6 @@ import { tv } from 'tailwind-variants';
 import {
   CursorClickIcon,
   CursorTextIcon,
-  SplitHorizontalIcon,
-  SplitVerticalIcon,
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
@@ -16,10 +14,9 @@ import { isPreviewSlotParams } from './browser-surface';
 import { usePreviewKeep } from './preview-keep';
 import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
 import { useHeaderTier } from './use-header-tier';
-import { PaneActionGroup } from './PaneActionButtons';
+import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
 import type { PaneProps } from './pane-props';
-import { IllegalRenameWarning, type RenameRejection } from './IllegalRenameWarning';
-import { InlineEditInput } from './InlineEditInput';
+import { usePaneRename } from './use-pane-rename';
 import {
   getMouseSelectionState,
   setOverride as setMouseOverride,
@@ -45,13 +42,12 @@ import {
   TerminalContextContext,
   ModeContext,
   WallActionsContext,
-  RenamingIdContext,
   SelectedIdContext,
   WindowFocusedContext,
   ZoomedIdContext,
 } from './wall-context';
 
-const tabVariant = tv({
+export const paneHeaderVariant = tv({
   // The active/inactive palette swap crossfades in step with the focus ring's
   // travel (HEADER_PALETTE_TRANSITION_CLASS); children inherit via `text-inherit`.
   base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
@@ -72,16 +68,21 @@ const terminalHeaderTier = (width: number): TerminalHeaderTier =>
     : width > 173 ? 'compact'
       : width > 98 ? 'minimal'
         : 'tiny';
+/** A Tool's port-conflict face leads with its Terminal Context button, whose
+ *  slot every boundary reserves. */
+const toolTerminalHeaderTier = (width: number): TerminalHeaderTier => terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX);
 
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
 
-export function TerminalPaneHeader({ id, title, params }: PaneProps) {
+export function TerminalPaneHeader({ id, title, params, terminalContext = false }: PaneProps & {
+  /** Lead with the Tool's Terminal Context button (`ToolPaneHeader`). */
+  terminalContext?: boolean;
+}) {
   const dirty = useToolDirty(id, params);
   const preview = isPreviewSlotParams(params);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
-  const renamingId = useContext(RenamingIdContext);
   const zoomed = useContext(ZoomedIdContext) === id;
   const windowFocused = useContext(WindowFocusedContext);
   const context = useContext(TerminalContextContext);
@@ -128,11 +129,10 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const mouseIconAriaLabel = inOverride ? 'Restore mouse capture' : 'Override mouse capture';
   const isSelected = selectedId === id;
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
-  const isRenaming = renamingId === id;
+  const rename = usePaneRename(id);
   const tabRef = useRef<HTMLDivElement>(null);
-  const tier = useHeaderTier(tabRef, terminalHeaderTier);
+  const tier = useHeaderTier(tabRef, terminalContext ? toolTerminalHeaderTier : terminalHeaderTier);
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
-  const [renameWarning, setRenameWarning] = useState<{ rect: DOMRect; reason: RenameRejection; value: string } | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const compactOrWider = tier === 'full' || tier === 'compact';
   const tiny = tier === 'tiny';
@@ -142,16 +142,6 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const keep = usePreviewKeep(id, preview);
 
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
-  const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
-  const submitRename = useCallback((value: string, anchor: HTMLElement) => {
-    const rect = anchor.getBoundingClientRect();
-    const result = actions.onFinishRename(id, value);
-    if (!result.accepted) {
-      setRenameWarning({ rect, reason: result.reason, value });
-    } else {
-      setRenameWarning(null);
-    }
-  }, [actions, id]);
   const openTodoPreview = useCallback((button: HTMLButtonElement) => {
     if (!activity.notification) return;
     setTodoPreviewRect(button.getBoundingClientRect());
@@ -165,7 +155,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
     <div
       ref={tabRef}
       data-pane-header-for={id}
-      className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
+      className={paneHeaderVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
       {...keep}
       onContextMenu={(e) => {
@@ -177,17 +167,9 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
       }}
     >
       <ToolDirtyIndicator dirty={dirty} />
+      {terminalContext && <TerminalContextButton surfaceId={id} />}
       <div className="flex flex-1 min-w-0 items-center gap-1.5 overflow-hidden">
-        {isRenaming ? (
-          <InlineEditInput
-            data-renaming-input-for={id}
-            className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
-            initialValue={label.primary}
-            blurAction="submit"
-            onSubmit={submitRename}
-            onCancel={actions.onCancelRename}
-          />
-        ) : (
+        {rename.renaming ? rename.editor(label.primary) : (
           // A preview's label is drag area, not a rename: its double-click
           // keeps the slot (`docs/specs/layout.md` -> Pane header).
           <span
@@ -232,7 +214,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
           </button>
         )}
       </div>
-      {!isRenaming && (
+      {!rename.renaming && (
         <>
           {showMouseIcon && compactOrWider && (
             <div className="ml-1 shrink-0">
@@ -256,22 +238,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
               </HeaderActionButton>
             </div>
           )}
-          {tier === 'full' && (
-            <div className="ml-1 flex shrink-0 items-center gap-0.5">
-              <HeaderActionButton
-                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-                onClick={(e) => { e.stopPropagation(); actions.onSplitH(id); }}
-                ariaLabel="Split left/right"
-                tooltip="Split left/right [|] or [%]"
-              ><SplitHorizontalIcon size={14} /></HeaderActionButton>
-              <HeaderActionButton
-                className="flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10"
-                onClick={(e) => { e.stopPropagation(); actions.onSplitV(id); }}
-                ariaLabel="Split top/bottom"
-                tooltip={'Split top/bottom [-] or ["]'}
-              ><SplitVerticalIcon size={14} /></HeaderActionButton>
-            </div>
-          )}
+          {tier === 'full' && <SplitButtons surfaceId={id} />}
           {/* The title region clips via `overflow-hidden` so this group
               never has to (`docs/specs/layout.md` → "Pane header responsive
               sizing"). */}
@@ -285,14 +252,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
           anchorRect={todoPreviewRect}
         />
       )}
-      {renameWarning && (
-        <IllegalRenameWarning
-          anchorRect={renameWarning.rect}
-          reason={renameWarning.reason}
-          attemptedValue={renameWarning.value}
-          onClose={closeRenameWarning}
-        />
-      )}
+      {rename.warning}
     </div>
   );
 }

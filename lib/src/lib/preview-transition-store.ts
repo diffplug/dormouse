@@ -34,7 +34,8 @@ export type PreviewTransitionPhase = 'holding' | 'committed' | 'revealing';
 export interface PreviewTransition {
   readonly token: number;
   readonly ghost: PreviewGhost;
-  /** The name a committed retarget gave the header; null keeps the held one. */
+  /** The name a committed retarget gave a terminal face's header; null keeps
+   *  the held one. A serving Tool's header names it from its params. */
   readonly label: string | null;
   readonly phase: PreviewTransitionPhase;
   /** Motion resolves instantly: a static blur and no fade. */
@@ -136,8 +137,8 @@ export function beginPreviewTransition(
 }
 
 /**
- * The owner's retarget committed: a new browser generation, the header's new
- * name, and the ready signals armed — the new layer's (`previewLayerReady`),
+ * The owner's retarget committed: a new browser generation, a terminal face
+ * header's new name, and the ready signals armed — the new layer's (`previewLayerReady`),
  * the committer's own (`arm`, which returns its stop), and the fallback. False,
  * doing nothing, for a request that no longer owns it.
  */

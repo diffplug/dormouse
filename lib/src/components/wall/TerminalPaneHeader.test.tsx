@@ -220,3 +220,13 @@ describe('TerminalPaneHeader — preview slot', () => {
     expect(onPinPreview).not.toHaveBeenCalled();
   });
 });
+
+describe('TerminalPaneHeader — unsaved changes', () => {
+  afterEach(() => resetToolDirty());
+
+  it('ignores dirty reports on an ordinary terminal', () => {
+    act(() => recordToolDirty('term-1', true));
+    renderHeader(stubActions(), null);
+    expect(container.querySelector('[aria-label="Unsaved changes"]')).toBeNull();
+  });
+});
