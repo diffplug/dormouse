@@ -231,7 +231,7 @@ export class BurrowService {
   readonly #connectSrc: string;
   readonly #oneTimeOrigin: string;
   readonly #kind: BurrowKind;
-  readonly #createWebSocket?: (url: string) => WebSocketLike;
+  readonly #createWebSocket: (url: string) => WebSocketLike;
   readonly #createDirectPeer?: DirectPeerFactory;
   readonly #fetch?: typeof globalThis.fetch;
   readonly #now: () => number;
@@ -288,7 +288,8 @@ export class BurrowService {
     this.#oneTimeOrigin = options.oneTimeOrigin;
     this.#oneTimeState = idleOneTimeState(options.oneTimeOrigin, options.connectSrc);
     this.#kind = options.kind;
-    this.#createWebSocket = options.createWebSocket;
+    this.#createWebSocket =
+      options.createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
     this.#createDirectPeer = options.createDirectPeer;
     this.#fetch = options.fetch;
     this.#now = options.now ?? (() => Date.now());
@@ -364,12 +365,10 @@ export class BurrowService {
       // attempt must not wait out an enroll's round trip past the link's expiry.
       case 'approve':
         return approvalKind(params as ApproveParams | null) === 'one-time'
-          ? this.#approveOneTime(params as ApproveParams)
+          ? this.#approve(params as ApproveParams)
           : this.#serialize(() => this.#approve(params as ApproveParams));
       case 'deny':
-        return approvalKind(params as DenyParams | null) === 'one-time'
-          ? this.#denyOneTime(params as DenyParams)
-          : this.#deny(params as DenyParams);
+        return this.#deny(params as DenyParams);
       case 'oneTimeOpen':
         return this.#openOneTime();
       case 'oneTimeEnd':
@@ -582,50 +581,28 @@ export class BurrowService {
   async #approve(params: ApproveParams): Promise<Record<string, never>> {
     // The code the person typed, straight through. The service never held the
     // expected one — the Burrow compares, once (`service-protocol.ts` →
-    // `PairingQueueItem`).
-    await this.#pendingPairing(params.clientId, params.pairingId).approve(
-      typeof params.code === 'string' ? params.code : '',
-    );
+    // `PairingQueueItem`); a one-time runtime spends its one attempt before it
+    // looks at the digits.
+    await this.#pendingRequest(params).approve(typeof params.code === 'string' ? params.code : '');
     return {};
   }
 
   #deny(params: DenyParams): Record<string, never> {
-    this.#pendingPairing(params.clientId, params.pairingId).deny();
-    return {};
-  }
-
-  /** Resolve an action only against the exact request its modal displayed. */
-  #pendingPairing(clientId: string, pairingId: string): PendingPairing {
-    const pending = this.#pairings.get(clientId);
-    if (!pending || pending.pairingId !== pairingId) {
-      throw new Error('pairing request is no longer pending');
-    }
-    return pending;
-  }
-
-  /**
-   * The one attempt, typed straight through to the runtime that compares it
-   * (`OneTimeRuntime` spends the attempt before it looks at the digits).
-   */
-  #approveOneTime(params: ApproveParams): Record<string, never> {
-    this.#pendingOneTime(params.pairingId).approve(
-      typeof params.code === 'string' ? params.code : '',
-    );
-    return {};
-  }
-
-  #denyOneTime(params: DenyParams): Record<string, never> {
-    this.#pendingOneTime(params.pairingId).deny();
+    this.#pendingRequest(params).deny();
     return {};
   }
 
   /**
-   * The one-time request, only by the ticket its modal displayed: a ticket from
-   * a link this service has since replaced names nothing.
+   * Resolve an action only against the exact request its modal displayed — a
+   * one-time request by its ticket alone, so a ticket from a link this service
+   * has since replaced names nothing.
    */
-  #pendingOneTime(pairingId: string): PendingPairing {
-    const pending = this.#oneTimeApproval?.pending;
-    if (!pending || pending.pairingId !== pairingId) {
+  #pendingRequest(params: DenyParams): PendingPairing {
+    const pending =
+      approvalKind(params) === 'one-time'
+        ? this.#oneTimeApproval?.pending
+        : this.#pairings.get(params.clientId);
+    if (!pending || pending.pairingId !== params.pairingId) {
       throw new Error('pairing request is no longer pending');
     }
     return pending;
@@ -655,7 +632,7 @@ export class BurrowService {
     }
     const runtime: OneTimeRuntime = new OneTimeRuntime({
       origin: this.#oneTimeOrigin,
-      createWebSocket: this.#createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike),
+      createWebSocket: this.#createWebSocket,
       createSession: (opts) => this.#createApiSession(opts),
       createDirectPeer: this.#createDirectPeer ?? null,
       // The name the phone shows: the one this machine enrolled under, else the

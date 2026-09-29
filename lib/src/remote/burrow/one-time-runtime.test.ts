@@ -17,7 +17,6 @@ import {
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   MAX_ONE_TIME_FORWARDED,
   MAX_ONE_TIME_FRAME_LENGTH,
-  NoiseTransportSession,
   ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
@@ -26,14 +25,9 @@ import {
   ONE_TIME_PONG,
   TokenBucket,
   boundedPairingLabel,
-  createNoiseInitiator,
   fromBase64Url,
-  generateNoiseKeyPair,
   oneTimeLinkPrologue,
-  parseOneTimeLinkUrl,
-  toBase64Url,
   utf8Encode,
-  type NoiseHandshake,
   type OneTimeLink,
 } from 'remote-lib-common';
 
@@ -48,6 +42,7 @@ import type { RemoteApiSessionLike } from './established-session';
 import { DirectPeer, type DirectPeerFactory } from '../direct/direct-peer';
 import {
   FakeDirectNetwork,
+  collect,
   type FakeDirectNetworkOptions,
   type FakePeer,
 } from '../direct/test-fake-peer';
@@ -61,8 +56,14 @@ import {
   testRoutingId,
 } from '../test-e2e-client';
 import {
+  TestOneTimePhone,
   createTestRendezvous,
-  type RendezvousSocket,
+  joinOneTimeRoom,
+  negotiateOneTimeDirect,
+  oneTimeEndReason,
+  oneTimeFrameText,
+  oneTimeInitiator,
+  openOneTimeLink,
   type TestRendezvous,
   type TestRendezvousOptions,
 } from '../test-rendezvous';
@@ -119,11 +120,7 @@ function makeRuntime(
   if (options.network) network = new FakeDirectNetwork(options.network);
   const createDirectPeer =
     options.createDirectPeer === undefined
-      ? () => {
-          const peer = network.createAnswerer();
-          answerers.push(peer);
-          return peer;
-        }
+      ? collect(answerers, () => network.createAnswerer())
       : options.createDirectPeer;
   runtime = new OneTimeRuntime({
     origin: ORIGIN,
@@ -150,36 +147,14 @@ function makeRuntime(
 }
 
 /** Open the runtime and read its link back the way a phone does. */
-async function openLink(): Promise<OneTimeLink> {
-  const state = await runtime.open();
-  if (state.status !== 'waiting') throw new Error(`expected waiting, got ${state.status}`);
-  const link = await parseOneTimeLinkUrl(state.url, ORIGIN, clock.now());
-  if (!link) throw new Error('the link did not parse');
-  return link;
-}
-
-/** One `one-time` frame, as a phone puts it on its socket. */
-function frameText(step: 'init' | 'transport', ciphertext: Uint8Array | string): string {
-  const ct = typeof ciphertext === 'string' ? ciphertext : toBase64Url(ciphertext);
-  return JSON.stringify({ t: 'one-time', step, ct });
-}
+const openLink = (): Promise<OneTimeLink> => openOneTimeLink(runtime, ORIGIN, clock.now);
 
 /** The Burrow's own frames of one step, off its socket's send log, whether or not anyone got them. */
 function burrowSent(step: 'response' | 'transport'): Array<Record<string, unknown>> {
   return rendezvous
     .room()
-    .burrow.sent.filter((data): data is string => typeof data === 'string' && data !== ONE_TIME_PING)
-    .map((data) => JSON.parse(data) as Record<string, unknown>)
+    .burrow.sentFrames()
     .filter((frame) => frame.step === step);
-}
-
-/** A phone's message 1 against `link`, under `prologue` when a case forges one. */
-async function initiator(link: OneTimeLink, prologue = oneTimeLinkPrologue(link)): Promise<NoiseHandshake> {
-  return await createNoiseInitiator({
-    prologue,
-    staticKeyPair: await generateNoiseKeyPair(),
-    remoteStaticPublicKey: link.ephPub,
-  });
 }
 
 /** Deliver `text` to the Burrow as the room would, whatever the room is. */
@@ -187,55 +162,13 @@ function fromRoom(text: string): void {
   rendezvous.room().burrow.deliver(text);
 }
 
-/**
- * The phone, on its own rendezvous socket, after a completed handshake: reads
- * the Burrow's transport frames in order, which is the only order its receive
- * nonce accepts.
- */
-class TestPhone {
-  #read = 0;
-
-  constructor(
-    readonly socket: RendezvousSocket,
-    readonly session: NoiseTransportSession,
-  ) {}
-
-  sendControl(value: Record<string, unknown>): void {
-    this.socket.send(frameText('transport', this.session.sendControl(value)));
-  }
-
-  /** One protocol-v1 message on the rendezvous — which the Burrow must refuse. */
-  sendApp(payload: unknown): void {
-    for (const ct of this.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-      this.socket.send(frameText('transport', ct));
-    }
-  }
-
-  /** The next Burrow->phone transport message off the rendezvous, opened. */
-  async next(): Promise<unknown> {
-    const frame = await flushUntil(
-      () => this.socket.frames().filter((f) => f.step === 'transport')[this.#read],
-    );
-    this.#read += 1;
-    return openReceipt(this.session, fromBase64Url(frame.ct as string));
-  }
-}
-
 /** Join the room, send message 1, and read message 2. */
-async function joinPhone(link: OneTimeLink): Promise<TestPhone> {
-  const socket = rendezvous.createClientSocket(rendezvous.clientUrl(link.roomId));
-  await flushUntil(() => (socket.readyState === 1 ? true : undefined));
-  const handshake = await initiator(link);
-  socket.send(frameText('init', await handshake.writeMessage()));
-  const response = await flushUntil(() => socket.frames().find((f) => f.step === 'response'));
-  await handshake.readMessage(fromBase64Url(response.ct as string));
-  return new TestPhone(socket, new NoiseTransportSession(handshake.session));
-}
+const joinPhone = (link: OneTimeLink): Promise<TestOneTimePhone> => joinOneTimeRoom(rendezvous, link);
 
 /** Everything up to the approval modal. */
 async function confirming(label = 'iPhone Safari'): Promise<{
   link: OneTimeLink;
-  phone: TestPhone;
+  phone: TestOneTimePhone;
   approval: OneTimeApprovalRequest;
 }> {
   const link = await openLink();
@@ -248,49 +181,22 @@ async function confirming(label = 'iPhone Safari'): Promise<{
 }
 
 /** Confirmed: the outcome is read, and the session awaits its direct path. */
-async function connecting(): Promise<{ link: OneTimeLink; phone: TestPhone }> {
+async function connecting(): Promise<{ link: OneTimeLink; phone: TestOneTimePhone }> {
   const { link, phone, approval } = await confirming();
   approval.approve(CODE);
   expect(await phone.next()).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
   return { link, phone };
 }
 
-/**
- * The phone's half of the direct path, up to the Burrow's own switch: offer,
- * answer, and the channel open.
- */
-async function negotiateDirect(phone: TestPhone): Promise<{ peer: DirectPeer; inbound: Uint8Array[] }> {
-  const inbound: Uint8Array[] = [];
-  const peer = new DirectPeer({
-    peer: network.createOfferer(),
-    setTimer: clock.setTimer,
-    handlers: {
-      onOpen: () => {},
-      onFrame: (frame) => void inbound.push(frame),
-      onClosed: () => {},
-      onViolation: () => {},
-    },
-  });
-  const offer = await peer.offer();
-  if (offer === null) throw new Error('the test peer could not describe an offer');
-  phone.sendControl({ v: 1, t: 'direct-offer', sdp: offer });
-  const answer = (await phone.next()) as Record<string, unknown>;
-  if (answer.t !== 'direct-answer') throw new Error(`expected an answer, got ${String(answer.t)}`);
-  await peer.acceptAnswer(answer.sdp as string);
-  // The Burrow's switch is its last message on the rendezvous.
-  expect(await phone.next()).toEqual({ v: 1, t: 'direct-switch' });
-  return { peer, inbound };
-}
-
 /** All the way to `connected`. */
 async function connected(): Promise<{
   link: OneTimeLink;
-  phone: TestPhone;
+  phone: TestOneTimePhone;
   peer: DirectPeer;
   inbound: Uint8Array[];
 }> {
   const { link, phone } = await connecting();
-  const { peer, inbound } = await negotiateDirect(phone);
+  const { peer, inbound } = await negotiateOneTimeDirect(phone, network, clock.setTimer);
   phone.sendControl({ v: 1, t: 'direct-switch' });
   await settleUntil(() => runtime.state.status === 'connected');
   expect(runtime.state.status).toBe('connected');
@@ -298,13 +204,8 @@ async function connected(): Promise<{
 }
 
 /** One protocol-v1 message on the channel, as the switched phone sends it. */
-function sendOnChannel(phone: TestPhone, peer: DirectPeer, payload: unknown): void {
+function sendOnChannel(phone: TestOneTimePhone, peer: DirectPeer, payload: unknown): void {
   for (const ct of phone.session.sendApp(utf8Encode(JSON.stringify(payload)))) peer.send(ct);
-}
-
-function endedWith(): string | null {
-  const state = runtime.state;
-  return state.status === 'ended' ? state.reason : null;
 }
 
 describe('OneTimeRuntime: the link', () => {
@@ -381,7 +282,7 @@ describe('OneTimeRuntime: the link', () => {
     clock.advance(link.expiry * 1000 - clock.now());
     expect(runtime.state.status).toBe('waiting');
     clock.advance(1);
-    expect(endedWith()).toBe('expired');
+    expect(oneTimeEndReason(runtime)).toBe('expired');
     expect(rendezvous.room().deleted).toBe(true);
     expect(clock.armed).toBe(0);
   });
@@ -391,10 +292,10 @@ describe('OneTimeRuntime: the handshake', () => {
   it('reserves nothing on a message 1 under another prologue', async () => {
     makeRuntime();
     const link = await openLink();
-    const forged = await initiator(link, oneTimeLinkPrologue({ ...link, roomId: testRoutingId() }));
-    const honest = await initiator(link);
-    fromRoom(frameText('init', await forged.writeMessage()));
-    fromRoom(frameText('init', await honest.writeMessage()));
+    const forged = await oneTimeInitiator(link, oneTimeLinkPrologue({ ...link, roomId: testRoutingId() }));
+    const honest = await oneTimeInitiator(link);
+    fromRoom(oneTimeFrameText('init', await forged.writeMessage()));
+    fromRoom(oneTimeFrameText('init', await honest.writeMessage()));
     const response = await flushUntil(() => burrowSent('response')[0]);
     // The honest phone's handshake completes against it: the forged one held nothing.
     await honest.readMessage(fromBase64Url(response.ct as string));
@@ -406,9 +307,9 @@ describe('OneTimeRuntime: the handshake', () => {
     const link = await openLink();
     const phone = await joinPhone(link);
     const deriveBits = vi.spyOn(globalThis.crypto.subtle, 'deriveBits');
-    const second = await (await initiator(link)).writeMessage();
+    const second = await (await oneTimeInitiator(link)).writeMessage();
     const before = deriveBits.mock.calls.length;
-    phone.socket.send(frameText('init', second));
+    phone.socket.send(oneTimeFrameText('init', second));
     // The request queues behind it, so its approval proves the init was read.
     phone.sendControl({ code: CODE, label: 'iPhone Safari' });
     await settleUntil(() => approvals.length > 0);
@@ -421,17 +322,17 @@ describe('OneTimeRuntime: the handshake', () => {
     const link = await openLink();
     const take = vi.spyOn(TokenBucket.prototype, 'take');
     for (let i = 0; i < E2E_INIT_BURST; i += 1) {
-      const forged = await initiator(link, oneTimeLinkPrologue({ ...link, roomId: testRoutingId() }));
-      fromRoom(frameText('init', await forged.writeMessage()));
+      const forged = await oneTimeInitiator(link, oneTimeLinkPrologue({ ...link, roomId: testRoutingId() }));
+      fromRoom(oneTimeFrameText('init', await forged.writeMessage()));
     }
-    const refused = await initiator(link);
-    fromRoom(frameText('init', await refused.writeMessage()));
+    const refused = await oneTimeInitiator(link);
+    fromRoom(oneTimeFrameText('init', await refused.writeMessage()));
     await settleUntil(() => take.mock.calls.length === E2E_INIT_BURST + 1);
     expect(burrowSent('response')).toHaveLength(0);
 
     clock.advance(E2E_INIT_REFILL_INTERVAL_MS);
-    const admitted = await initiator(link);
-    fromRoom(frameText('init', await admitted.writeMessage()));
+    const admitted = await oneTimeInitiator(link);
+    fromRoom(oneTimeFrameText('init', await admitted.writeMessage()));
     const response = await flushUntil(() => burrowSent('response')[0]);
     // Message 2 answers the admitted handshake, not the one the bucket refused.
     await admitted.readMessage(fromBase64Url(response.ct as string));
@@ -441,16 +342,16 @@ describe('OneTimeRuntime: the handshake', () => {
     makeRuntime();
     const link = await openLink();
     const parse = vi.spyOn(JSON, 'parse');
-    const padded = await initiator(link);
+    const padded = await oneTimeInitiator(link);
     // Valid JSON, and a valid init, one character past the bound.
-    const oversize = frameText('init', await padded.writeMessage()).padEnd(
+    const oversize = oneTimeFrameText('init', await padded.writeMessage()).padEnd(
       MAX_ONE_TIME_FRAME_LENGTH + 1,
       ' ',
     );
     fromRoom(oversize);
     expect(parse.mock.calls.some(([text]) => text === oversize)).toBe(false);
-    const honest = await initiator(link);
-    fromRoom(frameText('init', await honest.writeMessage()));
+    const honest = await oneTimeInitiator(link);
+    fromRoom(oneTimeFrameText('init', await honest.writeMessage()));
     const response = await flushUntil(() => burrowSent('response')[0]);
     await honest.readMessage(fromBase64Url(response.ct as string));
   });
@@ -459,11 +360,11 @@ describe('OneTimeRuntime: the handshake', () => {
     makeRuntime();
     await openLink();
     const deriveBits = vi.spyOn(globalThis.crypto.subtle, 'deriveBits');
-    const init = frameText('init', FORGED_CT);
+    const init = oneTimeFrameText('init', FORGED_CT);
     for (let i = 0; i < MAX_ONE_TIME_FORWARDED; i += 1) fromRoom(init);
     expect(runtime.state.status).toBe('waiting');
     fromRoom(init);
-    expect(endedWith()).toBe('burrow-error');
+    expect(oneTimeEndReason(runtime)).toBe('burrow-error');
     await settle();
     expect(deriveBits).not.toHaveBeenCalled();
     expect(rendezvous.room().burrow.closeCode).toBe(1000);
@@ -490,7 +391,7 @@ describe('OneTimeRuntime: the confirmation', () => {
     const phone = await joinPhone(link);
     phone.sendControl({ hello: 'there' });
     expect(await phone.next()).toEqual({ ok: false, code: 'burrow-error' });
-    expect(endedWith()).toBe('burrow-error');
+    expect(oneTimeEndReason(runtime)).toBe('burrow-error');
     expect(approvals).toHaveLength(0);
   });
 
@@ -499,7 +400,7 @@ describe('OneTimeRuntime: the confirmation', () => {
     const { phone, approval } = await confirming();
     approval.approve('07');
     expect(await phone.next()).toEqual({ ok: false, code: 'confirmation-mismatch' });
-    expect(endedWith()).toBe('confirmation-mismatch');
+    expect(oneTimeEndReason(runtime)).toBe('confirmation-mismatch');
     approval.approve(CODE);
     await settle();
     expect(burrowSent('transport')).toHaveLength(1);
@@ -512,7 +413,7 @@ describe('OneTimeRuntime: the confirmation', () => {
     const { phone, approval } = await confirming();
     approval.deny();
     expect(await phone.next()).toEqual({ ok: false, code: 'user-denied' });
-    expect(endedWith()).toBe('user-denied');
+    expect(oneTimeEndReason(runtime)).toBe('user-denied');
     expect(dismissals).toBe(1);
   });
 
@@ -523,7 +424,7 @@ describe('OneTimeRuntime: the confirmation', () => {
     clock.advance(link.expiry * 1000 + 1 - clock.now());
     phone.sendControl({ code: CODE, label: 'iPhone Safari' });
     expect(await phone.next()).toEqual({ ok: false, code: 'link-expired' });
-    expect(endedWith()).toBe('expired');
+    expect(oneTimeEndReason(runtime)).toBe('expired');
     expect(approvals).toHaveLength(0);
   });
 
@@ -533,7 +434,7 @@ describe('OneTimeRuntime: the confirmation', () => {
     clock.advance(link.expiry * 1000 + 1 - clock.now());
     approval.approve(CODE);
     expect(await phone.next()).toEqual({ ok: false, code: 'link-expired' });
-    expect(endedWith()).toBe('expired');
+    expect(oneTimeEndReason(runtime)).toBe('expired');
     expect(apis).toHaveLength(0);
   });
 
@@ -545,7 +446,7 @@ describe('OneTimeRuntime: the confirmation', () => {
     expect(runtime.state.status).toBe('confirming');
     clock.advance(1);
     expect(await phone.next()).toEqual({ ok: false, code: 'link-expired' });
-    expect(endedWith()).toBe('expired');
+    expect(oneTimeEndReason(runtime)).toBe('expired');
     expect(dismissals).toBe(1);
   });
 });
@@ -559,7 +460,7 @@ describe('OneTimeRuntime: the session', () => {
     // `hello` answers with the room id: there is no enrollment to name.
     expect(apis.map((api) => api.burrowId)).toEqual([link.roomId]);
 
-    const { peer, inbound } = await negotiateDirect(phone);
+    const { peer, inbound } = await negotiateOneTimeDirect(phone, network, clock.setTimer);
     expect(runtime.state.status).toBe('connecting');
     phone.sendControl({ v: 1, t: 'direct-switch' });
     await settleUntil(() => runtime.state.status === 'connected');
@@ -588,7 +489,7 @@ describe('OneTimeRuntime: the session', () => {
     const { phone } = await connecting();
     phone.sendApp({ requestId: '1', method: 'hello' });
     await settleUntil(() => runtime.state.status === 'ended');
-    expect(endedWith()).toBe('burrow-error');
+    expect(oneTimeEndReason(runtime)).toBe('burrow-error');
     expect(apis[0]!.handled).toEqual([]);
     expect(apis[0]!.disposed).toBe(true);
   });
@@ -604,7 +505,7 @@ describe('OneTimeRuntime: the session', () => {
     phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await peer.offer())! });
     expect(await phone.next()).toEqual({ v: 1, t: 'direct-decline' });
     await settleUntil(() => runtime.state.status === 'ended');
-    expect(endedWith()).toBe('direct-failed');
+    expect(oneTimeEndReason(runtime)).toBe('direct-failed');
     expect(phone.socket.closeCode).toBe(4013);
   });
 
@@ -614,14 +515,14 @@ describe('OneTimeRuntime: the session', () => {
     clock.advance(ONE_TIME_DIRECT_DEADLINE_MS - 1);
     expect(runtime.state.status).toBe('connecting');
     clock.advance(1);
-    expect(endedWith()).toBe('direct-failed');
+    expect(oneTimeEndReason(runtime)).toBe('direct-failed');
     expect(apis[0]!.disposed).toBe(true);
   });
 
   it('reads the phone’s switch before the room’s report that the phone left', async () => {
     makeRuntime();
     const { phone } = await connecting();
-    const { peer, inbound } = await negotiateDirect(phone);
+    const { peer, inbound } = await negotiateOneTimeDirect(phone, network, clock.setTimer);
     // The phone switches and leaves the room in one breath: both reach the
     // Burrow before it has read either.
     phone.sendControl({ v: 1, t: 'direct-switch' });
@@ -641,7 +542,7 @@ describe('OneTimeRuntime: the session', () => {
     await connected();
     network.dropChannels();
     await settleUntil(() => runtime.state.status === 'ended');
-    expect(endedWith()).toBe('phone-left');
+    expect(oneTimeEndReason(runtime)).toBe('phone-left');
     expect(apis[0]!.disposed).toBe(true);
     expect(answerers[0]!.closed).toBe(true);
   });
@@ -655,7 +556,7 @@ describe('OneTimeRuntime: the session', () => {
     clock.advance(1_000);
     expect(runtime.state.status).toBe('connected');
     clock.advance(ESTABLISHED_E2E_IDLE_TIMEOUT_MS);
-    expect(endedWith()).toBe('idle');
+    expect(oneTimeEndReason(runtime)).toBe('idle');
     expect(answerers[0]!.closed).toBe(true);
     expect(apis[0]!.disposed).toBe(true);
   });
@@ -667,7 +568,7 @@ describe('OneTimeRuntime: the rendezvous closing before the switch', () => {
     const { phone } = await confirming();
     phone.socket.close();
     await settleUntil(() => runtime.state.status === 'ended');
-    expect(endedWith()).toBe('phone-left');
+    expect(oneTimeEndReason(runtime)).toBe('phone-left');
     expect(dismissals).toBe(1);
   });
 
@@ -677,7 +578,7 @@ describe('OneTimeRuntime: the rendezvous closing before the switch', () => {
     rendezvous.expire(rendezvous.room().roomId);
     await settleUntil(() => runtime.state.status === 'ended');
     expect(rendezvous.room().burrow.closeCode).toBe(4010);
-    expect(endedWith()).toBe('expired');
+    expect(oneTimeEndReason(runtime)).toBe('expired');
     runtime.end();
 
     makeRuntime();
@@ -685,7 +586,7 @@ describe('OneTimeRuntime: the rendezvous closing before the switch', () => {
     rendezvous.expire(rendezvous.room().roomId);
     await settleUntil(() => runtime.state.status === 'ended');
     expect(rendezvous.room().burrow.closeCode).toBe(4014);
-    expect(endedWith()).toBe('expired');
+    expect(oneTimeEndReason(runtime)).toBe('expired');
   });
 
   it('ends burrow-error when the room closes it for a violation', async () => {
@@ -694,7 +595,7 @@ describe('OneTimeRuntime: the rendezvous closing before the switch', () => {
     phone.socket.send('x'.repeat(MAX_ONE_TIME_FRAME_LENGTH + 1));
     await settleUntil(() => runtime.state.status === 'ended');
     expect(rendezvous.room().burrow.closeCode).toBe(4015);
-    expect(endedWith()).toBe('burrow-error');
+    expect(oneTimeEndReason(runtime)).toBe('burrow-error');
   });
 
   it('ends rendezvous-lost on a close the room did not name', async () => {
@@ -702,7 +603,7 @@ describe('OneTimeRuntime: the rendezvous closing before the switch', () => {
     await openLink();
     rendezvous.room().burrow.closeWith(1006);
     await settleUntil(() => runtime.state.status === 'ended');
-    expect(endedWith()).toBe('rendezvous-lost');
+    expect(oneTimeEndReason(runtime)).toBe('rendezvous-lost');
   });
 });
 
@@ -711,12 +612,12 @@ describe('OneTimeRuntime: end()', () => {
     makeRuntime();
     await openLink();
     runtime.end();
-    expect(endedWith()).toBe('user-ended');
+    expect(oneTimeEndReason(runtime)).toBe('user-ended');
     expect(rendezvous.room().burrow.closeCode).toBe(1000);
     expect(rendezvous.room().deleted).toBe(true);
     expect(clock.armed).toBe(0);
     runtime.end('idle');
-    expect(endedWith()).toBe('user-ended');
+    expect(oneTimeEndReason(runtime)).toBe('user-ended');
   });
 
   it('dismisses a pending request, and a late approval does nothing', async () => {
@@ -734,7 +635,7 @@ describe('OneTimeRuntime: end()', () => {
     makeRuntime();
     await connected();
     runtime.end();
-    expect(endedWith()).toBe('user-ended');
+    expect(oneTimeEndReason(runtime)).toBe('user-ended');
     expect(apis[0]!.disposed).toBe(true);
     expect(answerers[0]!.closed).toBe(true);
     const lastState = states[states.length - 1];

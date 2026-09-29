@@ -3,11 +3,17 @@ import { useEffect, useState } from 'react';
 /**
  * What the Remote control section's two QR panels share: the Relay's "Set up a
  * phone" (`RemoteControlSection.tsx`) and the one-time connection
- * (`OneTimeConnection.tsx`).
+ * (`OneTimeConnection.tsx`), whose Baseboard indicator (`OneTimeIndicator.tsx`)
+ * repeats its connected sentence.
  */
 
 export const FIELD_LABEL = 'text-xs text-muted';
 export const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
+
+/** What a connected one-time phone can do, as the panel and the indicator's tooltip say it. */
+export function oneTimeControlSentence(label: string): string {
+  return `${label || '(unnamed)'} has full control of your terminals.`;
+}
 
 /**
  * A lookup into one of the section's copy tables, answering only for a key the

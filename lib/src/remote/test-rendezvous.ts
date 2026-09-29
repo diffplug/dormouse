@@ -1,7 +1,7 @@
 /**
  * The one-time rendezvous, in memory: Hosted's `OneTimeRoom` as
- * `docs/specs/one-time.md` states its contract ("Wire contract", and "Hosted
- * rendezvous" under its `## Future`).
+ * `docs/specs/one-time.md` states its contract ("Wire contract" and "Hosted
+ * rendezvous").
  *
  * Test-only, and shared for the reason `test-relay.ts` is: the laptop's
  * `OneTimeRuntime` and the phone's one-time client both have to be driven
@@ -30,11 +30,17 @@
  * Everything it deliberately does not do is the point, as with the relay stub:
  * it keeps no Noise state and learns no outcome, so a connection that succeeds
  * through it succeeded end to end.
+ *
+ * Below the room is the phone a Burrow-side suite drives through it — a real
+ * Noise IK initiator against the link — shared for the same reason: the
+ * runtime's suite and the service's both need one, and two would be two
+ * opinions about what a phone sends.
  */
 
 import {
   MAX_ONE_TIME_FORWARDED,
   MAX_ONE_TIME_FRAME_LENGTH,
+  NoiseTransportSession,
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
   ONE_TIME_PING,
@@ -47,11 +53,25 @@ import {
   WS_CLOSE_ONE_TIME_TAKEN,
   WS_CLOSE_ONE_TIME_UNAVAILABLE,
   WS_CLOSE_ONE_TIME_VIOLATION,
+  createNoiseInitiator,
+  fromBase64Url,
+  generateNoiseKeyPair,
+  oneTimeLinkPrologue,
+  parseOneTimeLinkUrl,
+  toBase64Url,
+  utf8Encode,
+  type NoiseHandshake,
+  type OneTimeBurrowFrame,
+  type OneTimeClientFrame,
+  type OneTimeLink,
   type OneTimeRoomFrame,
 } from 'remote-lib-common';
 
+import type { OneTimeState } from './burrow/one-time-runtime';
+import { DirectPeer } from './direct/direct-peer';
+import type { FakeDirectNetwork } from './direct/test-fake-peer';
 import { FakeEventTarget } from './test-fake-socket';
-import { testRoutingId } from './test-e2e-client';
+import { flushUntil, openReceipt, testRoutingId } from './test-e2e-client';
 import { realTimer, type RemoteTimer, type RemoteWebSocket } from './ws';
 
 /**
@@ -114,16 +134,12 @@ export class RendezvousSocket implements RemoteWebSocket {
 
   /** Every received message that parses as JSON, for a case reading frames. */
   frames(): Array<Record<string, unknown>> {
-    const out: Array<Record<string, unknown>> = [];
-    for (const data of this.received) {
-      if (typeof data !== 'string') continue;
-      try {
-        out.push(JSON.parse(data) as Record<string, unknown>);
-      } catch {
-        // a pong, or something a hostile room made up
-      }
-    }
-    return out;
+    return jsonFrames(this.received);
+  }
+
+  /** Every message this end sent that parses as JSON: its frames, without the pings. */
+  sentFrames(): Array<Record<string, unknown>> {
+    return jsonFrames(this.sent);
   }
 
   #finish(code: number): void {
@@ -133,6 +149,20 @@ export class RendezvousSocket implements RemoteWebSocket {
     this.onClose = null;
     this.#events.emit('close', { code });
   }
+}
+
+/** The messages in `log` that parse as JSON; a ping, a pong, or garbage is skipped. */
+function jsonFrames(log: readonly unknown[]): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const data of log) {
+    if (typeof data !== 'string') continue;
+    try {
+      out.push(JSON.parse(data) as Record<string, unknown>);
+    } catch {
+      // a ping or a pong, or something a hostile room made up
+    }
+  }
+  return out;
 }
 
 /** One room, as a case reads what happened in it. */
@@ -341,4 +371,134 @@ export function createTestRendezvous(options: TestRendezvousOptions = {}): TestR
       if (room) deadline(room);
     },
   };
+}
+
+// --- The phone, as a Burrow-side suite drives it ------------------------------
+
+/** One `one-time` frame's text, as either end puts it on its socket. */
+export function oneTimeFrameText(
+  step: OneTimeClientFrame['step'] | OneTimeBurrowFrame['step'],
+  ciphertext: Uint8Array | string,
+): string {
+  const ct = typeof ciphertext === 'string' ? ciphertext : toBase64Url(ciphertext);
+  return JSON.stringify({ t: 'one-time', step, ct });
+}
+
+/**
+ * Open `runtime` and read its link back the way a phone does: parsed from the
+ * `waiting` URL against `origin`, at `now` once the open settled. Throws where
+ * it did not settle at `waiting`, or the link did not parse.
+ */
+export async function openOneTimeLink(
+  runtime: { open(): Promise<OneTimeState> },
+  origin: string,
+  now: () => number,
+): Promise<OneTimeLink> {
+  const state = await runtime.open();
+  if (state.status !== 'waiting') throw new Error(`expected waiting, got ${state.status}`);
+  const link = await parseOneTimeLinkUrl(state.url, origin, now());
+  if (!link) throw new Error('the link did not parse');
+  return link;
+}
+
+/** Why `runtime` ended, or `null` while it has not. */
+export function oneTimeEndReason(runtime: { readonly state: OneTimeState }): string | null {
+  const state = runtime.state;
+  return state.status === 'ended' ? state.reason : null;
+}
+
+/** A phone's message 1 against `link`, under `prologue` where a case forges one. */
+export async function oneTimeInitiator(
+  link: OneTimeLink,
+  prologue = oneTimeLinkPrologue(link),
+): Promise<NoiseHandshake> {
+  return await createNoiseInitiator({
+    prologue,
+    staticKeyPair: await generateNoiseKeyPair(),
+    remoteStaticPublicKey: link.ephPub,
+  });
+}
+
+/**
+ * The phone, on its own rendezvous socket, after a completed handshake: reads
+ * the Burrow's transport frames in order, which is the only order its receive
+ * nonce accepts.
+ */
+export class TestOneTimePhone {
+  #read = 0;
+
+  constructor(
+    readonly socket: RendezvousSocket,
+    readonly session: NoiseTransportSession,
+  ) {}
+
+  sendControl(value: Record<string, unknown>): void {
+    this.socket.send(oneTimeFrameText('transport', this.session.sendControl(value)));
+  }
+
+  /** One protocol-v1 message on the rendezvous — which the Burrow must refuse. */
+  sendApp(payload: unknown): void {
+    for (const ct of this.session.sendApp(utf8Encode(JSON.stringify(payload)))) {
+      this.socket.send(oneTimeFrameText('transport', ct));
+    }
+  }
+
+  /** The next Burrow->phone transport message off the rendezvous, opened. */
+  async next(): Promise<unknown> {
+    const frame = await flushUntil(
+      () => this.socket.frames().filter((f) => f.step === 'transport')[this.#read],
+    );
+    this.#read += 1;
+    return openReceipt(this.session, fromBase64Url(frame.ct as string));
+  }
+}
+
+/** Join `link`'s room on `rendezvous`, send message 1, and read message 2. */
+export async function joinOneTimeRoom(
+  rendezvous: TestRendezvous,
+  link: OneTimeLink,
+): Promise<TestOneTimePhone> {
+  const socket = rendezvous.createClientSocket(rendezvous.clientUrl(link.roomId));
+  await flushUntil(() => (socket.readyState === 1 ? true : undefined));
+  const handshake = await oneTimeInitiator(link);
+  socket.send(oneTimeFrameText('init', await handshake.writeMessage()));
+  const response = await flushUntil(() => socket.frames().find((f) => f.step === 'response'));
+  await handshake.readMessage(fromBase64Url(response.ct as string));
+  return new TestOneTimePhone(socket, new NoiseTransportSession(handshake.session));
+}
+
+/**
+ * The phone's half of the direct path, up to the Burrow's own switch: offer,
+ * answer, and the channel open. The phone's own `direct-switch` is the
+ * caller's to send. Throws where the Burrow declines, or answers the offer
+ * with anything but its switch after the answer.
+ */
+export async function negotiateOneTimeDirect(
+  phone: TestOneTimePhone,
+  network: FakeDirectNetwork,
+  setTimer?: RemoteTimer,
+): Promise<{ peer: DirectPeer; inbound: Uint8Array[] }> {
+  const inbound: Uint8Array[] = [];
+  const peer = new DirectPeer({
+    peer: network.createOfferer(),
+    ...(setTimer ? { setTimer } : {}),
+    handlers: {
+      onOpen: () => {},
+      onFrame: (frame) => void inbound.push(frame),
+      onClosed: () => {},
+      onViolation: () => {},
+    },
+  });
+  const offer = await peer.offer();
+  if (offer === null) throw new Error('the test peer could not describe an offer');
+  phone.sendControl({ v: 1, t: 'direct-offer', sdp: offer });
+  const answer = (await phone.next()) as Record<string, unknown>;
+  if (answer.t !== 'direct-answer') throw new Error(`expected an answer, got ${String(answer.t)}`);
+  await peer.acceptAnswer(answer.sdp as string);
+  // The Burrow's switch is its last message on the rendezvous.
+  const switched = (await phone.next()) as Record<string, unknown>;
+  if (switched.v !== 1 || switched.t !== 'direct-switch' || Object.keys(switched).length !== 2) {
+    throw new Error(`expected the Burrow's switch, got ${JSON.stringify(switched)}`);
+  }
+  return { peer, inbound };
 }

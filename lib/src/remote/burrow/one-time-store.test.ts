@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BurrowLink } from '../../lib/platform/types';
-import { oneTimeWaiting } from '../../host/remote/test-burrow-link';
+import {
+  makeEventedBurrowLink,
+  oneTimeWaiting,
+  type EventedBurrowLink,
+} from '../../host/remote/test-burrow-link';
 import type { OneTimeState } from './one-time-runtime';
 
 let burrowLink: BurrowLink | undefined;
@@ -17,28 +21,16 @@ import {
   subscribeToOneTime,
 } from './one-time-store';
 
-type Handler = (data: unknown) => void;
-
-/** A link answering `command` and relaying `emit` to whoever subscribed by name. */
+/** A link answering `command`, installed as the platform's. */
 function fakeLink(command: (cmd: string, params?: unknown) => Promise<unknown>) {
-  const listeners = new Map<string, Set<Handler>>();
-  const link = {
-    command: vi.fn(command),
-    respond: () => {},
-    notify: () => {},
-    on: vi.fn((name: string, listener: Handler) => {
-      const set = listeners.get(name) ?? new Set<Handler>();
-      set.add(listener);
-      listeners.set(name, set);
-      return () => set.delete(listener);
-    }),
-    emit(state: unknown) {
-      for (const listener of listeners.get('one-time') ?? []) listener({ name: 'one-time', state });
-    },
-    listening: () => listeners.get('one-time')?.size ?? 0,
-  };
+  const link = makeEventedBurrowLink(vi.fn(command));
   burrowLink = link;
   return link;
+}
+
+/** One `one-time` event carrying `state`, as the service sends it. */
+function emitState(link: EventedBurrowLink<BurrowLink['command']>, state: unknown): void {
+  link.emit('one-time', { name: 'one-time', state });
 }
 
 /** A read the test answers by hand, so an event can land while it is in flight. */
@@ -78,7 +70,7 @@ describe('one-time store', () => {
     expect(link.command).toHaveBeenCalledWith('oneTimeStatus');
     expect(getOneTimeSnapshot()).toEqual({ kind: 'ready', state: { status: 'idle' } });
 
-    link.emit(CONNECTED);
+    emitState(link, CONNECTED);
     expect(getOneTimeSnapshot()).toEqual({ kind: 'ready', state: CONNECTED });
   });
 
@@ -87,9 +79,9 @@ describe('one-time store', () => {
     subscribe();
     await flush();
 
-    link.emit({ status: 'connected' });
-    link.emit({ status: 'ended' });
-    link.emit(undefined);
+    emitState(link, { status: 'connected' });
+    emitState(link, { status: 'ended' });
+    emitState(link, undefined);
     expect(getOneTimeSnapshot()).toEqual({ kind: 'ready', state: CONNECTED });
   });
 
@@ -100,7 +92,7 @@ describe('one-time store', () => {
     const link = fakeLink(() => read.promise);
     subscribe();
 
-    link.emit(CONNECTED);
+    emitState(link, CONNECTED);
     read.resolve(oneTimeWaiting());
     await flush();
     expect(getOneTimeSnapshot()).toEqual({ kind: 'ready', state: CONNECTED });
@@ -138,7 +130,7 @@ describe('one-time store', () => {
     // The service's events arrive before its answer; the answer is then stale.
     link.command.mockImplementation(async (cmd) => {
       if (cmd !== 'oneTimeOpen') return { status: 'idle' };
-      link.emit(CONNECTED);
+      emitState(link, CONNECTED);
       return waiting;
     });
     await openOneTime();
@@ -180,11 +172,11 @@ describe('one-time store', () => {
     const read = deferred<unknown>();
     const link = fakeLink(() => read.promise);
     subscribe();
-    expect(link.listening()).toBe(1);
+    expect(link.listening('one-time')).toBe(1);
 
     unsubscribe?.();
     unsubscribe = null;
-    expect(link.listening()).toBe(0);
+    expect(link.listening('one-time')).toBe(0);
     // A read in flight for a subscriber that left cannot land on the next one.
     read.resolve(CONNECTED);
     await flush();

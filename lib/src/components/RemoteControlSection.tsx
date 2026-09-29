@@ -3,8 +3,8 @@ import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { OneTimeConnection } from './OneTimeConnection';
-import { FIELD_HINT, FIELD_LABEL, own, useMinutesLeft } from './remote-control-shared';
-import { ScannableCode } from './ScannableCode';
+import { FIELD_HINT, FIELD_LABEL, own } from './remote-control-shared';
+import { ExpiringCode } from './ScannableCode';
 import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
   PairingOutcome,
@@ -863,7 +863,6 @@ function SetupPhonePanel({
 }) {
   const shown = displayedQr(state);
   const terminal = terminalCopy(state);
-  const minutesLeft = useMinutesLeft(shown?.expiresAt ?? null);
 
   return (
     <div className="mt-2 rounded border border-border p-2">
@@ -887,14 +886,12 @@ function SetupPhonePanel({
             In Dormouse Pocket on the phone, tap {SCAN_LABEL} and point it at this. Nothing to type
             — no address, no password.
           </div>
-          <div className="mt-2 flex justify-center">
-            <ScannableCode url={shown.url} label="Setup code for this machine" />
-          </div>
-          <div className="mt-1.5 text-center text-xs text-muted">
-            {(minutesLeft ?? 0) > 0
-              ? `Good for one phone. Expires in ${minutesLeft} min.`
-              : 'This code has expired — get a new one.'}
-          </div>
+          <ExpiringCode
+            url={shown.url}
+            label="Setup code for this machine"
+            expiresAt={shown.expiresAt}
+            noun="code"
+          />
         </>
       ) : state.phase === 'failed' ? (
         // The panel's own slot, not the enrolled view's: this mint may have been

@@ -46,7 +46,7 @@ import {
   type OneTimeResult,
 } from './one-time-client';
 import type { PageVisibility } from './session-core';
-import { FakeDirectNetwork, type FakePeer } from '../direct/test-fake-peer';
+import { FakeDirectNetwork, collect, type FakePeer } from '../direct/test-fake-peer';
 import {
   FORGED_CT,
   flushUntil,
@@ -56,7 +56,7 @@ import {
   testRoutingId,
 } from '../test-e2e-client';
 import { FakeSocket } from '../test-fake-socket';
-import { RendezvousSocket } from '../test-rendezvous';
+import { RendezvousSocket, oneTimeFrameText } from '../test-rendezvous';
 import { createTestClock, type TestClock } from '../test-timers';
 
 const WS_ORIGIN = 'wss://hosted.example';
@@ -107,11 +107,7 @@ function makeClient(
     visibility: VISIBLE,
     createDirectPeer:
       options.createDirectPeer === undefined
-        ? () => {
-            const peer = network.createOfferer();
-            offerers.push(peer);
-            return peer;
-          }
+        ? collect(offerers, () => network.createOfferer())
         : options.createDirectPeer,
   });
 }
@@ -125,9 +121,7 @@ function phoneSocket(): RendezvousSocket {
 
 /** Every JSON frame the phone put on its socket, in order. */
 function fromPhone(): Array<Record<string, unknown>> {
-  return phoneSocket()
-    .sent.filter((data): data is string => typeof data === 'string' && data !== ONE_TIME_PING)
-    .map((data) => JSON.parse(data) as Record<string, unknown>);
+  return phoneSocket().sentFrames();
 }
 
 /**
@@ -191,7 +185,7 @@ class ScriptedBurrow {
   }
 
   deliver(step: 'response' | 'transport', ciphertext: Uint8Array): void {
-    phoneSocket().deliver(JSON.stringify({ t: 'one-time', step, ct: toBase64Url(ciphertext) }));
+    phoneSocket().deliver(oneTimeFrameText(step, ciphertext));
   }
 }
 
@@ -260,7 +254,7 @@ describe('OneTimeClient: the rendezvous socket', () => {
     await flushUntil(() => (sockets.length > 0 && fromPhone().length > 0 ? true : undefined));
     const parse = vi.spyOn(JSON, 'parse');
     // Valid JSON, and a well-shaped frame, one character past the bound.
-    const oversize = JSON.stringify({ t: 'one-time', step: 'response', ct: 'AAAA' }).padEnd(
+    const oversize = oneTimeFrameText('response', 'AAAA').padEnd(
       MAX_ONE_TIME_FRAME_LENGTH + 1,
       ' ',
     );
@@ -573,7 +567,7 @@ describe('OneTimeClient: the direct path', () => {
     const { result } = await connecting(client, burrow);
     const settled = vi.fn();
     void result.then(settled);
-    phoneSocket().deliver(JSON.stringify({ t: 'one-time', step: 'transport', ct: FORGED_CT }));
+    phoneSocket().deliver(oneTimeFrameText('transport', FORGED_CT));
     await settleUntil(() => settled.mock.calls.length > 0);
     expect(settled).toHaveBeenCalledWith({ ok: false, message: ONE_TIME_DIRECT_FAILED_MESSAGE });
     expect(offerers[0]!.closed).toBe(true);

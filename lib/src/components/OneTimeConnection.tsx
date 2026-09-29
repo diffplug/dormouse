@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ModalReviewBlock, modalActionButton } from './design';
-import { FIELD_HINT, FIELD_LABEL, own, useMinutesLeft } from './remote-control-shared';
-import { ScannableCode } from './ScannableCode';
+import { FIELD_HINT, FIELD_LABEL, oneTimeControlSentence, own } from './remote-control-shared';
+import { ExpiringCode } from './ScannableCode';
 import { writeTextToClipboard } from '../lib/clipboard';
 import type {
   OneTimeEndReason,
@@ -217,7 +217,7 @@ function OneTimePanel({
     case 'connected':
       body = (
         <div className="mt-1 text-sm leading-relaxed text-foreground">
-          {state.label || '(unnamed)'} has full control of your terminals.
+          {oneTimeControlSentence(state.label)}
         </div>
       );
       actions = cancel('End');
@@ -256,21 +256,13 @@ function OneTimePanel({
 
 /** The live link: as a code for the phone's camera, and as text to send it. */
 function WaitingLink({ url, expiresAt }: { url: string; expiresAt: number }) {
-  const minutesLeft = useMinutesLeft(expiresAt) ?? 0;
   return (
     <>
       <div className="mt-1 text-sm leading-relaxed text-muted">
         Scan this with your phone’s camera, or open the link below on it. Phone and computer must be
         on the same Wi-Fi.
       </div>
-      <div className="mt-2 flex justify-center">
-        <ScannableCode url={url} label="One-time link for this machine" />
-      </div>
-      <div className="mt-1.5 text-center text-xs text-muted">
-        {minutesLeft > 0
-          ? `Good for one phone. Expires in ${minutesLeft} min.`
-          : 'This link has expired — get a new one.'}
-      </div>
+      <ExpiringCode url={url} label="One-time link for this machine" expiresAt={expiresAt} noun="link" />
       {/* `select-all`: one click takes the whole link, for a person copying it
           by hand where the clipboard is refused. */}
       <ModalReviewBlock className="mt-2 select-all" density="compact" wrap="breakAll">

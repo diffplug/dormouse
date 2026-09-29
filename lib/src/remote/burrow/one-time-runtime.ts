@@ -18,14 +18,11 @@ import {
   E2E_INIT_BURST,
   E2E_INIT_REFILL_INTERVAL_MS,
   MAX_ONE_TIME_FORWARDED,
-  MAX_ONE_TIME_FRAME_LENGTH,
   NoiseError,
   NoiseTransportSession,
   ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
-  ONE_TIME_PING,
-  ONE_TIME_PING_INTERVAL_MS,
   ONE_TIME_PONG,
   ONE_TIME_WS_ROUTES,
   TokenBucket,
@@ -60,7 +57,8 @@ import {
 } from 'remote-lib-common';
 
 import type { DirectPeerFactory } from '../direct/direct-peer';
-import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import { parseOneTimeFrame, RendezvousHold } from '../one-time-rendezvous';
+import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import {
   EstablishedE2eSession,
   sealControl,
@@ -69,9 +67,6 @@ import {
 
 /** How long {@link OneTimeRuntime.open} waits for the room to announce itself. */
 export const ONE_TIME_OPEN_TIMEOUT_MS = 8_000;
-
-/** The close the Burrow ends its own rendezvous socket with. */
-const NORMAL_CLOSURE = 1000;
 
 /**
  * Why a one-time connection ended, as the laptop's panel words it. A closed set
@@ -229,13 +224,8 @@ export class OneTimeRuntime {
   /** Resolves {@link open} when `opening` ends, either way. */
   #opened: ((state: OneTimeState) => void) | null = null;
 
-  /**
-   * The rendezvous socket, while this runtime still reads it. Nulled — before
-   * `close()`, so its own close event is ignored — at the switch and at the
-   * end, and by its own close.
-   */
-  #ws: RemoteWebSocket | null = null;
-  #cancelPing: (() => void) | null = null;
+  /** The rendezvous socket, while this runtime still reads it; closed at the switch and at the end. */
+  readonly #rendezvous: RendezvousHold;
 
   /**
    * The one-use responder keypair. **Erased at the reservation**, so no second
@@ -283,6 +273,7 @@ export class OneTimeRuntime {
     this.#onChange = options.onChange;
     this.#now = options.now ?? (() => Date.now());
     this.#setTimer = options.setTimer ?? realTimer;
+    this.#rendezvous = new RendezvousHold(this.#setTimer);
     this.#initTokens = new TokenBucket({
       capacity: E2E_INIT_BURST,
       refillIntervalMs: E2E_INIT_REFILL_INTERVAL_MS,
@@ -340,12 +331,13 @@ export class OneTimeRuntime {
       this.#end('unreachable');
       return;
     }
-    this.#ws = ws;
+    const rendezvous = this.#rendezvous;
+    rendezvous.hold(ws);
     ws.addEventListener('open', () => {
-      if (this.#ws === ws) this.#armPing(ws);
+      if (rendezvous.reads(ws)) rendezvous.armPing(ws);
     });
     ws.addEventListener('message', (ev) => {
-      if (this.#ws === ws) this.#onMessage((ev as { data?: unknown }).data);
+      if (rendezvous.reads(ws)) this.#onMessage((ev as { data?: unknown }).data);
     });
     ws.addEventListener('error', () => {
       // A `close` always follows.
@@ -353,50 +345,17 @@ export class OneTimeRuntime {
     ws.addEventListener('close', (ev) => {
       // Only the socket this runtime still reads: the one it closed itself at
       // the switch or the end was detached first.
-      if (this.#ws !== ws) return;
-      this.#detachRendezvous();
+      if (!rendezvous.reads(ws)) return;
+      rendezvous.detach();
       this.#enqueue({ kind: 'closed', code: closeCode(ev) });
     });
-  }
-
-  /** Keep the socket's path alive while it is open; the room answers without waking. */
-  #armPing(ws: RemoteWebSocket): void {
-    this.#cancelPing = this.#setTimer(() => {
-      this.#cancelPing = null;
-      if (this.#ws !== ws) return;
-      try {
-        ws.send(ONE_TIME_PING);
-      } catch {
-        // socket mid-close
-      }
-      this.#armPing(ws);
-    }, ONE_TIME_PING_INTERVAL_MS);
-  }
-
-  /** Stop reading the socket: nothing it says or does from here is an event. */
-  #detachRendezvous(): RemoteWebSocket | null {
-    const ws = this.#ws;
-    this.#ws = null;
-    this.#cancelPing?.();
-    this.#cancelPing = null;
-    return ws;
-  }
-
-  /** Detach the socket, then close it normally. */
-  #closeRendezvous(): void {
-    const ws = this.#detachRendezvous();
-    try {
-      ws?.close(NORMAL_CLOSURE);
-    } catch {
-      // already closing
-    }
   }
 
   /** One frame to the phone, through the room. Every Burrow->phone byte goes through here. */
   #sendFrame(step: OneTimeBurrowFrame['step'], ciphertext: Uint8Array): void {
     const frame: OneTimeBurrowFrame = { t: 'one-time', step, ct: toBase64Url(ciphertext) };
     try {
-      this.#ws?.send(JSON.stringify(frame));
+      this.#rendezvous.socket?.send(JSON.stringify(frame));
     } catch {
       // socket mid-close
     }
@@ -415,7 +374,7 @@ export class OneTimeRuntime {
       this.#end('burrow-error');
       return;
     }
-    const frame = parseFrame(raw);
+    const frame = parseOneTimeFrame(raw);
     if (!isOneTimeClientFrame(frame)) return;
     this.#enqueue({ kind: 'frame', frame });
   }
@@ -429,7 +388,7 @@ export class OneTimeRuntime {
    * expiry that over-promised would send a phone into a room already gone.
    */
   #onRoomMessage(raw: unknown): void {
-    const room = parseFrame(raw);
+    const room = parseOneTimeFrame(raw);
     const keyPair = this.#keyPair;
     if (!isOneTimeRoomFrame(room) || !keyPair) {
       console.warn('[one-time] the rendezvous did not announce a room');
@@ -660,7 +619,7 @@ export class OneTimeRuntime {
     const state = this.#state;
     if (this.#established !== e2e || state.status !== 'connecting') return;
     if (path === 'direct') {
-      this.#closeRendezvous();
+      this.#rendezvous.close();
       // Nothing queued is read any more: the room is not a path from here.
       this.#work.length = 0;
       this.#setState({ status: 'connected', label: state.label, since: this.#now() });
@@ -793,7 +752,7 @@ export class OneTimeRuntime {
     this.#state = { status: 'ended', reason };
     this.#clearDeadline();
     this.#work.length = 0;
-    this.#closeRendezvous();
+    this.#rendezvous.close();
     const e2e = this.#established;
     this.#established = null;
     this.#reserved = null;
@@ -836,21 +795,6 @@ function linkFor(room: OneTimeRoomFrame, keyPair: NoiseKeyPair, now: number): On
   };
 }
 
-/**
- * One rendezvous message as JSON, or `undefined`. **Measured before the parse,
- * not after**: every guard reads a value `JSON.parse` has already materialized,
- * so without this a hostile room buys an unbounded parse in the process that
- * owns every PTY. A non-string payload is dropped the same way.
- */
-function parseFrame(raw: unknown): unknown {
-  if (typeof raw !== 'string' || raw.length > MAX_ONE_TIME_FRAME_LENGTH) return undefined;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
-
 /** What a close from the room, before the switch, ends the connection as. */
 function endReasonForClose(code: number | undefined): OneTimeEndReason {
   switch (code) {
@@ -864,10 +808,4 @@ function endReasonForClose(code: number | undefined): OneTimeEndReason {
     default:
       return 'rendezvous-lost';
   }
-}
-
-/** The `code` of a `CloseEvent`, or undefined if the socket gave us none. */
-function closeCode(ev: unknown): number | undefined {
-  const code = (ev as { code?: unknown } | null)?.code;
-  return typeof code === 'number' ? code : undefined;
 }

@@ -51,11 +51,10 @@ import { mountRemoteWall } from './remote-wall';
 import {
   PairingCodeView,
   RELAYED_TRANSPORT,
-  TRANSPORT_PATH_LABELS,
+  TransportIndicator,
   UnsupportedBrowser,
   Waiting,
   deviceLabel,
-  transportTitle,
   type TransportView,
 } from './views';
 
@@ -694,7 +693,7 @@ export function ConnectedView({
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
-  /** Which path carries the session, and why; see {@link transportTitle}. */
+  /** Which path carries the session, and why; see {@link TransportIndicator}. */
   transport?: TransportView;
   onLeave: () => void;
   onError?: (error: unknown) => void;
@@ -706,9 +705,7 @@ export function ConnectedView({
           ‹ {BURROWS_TITLE}
         </button>
         <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
-        <span className={PK.headerNote} title={transportTitle(transport)}>
-          {TRANSPORT_PATH_LABELS[transport.path].label}
-        </span>
+        <TransportIndicator transport={transport} />
       </header>
       <div className={PK.wallHost}>
         <PocketWall adapter={adapter} onError={onError} />

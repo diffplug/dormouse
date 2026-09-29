@@ -32,21 +32,15 @@ import { PocketWall } from '../pocket-app/PocketWall';
 import { PK, pkButton } from '../pocket-app/pocket-chrome';
 import { applyPocketTheme } from '../pocket-app/pocket-theme';
 import { mountRemoteWall, type RemoteWallClient } from '../pocket-app/remote-wall';
-import {
-  PairingCodeView,
-  TRANSPORT_PATH_LABELS,
-  UnsupportedBrowser,
-  Waiting,
-  transportTitle,
-} from '../pocket-app/views';
+import { PairingCodeView, PocketScreen, TransportIndicator, Waiting } from '../pocket-app/views';
 
 // --- Copy -------------------------------------------------------------------
 
 /** The header on every screen but the wall, which names the computer instead. */
-export const ONE_TIME_HEADING = 'One-time connection';
+const ONE_TIME_HEADING = 'One-time connection';
 
 export const ONE_TIME_UNSUPPORTED_TITLE = 'This browser cannot make a one-time connection';
-export const ONE_TIME_UNSUPPORTED_BODY =
+const ONE_TIME_UNSUPPORTED_BODY =
   'A one-time connection needs X25519 in the Web Crypto API and WebRTC, which this browser ' +
   'does not have. Update it, or open the link in a newer browser.';
 
@@ -58,14 +52,14 @@ export const ONE_TIME_INVALID_MESSAGE =
 export const ONE_TIME_NOT_CONNECTED_TITLE = 'Not connected';
 
 export const ONE_TIME_READY_TITLE = 'Connect to your computer';
-export const ONE_TIME_SAME_WIFI =
+const ONE_TIME_SAME_WIFI =
   'Your phone and computer must be on the same Wi-Fi. Nothing is saved on this phone.';
 export const ONE_TIME_CONNECT_LABEL = 'Connect';
 
-export const ONE_TIME_CODE_INSTRUCTION = 'Type these two digits on your computer.';
+const ONE_TIME_CODE_INSTRUCTION = 'Type these two digits on your computer.';
 
 export const ONE_TIME_CONNECTING_TITLE = 'Connecting directly…';
-export const ONE_TIME_CONNECTING_BODY =
+const ONE_TIME_CONNECTING_BODY =
   'Keep this page open. Your phone and computer must be on the same Wi-Fi.';
 
 export const ONE_TIME_END_LABEL = 'End';
@@ -100,7 +94,7 @@ export type OneTimePageClient = RemoteWallClient &
  * Hosted, `ws:` on the loopback dev loop — the browser's own WebSocket, and
  * the phone's one direct-peer factory. Building it opens nothing.
  */
-export function createOneTimePageClient(): OneTimePageClient {
+function createOneTimePageClient(): OneTimePageClient {
   return new OneTimeClient({
     wsOrigin: location.origin.replace(/^http/, 'ws'),
     createWebSocket: (url) => new WebSocket(url) as unknown as RemoteWebSocket,
@@ -257,11 +251,10 @@ export function OneTimeApp({
       return <Waiting />;
     case 'unsupported':
       return (
-        <UnsupportedBrowser
-          heading={ONE_TIME_HEADING}
-          title={ONE_TIME_UNSUPPORTED_TITLE}
-          body={ONE_TIME_UNSUPPORTED_BODY}
-        />
+        <PocketScreen heading={ONE_TIME_HEADING}>
+          <p className={PK.title}>{ONE_TIME_UNSUPPORTED_TITLE}</p>
+          <p className={PK.lead}>{ONE_TIME_UNSUPPORTED_BODY}</p>
+        </PocketScreen>
       );
     case 'invalid':
       return <OneTimeNotice title={ONE_TIME_INVALID_TITLE} message={ONE_TIME_INVALID_MESSAGE} />;
@@ -279,12 +272,7 @@ export function OneTimeApp({
       return <OneTimeConnecting onCancel={endNow} />;
     case 'wall':
       return (
-        <OneTimeWall
-          burrowLabel={phase.burrowLabel}
-          adapter={phase.adapter}
-          onEnd={endNow}
-          onError={endNow}
-        />
+        <OneTimeWall burrowLabel={phase.burrowLabel} adapter={phase.adapter} onEnd={endNow} />
       );
     case 'ended':
       return <OneTimeNotice title={ONE_TIME_NOT_CONNECTED_TITLE} message={phase.message} />;
@@ -316,33 +304,15 @@ function LiveReady({
 
 // --- Screens ----------------------------------------------------------------
 
-/** A header, and whatever the screen says under it. */
-function Screen({
-  heading = ONE_TIME_HEADING,
-  children,
-}: {
-  heading?: string;
-  children: React.ReactNode;
-}): React.ReactElement {
-  return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <h1 className={PK.headerTitle}>{heading}</h1>
-      </header>
-      <div className={clsx(PK.body, PK.bodyCenter)}>{children}</div>
-    </div>
-  );
-}
-
 /** A link that cannot be used, or a connection that is over: no action, just what to do next. */
 export function OneTimeNotice({ title, message }: { title: string; message: string }): React.ReactElement {
   return (
-    <Screen>
+    <PocketScreen heading={ONE_TIME_HEADING}>
       <p className={PK.title}>{title}</p>
       <p className={PK.lead} role="status">
         {message}
       </p>
-    </Screen>
+    </PocketScreen>
   );
 }
 
@@ -355,14 +325,14 @@ export function OneTimeReady({
   onConnect: () => void;
 }): React.ReactElement {
   return (
-    <Screen>
+    <PocketScreen heading={ONE_TIME_HEADING}>
       <p className={PK.title}>{ONE_TIME_READY_TITLE}</p>
       <p className={PK.lead}>{ONE_TIME_SAME_WIFI}</p>
       <button type="button" className={pkButton({ block: true })} onClick={onConnect}>
         {ONE_TIME_CONNECT_LABEL}
       </button>
       <p className={clsx(PK.fieldLabel, 'text-center')}>{expiresInText(expiresInMs)}</p>
-    </Screen>
+    </PocketScreen>
   );
 }
 
@@ -387,7 +357,7 @@ export function OneTimeCode({
 /** Confirmed on the computer; the direct path is forming. */
 export function OneTimeConnecting({ onCancel }: { onCancel: () => void }): React.ReactElement {
   return (
-    <Screen>
+    <PocketScreen heading={ONE_TIME_HEADING}>
       <p className={PK.title} role="status">
         {ONE_TIME_CONNECTING_TITLE}
       </p>
@@ -395,7 +365,7 @@ export function OneTimeConnecting({ onCancel }: { onCancel: () => void }): React
       <button type="button" className={pkButton({ tone: 'outline', block: true })} onClick={onCancel}>
         Cancel
       </button>
-    </Screen>
+    </PocketScreen>
   );
 }
 
@@ -403,30 +373,27 @@ export function OneTimeConnecting({ onCancel }: { onCancel: () => void }): React
  * The session: the computer's label, the path — always direct here, since
  * the wall mounts only after the switch — and End, over Pocket's mobile wall.
  */
-export function OneTimeWall({
+function OneTimeWall({
   burrowLabel,
   adapter,
   onEnd,
-  onError,
 }: {
   burrowLabel: string;
   adapter: RemotePtyAdapter;
+  /** End, and a wall that fails under the session, both end the page. */
   onEnd: () => void;
-  onError?: (error: unknown) => void;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
       <header className={PK.header}>
         <h1 className={PK.headerTitle}>{burrowLabel}</h1>
-        <span className={PK.headerNote} title={transportTitle({ path: 'direct', cause: null })}>
-          {TRANSPORT_PATH_LABELS.direct.label}
-        </span>
+        <TransportIndicator transport={{ path: 'direct', cause: null }} />
         <button type="button" className={pkButton({ tone: 'ghost', size: 'sm' })} onClick={onEnd}>
           {ONE_TIME_END_LABEL}
         </button>
       </header>
       <div className={PK.wallHost}>
-        <PocketWall adapter={adapter} onError={onError} restoreTheme={applyPocketTheme} />
+        <PocketWall adapter={adapter} onError={onEnd} restoreTheme={applyPocketTheme} />
       </div>
     </div>
   );

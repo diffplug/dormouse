@@ -123,6 +123,44 @@ export function oneTimeWaiting(
   };
 }
 
+/** A link that answers through its `command` and relays {@link emit} to its subscribers. */
+export interface EventedBurrowLink<C extends BurrowLink['command']> extends BurrowLink {
+  /** Exactly the `command` it was made with, so a caller's spy reads its calls here. */
+  readonly command: C;
+  /** Deliver `data` to every listener subscribed to `name`, as the bridge would. */
+  emit(name: string, data: unknown): void;
+  /** How many listeners `name` has. */
+  listening(name: string): number;
+}
+
+/**
+ * A link a case drives by hand: `command` answers every command, and
+ * {@link EventedBurrowLink.emit} stands in for the service's pushed events. The
+ * listener map the Settings section's, the one-time store's, and the
+ * indicator's tests all need, kept here so a caller wanting spies passes a
+ * `vi.fn` as `command` rather than this file importing a framework.
+ */
+export function makeEventedBurrowLink<C extends BurrowLink['command']>(
+  command: C,
+): EventedBurrowLink<C> {
+  const listeners = new Map<string, Set<(data: unknown) => void>>();
+  return {
+    command,
+    respond: () => {},
+    notify: () => {},
+    on: (name, listener) => {
+      const set = listeners.get(name) ?? new Set<(data: unknown) => void>();
+      set.add(listener);
+      listeners.set(name, set);
+      return () => void set.delete(listener);
+    },
+    emit(name, data) {
+      for (const listener of listeners.get(name) ?? []) listener(data);
+    },
+    listening: (name) => listeners.get(name)?.size ?? 0,
+  };
+}
+
 /** What {@link makeStubBurrowLink} should answer. */
 export interface PrimedBurrow {
   /** What `status` answers. */

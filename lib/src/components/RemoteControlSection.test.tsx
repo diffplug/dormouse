@@ -26,6 +26,7 @@ import {
 } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
+  makeEventedBurrowLink,
   makeStubBurrowLink,
   OFFER_STATUS,
   oneTimeWaiting,
@@ -38,30 +39,16 @@ import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-type Handler = (data: unknown) => void;
-
 function makeLink(command: (cmd: string, params?: unknown) => Promise<unknown>) {
-  const listeners = new Map<string, Set<Handler>>();
-  return {
-    command: vi.fn(async (cmd: string, params?: unknown) => {
+  return makeEventedBurrowLink(
+    vi.fn(async (cmd: string, params?: unknown) => {
       const answer = await command(cmd, params);
       // Every service answers `oneTimeStatus`. A case about the Relay answers
       // every command with one status, so that reads as a machine with no
       // one-time connection rather than as a bridge answering nonsense.
       return cmd === 'oneTimeStatus' && !isOneTimeState(answer) ? { status: 'idle' } : answer;
     }),
-    on: vi.fn((name: string, listener: Handler) => {
-      const set = listeners.get(name) ?? new Set<Handler>();
-      set.add(listener);
-      listeners.set(name, set);
-      return () => set.delete(listener);
-    }),
-    respond: vi.fn(),
-    notify: vi.fn(),
-    emit(name: string, data: unknown) {
-      for (const listener of listeners.get(name) ?? []) listener(data);
-    },
-  };
+  );
 }
 
 /** Frozen only where a setup code's countdown has to read the same every run. */

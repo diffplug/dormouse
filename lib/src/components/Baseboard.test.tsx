@@ -29,6 +29,7 @@ import { resetShellStore, seedShellStore } from '../lib/shell-store';
 import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
+import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -388,13 +389,7 @@ describe('Baseboard one-time connection', () => {
     const platform = await import('../lib/platform');
     vi.spyOn(platform, 'getPlatform').mockReturnValue({
       alertPublishSettings: vi.fn(),
-      burrow: {
-        command: async (cmd: string) =>
-          cmd === 'oneTimeStatus' ? { status: 'connected', label: 'Pixel 9', since: 1 } : {},
-        respond: () => {},
-        notify: () => {},
-        on: () => () => {},
-      },
+      burrow: makeStubBurrowLink({ oneTime: { status: 'connected', label: 'Pixel 9', since: 1 } }),
     } as unknown as ReturnType<typeof platform.getPlatform>);
 
     await act(async () => root.render(

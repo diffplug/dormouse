@@ -123,7 +123,7 @@ export const ONE_TIME_LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
  * on HTTPS, or on HTTP at a loopback host, and short enough to fit a link.
  * `oneTimeAvailability`'s `origin-invalid` half, which the test pins this to.
  */
-export function isUsableOneTimeOrigin(origin) {
+function isUsableOneTimeOrigin(origin) {
   if (typeof origin !== 'string' || origin.length > MAX_ONE_TIME_ORIGIN_LENGTH) return false;
   let url;
   try {

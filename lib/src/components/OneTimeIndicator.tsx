@@ -1,4 +1,5 @@
 import { useState, useSyncExternalStore } from 'react';
+import { oneTimeControlSentence } from './remote-control-shared';
 import {
   endOneTime,
   getOneTimeSnapshot,
@@ -29,7 +30,7 @@ export function OneTimeIndicator() {
   return (
     <span
       className="flex shrink-0 items-center gap-1.5 pb-1 text-sm font-mono text-app-fg"
-      title={`${state.label || '(unnamed)'} has full control of your terminals.`}
+      title={oneTimeControlSentence(state.label)}
     >
       <span>{connected ? 'Phone connected' : 'Phone connecting…'}</span>
       <span aria-hidden className="text-muted">·</span>

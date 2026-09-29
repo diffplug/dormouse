@@ -9,12 +9,8 @@ import { hostname } from 'node:os';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   API_ROUTES,
-  NoiseTransportSession,
   ONE_TIME_WS_ROUTES,
-  createNoiseInitiator,
-  fromBase64Url,
   mintNoiseStaticKeyPair,
-  oneTimeLinkPrologue,
   parseOneTimeLinkUrl,
   parsePairingInvitationUrl,
   generateNoiseKeyPair,
@@ -25,14 +21,12 @@ import {
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
-import { DirectPeer } from '../../remote/direct/direct-peer';
 import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
   createTestAuthenticator,
   flushUntil,
   openPairingSession,
-  openReceipt,
   pairThroughSocket,
   readOutcome,
   settle,
@@ -42,7 +36,9 @@ import {
 } from '../../remote/test-e2e-client';
 import {
   createTestRendezvous,
-  type RendezvousSocket,
+  joinOneTimeRoom,
+  negotiateOneTimeDirect,
+  type TestOneTimePhone,
   type TestRendezvous,
 } from '../../remote/test-rendezvous';
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
@@ -1281,29 +1277,6 @@ describe('pushTest', () => {
  * commands, the event, `serving`, and the approval routed by kind.
  */
 describe('one-time connection', () => {
-  /** The phone after IK, reading the Burrow's transport frames in order. */
-  class Phone {
-    #read = 0;
-
-    constructor(
-      readonly socket: RendezvousSocket,
-      readonly session: NoiseTransportSession,
-    ) {}
-
-    sendControl(value: Record<string, unknown>): void {
-      const ct = toBase64Url(this.session.sendControl(value));
-      this.socket.send(JSON.stringify({ t: 'one-time', step: 'transport', ct }));
-    }
-
-    async next(): Promise<unknown> {
-      const frame = await flushUntil(
-        () => this.socket.frames().filter((f) => f.step === 'transport')[this.#read],
-      );
-      this.#read += 1;
-      return openReceipt(this.session, fromBase64Url(frame.ct as string));
-    }
-  }
-
   type Waiting = Extract<OneTimeState, { status: 'waiting' }>;
 
   async function open(): Promise<Waiting> {
@@ -1315,25 +1288,14 @@ describe('one-time connection', () => {
   }
 
   /** Read the link and complete IK against it, as the page does on Connect. */
-  async function join(url: string): Promise<Phone> {
+  async function join(url: string): Promise<TestOneTimePhone> {
     const link = await parseOneTimeLinkUrl(url, ONE_TIME_ORIGIN);
     if (!link) throw new Error(`a phone could not read the link: ${url}`);
-    const socket = rendezvous.createClientSocket(rendezvous.clientUrl(link.roomId));
-    await flushUntil(() => (socket.readyState === 1 ? true : undefined));
-    const handshake = await createNoiseInitiator({
-      prologue: oneTimeLinkPrologue(link),
-      staticKeyPair: await generateNoiseKeyPair(),
-      remoteStaticPublicKey: link.ephPub,
-    });
-    const ct = toBase64Url(await handshake.writeMessage());
-    socket.send(JSON.stringify({ t: 'one-time', step: 'init', ct }));
-    const response = await flushUntil(() => socket.frames().find((f) => f.step === 'response'));
-    await handshake.readMessage(fromBase64Url(response.ct as string));
-    return new Phone(socket, new NoiseTransportSession(handshake.session));
+    return joinOneTimeRoom(rendezvous, link);
   }
 
   /** Send the request, and answer the item the modal would show for it. */
-  async function request(phone: Phone, code = '42'): Promise<PairingQueueItem> {
+  async function request(phone: TestOneTimePhone, code = '42'): Promise<PairingQueueItem> {
     phone.sendControl({ code, label: 'iPhone Safari' });
     const event = await flushUntil(() =>
       queueEvents().findLast((e) => e.queue.some((item) => item.kind === 'one-time')),
@@ -1346,16 +1308,8 @@ describe('one-time connection', () => {
   }
 
   /** Offer the direct path and switch onto it, as the page does after `ok`. */
-  async function switchDirect(phone: Phone): Promise<void> {
-    const peer = new DirectPeer({
-      peer: network.createOfferer(),
-      handlers: { onOpen: () => {}, onFrame: () => {}, onClosed: () => {}, onViolation: () => {} },
-    });
-    const offer = await peer.offer();
-    phone.sendControl({ v: 1, t: 'direct-offer', sdp: offer });
-    const answer = (await phone.next()) as { t: string; sdp: string };
-    await peer.acceptAnswer(answer.sdp);
-    expect(await phone.next()).toEqual({ v: 1, t: 'direct-switch' });
+  async function switchDirect(phone: TestOneTimePhone): Promise<void> {
+    await negotiateOneTimeDirect(phone, network);
     phone.sendControl({ v: 1, t: 'direct-switch' });
     await settleUntil(() => oneTimeStates().at(-1)?.status === 'connected');
   }

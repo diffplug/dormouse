@@ -171,18 +171,6 @@ export async function waitFor(
   if (!held) throw new Error(`timed out waiting for ${what}`);
 }
 
-/**
- * A peer factory that keeps what it builds, so a case can close or inspect the
- * far end by hand. Both ends of a session get their own array.
- */
-export function collect<T>(into: T[], build: () => T): () => T {
-  return () => {
-    const peer = build();
-    into.push(peer);
-    return peer;
-  };
-}
-
 export const CREDENTIAL_ID = 'cred-123';
 export const PASSKEY_PUBLIC_KEY = 'pk-spki-b64u';
 

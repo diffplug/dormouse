@@ -303,10 +303,9 @@ runtime that carries these rules out ("Burrow runtime").
   nonextractable static it **never persists**, minted for the one handshake,
   the link's `ephPub` as `rs`; both handshake payloads are empty. The link
   carries no Burrow static, so the phone is left holding nothing to pin.
-- **The prologue binds every link field under its own kind** — the E2E domain,
-  `one-time`, the room id, then `v`, `expiry`, and `ephPub` in link order — so a
-  one-time transcript equals no pairing or connection transcript, and is useless
-  in any other room.
+- **The prologue binds every link field under its own kind** (field order:
+  `docs/specs/one-time.md` -> "Link"), so a one-time transcript equals no
+  pairing or connection transcript, and is useless in any other room.
 - **The first valid message 1 reserves the link**: the one-use key is erased
   with it, a later `init` is dropped before any WebCrypto, and one that fails
   to decrypt reserves nothing.
@@ -318,9 +317,9 @@ runtime that carries these rules out ("Burrow runtime").
   expiry check and the constant-time comparison. No ACL record, `deliveryId`,
   or Burrow static results, and the Burrow persists nothing.
 - **One padded outcome.** `OneTimeOutcomeV1` success carries only the Burrow
-  label — no Burrow static, no `deliveryId` — and a denial only `user-denied`,
-  `confirmation-mismatch`, `link-expired`, or `burrow-error`, in the same fixed
-  control message as [Pairing](#pairing)'s.
+  label — no Burrow static, no `deliveryId` — and a denial only one of
+  `ONE_TIME_DENIAL_CODES` (`docs/specs/one-time.md` -> "Wire contract"), in the
+  same fixed control message as [Pairing](#pairing)'s.
 - **Direct required: application data never crosses the rendezvous.** The
   outcome promotes the same session; the phone refuses protocol-v1 until both
   directions are direct, and an application message the Burrow decrypts off
@@ -396,9 +395,8 @@ Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in
 **Every bound is Burrow-enforced and independent of the relay** — Relay-side
 gates are defense in depth only, and Burrow correctness must survive a relay that
 omits `client-gone`, invents client IDs, or reorders frames. The one-time
-runtime holds its own against the rendezvous the same way: its own
-`TokenBucket`, the frame bound before any parse, the message cap, and every
-deadline on its own clock (`docs/specs/one-time.md` -> "Burrow runtime").
+runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
+-> "Burrow runtime").
 
 | Bound | Value | Declared in |
 | --- | --- | --- |
@@ -417,7 +415,7 @@ deadline on its own clock (`docs/specs/one-time.md` -> "Burrow runtime").
 | `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first; one pair for a receiver's hold and a sender's queue alike (rationale) | same |
 | `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 | `MAX_ONE_TIME_FRAME_LENGTH` | one maximal `ct` + 512 | `remote-lib-common/src/remote/one-time-wire.ts` |
-| `MAX_ONE_TIME_FORWARDED` | 32 messages; the one-time runtime stops reading a room past it | same |
+| `MAX_ONE_TIME_FORWARDED` | 32 messages, both directions together | same |
 | `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` / `ONE_TIME_DIRECT_DEADLINE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 30 000 / 15 000 | same |
 | `ONE_TIME_OPEN_TIMEOUT_MS` | 8 000 | `lib/src/remote/burrow/one-time-runtime.ts` |
 

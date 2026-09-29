@@ -16,7 +16,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ONE_TIME_DIRECT_DEADLINE_MS,
   fromBase64Url,
-  parseOneTimeLinkUrl,
   toBase64Url,
   utf8Decode,
   utf8Encode,
@@ -48,7 +47,12 @@ import type {
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { FakeDirectNetwork, type FakeDirectNetworkOptions } from '../direct/test-fake-peer';
 import { settleUntil } from '../test-e2e-client';
-import { createTestRendezvous, type TestRendezvous } from '../test-rendezvous';
+import {
+  createTestRendezvous,
+  oneTimeEndReason,
+  openOneTimeLink,
+  type TestRendezvous,
+} from '../test-rendezvous';
 import { createTestClock, type TestClock } from '../test-timers';
 
 const ORIGIN = 'https://hosted.example';
@@ -158,13 +162,7 @@ function makePhone(): OneTimeClient {
 }
 
 /** Open the runtime and read its link back the way the phone page does. */
-async function openLink(): Promise<OneTimeLink> {
-  const state = await runtime.open();
-  if (state.status !== 'waiting') throw new Error(`expected waiting, got ${state.status}`);
-  const link = await parseOneTimeLinkUrl(state.url, ORIGIN, clock.now());
-  if (!link) throw new Error('the link did not parse');
-  return link;
-}
+const openLink = (): Promise<OneTimeLink> => openOneTimeLink(runtime, ORIGIN, clock.now);
 
 /** Tap Connect, and wait for the laptop's approval modal with the digits the phone shows. */
 async function tapConnect(phone: OneTimeClient, link: OneTimeLink): Promise<{
@@ -181,10 +179,6 @@ async function tapConnect(phone: OneTimeClient, link: OneTimeLink): Promise<{
   const approval = approvals[before];
   if (!approval || shown === null) throw new Error('the laptop surfaced no request');
   return { result, approval, shown };
-}
-
-function endedWith(): string | null {
-  return runtime.state.status === 'ended' ? runtime.state.reason : null;
 }
 
 describe('one-time connection, end to end', () => {
@@ -262,7 +256,7 @@ describe('one-time connection, end to end', () => {
     network.dropChannels();
     await settleUntil(() => ended.length > 0 && runtime.state.status === 'ended');
     expect(ended).toEqual([ONE_TIME_ENDED_MESSAGE]);
-    expect(endedWith()).toBe('phone-left');
+    expect(oneTimeEndReason(runtime)).toBe('phone-left');
   });
 
   it('fails an attempt whose session is lost at the switch, rather than resolving it', async () => {
@@ -294,7 +288,7 @@ describe('one-time connection, end to end', () => {
 
     phone.close();
     await settleUntil(() => runtime.state.status === 'ended');
-    expect(endedWith()).toBe('phone-left');
+    expect(oneTimeEndReason(runtime)).toBe('phone-left');
     expect(ended).toEqual([]);
   });
 
@@ -306,13 +300,13 @@ describe('one-time connection, end to end', () => {
       ok: false,
       message: ONE_TIME_DENIAL_MESSAGES['confirmation-mismatch'],
     });
-    expect(endedWith()).toBe('confirmation-mismatch');
+    expect(oneTimeEndReason(runtime)).toBe('confirmation-mismatch');
 
     makeRuntime();
     const denied = await tapConnect(makePhone(), await openLink());
     denied.approval.deny();
     expect(await denied.result).toEqual({ ok: false, message: ONE_TIME_DENIAL_MESSAGES['user-denied'] });
-    expect(endedWith()).toBe('user-denied');
+    expect(oneTimeEndReason(runtime)).toBe('user-denied');
   });
 
   it('tells a second phone the link was already used, before and after the first connects', async () => {
@@ -343,7 +337,7 @@ describe('one-time connection, end to end', () => {
     approval.approve(shown);
     expect(await result).toEqual({ ok: false, message: ONE_TIME_DIRECT_FAILED_MESSAGE });
     await settleUntil(() => runtime.state.status === 'ended');
-    expect(endedWith()).toBe('direct-failed');
+    expect(oneTimeEndReason(runtime)).toBe('direct-failed');
   });
 
   it('gives the same-Wi-Fi copy when no channel opens by the direct deadline', async () => {
@@ -354,7 +348,7 @@ describe('one-time connection, end to end', () => {
     clock.advance(ONE_TIME_DIRECT_DEADLINE_MS);
     expect(await result).toEqual({ ok: false, message: ONE_TIME_DIRECT_FAILED_MESSAGE });
     await settleUntil(() => runtime.state.status === 'ended');
-    expect(endedWith()).toBe('direct-failed');
+    expect(oneTimeEndReason(runtime)).toBe('direct-failed');
   });
 
   it('says the link expired, whether the phone taps late or the laptop confirms late', async () => {
@@ -373,6 +367,6 @@ describe('one-time connection, end to end', () => {
     clock.advance(link.expiry * 1000 + 1 - clock.now());
     approval.approve(shown);
     expect(await result).toEqual({ ok: false, message: ONE_TIME_LINK_EXPIRED_MESSAGE });
-    expect(endedWith()).toBe('expired');
+    expect(oneTimeEndReason(runtime)).toBe('expired');
   });
 });

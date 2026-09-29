@@ -620,10 +620,12 @@ export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
  * Contend when there is something to serve: an enrollment, or another window's
  * one-time connection (`ONE_TIME_SERVING_KEY`), whose phone should see this
  * window's terminals too. Each read stands alone, so a keychain that refuses
- * one still lets the other decide.
+ * one still lets the other decide. A window already contending has nothing
+ * left to learn from either: contention is never withdrawn.
  */
 async function contendIfServing(ctx: vscode.ExtensionContext): Promise<void> {
   const store = burrowStateStore(ctx);
+  if (contending) return;
   const [enrollment, serving] = await Promise.allSettled([
     store.loadEnrollment(),
     store.loadOneTimeServing(),

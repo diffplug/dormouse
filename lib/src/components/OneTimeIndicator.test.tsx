@@ -5,7 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BurrowLink } from '../lib/platform/types';
-import { oneTimeWaiting } from '../host/remote/test-burrow-link';
+import { makeEventedBurrowLink, oneTimeWaiting } from '../host/remote/test-burrow-link';
 import type { OneTimeState } from '../remote/burrow/one-time-runtime';
 
 let burrow: BurrowLink | undefined;
@@ -25,11 +25,6 @@ let emit: (state: OneTimeState) => void = () => {};
 /** A service holding `initial`, whose `oneTimeEnd` ends it as the real one does. */
 function serve(initial: OneTimeState) {
   let state = initial;
-  const listeners = new Set<(data: unknown) => void>();
-  emit = (next) => {
-    state = next;
-    for (const listener of listeners) listener({ name: 'one-time', state });
-  };
   const command = vi.fn(async (cmd: string) => {
     if (cmd === 'oneTimeEnd') {
       emit({ status: 'ended', reason: 'user-ended' });
@@ -37,16 +32,12 @@ function serve(initial: OneTimeState) {
     }
     return cmd === 'oneTimeStatus' ? state : null;
   });
-  burrow = {
-    command,
-    respond: () => {},
-    notify: () => {},
-    on: (name, listener) => {
-      if (name !== 'one-time') return () => {};
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+  const link = makeEventedBurrowLink(command);
+  emit = (next) => {
+    state = next;
+    link.emit('one-time', { name: 'one-time', state });
   };
+  burrow = link;
   return command;
 }
 

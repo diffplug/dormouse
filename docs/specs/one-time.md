@@ -59,9 +59,10 @@ reaches a server.
 - **A link is live through its expiry second** (`oneTimeLinkExpired`), and the
   parser refuses on that same rule. A caller that must tell an expired link from
   a wrong one parses at `now = 0` and asks `oneTimeLinkExpired`.
-- **The prologue binds every link field under its own kind**: `lengthPrefixedConcat`
-  of `dormouse/e2e/v1`, `one-time`, `roomId`, then `v`, `expiry`, `ephPub` in link
-  order, from one builder both ends call.
+- The prologue is `lengthPrefixedConcat` of `dormouse/e2e/v1`, `one-time`,
+  `roomId`, then `v`, `expiry`, `ephPub` in link order, from one builder both
+  ends call (the rule: `docs/specs/remote-security-model.md` -> "One-time
+  connection").
 
 Which desktop release may carry a link version: `docs/specs/deploy.md` ->
 "Release checklist".
@@ -92,8 +93,9 @@ each end pings its open socket every `ONE_TIME_PING_INTERVAL_MS` (30 s) and
 counts no answer.
 
 - **Must measure a frame's raw text against `MAX_ONE_TIME_FRAME_LENGTH` before
-  parsing it.** A room forwards at most `MAX_ONE_TIME_FORWARDED` (32) frames,
-  both directions together.
+  parsing it**; both ends read the room through `parseOneTimeFrame`. A room
+  forwards at most `MAX_ONE_TIME_FORWARDED` (32) frames, both directions
+  together.
 - **Timings.** An unused link lives `ONE_TIME_LINK_TTL_MS` (the pairing TTL,
   5 minutes). A room's hard deadline is `expiresAt + ONE_TIME_EXPIRY_GRACE_MS`
   (30 s): join, confirmation, and the direct switch all finish inside it. The
@@ -116,6 +118,7 @@ The room closes a socket with one of six codes, each exported with a `_REASON`:
 | 4015 | `WS_CLOSE_ONE_TIME_VIOLATION` | a binary frame, one over the length bound, or one past the message cap |
 
 Source of truth: `remote-lib-common/src/remote/one-time-wire.ts`;
+`parseOneTimeFrame` in `lib/src/remote/one-time-rendezvous.ts`;
 `OneTimeRequestV1` / `OneTimeOutcomeV1` in
 `remote-lib-common/src/security/e2e-ceremony.ts`. Pinned by
 `remote-lib-common/test/one-time-wire.test.mjs` and
@@ -125,9 +128,7 @@ Source of truth: `remote-lib-common/src/remote/one-time-wire.ts`;
 
 **`OneTimeRuntime` is single-use: one rendezvous socket, one one-use keypair,
 one phone, and at most one session.** It opens once and ends once, and nothing
-resumes. The ceremony's trust rules — the reservation, the one attempt, direct
-required — are `docs/specs/remote-security-model.md` -> "One-time connection";
-this section is how the runtime carries them out.
+resumes.
 
 | `OneTimeState` | Meaning |
 | --- | --- |
@@ -146,11 +147,11 @@ decides them; a runtime never enters either.
 - **The first message must be one `OneTimeRoomFrame`**, else `unreachable`.
   The link's expiry is the earlier of the runtime's own `now +
   ONE_TIME_LINK_TTL_MS` and the room's `expiresAt`, floored to whole seconds.
-- **Must measure every later message against `MAX_ONE_TIME_FRAME_LENGTH` before
-  `JSON.parse`, then guard and count it**: past `MAX_ONE_TIME_FORWARDED` the
-  runtime stops reading the room. Frames run through one FIFO, one at a time,
-  and **the socket's close rides the same FIFO**, so a phone's `direct-switch`
-  is read before the room's report that the phone left.
+- **Must guard and count every later message** after the
+  [length check](#wire-contract): past `MAX_ONE_TIME_FORWARDED` the runtime
+  stops reading the room. Frames run through one FIFO, one at a time, and
+  **the socket's close rides the same FIFO**, so a phone's `direct-switch` is
+  read before the room's report that the phone left.
 - **Must spend an `E2E_INIT_BURST` `TokenBucket` token before an `init`'s
   WebCrypto.** The first non-keepalive transport message must be
   `OneTimeRequestV1`, else `burrow-error`; its label passes
@@ -158,8 +159,9 @@ decides them; a runtime never enters either.
 - **Promotion reuses the same Noise session** in an `EstablishedE2eSession`
   whose `hello.burrowId` is the room id, and arms the direct deadline. A
   decline the Burrow sends reaches the phone before the rendezvous closes.
-- **Must close the rendezvous normally at the switch, and ignore its loss from
-  then on.** Before the switch a close ends the connection by its code.
+- At the switch it closes the rendezvous normally (the lifecycle carve-out:
+  `docs/specs/remote-security-model.md` -> "One-time connection"); before the
+  switch a close ends the connection by its code.
 - **Never let a deadline run later than the room's**: each is on the runtime's
   own clock — an unclaimed link ends the first millisecond past its expiry, and
   a claimed one gets `ONE_TIME_EXPIRY_GRACE_MS` more, then is told
@@ -204,17 +206,15 @@ at most one session**, on `ClientSessionCore`, direct or not at all.
 
 - **Never open a socket outside `connectOnce`**, which runs once per client
   and opens none for an expired link.
-- **Never persist the static**: nonextractable, minted for this handshake, and
-  dropped with the session; the module imports no store, passkey, push, or
-  worker code.
-- **Never send protocol-v1 before the switch**: every protocol-v1 method
-  refuses until both directions are direct.
-- **Must measure every frame against `MAX_ONE_TIME_FRAME_LENGTH` before
-  `JSON.parse`**, then drop what `isOneTimeBurrowFrame` refuses.
+- **Never import store, passkey, push, or worker code** (the static's rule:
+  `docs/specs/remote-security-model.md` -> "One-time connection").
+- Every protocol-v1 method refuses until both directions are direct (Direct
+  required: `docs/specs/remote-security-model.md` -> "One-time connection").
+- **Must drop what `isOneTimeBurrowFrame` refuses**, after the
+  [length check](#wire-contract).
 - **An outcome already read outranks the room's close behind it.**
-- **After the switch the channel is the lifecycle authority**: its loss, the
-  laptop's End, or the idle deadline reaches `setOnEnded` once; `close()`
-  reports nothing.
+- After the switch (the same carve-out), channel loss, the laptop's End, or the
+  idle deadline reaches `setOnEnded` once; `close()` reports nothing.
 
 Every failure resolves `{ok: false, message}` with fixed copy:
 
@@ -249,9 +249,7 @@ string verbatim (rationale).
   API**, and never read a cookie, reach Hyperdrive, or call auth. The Worker
   mints each room id from 16 random bytes and hands the room a fresh request
   carrying only the upgrade and the room id, never the caller's headers.
-- **The `Origin` rules are abuse control, never authorization** (rationale):
-  the handshake against the link's one-use key and the laptop's confirmation
-  authorize a session.
+- **The `Origin` rules are abuse control, never authorization** (rationale).
 - **Both limits key on `cf-connecting-ip`**, an IPv6 address by its /64 and a
   missing one as `local` (rationale); `hosted/wrangler.jsonc` sets 10 mints and
   30 joins per 60 seconds.
@@ -270,8 +268,8 @@ A room's life, each step one event on the object:
    4010; otherwise the socket is accepted tagged `client`. **A refusal accepts
    outside hibernation and closes at once**, so its close never reaches the
    room's handlers (rationale).
-3. **Forward.** Every text frame counts, and goes verbatim to the other end's
-   open socket, or nowhere before a phone joins. A binary frame, one longer than
+3. **Forward.** Every text frame counts (rationale), and goes verbatim to the
+   other end's open socket, or nowhere before a phone joins. A binary frame, one longer than
    `MAX_ONE_TIME_FRAME_LENGTH`, or one past `MAX_ONE_TIME_FORWARDED` closes both
    ends with 4015.
 4. **Leave.** Either end closing or erroring closes the room's sockets with
@@ -302,8 +300,7 @@ on Pocket's screens, chrome, and mobile wall.
 | not connected | an expired link, a failed attempt, or any ending: the client's fixed copy, no action |
 
 - **Must take the fragment and erase it with `history.replaceState` before the
-  first render**, parsed or not, and reload on `hashchange`, so a link opened in
-  a tab already on the page is taken the same way.
+  first render**, parsed or not, and reload on `hashchange` (rationale).
 - **Never open a socket before the Connect tap**: the tap builds the client and
   runs `connectOnce`, so a link-preview crawler spends nothing.
 - **Never persist anything** on an origin Hosted's accounts share: no storage,
@@ -344,8 +341,6 @@ object-src 'none'; sandbox allow-scripts allow-same-origin
   `,`, and `'` in a host.
 - **The sandbox keeps `allow-same-origin`**, and Chrome's warning about the pair
   stands (rationale).
-
-`docs/specs/security-hosted.md` -> "Rendezvous boundary" holds the audited checks.
 
 Source of truth: `OneTimeApp` and `oneTimeDeviceLabel` in
 `lib/src/remote/one-time-app/OneTimeApp.tsx`;
@@ -400,8 +395,8 @@ enrolled runtime's.
 - **`status` and its event carry `serving`**: `enrolled`, or a one-time status
   of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip
   emits `status`. **A reader missing `serving` takes `enrolled`** (an older VS
-  Code broker). The webview's surface responder and approval mirror arm on
-  `serving`, the push device list on `enrolled`.
+  Code broker). What arms on each: `docs/specs/vscode.md` -> "Burrow: a
+  service in the extension host".
 - **Approval carries a `kind`** (`pairing` | `one-time`) on `PendingPairing`,
   `PairingQueueItem`, `ApproveParams`, and `DenyParams`. The one-time request
   has a slot of its own — `clientId: ''`, a fresh random `pairingId` ticket,
@@ -415,26 +410,23 @@ enrolled runtime's.
 
 **The origin is baked**: `DEFAULT_ONE_TIME_ORIGIN` (`https://hosted.dormouse.sh`),
 overridden by the build variable `DORMOUSE_ONE_TIME_ORIGIN`, which both host
-bundles substitute and assert, failing the build on an origin the runtime
-could not use. **`oneTimeAvailability` decides before any socket exists**:
-`origin-invalid` for anything but a bare HTTPS origin, or HTTP on a link
-loopback host, of at most 167 characters; `origin-not-allowed` outside the
-baked connect-src allowlist; either makes the state `unavailable`. **The
-Burrow's socket sends no `Origin` header**, as neither Node's global
-`WebSocket` nor `ws` does.
+bundles substitute and assert, failing the build on one `oneTimeAvailability`
+would call `origin-invalid`. **`oneTimeAvailability` decides before any socket
+exists**: `origin-invalid` for anything but a bare HTTPS origin, or HTTP on a
+link loopback host, of at most 167 characters; `origin-not-allowed` outside
+the baked connect-src allowlist; either makes the state `unavailable`.
 
 **Standalone** passes the baked origin from the sidecar entry; Rust broadcasts
 every `burrow:event` unchanged. VS Code's bootstrap, idle answers, and serving
 marker are `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
 
 Source of truth: `BurrowService`, `idleOneTimeState`, and `oneTimeServing` in
-`lib/src/host/remote/service.ts`; `OneTimeEvent` and `approvalKind` in
-`lib/src/host/remote/service-protocol.ts`; `oneTimeAvailability` and
+`lib/src/host/remote/service.ts`; `OneTimeEvent`, `servingOf`, and
+`approvalKind` in `lib/src/host/remote/service-protocol.ts`; `oneTimeAvailability` and
 `bakedOneTimeOrigin` in `lib/src/host/remote/one-time-origin.ts`;
 `resolveOneTimeOrigin` / `assertOneTimeOriginBaked` in `scripts/csp-defaults.mjs`;
-`armWhile` in `lib/src/remote/burrow/enrolled-gate.ts`; `mirrorPairingQueue` in
-`lib/src/remote/burrow/activation.ts`; `RemotePairingModal` in
-`lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by
+`mirrorPairingQueue` in `lib/src/remote/burrow/activation.ts`;
+`RemotePairingModal` in `lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by
 `lib/src/host/remote/service.test.ts` and
 `lib/src/host/remote/one-time-origin.test.ts`.
 
@@ -457,7 +449,7 @@ right cluster (`docs/specs/layout.md` -> "Baseboard").
 
 - **The panel renders the service's state and owns only its busy and error**; a
   refused `oneTimeOpen` renders inline. **Closing Settings changes nothing**:
-  the link keeps waiting, and reopening re-reads `oneTimeStatus`.
+  the link keeps waiting.
 - **Never open a link on a timer**: only New link replaces one, and the
   countdown re-renders on the minute (rationale).
 - **Cancel and End send `oneTimeEnd`; Done sends the one that returns `ended`

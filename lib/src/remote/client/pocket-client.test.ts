@@ -49,6 +49,7 @@ import { FakeSocket } from '../test-fake-socket';
 import { fakeTimers } from '../test-timers';
 import {
   FakeDirectNetwork,
+  collect,
   type FakeDirectNetworkOptions,
   type FakePeer,
 } from '../direct/test-fake-peer';
@@ -65,7 +66,6 @@ import {
   RP_ID,
   SESSION_TOKEN,
   STREAMED_CHUNK,
-  collect,
   makeE2eHarness,
   makeFetch,
   memoryKnownBurrows,

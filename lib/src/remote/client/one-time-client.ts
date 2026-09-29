@@ -16,12 +16,9 @@
  */
 
 import {
-  MAX_ONE_TIME_FRAME_LENGTH,
   NoiseTransportSession,
   ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_EXPIRY_GRACE_MS,
-  ONE_TIME_PING,
-  ONE_TIME_PING_INTERVAL_MS,
   ONE_TIME_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
@@ -50,7 +47,8 @@ import {
   type TerminalAttachResult,
 } from 'remote-lib-common';
 
-import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import { parseOneTimeFrame, RendezvousHold } from '../one-time-rendezvous';
+import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import type { RemoteAdapterClient, TerminalHandlers } from './remote-adapter';
 import { ClientSessionCore, type ClientSessionCoreDeps } from './session-core';
 
@@ -90,9 +88,6 @@ export const ONE_TIME_DENIAL_MESSAGES: Record<OneTimeDenialCode, string> = {
 
 /** What a protocol-v1 call made before the switch rejects with; never shown by a correct page. */
 const NOT_DIRECT_YET = 'the one-time connection is not direct yet';
-
-/** The close this phone ends its own rendezvous socket with. */
-const NORMAL_CLOSURE = 1000;
 
 /** Where this client's frames are addressed: the one room, for its whole life. */
 interface OneTimeRoute {
@@ -143,15 +138,10 @@ export class OneTimeClient implements RemoteAdapterClient {
   #phase: Phase = 'idle';
   #route: OneTimeRoute | null = null;
 
-  /**
-   * The rendezvous socket, while this client still reads it. Nulled — before
-   * `close()`, so its own close event is ignored — at the switch and at the
-   * end, and by its own close.
-   */
-  #ws: RemoteWebSocket | null = null;
+  /** The rendezvous socket, while this client still reads it; closed at the switch and at the end. */
+  readonly #rendezvous: RendezvousHold;
   /** Whether the socket ever opened: a close before that means the room was never reached. */
   #opened = false;
-  #cancelPing: (() => void) | null = null;
   #cancelDirectDeadline: (() => void) | null = null;
 
   /**
@@ -174,6 +164,7 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#createWebSocket = deps.createWebSocket;
     this.#now = deps.now ?? (() => Date.now());
     this.#setTimer = deps.setTimer ?? realTimer;
+    this.#rendezvous = new RendezvousHold(this.#setTimer);
     this.#core = new ClientSessionCore<OneTimeRoute>({
       // One route for the client's whole life, so the core's is always it.
       sendFrame: (_route, step, ciphertext) => this.#sendFrame(step, ciphertext),
@@ -350,7 +341,7 @@ export class OneTimeClient implements RemoteAdapterClient {
     if (path === 'direct') {
       this.#phase = 'connected';
       this.#clearDirectDeadline();
-      this.#closeRendezvous();
+      this.#rendezvous.close();
       this.#onSwitched?.();
       this.#onSwitched = null;
       return;
@@ -396,65 +387,33 @@ export class OneTimeClient implements RemoteAdapterClient {
       this.#fail(ONE_TIME_UNREACHABLE_MESSAGE);
       throw error;
     }
-    this.#ws = ws;
+    const rendezvous = this.#rendezvous;
+    rendezvous.hold(ws);
     return new Promise<void>((resolve) => {
       ws.addEventListener('open', () => {
-        if (this.#ws !== ws) return;
+        if (!rendezvous.reads(ws)) return;
         this.#opened = true;
-        this.#armPing(ws);
+        rendezvous.armPing(ws);
         resolve();
       });
       ws.addEventListener('message', (ev) => {
-        if (this.#ws === ws) this.#onMessage((ev as { data?: unknown }).data);
+        if (rendezvous.reads(ws)) this.#onMessage((ev as { data?: unknown }).data);
       });
       ws.addEventListener('error', () => {
         // After the open a `close` always follows; before it, a refused upgrade
         // may be all a browser reports.
-        if (this.#ws !== ws || this.#opened) return;
-        this.#detachRendezvous();
+        if (!rendezvous.reads(ws) || this.#opened) return;
+        rendezvous.detach();
         this.#fail(ONE_TIME_UNREACHABLE_MESSAGE);
       });
       ws.addEventListener('close', (ev) => {
         // Only the socket this client still reads: one it closed itself, at the
         // switch or the end, was detached first.
-        if (this.#ws !== ws) return;
-        this.#detachRendezvous();
+        if (!rendezvous.reads(ws)) return;
+        rendezvous.detach();
         this.#fail(this.#opened ? closeMessage(closeCode(ev), this.#phase) : ONE_TIME_UNREACHABLE_MESSAGE);
       });
     });
-  }
-
-  /** Keep the socket's path alive while it is open; the room answers without waking. */
-  #armPing(ws: RemoteWebSocket): void {
-    this.#cancelPing = this.#setTimer(() => {
-      this.#cancelPing = null;
-      if (this.#ws !== ws) return;
-      try {
-        ws.send(ONE_TIME_PING);
-      } catch {
-        // socket mid-close
-      }
-      this.#armPing(ws);
-    }, ONE_TIME_PING_INTERVAL_MS);
-  }
-
-  /** Stop reading the socket: nothing it says or does from here is an event. */
-  #detachRendezvous(): RemoteWebSocket | null {
-    const ws = this.#ws;
-    this.#ws = null;
-    this.#cancelPing?.();
-    this.#cancelPing = null;
-    return ws;
-  }
-
-  /** Detach the socket, then close it normally. */
-  #closeRendezvous(): void {
-    const ws = this.#detachRendezvous();
-    try {
-      ws?.close(NORMAL_CLOSURE);
-    } catch {
-      // already closing
-    }
   }
 
   /**
@@ -463,7 +422,7 @@ export class OneTimeClient implements RemoteAdapterClient {
    * `sendFrame`; throws where there is no socket to send on.
    */
   #sendFrame(step: E2eClientStep, ciphertext: Uint8Array): void {
-    const ws = this.#ws;
+    const ws = this.#rendezvous.socket;
     if (!ws) throw new Error('the rendezvous socket is not open');
     const frame: OneTimeClientFrame = { t: 'one-time', step, ct: toBase64Url(ciphertext) };
     ws.send(JSON.stringify(frame));
@@ -473,7 +432,7 @@ export class OneTimeClient implements RemoteAdapterClient {
     // A whole string, never JSON: the room answers a ping itself and never
     // forwards the answer.
     if (raw === ONE_TIME_PONG) return;
-    const frame = parseFrame(raw);
+    const frame = parseOneTimeFrame(raw);
     // The shared guard bounds every value before any is used as a key or
     // decoded; this phone runs it rather than trusting the room to have.
     if (!isOneTimeBurrowFrame(frame) || !this.#route) return;
@@ -547,7 +506,7 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#phase = 'ended';
     this.#clearDirectDeadline();
     this.#onSwitched = null;
-    this.#closeRendezvous();
+    this.#rendezvous.close();
     this.#core.endSession(this.#failure ?? ONE_TIME_ENDED_MESSAGE, { notifyGone: false });
   }
 }
@@ -570,25 +529,4 @@ function closeMessage(code: number | undefined, phase: Phase): string {
       // up before this one's deadline, then ends the connection.
       return phase === 'connecting' ? ONE_TIME_DIRECT_FAILED_MESSAGE : ONE_TIME_ENDED_MESSAGE;
   }
-}
-
-/**
- * One rendezvous message as JSON, or `undefined`. **Measured before the parse,
- * not after**: every guard reads a value `JSON.parse` has already materialized,
- * so without this a hostile room buys an unbounded parse. A non-string payload
- * is dropped the same way.
- */
-function parseFrame(raw: unknown): unknown {
-  if (typeof raw !== 'string' || raw.length > MAX_ONE_TIME_FRAME_LENGTH) return undefined;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return undefined;
-  }
-}
-
-/** The `code` of a `CloseEvent`, or undefined if the socket gave us none. */
-function closeCode(ev: unknown): number | undefined {
-  const code = (ev as { code?: unknown } | null)?.code;
-  return typeof code === 'number' ? code : undefined;
 }

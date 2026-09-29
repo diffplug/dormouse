@@ -139,10 +139,22 @@ export interface BurrowStatusEvent {
    * Whether anything can reach this machine's terminals: enrolled, or a
    * one-time connection opening, waiting, confirming, or live. What the
    * surface responder and the approval mirror arm on; push stays on
-   * `enrolled`. Absent from a broker older than the field, which a reader
-   * takes as `enrolled`.
+   * `enrolled`. Absent from a broker older than the field: read it through
+   * {@link servingOf}.
    */
   serving: boolean;
+}
+
+/**
+ * Whether a `status` answer or event says something can reach this machine's
+ * terminals. **A missing `serving` reads as `enrolled`**: a VS Code broker from
+ * before one-time connections sends none, and enrolled is all it could be
+ * serving on.
+ */
+export function servingOf(
+  status: Partial<Pick<BurrowStatusEvent, 'enrolled' | 'serving'>> | null | undefined,
+): boolean {
+  return typeof status?.serving === 'boolean' ? status.serving : !!status?.enrolled;
 }
 
 /**
@@ -163,17 +175,6 @@ export interface OneTimeEvent {
 /** Every `burrow:event` the service sends, by `name`. */
 export type BurrowUiEvent = BurrowStatusEvent | PairingQueueEvent | InvitationEvent | OneTimeEvent;
 
-const ONE_TIME_STATUSES: ReadonlySet<string> = new Set<OneTimeState['status']>([
-  'unavailable',
-  'idle',
-  'opening',
-  'waiting',
-  'confirming',
-  'connecting',
-  'connected',
-  'ended',
-]);
-
 /**
  * Whether `value` is a {@link OneTimeState} a panel can render: a known
  * `status` carrying the fields that status needs. A reason is only checked to
@@ -183,8 +184,10 @@ const ONE_TIME_STATUSES: ReadonlySet<string> = new Set<OneTimeState['status']>([
 export function isOneTimeState(value: unknown): value is OneTimeState {
   if (!value || typeof value !== 'object') return false;
   const state = value as Record<string, unknown>;
-  if (typeof state.status !== 'string' || !ONE_TIME_STATUSES.has(state.status)) return false;
   switch (state.status) {
+    case 'idle':
+    case 'opening':
+      return true;
     case 'unavailable':
     case 'ended':
       return typeof state.reason === 'string';
@@ -197,7 +200,7 @@ export function isOneTimeState(value: unknown): value is OneTimeState {
     case 'connected':
       return typeof state.label === 'string' && typeof state.since === 'number';
     default:
-      return true;
+      return false;
   }
 }
 

@@ -1,5 +1,6 @@
 import { Component, Suspense, lazy, useState, type ReactNode } from 'react';
 import { modalActionButton } from './design';
+import { useMinutesLeft } from './remote-control-shared';
 
 /**
  * The QR encoder (`uqr`) is only ever reached from inside the Settings dialog,
@@ -67,6 +68,37 @@ export function ScannableCode({
         <QrCode value={url} label={label} />
       </Suspense>
     </QrChunkBoundary>
+  );
+}
+
+/**
+ * A code good for one phone, centered over how long it has left: the Relay's
+ * setup code and the one-time link say it the same way.
+ */
+export function ExpiringCode({
+  url,
+  label,
+  expiresAt,
+  noun,
+}: {
+  url: string;
+  label: string;
+  expiresAt: number;
+  /** What the expired line calls it. */
+  noun: 'code' | 'link';
+}) {
+  const minutesLeft = useMinutesLeft(expiresAt) ?? 0;
+  return (
+    <>
+      <div className="mt-2 flex justify-center">
+        <ScannableCode url={url} label={label} />
+      </div>
+      <div className="mt-1.5 text-center text-xs text-muted">
+        {minutesLeft > 0
+          ? `Good for one phone. Expires in ${minutesLeft} min.`
+          : `This ${noun} has expired — get a new one.`}
+      </div>
+    </>
   );
 }
 

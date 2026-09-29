@@ -101,6 +101,7 @@ const E2E_MODULES = [
   'lib/src/remote/client/pocket-client.ts',
   'lib/src/remote/client/session-core.ts',
   'lib/src/remote/client/one-time-client.ts',
+  'lib/src/remote/one-time-rendezvous.ts',
   'lib/src/remote/pocket-app/sw.ts',
 ];
 
@@ -122,10 +123,18 @@ const FRAME_MODULES = [
   'lib/src/remote/burrow/one-time-runtime.ts',
   'lib/src/remote/client/pocket-client.ts',
   'lib/src/remote/client/one-time-client.ts',
+  'lib/src/remote/one-time-rendezvous.ts',
 ];
 
 /** The laptop's one-time runtime, which authorizes one session and writes nothing. */
 const ONE_TIME_RUNTIME = 'lib/src/remote/burrow/one-time-runtime.ts';
+
+/**
+ * The rendezvous plumbing the runtime and the phone's client share, held to
+ * both ends' rules: a grant or a store reached through it is reached through
+ * each of them.
+ */
+const ONE_TIME_RENDEZVOUS = 'lib/src/remote/one-time-rendezvous.ts';
 
 /**
  * The phone's one-time client, and the session core it shares with Pocket —
@@ -135,6 +144,7 @@ const ONE_TIME_RUNTIME = 'lib/src/remote/burrow/one-time-runtime.ts';
 const ONE_TIME_PHONE_MODULES = [
   'lib/src/remote/client/one-time-client.ts',
   'lib/src/remote/client/session-core.ts',
+  ONE_TIME_RENDEZVOUS,
 ];
 
 /** The one-time phone page, served from an origin Hosted's accounts share: every module in it. */
@@ -391,7 +401,7 @@ export const RULES = [
     rule: '`OneTimeRuntime` names nothing that grants or persists',
     security: 'must name no ACL, ACL store, delivery id, or presence verifier',
     kind: 'forbid',
-    files: [ONE_TIME_RUNTIME],
+    files: [ONE_TIME_RUNTIME, ONE_TIME_RENDEZVOUS],
     // A one-time connection authorizes one session and writes nothing. Naming
     // the ACL, its store, a delivery id, or the presence verifier is the leading
     // indicator that it has started to grant something that outlives the

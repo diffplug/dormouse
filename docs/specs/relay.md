@@ -790,9 +790,8 @@ memo invalidation — live in that burrow's spec.
   after the invitation expires answers `invitation-expired` and dismisses, ACL
   untouched.** In VS Code the queue is broadcast to every window, any of which
   may be in front of the user.
-* **One-time connection**: `oneTimeOpen`, `oneTimeEnd`, and `oneTimeStatus`,
-  with the `one-time` event and `status`'s `serving`, run beside the enrollment
-  and need none ([one-time.md](./one-time.md) -> "Service and hosts").
+* **One-time connection**: runs beside the enrollment and needs none
+  ([one-time.md](./one-time.md) -> "Service and hosts").
 * **Terminal bridge**: served through a `BurrowSurfaceProvider`
   ([remote-api.md](./remote-api.md)). `directory.watch` snapshots come from the
   webviews that own the panes; `surface.attach` resizes through the owning

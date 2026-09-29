@@ -8,6 +8,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BurrowLink } from '../../lib/platform/types';
+import {
+  makeEventedBurrowLink,
+  type EventedBurrowLink,
+} from '../../host/remote/test-burrow-link';
 
 /** The dialog's device store, as this module drives it. */
 const devices = vi.hoisted(() => ({
@@ -46,34 +50,20 @@ afterEach(() => {
 
 // --- Bridge mode ---
 
-interface FakeLink extends BurrowLink {
+interface FakeLink extends EventedBurrowLink<BurrowLink['command']> {
   commands: Array<{ cmd: string; params?: unknown }>;
-  emit(name: string, data: unknown): void;
   results: Record<string, unknown>;
 }
 
+/** A link recording every command and answering each from `results`. */
 function fakeLink(): FakeLink {
-  const listeners = new Map<string, Set<(data: unknown) => void>>();
-  const link: FakeLink = {
-    commands: [],
-    results: {},
-    command: async (cmd, params) => {
-      link.commands.push({ cmd, params });
-      return link.results[cmd];
-    },
-    respond: () => {},
-    notify: () => {},
-    on: (name, listener) => {
-      const set = listeners.get(name) ?? new Set();
-      set.add(listener);
-      listeners.set(name, set);
-      return () => void set.delete(listener);
-    },
-    emit: (name, data) => {
-      for (const listener of listeners.get(name) ?? []) listener(data);
-    },
-  };
-  return link;
+  const commands: FakeLink['commands'] = [];
+  const results: FakeLink['results'] = {};
+  const link = makeEventedBurrowLink(async (cmd, params) => {
+    commands.push({ cmd, params });
+    return results[cmd];
+  });
+  return Object.assign(link, { commands, results });
 }
 
 /**

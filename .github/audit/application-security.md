@@ -43,7 +43,8 @@ socket, the single runtime, and the approval routed by `kind`);
 and `session-core.ts` (the phone's ceremonies, and the established session they
 promote), `one-time-client.ts` (the one-time phone, which keeps nothing and
 sends no protocol-v1 before the direct switch), and
-`lib/src/remote/pocket-app/sw.ts` (the render sink);
+`lib/src/remote/one-time-rendezvous.ts` (the frame bound both one-time ends
+read the room under); `lib/src/remote/pocket-app/sw.ts` (the render sink);
 `relay/src/relay.ts` and `relay/src/app.ts` (which must know none of it). The
 harnesses that already exercise this are
 `lib/src/remote/burrow/burrow-bounds.test.ts`,

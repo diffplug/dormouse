@@ -15,7 +15,7 @@
  */
 
 import { isOneTimeState, type OneTimeEvent } from '../../host/remote/service-protocol';
-import { burrowLink, describeBurrowError } from './burrow-status-store';
+import { burrowLink, describeBurrowError, requireBurrowLink } from './burrow-status-store';
 import type { OneTimeState } from './one-time-runtime';
 
 /**
@@ -121,8 +121,7 @@ export async function refreshOneTime(): Promise<void> {
  * renders them, and the service's refusals are written to be read.
  */
 export async function openOneTime(): Promise<void> {
-  const active = burrowLink();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   const mine = ++generation;
   const state = await active.command('oneTimeOpen');
   if (mine === generation && isOneTimeState(state)) publish({ kind: 'ready', state });
@@ -134,8 +133,7 @@ export async function openOneTime(): Promise<void> {
  * so the state is re-read rather than guessed.
  */
 export async function endOneTime(): Promise<void> {
-  const active = burrowLink();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   await active.command('oneTimeEnd');
   await refreshOneTime();
 }

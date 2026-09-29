@@ -59,7 +59,7 @@ import {
 import type { BurrowEnrollment } from './enrollment';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import type { DirectPeerFactory } from '../direct/direct-peer';
-import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import { loadBurrowAcl } from './acl';
 import {
   EstablishedE2eSession,
@@ -1599,10 +1599,4 @@ export class BurrowRuntime {
     this.#disposeClient(clientId);
     this.#reap();
   }
-}
-
-/** The `code` of a `CloseEvent`, or undefined if the socket gave us none. */
-function closeCode(ev: unknown): number | undefined {
-  const code = (ev as { code?: unknown } | null)?.code;
-  return typeof code === 'number' ? code : undefined;
 }

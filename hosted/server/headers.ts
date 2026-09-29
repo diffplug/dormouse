@@ -6,7 +6,7 @@ const ORIGIN_POLICY =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; worker-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'";
 
 /** Whether a path is the one-time page's: `/connect` itself or anything under `/connect/`. */
-export function isOneTimePagePath(pathname: string) {
+function isOneTimePagePath(pathname: string) {
   return (
     pathname === ONE_TIME_PAGE_PATH.slice(0, -1) ||
     pathname.startsWith(ONE_TIME_PAGE_PATH)

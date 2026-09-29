@@ -23,7 +23,11 @@
  *   one-time phone needs both and no enrollment.
  */
 
-import type { BurrowConsoleStatus, BurrowStatusEvent } from '../../host/remote/service-protocol';
+import {
+  servingOf,
+  type BurrowConsoleStatus,
+  type BurrowStatusEvent,
+} from '../../host/remote/service-protocol';
 import type { BurrowLink } from '../../lib/platform/types';
 
 /** What a gate arms on: a field of the service's `status`. */
@@ -32,18 +36,12 @@ export type BurrowGate = 'enrolled' | 'serving';
 /** One gate's arming: runs on the rising edge, and returns its disarm. */
 export type GateArm = () => () => void;
 
-/**
- * Whether `gate` is open in a `status` answer or event. **A missing `serving`
- * reads as `enrolled`**: a VS Code broker from before one-time connections
- * sends none, and enrolled is all it could be serving on.
- */
+/** Whether `gate` is open in a `status` answer or event. */
 function gateOpen(
   gate: BurrowGate,
   status: Partial<Pick<BurrowStatusEvent, 'enrolled' | 'serving'>> | null | undefined,
 ): boolean {
-  const enrolled = !!status?.enrolled;
-  if (gate === 'enrolled') return enrolled;
-  return typeof status?.serving === 'boolean' ? status.serving : enrolled;
+  return gate === 'enrolled' ? !!status?.enrolled : servingOf(status);
 }
 
 /**

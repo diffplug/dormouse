@@ -41,32 +41,36 @@ export const UNSUPPORTED_BROWSER_BODY =
   'Dormouse Pocket needs X25519 in the Web Crypto API, which this browser does not have. ' +
   'Update it, or open Dormouse Pocket in a newer browser.';
 
-/**
- * The whole of what a runtime without X25519 gets. **No action, and no remote
- * operation behind it**: every ceremony this app has needs the primitive this
- * browser lacks, so an offer here would be one that cannot work
- * (`docs/specs/remote-security-model.md` → Burrow identity). The copy defaults
- * to Pocket's; another phone page names itself and what it needs.
- */
-export function UnsupportedBrowser({
-  heading = 'Dormouse Pocket',
-  title = UNSUPPORTED_BROWSER_TITLE,
-  body = UNSUPPORTED_BROWSER_BODY,
+/** A phone screen that is not the wall: its header, and what it says under it, centered. */
+export function PocketScreen({
+  heading,
+  children,
 }: {
-  heading?: string;
-  title?: string;
-  body?: string;
+  heading: string;
+  children: React.ReactNode;
 }): React.ReactElement {
   return (
     <div className={PK.app}>
       <header className={PK.header}>
         <h1 className={PK.headerTitle}>{heading}</h1>
       </header>
-      <div className={clsx(PK.body, PK.bodyCenter)}>
-        <p className={PK.title}>{title}</p>
-        <p className={PK.lead}>{body}</p>
-      </div>
+      <div className={clsx(PK.body, PK.bodyCenter)}>{children}</div>
     </div>
+  );
+}
+
+/**
+ * The whole of what a runtime without X25519 gets. **No action, and no remote
+ * operation behind it**: every ceremony this app has needs the primitive this
+ * browser lacks, so an offer here would be one that cannot work
+ * (`docs/specs/remote-security-model.md` → Burrow identity).
+ */
+export function UnsupportedBrowser(): React.ReactElement {
+  return (
+    <PocketScreen heading="Dormouse Pocket">
+      <p className={PK.title}>{UNSUPPORTED_BROWSER_TITLE}</p>
+      <p className={PK.lead}>{UNSUPPORTED_BROWSER_BODY}</p>
+    </PocketScreen>
   );
 }
 
@@ -98,27 +102,22 @@ export function PairingCodeView({
   instruction?: string;
 }): React.ReactElement {
   return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <h1 className={PK.headerTitle}>{heading}</h1>
-      </header>
-      <div className={clsx(PK.body, PK.bodyCenter)}>
-        {/* Named and announced structurally, so what identifies this screen — to
-            a screen reader, to the tests, and to the walkthrough harness — is
-            not a sentence the next copy pass is free to rewrite. */}
-        <p className={PK.code} role="status" aria-label={PAIRING_CODE_LABEL} aria-live="polite">
-          {code ?? '··'}
-        </p>
-        <p className={clsx(PK.lead, 'text-center')}>{instruction}</p>
-        <button
-          type="button"
-          className={pkButton({ tone: 'outline', block: true })}
-          onClick={onCancel}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
+    <PocketScreen heading={heading}>
+      {/* Named and announced structurally, so what identifies this screen — to
+          a screen reader, to the tests, and to the walkthrough harness — is
+          not a sentence the next copy pass is free to rewrite. */}
+      <p className={PK.code} role="status" aria-label={PAIRING_CODE_LABEL} aria-live="polite">
+        {code ?? '··'}
+      </p>
+      <p className={clsx(PK.lead, 'text-center')}>{instruction}</p>
+      <button
+        type="button"
+        className={pkButton({ tone: 'outline', block: true })}
+        onClick={onCancel}
+      >
+        Cancel
+      </button>
+    </PocketScreen>
   );
 }
 
@@ -169,4 +168,13 @@ export const RELAYED_TRANSPORT: TransportView = { path: 'relay', cause: null };
 export function transportTitle({ path, cause }: TransportView): string {
   const { title } = TRANSPORT_PATH_LABELS[path];
   return cause ? `${title} ${TRANSPORT_RELAY_CAUSES[cause]}` : title;
+}
+
+/** The wall header's path indicator: its label, with {@link transportTitle} as the hover text. */
+export function TransportIndicator({ transport }: { transport: TransportView }): React.ReactElement {
+  return (
+    <span className={PK.headerNote} title={transportTitle(transport)}>
+      {TRANSPORT_PATH_LABELS[transport.path].label}
+    </span>
+  );
 }

@@ -15,6 +15,12 @@ export interface RemoteWebSocket {
   readyState: number;
 }
 
+/** The `code` of a `CloseEvent`, or undefined if the socket gave us none. */
+export function closeCode(ev: unknown): number | undefined {
+  const code = (ev as { code?: unknown } | null)?.code;
+  return typeof code === 'number' ? code : undefined;
+}
+
 /**
  * How both sides arm a timer: `(run, delayMs) => cancel`. Injected so a test
  * driving an injected clock never waits out a real deadline, and so "nothing is

@@ -16,11 +16,12 @@
  * status rather than patching a field.
  */
 
-import type {
-  InvitationEvent,
-  PushSendSummary,
-  BurrowConsoleStatus,
-  SetupQrResult,
+import {
+  servingOf,
+  type InvitationEvent,
+  type PushSendSummary,
+  type BurrowConsoleStatus,
+  type SetupQrResult,
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
@@ -141,6 +142,13 @@ export function burrowLink(): BurrowLink | undefined {
   }
 }
 
+/** The Burrow link, for a command that has nothing to do without one. */
+export function requireBurrowLink(): BurrowLink {
+  const active = burrowLink();
+  if (!active) throw new Error('This build has no Burrow service.');
+  return active;
+}
+
 export function getBurrowStatusSnapshot(): BurrowStatusState {
   return state;
 }
@@ -233,15 +241,10 @@ function refreshAfterMutation(): Promise<void> {
  * `label.trim()` while the enroll form renders, where an `undefined` throws the
  * whole section away rather than degrading, so it is defaulted here — at the
  * seam where the untrusted shape becomes the typed one — instead of at each of
- * the two forms that read it. `serving` is defaulted to `enrolled`, which is
- * all a broker from before one-time connections could be serving on.
+ * the two forms that read it. `serving` is read through `servingOf`.
  */
 function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
-  return {
-    ...status,
-    serving: status.serving ?? status.enrolled,
-    suggestedLabel: status.suggestedLabel ?? '',
-  };
+  return { ...status, serving: servingOf(status), suggestedLabel: status.suggestedLabel ?? '' };
 }
 
 async function readBurrowStatus(): Promise<void> {
@@ -276,8 +279,7 @@ export async function enrollBurrow(
   password: string,
   label: string,
 ): Promise<void> {
-  const active = burrowLink();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   await active.command('enroll', { relayUrl, password, label });
   await refreshAfterMutation();
 }
@@ -296,8 +298,7 @@ export async function enrollBurrow(
  * build was not compiled to reach.
  */
 export async function enrollOfferBurrow(origin: string, label: string): Promise<void> {
-  const active = burrowLink();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   await active.command('enrollOffer', { origin, label });
   await refreshAfterMutation();
 }
@@ -308,8 +309,7 @@ export async function enrollOfferBurrow(origin: string, label: string): Promise<
  * (`docs/specs/relay.md`, "Relay socket policy").
  */
 export async function reconnectBurrow(): Promise<void> {
-  const active = burrowLink();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   await active.command('reconnect');
   await refreshAfterMutation();
 }
@@ -320,8 +320,7 @@ export async function reconnectBurrow(): Promise<void> {
  * claiming otherwise while the credential is still on disk.
  */
 export async function clearBurrowEnrollment(): Promise<void> {
-  const active = burrowLink();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   await active.command('clearEnrollment');
   await refreshAfterMutation();
 }
@@ -337,8 +336,7 @@ export async function clearBurrowEnrollment(): Promise<void> {
  * Relay that refuses both have to read as themselves.
  */
 export async function mintSetupQr(): Promise<SetupQrResult> {
-  const active = burrowLink();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   return (await active.command('setupQr')) as SetupQrResult;
 }
 
@@ -395,8 +393,7 @@ export function subscribeToInvitation(
  * Burrow stack into the main bundle on every host.
  */
 export async function sendTestPush(): Promise<PushSendSummary> {
-  const active = burrowLink();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   return (await active.command('pushTest')) as PushSendSummary;
 }
 
