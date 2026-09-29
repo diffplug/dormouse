@@ -83,11 +83,8 @@ const mgr = create((event, data) => {
 const host = createSidecarHost({
   send,
   stateDir: process.env.DORMOUSE_STATE_DIR,
-  hostedOrigin: process.env.DORMOUSE_HOSTED_ORIGIN,
   mgr,
 });
-// Keep the development Hosted override out of every PTY's inherited environment.
-delete process.env.DORMOUSE_HOSTED_ORIGIN;
 
 // Dor Tools. Shares the app's state directory, so an approved repo stays
 // approved across restarts (docs/specs/dor-tool.md -> Trust).

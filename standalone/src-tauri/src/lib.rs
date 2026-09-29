@@ -3724,17 +3724,6 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        // docs/specs/security-local.md -> "Persisted state": only a debug
-        // build's sidecar sees the managed-voice dev override. The spawn
-        // inherits the whole environment, so release removes it explicitly.
-        match env::var("DORMOUSE_HOSTED_ORIGIN") {
-            Ok(origin) if cfg!(debug_assertions) => {
-                c.env("DORMOUSE_HOSTED_ORIGIN", origin);
-            }
-            _ => {
-                c.env_remove("DORMOUSE_HOSTED_ORIGIN");
-            }
-        }
     });
     #[cfg(windows)]
     {

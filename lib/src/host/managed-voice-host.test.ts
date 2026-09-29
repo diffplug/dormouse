@@ -6,7 +6,6 @@ import {
   createManagedVoiceHost,
   MAX_AUDIO_BYTES,
   MANAGED_VOICE_FILE,
-  resolveManagedVoiceSpeakUrl,
 } from './managed-voice-host';
 import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
 
@@ -23,12 +22,11 @@ let dir: string;
 let fetchMock: ReturnType<typeof vi.fn>;
 let host: ReturnType<typeof make>;
 
-function make(options: { timeoutMs?: number; stateDir?: string; speakOrigin?: string } = {}) {
+function make(options: { timeoutMs?: number; stateDir?: string } = {}) {
   return createManagedVoiceHost({
     stateDir: 'stateDir' in options ? options.stateDir : dir,
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
-    speakOrigin: options.speakOrigin,
   });
 }
 
@@ -146,41 +144,5 @@ describe('speak', () => {
     expect(await host.handle({ op: 'speak', text: '   ' })).toEqual({ ok: false, reason: 'bad-request' });
     expect(await host.handle({ op: 'speak', text: 'x'.repeat(201) })).toEqual({ ok: false, reason: 'bad-request' });
     expect(fetchMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('dev Hosted origin override', () => {
-  it.each([
-    ['http://127.0.0.1:5199', 'http://127.0.0.1:5199/api/voice/speak'],
-    ['http://127.0.0.1:5199/', 'http://127.0.0.1:5199/api/voice/speak'],
-    ['http://localhost:5199', 'http://localhost:5199/api/voice/speak'],
-    ['http://[::1]:5199', 'http://[::1]:5199/api/voice/speak'],
-  ])('accepts the loopback origin %s', (override, expected) => {
-    expect(resolveManagedVoiceSpeakUrl(override)).toBe(expected);
-  });
-
-  it.each([
-    undefined, '', 'not a url', 'https://127.0.0.1:5199', 'http://hosted.dormouse.sh',
-    'http://evil.example', 'http://127.0.0.1.evil.example:5199', 'http://192.168.1.2:5199',
-    'http://0.0.0.0:5199', 'http://user:pw@127.0.0.1:5199', 'http://127.0.0.1:5199/api',
-    'http://127.0.0.1:5199/?x=1', 'file:///etc/passwd', 'ws://127.0.0.1:5199',
-  ])('falls back to production for %s', (override) => {
-    expect(resolveManagedVoiceSpeakUrl(override)).toBe(MANAGED_VOICE_SPEAK_URL);
-  });
-
-  it('sends the speak request to the accepted origin', async () => {
-    const dev = make({ speakOrigin: 'http://127.0.0.1:5199' });
-    await dev.handle({ op: 'configure', update: { token: TOKEN } });
-    fetchMock.mockResolvedValue(audioResponse());
-    await dev.handle({ op: 'speak', text: 'x' });
-    expect(fetchMock.mock.calls[0][0]).toBe('http://127.0.0.1:5199/api/voice/speak');
-  });
-
-  it('never sends the token to a rejected override', async () => {
-    const dev = make({ speakOrigin: 'http://evil.example' });
-    await dev.handle({ op: 'configure', update: { token: TOKEN } });
-    fetchMock.mockResolvedValue(audioResponse());
-    await dev.handle({ op: 'speak', text: 'x' });
-    expect(fetchMock.mock.calls[0][0]).toBe(MANAGED_VOICE_SPEAK_URL);
   });
 });

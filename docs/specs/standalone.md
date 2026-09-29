@@ -1331,9 +1331,10 @@ Source of truth: `standalone/package.json` (package scripts),
   sources.** Frontend edits hot-reload; Tauri watches Rust.
 - `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
   browser-dev harness instead of the Tauri WebView (below).
-- **May set `DORMOUSE_HOSTED_ORIGIN=http://localhost:<port>`** to speak managed
-  voice through a local `pnpm dev:hosted`, which answers no other `Host`
-  (`docs/specs/security-local.md` -> "Persisted state").
+- **May build with `DORMOUSE_HOSTED_ORIGIN=http://localhost:<port>`**, the
+  origin a local `pnpm dev:hosted` prints, to speak managed voice through it;
+  it answers no other `Host` (`docs/specs/security-local.md` -> "Persisted
+  state").
 
 ### Standalone browser-dev harness
 

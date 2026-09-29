@@ -7,6 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
+import { bakedHostedOrigin } from './hosted-origin';
 import {
   DEFAULT_MANAGED_VOICE_ID,
   type ManagedVoiceConfigResult,
@@ -15,9 +16,7 @@ import {
 } from '../lib/platform/managed-voice-types';
 
 export const MANAGED_VOICE_FILE = 'managed-voice.json';
-const MANAGED_VOICE_ORIGIN = 'https://hosted.dormouse.sh';
 const MANAGED_VOICE_SPEAK_PATH = '/api/voice/speak';
-const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', '[::1]', 'localhost']);
 /** `docs/specs/alert.md` -> "Managed voice"; Rust's `MANAGED_VOICE_TIMEOUT` sits above it. */
 const MANAGED_VOICE_REQUEST_TIMEOUT_MS = 15_000;
 /** Hosted's own `voiceId` grammar. */
@@ -28,19 +27,6 @@ const MANAGED_VOICE_TOKEN_PATTERN = /^dmv_[A-Za-z0-9_-]{43}$/;
 const MAX_TEXT_LENGTH = 200;
 /** `docs/specs/standalone.md` -> "Rust ↔ sidecar bridge". */
 export const MAX_AUDIO_BYTES = 512 * 1024;
-
-/** Production's speak URL unless `override` is a bare `http:` loopback origin;
- *  anything else is ignored, never an error. */
-export function resolveManagedVoiceSpeakUrl(override: string | undefined): string {
-  const production = MANAGED_VOICE_ORIGIN + MANAGED_VOICE_SPEAK_PATH;
-  if (!override) return production;
-  let url: URL;
-  try { url = new URL(override); } catch { return production; }
-  const bare = url.username === '' && url.password === '' && url.pathname === '/'
-    && url.search === '' && url.hash === '';
-  if (url.protocol !== 'http:' || !LOOPBACK_HOSTNAMES.has(url.hostname) || !bare) return production;
-  return url.origin + MANAGED_VOICE_SPEAK_PATH;
-}
 
 interface StoredConfig {
   token: string | null;
@@ -59,8 +45,6 @@ function normalizeStored(value: unknown): StoredConfig {
 export function createManagedVoiceHost(options: {
   /** The owner-only state directory; without one no token can be stored. */
   stateDir?: string;
-  /** Dev override for Hosted's origin, filtered by `resolveManagedVoiceSpeakUrl`. */
-  speakOrigin?: string;
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
   log?: (message: string) => void;
@@ -71,12 +55,8 @@ export function createManagedVoiceHost(options: {
   const store = options.stateDir
     ? { dir: options.stateDir, file: join(options.stateDir, MANAGED_VOICE_FILE) }
     : undefined;
-  const speakUrl = resolveManagedVoiceSpeakUrl(options.speakOrigin);
-  if (options.speakOrigin) {
-    log(speakUrl.startsWith(MANAGED_VOICE_ORIGIN)
-      ? '[managed-voice] ignoring DORMOUSE_HOSTED_ORIGIN: not an http loopback origin'
-      : `[managed-voice] dev override: speaking via ${speakUrl}`);
-  }
+  // The only place the token may go (`docs/specs/security-local.md` -> "Persisted state").
+  const speakUrl = bakedHostedOrigin() + MANAGED_VOICE_SPEAK_PATH;
   let loaded: Promise<StoredConfig> | null = null;
 
   const load = (): Promise<StoredConfig> => {

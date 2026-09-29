@@ -16,6 +16,7 @@ import type { AlertManager, AlertState } from '../../lib/alert-manager';
 import type { TerminalColorProvider, TerminalColors } from '../../lib/terminal-protocol';
 import { createAlertHost, type AlertRealm } from '../alert-host';
 import type { AlertEvents } from '../alert-protocol';
+import { bakedHostedOrigin } from '../hosted-origin';
 import { createManagedVoiceHost } from '../managed-voice-host';
 import { alertedPty, createOwnerPtyStream } from '../owner-pty';
 import type {
@@ -25,7 +26,6 @@ import type {
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { bakedConnectSrc } from './connect-src';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
-import { bakedOneTimeOrigin } from './one-time-origin';
 import {
   createEphemeralBurrowStateStore,
   FileBurrowStateStore,
@@ -402,8 +402,6 @@ export interface SidecarHostOptions {
    * create the app-data directory, which falls back to the in-memory store.
    */
   stateDir?: string;
-  /** Development override for managed voice's Hosted origin. */
-  hostedOrigin?: string;
 }
 
 export interface SidecarHost {
@@ -489,7 +487,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     kind: 'standalone',
     sendToUi: send,
     connectSrc: bakedConnectSrc(),
-    oneTimeOrigin: bakedOneTimeOrigin(),
+    oneTimeOrigin: bakedHostedOrigin(),
     // The one host that answers a `direct-offer` today. Building the factory
     // loads nothing: the addon is opened inside the first offer, if one ever
     // comes (`native-direct-peer.ts`).
@@ -501,7 +499,6 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
 
   const voice = createManagedVoiceHost({
     stateDir: options.stateDir,
-    speakOrigin: options.hostedOrigin,
     log: (message) => console.error(message),
   });
 
