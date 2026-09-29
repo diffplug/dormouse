@@ -31,7 +31,7 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
 | `/hosted` | Account-service introduction and prelaunch managed services | `website/src/pages/Hosted.tsx` |
 | `/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
-| `/privacy`, `/terms` | Standalone Hosted account policy drafts outside Docs | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
+| `/privacy`, `/terms` | Standalone Hosted account policies outside Docs | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
 Internal specs remain maintainer references, the one exception being the
@@ -353,7 +353,7 @@ and the speech and remote-control settings; `linkedFrom` owns the rest.
 
 ## Hosted policies
 
-**Must prerender `/privacy` and `/terms` outside Docs navigation with standalone marketing chrome and draft labels until approved.**
+**Must prerender `/privacy` and `/terms` outside Docs navigation with standalone marketing chrome and an effective date.**
 
 Source of truth: `HostedPolicyLayout` in `website/src/components/HostedPolicyLayout.tsx`.
 
