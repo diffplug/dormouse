@@ -34,9 +34,6 @@ export type PreviewTransitionPhase = 'holding' | 'committed' | 'revealing';
 export interface PreviewTransition {
   readonly token: number;
   readonly ghost: PreviewGhost;
-  /** The name a committed retarget gave a terminal face's header; null keeps
-   *  the held one. A serving Tool's header names it from its params. */
-  readonly label: string | null;
   readonly phase: PreviewTransitionPhase;
   /** Motion resolves instantly: a static blur and no fade. */
   readonly instant: boolean;
@@ -131,21 +128,21 @@ export function beginPreviewTransition(
   const token = nextToken++;
   write(id, {
     generation: entry?.view.generation ?? 0,
-    transition: { token, ghost, label: null, phase: 'holding', instant },
+    transition: { token, ghost, phase: 'holding', instant },
   });
   return token;
 }
 
 /**
- * The owner's retarget committed: a new browser generation, a terminal face
- * header's new name, and the ready signals armed — the new layer's (`previewLayerReady`),
- * the committer's own (`arm`, which returns its stop), and the fallback. False,
- * doing nothing, for a request that no longer owns it.
+ * The owner's retarget committed: a new browser generation, and the ready
+ * signals armed — the new layer's (`previewLayerReady`), the committer's own
+ * (`arm`, which returns its stop), and the fallback. False, doing nothing, for
+ * a request that no longer owns it.
  */
 export function commitPreviewTransition(
   id: string,
   token: number,
-  commit: { label: string | null; arm: (ready: () => void) => () => void },
+  arm: (ready: () => void) => () => void,
 ): boolean {
   const current = owned(id, token);
   if (!current) return false;
@@ -154,11 +151,11 @@ export function commitPreviewTransition(
   const generation = entry.view.generation + 1;
   write(id, {
     generation,
-    transition: { ...transition, phase: 'committed', label: commit.label ?? transition.label },
+    transition: { ...transition, phase: 'committed' },
   });
   const ready = () => viewReady(id, generation);
   entry.awaiting = { generation, timer: setTimeout(ready, PREVIEW_READY_FALLBACK_MS) };
-  const stopWatch = commit.arm(ready);
+  const stopWatch = arm(ready);
   if (entry.awaiting?.generation === generation) entry.awaiting.stopWatch = stopWatch;
   else stopWatch();
   return true;

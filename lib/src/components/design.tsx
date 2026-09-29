@@ -130,6 +130,19 @@ export const FOCUS_MOTION_MS = 220;
 export const HEADER_PALETTE_TRANSITION_CLASS =
   'transition-colors duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none';
 
+/** A Pane header's root: the drag handle in the header palette. The
+ *  active/inactive swap crossfades in step with the focus ring's travel;
+ *  children inherit via `text-inherit`. */
+export const paneHeader = tv({
+  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
+  variants: {
+    state: {
+      active: 'bg-header-active-bg text-header-active-fg',
+      inactive: 'bg-header-inactive-bg text-header-inactive-fg',
+    },
+  },
+});
+
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';

@@ -244,6 +244,17 @@ describe('SurfacePaneHeader — browser chrome', () => {
     }
   });
 
+  it('hands focus to the trigger when a resize moves a focused Kill into the popover', () => {
+    const registration = register('pane-kill-focus');
+    renderHeader(headerProps('pane-kill-focus', 'Browser'), stubActions());
+    act(() => resizeHeader(OVERFLOW_PX));
+    act(() => container.querySelector<HTMLButtonElement>('[aria-label="Kill"]')!.focus());
+    act(() => resizeHeader(TINY_PX));
+    expect(container.querySelector('[aria-label="Kill"]')).toBeNull();
+    expect(document.activeElement).toBe(overflowTrigger());
+    registration.dispose();
+  });
+
   it('closes the popover from Minimize and Kill wherever they render', async () => {
     const registration = register('pane-actions');
     const actions = stubActions();

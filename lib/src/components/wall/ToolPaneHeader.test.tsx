@@ -229,7 +229,7 @@ describe('ToolPaneHeader — preview slot', () => {
     expect(name()).toBe(shown);
     expect(name()?.textContent).toBe('a.md');
     expect(glyph()).toBe('agent-browser-resize');
-    act(() => { commitPreviewTransition(ID, token, { label: 'b.md', arm: () => () => {} }); });
+    act(() => { commitPreviewTransition(ID, token, () => () => {}); });
     renderHeader({ ...retired, command: 'view /repo/b.md', toolKey: ['viewer', '/repo/b.md'], toolTarget: '/repo/b.md' });
     expect(name()).toBe(shown);
     expect(name()?.textContent).toBe('b.md');
@@ -239,20 +239,21 @@ describe('ToolPaneHeader — preview slot', () => {
     expect(labelled('Terminal context')).toBeNull();
   });
 
-  it('holds a terminal face\'s label through a switch, then names the new target', () => {
-    const params = { surfaceType: 'tool', command: 'less a.md', toolPreview: true };
+  it('holds a terminal face\'s label through a switch, then names the Tool the retarget committed', () => {
+    const params = { surfaceType: 'tool', command: 'less /repo/a.md', toolTarget: '/repo/a.md', toolPreview: true };
     act(() => applyTerminalSemanticEvents(ID, [
-      { type: 'commandLine', commandLine: 'less a.md' }, { type: 'commandStart', source: 'osc633_boundaries' },
+      { type: 'commandLine', commandLine: 'less /repo/a.md' }, { type: 'commandStart', source: 'osc633_boundaries' },
     ]));
     renderHeader(params);
     const label = () => name()?.textContent;
     const shown = label();
-    expect(shown).toContain('less a.md');
+    expect(shown).toContain('less /repo/a.md');
     let token!: number;
     act(() => { token = beginSlotSwitch(ID, () => params)!; });
     act(() => applyTerminalSemanticEvents(ID, [{ type: 'commandFinish', exitCode: 130 }, { type: 'promptStart' }]));
     expect(label()).toBe(shown);
-    act(() => { commitPreviewTransition(ID, token, { label: 'b.md', arm: () => () => {} }); });
+    act(() => { commitPreviewTransition(ID, token, () => () => {}); });
+    renderHeader({ ...params, command: 'less /repo/b.md', toolTarget: '/repo/b.md' });
     expect(label()).toBe('b.md');
     act(() => resetPreviewTransitions());
     // Derived live again: neither the held label nor the committed name.
@@ -293,6 +294,17 @@ describe('ToolPaneHeader — other faces', () => {
     renderHeader({ surfaceType: 'tool', command: 'pnpm dev' });
     expect(labelled('Terminal context')).toBeNull();
     expect(name()).not.toBeNull();
+  });
+
+  it('re-tiers when a port conflict comes and goes, though the header\'s width never changes', () => {
+    act(() => resizeHeader(110));
+    renderHeader({ surfaceType: 'tool', command: 'pnpm dev' });
+    expect(labelled('Kill')).not.toBeNull();
+    renderHeader({ surfaceType: 'tool', command: 'pnpm dev', toolPortConflict: [3000, 4000] });
+    expect(labelled('Terminal context')).not.toBeNull();
+    expect(labelled('Kill')).toBeNull();
+    renderHeader({ surfaceType: 'tool', command: 'pnpm dev' });
+    expect(labelled('Kill')).not.toBeNull();
   });
 
   it('keeps the port-conflict face\'s minimize and kill to the Terminal Context button\'s narrowest boundary', () => {

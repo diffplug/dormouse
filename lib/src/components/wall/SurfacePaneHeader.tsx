@@ -13,7 +13,7 @@ import {
   ArrowRightIcon,
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { chromeButton, OVERLAY_MAX_HEIGHT, paneHeader, POPUP_SURFACE_CLASS } from '../design';
 import { MinimizeKillButtons, PaneActionGroup, SplitButtons } from './PaneActionButtons';
 import {
   useAgentBrowserChromeSnapshot,
@@ -93,7 +93,6 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
     else if (value.trim()) setUrlRefusal({ rect: el.getBoundingClientRect(), value: value.trim() });
     setEditingUrl(false);
   };
-  const closeUrlEditor = () => setEditingUrl(false);
 
   // Below the `minimal` tier the chrome lives in a popover behind one trigger;
   // resizing or a hidden Surface closes it, the latter without pulling focus
@@ -113,14 +112,10 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
   // a focused one hands focus to the trigger as it goes.
   const inlineMinimizeKill = tier !== 'tiny';
   const minimizeKillFocused = useRef(false);
-  const previousInlineMinimizeKill = useRef(inlineMinimizeKill);
   useLayoutEffect(() => {
-    if (previousInlineMinimizeKill.current !== inlineMinimizeKill) {
-      if (menuOpen || (!inlineMinimizeKill && minimizeKillFocused.current)) closeMenu();
-      minimizeKillFocused.current = false;
-    }
-    previousInlineMinimizeKill.current = inlineMinimizeKill;
-  }, [inlineMinimizeKill, menuOpen, closeMenu]);
+    if (!inlineMinimizeKill && minimizeKillFocused.current) closeMenu();
+    minimizeKillFocused.current = false;
+  }, [inlineMinimizeKill, closeMenu]);
   const popoverOpen = visible && inline === null && menuOpen;
   const overflowLabel = 'Browser controls';
   useEffect(() => {
@@ -181,7 +176,7 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
                 initialValue={chrome.url}
                 blurAction="cancel"
                 onSubmit={submitUrl}
-                onCancel={closeUrlEditor}
+                onCancel={() => setEditingUrl(false)}
               />
             ) : (
               <>
@@ -252,7 +247,7 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
   return (
     <div
       ref={headerRef}
-      className={`flex h-full min-w-0 flex-1 cursor-grab items-center ${inline ? 'gap-1.5 pl-2 pr-[5px]' : 'gap-0.5 px-1'} ${TERMINAL_TOP_RADIUS_CLASS} text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS} ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
+      className={paneHeader({ state: isActiveHeader ? 'active' : 'inactive', class: inline ? undefined : 'gap-0.5 px-1' })}
       onMouseDown={() => actions.onClickPanel(id)}
     >
       {inline ? renderBrowserControls(inline) : (
@@ -270,7 +265,7 @@ export function SurfacePaneHeader({ id, title, parked }: PaneProps) {
       {paneActions}
       {popoverOpen && <BrowserHeaderPopover anchorRef={overflowRef} onClose={closeMenu}>
         {renderBrowserControls('popover')}
-        {!inlineMinimizeKill && <MinimizeKillButtons surfaceId={id} beforeAct={closeMenu} {...minimizeKillFocus} />}
+        {!inlineMinimizeKill && <MinimizeKillButtons surfaceId={id} beforeAct={closeMenu} />}
       </BrowserHeaderPopover>}
       {urlRefusal && (
         <AnchoredWarning

@@ -1,4 +1,5 @@
 import { viewerTitle } from 'dor/file-viewer-format';
+import { toolCommandFromParams } from '../../lib/session-save';
 
 const ABSOLUTE_PATH = /^(?:[\\/]|[A-Za-z]:[\\/])/;
 
@@ -11,7 +12,7 @@ const ABSOLUTE_PATH = /^(?:[\\/]|[A-Za-z]:[\\/])/;
 export function toolSemanticName(params: Record<string, unknown> | undefined, userTitle?: string | null): string | null {
   const renamed = userTitle?.trim();
   if (renamed) return renamed;
-  const { toolTarget, toolName, toolKey, command } = params ?? {};
+  const { toolTarget, toolName, toolKey } = params ?? {};
   if (typeof toolTarget === 'string' && toolTarget) return viewerTitle(toolTarget);
   if (typeof toolName === 'string' && toolName) {
     // Keys are namespaced `[toolName, ...declared]`: only what follows the
@@ -22,5 +23,5 @@ export function toolSemanticName(params: Record<string, unknown> | undefined, us
       : [];
     return [toolName, ...elements.filter(element => element && element !== toolName)].join(' ');
   }
-  return typeof command === 'string' && command.trim() ? command : null;
+  return toolCommandFromParams(params);
 }

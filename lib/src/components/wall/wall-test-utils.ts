@@ -74,14 +74,13 @@ export function pointerEvent(type: string, overrides: Partial<PointerEvent> = {}
 
 /** A double-click as a browser fires it: a press and click counted 1, then a
  *  press, click, and `dblclick` counted 2, each click committed before the
- *  next press. `second` is where the second press lands, when the first click
- *  replaced what was under it. */
-export function doubleClick(first: Element, second: () => Element = () => first): void {
-  const fire = (target: Element, types: string[], detail: number) => {
+ *  next press. */
+export function doubleClick(target: Element): void {
+  const fire = (types: string[], detail: number) => {
     for (const type of types) target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, detail }));
   };
-  act(() => fire(first, ['mousedown', 'mouseup', 'click'], 1));
-  act(() => fire(second(), ['mousedown', 'mouseup', 'click', 'dblclick'], 2));
+  act(() => fire(['mousedown', 'mouseup', 'click'], 1));
+  act(() => fire(['mousedown', 'mouseup', 'click', 'dblclick'], 2));
 }
 
 /** jsdom lacks the native modal `<dialog>` API that `NativeModalDialog` calls. */

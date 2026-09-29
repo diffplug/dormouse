@@ -4,8 +4,6 @@ import { HeaderActionButton } from '../HeaderActionButton';
 import { chromeButton, paneZoomButtonClass } from '../design';
 import { TerminalContextContext, WallActionsContext } from './wall-context';
 
-const ACTION_BUTTON_CLASS = 'flex h-5 min-w-5 items-center justify-center rounded transition-colors hover:bg-current/10';
-
 /** Whoever renders minimize + kill watches them for focus, because a header
  *  that relocates the pair should take focus with them. */
 export type FocusHandlers = { onFocus?: () => void; onBlur?: () => void };
@@ -24,7 +22,7 @@ export function MinimizeKillButtons({ surfaceId, beforeAct, onFocus, onBlur }: {
   return (
     <div className="flex shrink-0 items-center gap-0.5" onFocus={onFocus} onBlur={onBlur}>
       <HeaderActionButton
-        className={ACTION_BUTTON_CLASS}
+        className={chromeButton()}
         onClick={(e) => { e.stopPropagation(); beforeAct?.(); actions.onMinimize(surfaceId); }}
         ariaLabel="Minimize"
         tooltip="Minimize [m] or [d]"
@@ -77,13 +75,13 @@ export function SplitButtons({ surfaceId }: { surfaceId: string }) {
   return (
     <div className="ml-1 flex shrink-0 items-center gap-0.5">
       <HeaderActionButton
-        className={ACTION_BUTTON_CLASS}
+        className={chromeButton()}
         onClick={(e) => { e.stopPropagation(); actions.onSplitH(surfaceId); }}
         ariaLabel="Split left/right"
         tooltip="Split left/right [|] or [%]"
       ><SplitHorizontalIcon size={14} /></HeaderActionButton>
       <HeaderActionButton
-        className={ACTION_BUTTON_CLASS}
+        className={chromeButton()}
         onClick={(e) => { e.stopPropagation(); actions.onSplitV(surfaceId); }}
         ariaLabel="Split top/bottom"
         tooltip={'Split top/bottom [-] or ["]'}

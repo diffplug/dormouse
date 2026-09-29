@@ -2,20 +2,20 @@ import { isHelperSession } from '../../lib/terminal-store';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
-import { tv } from 'tailwind-variants';
 import {
   CursorClickIcon,
   CursorTextIcon,
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { HEADER_PALETTE_TRANSITION_CLASS, HEADER_PILL_CLASS, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { HEADER_PILL_CLASS, paneHeader, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS } from '../design';
 import { isPreviewSlotParams } from './browser-surface';
 import { usePreviewKeep } from './preview-keep';
 import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
 import { useHeaderTier } from './use-header-tier';
 import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
 import type { PaneProps } from './pane-props';
+import { toolSemanticName } from './tool-name';
 import { usePaneRename } from './use-pane-rename';
 import {
   getMouseSelectionState,
@@ -47,30 +47,15 @@ import {
   ZoomedIdContext,
 } from './wall-context';
 
-export const paneHeaderVariant = tv({
-  // The active/inactive palette swap crossfades in step with the focus ring's
-  // travel (HEADER_PALETTE_TRANSITION_CLASS); children inherit via `text-inherit`.
-  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
-  variants: {
-    state: {
-      active: 'bg-header-active-bg text-header-active-fg',
-      inactive: 'bg-header-inactive-bg text-header-inactive-fg',
-    },
-  },
-});
-
 type TerminalHeaderTier = 'full' | 'compact' | 'minimal' | 'tiny';
 // Border-box widths, so they include the header's 8px left + 5px right padding
 // (`docs/specs/layout.rationale.md` derives each boundary). Measuring the
 // border box also tells a narrow header from a hidden one.
-const terminalHeaderTier = (width: number): TerminalHeaderTier =>
+export const terminalHeaderTier = (width: number): TerminalHeaderTier =>
   width > 293 ? 'full'
     : width > 173 ? 'compact'
       : width > 98 ? 'minimal'
         : 'tiny';
-/** A Tool's port-conflict face leads with its Terminal Context button, whose
- *  slot every boundary reserves. */
-const toolTerminalHeaderTier = (width: number): TerminalHeaderTier => terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX);
 
 const TODO_PREVIEW_GAP = 6;
 const TODO_PREVIEW_MARGIN = 8;
@@ -110,16 +95,21 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   // so we can color it red and strip it from the editing/rename base without
   // guessing from the string (a user title ending in "✗" would fool a match).
   const showsFailGlyph = derivedHeader.lastCommandFailed === true;
-  // A preview slot switch on this face holds the label it showed, then names
-  // the new target once it commits (`docs/specs/layout.md` -> Pane header).
-  const { transition } = usePreviewSlotView(id);
+  // A preview slot switch on this face holds the label it showed, then, once
+  // a retarget commits a new generation, the Tool's name
+  // (`docs/specs/layout.md` -> Pane header).
+  const { generation, transition } = usePreviewSlotView(id);
   const holding = transition?.ghost.kind === 'terminal';
-  const heldLabel = useHeldWhile({
-    primary: showsFailGlyph ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length) : displayTitle,
-    secondary: derivedHeader.secondary ?? null,
-    failed: showsFailGlyph,
+  const held = useHeldWhile({
+    generation,
+    label: {
+      primary: showsFailGlyph ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length) : displayTitle,
+      secondary: derivedHeader.secondary ?? null,
+      failed: showsFailGlyph,
+    },
   }, holding);
-  const label = holding && transition.label !== null ? { primary: transition.label, secondary: null, failed: false } : heldLabel;
+  const retargeted = held.generation !== generation ? toolSemanticName(params, paneState.titleCandidates.user?.title) : null;
+  const label = retargeted !== null ? { primary: retargeted, secondary: null, failed: false } : held.label;
   const inOverride = mouseOverride !== 'off';
   const mouseIconTooltip: string | null = mouseOverride === 'permanent'
     ? "You're overriding the TUI's mouse capture. Click to restore."
@@ -131,7 +121,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
   const isActiveHeader = mode === 'passthrough' && isSelected && windowFocused;
   const rename = usePaneRename(id);
   const tabRef = useRef<HTMLDivElement>(null);
-  const tier = useHeaderTier(tabRef, terminalContext ? toolTerminalHeaderTier : terminalHeaderTier);
+  const tier = useHeaderTier(tabRef, terminalHeaderTier, { reservePx: terminalContext ? HEADER_CONTROL_SLOT_PX : 0 });
   const [todoPreviewRect, setTodoPreviewRect] = useState<DOMRect | null>(null);
   const todoPill = useTodoPillContent(activity.todo);
   const compactOrWider = tier === 'full' || tier === 'compact';
@@ -155,7 +145,7 @@ export function TerminalPaneHeader({ id, title, params, terminalContext = false 
     <div
       ref={tabRef}
       data-pane-header-for={id}
-      className={paneHeaderVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
+      className={paneHeader({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
       {...keep}
       onContextMenu={(e) => {

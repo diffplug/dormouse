@@ -6,6 +6,7 @@ import {
   PictureInPictureIcon,
 } from '@phosphor-icons/react';
 import { BROWSER_PROVIDER_IDS, BROWSER_PROVIDERS } from 'dor-lib-common/browser-providers';
+import { chromeButton } from '../design';
 import { BROWSER_VIEWS, displayModeFor, displayView, type BrowserDisplayMode, type BrowserView } from './agent-browser-screen';
 
 const VIEW_LABEL: Record<BrowserView, string> = { resize: 'resizes with pane', fixed: 'fixed size', popout: 'popout' };
@@ -92,9 +93,13 @@ export function BrowserDisplayIcon({
   );
 }
 
+/** The widest a header's Display trigger gets — robot, 2px gap, presentation
+ *  glyph — with the header's 6px gap before it. */
+export const BROWSER_DISPLAY_SLOT_PX = 36;
+
 /** A browser header's Display trigger: its glyph is the Surface's display
  *  identity, and a press opens the Display modal (`docs/specs/dor-browser.md`
- *  -> Browser Chrome). Up to 30px wide: robot, gap, presentation glyph. */
+ *  -> Browser Chrome). */
 export function BrowserDisplayButton({ mode, onOpen }: { mode: BrowserDisplayMode | null; onOpen?: () => void }) {
   const label = mode ? `${BROWSER_DISPLAY_LABEL[mode]} — change display` : 'Change display';
   return (
@@ -104,7 +109,7 @@ export function BrowserDisplayButton({ mode, onOpen }: { mode: BrowserDisplayMod
       aria-label={label}
       title={label}
       data-browser-display-trigger="true"
-      className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded transition-colors hover:bg-current/10"
+      className={chromeButton({ class: 'shrink-0' })}
     >
       {mode && <BrowserDisplayIcon mode={mode} size={14} />}
     </button>

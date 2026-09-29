@@ -154,7 +154,7 @@ Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focus
 3. Its Tool name, then each dedupe-key element that adds to it, space-separated: an absolute path by its last component, an element that shows as the name skipped.
 4. An anonymous Tool's command.
 
-The terminal face and the Door keep the derived terminal label, which carries command status.
+The terminal face and the Door keep the derived terminal label, which carries command status, except where a switch's hold names the retargeted Tool (`docs/specs/layout.md` → Pane header).
 
 Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`. Tests: `lib/src/components/wall/tool-name.test.ts`, `lib/src/components/wall/ToolPaneHeader.test.tsx`.
 

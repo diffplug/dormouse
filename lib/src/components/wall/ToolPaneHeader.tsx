@@ -1,15 +1,15 @@
 import { useContext, useRef, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
-import { PREVIEW_LABEL_CLASS } from '../design';
+import { paneHeader, PREVIEW_LABEL_CLASS } from '../design';
 import { getTerminalPaneStateSnapshot, subscribeToTerminalPaneState } from '../../lib/terminal-registry';
-import { browserDisplayMode, useAgentBrowserScreenController, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
-import { BrowserDisplayButton } from './BrowserDisplayIcon';
+import { useAgentBrowserDisplayMode, useAgentBrowserScreenController } from './agent-browser-screen';
+import { BROWSER_DISPLAY_SLOT_PX, BrowserDisplayButton } from './BrowserDisplayIcon';
 import { isPreviewSlotParams } from './browser-surface';
-import { PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
+import { HEADER_CONTROL_SLOT_PX, PaneActionGroup, SplitButtons, TerminalContextButton } from './PaneActionButtons';
 import { usePreviewKeep } from './preview-keep';
 import { shownToolFace, useHeldWhile, usePreviewSlotView } from './preview-transition';
-import { paneHeaderVariant, TerminalPaneHeader } from './TerminalPaneHeader';
+import { TerminalPaneHeader, terminalHeaderTier } from './TerminalPaneHeader';
 import { toolSemanticName } from './tool-name';
 import { useHeaderTier } from './use-header-tier';
 import { usePaneRename } from './use-pane-rename';
@@ -26,21 +26,28 @@ import type { PaneProps } from './pane-props';
 export function ToolPaneHeader(props: PaneProps) {
   // A preview slot switch keeps the face it holds (`docs/specs/layout.md` ->
   // Pane header), so the header neither flips nor remounts.
-  const face = shownToolFace(props.params, usePreviewSlotView(props.id).transition);
-  if (face === 'browser') return <ToolBrowserHeader {...props} />;
+  const { transition } = usePreviewSlotView(props.id);
+  const face = shownToolFace(props.params, transition);
+  if (face === 'browser') return <ToolBrowserHeader {...props} switching={transition !== null} />;
   // The terminal face shows the terminal Terminal Context would, and pending
   // approval has none yet.
   return <TerminalPaneHeader {...props} terminalContext={face === 'port-conflict'} />;
 }
 
 type ToolHeaderTier = 'full' | 'compact' | 'minimal' | 'tiny';
-// Border-box widths; `docs/specs/layout.rationale.md` derives each boundary.
-const toolHeaderTier = (width: number): ToolHeaderTier =>
-  width > 355 ? 'full' : width > 160 ? 'compact' : width > 124 ? 'minimal' : 'tiny';
+/** The terminal header's boundaries, each with the leading controls it keeps
+ *  reserved: splits and Display need both, minimize and kill Terminal Context
+ *  alone (`docs/specs/layout.rationale.md`). */
+const toolHeaderTier = (width: number): ToolHeaderTier => {
+  const withDisplay = terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX - BROWSER_DISPLAY_SLOT_PX);
+  if (withDisplay === 'full') return 'full';
+  if (withDisplay !== 'tiny') return 'compact';
+  return terminalHeaderTier(width - HEADER_CONTROL_SLOT_PX) === 'tiny' ? 'tiny' : 'minimal';
+};
 
 /** A serving Tool's header: its semantic name, never a browser's navigation
  *  or address (`docs/specs/layout.md` -> Pane header). */
-function ToolBrowserHeader({ id, title, params }: PaneProps) {
+function ToolBrowserHeader({ id, title, params, switching }: PaneProps & { switching: boolean }) {
   const dirty = useToolDirty(id, params);
   const preview = isPreviewSlotParams(params);
   const mode = useContext(ModeContext);
@@ -53,9 +60,8 @@ function ToolBrowserHeader({ id, title, params }: PaneProps) {
   const userTitle = useSyncExternalStore(subscribeToTerminalPaneState, () => getTerminalPaneStateSnapshot().get(id)?.titleCandidates.user?.title ?? null);
   const name = toolSemanticName(params, userTitle) ?? title ?? id;
   const screen = useAgentBrowserScreenController(id);
-  const snapshot = useAgentBrowserScreenSnapshot(screen);
   // A switch retires the browser the ghost shows, so the glyph holds too.
-  const displayMode = useHeldWhile(snapshot ? browserDisplayMode(snapshot) : null, usePreviewSlotView(id).transition !== null);
+  const displayMode = useHeldWhile(useAgentBrowserDisplayMode(screen), switching);
   const headerRef = useRef<HTMLDivElement>(null);
   const tier = useHeaderTier(headerRef, toolHeaderTier);
   const rename = usePaneRename(id);
@@ -65,7 +71,7 @@ function ToolBrowserHeader({ id, title, params }: PaneProps) {
     <div
       ref={headerRef}
       data-pane-header-for={id}
-      className={paneHeaderVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
+      className={paneHeader({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
       {...keep}
       onContextMenu={(e) => {
