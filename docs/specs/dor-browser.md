@@ -204,7 +204,7 @@ its presentation glyph.
 The iframe option lists that the embed keeps no logins or cookies (for
 `https://`, see [Iframe Renderer](#iframe-renderer)).
 
-**Must offer only Resize with pane and Fixed size for screencast resolution.** Fixed size nests a preset selector including Custom and editable width, height, and DPR. Choosing a preset fills the fields; editing a field selects Custom. Preset selection preserves omitted DPR until explicitly edited. Device emulation is CLI-only. **Resize with pane is owned by the host** (rationale).
+**Must offer only Resize with pane and Fixed size for screencast resolution.** Fixed size places its preset selector, including Custom, beside the mode label, with editable width, height, and DPR below. Choosing a preset fills the fields; editing a field selects Custom. Preset selection preserves omitted DPR until explicitly edited. Device emulation is CLI-only. **Resize with pane is owned by the host** (rationale).
 
 - **Must send the pane's laid-out CSS size — never `getBoundingClientRect()`,
   which a Workspace presentation scales — and display ratio over the viewer

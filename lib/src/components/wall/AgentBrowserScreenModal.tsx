@@ -205,22 +205,22 @@ export function AgentBrowserScreenModal({
         </label>
 
         <div className="flex flex-col gap-2">
-          <label className="flex cursor-pointer items-center gap-2">
-            <input type="radio" name="screen-target" checked={target === 'fixed'} onChange={() => chooseTarget('fixed')} />
-            <BrowserPresentationIcon mode="agent-browser-fixed" size={14} className="shrink-0 text-muted" />
-            <span className="text-foreground">Fixed size</span>
-          </label>
-          <div className="ml-6 flex min-w-0 flex-col gap-2">
+          <div className="flex min-w-0 items-center gap-3">
+            <label className="flex shrink-0 cursor-pointer items-center gap-2">
+              <input type="radio" name="screen-target" checked={target === 'fixed'} onChange={() => chooseTarget('fixed')} />
+              <BrowserPresentationIcon mode="agent-browser-fixed" size={14} className="shrink-0 text-muted" />
+              <span className="text-foreground">Fixed size</span>
+            </label>
             <select aria-label="Size preset" value={preset} onChange={(event) => choosePreset(event.target.value)}
-              className="min-w-0 rounded border border-border bg-app-bg px-1.5 py-1 text-foreground">
+              className="min-w-0 flex-1 rounded border border-border bg-app-bg px-1.5 py-1 text-foreground">
               <option value="">Custom</option>
               {Object.entries(config.viewports).map(([name, size]) => <option key={name} value={name}>{name} · {size.width} × {size.height}</option>)}
             </select>
-            <div className="flex flex-wrap items-center gap-2">
-              <DimInput label="W" chars={4} value={customW} onChange={(v) => editSize(setCustomW, v)} onFocus={() => chooseTarget('fixed')} />
-              <DimInput label="H" chars={4} value={customH} onChange={(v) => editSize(setCustomH, v)} onFocus={() => chooseTarget('fixed')} />
-              <DimInput label="DPR" chars={1} value={customDpi} onChange={(v) => { editSize(setCustomDpi, v); setExplicitDpr(true); }} onFocus={() => chooseTarget('fixed')} />
-            </div>
+          </div>
+          <div className="ml-6 flex flex-wrap items-center gap-2">
+            <DimInput label="W" chars={4} value={customW} onChange={(v) => editSize(setCustomW, v)} onFocus={() => chooseTarget('fixed')} />
+            <DimInput label="H" chars={4} value={customH} onChange={(v) => editSize(setCustomH, v)} onFocus={() => chooseTarget('fixed')} />
+            <DimInput label="DPR" chars={1} value={customDpi} onChange={(v) => { editSize(setCustomDpi, v); setExplicitDpr(true); }} onFocus={() => chooseTarget('fixed')} />
           </div>
         </div>
       </div>
