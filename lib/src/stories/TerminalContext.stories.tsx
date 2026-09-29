@@ -168,8 +168,8 @@ const meta = {
     }
     const panel = canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
     const bounds = panel.getBoundingClientRect();
-    // The Dir and Ports rows each stay on one line at every width.
-    for (const row of panel.querySelectorAll<HTMLElement>('[data-context-dir], [data-context-ports]')) {
+    // The Title, Dir, and Ports rows each stay on one line at every width.
+    for (const row of panel.querySelectorAll<HTMLElement>('[data-context-title], [data-context-dir], [data-context-ports]')) {
       expect(row.getBoundingClientRect().height).toBeLessThanOrEqual(28);
       expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
     }

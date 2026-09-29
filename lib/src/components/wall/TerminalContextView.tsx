@@ -173,7 +173,40 @@ function useRowFit(row: RefObject<HTMLElement | null>, measurer: RefObject<HTMLE
 }
 
 const COPY_ICON = <CopyIcon size={12} />;
+const COPY_CHECK = <CheckIcon size={12} weight="bold" />;
 const EXPLORE_ICON = <ArrowSquareOutIcon size={15} />;
+const EXPLAIN_ICON = <BugBeetleIcon size={15} />;
+
+/** The title, its explanation, the copyable Surface ref, and `actions` on one line. */
+function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions }: {
+  title: string; surfaceRef: string; actions: ReactNode;
+  onExplain(): void; onCopyRef(): Promise<boolean>;
+}) {
+  const row = useRef<HTMLDivElement>(null);
+  const measures = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const [explainCompact, setExplainCompact] = useState(false);
+  const [refCompact, setRefCompact] = useState(false);
+  // Explain drops its label, the title truncates to 8ch, the ref drops to its icon, then the title truncates on.
+  useRowFit(row, measures, (width, gap, [text, least, explainFull, explainIcon, refFull]) => {
+    const rest = (actionsRef.current?.offsetWidth ?? 0) + 3 * gap;
+    setExplainCompact(text + explainFull + refFull + rest > width);
+    setRefCompact(Math.min(text, least) + explainIcon + refFull + rest > width);
+  }, [title, surfaceRef]);
+  return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 items-center gap-1.5">
+    <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
+      <span className="whitespace-nowrap">{title}</span>
+      <span className="w-[8ch] shrink-0" />
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}explain</span>
+      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
+      <span className={ACTION_BOX_CLASS}>{surfaceRef}{COPY_ICON}</span>
+    </div>
+    <span className="min-w-0 flex-1 truncate" title={title}>{title}</span>
+    <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}{!explainCompact && 'explain'}</ContextAction>
+    <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={refCompact ? COPY_CHECK : undefined} onCopy={onCopyRef}>{!refCompact && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>
+    <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5">{actions}</div>
+  </div>;
+}
 
 /** The directory, its unlabeled copy, and the explorer action on one line. */
 function DirRow({ cwd, explorerLabel, canExplore, onExplore, onCopyPath }: {
@@ -194,7 +227,7 @@ function DirRow({ cwd, explorerLabel, canExplore, onExplore, onCopyPath }: {
     </div>
     {/* Right-to-left so truncation drops the start; the isolate keeps the path's own order. */}
     <span className="min-w-0 truncate [direction:rtl]" title={cwd}><bdi>{cwd}</bdi></span>
-    <ContextCopyAction label="Copy absolute path" confirmation={<CheckIcon size={12} weight="bold" />} onCopy={onCopyPath}>{COPY_ICON}</ContextCopyAction>
+    <ContextCopyAction label="Copy absolute path" confirmation={COPY_CHECK} onCopy={onCopyPath}>{COPY_ICON}</ContextCopyAction>
     <ContextOpenAction label={canExplore ? explorerLabel : 'Directory unavailable on this host'} disabled={!canExplore} compact={compact} onOpen={onExplore}>{EXPLORE_ICON}{!compact && text}</ContextOpenAction>
   </div>;
 }
@@ -375,14 +408,11 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       <div className="shrink-0 max-h-[45%] overflow-auto px-3 py-2">
         <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-y-1">
           <span className="text-muted">Title</span>
-          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
-            <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span><ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />explain</ContextAction>
-            <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction><div data-context-header-actions className="flex shrink-0 items-center gap-0.5">
-              {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
-                <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
-              <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
-            </div></div>
-          </div>
+          <TitleRow title={p.title} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
+            {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
+              <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
+            <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>
+          </>} />
           <span className="text-muted">Dir</span>
           <DirRow cwd={p.cwd} explorerLabel={p.explorerLabel} canExplore={p.canExplore} onExplore={() => attempt(p.onExplore)} onCopyPath={() => attempt(p.onCopyPath)} />
           <span className="text-muted">Ports</span>

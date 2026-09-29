@@ -136,6 +136,34 @@ it('moves trailing actions into the dropdown on resize and dispatches hidden act
   } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
 });
 
+it('drops the explain label, then the Surface ref text, as the title row narrows', () => {
+  let width = 320;
+  const observers = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { observers.add(callback); }
+    observe() {} disconnect() {} unobserve() {}
+  });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-context-title') ? width : 0; });
+  // Ten pixels a character, twenty an icon, 8ch as eighty: the title is 80, explain 90 or 20, the ref 110, close 20.
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function(this: HTMLElement) {
+    return (this.textContent?.length ?? 0) * 10 + this.querySelectorAll('svg').length * 20 + (this.classList.contains('w-[8ch]') ? 80 : 0);
+  });
+  const resize = (next: number) => act(() => { width = next; observers.forEach(notify => notify()); });
+  try {
+    render();
+    expect(button('Explain this title').textContent).toBe('explain');
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+    resize(260);
+    expect(button('Explain this title').textContent).toBe('');
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+    resize(200);
+    expect(button('Copy surface:3').textContent).toBe('');
+    resize(320);
+    expect(button('Explain this title').textContent).toBe('explain');
+    expect(button('Copy surface:3').textContent).toBe('surface:3');
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
+});
+
 it('drops the explorer label, and its busy text, before truncating the directory', async () => {
   let width = 400;
   const observers = new Set<() => void>();
