@@ -89,6 +89,9 @@ separately protected `hosted-release-tag` environment. Apple's private relay
 has the exact sender and the Postmark return-path domain registered. Provisioning
 these registrations does not establish acceptance.
 
+The public policy pages are live. Google is external and in production; its
+branding is verified and published, with only OpenID, email, and profile scopes.
+
 ## GitHub setup
 
 Run once from the repository root with the operator's existing `gh` login:
@@ -278,7 +281,7 @@ secrets before release; deployment preserves the ones already there.
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in
 `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables
-none; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a
+GitHub, Google, Microsoft, and Apple; `docs/specs/hosted.md` -> "Identity and login" owns what a name and a
 credential pair do and do not enable. Facebook is outside this milestone.
 
 ## Release

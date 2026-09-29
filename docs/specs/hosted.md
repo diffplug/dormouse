@@ -75,7 +75,7 @@ Source of truth: `.github/workflows/hosted-production.yml`; `verifyPackages` / `
 
 ## Future
 
-1. Finish OAuth consent branding, publish approved policy pages, enable providers, and pass real production acceptance. Credentials and Postgres/Hyperdrive are provisioned. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
+1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
 3. Hosted ElevenLabs: desktop authorization, scoped revocable credentials, quotas, usage accounting, spending bounds, and explicit text/redaction disclosure.
 4. Hosted Relay: follow the **saas-multitenant** scope in `docs/specs/relay.md`; account login never replaces Burrow pairing and authorization. Paid security claims retain the independent-review precondition.

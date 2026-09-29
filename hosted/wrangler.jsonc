@@ -23,7 +23,7 @@
   "vars": {
     "APP_ORIGIN": "https://hosted.dormouse.sh",
     "EMAIL_FROM": "signin@dormouse.sh",
-    "OAUTH_PROVIDERS": ""
+    "OAUTH_PROVIDERS": "github,google,microsoft,apple"
   },
   "hyperdrive": [
     {

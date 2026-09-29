@@ -42,7 +42,19 @@ function provider({
   };
 }
 test("preflight rejects wrong databases, caching, reused roles, and incomplete provider secrets", async () => {
-  await preflight(env, config, provider());
+  const configuredSecrets = [
+    "AUTH_SECRET", "POSTMARK_SERVER_TOKEN",
+    ...config.vars.OAUTH_PROVIDERS.split(",").filter(Boolean).flatMap((name) => [
+      `${name.toUpperCase()}_CLIENT_ID`, `${name.toUpperCase()}_CLIENT_SECRET`,
+    ]),
+  ];
+  await preflight(env, config, provider({ secrets: configuredSecrets }));
+  for (const missing of configuredSecrets) {
+    await assert.rejects(
+      preflight(env, config, provider({ secrets: configuredSecrets.filter((name) => name !== missing) })),
+      { message: `Missing Worker secret: ${missing}` },
+    );
+  }
   for (const override of [
     { host: "ep-preview.neon.tech" },
     { database: "preview" },
