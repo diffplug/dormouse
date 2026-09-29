@@ -329,7 +329,7 @@ describe('sync-to-pane', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it('names the engagement a Fixed viewport or device ends', async () => {
+  it('names the engagement a Fixed viewport ends', async () => {
     const host = installBrowserHost();
     const controller = withPort('id', { session: 'sess', browserViewport: { mode: 'pane-sync' } }, 4321);
     controller.attachView(resizablePane().sink);
@@ -342,8 +342,8 @@ describe('sync-to-pane', () => {
     screen.actions.engageSync();
     const next = engagementAt(4321);
     expect(next).not.toBe(first);
-    screen.actions.applyDevice('iPhone 15');
-    expect(host.requests('device').at(-1)).toMatchObject({ endsSync: next });
+    screen.actions.applyViewport(800, 600, 1);
+    expect(host.requests('viewport').at(-1)).toMatchObject({ endsSync: next });
   });
 
   it('sends the host the pane size when its socket opens, once a resize settles, and at once on a display-scale change', async () => {
@@ -1436,7 +1436,6 @@ describe('relaunch (pop-out / pop-in)', () => {
       screen.chromeActions.reload();
       screen.chromeActions.navigate('https://first.example/');
       screen.chromeActions.navigate('https://latest.example/');
-      screen.actions.applyDevice('iPhone 16 Pro');
       screen.actions.applyViewport(1024, 768, 2);
       screen.actions.engageSync();
       const [first, second] = controller.snapshot().tabs;
@@ -1533,13 +1532,11 @@ describe('relaunch (pop-out / pop-in)', () => {
     expect(host.requests('viewport')).toEqual([]);
 
     // The modal reports the ratio it fixed, until another resolution is picked.
-    for (const pick of [() => screen.actions.engageSync(), () => screen.actions.applyDevice('iPhone 16')]) {
-      await screen.actions.applyViewportSetting?.({ mode: 'fixed', width: 1024, height: 768, dpr: 3 });
-      expect(screen.snapshot()).toMatchObject({ syncEngaged: false, viewport: { dpr: 3 } });
-      pick();
-      await flushMicrotasks();
-      expect(screen.snapshot()?.viewport.dpr).toBe(1);
-    }
+    await screen.actions.applyViewportSetting?.({ mode: 'fixed', width: 1024, height: 768, dpr: 3 });
+    expect(screen.snapshot()).toMatchObject({ syncEngaged: false, viewport: { dpr: 3 } });
+    screen.actions.engageSync();
+    await flushMicrotasks();
+    expect(screen.snapshot()?.viewport.dpr).toBe(1);
     // Or until another browser streams.
     await screen.actions.applyViewportSetting?.({ mode: 'fixed', width: 1024, height: 768, dpr: 3 });
     controller.handOver(4321);

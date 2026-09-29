@@ -242,7 +242,6 @@ export function IframePanel({ id, title, params }: PaneProps) {
   const agentBrowserCapable = renderModes.includes('agent-browser-screencast');
   const screenActions = useMemo<ScreenActions>(() => ({
     engageSync() {},
-    applyDevice() {},
     applyViewport() {},
     openModal() { openAgentBrowserScreenModal(id); },
     // iframe is the current backend; every other offered mode swaps to an

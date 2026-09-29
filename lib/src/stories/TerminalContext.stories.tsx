@@ -89,7 +89,7 @@ function TerminalOutput({ scenario }: { scenario: Scenario }) {
   </>;
 }
 
-function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeight }: { scenario: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth: number; paneHeight: number }) {
+function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeight, bothProviders = false }: { bothProviders?: boolean; scenario: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth: number; paneHeight: number }) {
   const [side, setSide] = useState<ContextSide | undefined>();
   const bounds = { x: 0, y: 0, width: paneWidth, height: paneHeight };
   const placement = placeTerminalContext(bounds, bounds, false, side);
@@ -107,7 +107,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
         scan={scenario === 'scanFailed' ? { status: 'failed' } : { status: 'loaded', entries: scenario === 'noPorts' ? [] : ports }}
         watchRule="pnpm" watching={watching} todo={todo} notification={scenario === 'notification' ? { title: 'Tests complete', body: '341 passed, 0 failed' } : null}
         status={preserved ? 'preserved' : scenario === 'running' ? 'running' : scenario === 'autorunOff' ? 'off' : 'completed'} command={command}
-        explorerLabel="Open in Finder" canExplore browserProviders={['agent-browser']} canIframe initialDetail={initialDetail}
+        explorerLabel="Open in Finder" canExplore browserProviders={bothProviders ? ['agent-browser', 'playwright'] : ['agent-browser']} canIframe initialDetail={initialDetail}
         onClose={() => {}} onCopyRef={() => {}} onCopyPath={() => {}} onExplore={() => {}} onPort={() => {
           if (scenario === 'launchPending') return new Promise<void>(() => {});
           if (scenario === 'launchFailed') throw new Error("agent-browser binary not found ('agent-browser' was not found)");
@@ -119,7 +119,7 @@ function ContextPrototype({ scenario, initialDetail = null, paneWidth, paneHeigh
   </div>;
 }
 
-function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900, paneHeight = 680 }: { initialScenario?: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
+function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null, paneWidth = 900, paneHeight = 680, bothProviders = false }: { bothProviders?: boolean; initialScenario?: Scenario; initialDetail?: 'title' | 'modify' | 'reset' | null; paneWidth?: number; paneHeight?: number }) {
   const [scenario, setScenario] = useState(initialScenario);
   return <main className="min-h-screen bg-app-bg p-5 font-mono text-sm text-foreground">
     <div className="mb-3 w-[900px]">
@@ -128,7 +128,7 @@ function TerminalContextStory({ initialScenario = 'fresh', initialDetail = null,
         {SCENARIOS.map(item => <button key={item.id} type="button" aria-pressed={scenario === item.id} onClick={() => setScenario(item.id)} className={`rounded px-2 py-1 ${scenario === item.id ? 'bg-header-active-bg text-header-active-fg' : 'text-muted hover:bg-foreground/10'}`}>{item.label}</button>)}
       </div>
     </div>
-    <ContextPrototype key={scenario} scenario={scenario} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
+    <ContextPrototype key={scenario} bothProviders={bothProviders} scenario={scenario} initialDetail={initialDetail} paneWidth={paneWidth} paneHeight={paneHeight} />
   </main>;
 }
 
@@ -140,9 +140,12 @@ const meta = {
   play: async ({ args, canvasElement }) => {
     if (args.initialScenario === 'launchPending' || args.initialScenario === 'launchFailed') {
       const canvas = within(canvasElement);
-      await userEvent.click(canvas.getByRole('button', { name: 'Open in agent-browser screencast' }));
+      // Narrow stories reach the screencast through the overflow dropdown.
+      const launch = canvas.queryByRole('button', { name: 'Open in agent-browser screencast' }) ?? canvas.getByRole('combobox', { name: 'More browser actions' });
+      if (launch instanceof HTMLSelectElement) await userEvent.selectOptions(launch, 'agent-browser-screencast');
+      else await userEvent.click(launch);
       if (args.initialScenario === 'launchPending') {
-        await expect(canvas.getByRole('button', { name: 'Open in agent-browser screencast' })).toHaveAttribute('aria-busy', 'true');
+        await expect(launch).toHaveAttribute('aria-busy', 'true');
       } else {
         const diagnostic = canvas.getByRole('alert');
         await expect(diagnostic).toHaveTextContent('agent-browser binary not found');
@@ -165,6 +168,11 @@ const meta = {
     }
     const panel = canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
     const bounds = panel.getBoundingClientRect();
+    // The Title, Dir, and Ports rows each stay on one line at every width.
+    for (const row of panel.querySelectorAll<HTMLElement>('[data-context-title], [data-context-dir], [data-context-ports]')) {
+      expect(row.getBoundingClientRect().height).toBeLessThanOrEqual(28);
+      expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth);
+    }
     // DOM visibility matchers do not catch overflow clipping; check actual bounds.
     for (const element of [within(panel).getByTitle('pnpm dev'), ...panel.querySelectorAll('button')]) {
       const box = element.getBoundingClientRect();
@@ -206,3 +214,5 @@ export const NarrowResetConfirmation: Story = { args: { initialScenario: 'editor
 
 export const OpeningBrowser: Story = { args: { initialScenario: 'launchPending', paneWidth: 380, paneHeight: 520 } };
 export const BrowserLaunchFailed: Story = { args: { initialScenario: 'launchFailed', paneWidth: 480, paneHeight: 520 } };
+
+export const BrowserProviders: Story = { args: { bothProviders: true, paneWidth: 900, paneHeight: 900 } };

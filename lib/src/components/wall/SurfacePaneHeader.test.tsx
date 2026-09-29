@@ -377,7 +377,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     const openModal = vi.fn(() => { stillOwnsFocus(); modalControl.focus(); });
     const registration = registerAgentBrowserScreen('pane-popup-actions', {
       snapshot: SCREEN, chrome: CHROME, hostCapable: true,
-      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal },
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal },
       chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload },
     });
     try {
@@ -499,7 +499,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     const navigate = vi.fn();
     const registration = registerAgentBrowserScreen('pane-url-edit', {
       snapshot: SCREEN,
-      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
       chrome: CHROME,
       chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
       hostCapable: true,
@@ -530,7 +530,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     const navigate = vi.fn();
     const registration = registerAgentBrowserScreen('pane-url-refuse', {
       snapshot: SCREEN,
-      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
       chrome: CHROME,
       chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
       hostCapable: true,
@@ -561,7 +561,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
     const navigate = vi.fn();
     const registration = registerAgentBrowserScreen('pane-url-esc', {
       snapshot: SCREEN,
-      actions: { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
+      actions: { engageSync: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() },
       chrome: CHROME,
       chromeActions: { navigate, back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
       hostCapable: true,
