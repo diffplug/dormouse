@@ -42,7 +42,8 @@ import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
-import type { SessionStatus } from '../lib/terminal-registry';
+import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
+import { scrollMobileTerminal, isMobileScrollWheel } from '../lib/mobile-terminal-scroll';
 import { acknowledgeSession } from '../lib/session-activity-store';
 import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
 import { TERMINAL_TAP_EVENT, type TerminalTapDetail } from '../lib/terminal-mouse-router';
@@ -131,6 +132,7 @@ export interface MobileTerminalUiProps {
   cursorTouchAvailable?: boolean;
   onSendInput?: (data: string) => void;
   onGestureInput?: (input: MobileGestureInputId, data: string) => void;
+  onGestureScroll?: (lines: number) => void;
   onPaste?: () => void | Promise<void>;
   onFocusInput?: () => void;
   sessions?: MobileTerminalSessionItem[];
@@ -427,6 +429,7 @@ function isGestureDialogTarget(target: EventTarget | null): boolean {
 }
 
 function consumeNativeTouchOrScrollEvent(event: Event): void {
+  if (isMobileScrollWheel(event)) return;
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
@@ -501,6 +504,7 @@ export function MobileTerminalUi({
   cursorTouchAvailable = false,
   onSendInput,
   onGestureInput,
+  onGestureScroll,
   onPaste,
   onFocusInput,
   sessions = [],
@@ -516,9 +520,11 @@ export function MobileTerminalUi({
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
   const keyboardMode = activeKeyboardMode ?? internalKeyboardMode;
   const touchMode = activeTouchMode ?? internalTouchMode;
+  const activeSessionId = sessions.find((session) => session.active)?.id;
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
+  const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; y: number; remainder: number } | null>(null);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const completedGesturePointerIdRef = useRef<number | null>(null);
   const gestureCompletionTimerRef = useRef<number | null>(null);
@@ -642,8 +648,8 @@ export function MobileTerminalUi({
     if (!action) return;
     if (action.kind === 'input') {
       const data = MOBILE_TERMINAL_KEY_SEQUENCES[action.input];
-      sendInput(data);
       onGestureInput?.(action.input, data);
+      sendInput(data);
       return;
     }
     if (action.kind === 'text') {
@@ -719,7 +725,12 @@ export function MobileTerminalUi({
   }, [configurePaneTextInputs, terminal]);
 
   useEffect(() => {
+    if (edgeScrollRef.current?.sessionId !== activeSessionId) edgeScrollRef.current = null;
+  }, [activeSessionId]);
+
+  useEffect(() => {
     if (touchMode === 'gestures' && interactive) return;
+    edgeScrollRef.current = null;
     clearGestureCompletionTimer();
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
     setPendingGestureConfirmation(null);
@@ -764,7 +775,7 @@ export function MobileTerminalUi({
       return;
     }
     if (!interactive || touchMode !== 'gestures') return;
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -773,6 +784,13 @@ export function MobileTerminalUi({
     completedGesturePointerIdRef.current = null;
 
     const origin = localPointerPoint(event);
+    const rect = event.currentTarget.getBoundingClientRect();
+    // The starting point owns the whole drag, even if it later leaves the edge.
+    if (active && rect.width > 0 && (origin.x <= 48 || origin.x >= rect.width - 48)) {
+      edgeScrollRef.current = { pointerId: event.pointerId, sessionId: active.id, y: event.clientY, remainder: 0 };
+      commitGestureState(MOBILE_GESTURE_IDLE_STATE);
+      return;
+    }
     commitGestureState(beginMobileGesture(
       event.pointerId,
       origin,
@@ -792,6 +810,22 @@ export function MobileTerminalUi({
       return;
     }
 
+    const scroll = edgeScrollRef.current;
+    if (scroll?.pointerId === event.pointerId) {
+      event.preventDefault();
+      event.stopPropagation();
+      scroll.remainder += scroll.y - event.clientY;
+      scroll.y = event.clientY;
+      // Natural scrolling: content follows the finger, one line per 18px.
+      const lines = Math.trunc(scroll.remainder / 18);
+      scroll.remainder -= lines * 18;
+      const terminal = getTerminalInstance(scroll.sessionId);
+      if (lines && terminal && sessions.some((session) => session.id === scroll.sessionId && session.active)) {
+        scrollMobileTerminal(terminal, lines, event.clientX, event.clientY);
+        onGestureScroll?.(lines);
+      }
+      return;
+    }
     const state = gestureStateRef.current;
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -807,13 +841,21 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(nextState);
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode]);
+  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode, sessions, onGestureScroll]);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;
     if (tap?.pointerId === event.pointerId) {
       pendingTapRef.current = null;
       if (withinTapSlop(tap, event)) acknowledgeSession(tap.sessionId);
+    }
+    if (edgeScrollRef.current?.pointerId === event.pointerId) {
+      event.preventDefault();
+      event.stopPropagation();
+      pendingTapRef.current = null;
+      edgeScrollRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
     }
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
@@ -859,6 +901,14 @@ export function MobileTerminalUi({
   }, [blurPaneTextInputs]);
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (edgeScrollRef.current?.pointerId === event.pointerId) {
+      event.preventDefault();
+      event.stopPropagation();
+      pendingTapRef.current = null;
+      edgeScrollRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
     if (pendingTapRef.current?.pointerId === event.pointerId) pendingTapRef.current = null;
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
