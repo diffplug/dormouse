@@ -7,7 +7,7 @@
 
 import { clsx } from 'clsx';
 import type { DirectPath, DirectRelayCause } from 'remote-lib-common';
-import { isInstalledWebApp } from '../client/push-subscribe';
+import { isInstalledWebApp } from '../client/install-state';
 import { PK, pkButton } from './pocket-chrome';
 
 /**

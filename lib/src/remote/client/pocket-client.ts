@@ -61,7 +61,6 @@ import {
   type PushSubscriptionsQueryResponse,
   type ReauthBeginResponse,
   type ReauthFinishResponse,
-  type RemoteEventMsg,
   type RelayToClientFrame,
   type SetupBeginResponse,
   type SetupFinishResponse,
@@ -82,9 +81,9 @@ import {
   type PendingDeletionStore,
 } from './pocket-db';
 import { SCAN_LABEL } from '../setup-copy';
-import type { DirectPeerFactory } from '../direct/direct-peer';
-import type { RemoteTimer, RemoteWebSocket } from '../ws';
-import { ClientSessionCore, type PageVisibility, type TerminalHandlers } from './session-core';
+import type { RemoteWebSocket } from '../ws';
+import { ClientSessionCore, type ClientSessionCoreDeps } from './session-core';
+import type { TerminalHandlers } from './remote-adapter';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
 export type PocketSocket = RemoteWebSocket;
@@ -117,7 +116,12 @@ export interface PocketStorage {
   setRegisteredPushEndpoint(fingerprint: string): void;
 }
 
-export interface PocketClientDeps {
+/**
+ * What a `PocketClient` is built from. The session core's own seams —
+ * `setTimer`, `visibility`, `createDirectPeer` — pass straight through to it.
+ */
+export interface PocketClientDeps
+  extends Pick<ClientSessionCoreDeps<E2eRoute>, 'setTimer' | 'visibility' | 'createDirectPeer'> {
   /** Prepended to API routes; `''` for same-origin (the served app). */
   readonly baseUrl?: string;
   /** Base for the `/ws/client` URL, e.g. `wss://host`; derived from origin in the app. */
@@ -131,16 +135,6 @@ export interface PocketClientDeps {
   readonly pendingDeletions: PendingDeletionStore;
   readonly storage?: PocketStorage;
   readonly now?: () => number;
-  /** The keepalive timer; see {@link RemoteTimer}. */
-  readonly setTimer?: RemoteTimer;
-  readonly visibility?: PageVisibility;
-  /**
-   * How this runtime builds a peer connection for the direct path
-   * (`docs/specs/remote-api.md` → Transport → "Direct path"), or `null` where it
-   * has none. Absent, this Client never offers one and every session stays
-   * relayed.
-   */
-  readonly createDirectPeer?: DirectPeerFactory;
 }
 
 /**
@@ -876,7 +870,7 @@ export class PocketClient {
       try {
         await this.#dropAuthorization(record);
       } catch {
-        this.#core.disposeCeremony();
+        this.#core.disposeSession();
       }
     }
     return {
@@ -905,7 +899,7 @@ export class PocketClient {
     } catch {
       // Left queued.
     }
-    this.#core.disposeCeremony();
+    this.#core.disposeSession();
   }
 
   async #tombstone(burrowId: string, deliveryId: string): Promise<void> {
@@ -941,18 +935,6 @@ export class PocketClient {
 
   detach(surfaceId: string, subId?: string): Promise<unknown> {
     return this.#core.detach(surfaceId, subId);
-  }
-
-  request<T = unknown>(method: string, params?: unknown, requestId?: string): Promise<T> {
-    return this.#core.request<T>(method, params, requestId);
-  }
-
-  subscribe<T = unknown>(
-    method: string,
-    params: unknown,
-    onEvent: (event: RemoteEventMsg) => void,
-  ): Promise<{ subId: string; result: T }> {
-    return this.#core.subscribe<T>(method, params, onEvent);
   }
 
   unsubscribe(subId: string): void {
@@ -1107,7 +1089,7 @@ export class PocketClient {
    * expired timer, all of them {@link BURROW_UNAVAILABLE_MESSAGE}.
    */
   #unavailable(error: unknown): { readonly ok: false; readonly message: string } {
-    this.#core.disposeCeremony();
+    this.#core.disposeSession();
     if (error instanceof SessionExpiredError) throw error;
     return { ok: false, message: BURROW_UNAVAILABLE_MESSAGE };
   }

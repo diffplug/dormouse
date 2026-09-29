@@ -13,6 +13,7 @@
  */
 
 import {
+  ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   type DirectSignalV1,
   type NoiseTransportSession,
   type TransportReceipt,
@@ -23,6 +24,20 @@ import {
 import { DirectEndpoint } from '../direct/direct-endpoint';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
+
+/**
+ * `value` as one control message on `session`, or `null` for a poisoned
+ * session, which has nothing to say — whatever poisoned it disposes it, so the
+ * caller need not. The transport pads every control message to the same size
+ * (`docs/specs/relay.md` → E2E framing).
+ */
+export function sealControl(session: NoiseTransportSession, value: object): Uint8Array | null {
+  try {
+    return session.sendControl({ ...value });
+  } catch {
+    return null;
+  }
+}
 
 /** The remote-api handler an established session drives. */
 export interface RemoteApiSessionLike {
@@ -86,7 +101,7 @@ export class EstablishedE2eSession {
     this.#direct = new DirectEndpoint('answerer', {
       createPeer: deps.createDirectPeer,
       sendSignal: (signal) => this.#sendSignal(signal),
-      sendRelay: (ciphertext) => this.#sendRelay(ciphertext),
+      sendRelay: this.#sendRelay,
       receive: (ciphertext) => this.#receive(ciphertext),
       fatal: (reason) => {
         console.warn(`[burrow] the direct path ended this session: ${reason}`);
@@ -102,11 +117,12 @@ export class EstablishedE2eSession {
   }
 
   /**
-   * When this Burrow last **decrypted** a Client→Burrow transport message here,
-   * on either path: the idle deadline is path-agnostic.
+   * When the Burrow reaps this session: `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` after
+   * it last **decrypted** a Client→Burrow transport message here, on either
+   * path — the idle deadline is path-agnostic.
    */
-  get lastClientActivityAt(): number {
-    return this.#lastClientActivityAt;
+  get idleDeadlineAt(): number {
+    return this.#lastClientActivityAt + ESTABLISHED_E2E_IDLE_TIMEOUT_MS;
   }
 
   /**
@@ -204,18 +220,12 @@ export class EstablishedE2eSession {
 
   /**
    * One of the direct path's signals, as a control message on the relay path —
-   * signals ride the relay until the switch. The transport pads every control
-   * message to the same size (`docs/specs/relay.md` → E2E framing). Answers
-   * `false` for a poisoned session, which has nothing to say.
+   * signals ride the relay until the switch. Answers `false` for a poisoned
+   * session; see {@link sealControl}.
    */
   #sendSignal(signal: DirectSignalV1): boolean {
-    let ciphertext: Uint8Array;
-    try {
-      ciphertext = this.#session.sendControl({ ...signal });
-    } catch {
-      // Whatever poisoned it disposes it; the caller need not.
-      return false;
-    }
+    const ciphertext = sealControl(this.#session, signal);
+    if (!ciphertext) return false;
     this.#sendRelay(ciphertext);
     return true;
   }

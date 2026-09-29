@@ -59,7 +59,7 @@ export interface DirectEndpointDeps {
   /**
    * The session is unrecoverable: the endpoint's owner disposes it (the Burrow
    * through `EstablishedE2eSession`'s `onFatal`, the Client through
-   * `#loseBurrow`).
+   * `ClientSessionCore.loseBurrow`).
    */
   fatal(reason: string): void;
   /**

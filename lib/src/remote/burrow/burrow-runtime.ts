@@ -10,7 +10,6 @@ import {
   DEFAULT_PAIRING_TTL_MS,
   E2E_INIT_BURST,
   E2E_INIT_REFILL_INTERVAL_MS,
-  ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   BurrowAcl,
   ChallengeIssuer,
   MAX_ESTABLISHED_E2E_SESSIONS,
@@ -62,14 +61,12 @@ import { createSerialQueue } from '../../host/remote/serial-queue';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import { loadBurrowAcl } from './acl';
-import { EstablishedE2eSession, type RemoteApiSessionLike } from './established-session';
+import {
+  EstablishedE2eSession,
+  sealControl,
+  type RemoteApiSessionLike,
+} from './established-session';
 import type { PendingPairing } from './pairing-approval';
-
-/**
- * The remote-api handler this controller drives per authorized client, declared
- * beside the session that drives it and re-exported for this module's callers.
- */
-export type { RemoteApiSessionLike };
 
 /** Minimal WebSocket surface, so tests can inject a fake. */
 export type WebSocketLike = RemoteWebSocket;
@@ -609,7 +606,7 @@ export class BurrowRuntime {
       }
       if (established) {
         out.push({
-          at: established.e2e.lastClientActivityAt + ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
+          at: established.e2e.idleDeadlineAt,
           expire: () => this.#disposeEstablished(clientId),
         });
       }
@@ -1561,9 +1558,8 @@ export class BurrowRuntime {
   // --- Shared plumbing -----------------------------------------------------
 
   /**
-   * One outcome on a ceremony's session. The transport pads every control
-   * message to the same size (`docs/specs/relay.md` → E2E framing). Answers
-   * `false` for a poisoned session, which has nothing to say.
+   * One outcome on a ceremony's session. Answers `false` for a poisoned
+   * session; see {@link sealControl}.
    */
   #sendControl(
     clientId: string,
@@ -1572,13 +1568,8 @@ export class BurrowRuntime {
     session: NoiseTransportSession,
     value: PairingOutcomeV1 | ConnectionOutcomeV1,
   ): boolean {
-    let ciphertext: Uint8Array;
-    try {
-      ciphertext = session.sendControl({ ...value });
-    } catch {
-      // Whatever poisoned it disposes it; the caller need not.
-      return false;
-    }
+    const ciphertext = sealControl(session, value);
+    if (!ciphertext) return false;
     this.#sendE2e(clientId, kind, id, 'transport', ciphertext);
     return true;
   }

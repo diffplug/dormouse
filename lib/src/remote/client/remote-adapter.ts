@@ -17,7 +17,15 @@ import {
 import type { AwaitHandle, AwaitOutcome } from '../../lib/alert-manager';
 import type { PlatformAdapter, PtyDataDetail, PtyInfo, OpenPort } from '../../lib/platform/types';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
-import type { TerminalHandlers } from './session-core';
+
+/** Terminal stream callbacks for {@link RemoteAdapterClient.attach}. */
+export interface TerminalHandlers {
+  /** One `terminal.data` payload: the renderer projection, and the text one
+   *  when it differs. Passed whole rather than as bytes so the pair cannot be
+   *  split here (`docs/specs/remote-api.md` → "Terminal surfaces"). */
+  onData(event: TerminalDataEvent): void;
+  onClosed?(exitCode?: number): void;
+}
 
 /**
  * The slice of an established session the adapter drives. `ClientSessionCore`

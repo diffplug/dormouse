@@ -83,10 +83,11 @@ vi.mock('remote-lib-common', async (importOriginal) => ({
   probeNoiseSupport: () => Promise.resolve(fake.noiseSupported),
 }));
 
+vi.mock('../client/install-state', () => ({ isInstalledWebApp: () => true }));
+
 vi.mock('../client/push-subscribe', () => ({
   getPushAvailability: () => Promise.resolve('unsupported'),
   hasCurrentPushSubscription: () => Promise.resolve(false),
-  isInstalledWebApp: () => true,
   needsHomeScreenInstall: () => false,
   subscribeToPushInBrowser: () => Promise.reject(new Error('not under test')),
 }));

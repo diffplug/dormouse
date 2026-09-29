@@ -13,13 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
-  NoiseTransportSession,
-  createNoiseInitiator,
-  createNoiseResponder,
-  e2eConnectionPrologue,
-  generateNoiseKeyPair,
   toBase64Url,
-  utf8Decode,
   utf8Encode,
   type E2eClientStep,
 } from 'remote-lib-common';
@@ -27,28 +21,8 @@ import {
 import { ClientSessionCore, type CeremonyRoute } from './session-core';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { FakeDirectNetwork, flushMicrotasks, type FakePeer } from '../direct/test-fake-peer';
+import { FORGED_CT, noiseSessionPair, openReceipt } from '../test-e2e-client';
 import { fakeTimers } from '../test-timers';
-
-/** A completed IK handshake: the Client's transport to establish, and the Burrow's. */
-async function sessionPair(): Promise<{
-  client: NoiseTransportSession;
-  burrow: NoiseTransportSession;
-}> {
-  const prologue = e2eConnectionPrologue('burrow', 'connection');
-  const burrowStatic = await generateNoiseKeyPair();
-  const initiator = await createNoiseInitiator({
-    prologue,
-    staticKeyPair: await generateNoiseKeyPair(),
-    remoteStaticPublicKey: burrowStatic.publicKey,
-  });
-  const responder = await createNoiseResponder({ prologue, staticKeyPair: burrowStatic });
-  await responder.readMessage(await initiator.writeMessage());
-  await initiator.readMessage(await responder.writeMessage());
-  return {
-    client: new NoiseTransportSession(initiator.session),
-    burrow: new NoiseTransportSession(responder.session),
-  };
-}
 
 const ROUTE: CeremonyRoute = { kind: 'connection', id: 'route-a' };
 
@@ -56,9 +30,6 @@ const MESSAGES = { unavailable: 'nobody answered', reaped: 'the Burrow let it go
 
 /** A ceremony deadline no case waits out; the clock starts at 1 000. */
 const LATER = 60_000;
-
-/** Bytes that decode as a `ct` and authenticate as nothing. */
-const FORGED_CT = toBase64Url(new Uint8Array(64));
 
 interface Sent {
   route: CeremonyRoute;
@@ -94,14 +65,6 @@ function makeCore({
   });
   core.setOnBurrowGone(() => void (gone.count += 1));
   return { core, sent, clock, timers, visibilityListeners, gone };
-}
-
-/** What one Client→Burrow ciphertext opens to on the Burrow's side. */
-function openOnBurrow(burrow: NoiseTransportSession, ciphertext: Uint8Array): unknown {
-  const receipt = burrow.receive(ciphertext);
-  if (receipt.kind === 'control') return receipt.value;
-  if (receipt.kind === 'app') return receipt.messages.map((m) => JSON.parse(utf8Decode(m)));
-  return receipt.kind;
 }
 
 describe('ceremony waiters', () => {
@@ -155,7 +118,7 @@ describe('establish', () => {
         return network.createOfferer();
       },
     });
-    const { client, burrow } = await sessionPair();
+    const { client, burrow } = await noiseSessionPair();
     const answer = core.exchange(ROUTE, new Uint8Array(1), LATER);
     core.onFrame(ROUTE, 'response', 'message-2');
     await answer;
@@ -169,7 +132,7 @@ describe('establish', () => {
     const offer = sent.at(-1)!;
     expect(offer.route).toBe(ROUTE);
     expect(offer.step).toBe('transport');
-    expect(openOnBurrow(burrow, offer.ciphertext)).toMatchObject({ v: 1, t: 'direct-offer' });
+    expect(openReceipt(burrow, offer.ciphertext)).toMatchObject({ v: 1, t: 'direct-offer' });
   });
 
   it('closes the previous session’s peer before building the next', async () => {
@@ -181,9 +144,9 @@ describe('establish', () => {
         return peer;
       },
     });
-    core.establish(ROUTE, (await sessionPair()).client);
+    core.establish(ROUTE, (await noiseSessionPair()).client);
     const second: CeremonyRoute = { kind: 'connection', id: 'route-b' };
-    core.establish(second, (await sessionPair()).client);
+    core.establish(second, (await noiseSessionPair()).client);
     expect(peers).toHaveLength(2);
     expect(peers[0]!.closed).toBe(true);
     expect(peers[1]!.closed).toBe(false);
@@ -194,14 +157,14 @@ describe('establish', () => {
 describe('an established session', () => {
   it('carries protocol-v1 as application messages, both ways', async () => {
     const { core, sent } = makeCore();
-    const { client, burrow } = await sessionPair();
+    const { client, burrow } = await noiseSessionPair();
     core.establish(ROUTE, client);
     await flushMicrotasks();
 
     const hello = core.hello();
     const request = sent.at(-1)!;
     expect(request.step).toBe('transport');
-    const [message] = openOnBurrow(burrow, request.ciphertext) as Array<{ requestId: string }>;
+    const [message] = openReceipt(burrow, request.ciphertext) as Array<{ requestId: string }>;
     expect(message).toMatchObject({ method: 'hello', params: { protocolVersion: 1, viewer: 'phone' } });
 
     const response = { requestId: message!.requestId, ok: true, result: { burrowId: 'b' } };
@@ -213,7 +176,7 @@ describe('an established session', () => {
 
   it('takes only its own route’s transport frames, and ends on one that will not decrypt', async () => {
     const { core, gone } = makeCore();
-    core.establish(ROUTE, (await sessionPair()).client);
+    core.establish(ROUTE, (await noiseSessionPair()).client);
 
     // Another route's transport frame, and this route's other step, are
     // ceremony frames with nobody waiting — never this session's to decrypt.
@@ -230,12 +193,12 @@ describe('an established session', () => {
 
   it('keepalives on its interval, and disarms on every ending', async () => {
     const { core, sent, timers, visibilityListeners, gone } = makeCore();
-    const { client, burrow } = await sessionPair();
+    const { client, burrow } = await noiseSessionPair();
     core.establish(ROUTE, client);
     const keepalive = () => timers.live.filter((t) => t.delayMs === E2E_KEEPALIVE_INTERVAL_MS);
     expect(keepalive()).toHaveLength(1);
     timers.fireAt(E2E_KEEPALIVE_INTERVAL_MS);
-    expect(openOnBurrow(burrow, sent.at(-1)!.ciphertext)).toBe('keepalive');
+    expect(openReceipt(burrow, sent.at(-1)!.ciphertext)).toBe('keepalive');
     expect(keepalive()).toHaveLength(1);
 
     const inFlight = core.hello();
@@ -248,7 +211,7 @@ describe('an established session', () => {
 
   it('ends a session the Burrow has already reaped, in the owner’s words', async () => {
     const { core, clock, gone, sent } = makeCore();
-    core.establish(ROUTE, (await sessionPair()).client);
+    core.establish(ROUTE, (await noiseSessionPair()).client);
     const inFlight = core.hello();
     const sentBefore = sent.length;
 
@@ -263,7 +226,7 @@ describe('an established session', () => {
 
   it('fails a request on a reaped session rather than sending it', async () => {
     const { core, clock, gone, sent } = makeCore();
-    core.establish(ROUTE, (await sessionPair()).client);
+    core.establish(ROUTE, (await noiseSessionPair()).client);
     const sentBefore = sent.length;
 
     clock.now += ESTABLISHED_E2E_IDLE_TIMEOUT_MS;

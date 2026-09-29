@@ -320,7 +320,7 @@ notifications** while any lacks a row, one **Push notifications on.** line once
 all have one — and its tap subscribes the browser, then registers every paired
 Burrow, repairing a rotated endpoint at once. **Each response commits as it
 lands**, so a loop that fails partway keeps what it registered. **Never offer
-push from the wall or from a Burrow row.** The row states **Push on** beside its
+push from the wall or a Burrow row.** The row states **Push on** beside its
 pair state — the card carries no per-Burrow signal.
 
 Every card state is one pure predicate over (paired set, registrations,
@@ -381,7 +381,8 @@ registering a replacement, and clear only on a Relay answer. **This deletes the
 delivery row alone** — never the scope's shared `PushSubscription`, and never
 another Burrow's row.
 
-Source of truth: `isInstalledWebApp` / `requiresInstallForPush` /
+Source of truth: `isInstalledWebApp` in
+`lib/src/remote/client/install-state.ts`; `requiresInstallForPush` /
 `needsHomeScreenInstall` / `getPushAvailability` / `hasCurrentPushSubscription` /
 `subscribeToPushInBrowser` in `lib/src/remote/client/push-subscribe.ts`;
 `InstallFirstNotice` / `InstallNotice` / `PushNotice` / `pushNoticeState` /

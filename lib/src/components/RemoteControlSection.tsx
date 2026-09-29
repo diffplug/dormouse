@@ -937,7 +937,7 @@ function SetupPhonePanel({
             — no address, no password.
           </div>
           <div className="mt-2 flex justify-center">
-            <ScannableCode url={shown.url} />
+            <ScannableCode url={shown.url} label="Setup code for this machine" />
           </div>
           <div className="mt-1.5 text-center text-xs text-muted">
             {minutesUntil(shown.expiresAt, now) > 0

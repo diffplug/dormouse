@@ -35,12 +35,8 @@ import {
   type NoiseKeyPair,
   type PresenceBinding,
 } from 'remote-lib-common';
-import {
-  BurrowRuntime,
-  MAX_QUEUED_RELAY_FRAMES,
-  MAX_QUEUED_RELAY_FRAME_CHARS,
-  type RemoteApiSessionLike,
-} from './burrow-runtime';
+import { BurrowRuntime, MAX_QUEUED_RELAY_FRAMES, MAX_QUEUED_RELAY_FRAME_CHARS } from './burrow-runtime';
+import type { RemoteApiSessionLike } from './established-session';
 import type { BurrowEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';

@@ -11,48 +11,18 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  NoiseTransportSession,
+  ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   chunkAppMessage,
-  createNoiseInitiator,
-  createNoiseResponder,
-  e2eConnectionPrologue,
   encodeTransportPlaintext,
-  generateNoiseKeyPair,
   toBase64Url,
-  utf8Decode,
   utf8Encode,
-  type NoiseSession,
 } from 'remote-lib-common';
 
 import { EstablishedE2eSession } from './established-session';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { FakeDirectNetwork, type FakePeer } from '../direct/test-fake-peer';
+import { FORGED_CT, noiseSessionPair, openReceipt } from '../test-e2e-client';
 import { fakeTimers } from '../test-timers';
-
-/** A completed IK handshake: the Client's transport, and the Burrow's to promote. */
-async function sessionPair(): Promise<{
-  client: NoiseTransportSession;
-  clientNoise: NoiseSession;
-  burrow: NoiseTransportSession;
-}> {
-  const prologue = e2eConnectionPrologue('burrow', 'connection');
-  const burrowStatic = await generateNoiseKeyPair();
-  const initiator = await createNoiseInitiator({
-    prologue,
-    staticKeyPair: await generateNoiseKeyPair(),
-    remoteStaticPublicKey: burrowStatic.publicKey,
-  });
-  const responder = await createNoiseResponder({ prologue, staticKeyPair: burrowStatic });
-  await responder.readMessage(await initiator.writeMessage());
-  await initiator.readMessage(await responder.writeMessage());
-  return {
-    client: new NoiseTransportSession(initiator.session),
-    // The raw `Split` state the wrapper holds, so a case can put a frame on the
-    // wire the wrapper would never write. The counters stay shared.
-    clientNoise: initiator.session,
-    burrow: new NoiseTransportSession(responder.session),
-  };
-}
 
 interface Options {
   /** Dispose the session when it reports itself over, as its owner does. */
@@ -64,7 +34,7 @@ interface Options {
 
 async function establish(options: Options = {}) {
   const { disposeOnFatal = true, createDirectPeer = null, onHandle } = options;
-  const { client, clientNoise, burrow } = await sessionPair();
+  const { client, clientNoise, burrow } = await noiseSessionPair();
   const clock = { now: 1_000 };
   const handled: unknown[] = [];
   const relayed: Uint8Array[] = [];
@@ -100,17 +70,6 @@ async function establish(options: Options = {}) {
   return { e2e, client, clientNoise, clock, handled, relayed, fatals, api, sendFromClient };
 }
 
-/** What one Burrow→Client ciphertext decrypts to on the Client's side. */
-function openOnClient(client: NoiseTransportSession, ciphertext: Uint8Array): unknown {
-  const receipt = client.receive(ciphertext);
-  if (receipt.kind === 'control') return receipt.value;
-  if (receipt.kind === 'app') return receipt.messages.map((m) => JSON.parse(utf8Decode(m)));
-  return receipt.kind;
-}
-
-/** Bytes that decode as a `ct` and authenticate as nothing. */
-const FORGED_CT = toBase64Url(new Uint8Array(64));
-
 describe('EstablishedE2eSession', () => {
   beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -134,18 +93,18 @@ describe('EstablishedE2eSession', () => {
     const { api, relayed, client } = await establish();
     api.send({ requestId: '1', ok: true, result: {} });
     expect(relayed).toHaveLength(1);
-    expect(openOnClient(client, relayed[0]!)).toEqual([{ requestId: '1', ok: true, result: {} }]);
+    expect(openReceipt(client, relayed[0]!)).toEqual([{ requestId: '1', ok: true, result: {} }]);
   });
 
   it('refreshes the idle clock on a decrypted keepalive, and on nothing that failed to decrypt', async () => {
     const { e2e, client, clock } = await establish({ disposeOnFatal: false });
-    expect(e2e.lastClientActivityAt).toBe(1_000);
+    expect(e2e.idleDeadlineAt).toBe(1_000 + ESTABLISHED_E2E_IDLE_TIMEOUT_MS);
     clock.now = 5_000;
     e2e.onRelayFrame(toBase64Url(client.sendKeepalive()));
-    expect(e2e.lastClientActivityAt).toBe(5_000);
+    expect(e2e.idleDeadlineAt).toBe(5_000 + ESTABLISHED_E2E_IDLE_TIMEOUT_MS);
     clock.now = 9_000;
     e2e.onRelayFrame(FORGED_CT);
-    expect(e2e.lastClientActivityAt).toBe(5_000);
+    expect(e2e.idleDeadlineAt).toBe(5_000 + ESTABLISHED_E2E_IDLE_TIMEOUT_MS);
   });
 
   it('reports a failed decrypt as fatal, and its owner’s dispose tears down the handler', async () => {
@@ -206,7 +165,7 @@ describe('EstablishedE2eSession', () => {
     const { e2e, client, relayed } = await establish();
     e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
     expect(relayed).toHaveLength(1);
-    expect(openOnClient(client, relayed[0]!)).toEqual({ v: 1, t: 'direct-decline' });
+    expect(openReceipt(client, relayed[0]!)).toEqual({ v: 1, t: 'direct-decline' });
   });
 
   it('disposes the direct path, then the handler, and ignores the relay afterwards', async () => {

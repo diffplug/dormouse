@@ -28,11 +28,11 @@ function makeQrCode() {
  */
 export function ScannableCode({
   url,
-  label = 'Setup code for this machine',
+  label,
 }: {
   url: string;
   /** The code's accessible name; the image itself carries no text. */
-  label?: string;
+  label: string;
 }) {
   const [attempt, setAttempt] = useState(0);
   const [QrCode, setQrCode] = useState(makeQrCode);

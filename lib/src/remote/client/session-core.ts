@@ -40,7 +40,7 @@ import {
 import { DirectEndpoint } from '../direct/direct-endpoint';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { realTimer, type RemoteTimer } from '../ws';
-import type { RemoteAdapterClient } from './remote-adapter';
+import type { RemoteAdapterClient, TerminalHandlers } from './remote-adapter';
 
 /**
  * Where one ceremony's frames are addressed. The owner's envelope may carry
@@ -98,15 +98,6 @@ export interface ClientSessionCoreDeps<R extends CeremonyRoute> {
   readonly createDirectPeer?: DirectPeerFactory | null;
 }
 
-/** Terminal stream callbacks for {@link ClientSessionCore.attach}. */
-export interface TerminalHandlers {
-  /** One `terminal.data` payload: the renderer projection, and the text one
-   *  when it differs. Passed whole rather than as bytes so the pair cannot be
-   *  split here (`docs/specs/remote-api.md` → "Terminal surfaces"). */
-  onData(event: TerminalDataEvent): void;
-  onClosed?(exitCode?: number): void;
-}
-
 interface CiphertextWaiter {
   resolve(ct: string): void;
   reject(error: Error): void;
@@ -129,9 +120,10 @@ interface EstablishedSession<R extends CeremonyRoute> {
    */
   readonly direct: DirectEndpoint;
   /**
-   * When this Client last put a byte on this session — the mirror of the
-   * Burrow's `lastClientActivityAt`, because that is the clock the Burrow reaps on
-   * (`docs/specs/remote-security-model.md` → Burrow bounds).
+   * When this Client last put a byte on this session — the mirror of the clock
+   * the Burrow's `EstablishedE2eSession.idleDeadlineAt` runs from, because that
+   * is the one it reaps on (`docs/specs/remote-security-model.md` → Burrow
+   * bounds).
    */
   lastSentAt: number;
 }
@@ -167,7 +159,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   readonly #events = new Map<string, (event: RemoteEventMsg) => void>();
 
   constructor(deps: ClientSessionCoreDeps<R>) {
-    this.#sendFrame = (route, step, ciphertext) => deps.sendFrame(route, step, ciphertext);
+    this.#sendFrame = deps.sendFrame;
     this.#messages = deps.messages;
     this.#now = deps.now ?? (() => Date.now());
     this.#setTimer = deps.setTimer ?? realTimer;
@@ -293,7 +285,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // Still load-bearing for a *concurrent* ceremony to another Burrow, which
     // the owner's own retire before its request cannot see: without it that
     // session's endpoint and peer would be overwritten below rather than closed.
-    this.disposeCeremony();
+    this.disposeSession();
     // Declared first so the endpoint's deps can name the session they serve;
     // assigned before anything can reach them.
     let established: EstablishedSession<R>;
@@ -643,13 +635,13 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * fail everything in flight, and — where `notifyGone` — report burrow loss.
    */
   endSession(reason: string, { notifyGone }: { notifyGone: boolean }): void {
-    this.disposeCeremony();
+    this.disposeSession();
     this.rejectAll(new Error(reason));
     if (notifyGone) this.#onBurrowGone?.();
   }
 
   /** Erase every session's cipher state; a new ceremony starts from a handshake. */
-  disposeCeremony(): void {
+  disposeSession(): void {
     this.#stopKeepalives();
     // The peer connection is this session's: every disposal path closes it, so
     // none can outlive the session that authorized it.
