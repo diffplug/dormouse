@@ -263,7 +263,7 @@ and `sync-to-pane` in `lib/src/host/browser-host.test.ts`,
 | `phone` | 390 × 844 |
 | `pane-sync` | Follow the pane |
 
-**Must preserve the current device-pixel ratio when DPR is omitted.** A requested ratio unsupported by the provider fails before changing dimensions; playwright can accept only its current context ratio. **Never turn an observed playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices. **Must label pixel density DPR.**
+**Must preserve the current device-pixel ratio when DPR is omitted.** A requested ratio unsupported by the provider fails before changing dimensions; playwright can accept only its current context ratio. **Never turn an observed playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices. **Must label pixel density DPR; fit fractional ratios, padding to two decimals without rounding.**
 
 **Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Agent-browser launches blank, sets the viewport and then navigates; playwright uses its context viewport configuration. Deferred `pane-sync` launches start at 1440 × 900 until placement; **must engage sync when resolving that preset and send the actual pane dimensions on first attach**. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer**, not discard sizing during a swap.
 

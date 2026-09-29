@@ -43,6 +43,11 @@ import {
 
 type Target = 'sync' | 'fixed';
 
+function formatDpr(value: number): string {
+  // Pad ordinary ratios without rounding a higher-precision browser setting.
+  return Number(value.toFixed(2)) === value ? value.toFixed(2) : String(value);
+}
+
 function matchingPreset(config: BrowserViewportConfig, setting: BrowserViewportSetting | undefined): string | undefined {
   if (setting?.mode !== 'fixed') return undefined;
   return Object.entries(config.viewports).find(([, size]) => size.width === setting.width
@@ -104,7 +109,7 @@ export function AgentBrowserScreenModal({
   }, [controller.cwd]);
   const [customW, setCustomW] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.width : initial?.viewport.w ?? 1440));
   const [customH, setCustomH] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.height : initial?.viewport.h ?? 900));
-  const [customDpi, setCustomDpi] = useState(String(initialSetting?.mode === 'fixed' ? initialSetting.dpr ?? initial?.viewport.dpr ?? 1 : initial?.viewport.dpr ?? 1));
+  const [customDpi, setCustomDpi] = useState(formatDpr(initialSetting?.mode === 'fixed' ? initialSetting.dpr ?? initial?.viewport.dpr ?? 1 : initial?.viewport.dpr ?? 1));
   // Display measured DPR without turning an omitted DPR into a persisted override.
   const [explicitDpr, setExplicitDpr] = useState(initialSetting?.mode === 'fixed' && initialSetting.dpr !== undefined);
   const choosePreset = (name: string) => {
@@ -114,7 +119,7 @@ export function AgentBrowserScreenModal({
     if (!name || !size) return;
     setCustomW(String(size.width));
     setCustomH(String(size.height));
-    setCustomDpi(String(size.dpr ?? initial?.viewport.dpr ?? 1));
+    setCustomDpi(formatDpr(size.dpr ?? initial?.viewport.dpr ?? 1));
     setExplicitDpr(size.dpr !== undefined);
   };
   const editSize = (set: (value: string) => void, value: string) => {
@@ -220,7 +225,10 @@ export function AgentBrowserScreenModal({
           <div className="ml-6 flex flex-wrap items-center gap-2">
             <DimInput label="W" chars={4} value={customW} onChange={(v) => editSize(setCustomW, v)} onFocus={() => chooseTarget('fixed')} />
             <DimInput label="H" chars={4} value={customH} onChange={(v) => editSize(setCustomH, v)} onFocus={() => chooseTarget('fixed')} />
-            <DimInput label="DPR" chars={1} value={customDpi} onChange={(v) => { editSize(setCustomDpi, v); setExplicitDpr(true); }} onFocus={() => chooseTarget('fixed')} />
+            <DimInput label="DPR" chars={4} value={customDpi} onChange={(v) => { editSize(setCustomDpi, v); setExplicitDpr(true); }} onFocus={() => chooseTarget('fixed')} onBlur={() => {
+              const dpr = Number(customDpi);
+              if (Number.isFinite(dpr) && dpr > 0) setCustomDpi(formatDpr(dpr));
+            }} />
           </div>
         </div>
       </div>
@@ -385,6 +393,7 @@ function DimInput({
   value,
   onChange,
   onFocus,
+  onBlur,
   disabled,
   chars = 4,
 }: {
@@ -392,6 +401,7 @@ function DimInput({
   value: string;
   onChange: (next: string) => void;
   onFocus: () => void;
+  onBlur?: () => void;
   disabled?: boolean;
   /** Max digits the field holds — sizes the box so W/H/DPI stay compact. */
   chars?: number;
@@ -406,6 +416,7 @@ function DimInput({
         chars={chars}
         disabled={disabled}
         onFocus={onFocus}
+        onBlur={onBlur}
       />
     </span>
   );

@@ -58,7 +58,7 @@ describe('AgentBrowserScreenModal', () => {
     act(() => { select.value = 'phone'; select.dispatchEvent(new Event('change', { bubbles: true })); });
     expect(field('W').value).toBe('390');
     expect(field('H').value).toBe('844');
-    expect(field('DPR').value).toBe('2');
+    expect(field('DPR').value).toBe('2.00');
     act(() => field('W').focus());
     expect(select.value).toBe('phone');
     edit('W', '400');
@@ -66,9 +66,16 @@ describe('AgentBrowserScreenModal', () => {
     expect(document.body.querySelector('input[name="screen-target"]:checked')?.closest('label')?.textContent).toContain('Fixed size');
     apply();
     expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844 });
-    edit('DPR', '3');
+    act(() => field('DPR').focus());
+    edit('DPR', '1.5');
+    expect(field('DPR').value).toBe('1.5');
+    act(() => field('DPR').blur());
+    expect(field('DPR').value).toBe('1.50');
     apply();
-    expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844, dpr: 3 });
+    expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844, dpr: 1.5 });
+    edit('DPR', '1.25');
+    apply();
+    expect(controller.actions.applyViewportSetting).toHaveBeenLastCalledWith({ mode: 'fixed', width: 400, height: 844, dpr: 1.25 });
     registration.dispose();
   });
 
