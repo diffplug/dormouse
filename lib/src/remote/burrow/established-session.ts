@@ -29,6 +29,14 @@ import type { DirectPeerFactory } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
 
 /**
+ * The longest {@link EstablishedE2eSession.end} keeps a direct channel open for
+ * the goodbye to leave it. Past it the channel closes regardless: a goodbye
+ * still queued behind that much output is not worth holding a peer connection
+ * for, and the Client learns of the ending from the close instead.
+ */
+export const SESSION_END_FLUSH_MS = 500;
+
+/**
  * `value` as one control message on `session`, or `null` for a poisoned
  * session, which has nothing to say — whatever poisoned it disposes it, so the
  * caller need not. The transport pads every control message to the same size
@@ -123,7 +131,8 @@ export class EstablishedE2eSession {
   /**
    * This session's direct path, as the answerer runs it. Created with the
    * session and disposed with it, so a peer connection can neither precede
-   * authorization nor outlive it.
+   * authorization nor outlive it — past the goodbye's bounded flush
+   * ({@link end}).
    */
   readonly #direct: DirectEndpoint;
   readonly #sendRelay: (ciphertext: Uint8Array) => void;
@@ -180,16 +189,28 @@ export class EstablishedE2eSession {
 
   /**
    * End this session on purpose: tell the Client with the goodbye, on whichever
-   * path it rides, then {@link dispose}. **Only for an ending the Burrow chose
-   * while the cipher is healthy** — a poisoned session has nothing to say, and
+   * path it rides, and dispose. **Only for an ending the Burrow chose while the
+   * cipher is healthy** — a poisoned session has nothing to say, and
    * {@link sealControl} answers nothing for one, so this degrades to the
-   * dispose. Never a substitute for it: the dispose always follows.
+   * dispose. Never a substitute for it: the session is over from this call.
+   *
+   * **Over at once, closed once the goodbye has left.** Nothing more is read
+   * and the remote-api handler goes now, so no input lands after the ending;
+   * but a channel closed in the same tick drops whatever it had not yet sent,
+   * so the direct path closes only once the goodbye has left it, bounded by
+   * {@link SESSION_END_FLUSH_MS}. The relay send is synchronous onto the
+   * owner's socket, which the dispose leaves open.
    */
   end(): void {
     if (this.#disposed) return;
     const goodbye = sealControl(this.#session, SESSION_END_V1);
+    // Before the send: a channel that refuses the goodbye reports its close,
+    // and a session that is already over has nothing left to report it to.
+    this.#disposed = true;
     if (goodbye) this.#direct.send(goodbye);
-    this.dispose();
+    this.#api.dispose();
+    if (goodbye) this.#direct.disposeAfterFlush(SESSION_END_FLUSH_MS);
+    else this.#direct.dispose();
   }
 
   /** Close the direct path, then the remote-api handler. Idempotent. */

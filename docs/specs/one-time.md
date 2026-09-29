@@ -170,9 +170,10 @@ decides them; a runtime never enters either.
   own clock. A link not yet promoted ends the first millisecond past its
   expiry — a claimed one telling its phone `link-expired`, which dismisses the
   modal — and the request and the approval each check the expiry again.
-- **`end()` releases everything**: the session and its peer connection, a
-  pending approval, the key, queued work, every timer, and the socket. Nothing
-  is written. **A `user-ended` or `idle` ending sends the goodbye first, before
+- **`end()` releases everything**: the session and its peer connection (a
+  switched one once the goodbye has left it: `docs/specs/remote-api.md` →
+  Transport), a pending approval, the key, queued work, every timer, and the
+  socket. Nothing is written. **A `user-ended` or `idle` ending sends the goodbye first, before
   the room closes** (`docs/specs/remote-api.md` → Transport), so a phone still
   connecting hears it over the rendezvous.
 

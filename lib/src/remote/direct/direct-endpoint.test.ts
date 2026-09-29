@@ -17,6 +17,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DIRECT_ANSWER_TIMEOUT_MS,
+  DIRECT_BUFFER_HIGH,
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_HANDOFF_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
@@ -604,5 +605,59 @@ describe('DirectEndpoint', () => {
     expect(run.offerer.relayed).toEqual([]);
     run.offerer.endpoint.onSignal({ v: 1, t: 'direct-switch' });
     expect(run.offerer.fatals).toEqual([]);
+  });
+
+  describe('disposing after a last send', () => {
+    it('keeps a switched channel open until what it was sent has left, then closes it', async () => {
+      const run = pair();
+      await cutover(run);
+      const channel = run.fake.answererChannel!;
+      // Busy: the last frame waits in the sender's queue rather than the channel.
+      channel.bufferedAmount = DIRECT_BUFFER_HIGH;
+      run.answerer.endpoint.send(frame(9));
+
+      run.answerer.endpoint.disposeAfterFlush(500);
+      // Disposed at once — nothing more goes out, and nothing is reported —
+      // but the peer stays up for the frame already sent.
+      expect(run.answerer.endpoint.disposed).toBe(true);
+      expect(run.answerer.peers[0]!.closed).toBe(false);
+      run.answerer.endpoint.send(frame(10));
+      channel.receiveRaw(frame(1).buffer);
+
+      channel.drained();
+      expect(channel.sent).toEqual([frame(9)]);
+      expect(run.answerer.peers[0]!.closed).toBe(true);
+      expect(run.timers.live.filter((timer) => timer.delayMs === 500)).toEqual([]);
+      await flushMicrotasks();
+      expect(run.offerer.received).toEqual([frame(9)]);
+      expect(run.answerer.received).toEqual([]);
+      expect(run.answerer.fatals).toEqual([]);
+    });
+
+    it('closes the channel after the grace when the frame never leaves', async () => {
+      const run = pair();
+      await cutover(run);
+      run.fake.answererChannel!.bufferedAmount = DIRECT_BUFFER_HIGH;
+      run.answerer.endpoint.send(frame(9));
+
+      run.answerer.endpoint.disposeAfterFlush(500);
+      expect(run.answerer.peers[0]!.closed).toBe(false);
+      run.timers.fireAt(500);
+      expect(run.answerer.peers[0]!.closed).toBe(true);
+    });
+
+    it('closes at once where there is nothing to wait for, or no channel to wait on', async () => {
+      const flushed = pair();
+      await cutover(flushed);
+      flushed.answerer.endpoint.disposeAfterFlush(500);
+      expect(flushed.answerer.peers[0]!.closed).toBe(true);
+      expect(flushed.timers.live.filter((timer) => timer.delayMs === 500)).toEqual([]);
+
+      // An attempt this end never switched onto carried nothing of its own.
+      const relayed = pair({ opening: 'manual' });
+      await cutover(relayed);
+      relayed.answerer.endpoint.disposeAfterFlush(500);
+      expect(relayed.answerer.peers[0]!.closed).toBe(true);
+    });
   });
 });

@@ -1579,8 +1579,8 @@ export class BurrowRuntime {
   #clearEstablished(state: ClientState, goodbye = false): void {
     if (!state.established) return;
     const { e2e } = state.established;
-    // Cleared first: a goodbye the channel refuses reports the session fatal
-    // from inside `end`, and that report must find nothing left to dispose.
+    // Cleared first, so nothing the teardown sets off can reach this session
+    // through the slot again — `end` itself reports nothing once it begins.
     state.established = undefined;
     if (goodbye) e2e.end();
     else e2e.dispose();

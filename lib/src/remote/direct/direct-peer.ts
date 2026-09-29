@@ -154,6 +154,8 @@ export class DirectPeer {
    * so nothing else would.
    */
   #endGathering: (() => void) | null = null;
+  /** Everyone waiting for what this end sent to leave; see {@link afterFlush}. */
+  readonly #flushWaiters: Array<() => void> = [];
   #open = false;
   #closed = false;
 
@@ -256,6 +258,25 @@ export class DirectPeer {
     }
   }
 
+  /**
+   * Run `done` once nothing this end has sent is still waiting — neither in its
+   * own queue nor in the channel's `bufferedAmount` — or the channel is gone;
+   * at once if that is already so. For a sender about to {@link close}, which
+   * would otherwise drop both: `RTCPeerConnection.close()` takes the
+   * association down with whatever it had not yet sent. Unbounded here; the
+   * caller bounds its own wait.
+   */
+  afterFlush(done: () => void): void {
+    if (this.#flushed()) {
+      done();
+      return;
+    }
+    // Woken at empty rather than at the low-water mark, so the next
+    // `bufferedamountlow` is the one that means the channel has let go.
+    this.#channel!.bufferedAmountLowThreshold = 0;
+    this.#flushWaiters.push(done);
+  }
+
   /** Close the channel and the connection. Idempotent, and reports nothing. */
   close(): void {
     this.#closed = true;
@@ -281,6 +302,8 @@ export class DirectPeer {
     // these handlers nor whatever the channel is still holding.
     this.#channel = null;
     this.#handlers = SILENT_HANDLERS;
+    // Nothing is left to wait for: whatever was still buffered went with it.
+    this.#settleFlush();
   }
 
   // --- Internals -------------------------------------------------------------
@@ -329,7 +352,10 @@ export class DirectPeer {
     channel.bufferedAmountLowThreshold = DIRECT_BUFFER_LOW;
     channel.addEventListener('open', () => this.#onOpen());
     channel.addEventListener('message', (ev) => this.#onMessage(ev));
-    channel.addEventListener('bufferedamountlow', () => this.#drain());
+    channel.addEventListener('bufferedamountlow', () => {
+      this.#drain();
+      this.#settleFlush();
+    });
     channel.addEventListener('close', () => this.#fail('the direct channel closed'));
     channel.addEventListener('error', () => this.#fail('the direct channel failed'));
   }
@@ -384,6 +410,17 @@ export class DirectPeer {
       this.#fail('the direct channel refused a message');
       return;
     }
+  }
+
+  /** Whether nothing this end sent is still waiting to leave, or there is no channel to leave by. */
+  #flushed(): boolean {
+    const channel = this.#channel;
+    return !channel || !this.isOpen || (this.#outbound.length === 0 && channel.bufferedAmount === 0);
+  }
+
+  #settleFlush(): void {
+    if (this.#flushWaiters.length === 0 || !this.#flushed()) return;
+    for (const done of this.#flushWaiters.splice(0)) done();
   }
 
   #write(channel: DirectChannelLike, frame: Uint8Array): boolean {

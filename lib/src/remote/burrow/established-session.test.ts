@@ -11,6 +11,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  DIRECT_BUFFER_HIGH,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   chunkAppMessage,
   type DirectPath,
@@ -20,9 +21,9 @@ import {
   utf8Encode,
 } from 'remote-lib-common';
 
-import { EstablishedE2eSession } from './established-session';
+import { EstablishedE2eSession, SESSION_END_FLUSH_MS } from './established-session';
 import type { DirectPeerFactory } from '../direct/direct-peer';
-import { FakeDirectNetwork, type FakePeer } from '../direct/test-fake-peer';
+import { FakeDirectNetwork, collect, flushMicrotasks, type FakePeer } from '../direct/test-fake-peer';
 import { FORGED_CT, noiseSessionPair, openReceipt } from '../test-e2e-client';
 import { fakeTimers } from '../test-timers';
 
@@ -46,6 +47,7 @@ async function establish(options: Options = {}) {
   const transports: Array<{ path: DirectPath; cause: DirectRelayCause | null }> = [];
   let relayedApps = 0;
   const api = { disposals: 0, send: (_payload: unknown): void => {} };
+  const timers = fakeTimers();
   const e2e: EstablishedE2eSession = new EstablishedE2eSession({
     session: burrow,
     createApi: (send) => {
@@ -67,7 +69,7 @@ async function establish(options: Options = {}) {
     onTransportChanged: (path, cause) => void transports.push({ path, cause }),
     ...(directOnly ? { onRelayedApp: () => void (relayedApps += 1) } : {}),
     now: () => clock.now,
-    setTimer: fakeTimers().setTimer,
+    setTimer: timers.setTimer,
   });
   /** One protocol-v1 message from the Client, on the relay. */
   const sendFromClient = (payload: unknown): void => {
@@ -86,8 +88,28 @@ async function establish(options: Options = {}) {
     transports,
     relayedApps: () => relayedApps,
     api,
+    timers,
     sendFromClient,
   };
+}
+
+/**
+ * Move an established session onto the direct path in both directions, as a
+ * Client offering it would, and answer the answerer's peer and channel. The
+ * Client has decrypted every signal the Burrow relayed, so the next thing it
+ * reads is whatever the Burrow puts on the channel.
+ */
+async function switchDirect(run: Awaited<ReturnType<typeof establish>>, network: FakeDirectNetwork) {
+  const { e2e, client, relayed } = run;
+  e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
+  await flushMicrotasks();
+  network.openChannels();
+  e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-switch' })));
+  expect(relayed.map((ct) => (openReceipt(client, ct) as { t: string }).t)).toEqual([
+    'direct-answer',
+    'direct-switch',
+  ]);
+  return network.answererChannel!;
 }
 
 describe('EstablishedE2eSession', () => {
@@ -247,6 +269,57 @@ describe('EstablishedE2eSession', () => {
     e2e.end();
     expect(relayed).toHaveLength(1);
     expect(api.disposals).toBe(1);
+  });
+
+  it('ends on the direct path by closing the channel only once the goodbye has left it', async () => {
+    const network = new FakeDirectNetwork({ opening: 'manual' });
+    const peers: FakePeer[] = [];
+    const run = await establish({ createDirectPeer: collect(peers, () => network.createAnswerer()) });
+    const { e2e, client, api, handled } = run;
+    const channel = await switchDirect(run, network);
+    const sendOnChannel = (payload: unknown): void => {
+      for (const ct of client.sendApp(utf8Encode(JSON.stringify(payload)))) {
+        channel.receiveRaw(ct.slice().buffer);
+      }
+    };
+    sendOnChannel({ requestId: '1', method: 'hello' });
+    expect(handled).toEqual([{ requestId: '1', method: 'hello' }]);
+    // Busy with output the Client has not read yet: the goodbye queues behind it.
+    channel.bufferedAmount = DIRECT_BUFFER_HIGH;
+
+    e2e.end();
+    // Over at once: the handler is gone and nothing the Client sends is read...
+    expect(api.disposals).toBe(1);
+    sendOnChannel({ requestId: '2', method: 'hello' });
+    expect(handled).toEqual([{ requestId: '1', method: 'hello' }]);
+    // ...but the channel stays up until the goodbye has gone out on it.
+    expect(peers[0]!.closed).toBe(false);
+    expect(channel.sent).toEqual([]);
+
+    channel.drained();
+    expect(channel.sent).toHaveLength(1);
+    expect(openReceipt(client, channel.sent[0]!)).toEqual({ v: 1, t: 'session-end' });
+    expect(peers[0]!.closed).toBe(true);
+    expect(run.timers.live.filter((timer) => timer.delayMs === SESSION_END_FLUSH_MS)).toEqual([]);
+    expect(run.fatals).toEqual([]);
+
+    // Ended once: a later dispose from its owner has nothing left to do.
+    e2e.dispose();
+    expect(api.disposals).toBe(1);
+  });
+
+  it('closes the direct channel after the flush grace when the goodbye cannot leave', async () => {
+    const network = new FakeDirectNetwork({ opening: 'manual' });
+    const peers: FakePeer[] = [];
+    const run = await establish({ createDirectPeer: collect(peers, () => network.createAnswerer()) });
+    const channel = await switchDirect(run, network);
+    channel.bufferedAmount = DIRECT_BUFFER_HIGH;
+
+    run.e2e.end();
+    expect(peers[0]!.closed).toBe(false);
+    run.timers.fireAt(SESSION_END_FLUSH_MS);
+    expect(peers[0]!.closed).toBe(true);
+    expect(channel.sent).toEqual([]);
   });
 
   it('ends a poisoned session with no goodbye, and still disposes it', async () => {

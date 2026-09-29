@@ -274,6 +274,50 @@ describe('DirectPeer', () => {
       expect(held * frame.length).toBeGreaterThan(MAX_DIRECT_PENDING_BYTES);
     });
 
+    it('says when what it sent has left: its queue and the channel’s buffer both empty', async () => {
+      const { network, clientPeer, burrow } = await connected();
+      const channel = network.offererChannel!;
+      const flushed = vi.fn();
+      clientPeer.afterFlush(flushed);
+      // Nothing waiting: at once.
+      expect(flushed).toHaveBeenCalledTimes(1);
+
+      channel.bufferedAmount = DIRECT_BUFFER_HIGH;
+      clientPeer.send(Uint8Array.of(1));
+      const later = vi.fn();
+      clientPeer.afterFlush(later);
+      expect(later).not.toHaveBeenCalled();
+      // Woken only at empty from here, not at the low-water mark.
+      expect(channel.bufferedAmountLowThreshold).toBe(0);
+
+      // The buffer empties and the queued frame goes out — into the buffer,
+      // which a real channel then reports holding: not yet.
+      const send = channel.send.bind(channel);
+      channel.send = (data) => {
+        send(data);
+        channel.bufferedAmount = 1;
+      };
+      channel.drained();
+      expect(channel.sent).toEqual([Uint8Array.of(1)]);
+      expect(later).not.toHaveBeenCalled();
+
+      channel.drained();
+      expect(later).toHaveBeenCalledTimes(1);
+      await flushMicrotasks();
+      expect(burrow.frames).toEqual([Uint8Array.of(1)]);
+    });
+
+    it('stops waiting for a flush when the channel goes', async () => {
+      const { network, clientPeer } = await connected();
+      network.offererChannel!.bufferedAmount = DIRECT_BUFFER_HIGH;
+      clientPeer.send(Uint8Array.of(1));
+      const flushed = vi.fn();
+      clientPeer.afterFlush(flushed);
+
+      clientPeer.close();
+      expect(flushed).toHaveBeenCalledTimes(1);
+    });
+
     it('reports the channel gone when a queued frame will not go out', async () => {
       const { network, clientPeer, client } = await connected();
       const channel = network.offererChannel!;

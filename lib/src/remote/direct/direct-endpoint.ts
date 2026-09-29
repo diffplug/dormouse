@@ -10,7 +10,8 @@
  * means. Two copies of that were two chances to disagree about a switch.
  *
  * One per authorized session, created at promotion and disposed with it, so a
- * peer connection can neither precede authorization nor outlive it.
+ * peer connection can neither precede authorization nor outlive it — past the
+ * bounded wait for a last message to leave ({@link disposeAfterFlush}).
  */
 
 import {
@@ -249,6 +250,33 @@ export class DirectEndpoint {
     this.#peer = null;
     this.#cutover.clear();
     this.#settle();
+  }
+
+  /**
+   * {@link dispose}, except that a channel this session has switched onto
+   * closes only once what was already sent on it has left
+   * ({@link DirectPeer.afterFlush}), or `graceMs` has passed, whichever is
+   * first — so a last message is not dropped by the close that follows it.
+   * Disposed from the call, like `dispose`: nothing more is sent, delivered,
+   * or reported, and the peer outlives it only by that wait.
+   */
+  disposeAfterFlush(graceMs: number): void {
+    if (this.#disposed) return;
+    const flushing = this.#cutover.outbound === 'direct' ? this.#peer : null;
+    // Kept from the dispose's close; every other attempt state closes now.
+    if (flushing) this.#peer = null;
+    this.dispose();
+    if (!flushing) return;
+    let closed = false;
+    let cancel: (() => void) | null = null;
+    const close = (): void => {
+      if (closed) return;
+      closed = true;
+      cancel?.();
+      flushing.close();
+    };
+    flushing.afterFlush(close);
+    if (!closed) cancel = this.#setTimer(close, graceMs);
   }
 
   // --- Internals -------------------------------------------------------------
