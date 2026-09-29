@@ -44,5 +44,5 @@ export const LongValues: Story = {
 // A one-time connection's request: the same warning, and what it grants in
 // place of what pairing adds (docs/specs/one-time.md).
 export const OneTime: Story = {
-  args: { label: 'iPhone Safari', kind: 'one-time' },
+  args: { label: 'iPhone', kind: 'one-time' },
 };

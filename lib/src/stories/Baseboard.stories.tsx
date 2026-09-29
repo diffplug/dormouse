@@ -251,7 +251,7 @@ export const OneTimePhoneConnected: Story = {
   args: { items: overflowWithRingingDoorItems },
   parameters: {
     ...withState(overflowWithRingingDoorItems, {}),
-    primedBurrow: { oneTime: { status: 'connected', label: 'Pixel 9', since: BASE_TIME } },
+    primedBurrow: { oneTime: { status: 'connected', label: 'Android phone', since: BASE_TIME } },
     docs: { story: { inline: false, height: '80px' } },
   },
   decorators: [

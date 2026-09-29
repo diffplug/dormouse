@@ -26,6 +26,7 @@ import {
 } from '../client/one-time-client';
 import type { RemotePtyAdapter } from '../client/remote-adapter';
 import type { RemoteWebSocket } from '../ws';
+import { PLATFORM_STRING } from '../../lib/platform';
 import { disposeAllSessions } from '../../lib/terminal-registry';
 import { PocketWall } from '../pocket-app/PocketWall';
 import { PK, pkButton } from '../pocket-app/pocket-chrome';
@@ -36,7 +37,6 @@ import {
   TRANSPORT_PATH_LABELS,
   UnsupportedBrowser,
   Waiting,
-  deviceLabel,
   transportTitle,
 } from '../pocket-app/views';
 
@@ -69,6 +69,19 @@ export const ONE_TIME_CONNECTING_BODY =
   'Keep this page open. Your phone and computer must be on the same Wi-Fi.';
 
 export const ONE_TIME_END_LABEL = 'End';
+
+/**
+ * The label this page suggests, which the laptop's approval modal shows beside
+ * the digits: a coarse name for the device from the browser's platform string.
+ * Never Pocket's `deviceLabel` — this page is not Pocket, and it holds no Client
+ * identity for a Home Screen install to be told apart from.
+ */
+export function oneTimeDeviceLabel(platform: string = PLATFORM_STRING): string {
+  if (/iPhone/i.test(platform)) return 'iPhone';
+  if (/iPad/i.test(platform)) return 'iPad';
+  if (/Android/i.test(platform)) return 'Android phone';
+  return 'Phone browser';
+}
 
 /** How long a live link has left, to the minute and then to the second. */
 export function expiresInText(remainingMs: number): string {
@@ -201,7 +214,7 @@ export function OneTimeApp({
       setPhase({ at: 'code', code: null });
       const result = await client.connectOnce(
         link,
-        deviceLabel(),
+        oneTimeDeviceLabel(),
         (code) => {
           if (!endedRef.current) setPhase({ at: 'code', code });
         },

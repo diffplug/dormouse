@@ -427,7 +427,7 @@ export const OneTimeConfirming: Story = {
   parameters: {
     primedBurrow: {
       status: UNENROLLED_STATUS,
-      oneTime: { status: 'confirming', label: 'Pixel 9', expiresAt: STORY_NOW + 60_000 },
+      oneTime: { status: 'confirming', label: 'Android phone', expiresAt: STORY_NOW + 60_000 },
     },
     docs: { story: { height: '380px' } },
   },
@@ -439,7 +439,7 @@ export const OneTimeConnecting: Story = {
   parameters: {
     primedBurrow: {
       status: UNENROLLED_STATUS,
-      oneTime: { status: 'connecting', label: 'Pixel 9' },
+      oneTime: { status: 'connecting', label: 'Android phone' },
     },
     docs: { story: { height: '360px' } },
   },
@@ -451,11 +451,11 @@ export const OneTimeConnected: Story = {
   parameters: {
     primedBurrow: {
       status: UNENROLLED_STATUS,
-      oneTime: { status: 'connected', label: 'Pixel 9', since: STORY_NOW },
+      oneTime: { status: 'connected', label: 'Android phone', since: STORY_NOW },
     },
     docs: { story: { height: '360px' } },
   },
-  play: settled('Pixel 9 has full control of your terminals.'),
+  play: settled('Android phone has full control of your terminals.'),
 };
 
 /**

@@ -65,6 +65,14 @@ showing `/connect/` changes only the fragment, which a browser treats as a
 same-document jump: measured in agent-browser's Chrome, 2026-09-28, the page
 stayed on its "invalid" screen with the new link left in the address bar.
 
+**Why the page names the device rather than borrowing Pocket's label.** Pocket
+names its install mode, "Dormouse Pocket (browser)" or "(Home Screen)", because
+one phone can hold two Client identities. The one-time page holds none, and the
+end-to-end run (standalone harness, 2026-09) showed the laptop's approval modal
+calling a one-time phone "Dormouse Pocket (browser)", an app it never opened.
+The platform string the codebase already reads gives a coarse name without a
+user-agent parser; a platform it does not name falls to "Phone browser".
+
 ## Laptop UI
 
 **Why nothing re-opens on a timer.** The Relay's "Set up a phone" panel

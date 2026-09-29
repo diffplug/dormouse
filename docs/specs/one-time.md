@@ -313,6 +313,9 @@ on Pocket's screens, chrome, and mobile wall.
 - **Mounts the wall only on `ok`**, through `mountRemoteWall`. End, Cancel, a
   reported ending, a failed mount, or a failed attachment closes the client and
   releases the adapter; the first ending's copy stays.
+- **The label the modal shows is `oneTimeDeviceLabel`, never Pocket's
+  `deviceLabel`**: `iPhone`, `iPad`, or `Android phone` from the platform
+  string, else `Phone browser` (rationale).
 
 **Build.** `build:one-time` in `lib/package.json` builds `lib/one-time/` with
 `lib/vite.one-time.config.ts` (base `ONE_TIME_PAGE_PATH`, Pocket's resolution,
@@ -344,7 +347,8 @@ object-src 'none'; sandbox allow-scripts allow-same-origin
 
 `docs/specs/security-hosted.md` -> "Rendezvous boundary" holds the audited checks.
 
-Source of truth: `OneTimeApp` in `lib/src/remote/one-time-app/OneTimeApp.tsx`;
+Source of truth: `OneTimeApp` and `oneTimeDeviceLabel` in
+`lib/src/remote/one-time-app/OneTimeApp.tsx`;
 `takeOneTimeLinkUrl` / `reloadOnNewLink` in
 `lib/src/remote/one-time-app/take-link.ts`; `applyPocketTheme` in
 `lib/src/remote/pocket-app/pocket-theme.ts`; `assertPocketShell` in

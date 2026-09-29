@@ -29,6 +29,7 @@ import {
   ONE_TIME_UNSUPPORTED_TITLE,
   OneTimeApp,
   expiresInText,
+  oneTimeDeviceLabel,
   type OneTimePageClient,
 } from './OneTimeApp';
 import { reloadOnNewLink, takeOneTimeLinkUrl } from './take-link';
@@ -57,7 +58,8 @@ vi.mock('remote-lib-common', async (importOriginal) => ({
   ...(await importOriginal<typeof import('remote-lib-common')>()),
   probeNoiseSupport: () => Promise.resolve(fake.noiseSupported),
 }));
-vi.mock('../client/install-state', () => ({ isInstalledWebApp: () => false }));
+// Pocket's label would name an installed app; the page must never use it.
+vi.mock('../client/install-state', () => ({ isInstalledWebApp: () => true }));
 vi.mock('../pocket-app/remote-wall', () => ({
   mountRemoteWall: (client: unknown) => fake.mount(client),
 }));
@@ -73,8 +75,8 @@ vi.mock('../../lib/terminal-registry', () => ({
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-/** The label a browser tab suggests; see `deviceLabel`. */
-const DEVICE_LABEL = 'Dormouse Pocket (browser)';
+/** The label jsdom's empty platform string gets; see `oneTimeDeviceLabel`. */
+const DEVICE_LABEL = 'Phone browser';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -289,6 +291,14 @@ describe('the gate', () => {
     expect(expiresInText(60_000)).toBe('Expires in 1 min.');
     expect(expiresInText(59_000)).toBe('Expires in 59 s.');
     expect(expiresInText(1)).toBe('Expires in 1 s.');
+  });
+
+  it('names the device coarsely from its platform string, never as Pocket', () => {
+    expect(oneTimeDeviceLabel('iPhone')).toBe('iPhone');
+    expect(oneTimeDeviceLabel('iPad')).toBe('iPad');
+    expect(oneTimeDeviceLabel('Android')).toBe('Android phone');
+    expect(oneTimeDeviceLabel('Linux aarch64')).toBe('Phone browser');
+    expect(oneTimeDeviceLabel('')).toBe('Phone browser');
   });
 });
 

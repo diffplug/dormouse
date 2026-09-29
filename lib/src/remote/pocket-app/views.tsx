@@ -1,8 +1,9 @@
 /**
  * The phone screens and copy that do not depend on how a session was
  * authorized — the capability gate, the two-digit waiting screen, the
- * transport indicator — plus the label a phone suggests for itself. Shared so
- * every phone page says these things one way (`docs/specs/pocket-app.md`).
+ * transport indicator — plus the label Pocket suggests at pairing (the
+ * one-time page names itself: `oneTimeDeviceLabel`). Shared so every phone
+ * page says these things one way (`docs/specs/pocket-app.md`).
  */
 
 import { clsx } from 'clsx';
