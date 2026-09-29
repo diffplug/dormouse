@@ -112,7 +112,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 | `port: auto`, no announced port | Wait for one unchanged scan tick; one port frames, several show a conflict, zero keeps waiting |
 | Anonymous command | Uses `auto` |
 
-- **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
+- **Must scan unbound Tools on each port announcement and every 1.5 seconds while their command runs.** Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
 - **Must let a changed announced port or path override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
 - **Must display the browser destination at once and leave the launch to the Surface's controller** (`docs/specs/dor-browser.md` → Browser Connection), in the session the Tool has or else its own `tool.<leafId>`, falling back to the embed. Block Workspace transfer until the session binds.
@@ -317,7 +317,7 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
 
 1. Directory open rules and `builtin:folder`.
 2. Local `OSC 8` file links: click previews, double-click pins.
-3. Speed within the open rules: an announce-triggered port scan, an optional per-rule `preview:` Tool, and opt-in retarget without restart (built-in viewer first).
+3. Speed within the open rules: an optional per-rule `preview:` Tool, and opt-in retarget without restart (built-in viewer first).
 
 ### Dehydrate and rehydrate
 

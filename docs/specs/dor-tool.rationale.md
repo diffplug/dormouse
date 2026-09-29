@@ -42,6 +42,8 @@ Successive startup listeners can appear in different scan ticks. One unchanged t
 
 A hardcoded Storybook port can disagree with the port it obtains under contention, while Vite with strict-port behavior can fail entirely. Discovery therefore checks the Session process tree. An OSC can cross SSH, but the current host scan still requires a locally discoverable listener.
 
+Every preview-slot retarget of a serving Tool (the built-in file viewer, `builtin:folder`, a web viewer) otherwise waits up to one 1.5-second poll before its browser frames (2026-09). The `serve` announcement already names the port, so scanning when it arrives removes most of that wait without trusting it any further.
+
 ## Lifecycle
 
 ### September 2026 innerdogfood QC record

@@ -184,6 +184,68 @@ describe('port: announced', () => {
   });
 });
 
+describe('an announcement scans at once', () => {
+  const announced = { surfaceType: 'tool', command: 'x', toolPort: 'announced' };
+  const announce = (port: number, key: string[] | null = null) =>
+    ({ port, name: null, key, dehydrate: false, persist: null });
+
+  it('frames the announced port before the next poll', async () => {
+    const { state, platform } = await run(announced, [[tcp(6006)]]);
+    expect(state.params.url).toBeUndefined();
+
+    await act(async () => { recordToolAnnounce('tool-1', announce(6006)); });
+
+    expect(state.params.url).toBe('http://localhost:6006/');
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(2);
+  });
+
+  it('runs a follow-up tick for an announcement that lands mid-tick', async () => {
+    const { lath, state } = toolEngine(announced);
+    const gate = Promise.withResolvers<OpenPort[]>();
+    const platform = new FakePtyAdapter();
+    platform.getOpenPorts = vi.fn()
+      .mockImplementationOnce(() => gate.promise)
+      .mockImplementation(async () => [tcp(6006)]);
+    setPlatform(platform);
+    function Probe() { useToolServing({ lath, doorsRef: { current: [] } }); return null; }
+    await act(async () => root.render(<Probe />));
+
+    // The first tick decided its scan before the announcement existed.
+    await act(async () => { recordToolAnnounce('tool-1', announce(6006)); });
+    await act(async () => gate.resolve([tcp(6006)]));
+
+    expect(state.params.url).toBe('http://localhost:6006/');
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(2);
+  });
+
+  it('frames nothing when the announced port is absent from the scan, and the poll retries', async () => {
+    const { state, platform } = await run(announced, [[tcp(6006)]]);
+
+    await act(async () => { recordToolAnnounce('tool-1', announce(9999)); });
+    expect(state.params.url).toBeUndefined();
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(2);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(3);
+    expect(state.params.url).toBeUndefined();
+  });
+
+  it('ignores an announcement from a Session that is not a Tool of this Wall', async () => {
+    const { platform } = await run(announced, [[tcp(6006)]]);
+    await act(async () => { recordToolAnnounce('elsewhere', announce(6006)); });
+    expect(platform.getOpenPorts).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops listening once unmounted', async () => {
+    // A re-key is the part of a tick that runs before any scan or cancel check.
+    const { state } = await run({ ...announced, toolName: 'named' }, [[tcp(6006)]]);
+    act(() => root.unmount());
+    root = createRoot(container);
+    await act(async () => { recordToolAnnounce('tool-1', announce(6006, ['late'])); });
+    expect(state.params.toolKey).toBeUndefined();
+  });
+});
+
 describe('port: auto (autobind)', () => {
   const auto = { surfaceType: 'tool', command: 'x', toolPort: 'auto' };
 

@@ -15,12 +15,23 @@
 import type { ToolAnnounce } from './tool-announce';
 
 const announces = new Map<string, ToolAnnounce>();
+const listeners = new Set<(id: string) => void>();
 
 /** Last-write-wins: the announcement is re-emittable, so a tool that changes
  *  its port or its name simply says so again. */
 export function recordToolAnnounce(id: string, announce: ToolAnnounce | null): void {
-  if (announce) announces.set(id, announce);
-  else announces.delete(id);
+  if (!announce) {
+    announces.delete(id);
+    return;
+  }
+  announces.set(id, announce);
+  for (const listener of listeners) listener(id);
+}
+
+/** Called with the Session id on every recorded announcement, never on a clear. */
+export function subscribeToToolAnnounces(listener: (id: string) => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
 }
 
 /** Drop a Session's announcement when it dies, so a recycled pane id cannot
