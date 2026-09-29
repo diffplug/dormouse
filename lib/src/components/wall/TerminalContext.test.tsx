@@ -105,6 +105,37 @@ it.each(['scanning', 'failed', 'empty'] as const)('distinguishes %s ports', stat
   expect(container.textContent).toContain(state === 'empty' ? 'No listening ports' : state === 'failed' ? 'Port scan failed' : 'Scanning ports');
   expect(button('Open in system browser')).toBeNull();
 });
+it('moves trailing actions into the dropdown on resize and dispatches hidden actions', async () => {
+  let width = 250;
+  const observers = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: () => void) { observers.add(callback); }
+    observe() {} disconnect() {} unobserve() {}
+  });
+  const client = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function(this: HTMLElement) { return this.hasAttribute('data-port-actions') ? width : 0; });
+  const offset = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(100);
+  try {
+    render();
+    const dropdown = () => container.querySelector<HTMLSelectElement>('[aria-label="More browser actions"]');
+    expect(button('Open in system browser')).not.toBeNull();
+    expect(button('Open in agent-browser screencast')).toBeNull();
+    expect([...dropdown()!.options].map(option => option.value)).toContain('agent-browser-screencast');
+    const launch = Promise.withResolvers<void>();
+    props.onPort = vi.fn(() => launch.promise); render();
+    await act(async () => { dropdown()!.value = 'agent-browser-screencast'; dropdown()!.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(props.onPort).toHaveBeenCalledWith(port(5173), 'agent-browser-screencast');
+    expect(dropdown()!.getAttribute('aria-busy')).toBe('true');
+    await act(async () => launch.reject(new Error('Launch failed')));
+    expect(container.querySelector('[data-context-diagnostic]')?.textContent).toBe('Launch failed');
+    act(() => { width = 80; observers.forEach(notify => notify()); });
+    expect(button('Open in system browser')).toBeNull();
+    expect(dropdown()!.options).toHaveLength(6);
+    act(() => { width = 600; observers.forEach(notify => notify()); });
+    expect(dropdown()).toBeNull();
+    expect(button('Open in agent-browser popout')).not.toBeNull();
+  } finally { client.mockRestore(); offset.mockRestore(); vi.unstubAllGlobals(); }
+});
+
 it('uses one pair of automated actions and remembers the selected provider on reopening', async () => {
   render();
   expect(button('Open in playwright screencast')).toBeNull();

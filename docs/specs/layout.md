@@ -84,9 +84,11 @@ Popups share the zoomed pane’s app-background halo.
 |---|---|
 | Title | Derived display title, labeled Explain action, copyable source Surface ref and close at right |
 | Dir | Home-abbreviated directory, native explorer action, absolute-path copy |
-| Ports | One scan per opening; scanning/empty/failure states; one port inline, multiple ports in a dropdown with count beside it; four labeled actions |
+| Ports | One scan per opening; scanning/empty/failure states; one port inline, multiple ports in a dropdown with count beside it; actions stay on that row, overflowing into a dropdown |
 | Alerts | Source Watch and TODO controls; notification details directly below |
 | Helper | Remaining space; one-line status, Modify/Reset and Promote; hide its name below 48rem container width |
+
+**Must keep port actions on one line to the right of the port display**, moving trailing actions into a dropdown as measured available width shrinks; all targets remain reachable.
 
 **Must focus context controls on opening.** Explicit entry into helper xterm gives it terminal keys; Escape there belongs to its program. Escape from controls closes the innermost disclosure, then context. Terminal clipboard routing uses the focused helper rather than the selected source. Actions use subdued link color and shared compact `OnOffSwitch` controls.
 

@@ -5,7 +5,7 @@ import { stepFocus } from '../focus-step';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon } from './BrowserDisplayIcon';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
-import { BrowserProviderSwitch, preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderSwitch';
+import { preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderSwitch';
 import type { PortUrlEntry } from './port-url';
 import type { RenderMode } from './agent-browser-screen';
 import type { HelperStatus } from '../../lib/helper-terminal';
@@ -39,8 +39,8 @@ function portActions(provider: BrowserAutomationProvider): readonly ({ mode: Por
   const { label } = BROWSER_PROVIDER_GUI[provider];
   const unavailable = `${label} unavailable on this host`;
   return [
-    { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'System browser' },
-    { mode: 'iframe', label: 'Open in iframe embed', needs: 'iframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'Iframe' },
+    { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'system browser' },
+    { mode: 'iframe', label: 'Open in iframe embed', needs: 'iframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'iframe' },
     { mode: renderModeFor(provider, 'screencast'), label: `Open in ${label} screencast`, needs: provider, unavailable, icon: <AgentRobotIcon size={17} />, text: `${label} screencast` },
     { mode: renderModeFor(provider, 'popout'), label: `Open in ${label} popout`, needs: provider, unavailable, icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: `${label} popout` },
   ];
@@ -139,6 +139,89 @@ function ContextOpenAction({ children, label, disabled, onOpen, fit = false }: {
 }
 
 /** The supplied Phosphor panel glyph, mirrored so its filled panel marks `side`. */
+/** Measure natural action widths so overflow follows this row, not the window.
+ * The native dropdown escapes the context's scroll/animation clipping and owns
+ * keyboard navigation; its entries are exactly the actions missing from the row. */
+function PortLaunchActions({ provider, providers, canIframe, entry, onPort, onProviderChange }: {
+  provider: BrowserAutomationProvider;
+  providers: readonly BrowserAutomationProvider[];
+  canIframe: boolean;
+  entry: PortUrlEntry;
+  onPort(entry: PortUrlEntry, mode: PortMode): Promise<boolean>;
+  onProviderChange(provider: BrowserAutomationProvider): void;
+}) {
+  const nextProvider = providers.find(value => value !== provider);
+  const actions = [
+    ...portActions(provider).map(action => {
+      const offered = action.needs === 'iframe' ? canIframe : !action.needs || providers.includes(action.needs);
+      return { key: action.mode as string, label: action.needs && !offered ? action.unavailable : action.label,
+        text: action.text, icon: action.icon, disabled: !offered, run: () => onPort(entry, action.mode) };
+    }),
+    ...(nextProvider ? [{ key: 'provider', label: `switch to ${nextProvider}`, text: `switch to ${nextProvider}`,
+      icon: null, disabled: false, run: async () => { onProviderChange(nextProvider); return true; } }] : []),
+  ];
+  const root = useRef<HTMLDivElement>(null);
+  const measures = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(actions.length);
+  const [pending, setPending] = useState<string | null>(null);
+  const pendingRef = useRef(false);
+  const dropdownWidth = pending && !actions.slice(0, visible).some(action => action.key === pending) ? 100 : 40;
+  const labels = actions.map(action => action.text).join('|');
+  useLayoutEffect(() => {
+    const row = root.current;
+    const measuring = measures.current;
+    if (!row || !measuring) return;
+    const measure = () => {
+      const width = row.clientWidth;
+      if (!width) return;
+      const widths = Array.from(measuring.children, child => (child as HTMLElement).offsetWidth);
+      const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * 4;
+      if (total <= width) { setVisible(widths.length); return; }
+      let used = dropdownWidth;
+      let count = 0;
+      for (const value of widths) {
+        if (used + 4 + value > width) break;
+        used += 4 + value;
+        count++;
+      }
+      setVisible(count);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    for (const child of measuring.children) observer.observe(child);
+    return () => observer.disconnect();
+  }, [labels, dropdownWidth]);
+  const run = async (action: typeof actions[number]) => {
+    if (pendingRef.current || action.disabled) return;
+    if (action.key === 'provider') { void action.run(); return; }
+    pendingRef.current = true;
+    setPending(action.key);
+    try { await action.run(); } finally { pendingRef.current = false; setPending(null); }
+  };
+  return <div ref={root} data-port-actions className="relative flex min-w-8 flex-1 items-center gap-1">
+    <div ref={measures} aria-hidden="true" inert className="pointer-events-none invisible absolute inset-x-0 top-0 flex h-0 gap-1 overflow-hidden">
+      {actions.map(action => <span key={action.key} className="grid h-6 shrink-0 whitespace-nowrap px-1.5">
+        <span className="col-start-1 row-start-1 inline-flex items-center gap-1.5">{action.icon}{action.text}</span>
+        <span className="col-start-1 row-start-1 inline-flex items-center gap-1.5"><CircleNotchIcon size={15} />Opening…</span>
+      </span>)}
+    </div>
+    {actions.slice(0, visible).map(action => <ContextAction key={action.key} label={action.label} disabled={action.disabled}
+      busy={pending === action.key} onClick={() => void run(action)}>
+      <span className="grid whitespace-nowrap">
+        <span className={`col-start-1 row-start-1 inline-flex items-center gap-1.5 ${pending === action.key ? 'invisible' : ''}`}>{action.icon}{action.text}</span>
+        <span aria-hidden={pending !== action.key} className={`col-start-1 row-start-1 inline-flex items-center gap-1.5 ${pending === action.key ? '' : 'invisible'}`}><CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />Opening…</span>
+      </span>
+    </ContextAction>)}
+    {visible < actions.length && <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={!!pending || undefined} aria-disabled={!!pending || undefined}
+      style={{ width: dropdownWidth, maxWidth: '100%' }} className="h-6 min-w-0 shrink-0 rounded border border-border bg-app-bg text-foreground"
+      onChange={event => { const action = actions.find(item => item.key === event.target.value); if (action) void run(action); }}>
+      <option value="">{pending && !actions.slice(0, visible).some(action => action.key === pending) ? 'Opening…' : '…'}</option>
+      {actions.slice(visible).map(action => <option key={action.key} value={action.key} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}
+    </select>}
+  </div>;
+}
+
 function PlacementIcon({ side }: { side: ContextSide }) {
   return <svg aria-hidden width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
     <g transform={side === 'bottom' ? 'translate(0 256) scale(1 -1)' : side === 'left' ? 'translate(256 0) scale(-1 1)' : undefined}>
@@ -243,17 +326,15 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <span className="text-muted">Dir</span>
           <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></div>
           <span className="text-muted">Ports</span>
-          <div className="flex min-h-7 flex-wrap items-center gap-2">
-            {p.scan.status === 'scanning' ? <span className="text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="text-muted">No listening ports</span> : <>
-              {entries.length > 1 ? <div className="flex w-full min-w-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 flex-1 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
-              <div className="ml-1 flex min-w-0 flex-wrap items-center gap-1 border-l border-border pl-2">
-                {portActions(provider).map(action => {
-                  const offered = action.needs === 'iframe' ? p.canIframe : !action.needs || p.browserProviders.includes(action.needs);
-                  const unavailable = action.needs && !offered ? action.unavailable : null;
-                  return <ContextOpenAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} fit onOpen={() => attempt(() => p.onPort(selected, action.mode))}>{action.icon}<span className="truncate">{action.text}</span></ContextOpenAction>;
-                })}
-              <BrowserProviderSwitch providers={p.browserProviders} value={provider} onChange={value => { setChosenProvider(value); rememberBrowserProvider(value); }} />
+          <div data-context-ports className="flex min-h-7 min-w-0 items-center gap-2">
+            {p.scan.status === 'scanning' ? <span className="truncate text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="truncate text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="truncate text-muted">No listening ports</span> : <>
+              <div className="flex min-w-0 max-w-[45%] shrink items-center gap-2">
+                {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="shrink-0 text-muted">{entries.length} ports</span></>
+                  : <span className="truncate" title={`${selected.host}:${selected.port}${selected.processName ? ` · ${selected.processName}` : ''}`}>{selected.host}:{selected.port} <span className="text-muted">{selected.processName}</span></span>}
               </div>
+              <PortLaunchActions provider={provider} providers={p.browserProviders} canIframe={p.canIframe} entry={selected}
+                onPort={(entry, mode) => attempt(() => p.onPort(entry, mode))}
+                onProviderChange={value => { setChosenProvider(value); rememberBrowserProvider(value); }} />
             </>}
           </div>
           <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.watchRule ? `Watch all ${p.watchRule} commands` : 'No command running'}</span>{p.watchRule && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>

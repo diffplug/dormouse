@@ -140,9 +140,11 @@ const meta = {
   play: async ({ args, canvasElement }) => {
     if (args.initialScenario === 'launchPending' || args.initialScenario === 'launchFailed') {
       const canvas = within(canvasElement);
-      await userEvent.click(canvas.getByRole('button', { name: 'Open in agent-browser screencast' }));
+      const launch = canvas.queryByRole('button', { name: 'Open in agent-browser screencast' });
+      if (launch) await userEvent.click(launch);
+      else await userEvent.selectOptions(canvas.getByRole('combobox', { name: 'More browser actions' }), 'agent-browser-screencast');
       if (args.initialScenario === 'launchPending') {
-        await expect(canvas.getByRole('button', { name: 'Open in agent-browser screencast' })).toHaveAttribute('aria-busy', 'true');
+        await expect(canvas.queryByRole('button', { name: 'Open in agent-browser screencast' }) ?? canvas.getByRole('combobox', { name: 'More browser actions' })).toHaveAttribute('aria-busy', 'true');
       } else {
         const diagnostic = canvas.getByRole('alert');
         await expect(diagnostic).toHaveTextContent('agent-browser binary not found');
@@ -165,6 +167,9 @@ const meta = {
     }
     const panel = canvasElement.querySelector<HTMLElement>('[data-terminal-context]')!;
     const bounds = panel.getBoundingClientRect();
+    const ports = panel.querySelector<HTMLElement>('[data-context-ports]')!;
+    expect(ports.getBoundingClientRect().height).toBeLessThanOrEqual(28);
+    expect(ports.scrollWidth).toBeLessThanOrEqual(ports.clientWidth);
     // DOM visibility matchers do not catch overflow clipping; check actual bounds.
     for (const element of [within(panel).getByTitle('pnpm dev'), ...panel.querySelectorAll('button')]) {
       const box = element.getBoundingClientRect();
