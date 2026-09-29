@@ -295,7 +295,7 @@ established session), `ChallengeIssuer` in
 
 **A third ceremony on the one suite, authorizing one session and writing
 nothing.** `docs/specs/one-time.md` owns the link, the rendezvous wire, and the
-staged runtime; these are the rules the shared contract fixes.
+runtime that carries these rules out ("Burrow runtime").
 
 - **IK against the link's one-use key.** The phone is the initiator with a fresh
   static it **never persists**, the link's `ephPub` as `rs`; both handshake
@@ -305,21 +305,39 @@ staged runtime; these are the rules the shared contract fixes.
   `one-time`, the room id, then `v`, `expiry`, and `ephPub` in link order — so a
   one-time transcript equals no pairing or connection transcript, and is useless
   in any other room.
-- **Reverse two-digit confirmation without a presence proof.**
+- **The first valid message 1 reserves the link**: the one-use key is erased
+  with it, a later `init` is dropped before any WebCrypto, and one that fails
+  to decrypt reserves nothing.
+- **The one carve-out from [Presence proofs](#presence-proofs): a fresh local
+  confirmation authorizes exactly one session and writes nothing.**
   `OneTimeRequestV1` carries the phone's code and label and nothing else; the
-  Burrow's one attempt and the carve-out from [Presence proofs](#presence-proofs)
-  are staged with the runtime (`docs/specs/one-time.md` -> "Future").
+  Burrow opens the approval modal on it, holds the expected code as
+  [Pairing](#pairing) does, and gets **exactly one attempt** — spent before the
+  expiry check and the constant-time comparison. No ACL record, `deliveryId`,
+  or Burrow static results, and the Burrow persists nothing.
 - **One padded outcome.** `OneTimeOutcomeV1` success carries only the Burrow
   label — no Burrow static, no `deliveryId` — and a denial only `user-denied`,
   `confirmation-mismatch`, `link-expired`, or `burrow-error`, in the same fixed
   control message as [Pairing](#pairing)'s.
+- **Direct required: application data never crosses the rendezvous.** The
+  outcome promotes the same session, and an application message decrypted off
+  the rendezvous ends it unread; a session with no direct path by
+  `ONE_TIME_DIRECT_DEADLINE_MS` ends, with no relayed fallback.
+- **After the switch the direct channel, not the rendezvous, is the lifecycle
+  authority** — for this ceremony alone, the carve-out from
+  [remote-api.md](./remote-api.md) -> "Direct path"'s rule that the Relay stays
+  the lifecycle authority, since no Relay carries it. The Burrow closes the
+  rendezvous at the switch and ignores its loss; channel loss or the idle
+  deadline ends the session, and nothing resumes.
 
-Source of truth: `oneTimeLinkPrologue` in
+Source of truth: `OneTimeRuntime` in
+`lib/src/remote/burrow/one-time-runtime.ts`, `oneTimeLinkPrologue` in
 `remote-lib-common/src/security/one-time-link.ts`, `e2eOneTimePrologue` in
 `remote-lib-common/src/security/noise-transport.ts`, `OneTimeRequestV1` /
 `OneTimeOutcomeV1` in `remote-lib-common/src/security/e2e-ceremony.ts`. Pinned
-by `remote-lib-common/test/one-time-link.test.mjs` and
-`remote-lib-common/test/e2e-ceremony.test.mjs`.
+by `remote-lib-common/test/one-time-link.test.mjs`,
+`remote-lib-common/test/e2e-ceremony.test.mjs`, and
+`lib/src/remote/burrow/one-time-runtime.test.ts`.
 
 ## Push sealing
 
@@ -367,7 +385,10 @@ Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in
 
 **Every bound is Burrow-enforced and independent of the relay** — Relay-side
 gates are defense in depth only, and Burrow correctness must survive a relay that
-omits `client-gone`, invents client IDs, or reorders frames.
+omits `client-gone`, invents client IDs, or reorders frames. The one-time
+runtime holds its own against the rendezvous the same way: its own
+`TokenBucket`, the frame bound before any parse, the message cap, and every
+deadline on its own clock (`docs/specs/one-time.md` -> "Burrow runtime").
 
 | Bound | Value | Declared in |
 | --- | --- | --- |
@@ -385,6 +406,10 @@ omits `client-gone`, invents client IDs, or reorders frames.
 | `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
 | `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first; one pair for a receiver's hold and a sender's queue alike (rationale) | same |
 | `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
+| `MAX_ONE_TIME_FRAME_LENGTH` | one maximal `ct` + 512 | `remote-lib-common/src/remote/one-time-wire.ts` |
+| `MAX_ONE_TIME_FORWARDED` | 32 messages; the one-time runtime stops reading a room past it | same |
+| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` / `ONE_TIME_DIRECT_DEADLINE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 30 000 / 15 000 | same |
+| `ONE_TIME_OPEN_TIMEOUT_MS` | 8 000 | `lib/src/remote/burrow/one-time-runtime.ts` |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative
   received-string length; both `e2e` and `client-gone` share one FIFO and one
@@ -491,7 +516,8 @@ their guard, and `DirectCutover`), `lib/src/remote/direct/direct-peer.ts`
 switch, created at promotion by `EstablishedE2eSession` in
 `lib/src/remote/burrow/established-session.ts`, which
 `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`
-constructs, and by `ClientSessionCore.establish` in
+and `OneTimeRuntime.#promote` in `lib/src/remote/burrow/one-time-runtime.ts`
+construct, and by `ClientSessionCore.establish` in
 `lib/src/remote/client/session-core.ts`). The audited rows are
 `docs/specs/security-remote.md` -> "Direct path".
 

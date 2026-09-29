@@ -32,15 +32,18 @@ Relay nor `BurrowRuntime` may read);
 `lib/src/remote/direct/direct-endpoint.ts` and `direct-peer.ts` (the data
 channel the same session may move onto, and the one switching policy both ends
 run — `docs/specs/security-remote.md` -> "Direct path");
-`lib/src/remote/burrow/burrow-runtime.ts` (both ceremonies, every Burrow bound)
-and `established-session.ts` (an authorized session's decrypt, idle clock, and
-direct path);
+`lib/src/remote/burrow/burrow-runtime.ts` (both ceremonies, every Burrow bound),
+`established-session.ts` (an authorized session's decrypt, idle clock, and
+direct path), and `one-time-runtime.ts` (the one-time ceremony, which grants
+nothing and must reach the direct path — `docs/specs/security-remote.md` ->
+"One-time connection");
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they
 promote) and `lib/src/remote/pocket-app/sw.ts` (the render sink);
 `relay/src/relay.ts` and `relay/src/app.ts` (which must know none of it). The
 harnesses that already exercise this are
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
+`lib/src/remote/burrow/one-time-runtime.test.ts`,
 `relay/test/malicious-relay.test.mjs`,
 `remote-lib-common/test/security-guarantees.test.mjs`,
 `remote-lib-common/test/noise.test.mjs`, and `remote-lib-common/test/push-seal.test.mjs`

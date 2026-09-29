@@ -33,6 +33,13 @@ import { realTimer, type RemoteTimer } from '../ws';
  */
 export type DirectRole = 'offerer' | 'answerer';
 
+/**
+ * Which path carried one transport ciphertext into the session. A channel frame
+ * held until the peer's `direct-switch` and drained afterwards is still
+ * `channel`, whichever call stack it is delivered from.
+ */
+export type DirectCarrier = 'relay' | 'channel';
+
 export interface DirectEndpointDeps {
   /** How this runtime builds a peer connection, or `null` where it has none. */
   readonly createPeer: DirectPeerFactory | null;
@@ -53,9 +60,10 @@ export interface DirectEndpointDeps {
    * decrypt failed — a poisoned session, which the owner has already disposed.
    *
    * A signal is left in the receipt rather than dispatched by the owner: the
-   * endpoint is the only thing that knows what one means.
+   * endpoint is the only thing that knows what one means. `carrier` names the
+   * path, for an owner whose rules differ by it.
    */
-  receive(ciphertext: Uint8Array): TransportReceipt | null;
+  receive(ciphertext: Uint8Array, carrier: DirectCarrier): TransportReceipt | null;
   /**
    * The session is unrecoverable: the endpoint's owner disposes it (the Burrow
    * through `EstablishedE2eSession`'s `onFatal`, the Client through
@@ -171,7 +179,7 @@ export class DirectEndpoint {
         // take: what was held is exactly what was sent after the switch.
         for (const frame of outcome.frames) {
           if (!this.#alive()) return;
-          this.#deliver(frame);
+          this.#deliver(frame, 'channel');
         }
         return;
       }
@@ -203,7 +211,7 @@ export class DirectEndpoint {
       this.#deps.fatal('a relay frame was not a ciphertext');
       return;
     }
-    this.#deliver(ciphertext);
+    this.#deliver(ciphertext, 'relay');
   }
 
   /**
@@ -340,7 +348,7 @@ export class DirectEndpoint {
     if (!this.#alive()) return;
     switch (this.#cutover.onChannelFrame(frame)) {
       case 'process':
-        this.#deliver(frame);
+        this.#deliver(frame, 'channel');
         return;
       case 'held':
         return;
@@ -355,8 +363,8 @@ export class DirectEndpoint {
    * control message on an established session is one of this path's signals**,
    * and reading it here is what keeps the two ends' receive paths identical.
    */
-  #deliver(ciphertext: Uint8Array): void {
-    const receipt = this.#deps.receive(ciphertext);
+  #deliver(ciphertext: Uint8Array, carrier: DirectCarrier): void {
+    const receipt = this.#deps.receive(ciphertext, carrier);
     if (receipt?.kind === 'control') this.onSignal(receipt.value);
   }
 

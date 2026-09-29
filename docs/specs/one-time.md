@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary; this spec uses them bare.
 > Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection".
-> Only the shared contract is built; the runtime, the rendezvous, and both interfaces are the **one-time-connection** scope under `## Future`.
+> The shared contract and the Burrow runtime are built; the phone client, the service commands, the rendezvous, and both interfaces are the **one-time-connection** scope under `## Future`.
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
@@ -92,21 +92,87 @@ Source of truth: `remote-lib-common/src/remote/one-time-wire.ts`;
 `remote-lib-common/test/one-time-wire.test.mjs` and
 `remote-lib-common/test/e2e-ceremony.test.mjs`.
 
+## Burrow runtime
+
+**`OneTimeRuntime` is single-use: one rendezvous socket, one one-use keypair,
+one phone, and at most one session.** It opens once and ends once, and nothing
+resumes. The ceremony's trust rules — the reservation, the one attempt, direct
+required — are `docs/specs/remote-security-model.md` -> "One-time connection";
+this section is how the runtime carries them out.
+
+| `OneTimeState` | Meaning |
+| --- | --- |
+| `opening` | minting the keypair, then waiting up to `ONE_TIME_OPEN_TIMEOUT_MS` (8 s) for the room frame |
+| `waiting {url, expiresAt}` | the link is live; `expiresAt` is its last live millisecond |
+| `confirming {label, expiresAt}` | a phone's request awaits the approval modal |
+| `connecting {label}` | confirmed; the direct path has `ONE_TIME_DIRECT_DEADLINE_MS` |
+| `connected {label, since}` | both directions are direct and the rendezvous is closed |
+| `ended {reason}` | terminal |
+
+`unavailable {reason}` and `idle` complete the type for the service, which
+decides them; a runtime never enters either.
+
+- **Must open the socket through the host's factory with no `Origin`
+  header**, on the origin's Burrow route with `http` replaced by `ws`. While it
+  is open the runtime sends `ONE_TIME_PING` every `ONE_TIME_PING_INTERVAL_MS`
+  (30 s) and ignores `ONE_TIME_PONG` uncounted.
+- **The first message must be one `OneTimeRoomFrame`**, else `unreachable`.
+  The link's expiry is the earlier of the runtime's own `now +
+  ONE_TIME_LINK_TTL_MS` and the room's `expiresAt`, floored to whole seconds.
+- **Must measure every later message against `MAX_ONE_TIME_FRAME_LENGTH` before
+  `JSON.parse`, then guard and count it**: past `MAX_ONE_TIME_FORWARDED` the
+  runtime stops reading the room. Frames run through one FIFO, one at a time,
+  and **the socket's close rides the same FIFO**, so a phone's `direct-switch`
+  is read before the room's report that the phone left.
+- **Must spend an `E2E_INIT_BURST` `TokenBucket` token before an `init`'s
+  WebCrypto.** The first non-keepalive transport message must be
+  `OneTimeRequestV1`, else `burrow-error`; its label passes
+  `boundedPairingLabel` before the approval request carries it.
+- **Promotion reuses the same Noise session** in an `EstablishedE2eSession`
+  whose `hello.burrowId` is the room id, and arms the direct deadline. A
+  decline the Burrow sends reaches the phone before the rendezvous closes.
+- **Must close the rendezvous normally at the switch, and ignore its loss from
+  then on.** Before the switch a close ends the connection by its code.
+- **Never let a deadline run later than the room's**: each is on the runtime's
+  own clock — an unclaimed link ends the first millisecond past its expiry, and
+  a claimed one gets `ONE_TIME_EXPIRY_GRACE_MS` more, then is told
+  `link-expired`.
+- **`end()` releases everything**: the session and its peer connection, a
+  pending approval, the key, queued work, every timer, and the socket. Nothing
+  is written.
+
+| `ended` reason | When |
+| --- | --- |
+| `user-ended` | `end()`: the laptop's End or Cancel, or service disposal |
+| `user-denied`, `confirmation-mismatch` | the modal's Deny, or digits the phone was not showing |
+| `expired` | a link past its expiry, claimed or not; a late request or confirmation; room close `4010` or `4014` |
+| `phone-left` | room close `4013` before the switch; any session failure after it |
+| `direct-failed` | a decline, an abandoned attempt, a session failure before the switch, or the direct deadline |
+| `idle` | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` without a decrypted phone message |
+| `unreachable` | no room frame by the open deadline, a first message that is not one, or a socket lost before it |
+| `rendezvous-lost` | any other close before the switch |
+| `burrow-error` | room close `4015`, a protocol violation, an application message over the rendezvous, a room past the message cap, or a local failure |
+
+Source of truth: `OneTimeRuntime` in
+`lib/src/remote/burrow/one-time-runtime.ts`; `onRelayedApp` and
+`onTransportChanged` in `lib/src/remote/burrow/established-session.ts`.
+Pinned by `lib/src/remote/burrow/one-time-runtime.test.ts`, which drives a real
+Noise initiator through the in-memory room `lib/src/remote/test-rendezvous.ts`.
+
 ## Future
 
 **Scope: one-time-connection** — the feature on top of the contract, in build
 order, each stage promoting its part above the fold:
 
-1. **Burrow runtime** — `OneTimeRuntime` and a fake rendezvous for its tests.
-2. **Phone client** — `ClientSessionCore` extracted from `PocketClient`, then
-   `OneTimeClient`, proven end to end against the runtime through the fake.
-3. **Service commands and host glue** — `BurrowService` commands and event, the
+1. **Phone client** — `OneTimeClient` on `ClientSessionCore`, proven end to
+   end against the runtime through the in-memory room.
+2. **Service commands and host glue** — `BurrowService` commands and event, the
    baked origin, the `serving` gate, approval `kind`, standalone and VS Code.
-4. **Hosted rendezvous** — the routes, the `OneTimeRoom` Durable Object, its
+3. **Hosted rendezvous** — the routes, the `OneTimeRoom` Durable Object, its
    configuration and headers, a Miniflare suite in the root test.
-5. **Phone page** — Pocket's shared views and wall mount moved out of its App,
+4. **Phone page** — Pocket's shared views and wall mount moved out of its App,
    the `/connect/` entry, its build and staging, the dev loop.
-6. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
+5. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
    enabled.
 
 **Scope: one-time-anywhere** — reach past one network, for paid users: STUN and
@@ -125,38 +191,17 @@ limit.
 4. The phone page takes and erases the fragment and **opens no socket until the
    person taps Connect**, so a link-preview crawler cannot spend the one join.
 5. The phone joins the client route and runs IK with a fresh, never-persisted
-   static against `ephPub`. The first valid message 1 reserves the link; later
-   inits are dropped.
+   static against `ephPub`, reserving the link ([Burrow runtime](#burrow-runtime)).
 6. The phone shows two digits and sends `OneTimeRequestV1`; the laptop's
-   approval modal takes one constant-time attempt.
-7. A match sends `OneTimeOutcomeV1 {ok: true}` and promotes the same Noise
-   session. The phone offers the direct path at once (`iceServers: []`) and
-   shows "Connecting directly…".
-8. **Direct required.** The phone sends no protocol-v1 until its path is direct;
-   the laptop ends the session on any application message over the rendezvous,
-   on a decline, or on no switch within `ONE_TIME_DIRECT_DEADLINE_MS`. The phone
-   then reads: "Couldn't reach your laptop directly. Make sure your phone is on
-   the same Wi-Fi, then open a new link."
-9. After the switch both ends close their rendezvous sockets normally and the
-   room deletes itself. **The direct channel is the lifecycle authority**:
-   channel loss, 120 s idle, the laptop's End, or service disposal ends the
-   session, and nothing resumes.
-
-### Burrow runtime
-
-- **`OneTimeRuntime` (lib/src/remote/burrow/one-time-runtime.ts) owns one socket
-  and one keypair.** Raw length check, then the guard, then a FIFO; a
-  `TokenBucket` of `E2E_INIT_BURST` on inits; reservation on the first valid
-  message 1; the label through `boundedPairingLabel`; one attempt — `attempted`
-  set first, then the expiry check, then `constantTimeEqual`.
-- **Promotion reuses `EstablishedE2eSession`** with `hello.burrowId` the room id.
-  The runtime arms the direct deadline, ends on a relayed application message,
-  closes the rendezvous after the switch, and ignores its loss thereafter.
-  **Imports nothing ACL or presence.**
-- **`OneTimeState`**: `unavailable{reason}` · `idle` · `opening` ·
-  `waiting{url, expiresAt}` · `confirming{label, expiresAt}` ·
-  `connecting{label}` · `connected{label, since}` · `ended{reason}`, whose
-  reasons include `direct-failed`.
+   approval modal takes the one attempt.
+7. A match promotes the session. The phone offers the direct path at once
+   (`iceServers: []`) and shows "Connecting directly…".
+8. **The phone sends no protocol-v1 until its path is direct.** When the laptop
+   ends the connection `direct-failed`, the phone reads: "Couldn't reach your
+   laptop directly. Make sure your phone is on the same Wi-Fi, then open a new
+   link."
+9. After the switch the phone closes its rendezvous socket normally too, and
+   the room deletes itself.
 
 ### Service and hosts
 
@@ -233,8 +278,5 @@ limit.
 ### Security model remainder
 
 Promoted into `docs/specs/remote-security-model.md` and the security specs as
-the runtime lands: the explicit carve-out from fresh WebAuthn presence (a fresh
-local confirmation authorizes one session and writes nothing); the direct
-channel, not the rendezvous, as lifecycle authority after the switch; no
-protocol-v1 over the rendezvous; the Hosted page as a third trusted endpoint;
-the Burrow enforcing its own bounds; and what the rendezvous learns.
+the phone page and the rendezvous land: the Hosted page as a third trusted
+endpoint, and what the rendezvous learns.

@@ -14,6 +14,8 @@
 
 import {
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
+  type DirectPath,
+  type DirectRelayCause,
   type DirectSignalV1,
   type NoiseTransportSession,
   type TransportReceipt,
@@ -21,7 +23,7 @@ import {
   utf8Encode,
 } from 'remote-lib-common';
 
-import { DirectEndpoint } from '../direct/direct-endpoint';
+import { DirectEndpoint, type DirectCarrier } from '../direct/direct-endpoint';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
 
@@ -71,6 +73,20 @@ export interface EstablishedE2eSessionDeps {
    * whatever replaced it.
    */
   onFatal(reason: string): void;
+  /**
+   * Notified whenever the direct path's {@link DirectPath} or
+   * {@link DirectRelayCause} changes — `direct` once **both** directions have
+   * switched. For an owner whose lifecycle turns on the switch.
+   */
+  onTransportChanged?(path: DirectPath, cause: DirectRelayCause | null): void;
+  /**
+   * Present only where the owner requires application data to arrive on the
+   * direct path alone: an application message decrypted off the relay is then
+   * **never handed to the remote-api handler**, and this is called instead, for
+   * the owner to end the session. Like {@link onFatal}, never called once this
+   * session is disposed. Absent, the relay carries protocol-v1 like the channel.
+   */
+  onRelayedApp?(): void;
   /** The owner's clock, which the idle deadline is read against. */
   readonly now: () => number;
   /** Every deadline the direct path arms; see {@link RemoteTimer}. */
@@ -88,6 +104,7 @@ export class EstablishedE2eSession {
   readonly #direct: DirectEndpoint;
   readonly #sendRelay: (ciphertext: Uint8Array) => void;
   readonly #onFatal: (reason: string) => void;
+  readonly #onRelayedApp: (() => void) | null;
   readonly #now: () => number;
   #lastClientActivityAt: number;
   #disposed = false;
@@ -96,13 +113,14 @@ export class EstablishedE2eSession {
     this.#session = deps.session;
     this.#sendRelay = deps.sendRelay;
     this.#onFatal = deps.onFatal;
+    this.#onRelayedApp = deps.onRelayedApp ?? null;
     this.#now = deps.now;
     this.#api = deps.createApi((payload) => this.#sendApp(payload));
     this.#direct = new DirectEndpoint('answerer', {
       createPeer: deps.createDirectPeer,
       sendSignal: (signal) => this.#sendSignal(signal),
       sendRelay: this.#sendRelay,
-      receive: (ciphertext) => this.#receive(ciphertext),
+      receive: (ciphertext, carrier) => this.#receive(ciphertext, carrier),
       fatal: (reason) => {
         console.warn(`[burrow] the direct path ended this session: ${reason}`);
         this.#fatal(reason);
@@ -111,6 +129,7 @@ export class EstablishedE2eSession {
       // disposes it on every route that replaces or tears one down, so a
       // session that is not disposed is the live one.
       isCurrent: () => !this.#disposed,
+      onTransportChanged: deps.onTransportChanged,
       setTimer: deps.setTimer,
     });
     this.#lastClientActivityAt = this.#now();
@@ -153,7 +172,7 @@ export class EstablishedE2eSession {
    * a keepalive, or one of the direct path's signals — and answer the receipt
    * for the endpoint to read a signal out of.
    */
-  #receive(ciphertext: Uint8Array): TransportReceipt | null {
+  #receive(ciphertext: Uint8Array, carrier: DirectCarrier): TransportReceipt | null {
     let receipt: TransportReceipt;
     try {
       receipt = this.#session.receive(ciphertext);
@@ -161,6 +180,12 @@ export class EstablishedE2eSession {
       // A failed decrypt is not activity: it proves only that *something*
       // reached this Burrow, and the session is dead either way.
       this.#fatal('a transport message failed to decrypt');
+      return null;
+    }
+    // Any stream chunk counts, a partial one included: an owner that requires
+    // the direct path wants no application byte on the relay at all.
+    if (receipt.kind === 'app' && carrier === 'relay' && this.#onRelayedApp) {
+      this.#onRelayedApp();
       return null;
     }
     // The one thing that refreshes the idle deadline, keepalive or application

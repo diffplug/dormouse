@@ -11,7 +11,8 @@
  * plaintext relay route, no legacy frame discriminant left to answer, no
  * Relay-side view of protocol-v1 or of the direct path's signaling, no ICE
  * server, no checked-in service worker shadowing the built one, no one-time
- * frame the Relay or `BurrowRuntime` could read. An absence is exactly what a
+ * frame the Relay or `BurrowRuntime` could read, and no grant a one-time
+ * connection could leave behind. An absence is exactly what a
  * reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
  * thorough but probabilistic. This makes the cheap half deterministic, so
@@ -88,6 +89,7 @@ const E2E_MODULES = [
   'remote-lib-common/src/remote/one-time-wire.ts',
   'lib/src/remote/burrow/burrow-runtime.ts',
   'lib/src/remote/burrow/established-session.ts',
+  'lib/src/remote/burrow/one-time-runtime.ts',
   'lib/src/remote/burrow/push-delivery.ts',
   'lib/src/remote/client/pocket-client.ts',
   'lib/src/remote/client/session-core.ts',
@@ -101,7 +103,7 @@ const NOISE_MODULES = [
 ];
 
 /**
- * The five files that decide what a relay or rendezvous frame is. A retired
+ * The files that decide what a relay or rendezvous frame is. A retired
  * discriminant anywhere here is a path something could still answer.
  */
 const FRAME_MODULES = [
@@ -109,8 +111,20 @@ const FRAME_MODULES = [
   'remote-lib-common/src/remote/one-time-wire.ts',
   'relay/src/relay.ts',
   'lib/src/remote/burrow/burrow-runtime.ts',
+  'lib/src/remote/burrow/one-time-runtime.ts',
   'lib/src/remote/client/pocket-client.ts',
 ];
+
+/** The laptop's one-time runtime, which authorizes one session and writes nothing. */
+const ONE_TIME_RUNTIME = 'lib/src/remote/burrow/one-time-runtime.ts';
+
+/**
+ * Every name through which a runtime could grant something that outlives its
+ * session: the ACL and its store, a push delivery id, the presence verifier and
+ * the proof it checks, and the enrollment that owns all of them.
+ */
+const GRANT_NAME =
+  /\b(?:BurrowAcl\w*|loadBurrowAcl|loadAcl|saveAcl|deliveryId|DELIVERY_ID_\w+|verifyPresenceProof|PresenceProofV1|BurrowEnrollment)\b/g;
 
 /**
  * Every spelling of the one-time family's names: its types and guards
@@ -319,6 +333,19 @@ export const RULES = [
     pattern: ONE_TIME_NAME,
     violationFile: 'lib/src/remote/burrow/burrow-runtime.ts',
     violation: "\nimport { isOneTimeClientFrame } from 'remote-lib-common';\n",
+  },
+  {
+    rule: '`OneTimeRuntime` names nothing that grants or persists',
+    security: 'must name no ACL, ACL store, delivery id, or presence verifier',
+    kind: 'forbid',
+    files: [ONE_TIME_RUNTIME],
+    // A one-time connection authorizes one session and writes nothing. Naming
+    // the ACL, its store, a delivery id, or the presence verifier is the leading
+    // indicator that it has started to grant something that outlives the
+    // session — the same reasoning as the Relay's rules above.
+    pattern: GRANT_NAME,
+    violationFile: ONE_TIME_RUNTIME,
+    violation: "\nimport { BurrowAcl } from 'remote-lib-common';\n",
   },
   {
     rule: '`E2eKind` is exactly pairing and connection',

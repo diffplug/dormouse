@@ -27,7 +27,7 @@ import {
   type DirectSignalV1,
 } from 'remote-lib-common';
 
-import { DirectEndpoint } from './direct-endpoint';
+import { DirectEndpoint, type DirectCarrier } from './direct-endpoint';
 import {
   FakeDirectNetwork,
   flushMicrotasks,
@@ -42,6 +42,8 @@ interface Side {
   readonly peers: FakePeer[];
   /** Every ciphertext this side decrypted, in the order it did. */
   readonly received: Uint8Array[];
+  /** The path each of {@link received} came in on, as the endpoint named it. */
+  readonly carriers: DirectCarrier[];
   /** Every reason this side's session was declared unrecoverable. */
   readonly fatals: string[];
   /** Every path change announced. */
@@ -82,6 +84,7 @@ function pair(options: Options = {}) {
     const side: Side = {
       peers,
       received: [],
+      carriers: [],
       fatals: [],
       relayed: [],
       paths: [],
@@ -116,8 +119,9 @@ function pair(options: Options = {}) {
         return true;
       },
       sendRelay: (ciphertext) => void side.relayed.push(ciphertext),
-      receive: (ciphertext) => {
+      receive: (ciphertext, carrier) => {
         side.received.push(ciphertext);
+        side.carriers.push(carrier);
         // Signals ride the stand-in relay here rather than a real session, so
         // nothing a frame decrypts to is a control message.
         return { kind: 'keepalive' } as const;
@@ -366,6 +370,25 @@ describe('DirectEndpoint', () => {
 
     expect(run.offerer.received).toEqual([frame(1), frame(2)]);
     expect(run.offerer.endpoint.path).toBe('direct');
+  });
+
+  it('names the path that carried each frame, a held channel frame included', async () => {
+    const run = pair({ opening: 'manual' });
+    await cutover(run);
+    run.offerer.endpoint.onRelayFrame(toBase64Url(frame(1)));
+
+    // Held until the answerer's switch and drained from inside its delivery:
+    // the frame still came off the channel, whichever call stack reads it.
+    run.answerer.hold();
+    run.fake.openChannels();
+    run.answerer.endpoint.send(frame(2));
+    await flushMicrotasks();
+    run.answerer.release();
+    run.answerer.endpoint.send(frame(3));
+    await flushMicrotasks();
+
+    expect(run.offerer.received).toEqual([frame(1), frame(2), frame(3)]);
+    expect(run.offerer.carriers).toEqual(['relay', 'channel', 'channel']);
   });
 
   it('ends the session when held frames outrun the queue', async () => {

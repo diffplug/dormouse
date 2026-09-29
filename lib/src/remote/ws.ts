@@ -6,7 +6,8 @@
  */
 export interface RemoteWebSocket {
   send(data: string): void;
-  close(): void;
+  /** `code` where the caller names one; a real socket defaults to a status-less close. */
+  close(code?: number): void;
   addEventListener(
     type: 'open' | 'message' | 'close' | 'error',
     handler: (ev: unknown) => void,

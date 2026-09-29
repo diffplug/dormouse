@@ -138,6 +138,27 @@ selftest.withAppended(
   `a one-time frame in the relay union in ${WIRE} stays green`,
 );
 
+// Every name the one-time runtime's grant rule lists must redden it on its
+// own, not just the import the loop appends: a delivery id minted inline or a
+// save through an injected store is the same grant.
+for (const violation of [
+  '\ntype __Selftest = BurrowAclRecord;\n',
+  '\nconst __selftest = loadBurrowAcl;\n',
+  '\nconst __selftest = { loadAcl: null };\n',
+  '\nconst __selftest = { saveAcl: null };\n',
+  '\nconst __selftest = { deliveryId: null };\n',
+  '\nconst __selftest = DELIVERY_ID_BYTE_LENGTH;\n',
+  '\nconst __selftest = verifyPresenceProof;\n',
+  '\ntype __Selftest = PresenceProofV1;\n',
+  '\ntype __Selftest = BurrowEnrollment;\n',
+]) {
+  selftest.withAppended(
+    'lib/src/remote/burrow/one-time-runtime.ts',
+    violation,
+    `a grant name in lib/src/remote/burrow/one-time-runtime.ts stays green: ${violation.trim()}`,
+  );
+}
+
 const security = readFileSync(join(repoRoot, SECURITY_SPEC), 'utf8');
 // A file-scoped storage exception must not become a directory-scoped escape.
 selftest.withAppended(

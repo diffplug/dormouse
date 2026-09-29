@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   chunkAppMessage,
+  type DirectPath,
+  type DirectRelayCause,
   encodeTransportPlaintext,
   toBase64Url,
   utf8Encode,
@@ -30,15 +32,19 @@ interface Options {
   createDirectPeer?: DirectPeerFactory | null;
   /** What the remote-api handler does with each payload it is handed. */
   onHandle?: (payload: unknown) => void;
+  /** Require the direct path for application data, as a one-time owner does. */
+  directOnly?: boolean;
 }
 
 async function establish(options: Options = {}) {
-  const { disposeOnFatal = true, createDirectPeer = null, onHandle } = options;
+  const { disposeOnFatal = true, createDirectPeer = null, onHandle, directOnly = false } = options;
   const { client, clientNoise, burrow } = await noiseSessionPair();
   const clock = { now: 1_000 };
   const handled: unknown[] = [];
   const relayed: Uint8Array[] = [];
   const fatals: string[] = [];
+  const transports: Array<{ path: DirectPath; cause: DirectRelayCause | null }> = [];
+  let relayedApps = 0;
   const api = { disposals: 0, send: (_payload: unknown): void => {} };
   const e2e: EstablishedE2eSession = new EstablishedE2eSession({
     session: burrow,
@@ -58,6 +64,8 @@ async function establish(options: Options = {}) {
       fatals.push(reason);
       if (disposeOnFatal) e2e.dispose();
     },
+    onTransportChanged: (path, cause) => void transports.push({ path, cause }),
+    ...(directOnly ? { onRelayedApp: () => void (relayedApps += 1) } : {}),
     now: () => clock.now,
     setTimer: fakeTimers().setTimer,
   });
@@ -67,7 +75,19 @@ async function establish(options: Options = {}) {
       e2e.onRelayFrame(toBase64Url(ct));
     }
   };
-  return { e2e, client, clientNoise, clock, handled, relayed, fatals, api, sendFromClient };
+  return {
+    e2e,
+    client,
+    clientNoise,
+    clock,
+    handled,
+    relayed,
+    fatals,
+    transports,
+    relayedApps: () => relayedApps,
+    api,
+    sendFromClient,
+  };
 }
 
 describe('EstablishedE2eSession', () => {
@@ -166,6 +186,28 @@ describe('EstablishedE2eSession', () => {
     e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
     expect(relayed).toHaveLength(1);
     expect(openReceipt(client, relayed[0]!)).toEqual({ v: 1, t: 'direct-decline' });
+  });
+
+  it('tells its owner when the direct path changes, a decline included', async () => {
+    const { e2e, client, transports } = await establish();
+    e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
+    expect(transports).toEqual([{ path: 'relay', cause: 'unsupported' }]);
+  });
+
+  it('hands relayed application data to the owner, never the handler, where the direct path is required', async () => {
+    const { e2e, client, handled, relayed, fatals, relayedApps, sendFromClient } = await establish({
+      directOnly: true,
+    });
+    sendFromClient({ requestId: '1', method: 'hello' });
+    expect(handled).toEqual([]);
+    expect(relayedApps()).toBe(1);
+    // Everything that is not application data still rides the relay: a
+    // keepalive, and the direct path's own signals.
+    e2e.onRelayFrame(toBase64Url(client.sendKeepalive()));
+    e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
+    expect(openReceipt(client, relayed[0]!)).toEqual({ v: 1, t: 'direct-decline' });
+    expect(relayedApps()).toBe(1);
+    expect(fatals).toEqual([]);
   });
 
   it('disposes the direct path, then the handler, and ignores the relay afterwards', async () => {

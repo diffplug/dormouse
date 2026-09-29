@@ -40,6 +40,7 @@ import type { RemoteApiSessionLike } from './established-session';
 import type { BurrowEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
+import { createTestClock } from '../test-timers';
 import { FakeDirectNetwork } from '../direct/test-fake-peer';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import {
@@ -64,54 +65,6 @@ import {
 const ORIGIN = 'https://burrow-machine.example';
 const RP_ID = 'burrow.example';
 const START = 1_700_000_000_000;
-
-/**
- * A clock and its one timer, both injected. `advance` fires every timer that
- * comes due, in order, so the Burrow's reaper runs exactly where it would in
- * real time — and the suite does not spend five minutes proving a TTL.
- */
-function createTestClock(start: number) {
-  let now = start;
-  let nextId = 1;
-  const timers = new Map<number, { at: number; run: () => void }>();
-  return {
-    now: () => now,
-    setTimer(run: () => void, delayMs: number): () => void {
-      const id = nextId++;
-      timers.set(id, { at: now + delayMs, run });
-      return () => timers.delete(id);
-    },
-    /** How many timers are armed — what `stop()` has to leave at zero. */
-    get armed(): number {
-      return timers.size;
-    },
-    /** Move the clock backwards, as an NTP correction or a sleeping laptop does. */
-    rewind(ms: number): void {
-      now -= ms;
-    },
-    advance(ms: number): void {
-      const target = now + ms;
-      // Bounded: a reaper that armed for an instant it does not clear would
-      // otherwise spin here rather than fail.
-      for (let guard = 0; guard < 10_000; guard += 1) {
-        let dueId: number | null = null;
-        let dueAt = Number.POSITIVE_INFINITY;
-        for (const [id, timer] of timers) {
-          if (timer.at <= target && timer.at < dueAt) {
-            dueAt = timer.at;
-            dueId = id;
-          }
-        }
-        if (dueId === null) break;
-        const timer = timers.get(dueId)!;
-        timers.delete(dueId);
-        now = timer.at;
-        timer.run();
-      }
-      now = target;
-    },
-  };
-}
 
 /**
  * Counting wrappers over the WebCrypto the security primitives reach for, plus
