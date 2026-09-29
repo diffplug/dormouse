@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import type { PlatformAdapter } from '../../lib/platform/types';
-import { rememberBrowserProvider, preferredBrowserProvider } from './BrowserProviderPicker';
+import { rememberBrowserProvider, preferredBrowserProvider } from './BrowserProviderSwitch';
 import { AgentBrowserScreenModal } from './AgentBrowserScreenModal';
 import { getAgentBrowserScreenController } from './agent-browser-screen';
 import { installBrowserHost, registerStubScreen, STUB_SCREEN } from './wall-test-utils';
@@ -111,10 +111,10 @@ describe('AgentBrowserScreenModal', () => {
     // Only the two agent-browser render options carry the robot; the nested
     // resolution rows and the iframe option are presentation-only.
     for (const [label, glyphs, robot] of [
-      ['Screencast', 1, true],
+      ['agent-browser screencast', 1, true],
       ['Resize with pane', 1, false],
       ['Fixed size', 1, false],
-      ['Popout', 2, true],
+      ['agent-browser popout', 2, true],
       ['iframe embed', 1, false],
     ] as const) {
       const row = option(label);
@@ -138,11 +138,11 @@ describe('AgentBrowserScreenModal', () => {
     const registration = registerStubScreen('playwright', { snapshot: { ...STUB_SCREEN, renderMode: 'playwright-screencast' } });
     const controller = getAgentBrowserScreenController('playwright')!;
     act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:4" onClose={() => {}} />));
-    expect(document.body.textContent).toContain('Screencast');
+    expect(document.body.textContent).toContain('playwright screencast');
     expect(document.body.querySelectorAll('input[name="screen-target"]')).toHaveLength(2);
     expect(document.body.textContent).not.toContain('Emulate');
     expect(document.body.textContent).not.toContain('Galaxy S25');
-    const popout = [...document.body.querySelectorAll('label')].find(label => label.textContent === 'Popout')!;
+    const popout = [...document.body.querySelectorAll('label')].find(label => label.textContent === 'playwright popout')!;
     act(() => popout.querySelector<HTMLInputElement>('input')!.click());
     act(() => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Apply')!.click());
     expect(controller.actions.setRenderMode).toHaveBeenCalledWith('playwright-popout');
@@ -158,9 +158,9 @@ describe('AgentBrowserScreenModal', () => {
     const controller = getAgentBrowserScreenController('switch-provider')!;
     const close = vi.fn();
     act(() => root.render(<AgentBrowserScreenModal controller={controller} label="surface:8" onClose={close} />));
-    expect(document.body.querySelector<HTMLInputElement>('input[value="agent-browser"]')!.checked).toBe(true);
+    expect(document.body.querySelector('button[aria-label="switch to playwright"]')).not.toBeNull();
     expect(document.body.querySelectorAll('input[name="render-mode"]')).toHaveLength(3);
-    act(() => document.body.querySelector<HTMLInputElement>('input[value="playwright"]')!.click());
+    act(() => document.body.querySelector<HTMLButtonElement>('button[aria-label="switch to playwright"]')!.click());
     expect(controller.actions.setRenderMode).not.toHaveBeenCalled();
     act(() => [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Apply')!.click());
     expect(controller.actions.setRenderMode).toHaveBeenCalledWith('playwright-popout');
@@ -181,7 +181,7 @@ describe('AgentBrowserScreenModal', () => {
     ));
     const options = [...document.body.querySelectorAll('input[name="render-mode"]')]
       .map((input) => input.closest('label')?.textContent);
-    expect(options).toEqual(['Screencast', 'iframe embed']);
+    expect(options).toEqual(['agent-browser screencast', 'iframe embed']);
     registration.dispose();
   });
 

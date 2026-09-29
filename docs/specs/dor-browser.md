@@ -33,9 +33,9 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 
 ## Providers
 
-**Must share a compact provider radio selector between port actions and the Display modal**, showing it only when multiple providers are available. Remember explicit port-selector choices and applied automated Display choices in renderer-local storage; default to agent-browser, falling back to an available provider. Opening Display selects the current browser's provider before the preference; changing provider preserves presentation when supported, otherwise selects screencast. Cancel does not change the preference.
+**Must name automated actions by provider and offer one adjacent “switch to <provider>” link**, shared by port actions and the Display modal and shown only when another provider is available. Remember explicit port-selector choices and applied automated Display choices in renderer-local storage; default to agent-browser, falling back to an available provider. Opening Display selects the current browser's provider before the preference; changing provider preserves presentation when supported, otherwise selects screencast. Cancel does not change the preference.
 
-Source of truth: `BrowserProviderPicker` in `lib/src/components/wall/BrowserProviderPicker.tsx`; `lib/src/components/wall/TerminalContext.test.tsx` and `lib/src/components/wall/AgentBrowserScreenModal.test.tsx`.
+Source of truth: `BrowserProviderSwitch` in `lib/src/components/wall/BrowserProviderSwitch.tsx`; `lib/src/components/wall/TerminalContext.test.tsx` and `lib/src/components/wall/AgentBrowserScreenModal.test.tsx`.
 
 An automated renderer belongs to one **provider**, the CLI that drives its
 browser. **Must read every per-provider fact from the one registry** — render

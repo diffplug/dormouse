@@ -33,7 +33,7 @@ import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-brows
 import { browserDisplayMode, useAgentBrowserChromeSnapshot, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 import { BROWSER_PROVIDER_IDS, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import { BROWSER_PROVIDER_GUI, surfaceProvider } from './browser-automation';
-import { BrowserProviderPicker, preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderPicker';
+import { BrowserProviderSwitch, preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderSwitch';
 import { iframeRefusal } from './browser-url';
 import {
   AgentRobotIcon,
@@ -277,13 +277,13 @@ export function AgentBrowserScreenModal({
         <div className="mt-4 flex flex-col gap-3">
           {/* Screencast owns the robot capability glyph; its nested resolution
               modes append the presentation glyph. */}
-          <BrowserProviderPicker providers={providers} value={provider} onChange={chooseProvider} />
           {offered(screencast) && (
             <RenderOption
               checked={renderMode === screencast}
               onSelect={() => setRenderMode(screencast)}
               icon={<AgentRobotIcon size={14} className="shrink-0 text-muted" />}
-              label="Screencast"
+              label={`${BROWSER_PROVIDER_GUI[provider].label} screencast`}
+              trailing={<BrowserProviderSwitch providers={providers} value={provider} onChange={chooseProvider} />}
               features={[[true, 'agents can read/write'], [true, 'any URL'], [false, 'laggy for humans']]}
             >
               {renderMode === screencast && <div className="ml-6 mt-2">{viewportControls}</div>}
@@ -294,7 +294,7 @@ export function AgentBrowserScreenModal({
               checked={renderMode === popout}
               onSelect={() => setRenderMode(popout)}
               icon={<BrowserDisplayIcon mode={popoutDisplay} size={14} className="text-muted" />}
-              label="Popout"
+              label={`${BROWSER_PROVIDER_GUI[provider].label} popout`}
               features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
             />
           )}
@@ -355,6 +355,7 @@ function RenderOption({
   label,
   features,
   disabledReason,
+  trailing,
   children,
 }: {
   checked: boolean;
@@ -364,17 +365,21 @@ function RenderOption({
   features: [boolean, string][];
   /** Why this option cannot be chosen here; absent ⇒ enabled. */
   disabledReason?: string;
+  trailing?: ReactNode;
   children?: ReactNode;
 }) {
   const disabled = disabledReason !== undefined;
   return (
     <div className="flex flex-col gap-1.5 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
       <label className={`flex items-center gap-2 ${disabled ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}`}>
         <input type="radio" name="render-mode" checked={checked} disabled={disabled} onChange={onSelect} />
         {icon}
         <span className="text-foreground">{label}</span>
         {disabled && <span className="text-xs text-muted">— {disabledReason}</span>}
       </label>
+      {trailing}
+      </div>
       <div className="ml-6 flex flex-col gap-0.5 text-xs">
         {features.map(([ok, text]) => <Feature key={text} ok={ok}>{text}</Feature>)}
       </div>

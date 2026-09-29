@@ -5,7 +5,7 @@ import { stepFocus } from '../focus-step';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { AgentRobotIcon } from './BrowserDisplayIcon';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
-import { BrowserProviderPicker, preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderPicker';
+import { BrowserProviderSwitch, preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderSwitch';
 import type { PortUrlEntry } from './port-url';
 import type { RenderMode } from './agent-browser-screen';
 import type { HelperStatus } from '../../lib/helper-terminal';
@@ -41,8 +41,8 @@ function portActions(provider: BrowserAutomationProvider): readonly ({ mode: Por
   return [
     { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'System browser' },
     { mode: 'iframe', label: 'Open in iframe embed', needs: 'iframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'Iframe' },
-    { mode: renderModeFor(provider, 'screencast'), label: `Open in ${label} screencast`, needs: provider, unavailable, icon: <AgentRobotIcon size={17} />, text: 'Screencast' },
-    { mode: renderModeFor(provider, 'popout'), label: `Open in ${label} popout`, needs: provider, unavailable, icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: 'Popout' },
+    { mode: renderModeFor(provider, 'screencast'), label: `Open in ${label} screencast`, needs: provider, unavailable, icon: <AgentRobotIcon size={17} />, text: `${label} screencast` },
+    { mode: renderModeFor(provider, 'popout'), label: `Open in ${label} popout`, needs: provider, unavailable, icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: `${label} popout` },
   ];
 }
 
@@ -246,13 +246,13 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <div className="flex min-h-7 flex-wrap items-center gap-2">
             {p.scan.status === 'scanning' ? <span className="text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="text-muted">No listening ports</span> : <>
               {entries.length > 1 ? <div className="flex w-full min-w-0 items-center gap-2"><select aria-label="Port" value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 flex-1 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="text-muted">{entries.length} ports</span></div> : <><span>{selected.host}:{selected.port}</span><span className="text-muted">{selected.processName}</span></>}
-              <BrowserProviderPicker providers={p.browserProviders} value={provider} onChange={value => { setChosenProvider(value); rememberBrowserProvider(value); }} />
               <div className="ml-1 flex min-w-0 flex-wrap items-center gap-1 border-l border-border pl-2">
                 {portActions(provider).map(action => {
                   const offered = action.needs === 'iframe' ? p.canIframe : !action.needs || p.browserProviders.includes(action.needs);
                   const unavailable = action.needs && !offered ? action.unavailable : null;
                   return <ContextOpenAction key={action.mode} label={unavailable ?? action.label} disabled={!!unavailable} fit onOpen={() => attempt(() => p.onPort(selected, action.mode))}>{action.icon}<span className="truncate">{action.text}</span></ContextOpenAction>;
                 })}
+              <BrowserProviderSwitch providers={p.browserProviders} value={provider} onChange={value => { setChosenProvider(value); rememberBrowserProvider(value); }} />
               </div>
             </>}
           </div>

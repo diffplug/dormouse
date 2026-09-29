@@ -767,7 +767,7 @@ describe('Wall on the Lath engine', () => {
       }));
     });
     await flush();
-    await act(async () => document.querySelector<HTMLInputElement>(`[data-terminal-context] input[value="${provider}"]`)?.click());
+    await act(async () => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="switch to ${provider}"]`)?.click());
   }
   const contextButton = (label: string) => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="${label}"]`)!;
 

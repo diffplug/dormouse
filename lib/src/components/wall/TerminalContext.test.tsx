@@ -13,7 +13,7 @@ import { ensureResizeObserver } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
-import { rememberBrowserProvider } from './BrowserProviderPicker';
+import { rememberBrowserProvider } from './BrowserProviderSwitch';
 import { cfg } from '../../cfg';
 
 vi.mock('../TerminalPane', () => ({ TerminalPane: () => <textarea aria-label="Fake terminal input" /> }));
@@ -108,7 +108,7 @@ it.each(['scanning', 'failed', 'empty'] as const)('distinguishes %s ports', stat
 it('uses one pair of automated actions and remembers the selected provider on reopening', async () => {
   render();
   expect(button('Open in playwright screencast')).toBeNull();
-  act(() => container.querySelector<HTMLInputElement>('input[value="playwright"]')!.click());
+  act(() => button('switch to playwright').click());
   expect(button('Open in agent-browser screencast')).toBeNull();
   await click('Open in playwright screencast');
   expect(props.onPort).toHaveBeenCalledWith(port(5173), 'playwright-screencast');
@@ -119,7 +119,7 @@ it('uses one pair of automated actions and remembers the selected provider on re
 it('disables unsupported host capabilities with an explanation', () => {
   props.browserProviders = ['playwright']; props.canExplore = false; render();
   expect(button('Open in agent-browser popout')).toBeNull();
-  expect(container.querySelector('[role="radiogroup"]')).toBeNull();
+  expect(button('switch to agent-browser')).toBeNull();
   expect(button('Open in playwright popout').disabled).toBe(false);
   expect(button('Directory unavailable on this host').disabled).toBe(true);
 });

@@ -1,6 +1,6 @@
-import { useId } from 'react';
 import { BROWSER_PROVIDER_IDS, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { loadJson, saveJson } from '../../lib/local-json-store';
+import { SUBTLE_ACTION_COLOR_CLASS } from '../design';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
 
 const PREFERENCE_KEY = 'dormouse:browser-provider';
@@ -17,17 +17,14 @@ export function rememberBrowserProvider(provider: BrowserAutomationProvider): vo
 }
 
 /** A single provider choice for the automated presentations; never selects a renderer itself. */
-export function BrowserProviderPicker({ providers, value, onChange }: {
+export function BrowserProviderSwitch({ providers, value, onChange }: {
   providers: readonly BrowserAutomationProvider[];
   value: BrowserAutomationProvider;
   onChange(provider: BrowserAutomationProvider): void;
 }) {
-  const name = useId();
-  if (providers.length < 2) return null;
-  return <div role="radiogroup" aria-label="Browser provider" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-    {providers.map(provider => <label key={provider} className="flex cursor-pointer items-center gap-1.5">
-      <input type="radio" name={name} value={provider} checked={value === provider} onChange={() => onChange(provider)} />
-      {BROWSER_PROVIDER_GUI[provider].label}
-    </label>)}
-  </div>;
+  const next = providers.find(provider => provider !== value);
+  if (!next) return null;
+  const label = `switch to ${BROWSER_PROVIDER_GUI[next].label}`;
+  return <button type="button" aria-label={label} title={label} onClick={() => onChange(next)}
+    className={`min-w-0 truncate text-xs hover:underline ${SUBTLE_ACTION_COLOR_CLASS}`}>{label}</button>;
 }
