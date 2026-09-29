@@ -30,10 +30,10 @@ import {
   OVERLAY_MAX_HEIGHT,
 } from '../design';
 import type { RenderMode, ScreenController, ScreenSnapshot } from './agent-browser-screen';
-import { browserDisplayMode, useAgentBrowserChromeSnapshot, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
+import { displayModeFor, useAgentBrowserChromeSnapshot, useAgentBrowserScreenSnapshot } from './agent-browser-screen';
 import { BROWSER_PROVIDER_IDS, parseRenderMode, renderModeFor } from 'dor-lib-common/browser-providers';
 import { BROWSER_PROVIDER_GUI, surfaceProvider } from './browser-automation';
-import { BrowserProviderSwitch, preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderSwitch';
+import { BrowserProviderSwitch, rememberBrowserProvider, useBrowserProvider } from './BrowserProviderSwitch';
 import { iframeRefusal } from './browser-url';
 import {
   AgentRobotIcon,
@@ -140,20 +140,18 @@ export function AgentBrowserScreenModal({
   // or changes provider); the current mode always shows so it stays selected.
   const offered = (mode: RenderMode) => mode === currentMode || controller.renderModes.includes(mode);
   const providers = BROWSER_PROVIDER_IDS.filter(provider => offered(renderModeFor(provider, 'screencast')) || offered(renderModeFor(provider, 'popout')));
-  const [chosenProvider, setChosenProvider] = useState(() => parseRenderMode(currentMode).provider ?? preferredBrowserProvider(providers));
-  const provider = providers.includes(chosenProvider) ? chosenProvider : preferredBrowserProvider(providers);
+  const [provider, setChosenProvider] = useBrowserProvider(providers, parseRenderMode(currentMode).provider);
+  const selected = parseRenderMode(renderMode);
   const chooseProvider = (value: typeof provider) => {
     setChosenProvider(value);
-    const presentation = parseRenderMode(renderMode).presentation;
-    if (presentation !== 'iframe') {
-      const next = renderModeFor(value, presentation);
+    if (selected.presentation !== 'iframe') {
+      const next = renderModeFor(value, selected.presentation);
       setRenderMode(offered(next) ? next : renderModeFor(value, 'screencast'));
     }
   };
   const embedRefusal = currentMode === 'iframe' ? null : iframeRefusal(chrome?.url ?? '');
   // Only the screencast backend has a Dormouse-settable viewport; pop-out is a
   // native OS window and embed renders at the pane size, so both grey it out.
-  const selected = parseRenderMode(renderMode);
   const viewportDisabled = selected.presentation !== 'screencast';
   // Whether Apply changes the render backend (vs only tweaking the current
   // screencast's viewport). A swap is gated on whether its option is shown, not
@@ -161,7 +159,7 @@ export function AgentBrowserScreenModal({
   const switchingMode = renderMode !== currentMode;
   const screencast = renderModeFor(provider, 'screencast');
   const popout = renderModeFor(provider, 'popout');
-  const popoutDisplay = browserDisplayMode({ renderMode: popout, syncEngaged: false });
+  const popoutDisplay = displayModeFor(provider, 'popout');
   const selectedViewport = (): BrowserViewportSetting => target === 'sync'
     ? { mode: 'pane-sync' }
     : { mode: 'fixed', width: Number(customW), height: Number(customH), ...(explicitDpr ? { dpr: Number(customDpi) } : {}) };
@@ -189,8 +187,7 @@ export function AgentBrowserScreenModal({
 
   const apply = () => {
     if (applyDisabled) return;
-    const appliedProvider = parseRenderMode(renderMode).provider;
-    if (appliedProvider) rememberBrowserProvider(appliedProvider);
+    if (selected.provider) rememberBrowserProvider(selected.provider);
     if (switchingMode) {
       // A mode swap; the viewport sub-controls don't apply to the outgoing
       // surface (and are inert on embed/popout controllers anyway).
@@ -294,7 +291,7 @@ export function AgentBrowserScreenModal({
               checked={renderMode === popout}
               onSelect={() => setRenderMode(popout)}
               icon={<BrowserDisplayIcon mode={popoutDisplay} size={14} className="text-muted" />}
-              label={`${BROWSER_PROVIDER_GUI[provider].label} popout`}
+              label={BROWSER_DISPLAY_LABEL[popoutDisplay]}
               features={[[true, 'agents can read/write'], [true, 'any URL'], [true, 'native human experience']]}
             />
           )}

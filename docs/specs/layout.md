@@ -84,19 +84,21 @@ Popups share the zoomed pane’s app-background halo.
 |---|---|
 | Title | Derived display title, labeled Explain action, copyable source Surface ref and close at right |
 | Dir | Home-abbreviated directory, native explorer action, absolute-path copy |
-| Ports | One scan per opening; scanning/empty/failure states; one port inline, multiple ports in a dropdown with count beside it; actions stay on that row, overflowing into a dropdown |
+| Ports | One scan per opening; scanning/empty/failure states; one port inline, multiple ports in a dropdown with count beside it; labeled launch actions |
 | Alerts | Source Watch and TODO controls; notification details directly below |
 | Helper | Remaining space; one-line status, Modify/Reset and Promote; hide its name below 48rem container width |
 
 **Must keep port actions on one line to the right of the port display**, moving trailing actions into a dropdown as measured available width shrinks; all targets remain reachable.
 
+**Must write visible action text in the Title, Dir, and Ports rows in lowercase**, since `iframe` and `agent-browser` cannot be capitalized; proper nouns such as Finder, tooltips, and accessible names keep their case.
+
 **Must focus context controls on opening.** Explicit entry into helper xterm gives it terminal keys; Escape there belongs to its program. Escape from controls closes the innermost disclosure, then context. Terminal clipboard routing uses the focused helper rather than the selected source. Actions use subdued link color and shared compact `OnOffSwitch` controls.
 
-**Must tint the copyable Surface ref as an action and confirm each successful context copy in its button** with a checkmark and “Copied” for 1.4 seconds, preserving button width and keeping the context open. Failed copies show the action error without success feedback.
+**Must tint the copyable Surface ref as an action and confirm each successful context copy in its button** with a checkmark and “copied” for 1.4 seconds, preserving button width and keeping the context open. Failed copies show the action error without success feedback.
 
 **Must suppress context action hover and focus highlights while the window is unfocused**, including after opening a native explorer or system browser. **Must also withhold hover from an in-flight action, which stays focusable and `aria-disabled` rather than `disabled`** so the innermost disclosure keeps a focused descendant for Escape and Tab.
 
-**Must show “Opening…” with a spinner in the directory explorer button during launch and for at least 0.75 seconds**, preserving width and keyboard focus while blocking repeat clicks. Stop immediately on failure and show the action error. Respect reduced motion by keeping the spinner static.
+**Must show “opening…” with a spinner in the directory explorer button during launch and for at least 0.75 seconds**, preserving width and keyboard focus while blocking repeat clicks. Stop immediately on failure and show the action error. Respect reduced motion by keeping the spinner static.
 
 **Must promote by adopting the helper Session into a new split beside the source**, preserving identity and focusing it. Helper lifetime and source closure are owned by `docs/specs/terminal-context.md`.
 

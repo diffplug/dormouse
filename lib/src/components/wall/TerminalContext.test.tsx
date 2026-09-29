@@ -76,7 +76,7 @@ it('keeps a pending port action focused, blocks repeats, and clears feedback on 
   const open = button('Open in agent-browser screencast');
   act(() => open.focus());
   await click('Open in agent-browser screencast');
-  expect(open.textContent).toContain('Opening…');
+  expect(open.textContent).toContain('opening…');
   expect(open.getAttribute('aria-busy')).toBe('true');
   expect(open.disabled).toBe(false);
   expect(document.activeElement).toBe(open);

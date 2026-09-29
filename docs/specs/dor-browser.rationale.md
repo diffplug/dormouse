@@ -22,7 +22,7 @@ views without weakening that first signal.
 
 **Why activation moves focus at all.** A repeat activation on an already-connected port only re-navigates to the current URL; without the reveal, the click has no visible feedback.
 
-**Why Connect acknowledges before placing.** Creating a pane before startup made a missing executable briefly split and then collapse the terminal (reported 2026-09). The button’s `Opening…` state acknowledges the click during daemon startup without layout churn. Preparing the Surface's own controller, rather than a Wall-side launch, retains its launch configuration, binding, and late-result cleanup.
+**Why Connect acknowledges before placing.** Creating a pane before startup made a missing executable briefly split and then collapse the terminal (reported 2026-09). The button’s `opening…` state acknowledges the click during daemon startup without layout churn. Preparing the Surface's own controller, rather than a Wall-side launch, retains its launch configuration, binding, and late-result cleanup.
 
 **Why a reuse is one intent.** Revealing the target and then asking for its mode and its URL separately sent `open <url>` in the same tick as a pop-out began its close/reopen, deterministically: the navigation raced the relaunch, which had already captured the old URL.
 

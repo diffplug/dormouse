@@ -1,13 +1,13 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CheckIcon, CircleNotchIcon, CopyIcon, FrameCornersIcon, PauseIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
-import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, PauseIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
+import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
-import { AgentRobotIcon } from './BrowserDisplayIcon';
+import { AgentRobotIcon, BROWSER_DISPLAY_LABEL, BrowserDisplayIcon } from './BrowserDisplayIcon';
 import { BROWSER_PROVIDER_GUI } from './browser-automation';
-import { preferredBrowserProvider, rememberBrowserProvider } from './BrowserProviderSwitch';
+import { browserProviderSwitch, rememberBrowserProvider, useBrowserProvider } from './BrowserProviderSwitch';
 import type { PortUrlEntry } from './port-url';
-import type { RenderMode } from './agent-browser-screen';
+import { displayModeFor, type RenderMode } from './agent-browser-screen';
 import type { HelperStatus } from '../../lib/helper-terminal';
 import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
@@ -34,16 +34,21 @@ const HELPER_STATUS: Record<HelperStatus, { icon: ReactNode; label: (command: st
   exited: { icon: SETTLED, label: () => 'Helper exited', reset: true },
 };
 
-/** One set of launch targets for the selected provider. */
-function portActions(provider: BrowserAutomationProvider): readonly ({ mode: PortMode; label: string; icon: ReactNode; text: string } & ({ needs?: undefined } | { needs: 'iframe' | BrowserAutomationProvider; unavailable: string }))[] {
+/** A port row entry: a launch target, or (`mode: null`) the provider switch. */
+type PortAction = { mode: PortMode | null; label: string; text: string; icon: ReactNode; disabled: boolean };
+
+/** The launch targets for `provider`, drawn and named as the Display modal draws and names them. */
+function portActions(provider: BrowserAutomationProvider, providers: readonly BrowserAutomationProvider[], canIframe: boolean): PortAction[] {
   const { label } = BROWSER_PROVIDER_GUI[provider];
-  const unavailable = `${label} unavailable on this host`;
-  return [
-    { mode: 'system', label: 'Open in system browser', icon: <ArrowSquareOutIcon size={15} />, text: 'system browser' },
-    { mode: 'iframe', label: 'Open in iframe embed', needs: 'iframe', unavailable: 'Iframe unavailable on this host', icon: <FrameCornersIcon size={15} />, text: 'iframe' },
-    { mode: renderModeFor(provider, 'screencast'), label: `Open in ${label} screencast`, needs: provider, unavailable, icon: <AgentRobotIcon size={17} />, text: `${label} screencast` },
-    { mode: renderModeFor(provider, 'popout'), label: `Open in ${label} popout`, needs: provider, unavailable, icon: <><AgentRobotIcon size={17} /><ArrowSquareOutIcon size={13} /></>, text: `${label} popout` },
+  const automated = providers.includes(provider) ? null : `${label} unavailable on this host`;
+  const popout = displayModeFor(provider, 'popout');
+  const targets: { mode: PortMode; icon: ReactNode; text: string; unavailable: string | null }[] = [
+    { mode: 'system', icon: <ArrowSquareOutIcon size={15} />, text: 'system browser', unavailable: null },
+    { mode: 'iframe', icon: <BrowserDisplayIcon mode="iframe" size={15} />, text: BROWSER_DISPLAY_LABEL.iframe, unavailable: canIframe ? null : 'Iframe unavailable on this host' },
+    { mode: renderModeFor(provider, 'screencast'), icon: <AgentRobotIcon size={15} />, text: `${label} screencast`, unavailable: automated },
+    { mode: renderModeFor(provider, 'popout'), icon: <BrowserDisplayIcon mode={popout} size={15} />, text: BROWSER_DISPLAY_LABEL[popout], unavailable: automated },
   ];
+  return targets.map(({ unavailable, ...target }) => ({ ...target, label: unavailable ?? `Open in ${target.text}`, disabled: !!unavailable }));
 }
 
 const DETAILS = {
@@ -74,10 +79,10 @@ export interface TerminalContextViewProps {
   initialDetail?: Detail | null;
 }
 
-/** `fit` lets the button shrink to its row and truncate its text rather than
- *  overflow the panel; wrap the text in a `truncate` span. The tooltip keeps the
- *  full label. For a row whose labels grow with the host's browser providers. */
-export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false, fit = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean; fit?: boolean }) {
+/** A context action's box, shared with the port row's off-screen measurements. */
+const ACTION_BOX_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-1.5';
+
+export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean }) {
   const windowFocused = useContext(WindowFocusedContext);
   // Native app launches can leave :hover stale until this window regains focus.
   const color = muted ? 'text-muted' : windowFocused ? SUBTLE_ACTION_COLOR_CLASS : SUBTLE_ACTION_REST_COLOR_CLASS;
@@ -85,8 +90,11 @@ export function ContextAction({ children, label, onClick, disabled = false, busy
   // and this context's Escape and Tab handling both live on the <section> and need a focused descendant.
   return <button type="button" title={label} aria-label={label} aria-busy={busy || undefined} aria-disabled={busy || undefined} disabled={disabled} onClick={busy ? undefined : onClick}
     aria-pressed={pressed} onPointerDown={keepFocus ? event => event.preventDefault() : undefined}
-    className={`inline-flex h-6 ${fit ? 'min-w-0' : 'shrink-0'} items-center justify-center gap-1.5 rounded px-1.5 disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
+    className={`${ACTION_BOX_CLASS} disabled:opacity-40 aria-pressed:bg-current/10 ${windowFocused ? SUBTLE_ACTION_INTERACTION_CLASS : ''} ${color}`}>{children}</button>;
 }
+
+/** docs/specs/layout.md → "Header context menu" lowercases visible action text only. */
+const actionText = (label: string) => label.charAt(0).toLowerCase() + label.slice(1);
 
 function ContextCopyAction({ children, label, onCopy }: { children: ReactNode; label: string; onCopy: () => Promise<boolean> }) {
   const [confirmation, setConfirmation] = useState(0);
@@ -99,14 +107,19 @@ function ContextCopyAction({ children, label, onCopy }: { children: ReactNode; l
     setConfirmation(0);
     void onCopy().then(success => { if (success) setConfirmation(value => value + 1); });
   }}>
-    <span className="grid">
-      <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5 ${confirmation ? 'invisible' : ''}`}>{children}</span>
-      <span role="status" className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5">
-        {confirmation ? <><CheckIcon size={14} weight="bold" />Copied</> : null}
-      </span>
-    </span>
+    <ActionFace status={confirmation ? <><CheckIcon size={14} weight="bold" />copied</> : null}>{children}</ActionFace>
   </ContextAction>;
 }
+
+/** `children`, covered by `status` while it is set without giving up their width. */
+function ActionFace({ status, children }: { status: ReactNode; children: ReactNode }) {
+  return <span className="grid">
+    <span className={`col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5 ${status ? 'invisible' : ''}`}>{children}</span>
+    <span role="status" className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5">{status}</span>
+  </span>;
+}
+
+const OPENING = <><CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />opening…</>;
 
 /** Drag-selectable diagnostic text. A press focuses it, so Cmd/Ctrl+C reaches
  *  `handleContextCopy` rather than the helper terminal. */
@@ -115,7 +128,7 @@ function ContextDiagnostic({ className, children }: { className: string; childre
     className={`select-text cursor-text outline-none ${className}`}>{children}</div>;
 }
 
-function ContextOpenAction({ children, label, disabled, onOpen, fit = false }: { children: ReactNode; label: string; disabled: boolean; onOpen: () => Promise<boolean>; fit?: boolean }) {
+function ContextOpenAction({ children, label, disabled, onOpen }: { children: ReactNode; label: string; disabled: boolean; onOpen: () => Promise<boolean> }) {
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState(false);
   const opening = pending || feedback;
@@ -124,48 +137,37 @@ function ContextOpenAction({ children, label, disabled, onOpen, fit = false }: {
     const timer = setTimeout(() => setFeedback(false), 750);
     return () => clearTimeout(timer);
   }, [feedback]);
-  return <ContextAction label={label} disabled={disabled} busy={opening} fit={fit} onClick={() => {
+  return <ContextAction label={label} disabled={disabled} busy={opening} onClick={() => {
     setPending(true);
     setFeedback(true);
     void onOpen().then(success => { setPending(false); if (!success) setFeedback(false); });
   }}>
-    <span className="grid min-w-0">
-      <span className={`col-start-1 row-start-1 inline-flex min-w-0 items-center justify-center gap-1.5 ${opening ? 'invisible' : ''}`}>{children}</span>
-      <span role="status" className="col-start-1 row-start-1 inline-flex items-center justify-center gap-1.5">
-        {opening ? <><CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />Opening…</> : null}
-      </span>
-    </span>
+    <ActionFace status={opening ? OPENING : null}>{children}</ActionFace>
   </ContextAction>;
 }
 
-/** The supplied Phosphor panel glyph, mirrored so its filled panel marks `side`. */
+const MORE = <span className="inline-flex items-center gap-1">more…<CaretDownIcon size={10} weight="fill" /></span>;
+
 /** Measure natural action widths so overflow follows this row, not the window.
  * The native dropdown escapes the context's scroll/animation clipping and owns
  * keyboard navigation; its entries are exactly the actions missing from the row. */
-function PortLaunchActions({ provider, providers, canIframe, entry, onPort, onProviderChange }: {
-  provider: BrowserAutomationProvider;
+function PortLaunchActions({ providers, canIframe, onPort }: {
   providers: readonly BrowserAutomationProvider[];
   canIframe: boolean;
-  entry: PortUrlEntry;
-  onPort(entry: PortUrlEntry, mode: PortMode): Promise<boolean>;
-  onProviderChange(provider: BrowserAutomationProvider): void;
+  onPort(mode: PortMode): Promise<boolean>;
 }) {
-  const nextProvider = providers.find(value => value !== provider);
-  const actions = [
-    ...portActions(provider).map(action => {
-      const offered = action.needs === 'iframe' ? canIframe : !action.needs || providers.includes(action.needs);
-      return { key: action.mode as string, label: action.needs && !offered ? action.unavailable : action.label,
-        text: action.text, icon: action.icon, disabled: !offered, run: () => onPort(entry, action.mode) };
-    }),
-    ...(nextProvider ? [{ key: 'provider', label: `switch to ${nextProvider}`, text: `switch to ${nextProvider}`,
-      icon: null, disabled: false, run: async () => { onProviderChange(nextProvider); return true; } }] : []),
+  const [provider, setProvider] = useBrowserProvider(providers);
+  const offer = browserProviderSwitch(providers, provider);
+  const actions: PortAction[] = [
+    ...portActions(provider, providers, canIframe),
+    ...(offer ? [{ mode: null, label: offer.label, text: offer.label, icon: null, disabled: false }] : []),
   ];
   const root = useRef<HTMLDivElement>(null);
   const measures = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(actions.length);
-  const [pending, setPending] = useState<string | null>(null);
-  const pendingRef = useRef(false);
-  const dropdownWidth = pending && !actions.slice(0, visible).some(action => action.key === pending) ? 100 : 40;
+  const [pending, setPending] = useState<PortMode | null>(null);
+  const windowFocused = useContext(WindowFocusedContext);
+  const hiddenPending = pending !== null && actions.findIndex(action => action.mode === pending) >= visible;
   const labels = actions.map(action => action.text).join('|');
   useLayoutEffect(() => {
     const row = root.current;
@@ -174,14 +176,17 @@ function PortLaunchActions({ provider, providers, canIframe, entry, onPort, onPr
     const measure = () => {
       const width = row.clientWidth;
       if (!width) return;
-      const widths = Array.from(measuring.children, child => (child as HTMLElement).offsetWidth);
-      const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * 4;
+      const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+      // The trigger at rest and while opening, then each action's face; a pending action shows "opening…".
+      const [rest, opening, ...faces] = Array.from(measuring.children, child => (child as HTMLElement).offsetWidth);
+      const widths = faces.map(face => Math.max(face, opening));
+      const total = widths.reduce((sum, value) => sum + value, 0) + Math.max(0, widths.length - 1) * gap;
       if (total <= width) { setVisible(widths.length); return; }
-      let used = dropdownWidth;
+      let used = hiddenPending ? opening : rest;
       let count = 0;
       for (const value of widths) {
-        if (used + 4 + value > width) break;
-        used += 4 + value;
+        if (used + gap + value > width) break;
+        used += gap + value;
         count++;
       }
       setVisible(count);
@@ -191,37 +196,43 @@ function PortLaunchActions({ provider, providers, canIframe, entry, onPort, onPr
     observer.observe(row);
     for (const child of measuring.children) observer.observe(child);
     return () => observer.disconnect();
-  }, [labels, dropdownWidth]);
-  const run = async (action: typeof actions[number]) => {
-    if (pendingRef.current || action.disabled) return;
-    if (action.key === 'provider') { void action.run(); return; }
-    pendingRef.current = true;
-    setPending(action.key);
-    try { await action.run(); } finally { pendingRef.current = false; setPending(null); }
+  }, [labels, hiddenPending]);
+  const run = async ({ mode, disabled }: PortAction) => {
+    if (pending !== null || disabled) return;
+    if (!mode) {
+      if (offer) { setProvider(offer.next); rememberBrowserProvider(offer.next); }
+      return;
+    }
+    setPending(mode);
+    try { await onPort(mode); } finally { setPending(null); }
   };
+  const key = (action: PortAction) => action.mode ?? 'switch';
   return <div ref={root} data-port-actions className="relative flex min-w-8 flex-1 items-center gap-1">
-    <div ref={measures} aria-hidden="true" inert className="pointer-events-none invisible absolute inset-x-0 top-0 flex h-0 gap-1 overflow-hidden">
-      {actions.map(action => <span key={action.key} className="grid h-6 shrink-0 whitespace-nowrap px-1.5">
-        <span className="col-start-1 row-start-1 inline-flex items-center gap-1.5">{action.icon}{action.text}</span>
-        <span className="col-start-1 row-start-1 inline-flex items-center gap-1.5"><CircleNotchIcon size={15} />Opening…</span>
-      </span>)}
+    <div ref={measures} aria-hidden="true" inert className="pointer-events-none invisible absolute inset-x-0 top-0 flex h-0 overflow-hidden">
+      <span className={ACTION_BOX_CLASS}>{MORE}</span>
+      <span className={ACTION_BOX_CLASS}>{OPENING}</span>
+      {actions.map(action => <span key={key(action)} className={ACTION_BOX_CLASS}>{action.icon}{action.text}</span>)}
     </div>
-    {actions.slice(0, visible).map(action => <ContextAction key={action.key} label={action.label} disabled={action.disabled}
-      busy={pending === action.key} onClick={() => void run(action)}>
-      <span className="grid whitespace-nowrap">
-        <span className={`col-start-1 row-start-1 inline-flex items-center gap-1.5 ${pending === action.key ? 'invisible' : ''}`}>{action.icon}{action.text}</span>
-        <span aria-hidden={pending !== action.key} className={`col-start-1 row-start-1 inline-flex items-center gap-1.5 ${pending === action.key ? '' : 'invisible'}`}><CircleNotchIcon size={15} className="animate-spin motion-reduce:animate-none" />Opening…</span>
-      </span>
-    </ContextAction>)}
-    {visible < actions.length && <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={!!pending || undefined} aria-disabled={!!pending || undefined}
-      style={{ width: dropdownWidth, maxWidth: '100%' }} className="h-6 min-w-0 shrink-0 rounded border border-border bg-app-bg text-foreground"
-      onChange={event => { const action = actions.find(item => item.key === event.target.value); if (action) void run(action); }}>
-      <option value="">{pending && !actions.slice(0, visible).some(action => action.key === pending) ? 'Opening…' : '…'}</option>
-      {actions.slice(visible).map(action => <option key={action.key} value={action.key} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}
-    </select>}
+    {actions.slice(0, visible).map(action => {
+      const opening = pending !== null && pending === action.mode;
+      return <ContextAction key={key(action)} label={action.label} disabled={action.disabled} busy={opening} onClick={() => void run(action)}>
+        <ActionFace status={opening ? OPENING : null}>{action.icon}{action.text}</ActionFace>
+      </ContextAction>;
+    })}
+    {/* A transparent native select over a link-styled label, like the other actions. */}
+    {visible < actions.length && <span className={`relative ${ACTION_BOX_CLASS} ${SUBTLE_ACTION_REST_COLOR_CLASS} ${windowFocused && pending === null ? SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS : ''}`}>
+      {hiddenPending ? OPENING : MORE}
+      <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
+        className="absolute inset-0 cursor-pointer appearance-none opacity-0"
+        onChange={event => { const action = actions.find(item => key(item) === event.target.value); if (action) void run(action); }}>
+        <option value="">More browser actions</option>
+        {actions.slice(visible).map(action => <option key={key(action)} value={key(action)} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}
+      </select>
+    </span>}
   </div>;
 }
 
+/** The supplied Phosphor panel glyph, mirrored so its filled panel marks `side`. */
 function PlacementIcon({ side }: { side: ContextSide }) {
   return <svg aria-hidden width="18" height="18" viewBox="0 0 256 256" fill="currentColor">
     <g transform={side === 'bottom' ? 'translate(0 256) scale(1 -1)' : side === 'left' ? 'translate(256 0) scale(-1 1)' : undefined}>
@@ -249,8 +260,6 @@ function snapshotExit(surface: HTMLElement, content: HTMLElement | null) {
 }
 
 export function TerminalContextView(p: TerminalContextViewProps) {
-  const [chosenProvider, setChosenProvider] = useState(() => preferredBrowserProvider(p.browserProviders));
-  const provider = p.browserProviders.includes(chosenProvider) ? chosenProvider : preferredBrowserProvider(p.browserProviders);
   const motionClass = motionIsInstant() ? '' : p.closing ? 'terminal-context-exit' : 'terminal-context-enter';
   const surface = useRef<HTMLElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -316,7 +325,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
         <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-y-1">
           <span className="text-muted">Title</span>
           <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
-            <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span><ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />Explain</ContextAction>
+            <span className="min-w-[8ch] flex-1 truncate" title={p.title}>{p.title}</span><ContextAction label="Explain this title" onClick={() => setDetail('title')}><BugBeetleIcon size={15} />explain</ContextAction>
             <div className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 text-muted"><ContextCopyAction label="Copy surface identifier" onCopy={() => attempt(p.onCopyRef)}><span>{p.surfaceRef}</span><CopyIcon size={12} /></ContextCopyAction><div data-context-header-actions className="flex shrink-0 items-center gap-0.5">
               {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
                 <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
@@ -324,7 +333,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
             </div></div>
           </div>
           <span className="text-muted">Dir</span>
-          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{p.explorerLabel}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />Copy path</ContextCopyAction></div>
+          <div className="flex min-h-6 min-w-0 flex-wrap items-center gap-1.5"><span className="truncate" title={p.cwd}>{p.cwd}</span><ContextOpenAction label={p.canExplore ? p.explorerLabel : 'Directory unavailable on this host'} disabled={!p.canExplore} onOpen={() => attempt(p.onExplore)}><ArrowSquareOutIcon size={15} />{actionText(p.explorerLabel)}</ContextOpenAction><ContextCopyAction label="Copy absolute path" onCopy={() => attempt(p.onCopyPath)}><CopyIcon size={14} />copy path</ContextCopyAction></div>
           <span className="text-muted">Ports</span>
           <div data-context-ports className="flex min-h-7 min-w-0 items-center gap-2">
             {p.scan.status === 'scanning' ? <span className="truncate text-muted">Scanning ports…</span> : p.scan.status === 'failed' ? <span className="truncate text-error">Port scan failed · Reopen to try again</span> : !selected ? <span className="truncate text-muted">No listening ports</span> : <>
@@ -332,9 +341,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
                 {entries.length > 1 ? <><select aria-label="Port" title={`${entries.length} ports`} value={selected.port} onChange={e => setPort(Number(e.target.value))} className="h-6 min-w-0 rounded border border-input-border bg-input-bg px-1 text-foreground">{entries.map(entry => <option key={entry.port} value={entry.port}>{entry.host}:{entry.port}{entry.processName ? ` · ${entry.processName}` : ''}</option>)}</select><span className="shrink-0 text-muted">{entries.length} ports</span></>
                   : <span className="truncate" title={`${selected.host}:${selected.port}${selected.processName ? ` · ${selected.processName}` : ''}`}>{selected.host}:{selected.port} <span className="text-muted">{selected.processName}</span></span>}
               </div>
-              <PortLaunchActions provider={provider} providers={p.browserProviders} canIframe={p.canIframe} entry={selected}
-                onPort={(entry, mode) => attempt(() => p.onPort(entry, mode))}
-                onProviderChange={value => { setChosenProvider(value); rememberBrowserProvider(value); }} />
+              <span className="ml-1 h-3 shrink-0 border-l border-border" />
+              <PortLaunchActions providers={p.browserProviders} canIframe={p.canIframe} onPort={mode => attempt(() => p.onPort(selected, mode))} />
             </>}
           </div>
           <span className="text-muted">Alerts</span><div className="flex min-h-6 flex-wrap items-center gap-2"><span>{p.watchRule ? `Watch all ${p.watchRule} commands` : 'No command running'}</span>{p.watchRule && <OnOffSwitch on={p.watching} onEnable={p.onWatch} onDisable={p.onWatch} label={`Watch all ${p.watchRule} commands`} />}<span className="mx-1 h-3 border-l border-border" /><span>TODO</span><OnOffSwitch on={p.todo} onEnable={p.onTodo} onDisable={p.onTodo} label="TODO" /></div>

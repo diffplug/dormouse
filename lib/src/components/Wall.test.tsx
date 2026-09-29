@@ -901,7 +901,7 @@ describe('Wall on the Lath engine', () => {
     events.mockClear();
     await act(async () => { button.focus(); button.click(); });
     await flush();
-    expect(button.textContent).toContain('Opening…');
+    expect(button.textContent).toContain('opening…');
     expect(button.getAttribute('aria-busy')).toBe('true');
     expect(document.activeElement).toBe(button);
     expect(leafCount()).toBe(1);

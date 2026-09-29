@@ -33,9 +33,9 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
 
 ## Providers
 
-**Must name automated actions by provider and offer one adjacent “switch to <provider>” link**, shared by port actions and the Display modal and shown only when another provider is available. Remember explicit port-selector choices and applied automated Display choices in renderer-local storage; default to agent-browser, falling back to an available provider. Opening Display selects the current browser's provider before the preference; changing provider preserves presentation when supported, otherwise selects screencast. Cancel does not change the preference.
+**Must name automated actions by provider and offer one adjacent “switch to <provider>” link**, shared by port actions and the Display modal and shown only when another provider is available. Remember explicit port-row switches and applied automated Display choices in renderer-local storage; default to agent-browser, falling back to an available provider. Opening Display selects the current browser's provider before the preference; changing provider preserves presentation when supported, otherwise selects screencast. Cancel does not change the preference.
 
-Source of truth: `BrowserProviderSwitch` in `lib/src/components/wall/BrowserProviderSwitch.tsx`; `lib/src/components/wall/TerminalContext.test.tsx` and `lib/src/components/wall/AgentBrowserScreenModal.test.tsx`.
+Source of truth: `BrowserProviderSwitch`, `browserProviderSwitch`, and `useBrowserProvider` in `lib/src/components/wall/BrowserProviderSwitch.tsx`; `lib/src/components/wall/TerminalContext.test.tsx` and `lib/src/components/wall/AgentBrowserScreenModal.test.tsx`.
 
 An automated renderer belongs to one **provider**, the CLI that drives its
 browser. **Must read every per-provider fact from the one registry** — render
@@ -184,11 +184,11 @@ Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 
 **Must scan once per context opening**, using the shared per-port URL selection in `docs/specs/dor-cli.md` → Browser Open Target Resolution. Zero/one port uses an inline row; multiple ports use a selector. Failed scans are distinct from no listeners.
 
-**Must offer system browser, iframe, and provider-named screencast and popout once for the selected port**, using the provider selector in Providers for automated targets. Disabled targets explain unavailable capabilities. Opening a browser from context always preserves the source terminal, including an untouched one.
+**Must offer system browser, iframe, and provider-named screencast and popout once for the selected port**, using the provider switch in Providers for automated targets. Disabled targets explain unavailable capabilities. Opening a browser from context always preserves the source terminal, including an untouched one.
 
 **Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page rather than racing a navigation into it, even in an unmounted Door. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
 
-**Must acknowledge a port click with `Opening…` and suppress repeat activation while pending.** For a new automated target, start its controller before creating a Pane; split and focus only after the host confirms startup, without waiting for page load. Failure reports in context without changing layout or focus. Concurrent requests for the same target are serialized. (rationale)
+**Must acknowledge a port click with `opening…` and suppress repeat activation while pending.** For a new automated target, start its controller before creating a Pane; split and focus only after the host confirms startup, without waiting for page load. Failure reports in context without changing layout or focus. Concurrent requests for the same target are serialized. (rationale)
 
 **Must dismiss context after a successful browser placement or reuse, preserving browser focus.** System browser dismisses after dispatch to the OS opener; failed or cancelled launches keep context open. A completed launch must not dismiss a replacement context.
 

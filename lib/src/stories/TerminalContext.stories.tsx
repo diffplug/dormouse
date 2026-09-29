@@ -140,11 +140,12 @@ const meta = {
   play: async ({ args, canvasElement }) => {
     if (args.initialScenario === 'launchPending' || args.initialScenario === 'launchFailed') {
       const canvas = within(canvasElement);
-      const launch = canvas.queryByRole('button', { name: 'Open in agent-browser screencast' });
-      if (launch) await userEvent.click(launch);
-      else await userEvent.selectOptions(canvas.getByRole('combobox', { name: 'More browser actions' }), 'agent-browser-screencast');
+      // Narrow stories reach the screencast through the overflow dropdown.
+      const launch = canvas.queryByRole('button', { name: 'Open in agent-browser screencast' }) ?? canvas.getByRole('combobox', { name: 'More browser actions' });
+      if (launch instanceof HTMLSelectElement) await userEvent.selectOptions(launch, 'agent-browser-screencast');
+      else await userEvent.click(launch);
       if (args.initialScenario === 'launchPending') {
-        await expect(canvas.queryByRole('button', { name: 'Open in agent-browser screencast' }) ?? canvas.getByRole('combobox', { name: 'More browser actions' })).toHaveAttribute('aria-busy', 'true');
+        await expect(launch).toHaveAttribute('aria-busy', 'true');
       } else {
         const diagnostic = canvas.getByRole('alert');
         await expect(diagnostic).toHaveTextContent('agent-browser binary not found');
