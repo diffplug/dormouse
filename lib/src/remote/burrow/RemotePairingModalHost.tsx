@@ -31,6 +31,7 @@ export function RemotePairingModalHost() {
       // different device — which has to remount rather than re-render into
       // whatever the previous one left, typed digits included.
       key={head.pairingId}
+      kind={head.kind}
       label={head.label}
       onApprove={(code) => head.approve(code)}
       onDeny={() => head.deny()}

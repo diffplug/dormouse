@@ -130,8 +130,9 @@ The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
 side", which owns that split and what the webview keeps): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
-with the relay-origin allowlist baked in (`docs/specs/relay.md`). **Nothing the
-webview says can widen access** (`docs/specs/remote-security-model.md`).
+with the relay-origin allowlist and the one-time rendezvous origin baked in
+(`docs/specs/relay.md`, `docs/specs/one-time.md`).
+**Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
 as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStore`
@@ -196,7 +197,7 @@ pushes the live window labels** (`burrow:windows`) at setup and on every window
 create and destroy, and **dropping one settles the asks that window can no longer
 answer**; an ask in flight is only ever *narrowed*, since a window that opened
 after it never received it. **An ask naming a `surfaceId` goes to that Surface's
-owner alone** — `attach` and `resize` mutate the pane they reach, and fanned out
+owner alone** — `attach`, `resize`, and `release` act on the pane they reach, and fanned out
 they ask every other window to resize one it does not hold — and Rust names the
 window it delivered to (`burrow:askDelivered`) so the collector settles on that
 one answer instead of spending the budget on windows the ask never reached. `ASK_BUDGET_MS` (1s) still bounds the whole fan-out,

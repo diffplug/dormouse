@@ -29,7 +29,8 @@ import {
   type TerminalDataEvent,
 } from 'remote-lib-common';
 import { DirectPeer, type DirectPeerLike } from '../../remote/direct/direct-peer';
-import { STREAMED_CHUNK, collect, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
+import { STREAMED_CHUNK, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
+import { collect } from '../../remote/direct/test-fake-peer';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 
 /** The one call the reliability case needs that `DirectPeerLike` has no reason to. */

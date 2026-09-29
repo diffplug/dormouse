@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import type { DirectoryEntry } from '../../remote/burrow/burrow-surface-provider';
+import type { DirectoryEntry, SurfaceHold } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 
 const entry = (surfaceId: string, title: string): DirectoryEntry => ({
@@ -13,6 +13,8 @@ const entry = (surfaceId: string, title: string): DirectoryEntry => ({
   ringing: false,
   hasTODO: false,
 });
+
+const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '3' };
 
 const inertPty = {
   writePty: () => {},
@@ -47,8 +49,61 @@ describe('createAskSurfaceProvider resize', () => {
         : [],
       inertPty,
     );
-    const handle = await provider.resolveSurface('pane-1', { cols: 80, rows: 24 });
+    const handle = await provider.resolveSurface('pane-1', { cols: 80, rows: 24 }, HOLD);
     await expect(handle!.resize(120, 40)).rejects.toThrow('surface owner unavailable');
     expect({ cols: handle!.cols, rows: handle!.rows }).toEqual({ cols: 80, rows: 24 });
+  });
+});
+
+describe('createAskSurfaceProvider holds', () => {
+  it('names the hold on the attach and every resize, and releases it at the owner that took it', async () => {
+    const asks: Array<{ op: string; params: unknown; ownerPtyId?: string }> = [];
+    const { provider } = createAskSurfaceProvider(async (op, params, ownerPtyId) => {
+      asks.push({ op, params, ownerPtyId });
+      const { op: surfaceOp } = params as { op: string };
+      return surfaceOp === 'release' ? [] : [{ ptyId: 'owner-key', cols: 51, rows: 14 }];
+    }, inertPty);
+
+    const handle = await provider.resolveSurface('pane-1', { cols: 51, rows: 14 }, HOLD);
+    await handle!.resize(40, 20);
+    handle!.release();
+
+    expect(asks).toEqual([
+      { op: 'surfaceOp', params: { surfaceId: 'pane-1', op: 'attach', cols: 51, rows: 14, hold: HOLD }, ownerPtyId: undefined },
+      { op: 'surfaceOp', params: { surfaceId: 'pane-1', op: 'resize', cols: 40, rows: 20, hold: HOLD }, ownerPtyId: 'owner-key' },
+      { op: 'surfaceOp', params: { surfaceId: 'pane-1', op: 'release', hold: HOLD }, ownerPtyId: 'owner-key' },
+    ]);
+  });
+
+  it('releases a hold no handle carries at every answerer, naming no owner', () => {
+    const asks: Array<{ op: string; params: unknown; ownerPtyId?: string }> = [];
+    const { provider } = createAskSurfaceProvider(async (op, params, ownerPtyId) => {
+      asks.push({ op, params, ownerPtyId });
+      return [];
+    }, inertPty);
+
+    provider.releaseSurface('pane-1', HOLD);
+    expect(asks).toEqual([
+      { op: 'surfaceOp', params: { surfaceId: 'pane-1', op: 'release', hold: HOLD }, ownerPtyId: undefined },
+    ]);
+  });
+
+  it('swallows a release whose ask rejects: nothing waits on one', async () => {
+    const { provider } = createAskSurfaceProvider(async (_op, params) => {
+      if ((params as { op: string }).op === 'release') throw new Error('window gone');
+      return [{ ptyId: 'owner-key', cols: 80, rows: 24 }];
+    }, inertPty);
+    const handle = await provider.resolveSurface('pane-1', {}, HOLD);
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => void unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      handle!.release();
+      provider.releaseSurface('pane-1', HOLD);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
   });
 });

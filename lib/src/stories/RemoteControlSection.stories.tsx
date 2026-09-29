@@ -86,8 +86,8 @@ async function openPersistent(canvasElement: HTMLElement) {
 }
 
 /**
- * What a machine that has never enrolled opens on: a one-time connection (not
- * built yet, so disabled) and a folded Persistent Relay.
+ * What a machine that has never enrolled opens on: a one-time connection and a
+ * folded Persistent Relay.
  */
 export const Choices: Story = {
   parameters: {
@@ -391,4 +391,113 @@ export const SetupPhoneRefused: Story = {
 export const BurrowServiceError: Story = {
   parameters: { primedBurrow: { statusError: 'It did not answer.' } },
   play: settled(/Could not reach this machine’s remote-control service/),
+};
+
+/**
+ * A one-time link waiting for its phone: the code for the phone's camera, the
+ * link as text to send it, and New link and Cancel — no auto-refresh, since a
+ * link is single-use (`docs/specs/one-time.md` -> "Laptop UI"). Reached by the
+ * button, like {@link SetupPhoneQr}, so the stub mints the link under the frozen
+ * clock and the code draws the same every run.
+ */
+export const OneTimeWaiting: Story = {
+  parameters: {
+    primedBurrow: { status: UNENROLLED_STATUS },
+    docs: { story: { height: '720px' } },
+  },
+  play: async (context) => {
+    await import('../components/QrCode');
+    const canvas = within(context.canvasElement);
+    await userEvent.click(await canvas.findByRole('button', { name: 'One-time connection' }));
+    await canvas.findByRole('img', { name: 'One-time link for this machine' });
+  },
+};
+
+/** The same panel on a machine that also enrolled with a Relay. */
+export const OneTimeWaitingEnrolled: Story = {
+  parameters: {
+    primedBurrow: { status: enrolledStatus({ pairedClients: 1 }) },
+    docs: { story: { height: '800px' } },
+  },
+  play: OneTimeWaiting.play,
+};
+
+/** A phone used the link and its request is up in the approval modal. */
+export const OneTimeConfirming: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'confirming', label: 'Android phone', expiresAt: STORY_NOW + 60_000 },
+    },
+    docs: { story: { height: '380px' } },
+  },
+  play: settled('Type the two digits your phone shows into the dialog.'),
+};
+
+/** Confirmed; the phone is setting up the direct path on the same Wi-Fi. */
+export const OneTimeConnecting: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'connecting', label: 'Android phone' },
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: settled('Connecting directly…'),
+};
+
+/** Live: the phone has every terminal here until either end stops it. */
+export const OneTimeConnected: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'connected', label: 'Android phone', since: STORY_NOW },
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: settled('Android phone has full control of your terminals.'),
+};
+
+/**
+ * The failure this feature is likeliest to hit: the phone is on another
+ * network, or one that keeps devices apart, so no direct path formed. The
+ * sentence names the fix.
+ */
+export const OneTimeEndedDirectFailed: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'ended', reason: 'direct-failed' },
+    },
+    docs: { story: { height: '380px' } },
+  },
+  play: settled(/couldn’t reach this computer directly/),
+};
+
+/** The one attempt was spent on digits the phone was not showing. */
+export const OneTimeEndedMismatch: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'ended', reason: 'confirmation-mismatch' },
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: settled('The two digits did not match, so nothing connected.'),
+};
+
+/**
+ * A build whose allowed remote addresses leave the rendezvous out — a
+ * self-host build that narrowed them, say — offers the button disabled, and
+ * says why.
+ */
+export const OneTimeUnavailable: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: { status: 'unavailable', reason: 'origin-not-allowed' },
+    },
+    docs: { story: { height: '330px' } },
+  },
+  play: settled(/it isn’t allowed to reach hosted\.dormouse\.sh/),
 };

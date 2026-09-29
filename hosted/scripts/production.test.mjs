@@ -25,6 +25,23 @@ test("production config keeps canonical domain and production entry, excludes pu
   assert.throws(() => productionConfig(base, { ...env, BUILD_SHA: "main" }));
   assert.throws(() => productionConfig({ ...base, workers_dev: true }, env));
 });
+test("production config keeps the rendezvous Durable Object, its append-only migrations, and its rate limits", () => {
+  assert.deepEqual(config.durable_objects, {
+    bindings: [{ name: "ONE_TIME_ROOM", class_name: "OneTimeRoom" }],
+  });
+  // Durable Object migrations are append-only: a deployed tag is never edited.
+  assert.deepEqual(config.migrations[0], {
+    tag: "v1",
+    new_sqlite_classes: ["OneTimeRoom"],
+  });
+  assert.deepEqual(
+    config.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+    [
+      ["ONE_TIME_MINT_LIMIT", "1"],
+      ["ONE_TIME_JOIN_LIMIT", "2"],
+    ],
+  );
+});
 function provider({
   host = "ep-production.neon.tech",
   database = "neondb",
@@ -55,14 +72,18 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete p
       { message: `Missing Worker secret: ${missing}` },
     );
   }
-  for (const override of [
-    { host: "ep-preview.neon.tech" },
-    { database: "preview" },
-    { user: "migration" },
-    { disabled: false },
-    { secrets: ["AUTH_SECRET"] },
+  // Each case supplies every configured secret, so it fails on its own check.
+  for (const [override, message] of [
+    [{ host: "ep-preview.neon.tech" }, "Migration and runtime databases must use the same host"],
+    [{ database: "preview" }, "Migration and runtime databases must match"],
+    [{ user: "migration" }, "Use separate runtime and migration roles"],
+    [{ disabled: false }, "Production Hyperdrive must disable caching"],
+    [{ secrets: ["AUTH_SECRET"] }, "Missing Worker secret: POSTMARK_SERVER_TOKEN"],
   ])
-    await assert.rejects(preflight(env, config, provider(override)));
+    await assert.rejects(
+      preflight(env, config, provider({ secrets: configuredSecrets, ...override })),
+      { message: new RegExp(`^${message}`) },
+    );
   const oauth = {
     ...config,
     vars: { ...config.vars, OAUTH_PROVIDERS: "github" },

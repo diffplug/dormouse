@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { providerAuthorizationOrigins } from "../server/providers.js";
+import { oneTimeSmoke } from "./one-time-smoke.mjs";
 
 /** @param {{ text: string }} email */
 export const codeFrom = (email) => email.text.match(/\b\d{8}\b/)?.[0];
@@ -214,6 +215,7 @@ if (
   for (let attempt = 1; ; attempt++) {
     try {
       await smoke(origin, sha, fetch, true);
+      await oneTimeSmoke(origin);
       console.log(`Preview smoke checks passed: ${origin}/login (${sha})`);
       break;
     } catch (error) {

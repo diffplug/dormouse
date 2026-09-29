@@ -19,6 +19,13 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `publish-vsco
 
 ## Release checklist
 
+**Must ship a desktop release that carries, or changes, the one-time link
+version only after Hosted production serves that version** — its rendezvous
+routes and its `/connect/` page (`docs/specs/one-time.md` -> "Link"): run
+`.github/workflows/hosted-production.yml` first and confirm its live
+verification passed, `oneTimeSmoke` included. **Hosted must never stop serving
+a link version a shipped Burrow emits.**
+
 Human-driven, in order:
 
 1. **Update dependency snapshots** — run `node website/scripts/generate-deps.js`, review the diffs in `website/src/data/dependencies-{npm,cargo,runtime}.json`, commit if changed.
@@ -177,7 +184,7 @@ Source of truth: `create_release` in `scripts/sign-and-deploy.sh`; `website/scri
 
 ## Hosted account releases
 
-See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/README.md` for provisioning and operator commands.
+See `docs/specs/hosted.md` -> "Production releases" for the Hosted pipeline and `hosted/README.md` for provisioning and operator commands. A desktop release waits on Hosted for the one-time link version ([Release checklist](#release-checklist)).
 
 ## Future
 

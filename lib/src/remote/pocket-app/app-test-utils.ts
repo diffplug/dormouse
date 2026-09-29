@@ -15,7 +15,8 @@ import {
   type PairingInvitation,
 } from 'remote-lib-common';
 
-import { PAIRING_CODE_LABEL, type BurrowView } from './App';
+import type { BurrowView } from './App';
+import { PAIRING_CODE_LABEL } from './views';
 import { testRoutingId } from '../test-e2e-client';
 
 /**

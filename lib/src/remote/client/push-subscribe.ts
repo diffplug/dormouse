@@ -6,6 +6,7 @@ import {
   type PushSubscriptionPayload,
 } from 'remote-lib-common';
 import { getPushServiceWorkerRegistration } from '../pocket-app/service-worker';
+import { isInstalledWebApp } from './install-state';
 
 /** Why the user cannot subscribe now, or `ready`; see pocket-app.md. */
 export type PushAvailability =
@@ -14,12 +15,6 @@ export type PushAvailability =
   | 'needs-install'
   | 'no-worker'
   | 'denied';
-
-export function isInstalledWebApp(): boolean {
-  const nav = navigator as Navigator & { standalone?: boolean };
-  if (nav.standalone === true) return true;
-  return globalThis.matchMedia?.('(display-mode: standalone)').matches ?? false;
-}
 
 /** `navigator.standalone` presence identifies iOS without unreliable UA parsing. */
 export function requiresInstallForPush(): boolean {

@@ -112,8 +112,11 @@ invalid base64url or UTF-8**, then continue accepting later data. Pinned by
 `RemotePtyAdapter` exposes the adapter-specific `setActivePane(id)`: v1 allows
 one attachment per session, so pane switching is detach → attach, whose repaint
 (resize) redraws the screen. **Writes and resizes for a non-attached pane are
-dropped**, since the Burrow rejects them anyway. Badges for non-attached panes come
-from `directory.watch` without attaching.
+dropped**, since the Burrow rejects them, **but the latest resize for a pane
+being attached is kept**: its attach or a `terminal.resize` after it carries
+that size (rationale). **A refused `terminal.resize` after the attach never
+fails `setActivePane`**: the wall ends the session on a failed one. Badges for
+non-attached panes come from `directory.watch` without attaching.
 
 **Must normalize dimensions before sending or caching them.** **Must settle
 fire-and-forget PTY failures and release subscriptions that arrive after
@@ -147,8 +150,10 @@ delivery id before deleting the record; the list carries **Scan a setup code**.
 Pairing continues into connecting.
 
 Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`;
-`SetupOrSignin` / `PairingCodeView` / `BurrowsView` / `ConnectedView` and the
-`probeNoiseSupport` gate in `lib/src/remote/pocket-app/App.tsx`;
+`SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
+gate in `lib/src/remote/pocket-app/App.tsx`; `PairingCodeView` in
+`lib/src/remote/pocket-app/views.tsx`; `mountRemoteWall` in
+`lib/src/remote/pocket-app/remote-wall.ts`;
 `lib/src/remote/pocket-app/PocketWall.tsx`;
 `lib/src/remote/pocket-app/pair-link.ts`;
 `lib/src/remote/pocket-app/ScanInvitation.tsx`; `PocketClient.pair` in
@@ -167,7 +172,7 @@ re-skins auth screens and wall together.
 **The theme is restored before first paint** by `main.tsx` calling
 `restorePocketTheme()` (rationale), defaulting to Kimbie Dark, the homepage brand
 theme; `PocketWall` repeats it idempotently through `usePocketTheme()` for
-isolated consumers (stories). **That default is one shared `POCKET_THEME_ID`**
+isolated consumers (stories), or repeats the restore its caller hands it. **That default is one shared `POCKET_THEME_ID`**
 the website playground imports, so it cannot drift. Restoring also syncs
 document-level chrome no in-app burrow needs — root `color-scheme` and the
 `<meta name="theme-color">` tint — from the applied theme's type and resolved
@@ -273,7 +278,7 @@ Source of truth: `lib/pocket/public/manifest.webmanifest`;
 `registerPushServiceWorker` in `lib/src/remote/pocket-app/service-worker.ts`;
 `PASSKEY_UNAVAILABLE_MESSAGE` / `PocketClient.signin` in
 `lib/src/remote/client/pocket-client.ts`; `deviceLabel` in
-`lib/src/remote/pocket-app/App.tsx`.
+`lib/src/remote/pocket-app/views.tsx`.
 
 ### Detecting install state, and what cannot be detected
 
@@ -318,7 +323,7 @@ notifications** while any lacks a row, one **Push notifications on.** line once
 all have one — and its tap subscribes the browser, then registers every paired
 Burrow, repairing a rotated endpoint at once. **Each response commits as it
 lands**, so a loop that fails partway keeps what it registered. **Never offer
-push from the wall or from a Burrow row.** The row states **Push on** beside its
+push from the wall or a Burrow row.** The row states **Push on** beside its
 pair state — the card carries no per-Burrow signal.
 
 Every card state is one pure predicate over (paired set, registrations,
@@ -379,7 +384,8 @@ registering a replacement, and clear only on a Relay answer. **This deletes the
 delivery row alone** — never the scope's shared `PushSubscription`, and never
 another Burrow's row.
 
-Source of truth: `isInstalledWebApp` / `requiresInstallForPush` /
+Source of truth: `isInstalledWebApp` in
+`lib/src/remote/client/install-state.ts`; `requiresInstallForPush` /
 `needsHomeScreenInstall` / `getPushAvailability` / `hasCurrentPushSubscription` /
 `subscribeToPushInBrowser` in `lib/src/remote/client/push-subscribe.ts`;
 `InstallFirstNotice` / `InstallNotice` / `PushNotice` / `pushNoticeState` /
@@ -516,12 +522,20 @@ suspended for longer than that comes back to no session**, and reconnecting cost
 a fresh Noise handshake and one WebAuthn prompt. (rationale)
 
 **Pocket runs the same deadline against its own last send**, before a keepalive
-and before every request, and reports burrow loss when it passes. **A reap sends
-nothing** — there is no frame to send — and this Client's relay socket is to the
-*Relay*, so it stays open. (rationale)
+and before every request, and reports burrow loss when it passes. **A reap's
+goodbye cannot be relied on** — a suspended page may never read it — and this
+Client's relay socket is to the *Relay*, so it stays open. (rationale)
 
-Source of truth: `PocketClient.sendKeepalive` / `#reapedByBurrow` and the injected
-timer, clock, and visibility seams in `lib/src/remote/client/pocket-client.ts`.
+**The Burrow's goodbye is burrow loss** — its idle reap, a newer session from
+this same Client static, or the person at the computer taking a pane back
+([remote-api.md](./remote-api.md) → Transport): the phone leaves the wall
+exactly as it does for a `burrow-gone`, and stays paired. Pinned by `leaves the
+wall when the Burrow ends a relayed session, rather than freezing` in
+`lib/src/remote/client/pocket-client.test.ts`.
+
+Source of truth: `ClientSessionCore.sendKeepalive` / `#reapedByBurrow` and the
+injected timer, clock, and visibility seams in
+`lib/src/remote/client/session-core.ts`.
 
 ## The path the session takes
 
@@ -555,10 +569,12 @@ leaves the wall exactly as it does for a `burrow-gone`, and returning costs a
 fresh handshake and one WebAuthn prompt. Before the switch a failed channel
 costs nothing.
 
-Source of truth: `PocketClient.connect` / `transportPath` /
-`setOnTransportChanged` in `lib/src/remote/client/pocket-client.ts`, `TRANSPORT_PATH_LABELS` /
+Source of truth: `PocketClient.connect` in
+`lib/src/remote/client/pocket-client.ts`; `browserDirectPeer` in
+`lib/src/remote/client/browser-direct-peer.ts`; `ClientSessionCore.transportPath` /
+`setOnTransportChanged` in `lib/src/remote/client/session-core.ts`; `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in
-`lib/src/remote/pocket-app/App.tsx`.
+`lib/src/remote/pocket-app/views.tsx`.
 
 ## An expired session drops to sign-in
 
@@ -596,7 +612,9 @@ rationale); the Relay emits no cross-origin grant
 ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle
 mounts at the origin root, never under a path prefix**: the manifest's
 `start_url`/`scope`, the worker's registration scope, and the shell's
-manifest/icon links are all root-absolute.
+manifest/icon links are all root-absolute. The one-time page reuses Pocket's
+screens and wall but not this rule: it has no manifest or worker, and mounts at
+Hosted's `/connect/` (`docs/specs/one-time.md` -> "Phone page").
 
 **The origin is served with a Content-Security-Policy**, the defense in depth
 around the active XSS `docs/specs/security.md` -> "What is not defended" names (rationale).

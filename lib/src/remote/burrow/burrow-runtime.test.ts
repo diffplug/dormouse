@@ -28,8 +28,9 @@ import {
   type PresenceBinding,
   type PresenceProofV1,
 } from 'remote-lib-common';
-import { BurrowRuntime, type RemoteApiSessionLike, type BurrowOptions } from './burrow-runtime';
+import { BurrowRuntime, type BurrowOptions } from './burrow-runtime';
 import type { BurrowEnrollment } from './enrollment';
+import type { RemoteApiSessionLike } from './established-session';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
 import {

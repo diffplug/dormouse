@@ -1,11 +1,13 @@
 # Dormouse Hosted accounts
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
-> Owns the Hosted account application. Remote authorization belongs to `docs/specs/remote-security-model.md`; the multi-tenant Relay remains in `docs/specs/relay.md` -> Future.
+> Owns the Hosted account application and the Worker's deployment. The one-time rendezvous it also serves belongs to `docs/specs/one-time.md` -> "Hosted rendezvous"; remote authorization to `docs/specs/remote-security-model.md`; the multi-tenant Relay remains in `docs/specs/relay.md` -> Future.
 
 ## Application boundary
 
 **Must serve the account frontend and its API from `https://hosted.dormouse.sh`.** The Hono Worker serves Vite assets and pgstencil's request-scoped Better Auth adapter. Requests addressed to another origin receive 421. Marketing remains a separate bundle and deployment; no marketing component is imported.
+
+The one-time rendezvous routes and `/connect/` page mount in this app (`docs/specs/one-time.md` -> "Hosted rendezvous", "Phone page"). Both bindings mappers pass its Durable Object and rate-limit bindings; `remote-lib-common` is compiled in from source through `hosted/tsconfig.json` `paths`, which every esbuild bundle and Wrangler honor.
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding. The runtime creates and closes its database pool within each request.
 
@@ -45,9 +47,9 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; the production entry imports no inbox or test-control handler.
+**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; the production entry imports no inbox or test-control handler. `dor tool one-time` runs the rendezvous and phone page on loopback, without a database (`docs/specs/one-time.md` -> "Dev loop").
 
-**Must verify the production Worker bundle and run the consumer's integration suite before release.** Root `pnpm test` runs the `hosted/scripts/*.test.mjs` deploy suites; `pnpm test:hosted`'s vitest half needs Docker and is skipped there. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
+**Must verify the production Worker bundle and run the consumer's integration suite before release.** Root `pnpm test` runs the `hosted/scripts/*.test.mjs` deploy suites and `test:one-time`, the rendezvous's Miniflare suite, which needs no Docker; the rest of `pnpm test:hosted`'s vitest half needs Docker and is skipped there. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
@@ -57,7 +59,7 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials. Changed paths include rename sources and all API pages. Deployment runs serialize per PR without cancellation; close/merge cleanup ignores path filtering and tolerates absent resources.
 
-**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark.
+**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark. **Must give each preview its own Durable Object namespace and preview-only rate-limit namespaces**, and delete its Worker with `force` so the namespace goes with it.
 
 **Must run cleanup from the base branch's checkout, never the closed PR's.**
 
@@ -69,9 +71,11 @@ Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workf
 
 **Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks both installed packages' clean, matching provenance; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and required Worker secret names. Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Production has no public candidate URL.
 
+**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so the deploy that adds a class is a rollback floor. A deploy restarts every room, dropping links still waiting or mid-handshake; a session already on its direct path never touches Hosted. Live verification runs `oneTimeSmoke` after the account smoke.
+
 **Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification.** Tags identify the deployed commit and verification run/attempt; retries are idempotent and redeployments get new tags. Dating and repeat-deployment suffixes: `recordDeployment`. Code rollback never reverses migrations.
 
-Source of truth: `.github/workflows/hosted-production.yml`; `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `hosted/scripts/production-backup.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs` and `hosted/scripts/production-tag.test.mjs`.
+Source of truth: `.github/workflows/hosted-production.yml`; `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `hosted/scripts/production-backup.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs` and `hosted/scripts/production-tag.test.mjs`.
 
 ## Future
 
