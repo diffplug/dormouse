@@ -602,6 +602,10 @@ export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
     dispose() {
       service?.dispose();
       service = null;
+      // The service ends its one-time connection unannounced, so a mark this
+      // window set would outlive it. Only its own: a window that never served
+      // must not clear the broker's.
+      if (servingMarked) markOneTimeServing(false);
       // After the service; only here (`docs/specs/vscode.md` → "The direct path").
       disposeNativeDirectPeers();
       askProvider = null;

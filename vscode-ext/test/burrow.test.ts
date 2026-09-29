@@ -666,6 +666,32 @@ describe('burrow service glue', () => {
     await waitFor(() => !store.secrets.has(ONE_TIME_SERVING_KEY));
   });
 
+  it('clears its own mark when the window goes away while serving, and never another window’s', async () => {
+    // Disposal ends the connection without a final event, so the mark is the
+    // extension's to clear.
+    stubRendezvous();
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    const activation = mod.initBurrow(context);
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
+    await waitFor(() => store.secrets.has(ONE_TIME_SERVING_KEY));
+    activation.dispose();
+    await waitFor(() => !store.secrets.has(ONE_TIME_SERVING_KEY));
+
+    // A window that never served leaves the broker's mark alone.
+    const other = await freshBurrow();
+    other.configureBurrow(fakeDeps().deps());
+    const second = fakeContext();
+    const otherActivation = other.initBurrow(second.context);
+    await tick();
+    second.store.secrets.set(ONE_TIME_SERVING_KEY, '1');
+    otherActivation.dispose();
+    await tick();
+    expect(second.store.secrets.get(ONE_TIME_SERVING_KEY)).toBe('1');
+  });
+
   it('joins the peer net when another window’s one-time connection starts serving', async () => {
     // Un-enrolled, this window never contended, so the marker is the only thing
     // that brings its terminals into the directory the phone sees.
