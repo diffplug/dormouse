@@ -446,7 +446,20 @@ test("rate-limit keys", () => {
   expect(rateLimitKey("2001:0DB8:0001:0002::6")).toBe("2001:db8:1:2::/64");
   expect(rateLimitKey("2001:db8::1")).toBe("2001:db8:0:0::/64");
   expect(rateLimitKey("::1")).toBe("0:0:0:0::/64");
-  expect(rateLimitKey("::ffff:203.0.113.9")).toBe("0:0:0:0::/64");
+  // An IPv4-mapped address is its IPv4 client, however it is spelled, never
+  // the one all-zero /64 every such client would share.
+  for (const mapped of [
+    "::ffff:203.0.113.9",
+    "::FFFF:203.0.113.9",
+    "0:0:0:0:0:ffff:203.0.113.9",
+    "0000:0000:0000:0000:0000:ffff:cb00:7109",
+    "::ffff:cb00:7109",
+  ])
+    expect(rateLimitKey(mapped), mapped).toBe("203.0.113.9");
+  expect(rateLimitKey("::ffff:198.51.100.7")).toBe("198.51.100.7");
+  // Only the mapped prefix: another address with a dotted tail keeps its /64.
+  expect(rateLimitKey("2001:db8:1:2::203.0.113.9")).toBe("2001:db8:1:2::/64");
+  expect(rateLimitKey("::203.0.113.9")).toBe("0:0:0:0::/64");
 });
 
 test("the preview Worker serves the room, and the deployment smoke passes against it", async () => {

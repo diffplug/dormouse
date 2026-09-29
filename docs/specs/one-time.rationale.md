@@ -24,7 +24,11 @@ client can forge either header; what authorizes a session is the Noise
 handshake against the link's one-use key and the laptop's confirmation.
 
 **Why IPv6 is limited by its /64.** A single subscriber commonly holds a whole
-/64, so a per-address key would give one client 2^64 fresh limits.
+/64, so a per-address key would give one client 2^64 fresh limits. An
+IPv4-mapped address names one IPv4 client, and its /64 is all zeros: keyed by
+that, every such client in the world would share one limit. Only the mapped
+prefix is unwrapped, since keying any address with a dotted tail by its last 32
+bits would give a /64's holder 2^32 fresh limits.
 
 **Why a refusal is accepted outside hibernation.** Measured in workerd
 1.20260908.1 under Miniflare, 2026-09-28: when an object closes a hibernatable

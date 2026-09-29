@@ -87,31 +87,54 @@ async function allowed(c: OneTimeContext, limit: RateLimit) {
 /**
  * The per-client key both limits count under: the connecting IPv4 address, or
  * the /64 of an IPv6 one, since a single subscriber commonly holds a whole /64.
+ * An IPv4-mapped IPv6 address (`::ffff:0:0/96`), however it is spelled, is its
+ * IPv4 client, or every such client would share one all-zero /64.
  */
 export function rateLimitKey(ip: string | null): string {
   if (!ip) return "local";
   if (!ip.includes(":")) return ip;
-  const [head, tail] = ip.toLowerCase().split("::");
-  const split = (part?: string) => (part ? part.split(":") : []);
-  // An embedded IPv4 tail fills two groups.
-  const width = (groups: string[]) =>
-    groups.reduce((n, group) => n + (group.includes(".") ? 2 : 1), 0);
+  const groups = ipv6Groups(ip.toLowerCase());
+  if (
+    groups.length === 8 &&
+    groups.slice(0, 6).join(":") === "0:0:0:0:0:ffff" &&
+    groups.slice(6).every(isHexGroup)
+  ) {
+    const [high, low] = groups.slice(6).map((group) => parseInt(group, 16));
+    return [high >> 8, high & 0xff, low >> 8, low & 0xff].join(".");
+  }
+  return `${groups.slice(0, 4).join(":")}::/64`;
+}
+
+function isHexGroup(group: string): boolean {
+  return /^[0-9a-f]{1,4}$/.test(group);
+}
+
+/**
+ * An IPv6 address's groups with `::` expanded, each hex group without leading
+ * zeros; an embedded dotted IPv4 tail becomes the last two groups. A group that
+ * is neither is kept as it is.
+ */
+function ipv6Groups(ip: string): string[] {
+  const split = (part?: string) =>
+    (part ? part.split(":") : []).flatMap((group) => {
+      if (isHexGroup(group)) return [parseInt(group, 16).toString(16)];
+      const octets = group.split(".");
+      const dotted =
+        octets.length === 4 &&
+        octets.every((octet) => /^\d{1,3}$/.test(octet) && +octet <= 255);
+      if (!dotted) return [group];
+      const [a, b, c, d] = octets.map(Number);
+      return [((a << 8) | b).toString(16), ((c << 8) | d).toString(16)];
+    });
+  const [head, tail] = ip.split("::");
   const left = split(head);
+  if (tail === undefined) return left;
   const right = split(tail);
-  const groups =
-    tail === undefined
-      ? left
-      : [
-          ...left,
-          ...Array<string>(Math.max(0, 8 - width(left) - width(right))).fill("0"),
-          ...right,
-        ];
-  const prefix = groups
-    .slice(0, 4)
-    .map((group) =>
-      /^[0-9a-f]{1,4}$/.test(group) ? parseInt(group, 16).toString(16) : group,
-    );
-  return `${prefix.join(":")}::/64`;
+  return [
+    ...left,
+    ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill("0"),
+    ...right,
+  ];
 }
 
 /**

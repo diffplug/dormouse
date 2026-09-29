@@ -254,9 +254,10 @@ string verbatim (rationale).
   mints each room id from 16 random bytes and hands the room a fresh request
   carrying only the upgrade and the room id, never the caller's headers.
 - **The `Origin` rules are abuse control, never authorization** (rationale).
-- **Both limits key on `cf-connecting-ip`**, an IPv6 address by its /64 and a
-  missing one as `local` (rationale); `hosted/wrangler.jsonc` sets 10 mints and
-  30 joins per 60 seconds.
+- **Both limits key on `cf-connecting-ip`**: an IPv6 address by its /64, an
+  IPv4-mapped one (`::ffff:0:0/96`, however spelled) by its IPv4, and a missing
+  one as `local` (rationale); `hosted/wrangler.jsonc` sets 10 mints and 30 joins
+  per 60 seconds.
 - **The room's state is the Burrow socket's hibernation attachment** —
   `expiresAt`, `joined`, and a count of every frame received — never memory, so
   a hibernated room keeps its join and its count. `ONE_TIME_PING` is answered by
