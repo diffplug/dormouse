@@ -16,6 +16,8 @@ import {
   type ScreenSnapshot,
 } from './agent-browser-screen';
 import { setDevServerResolution } from './agent-browser-ports';
+import { applyTerminalSemanticEvents, removeTerminalPaneState, setTerminalUserTitle } from '../../lib/terminal-state-store';
+import * as terminalState from '../../lib/terminal-state';
 import {
   ModeContext,
   WorkspaceActiveContext,
@@ -25,8 +27,10 @@ import {
   ZoomedIdContext,
   type WallActions,
 } from './wall-context';
-import { registerStubScreen, STUB_CHROME, STUB_SCREEN, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
+import { doubleClick, registerStubScreen, STUB_CHROME, STUB_SCREEN, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
+import { commitPreviewTransition, resetPreviewTransitions } from '../../lib/preview-transition-store';
+import { beginSlotSwitch } from './preview-transition';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -63,6 +67,7 @@ afterEach(() => {
   container.remove();
   vi.unstubAllGlobals();
   resetToolDirty();
+  resetPreviewTransitions();
   vi.restoreAllMocks();
 });
 
@@ -105,6 +110,168 @@ function openPopup() {
   act(() => overflowTrigger().click());
   expect(popup()).not.toBeNull();
 }
+
+describe('SurfacePaneHeader — preview slot', () => {
+  it('italicizes a serving slot\'s name and address, named Preview, as its only mark at every width', () => {
+    const id = 'preview-tool-header';
+    const registration = register(id);
+    // A serving Tool's name is the dev-server chip for its own port.
+    setDevServerResolution(5173, { paneId: id, fallbackTitle: 'README.md' });
+    try {
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions(), { tool: true });
+      for (const width of [620, 400, 200]) {
+        act(() => resizeHeader(width));
+        const address = container.querySelector<HTMLElement>('[role="button"].italic');
+        expect(address?.title).toMatch(/^Preview — /);
+        expect(container.querySelector('button[aria-label^="Focus README.md"] .italic')?.textContent).toBe('README.md');
+        expect(container.textContent).not.toContain('Preview');
+      }
+      act(() => resizeHeader(OVERFLOW_PX));
+      openPopup();
+      expect(inPopup('[role="button"].italic')?.title).toMatch(/^Preview — /);
+      expect(popup()!.textContent).not.toContain('Preview');
+    } finally {
+      registration.dispose();
+      setDevServerResolution(5173, null);
+    }
+  });
+
+  it('keeps a serving slot on a double-click of its chip, address, or empty header, never of a control or an open URL editor', () => {
+    const id = 'keep-tool-header';
+    const registration = register(id);
+    setDevServerResolution(5173, { paneId: id, fallbackTitle: 'README.md' });
+    try {
+      const onPinPreview = vi.fn();
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
+      const address = () => container.querySelector<HTMLElement>('[role="button"].italic')!;
+      const urlInput = () => container.querySelector<HTMLInputElement>(`[data-url-input-for="${id}"]`);
+      // The editor replaces the chip while it is open.
+      const chip = () => container.querySelector<HTMLElement>('button[aria-label^="Focus README.md"]')!;
+      // Display, navigation, splits, pane actions, and the Terminal Context button.
+      const controls = [...container.querySelectorAll('button')].filter(button => button !== chip());
+      expect(controls.length).toBeGreaterThan(5);
+      for (const control of controls) doubleClick(control);
+      // Inside an editor already open, a double-click selects a word.
+      act(() => address().click());
+      doubleClick(urlInput()!);
+      expect(urlInput()).not.toBeNull();
+      expect(onPinPreview).not.toHaveBeenCalled();
+      act(() => urlInput()!.blur());
+
+      // The address's first click opens the editor under the second.
+      doubleClick(address(), () => urlInput()!);
+      expect(onPinPreview).toHaveBeenCalledExactlyOnceWith(id);
+      expect(urlInput()).toBeNull();
+      doubleClick(chip());
+      doubleClick(address().closest('.cursor-grab')!);
+      expect(onPinPreview).toHaveBeenCalledTimes(3);
+    } finally {
+      registration.dispose();
+      setDevServerResolution(5173, null);
+    }
+  });
+
+  it('keeps nothing on a double-click inside the collapsed header\'s popover', () => {
+    const id = 'keep-popover-header';
+    const registration = register(id);
+    try {
+      const onPinPreview = vi.fn();
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
+      act(() => resizeHeader(OVERFLOW_PX));
+      openPopup();
+      doubleClick(popup()!);
+      doubleClick(inPopup('[role="button"].italic')!, () => inPopup(`[data-url-input-for="${id}"]`)!);
+      expect(onPinPreview).not.toHaveBeenCalled();
+    } finally {
+      registration.dispose();
+    }
+  });
+
+  it('marks a serving slot whose browser has not registered yet', () => {
+    const id = 'unregistered-preview-header';
+    renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions(), { tool: true });
+    expect(container.querySelector('span.italic')?.getAttribute('title')).toBe('Preview');
+    expect(container.textContent).not.toContain('Preview');
+  });
+
+  it('holds the chip and address through a switch, naming the new target once it commits', () => {
+    const id = 'switching-slot-header';
+    const serving = { surfaceType: 'tool', toolPreview: true, url: CHROME.url, renderMode: 'iframe' };
+    let registration = register(id);
+    setDevServerResolution(5173, { paneId: id, fallbackTitle: 'a.md' });
+    try {
+      renderHeader({ ...headerProps(id, 'viewer'), params: serving }, stubActions(), { tool: true });
+      const chip = () => container.querySelector<HTMLButtonElement>('button[aria-label$="serves this localhost port"]');
+      const address = () => container.querySelector<HTMLElement>('[role="button"].italic');
+      const shown = chip();
+      expect(shown?.textContent).toBe('a.md:5173');
+      let token!: number;
+      act(() => { token = beginSlotSwitch(id, () => serving)!; });
+      // Retired: the browser re-registers empty, and the slot has no URL.
+      act(() => {
+        registration.dispose();
+        registration = register(id, { url: '', displayUrl: '', title: null, key: null });
+      });
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true } }, stubActions(), { tool: true });
+      expect(chip()).toBe(shown);
+      expect(chip()?.textContent).toBe('a.md:5173');
+      expect(address()?.textContent).toBe('/app');
+      expect(address()?.title).toBe(`Preview — ${CHROME.title}`);
+      act(() => { commitPreviewTransition(id, token, { label: 'b.md', arm: () => () => {} }); });
+      expect(chip()).toBe(shown);
+      expect(chip()?.textContent).toBe('b.md:5173');
+      expect(address()?.textContent).toBe('/app');
+      act(() => resetPreviewTransitions());
+      expect(chip()).toBeNull();
+    } finally {
+      registration.dispose();
+      setDevServerResolution(5173, null);
+    }
+  });
+
+  it('holds a terminal face\'s label through a switch, then names the new target', () => {
+    const id = 'switching-terminal-header';
+    const params = { surfaceType: 'tool', toolPreview: true };
+    act(() => applyTerminalSemanticEvents(id, [
+      { type: 'commandLine', commandLine: 'less a.md' }, { type: 'commandStart', source: 'osc633_boundaries' },
+    ]));
+    try {
+      renderHeader({ ...headerProps(id, 'viewer'), params }, stubActions(), { tool: true });
+      const label = () => container.querySelector(`[data-pane-title-for="${id}"]`)?.textContent;
+      const shown = label();
+      expect(shown).toContain('less a.md');
+      let token!: number;
+      act(() => { token = beginSlotSwitch(id, () => params)!; });
+      act(() => applyTerminalSemanticEvents(id, [{ type: 'commandFinish', exitCode: 130 }, { type: 'promptStart' }]));
+      expect(label()).toBe(shown);
+      act(() => { commitPreviewTransition(id, token, { label: 'b.md', arm: () => () => {} }); });
+      expect(label()).toBe('b.md');
+      act(() => resetPreviewTransitions());
+      // Derived live again: neither the held label nor the committed name.
+      expect([shown, 'b.md']).not.toContain(label());
+    } finally {
+      removeTerminalPaneState(id);
+    }
+  });
+
+  it('marks nothing on a pinned Tool, and a double-click keeps nothing', () => {
+    const id = 'pinned-tool-header';
+    const registration = register(id);
+    setDevServerResolution(5173, { paneId: id, fallbackTitle: 'README.md' });
+    try {
+      const onPinPreview = vi.fn();
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
+      const chip = container.querySelector<HTMLElement>('button[aria-label^="Focus README.md"]')!;
+      expect(chip).not.toBeNull();
+      expect(container.querySelector('.italic')).toBeNull();
+      doubleClick(chip);
+      expect(onPinPreview).not.toHaveBeenCalled();
+    } finally {
+      registration.dispose();
+      setDevServerResolution(5173, null);
+    }
+  });
+});
 
 describe('SurfacePaneHeader — browser chrome', () => {
   it.each([
@@ -465,7 +632,7 @@ describe('SurfacePaneHeader — browser chrome', () => {
 
   it('renders the dev-server chip and focuses the serving pane on click', () => {
     const reg = register('pane-dev');
-    setDevServerResolution(5173, { paneId: 'term-9', label: 'pnpm dev' });
+    setDevServerResolution(5173, { paneId: 'term-9', fallbackTitle: 'pnpm dev' });
     const onFocusPane = vi.fn();
     renderHeader(headerProps('pane-dev', 'x'), stubActions({ onFocusPane }));
 
@@ -484,6 +651,45 @@ describe('SurfacePaneHeader — browser chrome', () => {
     expect(onFocusPane).toHaveBeenCalledWith('term-9');
 
     reg.dispose();
+  });
+
+  it('labels the chip from the serving pane\'s live state, so a retitle shows at once', () => {
+    const reg = register('pane-live');
+    setDevServerResolution(5173, { paneId: 'term-live', fallbackTitle: 'stored' });
+    try {
+      renderHeader(headerProps('pane-live', 'x'), stubActions());
+      const chipLabel = () => container.querySelector('button[aria-label$="serves this localhost port"]')?.getAttribute('aria-label');
+      expect(chipLabel()).toBe('Focus stored — serves this localhost port');
+      act(() => { setTerminalUserTitle('term-live', 'first.md'); });
+      expect(chipLabel()).toBe('Focus first.md — serves this localhost port');
+      // Another pane's state change leaves the label underived.
+      const derive = vi.spyOn(terminalState, 'deriveSurfaceLabel');
+      act(() => { setTerminalUserTitle('term-other', 'elsewhere'); });
+      expect(derive).not.toHaveBeenCalled();
+      act(() => { setTerminalUserTitle('term-live', 'second.md'); });
+      expect(chipLabel()).toBe('Focus second.md — serves this localhost port');
+    } finally {
+      reg.dispose();
+      setDevServerResolution(5173, null);
+      removeTerminalPaneState('term-live');
+      removeTerminalPaneState('term-other');
+    }
+  });
+
+  it('lets the URL give up all its width before the chip truncates', () => {
+    // jsdom has no layout: the URL grows from a zero basis up to its text, and
+    // the space it leaves goes to an auto margin rather than a flexible spacer.
+    const reg = register('pane-width');
+    setDevServerResolution(5173, { paneId: 'term-9', fallbackTitle: 'pnpm dev' });
+    try {
+      renderHeader(headerProps('pane-width', 'x'), stubActions());
+      const url = container.querySelector<HTMLElement>('span[title="Vite + React"]')!;
+      expect([...url.classList]).toEqual(expect.arrayContaining(['basis-0', 'grow', 'max-w-max', 'min-w-0']));
+      expect(url.nextElementSibling?.className).toBe('ml-auto');
+    } finally {
+      reg.dispose();
+      setDevServerResolution(5173, null);
+    }
   });
 
   it('exposes back/forward/reload nav controls', () => {

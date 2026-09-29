@@ -198,6 +198,16 @@ describe('view attachment', () => {
     expect(second.updateParameters).toHaveBeenCalledWith({ url: 'https://example.com/' });
     expect(first.updateParameters).not.toHaveBeenCalled();
   });
+
+  it('lends the attached view\'s frame canvas, which a preview slot switch copies', async () => {
+    const controller = withPort('id', { session: 'sess' }, 4321);
+    expect(controller.frameCanvas()).toBeNull();
+    const sink = makeSink();
+    const handle = controller.attachView(sink);
+    expect(controller.frameCanvas()).toBe(sink.canvas);
+    handle.detach();
+    expect(controller.frameCanvas()).toBeNull();
+  });
 });
 
 describe('painting', () => {

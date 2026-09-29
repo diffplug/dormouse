@@ -79,7 +79,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
           ...(pane.tool?.argv ? { toolArgv: pane.tool.argv } : {}),
           toolScope: pane.tool?.scope, toolName: pane.tool?.name, toolRender: pane.tool?.render ?? 'iframe',
           toolPort: pane.tool?.port ?? 'announced', toolKey: pane.tool?.key,
-          browserViewport: pane.tool?.viewport },
+          browserViewport: pane.tool?.viewport, toolPreview: pane.tool?.preview, toolTarget: pane.tool?.target },
       } : { component: 'terminal', tabComponent: 'terminal', title: pane.title }])),
     };
   }

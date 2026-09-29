@@ -396,6 +396,29 @@ it('uses the Tool primary terminal without creating a helper or offering helper 
   openHelper.mockRestore(); terminal.mockRestore(); focusSurface.mockRestore();
 });
 
+it('offers Keep open only for a preview slot, as a focusable button that keeps focus in the context', async () => {
+  props = { ...props, terminalRole: 'tool', status: 'running', command: 'view a.md' };
+  render();
+  expect(button('Keep open')).toBeNull();
+  props.onKeepPreview = vi.fn();
+  render();
+  const keep = button('Keep open');
+  expect(keep.textContent).toBe('Keep open');
+  expect(keep.disabled).toBe(false);
+  expect(keep.tabIndex).toBe(0);
+  act(() => keep.focus());
+  expect(document.activeElement).toBe(keep);
+  await click('Keep open');
+  expect(props.onKeepPreview).toHaveBeenCalledOnce();
+  // The action leaves with the mark; Escape still closes from the context.
+  props.onKeepPreview = undefined;
+  render();
+  expect(button('Keep open')).toBeNull();
+  expect(document.activeElement?.hasAttribute('data-terminal-context')).toBe(true);
+  act(() => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(props.onClose).toHaveBeenCalledOnce();
+});
+
 it('always shows context details alongside the helper', () => {
   render();
   expect(button('Terminal context details')).toBeNull();

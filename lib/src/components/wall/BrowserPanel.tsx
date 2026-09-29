@@ -42,7 +42,10 @@ export type BrowserPanelParams = {
   contextPortKey?: string;
 };
 
-export function BrowserPanel(props: PaneProps) {
+export function BrowserPanel(props: PaneProps & {
+  /** Once it has painted its first document or frame. */
+  onReady?: () => void;
+}) {
   const renderMode = resolveRenderMode(props.params);
   return (
     <div className="relative h-full w-full">

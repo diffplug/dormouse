@@ -87,6 +87,8 @@ export interface Surface {
   /** At least one `dor await` is parked on this Surface. Never persisted — a
    *  wait cannot outlive the process blocking on it. */
   awaited: boolean;
+  /** The Workspace's preview slot (`dor open --preview`); omitted otherwise. */
+  preview?: boolean;
   /** Listening ports opened by this terminal Surface. Present only when the
    *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
   ports?: SurfacePort[];
@@ -268,7 +270,7 @@ export interface EnsureSurfaceResponse {
  * authorized it (`docs/specs/dor-tool.md` -> Trust).
  */
 export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
-  /** Local-file dispatch; never eligible for caller takeover. */
+  /** Local-file dispatch (`dor open`). */
   file?: string;
   tool?: string;
   /** Registered tool name (`dor tool <name>`). */
@@ -284,6 +286,8 @@ export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
   cwd: string;
   /** Surface to split when creating. */
   surface?: string;
+  /** Show `file` in the Workspace's preview slot (`dor open --preview`). */
+  preview?: boolean;
 }
 
 export interface ToolSurfaceResponse {
@@ -295,8 +299,14 @@ export interface ToolSurfaceResponse {
    * for the same reason `takeover` is. `takeover` is the calling pane itself
    * becoming the tool, answered before the command is typed — `dor` has to exit
    * before its own shell is free to run it.
+   *
+   * `retargeted` is the preview slot running the newly resolved Tool in place,
+   * answered once the command is typed; the slot re-running the Tool and
+   * target it already had, after its command exited, is `adopted`.
+   * `superseded` is a preview a newer one replaced before it ran; the handle is
+   * the slot's.
    */
-  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover';
+  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover' | 'retargeted' | 'superseded';
   surfaceId: string;
   surfaceRef: string;
   /** The rendered command, as typed into the shell. */
@@ -308,6 +318,10 @@ export interface ToolSurfaceResponse {
   /** Non-fatal `dormouse.yml` lint output, printed to stderr by the CLI. */
   warnings?: string[];
 }
+
+/** The error a preview answers with when a newer one replaced it while no
+ *  slot exists: superseded, as the `superseded` status is, not failed. */
+export const PREVIEW_SUPERSEDED_ERROR = 'superseded by a newer preview';
 
 /** `dor tool --list`: the Tools `dor tool <name>` would resolve from `cwd`. */
 export interface ToolListRequest {

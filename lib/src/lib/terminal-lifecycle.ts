@@ -1,5 +1,6 @@
 import { clearToolAnnounce } from './tool-announce-store';
 import { clearToolDirty } from './tool-dirty-store';
+import { clearPreviewTransition } from './preview-transition-store';
 import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -14,7 +15,7 @@ import type { HelperIdentity } from './terminal-context-types';
 import type { PersistedAlertState } from './session-types';
 import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
-import { requestExternalLinkConfirmation } from './external-link-confirmation';
+import { activateTerminalLink } from './terminal-link-activation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
 import { xtermVtExtensions } from './xterm-options';
@@ -116,9 +117,10 @@ function seedProcessCwdAfterSpawn(id: string): void {
 
 // Reconstructs the visible text from an OSC 8 hyperlink's buffer range. xterm
 // passes the URL as the second arg to linkHandler.activate but not the rendered
-// link text; we read it ourselves so the dialog can tell the user whether the
-// label they clicked matched the URL. Wrapped lines concatenate without a
-// separator (the wrap is visual, not a semantic break).
+// link text; we read it ourselves so a local file link can be checked against
+// the path it names, and the dialog can tell the user whether the label they
+// clicked matched the URL. Wrapped lines concatenate without a separator (the
+// wrap is visual, not a semantic break).
 function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): string {
   try {
     const buffer = terminal.buffer.active;
@@ -136,7 +138,7 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
-function createXtermHost(grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
+function createXtermHost(id: string, grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
@@ -154,7 +156,7 @@ function createXtermHost(grid?: TerminalGrid): { terminal: Terminal; fit: FitAdd
       activate: (event, uri, range) => {
         event.preventDefault();
         // Closure capture: `terminal` is defined by the time a click fires.
-        requestExternalLinkConfirmation(uri, readDisplayTextFromBuffer(terminal, range));
+        activateTerminalLink(id, event, uri, readDisplayTextFromBuffer(terminal, range));
       },
       allowNonHttpProtocols: true,
     },
@@ -294,7 +296,7 @@ function wireXtermHandlers(
 interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid }
 
 function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
-  const { terminal, fit, serialize, element } = createXtermHost(options.grid);
+  const { terminal, fit, serialize, element } = createXtermHost(id, options.grid);
   const selectionBaselineRef = { current: null as string | null };
   // Every module that finalizes a selection arms the render handler through
   // this one setter at drag end.
@@ -639,6 +641,7 @@ function teardownSession(id: string, { kill }: { kill: boolean }): void {
   removeMouseSelectionState(id);
   clearToolAnnounce(id);
   clearToolDirty(id);
+  clearPreviewTransition(id);
   clearTerminalActivity(id);
 }
 
@@ -707,6 +710,12 @@ export function getTerminalOverlayDims(id: string): TerminalOverlayDims | null {
 
 export function isUntouched(id: string): boolean {
   return registry.get(id)?.untouched ?? false;
+}
+
+/** Counts the human input a Session has received (`markSessionTouched`), so a
+ *  caller can tell whether the user touched it since an earlier read. */
+export function getSessionInputVersion(id: string): number {
+  return registry.get(id)?.inputVersion ?? 0;
 }
 
 /**

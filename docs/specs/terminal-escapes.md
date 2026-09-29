@@ -34,7 +34,7 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boun
 
 ### `pty:data` strip semantics
 
-**Supported semantic sequences are consumed and never re-emitted** — empty or unparseable payloads, unrecognized `OSC 1337` subcommands and `OSC 50` / `OSC 52` included. **`OSC 8` and the recognized ImageAddon `OSC 1337` forms are the exceptions**: they stay in `pty:data` so xterm.js owns hyperlink regions and inline graphics. Dormouse supplies only the hyperlink activation-confirmation handler. Every other OSC family passes through unchanged, so xterm.js handles standard behavior Dormouse does not model.
+**Supported semantic sequences are consumed and never re-emitted** — empty or unparseable payloads, unrecognized `OSC 1337` subcommands and `OSC 50` / `OSC 52` included. **`OSC 8` and the recognized ImageAddon `OSC 1337` forms are the exceptions**: they stay in `pty:data` so xterm.js owns hyperlink regions and inline graphics. Dormouse supplies only the hyperlink activation handler. Every other OSC family passes through unchanged, so xterm.js handles standard behavior Dormouse does not model.
 
 **`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. The webview receives them apart: `pty:data` (the stripped output; feeds xterm.js), `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`), and `terminal:toolEvents` (OSC 367, [dor-tool.md](dor-tool.md#osc-367)). **Notification-derived state never travels as `pty:data`**: the parse site feeds its own process's `AlertManager`.
 
@@ -50,7 +50,7 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `OSC 0 ; <title> ST` | Window/icon title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 2 ; <title> ST` | Window title | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 7 ; file://host/path ST` | CWD (xterm-style URI) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
-| `OSC 8 ; <params> ; <URI> ST ... OSC 8 ; ; ST` | Explicit hyperlink region; passed through to xterm.js, opened only after a confirmation dialog. | This spec |
+| `OSC 8 ; <params> ; <URI> ST ... OSC 8 ; ; ST` | Explicit hyperlink region; passed through to xterm.js. A local file link naming its target previews; any other opens only after a confirmation dialog. | This spec |
 | `OSC 10 ; ? ST` / `OSC 11 ; ? ST` / `OSC 12 ; ? ST` | Foreground / background / cursor color **query**. Consumed and answered `OSC <code> ; rgb:RRRR/GGGG/BBBB ST` (8-bit channels doubled) from the active terminal theme (rationale). Only the `?` (report) form is intercepted; *set* requests pass through, and an unknown or unparseable theme falls the query through to xterm.js. Theme: read where the parser stands if it has a DOM, pushed up where it has none ([vscode.md](vscode.md#osc-color-query-answering), [standalone.md](standalone.md#burrow-service)). | This spec |
 | `OSC 9 ; <message> ST` | iTerm2 legacy notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 9 ; 4 ; <state> [; <progress>] ST` | iTerm2 progress | [alert.md](alert.md#terminal-reports) |
@@ -84,7 +84,7 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 
 Neither `params` nor the URI is parsed at the PTY boundary.
 
-**Activation never opens directly**: `terminal-lifecycle.ts` sets xterm.js's `linkHandler`, so every click routes to the confirmation dialog carrying the URI *and* the link's rendered display text, read from the buffer range xterm supplies. The dialog shows the full target and picks one of three states:
+**Activation never opens directly**: `terminal-lifecycle.ts` sets xterm.js's `linkHandler`, which reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews through `dor open --preview` on a click and pins on a double-click (`docs/specs/dor-tool.md` -> "Terminal links"). Every other click, and any preview that fails, routes to the confirmation dialog carrying the URI *and* the display text. The dialog shows the full target and picks one of three states:
 
 | State | Target | Dialog |
 |---|---|---|

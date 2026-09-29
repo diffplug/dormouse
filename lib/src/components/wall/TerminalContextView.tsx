@@ -1,5 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type ReactNode, type RefObject } from 'react';
-import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, PauseIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
+import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, PauseIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
 import { renderModeFor, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
@@ -76,6 +76,8 @@ export interface TerminalContextViewProps {
   onClose(): void; onCopyRef: Action; onCopyPath: Action; onExplore: Action;
   onWatch(): void; onTodo(): void; onPort(entry: PortUrlEntry, mode: PortMode): void | Promise<void>;
   onModify(command: string): Promise<void>; onReset: Action; onPromote: Action;
+  /** Present only while the source is a preview slot: keep it open. */
+  onKeepPreview?(): void;
   initialDetail?: Detail | null;
 }
 
@@ -438,7 +440,11 @@ export function TerminalContextView(p: TerminalContextViewProps) {
           <div className="flex min-w-0 items-center gap-2 text-muted">{status.icon}<span className="truncate" title={statusLabel}>{statusLabel}</span>
             {!isTool && (status.reset ? <ContextAction label="Reset helper terminal" onClick={() => setDetail('reset')}><ArrowCounterClockwiseIcon size={13} />Reset…</ContextAction> : <ContextAction label="Modify autorun command" onClick={() => { setCommand(p.defaultCommand ?? p.command); setDetail('modify'); }}><SlidersHorizontalIcon size={15} />Modify</ContextAction>)}
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2">{!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}</div>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {/* The action leaves with the mark, so focus stays in the context for Escape and Tab. */}
+            {p.onKeepPreview && <ContextAction label="Keep open" onClick={() => { surface.current?.focus({ preventScroll: true }); p.onKeepPreview?.(); }}><PushPinIcon size={15} />Keep open</ContextAction>}
+            {!isTool && <ContextAction label="Move this terminal into a new pane" busy={busy} onClick={() => void submit(p.onPromote)}><ArrowLineUpIcon size={15} />Promote</ContextAction>}
+          </div>
         </div>
         {p.mismatch && <ContextDiagnostic className="mx-3 mb-2 flex max-h-[40%] min-h-0 shrink items-start gap-2 overflow-auto border-l-4 border-error bg-error/10 px-3 py-2"><WarningIcon size={18} weight="fill" className="shrink-0 text-error" /><div className="min-w-0 break-words"><div className="font-semibold">Helper directory differs from parent</div><div className="mt-1 grid grid-cols-[4rem_minmax(0,1fr)] gap-x-2"><span className="text-muted">Helper</span><strong>{p.helperCwd}</strong><span className="text-muted">Parent</span><span>{p.cwd}</span></div></div></ContextDiagnostic>}
         {(p.warning || (!detail && error)) && <ContextDiagnostic className="mx-3 mb-2 max-h-[40%] min-h-0 shrink overflow-auto break-words border-l-4 border-error bg-error/10 px-3 py-2">{p.warning || error}</ContextDiagnostic>}

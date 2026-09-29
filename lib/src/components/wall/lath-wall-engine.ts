@@ -30,6 +30,8 @@ import {
   lathLayoutFromStore,
 } from '../../lib/lath/persistence';
 import type { VisiblePane } from './wall-types';
+import { isToolParams } from './browser-surface';
+import { toolCommandFromParams } from '../../lib/session-save';
 import type { PersistedDoor } from '../../lib/session-types';
 
 /** Wall-clock reader for the animator (the single definition — LathHost imports it
@@ -97,6 +99,17 @@ export function browserLeafMeta(title: string, params: Record<string, unknown>):
  *  header follows whichever half is forward. */
 export function toolLeafMeta(title: string, params: Record<string, unknown>): LeafMeta {
   return { component: 'tool', tabComponent: 'tool', title, params };
+}
+
+/** The tool leaf a Surface becomes in place — a take-over, or a retarget to
+ *  another Tool. A rename the user made outlives it; the unnamed fallback, or
+ *  the previous Tool's default title, becomes `title`. */
+export function becomeToolMeta(meta: LeafMeta, title: string, params: Record<string, unknown>): LeafMeta {
+  const previous = meta.params;
+  const previousTitle = isToolParams(previous)
+    ? (typeof previous.toolName === 'string' ? previous.toolName : toolCommandFromParams(previous))
+    : null;
+  return toolLeafMeta(meta.title === UNNAMED_PANEL_TITLE || meta.title === previousTitle ? title : meta.title, params);
 }
 
 /**

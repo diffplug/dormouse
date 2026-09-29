@@ -43,6 +43,10 @@ export const DOOR_TAB_CLASS = clsx(
  *  (`docs/specs/layout.md` → "Workspace names"). */
 export const AUTO_NAME_CLASS = 'italic';
 
+/** A preview slot's label in its Pane header and Door, italic as an editor's
+ *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
+export const PREVIEW_LABEL_CLASS = 'italic';
+
 /** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
  *  reason about a tab's size without a rendered element (the cross-window tab
  *  drag). Tailwind needs the arbitrary values spelled literally above, so these
@@ -129,6 +133,10 @@ export const HEADER_PALETTE_TRANSITION_CLASS =
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
+
+// A header's bordered pill button in its own foreground: the TODO pill and the
+// preview slot's mark.
+export const HEADER_PILL_CLASS = `shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`;
 
 // Letter-spacing for the alarm overlay's `SPEAKING` / `SPOKEN` labels — wider
 // tracking keeps the small all-caps label legible over the wash.

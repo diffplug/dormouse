@@ -37,7 +37,7 @@ interface ToolFlags {
 
 // A named tool waits on the same shell-integration handshake `dor ensure` does,
 // plus a `dormouse.yml` read; both are bounded well under this.
-const TOOL_TIMEOUT_MS = 20_000;
+export const TOOL_TIMEOUT_MS = 20_000;
 
 // Keep in sync with `parameters.flags`.
 const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
@@ -226,7 +226,8 @@ export async function dispatchToolSurface(
     writeStdout(context, renderToolResponse(response, json));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    // Host errors can echo paths and repo text.
+    return new Error(printable(errorMessage(error)));
   }
 }
 
@@ -255,7 +256,7 @@ async function listTools(context: DorCommandContext, flags: ToolFlags): Promise<
     writeStdout(context, flags.json === true ? renderPrintableJson(shown) : renderToolList(listing, flags.global === true));
     return undefined;
   } catch (error) {
-    return new Error(errorMessage(error));
+    return new Error(printable(errorMessage(error)));
   }
 }
 

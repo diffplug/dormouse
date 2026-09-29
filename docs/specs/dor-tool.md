@@ -44,7 +44,7 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 | `port` | `announced` by default, or `auto`; [Serving](#serving) owns selection |
 | `prespawn_dedupe` | Optional scalar or list of literal key elements with substitutions |
 
-- **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file input. (rationale)
+- **Must reject unknown `prespawn_*` fields and unknown substitutions**; unknown ordinary fields produce warnings. `$PROJECT_ROOT` is the declaring directory, `$CWD` the caller's resolved directory, and `$TARGET` the canonical local file or directory input. (rationale)
 - **Must deliver the parsed file's warnings on the untrusted answer and on a built-in open**, not only on an already-trusted lookup — those are the paths a Tool's first run takes.
 - **Must preserve scalar `prespawn_dedupe` as a one-element literal list**, never interpret it as a command to execute. Reserve separate fields for future computed keys. (rationale)
 - **Must reject an empty `prespawn_dedupe` list, and `$TARGET` in a `prespawn_dedupe` whose `run` is a shell-command string** — a string `run` takes no inputs, so there is no target to key on.
@@ -53,9 +53,9 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must pass named-tool inputs as argument values, never substitute them into a shell-command string.** String `run` accepts no arguments and remains literal shell syntax. List `run` expands `$TARGET`, `$CWD`, and `$PROJECT_ROOT` within elements; a whole `$ARGS` element expands all input arguments. Without `$ARGS` or `$TARGET` in the list, append the inputs. **Must quote argv for the destination Session's shell**, using the current default only for new Sessions; takeover stores that quoted command for reruns.
 
-**Must require exactly one existing regular local file when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. Reject URLs, directories, and missing files. Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
+**Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot), converting it with the host platform's `fileURLToPath`; reject other URLs, missing paths, and every other file kind (fifo, socket, device). Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
-Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` / `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-input.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 **Must resolve a Tool's initial viewport host-side with its declaration, including after approval.** Iframe Tools accept only `pane-sync`; automated Tools accept a preset or inline dimensions. **Must preserve live user/agent sizing when reusing a Tool**, rather than reapplying its declaration.
 
@@ -74,6 +74,7 @@ Source of truth: `toolViewport` in `lib/src/host/browser-config.ts`; `createTool
 - **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, arguments, and fresh intent; preserve its approval state and report `pending`.
 - **Must accept a short-lived keyed restart after observing its new completed command id**, matching the stored command and directory. A completion predating injection or belonging to another command does not prove restart.
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
+- A marked preview slot never matches ([Preview slot](#preview-slot)).
 
 Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/components/wall/use-dor-control.ts`; `namespacedToolKey` / `toolKeysEqual` in `lib/src/components/wall/browser-surface.ts`; `lib/src/components/Wall.test.tsx`.
 
@@ -107,11 +108,11 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 | Policy | Selection |
 | --- | --- |
 | Announced port present | Match that exact port in the scan; absent match frames nothing |
-| `port: announced`, no announced port | Frame nothing |
-| `port: auto`, no announced port | Wait for one unchanged scan tick; one port frames, several show a conflict, zero keeps waiting |
+| `port: announced`, no announced port | Frame nothing, without scanning |
+| `port: auto`, no announced port | Wait for one unchanged poll; one port frames, several show a conflict, zero keeps waiting |
 | Anonymous command | Uses `auto` |
 
-- **Must poll unbound Tools every 1.5 seconds while their command runs.** Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
+- **Must scan unbound Tools every 1.5 seconds while their command runs, and a Tool alone at once when its announced port or path changes**; that scan is never an autobind poll. Reset settle memory and retire browser resources when the observed command-run id changes, even when the command text is unchanged; an initial observation preserves an imported live binding. (rationale)
 - **Must let a changed announced port or path override a committed conflict or browser**, but only after a matching scan. An unchanged announcement never undoes URL-bar navigation. (rationale)
 - **Must stop ordinary port scans once a browser or conflict is committed.** An unannounced additional port appearing after settle is not detected.
 - **Must display the browser destination at once and leave the launch to the Surface's controller** (`docs/specs/dor-browser.md` → Browser Connection), in the session the Tool has or else its own `tool.<leafId>`, falling back to the embed. Block Workspace transfer until the session binds.
@@ -136,7 +137,7 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 | Re-run stored command | Same Surface may serve again |
 | Kill | Helper guard settles before PTY/browser teardown |
 
-**Must show the full terminal before serving and after command exit.** A serving Tool shows its browser, and Terminal Context reveals the same primary terminal (`docs/specs/terminal-context.md` → Tool context). Keep the browser mounted behind context, and keep the hidden terminal sized with `visibility` and `inert`, never `display: none`. Pending approval mounts neither capability.
+**Must show the full terminal before serving and after command exit**, except while a preview slot switch holds a browser ghost ([Switching the slot](#switching-the-slot)). A serving Tool shows its browser, and Terminal Context reveals the same primary terminal (`docs/specs/terminal-context.md` → Tool context). Keep the browser mounted behind context, and keep the hidden terminal sized with `visibility` and `inert`, never `display: none`. Pending approval mounts neither capability.
 
 **Must hide Tools in inactive Workspaces and minimized leaves without unmounting.**
 
@@ -156,13 +157,15 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 ## Opening local files
 
-**Must accept exactly one existing local regular file for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools).
+**Must accept exactly one existing local regular file or directory for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools); [Folders](#folders) owns directories.
 
-**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or `builtin:file`. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
+**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or the built-in handler of its kind. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
+
+**Must use a matching rule's optional `preview` handler for a `--preview` request**, validated as `tool` is, and its `tool` otherwise; an explicit `--tool` overrides both.
 
 **Must use the supplied CWD when canonicalization fails**, and never let matching change the Tool's run directory or `$CWD`. A miss names the user config path and suggests `--tool`. (rationale)
 
-**Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over).
+**Must pass the canonical path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over), and `--preview` follows [Preview slot](#preview-slot).
 
 **Must reject declared Tool names beginning with `builtin:` in either configuration scope.** Built-in handler names cannot be shadowed.
 
@@ -172,11 +175,77 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must run the built-in viewer as a Tool-owned `dor` process.** Text/source previews grant only their opened file and skip dependency inspection. (rationale) Oversized HTML and referenced CSS still stream without dependency inspection. **The grant contains at most 256 files** — the opened document and statically referenced relative HTML/CSS assets within its directory tree — and exceeding that bound fails the open without serving a partial grant. **Never expand the grant through root-relative, external, or dynamic references**; requests can read only granted paths.
 
+**Must title the built-in viewers' Session with the canonical target's basename via `OSC 2`**, controls stripped. (rationale)
+
 **Must require a user Tool for PDFs**, including files named `README.pdf`. (rationale)
 
 **Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
 
-Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `fileViewerFormat` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`, `dor/test/file-viewer.test.mjs`.
+Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `fileViewerFormat` / `viewerTitle` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`; `announceViewer` in `dor/src/viewer-server.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`, `dor/test/file-viewer.test.mjs`.
+
+## Folders
+
+**Must match a directory as its name suffixed with `.📁` (U+1F4C1)**, in the filename and both path forms. **A pattern ending in `.📁` matches only directories, and a directory matches only such patterns**, so a catch-all file rule never captures one (rationale). Dot-directories follow the dotfile rule: `*.📁` skips them and `.*.📁` names them.
+
+**Must open `builtin:folder` for a directory no rule matches.** **Never let `builtin:file` open a directory or `builtin:folder` a file**: a rule naming the other kind fails the configuration, and `--tool` fails the open, naming the handler that fits.
+
+A folder viewer is any Tool that selects on single-click and activates on double-click through the [Preview slot](#preview-slot) invocations. `builtin:folder`, the default, is a Tool-owned `dor` process, titled as in [Opening local files](#opening-local-files):
+
+- **Must list names and entry types only, loading one directory at a time, and never serve file contents** (rationale). Previews reach files only through the slot, so the one-file grant in [Opening local files](#opening-local-files) is unchanged. The listener's audited rules are `docs/specs/security-local.md` → Local-file viewer.
+- **Must list dotfiles.** Entries git ignores are listed by default, with a show/hide checkbox.
+- **Must cut a listing to its first 5,000 entries in display order**, directories first, from at most 100,000 names read.
+- **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which invokes `dor open --preview` or `dor open` over the control socket.
+- **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)
+
+Source of truth: `FOLDER_MATCH_SUFFIX` in `dor/src/file-viewer-format.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseOpenRules` in `lib/src/host/tool-registry.ts`; `startFolderViewer` / `runFolderViewer` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`. Tests: `folders` in `lib/src/host/tool-open.test.ts`, `folder rules and preview handlers` in `lib/src/host/tool-registry.test.ts`, `dor/test/folder-viewer.test.mjs`, `a folder in the slot` in `lib/src/components/wall/preview-slot.test.tsx`.
+
+## Preview slot
+
+**Must keep at most one preview slot per Workspace**: a Tool Surface whose params carry `toolPreview`, marked in its Pane header and Door (`docs/specs/layout.md` → Pane header) and tagged `[preview]` by `dor list`. Creating a slot pins every other marked Surface, a closing one included, so a refused close never leaves two. **Must resolve a preview through the user's ordered `open` list**, as `dor open` does, never through a faster built-in-only renderer (rationale). A Tool browsing files selects and activates them through two invocations:
+
+| Gesture | Invocation | Result |
+| --- | --- | --- |
+| Select | `dor open --preview <file>` | Show the file in the slot |
+| Activate | `dor open <file>` | Pin the slot when it shows that file; otherwise the ordinary open |
+
+A preview is answered by the first of:
+
+1. A pinned Tool matching the resolved key is revealed focus-neutrally: `existing`.
+2. A slot given the same Tool (scope, name, run) for the same target is revealed focus-neutrally, without restart: `existing`. When its command is not running, counting a run a superseded retarget interrupted, it is retargeted to that Tool again: `adopted`.
+3. A slot asked from its own Session is pinned, and a new slot is created, so the `dor` awaiting the answer is never interrupted.
+4. A slot is retargeted: `retargeted`.
+5. Otherwise a new slot is created: `created`.
+
+- **Must retarget in place**: interrupt the slot's command, wait up to 1s for its prompt, then type the new Tool's command quoted for the slot's shell, in the slot's directory. Retain the Session id, Surface ref, terminal, and a user rename; the new Tool may differ. Retire the old command's browser, announcements, and unsaved state at once ([Serving](#serving)); a Door slot reattaches focus-neutrally. **Must keep a slot still running after that 1s**: pin it untouched and place the launch as if there were no slot (rationale); slot Tools should exit on Ctrl+C (`less -K`, `glow`). **Must restore a slot pinned during the interrupt**, whatever becomes of the request: type its previous command again, then place the launch as if there were no slot.
+- **Must let the newest preview in a Workspace supersede older ones**: a preview not yet past its lookup, or still interrupting the slot, answers `superseded` with the slot's handle, or an error while there is no slot. Once its command is typed, a retarget holds the launch lock until the command is observed, as [Take-over](#take-over) does (rationale). **Must restore a run a superseded or cancelled retarget interrupted and nothing replaced**, once a Tool request ends with no preview left to come.
+- **Must type a kept or restored run's command again when its prompt comes after the 1s, within 15s of the interrupt**, watching off the launch queue so the queue waits only the 1s (rationale). **Never retype a Surface the user has typed into since the interrupt**, one a newer command or retarget has taken, or one going away with its Workspace; after the 15s, give up silently.
+- **Never let a preview take over its caller or become a Door.** A new slot splits focus-neutrally from `--surface` when given, else from the slot pinned last while it is a visible pane of the Workspace, else from the caller (rationale). `--preview` rejects `--fresh` and `--minimize`.
+- **Must exclude a marked slot from keyed dedupe.** It keeps its key, which counts once pinned, so pinning only clears the mark.
+- **Must pin at once when the slot's Tool reports unsaved changes** ([Unsaved changes](#unsaved-changes)); clean and unreported state never pin. A double-click on its Pane header, or Keep open in its terminal context, pins too (`docs/specs/layout.md` → Pane header). **Never pin on keyboard input or focus** (rationale).
+- **Must pin without restarting when `dor open` resolves the slot's running Tool and target**, revealing it as a keyed match is and reporting `existing`; a slot not running is re-run as in rule 2, then pinned. A pinned Tool with the resolved key is revealed first, leaving the slot untouched. A different Tool for that target retargets the slot, then pins it. From the slot's own Session, `dor open` pins it and continues as an ordinary open; `--fresh` bypasses the slot.
+
+Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `surface.tool` / `PREVIEW_INTERRUPT_GRACE_MS` / `restoreOnLatePrompt` in `lib/src/components/wall/use-dor-control.ts`; `decidePreviewSlot` / `retargetToolLeaf` / `usePreviewSlotPin` in `lib/src/components/wall/preview-slot.ts`; `matchesToolKey` / `isPreviewSlotParams` / `TOOL_IDENTITY_PARAMS` in `lib/src/components/wall/browser-surface.ts`; `revealSurface` / `createSplitSurface` in `lib/src/components/Wall.tsx`; `retireToolRun` in `lib/src/components/wall/use-tool-serving.ts`. Tests: `lib/src/components/wall/preview-slot.test.tsx`; `a preview retarget` in `lib/src/components/wall/use-tool-serving.test.tsx`; `lib/src/host/tool-open.test.ts`; `dor/test/cli-output.test.mjs`.
+
+### Switching the slot
+
+**Must hold a preview's slot as a ghost from the moment `dor open --preview` reaches the renderer**, before its queue or lookup: what a visible slot last fully showed, never a Door's, and never for a preview from the slot's own Session, which never retargets it. The newest preview takes a switch over, keeping its ghost rather than capturing a half-switched pane. Its retarget holds the ghost until the new view is ready; the switch ends at once when the request places the Tool elsewhere or answers otherwise, and one taken over ends nothing. **Must keep a committed switch's ready signals through a takeover**: one ending without its own commit goes back to waiting for that view, or fades it in at once if it became ready meanwhile.
+
+- **Never reload or reconnect a ghost.** An iframe keeps its frame on the params it had, the new frame mounting beside it laid out and transparent; a screencast is held as a snapshot of its canvas; a terminal face blurs in place. Under a browser ghost the terminal face shows only as the switch ends (rationale).
+- **Must blur the ghost 2px at once, easing out to 8px over 600ms, and never dim it** (rationale); instant motion (`motionIsInstant`) holds a static 8px blur. The ghost takes no input; a press on it selects the pane.
+- **Must count the new view ready** a frame after its browser layer's first document load or screencast frame; for a terminal-only Tool, after visible output (neither OSC nor its command's echo) then 250ms of quiet on the terminal face, or once its command finishes, so a failure shows; and 3s after the retarget regardless. It fades in over the ghost in 120ms, at once under instant motion. Session disposal ends a switch.
+
+The header holds as `docs/specs/layout.md` → Pane header states.
+
+Source of truth: `beginPreviewTransition` / `commitPreviewTransition` / `endPreviewTransition` in `lib/src/lib/preview-transition-store.ts`; `beginSlotSwitch` / `capturePreviewGhost` in `lib/src/components/wall/preview-transition.ts`; `beginPreviewSwitch` / `watchTerminalReady` in `lib/src/components/wall/use-dor-control.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `.preview-ghost` in `lib/src/theme.css`. Tests: `a switching slot` in `lib/src/components/wall/preview-slot.test.tsx`; `lib/src/lib/preview-transition-store.test.ts`; `a preview slot switch` in `lib/src/components/wall/ToolPanel.test.tsx`; `lib/src/components/wall/preview-transition.test.ts`; `lib/src/components/wall/use-dor-control.test.ts`.
+
+### Terminal links
+
+**Must open a local `file:` `OSC 8` link as a `dor open` from the Session showing it**: a click previews, a double-click's second click (`MouseEvent.detail` 2) pins, and later clicks of that burst do nothing (rationale). The request carries the URL ([Declaring tools](#declaring-tools)) and the Session's local CWD, else the target's directory.
+
+- **Must send a link to the confirmation dialog unless its display text names its target**: trimmed, with at most one trailing `ls -F` classifier removed, the text equals the decoded path or a whole-component suffix of it, case-sensitively — `x/README.md` names `/x/README.md`, `EADME.md` does not. A host that is not a plain name, or a control character in the decoded path, sends it there too. The dialog belongs to `docs/specs/terminal-escapes.md` -> "OSC 8 hyperlinks".
+- **Must fall back to the dialog when the open fails**, a superseded preview excepted — its status, or its error while there is no slot. A double-click's pin never reopens the dialog its failed preview opened. A host without Tool operations sends every link to the dialog.
+
+Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`; `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`; `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`. Tests: `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `local file URLs` in `lib/src/host/tool-input.test.ts`, `file URLs` in `lib/src/host/tool-open.test.ts`, `a terminal link` in `lib/src/components/wall/preview-slot.test.tsx`.
 
 ## Take-over
 
@@ -204,7 +273,7 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 - **May interleave user keystrokes arriving between the prompt and command injection.**
 - **Must include already-owned background listeners in the usual process-tree scan.** [Serving](#serving) owns selection.
 
-Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlaceable` / `callerStillRunnable` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`; `setMeta` in `lib/src/components/wall/lath-wall-store.ts`. Tests: `lib/src/components/wall/tool-takeover.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlaceable` / `callerStillRunnable` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`; `becomeToolMeta` in `lib/src/components/wall/lath-wall-engine.ts`; `setMeta` in `lib/src/components/wall/lath-wall-store.ts`. Tests: `lib/src/components/wall/tool-takeover.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 ## OSC 367
 
@@ -249,6 +318,8 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 **Must retain resolved browser viewport settings with Tool metadata**, including cold restore and Workspace transfer; sizing behavior belongs to `docs/specs/dor-browser.md` → Viewport presets.
 
+**Must persist a preview slot's mark and an opened Tool's canonical target with its Tool metadata**, so a cold-restored slot is still the slot ([Preview slot](#preview-slot)). Reject a persisted target containing terminal controls, as argv is.
+
 **Must retain resolved argv for argument-list Tools and re-quote it for the shell selected at cold restore.** Update the restored command in terminal options and Tool pane/door metadata. Literal shell-string commands retain their saved text. Reject persisted argv containing terminal controls before restoring any PTY.
 
 **Must cold-restore an approved Tool by starting its saved command through integration-gated shell readiness**, then rediscover its port. Agent-resume commands do not override the saved Tool command. Pending approvals restore as ordinary terminals and execute nothing. **Must rebuild visible Tool metadata from its pane row when layout geometry is unusable**, rather than starting the command in a plain terminal with no serving behavior.
@@ -283,6 +354,8 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
   glossary's reserved multiple-Surfaces-per-Pane). A `boots: web` hint if the
   terminal flash grates. `--has terminal` / `--has browser` *filter flags* for
   `dor list`, whose rows already carry the fields.
+
+**Scope: open-folder** — the [Preview slot](#preview-slot)'s speed within the open rules: opt-in retarget without restart, built-in viewer first.
 
 ### Dehydrate and rehydrate
 

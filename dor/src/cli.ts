@@ -19,14 +19,15 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
-import { toolCommand } from './commands/tool.js';
+import { TOOL_TIMEOUT_MS, toolCommand } from './commands/tool.js';
 import { openCommand } from './commands/open.js';
 import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
-import { errorLine, errorMessage, fail } from './commands/shared.js';
-import { VIEW_FILE_ARGV } from './file-viewer-format.js';
+import { errorLine, errorMessage, fail, requireControlClient } from './commands/shared.js';
+import { VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from './file-viewer-format.js';
 import { runFileViewer } from './file-viewer.js';
+import { runFolderViewer } from './folder-viewer.js';
 import type {
   CliEnv,
   CliOptions,
@@ -224,9 +225,14 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
   // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
-  // call; the announcement is the only output.
+  // call; its title and announcement are the only output.
   if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
     return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
+  }
+  // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
+  // selects and activates files through this terminal's control client.
+  if (argv[0] === VIEW_FOLDER_ARGV && argv.length === 2) {
+    return { stdout: await runFolderViewer(argv[1], requireControlClient(options, TOOL_TIMEOUT_MS)), stderr: '', exitCode: 0 };
   }
 
   const helpTarget = getHelpTarget(argv);

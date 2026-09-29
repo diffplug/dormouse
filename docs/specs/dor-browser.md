@@ -175,6 +175,8 @@ it against terminal panes and minimized doors.
   (`0.0.0.0`, `::`), never a specific non-loopback bind.
 - **The scan stays decorative and off the hot path**, so it may never pile onto
   a tab open or poll forever.
+- **Must label the chip from the serving pane's live state**; a settled port is
+  not rescanned when its pane is retitled.
 
 Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
 `lib/src/components/wall/port-url.ts` (`servesLoopback`),
@@ -764,6 +766,12 @@ agents cannot drive or read it. On hosts with `createIframeProxyUrl`,
 `IframePanel` frames a per-surface loopback proxy URL; without it, a raw
 uninstrumented iframe.
 
+**Must keep a frame transparent until its first `load`, or 1s after it is
+given a source**, so the pane's themed background shows rather than a white
+blank (rationale); its `bg-white` stays for pages that expect a white canvas.
+Navigation, reload, and history mount frames that never hide again; only losing
+the URL starts over.
+
 The proxy instruments any `http://` upstream, loopback and remote alike:
 
 - HTTP (any host): headers rewritten per the table below, the shim injected into
@@ -839,7 +847,8 @@ Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 (`FRAMING_RESPONSE_HEADERS`, `HOP_BY_HOP_RESPONSE_HEADERS`, `instrumentHtml`,
 `isBlockedAddress`, `errorPageHtml`), `lib/src/lib/platform/iframe-proxy-types.ts`
 (`IFRAME_HTTP_ONLY`), `iframeRefusal` in `lib/src/components/wall/browser-url.ts`,
-`isLoopbackHostname` in `lib/src/lib/ip-literal.ts`.
+`isLoopbackHostname` in `lib/src/lib/ip-literal.ts`. Tests: `before its first
+paint` in `lib/src/components/wall/IframePanel.test.tsx`.
 
 ### Iframe Shim
 

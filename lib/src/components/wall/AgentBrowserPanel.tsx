@@ -29,7 +29,11 @@ import {
 
 type AgentBrowserPanelParams = AgentBrowserSurfaceParams;
 
-export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: renderModeProp }: PaneProps & { renderMode?: RenderMode }) {
+export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: renderModeProp, onReady }: PaneProps & {
+  renderMode?: RenderMode;
+  /** A frame after its session's first frame is drawn. */
+  onReady?: () => void;
+}) {
   // The engine-tracked `title` prop is unused here: the live title is derived
   // from the stream (controller → paneWrite.setTitle), never read back.
   const params = rawParams as AgentBrowserPanelParams | undefined;
@@ -76,6 +80,11 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
 
   const snapshot = useSyncExternalStore(controller.subscribe, controller.snapshot);
   const { tabs, status, hasFrame, poppedOut, phase, error } = snapshot;
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
+  useEffect(() => {
+    if (hasFrame) requestAnimationFrame(() => onReadyRef.current?.());
+  }, [hasFrame]);
 
   // Gated on the same Workspace-aware visibility the streaming body reads, so a
   // Workspace left in passthrough on a browser pane stops forwarding (and

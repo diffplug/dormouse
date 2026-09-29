@@ -649,6 +649,11 @@ export class AgentBrowserSurfaceController {
     };
   }
 
+  /** The attached view's frame canvas; null with no view attached. */
+  frameCanvas(): HTMLCanvasElement | null {
+    return this.sink?.canvas ?? null;
+  }
+
   // --- params ---
 
   updateParams(params: AgentBrowserSurfaceParams): void {

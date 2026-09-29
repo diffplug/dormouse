@@ -48,13 +48,19 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 **Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and terminal/browser faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. Never hide it inside browser overflow controls or replace Kill. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
 
+**Must mark the Workspace's preview slot with an italic derived label alone in its Pane header and Door** (a serving Tool's dev-server chip label and address), naming it Preview in the label's tooltip and the Door's accessible name (rationale). **Must keep the slot on a double-click of its Pane header whose first press lands in the header itself, off its controls** (every button but the dev-server chip, and an open editor); a double-click on the address keeps it and closes the URL editor it opened (rationale). **Must offer Keep open in its terminal context too**, beside the Tool status and only while it is the slot: the keyboard path to the same pin. Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
+
+**Must hold the slot's header while a switch holds its ghost** (`docs/specs/dor-tool.md` → Switching the slot): the ghost's face, dev-server chip, address, and page-title tooltip stay until the new view is ready, the chip never unmounting. The label keeps its name until the retarget, then shows the new target's basename as a built-in viewer titles it, unless the user named the slot; derivation resumes once ready.
+
 A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold begins a Lath pane drag**; below the threshold the header's own click behavior stands. It uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, the shared terminal top radius from `lib/src/components/design.tsx`, and the `--color-header-active-*` / `--color-header-inactive-*` token pairs (VSCode file-tree list colors).
 
 **Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
 Elements left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
 
-The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames/pins; right-click — or `>` in command mode — opens the header context menu.
+The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames, except on a preview slot, whose label is drag area; right-click — or `>` in command mode — opens the header context menu.
+
+Source of truth: `useHeldWhile` in `lib/src/components/wall/preview-transition.ts`; `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `usePreviewKeep` in `lib/src/components/wall/preview-keep.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `holds the chip and address through a switch` and `keeps a serving slot on a double-click` in `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `keeps the slot on a double-click` in `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `in its header chip` and `pins from Keep open in its terminal context` in `lib/src/components/wall/preview-slot.test.tsx`; `offers Keep open only for a preview slot` in `lib/src/components/wall/TerminalContext.test.tsx`.
 
 #### Header context menu
 
@@ -153,7 +159,7 @@ A browser header, including a Tool's (Terminal Context sits outside the measured
 | 180px | Chrome moves into a viewport-clamped popover behind one trigger. |
 | 94px (102px with an unsaved-change dot) | Minimize and kill join the popover. |
 
-**Must reclamp the popover on content resize and keep it keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves minimize/kill controls (restoring trigger focus), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. Keys and connection labels truncate before controls.
+**Must reclamp the popover on content resize and keep it keyboard reachable** (focus enters on open, Tab stays inside, Escape returns it to the trigger) **and dismiss it on resize, when a dirty report moves minimize/kill controls (restoring trigger focus), or when its Surface is hidden (without restoring focus)**; `lib/src/components/wall/use-dismiss-overlay.ts` handles other dismissal, and controls dismiss only after acting. Keys and connection labels truncate before controls, and a connection label only once the URL has given up all its width.
 
 Source of truth: `SurfacePaneHeader` in `lib/src/components/wall/SurfacePaneHeader.tsx`; `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx`; `PaneActionGroup` in `lib/src/components/wall/PaneActionButtons.tsx`; `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`; `lib/src/components/wall/SurfacePaneHeader.test.tsx`; `lib/src/components/wall/TerminalPaneHeader.test.tsx`; `lib/src/stories/BrowserChromeHeader.stories.tsx`.
 

@@ -65,24 +65,34 @@ const CLOSE_GRACE_MS = 250;
  * combined stdout/stderr it is killed the same way and resolves `{ ok: false }`
  * with `ENOBUFS` and none of the output, which may hold secrets.
  *
+ * `input` is written to the child's stdin, which is then closed; without it
+ * stdin is ignored.
+ *
  * Explicit cmd.exe /s /c callers must set windowsVerbatimArguments: Node's
  * default MSVCRT escaping inserts backslashes that cmd.exe does not decode.
  */
 export function spawnAndCapture(
   binary: string,
   args: readonly string[],
-  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number; windowsVerbatimArguments?: boolean } = {},
+  options: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; maxOutputBytes?: number; windowsVerbatimArguments?: boolean; input?: string } = {},
 ): Promise<SpawnCaptureResult> {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
+      child = spawn(binary, args, { stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], windowsHide: true, cwd: options.cwd, env: options.env, windowsVerbatimArguments: options.windowsVerbatimArguments });
     } catch (error) {
       // Invalid argv (for example a NUL in an eval string) throws before a child
       // exists; preserve the same result contract as an asynchronous ENOENT.
       const cause = error as NodeJS.ErrnoException;
       resolve({ ok: false, error: { code: cause.code, message: cause.message } });
       return;
+    }
+    if (options.input !== undefined) {
+      // A child that exits without reading all its input fails our write with
+      // EPIPE; its exit status is the answer, and an unheard stream error would
+      // throw out of this never-throwing call.
+      child.stdin?.on('error', () => {});
+      child.stdin?.end(options.input);
     }
     let stdout = '';
     let stderr = '';

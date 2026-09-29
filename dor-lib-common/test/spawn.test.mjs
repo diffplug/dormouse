@@ -170,3 +170,11 @@ test('bounds combined output without returning captured secrets', async () => {
   const result = await spawnAndCapture(node, ['-e', 'process.stdout.write("secret".repeat(1000)); setInterval(() => {}, 1000)'], { maxOutputBytes: 100, timeoutMs: 2000 });
   assert.deepEqual(result, { ok: false, error: { code: 'ENOBUFS', message: 'Child output exceeded the capture limit' } });
 });
+
+test('writes input to stdin, and a child that never reads it still resolves', async () => {
+  const echo = await spawnAndCapture(node, ['-e', 'process.stdin.pipe(process.stdout)'], { input: 'a\0b/\0' });
+  assert.deepEqual(echo, { ok: true, exitCode: 0, stdout: 'a\0b/\0', stderr: '' });
+  // Larger than any pipe buffer, so the write fails with EPIPE once the child exits.
+  const unread = await spawnAndCapture(node, ['-e', 'process.exit(1)'], { input: 'x'.repeat(8 * 1024 * 1024) });
+  assert.deepEqual(unread, { ok: true, exitCode: 1, stdout: '', stderr: '' });
+});

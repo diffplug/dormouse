@@ -11,6 +11,7 @@ import { ALERT_RING_LABEL, AlertRingInset, alarmPulseClass, alertRingRow, useAle
 import {
   ALERT_SPEECH_TRACKING_CLASS,
   DOOR_TAB_CLASS,
+  PREVIEW_LABEL_CLASS,
   TERMINAL_TOP_RADIUS_CLASS,
   TODO_PILL_TRACKING_CLASS,
 } from './design';
@@ -24,6 +25,8 @@ export interface DoorProps {
   browserDisplay?: BrowserDisplayMode;
   /** Set only for a Tool whose last report says it has unsaved changes. */
   toolDirty?: boolean;
+  /** The Workspace's preview slot (`docs/specs/dor-tool.md` -> Preview slot). */
+  preview?: boolean;
   status?: SessionStatus;
   todo?: TodoState;
   speechState?: AlertSpeechState;
@@ -48,6 +51,7 @@ export function Door({
   title,
   browserDisplay,
   toolDirty = false,
+  preview = false,
   status = 'WATCHING_DISABLED',
   todo = false,
   speechState,
@@ -65,6 +69,7 @@ export function Door({
   const insetRing = row === 'ringing' || spoken;
   const detail = browserDisplay ? BROWSER_DISPLAY_LABEL[browserDisplay] : undefined;
   const extras = [
+    preview && 'Preview',
     detail,
     row ? ALERT_RING_LABEL[row].door : undefined,
     toolDirty && 'Unsaved changes',
@@ -106,7 +111,7 @@ export function Door({
       >
         <ToolDirtyIndicator dirty={toolDirty} />
         {browserDisplay && <BrowserDisplayIcon mode={browserDisplay} size={12} />}
-        <span className="min-w-0 flex-1 truncate">
+        <span className={clsx('min-w-0 flex-1 truncate', preview && PREVIEW_LABEL_CLASS)}>
           {title}
         </span>
         {/* `spoken` is unbounded (it lasts until the ring clears), so it joins

@@ -48,6 +48,7 @@ describe.each(['tool', 'open'] as const)('toolTakesOverCaller for dor %s', (verb
     verb,
     explicitSurface: false,
     minimized: false,
+    preview: false,
     workspaceActive: true,
     visible: true,
     kind: 'terminal',
@@ -65,6 +66,7 @@ describe.each(['tool', 'open'] as const)('toolTakesOverCaller for dor %s', (verb
     const splits: Array<[string, Partial<ToolTakeoverGate>]> = [
       ['--surface named a reference', { explicitSurface: true }],
       ['--minimize asked for a background surface', { minimized: true }],
+      ['--preview asked for the preview slot', { preview: true }],
       ['the caller is minimized', { visible: false }],
       ['another Workspace is active', { workspaceActive: false }],
       ['the caller has an auxiliary helper', { helperPresent: true }],
@@ -105,6 +107,7 @@ describe('after the prompt wait', () => {
     verb: 'tool',
     explicitSurface: false,
     minimized: false,
+    preview: false,
     workspaceActive: true,
     visible: true,
     kind: 'terminal',

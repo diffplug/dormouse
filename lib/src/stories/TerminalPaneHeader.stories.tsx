@@ -127,6 +127,7 @@ function TabStory({
   reducedMotion = false,
   mouseCaptured = false,
   dirty = false,
+  preview = false,
   actions = noopActions,
 }: {
   mode?: WallMode;
@@ -139,6 +140,8 @@ function TabStory({
   /** A Tool terminal face reporting unsaved changes — the dot takes its own
    *  12px at the header root, outside the region that clips. */
   dirty?: boolean;
+  /** A Tool terminal face in the Workspace's preview slot: an italic label. */
+  preview?: boolean;
   actions?: WallActions;
 }) {
   useEffect(() => {
@@ -164,7 +167,7 @@ function TabStory({
               style={{ width }}
             >
               <div className="bg-app-bg" style={{ height: 26 }}>
-                <TerminalPaneHeader id={SESSION_ID} title={undefined} params={dirty ? { surfaceType: 'tool' } : undefined} />
+                <TerminalPaneHeader id={SESSION_ID} title={undefined} params={dirty || preview ? { surfaceType: 'tool', ...(preview ? { toolPreview: true } : {}) } : undefined} />
               </div>
             </div>
           </RenamingIdContext.Provider>
@@ -359,6 +362,7 @@ const meta: Meta<typeof TabStory> = {
     isRenaming: { control: 'boolean' },
     width: { control: 'number' },
     dirty: { control: 'boolean' },
+    preview: { control: 'boolean' },
     reducedMotion: { control: 'boolean' },
     mouseCaptured: { control: 'boolean' },
   },
@@ -396,6 +400,12 @@ export const AlertDialogNoCommandRunning: Story = contextDialogStory({
 });
 
 export const TodoOnly: Story = {
+  parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),
+};
+
+/** The Workspace's preview slot, beside a TODO: an italic label, then the TODO pill. */
+export const PreviewSlot: Story = {
+  args: { preview: true },
   parameters: primedPane({ status: 'WATCHING_DISABLED', todo: true }),
 };
 

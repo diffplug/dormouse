@@ -183,7 +183,7 @@ describe('createToolHost', () => {
     expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: ['a b; $(echo bad).md'] }))
       .toMatchObject({ status: 'ok', scope: 'user', run: ['viewer', target], key: [target] });
     expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: ['https://example.com/a.md'] }))
-      .toMatchObject({ status: 'error', message: expect.stringContaining('local file') });
+      .toMatchObject({ status: 'error', message: expect.stringContaining('local path') });
     expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: [] }))
       .toMatchObject({ status: 'error', message: expect.stringContaining('exactly one') });
   });
@@ -212,7 +212,7 @@ describe('createToolHost', () => {
     await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  view:\n    run: [viewer, $ARGS]\n    prespawn_dedupe: [$TARGET]\n');
     const host = createToolHost({ stateDir });
     expect(await host.handle({ op: 'lookup', name: 'view', cwd: repo, args: ['missing.md'] }))
-      .toMatchObject({ status: 'error', message: 'no such file: missing.md' });
+      .toMatchObject({ status: 'error', message: 'no such file or folder: missing.md' });
   });
 
   it('names the actual user path when --global has no config', async () => {

@@ -80,6 +80,10 @@ export interface WallActions {
   /** Resolve a pending tool's approval: grant and start it, or close its pane
    *  (docs/specs/dor-tool.md -> Trust). */
   onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
+  /** Keep a preview slot open: clear its mark (`docs/specs/dor-tool.md` ->
+   *  Preview slot). A double-click on its Pane header, or Keep open in its
+   *  terminal context. */
+  onPinPreview?: (id: string) => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
