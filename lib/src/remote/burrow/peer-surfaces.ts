@@ -11,7 +11,7 @@ import { subscribeToActivity } from '../../lib/session-activity-store';
 import { isHelperSession, registry } from '../../lib/terminal-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import { collectDirectorySnapshot } from './directory-collect';
-import { armWhileEnrolled } from './enrolled-gate';
+import { armWhile } from './enrolled-gate';
 
 /**
  * What the Burrow can ask the owner of a surface to do with it. There is no
@@ -115,9 +115,9 @@ export function installPeerSurfaceResponder(): void {
   if (!link || link === announcingFor) return;
   announcingFor = link;
   // Announcing is not free — one crossing per pane-state change, activity
-  // change, and focus move — so it is armed only while a Burrow exists to hear it
-  // (`enrolled-gate.ts`).
-  armWhileEnrolled(link, () => {
+  // change, and focus move — so it is armed only while something can reach
+  // these terminals: an enrolled Burrow, or a one-time phone (`enrolled-gate.ts`).
+  armWhile(link, { serving: () => {
     let armed = true;
     let queued = false;
     // Trailing-edge coalesce: these sources fire in bursts — a focus move is a
@@ -149,5 +149,5 @@ export function installPeerSurfaceResponder(): void {
       document.removeEventListener('focusin', notifyDirectory);
       document.removeEventListener('focusout', notifyDirectory);
     };
-  });
+  } });
 }

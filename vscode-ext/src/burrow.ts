@@ -13,11 +13,19 @@ import {
   createNativeDirectPeerFactory,
   disposeNativeDirectPeers,
 } from '../../lib/src/host/remote/native-direct-peer';
-import { BurrowService, unenrolledStatus } from '../../lib/src/host/remote/service';
+import { bakedOneTimeOrigin } from '../../lib/src/host/remote/one-time-origin';
+import {
+  BurrowService,
+  idleOneTimeState,
+  oneTimeServing,
+  unenrolledStatus,
+} from '../../lib/src/host/remote/service';
 import {
   BURROW_EVENT_EVENT,
   BURROW_RESULT_EVENT,
   isBurrowCommand,
+  isOneTimeState,
+  type OneTimeEvent,
   type PairingQueueItem,
   type PushDevicesResult,
   type BurrowCommand,
@@ -220,9 +228,36 @@ export function createRelaySocket(url: string): WebSocketLike {
   return new Ws(url, { maxPayload: MAX_RELAY_TO_BURROW_FRAME_LENGTH }) as unknown as WebSocketLike;
 }
 
+/**
+ * What this window last wrote to the one-time serving marker, so only a flip
+ * writes; `null` until the service's start has written it.
+ */
+let servingMarked: boolean | null = null;
+
+/**
+ * Tell every window whether this broker's one-time connection is serving
+ * (`ONE_TIME_SERVING_KEY` in `burrow-store.ts`). A window with no enrollment
+ * contends only for a reason it can read off `SecretStorage`, and without this
+ * one it would never join the peer net — its terminals would be missing from
+ * what the phone sees.
+ */
+function markOneTimeServing(serving: boolean): void {
+  if (!context || servingMarked === serving) return;
+  servingMarked = serving;
+  void burrowStateStore(context)
+    .saveOneTimeServing(serving)
+    .catch((error: unknown) => {
+      log.error(`[burrow] could not write the one-time serving marker: ${String(error)}`);
+    });
+}
+
 function startService(): void {
   if (service || !context || !deps) return;
   const bound = deps;
+  // A marker a previous broker left — a window that closed or crashed while
+  // serving — names a connection that is gone with it.
+  servingMarked = null;
+  markOneTimeServing(false);
   service = new BurrowService({
     store: burrowStateStore(context),
     provider: createBurrowProvider(bound),
@@ -237,9 +272,14 @@ function startService(): void {
         // the windows that see the queue can show one.
         bound.broadcastToWebviews({ type: 'burrow:event', payload: data });
         broadcastUiEvent(data);
+        const oneTime = data as Partial<OneTimeEvent> | null;
+        if (oneTime?.name === 'one-time' && isOneTimeState(oneTime.state)) {
+          markOneTimeServing(oneTimeServing(oneTime.state));
+        }
       }
     },
     connectSrc: bakedConnectSrc(),
+    oneTimeOrigin: bakedOneTimeOrigin(),
     // Building the factory loads nothing: the addon is opened inside the first
     // offer, if one ever comes (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),
@@ -348,6 +388,9 @@ function drainQueuedCommands(): void {
   }
 }
 
+/** The commands that bootstrap an installation with no Burrow; see {@link handleBurrowCommand}. */
+const CONTENTION_STARTERS: ReadonlySet<string> = new Set(['enroll', 'enrollOffer', 'oneTimeOpen']);
+
 /**
  * Hand one of this window's webview commands to the Burrow.
  *
@@ -362,11 +405,13 @@ function drainQueuedCommands(): void {
  * an enrolled machine's webview it has no Burrow moments before it gets one,
  * leaving the gates that arm on that answer down.
  *
- * `enroll` and `enrollOffer` are the two commands that may start the contention:
- * they are how an installation with no Burrow at all bootstraps, the second from
- * the one-click card an idle `status` advertises ({@link idleStatus}).
- * Everything else refuses only where there is genuinely nothing to reach — never
- * contending, or settled with no service and no broker.
+ * `enroll`, `enrollOffer`, and `oneTimeOpen` are the commands that may start
+ * the contention: they are how an installation with no Burrow at all
+ * bootstraps — `enrollOffer` from the one-click card an idle `status`
+ * advertises ({@link idleStatus}), `oneTimeOpen` from the idle one-time panel,
+ * which needs no enrollment. Everything else refuses only where there is
+ * genuinely nothing to reach — never contending, or settled with no service
+ * and no broker.
  */
 export function handleBurrowCommand(payload: BurrowCommand | undefined): void {
   if (!isBurrowCommand(payload)) return;
@@ -375,7 +420,7 @@ export function handleBurrowCommand(payload: BurrowCommand | undefined): void {
     return;
   }
   if (forwardCommand(payload)) return;
-  if (payload.cmd === 'enroll' || payload.cmd === 'enrollOffer') {
+  if (CONTENTION_STARTERS.has(payload.cmd)) {
     // Held rather than run inline once the contention settles: if some other
     // window enrolled first, this window is a client and the command belongs
     // on the link, which is exactly what the drain does.
@@ -459,6 +504,9 @@ export function handleForwardedPush(sessionId: string, title: string): void {
 export function greetPeerWindow(client: PeerLinkClient): void {
   if (!service) return;
   sendUiEvent(client, service.statusEvent());
+  // And the one-time panel's state, which changes as rarely and matters as much
+  // to a window whose Settings may be showing it.
+  sendUiEvent(client, service.oneTimeEvent());
 }
 
 function refuse(burrowRequestId: string): void {
@@ -479,7 +527,9 @@ function refuse(burrowRequestId: string): void {
  * unreachable Relay on a machine that had simply never enrolled
  * (`lib/src/lib/push-devices.ts`), and `enrolled-gate.ts` seeds from `status`.
  * The sidecar has no such path — it always has a service — so these are exactly
- * what one with no enrollment returns (`lib/src/host/remote/service.ts`).
+ * what one with no enrollment returns (`lib/src/host/remote/service.ts`). The
+ * one-time pair is the same: no service means no connection, so its status is
+ * the idle one this build's origin allows, and ending it is already done.
  */
 function idleAnswer(cmd: string): { result: unknown } | null {
   switch (cmd) {
@@ -487,6 +537,10 @@ function idleAnswer(cmd: string): { result: unknown } | null {
       return { result: null satisfies PushDevicesResult };
     case 'pairingQueue':
       return { result: [] satisfies PairingQueueItem[] };
+    case 'oneTimeStatus':
+      return { result: idleOneTimeState(bakedOneTimeOrigin(), bakedConnectSrc()) };
+    case 'oneTimeEnd':
+      return { result: {} };
     default:
       return null;
   }
@@ -537,11 +591,12 @@ function answerIdle(burrowRequestId: string, result: unknown): void {
 
 /**
  * Give the Burrow its storage and start it if this installation is already
- * enrolled. Nothing contends for the socket otherwise — see the module header.
+ * enrolled, or another window's one-time connection is serving. Nothing
+ * contends for the socket otherwise — see the module header.
  */
 export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
   context = ctx;
-  void contendIfEnrolled(ctx);
+  void contendIfServing(ctx);
 
   return {
     dispose() {
@@ -551,6 +606,7 @@ export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
       disposeNativeDirectPeers();
       askProvider = null;
       contending = false;
+      servingMarked = null;
       commandRoutes.clear();
       for (const { timer } of queued.splice(0)) clearTimeout(timer);
       store?.dispose();
@@ -560,29 +616,45 @@ export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
   };
 }
 
-function contendIfEnrolled(ctx: vscode.ExtensionContext): Promise<void> {
-  return burrowStateStore(ctx)
-    .loadEnrollment()
-    .then((enrollment) => {
-      if (enrollment) contendForBurrow();
-    })
-    .catch((error: unknown) => {
-      log.error(`[burrow] could not read the enrollment: ${String(error)}`);
-    });
+/**
+ * Contend when there is something to serve: an enrollment, or another window's
+ * one-time connection (`ONE_TIME_SERVING_KEY`), whose phone should see this
+ * window's terminals too. Each read stands alone, so a keychain that refuses
+ * one still lets the other decide.
+ */
+async function contendIfServing(ctx: vscode.ExtensionContext): Promise<void> {
+  const store = burrowStateStore(ctx);
+  const [enrollment, serving] = await Promise.allSettled([
+    store.loadEnrollment(),
+    store.loadOneTimeServing(),
+  ]);
+  if (enrollment.status === 'rejected') {
+    log.error(`[burrow] could not read the enrollment: ${String(enrollment.reason)}`);
+  }
+  if (serving.status === 'rejected') {
+    log.error(`[burrow] could not read the one-time serving marker: ${String(serving.reason)}`);
+  }
+  if (
+    (enrollment.status === 'fulfilled' && enrollment.value) ||
+    (serving.status === 'fulfilled' && serving.value)
+  ) {
+    contendForBurrow();
+  }
 }
 
 /**
  * The window's one store, made on first use.
  *
- * It reports enrollment writes from *any* window of this extension, which is
- * the only signal a window that was un-enrolled at activation ever gets: it
- * never contended, so it has no socket and no broker to hear from. Re-checking
- * here is what lets a second window join the Burrow a first one just enrolled,
- * without a reload.
+ * It reports enrollment and serving-marker writes from *any* window of this
+ * extension, which is the only signal a window that was un-enrolled at
+ * activation ever gets: it never contended, so it has no socket and no broker
+ * to hear from. Re-checking here is what lets a second window join the Burrow a
+ * first one just enrolled, or the one-time connection it just opened, without
+ * a reload.
  */
 function burrowStateStore(ctx: vscode.ExtensionContext): VsCodeBurrowStateStore {
   store ??= new VsCodeBurrowStateStore(ctx, () => {
-    void contendIfEnrolled(ctx);
+    void contendIfServing(ctx);
   });
   return store;
 }

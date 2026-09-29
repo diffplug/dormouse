@@ -27,9 +27,14 @@ class ServicePlatform {
   notified = 0;
   /** What `status` answers — the gate the notify sources arm on. */
   enrolled = true;
+  /** Absent, as a broker from before one-time connections answers, unless a case sets it. */
+  serving: boolean | undefined = undefined;
 
   readonly burrow = {
-    command: async (cmd: string) => (cmd === 'status' ? { enrolled: this.enrolled } : undefined),
+    command: async (cmd: string) =>
+      cmd === 'status'
+        ? { enrolled: this.enrolled, ...(this.serving === undefined ? {} : { serving: this.serving }) }
+        : undefined,
     respond: (op: string, handler: Responder) => {
       this.responders.set(op, handler);
     },
@@ -198,6 +203,21 @@ describe('surface responder', () => {
     // And answering still works after the extra calls.
     registerSurface('surface-1');
     expect(platform.answer('directory', {})).toHaveLength(1);
+  });
+
+  it('announces while a one-time connection serves, with no enrollment', async () => {
+    // A one-time phone reaches these terminals through the same directory, so
+    // `serving` arms the announcements, not `enrolled`.
+    const oneTime = new ServicePlatform();
+    oneTime.enrolled = false;
+    oneTime.serving = true;
+    setPlatform(oneTime.asAdapter());
+    installPeerSurfaceResponder();
+    await armed();
+
+    setTerminalActivity('pty-3', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
+    await Promise.resolve();
+    expect(oneTime.notified).toBe(1);
   });
 
   it('announces nothing until there is a Burrow to hear it', async () => {

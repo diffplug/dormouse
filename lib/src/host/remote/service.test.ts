@@ -9,7 +9,13 @@ import { hostname } from 'node:os';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   API_ROUTES,
+  NoiseTransportSession,
+  ONE_TIME_WS_ROUTES,
+  createNoiseInitiator,
+  fromBase64Url,
   mintNoiseStaticKeyPair,
+  oneTimeLinkPrologue,
+  parseOneTimeLinkUrl,
   parsePairingInvitationUrl,
   generateNoiseKeyPair,
   toBase64Url,
@@ -18,22 +24,36 @@ import {
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from '../../remote/burrow/enrollment';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
+import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import { DirectPeer } from '../../remote/direct/direct-peer';
+import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
   createTestAuthenticator,
+  flushUntil,
   openPairingSession,
+  openReceipt,
   pairThroughSocket,
   readOutcome,
   settle,
+  settleUntil,
   testRoutingId,
   type TestAuthenticator,
 } from '../../remote/test-e2e-client';
+import {
+  createTestRendezvous,
+  type RendezvousSocket,
+  type TestRendezvous,
+} from '../../remote/test-rendezvous';
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
-import { BurrowService } from './service';
+import { BurrowService, idleOneTimeState, type BurrowServiceOptions } from './service';
+import { isOneTimeState } from './service-protocol';
 import type {
   BurrowStatusEvent,
   InvitationEvent,
+  OneTimeEvent,
   PairingQueueEvent,
+  PairingQueueItem,
   BurrowConsoleStatus,
   SetupQrResult,
 } from './service-protocol';
@@ -41,6 +61,8 @@ import type {
 const CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
 const BURROW_ID = testRoutingId();
 const ORIGIN = 'https://relay.dormouse.sh';
+/** The shipped rendezvous, which the shipped allowlist admits. */
+const ONE_TIME_ORIGIN = 'https://hosted.dormouse.sh';
 
 /**
  * The enrollment every case runs on, with a **real** Noise static: without one
@@ -125,6 +147,10 @@ function fakeProvider(): BurrowSurfaceProvider {
 }
 
 let sockets: FakeSocket[];
+/** The one-time rendezvous every one-time socket the service opens reaches. */
+let rendezvous: TestRendezvous;
+/** Where the Burrow's direct peers and the test phone's meet. */
+let network: FakeDirectNetwork;
 let sent: Array<{ event: string; data: Record<string, unknown> }>;
 let requests: Array<{ url: string; init?: RequestInit }>;
 let store: MemoryStore;
@@ -203,7 +229,10 @@ const OFFER: EnrollmentOffer = {
   mintedAt: '2026-08-31T00:00:00.000Z',
 };
 
-function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>): BurrowService {
+function createService(
+  seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>,
+  over: Partial<BurrowServiceOptions> = {},
+): BurrowService {
   store = memoryStore(seed);
   service = new BurrowService({
     store,
@@ -211,17 +240,25 @@ function createService(seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>):
     kind: 'vscode',
     sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
     connectSrc: CONNECT_SRC,
-    createWebSocket: () => {
+    oneTimeOrigin: ONE_TIME_ORIGIN,
+    // One factory for both sockets, as each host passes: the rendezvous route
+    // reaches the in-memory room, everything else the fake relay.
+    createWebSocket: (url) => {
+      if (new URL(url).pathname === ONE_TIME_WS_ROUTES.burrow) {
+        return rendezvous.createBurrowSocket(url);
+      }
       const socket = new FakeSocket();
       sockets.push(socket);
       return socket;
     },
+    createDirectPeer: () => network.createAnswerer(),
     fetch: fakeFetch(),
     readOffer: async () => {
       offerReads++;
       if (offerGate) await offerGate;
       return offer;
     },
+    ...over,
   });
   return service;
 }
@@ -246,12 +283,16 @@ function queueEvents(): PairingQueueEvent[] {
   return uiEvents().filter((event): event is PairingQueueEvent => event.name === 'pairing-queue');
 }
 
-function uiEvents(): Array<PairingQueueEvent | BurrowStatusEvent | InvitationEvent> {
+function uiEvents(): Array<PairingQueueEvent | BurrowStatusEvent | InvitationEvent | OneTimeEvent> {
   return sent
     .filter((message) => message.event === 'burrow:event')
     .map(
       (message) =>
-        message.data as unknown as PairingQueueEvent | BurrowStatusEvent | InvitationEvent,
+        message.data as unknown as
+          | PairingQueueEvent
+          | BurrowStatusEvent
+          | InvitationEvent
+          | OneTimeEvent,
     );
 }
 
@@ -266,8 +307,24 @@ function statusEvents(): boolean[] {
     .map((event) => event.enrolled);
 }
 
+/** What the webviews were told about whether anything can reach the terminals, in order. */
+function servingEvents(): boolean[] {
+  return uiEvents()
+    .filter((event): event is BurrowStatusEvent => event.name === 'status')
+    .map((event) => event.serving);
+}
+
+/** Every one-time state the webviews were told of, in order. */
+function oneTimeStates(): OneTimeState[] {
+  return uiEvents()
+    .filter((event): event is OneTimeEvent => event.name === 'one-time')
+    .map((event) => event.state);
+}
+
 beforeEach(() => {
   sockets = [];
+  rendezvous = createTestRendezvous();
+  network = new FakeDirectNetwork();
   sent = [];
   requests = [];
   offer = null;
@@ -290,6 +347,7 @@ describe('status', () => {
     await service.start();
     expect((await command('status')).result).toEqual({
       enrolled: false,
+      serving: false,
       relayUrl: null,
       burrowId: null,
       connection: 'stopped',
@@ -306,6 +364,7 @@ describe('status', () => {
 
     expect((await command('status')).result).toEqual({
       enrolled: false,
+      serving: false,
       relayUrl: null,
       burrowId: null,
       connection: 'stopped',
@@ -336,6 +395,7 @@ describe('status', () => {
 
     expect((await command('status')).result).toEqual({
       enrolled: true,
+      serving: true,
       relayUrl: ENROLLMENT.relayUrl,
       burrowId: BURROW_ID,
       connection: 'connected',
@@ -718,10 +778,10 @@ describe('pairing queue', () => {
     const event = queueEvents().at(-1)!;
     expect(event.name).toBe('pairing-queue');
     expect(event.queue).toHaveLength(1);
-    // Exactly four fields cross the bridge — and the expected code is not one
+    // Exactly five fields cross the bridge — and the expected code is not one
     // of them, which is the whole point of typing it on this side.
-    expect(Object.keys(item).sort()).toEqual(['clientId', 'label', 'pairingId', 'requestedAt']);
-    expect(item).toMatchObject({ clientId: 'c1', label: 'iPhone Safari' });
+    expect(Object.keys(item).sort()).toEqual(['clientId', 'kind', 'label', 'pairingId', 'requestedAt']);
+    expect(item).toMatchObject({ kind: 'pairing', clientId: 'c1', label: 'iPhone Safari' });
     expect(typeof item.pairingId).toBe('string');
 
     // A webview that reloaded mid-pairing seeds from the same snapshot.
@@ -1099,6 +1159,7 @@ describe('push', () => {
       kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
       connectSrc: CONNECT_SRC,
+      oneTimeOrigin: ONE_TIME_ORIGIN,
       createWebSocket: () => new FakeSocket(),
       fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch,
     });
@@ -1146,6 +1207,7 @@ describe('pushDevices', () => {
       kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
       connectSrc: CONNECT_SRC,
+      oneTimeOrigin: ONE_TIME_ORIGIN,
       createWebSocket: () => new FakeSocket(),
       fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
     });
@@ -1201,11 +1263,420 @@ describe('pushTest', () => {
       kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
       connectSrc: CONNECT_SRC,
+      oneTimeOrigin: ONE_TIME_ORIGIN,
       createWebSocket: () => new FakeSocket(),
       fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
     });
     await service.start();
 
     expect((await command('pushTest')).error).toBeTruthy();
+  });
+});
+
+/**
+ * The one-time connection, through the in-memory rendezvous and a phone driven
+ * by hand — a real Noise initiator against the link, as the `/connect/` page
+ * runs one (`docs/specs/one-time.md`). The ceremony itself is
+ * `one-time-runtime.test.ts`'s; this is what the service adds: the three
+ * commands, the event, `serving`, and the approval routed by kind.
+ */
+describe('one-time connection', () => {
+  /** The phone after IK, reading the Burrow's transport frames in order. */
+  class Phone {
+    #read = 0;
+
+    constructor(
+      readonly socket: RendezvousSocket,
+      readonly session: NoiseTransportSession,
+    ) {}
+
+    sendControl(value: Record<string, unknown>): void {
+      const ct = toBase64Url(this.session.sendControl(value));
+      this.socket.send(JSON.stringify({ t: 'one-time', step: 'transport', ct }));
+    }
+
+    async next(): Promise<unknown> {
+      const frame = await flushUntil(
+        () => this.socket.frames().filter((f) => f.step === 'transport')[this.#read],
+      );
+      this.#read += 1;
+      return openReceipt(this.session, fromBase64Url(frame.ct as string));
+    }
+  }
+
+  type Waiting = Extract<OneTimeState, { status: 'waiting' }>;
+
+  async function open(): Promise<Waiting> {
+    const { result, error } = await command('oneTimeOpen');
+    if (error) throw new Error(String(error));
+    const state = result as OneTimeState;
+    if (state.status !== 'waiting') throw new Error(`expected waiting, got ${state.status}`);
+    return state;
+  }
+
+  /** Read the link and complete IK against it, as the page does on Connect. */
+  async function join(url: string): Promise<Phone> {
+    const link = await parseOneTimeLinkUrl(url, ONE_TIME_ORIGIN);
+    if (!link) throw new Error(`a phone could not read the link: ${url}`);
+    const socket = rendezvous.createClientSocket(rendezvous.clientUrl(link.roomId));
+    await flushUntil(() => (socket.readyState === 1 ? true : undefined));
+    const handshake = await createNoiseInitiator({
+      prologue: oneTimeLinkPrologue(link),
+      staticKeyPair: await generateNoiseKeyPair(),
+      remoteStaticPublicKey: link.ephPub,
+    });
+    const ct = toBase64Url(await handshake.writeMessage());
+    socket.send(JSON.stringify({ t: 'one-time', step: 'init', ct }));
+    const response = await flushUntil(() => socket.frames().find((f) => f.step === 'response'));
+    await handshake.readMessage(fromBase64Url(response.ct as string));
+    return new Phone(socket, new NoiseTransportSession(handshake.session));
+  }
+
+  /** Send the request, and answer the item the modal would show for it. */
+  async function request(phone: Phone, code = '42'): Promise<PairingQueueItem> {
+    phone.sendControl({ code, label: 'iPhone Safari' });
+    const event = await flushUntil(() =>
+      queueEvents().findLast((e) => e.queue.some((item) => item.kind === 'one-time')),
+    );
+    return event.queue.find((item) => item.kind === 'one-time')!;
+  }
+
+  function approve(item: PairingQueueItem, code = '42') {
+    return command('approve', { kind: 'one-time', clientId: '', pairingId: item.pairingId, code });
+  }
+
+  /** Offer the direct path and switch onto it, as the page does after `ok`. */
+  async function switchDirect(phone: Phone): Promise<void> {
+    const peer = new DirectPeer({
+      peer: network.createOfferer(),
+      handlers: { onOpen: () => {}, onFrame: () => {}, onClosed: () => {}, onViolation: () => {} },
+    });
+    const offer = await peer.offer();
+    phone.sendControl({ v: 1, t: 'direct-offer', sdp: offer });
+    const answer = (await phone.next()) as { t: string; sdp: string };
+    await peer.acceptAnswer(answer.sdp);
+    expect(await phone.next()).toEqual({ v: 1, t: 'direct-switch' });
+    phone.sendControl({ v: 1, t: 'direct-switch' });
+    await settleUntil(() => oneTimeStates().at(-1)?.status === 'connected');
+  }
+
+  it('is idle on a machine that never enrolled, serving nothing', async () => {
+    createService();
+    await service.start();
+
+    expect((await command('oneTimeStatus')).result).toEqual({ status: 'idle' });
+    expect(service.oneTimeEvent()).toEqual({ name: 'one-time', state: { status: 'idle' } });
+    expect((await command('status')).result).toMatchObject({ enrolled: false, serving: false });
+    expect(service.statusEvent()).toEqual({ name: 'status', enrolled: false, serving: false });
+  });
+
+  it('opens a link un-enrolled, on the baked origin whatever the webview sends', async () => {
+    createService();
+    await service.start();
+
+    // The command takes no parameters: an origin in them reaches nothing.
+    const { result } = await command('oneTimeOpen', { origin: 'https://evil.example' });
+    const waiting = result as Waiting;
+    expect(waiting.status).toBe('waiting');
+    expect(rendezvous.rooms).toHaveLength(1);
+    expect(rendezvous.room().burrowUrl).toBe('wss://hosted.dormouse.sh/api/one-time/burrow');
+    expect((await parseOneTimeLinkUrl(waiting.url, ONE_TIME_ORIGIN))?.roomId).toBe(
+      rendezvous.room().roomId,
+    );
+    // No enrollment: no relay socket, and nothing sent to a Relay.
+    expect(sockets).toEqual([]);
+    expect(requests).toEqual([]);
+
+    expect(oneTimeStates().map((state) => state.status)).toEqual(['opening', 'waiting']);
+    expect((await command('oneTimeStatus')).result).toEqual(waiting);
+    expect(service.oneTimeEvent().state).toEqual(waiting);
+  });
+
+  it('serves while a connection is open, and announces each flip', async () => {
+    createService();
+    await service.start();
+    await open();
+    // `serving` rose at `opening`; `enrolled` never did.
+    expect(servingEvents()).toEqual([true]);
+    expect(statusEvents()).toEqual([false]);
+    expect((await command('status')).result).toMatchObject({ enrolled: false, serving: true });
+
+    // End: the room goes, and so does `serving`.
+    expect((await command('oneTimeEnd')).result).toEqual({});
+    expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'user-ended' });
+    expect(rendezvous.room().burrow.closeCode).toBe(1000);
+    expect(servingEvents()).toEqual([true, false]);
+
+    // Done: back to idle, which moves no gate.
+    await command('oneTimeEnd');
+    expect(oneTimeStates().at(-1)).toEqual({ status: 'idle' });
+    expect(servingEvents()).toEqual([true, false]);
+    // And an idle one has nothing to end.
+    const quiet = uiEvents().length;
+    expect((await command('oneTimeEnd')).result).toEqual({});
+    expect(uiEvents()).toHaveLength(quiet);
+  });
+
+  it('is unavailable, and opens nothing, where connect-src does not admit the origin', async () => {
+    createService(undefined, { oneTimeOrigin: 'https://rendezvous.example.com' });
+
+    expect((await command('oneTimeStatus')).result).toEqual({
+      status: 'unavailable',
+      reason: 'origin-not-allowed',
+    });
+    expect((await command('oneTimeOpen')).error).toContain(CONNECT_SRC);
+    expect(rendezvous.rooms).toEqual([]);
+    expect(oneTimeStates()).toEqual([]);
+  });
+
+  it('is unavailable for an origin no link can carry', async () => {
+    // Plain HTTP off loopback: the phone would refuse every link it minted.
+    createService(undefined, { oneTimeOrigin: 'http://hosted.dormouse.sh' });
+    expect((await command('oneTimeStatus')).result).toEqual({
+      status: 'unavailable',
+      reason: 'origin-invalid',
+    });
+    expect((await command('oneTimeOpen')).error).toMatch(/unavailable/);
+    expect(rendezvous.rooms).toEqual([]);
+    // The same answer a window with no service gives (`vscode-ext/src/burrow.ts`).
+    expect(idleOneTimeState('http://hosted.dormouse.sh', CONNECT_SRC)).toEqual({
+      status: 'unavailable',
+      reason: 'origin-invalid',
+    });
+    expect(idleOneTimeState(ONE_TIME_ORIGIN, CONNECT_SRC)).toEqual({ status: 'idle' });
+  });
+
+  it('joins an open in flight rather than minting a second room', async () => {
+    createService();
+    const [first, second] = await Promise.all([command('oneTimeOpen'), command('oneTimeOpen')]);
+    expect(rendezvous.rooms).toHaveLength(1);
+    expect(first.result).toMatchObject({ status: 'waiting' });
+    expect(second.result).toEqual(first.result);
+  });
+
+  it('replaces a waiting link, whose room goes with it unannounced', async () => {
+    createService();
+    const first = await open();
+    const firstRoom = rendezvous.room();
+
+    const second = await open();
+    expect(rendezvous.rooms).toHaveLength(2);
+    expect(second.url).not.toBe(first.url);
+    expect(firstRoom.burrow.closeCode).toBe(1000);
+    // The replaced runtime's ending is not announced as this service's: the
+    // replacement's `opening` is, and `serving` never dropped between them.
+    expect(oneTimeStates().map((state) => state.status)).toEqual([
+      'opening',
+      'waiting',
+      'opening',
+      'waiting',
+    ]);
+    expect(servingEvents()).toEqual([true]);
+  });
+
+  it('replaces a link a phone is confirming, and its modal with it', async () => {
+    createService();
+    const phone = await join((await open()).url);
+    const item = await request(phone);
+
+    await open();
+    expect(queueEvents().at(-1)!.queue).toEqual([]);
+    // The old modal's ticket names nothing now.
+    expect((await approve(item)).error).toContain('no longer pending');
+    expect(phone.socket.closeCode).not.toBeNull();
+  });
+
+  it('queues the request in its own slot, and routes the answer by kind', async () => {
+    createService();
+    const phone = await join((await open()).url);
+    const item = await request(phone);
+    expect(item).toEqual({
+      kind: 'one-time',
+      clientId: '',
+      pairingId: expect.any(String),
+      label: 'iPhone Safari',
+      requestedAt: expect.any(Number),
+    });
+    expect(oneTimeStates().at(-1)).toMatchObject({ status: 'confirming', label: 'iPhone Safari' });
+    // The digits the phone shows are not in anything the webviews heard.
+    expect(JSON.stringify(uiEvents())).not.toContain('"42"');
+
+    // An answer that names no kind is a pairing's — a webview from before the
+    // field — and no pairing holds this ticket, so the one attempt is not spent.
+    expect(
+      (await command('approve', { clientId: '', pairingId: item.pairingId, code: '42' })).error,
+    ).toContain('no longer pending');
+    expect((await command('deny', { clientId: '', pairingId: item.pairingId })).error).toContain(
+      'no longer pending',
+    );
+    // Nor does a ticket the modal was not showing.
+    expect(
+      (await command('approve', { kind: 'one-time', clientId: '', pairingId: 'stale', code: '42' }))
+        .error,
+    ).toContain('no longer pending');
+    expect(oneTimeStates().at(-1)).toMatchObject({ status: 'confirming' });
+
+    expect((await approve(item)).result).toEqual({});
+    // Un-enrolled, the phone is told the name the enrollment form would suggest.
+    expect(await phone.next()).toEqual({ ok: true, burrowLabel: `${hostname()} (VS Code)` });
+    expect(oneTimeStates().at(-1)).toEqual({ status: 'connecting', label: 'iPhone Safari' });
+    expect(queueEvents().at(-1)!.queue).toEqual([]);
+  });
+
+  it('denies by kind, which ends the connection', async () => {
+    createService();
+    const phone = await join((await open()).url);
+    const item = await request(phone);
+
+    await command('deny', { kind: 'one-time', clientId: '', pairingId: item.pairingId });
+    expect(await phone.next()).toEqual({ ok: false, code: 'user-denied' });
+    expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'user-denied' });
+    expect(queueEvents().at(-1)!.queue).toEqual([]);
+    expect(servingEvents()).toEqual([true, false]);
+  });
+
+  it('answers a one-time request without waiting behind an enrollment', async () => {
+    // An enroll holds the lifecycle chain across its round trip to the Relay,
+    // and the one attempt must not wait that out past the link's expiry.
+    createService();
+    const phone = await join((await open()).url);
+    const item = await request(phone);
+    const relay = Promise.withResolvers<Response>();
+    vi.stubGlobal('fetch', () => relay.promise);
+    const enrolling = command('enroll', { relayUrl: ORIGIN, password: 'setup', label: 'Laptop' });
+    await settle();
+
+    await approve(item);
+    expect(await phone.next()).toMatchObject({ ok: true });
+
+    relay.resolve({ ok: false, status: 503, text: async () => '' } as Response);
+    expect((await enrolling).error).toBeTruthy();
+  });
+
+  it('refuses a new link while a phone holds this one, connecting or connected', async () => {
+    createService();
+    const phone = await join((await open()).url);
+    await approve(await request(phone));
+    expect(await phone.next()).toMatchObject({ ok: true });
+
+    expect((await command('oneTimeOpen')).error).toMatch(/already/);
+    await switchDirect(phone);
+    expect(oneTimeStates().at(-1)).toMatchObject({ status: 'connected', label: 'iPhone Safari' });
+    expect((await command('oneTimeOpen')).error).toMatch(/already/);
+    expect(rendezvous.rooms).toHaveLength(1);
+
+    // End is the way out, and a new link is then a new room.
+    await command('oneTimeEnd');
+    expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'user-ended' });
+    await open();
+    expect(rendezvous.rooms).toHaveLength(2);
+
+    // Every state it announced is one a panel — or the VS Code marker — can read.
+    expect(new Set(oneTimeStates().map((state) => state.status))).toEqual(
+      new Set(['opening', 'waiting', 'confirming', 'connecting', 'connected', 'ended']),
+    );
+    expect(oneTimeStates().every(isOneTimeState)).toBe(true);
+    for (const malformed of [
+      null,
+      { status: 'waiting', expiresAt: 1 },
+      { status: 'connected', label: 'x' },
+      { status: 'ended' },
+      { status: 'unheard-of' },
+    ]) {
+      expect(isOneTimeState(malformed), JSON.stringify(malformed)).toBe(false);
+    }
+  });
+
+  it('survives the enrollment going, and a reconnect', async () => {
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    sockets[0]!.open();
+    const waiting = await open();
+
+    await command('clearEnrollment');
+    await command('reconnect');
+    expect((await command('oneTimeStatus')).result).toEqual(waiting);
+    expect(rendezvous.room().burrow.readyState).toBe(1);
+    // The enrollment gate cycled; the serving one never dropped.
+    expect(statusEvents()).toEqual([true, false]);
+    expect(servingEvents()).toEqual([true, true]);
+
+    // And the link still works end to end, the phone told the enrolled name
+    // the connection opened under.
+    const phone = await join(waiting.url);
+    await approve(await request(phone));
+    expect(await phone.next()).toEqual({ ok: true, burrowLabel: ENROLLMENT.label });
+  });
+
+  it('keeps its request beside the pairings, and through a clearEnrollment', async () => {
+    const authenticator = await createTestAuthenticator({ rpId: ENROLLMENT.rpId, origin: ORIGIN });
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    const socket = sockets[0]!;
+    socket.open();
+    const qr = (await command('setupQr')).result as SetupQrResult;
+    const invitation = await parsePairingInvitationUrl(qr.url, ORIGIN);
+    await pairThroughSocket({
+      socket,
+      burrowId: ENROLLMENT.burrowId,
+      clientId: 'c1',
+      invitation: invitation!,
+      authenticator,
+      until: () => queueEvents().length > 0,
+    });
+
+    const phone = await join((await open()).url);
+    await request(phone);
+    // Pairings first, the one-time request after them.
+    expect(queueEvents().at(-1)!.queue.map((item) => [item.kind, item.clientId])).toEqual([
+      ['pairing', 'c1'],
+      ['one-time', ''],
+    ]);
+
+    // Clearing the enrollment drops the pairing, whose Relay is gone, and
+    // nothing else.
+    await command('clearEnrollment');
+    expect(queueEvents().at(-1)!.queue.map((item) => item.kind)).toEqual(['one-time']);
+    expect(oneTimeStates().at(-1)).toMatchObject({ status: 'confirming' });
+  });
+
+  it('ends with the service, and says nothing after', async () => {
+    createService();
+    await open();
+    const before = sent.length;
+
+    service.dispose();
+    expect(rendezvous.room().burrow.closeCode).toBe(1000);
+    await settle();
+    expect(sent).toHaveLength(before);
+  });
+
+  it('opens the rendezvous with no Origin header, over Node’s own WebSocket', async () => {
+    // The Burrow route refuses any Origin, so that no browser page can mint a
+    // room; the default factory is the global the sidecar runs on.
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((resolve) => server.on('listening', resolve));
+    const { port } = server.address() as { port: number };
+    const upgrades: Array<{ url?: string; origin?: string }> = [];
+    server.on('connection', (socket, request) => {
+      upgrades.push({ url: request.url, origin: request.headers.origin });
+      socket.send(
+        JSON.stringify({ t: 'one-time-room', roomId: testRoutingId(), expiresAt: Date.now() + 60_000 }),
+      );
+    });
+    try {
+      const origin = `http://127.0.0.1:${port}`;
+      createService(undefined, {
+        oneTimeOrigin: origin,
+        connectSrc: `${origin} ws://127.0.0.1:${port}`,
+        createWebSocket: undefined,
+      });
+      expect(await open()).toMatchObject({ status: 'waiting' });
+      expect(upgrades).toEqual([{ url: ONE_TIME_WS_ROUTES.burrow, origin: undefined }]);
+    } finally {
+      service.dispose();
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

@@ -857,6 +857,16 @@ describe('the sidecar host', () => {
     expect(after.seen.get('flagged')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 
+  it('gives its Burrow the baked rendezvous, so a one-time connection is on offer', async () => {
+    host.handleCommand('burrow:command', { burrowRequestId: 'b-1', cmd: 'oneTimeStatus' });
+    await vi.waitFor(() => {
+      expect(out.find((line) => line.event === 'burrow:result')?.data).toEqual({
+        burrowRequestId: 'b-1',
+        result: { status: 'idle' },
+      });
+    });
+  });
+
   it('leaves every other command to main.js', () => {
     expect(host.handleCommand('pty:getCwd', { id: 'pty-1' })).toBe(false);
     expect(calls).toEqual([]);

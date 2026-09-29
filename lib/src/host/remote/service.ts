@@ -1,7 +1,8 @@
 /**
  * Environment-free Burrow service shared by both Node burrows; see
- * `docs/specs/relay.md` → "Burrow side". Surface ownership is injected through
- * {@link BurrowSurfaceProvider}.
+ * `docs/specs/relay.md` → "Burrow side", and `docs/specs/one-time.md` →
+ * "Service and hosts" for the one-time connection it also holds. Surface
+ * ownership is injected through {@link BurrowSurfaceProvider}.
  */
 
 import { hostname } from 'node:os';
@@ -13,6 +14,7 @@ import {
   isSetupTokenResponse,
   mintNoiseStaticKeyPair,
   normalizeOrigin,
+  randomBase64Url,
   type EnrollmentOffer,
 } from 'remote-lib-common';
 import {
@@ -37,22 +39,32 @@ import {
   type PairingOutcome,
   type WebSocketLike,
 } from '../../remote/burrow/burrow-runtime';
+import {
+  OneTimeRuntime,
+  type OneTimeApprovalRequest,
+  type OneTimeState,
+  type OneTimeUnavailableReason,
+} from '../../remote/burrow/one-time-runtime';
 import type { DirectPeerFactory } from '../../remote/direct/direct-peer';
 import { originAllowedByConnectSrc } from './connect-src';
 import { readEnrollmentOffer } from './enroll-offer';
+import { oneTimeAvailability } from './one-time-origin';
 import type { BurrowStateStore } from './burrow-state-store';
 import { createSerialQueue } from './serial-queue';
 import {
   BURROW_EVENT_EVENT,
   BURROW_RESULT_EVENT,
+  approvalKind,
   isBurrowCommand,
   type ApproveParams,
+  type BurrowUiEvent,
   type DenyParams,
   type EnrollOfferParams,
   type EnrollParams,
   type EnrollResult,
   type BurrowStatusEvent,
   type InvitationEvent,
+  type OneTimeEvent,
   type PairingQueueEvent,
   type PairingQueueItem,
   type PushDevicesResult,
@@ -74,6 +86,19 @@ export interface BurrowServiceOptions {
   sendToUi: (event: string, data: unknown) => void;
   /** The CSP-shaped allowlist this build was compiled with (`connect-src.ts`). */
   connectSrc: string;
+  /**
+   * The one-time rendezvous origin this build was compiled with
+   * (`one-time-origin.ts`). **Never webview input**: `oneTimeOpen` takes no
+   * parameters, and this is checked against {@link connectSrc} once, here,
+   * before any socket.
+   */
+  oneTimeOrigin: string;
+  /**
+   * Opens the relay socket and the one-time rendezvous alike. **Must send no
+   * `Origin` header** — the rendezvous refuses one, so that no browser page can
+   * mint a room — which Node's global `WebSocket` (the default) and `ws` both
+   * already do.
+   */
   createWebSocket?: (url: string) => WebSocketLike;
   /**
    * How this host builds a peer connection for the direct path
@@ -122,9 +147,11 @@ function safeHostname(): string {
 export function unenrolledStatus(
   offer: EnrollmentOffer | null,
   kind: BurrowKind,
+  serving = false,
 ): BurrowConsoleStatus {
   return {
     enrolled: false,
+    serving,
     relayUrl: null,
     burrowId: null,
     connection: 'stopped',
@@ -133,6 +160,47 @@ export function unenrolledStatus(
     offer: offer ? { origin: offer.origin } : null,
   };
 }
+
+/** The one-time states that hold a socket or a session, which make a Burrow `serving`. */
+const ONE_TIME_SERVING: ReadonlySet<OneTimeState['status']> = new Set<OneTimeState['status']>([
+  'opening',
+  'waiting',
+  'confirming',
+  'connecting',
+  'connected',
+]);
+
+/**
+ * Whether a one-time connection in `state` can reach this machine's terminals,
+ * or is about to: what `serving` adds to `enrolled`
+ * (`service-protocol.ts` → `BurrowStatusEvent.serving`).
+ */
+export function oneTimeServing(state: OneTimeState): boolean {
+  return ONE_TIME_SERVING.has(state.status);
+}
+
+/**
+ * The one-time state of a Burrow with no connection: `unavailable` when this
+ * build's origin fails {@link oneTimeAvailability}, else `idle`. One builder,
+ * because two processes answer it — the service, and the VS Code glue for a
+ * window with no service at all (`vscode-ext/src/burrow.ts` → `refuseCommand`).
+ */
+export function idleOneTimeState(origin: string, connectSrc: string): OneTimeState {
+  const reason = oneTimeAvailability(origin, connectSrc);
+  return reason ? { status: 'unavailable', reason } : { status: 'idle' };
+}
+
+/** What `oneTimeOpen` answers on a build that cannot open one. */
+function unavailableMessage(reason: OneTimeUnavailableReason, origin: string, connectSrc: string): string {
+  return reason === 'origin-not-allowed'
+    ? `One-time connections are unavailable: this build's rendezvous (${origin}) is outside its ` +
+        `allowed remote sources (${connectSrc}).`
+    : `One-time connections are unavailable: this build's rendezvous (${origin}) is not an ` +
+        'https:// origin a link can carry.';
+}
+
+/** Bytes of the random ticket a one-time request is answered by, as `pairingId`. */
+const ONE_TIME_TICKET_BYTES = 16;
 
 /** Which app a Burrow is. Standalone and VS Code enroll separately. */
 export type BurrowKind = 'standalone' | 'vscode';
@@ -161,6 +229,7 @@ export class BurrowService {
   readonly #provider: BurrowSurfaceProvider;
   readonly #sendToUi: (event: string, data: unknown) => void;
   readonly #connectSrc: string;
+  readonly #oneTimeOrigin: string;
   readonly #kind: BurrowKind;
   readonly #createWebSocket?: (url: string) => WebSocketLike;
   readonly #createDirectPeer?: DirectPeerFactory;
@@ -193,11 +262,31 @@ export class BurrowService {
    */
   readonly #pairings = new Map<string, PendingPairing>();
 
+  /**
+   * The one-time connection, as `oneTimeStatus` answers it and the `one-time`
+   * event carries it. Independent of the enrollment: it needs none, and
+   * enrolling, clearing, and reconnecting leave it alone.
+   */
+  #oneTimeState: OneTimeState;
+  /** The runtime behind that state while it is live; `null` once it ended. */
+  #oneTime: OneTimeRuntime | null = null;
+  /** The open in flight, which a second `oneTimeOpen` joins rather than replaces. */
+  #oneTimeOpening: Promise<OneTimeState> | null = null;
+  /**
+   * The one-time request awaiting the modal, in a slot of its own — never in
+   * `#pairings`, so it is neither capped nor coalesced with a pairing, and its
+   * answer never waits behind an enrollment. Tagged with the runtime that
+   * asked, so only that runtime's dismissal clears it.
+   */
+  #oneTimeApproval: { runtime: OneTimeRuntime; pending: PendingPairing } | null = null;
+
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
     this.#provider = options.provider;
     this.#sendToUi = options.sendToUi;
     this.#connectSrc = options.connectSrc;
+    this.#oneTimeOrigin = options.oneTimeOrigin;
+    this.#oneTimeState = idleOneTimeState(options.oneTimeOrigin, options.connectSrc);
     this.#kind = options.kind;
     this.#createWebSocket = options.createWebSocket;
     this.#createDirectPeer = options.createDirectPeer;
@@ -227,11 +316,14 @@ export class BurrowService {
     await this.#startBurrow(enrollment);
   }
 
-  /** Stop the Burrow and forget the connection-scoped state. */
+  /** Stop the Burrow, end any one-time connection, and forget the connection-scoped state. */
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#stopBurrow();
+    const oneTime = this.#oneTime;
+    this.#oneTime = null;
+    oneTime?.end('user-ended');
   }
 
   async handleCommand(raw: unknown): Promise<void> {
@@ -267,10 +359,23 @@ export class BurrowService {
         return this.#serialize(() => this.#clearEnrollment());
       case 'setupQr':
         return this.#setupQr();
+      // A one-time answer goes straight to its runtime, never behind the chain:
+      // it writes nothing an enrollment's store work could race, and its one
+      // attempt must not wait out an enroll's round trip past the link's expiry.
       case 'approve':
-        return this.#serialize(() => this.#approve(params as ApproveParams));
+        return approvalKind(params as ApproveParams | null) === 'one-time'
+          ? this.#approveOneTime(params as ApproveParams)
+          : this.#serialize(() => this.#approve(params as ApproveParams));
       case 'deny':
-        return this.#deny(params as DenyParams);
+        return approvalKind(params as DenyParams | null) === 'one-time'
+          ? this.#denyOneTime(params as DenyParams)
+          : this.#deny(params as DenyParams);
+      case 'oneTimeOpen':
+        return this.#openOneTime();
+      case 'oneTimeEnd':
+        return this.#endOneTime();
+      case 'oneTimeStatus':
+        return this.#oneTimeState;
       case 'pushTest':
         return this.#pushTest();
       case 'pushDevices':
@@ -372,9 +477,10 @@ export class BurrowService {
   async #status(): Promise<BurrowConsoleStatus> {
     const offer = this.#enrollment ? null : await this.#readOffer();
     const enrollment = this.#enrollment;
-    if (!enrollment) return unenrolledStatus(offer, this.#kind);
+    if (!enrollment) return unenrolledStatus(offer, this.#kind, this.#serving());
     return {
       enrolled: true,
+      serving: true,
       relayUrl: enrollment.relayUrl,
       burrowId: enrollment.burrowId,
       connection: this.#burrow?.status ?? 'stopped',
@@ -498,6 +604,132 @@ export class BurrowService {
   }
 
   /**
+   * The one attempt, typed straight through to the runtime that compares it
+   * (`OneTimeRuntime` spends the attempt before it looks at the digits).
+   */
+  #approveOneTime(params: ApproveParams): Record<string, never> {
+    this.#pendingOneTime(params.pairingId).approve(
+      typeof params.code === 'string' ? params.code : '',
+    );
+    return {};
+  }
+
+  #denyOneTime(params: DenyParams): Record<string, never> {
+    this.#pendingOneTime(params.pairingId).deny();
+    return {};
+  }
+
+  /**
+   * The one-time request, only by the ticket its modal displayed: a ticket from
+   * a link this service has since replaced names nothing.
+   */
+  #pendingOneTime(pairingId: string): PendingPairing {
+    const pending = this.#oneTimeApproval?.pending;
+    if (!pending || pending.pairingId !== pairingId) {
+      throw new Error('pairing request is no longer pending');
+    }
+    return pending;
+  }
+
+  // --- One-time connection ---
+
+  /**
+   * Open a one-time connection, answering the state the open settled at —
+   * `waiting` with the link, or `ended`. **No parameters**: the origin is this
+   * build's, never the webview's.
+   *
+   * An open in flight is joined, not replaced; a waiting, confirming, or ended
+   * connection is replaced, and its link dies with it. **A connecting or
+   * connected one is refused**: a phone holds it, and only End lets it go.
+   */
+  async #openOneTime(): Promise<OneTimeState> {
+    const state = this.#oneTimeState;
+    if (state.status === 'unavailable') {
+      throw new Error(unavailableMessage(state.reason, this.#oneTimeOrigin, this.#connectSrc));
+    }
+    if (this.#oneTimeOpening) return this.#oneTimeOpening;
+    if (state.status === 'connecting' || state.status === 'connected') {
+      throw new Error(
+        'A phone is already connected through a one-time link. End it before opening another.',
+      );
+    }
+    const runtime: OneTimeRuntime = new OneTimeRuntime({
+      origin: this.#oneTimeOrigin,
+      createWebSocket: this.#createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike),
+      createSession: (opts) => this.#createApiSession(opts),
+      createDirectPeer: this.#createDirectPeer ?? null,
+      // The name the phone shows: the one this machine enrolled under, else the
+      // one the enrollment form would have suggested.
+      burrowLabel: this.#enrollment?.label || suggestedBurrowLabel(this.#kind),
+      requestApproval: (request) => this.#requestOneTimeApproval(runtime, request),
+      dismissApproval: () => this.#dismissOneTimeApproval(runtime),
+      onChange: (next) => this.#onOneTimeChanged(runtime, next),
+      now: this.#now,
+    });
+    // Swapped in before either runtime moves: the one being replaced ends
+    // unannounced, and this one's first state is the next the webviews hear.
+    const replaced = this.#oneTime;
+    this.#oneTime = runtime;
+    replaced?.end('user-ended');
+    const opening = runtime.open();
+    this.#oneTimeOpening = opening;
+    try {
+      return await opening;
+    } finally {
+      if (this.#oneTimeOpening === opening) this.#oneTimeOpening = null;
+    }
+  }
+
+  /**
+   * End the live one-time connection (`ended`, `user-ended`) — the panel's End
+   * and Cancel — or put an ended one back to `idle`, its Done.
+   */
+  #endOneTime(): Record<string, never> {
+    if (this.#oneTime) this.#oneTime.end('user-ended');
+    else if (this.#oneTimeState.status === 'ended') this.#setOneTimeState({ status: 'idle' });
+    return {};
+  }
+
+  #onOneTimeChanged(runtime: OneTimeRuntime, state: OneTimeState): void {
+    if (this.#oneTime !== runtime) return;
+    // An ended runtime holds nothing more; its last state stays for the panel.
+    if (state.status === 'ended') this.#oneTime = null;
+    this.#setOneTimeState(state);
+  }
+
+  #setOneTimeState(state: OneTimeState): void {
+    const wasServing = this.#serving();
+    this.#oneTimeState = state;
+    this.#emitOneTime();
+    if (this.#serving() !== wasServing) this.#emitStatus();
+  }
+
+  #requestOneTimeApproval(runtime: OneTimeRuntime, request: OneTimeApprovalRequest): void {
+    if (this.#oneTime !== runtime) return;
+    this.#oneTimeApproval = {
+      runtime,
+      pending: {
+        kind: 'one-time',
+        clientId: '',
+        // A fresh ticket per request, for the reason a pairing carries one: a
+        // modal left open over a replaced link must answer nothing.
+        pairingId: randomBase64Url(ONE_TIME_TICKET_BYTES),
+        label: request.label,
+        requestedAt: request.requestedAt,
+        approve: (code) => request.approve(code),
+        deny: () => request.deny(),
+      },
+    };
+    this.#emitQueue();
+  }
+
+  #dismissOneTimeApproval(runtime: OneTimeRuntime): void {
+    if (this.#oneTimeApproval?.runtime !== runtime) return;
+    this.#oneTimeApproval = null;
+    this.#emitQueue();
+  }
+
+  /**
    * One due alarm push, from the alert host in this same process — the
    * sidecar's, or VS Code's through `pushAlert` in `vscode-ext/src/burrow.ts`
    * (`docs/specs/alert.md` -> Push notifications). No Burrow means no ACL and
@@ -617,15 +849,10 @@ export class BurrowService {
       enrollment,
       createWebSocket: this.#createWebSocket,
       createDirectPeer: this.#createDirectPeer,
-      createSession: (opts) =>
-        new RemoteApiSession({
-          burrowId: opts.burrowId,
-          send: opts.send,
-          provider: this.#provider,
-        }),
+      createSession: (opts) => this.#createApiSession(opts),
       loadAcl: () => records,
       saveAcl: (burrowId, next) => this.#store.saveAcl(burrowId, next),
-      requestApproval: (pending) => this.#enqueuePairing(pending),
+      requestApproval: (pending) => this.#enqueuePairing({ ...pending, kind: 'pairing' }),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
       onInvitationChanged: (inviteId, state, outcome) =>
         this.#emitInvitation(inviteId, state, outcome),
@@ -635,19 +862,30 @@ export class BurrowService {
     this.#emitStatus();
   }
 
+  /** The remote-api handler both runtimes serve an authorized session through. */
+  #createApiSession(opts: { burrowId: string; send: (payload: unknown) => void }): RemoteApiSession {
+    return new RemoteApiSession({ burrowId: opts.burrowId, send: opts.send, provider: this.#provider });
+  }
+
+  /** Enrolled, or a one-time connection holding a socket or a session. */
+  #serving(): boolean {
+    return !!this.#enrollment || oneTimeServing(this.#oneTimeState);
+  }
+
   /**
-   * Tell the webviews whether there is a Burrow at all. Everything they do *for*
-   * one — announcing that the directory may have changed on every pane-state,
-   * activity, and focus change — costs a crossing per event on a machine that
-   * may never enroll, so they arm on this and idle without it
-   * (`lib/src/remote/burrow/enrolled-gate.ts`).
+   * Tell the webviews whether there is a Burrow at all, and whether anything can
+   * reach this machine's terminals. Everything they do *for* one — announcing
+   * that the directory may have changed on every pane-state, activity, and focus
+   * change — costs a crossing per event on a machine that may never enroll, so
+   * they arm on this and idle without it
+   * (`lib/src/remote/burrow/enrolled-gate.ts`). Sent when either field may
+   * have changed.
    *
-   * `enrolled` means the same thing as the `status` command's field of that
-   * name, which is how a webview seeds before any event arrives.
+   * Both fields mean the same thing as the `status` command's fields of those
+   * names, which is how a webview seeds before any event arrives.
    */
   #emitStatus(): void {
-    if (this.#disposed) return;
-    this.#sendToUi(BURROW_EVENT_EVENT, this.statusEvent());
+    this.#emit(this.statusEvent());
   }
 
   /**
@@ -656,7 +894,22 @@ export class BurrowService {
    * that joins the broker with it).
    */
   statusEvent(): BurrowStatusEvent {
-    return { name: 'status', enrolled: !!this.#enrollment };
+    return { name: 'status', enrolled: !!this.#enrollment, serving: this.#serving() };
+  }
+
+  /** The one-time event as it stands, for the same late arrival as {@link statusEvent}. */
+  oneTimeEvent(): OneTimeEvent {
+    return { name: 'one-time', state: this.#oneTimeState };
+  }
+
+  #emitOneTime(): void {
+    this.#emit(this.oneTimeEvent());
+  }
+
+  /** Every `burrow:event`; nothing is said once disposed. */
+  #emit(event: BurrowUiEvent): void {
+    if (this.#disposed) return;
+    this.#sendToUi(BURROW_EVENT_EVENT, event);
   }
 
   #stopBurrow(): void {
@@ -697,11 +950,16 @@ export class BurrowService {
   }
 
   #queueSnapshot(): PairingQueueItem[] {
+    const pending = [...this.#pairings.values()];
+    // The one-time request last: the modal shows the head, and pairings that
+    // were already waiting keep their order.
+    if (this.#oneTimeApproval) pending.push(this.#oneTimeApproval.pending);
     // Field by field, never a spread: the pending pairing the Burrow handed us
     // carries the approve/deny closures, and a spread would try to serialize
-    // them across the bridge. Naming the four is what keeps this projection the
+    // them across the bridge. Naming the five is what keeps this projection the
     // whole of what a webview learns.
-    return [...this.#pairings.values()].map(({ clientId, pairingId, label, requestedAt }) => ({
+    return pending.map(({ kind, clientId, pairingId, label, requestedAt }) => ({
+      kind,
       clientId,
       pairingId,
       label,
@@ -714,8 +972,7 @@ export class BurrowService {
    * state, naming it so a panel showing a *different* code stays live.
    */
   #emitInvitation(inviteId: string, state: InvitationState, outcome?: PairingOutcome): void {
-    if (this.#disposed) return;
-    this.#sendToUi(BURROW_EVENT_EVENT, {
+    this.#emit({
       name: 'invitation',
       inviteId,
       state,
@@ -728,8 +985,7 @@ export class BurrowService {
   }
 
   #emitQueue(): void {
-    if (this.#disposed) return;
-    this.#sendToUi(BURROW_EVENT_EVENT, {
+    this.#emit({
       name: 'pairing-queue',
       queue: this.#queueSnapshot(),
     } satisfies PairingQueueEvent);

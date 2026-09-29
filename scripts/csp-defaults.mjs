@@ -1,5 +1,5 @@
 // The one definition of where a Burrow may reach a Relay, shared by both
-// Burrows' build scripts.
+// Burrows' build scripts — and, at the end, of the one-time rendezvous.
 //
 // Both Burrows now run outside any webview — standalone's in the sidecar, VS
 // Code's in the extension host — so neither is fenced by a CSP and both bake
@@ -84,5 +84,98 @@ export function assertConnectSrcBaked(bundlePath, remoteSrc) {
     throw new Error(
       `connect-src: ${bundlePath} does not contain the resolved sources (${remoteSrc}).`,
     );
+  }
+}
+
+// --- The one-time rendezvous ---
+//
+// Where a Burrow opens a one-time connection's handshake
+// (docs/specs/one-time.md). Baked by the same two builds, beside the allowlist
+// above, and fenced by it at runtime: `oneTimeAvailability` in
+// `lib/src/host/remote/one-time-origin.ts` refuses an origin connect-src does
+// not admit, so an override here needs a matching `DORMOUSE_REMOTE_CONNECT_SRC`.
+
+/** The identifier esbuild substitutes; read by `lib/src/host/remote/one-time-origin.ts`. */
+export const ONE_TIME_ORIGIN_PLACEHOLDER = '__DORMOUSE_ONE_TIME_ORIGIN__';
+
+/** The rendezvous baked into published builds; `one-time-origin.test.ts` pins it to the `.ts`. */
+export const DEFAULT_ONE_TIME_ORIGIN = 'https://hosted.dormouse.sh';
+
+/**
+ * The longest origin a one-time link fits, duplicated from
+ * `MAX_ONE_TIME_ORIGIN_LENGTH` in `lib/src/host/remote/one-time-origin.ts`
+ * (pinned equal there): 256, less `/connect/`, the `#`, and the 79-character
+ * fragment.
+ */
+export const MAX_ONE_TIME_ORIGIN_LENGTH = 167;
+
+/**
+ * The hosts plain HTTP is allowed on, duplicated from `LINK_LOOPBACK_HOSTS` in
+ * `remote-lib-common/src/security/link-url.ts` (pinned equal by
+ * `one-time-origin.test.ts`): a phone parses the link under that rule, so an
+ * origin outside it mints links no phone will open.
+ */
+export const ONE_TIME_LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+/**
+ * Whether `origin` is one the runtime can use: a bare origin — `new URL`'s own
+ * spelling of it, so no path, trailing slash, query, fragment, or credentials —
+ * on HTTPS, or on HTTP at a loopback host, and short enough to fit a link.
+ * `oneTimeAvailability`'s `origin-invalid` half, which the test pins this to.
+ */
+export function isUsableOneTimeOrigin(origin) {
+  if (typeof origin !== 'string' || origin.length > MAX_ONE_TIME_ORIGIN_LENGTH) return false;
+  let url;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.origin !== origin) return false;
+  return (
+    url.protocol === 'https:' ||
+    (url.protocol === 'http:' && ONE_TIME_LOOPBACK_HOSTS.includes(url.hostname))
+  );
+}
+
+/**
+ * The rendezvous origin this build should bake: `DORMOUSE_ONE_TIME_ORIGIN` if
+ * set and non-empty, otherwise the shipped default. Logs to stderr when it
+ * overrides. An override the runtime could never use fails the build, for the
+ * reason a malformed `DORMOUSE_REMOTE_CONNECT_SRC` does: silently, it builds a
+ * binary whose One-time connection button is disabled for a reason nobody asked
+ * for.
+ */
+export function resolveOneTimeOrigin(env = process.env, label = 'build') {
+  const override = env.DORMOUSE_ONE_TIME_ORIGIN?.trim();
+  if (!override) return DEFAULT_ONE_TIME_ORIGIN;
+  if (!isUsableOneTimeOrigin(override)) {
+    throw new Error(
+      `[${label}] DORMOUSE_ONE_TIME_ORIGIN: "${override}" is not an origin a one-time link can ` +
+        `carry. It must be a bare https:// origin, or http:// on ${ONE_TIME_LOOPBACK_HOSTS.join(', ')}, ` +
+        `with no path or trailing slash, at most ${MAX_ONE_TIME_ORIGIN_LENGTH} characters ` +
+        `(e.g. "${DEFAULT_ONE_TIME_ORIGIN}").`,
+    );
+  }
+  console.error(`[${label}] one-time rendezvous origin overridden: ${override}`);
+  return override;
+}
+
+/**
+ * Fail the build if the one-time define did not reach `bundlePath` — the same
+ * class of drift `assertConnectSrcBaked` catches, with the same symptom
+ * otherwise: a lost define compiles, and the Burrow silently opens the shipped
+ * default's rendezvous instead of the one it was built for.
+ */
+export function assertOneTimeOriginBaked(bundlePath, origin) {
+  const bundle = readFileSync(bundlePath, 'utf8');
+  if (bundle.includes(ONE_TIME_ORIGIN_PLACEHOLDER)) {
+    throw new Error(
+      `one-time origin: ${ONE_TIME_ORIGIN_PLACEHOLDER} survived into ${bundlePath} — the esbuild ` +
+        'define did not apply, and the Burrow would use the built-in default rendezvous.',
+    );
+  }
+  if (!bundle.includes(origin)) {
+    throw new Error(`one-time origin: ${bundlePath} does not contain the resolved origin (${origin}).`);
   }
 }

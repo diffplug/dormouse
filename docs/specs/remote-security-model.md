@@ -37,7 +37,8 @@ Non-goals: a compromised browser runtime or operating system; a user
 intentionally clearing browser data; permanent device identity across browser
 resets; **availability** — the relay is down whenever the machine is (a
 per-login user agent), and the Relay is a hard online dependency for every new
-session ([relay.md](./relay.md)); **traffic analysis**
+session but a [one-time connection](#one-time-connection)'s
+([relay.md](./relay.md)); **traffic analysis**
 ([Residual metadata](#residual-metadata)).
 
 ## Trust Model

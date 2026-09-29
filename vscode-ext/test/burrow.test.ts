@@ -13,6 +13,8 @@ import { dirname } from 'node:path';
 import type { EnrollmentOffer } from 'remote-lib-common';
 
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
+import { createTestRendezvous, type TestRendezvous } from '../../lib/src/remote/test-rendezvous';
+import { ONE_TIME_SERVING_KEY } from '../src/burrow-store';
 import type { ExtensionMessage } from '../src/message-types';
 import { FrameDecoder, encodeFrame } from '../src/peer-link-protocol';
 import {
@@ -301,6 +303,24 @@ async function otherWindowHoldsTheBurrow(): Promise<{ frames: Array<{ kind: stri
   return { frames };
 }
 
+/**
+ * Route the service's rendezvous socket to the in-memory room: the glue's
+ * factory prefers the host's global `WebSocket`, so that global is what stands
+ * in for the network.
+ */
+function stubRendezvous(): TestRendezvous {
+  const rendezvous = createTestRendezvous();
+  vi.stubGlobal(
+    'WebSocket',
+    class {
+      constructor(url: string) {
+        return rendezvous.createBurrowSocket(url);
+      }
+    },
+  );
+  return rendezvous;
+}
+
 function results(posted: ExtensionMessage[]) {
   return posted
     .filter((message) => message.type === 'burrow:result')
@@ -467,6 +487,26 @@ describe('burrow state store', () => {
     expect(changes).toHaveLength(1);
   });
 
+  it('keeps the one-time serving marker, announcing only a real change', async () => {
+    // Every window hears a write, and every service start clears the marker: a
+    // clear of one that is not there must not wake them all for nothing.
+    const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
+    const { context, store } = fakeContext();
+    const changes: number[] = [];
+    const target = new VsCodeBurrowStateStore(context, () => changes.push(1));
+
+    await target.saveOneTimeServing(false);
+    expect(changes).toHaveLength(0);
+    await target.saveOneTimeServing(true);
+    expect(await target.loadOneTimeServing()).toBe(true);
+    // Not a credential, and never beside the enrollment's.
+    expect(store.secrets.get(ONE_TIME_SERVING_KEY)).toBe('1');
+    expect(changes).toHaveLength(1);
+    await target.saveOneTimeServing(false);
+    expect(await target.loadOneTimeServing()).toBe(false);
+    expect(changes).toHaveLength(2);
+  });
+
   it('drops records that name a different burrow, and unreadable values', async () => {
     const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
     const { context, store } = fakeContext();
@@ -587,6 +627,75 @@ describe('burrow service glue', () => {
     });
   });
 
+  it('bootstraps the contention on oneTimeOpen, which needs no enrollment', async () => {
+    // The one-time panel is offered on a machine no window has a Burrow for;
+    // refusing its open there would leave the button dead.
+    const rendezvous = stubRendezvous();
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    mod.initBurrow(fakeContext().context);
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
+
+    await waitFor(() => results(bound.posted).length > 0);
+    expect(opened!.isPeerBroker()).toBe(true);
+    expect(results(bound.posted)[0]).toMatchObject({
+      burrowRequestId: 'rh-1',
+      result: { status: 'waiting' },
+    });
+    // On the baked origin, through the same factory the relay socket uses.
+    expect(rendezvous.room().burrowUrl).toBe('wss://hosted.dormouse.sh/api/one-time/burrow');
+  });
+
+  it('marks the connection serving for every window, and clears the mark when it stops', async () => {
+    stubRendezvous();
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
+    await waitFor(() => store.secrets.has(ONE_TIME_SERVING_KEY));
+    // A marker, not a credential: nothing about the link is in it.
+    expect(store.secrets.get(ONE_TIME_SERVING_KEY)).toBe('1');
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-2', cmd: 'oneTimeEnd' });
+    await waitFor(() => !store.secrets.has(ONE_TIME_SERVING_KEY));
+  });
+
+  it('joins the peer net when another window’s one-time connection starts serving', async () => {
+    // Un-enrolled, this window never contended, so the marker is the only thing
+    // that brings its terminals into the directory the phone sees.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
+    await tick();
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    store.secrets.set(ONE_TIME_SERVING_KEY, '1');
+    store.announce(ONE_TIME_SERVING_KEY);
+    await waitFor(() => opened!.isPeerBroker());
+  });
+
+  it('contends at activation on a marker, and the service it starts clears a stale one', async () => {
+    // A broker that closed or crashed while serving leaves its mark behind; the
+    // next service to start names no such connection.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    store.secrets.set(ONE_TIME_SERVING_KEY, '1');
+    mod.initBurrow(context);
+
+    await waitFor(() => opened!.isPeerBroker());
+    await waitFor(() => !store.secrets.has(ONE_TIME_SERVING_KEY));
+  });
+
   it('forwards a command to the window that holds the Burrow', async () => {
     const squat = await otherWindowHoldsTheBurrow();
     const mod = await freshBurrow();
@@ -608,6 +717,7 @@ describe('burrow service glue', () => {
         burrowRequestId: 'rh-1',
         result: {
           enrolled: false,
+          serving: false,
           relayUrl: null,
           burrowId: null,
           connection: 'stopped',
@@ -737,6 +847,10 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({ burrowRequestId: 'rh-status', cmd: 'status' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-pushDevices', cmd: 'pushDevices' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-pairingQueue', cmd: 'pairingQueue' });
+    // A window with no service has no one-time connection either: idle, and
+    // nothing to end.
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeStatus', cmd: 'oneTimeStatus' });
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeEnd', cmd: 'oneTimeEnd' });
     // Everything else still says there is nothing to reach.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-clear', cmd: 'clearEnrollment' });
     expect(results(bound.posted).find((r) => r.burrowRequestId === 'rh-clear')).toEqual({
@@ -764,15 +878,16 @@ describe('burrow service glue', () => {
       kind: 'vscode',
       sendToUi: (event, data) => void sent.push({ event, data: data as never }),
       connectSrc: 'https://*.dormouse.sh wss://*.dormouse.sh',
+      oneTimeOrigin: 'https://hosted.dormouse.sh',
     });
     await idle.start();
-    for (const cmd of ['status', 'pushDevices', 'pairingQueue']) {
+    for (const cmd of ['status', 'pushDevices', 'pairingQueue', 'oneTimeStatus', 'oneTimeEnd']) {
       await idle.handleCommand({ burrowRequestId: `rh-${cmd}`, cmd });
     }
     idle.dispose();
     // The glue's `status` is the one idle answer that reads a file, so it
-    // settles a tick later than the two that do not.
-    await waitFor(() => results(bound.posted).length === 4);
+    // settles a tick later than the ones that do not.
+    await waitFor(() => results(bound.posted).length === 6);
 
     const byId = (entries: Array<{ burrowRequestId: string; result?: unknown }>) =>
       Object.fromEntries(
@@ -781,6 +896,7 @@ describe('burrow service glue', () => {
     expect(byId(results(bound.posted))).toEqual(
       byId(sent.filter((message) => message.event === 'burrow:result').map((m) => m.data)),
     );
+    expect(byId(results(bound.posted))['rh-oneTimeStatus']).toEqual({ status: 'idle' });
   });
 
   it('contends when another window enrolls, without a reload', async () => {
@@ -856,6 +972,31 @@ describe('the relay socket', () => {
       expect(closes).toEqual([4001]);
     } finally {
       relay.close();
+    }
+  });
+
+  it('sends no Origin header on either implementation', async () => {
+    // The one-time rendezvous refuses any Origin on its Burrow route, so no
+    // browser page can mint a room; this factory opens that socket too.
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((resolve) => server.on('listening', resolve));
+    const origins: Array<string | undefined> = [];
+    server.on('connection', (socket, request) => {
+      origins.push(request.headers.origin);
+      socket.close(1000);
+    });
+    const { port } = server.address() as { port: number };
+    try {
+      const mod = await freshBurrow();
+      const closed = (socket: ReturnType<typeof mod.createRelaySocket>) =>
+        new Promise<void>((resolve) => socket.addEventListener('close', () => resolve()));
+      await closed(mod.createRelaySocket(`ws://127.0.0.1:${port}`));
+      vi.stubGlobal('WebSocket', undefined);
+      await closed(mod.createRelaySocket(`ws://127.0.0.1:${port}`));
+      expect(origins).toEqual([undefined, undefined]);
+    } finally {
+      server.close();
     }
   });
 
@@ -1153,9 +1294,13 @@ describe('serving the other windows', () => {
     const far = fakeWindow();
     await openFarWindow(far);
 
-    await waitFor(() => far.uiEvents.length > 0);
-    // Addressed to the window that joined, and nothing else is invented for it.
-    expect(far.uiEvents).toEqual([{ name: 'status', enrolled: false }]);
+    await waitFor(() => far.uiEvents.length > 1);
+    // Addressed to the window that joined, and nothing else is invented for it:
+    // whether anything is served, and the one-time panel's state.
+    expect(far.uiEvents).toEqual([
+      { name: 'status', enrolled: false, serving: false },
+      { name: 'one-time', state: { status: 'idle' } },
+    ]);
   });
 
   // A due alarm push is fire and forget: nothing waits on an answer, and a

@@ -23,6 +23,7 @@ import type {
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { bakedConnectSrc } from './connect-src';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
+import { bakedOneTimeOrigin } from './one-time-origin';
 import {
   createEphemeralBurrowStateStore,
   FileBurrowStateStore,
@@ -483,6 +484,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     kind: 'standalone',
     sendToUi: send,
     connectSrc: bakedConnectSrc(),
+    oneTimeOrigin: bakedOneTimeOrigin(),
     // The one host that answers a `direct-offer` today. Building the factory
     // loads nothing: the addon is opened inside the first offer, if one ever
     // comes (`native-direct-peer.ts`).

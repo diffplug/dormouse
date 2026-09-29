@@ -225,7 +225,7 @@ export interface E2eHarness {
   noiseStatic: NoiseStaticKeyMaterial;
   knownBurrows: MemoryKnownBurrows;
   pendingDeletions: MemoryPendingDeletions;
-  approvals: PendingPairing[];
+  approvals: Array<Omit<PendingPairing, 'kind'>>;
   savedAcl: BurrowAclRecord[];
   calls: FetchCall[];
   /** The harness's own `fetch`, for a second client on the same fake Relay. */
@@ -287,7 +287,7 @@ export async function makeE2eHarness(
   const noiseStatic = options.noiseStatic ?? (await mintNoiseStaticKeyPair());
   const knownBurrows = options.knownBurrows ?? memoryKnownBurrows();
   const pendingDeletions = options.pendingDeletions ?? memoryPendingDeletions();
-  const approvals: PendingPairing[] = [];
+  const approvals: Array<Omit<PendingPairing, 'kind'>> = [];
   let savedAcl: BurrowAclRecord[] = [];
 
   const enrollment: BurrowEnrollment = {

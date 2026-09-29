@@ -102,9 +102,14 @@ export type OneTimeEndReason =
 
 /**
  * Why the service offers no one-time connection at all. The service's to
- * decide, never this runtime's: a runtime exists only for an available origin.
+ * decide, never this runtime's: a runtime exists only for an available origin
+ * (`oneTimeAvailability` in `lib/src/host/remote/one-time-origin.ts`).
  */
-export type OneTimeUnavailableReason = 'origin-insecure' | 'origin-not-allowed';
+export type OneTimeUnavailableReason =
+  /** Not a bare HTTPS or loopback-HTTP origin a link can carry. */
+  | 'origin-invalid'
+  /** Outside this build's baked connect-src allowlist. */
+  | 'origin-not-allowed';
 
 /**
  * What the one-time connection is doing, as the laptop's panel renders it.

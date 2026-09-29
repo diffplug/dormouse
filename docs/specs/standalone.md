@@ -130,8 +130,9 @@ The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
 side", which owns that split and what the webview keeps): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
-with the relay-origin allowlist baked in (`docs/specs/relay.md`). **Nothing the
-webview says can widen access** (`docs/specs/remote-security-model.md`).
+with the relay-origin allowlist and the one-time rendezvous origin baked in
+(`docs/specs/relay.md`, `docs/specs/one-time.md`).
+**Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
 as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStore`

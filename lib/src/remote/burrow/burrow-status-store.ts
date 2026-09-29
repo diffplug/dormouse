@@ -10,7 +10,7 @@
  * subscribe to the same service events, and `link.on` supports either arriving
  * first, so the dialog works whether or not the pairing chunk has loaded.
  *
- * The service's `status` event carries only `{ enrolled }`
+ * The service's `status` event carries only `{ enrolled, serving }`
  * (`service-protocol.ts` -> `BurrowStatusEvent`), which is enough to know the
  * answer changed but not what it changed to — so every event re-reads the full
  * status rather than patching a field.
@@ -47,8 +47,8 @@ let refreshInFlight: Promise<void> | null = null;
 let refreshAgain = false;
 
 /**
- * The service's `status` event fires only when `enrolled` changes, because that
- * is the edge its webview gate arms on. The *connection* moves underneath it
+ * The service's `status` event fires only when `enrolled` or `serving` changes,
+ * because those are the edges its webview gate arms on. The *connection* moves underneath it
  * with no event at all: `connecting -> connected` on a normal start,
  * `connected -> disconnected` on a dropped relay, `-> displaced` when another
  * instance takes the slot. Without a poll the dialog would show whichever state
@@ -102,6 +102,7 @@ const STATUS_FIELDS: {
   ) => boolean;
 } = {
   enrolled: Object.is,
+  serving: Object.is,
   relayUrl: Object.is,
   burrowId: Object.is,
   connection: Object.is,
@@ -232,10 +233,15 @@ function refreshAfterMutation(): Promise<void> {
  * `label.trim()` while the enroll form renders, where an `undefined` throws the
  * whole section away rather than degrading, so it is defaulted here — at the
  * seam where the untrusted shape becomes the typed one — instead of at each of
- * the two forms that read it.
+ * the two forms that read it. `serving` is defaulted to `enrolled`, which is
+ * all a broker from before one-time connections could be serving on.
  */
 function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
-  return { ...status, suggestedLabel: status.suggestedLabel ?? '' };
+  return {
+    ...status,
+    serving: status.serving ?? status.enrolled,
+    suggestedLabel: status.suggestedLabel ?? '',
+  };
 }
 
 async function readBurrowStatus(): Promise<void> {

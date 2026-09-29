@@ -774,9 +774,12 @@ memo invalidation — live in that burrow's spec.
   **passes its own timeout**; [remote-security-model.md](./remote-security-model.md)
   owns what an invitation proves.
 * **Pairing confirmation modal**: the queue is service-side; webviews mirror a
-  serializable projection (`{ clientId, pairingId, label, requestedAt }[]`,
-  pushed whole on every change) and echo both ids plus the **typed digits** on
-  Confirm, so the approve/deny closures never leave the Burrow's process. **A
+  serializable projection (`{ kind, clientId, pairingId, label, requestedAt }[]`,
+  pushed whole on every change) and echo the kind, both ids, and the **typed
+  digits** on Confirm, so the approve/deny closures never leave the Burrow's
+  process. `kind` is `pairing` here; a one-time connection's request rides the
+  same queue under its own kind ([one-time.md](./one-time.md) -> "Service and
+  hosts"). **A
   confirmation is bound to the displayed `pairingId`, not whichever ceremony
   currently occupies `clientId`**: a re-sent pairing replaces its predecessor,
   and an old modal action whose immutable id no longer matches is rejected; the
@@ -787,6 +790,9 @@ memo invalidation — live in that burrow's spec.
   after the invitation expires answers `invitation-expired` and dismisses, ACL
   untouched.** In VS Code the queue is broadcast to every window, any of which
   may be in front of the user.
+* **One-time connection**: `oneTimeOpen`, `oneTimeEnd`, and `oneTimeStatus`,
+  with the `one-time` event and `status`'s `serving`, run beside the enrollment
+  and need none ([one-time.md](./one-time.md) -> "Service and hosts").
 * **Terminal bridge**: served through a `BurrowSurfaceProvider`
   ([remote-api.md](./remote-api.md)). `directory.watch` snapshots come from the
   webviews that own the panes; `surface.attach` resizes through the owning
@@ -879,7 +885,7 @@ exists to honor:
 - **Disconnect asks first**: clearing the enrollment drops every paired phone
   until each pairs again.
 - **Status is re-read, not patched**: the service's `status` event carries only
-  `{ enrolled }`, so every event triggers a full `status` command, and the dialog
+  `{ enrolled, serving }`, so every event triggers a full `status` command, and the dialog
   re-reads on open since another window may have enrolled meanwhile. **The
   connection is polled every 2 s while something is subscribed**, never as a
   standing timer in every window, comparing field-wise before publishing
@@ -902,7 +908,9 @@ five enrollment commands: `enroll(relayUrl, password, label)`,
 `enrollOffer(origin, label)` (its origin from `status().offer.origin`), `status`,
 `reconnect`, `clearEnrollment`. **Pairing confirmation is never here**: it is a
 modal because it must interrupt, and because the digits it takes are read off a
-phone ([remote-security-model.md](./remote-security-model.md) -> Pairing).
+phone ([remote-security-model.md](./remote-security-model.md) -> Pairing). The
+one-time commands are not on the hook either; `status()` prints `serving`
+beside `enrolled`.
 
 `docs/stories/pairing.mdx` is a narrative Storybook page walking this section and
 the pairing modal in sequence with the rest of the setup, rendering the real

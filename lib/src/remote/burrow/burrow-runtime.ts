@@ -252,8 +252,8 @@ export interface BurrowOptions {
    */
   loadAcl: (burrowId: string) => BurrowAclRecord[];
   saveAcl: (burrowId: string, records: readonly BurrowAclRecord[]) => void | Promise<void>;
-  /** Surface a pairing request for local approval. */
-  requestApproval: (pending: PendingPairing) => void;
+  /** Surface a pairing request for local approval; its owner names the kind. */
+  requestApproval: (pending: Omit<PendingPairing, 'kind'>) => void;
   /** Dismiss a surfaced request once resolved. */
   dismissApproval: (clientId: string) => void;
   /**
@@ -302,7 +302,7 @@ export class BurrowRuntime {
   readonly #createWebSocket: (url: string) => WebSocketLike;
   readonly #createSession?: BurrowOptions['createSession'];
   readonly #saveAcl: BurrowOptions['saveAcl'];
-  readonly #requestApproval: (pending: PendingPairing) => void;
+  readonly #requestApproval: (pending: Omit<PendingPairing, 'kind'>) => void;
   readonly #dismissApproval: (clientId: string) => void;
   readonly #onInvitationChanged: NonNullable<BurrowOptions['onInvitationChanged']>;
   readonly #now: () => number;

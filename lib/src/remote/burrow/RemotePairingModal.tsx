@@ -1,11 +1,35 @@
 import { useRef, useState } from 'react';
 import { ModalFrame, ModalReviewBlock, modalActionButton } from '../../components/design';
 import { PAIRING_CODE_LENGTH } from 'remote-lib-common';
+import type { ApprovalKind } from '../../host/remote/service-protocol';
+
+/**
+ * What differs between the two ceremonies the modal confirms. The warning
+ * about a phone showing no code is the same for both: it names the one failure
+ * mode either request can hide behind.
+ */
+const COPY: Record<ApprovalKind, { title: string; consequence: string; confirm: string }> = {
+  pairing: {
+    title: 'Pair a new device',
+    consequence:
+      'Approving adds it to this machine only. Your other machines are unaffected, and each asks separately.',
+    confirm: 'Confirm and authorize',
+  },
+  // A one-time connection writes nothing, so the copy says what it grants
+  // instead: all of it, for as long as it lasts (docs/specs/one-time.md).
+  'one-time': {
+    title: 'Allow a one-time connection',
+    consequence:
+      'This phone gets full control of every terminal here until it disconnects or you end it. Nothing is saved.',
+    confirm: 'Confirm and allow',
+  },
+};
 
 /**
  * The Burrow's local pairing confirmation (relay.md → "Pairing approval modal";
- * same pattern as KillConfirm). Confirming here is the only path that writes
- * the ACL.
+ * same pattern as KillConfirm). Confirming a pairing here is the only path that
+ * writes the ACL; confirming a one-time request authorizes one session and
+ * writes nothing.
  *
  * **The direction of the code is the control.** The phone displays two digits
  * and the person types them on the laptop, so authorizing requires holding the
@@ -15,10 +39,13 @@ import { PAIRING_CODE_LENGTH } from 'remote-lib-common';
  * gets **one** attempt (`docs/specs/remote-security-model.md` → Pairing).
  */
 export function RemotePairingModal({
+  kind = 'pairing',
   label,
   onApprove,
   onDeny,
 }: {
+  /** Which ceremony is asking; a pairing unless told otherwise. */
+  kind?: ApprovalKind;
   /** The Client's own name for itself, already bounded by the Burrow. */
   label: string;
   onApprove: (code: string) => void;
@@ -27,6 +54,7 @@ export function RemotePairingModal({
   const denyButtonRef = useRef<HTMLButtonElement>(null);
   const [code, setCode] = useState('');
   const complete = code.length === PAIRING_CODE_LENGTH;
+  const copy = COPY[kind];
 
   return (
     <ModalFrame
@@ -37,7 +65,7 @@ export function RemotePairingModal({
       onEscape={onDeny}
     >
       <h2 id="remote-pairing-title" className="mb-1 text-base font-bold text-foreground">
-        Pair a new device
+        {copy.title}
       </h2>
       {/* The exact copy the spec fixes. It has to name the failure mode — a
           request that shows no code — because that is the only signal a user
@@ -73,10 +101,7 @@ export function RemotePairingModal({
         />
       </label>
 
-      <p className="mb-4 text-sm leading-relaxed text-muted">
-        Approving adds it to this machine only. Your other machines are unaffected, and each asks
-        separately.
-      </p>
+      <p className="mb-4 text-sm leading-relaxed text-muted">{copy.consequence}</p>
 
       <div className="flex justify-end gap-2">
         <button
@@ -93,7 +118,7 @@ export function RemotePairingModal({
           onClick={() => onApprove(code)}
           className={modalActionButton({ tone: 'primary' })}
         >
-          Confirm and authorize
+          {copy.confirm}
         </button>
       </div>
     </ModalFrame>

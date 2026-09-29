@@ -2,7 +2,7 @@
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, Pane, and Baseboard vocabulary; this spec uses them bare.
 > Owns the one-time connection: the link a Burrow shows, the Hosted rendezvous that carries only its handshake, and the direct-only session that follows. Defers the ceremony's trust rules to `docs/specs/remote-security-model.md` -> "One-time connection" and the audited checks to `docs/specs/security-remote.md` -> "One-time connection".
-> The shared contract, the Burrow runtime, the phone client and page, and the Hosted rendezvous are built; the service commands and the laptop's interface are the **one-time-connection** scope under `## Future`.
+> The shared contract, the Burrow runtime, the service with its host glue, the phone client and page, and the Hosted rendezvous are built; the laptop's interface is the **one-time-connection** scope under `## Future`.
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
@@ -347,14 +347,72 @@ page over OSC 367, since Wrangler's inspector binds a second port.
 Source of truth: `devConfig` in `hosted/scripts/dev-one-time.mjs`. Pinned by
 `hosted/scripts/dev-one-time.test.mjs`.
 
+## Service and hosts
+
+**`BurrowService` holds at most one `OneTimeRuntime`, independent of the
+enrollment**: it works un-enrolled, survives `clearEnrollment` and
+`reconnect`, and `dispose()` ends it. Its label is the enrollment's, else
+`suggestedBurrowLabel(kind)`; its provider and direct-peer factory are the
+enrolled runtime's.
+
+| Command | Answers |
+| --- | --- |
+| `oneTimeOpen` | the state the open settled at, `waiting` or `ended` |
+| `oneTimeEnd` | `{}`: a live connection ends `user-ended`; an `ended` one returns to `idle` |
+| `oneTimeStatus` | the current `OneTimeState` |
+
+- **`oneTimeOpen` takes no parameters: the origin is never webview input.**
+  It joins an open in flight, replaces a waiting, confirming, or ended
+  connection (ending it unannounced), and is **refused while `connecting` or
+  `connected`**, and while `unavailable`.
+- **Every state change is a `{ name: 'one-time', state }` event.**
+- **`status` and its event carry `serving`**: `enrolled`, or a one-time status
+  of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip
+  emits `status`. **A reader missing `serving` takes `enrolled`** (an older VS
+  Code broker). The webview's surface responder and approval mirror arm on
+  `serving`, the push device list on `enrolled`.
+- **Approval carries a `kind`** (`pairing` | `one-time`) on `PendingPairing`,
+  `PairingQueueItem`, `ApproveParams`, and `DenyParams`. The one-time request
+  has a slot of its own — `clientId: ''`, a fresh random `pairingId` ticket,
+  after the pairings in the snapshot — and **its answer goes straight to the
+  runtime, never behind the lifecycle chain**. **A missing `kind` is a
+  `pairing`**, so an older webview's answer finds nothing to approve. The
+  mirror keys by `(kind, clientId)`. The one-time modal keeps Pairing's fixed
+  warning under "Allow a one-time connection", then says "This phone gets full
+  control of every terminal here until it disconnects or you end it. Nothing is
+  saved." beside a "Confirm and allow" button.
+
+**The origin is baked**: `DEFAULT_ONE_TIME_ORIGIN` (`https://hosted.dormouse.sh`),
+overridden by the build variable `DORMOUSE_ONE_TIME_ORIGIN`, which both host
+bundles substitute and assert, failing the build on an origin the runtime
+could not use. **`oneTimeAvailability` decides before any socket exists**:
+`origin-invalid` for anything but a bare HTTPS origin, or HTTP on a link
+loopback host, of at most 167 characters; `origin-not-allowed` outside the
+baked connect-src allowlist; either makes the state `unavailable`. **The
+Burrow's socket sends no `Origin` header**, as neither Node's global
+`WebSocket` nor `ws` does.
+
+**Standalone** passes the baked origin from the sidecar entry; Rust broadcasts
+every `burrow:event` unchanged. VS Code's bootstrap, idle answers, and serving
+marker are `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
+
+Source of truth: `BurrowService`, `idleOneTimeState`, and `oneTimeServing` in
+`lib/src/host/remote/service.ts`; `OneTimeEvent` and `approvalKind` in
+`lib/src/host/remote/service-protocol.ts`; `oneTimeAvailability` and
+`bakedOneTimeOrigin` in `lib/src/host/remote/one-time-origin.ts`;
+`resolveOneTimeOrigin` / `assertOneTimeOriginBaked` in `scripts/csp-defaults.mjs`;
+`armWhile` in `lib/src/remote/burrow/enrolled-gate.ts`; `mirrorPairingQueue` in
+`lib/src/remote/burrow/activation.ts`; `RemotePairingModal` in
+`lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by
+`lib/src/host/remote/service.test.ts` and
+`lib/src/host/remote/one-time-origin.test.ts`.
+
 ## Future
 
 **Scope: one-time-connection** — the feature on top of the contract, in build
 order, each stage promoting its part above the fold:
 
-1. **Service commands and host glue** — `BurrowService` commands and event, the
-   baked origin, the `serving` gate, approval `kind`, standalone and VS Code.
-2. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
+1. **Laptop UI** — the Settings panel and the Baseboard indicator; the button
    enabled.
 
 **Scope: one-time-anywhere** — reach past one network, for paid users: STUN and
@@ -380,33 +438,6 @@ limit.
    the switch.
 8. After the switch both ends have left the room, and it deletes itself.
 
-### Service and hosts
-
-- **`BurrowService` holds at most one runtime**, from its `oneTimeOrigin`
-  option. `oneTimeOpen` takes no parameters — **the origin is never webview
-  input** — is refused while connecting or connected, and replaces a waiting or
-  ended one; `oneTimeEnd` and `oneTimeStatus` complete the set, with a
-  `{name: 'one-time', state}` event. `status` gains
-  `serving = enrolled || one-time active`. Works un-enrolled, survives
-  `clearEnrollment`, and `dispose()` ends it. The label is the enrollment's, or
-  `suggestedBurrowLabel(kind)`.
-- **Approval carries a `kind`** (`pairing` | `one-time`) on `PendingPairing`,
-  `PairingQueueItem`, `ApproveParams`, and `DenyParams`, the one-time request in
-  a slot of its own and a missing `kind` read as `pairing`. The webview mirror
-  keys by `(kind, clientId)`; the modal's one-time copy: "Allow a one-time
-  connection … full control of every terminal here until it disconnects or you
-  end it. Nothing is saved."
-- **The origin is baked**: `DEFAULT_ONE_TIME_ORIGIN = 'https://hosted.dormouse.sh'`
-  through `__DORMOUSE_ONE_TIME_ORIGIN__`, available only when HTTPS or loopback
-  HTTP **and** admitted by the baked connect-src allowlist. The Burrow's socket
-  sends no `Origin` header.
-- **The webview gate arms on `serving`** for the peer-surface responder and the
-  pairing-queue mirror; push refresh stays on `enrolled`.
-- **Standalone** passes the baked origin from the sidecar entry. **VS Code**
-  treats `oneTimeOpen` as contention-starting, answers `oneTimeStatus` and
-  `oneTimeEnd` idly from a non-broker window, and while a one-time connection is
-  active keeps a SecretStorage serving marker so sibling windows join the peer
-  net and their terminals reach the phone.
 
 ### Laptop UI
 

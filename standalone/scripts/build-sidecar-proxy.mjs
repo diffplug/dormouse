@@ -18,7 +18,10 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
   assertConnectSrcBaked,
+  assertOneTimeOriginBaked,
   CONNECT_SRC_PLACEHOLDER,
+  ONE_TIME_ORIGIN_PLACEHOLDER,
+  resolveOneTimeOrigin,
   resolveRemoteConnectSrc,
 } from '../../scripts/csp-defaults.mjs';
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
@@ -30,6 +33,9 @@ const sidecar = path.resolve(here, '../sidecar');
 // Where the Burrow may reach a Relay. The Burrow runs in the sidecar,
 // so this is the enforcement point — there is no webview CSP in front of it.
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
+// Where the Burrow opens a one-time connection's rendezvous, fenced by the
+// allowlist above at runtime (docs/specs/one-time.md).
+const oneTimeOrigin = resolveOneTimeOrigin(process.env, 'sidecar');
 
 // What the sidecar installs at runtime, read from the manifest that installs
 // it: `node-datachannel` resolves its platform package and `detect-libc`
@@ -71,7 +77,10 @@ const bundles = [
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'burrow.cjs',
-    define: { [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc) },
+    define: {
+      [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
+      [ONE_TIME_ORIGIN_PLACEHOLDER]: JSON.stringify(oneTimeOrigin),
+    },
     assertBaked: true,
     external: NATIVE_DIRECT,
   },
@@ -104,7 +113,10 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     // Only the bundle with externals to check reads one.
     ...(external ? { metafile: true } : {}),
   });
-  if (assertBaked) assertConnectSrcBaked(outfile, remoteSrc);
+  if (assertBaked) {
+    assertConnectSrcBaked(outfile, remoteSrc);
+    assertOneTimeOriginBaked(outfile, oneTimeOrigin);
+  }
   if (external) assertNothingInlined(result.metafile, SIDECAR_RUNTIME_DEPS, `sidecar ${out}`);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }

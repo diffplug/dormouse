@@ -162,12 +162,12 @@ describe('burrow bridge mode', () => {
     head.approve('47');
     expect(link.commands.at(-1)).toEqual({
       cmd: 'approve',
-      params: { clientId: 'c1', pairingId: 'p1', code: '47' },
+      params: { kind: 'pairing', clientId: 'c1', pairingId: 'p1', code: '47' },
     });
     head.deny();
     expect(link.commands.at(-1)).toEqual({
       cmd: 'deny',
-      params: { clientId: 'c1', pairingId: 'p1' },
+      params: { kind: 'pairing', clientId: 'c1', pairingId: 'p1' },
     });
   });
 
@@ -228,7 +228,7 @@ describe('burrow bridge mode', () => {
     stale.approve('47');
     expect(link.commands.at(-1)).toEqual({
       cmd: 'approve',
-      params: { clientId: 'c1', pairingId: 'p1', code: '47' },
+      params: { kind: 'pairing', clientId: 'c1', pairingId: 'p1', code: '47' },
     });
   });
 
@@ -339,6 +339,93 @@ describe('burrow bridge mode', () => {
     devices.refreshers.at(-1)!();
     await settle();
     expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
+  });
+
+  it('keys the mirror by kind and client, so a one-time request stands apart', async () => {
+    // A one-time request has no Relay and so no client id; it must never be
+    // taken for, or coalesce with, a pairing — and its answers must say which
+    // half of the service holds it.
+    const link = fakeLink();
+    const { pairing } = await installBridge(link);
+    const pairingItem = { kind: 'pairing', clientId: 'c1', pairingId: 'p1', label: 'iPad', requestedAt: 5 };
+    const oneTimeItem = { kind: 'one-time', clientId: '', pairingId: 't1', label: 'iPhone', requestedAt: 6 };
+    // A pairing whose id happens to match the one-time request's.
+    const blankPairing = { ...pairingItem, clientId: '', pairingId: 'p0' };
+
+    link.emit('pairing-queue', { name: 'pairing-queue', queue: [pairingItem, blankPairing, oneTimeItem] });
+    expect(pairing.getPairingApprovalSnapshot().map((p) => [p.kind, p.clientId])).toEqual([
+      ['pairing', 'c1'],
+      ['pairing', ''],
+      ['one-time', ''],
+    ]);
+
+    const oneTime = pairing.getPairingApprovalSnapshot().at(-1)!;
+    oneTime.approve('42');
+    expect(link.commands.at(-1)).toEqual({
+      cmd: 'approve',
+      params: { kind: 'one-time', clientId: '', pairingId: 't1', code: '42' },
+    });
+    oneTime.deny();
+    expect(link.commands.at(-1)).toEqual({
+      cmd: 'deny',
+      params: { kind: 'one-time', clientId: '', pairingId: 't1' },
+    });
+
+    // The one-time request answered: only it goes.
+    link.emit('pairing-queue', { name: 'pairing-queue', queue: [pairingItem, blankPairing] });
+    expect(pairing.getPairingApprovalSnapshot().map((p) => [p.kind, p.clientId])).toEqual([
+      ['pairing', 'c1'],
+      ['pairing', ''],
+    ]);
+  });
+
+  it('reads an item that names no kind as a pairing, and answers it as one', async () => {
+    // A broker from before the field: nothing it sends can be a one-time
+    // request, and an answer naming `pairing` fails closed on the new service.
+    const link = fakeLink();
+    const { pairing } = await installBridge(link);
+    link.emit('pairing-queue', {
+      name: 'pairing-queue',
+      queue: [{ clientId: 'c1', pairingId: 'p1', label: 'iPad', requestedAt: 5 }],
+    });
+
+    const head = pairing.getPairingApprovalSnapshot()[0]!;
+    expect(head.kind).toBe('pairing');
+    head.approve('47');
+    expect(link.commands.at(-1)).toMatchObject({ params: { kind: 'pairing', clientId: 'c1' } });
+  });
+
+  it('seeds the mirror while serving un-enrolled, and fetches no devices', async () => {
+    // A one-time connection needs the approval modal and no Relay: the queue
+    // arms on `serving`, the Relay's device list on `enrolled` alone.
+    const link = fakeLink();
+    link.results.status = { enrolled: false, serving: false };
+    link.results.pairingQueue = [
+      { kind: 'one-time', clientId: '', pairingId: 't1', label: 'iPhone', requestedAt: 5 },
+    ];
+    const { pairing } = await installBridge(link);
+    link.emit('status', { name: 'status', enrolled: false, serving: true });
+    await settle();
+
+    expect(pairing.getPairingApprovalSnapshot()).toHaveLength(1);
+    expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(false);
+    // One seed for both gates: the un-enrolled `status` reads the offer file.
+    expect(link.commands.filter((c) => c.cmd === 'status')).toHaveLength(1);
+
+    // Enrolling while serving arms the devices without re-seeding the queue.
+    link.commands.length = 0;
+    link.emit('status', { name: 'status', enrolled: true, serving: true });
+    await settle();
+    expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
+  });
+
+  it('reads a status with no `serving` as serving exactly when enrolled', async () => {
+    // What a broker from before one-time connections sends.
+    const link = fakeLink();
+    link.results.status = { enrolled: true };
+    await installBridge(link);
+    expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(true);
+    expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(true);
   });
 
   it('is idempotent under a StrictMode double mount', async () => {
