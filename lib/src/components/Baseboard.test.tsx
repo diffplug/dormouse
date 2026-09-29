@@ -461,13 +461,15 @@ describe('Baseboard overflow alerts', () => {
 });
 
 describe('Baseboard preview slot', () => {
-  it('italicizes a preview slot\'s Door and names it Preview', () => {
+  it('marks a preview slot\'s Door with italics alone and names it Preview', () => {
     const door = (id: string) => container.querySelector<HTMLElement>(`[data-door-id="${id}"]`)!;
     renderBaseboard([{ id: 'slot', kind: 'tool', title: 'viewer', preview: true }]);
     // A Tool Door's label is header-derived: `<idle>` with no Session state.
     expect(door('slot').title).toBe('<idle> — Preview');
     expect(door('slot').getAttribute('aria-label')).toBe('<idle>, Preview');
     expect(door('slot').querySelector('.italic')?.textContent).toBe('<idle>');
+    // The italic label is the whole mark.
+    expect(door('slot').textContent).toBe('<idle>');
     renderBaseboard([{ id: 'kept', kind: 'tool', title: 'viewer' }]);
     expect(door('kept').title).toBe('<idle>');
     expect(door('kept').querySelector('.italic')).toBeNull();

@@ -18,7 +18,7 @@ import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import { isPreviewSlotParams } from './browser-surface';
-import { PreviewPill } from './PreviewPill';
+import { usePreviewKeep } from './preview-keep';
 import { useHeldWhile, usePreviewSlotView } from './preview-transition';
 import { MinimizeKillButtons, PaneActionGroup } from './PaneActionButtons';
 import {
@@ -151,8 +151,11 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
     if (!visible) closeMenu(false);
   }, [visible, closeMenu]);
 
+  // A double-click on the address keeps the preview and closes the URL editor
+  // its first click opened.
+  const keep = usePreviewKeep(id, preview, closeUrlEditor);
+
   const renderBrowserControls = (placement: BrowserInlineTier | 'popover') => {
-    const previewPill = preview && placement !== 'minimal' && <PreviewPill id={id} />;
     return (
       <>
         {screen && screenSnapshot && chrome ? (
@@ -227,6 +230,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
                 {devServer && (
                   <button
                     type="button"
+                    data-header-label="true"
                     onClick={(e) => { e.stopPropagation(); actions.onFocusPane(devServer.paneId); }}
                     aria-label={`Focus ${devServer.label} — serves this localhost port`}
                     title={`localhost served by ${devServer.label}${port != null ? ` (:${port})` : ''} — click to focus`}
@@ -251,7 +255,6 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
                   onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setEditingUrl(true); } }}
                   onClick={(e) => { e.stopPropagation(); setEditingUrl(true); }}
                 >{urlText || title || id}</span>
-                {previewPill}
 
                 {/* Takes the space the URL leaves, keeping the layout buttons
                     right-aligned; an auto margin, so it never competes with the
@@ -261,10 +264,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
             )}
           </>
         ) : (
-          <>
-            <span className={clsx('min-w-0 flex-1 truncate font-medium', preview && PREVIEW_LABEL_CLASS)} title={preview ? 'Preview' : undefined}>{title ?? id}</span>
-            {previewPill}
-          </>
+          <span className={clsx('min-w-0 flex-1 truncate font-medium', preview && PREVIEW_LABEL_CLASS)} title={preview ? 'Preview' : undefined}>{title ?? id}</span>
         )}
 
         {(placement === 'popover' || placement === 'full') && <div className="ml-1 flex shrink-0 items-center gap-0.5">
@@ -305,6 +305,7 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
       ref={headerRef}
       className={`flex h-full min-w-0 flex-1 cursor-grab items-center ${inline ? 'gap-1.5 pl-2 pr-[5px]' : 'gap-0.5 px-1'} ${TERMINAL_TOP_RADIUS_CLASS} text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS} ${isActiveHeader ? 'bg-header-active-bg text-header-active-fg' : 'bg-header-inactive-bg text-header-inactive-fg'}`}
       onMouseDown={() => actions.onClickPanel(id)}
+      {...keep}
     >
       <ToolDirtyIndicator dirty={dirty} />
       {inline ? renderBrowserControls(inline) : (

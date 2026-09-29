@@ -1344,7 +1344,7 @@ export function useDorControl({
           if (interrupted !== RESTART_CANCELLED) interruptedSlotRuns.current.delete(slotId);
           const previous = lath.getMeta(slotId)?.params;
           if (previous && !isPreviewSlotParams(previous)) {
-            // Kept meanwhile — its pill, or unsaved changes: its own Tool runs
+            // Kept meanwhile — its header, or unsaved changes: its own Tool runs
             // again, unless it outlived the interrupt.
             if (keptCommand && (interrupted.ok || interrupted === RESTART_CANCELLED)) await restoreKeptSlot(slotId, keptCommand);
             return answeredSuperseded() || unavailable();

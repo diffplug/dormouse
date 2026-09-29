@@ -119,7 +119,7 @@ export function retargetToolLeaf(
 
 export interface PreviewSlotPin {
   /** Clear the mark, leaving an ordinary Tool that keeps its key. Every pin —
-   *  by open, by unsaved state, by the header pill — goes through here. A
+   *  by open, by unsaved state, by a header double-click — goes through here. A
    *  retarget passes the leaf it writes, which is written without the mark. */
   pin: (id: string, next?: LeafMeta) => void;
   /** The slot this Wall pinned last; runtime only, never persisted. */

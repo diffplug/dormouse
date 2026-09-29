@@ -524,17 +524,22 @@ export function LathHost({
   }, [externalDragId]);
 
   // Swallow the one click the browser synthesizes after a real drag (so a drop over a
-  // header/button/door does not also fire its click). Capture phase, so React's own
-  // bubble-phase onClick never runs.
+  // header/button/door does not also fire its click), and the dblclick after it when
+  // the drag was a burst's second press (so it never keeps a preview slot). Capture
+  // phase, so React's own bubble-phase handlers never run.
   useEffect(() => {
     const onClickCapture = (e: MouseEvent): void => {
       if (!suppressNextClickRef.current) return;
-      suppressNextClickRef.current = false;
+      if (e.type === 'dblclick' || e.detail !== 2) suppressNextClickRef.current = false;
       e.stopPropagation();
       e.preventDefault();
     };
     window.addEventListener('click', onClickCapture, true);
-    return () => window.removeEventListener('click', onClickCapture, true);
+    window.addEventListener('dblclick', onClickCapture, true);
+    return () => {
+      window.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('dblclick', onClickCapture, true);
+    };
   }, []);
 
   // --- Animation: imperatively apply the animator's interpolated frames to the leaf

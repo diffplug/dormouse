@@ -74,7 +74,7 @@ interface StoryArgs {
   /** Include the Tool Terminal Context button beside the browser header. */
   tool: boolean;
   dirty: 'unknown' | 'clean' | 'dirty';
-  /** The Tool is the Workspace's preview slot (italic address + Preview pill). */
+  /** The Tool is the Workspace's preview slot (italic address). */
   preview: boolean;
   /** Whether the surface is the selected/active pane (header highlight). */
   selected: boolean;

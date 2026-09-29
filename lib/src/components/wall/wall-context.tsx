@@ -81,7 +81,7 @@ export interface WallActions {
    *  (docs/specs/dor-tool.md -> Trust). */
   onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
   /** Keep a preview slot open: clear its mark (`docs/specs/dor-tool.md` ->
-   *  Preview slot). The header's Preview pill. */
+   *  Preview slot). A double-click on its Pane header. */
   onPinPreview?: (id: string) => void;
 }
 

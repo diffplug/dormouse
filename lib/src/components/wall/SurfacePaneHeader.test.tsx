@@ -27,7 +27,7 @@ import {
   ZoomedIdContext,
   type WallActions,
 } from './wall-context';
-import { registerStubScreen, STUB_CHROME, STUB_SCREEN, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
+import { doubleClick, registerStubScreen, STUB_CHROME, STUB_SCREEN, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
 import { commitPreviewTransition, resetPreviewTransitions } from '../../lib/preview-transition-store';
 import { beginSlotSwitch } from './preview-transition';
@@ -112,27 +112,78 @@ function openPopup() {
 }
 
 describe('SurfacePaneHeader — preview slot', () => {
-  it('italicizes a serving slot\'s name and address and offers a Keep open pill until the minimal tier', () => {
+  it('italicizes a serving slot\'s name and address, named Preview, as its only mark at every width', () => {
     const id = 'preview-tool-header';
     const registration = register(id);
     // A serving Tool's name is the dev-server chip for its own port.
     setDevServerResolution(5173, { paneId: id, fallbackTitle: 'README.md' });
     try {
-      const onPinPreview = vi.fn();
-      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
-      const address = container.querySelector<HTMLElement>('[role="button"].italic');
-      expect(address?.title).toMatch(/^Preview — /);
-      expect(container.querySelector('button[aria-label^="Focus README.md"] .italic')?.textContent).toBe('README.md');
-      const pill = () => container.querySelector<HTMLButtonElement>(`[data-preview-pill-for="${id}"]`);
-      expect(pill()?.title).toBe('Keep open');
-      act(() => pill()!.click());
-      expect(onPinPreview).toHaveBeenCalledExactlyOnceWith(id);
-      act(() => resizeHeader(200));
-      expect(pill()).toBeNull();
-      expect(container.querySelector('[role="button"].italic')).not.toBeNull();
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions(), { tool: true });
+      for (const width of [620, 400, 200]) {
+        act(() => resizeHeader(width));
+        const address = container.querySelector<HTMLElement>('[role="button"].italic');
+        expect(address?.title).toMatch(/^Preview — /);
+        expect(container.querySelector('button[aria-label^="Focus README.md"] .italic')?.textContent).toBe('README.md');
+        expect(container.textContent).not.toContain('Preview');
+      }
+      act(() => resizeHeader(OVERFLOW_PX));
+      openPopup();
+      expect(inPopup('[role="button"].italic')?.title).toMatch(/^Preview — /);
+      expect(popup()!.textContent).not.toContain('Preview');
     } finally {
       registration.dispose();
       setDevServerResolution(5173, null);
+    }
+  });
+
+  it('keeps a serving slot on a double-click of its chip, address, or empty header, never of a control or an open URL editor', () => {
+    const id = 'keep-tool-header';
+    const registration = register(id);
+    setDevServerResolution(5173, { paneId: id, fallbackTitle: 'README.md' });
+    try {
+      const onPinPreview = vi.fn();
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
+      const address = () => container.querySelector<HTMLElement>('[role="button"].italic')!;
+      const urlInput = () => container.querySelector<HTMLInputElement>(`[data-url-input-for="${id}"]`);
+      // The editor replaces the chip while it is open.
+      const chip = () => container.querySelector<HTMLElement>('button[aria-label^="Focus README.md"]')!;
+      // Display, navigation, splits, pane actions, and the Terminal Context button.
+      const controls = [...container.querySelectorAll('button')].filter(button => button !== chip());
+      expect(controls.length).toBeGreaterThan(5);
+      for (const control of controls) doubleClick(control);
+      // Inside an editor already open, a double-click selects a word.
+      act(() => address().click());
+      doubleClick(urlInput()!);
+      expect(urlInput()).not.toBeNull();
+      expect(onPinPreview).not.toHaveBeenCalled();
+      act(() => urlInput()!.blur());
+
+      // The address's first click opens the editor under the second.
+      doubleClick(address(), () => urlInput()!);
+      expect(onPinPreview).toHaveBeenCalledExactlyOnceWith(id);
+      expect(urlInput()).toBeNull();
+      doubleClick(chip());
+      doubleClick(address().closest('.cursor-grab')!);
+      expect(onPinPreview).toHaveBeenCalledTimes(3);
+    } finally {
+      registration.dispose();
+      setDevServerResolution(5173, null);
+    }
+  });
+
+  it('keeps nothing on a double-click inside the collapsed header\'s popover', () => {
+    const id = 'keep-popover-header';
+    const registration = register(id);
+    try {
+      const onPinPreview = vi.fn();
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
+      act(() => resizeHeader(OVERFLOW_PX));
+      openPopup();
+      doubleClick(popup()!);
+      doubleClick(inPopup('[role="button"].italic')!, () => inPopup(`[data-url-input-for="${id}"]`)!);
+      expect(onPinPreview).not.toHaveBeenCalled();
+    } finally {
+      registration.dispose();
     }
   });
 
@@ -140,7 +191,7 @@ describe('SurfacePaneHeader — preview slot', () => {
     const id = 'unregistered-preview-header';
     renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions(), { tool: true });
     expect(container.querySelector('span.italic')?.getAttribute('title')).toBe('Preview');
-    expect(container.querySelector(`[data-preview-pill-for="${id}"]`)).not.toBeNull();
+    expect(container.textContent).not.toContain('Preview');
   });
 
   it('holds the chip and address through a switch, naming the new target once it commits', () => {
@@ -203,15 +254,18 @@ describe('SurfacePaneHeader — preview slot', () => {
     }
   });
 
-  it('marks nothing on a pinned Tool', () => {
+  it('marks nothing on a pinned Tool, and a double-click keeps nothing', () => {
     const id = 'pinned-tool-header';
     const registration = register(id);
     setDevServerResolution(5173, { paneId: id, fallbackTitle: 'README.md' });
     try {
-      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
-      expect(container.querySelector(`[data-preview-pill-for="${id}"]`)).toBeNull();
-      expect(container.querySelector('button[aria-label^="Focus README.md"]')).not.toBeNull();
+      const onPinPreview = vi.fn();
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
+      const chip = container.querySelector<HTMLElement>('button[aria-label^="Focus README.md"]')!;
+      expect(chip).not.toBeNull();
       expect(container.querySelector('.italic')).toBeNull();
+      doubleClick(chip);
+      expect(onPinPreview).not.toHaveBeenCalled();
     } finally {
       registration.dispose();
       setDevServerResolution(5173, null);

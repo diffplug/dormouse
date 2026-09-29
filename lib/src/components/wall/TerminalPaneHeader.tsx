@@ -13,7 +13,7 @@ import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
 import { HEADER_PALETTE_TRANSITION_CLASS, HEADER_PILL_CLASS, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
 import { isPreviewSlotParams } from './browser-surface';
-import { PreviewPill } from './PreviewPill';
+import { usePreviewKeep } from './preview-keep';
 import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
 import { useHeaderTier } from './use-header-tier';
 import { PaneActionGroup } from './PaneActionButtons';
@@ -139,6 +139,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const showTodoPill = todoPill.visible && compactOrWider;
   const todoNotificationPreview = formatNotificationPreview(activity.notification);
   const todoPreviewId = `todo-notification-preview-${id}`;
+  const keep = usePreviewKeep(id, preview);
 
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
   const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
@@ -166,6 +167,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
       data-pane-header-for={id}
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
+      {...keep}
       onContextMenu={(e) => {
         // The whole header is the terminal context's entry point; `[a]` opens
         // the same menu anchored here (`docs/specs/alert.md` -> Pane Header).
@@ -186,11 +188,13 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             onCancel={actions.onCancelRename}
           />
         ) : (
+          // A preview's label is drag area, not a rename: its double-click
+          // keeps the slot (`docs/specs/layout.md` -> Pane header).
           <span
             data-pane-title-for={id}
-            className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
+            className={clsx('inline-flex max-w-full min-w-0 shrink items-baseline overflow-hidden font-medium text-inherit', !preview && 'cursor-text decoration-current/50 underline-offset-2 hover:underline')}
+            onMouseDown={preview ? undefined : (e) => e.stopPropagation()}
+            onClick={preview ? undefined : (e) => { e.stopPropagation(); actions.onStartRename(id); }}
             title={preview ? 'Preview' : undefined}
           >
             <span className={clsx('min-w-0 shrink truncate', preview && PREVIEW_LABEL_CLASS)}>{label.primary}</span>
@@ -202,7 +206,6 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             )}
           </span>
         )}
-        {preview && compactOrWider && <PreviewPill id={id} />}
         {showTodoPill && (
           <button
             type="button"

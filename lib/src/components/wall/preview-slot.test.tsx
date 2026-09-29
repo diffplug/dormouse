@@ -3,7 +3,7 @@
  *
  * The Workspace preview slot through a mounted Wall (`docs/specs/dor-tool.md`
  * -> Preview slot): `dor open --preview` creates, retargets, and supersedes the
- * slot; `dor open`, unsaved state, and the header pill pin it.
+ * slot; `dor open`, unsaved state, and a header double-click pin it.
  */
 import { act } from 'react';
 import { type Root } from 'react-dom/client';
@@ -17,7 +17,7 @@ import type { PersistedSession } from '../../lib/session-types';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
-import { mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall-test-utils';
+import { doubleClick, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall-test-utils';
 import { getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import type { LathNode } from '../../lib/lath/model';
@@ -217,6 +217,9 @@ async function listRow(id: string) {
   await act(async () => { respond = dispatch(SURFACE_CONTROL_METHODS.list, {}); });
   return (respond.mock.calls[0][0].result.surfaces as Array<{ id: string; ref: string; focused: boolean; preview?: boolean }>).find(row => row.id === id);
 }
+
+/** Double-click the empty area of the slot's Pane header, as a user keeps it. */
+const keepByHeader = () => doubleClick(container.querySelector('[data-lath-leaf="slot"] .lath-leaf-header .cursor-grab')!);
 
 const focusOf = (id: string) => container.querySelector(`[data-session-id="${id}"]`)?.getAttribute('data-focused') ?? null;
 const leafCount = () => container.querySelectorAll('[data-lath-leaf]').length;
@@ -448,13 +451,13 @@ describe('dor open --preview', () => {
   });
 
   it.each([
-    ['its pill', () => container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]')!.click()],
-    ['unsaved changes', () => recordToolDirty('slot', true)],
+    ['its header', keepByHeader],
+    ['unsaved changes', () => act(() => recordToolDirty('slot', true))],
   ])('restores a slot kept by %s while a preview interrupts it, and previews in a new slot', async (_, keep) => {
     await mountSlot({ slot: { holdInterrupt: true } });
     const respond = await request({ file: 'b.md', preview: true });
     await waitUntil(() => typed.slot.length === 1);
-    await act(async () => keep());
+    keep();
     act(() => returnToPrompt('slot'));
     const result = await answer(respond);
     expect(result).toMatchObject({ status: 'created', command: 'view /repo/b.md' });
@@ -514,7 +517,7 @@ describe('pinning the slot', () => {
     await mountSlot({ caller: 'claude', slot: { holdInterrupt: true } });
     const respond = await request({ file: 'a.md', tool: 'other' });
     await waitUntil(() => typed.slot.length === 1);
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]')!.click());
+    keepByHeader();
     act(() => returnToPrompt('slot'));
     await waitUntil(() => leafCount() === 3);
     const created = newLeaf();
@@ -566,13 +569,21 @@ describe('pinning the slot', () => {
     expect(await paramsOf('slot')).toMatchObject({ toolPreview: true });
   });
 
-  it('pins from the header pill', async () => {
+  it('pins on a double-click of its header, and a press past the threshold drags it instead', async () => {
     await mountSlot();
-    const pill = container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]');
-    expect(pill).not.toBeNull();
-    await act(async () => pill!.click());
+    const label = container.querySelector<HTMLElement>('[data-pane-title-for="slot"]')!;
+    const leaf = container.querySelector<HTMLElement>('[data-lath-leaf="slot"]')!;
+    act(() => label.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 15, button: 0 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 104, clientY: 15 })));
+    expect(leaf.style.opacity).toBe('');
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 120, clientY: 15 })));
+    expect(leaf.style.opacity).toBe('0.6');
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(leaf.style.opacity).toBe('');
+    expect(await paramsOf('slot')).toMatchObject({ toolPreview: true });
+    keepByHeader();
     expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
-    expect(container.querySelector('[data-preview-pill-for="slot"]')).toBeNull();
+    expect(container.querySelector('[data-lath-leaf="slot"] .italic')).toBeNull();
   });
 
   it('never lets a marked slot answer a keyed launch of its Tool', async () => {
@@ -660,7 +671,7 @@ describe('a terminal link', () => {
     const click = (detail: number) => act(async () => activateTerminalLink('pane-a', { detail }, 'file:///repo/a.md', 'a.md'));
     await click(1);
     await click(2);
-    await waitUntil(() => container.querySelector('[data-preview-pill-for="slot"]') === null);
+    await waitUntil(() => container.querySelector('[data-lath-leaf="slot"] .italic') === null);
     expect(toolControl.mock.calls.map(([request]) => request)).toEqual([
       { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined, preview: true },
       { op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined },
@@ -800,7 +811,7 @@ describe('a switching slot', () => {
     await mountServingSlot({ holdInterrupt: true });
     const respond = await request({ file: 'b.md', preview: true });
     await waitUntil(() => typed.slot.length === 1);
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]')!.click());
+    keepByHeader();
     act(() => returnToPrompt('slot'));
     await waitUntil(() => leafCount() === 3);
     const ghostsWhileWaiting = inSlot('.preview-ghost-static').length;
@@ -819,7 +830,7 @@ describe('a switching slot', () => {
     const answerLookup = toolControl.getMockImplementation()!;
     toolControl.mockImplementationOnce(async (call) => { await lookup.promise; return answerLookup(call); });
     const respond = await request({ file: 'b.md', preview: true });
-    await act(async () => container.querySelector<HTMLButtonElement>('[data-preview-pill-for="slot"]')!.click());
+    keepByHeader();
     await act(async () => lookup.resolve());
     await waitUntil(() => leafCount() === 3);
     const ghostsWhileWaiting = inSlot('.preview-ghost').length;

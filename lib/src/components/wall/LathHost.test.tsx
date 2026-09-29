@@ -862,6 +862,31 @@ describe('LathHost — pane / Door drag', () => {
     expect(onProposeMove).not.toHaveBeenCalled();
   });
 
+  it('swallows the click and dblclick a drag\'s release fires, never a sub-threshold press\'s', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mountDrag(store);
+    const seen: string[] = [];
+    const record = (e: Event) => seen.push(`${e.type}:${(e as MouseEvent).detail}`);
+    header('a').addEventListener('click', record);
+    header('a').addEventListener('dblclick', record);
+    // A double-click's second press: the browser fires both on its release.
+    const release = () => {
+      up();
+      header('a').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }));
+      header('a').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+    };
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(120, 15));
+    act(release);
+    expect(seen).toEqual([]);
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(102, 16));
+    act(release);
+    expect(seen).toEqual(['click:2', 'dblclick:2']);
+  });
+
   it('does not start a drag from a header button', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onDragStart } = mountDrag(store);

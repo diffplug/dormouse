@@ -2,6 +2,12 @@
 
 > Informative companion to [layout.md](layout.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Pane header
+
+Italics alone mark a VS Code preview tab, and a double-click on that tab keeps it; the slot mirrors both. A Preview pill beside the italic label repeated the mark and cost a pill's width in every header from compact width up, and header width is the scarcest space Dormouse has (product decision, 2026-09-28).
+
+The keep is judged by the burst's first press because the address stays click-to-edit: its first click swaps the address for the URL editor, so the second press lands in that editor, while a double-click inside an editor opened earlier must still select a word. A preview's label opens no rename for the same reason: the double-click's first click would open the field.
+
 ## Pane header responsive sizing
 
 A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Tool headers have even less browser width because Terminal Context occupies its own button. Measuring the header and moving fixed controls together keeps long keys and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
