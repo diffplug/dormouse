@@ -270,11 +270,9 @@ export interface EnsureSurfaceResponse {
  * authorized it (`docs/specs/dor-tool.md` -> Trust).
  */
 export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
-  /** Local-file dispatch; never eligible for caller takeover. */
+  /** Local-file dispatch (`dor open`). */
   file?: string;
   tool?: string;
-  /** Show the file in the Workspace's preview slot (`dor open --preview`). */
-  preview?: boolean;
   /** Registered tool name (`dor tool <name>`). */
   name?: string;
   args?: string[];
