@@ -85,6 +85,8 @@ Each page POST is its own control connection. In a live run (2026-09-28) a doubl
 
 Customizable viewers are the point of `dor open`, so previews trade speed for flexibility. A design considered on 2026-09-28 previewed inside one long-lived built-in viewer with a folder-scoped grant: every selection was an in-page navigation, but user Tools never saw a preview. Retargeting the slot instead costs an interrupt, a process start, and a port scan for a serving Tool, which its `serve` announcement now starts at once ([Serving](#serving)); terminal-only viewers skip the scan. A rule's `preview` handler and the speed item in scope **open-folder** narrow that cost without bypassing the open rules.
 
+Measured in the innerdogfood harness (Chromium, macOS, 2026-09-28), a built-in viewer retarget took 255–285 ms from issuing the click to the new document's `load`, about 100 ms of it the automation round trip. That left retarget without restart, the remaining speed item, unbuilt.
+
 Most slot occupants are viewers scrolled with the keyboard (`less`, `glow`), so pinning on keyboard input would pin nearly every preview. Editors report `OSC 367 state`; one that does not loses unsaved work on the next selection.
 
 Splitting the pinned pane keeps a double-clicked file visible, the intent of the gesture. Minimizing it to a Door, the closer analogue of a VS Code tab left behind the preview, was rejected for that reason. Without latest-wins supersession, the Tool launch queue would run one restart per click in order.
