@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaneProps } from './pane-props';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { RenamingIdContext, WallActionsContext, type WallActions } from './wall-context';
-import { ensureResizeObserver, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
+import { doubleClick, ensureResizeObserver, stubResizeObserver, stubWallActions as stubActions } from './wall-test-utils';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
 import { setPlatform } from '../../lib/platform';
 import { setNativeFieldValue } from '../../lib/dom';
@@ -161,5 +161,62 @@ describe('TerminalPaneHeader — inline rename', () => {
     act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
 
     expect(document.body.textContent).toContain('<idle> nope');
+  });
+});
+
+describe('TerminalPaneHeader — preview slot', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const PREVIEW: Partial<PaneProps> = { params: { surfaceType: 'tool', toolPreview: true } };
+  const header = () => container.querySelector<HTMLElement>('[data-pane-header-for="term-1"]')!;
+  const label = () => container.querySelector<HTMLElement>('[data-pane-title-for="term-1"]')!;
+
+  it('marks the slot with its italic label alone, named Preview, at every width', () => {
+    const resize = stubResizeObserver(400);
+    renderHeader(stubActions(), null, PREVIEW);
+    for (const width of [400, 250, 150]) {
+      act(() => resize(width));
+      expect(label().title).toBe('Preview');
+      expect(label().querySelector('.italic')).not.toBeNull();
+      expect(header().textContent).not.toContain('Preview');
+    }
+  });
+
+  it('keeps the slot on a double-click of its label or empty header, never of a button or the rename field', () => {
+    stubResizeObserver(400);
+    const onPinPreview = vi.fn();
+    renderHeader(stubActions({ onPinPreview }), null, PREVIEW);
+    const buttons = header().querySelectorAll('button');
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) doubleClick(button);
+    expect(onPinPreview).not.toHaveBeenCalled();
+    doubleClick(label().querySelector('.italic')!);
+    doubleClick(header());
+    expect(onPinPreview.mock.calls).toEqual([['term-1'], ['term-1']]);
+    // Command-mode rename still opens on a preview; a double-click in it selects a word.
+    renderHeader(stubActions({ onPinPreview }), 'term-1', PREVIEW);
+    doubleClick(renameInput());
+    expect(onPinPreview).toHaveBeenCalledTimes(2);
+  });
+
+  it('starts no rename from a preview\'s label click, selecting the pane instead; kept, the label renames', () => {
+    const onStartRename = vi.fn();
+    const onClickPanel = vi.fn();
+    renderHeader(stubActions({ onStartRename, onClickPanel }), null, PREVIEW);
+    act(() => { label().dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); label().click(); });
+    expect(onStartRename).not.toHaveBeenCalled();
+    expect(onClickPanel).toHaveBeenCalledExactlyOnceWith('term-1');
+    renderHeader(stubActions({ onStartRename, onClickPanel }), null, { params: { surfaceType: 'tool' } });
+    act(() => { label().dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); label().click(); });
+    expect(onStartRename).toHaveBeenCalledExactlyOnceWith('term-1');
+    expect(onClickPanel).toHaveBeenCalledOnce();
+  });
+
+  it('marks nothing once the Tool is pinned, and a double-click keeps nothing', () => {
+    const onPinPreview = vi.fn();
+    renderHeader(stubActions({ onPinPreview }), null, { params: { surfaceType: 'tool', toolTarget: '/repo/a.md' } });
+    expect(container.querySelector('[data-pane-title-for="term-1"] .italic')).toBeNull();
+    expect(label().title).toBe('');
+    doubleClick(header());
+    expect(onPinPreview).not.toHaveBeenCalled();
   });
 });

@@ -35,7 +35,7 @@ type TestPanelParams = {
 const DEFAULT_PARAMS: TestPanelParams = { surfaceType: 'agent-browser', session: 'browser-session' };
 
 /** The operations that drive a live browser, rather than bind or view one. */
-const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'device', 'close']);
+const DRIVES = new Set(['navigate', 'history', 'tab', 'viewport', 'close']);
 
 class ResizeObserverMock {
   observe() {}
@@ -704,6 +704,30 @@ describe('AgentBrowserPanel visibility parking', () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(createImageBitmap).toHaveBeenCalledOnce();
+  });
+
+  it('reports ready a frame after its session\'s first frame is drawn', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 4, height: 4, close: vi.fn() })));
+    setDocumentHidden(false);
+    const onReady = vi.fn();
+    await act(async () => {
+      root.render(
+        <PaneWriteContext.Provider value={paneWriteFor(() => {})}>
+          <WallActionsContext.Provider value={stubActions()}>
+            <AgentBrowserPanel {...paneProps('ab-panel', { surfaceType: 'browser', session: 'browser-session', stream: 4321 })} onReady={onReady} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(50); });
+    expect(onReady).not.toHaveBeenCalled();
+    for (const _ of [1, 2]) {
+      await act(async () => {
+        liveStreamSocket(4321)?.emitMessage(encodeViewerFrame({ kind: 'provisional', jpeg: new Uint8Array([0xff, 0xd8, 1]) }).buffer);
+        await vi.advanceTimersByTimeAsync(50);
+      });
+    }
+    expect(onReady).toHaveBeenCalledOnce();
   });
 
   it('does not park a popped-out panel while it is hidden', async () => {

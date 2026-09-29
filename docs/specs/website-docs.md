@@ -3,8 +3,7 @@
 > See `docs/specs/glossary.md` for canonical Surface / Session / Pane
 > vocabulary used by the public product guide and browser workflow.
 
-Dormouse publishes specialized references and a hosted-services preview
-on the marketing site. Each reference is generated from its canonical source.
+The following references are generated from canonical sources.
 
 ```text
 /dor                dor CLI reference
@@ -30,8 +29,9 @@ that once rendered it at `/docs` is retained and still runs (see
 | `/compatible-agents` | Agent recovery, watching, and contributions | `docs/compatible-agents.md` |
 | `/agent-skill` | Agent-facing operating guide | Exact `dor/skill.md` |
 | `/self-host` | Running your own Relay | The runbook half of `SELF_HOST.md` |
-| `/hosted` | Prelaunch overview of optional paid managed services | `website/src/pages/Hosted.tsx` |
+| `/hosted` | Account-service introduction and prelaunch managed services | `website/src/pages/Hosted.tsx` |
 | `/security` | What Dormouse guarantees and how it is checked | Every section of `docs/specs/security.md`, minus title and front matter; its rows split across three pages |
+| `/privacy`, `/terms` | Standalone Hosted account policies outside Docs | `website/src/pages/Privacy.tsx`, `website/src/pages/Terms.tsx` |
 | GitHub root | Repository overview and contributor entry point | Root `README.md` |
 
 Internal specs remain maintainer references, the one exception being the
@@ -332,6 +332,9 @@ hidden, so a returning reader never sees dismissed UI flash. Pinned by
 
 ## `/hosted` preview
 
+**Must describe the account service and link its account app, privacy policy, and terms.**
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`.
+
 **Must mark both services unavailable:** Hosted operates Pocket's Relay;
 optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
 computer; browser speech and self-hosting remain. `NotifySignupForm` exposes
@@ -347,6 +350,12 @@ discloses metadata, and links the model.
 
 **Must also link the preview from** Pocket marketing/tutorial, self-host docs,
 and the speech and remote-control settings; `linkedFrom` owns the rest.
+
+## Hosted policies
+
+**Must prerender `/privacy` and `/terms` outside Docs navigation with standalone marketing chrome and an effective date.**
+
+Source of truth: `HostedPolicyLayout` in `website/src/components/HostedPolicyLayout.tsx`.
 
 ## `/dor` reference
 

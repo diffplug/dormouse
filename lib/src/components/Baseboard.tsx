@@ -316,6 +316,7 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
       title: deriveDisplayedSurfaceLabel(item.kind, item.id, item.title, terminalStates, appTitleForPane),
       browserDisplay: item.browserDisplay,
       toolDirty: item.kind === 'tool' && dirtyTools.get(item.id) === true,
+      preview: item.preview === true,
       status: activity.status,
       todo: activity.todo,
       speechState: speechStates.get(item.id),

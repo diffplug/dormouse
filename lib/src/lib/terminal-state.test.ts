@@ -632,6 +632,15 @@ describe('header and grouping derivation', () => {
     });
   });
 
+  it('names a built-in viewer\'s Session by its OSC 2 file name, not its command', () => {
+    const pane = reduceTerminalState(
+      runningPane('/repo/app', 'dor __view-file /repo/app/README.md'),
+      { type: 'title', title: { title: 'README.md', source: 'osc2', updatedAt: 2 } },
+    );
+
+    expect(deriveSurfaceLabel(pane, () => null, null)).toBe('README.md');
+  });
+
   it('keeps the command when ConPTY broadcasts a child process path as the title', () => {
     // pnpm's script shell on Windows is cmd.exe, whose console title (its own
     // image path) ConPTY relays as OSC 0 — no command meaning, so the detected

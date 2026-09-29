@@ -28,7 +28,7 @@ import { UNNAMED_PANEL_TITLE } from '../lib/terminal-registry';
 import { pendingShellOpts } from '../lib/terminal-store';
 import { createTerminalPaneState, type TerminalPaneState } from '../lib/terminal-state';
 import { getWallHandle, listWallHandles, registerWallHandle, stubWallHandle } from './wall/wall-handles';
-import { installBrowserHost, mountWallHarness, type WallHarness } from './wall/wall-test-utils';
+import { installBrowserHost, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall/wall-test-utils';
 import { DEFAULT_WORKSPACE_ID } from '../lib/session-types';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
@@ -79,13 +79,6 @@ afterEach(() => {
 const flush = (): Promise<void> => harness.flush();
 const flushFrame = (): Promise<void> => harness.flushFrame();
 
-/** Wait out the host's own 100ms state polls (a tool taking over a pane, a
- *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
-const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
-  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
-  expect(ready()).toBe(true);
-}, { timeout: 2_000, interval: 25 });
-
 /** The host's answer for an approved `storybook` tool. */
 const okToolLookup = (key: string[] | null) => ({
   status: 'ok' as const,
@@ -98,12 +91,6 @@ const okToolLookup = (key: string[] | null) => ({
   key,
   warnings: [],
 });
-
-/** The integrated shell in `id` reports `line` as its running command. */
-const reportRunning = (id: string, line: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [
-  { type: 'commandLine', commandLine: line },
-  { type: 'commandStart', source: 'osc633_boundaries' },
-]);
 
 /** The shell in `id` is back at its prompt. */
 const promptBack = (id: string): void => terminalRegistry.applyTerminalSemanticEvents(id, [{ type: 'promptStart' }]);
@@ -755,7 +742,7 @@ describe('Wall on the Lath engine', () => {
     }
   });
 
-  async function openPortContext() {
+  async function openPortContext(provider = 'agent-browser') {
     // The mocked TerminalPane registers no terminal, so a real helper would
     // report its parent closed — an alert the context shows ahead of a port error.
     vi.spyOn(helpers, 'openHelper').mockResolvedValue({ id: 'context-helper', parentId: 'pane-a', command: '', status: 'preserved' });
@@ -767,6 +754,7 @@ describe('Wall on the Lath engine', () => {
       }));
     });
     await flush();
+    await act(async () => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="switch to ${provider}"]`)?.click());
   }
   const contextButton = (label: string) => document.querySelector<HTMLButtonElement>(`[data-terminal-context] button[aria-label="${label}"]`)!;
 
@@ -874,7 +862,7 @@ describe('Wall on the Lath engine', () => {
         root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" />);
       });
       await flush();
-      await openPortContext();
+      await openPortContext('playwright');
       await act(async () => contextButton('Open in playwright screencast').click());
       await flush();
 
@@ -895,12 +883,12 @@ describe('Wall on the Lath engine', () => {
     const events = vi.fn();
     await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
     await flush();
-    await openPortContext();
+    await openPortContext(provider);
     const button = contextButton(`Open in ${provider} ${presentation}`);
     events.mockClear();
     await act(async () => { button.focus(); button.click(); });
     await flush();
-    expect(button.textContent).toContain('Opening…');
+    expect(button.textContent).toContain('opening…');
     expect(button.getAttribute('aria-busy')).toBe('true');
     expect(document.activeElement).toBe(button);
     expect(leafCount()).toBe(1);
@@ -925,7 +913,7 @@ describe('Wall on the Lath engine', () => {
     const events = vi.fn();
     await act(async () => { root.render(<Wall initialPaneIds={['pane-a']} initialMode="command" onEvent={events} />); });
     await flush();
-    await openPortContext();
+    await openPortContext(provider);
     const button = contextButton(`Open in ${provider} screencast`);
     events.mockClear();
     await act(async () => { button.focus(); button.click(); });
@@ -4309,7 +4297,7 @@ describe('engagement', () => {
       initialMode="command"
     />));
     await flush();
-    await act(async () => { setDevServerResolution(5173, { paneId: 'pane-a', label: 'pnpm dev' }); });
+    await act(async () => { setDevServerResolution(5173, { paneId: 'pane-a', fallbackTitle: 'pnpm dev' }); });
     try {
       const chip = container.querySelector<HTMLButtonElement>('button[aria-label^="Focus pnpm dev"]');
       expect(chip).not.toBeNull();

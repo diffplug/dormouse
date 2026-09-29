@@ -254,6 +254,22 @@ describe('saveSession', () => {
     });
   });
 
+  it('persists the preview slot mark and open target for panes and Doors, and omits them otherwise', async () => {
+    const platform = createPlatform(null);
+    const params = { surfaceType: 'tool', command: 'view /repo/a.md', toolArgv: ['view', '/repo/a.md'], toolTarget: '/repo/a.md', toolPreview: true };
+    await saveSession(platform, [
+      { id: 'slot', title: 'viewer', surfaceType: 'tool', params },
+      { id: 'named', title: 'storybook', surfaceType: 'tool', params: { surfaceType: 'tool', command: 'pnpm storybook' } },
+    ], [{ id: 'pinned', title: 'viewer', component: 'tool', params: { ...params, toolPreview: undefined } }]);
+    const saved = vi.mocked(platform.saveState).mock.calls[0]![0] as PersistedSession;
+    const tool = (id: string) => saved.panes.find(pane => pane.id === id)?.tool;
+    expect(tool('slot')).toMatchObject({ preview: true, target: '/repo/a.md' });
+    expect(tool('pinned')).toMatchObject({ target: '/repo/a.md' });
+    expect(tool('pinned')).not.toHaveProperty('preview');
+    expect(tool('named')).not.toHaveProperty('preview');
+    expect(tool('named')).not.toHaveProperty('target');
+  });
+
   it('keeps resolved argv independently of the live shell command for panes and Doors', async () => {
     const platform = createPlatform(null);
     const toolArgv = ['program path', "it's.txt", '$(literal)'];

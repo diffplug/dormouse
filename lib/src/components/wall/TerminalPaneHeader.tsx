@@ -1,6 +1,7 @@
 import { isHelperSession } from '../../lib/terminal-store';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
+import { clsx } from 'clsx';
 import { tv } from 'tailwind-variants';
 import {
   CursorClickIcon,
@@ -10,7 +11,9 @@ import {
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { HEADER_PALETTE_TRANSITION_CLASS, HEADER_PILL_CLASS, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { isPreviewSlotParams } from './browser-surface';
+import { usePreviewKeep } from './preview-keep';
 import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
 import { useHeaderTier } from './use-header-tier';
 import { PaneActionGroup } from './PaneActionButtons';
@@ -37,6 +40,7 @@ import {
   deriveHeader,
   resolveDisplayPrimary,
 } from '../../lib/terminal-state';
+import { useHeldWhile, usePreviewSlotView } from './preview-transition';
 import {
   TerminalContextContext,
   ModeContext,
@@ -74,6 +78,7 @@ const TODO_PREVIEW_MARGIN = 8;
 
 export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const dirty = useToolDirty(id, params);
+  const preview = isPreviewSlotParams(params);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const renamingId = useContext(RenamingIdContext);
@@ -104,9 +109,16 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   // so we can color it red and strip it from the editing/rename base without
   // guessing from the string (a user title ending in "✗" would fool a match).
   const showsFailGlyph = derivedHeader.lastCommandFailed === true;
-  const displayTitleBase = showsFailGlyph
-    ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length)
-    : displayTitle;
+  // A preview slot switch on this face holds the label it showed, then names
+  // the new target once it commits (`docs/specs/layout.md` -> Pane header).
+  const { transition } = usePreviewSlotView(id);
+  const holding = transition?.ghost.kind === 'terminal';
+  const heldLabel = useHeldWhile({
+    primary: showsFailGlyph ? displayTitle.slice(0, -` ${COMMAND_FAIL_GLYPH}`.length) : displayTitle,
+    secondary: derivedHeader.secondary ?? null,
+    failed: showsFailGlyph,
+  }, holding);
+  const label = holding && transition.label !== null ? { primary: transition.label, secondary: null, failed: false } : heldLabel;
   const inOverride = mouseOverride !== 'off';
   const mouseIconTooltip: string | null = mouseOverride === 'permanent'
     ? "You're overriding the TUI's mouse capture. Click to restore."
@@ -127,6 +139,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const showTodoPill = todoPill.visible && compactOrWider;
   const todoNotificationPreview = formatNotificationPreview(activity.notification);
   const todoPreviewId = `todo-notification-preview-${id}`;
+  const keep = usePreviewKeep(id, preview);
 
   const closeTodoPreview = useCallback(() => setTodoPreviewRect(null), []);
   const closeRenameWarning = useCallback(() => setRenameWarning(null), []);
@@ -154,6 +167,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
       data-pane-header-for={id}
       className={tabVariant({ state: isActiveHeader ? 'active' : 'inactive' })}
       onMouseDown={() => actions.onClickPanel(id)}
+      {...keep}
       onContextMenu={(e) => {
         // The whole header is the terminal context's entry point; `[a]` opens
         // the same menu anchored here (`docs/specs/alert.md` -> Pane Header).
@@ -168,24 +182,27 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
           <InlineEditInput
             data-renaming-input-for={id}
             className="bg-transparent outline-none border-none text-inherit font-medium font-mono w-full min-w-0 p-0 m-0"
-            initialValue={displayTitleBase}
+            initialValue={label.primary}
             blurAction="submit"
             onSubmit={submitRename}
             onCancel={actions.onCancelRename}
           />
         ) : (
+          // A preview's label is drag area, not a rename: its double-click
+          // keeps the slot (`docs/specs/layout.md` -> Pane header).
           <span
             data-pane-title-for={id}
-            className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
-            onMouseDown={(e) => e.stopPropagation()}
-            onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
+            className={clsx('inline-flex max-w-full min-w-0 shrink items-baseline overflow-hidden font-medium text-inherit', !preview && 'cursor-text decoration-current/50 underline-offset-2 hover:underline')}
+            onMouseDown={preview ? undefined : (e) => e.stopPropagation()}
+            onClick={preview ? undefined : (e) => { e.stopPropagation(); actions.onStartRename(id); }}
+            title={preview ? 'Preview' : undefined}
           >
-            <span className="min-w-0 shrink truncate">{displayTitleBase}</span>
-            {showsFailGlyph && (
+            <span className={clsx('min-w-0 shrink truncate', preview && PREVIEW_LABEL_CLASS)}>{label.primary}</span>
+            {label.failed && (
               <span className="ml-1 shrink-0 text-error" aria-label="last command failed">{COMMAND_FAIL_GLYPH}</span>
             )}
-            {derivedHeader.secondary && (
-              <span className="ml-1 min-w-0 shrink truncate opacity-70">{derivedHeader.secondary}</span>
+            {label.secondary && (
+              <span className="ml-1 min-w-0 shrink truncate opacity-70">{label.secondary}</span>
             )}
           </span>
         )}
@@ -194,7 +211,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             type="button"
             data-session-todo-for={id}
             data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-            className={`todo-pill-shell relative shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
+            className={`todo-pill-shell relative ${HEADER_PILL_CLASS}`}
             aria-label={todoNotificationPreview ? `Dismiss TODO: ${todoNotificationPreview}` : 'Dismiss TODO'}
             aria-describedby={todoPreviewRect && activity.notification ? todoPreviewId : undefined}
             aria-hidden={todoPill.flourishing ? true : undefined}

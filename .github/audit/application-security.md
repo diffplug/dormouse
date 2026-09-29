@@ -63,8 +63,12 @@ The lint scans all tracked JavaScript and TypeScript. Search the same files for
 `createServer`, `.listen(`, `serve(` and `WebSocket` too, because a new API or a
 host built at runtime can escape its patterns.
 The Local-file viewer subsection adds a tokenized file grant: read
-`dor/src/file-viewer.ts` and `dor/src/file-viewer-loopback-guard.ts`, including
-its static asset discovery, descriptor lifetime, and every request gate.
+`dor/src/file-viewer.ts`, `dor/src/viewer-server.ts`, and
+`dor/src/file-viewer-loopback-guard.ts`, including its static asset discovery,
+descriptor lifetime, and every request gate. The folder viewer shares that
+listener and guard: read `dor/src/folder-viewer.ts` and
+`dor/src/folder-viewer-page.ts` for path containment, the POST gate, how names
+reach the page, and the git invocation.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,

@@ -18,7 +18,8 @@ import {
   toolPortConflictFromParams,
 } from './browser-surface';
 import { listenerUrlsByPort } from './port-url';
-import { getToolAnnounce } from '../../lib/tool-announce-store';
+import { getToolAnnounce, subscribeToToolAnnounces } from '../../lib/tool-announce-store';
+import { forgetToolReports } from '../../lib/tool-events';
 import { validToolServePath } from '../../lib/tool-announce';
 import { closeBrowserSurface } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
@@ -53,6 +54,36 @@ function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
   return leaves;
 }
 
+/** Retire a Tool's browser half and the serving state that framed it, leaving
+ *  the terminal forward; false, doing nothing, when nothing is framed. The
+ *  browser panel remains mounted behind the terminal half, so its controller
+ *  must be released explicitly rather than waiting for an unmount that will not
+ *  happen — closing its session with it. */
+export function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): boolean {
+  if (browserUrlFromParams(params) === null && toolPortConflictFromParams(params) === null) return false;
+  closeBrowserSurface(id, params);
+  lath.store.updateParams(id, {
+    url: undefined,
+    toolAnnouncedPort: undefined,
+    toolAnnouncedPath: undefined,
+    toolPortConflict: undefined,
+    session: undefined,
+    launchSession: undefined,
+    launchFallback: undefined,
+    renderMode: undefined,
+    syncEngaged: undefined,
+  });
+  return true;
+}
+
+/** Retire a Session's previous Tool run before another is typed into it: its
+ *  browser, announcement, and unsaved state are not the next run's. */
+export function retireToolRun(lath: LathWallEngine, id: string): void {
+  const params = lath.getMeta(id)?.params;
+  if (params) retireToolBrowser(lath, id, params);
+  forgetToolReports(id);
+}
+
 export function useToolServing({
   lath,
   doorsRef,
@@ -75,7 +106,9 @@ export function useToolServing({
     if (!platform.getOpenPorts) return;
     let cancelled = false;
 
-    const tick = async () => {
+    /** One scan pass over every tool leaf, or over `only` — the leaves an
+     *  announcement named, leaving every other leaf's settle state alone. */
+    const tick = async (only?: ReadonlySet<string>) => {
       if (paused()) return;
       const leaves = toolLeaves(lath, doorsRef.current);
       // A killed tool never reaches the exit branch below, so prune by absence.
@@ -92,6 +125,7 @@ export function useToolServing({
       // no leaf can be retired out from under a later one.
       const scanning: { leaf: ToolLeaf; run: CommandRun; announcedPort: number | null; announcedPath: string }[] = [];
       for (const leaf of leaves) {
+        if (only && !only.has(leaf.id)) continue;
         const run = getTerminalPaneState(leaf.id).currentCommand;
         const runId = run?.id ?? null;
         const runChanged = observedRuns.current.has(leaf.id) && observedRuns.current.get(leaf.id) !== runId;
@@ -123,24 +157,7 @@ export function useToolServing({
         // the regression the settle window exists to prevent.
         if (!running || runChanged) seenPorts.current.delete(leaf.id);
 
-        if ((hasUrl || hasConflict) && (!running || runChanged)) {
-          // The browser panel remains mounted behind the terminal half, so its
-          // controller must be released explicitly rather than waiting for an
-          // unmount that will not happen — closing its session with it.
-          closeBrowserSurface(leaf.id, leaf.params);
-          lath.store.updateParams(leaf.id, {
-            url: undefined,
-            toolAnnouncedPort: undefined,
-            toolAnnouncedPath: undefined,
-            toolPortConflict: undefined,
-            session: undefined,
-            launchSession: undefined,
-            launchFallback: undefined,
-            renderMode: undefined,
-            syncEngaged: undefined,
-          });
-          continue;
-        }
+        if ((!running || runChanged) && retireToolBrowser(lath, leaf.id, leaf.params)) continue;
         // An announcement outranks whatever autobind decided, framed or
         // refused: a conflict is a verdict about *guessing*, not a final state,
         // so a tool that names its port after autobind refused must still be
@@ -156,6 +173,10 @@ export function useToolServing({
           && (leaf.params.toolAnnouncedPort !== announcedPort || appliedPath !== announcedPath);
         if (!running) continue;
         if ((hasUrl || hasConflict) && !announcementChanged) continue;
+        // `announced` never guesses: no announcement, nothing to scan for. An
+        // announcement's own scan never counts as an autobind settle tick,
+        // which two scans milliseconds apart would make meaningless.
+        if (announcedPort === null && (only || leaf.params.toolPort !== 'auto')) continue;
         scanning.push({ leaf, run, announcedPort, announcedPath });
       }
 
@@ -185,9 +206,6 @@ export function useToolServing({
           // announced port that nothing bound frames nothing.
           entry = entries.find((candidate) => candidate.port === announcedPort);
           if (!entry) continue;
-        } else if (leaf.params.toolPort !== 'auto') {
-          // `announced`: never guess. No announcement, no browser.
-          continue;
         } else {
           // Autobind. Do not commit on first sighting: ports appear one at a
           // time during boot, so framing the first one seen would frame
@@ -238,22 +256,46 @@ export function useToolServing({
 
     // `getOpenPorts` shells out (lsof / PowerShell) and can outrun the
     // interval. Without this guard a second tick re-enters a leaf whose `url`
-    // is not written yet and frames it twice.
+    // is not written yet and frames it twice. A poll that lands mid-tick is
+    // dropped; an announcement is not, since the tick in flight decided its
+    // scans before the announcement existed: its leaf waits in `pending` for
+    // a run of its own once the tick settles.
     let ticking = false;
-    const runTick = async () => {
-      if (ticking) return;
+    const pending = new Set<string>();
+    const runTick = async (full: boolean) => {
+      if (ticking || (!full && pending.size === 0)) return;
       ticking = true;
       try {
-        await tick();
+        if (full) {
+          // A full tick reads every announcement recorded so far.
+          pending.clear();
+          await tick();
+        }
+        while (pending.size > 0 && !cancelled) {
+          const only = new Set(pending);
+          pending.clear();
+          await tick(only);
+        }
       } finally {
         ticking = false;
       }
     };
 
-    void runTick();
-    const timer = setInterval(() => void runTick(), POLL_MS);
+    // An announcement names the port the next poll would find, so scan that
+    // Tool now rather than up to a poll interval later. It still only selects:
+    // the announced port must appear in the scan. The run waits for a
+    // microtask, since the announcement is recorded mid-chunk and a later event
+    // in that chunk (a command start) can retire it.
+    const unsubscribe = subscribeToToolAnnounces((id) => {
+      if (!toolLeaves(lath, doorsRef.current).some((leaf) => leaf.id === id)) return;
+      pending.add(id);
+      queueMicrotask(() => void runTick(false));
+    });
+    void runTick(true);
+    const timer = setInterval(() => void runTick(true), POLL_MS);
     return () => {
       cancelled = true;
+      unsubscribe();
       clearInterval(timer);
     };
   }, [lath, doorsRef, paused]);

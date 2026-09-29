@@ -535,7 +535,6 @@ describe('agent-browser host attach', () => {
       { op: 'history', dir: 'back' },
       { op: 'tab', action: 'select', tabId: 't1' },
       { op: 'viewport', width: 800, height: 600, dpr: 2 },
-      { op: 'device', name: 'iPhone 16' },
       { op: 'edit', edit: 'copy' },
     ];
     const provider = createAgentBrowserProvider();
@@ -1125,8 +1124,6 @@ describe('agent-browser host requests', () => {
       [{ op: 'tab', action: 'close', tabId: 't2' }, ['tab', 'close', 't2']],
       [{ op: 'viewport', width: 1280, height: 720, dpr: 2 }, ['set', 'viewport', '1280', '720', '2']],
       [{ op: 'viewport', width: 801, height: 599, dpr: 1.100000023841858 }, ['set', 'viewport', '801', '599', '1.100000023841858']],
-      [{ op: 'device', name: 'iPhone 16 Pro' }, ['set', 'device', 'iPhone 16 Pro']],
-      [{ op: 'device', name: 'iPad (gen 11)' }, ['set', 'device', 'iPad (gen 11)']],
     ];
     const host = makeHost();
     for (const [op, argv] of shapes) {
@@ -1153,7 +1150,6 @@ describe('agent-browser host requests', () => {
       { op: 'tab', action: 'select', tabId: '--extension' },
       { op: 'tab', action: 'close', tabId: '--args=--disable-web-security' },
       { op: 'tab', action: 'list', tabId: 't2' },
-      { op: 'device', name: '--state=/tmp/s.json' },
       { op: 'screenshotTo', path: '/Users/someone/.zshrc' },
       { op: 'eval', script: 'document.cookie' },
       // The webview holds no CDP, captures nothing itself, and names no port to dial but a stream's.

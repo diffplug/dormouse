@@ -276,6 +276,54 @@ describe('IframePanel', () => {
   });
 });
 
+describe('before its first paint', () => {
+  const hidden = (iframe: HTMLIFrameElement) => iframe.classList.contains('opacity-0');
+  function renderUrl(url: string, onReady?: () => void) {
+    act(() => {
+      root.render(
+        <PaneWriteContext.Provider value={{ updateParams: () => {}, setTitle: () => {} }}>
+          <WallActionsContext.Provider value={stubActions()}>
+            <IframePanel id="iframe-paint" title="t" params={{ url }} onReady={onReady} />
+          </WallActionsContext.Provider>
+        </PaneWriteContext.Provider>,
+      );
+    });
+    return container.querySelector('iframe')!;
+  }
+
+  it('hides the frame until its first load, then reports ready a frame later', async () => {
+    const onReady = vi.fn();
+    const iframe = renderUrl('http://example.test/a', onReady);
+    expect(hidden(iframe)).toBe(true);
+    await act(async () => { iframe.dispatchEvent(new Event('load')); });
+    expect(hidden(iframe)).toBe(false);
+    expect(onReady).not.toHaveBeenCalled();
+    await act(async () => { await new Promise(resolve => requestAnimationFrame(() => resolve(undefined))); });
+    expect(onReady).toHaveBeenCalledOnce();
+  });
+
+  it('never hides a loaded frame again when it navigates', async () => {
+    const iframe = renderUrl('http://example.test/a');
+    await act(async () => { iframe.dispatchEvent(new Event('load')); });
+    const next = renderUrl('http://example.test/b');
+    expect(next.getAttribute('src')).toBe('http://example.test/b');
+    expect(hidden(next)).toBe(false);
+  });
+
+  it('shows a frame whose load never fires after a second', async () => {
+    vi.useFakeTimers();
+    try {
+      const iframe = renderUrl('http://example.test/a');
+      await act(async () => { vi.advanceTimersByTime(900); });
+      expect(hidden(iframe)).toBe(true);
+      await act(async () => { vi.advanceTimersByTime(200); });
+      expect(hidden(iframe)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('iframe failures offer a way out', () => {
   const PROXY = 'http://127.0.0.1:61234';
   function proxyPlatform(result: Awaited<ReturnType<NonNullable<PlatformAdapter['createIframeProxyUrl']>>> = { ok: true, url: `${PROXY}/app` }, swapCapable = true) {

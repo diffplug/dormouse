@@ -12,7 +12,9 @@ The attacker is any program writing to a PTY.
 
 **Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 52`, `OSC 50`, and unsupported `OSC 1337`. **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/terminal-escapes.md` -> "Inline graphics").
 
-**An `OSC 8` hyperlink opens only after a confirmation dialog**; a target whose
+**An `OSC 8` hyperlink opens only after a confirmation dialog**, except a local
+`file:` link whose display text names its target, which previews through the
+user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose
 display text names a different host gets **no open action at all** — close and
 copy only, copy holding initial focus
 (`docs/specs/terminal-escapes.md` -> "OSC 8 hyperlinks"). **Nothing opens without
@@ -37,6 +39,7 @@ shell-integration scripts — the parser scans raw bytes and cannot defend it
 - **FAIL IF** `isKnownUnsupportedIterm2Osc` in `lib/src/lib/terminal-protocol.ts` stops consuming `OSC 52`, or a parse site stops running `TerminalProtocolParser` before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.
 - **FAIL IF** a value the parser retains stops being bounded and control-stripped before storage, or a new one arrives without a limit — `TITLE_LIMIT`, `BODY_LIMIT`, `COMMAND_LINE_LIMIT` and `sanitizeText` in `lib/src/lib/terminal-protocol.ts`, `MAX_CWD_LENGTH` and `boundedCwdValue` in `lib/src/lib/terminal-state.ts`. `COMMAND_LINE_LIMIT` binds *after* the `\xNN` unescape, a 4x bound before it (rationale).
 - **FAIL IF** an `OSC 8` activation reaches an adapter's `openExternal` without the confirmation dialog, or the dialog renders an open action for a **deceptive** verdict: `linkHandler` in `lib/src/lib/terminal-lifecycle.ts`, `classifyDisplayMatch` in `lib/src/lib/external-links.ts`, the render branches in `lib/src/components/ExternalLinkModal.tsx`. Pinned by `lib/src/lib/external-links.test.ts` and `lib/src/components/ExternalLinkModalHost.test.tsx`; the host also rejects a deceptive confirmation (rationale).
+- **FAIL IF** an `OSC 8` activation reaches the preview path when its display text is not a whole-component suffix of its decoded target, or the host opens a `file:` URL whose host is not empty, `localhost`, or this machine: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`, `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`, `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`. Pinned by `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, and `local file URLs` in `lib/src/host/tool-input.test.ts`.
 
 ## Browser panes
 
@@ -137,11 +140,19 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 
 **FAIL IF** `dor/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own case-insensitive loopback `Host`, an absent or same-listener `Origin`, and a GET/HEAD method. Compare capability prefixes by SHA-256 then `timingSafeEqual`, including malformed lengths. `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
 
-**FAIL IF** the local-file viewer exposes directory listings, arbitrary path reads, writes, or a file outside its opened-document grant. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains descriptors so later path replacement cannot widen the grant. Viewer resource loads are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; escaped text previews execute no document markup. The viewer opts into the proxy's upstream-policy preservation (`docs/specs/dor-browser.md` → Iframe Renderer).
+**FAIL IF** the file viewer exposes directory listings, arbitrary path reads, writes, or a file outside its opened-document grant. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains descriptors so later path replacement cannot widen the grant. Viewer resource loads are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; escaped text previews execute no document markup. The viewer opts into the proxy's upstream-policy preservation (`docs/specs/dor-browser.md` → Iframe Renderer).
 
 **Must not describe the viewer CSP as confining active documents' navigation.** HTML/SVG scripts can navigate their frame to external URLs, including with granted contents; the resource policy is not a no-egress boundary. (rationale)
 
-Source of truth: `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
+**FAIL IF** the folder viewer, `dor/src/folder-viewer.ts`, serves any request without the capability, `Host`, `Origin`, and response-header rules above, or accepts a POST whose `Origin` is absent, `null`, or not its own. `allowsFileViewerRequest` with `post` gates every route; a POST runs `dor open` as the user.
+
+**FAIL IF** the folder viewer returns file contents, lists or opens anything outside its canonical root, or renders an entry name as markup. `resolveInside` refuses `.`, `..`, and empty segments, backslashes, and controls, then requires the realpath at or under the root; a symlink whose target leaves it lists as `other`. A listing carries names, kinds, and ignore flags only, and `folderViewerPage` sets names through `textContent`, since script in the page could POST as it.
+
+**FAIL IF** either viewer's `OSC 2` title keeps a C0, DEL, or C1 character. `viewerTitle` in `dor/src/file-viewer-format.ts` strips them from the target's basename, which would otherwise write terminal escapes such as a forged `OSC 367 serve`.
+
+**FAIL IF** `gitIgnored` runs git by bare name or lets `core.fsmonitor` run, which the browsed folder's own `.git/config` can name.
+
+Source of truth: `startCapabilityViewer` / `isInsideRoot` / `pathSegments` in `dor/src/viewer-server.ts`; `viewerTitle` in `dor/src/file-viewer-format.ts`; `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `startFolderViewer` / `resolveInside` / `gitIgnored` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `dor/test/folder-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
 
 ## Persisted state
 
@@ -210,9 +221,9 @@ Approval workflow, declaration and resolution belong to `docs/specs/dor-tool.md`
 
 **Must keep named-tool inputs as argv until the renderer quotes them for the target shell.** User configuration is the local user's authority; a project name cannot replace a user Tool during user-only lookup.
 
-**Must escape C0, DEL, and C1 characters in every repo-sourced field `dor tool` prints, its warnings and `--list --json` included**, since each is bound for a terminal. Source of truth: `printable` / `renderPrintableJson` in `dor/src/commands/shared.ts`. Test: `tool --list escapes control characters in repo text, in every output` in `dor/test/cli-output.test.mjs`.
+**Must escape C0, DEL, and C1 characters in every repo-sourced field `dor tool` prints, its warnings, `--list --json`, and the host errors `dor tool` and `dor open` relay included**, since each is bound for a terminal. Source of truth: `printable` / `renderPrintableJson` in `dor/src/commands/shared.ts`; `dispatchToolSurface` in `dor/src/commands/tool.ts`. Tests: `tool --list escapes control characters in repo text, in every output` and `open, tool, and tool --list escape control characters in a host error` in `dor/test/cli-output.test.mjs`.
 
-**Must reject C0 and DEL characters in Tool argv, substituted argv, and local-file targets before launch**, including controls exposed by canonicalizing symlinks. Shell quotes do not protect terminal editing keys. String `run` remains explicit shell code. Source of truth: `hasShellInputControls` in `dor/src/commands/shell-quote.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `useDorControl` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-input.test.ts`, `lib/src/components/Wall.test.tsx`.
+**Must reject C0 and DEL characters in Tool argv, substituted argv, and local targets before launch**, including controls exposed by canonicalizing symlinks or by decoding a `file:` URL, which a filesystem error would otherwise echo. Shell quotes do not protect terminal editing keys. String `run` remains explicit shell code. Source of truth: `hasShellInputControls` in `dor/src/commands/shell-quote.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `useDorControl` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-input.test.ts`, `lib/src/components/Wall.test.tsx`.
 
 **Must derive the grant key in the host**, using the canonical upstream URL or project-root folder; a renderer request cannot supply an arbitrary grant URL. **Must bound config reads and refuse repo-config symlinks on every host.** The user config may follow a dotfiles symlink; its opened descriptor must still be a bounded regular file.
 

@@ -202,7 +202,7 @@ export function createViewportSync<B extends { id: string }>(deps: ViewportSyncD
       };
     },
 
-    /** Commit a successful Fixed viewport or device. An engagement chosen
+    /** Commit a successful Fixed viewport. An engagement chosen
      *  after the Fixed request arrived owns the browser's next size. */
     fixed(id: string, engagement?: string): void {
       if (engagement === undefined) return;

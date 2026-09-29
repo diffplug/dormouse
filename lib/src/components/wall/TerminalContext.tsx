@@ -12,7 +12,9 @@ import { listenerUrlsByPort } from './port-url';
 import { hostBrowserProviders } from './browser-automation';
 import { DEFAULT_HELPER_COMMAND } from '../../lib/terminal-context-types';
 
-export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, placement }: TerminalContextState & { title?: string; tool?: boolean } & Pick<TerminalContextViewProps, 'placement'>) {
+/** `preview`: the Surface is its Workspace's preview slot, which the context
+ *  offers to keep (`docs/specs/layout.md` -> Pane header). */
+export function TerminalContext({ id, title, closing, origin, warning: openWarning, tool = false, preview = false, placement }: TerminalContextState & { title?: string; tool?: boolean; preview?: boolean } & Pick<TerminalContextViewProps, 'placement'>) {
   const context = useContext(TerminalContextContext);
   const actions = useContext(WallActionsContext);
   const states = useSyncExternalStore(subscribeToTerminalPaneState, getTerminalPaneStateSnapshot);
@@ -63,7 +65,8 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
     onWatch={() => { if (offeredRule) setCommandWatched(offeredRule, watchRule === null); }} onTodo={() => toggleSessionTodo(id)}
     onPort={(entry, mode) => context.openPort(id, entry, mode)}
     onModify={async command => { await platform.terminalContext?.({ op: 'settings', command }); setDefaultCommand(command); }}
-    onReset={async () => { disposeHelper(id); await openHelper(id); }} onPromote={() => context.promote(id)}>
+    onReset={async () => { disposeHelper(id); await openHelper(id); }} onPromote={() => context.promote(id)}
+    onKeepPreview={preview ? () => actions.onPinPreview?.(id) : undefined}>
     {tool && <div data-context-terminal={id} className="h-full px-3 py-2" onMouseDown={() => getTerminalInstance(id)?.focus()}><TerminalPane id={id} isFocused={false} /></div>}
     {helper && <div data-helper-terminal={helper.id} className="h-full px-3 py-2" onMouseDown={() => focusSession(helper.id, true)}><TerminalPane key={helper.id} id={helper.id} isFocused={false} /></div>}
   </TerminalContextView>;

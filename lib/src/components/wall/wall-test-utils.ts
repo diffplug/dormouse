@@ -1,8 +1,9 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { vi } from 'vitest';
+import { expect, vi } from 'vitest';
 import { BROWSER_PROVIDER_IDS, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { applyTerminalSemanticEvents } from '../../lib/terminal-registry';
 import type { BrowserOp, BrowserRequest, BrowserResult } from '../../lib/platform/browser-automation';
 import type { WallActions } from './wall-context';
 import {
@@ -31,6 +32,7 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
     onCancelRename: vi.fn(),
     onSwapRenderMode: vi.fn(),
     resolveSurfaceRef: vi.fn((id: string) => id),
+    onPinPreview: vi.fn(),
     ...overrides,
   };
 }
@@ -68,6 +70,18 @@ export function pointerEvent(type: string, overrides: Partial<PointerEvent> = {}
     Object.defineProperty(event, key, { configurable: true, get: () => value });
   }
   return event;
+}
+
+/** A double-click as a browser fires it: a press and click counted 1, then a
+ *  press, click, and `dblclick` counted 2, each click committed before the
+ *  next press. `second` is where the second press lands, when the first click
+ *  replaced what was under it. */
+export function doubleClick(first: Element, second: () => Element = () => first): void {
+  const fire = (target: Element, types: string[], detail: number) => {
+    for (const type of types) target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, detail }));
+  };
+  act(() => fire(first, ['mousedown', 'mouseup', 'click'], 1));
+  act(() => fire(second(), ['mousedown', 'mouseup', 'click', 'dblclick'], 2));
 }
 
 /** jsdom lacks the native modal `<dialog>` API that `NativeModalDialog` calls. */
@@ -161,6 +175,19 @@ export function mountWallHarness(): WallHarness {
   };
 }
 
+/** Wait out the host's own 100ms state polls (a tool taking over a pane, a
+ *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
+export const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
+  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+  expect(ready()).toBe(true);
+}, { timeout: 2_000, interval: 25 });
+
+/** The integrated shell in `id` reports `line` as its running command. */
+export const reportRunning = (id: string, line: string): void => applyTerminalSemanticEvents(id, [
+  { type: 'commandLine', commandLine: line },
+  { type: 'commandStart', source: 'osc633_boundaries' },
+]);
+
 export const STUB_SCREEN: ScreenSnapshot = {
   state: 'SYNCED',
   renderMode: 'agent-browser-screencast',
@@ -194,7 +221,6 @@ export function registerStubScreen(
     snapshot: init.snapshot ?? STUB_SCREEN,
     actions: {
       engageSync: vi.fn(),
-      applyDevice: vi.fn(),
       applyViewport: vi.fn(),
       applyViewportSetting: vi.fn(async () => {}),
       openModal: vi.fn(),

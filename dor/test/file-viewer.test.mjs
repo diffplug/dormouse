@@ -8,7 +8,7 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
-import { fileViewerFormat } from '../dist/file-viewer-format.js';
+import { fileViewerFormat, viewerTitle } from '../dist/file-viewer-format.js';
 
 let root;
 const viewers = [];
@@ -168,7 +168,18 @@ test('bounds the asset graph and keeps a grant on the opened file after path rep
   await assert.rejects(startFileViewer(html), /256 referenced files/);
 });
 
-test('the bundled private entry announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
+test('titles a viewer with its target\'s basename, controls stripped', () => {
+  assert.equal(viewerTitle(join(root, 'README.md')), 'README.md');
+  // Either separator on every platform: a preview slot switch names its target
+  // with it in the renderer.
+  for (const [target, title] of [['/repo/docs/', 'docs'], ['C:\\repo\\b.md', 'b.md'], ['/', '/'], ['C:\\', 'C:\\']]) {
+    assert.equal(viewerTitle(target), title);
+  }
+  // C0 (BEL, ESC), DEL, and C1 (NEL, CSI, ST) could end or open a sequence.
+  assert.equal(viewerTitle(join(root, 'a\x07\x1b]2;x\x7f\u0085\u009b\u009cb.txt')), 'a]2;xb.txt');
+});
+
+test('the bundled private entry titles itself, announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
   const file = join(root, 'cli.txt');
   await writeFile(file, 'cli preview');
   const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), '__view-file', file], { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -183,6 +194,7 @@ test('the bundled private entry announces its port and path, then exits on termi
         if (match) resolve(JSON.parse(match[1]));
       });
     });
+    assert.ok(output.includes('\x1b]2;cli.txt\x07'), JSON.stringify(output));
     assert.equal((await get(announce)).status, 200);
     const exited = once(child, 'exit');
     child.kill('SIGTERM');

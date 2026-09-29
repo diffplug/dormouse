@@ -7,6 +7,12 @@ export function isProtocolCommandStart(event: TerminalProtocolEvent): boolean {
   return event.kind === 'semantic' && event.event.type === 'commandStart';
 }
 
+/** Forget a Session's previous run's reports: its announcement and unsaved state. */
+export function forgetToolReports(id: string): void {
+  clearToolAnnounce(id);
+  recordToolDirty(id, null);
+}
+
 /** The one spelling of "record whatever Tool reports this parse produced",
  *  shared by every renderer-side seam that parses raw replay itself.
  *  Preserve stream order: a fresh command retires the previous run's
@@ -17,6 +23,6 @@ export function recordToolEvents(id: string, events: readonly TerminalProtocolEv
   for (const event of events) {
     if (event.kind === 'toolAnnounce') recordToolAnnounce(id, event.announce);
     else if (event.kind === 'toolState') recordToolDirty(id, event.state.dirty);
-    else if (isProtocolCommandStart(event)) { clearToolAnnounce(id); recordToolDirty(id, null); }
+    else if (isProtocolCommandStart(event)) forgetToolReports(id);
   }
 }

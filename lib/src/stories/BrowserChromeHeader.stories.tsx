@@ -74,6 +74,8 @@ interface StoryArgs {
   /** Include the Tool Terminal Context button beside the browser header. */
   tool: boolean;
   dirty: 'unknown' | 'clean' | 'dirty';
+  /** The Tool is the Workspace's preview slot (italic address). */
+  preview: boolean;
   /** Whether the surface is the selected/active pane (header highlight). */
   selected: boolean;
 }
@@ -112,7 +114,6 @@ function BrowserChromeStory(args: StoryArgs) {
       chrome: chromeSnapshot,
       actions: {
         engageSync: () => console.log('[story] engageSync'),
-        applyDevice: (name) => console.log('[story] applyDevice', name),
         applyViewport: (w, h, dpr) => console.log('[story] applyViewport', w, h, dpr),
         openModal: () => console.log('[story] openModal'),
         setRenderMode: (mode) => console.log('[story] setRenderMode', mode),
@@ -148,7 +149,7 @@ function BrowserChromeStory(args: StoryArgs) {
   useEffect(() => {
     if (port == null) return;
     const label = args.devServerLabel.trim();
-    setDevServerResolution(port, label ? { paneId: 'term-dev', label } : null);
+    setDevServerResolution(port, label ? { paneId: 'term-dev', fallbackTitle: label } : null);
   }, [port, args.devServerLabel]);
 
   const Header = args.tool ? ToolPaneHeader : SurfacePaneHeader;
@@ -165,7 +166,7 @@ function BrowserChromeStory(args: StoryArgs) {
                 <Header
                   id={surfaceId}
                   title={args.htmlTitle || hostPathDisplay(args.url)}
-                  params={args.tool ? { surfaceType: 'tool', url: args.url } : undefined}
+                  params={args.tool ? { surfaceType: 'tool', url: args.url, ...(args.preview ? { toolPreview: true } : {}) } : undefined}
                 />
               </div>
             </div>
@@ -192,6 +193,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     selected: { control: 'boolean' },
     tool: { control: 'boolean' },
     dirty: { control: 'inline-radio', options: ['unknown', 'clean', 'dirty'], if: { arg: 'tool' } },
+    preview: { control: 'boolean', if: { arg: 'tool' } },
   },
   args: {
     renderMode: 'agent-browser-screencast',
@@ -205,6 +207,7 @@ const meta: Meta<typeof BrowserChromeStory> = {
     width: 620,
     tool: false,
     dirty: 'unknown',
+    preview: false,
     selected: true,
   },
 };
@@ -272,3 +275,6 @@ export const CleanTool: Story = { args: { tool: true, dirty: 'clean' } };
 // 118px leaves 94px of chrome — the tight band, where the dot is what pushes
 // minimize/kill into the popover.
 export const NarrowDirtyTool: Story = { args: { tool: true, dirty: 'dirty', width: 118 } };
+
+/** A serving Tool in the Workspace's preview slot. */
+export const PreviewTool: Story = { args: { tool: true, preview: true } };

@@ -31,7 +31,7 @@ const CHROME: ChromeSnapshot = {
 };
 
 function stubActions(): ScreenActions {
-  return { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() };
+  return { engageSync: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() };
 }
 
 function stubChromeActions(): ChromeActions {
