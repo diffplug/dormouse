@@ -19,7 +19,6 @@ import { MAX_AWAIT_TIMEOUT_MS } from '../../lib/alert-manager';
 import type { OpenPort, PtyDataDetail } from '../../lib/platform/types';
 import type { ToolKeyScope, ToolRender } from '../../lib/platform/tool-types';
 import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } from 'dor/commands/shell-quote';
-import { viewerTitle } from 'dor/file-viewer-format';
 import {
   getDefaultShellOpts,
   getSessionInputVersion,
@@ -1447,12 +1446,8 @@ export function useDorControl({
           // Quoted for the slot's shell; the caller's directory is not the slot's.
           const slotCommand = toolRunCommand(toolRun, slotId);
           if (slotSwitch?.id === slotId) {
-            // The header names the new target at once, unless the user named the slot.
-            const renamed = !!getTerminalPaneState(slotId).titleCandidates.user?.title.trim();
-            commitPreviewTransition(slotId, slotSwitch.token, {
-              label: openTarget === undefined || renamed ? null : viewerTitle(openTarget),
-              arm: ready => watchTerminalReady(slotId, slotCommand, () => toolFace(lath.getMeta(slotId)?.params) === 'terminal', ready),
-            });
+            commitPreviewTransition(slotId, slotSwitch.token,
+              ready => watchTerminalReady(slotId, slotCommand, () => toolFace(lath.getMeta(slotId)?.params) === 'terminal', ready));
           }
           retargetToolLeaf(lath, slotId, { title: toolName ?? slotCommand, identity: { ...identity, command: slotCommand } }, pin ? previewSlot.pin : undefined);
           const visible = revealSurface(slotId, { focusNeutral: true });

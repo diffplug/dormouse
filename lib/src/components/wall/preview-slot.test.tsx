@@ -1059,22 +1059,43 @@ describe('a switching slot', () => {
   });
 
   it.each([
-    ['names the new target at once', null, 'b.md'],
-    ['keeps the name a user gave the slot', 'notes', 'notes'],
-  ])('%s in its header chip', async (_, rename, expected) => {
+    ['names the new target at once', null, ['a.md', 'b.md']],
+    ['keeps the name a user gave the slot', 'notes', ['notes']],
+  ])('%s in its header, one element in one type from start to end', async (_, rename, expected) => {
+    // The name once came from the dev-server chip, which the port scan
+    // resolves for each new viewer's port only after the switch has ended.
     await mountServingSlot();
     act(() => setDevServerResolution(6006, { paneId: 'slot', fallbackTitle: null }));
     try {
       if (rename) act(() => { terminalRegistry.setTerminalUserTitle('slot', rename); });
-      const chip = () => inSlot<HTMLButtonElement>('button[aria-label$="serves this localhost port"]')[0];
-      const shown = chip();
-      if (rename) expect(shown.textContent).toBe(`${rename}:6006`);
-      expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'retargeted' });
+      const name = () => inSlot<HTMLElement>('[data-pane-title-for="slot"]')[0];
+      const shown = name();
+      const typography = shown.className;
+      const seen: (string | null)[] = [];
+      const sample = () => {
+        expect(name()).toBe(shown);
+        expect(name().className).toBe(typography);
+        if (name().textContent !== seen.at(-1)) seen.push(name().textContent);
+      };
+      sample();
+      const respond = await request({ file: 'b.md', preview: true });
+      sample();
+      expect(await answer(respond)).toMatchObject({ status: 'retargeted' });
       await waitUntil(runs('view /repo/b.md'));
-      expect(chip()).toBe(shown);
-      expect(chip().textContent).toBe(`${expected}:6006`);
+      sample();
+      serve(7007);
+      await waitUntil(() => frames().length === 2);
+      sample();
+      await act(async () => { frames()[1].dispatchEvent(new Event('load')); });
+      await harness.flushFrame();
+      expect(frames()).toHaveLength(1);
+      sample();
+      act(() => setDevServerResolution(7007, { paneId: 'slot', fallbackTitle: null }));
+      sample();
+      expect(seen).toEqual(expected);
     } finally {
       setDevServerResolution(6006, null);
+      setDevServerResolution(7007, null);
     }
   });
 
