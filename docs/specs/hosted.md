@@ -39,7 +39,7 @@ Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings`
 
 **Must show configured sign-in methods only.** Email has send, existing-code, verify, resend, and change-address paths. The account screen lists connected methods and explains recent-login requirements and provider-only recovery limits. Failed callbacks display a recoverable error and remove query parameters from browser history.
 
-**Must check the account on return to the page and serialize submitted actions.** Authenticated data remains in memory; login tokens never enter local storage. Only public identity fields are rendered, without provider images or external assets. The Voice tokens section renders only when `GET /api/voice/tokens` succeeds; a minted token stays in memory and is shown once.
+**Must check the account on return to the page and serialize submitted actions.** Authenticated data remains in memory; login tokens never enter local storage. Only public identity fields are rendered, without provider images or external assets. The Voice tokens section renders only when `GET /api/voice/tokens` succeeds, and its failure never fails the account page; a minted token stays in memory and is shown once.
 
 **Must inherit Dormouse product theme tokens before mounting React.** The OS light/dark preference selects bundled Light Visual Studio or Kimbie Dark. Its type scale and touch sizing are in `hosted/src/style.css`. It loads no marketing styles, fonts, or analytics.
 
@@ -77,7 +77,8 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 
 - **Must use an ElevenLabs account dedicated to Dormouse voice.** A sweep deletes the whole account's history.
 - **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep, and the preview config drops `triggers`.
-- **Must bound each pass**; a backlog waits for the next pass. At most six deletes are in flight; a 404 counts as deleted; failures are counted, never abort the pass, and only counts are logged.
+- **Must bound each pass**; a backlog waits for the next pass. At most six deletes are in flight; a 404 counts as deleted; a failed delete never aborts the pass. Only counts and statuses are logged or thrown.
+- **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
 Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceRoutes` / `elevenLabs` / `sweepOnCron` / `sweepAfterSpeech` in `hosted/server/voice.ts`; `scheduled` in `hosted/server/worker-app.ts`; `triggers` in `hosted/wrangler.jsonc`; `hosted/server/dormouse-migrations/001_voice_tokens.sql`; `preflight` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/workers.test.ts`, `hosted/scripts/production.test.mjs`, and `hosted/scripts/preview.test.mjs`.
 

@@ -49,8 +49,9 @@ export function App() {
       getSession(),
       getProviders(),
     ]);
+    // A failed token list hides the voice section, never the account page.
     const [linked, tokens] = current
-      ? await Promise.all([getAccounts(), getVoiceTokens()])
+      ? await Promise.all([getAccounts(), getVoiceTokens().catch(() => null)])
       : [[], null];
     if (generation !== refreshGeneration.current) return;
     setSession(current);

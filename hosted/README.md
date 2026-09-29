@@ -301,9 +301,10 @@ pnpm exec wrangler secret put ELEVENLABS_API_KEY
 ```
 
 Create `ELEVENLABS_API_KEY` in an ElevenLabs account dedicated to Dormouse
-voice, restricted to text-to-speech plus speech-history access, with a spending
-limit set in the ElevenLabs console. Why the account must be dedicated, and how
-the Worker uses the key, is `docs/specs/hosted.md` -> "Managed voice".
+voice — the Worker deletes that account's entire speech history on a schedule,
+so never point it at a shared account. Restrict the key to text-to-speech plus
+speech-history access, and set a spending limit in the ElevenLabs console. How
+the Worker uses the key is `docs/specs/hosted.md` -> "Managed voice".
 
 Generate a fresh cryptographically random `AUTH_SECRET` with at least 32 bytes
 of entropy in your secret manager. Client IDs are public but may be stored
@@ -364,22 +365,24 @@ credential pair do and do not enable. Facebook is outside this milestone.
    `schedule: */5 * * * *`, and the dashboard shows it under Workers & Pages ->
    `dormouse-hosted` -> Settings -> Trigger Events. After the speak in step 6,
    the ElevenLabs console's speech history should be empty within a few
-   minutes; the Worker's Cron Events list each run.
+   minutes. The Worker's Cron Events list each run; a failed run means the key
+   cannot list or delete history. Recheck them for failed runs after any key
+   change.
 8. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
    check the live responses against the origin, caching, and cookie rules in
    `docs/specs/security-hosted.md` -> "Origin boundary".
-7. Confirm the release smoke's one-time half passed: `/connect/` answers the
+9. Confirm the release smoke's one-time half passed: `/connect/` answers the
    page under its own policy with its script beside it, and the rendezvous
    mints a room, is refused with a browser `Origin`, joins from the app origin,
    crosses a frame each way, and is refused a second phone. Load `/connect/`
    in a browser and confirm no injected script or third-party request.
-8. With a desktop build pointed at this origin, open a one-time link on a real
-   iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi
-   as the laptop and each by scanning the QR code with the native camera, which
-   must keep the fragment. Connect, type the digits, run a command, and End
-   from the laptop. Then turn the phone's Wi-Fi off mid-session: both ends
-   report the end. On a guest or client-isolated network the attempt ends on
-   the same-Wi-Fi copy.
+10. With a desktop build pointed at this origin, open a one-time link on a real
+    iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi
+    as the laptop and each by scanning the QR code with the native camera, which
+    must keep the fragment. Connect, type the digits, run a command, and End
+    from the laptop. Then turn the phone's Wi-Fi off mid-session: both ends
+    report the end. On a guest or client-isolated network the attempt ends on
+    the same-Wi-Fi copy.
 
 Do not mark all five login methods complete until email and all four providers
 pass in real browsers; a simulated callback certifies nothing. No real-provider

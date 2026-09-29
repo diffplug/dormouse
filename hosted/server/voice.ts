@@ -217,57 +217,66 @@ export const CRON_SWEEP_CAP = 40;
 export const SPEECH_SWEEP_CAP = 10;
 const SWEEP_CONCURRENCY = 6;
 
-/** Deletes up to `cap` of the newest history items; logs counts, never rejects. */
+/** A sweep failure: statuses and counts only, never upstream text. */
+const sweepFailed = (reason: string) =>
+  new Error(`ElevenLabs history sweep: ${reason}`);
+
+/**
+ * Deletes up to `cap` of the newest history items and logs the count. Rejects
+ * when the list fails, or once every delete was attempted if any failed.
+ */
 async function sweepHistory(apiKey: string, cap: number) {
   const headers = { "xi-api-key": apiKey };
-  try {
-    const response = await fetch(
-      `${ELEVENLABS_API}/history?page_size=${cap}`,
-      { headers },
-    );
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new Error(`list failed (${response.status})`);
-    }
-    const { history } = (await response.json()) as {
-      history?: { history_item_id?: unknown }[];
-    };
-    const queue = (history ?? [])
-      .map((item) => item.history_item_id)
-      .filter((id): id is string => typeof id === "string")
-      .slice(0, cap);
-    let deleted = 0,
-      failed = 0;
-    const worker = async () => {
-      for (let id; (id = queue.shift()) !== undefined; ) {
-        const ok = await fetch(
-          `${ELEVENLABS_API}/history/${encodeURIComponent(id)}`,
-          { method: "DELETE", headers },
-        ).then(
-          async (response) => {
-            await response.body?.cancel();
-            return response.ok || response.status === 404;
-          },
-          () => false,
-        );
-        if (ok) deleted++;
-        else failed++;
-      }
-    };
-    await Promise.all(Array.from({ length: SWEEP_CONCURRENCY }, worker));
-    if (deleted || failed)
-      console.log(
-        `ElevenLabs history sweep: ${deleted} deleted, ${failed} failed`,
-      );
-  } catch (error) {
-    console.log(`ElevenLabs history sweep: ${(error as Error).message}`);
+  const response = await fetch(`${ELEVENLABS_API}/history?page_size=${cap}`, {
+    headers,
+  }).catch(() => {
+    throw sweepFailed("list unreachable");
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw sweepFailed(`list failed (${response.status})`);
   }
+  // A parse error's message can quote the body, which holds spoken text.
+  const listed = (await response.json().catch(() => null)) as {
+    history?: { history_item_id?: unknown }[];
+  } | null;
+  if (!listed) throw sweepFailed("list unreadable");
+  const queue = (listed.history ?? [])
+    .map((item) => item.history_item_id)
+    .filter((id): id is string => typeof id === "string")
+    .slice(0, cap);
+  let deleted = 0,
+    failed = 0;
+  const worker = async () => {
+    for (let id; (id = queue.shift()) !== undefined; ) {
+      const ok = await fetch(
+        `${ELEVENLABS_API}/history/${encodeURIComponent(id)}`,
+        { method: "DELETE", headers },
+      ).then(
+        async (response) => {
+          await response.body?.cancel();
+          return response.ok || response.status === 404;
+        },
+        () => false,
+      );
+      if (ok) deleted++;
+      else failed++;
+    }
+  };
+  await Promise.all(Array.from({ length: SWEEP_CONCURRENCY }, worker));
+  const counts = `${deleted} deleted, ${failed} failed`;
+  if (failed) throw sweepFailed(counts);
+  if (deleted) console.log(`ElevenLabs history sweep: ${counts}`);
 }
 
+/** Rejects on failure, so Cloudflare records the cron invocation as failed. */
 export const sweepOnCron = (apiKey: string) =>
   sweepHistory(apiKey, CRON_SWEEP_CAP);
 
+/** Never rejects: the speech already succeeded, and the cron pass retries. */
 export async function sweepAfterSpeech(apiKey: string, delayMs: number) {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
-  await sweepHistory(apiKey, SPEECH_SWEEP_CAP);
+  await sweepHistory(apiKey, SPEECH_SWEEP_CAP).catch((error: Error) =>
+    console.log(error.message),
+  );
 }

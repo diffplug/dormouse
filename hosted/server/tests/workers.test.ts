@@ -741,6 +741,7 @@ test("production cron sweeps ElevenLabs history with only its key and no databas
   const deleted: string[] = [];
   let gone = "item3";
   let failing = "item5";
+  let listStatus = 200;
   let inFlight = 0,
     maxInFlight = 0;
   const sweeper = async (bindings: Record<string, string>) => {
@@ -758,6 +759,8 @@ test("production cron sweeps ElevenLabs history with only its key and no databas
           expect(request.headers.get("xi-api-key")).toBe("sweep-key");
           if (request.method === "GET" && url.pathname === "/v1/history") {
             listed.push(url.search);
+            if (listStatus !== 200)
+              return new WorkerResponse("{}", { status: listStatus });
             const size = Number(url.searchParams.get("page_size"));
             return WorkerResponse.json({
               history: [...history].slice(0, size).map((history_item_id) => ({
@@ -793,9 +796,17 @@ test("production cron sweeps ElevenLabs history with only its key and no databas
   expect(listed).toEqual([]);
 
   const scheduled = await sweeper({ ELEVENLABS_API_KEY: "sweep-key" });
-  // First pass: one list, deletes up to the cap, and survives one failure and
-  // one item already gone (404).
-  expect((await scheduled()).outcome).toBe("ok");
+  // A key the history API refuses fails the invocation and deletes nothing.
+  listStatus = 401;
+  expect((await scheduled()).outcome).toBe("exception");
+  expect(listed).toEqual([`?page_size=${CRON_SWEEP_CAP}`]);
+  expect(deleted).toEqual([]);
+  listStatus = 200;
+  listed.length = 0;
+
+  // One list, deletes up to the cap, and treats an item already gone (404) as
+  // deleted; one failed delete aborts none of the others but fails the invocation.
+  expect((await scheduled()).outcome).toBe("exception");
   expect(listed).toEqual([`?page_size=${CRON_SWEEP_CAP}`]);
   expect(deleted).toHaveLength(CRON_SWEEP_CAP - 1);
   expect(deleted).toContain(gone);
