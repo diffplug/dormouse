@@ -11,7 +11,7 @@ import { PlaygroundShellRegistry } from "../lib/playground-shells";
 import { TutorialState } from "../lib/tutorial-state";
 import { TutDetector } from "../lib/tut-detector";
 import { TutRunner } from "../lib/tut-runner";
-import { POCKET_TUTORIAL_PROFILE, type ItemId } from "../lib/tut-items";
+import { POCKET_TUTORIAL_PROFILE } from "../lib/tut-items";
 import { ChangelogRunner } from "../lib/changelog-runner";
 import { useRestoredTheme } from "dormouse-lib/lib/themes";
 
@@ -31,12 +31,6 @@ const POCKET_AUTOSTART_COMMANDS = new Map<string, string>([
   [POCKET_CHANGELOG_PANE, "changelog"],
 ]);
 
-const GESTURE_ARROW_INPUTS = new Set<MobileGestureInputId>([
-  "up",
-  "down",
-  "left",
-  "right",
-]);
 const GITHUB_URL = "https://github.com/diffplug/dormouse";
 const POCKET_NOTIFY_URL = "/hosted/#remote-control";
 
@@ -52,10 +46,9 @@ export function PocketTerminalExperience({
   const adapterRef = useRef<FakePtyAdapter | null>(null);
   const shellRegistryRef = useRef<PlaygroundShellRegistry | null>(null);
   const detectorRef = useRef<TutDetector | null>(null);
-  const tutorialStateRef = useRef<TutorialState | null>(null);
   const autoStartedRef = useRef<Set<string>>(new Set());
   const spawnUnsubRef = useRef<(() => void) | null>(null);
-  const sawSelectionTouchModeRef = useRef(false);
+  const tutorialRunnerRef = useRef<TutRunner | null>(null);
   const touchModeRef = useRef<MobileTerminalTouchMode>("gestures");
   const touchModeListenersRef = useRef(new Set<() => void>());
   const [activePaneId, setActivePaneId] = useState(POCKET_TUTORIAL_PANE);
@@ -79,10 +72,6 @@ export function PocketTerminalExperience({
     window.location.assign(POCKET_NOTIFY_URL);
   }, []);
 
-  const markPocketItemComplete = useCallback((id: ItemId) => {
-    tutorialStateRef.current?.markComplete(id);
-  }, []);
-
   const getPocketTouchMode = useCallback(() => touchModeRef.current, []);
 
   const subscribeToPocketTouchMode = useCallback((listener: () => void) => {
@@ -92,33 +81,19 @@ export function PocketTerminalExperience({
     };
   }, []);
 
-  const publishTouchMode = useCallback((nextMode: MobileTerminalTouchMode) => {
+  const handleTouchModeChange = useCallback((nextMode: MobileTerminalTouchMode) => {
     touchModeRef.current = nextMode;
     for (const listener of touchModeListenersRef.current) listener();
+    setTouchMode(nextMode);
   }, []);
 
-  const handleTouchModeChange = useCallback((nextMode: MobileTerminalTouchMode) => {
-    publishTouchMode(nextMode);
-    setTouchMode(nextMode);
-    if (nextMode === "selection") {
-      sawSelectionTouchModeRef.current = true;
-      return;
-    }
-    if (nextMode === "gestures" && sawSelectionTouchModeRef.current) {
-      sawSelectionTouchModeRef.current = false;
-      markPocketItemComplete("gn-touch-mode");
-    }
-  }, [markPocketItemComplete, publishTouchMode]);
-
   const handleGestureInput = useCallback((input: MobileGestureInputId) => {
-    if (GESTURE_ARROW_INPUTS.has(input)) {
-      markPocketItemComplete("gn-arrows");
-    } else if (input === "enter") {
-      markPocketItemComplete("gn-enter");
-    } else if (input === "esc") {
-      markPocketItemComplete("gn-esc");
-    }
-  }, [markPocketItemComplete]);
+    if (activePaneId === POCKET_TUTORIAL_PANE) tutorialRunnerRef.current?.handleGestureInput(input);
+  }, [activePaneId]);
+
+  const handleGestureScroll = useCallback((lines: number) => {
+    if (activePaneId === POCKET_TUTORIAL_PANE) tutorialRunnerRef.current?.handleGestureScroll(lines);
+  }, [activePaneId]);
 
   const tryAutoStart = useCallback((id: string) => {
     const command = POCKET_AUTOSTART_COMMANDS.get(id);
@@ -154,7 +129,6 @@ export function PocketTerminalExperience({
       }
 
       const tutorialState = new TutorialState(POCKET_TUTORIAL_PROFILE.sections);
-      tutorialStateRef.current = tutorialState;
       const detector = new TutDetector({
         state: tutorialState,
         activityStore: registry,
@@ -167,7 +141,7 @@ export function PocketTerminalExperience({
         adapter,
         (terminalId, name, args, onExit) => {
           if (name === "tut") {
-            return new TutRunner({
+            const runner = new TutRunner({
               adapter,
               terminalId,
               state: tutorialState,
@@ -178,6 +152,8 @@ export function PocketTerminalExperience({
               getPocketTouchMode,
               subscribeToPocketTouchMode,
             });
+            if (terminalId === POCKET_TUTORIAL_PANE) tutorialRunnerRef.current = runner;
+            return runner;
           }
           if (name === "ascii-splash" || name === "splash") {
             return new asciiSplash.AsciiSplashRunner({
@@ -217,9 +193,8 @@ export function PocketTerminalExperience({
       detectorRef.current = null;
       shellRegistryRef.current?.disposeAll();
       shellRegistryRef.current = null;
-      tutorialStateRef.current = null;
       autoStartedRef.current.clear();
-      sawSelectionTouchModeRef.current = false;
+      tutorialRunnerRef.current = null;
       touchModeListenersRef.current.clear();
       adapterRef.current = null;
     };
@@ -258,6 +233,7 @@ export function PocketTerminalExperience({
       onSessionSelect={setActivePaneId}
       onSendInput={(data) => { if (adapterRef.current) writeUserInput(activePaneId, data); }}
       onGestureInput={handleGestureInput}
+      onGestureScroll={handleGestureScroll}
       onPaste={async () => {
         const { doPaste } = await import("dormouse-lib/lib/clipboard");
         await doPaste(activePaneId);

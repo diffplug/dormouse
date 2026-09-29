@@ -237,6 +237,12 @@ the client-secret **Value**, not its identifier, and record its expiry. The
 installed pgstencil release includes the callback fix. Verify real personal
 and work/school callbacks during Dormouse acceptance.
 
+The marketing site serves `website/public/.well-known/microsoft-identity-association.json`
+at `https://dormouse.sh/.well-known/microsoft-identity-association.json` for
+Microsoft publisher-domain verification. Promote the website before using
+**Update domain** in Entra; publisher verification through Partner Center is
+separate from domain verification.
+
 For Apple, register domain `hosted.dormouse.sh` and the return URL above. The
 client ID is the Services ID; the client secret is an ES256 JWT signed with
 the Apple key (Team ID issuer, Services ID subject, Apple audience, key ID

@@ -7,11 +7,15 @@ import {
   FG_DEFAULT,
   ITALIC,
   LEAVE_ALT_SCREEN,
+  MOUSE_ENABLE,
+  MOUSE_DISABLE,
   RESET,
   fg,
 } from "dormouse-lib/lib/ansi";
 import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
+import type { MobileGestureInputId } from "dormouse-lib/lib/mobile-gesture-menu";
+import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import type { InteractiveProgram } from "./tutorial-shell";
 import {
   DESKTOP_TUTORIAL_PROFILE,
@@ -53,6 +57,12 @@ const SPINNER_INTERVAL_MS = 100;
  *  Alerts section is teaching. (Runner frames are written with `skipActivity`,
  *  so animation would no longer move the detector either way.) */
 const ACTIVE_ITEM_GLYPH = "●";
+const DONE_MARK = `${fg(32)}✓${RESET}`;
+const ACTIVE_MARK = `${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}`;
+const GESTURE_ARROWS: readonly MobileGestureInputId[] = ["up", "down", "left", "right"];
+/** Rows before the Pocket gesture background repeats: a multiple of its 32-row wave. */
+export const GESTURE_BACKGROUND_PERIOD = 256;
+export const GESTURE_BACKGROUND_TICK_MS = 160;
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
 const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
@@ -173,6 +183,12 @@ export class TutRunner implements InteractiveProgram {
   private commandExitDemoStart: number | null = null;
   private commandExitDemoDurationMs = 0;
   private disposed = false;
+  private gestureScrollDirections = new Set<number>();
+  private gestureArrows = new Set<MobileGestureInputId>();
+  private backgroundOffset = 0;
+  private backgroundFrame = 0;
+  private backgroundTimer: ReturnType<typeof setInterval> | null = null;
+  private capturingMouse = false;
 
   constructor(options: TutRunnerOptions) {
     this.adapter = options.adapter;
@@ -232,6 +248,20 @@ export class TutRunner implements InteractiveProgram {
     if (!this.flappyTimer) return;
     clearInterval(this.flappyTimer);
     this.flappyTimer = null;
+  }
+
+  private startBackgroundTicks(): void {
+    if (this.backgroundTimer) return;
+    this.backgroundTimer = setInterval(() => {
+      this.backgroundFrame++;
+      this.render();
+    }, GESTURE_BACKGROUND_TICK_MS);
+  }
+
+  private stopBackgroundTicks(): void {
+    if (!this.backgroundTimer) return;
+    clearInterval(this.backgroundTimer);
+    this.backgroundTimer = null;
   }
 
   private resetFlappyGame(): void {
@@ -329,6 +359,29 @@ export class TutRunner implements InteractiveProgram {
     }
   }
 
+  private isPocketGestureScreen(): boolean {
+    return !this.disposed && this.profile.id === "pocket" && this.screen === "section" && this.sectionId === "gesture";
+  }
+
+  handleGestureScroll(lines: number): void {
+    if (!this.isPocketGestureScreen() || !lines) return;
+    this.gestureScrollDirections.add(Math.sign(lines));
+    if (this.gestureScrollDirections.size === 2) this.state.markComplete("gn-scroll");
+  }
+
+  handleGestureInput(input: MobileGestureInputId): void {
+    if (!this.isPocketGestureScreen() || !this.state.isComplete("gn-scroll")) return;
+    if (GESTURE_ARROWS.includes(input)) {
+      this.gestureArrows.add(input);
+      if (this.gestureArrows.size === GESTURE_ARROWS.length) this.state.markComplete("gn-arrows");
+      else this.render();
+    } else if (input === "enter" && this.state.isComplete("gn-arrows")) {
+      this.state.markComplete("gn-enter");
+    } else if (input === "esc" && this.state.isComplete("gn-enter")) {
+      this.state.markComplete("gn-esc");
+    }
+  }
+
   handleInput(data: string): void {
     if (this.disposed) return;
     let i = 0;
@@ -340,8 +393,20 @@ export class TutRunner implements InteractiveProgram {
       }
       if (ch === "\x1b") {
         const tail = data.slice(i);
-        // Consume complete key sequences, including unsupported Home/Delete
-        // and modified arrows, without mistaking their prefix for a bare Esc.
+        // Consume complete key sequences, including unsupported Home/Delete,
+        // modified arrows, and SGR mouse reports, without mistaking their
+        // prefix for a bare Esc.
+        const wheel = tail.match(/^\x1b\[<6([45]);\d+;\d+M/);
+        if (wheel) {
+          if (this.isPocketGestureScreen()) {
+            // A periodic field has no top or bottom; only its origin moves.
+            const step = wheel[1] === "4" ? -1 : 1;
+            this.backgroundOffset = (this.backgroundOffset + step + GESTURE_BACKGROUND_PERIOD) % GESTURE_BACKGROUND_PERIOD;
+            this.render();
+          }
+          i += wheel[0].length;
+          continue;
+        }
         const csi = tail.match(/^\x1b\[([0-?]*)([ -/]*)([@-~])/);
         if (csi) {
           if (csi[1] === "" && csi[2] === "") this.handleArrow(csi[3]);
@@ -540,6 +605,8 @@ export class TutRunner implements InteractiveProgram {
     }
     if (this.screen === "reset") {
       if (this.resetBuffer.trim().toLowerCase() === RESET_CONFIRM_WORD) {
+        this.gestureScrollDirections.clear();
+        this.gestureArrows.clear();
         this.state.reset();
         this.resetBuffer = "";
         this.resetMismatch = false;
@@ -620,6 +687,7 @@ export class TutRunner implements InteractiveProgram {
 
   private render(): void {
     if (this.disposed) return;
+    const gestureScreen = this.syncGestureScreen();
     if (this.screen === "flappy") {
       this.renderFlappy();
       return;
@@ -630,10 +698,46 @@ export class TutRunner implements InteractiveProgram {
         : this.screen === "reset"
         ? this.renderReset()
         : this.renderSection();
+    if (gestureScreen) {
+      this.renderGestureBackground(lines);
+      return;
+    }
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
     for (const line of lines) {
       out += `${highlightKeys(line)}\r\n`;
     }
+    this.write(out);
+  }
+
+  /** Level-triggered from render and cleanup: the Pocket gesture screen alone
+   *  captures the mouse and animates its background. */
+  private syncGestureScreen(): boolean {
+    const gestureScreen = this.isPocketGestureScreen();
+    if (gestureScreen !== this.capturingMouse) {
+      this.capturingMouse = gestureScreen;
+      this.write(gestureScreen ? MOUSE_ENABLE : MOUSE_DISABLE);
+      if (gestureScreen && !prefersReducedMotion()) this.startBackgroundTicks();
+      else this.stopBackgroundTicks();
+    }
+    return gestureScreen;
+  }
+
+  private renderGestureBackground(lines: string[]): void {
+    const { cols, rows } = this.adapter.getPtySize(this.terminalId);
+    let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
+    for (let row = 0; row < rows; row++) {
+      const worldRow = (row + this.backgroundOffset) % GESTURE_BACKGROUND_PERIOD;
+      const shift = Math.round(4 * Math.sin(worldRow * Math.PI / 16));
+      const glyph = (worldRow + this.backgroundFrame) % 7 === 0 ? "+" : "·";
+      let pattern = "";
+      for (let col = 0; col < cols; col++) pattern += (col + shift) % 12 === 0 ? glyph : " ";
+      out += `${moveTo(row + 1, 1)}${DIM}${fg(36)}${pattern}${RESET}`;
+    }
+    // Absolute cursor positions keep the foreground fixed and prevent a final
+    // newline at the bottom of the viewport from scrolling the whole screen.
+    lines.slice(0, rows).forEach((line, row) => {
+      if (line.trim()) out += `${moveTo(row + 1, 1)}${RESET}${highlightKeys(line)} `;
+    });
     this.write(out);
   }
 
@@ -948,20 +1052,19 @@ export class TutRunner implements InteractiveProgram {
   private renderItem(item: Item, index: number, activeIndex: number): string[] {
     const complete = this.state.isComplete(item.id);
     const isActive = !complete && index === activeIndex;
-    let mark: string;
-    if (complete) {
-      mark = `${fg(32)}✓${RESET}`;
-    } else if (isActive) {
-      mark = `${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}`;
-    } else {
-      mark = `${DIM}·${RESET}`;
+    const mark = complete ? DONE_MARK : isActive ? ACTIVE_MARK : `${DIM}·${RESET}`;
+    const style = complete ? DIM : isActive ? BOLD : "";
+    // The gesture screen places rows absolutely, so a title must not soft-wrap.
+    const lines = this.isPocketGestureScreen()
+      ? this.wrapText(item.title, 6).map((part, i) => `${i === 0 ? `   ${mark}  ` : "      "}${style}${part}${RESET}`)
+      : [`   ${mark}  ${style ? `${style}${item.title}${RESET}` : item.title}`];
+    if (item.id === "gn-arrows" && (isActive || complete)) {
+      const arrows = GESTURE_ARROWS.map((direction) => {
+        const sent = complete || this.gestureArrows.has(direction);
+        return `${sent ? DONE_MARK : ACTIVE_MARK}${fg(37)}${sent ? "" : BOLD}${direction}${RESET}`;
+      });
+      lines.push(`        ${arrows.join(" ")}`);
     }
-    const title = complete
-      ? `${DIM}${item.title}${RESET}`
-      : isActive
-      ? `${BOLD}${item.title}${RESET}`
-      : item.title;
-    const lines = [`   ${mark}  ${title}`];
     if (isActive && item.hint) {
       const indent = "        ";
       for (const wrapped of this.wrapText(item.hint, indent.length)) {
@@ -1013,6 +1116,7 @@ export class TutRunner implements InteractiveProgram {
     if (this.disposed) return;
     this.disposed = true;
     this.stopSpinnerTicks();
+    this.syncGestureScreen();
     this.stopFlappyTicks();
     this.flappy = null;
     this.busyDemoStart = null;

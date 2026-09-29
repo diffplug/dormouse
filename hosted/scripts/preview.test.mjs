@@ -298,7 +298,7 @@ test("preview cleanup runs the base branch's script, never the closed PR's", asy
   assert.match(cleanup, /\n {10}persist-credentials: false\n/);
 });
 
-test("deployment smoke fails on a stale revision before making any auth requests", async () => {
+test("deployment smoke rejects malformed health before making any auth requests", async () => {
   let requests = 0;
   await assert.rejects(
     smoke(

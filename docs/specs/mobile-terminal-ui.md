@@ -71,7 +71,7 @@ short mode label (rationale).
 
 | Mode (button label) | Availability | Behavior |
 | --- | --- | --- |
-| Gestures | Always | Pane-content touches, pen presses, and primary clicks open the Gesture mode radial menu. |
+| Gestures | Always | Either-edge drags scroll; other pane-content touches, pen presses, and primary clicks open the radial menu. |
 | Text selection (`Select`) | Always | Touch, pen, and primary drags select terminal text as on desktop; a capturing pane gets mouse override. |
 | Mouse | Active TUI capturing mouse events | Touches are passed through as terminal mouse input. |
 
@@ -93,7 +93,7 @@ review.
 Event routing, by mode:
 
 * **Gestures / Select** — `wheel` and `touchmove` in the pane content are
-  consumed in the capture phase, before xterm can act on them (rationale).
+  consumed in the capture phase, except Gestures mode’s synthesized edge-scroll wheels ([Edge scrolling](#edge-scrolling); rationale).
 * **Mouse** — `touchstart` / `touchmove` / `touchend` / `touchcancel` are
   consumed instead, and primary touch and pen pointers synthesize left-button
   mouse events on the element under the pointer (pointerdown / pointermove /
@@ -115,9 +115,27 @@ Source of truth: `TOUCH_MODES` and `paneMouseOverride` in
 `lib/src/remote/pocket-app/PocketWall.tsx` and
 `website/src/components/PocketTerminalExperience.tsx`.
 
+## Edge scrolling
+
+**Must reserve the outermost 48 CSS pixels on both sides of the pane for scrolling in Gestures
+mode**, locking the drag's owner and Session at pointerdown until release or
+cancel. **Must accumulate vertical movement at 18 CSS pixels per line**; content
+follows the finger, with no radial-menu input or native-keyboard focus.
+
+**Must send wheel events through xterm when the Session captures the mouse**,
+clamping the reported coordinates inside its terminal screen. **Must otherwise
+scroll the terminal buffer directly**, never synthesize alternate-screen arrow
+keys. **Must stop scrolling when interaction is disabled, the touch mode changes,
+or the active Session changes.**
+
+Source of truth: `EDGE_SCROLL_WIDTH_PX`, `EDGE_SCROLL_LINE_PX`, and
+`scrollMobileTerminal` in `lib/src/lib/mobile-terminal-scroll.ts`;
+`MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`.
+Tests: `lib/src/components/MobileTerminalUi.test.tsx`.
+
 ## Gesture mode
 
-Touching the pane content opens a radial menu offset from the touch origin, in
+Touching the pane content away from either edge opens a radial menu offset from the touch origin, in
 the opposite diagonal from the user's thumb (rationale). **The offset is clamped
 inside the pane**; on an axis shorter than twice the clamp margin the rose
 centers on that axis instead.
