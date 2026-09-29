@@ -17,15 +17,17 @@ function isOneTimePagePath(pathname: string) {
  * The one-time page's own policy (`docs/specs/one-time.md` -> "Phone page"),
  * narrower than the origin's where it can be and looser only where the page
  * needs it: scripts from `/connect/assets/` alone (plus WebAssembly for xterm's
- * image decoder), inline styles for the shell and React, and one socket — the
- * rendezvous client route. Sandboxed, so it opens no popup and submits no form.
+ * image decoder), styles from there too plus inline ones for the shell and
+ * React, and one socket — the rendezvous client route. Nothing names `'self'`,
+ * which would admit the account frontend's files. Sandboxed, so it opens no
+ * popup and submits no form.
  */
 export function oneTimePagePolicy(appOrigin: string) {
   const page = `${appOrigin}${ONE_TIME_PAGE_PATH}`;
   return [
     "default-src 'none'",
     `script-src ${page}assets/ 'wasm-unsafe-eval'`,
-    "style-src 'self' 'unsafe-inline'",
+    `style-src ${page}assets/ 'unsafe-inline'`,
     `img-src ${page} data: blob:`,
     `font-src ${page}`,
     "media-src blob:",

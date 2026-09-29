@@ -341,7 +341,7 @@ policy, from `APP_ORIGIN` (`<o>`; `<ws-o>` with `http` replaced by `ws`):
 
 ```
 default-src 'none'; script-src <o>/connect/assets/ 'wasm-unsafe-eval';
-style-src 'self' 'unsafe-inline'; img-src <o>/connect/ data: blob:;
+style-src <o>/connect/assets/ 'unsafe-inline'; img-src <o>/connect/ data: blob:;
 font-src <o>/connect/; media-src blob:; connect-src <ws-o>/api/one-time/client;
 worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none';
 object-src 'none'; sandbox allow-scripts allow-same-origin

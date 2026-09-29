@@ -496,13 +496,29 @@ test("the smoke's copies of the contract match remote-lib-common", () => {
 const PAGE_POLICY =
   "default-src 'none'; " +
   "script-src https://hosted.dormouse.sh/connect/assets/ 'wasm-unsafe-eval'; " +
-  "style-src 'self' 'unsafe-inline'; " +
+  "style-src https://hosted.dormouse.sh/connect/assets/ 'unsafe-inline'; " +
   "img-src https://hosted.dormouse.sh/connect/ data: blob:; " +
   "font-src https://hosted.dormouse.sh/connect/; " +
   "media-src blob:; " +
   "connect-src wss://hosted.dormouse.sh/api/one-time/client; " +
   "worker-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'; " +
   "object-src 'none'; sandbox allow-scripts allow-same-origin";
+
+test("the page's policy admits no source outside /connect/ but its one socket", () => {
+  // `docs/specs/security-hosted.md`'s FAIL IF, directive by directive: `'self'`
+  // would admit the account frontend's own files.
+  const socket = `${origin.replace(/^http/, "ws")}${ONE_TIME_WS_ROUTES.client}`;
+  for (const directive of oneTimePagePolicy(origin).split("; ")) {
+    const [name, ...sources] = directive.split(" ");
+    if (name === "sandbox") continue;
+    for (const source of sources) {
+      expect(source, name).not.toBe("'self'");
+      if (source.startsWith("'") || /^[a-z]+:$/.test(source)) continue;
+      if (name === "connect-src") expect(source).toBe(socket);
+      else expect(source.startsWith(`${origin}${ONE_TIME_PAGE_PATH}`), `${name} ${source}`).toBe(true);
+    }
+  }
+});
 
 const get = (path: string, init?: { method: string }) =>
   production.mf.dispatchFetch(origin + path, init);
