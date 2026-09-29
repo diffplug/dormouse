@@ -8,8 +8,9 @@
  * never enroll a Burrow at all.
  *
  * So the outbound half is gated on the service's own answer: it announces
- * `{ name: 'status', enrolled, serving }` whenever its lifecycle changes either
- * (`lib/src/host/remote/service.ts`), and the seed is one `status` command at
+ * `{ name: 'status', enrolled, serving, serviceId }` whenever its lifecycle
+ * changes either, and once as it starts (`lib/src/host/remote/service.ts`),
+ * and the seed is one `status` command at
  * install time, because a webview that opens after the enrollment would
  * otherwise wait for a change that already happened.
  *

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   clearSizeHold,
+  dropSizeHoldsFromOtherServices,
   getSizeHolds,
   holdSize,
   releaseSizeHold,
@@ -40,6 +41,26 @@ describe('size holds', () => {
 
     expect(releaseSizeHold('pane-1', PHONE)).toBe(true);
     expect(getSizeHolds('pane-1')).toEqual([]);
+  });
+
+  it('drops only the holds another service instance took, saying so once', () => {
+    const changed = vi.fn();
+    const unsubscribe = subscribeToSizeHolds(changed);
+    holdSize('pane-1', { ...PHONE, serviceId: 'gone' });
+    holdSize('pane-1', { ...TABLET, serviceId: 'current' });
+    holdSize('pane-2', { ...PHONE, serviceId: 'gone' });
+    const legacy = { holder: 'session-c', label: 'Pixel', lease: '1' };
+    holdSize('pane-2', legacy);
+    changed.mockClear();
+
+    dropSizeHoldsFromOtherServices('current');
+    expect(getSizeHolds('pane-1')).toEqual([{ ...TABLET, serviceId: 'current' }]);
+    expect(getSizeHolds('pane-2')).toEqual([legacy]);
+    expect(changed).toHaveBeenCalledTimes(1);
+
+    dropSizeHoldsFromOtherServices('current');
+    expect(changed).toHaveBeenCalledTimes(1);
+    unsubscribe();
   });
 
   it('answers the same array until something changes, and says when it does', () => {

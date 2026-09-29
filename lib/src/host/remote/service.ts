@@ -208,6 +208,9 @@ const ONE_TIME_TICKET_BYTES = 16;
 /** Bytes of the random id a remote session holds a pane's size under. */
 const HOLDER_ID_BYTES = 16;
 
+/** Bytes of the random id that names one service instance to the webviews. */
+const SERVICE_ID_BYTES = 16;
+
 /** Which app a Burrow is. Standalone and VS Code enroll separately. */
 export type BurrowKind = 'standalone' | 'vscode';
 
@@ -291,6 +294,12 @@ export class BurrowService {
    * Take back runs. Entered at creation, left at disposal.
    */
   readonly #holders = new Map<string, () => void>();
+  /**
+   * This instance, as every `status` event names it and every hold its
+   * sessions take carries it: a webview drops a hold another instance took, which no
+   * release will ever reach (`docs/specs/remote-api.md` → "Size authority").
+   */
+  readonly #serviceId = randomBase64Url(SERVICE_ID_BYTES);
 
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
@@ -308,10 +317,21 @@ export class BurrowService {
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
   }
 
-  /** Start from a persisted enrollment, if there is one this build may reach. */
+  /**
+   * Start from a persisted enrollment, if there is one this build may reach —
+   * and announce this instance either way, since a webview that outlived the
+   * one before it holds panes under sessions that are gone.
+   */
   start(): Promise<void> {
     if (this.#disposed) return Promise.resolve();
-    return this.#serialize(() => this.#start());
+    return this.#serialize(async () => {
+      try {
+        await this.#start();
+      } finally {
+        // A started Burrow has already said so, this instance included.
+        if (!this.#burrow) this.#emitStatus();
+      }
+    });
   }
 
   async #start(): Promise<void> {
@@ -865,7 +885,7 @@ export class BurrowService {
       burrowId: context.burrowId,
       send: context.send,
       provider: this.#provider,
-      holder: { id: holder, label: context.label },
+      holder: { id: holder, label: context.label, serviceId: this.#serviceId },
       onDispose: () => this.#holders.delete(holder),
     });
   }
@@ -896,7 +916,7 @@ export class BurrowService {
    * change — costs a crossing per event on a machine that may never enroll, so
    * they arm on this and idle without it
    * (`lib/src/remote/burrow/enrolled-gate.ts`). Sent when either field may
-   * have changed.
+   * have changed, and once as this instance starts, for its `serviceId`.
    *
    * Both fields mean the same thing as the `status` command's fields of those
    * names, which is how a webview seeds before any event arrives.
@@ -911,7 +931,12 @@ export class BurrowService {
    * that joins the broker with it).
    */
   statusEvent(): BurrowStatusEvent {
-    return { name: 'status', enrolled: !!this.#enrollment, serving: this.#serving() };
+    return {
+      name: 'status',
+      enrolled: !!this.#enrollment,
+      serving: this.#serving(),
+      serviceId: this.#serviceId,
+    };
   }
 
   /** The one-time event as it stands, for the same late arrival as {@link statusEvent}. */

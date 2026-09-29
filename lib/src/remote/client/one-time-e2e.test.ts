@@ -409,6 +409,15 @@ describe('size authority across a one-time connection, end to end', () => {
   let responders: Map<string, (params: unknown) => unknown[]>;
   let terminal: { cols: number; rows: number; resize: ReturnType<typeof vi.fn> };
   let commandSeq: number;
+  /** The webview's `burrow:event` listeners, by event name. */
+  let listeners: Map<string, Set<(data: unknown) => void>>;
+
+  /** What the service sends this webview, as the sidecar bridge carries it. */
+  function toWebview(event: string, data: unknown): void {
+    toUi.push({ event, data });
+    if (event !== 'burrow:event') return;
+    for (const listener of [...(listeners.get((data as { name: string }).name) ?? [])]) listener(data);
+  }
 
   /** One `burrow:command` and the `burrow:result` it produced. */
   async function command(cmd: string, params?: unknown): Promise<unknown> {
@@ -433,6 +442,7 @@ describe('size authority across a one-time connection, end to end', () => {
   beforeEach(() => {
     toUi = [];
     responders = new Map();
+    listeners = new Map();
     commandSeq = 0;
     terminal = {
       cols: 80,
@@ -461,7 +471,7 @@ describe('size authority across a one-time connection, end to end', () => {
       store: createEphemeralBurrowStateStore(() => {}),
       provider,
       kind: 'standalone',
-      sendToUi: (event, data) => void toUi.push({ event, data }),
+      sendToUi: toWebview,
       connectSrc: `${ORIGIN} wss://hosted.example`,
       oneTimeOrigin: ORIGIN,
       createWebSocket: (url) => rendezvous.createBurrowSocket(url) as never,
@@ -475,7 +485,12 @@ describe('size authority across a one-time connection, end to end', () => {
         command: (cmd: string, params?: unknown) => command(cmd, params),
         respond: (op: string, handler: (params: unknown) => unknown[]) => void responders.set(op, handler),
         notify: () => {},
-        on: () => () => {},
+        on: (name: string, listener: (data: unknown) => void) => {
+          const named = listeners.get(name) ?? new Set();
+          listeners.set(name, named);
+          named.add(listener);
+          return () => void named.delete(listener);
+        },
       },
     };
     setPlatform(webview as unknown as PlatformAdapter);
@@ -549,6 +564,31 @@ describe('size authority across a one-time connection, end to end', () => {
     expect(getSizeHolds(SURFACE_ID)).toEqual([]);
     await settleUntil(() => ended.length > 0);
     expect(ended).toEqual([ONE_TIME_ENDED_MESSAGE]);
+  });
+
+  it('drops the hold of a service that is gone once the one replacing it speaks', async () => {
+    await attachedPhone();
+    // Held under this service instance, whose own status — every serving flip
+    // on the way here — dropped nothing.
+    const { serviceId } = service.statusEvent();
+    expect(getSizeHolds(SURFACE_ID)).toMatchObject([{ label: PHONE_LABEL, serviceId }]);
+
+    // The service went without a word — its broker window closed, or its
+    // sidecar restarted — and another starts in its place.
+    const replacement = new BurrowService({
+      store: createEphemeralBurrowStateStore(() => {}),
+      provider: new OnePaneProvider(),
+      kind: 'standalone',
+      sendToUi: toWebview,
+      connectSrc: `${ORIGIN} wss://hosted.example`,
+      oneTimeOrigin: ORIGIN,
+    });
+    try {
+      await replacement.start();
+      expect(getSizeHolds(SURFACE_ID)).toEqual([]);
+    } finally {
+      replacement.dispose();
+    }
   });
 
   it('gives the pane back when the phone detaches, and when it attaches another', async () => {

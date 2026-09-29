@@ -5,10 +5,16 @@
  */
 
 import { clampTerminalDimension, type DirectoryEntry } from 'remote-lib-common';
+import { serviceIdOf, type BurrowStatusEvent } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';
-import { holdSize, releaseSizeHold, type SizeHold } from '../../lib/size-hold-store';
+import {
+  dropSizeHoldsFromOtherServices,
+  holdSize,
+  releaseSizeHold,
+  type SizeHold,
+} from '../../lib/size-hold-store';
 import { isHelperSession, registry } from '../../lib/terminal-store';
 import { subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import type { SurfaceHold } from './burrow-surface-provider';
@@ -73,7 +79,9 @@ function holdOf(value: unknown): SizeHold | null {
   const hold = value as Partial<Record<keyof SizeHold, unknown>> | null | undefined;
   if (typeof hold?.holder !== 'string' || typeof hold.label !== 'string') return null;
   if (typeof hold.lease !== 'string') return null;
-  return { holder: hold.holder, label: hold.label, lease: hold.lease };
+  const { holder, label, lease, serviceId } = hold;
+  // A malformed instance id is read as none: such a hold is kept, never dropped.
+  return typeof serviceId === 'string' ? { holder, label, lease, serviceId } : { holder, label, lease };
 }
 
 /**
@@ -152,6 +160,14 @@ export function installPeerSurfaceResponder(): void {
   const link = getPlatform().burrow;
   if (!link || link === announcingFor) return;
   announcingFor = link;
+  // Unconditional too: a hold outlives the gate that armed it. A `status`
+  // naming another service instance means the one whose sessions took holds
+  // here — a broker window that closed, a sidecar that restarted — is gone, and
+  // its releases with it (`docs/specs/remote-api.md` → "Size authority").
+  link.on('status', (data) => {
+    const serviceId = serviceIdOf(data as Partial<BurrowStatusEvent> | null);
+    if (serviceId) dropSizeHoldsFromOtherServices(serviceId);
+  });
   // Announcing is not free — one crossing per pane-state change, activity
   // change, and focus move — so it is armed only while something can reach
   // these terminals: an enrolled Burrow, or a one-time phone (`enrolled-gate.ts`).

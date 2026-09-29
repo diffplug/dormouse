@@ -146,6 +146,15 @@ export interface BurrowStatusEvent {
    * {@link servingOf}.
    */
   serving: boolean;
+  /**
+   * Which service instance is speaking: minted per `BurrowService`, and
+   * carried on every size hold its sessions take (`SurfaceHold.serviceId`). A
+   * webview drops the holds of any other instance — a VS Code broker window
+   * that closed, a sidecar that restarted — since nothing will release them
+   * (`docs/specs/remote-api.md` → "Size authority"). Absent from a broker
+   * older than the field: read it through {@link serviceIdOf}.
+   */
+  serviceId: string;
 }
 
 /**
@@ -158,6 +167,14 @@ export function servingOf(
   status: Partial<Pick<BurrowStatusEvent, 'enrolled' | 'serving'>> | null | undefined,
 ): boolean {
   return typeof status?.serving === 'boolean' ? status.serving : !!status?.enrolled;
+}
+
+/**
+ * The service instance a `status` event names, or `null` where it names none —
+ * a broker older than the field — which drops no hold.
+ */
+export function serviceIdOf(status: { serviceId?: unknown } | null | undefined): string | null {
+  return typeof status?.serviceId === 'string' && status.serviceId ? status.serviceId : null;
 }
 
 /**

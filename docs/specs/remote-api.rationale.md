@@ -68,6 +68,8 @@ In September 2026, the Viewer-local 60ms restoration timer could overwrite a lat
 
 **Why Take back ends the session.** Chosen by the product owner (2026-09) over re-sizing the phone to the laptop's grid: the phone never resizes, so there is no protocol-v1 event and no phone-side strip, and the person at the laptop — who owns every terminal — gets their pane back in one click. A Pocket session ended this way is not an unpairing; the phone reconnects with one presence prompt. With two viewers on a pane it ends both (product owner, 2026-09): Take back means the laptop has the size again, which no remaining viewer can share.
 
+**Why a hold names its service instance.** A hold is released only by the session that took it, and a VS Code broker window that closes, or a sidecar that restarts, takes its sessions with it: no release ever arrives, and surviving webviews kept their strips — and their phone-sized panes — until someone clicked Take back (review, 2026-09). Only the instance that replaced it can say so, and saying "I am a different service" needs no list of what the old one held.
+
 **Why a pane keeps a hold per holder.** With one hold per pane (review of the first cut, 2026-09), a second viewer's attach replaced the first's, so the second leaving re-fit the pane under the first phone still attached, and Take back ended only the second.
 
 **Why a release names a lease as well as a holder.** A session's own attachments overlap: re-attaching the pane it already holds, or an attach superseded by one to the same pane, sends the earlier attachment's release after the later one took the hold. With the holder alone that release would free the newer hold and re-fit the pane under a phone still attached.

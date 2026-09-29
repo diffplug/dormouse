@@ -716,7 +716,7 @@ describe('start', () => {
 describe('status events', () => {
   it('announces a Burrow that started, and one that was cleared', async () => {
     // What every webview arms its outbound work on: an installation that never
-    // enrolls is told nothing and does nothing (`enrolled-gate.ts`).
+    // enrolls arms nothing (`enrolled-gate.ts`).
     createService({ enrollment: ENROLLMENT });
     await service.start();
     expect(statusEvents()).toEqual([true]);
@@ -725,11 +725,29 @@ describe('status events', () => {
     expect(statusEvents()).toEqual([true, false]);
   });
 
-  it('says nothing at all when there is no Burrow to run', async () => {
+  it('says only that nothing runs when there is no Burrow to run', async () => {
+    // Its instance, for a webview that outlived the one before it; nothing
+    // arms on it.
     createService();
     await service.start();
     await command('status');
-    expect(statusEvents()).toEqual([]);
+    expect(uiEvents()).toEqual([
+      { name: 'status', enrolled: false, serving: false, serviceId: service.statusEvent().serviceId },
+    ]);
+  });
+
+  it('names its own instance in every status event, a new one for each service', async () => {
+    createService({ enrollment: ENROLLMENT });
+    await service.start();
+    await command('clearEnrollment');
+    const { serviceId } = service.statusEvent();
+    expect(serviceId).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    const named = uiEvents().filter((event): event is BurrowStatusEvent => event.name === 'status');
+    expect(named.map((event) => event.serviceId)).toEqual([serviceId, serviceId]);
+
+    service.dispose();
+    createService();
+    expect(service.statusEvent().serviceId).not.toBe(serviceId);
   });
 
   it('announces the Burrow an enroll started', async () => {
@@ -1327,7 +1345,12 @@ describe('one-time connection', () => {
     expect((await command('oneTimeStatus')).result).toEqual({ status: 'idle' });
     expect(service.oneTimeEvent()).toEqual({ name: 'one-time', state: { status: 'idle' } });
     expect((await command('status')).result).toMatchObject({ enrolled: false, serving: false });
-    expect(service.statusEvent()).toEqual({ name: 'status', enrolled: false, serving: false });
+    expect(service.statusEvent()).toEqual({
+      name: 'status',
+      enrolled: false,
+      serving: false,
+      serviceId: expect.any(String),
+    });
   });
 
   it('opens a link un-enrolled, on the baked origin whatever the webview sends', async () => {
@@ -1356,21 +1379,21 @@ describe('one-time connection', () => {
     createService();
     await service.start();
     await open();
-    // `serving` rose at `opening`; `enrolled` never did.
-    expect(servingEvents()).toEqual([true]);
-    expect(statusEvents()).toEqual([false]);
+    // `serving` rose at `opening` from the start's announcement; `enrolled` never did.
+    expect(servingEvents()).toEqual([false, true]);
+    expect(statusEvents()).toEqual([false, false]);
     expect((await command('status')).result).toMatchObject({ enrolled: false, serving: true });
 
     // End: the room goes, and so does `serving`.
     expect((await command('oneTimeEnd')).result).toEqual({});
     expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'user-ended' });
     expect(rendezvous.room().burrow.closeCode).toBe(1000);
-    expect(servingEvents()).toEqual([true, false]);
+    expect(servingEvents()).toEqual([false, true, false]);
 
     // Done: back to idle, which moves no gate.
     await command('oneTimeEnd');
     expect(oneTimeStates().at(-1)).toEqual({ status: 'idle' });
-    expect(servingEvents()).toEqual([true, false]);
+    expect(servingEvents()).toEqual([false, true, false]);
     // And an idle one has nothing to end.
     const quiet = uiEvents().length;
     expect((await command('oneTimeEnd')).result).toEqual({});
@@ -1542,8 +1565,9 @@ describe('one-time connection', () => {
     const attach = { requestId: 'a-1', method: 'surface.attach', params: { surfaceId: 's1', cols: 51, rows: 14 } };
     for (const ct of phone.session.sendApp(utf8Encode(JSON.stringify(attach)))) peer.send(ct);
     await settleUntil(() => holds.length > 0);
-    // The pane is held under the phone's own label, and an id only this session has.
-    expect(holds[0]).toMatchObject({ label: 'iPhone' });
+    // The pane is held under the phone's own label, an id only this session
+    // has, and this service instance.
+    expect(holds[0]).toMatchObject({ label: 'iPhone', serviceId: service.statusEvent().serviceId });
 
     const holder = holds[0]!.holder;
     expect((await command('takeBack', { holder })).result).toEqual({ ended: true });

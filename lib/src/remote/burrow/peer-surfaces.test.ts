@@ -51,8 +51,21 @@ class ServicePlatform {
     notify: () => {
       this.notified += 1;
     },
-    on: () => () => {},
+    on: (name: string, listener: (data: unknown) => void) => {
+      const named = this.listeners.get(name) ?? new Set();
+      this.listeners.set(name, named);
+      named.add(listener);
+      return () => void named.delete(listener);
+    },
   };
+
+  /** The webview's `burrow:event` listeners, by event name. */
+  readonly listeners = new Map<string, Set<(data: unknown) => void>>();
+
+  /** One `burrow:event` from the service. */
+  emit(data: { name: string } & Record<string, unknown>): void {
+    for (const listener of [...(this.listeners.get(data.name) ?? [])]) listener(data);
+  }
 
   answer(op: string, params: unknown): unknown[] {
     const handler = this.responders.get(op);
@@ -96,6 +109,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const id of registry.keys()) clearSizeHold(id);
   clearSizeHold('surface-1');
+  clearSizeHold('surface-2');
   registry.clear();
   clearTerminalActivity();
   setPlatform(new FakePtyAdapter());
@@ -378,6 +392,45 @@ describe('size holds', () => {
     };
     await takeBackSize('surface-1');
     expect(getSizeHolds('surface-1')).toEqual([later]);
+  });
+
+  it('drops the holds of a service instance once another one speaks, and keeps the rest', async () => {
+    registerSurface('surface-1');
+    registerSurface('surface-2');
+    const gone = { ...PHONE, serviceId: 'service-1' };
+    // An older Burrow's hold names no instance, and is never dropped for it.
+    const legacy = { holder: 'session-c', label: 'iPad', lease: '1' };
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: gone });
+    platform.answer('surfaceOp', { surfaceId: 'surface-2', op: 'attach', cols: 51, rows: 14, hold: gone });
+    platform.answer('surfaceOp', { surfaceId: 'surface-2', op: 'attach', cols: 51, rows: 14, hold: legacy });
+    expect(getSizeHolds('surface-1')).toEqual([gone]);
+
+    // A broker older than the field names none, and the service that took
+    // them is still the one speaking: nothing is dropped.
+    platform.emit({ name: 'status', enrolled: true, serving: true });
+    platform.emit({ name: 'status', enrolled: true, serving: true, serviceId: 'service-1' });
+    expect(getSizeHolds('surface-1')).toEqual([gone]);
+    expect(getSizeHolds('surface-2')).toEqual([gone, legacy]);
+
+    platform.emit({ name: 'status', enrolled: false, serving: true, serviceId: 'service-2' });
+    expect(getSizeHolds('surface-1')).toEqual([]);
+    expect(getSizeHolds('surface-2')).toEqual([legacy]);
+
+    // What the new instance's sessions take, it keeps.
+    const current = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-2' };
+    platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 40, rows: 20, hold: current });
+    platform.emit({ name: 'status', enrolled: false, serving: true, serviceId: 'service-2' });
+    expect(getSizeHolds('surface-1')).toEqual([current]);
+  });
+
+  it('reads a malformed service instance as none, keeping its hold', () => {
+    registerSurface('surface-1');
+    platform.answer('surfaceOp', {
+      surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: { ...PHONE, serviceId: 7 },
+    });
+    expect(getSizeHolds('surface-1')).toEqual([PHONE]);
+    platform.emit({ name: 'status', enrolled: true, serving: true, serviceId: 'service-2' });
+    expect(getSizeHolds('surface-1')).toEqual([PHONE]);
   });
 
   it('sends nothing for a pane nobody holds', async () => {

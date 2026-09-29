@@ -1390,7 +1390,7 @@ describe('serving the other windows', () => {
     // Addressed to the window that joined, and nothing else is invented for it:
     // whether anything is served, and the one-time panel's state.
     expect(far.uiEvents).toEqual([
-      { name: 'status', enrolled: false, serving: false },
+      { name: 'status', enrolled: false, serving: false, serviceId: expect.any(String) },
       { name: 'one-time', state: { status: 'idle' } },
     ]);
   });

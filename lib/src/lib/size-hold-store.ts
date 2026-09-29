@@ -18,6 +18,8 @@ export interface SizeHold {
   readonly label: string;
   /** Which of that session's attachments set it, opaque too. */
   readonly lease: string;
+  /** Which service instance serves that session; absent from an older Burrow. */
+  readonly serviceId?: string;
 }
 
 const NO_HOLDS: readonly SizeHold[] = Object.freeze([]);
@@ -56,13 +58,15 @@ export function holdSize(id: string, hold: SizeHold): void {
   if (
     newest?.holder === hold.holder &&
     newest.lease === hold.lease &&
-    newest.label === hold.label
+    newest.label === hold.label &&
+    newest.serviceId === hold.serviceId
   ) {
     return;
   }
+  const { holder, label, lease, serviceId } = hold;
   set(id, [
-    ...current.filter((held) => held.holder !== hold.holder),
-    { holder: hold.holder, label: hold.label, lease: hold.lease },
+    ...current.filter((held) => held.holder !== holder),
+    serviceId === undefined ? { holder, label, lease } : { holder, label, lease, serviceId },
   ]);
 }
 
@@ -78,6 +82,24 @@ export function releaseSizeHold(id: string, hold: Pick<SizeHold, 'holder' | 'lea
   if (next.length === current.length) return false;
   set(id, next);
   return true;
+}
+
+/**
+ * Forget every hold another service instance took: `serviceId` now speaks for
+ * this machine, and the sessions of the one before it are gone with it, their
+ * releases with them. A hold that names no instance — an older Burrow's — is
+ * kept.
+ */
+export function dropSizeHoldsFromOtherServices(serviceId: string): void {
+  let dropped = false;
+  for (const [id, current] of [...holds]) {
+    const next = current.filter((held) => held.serviceId === undefined || held.serviceId === serviceId);
+    if (next.length === current.length) continue;
+    dropped = true;
+    if (next.length === 0) holds.delete(id);
+    else holds.set(id, next);
+  }
+  if (dropped) notify();
 }
 
 /** Forget every hold on `id`, whoever holds it: the Session is gone from this webview. */

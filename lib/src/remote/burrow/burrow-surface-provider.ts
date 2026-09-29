@@ -27,6 +27,12 @@ export interface SurfaceHold {
    * one from an attachment the session has since replaced frees nothing.
    */
   readonly lease: string;
+  /**
+   * Which service instance serves the session (`BurrowStatusEvent.serviceId`),
+   * so a webview can drop the hold once another instance speaks for this
+   * machine. Absent from a Burrow older than the field, whose holds are kept.
+   */
+  readonly serviceId?: string;
 }
 
 export interface SurfaceHandle {

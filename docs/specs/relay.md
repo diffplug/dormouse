@@ -885,7 +885,7 @@ exists to honor:
 - **Disconnect asks first**: clearing the enrollment drops every paired phone
   until each pairs again.
 - **Status is re-read, not patched**: the service's `status` event carries only
-  `{ enrolled, serving }`, so every event triggers a full `status` command, and the dialog
+  `{ enrolled, serving, serviceId }`, so every event triggers a full `status` command, and the dialog
   re-reads on open since another window may have enrolled meanwhile. **The
   connection is polled every 2 s while something is subscribed**, never as a
   standing timer in every window, comparing field-wise before publishing

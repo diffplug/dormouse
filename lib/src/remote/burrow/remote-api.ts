@@ -50,19 +50,27 @@ export interface RemoteApiSessionOptions {
   provider: BurrowSurfaceProvider;
   /**
    * Who this session is to the panes it sizes (`docs/specs/remote-api.md` →
-   * "Size authority"): an id unique to it, opaque to every owner, and the
-   * label a held pane's strip shows.
+   * "Size authority"): an id unique to it, opaque to every owner, the label a
+   * held pane's strip shows, and the service instance that serves it.
    */
-  holder: { readonly id: string; readonly label: string };
+  holder: SessionHolder;
   /** Called once, when this session is disposed. */
   onDispose?: () => void;
+}
+
+/** {@link RemoteApiSessionOptions.holder}. */
+export interface SessionHolder {
+  readonly id: string;
+  readonly label: string;
+  /** {@link SurfaceHold.serviceId}; absent where no service instance names itself. */
+  readonly serviceId?: string;
 }
 
 export class RemoteApiSession {
   readonly #burrowId: string;
   readonly #send: (payload: RemoteResponse | RemoteEventMsg) => void;
   readonly #provider: BurrowSurfaceProvider;
-  readonly #holder: { readonly id: string; readonly label: string };
+  readonly #holder: SessionHolder;
   readonly #onDispose: (() => void) | null;
 
   #directorySubId: string | null = null;
@@ -266,10 +274,12 @@ export class RemoteApiSession {
     // Per attach too: a release names the attachment it gives up, so one from
     // an attachment this session has since replaced — the same pane included —
     // cannot free the hold its successor took.
+    const { id, label, serviceId } = this.#holder;
     const hold: SurfaceHold = {
-      holder: this.#holder.id,
-      label: this.#holder.label,
+      holder: id,
+      label,
       lease: String(generation),
+      ...(serviceId === undefined ? {} : { serviceId }),
     };
     void this.#provider.resolveSurface(params.surfaceId, params, hold).then(
       (handle) => {
