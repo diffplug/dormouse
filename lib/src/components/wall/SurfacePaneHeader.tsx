@@ -15,7 +15,9 @@ import {
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { chromeButton, HEADER_PALETTE_TRANSITION_CLASS, OVERLAY_MAX_HEIGHT, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS } from '../design';
+import { isPreviewSlotParams } from './browser-surface';
+import { PreviewPill } from './PreviewPill';
 import { MinimizeKillButtons, PaneActionGroup } from './PaneActionButtons';
 import {
   useAgentBrowserChromeSnapshot,
@@ -49,6 +51,8 @@ const browserHeaderTier = (width: number): BrowserHeaderTier =>
 
 export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
   const dirty = useToolDirty(id, params);
+  const preview = isPreviewSlotParams(params);
+  const labelClass = preview ? PREVIEW_LABEL_CLASS : '';
   const visible = useSurfaceVisibility(parked);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
@@ -224,14 +228,15 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
                   <title> / full URL → tooltip. Gives up width (shrink-[10]) long
                   before the command does. */}
               <span
-                className={`${placement === 'popover' ? 'basis-full' : ''} min-w-0 shrink-[10] cursor-text truncate font-medium underline-offset-2 hover:underline`}
-                title={chrome.title ?? chrome.url ?? undefined}
+                className={`${placement === 'popover' ? 'basis-full' : ''} min-w-0 shrink-[10] cursor-text truncate font-medium underline-offset-2 hover:underline ${labelClass}`}
+                title={[preview && 'Preview', chrome.title ?? chrome.url].filter(Boolean).join(' — ') || undefined}
                 onMouseDown={(e) => e.stopPropagation()}
                 role="button"
                 tabIndex={0}
                 onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setEditingUrl(true); } }}
                 onClick={(e) => { e.stopPropagation(); setEditingUrl(true); }}
               >{urlText || title || id}</span>
+              {preview && placement !== 'minimal' && <PreviewPill id={id} />}
 
               {/* Flexible spacer keeps the layout buttons right-aligned. */}
               {placement !== 'popover' && <div className="min-w-0 flex-1" />}
@@ -239,7 +244,10 @@ export function SurfacePaneHeader({ id, title, params, parked }: PaneProps) {
           )}
         </>
       ) : (
-        <span className="min-w-0 flex-1 truncate font-medium">{title ?? id}</span>
+        <>
+          <span className={`min-w-0 flex-1 truncate font-medium ${labelClass}`} title={preview ? 'Preview' : undefined}>{title ?? id}</span>
+          {preview && placement !== 'minimal' && <PreviewPill id={id} />}
+        </>
       )}
 
       {(placement === 'popover' || placement === 'full') && <div className="ml-1 flex shrink-0 items-center gap-0.5">

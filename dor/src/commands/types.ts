@@ -87,6 +87,8 @@ export interface Surface {
   /** At least one `dor await` is parked on this Surface. Never persisted — a
    *  wait cannot outlive the process blocking on it. */
   awaited: boolean;
+  /** The Workspace's preview slot (`dor open --preview`); omitted otherwise. */
+  preview?: boolean;
   /** Listening ports opened by this terminal Surface. Present only when the
    *  request set `includePorts` (`dor list --ports`); never on browser Surfaces. */
   ports?: SurfacePort[];
@@ -284,6 +286,8 @@ export interface ToolSurfaceRequest extends WorkspaceScopedRequest {
   cwd: string;
   /** Surface to split when creating. */
   surface?: string;
+  /** Show `file` in the Workspace's preview slot (`dor open --preview`). */
+  preview?: boolean;
 }
 
 export interface ToolSurfaceResponse {
@@ -295,8 +299,12 @@ export interface ToolSurfaceResponse {
    * for the same reason `takeover` is. `takeover` is the calling pane itself
    * becoming the tool, answered before the command is typed — `dor` has to exit
    * before its own shell is free to run it.
+   *
+   * `retargeted` is the preview slot running the newly resolved Tool in place,
+   * answered once the command is typed. `superseded` is a preview a newer one
+   * replaced before it ran; the handle is the slot's.
    */
-  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover';
+  status: 'created' | 'existing' | 'adopted' | 'pending' | 'takeover' | 'retargeted' | 'superseded';
   surfaceId: string;
   surfaceRef: string;
   /** The rendered command, as typed into the shell. */

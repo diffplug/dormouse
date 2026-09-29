@@ -180,6 +180,21 @@ export function toolScopeFromParams(params: unknown): ToolKeyScope | undefined {
   return isToolKeyScope(scope) ? scope : undefined;
 }
 
+/** Whether params mark the Workspace's preview slot (`docs/specs/dor-tool.md`
+ *  -> Preview slot). Pinning deletes the mark. */
+export function isPreviewSlotParams(params: unknown): boolean {
+  return isToolParams(params) && params.toolPreview === true;
+}
+
+/** The keyed-dedupe predicate every Tool launch shares
+ *  (`docs/specs/dor-tool.md` -> Identity and dedupe). A marked preview slot
+ *  never matches: it keeps its key, which counts once it is pinned. */
+export function matchesToolKey(candidate: unknown, scope: ToolKeyScope | undefined, key: readonly string[] | null): boolean {
+  return !isPreviewSlotParams(candidate)
+    && toolScopeFromParams(candidate) === scope
+    && toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
+}
+
 /** Whether params describe a plain browser surface (vs a terminal): the unified
  *  'browser' type, or anything carrying a renderMode. A tool is neither — it is
  *  its own kind, and `isToolParams` answers for it. */

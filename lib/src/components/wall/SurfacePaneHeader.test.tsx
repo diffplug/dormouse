@@ -106,6 +106,47 @@ function openPopup() {
   expect(popup()).not.toBeNull();
 }
 
+describe('SurfacePaneHeader — preview slot', () => {
+  it('italicizes a serving slot\'s address and offers a Keep open pill until the minimal tier', () => {
+    const id = 'preview-tool-header';
+    const registration = register(id);
+    try {
+      const onPinPreview = vi.fn();
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions({ onPinPreview }), { tool: true });
+      const address = container.querySelector<HTMLElement>('[role="button"].italic');
+      expect(address?.title).toMatch(/^Preview — /);
+      const pill = () => container.querySelector<HTMLButtonElement>(`[data-preview-pill-for="${id}"]`);
+      expect(pill()?.title).toBe('Keep open');
+      act(() => pill()!.click());
+      expect(onPinPreview).toHaveBeenCalledExactlyOnceWith(id);
+      act(() => resizeHeader(200));
+      expect(pill()).toBeNull();
+      expect(container.querySelector('[role="button"].italic')).not.toBeNull();
+    } finally {
+      registration.dispose();
+    }
+  });
+
+  it('marks a serving slot whose browser has not registered yet', () => {
+    const id = 'unregistered-preview-header';
+    renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', toolPreview: true, url: CHROME.url } }, stubActions(), { tool: true });
+    expect(container.querySelector('span.italic')?.getAttribute('title')).toBe('Preview');
+    expect(container.querySelector(`[data-preview-pill-for="${id}"]`)).not.toBeNull();
+  });
+
+  it('marks nothing on a pinned Tool', () => {
+    const id = 'pinned-tool-header';
+    const registration = register(id);
+    try {
+      renderHeader({ ...headerProps(id, 'viewer'), params: { surfaceType: 'tool', url: CHROME.url } }, stubActions(), { tool: true });
+      expect(container.querySelector(`[data-preview-pill-for="${id}"]`)).toBeNull();
+      expect(container.querySelector('.italic')).toBeNull();
+    } finally {
+      registration.dispose();
+    }
+  });
+});
+
 describe('SurfacePaneHeader — browser chrome', () => {
   it.each([
     ['terminal', {}],

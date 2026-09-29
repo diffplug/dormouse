@@ -22,6 +22,8 @@ export type DoorChip = DooredItem & {
   kind: SurfaceKind;
   /** Browser-only presentation identity. Terminals omit it. */
   browserDisplay?: BrowserDisplayMode;
+  /** The Workspace's preview slot (`docs/specs/dor-tool.md` -> Preview slot). */
+  preview?: boolean;
 };
 
 /** The visible-pane projection (`lath.listPanes()`). Shared by the Wall helpers,

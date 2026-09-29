@@ -48,11 +48,13 @@ Panes are separated by a 7px gap (`PANE_GUTTER_PX`), odd so the 1px selection ri
 
 **Must keep a Tool's unsaved-change dot visible in its Pane header and minimized Door**, across header widths and terminal/browser faces. Use inherited foreground, without animation; label and tooltip it “Unsaved changes”. Never hide it inside browser overflow controls or replace Kill. State semantics belong to `docs/specs/dor-tool.md` → Unsaved changes.
 
+**Must mark the Workspace's preview slot with an italic derived label in its Pane header and Door**, naming it Preview in the label's tooltip and the Door's accessible name, **and a Preview pill whose click pins the slot** ("Keep open"). Slot semantics belong to `docs/specs/dor-tool.md` → Preview slot.
+
 A 30px header doubling as a drag handle: **a `pointerdown` past a 5px threshold begins a Lath pane drag**; below the threshold the header's own click behavior stands. It uses `cursor-grab` / `active:cursor-grabbing`, `select-none`, the shared terminal top radius from `lib/src/components/design.tsx`, and the `--color-header-active-*` / `--color-header-inactive-*` token pairs (VSCode file-tree list colors).
 
 **Must use browser chrome for a serving Tool, with a Terminal Context disclosure for its serving terminal.** Tool composition belongs to `docs/specs/dor-tool.md` → Lifecycle.
 
-Elements left to right: derived label; TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
+Elements left to right: derived label; Preview pill (compact+); TODO pill (compact+); flexible gap; mouse-reporting override icon (compact+, only while the inside program requests mouse reporting); split left/right, split top/bottom (full only); then the pane-action group: zoom/unzoom, minimize, kill (hover turns error-red).
 
 The label is the `DerivedHeader` from `deriveHeader(...)`; `docs/specs/terminal-state.md` owns the priority chain and disambiguator. Layout renders it: primary truncates with ellipsis, secondary muted beside it, a failed last command appends an error-colored glyph. Click renames/pins; right-click — or `>` in command mode — opens the header context menu.
 
@@ -135,7 +137,7 @@ Both layers wear the leaf's own rounding (header radius on top, terminal radius 
 
 - **Full** (>293px): everything.
 - **Compact** (>173px): split hidden.
-- **Minimal** (>98px): also hides the TODO pill and the mouse-override icon. The label truncates with ellipsis.
+- **Minimal** (>98px): also hides the TODO and Preview pills and the mouse-override icon. The label truncates with ellipsis.
 - **Tiny** (≤98px): minimize and kill go too.
 
 A browser header, including a Tool's (Terminal Context sits outside the measured width), collapses by border-box width:
@@ -143,7 +145,7 @@ A browser header, including a Tool's (Terminal Context sits outside the measured
 | Below | Change |
 |---|---|
 | 420px | Split hidden. |
-| 360px | Navigation hidden. |
+| 360px | Navigation and the Preview pill hidden. |
 | 180px | Chrome moves into a viewport-clamped popover behind one trigger. |
 | 94px (102px with an unsaved-change dot) | Minimize and kill join the popover. |
 

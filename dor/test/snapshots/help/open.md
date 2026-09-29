@@ -4,7 +4,7 @@ Invocation: `dor open --help`
 
 ```text
 USAGE
-  dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] <file>
+  dor open [--json] [--minimize] [--fresh] [--surface id|ref] [--workspace ref] [--cwd path] [--tool name] [--preview] <file>
   dor open --help
 
 Opens one existing local file. Relative paths resolve from the caller's directory (or --cwd); symlink aliases resolve to the same file. URLs, directories, and Surface handles are not accepted.
@@ -17,6 +17,8 @@ The selected Tool receives the canonical absolute filename as one argument. Conf
 
 Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split without taking focus. The pane remains a Tool after its command exits: opening a different file from that prompt splits unless keyed reuse finds an existing Tool; the same keyed file reruns in place. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
 
+--preview shows the file in this Workspace's preview slot: one reusable pane, marked by an italic label and a Preview pill, that each preview retargets in place — reporting "retargeted", or "superseded" when a newer preview replaced it first. Opening the file the slot shows without --preview keeps it open, as does clicking its pill or the Tool reporting unsaved changes; the next preview then gets a new slot. A preview never takes over the calling pane, and a Tool already kept open for the file is revealed instead.
+
 FLAGS
      [--json]       Print JSON output.
      [--minimize]   Create the surface minimized.
@@ -25,6 +27,7 @@ FLAGS
      [--workspace]  Workspace to act in, instead of the caller's.
      [--cwd]        Directory for resolving the file.
      [--tool]       Use a user Tool or builtin:file.
+     [--preview]    Show the file in this Workspace's preview slot.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments
 

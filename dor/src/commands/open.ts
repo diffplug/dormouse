@@ -10,6 +10,7 @@ interface OpenFlags extends WorkspaceScopedFlags {
   readonly surface?: string;
   readonly cwd?: string;
   readonly tool?: string;
+  readonly preview?: boolean;
 }
 
 export const openCommand: Command = {
@@ -25,7 +26,9 @@ The ordered open list contains {match, tool} entries. Patterns without a slash m
 
 The selected Tool receives the canonical absolute filename as one argument. Configure prespawn_dedupe: [$TARGET] to reveal the same file on repeated opens within a Workspace. --fresh bypasses reuse.
 
-Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split without taking focus. The pane remains a Tool after its command exits: opening a different file from that prompt splits unless keyed reuse finds an existing Tool; the same keyed file reruns in place. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.`,
+Placement follows dor tool: typed alone at a prompt in a visible, integrated plain terminal in the requested directory, opening takes over that pane, preserving its terminal and scrollback. Agent/script invocations, compound lines, a pane with a helper, --minimize, --surface, or --cwd elsewhere split without taking focus. The pane remains a Tool after its command exits: opening a different file from that prompt splits unless keyed reuse finds an existing Tool; the same keyed file reruns in place. A matching Tool elsewhere is reused. The command prints the Surface handle; --json prints structured output.
+
+--preview shows the file in this Workspace's preview slot: one reusable pane, marked by an italic label and a Preview pill, that each preview retargets in place — reporting "retargeted", or "superseded" when a newer preview replaced it first. Opening the file the slot shows without --preview keeps it open, as does clicking its pill or the Tool reporting unsaved changes; the next preview then gets a new slot. A preview never takes over the calling pane, and a Tool already kept open for the file is revealed instead.`,
     },
     parameters: {
       flags: {
@@ -36,10 +39,15 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
         workspace: workspaceFlag,
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Directory for resolving the file.', optional: true, placeholder: 'path' },
         tool: { kind: 'parsed', parse: stringParser, brief: 'Use a user Tool or builtin:file.', optional: true, placeholder: 'name' },
+        preview: { kind: 'boolean', brief: "Show the file in this Workspace's preview slot.", optional: true, withNegated: false },
       },
       positional: { kind: 'tuple', parameters: [{ parse: stringParser, brief: 'Local file to open.', placeholder: 'file' }] },
     },
     func(this: DorCommandContext, flags: OpenFlags, file: string) {
+      // The slot is one reused pane: it is never another instance or a Door.
+      if (flags.preview && (flags.fresh || flags.minimize)) {
+        return new Error(`--preview cannot be combined with ${flags.fresh ? '--fresh' : '--minimize'}`);
+      }
       return dispatchToolSurface(this, {
         file,
         tool: flags.tool,
@@ -48,6 +56,7 @@ Placement follows dor tool: typed alone at a prompt in a visible, integrated pla
         minimized: flags.minimize === true,
         surface: flags.surface,
         cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+        ...(flags.preview ? { preview: true } : {}),
       }, flags.json === true);
     },
   }),

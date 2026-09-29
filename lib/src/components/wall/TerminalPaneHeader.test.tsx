@@ -163,3 +163,33 @@ describe('TerminalPaneHeader — inline rename', () => {
     expect(document.body.textContent).toContain('<idle> nope');
   });
 });
+
+describe('TerminalPaneHeader — preview slot', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('italicizes the label and offers a Keep open pill from compact width up', () => {
+    const resize = stubResizeObserver(250);
+    const onPinPreview = vi.fn();
+    const onClickPanel = vi.fn();
+    renderHeader(stubActions({ onPinPreview, onClickPanel }), null, { params: { surfaceType: 'tool', toolPreview: true } });
+    const label = container.querySelector<HTMLElement>('[data-pane-title-for="term-1"]')!;
+    expect(label.title).toBe('Preview');
+    expect(label.querySelector('.italic')).not.toBeNull();
+    const pill = container.querySelector<HTMLButtonElement>('[data-preview-pill-for="term-1"]')!;
+    expect(pill.textContent).toBe('Preview');
+    expect(pill.title).toBe('Keep open');
+    act(() => { pill.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); pill.click(); });
+    expect(onPinPreview).toHaveBeenCalledExactlyOnceWith('term-1');
+    expect(onClickPanel).not.toHaveBeenCalled();
+    act(() => resize(150));
+    expect(container.querySelector('[data-preview-pill-for="term-1"]')).toBeNull();
+    expect(label.querySelector('.italic')).not.toBeNull();
+  });
+
+  it('marks nothing once the Tool is pinned', () => {
+    renderHeader(stubActions(), null, { params: { surfaceType: 'tool', toolTarget: '/repo/a.md' } });
+    expect(container.querySelector('[data-preview-pill-for="term-1"]')).toBeNull();
+    expect(container.querySelector('[data-pane-title-for="term-1"] .italic')).toBeNull();
+    expect(container.querySelector<HTMLElement>('[data-pane-title-for="term-1"]')!.title).toBe('');
+  });
+});

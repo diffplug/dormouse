@@ -53,14 +53,18 @@ import {
   agentBrowserSessionFromParams,
   browserBindingFromParams,
   browserUrlFromParams,
+  isPreviewSlotParams,
+  matchesToolKey,
   namespacedToolKey,
   surfaceKindFromParams,
   toolKeysEqual,
   toolPendingFromParams,
-  toolScopeFromParams,
+  toolPortConflictFromParams,
   viewportFromMeasurement,
   type ToolPending,
 } from './browser-surface';
+import { runsSameTool, toolTargetFromParams, type PreviewSlotPin } from './preview-slot';
+import { retireToolBrowser } from './use-tool-serving';
 
 import { listenerUrlsByPort } from './port-url';
 import { dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
@@ -108,6 +112,7 @@ export type DorControlParams = {
   tool?: unknown;
   setting?: unknown;
   initialViewport?: unknown;
+  preview?: unknown;
 };
 
 // The webview view of a control request: the shared wire payload, but with
@@ -370,15 +375,11 @@ const CREATING_CONTROL_METHODS = new Set<string>([
 const ENSURE_CANCELLED = 'ensure was cancelled';
 
 /**
- * Restart a surface already running `command` in `cwd`: interrupt it (Ctrl+C),
- * wait for the shell to return to its prompt, type the command again, and wait
- * for it to go live. Drives the live PTY directly, so it works for minimized
- * doors too (their PTY keeps running). Returns a message on failure.
+ * Interrupt a Surface's foreground command (Ctrl+C) and wait for its shell to
+ * return to a prompt — the first half of every in-place restart, and of a
+ * preview retarget. Returns a message on failure.
  */
-export async function restartSurfaceInPlace(
-  id: string, command: string, cwd: string, signal?: AbortSignal,
-  options: { acceptCompletedRun?: boolean } = {},
-): Promise<ParseResult<undefined>> {
+async function interruptToPrompt(id: string, signal?: AbortSignal): Promise<ParseResult<undefined>> {
   // Checked before the interrupt is written, not just before each wait.
   if (signal?.aborted) return RESTART_CANCELLED;
   // A match is by construction OSC-driven (surfaceRunsCommand only matches a
@@ -386,8 +387,7 @@ export async function restartSurfaceInPlace(
   // it guarantees we never fire Ctrl+C into a non-integration shell (e.g. cmd.exe
   // popping `Terminate batch job (Y/N)?`).
   if (!isPaneOscDriven(id)) return { ok: false, message: 'has no Dormouse shell integration to restart' };
-  const platform = getPlatform();
-  platform.writePty(id, '\x03');
+  getPlatform().writePty(id, '\x03');
   const interrupted = await waitForTerminalState(
     id,
     (state) => state.currentCommand === null,
@@ -399,9 +399,24 @@ export async function restartSurfaceInPlace(
   // otherwise slip past and type the command.
   if (signal?.aborted || interrupted === 'aborted') return RESTART_CANCELLED;
   if (interrupted === 'timeout') return { ok: false, message: 'did not return to a prompt after interrupt' };
+  return { ok: true, value: undefined };
+}
+
+/**
+ * Restart a surface already running `command` in `cwd`: interrupt it (Ctrl+C),
+ * wait for the shell to return to its prompt, type the command again, and wait
+ * for it to go live. Drives the live PTY directly, so it works for minimized
+ * doors too (their PTY keeps running). Returns a message on failure.
+ */
+export async function restartSurfaceInPlace(
+  id: string, command: string, cwd: string, signal?: AbortSignal,
+  options: { acceptCompletedRun?: boolean } = {},
+): Promise<ParseResult<undefined>> {
+  const interrupted = await interruptToPrompt(id, signal);
+  if (!interrupted.ok) return interrupted;
   const previousRun = getTerminalPaneState(id).lastCommand?.id ?? null;
   recordToolDirty(id, null);
-  platform.writePty(id, `${command}\r`);
+  getPlatform().writePty(id, `${command}\r`);
   const restarted = await waitForTerminalState(
     id,
     (state) => surfaceRunsCommand(state, command, cwd)
@@ -455,21 +470,34 @@ async function runToolInCallerPane(
     const title = meta.title === UNNAMED_PANEL_TITLE ? tool.become.title : meta.title;
     lath.store.setMeta(id, toolLeafMeta(title, tool.become.params));
   }
+  await typeToolCommand(id, tool.command, tool.cwd, signal);
+}
+
+/**
+ * Type a Tool's command at its shell's prompt, then wait until it is observed
+ * running or newly completed in `cwd`. The caller holds the spawn lock until
+ * this resolves: a pane typed into but not yet reporting reads as an idle tool,
+ * which a queued invocation of the same key would interrupt and retype. It ends
+ * on either outcome — a command that dies on boot (a typo, a missing `pnpm`)
+ * can start and finish between two samples, and waiting out the timeout for it
+ * would pin the lock for 15s. The command is written before this returns.
+ */
+function typeToolCommand(id: string, command: string, cwd: string, signal?: AbortSignal): Promise<WaitOutcome> {
   const previousRun = getTerminalPaneState(id).lastCommand?.id ?? null;
-  getPlatform().writePty(id, `${tool.command}\r`);
-  // The caller holds the spawn lock until this resolves: a pane typed into but
-  // not yet reporting reads as an idle tool, which a queued invocation of the
-  // same key would interrupt and retype. It ends on either outcome — a command
-  // that dies on boot (a typo, a missing `pnpm`) can start and finish between two
-  // samples, and waiting out the timeout for it would pin the lock for 15s.
-  await waitForTerminalState(
+  getPlatform().writePty(id, `${command}\r`);
+  return waitForTerminalState(
     id,
-    (state) => surfaceRunsCommand(state, tool.command, tool.cwd)
-      || completedCommandMatches(state, tool.command, tool.cwd, previousRun),
+    (state) => surfaceRunsCommand(state, command, cwd) || completedCommandMatches(state, command, cwd, previousRun),
     COMMAND_START_TIMEOUT_MS,
     signal,
   );
 }
+
+/** The params a preview retarget replaces with the newly resolved Tool's; the
+ *  rest of the slot (its directory, a user rename) stays. */
+const TOOL_IDENTITY_PARAMS: ReadonlySet<string> = new Set([
+  'command', 'toolArgv', 'toolName', 'toolScope', 'toolRender', 'toolPort', 'toolKey', 'browserViewport', 'toolTarget',
+]);
 
 // A `dor ensure -- <command>` command is typed into the shell programmatically,
 // which bypasses the keystroke heuristic — so only a shell whose integration
@@ -546,6 +574,8 @@ export function useDorControl({
   isClosingWorkspace,
   closeSurface,
   revealSurface,
+  revealSurfaceQuietly,
+  previewSlot,
   workspaceRef,
   workspaceScope,
 }: {
@@ -595,6 +625,11 @@ export function useDorControl({
   /** Reveal a Surface (reattaching a Door first) and report whether it ended up
    *  visible. `Wall.tsx` -> `revealSurface`. */
   revealSurface: (id: string) => boolean;
+  /** Reveal a Surface without moving selection, mode, or keyboard focus,
+   *  reattaching a Door; reports whether it ended up visible. */
+  revealSurfaceQuietly: (id: string) => boolean;
+  /** This Wall's preview slot pinning (`docs/specs/dor-tool.md` -> Preview slot). */
+  previewSlot: PreviewSlotPin;
   /** This Wall's own positional Workspace ref, reported by `dor list` so a caller
    *  learns which Workspace answered (docs/specs/dor-cli.md → "Handle Model").
    *  The Window's own ref rides beside it, so `dor list` says which Window
@@ -773,6 +808,19 @@ export function useDorControl({
 
   const browserReservations = useRef(new BrowserBindingReservations());
 
+  // The newest preview's ticket. A newer preview aborts it, and so does the
+  // request's own cancellation; a Wall answers for one Workspace, so this is
+  // per Workspace (docs/specs/dor-tool.md -> Preview slot).
+  const previewTicket = useRef<AbortController | null>(null);
+  const supersedePreviews = useCallback((signal: AbortSignal | undefined): AbortSignal => {
+    previewTicket.current?.abort();
+    const ticket = new AbortController();
+    if (signal?.aborted) ticket.abort();
+    else signal?.addEventListener('abort', () => ticket.abort(), { once: true });
+    previewTicket.current = ticket;
+    return ticket.signal;
+  }, []);
+
   const ensureBrowserSurface = useCallback<EnsureBrowserSurface>(({
     key,
     provider,
@@ -936,6 +984,15 @@ export function useDorControl({
     }
 
     if (detail.method === SURFACE_CONTROL_METHODS.tool) {
+      // The preview slot is one reused pane, never another instance or a Door.
+      if (booleanParam(params.preview) && (stringParam(params.file) === undefined
+        || booleanParam(params.fresh) || booleanParam(params.minimized))) {
+        detail.respond({ ok: false, error: 'preview takes one file, without fresh or minimized' });
+        return;
+      }
+      // Taken before the queue, so a newer preview supersedes this one while it
+      // waits there or while it interrupts the slot.
+      const previewSignal = booleanParam(params.preview) ? supersedePreviews(detail.signal) : null;
       // Serialize every tool request behind the last one. Each `dor`
       // invocation is its own socket connection, so two handlers otherwise
       // interleave across the host lookup, both clear the key check, and both
@@ -975,6 +1032,7 @@ export function useDorControl({
         // autobinds. Safe by construction now that `auto` refuses two ports
         // rather than tie-breaking; a declared tool opts in with one line.
         let port: 'announced' | 'auto' = 'auto';
+        let openTarget: string | undefined;
         const toolShell = getDefaultShellOpts()?.shell;
         /** Approval and spawn both require an OSC 633-integrated shell. */
         const refuseCmdShell = (): boolean => {
@@ -1016,6 +1074,28 @@ export function useDorControl({
             helperPresent: !!getHelper(id),
           };
         };
+        const findPreviewSlot = () => findSurfaceByParams(isPreviewSlotParams);
+        /** Where a Tool Surface runs: its shell's directory, else its own. */
+        const runDirectory = (id: string) =>
+          getTerminalPaneState(id).cwd?.path ?? stringParam(lath.getMeta(id)?.params?.cwd) ?? cwd;
+        /** Answer with a Tool Surface as it stands, command and directory its own. */
+        const respondStanding = (status: ToolSurfaceResponse['status'], id: string, visible: boolean) => respondTool(status, {
+          surfaceId: id,
+          command: toolCommandFromParams(lath.getMeta(id)?.params) ?? '',
+          cwd: runDirectory(id),
+          minimized: !visible,
+        });
+        /** A newer preview replaced this one; its own cancellation is not that. */
+        const superseded = () => previewSignal?.aborted === true && !detail.signal?.aborted;
+        const respondSuperseded = () => {
+          const slot = findPreviewSlot();
+          if (slot) respondStanding('superseded', slot.id, !slot.minimized);
+          else detail.respond({ ok: false, error: 'superseded by a newer preview' });
+        };
+        if (superseded()) {
+          respondSuperseded();
+          return;
+        }
 
         if (toolName || opening) {
           // The registry, the closed substitution set, and the trust gate all
@@ -1032,6 +1112,10 @@ export function useDorControl({
             ? { op: 'open', target: openFile, cwd, tool: stringParam(params.tool) }
             : { op: 'lookup', name: toolName!, cwd, args: toolArgs, global: booleanParam(params.global) });
           if (unavailable()) return;
+          if (superseded()) {
+            respondSuperseded();
+            return;
+          }
           switch (lookup.status) {
             case 'trust-recorded':
             case 'browser-config':
@@ -1052,6 +1136,7 @@ export function useDorControl({
               viewport = lookup.viewport;
               port = lookup.port;
               warnings = lookup.warnings;
+              openTarget = lookup.target;
               break;
             case 'no-file':
               detail.respond({ ok: false, error: `no dormouse.yml found in '${cwd}' or any parent directory` });
@@ -1178,18 +1263,113 @@ export function useDorControl({
           toolPort: port,
           ...(key ? { toolKey: key } : {}),
           ...(toolName ? { toolName } : {}),
+          ...(openTarget !== undefined ? { toolTarget: openTarget } : {}),
         };
 
         const callerId = detail.surfaceId;
         const callerGate = callerId === undefined ? null : readCallerGate(callerId, cwd);
+        const resolvedTool = { scope: toolScope, name: toolName, run: toolRun };
+
+        /**
+         * Run the resolved Tool in the preview slot in place: interrupt it, then
+         * type the new command at its prompt, keeping its Session id, ref, and
+         * terminal (docs/specs/dor-tool.md -> Preview slot). Answers the request,
+         * except when the slot went away or was pinned during the interrupt —
+         * `false` leaves the caller to place the Tool elsewhere.
+         */
+        const retargetPreviewSlot = async (slotId: string, options: { pin: boolean; signal?: AbortSignal }): Promise<boolean> => {
+          const interrupted = await interruptToPrompt(slotId, options.signal);
+          if (superseded()) {
+            respondSuperseded();
+            return true;
+          }
+          if (!interrupted.ok) {
+            detail.respond({ ok: false, error: `surface '${surfaceRefForId(slotId)}' ${interrupted.message}` });
+            return true;
+          }
+          const gone = workspaceGone();
+          if (gone) {
+            detail.respond({ ok: false, error: gone });
+            return true;
+          }
+          const previous = lath.getMeta(slotId)?.params;
+          if (!previous || !isTargetable(slotId) || (!options.pin && !isPreviewSlotParams(previous))) return false;
+          // The retired command's browser, announcement, and unsaved state are
+          // not the new Tool's.
+          if (browserUrlFromParams(previous) !== null || toolPortConflictFromParams(previous) !== null) {
+            retireToolBrowser(lath, slotId, previous);
+          }
+          clearToolAnnounce(slotId);
+          recordToolDirty(slotId, null);
+          const meta = lath.getMeta(slotId)!;
+          const slotCommand = toolRunCommand(toolRun, slotId);
+          // A rename outlives the retarget; the previous Tool's default title
+          // becomes the new one's.
+          const previousTitle = stringParam(previous.toolName) ?? toolCommandFromParams(previous);
+          const title = meta.title === previousTitle || meta.title === UNNAMED_PANEL_TITLE ? (toolName ?? slotCommand) : meta.title;
+          // The mark is kept with the rest.
+          const kept = Object.fromEntries(Object.entries(meta.params ?? {}).filter(([name]) => !TOOL_IDENTITY_PARAMS.has(name)));
+          // The command runs in the slot's shell, wherever that is.
+          const { cwd: _callerCwd, ...identity } = toolParams;
+          lath.store.setMeta(slotId, toolLeafMeta(title, { ...kept, ...identity, command: slotCommand }));
+          if (options.pin) previewSlot.pin(slotId);
+          const visible = revealSurfaceQuietly(slotId);
+          const slotCwd = runDirectory(slotId);
+          const started = typeToolCommand(slotId, slotCommand, slotCwd, detail.signal);
+          respondTool('retargeted', { surfaceId: slotId, command: slotCommand, cwd: slotCwd, minimized: !visible });
+          // Only the request's own cancellation ends this wait: a newer preview
+          // interrupting a typed command before its shell reports it would race
+          // the shell reading the line.
+          await started;
+          return true;
+        };
+
+        if (previewSignal) {
+          // A pinned Tool already showing this file is revealed, never replaced.
+          const pinned = key ? findSurfaceByParams(candidate => matchesToolKey(candidate, toolScope, key)) : null;
+          if (pinned) {
+            respondStanding('existing', pinned.id, revealSurfaceQuietly(pinned.id));
+            return;
+          }
+          const slot = findPreviewSlot();
+          if (slot) {
+            const slotParams = lath.getMeta(slot.id)?.params;
+            if (runsSameTool(slotParams, resolvedTool) && toolTargetFromParams(slotParams) === openTarget) {
+              respondStanding('existing', slot.id, revealSurfaceQuietly(slot.id));
+              return;
+            }
+            // A request from the slot's own Session (a viewer shown in it) keeps
+            // the slot: pinned, it is where the new slot splits from, and the
+            // `dor` awaiting this answer is never interrupted. Unsaved changes
+            // pinned it already (`usePreviewSlotPin`).
+            if (slot.id === callerId) previewSlot.pin(slot.id);
+            else if (await retargetPreviewSlot(slot.id, { pin: false, signal: previewSignal })) return;
+          }
+        } else if (openTarget !== undefined && !booleanParam(params.fresh)) {
+          // Opening the file the slot shows keeps it (pin by open).
+          const slot = findPreviewSlot();
+          const slotParams = slot ? lath.getMeta(slot.id)?.params : undefined;
+          if (slot && toolTargetFromParams(slotParams) === openTarget) {
+            // From the slot's own Session, pinned, it is an ordinary keyed Tool
+            // for the reuse below, which never interrupts the `dor` asking.
+            if (slot.id === callerId) {
+              previewSlot.pin(slot.id);
+            } else if (runsSameTool(slotParams, resolvedTool)) {
+              previewSlot.pin(slot.id);
+              respondStanding('existing', slot.id, revealSurface(slot.id));
+              return;
+            } else if (await retargetPreviewSlot(slot.id, { pin: true, signal: detail.signal })) {
+              // Another Tool for the same file replaces the slot's, then pins it.
+              return;
+            }
+          }
+        }
 
         // Spawn-time dedupe, and only for a tool that was given an identity
-        // (docs/specs/dor-tool.md -> Identity and dedupe).
-        if (key && !booleanParam(params.fresh)) {
-          const matchesToolKey = (candidate: unknown) =>
-            toolScopeFromParams(candidate) === toolScope
-            && toolKeysEqual((candidate as { toolKey?: unknown } | null | undefined)?.toolKey, key);
-          const match = findSurfaceByParams(matchesToolKey);
+        // (docs/specs/dor-tool.md -> Identity and dedupe). A preview checked
+        // for a pinned match above.
+        if (key && !booleanParam(params.fresh) && !previewSignal) {
+          const match = findSurfaceByParams(candidate => matchesToolKey(candidate, toolScope, key));
           if (match) {
             const matchedCommand = toolCommandFromParams(lath.getMeta(match.id)?.params) ?? toolRunCommand(toolRun, match.id);
             const matchState = getTerminalPaneState(match.id);
@@ -1261,8 +1441,8 @@ export function useDorControl({
         // Take-over: typed alone at a prompt, the tool runs in the calling pane
         // rather than splitting (docs/specs/dor-tool.md -> Take-over). Must stay
         // below the pending-approval and key-match returns above: both of those
-        // placements win over this one.
-        if (callerId && callerGate && toolTakesOverCaller(callerGate)) {
+        // placements win over this one. A preview always gets its own pane.
+        if (!previewSignal && callerId && callerGate && toolTakesOverCaller(callerGate)) {
           command = toolRunCommand(toolRun, callerId);
           toolParams.command = command;
           // Answered before the tool starts, because answering is what frees
@@ -1284,7 +1464,12 @@ export function useDorControl({
         // as `dor ensure` spawns one — but with no command+cwd matching, and a
         // leaf that renders both capabilities.
         if (refuseCmdShell()) return;
-        const toolTarget = resolveSplitTarget();
+        // A new preview slot splits from the slot pinned last while it is still
+        // a visible pane, unless `--surface` names a reference.
+        const lastPinned = previewSlot.lastPinned.current;
+        const pinnedReference = previewSignal && stringParam(params.surface) === undefined && lastPinned
+          && nav.hasPane(lastPinned) && isTargetable(lastPinned) ? resolveListedSurface(lastPinned, detail.surfaceId) : null;
+        const toolTarget = pinnedReference?.ok ? { target: pinnedReference.value } : resolveSplitTarget();
         if (!toolTarget) return;
         const created = createSplitSurface({
           command,
@@ -1296,12 +1481,15 @@ export function useDorControl({
           // Focus-neutral like `dor ensure`: a tool spawned by a script or an
           // agent must not steal the caller's selection.
           focusNeutral: true,
-          leafMeta: toolLeafMeta(toolName ?? command, toolParams),
+          leafMeta: toolLeafMeta(toolName ?? command, previewSignal ? { ...toolParams, toolPreview: true } : toolParams),
         });
         if (!created.ok) {
           detail.respond({ ok: false, error: created.message });
           return;
         }
+        // A minimized reference creates its sibling as a Door; a preview slot
+        // is meant to be seen.
+        const createdMinimized = created.value.minimized && !(previewSignal && revealSurfaceQuietly(created.value.id));
         const toolIntegrated = await waitForTerminalState(
           created.value.id,
           () => isPaneOscDriven(created.value.id),
@@ -1318,7 +1506,7 @@ export function useDorControl({
           surfaceRef: created.value.ref,
           command,
           cwd,
-          minimized: created.value.minimized,
+          minimized: createdMinimized,
         });
         await waitForNewToolCommand(created.value.id, command, cwd, detail.signal);
       });
@@ -1910,7 +2098,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
-  }, [browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
+  }, [browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, revealSurfaceQuietly, previewSlot, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

@@ -74,6 +74,7 @@ Source of truth: `toolViewport` in `lib/src/host/browser-config.ts`; `createTool
 - **Must reuse and reveal a matching pending approval Surface unless `--fresh` is set**, matching Tool name, project root, CWD, arguments, and fresh intent; preserve its approval state and report `pending`.
 - **Must accept a short-lived keyed restart after observing its new completed command id**, matching the stored command and directory. A completion predating injection or belonging to another command does not prove restart.
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
+- A marked preview slot never matches ([Preview slot](#preview-slot)).
 
 Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/components/wall/use-dor-control.ts`; `namespacedToolKey` / `toolKeysEqual` in `lib/src/components/wall/browser-surface.ts`; `lib/src/components/Wall.test.tsx`.
 
@@ -162,7 +163,7 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must use the supplied CWD when canonicalization fails**, and never let matching change the Tool's run directory or `$CWD`. A miss names the user config path and suggests `--tool`. (rationale)
 
-**Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over).
+**Must pass the canonical file path as the selected Tool's one input.** Reuse follows [Identity and dedupe](#identity-and-dedupe), `$TARGET` in the key providing per-file identity; placement follows [Take-over](#take-over), and `--preview` follows [Preview slot](#preview-slot).
 
 **Must reject declared Tool names beginning with `builtin:` in either configuration scope.** Built-in handler names cannot be shadowed.
 
@@ -177,6 +178,32 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 **Must retain the viewer's opened file descriptors until the Tool exits.** Refresh reads those files again, but atomic replacements and changes to the dependency graph require restarting the viewer. Cold restore runs the saved file command with a fresh URL capability; Workspace movement keeps the live binding. The listener's authority is `docs/specs/security-local.md` → Local-file viewer.
 
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `fileViewerFormat` in `dor/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor/src/file-viewer.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`, `dor/test/file-viewer.test.mjs`.
+
+## Preview slot
+
+**Must keep at most one preview slot per Workspace**: a Tool Surface whose params carry `toolPreview`, marked in its Pane header and Door (`docs/specs/layout.md` → Pane header) and tagged `[preview]` by `dor list`. **Must resolve a preview through the user's ordered `open` list**, as `dor open` does, never through a faster built-in-only renderer (rationale). A Tool browsing files selects and activates them through two invocations:
+
+| Gesture | Invocation | Result |
+| --- | --- | --- |
+| Select | `dor open --preview <file>` | Show the file in the slot |
+| Activate | `dor open <file>` | Pin the slot when it shows that file; otherwise the ordinary open |
+
+A preview is answered by the first of:
+
+1. A pinned Tool matching the resolved key is revealed focus-neutrally: `existing`.
+2. A slot given the same Tool (scope, name, run) for the same target is revealed focus-neutrally, without restart: `existing`.
+3. A slot asked from its own Session is pinned, and a new slot is created, so the `dor` awaiting the answer is never interrupted.
+4. A slot is retargeted: `retargeted`.
+5. Otherwise a new slot is created: `created`.
+
+- **Must retarget in place**: interrupt the slot's command, wait for its prompt, then type the new Tool's command quoted for the slot's shell, in the slot's directory. Retain the Session id, Surface ref, terminal, and a user rename; the new Tool may differ. Retire the old command's browser, announcements, and unsaved state at once ([Serving](#serving)); a Door slot reattaches focus-neutrally.
+- **Must let the newest preview in a Workspace supersede older ones**: a preview not yet past its lookup, or still interrupting the slot, answers `superseded` with the slot's handle, or an error while there is no slot. Once its command is typed, a retarget holds the launch lock until the command is observed, as [Take-over](#take-over) does (rationale).
+- **Never let a preview take over its caller or become a Door.** A new slot splits focus-neutrally from `--surface` when given, else from the slot pinned last while it is a visible pane of the Workspace, else from the caller (rationale). `--preview` rejects `--fresh` and `--minimize`.
+- **Must exclude a marked slot from keyed dedupe.** It keeps its key, which counts once pinned, so pinning only clears the mark.
+- **Must pin at once when the slot's Tool reports unsaved changes** ([Unsaved changes](#unsaved-changes)); clean and unreported state never pin. The header pill pins too. **Never pin on keyboard input or focus** (rationale).
+- **Must pin without restarting when `dor open` resolves the slot's Tool and target**, revealing it as a keyed match is and reporting `existing`. A different Tool for that target retargets the slot, then pins it. From the slot's own Session, `dor open` pins it and continues as an ordinary open; `--fresh` bypasses the slot.
+
+Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `usePreviewSlotPin` / `runsSameTool` in `lib/src/components/wall/preview-slot.ts`; `matchesToolKey` / `isPreviewSlotParams` in `lib/src/components/wall/browser-surface.ts`; `revealSurfaceQuietly` in `lib/src/components/Wall.tsx`; `retireToolBrowser` in `lib/src/components/wall/use-tool-serving.ts`. Tests: `lib/src/components/wall/preview-slot.test.tsx`; `a preview retarget` in `lib/src/components/wall/use-tool-serving.test.tsx`; `lib/src/host/tool-open.test.ts`; `dor/test/cli-output.test.mjs`.
 
 ## Take-over
 
@@ -249,6 +276,8 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 **Must retain resolved browser viewport settings with Tool metadata**, including cold restore and Workspace transfer; sizing behavior belongs to `docs/specs/dor-browser.md` → Viewport presets.
 
+**Must persist a preview slot's mark and an opened Tool's canonical target with its Tool metadata**, so a cold-restored slot is still the slot ([Preview slot](#preview-slot)). Reject a persisted target containing terminal controls, as argv is.
+
 **Must retain resolved argv for argument-list Tools and re-quote it for the shell selected at cold restore.** Update the restored command in terminal options and Tool pane/door metadata. Literal shell-string commands retain their saved text. Reject persisted argv containing terminal controls before restoring any PTY.
 
 **Must cold-restore an approved Tool by starting its saved command through integration-gated shell readiness**, then rediscover its port. Agent-resume commands do not override the saved Tool command. Pending approvals restore as ordinary terminals and execute nothing. **Must rebuild visible Tool metadata from its pane row when layout geometry is unusable**, rather than starting the command in a plain terminal with no serving behavior.
@@ -284,12 +313,11 @@ Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `sav
   terminal flash grates. `--has terminal` / `--has browser` *filter flags* for
   `dor list`, whose rows already carry the fields.
 
-**Scope: open-folder** — folders and the Workspace preview slot, in implementation order; the design is [Folders and the preview slot](#folders-and-the-preview-slot).
+**Scope: open-folder** — folders and links on the [Preview slot](#preview-slot), in implementation order; the design is [Folders and the preview slot](#folders-and-the-preview-slot).
 
-1. `dor open --preview` and the preview slot: in-place retarget, latest-wins supersession, pin by open, pin on unsaved state, placement.
-2. Directory open rules and `builtin:folder`.
-3. Local `OSC 8` file links: click previews, double-click pins.
-4. Speed within the open rules: an announce-triggered port scan, an optional per-rule `preview:` Tool, and opt-in retarget without restart (built-in viewer first).
+1. Directory open rules and `builtin:folder`.
+2. Local `OSC 8` file links: click previews, double-click pins.
+3. Speed within the open rules: an announce-triggered port scan, an optional per-rule `preview:` Tool, and opt-in retarget without restart (built-in viewer first).
 
 ### Dehydrate and rehydrate
 
@@ -324,23 +352,7 @@ announce — self-knowledge, like a runtime re-key); the final marketing noun
 
 ### Folders and the preview slot
 
-**Must resolve every preview through the user's ordered `open` list**, as `dor open` does; no gesture falls back to a faster built-in-only renderer (rationale). A folder viewer is any Tool that selects and activates files through two invocations:
-
-| Gesture | Invocation | Result |
-| --- | --- | --- |
-| Select (single-click) | `dor open --preview <file>` | Retarget the Workspace's preview slot |
-| Activate (double-click) | `dor open <file>` | Pin the slot when it shows that file; otherwise the ordinary open |
-
-**The preview slot.**
-
-- **Must keep at most one preview slot per Workspace**: a Tool Surface carrying a provisional mark on its Pane header and Door. Placement of the mark belongs to `docs/specs/layout.md` → Pane header.
-- **Must persist the mark with Tool metadata**, so the slot remains the preview slot after cold restore. A slot transferred into a Workspace that already has one arrives pinned.
-- **Must create a missing slot as a focus-neutral split of the most recently pinned slot** while it remains in the Workspace, else of the invoking Surface (rationale).
-- **Must retarget in place**: interrupt the slot's command, then run the newly resolved Tool through the [Take-over](#take-over) handshake, retaining the Session id, Surface ref, and terminal. The new Tool may differ from the old one.
-- **Must reveal a pinned keyed match focus-neutrally instead of retargeting.**
-- **Must let a newer preview supersede a pending retarget**, rather than queueing one restart per selection behind the Tool launch lock; the superseded invocation reports that it was superseded.
-- **Never retarget a slot whose Tool reports unsaved changes** ([Unsaved changes](#unsaved-changes)): pin it and create a new slot. Clean and unreported state retarget. **Never pin on keyboard input or focus** (rationale).
-- **Must pin without restarting** when `dor open` resolves to the slot's current Tool and target: clear the mark, adopt the Tool key for [Identity and dedupe](#identity-and-dedupe), and report `existing`.
+A folder viewer is any Tool that selects on single-click and activates on double-click through the invocations in [Preview slot](#preview-slot).
 
 **Folders.** **Must accept a directory in `dor open`**, matched against the same `open` list and passed to a user Tool as the canonical `$TARGET`; without a match it opens `builtin:folder`.
 

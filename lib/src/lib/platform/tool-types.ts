@@ -69,6 +69,10 @@ export type ToolLookupResult =
       port: 'announced' | 'auto';
       key: string[] | null;
       warnings: string[];
+      /** The canonical absolute path an `open` lookup resolved; the preview
+       *  slot compares it (`docs/specs/dor-tool.md` -> Preview slot). Named
+       *  lookups leave it unset. */
+      target?: string;
     };
 
 export type ToolControlResult =

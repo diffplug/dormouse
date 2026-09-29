@@ -53,6 +53,25 @@ function toolLeaves(lath: LathWallEngine, doors: DooredItem[]): ToolLeaf[] {
   return leaves;
 }
 
+/** Retire a Tool's browser half and the serving state that framed it, leaving
+ *  the terminal forward. The browser panel remains mounted behind the terminal
+ *  half, so its controller must be released explicitly rather than waiting for
+ *  an unmount that will not happen — closing its session with it. */
+export function retireToolBrowser(lath: LathWallEngine, id: string, params: Record<string, unknown>): void {
+  closeBrowserSurface(id, params);
+  lath.store.updateParams(id, {
+    url: undefined,
+    toolAnnouncedPort: undefined,
+    toolAnnouncedPath: undefined,
+    toolPortConflict: undefined,
+    session: undefined,
+    launchSession: undefined,
+    launchFallback: undefined,
+    renderMode: undefined,
+    syncEngaged: undefined,
+  });
+}
+
 export function useToolServing({
   lath,
   doorsRef,
@@ -124,21 +143,7 @@ export function useToolServing({
         if (!running || runChanged) seenPorts.current.delete(leaf.id);
 
         if ((hasUrl || hasConflict) && (!running || runChanged)) {
-          // The browser panel remains mounted behind the terminal half, so its
-          // controller must be released explicitly rather than waiting for an
-          // unmount that will not happen — closing its session with it.
-          closeBrowserSurface(leaf.id, leaf.params);
-          lath.store.updateParams(leaf.id, {
-            url: undefined,
-            toolAnnouncedPort: undefined,
-            toolAnnouncedPath: undefined,
-            toolPortConflict: undefined,
-            session: undefined,
-            launchSession: undefined,
-            launchFallback: undefined,
-            renderMode: undefined,
-            syncEngaged: undefined,
-          });
+          retireToolBrowser(lath, leaf.id, leaf.params);
           continue;
         }
         // An announcement outranks whatever autobind decided, framed or

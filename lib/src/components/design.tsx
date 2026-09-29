@@ -43,6 +43,10 @@ export const DOOR_TAB_CLASS = clsx(
  *  (`docs/specs/layout.md` → "Workspace names"). */
 export const AUTO_NAME_CLASS = 'italic';
 
+/** A preview slot's label in its Pane header and Door, italic as an editor's
+ *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
+export const PREVIEW_LABEL_CLASS = 'italic';
+
 /** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
  *  reason about a tab's size without a rendered element (the cross-window tab
  *  drag). Tailwind needs the arbitrary values spelled literally above, so these

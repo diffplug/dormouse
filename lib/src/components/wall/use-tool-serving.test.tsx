@@ -11,7 +11,7 @@ import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { recordToolEvents } from '../../lib/tool-events';
 import { TerminalProtocolParser } from '../../lib/terminal-protocol';
-import { useToolServing } from './use-tool-serving';
+import { retireToolBrowser, useToolServing } from './use-tool-serving';
 import { captureToolParams } from './tool-transfer';
 import { createLathWallEngine, toolLeafMeta } from './lath-wall-engine';
 import type { OpenPort } from '../../lib/platform/types';
@@ -320,6 +320,31 @@ describe('agent-browser retirement on command exit', () => {
   });
 });
 
+describe('a preview retarget', () => {
+  it('releases the old agent-browser session once and frames the new Tool\'s port under its own render', async () => {
+    recordToolAnnounce('tool-1', { port: 6006, name: null, key: null, dehydrate: false, persist: null });
+    const { lath, state, platform } = await run({ surfaceType: 'tool', command: 'x', toolRender: 'agent-browser-screencast', toolPort: 'announced' }, [[tcp(6006)]]);
+    state.set({ session: 'dormouse.1.tool.tool-1' });
+    expect(state.params).toMatchObject({ url: 'http://localhost:6006/', renderMode: 'agent-browser-screencast' });
+    controllerMocks.closeBrowserSurface.mockClear();
+
+    // The retarget's commit (`retargetPreviewSlot` in use-dor-control.ts): the
+    // browser retires with the old identity, then a new command runs.
+    retireToolBrowser(lath, 'tool-1', state.params);
+    state.set({ command: 'y', toolRender: 'iframe' });
+    currentCommand = 'y';
+    runId += 1;
+    resetToolAnnounces();
+    recordToolAnnounce('tool-1', { port: 7007, name: null, key: null, dehydrate: false, persist: null });
+    platform.getOpenPorts = vi.fn(async () => [tcp(7007)]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+
+    expect(controllerMocks.closeBrowserSurface).toHaveBeenCalledExactlyOnceWith('tool-1', expect.objectContaining({ session: 'dormouse.1.tool.tool-1' }));
+    expect(state.params).toMatchObject({ url: 'http://localhost:7007/', renderMode: 'iframe' });
+    expect(state.params.session).toBeUndefined();
+    expect(state.params.launchSession).toBeUndefined();
+  });
+});
 
 it('does not frame or re-key a different command running in a Tool Session', async () => {
   currentCommand = 'cat untrusted.log';

@@ -1612,6 +1612,16 @@ test('list tags an awaited surface after its todo', async () => {
   );
 });
 
+test('list tags the preview slot in text and JSON only', async () => {
+  const surfaces = [fixtureSurfaces[0], { ...fixtureSurfaces[1], kind: 'tool', todo: false, awaited: false, preview: true }];
+  const text = await runCli(['list'], { client: fixtureClient(surfaces), env: listEnv });
+  const rows = text.stdout.split('\n');
+  assert.match(rows.find((line) => line.includes('surface:2')), /\[preview\]$/);
+  assert.doesNotMatch(rows.find((line) => line.includes('surface:1')), /\[preview\]/);
+  const json = await runCli(['list', '--json'], { client: fixtureClient(surfaces), env: listEnv });
+  assert.deepEqual(JSON.parse(json.stdout).surfaces.map((surface) => [surface.ref, surface.preview]), [['surface:1', undefined], ['surface:2', true]]);
+});
+
 test('list --all groups every Workspace under a header', async () => {
   const client = fixtureClient();
   const result = await runCli(['list', '--all'], { client, env: listEnv });
@@ -2063,6 +2073,31 @@ test('open forwards one file, explicit handler, placement, and Workspace to Tool
     workspace: 'workspace:2', fresh: true, minimized: true, surface: 'surface:4',
   } });
   assert.equal(JSON.parse(result.stdout).surface_ref, 'surface:4');
+});
+
+test('open --preview asks for the preview slot and prints its retarget', async () => {
+  const client = fixtureClient();
+  client.toolSurface = async function toolSurface(request) {
+    this.requests.push({ method: 'toolSurface', request });
+    return { status: 'retargeted', surfaceId: 'slot', surfaceRef: 'surface:5', command: 'viewer a.md', cwd: request.cwd, minimized: false, key: null };
+  };
+  const result = await runCli(['open', '--preview', 'a.md'], { client, env: { PWD: '/repo' } });
+  assert.equal(result.exitCode, 0);
+  assert.equal(client.requests[0].request.preview, true);
+  assert.equal(result.stdout, 'retargeted surface:5  "viewer a.md"\n');
+  const plain = fixtureClient();
+  await runCli(['open', 'a.md'], { client: plain, env: { PWD: '/repo' } });
+  assert.equal('preview' in plain.requests[0].request, false);
+});
+
+test('open --preview refuses --fresh and --minimize before asking the host', async () => {
+  for (const flag of ['--fresh', '--minimize']) {
+    const client = fixtureClient();
+    const result = await runCli(['open', '--preview', flag, 'a.md'], { client, env: { PWD: '/repo' } });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stderr, new RegExp(`--preview cannot be combined with ${flag}`));
+    assert.equal(client.requests.length, 0);
+  }
 });
 
 test('open requires exactly one file', async () => {

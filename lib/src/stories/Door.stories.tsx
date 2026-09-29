@@ -68,3 +68,6 @@ export const DirtyTool: Story = {
   // `spoken` only exists over a latched ring (`docs/specs/alert.md` -> Pane Header).
   args: { title: 'Editor', toolDirty: true, speechState: 'spoken', status: 'ALERT_RINGING' },
 };
+
+/** The Workspace's preview slot minimized: an italic label (`docs/specs/layout.md` -> Pane header). */
+export const PreviewSlot: Story = { args: { title: 'README.md', preview: true } };

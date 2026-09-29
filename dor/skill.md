@@ -197,7 +197,7 @@ A Tool is a command a project or the user declares in `dormouse.yml`, run in one
 **When you add a Tool, write for the next agent:** a comment directly above the entry saying what it is for and anything its fields do not show, and `$PROJECT_ROOT` in its `prespawn_dedupe` so each checkout gets its own. An entry's fields are `run`, `render`, `port`, and `prespawn_dedupe`, taking the values the listing shows, plus `viewport` (a preset name or dimensions).
 
 - **`dor tool -- <command>`** makes any command a Tool, serving the one port it opens, but with no key: every call creates another surface. For a process you will rerun, use `dor ensure` and a browser instead.
-- **`dor open <file>`** shows the user one local file (HTML, text, images, media) in a new pane, or in the Tool the user's `dormouse.yml` `open` rules pick. It takes a path, never a URL or directory. Opening the same file again reveals and focuses its viewer; `--fresh` opens another.
+- **`dor open <file>`** shows the user one local file (HTML, text, images, media) in a new pane, or in the Tool the user's `dormouse.yml` `open` rules pick. It takes a path, never a URL or directory. Opening the same file again reveals and focuses its viewer; `--fresh` opens another. `--preview` instead shows it in the Workspace's one reusable preview pane, replacing the last preview, without taking focus.
 
 ## Workspaces
 

@@ -84,8 +84,9 @@ import {
   browserUrlFromParams,
   isBrowserParams,
   surfaceKindFromParams,
-  isToolParams, namespacedToolKey, toolKeysEqual, toolPendingFromParams, toolScopeFromParams,
+  isPreviewSlotParams, isToolParams, matchesToolKey, namespacedToolKey, toolPendingFromParams,
 } from './wall/browser-surface';
+import { usePreviewSlotPin } from './wall/preview-slot';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './wall/browser-url';
 import { WorkspaceSelectionOverlay } from './wall/WorkspaceSelectionOverlay';
 import { LathHost } from './wall/LathHost';
@@ -458,7 +459,7 @@ export function Wall({
     const meta = lath.store.getSnapshot().leafMeta;
     return doorsRef.current.map((door) => {
       const leaf = meta.get(door.id);
-      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}`;
+      return `${leaf?.title ?? ''}\u0001${surfaceKindFromParams(leaf?.params)}\u0001${browserDisplayModeFromParams(leaf?.params) ?? ''}\u0001${isPreviewSlotParams(leaf?.params)}`;
     }).join('\u0000');
   });
   // The Baseboard's chips: the runtime Doors plus the store's current fallback title
@@ -471,6 +472,7 @@ export function Wall({
         title: persistedPanelTitle(meta?.title),
         kind: surfaceKindFromParams(meta?.params),
         browserDisplay: browserDisplayModeFromParams(meta?.params),
+        ...(isPreviewSlotParams(meta?.params) ? { preview: true } : {}),
       };
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `doorDisplayMetadata` is the store read
@@ -1104,13 +1106,8 @@ export function Wall({
 
   // --- Reattach ---
 
-  const handleReattach = useCallback((
-    item: DooredItem,
-    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction },
-  ) => {
-    const enterPassthrough = options?.enterPassthrough ?? true;
-    const afterRestore = options?.afterRestore;
-
+  /** Put a Door's leaf back in the tree, leaving the Door list to the caller. */
+  const restoreDoorLeaf = useCallback((item: DooredItem) => {
     // Restore through the core token (the real payload): exact tier when the
     // captured context survives, else neighbor, else fallback beside a live ref.
     // Every Door has store meta; the fallback keeps a reattach from being lost if
@@ -1125,7 +1122,16 @@ export function Wall({
     const r = token ? lath.store.restoreLeaf(meta, token, { fallbackRef }) : { ok: false };
     // No token (or no fallback was possible — empty tree): make the leaf the root.
     if (!r.ok) lath.store.addLeaf(item.id, meta, null);
+  }, [lath]);
 
+  const handleReattach = useCallback((
+    item: DooredItem,
+    options?: { enterPassthrough?: boolean; afterRestore?: DoorAfterRestoreAction },
+  ) => {
+    const enterPassthrough = options?.enterPassthrough ?? true;
+    const afterRestore = options?.afterRestore;
+
+    restoreDoorLeaf(item);
     removeDoorAndSelect(item.id);
     if (enterPassthrough) {
       enterTerminalMode(item.id);
@@ -1153,7 +1159,7 @@ export function Wall({
         }
       });
     }
-  }, [selectPane, removeDoorAndSelect, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
+  }, [selectPane, removeDoorAndSelect, restoreDoorLeaf, enterTerminalMode, forgetSurfaceRef, showShellSpawnNotice, lath, nav]);
   const handleReattachRef = useRef(handleReattach);
   handleReattachRef.current = handleReattach;
 
@@ -1184,6 +1190,22 @@ export function Wall({
     if (door) handleReattachRef.current(door);
     return nav.hasPane(id);
   }, [nav, enterTerminalMode]);
+
+  /** `revealSurface` for a reveal nobody asked to look at — a preview slot
+   *  (`docs/specs/dor-tool.md` -> Preview slot): a Door reattaches, but mode,
+   *  selection, and keyboard focus stay put. A selected Door's selection
+   *  follows it onto the pane. */
+  const revealSurfaceQuietly = useCallback((id: string): boolean => {
+    const door = doorsRef.current.find((item) => item.id === id);
+    if (door) {
+      restoreDoorLeaf(door);
+      const nextDoors = doorsRef.current.filter((item) => item.id !== id);
+      doorsRef.current = nextDoors;
+      setDoors(nextDoors);
+      if (selectedTypeRef.current === 'door' && selectedIdRef.current === id) selectPane(id);
+    }
+    return nav.hasPane(id);
+  }, [nav, restoreDoorLeaf, selectPane]);
 
   // The Surfaces of the current Workspace. `buildDorSurfaces` is the visible-pane
   // projection used for geometry/placement; `buildDorSurfaceList` additionally
@@ -1247,6 +1269,7 @@ export function Wall({
         ringing: activity?.status === 'ALERT_RINGING',
         todo: activity?.todo === true,
         awaited: activity?.awaited === true,
+        ...(isPreviewSlotParams(source.params) ? { preview: true } : {}),
       };
     });
   }, [lath, surfaceRefForId]);
@@ -1552,6 +1575,7 @@ export function Wall({
   // A tool grows its browser when its command starts serving.
   useToolServing({ lath, doorsRef, paused: useCallback(() => closingWorkspaceRef.current || isWorkspaceTransferPending(effectiveWorkspaceId), [effectiveWorkspaceId]) });
 
+  const previewSlot = usePreviewSlotPin(lath);
   const { findSurfaceByParams, updateSurfaceParams, handleDorControl } = useDorControl({
     lath,
     nav,
@@ -1564,6 +1588,8 @@ export function Wall({
     isClosingSurface,
     closeSurface,
     revealSurface,
+    revealSurfaceQuietly,
+    previewSlot,
     isClosingWorkspace: useCallback(() => closingWorkspaceRef.current, []),
     workspaceRef: useCallback(() => workspaceRefFor(effectiveWorkspaceId), [effectiveWorkspaceId]),
     // The raw prop, not `effectiveWorkspaceId`: a bare Wall keeps the unscoped
@@ -1636,9 +1662,7 @@ export function Wall({
 
         if (!isCurrent()) return;
         const key = namespacedToolKey(resolved.name, resolved.key);
-        const match = !pending.fresh && key ? findSurfaceByParams(candidate =>
-          toolScopeFromParams(candidate) === resolved.scope
-          && toolKeysEqual((candidate as { toolKey?: unknown } | undefined)?.toolKey, key)) : null;
+        const match = !pending.fresh && key ? findSurfaceByParams(candidate => matchesToolKey(candidate, resolved.scope, key)) : null;
         if (match) {
           // A helper refusal retains the pending pane and never restarts the match.
           if (await closeSurface(id)) return;
@@ -2033,7 +2057,8 @@ export function Wall({
     onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => {
       void resolveToolApproval(id, choice);
     },
-  }), [addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
+    onPinPreview: previewSlot.pin,
+  }), [previewSlot, addSplitPanel, minimizePane, enterTerminalMode, exitTerminalMode, requestKill, replaceSurface, buildDorSurfaces, createContentSurface, surfaceRefForId, resolveToolApproval, lath, nav]);
   const openContextPort = useCallback(async (id: string, entry: PortUrlEntry, mode: PortMode): Promise<void> => {
     const opening = terminalContextRef.current;
     const dismiss = () => {

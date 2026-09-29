@@ -10,7 +10,9 @@ import {
 } from '@phosphor-icons/react';
 import { ToolDirtyIndicator, useToolDirty } from '../ToolDirtyIndicator';
 import { HeaderActionButton } from '../HeaderActionButton';
-import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { HEADER_PALETTE_TRANSITION_CLASS, POPUP_SURFACE_CLASS, PREVIEW_LABEL_CLASS, TERMINAL_TOP_RADIUS_CLASS, TODO_PILL_TRACKING_CLASS } from '../design';
+import { isPreviewSlotParams } from './browser-surface';
+import { PreviewPill } from './PreviewPill';
 import { TodoSpotlight, useTodoPillContent } from '../TodoPillBody';
 import { useHeaderTier } from './use-header-tier';
 import { PaneActionGroup } from './PaneActionButtons';
@@ -74,6 +76,7 @@ const TODO_PREVIEW_MARGIN = 8;
 
 export function TerminalPaneHeader({ id, title, params }: PaneProps) {
   const dirty = useToolDirty(id, params);
+  const preview = isPreviewSlotParams(params);
   const mode = useContext(ModeContext);
   const selectedId = useContext(SelectedIdContext);
   const renamingId = useContext(RenamingIdContext);
@@ -179,8 +182,9 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             className="inline-flex max-w-full min-w-0 shrink cursor-text items-baseline overflow-hidden font-medium text-inherit decoration-current/50 underline-offset-2 hover:underline"
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => { e.stopPropagation(); actions.onStartRename(id); }}
+            title={preview ? 'Preview' : undefined}
           >
-            <span className="min-w-0 shrink truncate">{displayTitleBase}</span>
+            <span className={`min-w-0 shrink truncate ${preview ? PREVIEW_LABEL_CLASS : ''}`}>{displayTitleBase}</span>
             {showsFailGlyph && (
               <span className="ml-1 shrink-0 text-error" aria-label="last command failed">{COMMAND_FAIL_GLYPH}</span>
             )}
@@ -189,6 +193,7 @@ export function TerminalPaneHeader({ id, title, params }: PaneProps) {
             )}
           </span>
         )}
+        {preview && compactOrWider && <PreviewPill id={id} />}
         {showTodoPill && (
           <button
             type="button"

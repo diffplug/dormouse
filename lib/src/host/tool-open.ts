@@ -27,12 +27,13 @@ export async function resolveOpenTool(
     // parsed to get here — its lint warnings are the user's to see.
     return { status: 'ok', projectRoot: request.cwd, path: '<built-in>', name: 'file', scope: 'builtin',
       run: ['dor', VIEW_FILE_ARGV, target], key: [target], render: 'iframe', port: 'announced',
-      warnings: file ? [...file.warnings] : [] };
+      warnings: file ? [...file.warnings] : [], target };
   }
   if (name === BUILTIN_FILE_TOOL) return { status: 'error',
     message: `the built-in viewer does not support '${basename(target)}'; add an open rule to ${path} naming a user Tool` };
   if (!file || !entry) return { status: 'error', message: request.tool
     ? `no user Tool '${request.tool}' in ${path}`
     : `no Tool matches '${request.target}'; add an open rule to ${path}, or use dor open --tool <name> <file>` };
-  return resolveUserTool(file, path, entry, request.cwd, [target]);
+  const resolved = await resolveUserTool(file, path, entry, request.cwd, [target]);
+  return resolved.status === 'ok' ? { ...resolved, target } : resolved;
 }

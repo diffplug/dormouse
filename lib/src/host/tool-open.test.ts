@@ -146,3 +146,13 @@ it('reports the user file warnings on the built-in viewer path too', async () =>
   expect(result).toMatchObject({ status: 'ok', scope: 'builtin' });
   expect(result.status === 'ok' && result.warnings).toEqual([expect.stringContaining('nonsense')]);
 });
+
+it('reports the canonical target an open resolved, for the preview slot, and none for a named lookup', async () => {
+  const target = join(root, 'docs', 'README.md');
+  const spelled = join('docs', '..', 'docs', 'README.md');
+  expect(await host().handle({ op: 'open', target: spelled, cwd: root })).toMatchObject({ status: 'ok', scope: 'user', target });
+  expect(await host().handle({ op: 'open', target: spelled, cwd: root, tool: 'builtin:file' })).toMatchObject({ status: 'ok', scope: 'builtin', target });
+  const named = await host().handle({ op: 'lookup', name: 'markdown', cwd: root, args: [spelled], global: true });
+  expect(named).toMatchObject({ status: 'ok', run: ['markdown', target] });
+  expect(named).not.toHaveProperty('target');
+});
