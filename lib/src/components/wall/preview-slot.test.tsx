@@ -23,7 +23,7 @@ import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import type { LathNode } from '../../lib/lath/model';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
-import { PREVIEW_INTERRUPT_GRACE_MS, PREVIEW_OUTPUT_QUIET_MS } from './use-dor-control';
+import { PREVIEW_INTERRUPT_GRACE_MS, PREVIEW_OUTPUT_QUIET_MS, PROMPT_RETURN_TIMEOUT_MS } from './use-dor-control';
 import { setDevServerResolution } from './agent-browser-ports';
 import * as helpers from '../../lib/helper-terminal';
 
@@ -571,6 +571,86 @@ describe('dor open --preview', () => {
     expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
     expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
     startTool(result.surfaceId, result.command);
+  });
+});
+
+describe('a prompt after the interrupt\'s grace', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** Advance the faked timers inside `act`. */
+  const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+  /** Preview b.md into a slot whose viewer is still running when the grace
+   *  runs out: the slot is kept and b.md created beside it, whose command has
+   *  reported, freeing the launch queue. Only the host's state polls run on
+   *  the test's clock unless `clock` fakes more. */
+  async function outliveGrace(clock: Parameters<typeof vi.useFakeTimers>[0] = { toFake: ['setInterval', 'clearInterval'] }) {
+    await mountSlot({ slot: { holdInterrupt: true } });
+    vi.useFakeTimers(clock);
+    const respond = await request({ file: 'b.md', preview: true });
+    expect(typed.slot).toEqual(['\x03']);
+    await advance(PREVIEW_INTERRUPT_GRACE_MS);
+    const created = respond.mock.calls[0]?.[0]?.result as ToolResult;
+    expect(created).toMatchObject({ status: 'created', command: 'view /repo/b.md' });
+    startTool(created.surfaceId, created.command);
+    await advance(100);
+    return created.surfaceId;
+  }
+
+  /** Let a queued retype run, on the real clock. */
+  const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+
+  it('types a kept slot\'s command again once its late prompt comes, with the queue free meanwhile', async () => {
+    const created = await outliveGrace();
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: created });
+    await advance(500);
+    expect(typed.slot).toEqual(['\x03']);
+    act(() => returnToPrompt('slot'));
+    await waitUntil(() => typed.slot.length === 2);
+    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(terminalRegistry.getTerminalPaneState('slot').currentCommand?.rawCommandLine).toBe('view /repo/a.md');
+    expect(await paramsOf('slot')).not.toHaveProperty('toolPreview');
+  });
+
+  it('leaves a kept slot at its prompt when the user typed into it before the prompt came', async () => {
+    let input = 0;
+    vi.spyOn(terminalRegistry, 'getSessionInputVersion').mockImplementation(() => input);
+    await outliveGrace();
+    input += 1;
+    act(() => returnToPrompt('slot'));
+    await settle();
+    expect(typed.slot).toEqual(['\x03']);
+  });
+
+  it('types a superseded slot\'s viewer again once its late prompt comes', async () => {
+    installHost();
+    await mountWall([{ id: 'slot', params: viewerParams('a.md') }], { doors: [{ id: 'kept', params: viewerParams('b.md', { toolPreview: undefined }) }] });
+    shell('pane-a', null);
+    shell('slot', 'view /repo/a.md', { holdInterrupt: true });
+    shell('kept', 'view /repo/b.md');
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    const first = await request({ file: 'c.md', preview: true });
+    const second = await request({ file: 'b.md', preview: true });
+    expect(await answer(first)).toMatchObject({ status: 'superseded', surfaceId: 'slot' });
+    expect(await answer(second)).toMatchObject({ status: 'existing', surfaceId: 'kept' });
+    // The last request's own wait for the prompt runs out; the queue is free.
+    await advance(PREVIEW_INTERRUPT_GRACE_MS);
+    expect(await answer(await request({ file: 'b.md', preview: true }))).toMatchObject({ status: 'existing', surfaceId: 'kept' });
+    expect(typed.slot).toEqual(['\x03']);
+    act(() => returnToPrompt('slot'));
+    await waitUntil(() => typed.slot.length === 2);
+    expect(typed.slot).toEqual(['\x03', 'view /repo/a.md\r']);
+    expect(await paramsOf('slot')).toMatchObject({ toolTarget: '/repo/a.md', toolPreview: true });
+  });
+
+  it('gives up on a prompt later than its window', async () => {
+    await outliveGrace({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    await advance(PROMPT_RETURN_TIMEOUT_MS - PREVIEW_INTERRUPT_GRACE_MS);
+    act(() => returnToPrompt('slot'));
+    await advance(1_000);
+    vi.useRealTimers();
+    await settle();
+    expect(typed.slot).toEqual(['\x03']);
   });
 });
 

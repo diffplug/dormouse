@@ -1,6 +1,6 @@
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
-import { useCallback, useRef, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { getPlatform, PLATFORM_STRING } from '../../lib/platform';
 import { currentWindowRef, getActiveWorkspaceId } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
@@ -22,6 +22,7 @@ import { buildShellCommandForKind, hasShellInputControls, shellCommandKind } fro
 import { viewerTitle } from 'dor/file-viewer-format';
 import {
   getDefaultShellOpts,
+  getSessionInputVersion,
   getTerminalInstance,
   getTerminalPaneState,
   getTerminalShellKind,
@@ -305,7 +306,7 @@ function readSurfaceText(surfaceId: string, lines: number | undefined, scrollbac
 // terminal state: a command is gone once `currentCommand` clears (commandFinish
 // → prompt) and back once the surface reports the same command live again.
 const TERMINAL_STATE_POLL_MS = 100;
-const PROMPT_RETURN_TIMEOUT_MS = 15_000;
+export const PROMPT_RETURN_TIMEOUT_MS = 15_000;
 const COMMAND_START_TIMEOUT_MS = 15_000;
 /** How long a preview retarget waits for the slot's prompt after its Ctrl+C:
  *  an occupant still running then ignores it (`less` without `-K`, an editor),
@@ -414,6 +415,9 @@ export function watchTerminalReady(
 
 const RESTART_CANCELLED: ParseResult<undefined> = { ok: false, message: 'restart was cancelled' };
 const INTERRUPT_OUTLIVED: ParseResult<undefined> = { ok: false, message: 'did not return to a prompt after interrupt' };
+/** A run a preview retarget interrupted: its id, when, and the Session's user
+ *  input count then (`getSessionInputVersion`). */
+interface InterruptedRun { id: string; at: number; input: number }
 /** The control verbs that can add a Surface to the Wall. The `resolve*` verbs
  *  only answer questions, and every other verb addresses a Surface that
  *  already exists. */
@@ -872,9 +876,66 @@ export function useDorControl({
   // newer preview superseded it or it was cancelled: that run is on its way
   // out, though its shell may report it running a while longer. The request
   // that finishes with no preview left to come types its command again.
-  const interruptedSlotRuns = useRef(new Map<string, string>());
+  const interruptedSlotRuns = useRef(new Map<string, InterruptedRun>());
   // Previews dispatched and not yet finished, counted before their queue.
   const pendingPreviews = useRef(0);
+  // Surface id -> stops watching an interrupted run for a late prompt.
+  const lateRestores = useRef(new Map<string, () => void>());
+  useEffect(() => () => {
+    for (const stop of [...lateRestores.current.values()]) stop();
+  }, []);
+
+  /** Type a Surface's own command again, under the launch lock, at the prompt
+   *  `run`'s interrupt brought — unless the user has typed into it since, a
+   *  newer command or retarget has it, or it or its Workspace is going away. */
+  const retypeInterruptedRun = useCallback(async (id: string, run: InterruptedRun | undefined, command: string): Promise<void> => {
+    const meta = lath.getMeta(id);
+    const state = getTerminalPaneState(id);
+    const scope = workspaceScope();
+    if (!meta || !isTargetable(id) || isClosingWorkspace() || (scope && isWorkspaceTransferPending(scope))
+      || state.currentCommand !== null || toolCommandFromParams(meta.params) !== command
+      || (run && (getSessionInputVersion(id) !== run.input || state.lastCommand?.id !== run.id))) return;
+    retireToolRun(lath, id);
+    await typeToolCommand(id, command, state.cwd?.path ?? stringParam(meta.params?.cwd) ?? '');
+  }, [lath, isTargetable, isClosingWorkspace, workspaceScope]);
+
+  /**
+   * Retype a run still running when the grace ran out, once its shell reports
+   * its prompt: watched off the launch queue, so the queue stays bounded by the
+   * grace, until `PROMPT_RETURN_TIMEOUT_MS` after the interrupt, then given up
+   * (docs/specs/dor-tool.md -> Preview slot). A retarget of the Surface stops it.
+   */
+  const restoreOnLatePrompt = useCallback((id: string, run: InterruptedRun): void => {
+    lateRestores.current.get(id)?.();
+    const command = toolCommandFromParams(lath.getMeta(id)?.params);
+    if (!command) return;
+    const stop = () => {
+      clearTimeout(timer);
+      unsubscribe();
+      if (lateRestores.current.get(id) === stop) lateRestores.current.delete(id);
+    };
+    const onState = (changed?: string) => {
+      if ((changed !== undefined && changed !== id) || getTerminalPaneState(id).currentCommand !== null) return;
+      stop();
+      void queueToolSpawn(() => retypeInterruptedRun(id, run, command));
+    };
+    const timer = setTimeout(stop, run.at + PROMPT_RETURN_TIMEOUT_MS - Date.now());
+    const unsubscribe = subscribeToTerminalPaneState(onState);
+    lateRestores.current.set(id, stop);
+  }, [lath, retypeInterruptedRun]);
+
+  /** Type the command of a run a retarget interrupted and nothing replaced
+   *  again, once its shell is back at a prompt: within the grace, under the
+   *  caller's launch lock; later, off it (`restoreOnLatePrompt`). No request's
+   *  signal stops it. */
+  const restoreInterruptedRun = useCallback(async (id: string, run = interruptedSlotRuns.current.get(id)): Promise<void> => {
+    interruptedSlotRuns.current.delete(id);
+    const command = toolCommandFromParams(lath.getMeta(id)?.params);
+    if (!command) return;
+    const atPrompt = await waitForTerminalState(id, state => state.currentCommand === null, PREVIEW_INTERRUPT_GRACE_MS);
+    if (atPrompt === 'ready') await retypeInterruptedRun(id, run, command);
+    else if (run) restoreOnLatePrompt(id, run);
+  }, [lath, retypeInterruptedRun, restoreOnLatePrompt]);
 
   const ensureBrowserSurface = useCallback<EnsureBrowserSurface>(({
     key,
@@ -1056,22 +1117,6 @@ export function useDorControl({
       const slotSwitch = previewSignal ? beginPreviewSwitch(detail.surfaceId) : null;
       const settleSwitch = () => {
         if (slotSwitch) endPreviewTransition(slotSwitch.id, slotSwitch.token);
-      };
-      /** A Surface's own command, typed again once its shell is back at a
-       *  prompt after a retarget's interrupt that nothing replaced, holding the
-       *  launch lock until it is observed. No request's signal stops it: only
-       *  the Surface or its Workspace going away does, and a command still
-       *  running after the grace outlived the interrupt. */
-      const restoreInterruptedRun = async (id: string): Promise<void> => {
-        interruptedSlotRuns.current.delete(id);
-        const command = toolCommandFromParams(lath.getMeta(id)?.params);
-        if (!command) return;
-        const atPrompt = await waitForTerminalState(id, state => state.currentCommand === null, PREVIEW_INTERRUPT_GRACE_MS);
-        const scope = workspaceScope();
-        if (atPrompt !== 'ready' || !lath.getMeta(id) || !isTargetable(id)
-          || isClosingWorkspace() || (scope && isWorkspaceTransferPending(scope))) return;
-        retireToolRun(lath, id);
-        await typeToolCommand(id, command, getTerminalPaneState(id).cwd?.path ?? stringParam(lath.getMeta(id)?.params?.cwd) ?? '');
       };
       // Runs under the launch lock below, whose cleanup follows every return.
       const launch = async (): Promise<void> => {
@@ -1361,7 +1406,10 @@ export function useDorControl({
         const retargetPreviewSlot = async (slotId: string, status: 'retargeted' | 'adopted'): Promise<boolean> => {
           const pin = !previewSignal;
           const running = getTerminalPaneState(slotId).currentCommand;
-          if (running) interruptedSlotRuns.current.set(slotId, running.id);
+          const run = running ? { id: running.id, at: Date.now(), input: getSessionInputVersion(slotId) } : undefined;
+          // This retarget owns the slot now, whatever an earlier one left.
+          lateRestores.current.get(slotId)?.();
+          if (run) interruptedSlotRuns.current.set(slotId, run);
           const interrupted = await interruptToPrompt(slotId, previewSignal ?? detail.signal, PREVIEW_INTERRUPT_GRACE_MS);
           // Only a cancelled wait leaves the run on its way out; one that
           // survived the interrupt is live.
@@ -1369,15 +1417,21 @@ export function useDorControl({
           const previous = lath.getMeta(slotId)?.params;
           if (previous && !isPreviewSlotParams(previous)) {
             // Kept meanwhile — its header, or unsaved changes: no newer preview
-            // owns it, so its own Tool runs again, unless it outlived the interrupt.
-            if (interrupted.ok || interrupted === RESTART_CANCELLED) await restoreInterruptedRun(slotId);
+            // owns it, so its own Tool runs again once back at its prompt.
+            if (interrupted === INTERRUPT_OUTLIVED) {
+              if (run) restoreOnLatePrompt(slotId, run);
+            } else {
+              await restoreInterruptedRun(slotId, run);
+            }
             return answeredSuperseded() || unavailable();
           }
           if (answeredSuperseded()) return true;
           if (interrupted === INTERRUPT_OUTLIVED) {
-            // Its command ignores Ctrl+C (`less` without `-K`, an editor): the
-            // slot is kept as it stands, and the launch placed beside it.
+            // Its command ignores Ctrl+C (`less` without `-K`, an editor), or is
+            // slow to exit: the slot is kept as it stands, the launch placed
+            // beside it, and its command typed again if a late prompt comes.
             previewSlot.pin(slotId);
+            if (run) restoreOnLatePrompt(slotId, run);
             return unavailable();
           }
           if (!interrupted.ok) {
@@ -1415,7 +1469,7 @@ export function useDorControl({
          *  the run an unfinished retarget interrupted. */
         const commandRuns = (id: string): boolean => {
           const current = getTerminalPaneState(id).currentCommand;
-          return current !== null && current.id !== interruptedSlotRuns.current.get(id);
+          return current !== null && current.id !== interruptedSlotRuns.current.get(id)?.id;
         };
 
         const slot = findPreviewSlot();
@@ -2189,7 +2243,7 @@ export function useDorControl({
     }
 
     detail.respond({ ok: false, error: unsupportedControlMethodMessage(detail.method) });
-  }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
+  }, [beginPreviewSwitch, browserKeyScope, buildDorSurfaces, buildDorSurfaceList, closeSurface, createContentSurface, createSplitSurface, ensureBrowserSurface, findBrowserSurface, findSurfaceIdRunningCommand, findSurfaceByParams, isTargetable, revealSurface, previewSlot, restoreInterruptedRun, restoreOnLatePrompt, supersedePreviews, isClosingWorkspace, requireAutomationSession, requireBrowserSurface, requireListedSurface, requireTerminalSurface, resolveListedSurface, resolveVisibleSurface, surfaceRefForId, lath, nav, workspaceRef, workspaceScope]);
 
   return { findSurfaceByParams, updateSurfaceParams, handleDorControl };
 }

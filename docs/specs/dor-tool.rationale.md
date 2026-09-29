@@ -93,6 +93,8 @@ Splitting the pinned pane keeps a double-clicked file visible, the intent of the
 
 `less` without `-K`, vim, nvim, and hx ignore Ctrl+C. Waiting out the 15s prompt timeout for one held the serial Tool queue on every click after the first, then failed, and a terminal link then fell back to its dialog. Considered on 2026-09-28: signalling the foreground process group with SIGTERM needs new plumbing in every host's PTY owner and has no Windows equivalent; typing `q` risks inserting it into an editor's buffer; killing the Session could lose editor state. Keeping the slot as it stands costs a pane, and its occupant never agreed to exit.
 
+At the 1s mark an ignored Ctrl+C looks the same as a slow exit: a serving Tool's shutdown work, or a prompt hook that reports late, such as a git-status prompt in a large repository (reasoned 2026-09-28). Watching for that late prompt off the queue gives a kept pane its content back, and a marked slot its viewer, without holding the queue past the 1s; 15s is the prompt timeout the interrupt waited before the grace existed. A Surface typed into since the interrupt is the user's again, and a retyped command would land in their line.
+
 Supersession stops once a retarget has typed its command. A newer preview interrupting a line the shell has not yet reported could send its Ctrl+C before the shell reads that line, and its own command would then be typed into the old command's input (reasoned 2026-09-28, not reproduced). The wait it keeps is the command's startup report, normally milliseconds.
 
 ## Switching the slot

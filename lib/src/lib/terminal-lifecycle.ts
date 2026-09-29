@@ -712,6 +712,12 @@ export function isUntouched(id: string): boolean {
   return registry.get(id)?.untouched ?? false;
 }
 
+/** Counts the human input a Session has received (`markSessionTouched`), so a
+ *  caller can tell whether the user touched it since an earlier read. */
+export function getSessionInputVersion(id: string): number {
+  return registry.get(id)?.inputVersion ?? 0;
+}
+
 /**
  * Write human-originated input — a keystroke, a paste, a file drop, the mobile
  * input bar — so every path acknowledges alike (`docs/specs/alert.md` ->
