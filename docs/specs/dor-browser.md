@@ -852,11 +852,10 @@ paint` in `lib/src/components/wall/IframePanel.test.tsx`.
 
 ### Iframe Shim
 
-**Must send four fixed, never-user-provided message kinds to the app and nothing
-else** — `leader`, `pointerdown`, `location`, `open-window`; `location` carries
+**Must send only fixed shim message kinds to the app** — `leader`, `pointerdown`, `location`, `open-window`, `theme-request`; `location` carries
 `loaded: true` only on the document's own `pageshow`/`DOMContentLoaded` report.
-**`location` is never relayed from a nested document**; the other three are. **`open-window`
-intercepts every anchor target but `_self`**, plus `window.open`.
+**Must relay only `leader`, `pointerdown`, and `open-window` from nested documents.** **`open-window`
+intercepts every anchor target but `_self`**, plus `window.open`. Theme delivery is `docs/specs/theme.md` → Tool iframe themes; `theme-request` stays in the outer document.
 
 **Only `http:` and `https:` reach a browser Surface, re-checked at the sink.**
 `open-window` and the control socket's `surface.iframe` go through

@@ -17,6 +17,7 @@ import {
   type ScreenRegistration,
 } from './agent-browser-screen';
 import { isToolParams } from './browser-surface';
+import { connectIframeTheme } from '../../lib/themes/iframe-theme';
 import { offeredRenderModes } from './browser-automation';
 import { browserSurfaceUrl, hostPathDisplay, iframeRefusal } from './browser-url';
 
@@ -199,6 +200,10 @@ export function IframePanel({ id, title, params, onReady }: PaneProps & {
   // accurate focus model, and real error pages. Reachability is diagnosed by
   // the proxy and shown as a served page inside the frame.
   const [resolution, setResolution] = useState<Resolution>(() => (sourceUrl ? { kind: 'resolving' } : { kind: 'empty' }));
+  useEffect(() => {
+    if (!isTool || resolution.kind !== 'proxied' || !iframeRef.current) return;
+    return connectIframeTheme(iframeRef.current, resolution.origin);
+  }, [isTool, resolution]);
   useEffect(() => {
     if (!sourceUrl) {
       setResolution({ kind: 'empty' });

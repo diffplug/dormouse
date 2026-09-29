@@ -32,16 +32,26 @@ function shimFrame(parentOrigin: string, deliver: (data: unknown) => void) {
     },
   };
   const window = { parent, open: undefined as unknown };
+  const properties = new Map<string, string>();
+  const classes = new Set<string>();
+  const root = {
+    style: { setProperty: (k: string, v: string) => properties.set(k, v), removeProperty: (k: string) => properties.delete(k), colorScheme: '' },
+    classList: { toggle: (k: string, enabled: boolean) => enabled ? classes.add(k) : classes.delete(k) },
+  };
+  const dispatched: string[] = [];
   runInNewContext(IFRAME_SHIM, {
     window,
     location: { origin: PROXY, href: `${PROXY}/story` },
-    document: { readyState: 'loading' },
+    document: { readyState: 'loading', documentElement: root, body: root },
+    CustomEvent: class { constructor(public type: string) {} },
+    dispatchEvent: (event: { type: string }) => dispatched.push(event.type),
     history: {},
     addEventListener,
     setTimeout: () => 0,
     URL,
   });
   return {
+    parent, properties, classes, root, dispatched,
     emit(type: string, event: Record<string, unknown>) {
       for (const listener of listeners.get(type) ?? []) listener(event);
     },
@@ -127,13 +137,35 @@ describe('the shim addresses the grant and app, not the world', () => {
     expect(IFRAME_SHIM).not.toContain("postMessage(m,'*')");
   });
 
+  it('accepts theme data only from its embedder, replaces old variables and leaves page styling alone', () => {
+    const frame = shimFrame(APP, () => {});
+    frame.properties.set('background', 'pink');
+    const data = { __dormouse: 'theme', kind: 'vscode-dark', scheme: 'dark', vars: {
+      '--vscode-editor-background': '#123456', 'background': 'red', '--private': 'secret',
+    } };
+    frame.emit('message', { source: {}, origin: APP, data });
+    frame.emit('message', { source: frame.parent, origin: 'https://elsewhere.test', data });
+    expect(frame.dispatched).toHaveLength(0);
+    frame.emit('message', { source: frame.parent, origin: APP, data });
+    expect(frame.properties.get('--vscode-editor-background')).toBe('#123456');
+    expect(frame.properties.get('background')).toBe('pink');
+    expect(frame.properties.has('--private')).toBe(false);
+    frame.emit('message', { source: frame.parent, origin: APP, data: {
+      ...data, kind: 'vscode-light', scheme: 'light', vars: { '--vscode-editor-foreground': '#111111' },
+    } });
+    expect(frame.properties.has('--vscode-editor-background')).toBe(false);
+    expect(frame.classes).toEqual(new Set(['vscode-light']));
+    expect(frame.root.style.colorScheme).toBe('light');
+    expect(frame.dispatched).toEqual(['dormouse:theme', 'dormouse:theme']);
+  });
+
   it('flags the document\'s own load reports, and only those', () => {
     const delivered: Array<Record<string, unknown>> = [];
     const frame = shimFrame(APP, (data) => delivered.push(data as Record<string, unknown>));
     frame.emit('DOMContentLoaded', {});
     frame.emit('pageshow', {});
     frame.emit('popstate', {});
-    expect(delivered).toEqual([
+    expect(delivered.filter(data => data.__dormouse !== 'theme-request')).toEqual([
       { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
       { __dormouse: 'location', url: `${PROXY}/story`, loaded: true },
       { __dormouse: 'location', url: `${PROXY}/story` },
@@ -144,6 +176,7 @@ describe('the shim addresses the grant and app, not the world', () => {
     const delivered: unknown[] = [];
     const outer = shimFrame(APP, (data) => delivered.push(data));
     const inner = shimFrame(PROXY, (data) => outer.emit('message', { origin: PROXY, data }));
+    delivered.length = 0; // The outer document asks the app for its initial theme.
 
     inner.emit('pointerdown', {});
     expect(delivered).toEqual([{ __dormouse: 'pointerdown' }]);

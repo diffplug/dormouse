@@ -118,6 +118,28 @@ export function iframeShim(embedderOrigin: string): string {
   // document's location never escape.
   function send(m){try{P.postMessage(m,location.origin);}catch(e){}try{P.postMessage(m,TARGET);}catch(e){}}
   function post(t,d){var m={__dormouse:t};if(d)for(var k in d)m[k]=d[k];send(m);}
+  // Only the embedding app can publish a theme. These are data values passed
+  // to CSSOM, never a stylesheet or executable markup. A Tool's own selectors
+  // and controls remain its own; only the webview variable surface is exposed.
+  var themeKeys=[];
+  addEventListener('message',function(e){
+    var d=e.data;
+    if(e.source!==P||e.origin!==TARGET||!d||d.__dormouse!=='theme'||!d.vars)return;
+    if(['vscode-light','vscode-dark','vscode-high-contrast','vscode-high-contrast-light'].indexOf(d.kind)<0)return;
+    if(d.scheme!=='light'&&d.scheme!=='dark')return;
+    var roots=[document.documentElement,document.body].filter(Boolean);
+    roots.forEach(function(root){
+      themeKeys.forEach(function(k){root.style.removeProperty(k);});
+      Object.keys(d.vars).forEach(function(k){
+        if(/^--vscode-[a-zA-Z0-9-]+$/.test(k)&&typeof d.vars[k]==='string')root.style.setProperty(k,d.vars[k]);
+      });
+      ['vscode-light','vscode-dark','vscode-high-contrast','vscode-high-contrast-light'].forEach(function(k){root.classList.toggle(k,k===d.kind);});
+      root.style.colorScheme=d.scheme;
+    });
+    themeKeys=Object.keys(d.vars).filter(function(k){return /^--vscode-[a-zA-Z0-9-]+$/.test(k);});
+    dispatchEvent(new CustomEvent('dormouse:theme'));
+  });
+  post('theme-request');
   addEventListener('message',function(e){
     if(e.origin!==location.origin)return;
     var d=e.data,t=d&&d.__dormouse;
@@ -127,7 +149,7 @@ export function iframeShim(embedderOrigin: string): string {
   function postLocation(){post('location',{url:String(location.href)});}
   // The document's own load, flagged: the parent takes only these as proof
   // that the document it just loaded carries the shim.
-  function postLoaded(){post('location',{url:String(location.href),loaded:true});}
+  function postLoaded(){post('location',{url:String(location.href),loaded:true});post('theme-request');}
   function anchorHref(e){
     var n=e&&e.target;
     while(n&&n.nodeType===1){
