@@ -61,6 +61,10 @@ rendering, Windows shells, or cold restore. The reusable recipe is
 
 The September 2026 integration reuses Terminal Context for the Tool's primary terminal. The auxiliary helper's automatic refresh, Reset, and Promote semantics do not describe a serving command, whose Session also owns the browser and remote terminal identity. Sharing the presentation avoids introducing a second navigation mechanism or a second shell.
 
+## Naming
+
+A name read from a browser or terminal passes through whatever those show mid-switch: the dev-server chip that named serving Tools went chip, bare address, chip on every preview retarget (`docs/specs/layout.rationale.md` → Pane header, 2026-09-29). The dedupe key is what tells two Surfaces of one Tool apart, so its elements beyond the name are what the name adds; an absolute path's last component is usually the checkout or file it scopes to.
+
 ## Opening local files
 
 Innerdogfood QC in Chromium (2026-09) showed the native PDF plugin failing inside the normal iframe sandbox. PDFs use configured user Tools; the built-in viewer carries no PDF renderer dependency.

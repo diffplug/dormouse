@@ -1,7 +1,7 @@
 # Dor Tools
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
-> Owns tool designation, configuration, trust workflow, serving, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`.
+> Owns tool designation, configuration, trust workflow, serving, naming, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`.
 
 ## Files
 
@@ -144,6 +144,19 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 Tool context follows `docs/specs/terminal-context.md` → Tool context.
 
 Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focusSession` in `lib/src/lib/terminal-lifecycle.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `toolLeafMeta` / `shouldParkOnMinimize` in `lib/src/components/wall/lath-wall-engine.ts`; `closeSurface` in `lib/src/components/Wall.tsx`. Tests: `lib/src/components/wall/ToolPanel.test.tsx`, `lib/src/components/Wall.test.tsx`, `lib/src/components/TerminalPane.test.tsx`, `lib/src/lib/terminal-registry.alert.test.ts`.
+
+## Naming
+
+**Must name a serving Tool's Pane header from its params and a user rename alone**, never its port, page, or terminal output, so the name changes only with a retarget, a runtime re-key, or a rename (rationale). The first that applies:
+
+1. A user rename.
+2. Its target's name, as the built-in viewers title it ([Opening local files](#opening-local-files)), previewed or pinned.
+3. Its Tool name, then each dedupe-key element that adds to it, space-separated: an absolute path by its last component, an element that shows as the name skipped.
+4. An anonymous Tool's command.
+
+The terminal face and the Door keep the derived terminal label, which carries command status.
+
+Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`. Tests: `lib/src/components/wall/tool-name.test.ts`, `lib/src/components/wall/ToolPaneHeader.test.tsx`.
 
 ## CLI
 

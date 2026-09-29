@@ -125,7 +125,9 @@ Source of truth: `lib/src/components/Wall.tsx` (`createContentSurface`'s `focusN
 ## Browser Chrome
 
 Chrome is keyed by a screen controller. **Both renderers must register one
-unconditionally**; render swaps are separately host-gated.
+unconditionally**; render swaps are separately host-gated. The chrome below is a
+browser Surface's; a Tool's header keeps only its Display trigger
+(`docs/specs/layout.md` → Pane header).
 
 Header contract:
 

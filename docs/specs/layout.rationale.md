@@ -6,11 +6,15 @@
 
 Italics alone mark a VS Code preview tab, and a double-click on that tab keeps it; the slot mirrors both. A Preview pill beside the italic label repeated the mark and cost a pill's width in every header from compact width up, and header width is the scarcest space Dormouse has (product decision, 2026-09-28).
 
-The keep is judged by the burst's first press because the address stays click-to-edit: its first click swaps the address for the URL editor, so the second press lands in that editor, while a double-click inside an editor opened earlier must still select a word. A preview's label opens no rename for the same reason: the double-click's first click would open the field.
+The keep is judged by the burst's first press, so a double-click inside a rename opened earlier still selects a word. A preview's label opens no rename because the double-click's first click would open the field under the second.
+
+Tools carry no navigation, address, or dev-server chip (Ned, 2026-09-29): a Tool is named for what it is, and a page it serves is not somewhere to navigate from, so that chrome stays with plain browser Surfaces. Its Terminal Context button had sat beside the header, outside its palette, and showed a different background.
+
+A serving preview's header changed size on every switch (standalone, 2026-09-29) because its name was the dev-server chip. The chip names a pane only once the Window's port scan resolves the page's loopback port: 600 ms of debounce, then a scan at idle. Each retarget starts a viewer on a new port, and the switch's hold ended when the new document loaded, before that scan. The chip unmounted and the address, in `text-sm font-medium` where the chip is `text-xs`, widened to the whole `localhost:<port>/<path>`; once the scan landed the chip returned and the address shrank to its path. The Wall harness in `lib/src/components/wall/preview-slot.test.tsx`, run against that header, stepped through `chip(b.md:6006) + url(/)`, `url(localhost:7007)`, then `chip(… :7007) + url(/)`. A name from params changes once, with the retarget, so nothing needs holding.
 
 ## Pane header responsive sizing
 
-A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Tool headers have even less browser width because Terminal Context occupies its own button. Measuring the header and moving fixed controls together keeps long keys and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
+A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Measuring the header and moving fixed controls together keeps long keys and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
 
 In the same run, real clicks exposed premature popup dismissal before the action ran. After repair, Zoom reached 716×403 pixels, Unzoom returned to the compact header, Reload worked, and Display retained modal focus. Header buttons stayed within their panes at the final 1200×800 viewport.
 
@@ -18,7 +22,9 @@ Terminal border-box thresholds of 293/173 pixels preserve the former 280/160 con
 
 The minimal boundary keeps the pane-action group and its 5-pixel right padding intact. The group is 68 pixels (a 4-pixel `ml-1`, three 20-pixel buttons, two 2-pixel gaps); the header root adds a 6-pixel gap, and an unsaved-change dot adds 12 pixels. The 98-pixel threshold reserves that dot even when absent. The group sits flush below this threshold, leaving no margin against font or icon changes (measured in Storybook, 2026-09).
 
-The browser's 94/102 pair is the former 72/80 pair plus the zoom button and its gap, zoom having moved into the group; the 8-pixel spread is the unsaved-change dot and its gap. Its collapsed root is `gap-0.5 px-1`, already counted, so it needs no equivalent correction.
+The browser's 94-pixel boundary is the former 72 plus the zoom button and its gap, zoom having moved into the group. Its collapsed root is `gap-0.5 px-1`, already counted, so it needs no equivalent correction. A 102-pixel variant reserved an unsaved-change dot, which only a Tool reports; it went with the Tool's own header (2026-09-29).
+
+A serving Tool's boundaries follow the same rule over its elements (derived 2026-09-29): 13 pixels of padding, 12 for the dot, Display up to 36 (robot, 2-pixel gap, presentation glyph, then its gap), Terminal Context 26, and the group's 74 with its gap. Display yields at 161, where those leave the name no width; minimize and kill at 125, 36 narrower. Full is the terminal's 293 plus both leading controls, 355. The tiny header needs 81 pixels, inside Lath's 100-pixel minimum leaf. Without a popover the Tool reaches everything it drops through zoom, as a terminal does.
 
 ## Pane body
 
