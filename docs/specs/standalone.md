@@ -90,6 +90,8 @@ are *not* forwarded:
 | `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
 
+**Managed-voice audio is the one byte payload that rides the pipe**, as base64 in its `voice:result` line (rationale; `docs/specs/transport.md` → "Managed voice").
+
 Request/response commands block on the sidecar's reply under a timeout.
 `OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
 constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
@@ -130,7 +132,7 @@ The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
 side", which owns that split and what the webview keeps): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
-with the relay-origin allowlist and the one-time rendezvous origin baked in
+with the relay-origin allowlist and the Hosted origin baked in
 (`docs/specs/relay.md`, `docs/specs/one-time.md`).
 **Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
 
@@ -241,8 +243,8 @@ that feeds it: one `AlertManager`, every window a realm under its label
 
 - **Must offer every stdin line to `createSidecarHost`'s `handleCommand` before
   `main.js` dispatches it**: it owns the PTY commands the alerts must see —
-  spawn, input, resize, kill, reap, `pty:requestInit` — every alert and Burrow
-  command, the theme push.
+  spawn, input, resize, kill, reap, `pty:requestInit` — every alert, Burrow, and
+  managed-voice command, the theme push.
 - **Webview → sidecar is one passthrough, `alert_command(payload)`**, and **Rust
   stamps the invoking window's label on it as `window`**, over any the payload
   claimed, exactly as on `burrow_command`. **An unstamped `alert:command` is
@@ -501,6 +503,7 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`;
 | `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
+| `voice:result` | — | nowhere: only one that outlived its invoke gets here |
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the
@@ -1328,6 +1331,10 @@ Source of truth: `standalone/package.json` (package scripts),
   sources.** Frontend edits hot-reload; Tauri watches Rust.
 - `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
   browser-dev harness instead of the Tauri WebView (below).
+- **May build with `DORMOUSE_HOSTED_ORIGIN=http://localhost:<port>`**, the
+  origin a local `pnpm dev:hosted` prints, to speak managed voice through it;
+  it answers no other `Host` (`docs/specs/security-local.md` -> "Persisted
+  state").
 
 ### Standalone browser-dev harness
 

@@ -7,7 +7,7 @@
 //   - lib/src/host/playwright-host.ts     → sidecar/playwright-host.cjs
 //   - lib/src/host/tool-host.ts           → sidecar/tool-host.cjs
 //   - lib/src/host/git-info.ts            → sidecar/git-info.cjs
-//   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs (the alerts too)
+//   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs (the alerts and managed voice too)
 //   - lib/src/host/recovery.ts             → sidecar/recovery.cjs
 // See docs/specs/dor-browser.md, docs/specs/remote-api.md,
 // docs/specs/standalone.md -> "Agent recovery", and docs/specs/alert.md.
@@ -18,10 +18,10 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
   assertConnectSrcBaked,
-  assertOneTimeOriginBaked,
+  assertHostedOriginBaked,
   CONNECT_SRC_PLACEHOLDER,
-  ONE_TIME_ORIGIN_PLACEHOLDER,
-  resolveOneTimeOrigin,
+  HOSTED_ORIGIN_PLACEHOLDER,
+  resolveHostedOrigin,
   resolveRemoteConnectSrc,
 } from '../../scripts/csp-defaults.mjs';
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
@@ -33,9 +33,9 @@ const sidecar = path.resolve(here, '../sidecar');
 // Where the Burrow may reach a Relay. The Burrow runs in the sidecar,
 // so this is the enforcement point — there is no webview CSP in front of it.
 const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
-// Where the Burrow opens a one-time connection's rendezvous, fenced by the
-// allowlist above at runtime (docs/specs/one-time.md).
-const oneTimeOrigin = resolveOneTimeOrigin(process.env, 'sidecar');
+// The Hosted origin: the one-time rendezvous, fenced by the allowlist above at
+// runtime (docs/specs/one-time.md), and managed voice.
+const hostedOrigin = resolveHostedOrigin(process.env, 'sidecar');
 
 // What the sidecar installs at runtime, read from the manifest that installs
 // it: `node-datachannel` resolves its platform package and `detect-libc`
@@ -79,7 +79,7 @@ const bundles = [
     out: 'burrow.cjs',
     define: {
       [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
-      [ONE_TIME_ORIGIN_PLACEHOLDER]: JSON.stringify(oneTimeOrigin),
+      [HOSTED_ORIGIN_PLACEHOLDER]: JSON.stringify(hostedOrigin),
     },
     assertBaked: true,
     external: NATIVE_DIRECT,
@@ -115,7 +115,7 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
   });
   if (assertBaked) {
     assertConnectSrcBaked(outfile, remoteSrc);
-    assertOneTimeOriginBaked(outfile, oneTimeOrigin);
+    assertHostedOriginBaked(outfile, hostedOrigin);
   }
   if (external) assertNothingInlined(result.metafile, SIDECAR_RUNTIME_DEPS, `sidecar ${out}`);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);

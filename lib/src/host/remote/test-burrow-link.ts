@@ -23,7 +23,7 @@ import {
   fromBase64Url,
 } from 'remote-lib-common';
 
-import { DEFAULT_ONE_TIME_ORIGIN } from './one-time-origin';
+import { DEFAULT_HOSTED_ORIGIN } from '../hosted-origin';
 import type { InvitationEvent, BurrowConsoleStatus, SetupQrResult } from './service-protocol';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
@@ -111,7 +111,7 @@ export function oneTimeWaiting(
   const ephPubBase64Url = '7Hq2LmZx9cVb4NtRkWpYsD0aFgJ1uEiO3yTnC6hQ5Ks';
   return {
     status: 'waiting',
-    url: formatOneTimeLinkUrl(DEFAULT_ONE_TIME_ORIGIN, {
+    url: formatOneTimeLinkUrl(DEFAULT_HOSTED_ORIGIN, {
       roomId: 'Rm4qT0vXc8LbN2kZyPaE1w',
       expiry,
       ephPub: fromBase64Url(ephPubBase64Url),

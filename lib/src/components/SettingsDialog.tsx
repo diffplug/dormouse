@@ -19,6 +19,7 @@ import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
 import { RemoteControlSection } from './RemoteControlSection';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
+import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
@@ -445,6 +446,7 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
   const { policy: settings } = useWorkspaceAlertPolicy(preview);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasBurrowService = getPlatform().burrow !== undefined;
+  const managedVoiceOffered = useManagedVoiceOffered();
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -453,21 +455,34 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
   }, [sink, preview]);
 
   return sink === 'speech' ? (
-    <AlarmSinkSection
-      className={preview ? '' : SECTION}
-      switchLabel="Speak out loud if not attended"
-      delayLabel="Delay before speaking:"
-      enabled={settings.speakEnabled}
-      delayMs={settings.speakDelayMs}
-      onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
-      onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
-      action={preview ? null : <SpeakTestButton />}
-    >
-      Uses your browser or system voice.{' '}
-      <ExternalTextLink href={HOSTED_VOICE_URL}>
-        Managed ElevenLabs voice is coming soon.
-      </ExternalTextLink>
-    </AlarmSinkSection>
+    <>
+      <AlarmSinkSection
+        className={preview ? '' : SECTION}
+        switchLabel="Speak out loud if not attended"
+        delayLabel="Delay before speaking:"
+        enabled={settings.speakEnabled}
+        delayMs={settings.speakDelayMs}
+        onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
+        onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
+        action={preview ? null : <SpeakTestButton />}
+      >
+        {managedVoiceOffered ? (
+          'Uses managed voice while a voice token is saved, otherwise your browser or system voice.'
+        ) : (
+          <>
+            Uses your browser or system voice.{' '}
+            <ExternalTextLink href={HOSTED_VOICE_URL}>
+              Managed ElevenLabs voice is coming soon.
+            </ExternalTextLink>
+          </>
+        )}
+      </AlarmSinkSection>
+      {preview ? null : (
+        <div className={UNDER_SWITCH_INDENT}>
+          <ManagedVoiceSection />
+        </div>
+      )}
+    </>
   ) : (
     <AlarmSinkSection
       className={preview ? '' : SECTION}

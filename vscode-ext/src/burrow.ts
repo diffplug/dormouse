@@ -13,7 +13,7 @@ import {
   createNativeDirectPeerFactory,
   disposeNativeDirectPeers,
 } from '../../lib/src/host/remote/native-direct-peer';
-import { bakedOneTimeOrigin } from '../../lib/src/host/remote/one-time-origin';
+import { bakedHostedOrigin } from '../../lib/src/host/hosted-origin';
 import {
   BurrowService,
   idleOneTimeState,
@@ -280,7 +280,7 @@ function startService(): void {
       }
     },
     connectSrc: bakedConnectSrc(),
-    oneTimeOrigin: bakedOneTimeOrigin(),
+    oneTimeOrigin: bakedHostedOrigin(),
     // Building the factory loads nothing: the addon is opened inside the first
     // offer, if one ever comes (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),
@@ -540,7 +540,7 @@ function idleAnswer(cmd: string): { result: unknown } | null {
     case 'pairingQueue':
       return { result: [] satisfies PairingQueueItem[] };
     case 'oneTimeStatus':
-      return { result: idleOneTimeState(bakedOneTimeOrigin(), bakedConnectSrc()) };
+      return { result: idleOneTimeState(bakedHostedOrigin(), bakedConnectSrc()) };
     case 'oneTimeEnd':
       return { result: {} };
     // No service holds any session, so none holds a pane: the strip clears itself.

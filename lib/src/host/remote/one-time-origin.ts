@@ -1,12 +1,9 @@
 /**
- * Where a Burrow opens a one-time connection's rendezvous, and whether this
- * build may (`docs/specs/one-time.md` -> "Service and hosts").
- *
- * Baked the way the Relay allowlist is (`connect-src.ts`): one build-time
- * variable, `DORMOUSE_ONE_TIME_ORIGIN`, substituted into both host bundles by
- * `scripts/csp-defaults.mjs`. **Never webview input** — no command carries an
- * origin — and fenced by that same allowlist, so a build reaches no rendezvous
- * its own connect-src would refuse.
+ * Whether this build may open a one-time connection's rendezvous at its baked
+ * Hosted origin (`bakedHostedOrigin` in `lib/src/host/hosted-origin.ts`;
+ * `docs/specs/one-time.md` -> "Service and hosts"): fenced by the Relay
+ * allowlist (`connect-src.ts`), so a build reaches no rendezvous its own
+ * connect-src would refuse.
  */
 
 import {
@@ -21,13 +18,6 @@ import type { OneTimeUnavailableReason } from '../../remote/burrow/one-time-runt
 import { originAllowedByConnectSrc } from './connect-src';
 
 /**
- * The rendezvous baked into published builds. Kept equal to
- * `scripts/csp-defaults.mjs` by `one-time-origin.test.ts`, for the reason
- * `DEFAULT_REMOTE_CONNECT_SRC` is.
- */
-export const DEFAULT_ONE_TIME_ORIGIN = 'https://hosted.dormouse.sh';
-
-/**
  * The longest origin a link still fits: everything else in one is fixed —
  * the page path, the `#`, and the fragment. Checked here so a build baked with
  * an origin too long to scan is unavailable, rather than ending every link it
@@ -36,21 +26,6 @@ export const DEFAULT_ONE_TIME_ORIGIN = 'https://hosted.dormouse.sh';
  */
 export const MAX_ONE_TIME_ORIGIN_LENGTH =
   ONE_TIME_LINK_MAX_LENGTH - ONE_TIME_PAGE_PATH.length - '#'.length - ONE_TIME_FRAGMENT_LENGTH;
-
-/** Substituted by esbuild at build time; see `scripts/csp-defaults.mjs`. */
-declare const __DORMOUSE_ONE_TIME_ORIGIN__: string;
-
-/**
- * The rendezvous origin this build was compiled with — the one place the baked
- * value is read. Declared here rather than at each entry point for the reason
- * `bakedConnectSrc` gives; the `typeof` guard is for the test runners, which
- * have no define.
- */
-export function bakedOneTimeOrigin(): string {
-  return typeof __DORMOUSE_ONE_TIME_ORIGIN__ === 'string'
-    ? __DORMOUSE_ONE_TIME_ORIGIN__
-    : DEFAULT_ONE_TIME_ORIGIN;
-}
 
 /**
  * Why this build offers no one-time connection, or `null` when it does.

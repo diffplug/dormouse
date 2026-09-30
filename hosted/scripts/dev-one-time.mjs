@@ -165,7 +165,7 @@ async function main() {
       "",
       `One-time rendezvous and phone page: ${origin}${PAGE_PATH}`,
       "Build a Burrow that opens its links here (e.g. `pnpm innerdogfood`) with:",
-      `  DORMOUSE_ONE_TIME_ORIGIN=${origin}`,
+      `  DORMOUSE_HOSTED_ORIGIN=${origin}`,
       `  DORMOUSE_REMOTE_CONNECT_SRC='${origin} ${socketOrigin}'`,
       "",
     ].join("\n"),

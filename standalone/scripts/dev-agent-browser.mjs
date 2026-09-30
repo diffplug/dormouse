@@ -143,6 +143,10 @@ const invokeMap = {
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
   iframe_create_proxy_url: ({ target, embedderOrigins }) => requestSidecar('iframe:createProxyUrl', { target, embedderOrigins }, 'iframe:proxyUrl', (data) => data.result),
+  // Managed voice, the passthrough `managed_voice` in src-tauri/src/lib.rs;
+  // 20_000 mirrors its MANAGED_VOICE_TIMEOUT.
+  managed_voice: ({ payload }) =>
+    requestSidecar('voice:command', payload, 'voice:result', (data) => data.result, 20_000),
   tool_control: ({ request }) =>
     requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
   git_info: ({ paths }) =>

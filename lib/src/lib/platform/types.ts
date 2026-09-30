@@ -9,6 +9,9 @@ import type { ShellEntry } from '../shell-defaults';
 // share it without pulling this browser-typed module into a Node tsconfig.
 import type { IframeProxyResult } from './iframe-proxy-types';
 import type { ToolControlResult, ToolHostRequest } from './tool-types';
+import type { ManagedVoicePort } from './managed-voice-types';
+
+export type { ManagedVoicePort } from './managed-voice-types';
 import type { GitInfoResult } from './git-types';
 
 export type { ToolControlResult, ToolHostRequest, ToolLookupResult } from './tool-types';
@@ -411,4 +414,7 @@ export interface PlatformAdapter {
   getWindowState?(): PersistedWindow | null;
   saveWindowState?(snapshot: PersistedWindow): void;
 
+  /** Managed voice (`docs/specs/transport.md` -> "Managed voice"); absent
+   *  means every utterance goes to Web Speech. */
+  managedVoice?: ManagedVoicePort;
 }

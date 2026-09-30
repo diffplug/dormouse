@@ -49,7 +49,7 @@ dor tool one-time      # outside Dormouse: pnpm dev:one-time
 ```
 
 It serves `http://localhost:8787` (or `PORT`) and prints the
-`DORMOUSE_ONE_TIME_ORIGIN` and `DORMOUSE_REMOTE_CONNECT_SRC` values that point a
+`DORMOUSE_HOSTED_ORIGIN` and `DORMOUSE_REMOTE_CONNECT_SRC` values that point a
 local Burrow build at it; `docs/specs/one-time.md` -> "Dev loop" owns what it
 runs. A phone cannot reach a loopback origin, so a real phone tests against a
 PR preview.

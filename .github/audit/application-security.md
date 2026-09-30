@@ -36,9 +36,10 @@ run — `docs/specs/security-remote.md` -> "Direct path");
 `established-session.ts` (an authorized session's decrypt, idle clock, and
 direct path), and `one-time-runtime.ts` (the one-time ceremony, which grants
 nothing and must reach the direct path — `docs/specs/security-remote.md` ->
-"One-time connection"); `lib/src/host/remote/one-time-origin.ts` and the
-one-time half of `service.ts` (the baked rendezvous origin, its gate before any
-socket, the single runtime, and the approval routed by `kind`);
+"One-time connection"); `lib/src/host/hosted-origin.ts`,
+`lib/src/host/remote/one-time-origin.ts`, and the one-time half of `service.ts`
+(the baked rendezvous origin, its gate before any socket, the single runtime,
+and the approval routed by `kind`);
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they
 promote), `one-time-client.ts` (the one-time phone, which keeps nothing and

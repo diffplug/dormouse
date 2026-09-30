@@ -378,7 +378,7 @@ the host a Dor Tool frames, copies the Durable Object, migration, and rate
 limits, and carries no route, Hyperdrive, or secret; `vite build --watch`
 rebuilds the page into the folder Wrangler serves. Once the page answers, the
 loop prints the origin and the Burrow build variables
-(`DORMOUSE_ONE_TIME_ORIGIN`, `DORMOUSE_REMOTE_CONNECT_SRC`) and announces the
+(`DORMOUSE_HOSTED_ORIGIN`, `DORMOUSE_REMOTE_CONNECT_SRC`) and announces the
 page over OSC 367, since Wrangler's inspector binds a second port.
 
 Source of truth: `devConfig` in `hosted/scripts/dev-one-time.mjs`. Pinned by
@@ -420,10 +420,10 @@ enrolled runtime's.
   control of every terminal here until it disconnects or you end it. Nothing is
   saved." beside a "Confirm and allow" button.
 
-**The origin is baked**: `DEFAULT_ONE_TIME_ORIGIN` (`https://hosted.dormouse.sh`),
-overridden by the build variable `DORMOUSE_ONE_TIME_ORIGIN`, which both host
-bundles substitute and assert, failing the build on one `oneTimeAvailability`
-would call `origin-invalid`. **`oneTimeAvailability` decides before any socket
+**The origin is the baked Hosted origin**: `DEFAULT_HOSTED_ORIGIN`
+(`https://hosted.dormouse.sh`), overridden by the build variable
+`DORMOUSE_HOSTED_ORIGIN`, which both host bundles substitute and assert, failing
+the build on one `oneTimeAvailability` would call `origin-invalid`. **`oneTimeAvailability` decides before any socket
 exists**: `origin-invalid` for anything but a bare HTTPS origin, or HTTP on a
 link loopback host, of at most 167 characters; `origin-not-allowed` outside
 the baked connect-src allowlist; either makes the state `unavailable`.
@@ -434,9 +434,10 @@ marker are `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
 
 Source of truth: `BurrowService`, `idleOneTimeState`, and `oneTimeServing` in
 `lib/src/host/remote/service.ts`; `OneTimeEvent`, `servingOf`, and
-`approvalKind` in `lib/src/host/remote/service-protocol.ts`; `oneTimeAvailability` and
-`bakedOneTimeOrigin` in `lib/src/host/remote/one-time-origin.ts`;
-`resolveOneTimeOrigin` / `assertOneTimeOriginBaked` in `scripts/csp-defaults.mjs`;
+`approvalKind` in `lib/src/host/remote/service-protocol.ts`; `oneTimeAvailability` in
+`lib/src/host/remote/one-time-origin.ts`; `bakedHostedOrigin` in
+`lib/src/host/hosted-origin.ts`; `resolveHostedOrigin` / `assertHostedOriginBaked` in
+`scripts/csp-defaults.mjs`;
 `mirrorPairingQueue` in `lib/src/remote/burrow/activation.ts`;
 `RemotePairingModal` in `lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by
 `lib/src/host/remote/service.test.ts` and

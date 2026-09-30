@@ -6,20 +6,16 @@ import { LINK_LOOPBACK_HOSTS } from 'remote-lib-common';
 // The build scripts read the `.mjs` and the Burrow service reads the `.ts`; the
 // cases below are what keep them one fact.
 import {
-  DEFAULT_ONE_TIME_ORIGIN as BUILD_DEFAULT,
+  DEFAULT_HOSTED_ORIGIN as BUILD_DEFAULT,
   MAX_ONE_TIME_ORIGIN_LENGTH as BUILD_MAX_LENGTH,
   ONE_TIME_LOOPBACK_HOSTS as BUILD_LOOPBACK_HOSTS,
-  ONE_TIME_ORIGIN_PLACEHOLDER,
-  assertOneTimeOriginBaked,
-  resolveOneTimeOrigin,
+  HOSTED_ORIGIN_PLACEHOLDER,
+  assertHostedOriginBaked,
+  resolveHostedOrigin,
 } from '../../../../scripts/csp-defaults.mjs';
+import { DEFAULT_HOSTED_ORIGIN, bakedHostedOrigin } from '../hosted-origin';
 import { DEFAULT_REMOTE_CONNECT_SRC } from './connect-src';
-import {
-  DEFAULT_ONE_TIME_ORIGIN,
-  MAX_ONE_TIME_ORIGIN_LENGTH,
-  bakedOneTimeOrigin,
-  oneTimeAvailability,
-} from './one-time-origin';
+import { MAX_ONE_TIME_ORIGIN_LENGTH, oneTimeAvailability } from './one-time-origin';
 
 /**
  * An `https://` origin of exactly `length` characters under `example`, built
@@ -41,9 +37,9 @@ const ANY = 'https://*.example:* https://*.dormouse.sh:* http://localhost:* http
 
 describe('oneTimeAvailability', () => {
   it('offers the shipped rendezvous under the shipped allowlist', () => {
-    expect(oneTimeAvailability(DEFAULT_ONE_TIME_ORIGIN, DEFAULT_REMOTE_CONNECT_SRC)).toBeNull();
+    expect(oneTimeAvailability(DEFAULT_HOSTED_ORIGIN, DEFAULT_REMOTE_CONNECT_SRC)).toBeNull();
     // With no define — the test runner's case — the baked value is that default.
-    expect(bakedOneTimeOrigin()).toBe(DEFAULT_ONE_TIME_ORIGIN);
+    expect(bakedHostedOrigin()).toBe(DEFAULT_HOSTED_ORIGIN);
   });
 
   it('refuses an origin the allowlist does not admit', () => {
@@ -108,9 +104,9 @@ describe('oneTimeAvailability', () => {
   });
 });
 
-describe('the build-time one-time origin', () => {
+describe('the build-time Hosted origin', () => {
   it('keeps the same default, bound, and loopback hosts as the runtime', () => {
-    expect(BUILD_DEFAULT).toBe(DEFAULT_ONE_TIME_ORIGIN);
+    expect(BUILD_DEFAULT).toBe(DEFAULT_HOSTED_ORIGIN);
     expect(BUILD_MAX_LENGTH).toBe(MAX_ONE_TIME_ORIGIN_LENGTH);
     expect([...BUILD_LOOPBACK_HOSTS].sort()).toEqual([...LINK_LOOPBACK_HOSTS].sort());
   });
@@ -135,31 +131,29 @@ describe('the build-time one-time origin', () => {
       originOfLength(MAX_ONE_TIME_ORIGIN_LENGTH + 1),
     ]) {
       const invalid = oneTimeAvailability(origin, ANY) === 'origin-invalid';
-      const resolve = () => resolveOneTimeOrigin({ DORMOUSE_ONE_TIME_ORIGIN: origin }, 'test');
-      if (invalid) expect(resolve, origin).toThrow(/DORMOUSE_ONE_TIME_ORIGIN/);
+      const resolve = () => resolveHostedOrigin({ DORMOUSE_HOSTED_ORIGIN: origin }, 'test');
+      if (invalid) expect(resolve, origin).toThrow(/DORMOUSE_HOSTED_ORIGIN/);
       else expect(resolve(), origin).toBe(origin);
     }
     log.mockRestore();
   });
 
   it('passes an unset override through to the default', () => {
-    expect(resolveOneTimeOrigin({}, 'test')).toBe(DEFAULT_ONE_TIME_ORIGIN);
-    expect(resolveOneTimeOrigin({ DORMOUSE_ONE_TIME_ORIGIN: '  ' }, 'test')).toBe(
-      DEFAULT_ONE_TIME_ORIGIN,
-    );
+    expect(resolveHostedOrigin({}, 'test')).toBe(DEFAULT_HOSTED_ORIGIN);
+    expect(resolveHostedOrigin({ DORMOUSE_HOSTED_ORIGIN: '  ' }, 'test')).toBe(DEFAULT_HOSTED_ORIGIN);
   });
 
   it('fails a bundle the define did not reach', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'one-time-origin-'));
+    const dir = mkdtempSync(join(tmpdir(), 'hosted-origin-'));
     try {
       const bundle = join(dir, 'bundle.js');
-      writeFileSync(bundle, `const origin = ${ONE_TIME_ORIGIN_PLACEHOLDER};`);
-      expect(() => assertOneTimeOriginBaked(bundle, DEFAULT_ONE_TIME_ORIGIN)).toThrow(/survived/);
+      writeFileSync(bundle, `const origin = ${HOSTED_ORIGIN_PLACEHOLDER};`);
+      expect(() => assertHostedOriginBaked(bundle, DEFAULT_HOSTED_ORIGIN)).toThrow(/survived/);
       writeFileSync(bundle, 'const origin = "https://hosted.dormouse.sh";');
-      expect(() => assertOneTimeOriginBaked(bundle, 'http://127.0.0.1:8787')).toThrow(
+      expect(() => assertHostedOriginBaked(bundle, 'http://127.0.0.1:8787')).toThrow(
         /does not contain/,
       );
-      expect(() => assertOneTimeOriginBaked(bundle, DEFAULT_ONE_TIME_ORIGIN)).not.toThrow();
+      expect(() => assertHostedOriginBaked(bundle, DEFAULT_HOSTED_ORIGIN)).not.toThrow();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

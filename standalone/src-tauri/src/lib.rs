@@ -1487,6 +1487,24 @@ fn tool_control(
     Ok(response.get("result").cloned().unwrap_or(JsonValue::Null))
 }
 
+// ── Managed voice (docs/specs/transport.md -> "Managed voice"): one
+// passthrough to the sidecar host (lib/src/host/managed-voice-host.ts), whose
+// JSON answer, speak's base64 audio included, the webview decodes. ──────────
+
+/// Above the host's `MANAGED_VOICE_REQUEST_TIMEOUT_MS`, so its own `timeout`
+/// answer arrives before this bridge gives up.
+const MANAGED_VOICE_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[tauri::command(async)]
+fn managed_voice(
+    state: tauri::State<'_, SidecarState>,
+    payload: JsonValue,
+) -> Result<JsonValue, String> {
+    let mut response =
+        request_from_sidecar_timeout(&state, "voice:command", payload, MANAGED_VOICE_TIMEOUT)?;
+    Ok(response.get_mut("result").map(JsonValue::take).unwrap_or(JsonValue::Null))
+}
+
 // ── Browser automation (docs/specs/dor-browser.md → "Browser Host").
 // Thin forwarders to the Node sidecar, which runs the shared
 // lib/src/host/browser-host.ts — the very same module the VS Code extension
@@ -3761,13 +3779,16 @@ fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
                 .and_then(|m| m.remove("data"))
                 .unwrap_or(JsonValue::Null);
 
-            if let Some(request_id) = data
+            // Owned, so the reply moves to its waiter uncopied: a managed-voice
+            // answer carries a whole utterance's audio.
+            let request_id = data
                 .get("requestId")
-                .and_then(|request_id| request_id.as_str())
-            {
+                .and_then(JsonValue::as_str)
+                .map(str::to_owned);
+            if let Some(request_id) = request_id {
                 if let Ok(mut pending) = pending_requests_for_task.lock() {
-                    if let Some(response_tx) = pending.remove(request_id) {
-                        let _ = response_tx.send(data.clone());
+                    if let Some(response_tx) = pending.remove(&request_id) {
+                        let _ = response_tx.send(data);
                         continue;
                     }
                 }
@@ -4125,6 +4146,7 @@ pub fn run() {
             take_recovery_commands,
             iframe_create_proxy_url,
             tool_control,
+            managed_voice,
             git_info,
             pty_request_init,
             dor_control_response,

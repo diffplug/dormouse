@@ -156,6 +156,12 @@
 
 Guarding only completion leaves a stale `start` free to replace the active utterance's token. Queue-admission identity also covers old rings, collateral redispatch, and evicted callbacks after teardown; it retains one token per ringing Session without retaining each engine utterance.
 
+## Managed voice
+
+**Why the token stays in the host.** A renderer runs terminal-supplied text beside framed pages; a bearer credential there is one script injection away from leaving the machine. The sidecar keeps it with the Burrow's credential (`docs/specs/security-local.rationale.md` → "Persisted state") and makes the request without the webview's CSP granting any remote `connect-src`. The cost is one IPC round trip per managed utterance, its audio returning as base64.
+
+**Why fallback stops once audio starts.** Falling back after managed audio began would repeat a half-heard label in a second voice, and the Session would publish `speaking` twice for one delivery. A failure before `playing` has produced no sound, so speaking the same text through Web Speech still delivers the alarm once. Audio refused by the webview's autoplay policy lands on the fallback path; Web Speech may refuse the same gesture-less call (Spoken alarms, the synchronous `not-allowed` case), in which case the attempt ends unstarted.
+
 ## Push notifications
 
 **Why the device-list fetch is lazy and its store is not.** The fetch is Burrow machinery and rides the lazily-imported `RemotePairingModalHost` chunk; the store and its refresh fence stay in the common bundle because the Settings dialog reads them in every host, so disarming is one call on the store.
