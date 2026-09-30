@@ -138,6 +138,19 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
   process.kill(two.appPid, 0);
 });
 
+test('the dev server bakes the webview under the dev rule', { timeout: 60000 }, async t => {
+  // A dev build may count a loopback origin as Hosted; `vite build` may not
+  // (docs/specs/relay.md → "Relay origin").
+  const a = await fixture(t);
+  const run = await a.start(['dev'], {
+    DORMOUSE_RELAY_ORIGIN: 'http://localhost:8787', DORMOUSE_RELAY_IS_HOSTED: '1',
+  }).ready();
+  const env = await (await fetch(`${run.url}/@vite/env`)).text();
+  assert.match(env, /"__DORMOUSE_RELAY_ORIGIN__":\s*"http:\/\/localhost:8787"/);
+  assert.match(env, /"__DORMOUSE_RELAY_MODE__":\s*"hosted"/);
+  await run.stop();
+});
+
 test('an occupied explicit port fails without touching its owner; native failures close Vite', { timeout: 60000 }, async t => {
   const [a, b] = await Promise.all([fixture(t), fixture(t)]);
   const one = await a.start().ready();
