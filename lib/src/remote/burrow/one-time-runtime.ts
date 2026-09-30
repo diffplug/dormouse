@@ -98,14 +98,11 @@ export type OneTimeEndReason =
 
 /**
  * Why the service offers no one-time connection at all. The service's to
- * decide, never this runtime's: a runtime exists only for an available origin
- * (`oneTimeAvailability` in `lib/src/host/remote/one-time-origin.ts`).
+ * decide, never this runtime's: a runtime exists only in a build with a Hosted
+ * origin (`idleOneTimeState` in `lib/src/host/remote/service.ts`). The one
+ * reason is a self-host build, which reaches no rendezvous.
  */
-export type OneTimeUnavailableReason =
-  /** Not a bare HTTPS or loopback-HTTP origin a link can carry. */
-  | 'origin-invalid'
-  /** A self-host build, which reaches no rendezvous (`docs/specs/relay.md` → "Relay origin"). */
-  | 'self-host';
+export type OneTimeUnavailableReason = 'self-host';
 
 /**
  * What the one-time connection is doing, as the laptop's panel renders it.

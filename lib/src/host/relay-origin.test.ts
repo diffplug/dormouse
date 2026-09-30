@@ -12,7 +12,7 @@ import {
   relayOriginDefine,
   resolveRelayOrigin,
 } from '../../../scripts/relay-origin.mjs';
-import { DEFAULT_RELAY_ORIGIN, bakedRelayMode, bakedRelayOrigin, isRelayOrigin } from './relay-origin';
+import { DEFAULT_RELAY_ORIGIN, bakedRelay, bakedRelayMode, hostedOrigin, isRelayOrigin } from './relay-origin';
 
 /**
  * An `https://` origin of exactly `length` characters under `example`, built
@@ -62,8 +62,13 @@ describe('the baked relay origin', () => {
   });
 
   it('reads as the Hosted default where nothing was baked (the test runner)', () => {
-    expect(bakedRelayOrigin()).toBe(DEFAULT_RELAY_ORIGIN);
+    expect(bakedRelay()).toEqual({ origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' });
     expect(bakedRelayMode()).toBe('hosted');
+  });
+
+  it('reaches Hosted only in a Hosted build', () => {
+    expect(hostedOrigin({ origin: 'http://localhost:8787', mode: 'hosted' })).toBe('http://localhost:8787');
+    expect(hostedOrigin({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBeNull();
   });
 
   it('matches a stored Relay URL by origin, and nothing else', () => {

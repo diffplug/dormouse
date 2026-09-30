@@ -2,7 +2,7 @@
  * The Node-resident Burrow, driven the way both of its neighbours drive it: the
  * webview through `handleCommand`, and the relay through a fake `/ws/burrow`
  * socket. The point of most cases here is that nothing a webview says can widen
- * access — recipients, the ACL, and the allowlist are all read on this side.
+ * access — recipients, the ACL, and the relay origin are all read on this side.
  */
 
 import { hostname } from 'node:os';
@@ -47,6 +47,7 @@ import {
   type TestRendezvous,
 } from '../../remote/test-rendezvous';
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
+import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import { BurrowService, idleOneTimeState, type BurrowServiceOptions } from './service';
 import { isOneTimeState } from './service-protocol';
 import type {
@@ -61,9 +62,9 @@ import type {
 
 const BURROW_ID = testRoutingId();
 /** The self-host Relay the default service here was baked for. */
-const ORIGIN = 'https://relay.dormouse.sh';
+const ORIGIN = 'https://relay.example.ts.net';
 /** The shipped relay origin: a Hosted build's, where one-time links are made. */
-const ONE_TIME_ORIGIN = 'https://hosted.dormouse.sh';
+const HOSTED_ORIGIN = DEFAULT_RELAY_ORIGIN;
 
 /**
  * The enrollment every case runs on, with a **real** Noise static: without one
@@ -79,7 +80,7 @@ beforeAll(async () => {
     burrowId: BURROW_ID,
     burrowToken: 'tok',
     origin: ORIGIN,
-    rpId: 'relay.dormouse.sh',
+    rpId: 'relay.example.ts.net',
     label: 'Laptop',
     noiseStaticPrivateKey: material.privateKeyPkcs8,
     noiseStaticPublicKey: material.publicKey,
@@ -228,7 +229,7 @@ let offerReads: number;
 let offerGate: Promise<void> | null;
 
 const OFFER: EnrollmentOffer = {
-  origin: 'https://relay.dormouse.sh',
+  origin: ORIGIN,
   token: 'a'.repeat(64),
   mintedAt: '2026-08-31T00:00:00.000Z',
 };
@@ -244,8 +245,7 @@ function createService(
     kind: 'vscode',
     sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
     // A self-host build: the only kind that enrolls (docs/specs/relay.md → "Relay origin").
-    relayOrigin: ORIGIN,
-    relayMode: 'self-host',
+    relay: { origin: ORIGIN, mode: 'self-host' },
     // One factory for both sockets, as each host passes: the rendezvous route
     // reaches the in-memory room, everything else the fake relay.
     createWebSocket: (url) => {
@@ -269,18 +269,18 @@ function createService(
 }
 
 /**
- * A Hosted build — the only kind with one-time connections (`one-time-origin.ts`).
- * A seeded enrollment is moved to the Hosted origin, since one naming any other
- * reads as none.
+ * A Hosted build — the only kind with one-time connections (`hostedOrigin` in
+ * `../relay-origin.ts`). A seeded enrollment is moved to the Hosted origin,
+ * since one naming any other reads as none.
  */
 function createHostedService(
   seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>,
   over: Partial<BurrowServiceOptions> = {},
 ): BurrowService {
-  const enrollment = seed?.enrollment ? { ...seed.enrollment, relayUrl: ONE_TIME_ORIGIN } : seed?.enrollment;
+  const enrollment = seed?.enrollment ? { ...seed.enrollment, relayUrl: HOSTED_ORIGIN } : seed?.enrollment;
   return createService(
     seed ? { ...seed, enrollment } : seed,
-    { relayOrigin: ONE_TIME_ORIGIN, relayMode: 'hosted', ...over },
+    { relay: { origin: HOSTED_ORIGIN, mode: 'hosted' }, ...over },
   );
 }
 
@@ -390,7 +390,7 @@ describe('status', () => {
 
     expect((await command('status')).result).toMatchObject({
       enrolled: false,
-      relayOrigin: ONE_TIME_ORIGIN,
+      relayOrigin: HOSTED_ORIGIN,
       relayMode: 'hosted',
       offer: null,
     });
@@ -651,10 +651,10 @@ describe('enrollOffer', () => {
   });
 
   it('refuses in a Hosted build, before the offer is read', async () => {
-    offer = { ...OFFER, origin: ONE_TIME_ORIGIN };
+    offer = { ...OFFER, origin: HOSTED_ORIGIN };
     createHostedService();
 
-    const result = await command('enrollOffer', { origin: ONE_TIME_ORIGIN, label: 'Laptop' });
+    const result = await command('enrollOffer', { origin: HOSTED_ORIGIN, label: 'Laptop' });
 
     expect(result.error).toMatch(/Dormouse Hosted/);
     expect(offerReads).toBe(0);
@@ -1281,17 +1281,10 @@ describe('push', () => {
 
   it('warns rather than rejecting when the Relay refuses the send', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
-    service = new BurrowService({
-      store,
-      provider: fakeProvider(),
-      kind: 'vscode',
-      sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-      relayOrigin: ORIGIN,
-      relayMode: 'self-host',
-      createWebSocket: () => new FakeSocket(),
-      fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch,
-    });
+    createService(
+      { enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } },
+      { fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch },
+    );
     await service.start();
 
     await expect(service.push('pty-1', 'x')).resolves.toBeUndefined();
@@ -1329,17 +1322,10 @@ describe('pushDevices', () => {
   });
 
   it('errors when the Relay cannot be asked', async () => {
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
-    service = new BurrowService({
-      store,
-      provider: fakeProvider(),
-      kind: 'vscode',
-      sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-      relayOrigin: ORIGIN,
-      relayMode: 'self-host',
-      createWebSocket: () => new FakeSocket(),
-      fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
-    });
+    createService(
+      { enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } },
+      { fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch },
+    );
     await service.start();
 
     expect((await command('pushDevices')).error).toBeTruthy();
@@ -1385,17 +1371,10 @@ describe('pushTest', () => {
   });
 
   it('surfaces a refused send instead of swallowing it', async () => {
-    store = memoryStore({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
-    service = new BurrowService({
-      store,
-      provider: fakeProvider(),
-      kind: 'vscode',
-      sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-      relayOrigin: ORIGIN,
-      relayMode: 'self-host',
-      createWebSocket: () => new FakeSocket(),
-      fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
-    });
+    createService(
+      { enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } },
+      { fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch },
+    );
     await service.start();
 
     expect((await command('pushTest')).error).toBeTruthy();
@@ -1422,7 +1401,7 @@ describe('one-time connection', () => {
 
   /** Read the link and complete IK against it, as the page does on Connect. */
   async function join(url: string): Promise<TestOneTimePhone> {
-    const link = await parseOneTimeLinkUrl(url, ONE_TIME_ORIGIN);
+    const link = await parseOneTimeLinkUrl(url, HOSTED_ORIGIN);
     if (!link) throw new Error(`a phone could not read the link: ${url}`);
     return joinOneTimeRoom(rendezvous, link);
   }
@@ -1472,7 +1451,7 @@ describe('one-time connection', () => {
     expect(waiting.status).toBe('waiting');
     expect(rendezvous.rooms).toHaveLength(1);
     expect(rendezvous.room().burrowUrl).toBe('wss://hosted.dormouse.sh/api/one-time/burrow');
-    expect((await parseOneTimeLinkUrl(waiting.url, ONE_TIME_ORIGIN))?.roomId).toBe(
+    expect((await parseOneTimeLinkUrl(waiting.url, HOSTED_ORIGIN))?.roomId).toBe(
       rendezvous.room().roomId,
     );
     // No enrollment: no relay socket, and nothing sent to a Relay.
@@ -1522,27 +1501,9 @@ describe('one-time connection', () => {
     expect((await command('oneTimeOpen')).error).toMatch(/self-host build/);
     expect(rendezvous.rooms).toEqual([]);
     expect(oneTimeStates()).toEqual([]);
-  });
-
-  it('is unavailable for an origin no link can carry', async () => {
-    // Plain HTTP off loopback: the phone would refuse every link it minted.
-    createHostedService(undefined, { relayOrigin: 'http://hosted.dormouse.sh' });
-    expect((await command('oneTimeStatus')).result).toEqual({
-      status: 'unavailable',
-      reason: 'origin-invalid',
-    });
-    expect((await command('oneTimeOpen')).error).toMatch(/unavailable/);
-    expect(rendezvous.rooms).toEqual([]);
-    // The same answer a window with no service gives (`vscode-ext/src/burrow.ts`).
-    expect(idleOneTimeState({ origin: 'http://hosted.dormouse.sh', mode: 'hosted' })).toEqual({
-      status: 'unavailable',
-      reason: 'origin-invalid',
-    });
-    expect(idleOneTimeState({ origin: ONE_TIME_ORIGIN, mode: 'hosted' })).toEqual({ status: 'idle' });
-    expect(idleOneTimeState({ origin: ORIGIN, mode: 'self-host' })).toEqual({
-      status: 'unavailable',
-      reason: 'self-host',
-    });
+    // The same answers a window with no service gives (`vscode-ext/src/burrow.ts`).
+    expect(idleOneTimeState(null)).toEqual({ status: 'unavailable', reason: 'self-host' });
+    expect(idleOneTimeState(HOSTED_ORIGIN)).toEqual({ status: 'idle' });
   });
 
   it('joins an open in flight rather than minting a second room', async () => {
@@ -1813,7 +1774,7 @@ describe('one-time connection', () => {
     });
     try {
       const origin = `http://127.0.0.1:${port}`;
-      createHostedService(undefined, { relayOrigin: origin, createWebSocket: undefined });
+      createHostedService(undefined, { relay: { origin, mode: 'hosted' }, createWebSocket: undefined });
       expect(await open()).toMatchObject({ status: 'waiting' });
       expect(upgrades).toEqual([{ url: ONE_TIME_WS_ROUTES.burrow, origin: undefined }]);
     } finally {

@@ -473,8 +473,7 @@ describe('size authority across a one-time connection, end to end', () => {
       kind: 'standalone',
       sendToUi: toWebview,
       // A Hosted build: the only kind with one-time connections.
-      relayOrigin: ORIGIN,
-      relayMode: 'hosted',
+      relay: { origin: ORIGIN, mode: 'hosted' },
       createWebSocket: (url) => rendezvous.createBurrowSocket(url) as never,
       createDirectPeer: () => network.createAnswerer(),
       now: clock.now,
@@ -582,8 +581,7 @@ describe('size authority across a one-time connection, end to end', () => {
       kind: 'standalone',
       sendToUi: toWebview,
       // A Hosted build: the only kind with one-time connections.
-      relayOrigin: ORIGIN,
-      relayMode: 'hosted',
+      relay: { origin: ORIGIN, mode: 'hosted' },
     });
     try {
       await replacement.start();

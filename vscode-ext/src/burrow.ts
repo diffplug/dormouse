@@ -12,14 +12,13 @@ import {
   createNativeDirectPeerFactory,
   disposeNativeDirectPeers,
 } from '../../lib/src/host/remote/native-direct-peer';
-import { bakedRelayMode, bakedRelayOrigin, isRelayOrigin } from '../../lib/src/host/relay-origin';
+import { bakedRelay, hostedOrigin, isRelayOrigin } from '../../lib/src/host/relay-origin';
 import {
   BurrowService,
   idleOneTimeState,
   oneTimeServing,
   readsEnrollmentOffer,
   unenrolledStatus,
-  type RelayBuild,
 } from '../../lib/src/host/remote/service';
 import {
   BURROW_EVENT_EVENT,
@@ -280,8 +279,7 @@ function startService(): void {
         }
       }
     },
-    relayOrigin: bakedRelayOrigin(),
-    relayMode: bakedRelayMode(),
+    relay: bakedRelay(),
     // Building the factory loads nothing: the addon is opened inside the first
     // offer, if one ever comes (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),
@@ -541,7 +539,7 @@ function idleAnswer(cmd: string): { result: unknown } | null {
     case 'pairingQueue':
       return { result: [] satisfies PairingQueueItem[] };
     case 'oneTimeStatus':
-      return { result: idleOneTimeState(bakedRelay()) };
+      return { result: idleOneTimeState(hostedOrigin(bakedRelay())) };
     case 'oneTimeEnd':
       return { result: {} };
     // No service holds any session, so none holds a pane: the strip clears itself.
@@ -572,11 +570,6 @@ async function idleStatus(): Promise<BurrowConsoleStatus> {
   const relay = bakedRelay();
   const offer = readsEnrollmentOffer(relay) ? await readEnrollmentOffer() : null;
   return unenrolledStatus(offer, 'vscode', relay);
-}
-
-/** This build's baked relay origin and mode (`docs/specs/relay.md` → "Relay origin"). */
-function bakedRelay(): RelayBuild {
-  return { origin: bakedRelayOrigin(), mode: bakedRelayMode() };
 }
 
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */
@@ -658,7 +651,7 @@ async function contendIfServing(ctx: vscode.ExtensionContext): Promise<void> {
   if (
     (enrollment.status === 'fulfilled' &&
       enrollment.value &&
-      isRelayOrigin(enrollment.value.relayUrl, bakedRelayOrigin())) ||
+      isRelayOrigin(enrollment.value.relayUrl, bakedRelay().origin)) ||
     (serving.status === 'fulfilled' && serving.value)
   ) {
     contendForBurrow();

@@ -8,8 +8,9 @@ import {
   MANAGED_VOICE_FILE,
 } from './managed-voice-host';
 import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
+import { DEFAULT_RELAY_ORIGIN } from './relay-origin';
 
-const MANAGED_VOICE_SPEAK_URL = 'https://hosted.dormouse.sh/api/voice/speak';
+const MANAGED_VOICE_SPEAK_URL = `${DEFAULT_RELAY_ORIGIN}/api/voice/speak`;
 
 /** The next `readFile` fails with this, once: a Windows antivirus lock, say. */
 const readFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
@@ -44,6 +45,7 @@ function make(options: { timeoutMs?: number; stateDir?: string } = {}) {
     onStatus: (status) => void broadcasts.push(status),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
+    relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
   });
 }
 
@@ -196,8 +198,7 @@ describe('the build it runs in', () => {
       stateDir: dir,
       onStatus: () => {},
       fetch: fetchMock as unknown as typeof fetch,
-      relayOrigin: 'http://localhost:8787',
-      relayMode: 'hosted',
+      relay: { origin: 'http://localhost:8787', mode: 'hosted' },
     });
     await local.handle({ op: 'configure', update: { token: TOKEN } });
     fetchMock.mockResolvedValue(audioResponse());
@@ -215,8 +216,7 @@ describe('the build it runs in', () => {
       stateDir: dir,
       onStatus: (status) => void broadcasts.push(status),
       fetch: fetchMock as unknown as typeof fetch,
-      relayOrigin: 'https://relay.example.ts.net',
-      relayMode: 'self-host',
+      relay: { origin: 'https://relay.example.ts.net', mode: 'self-host' },
     });
     broadcasts = [];
 

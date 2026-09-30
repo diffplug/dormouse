@@ -33,11 +33,7 @@ vi.mock('./QrCode', async (importOriginal) => {
   };
 });
 
-import {
-  ONE_TIME_ENDED_COPY,
-  ONE_TIME_OUTCOME_LABEL,
-  ONE_TIME_UNAVAILABLE_FALLBACK,
-} from './OneTimeConnection';
+import { ONE_TIME_ENDED_COPY, ONE_TIME_OUTCOME_LABEL } from './OneTimeConnection';
 import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
 import {
   isOneTimeState,
@@ -1761,8 +1757,7 @@ describe('One-time connection', () => {
     // An older VS Code broker in another window still says `origin-not-allowed`.
     await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'origin-not-allowed' } as never));
     expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
-    expect(ONE_TIME_UNAVAILABLE_FALLBACK).toBe('Not available in this build.');
-    expect(text()).toContain(ONE_TIME_UNAVAILABLE_FALLBACK);
+    expect(text()).toContain('Not available in this build.');
     expect(text()).not.toContain('Open a link on your phone');
   });
 

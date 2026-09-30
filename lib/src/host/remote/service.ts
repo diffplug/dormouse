@@ -43,12 +43,10 @@ import {
   OneTimeRuntime,
   type OneTimeApprovalRequest,
   type OneTimeState,
-  type OneTimeUnavailableReason,
 } from '../../remote/burrow/one-time-runtime';
 import type { DirectPeerFactory } from '../../remote/direct/direct-peer';
-import { isRelayOrigin, type RelayMode } from '../relay-origin';
+import { hostedOrigin, isRelayOrigin, type RelayBuild } from '../relay-origin';
 import { readEnrollmentOffer } from './enroll-offer';
-import { oneTimeAvailability } from './one-time-origin';
 import type { BurrowStateStore } from './burrow-state-store';
 import { createSerialQueue } from './serial-queue';
 import {
@@ -87,14 +85,12 @@ export interface BurrowServiceOptions {
   /** Emit one of the `burrow:*` events to the webview. */
   sendToUi: (event: string, data: unknown) => void;
   /**
-   * The one relay origin this build was compiled with — `bakedRelayOrigin()`
-   * (`docs/specs/relay.md` → "Relay origin"). The only Relay this Burrow
-   * enrolls with or connects to, and in a Hosted build the one-time
-   * rendezvous too. **Never webview input**: no command carries an origin.
+   * This build's `bakedRelay()` (`docs/specs/relay.md` → "Relay origin"): the
+   * only Relay this Burrow enrolls with or connects to, and in a Hosted build
+   * the one-time rendezvous too. **Never webview input**: no command carries
+   * an origin.
    */
-  relayOrigin: string;
-  /** What that origin makes this build — `bakedRelayMode()`. */
-  relayMode: RelayMode;
+  relay: RelayBuild;
   /**
    * Opens the relay socket and the one-time rendezvous alike. **Must send no
    * `Origin` header** — the rendezvous refuses one, so that no browser page can
@@ -135,12 +131,6 @@ function safeHostname(): string {
   } catch {
     return '';
   }
-}
-
-/** This build's baked relay origin and the mode it sets (`../relay-origin.ts`). */
-export interface RelayBuild {
-  origin: string;
-  mode: RelayMode;
 }
 
 /**
@@ -202,23 +192,14 @@ export function oneTimeServing(state: OneTimeState): boolean {
 }
 
 /**
- * The one-time state of a Burrow with no connection: `unavailable` when this
- * build fails {@link oneTimeAvailability}, else `idle`. One builder, because two
- * processes answer it — the service, and the VS Code glue for a window with no
- * service at all (`vscode-ext/src/burrow.ts` → `refuseCommand`).
+ * The one-time state of a Burrow with no connection, from this build's
+ * `hostedOrigin` (`../relay-origin.ts`): `unavailable` without one — a
+ * self-host build, which opens no rendezvous — else `idle`. One builder,
+ * because two processes answer it — the service, and the VS Code glue for a
+ * window with no service at all (`vscode-ext/src/burrow.ts` → `refuseCommand`).
  */
-export function idleOneTimeState(relay: RelayBuild): OneTimeState {
-  const reason = oneTimeAvailability(relay.origin, relay.mode);
-  return reason ? { status: 'unavailable', reason } : { status: 'idle' };
-}
-
-/** What `oneTimeOpen` answers on a build that cannot open one. */
-function unavailableMessage(reason: OneTimeUnavailableReason, origin: string): string {
-  return reason === 'self-host'
-    ? 'One-time connections are unavailable in a self-host build: their links are made at Dormouse ' +
-        `Hosted, and this build reaches only its own Relay (${origin}).`
-    : `One-time connections are unavailable: this build's rendezvous (${origin}) is not an ` +
-        'https:// origin a link can carry.';
+export function idleOneTimeState(hosted: string | null): OneTimeState {
+  return hosted === null ? { status: 'unavailable', reason: 'self-host' } : { status: 'idle' };
 }
 
 /** Bytes of the random ticket a one-time request is answered by, as `pairingId`. */
@@ -257,6 +238,8 @@ export class BurrowService {
   readonly #provider: BurrowSurfaceProvider;
   readonly #sendToUi: (event: string, data: unknown) => void;
   readonly #relay: RelayBuild;
+  /** `hostedOrigin(#relay)`: where one-time links are made, or `null` for none. */
+  readonly #hostedOrigin: string | null;
   readonly #kind: BurrowKind;
   readonly #createWebSocket: (url: string) => WebSocketLike;
   readonly #createDirectPeer?: DirectPeerFactory;
@@ -323,8 +306,9 @@ export class BurrowService {
     this.#store = options.store;
     this.#provider = options.provider;
     this.#sendToUi = options.sendToUi;
-    this.#relay = { origin: options.relayOrigin, mode: options.relayMode };
-    this.#oneTimeState = idleOneTimeState(this.#relay);
+    this.#relay = options.relay;
+    this.#hostedOrigin = hostedOrigin(options.relay);
+    this.#oneTimeState = idleOneTimeState(this.#hostedOrigin);
     this.#kind = options.kind;
     this.#createWebSocket =
       options.createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
@@ -700,10 +684,14 @@ export class BurrowService {
    * connected one is refused**: a phone holds it, and only End lets it go.
    */
   async #openOneTime(): Promise<OneTimeState> {
-    const state = this.#oneTimeState;
-    if (state.status === 'unavailable') {
-      throw new Error(unavailableMessage(state.reason, this.#relay.origin));
+    const hosted = this.#hostedOrigin;
+    if (hosted === null) {
+      throw new Error(
+        'One-time connections are unavailable in a self-host build: their links are made at ' +
+          `Dormouse Hosted, and this build reaches only its own Relay (${this.#relay.origin}).`,
+      );
     }
+    const state = this.#oneTimeState;
     if (this.#oneTimeOpening) return this.#oneTimeOpening;
     if (state.status === 'connecting' || state.status === 'connected') {
       throw new Error(
@@ -711,7 +699,7 @@ export class BurrowService {
       );
     }
     const runtime: OneTimeRuntime = new OneTimeRuntime({
-      origin: this.#relay.origin,
+      origin: hosted,
       createWebSocket: this.#createWebSocket,
       createSession: (opts) => this.#createApiSession(opts),
       createDirectPeer: this.#createDirectPeer ?? null,

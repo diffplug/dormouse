@@ -85,8 +85,7 @@ const relayBuild = vi.hoisted(() => ({
 }));
 vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/src/host/relay-origin')>()),
-  bakedRelayOrigin: () => relayBuild.origin,
-  bakedRelayMode: () => relayBuild.mode,
+  bakedRelay: () => ({ ...relayBuild }),
 }));
 
 /**
@@ -990,8 +989,7 @@ describe('burrow service glue', () => {
       },
       kind: 'vscode',
       sendToUi: (event, data) => void sent.push({ event, data: data as never }),
-      relayOrigin: relayBuild.origin,
-      relayMode: relayBuild.mode,
+      relay: { ...relayBuild },
     });
     await idle.start();
     for (const cmd of ['status', 'pushDevices', 'pairingQueue', 'oneTimeStatus', 'oneTimeEnd', 'takeBack']) {
