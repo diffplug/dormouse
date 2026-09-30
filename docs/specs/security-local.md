@@ -208,7 +208,7 @@ does. A gap, not an accepted risk.
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in
 `standalone/src-tauri/src/lib.rs`, `createManagedVoiceHost` in
-`lib/src/host/managed-voice-host.ts`, `bakedRelayOrigin` in
+`lib/src/host/managed-voice-host.ts`, `hostedOrigin` in
 `lib/src/host/relay-origin.ts`.
 
 ## Terminal context directory actions

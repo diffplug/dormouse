@@ -36,10 +36,10 @@ run — `docs/specs/security-remote.md` -> "Direct path");
 `established-session.ts` (an authorized session's decrypt, idle clock, and
 direct path), and `one-time-runtime.ts` (the one-time ceremony, which grants
 nothing and must reach the direct path — `docs/specs/security-remote.md` ->
-"One-time connection"); `lib/src/host/relay-origin.ts`,
-`lib/src/host/remote/one-time-origin.ts`, and the one-time half of `service.ts`
-(the one baked origin, the rendezvous gate before any socket, the single
-runtime, and the approval routed by `kind`);
+"One-time connection"); `lib/src/host/relay-origin.ts` and the one-time half
+of `service.ts` (the one baked origin and its nullable Hosted origin, the
+rendezvous gate before any socket, the single runtime, and the approval routed
+by `kind`);
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they
 promote), `one-time-client.ts` (the one-time phone, which keeps nothing and
@@ -103,11 +103,13 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   back to configuration.
 - **Does a self-host build reach Dormouse's servers with nobody clicking?**
   Follow `DORMOUSE_RELAY_ORIGIN` from `scripts/relay-origin.mjs` into both host
-  bundles, then list every request a build baked with a non-default origin
-  could make to `dormouse.sh` or `hosted.dormouse.sh` — the one-time half of
-  `service.ts`, `lib/src/host/managed-voice-host.ts`, `standalone/src/updater.ts`,
-  and anything else that fetches. A release build that accepts
-  `DORMOUSE_RELAY_IS_HOSTED` or a loopback `http:` origin is the same finding.
+  bundles and the standalone webview (`standalone/vite.config.ts`), then list
+  every request a build baked with a non-default origin could make to
+  `dormouse.sh` or `hosted.dormouse.sh` — the one-time half of `service.ts`,
+  `lib/src/host/managed-voice-host.ts`, `standalone/src/updater.ts` and the
+  updater endpoint `standalone/scripts/tauri.mjs` overlays away, and anything
+  else that fetches. A release build that accepts `DORMOUSE_RELAY_IS_HOSTED`
+  or a loopback `http:` origin is the same finding.
 - Can anything reach a Burrow's ACL without a human approving on that Burrow? Trace
   every writer — including the ACL read filter, anything that rehydrates a
   record from disk, and what a compromised webview or a compromised Relay could

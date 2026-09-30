@@ -94,13 +94,6 @@ showing that phone with End, on a connection gone with its window, until
 someone pressed End (review, 2026-09). The state needs no enrollment, so it
 goes out before the keychain read.
 
-**Why a self-host build has no one-time connection.** The rendezvous and the
-`/connect/` page are Hosted's, and a self-host build's one origin is the
-user's own Relay, which serves neither. Keeping a second origin for this one
-feature would bring back the second baked value the one-origin rule removed,
-and a room at Hosted tells `hosted.dormouse.sh` the laptop exists
-(`docs/specs/relay.rationale.md` → "Relay origin").
-
 ## Laptop UI
 
 **Why the reveal waits for the QR.** The encoder is a lazy chunk. On a

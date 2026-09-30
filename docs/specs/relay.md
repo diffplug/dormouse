@@ -125,11 +125,14 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 | any other accepted origin | self-host | exactly this origin | off | off |
 
 - **A self-host build sends nothing to `hosted.dormouse.sh` or `dormouse.sh`
-  unless the user clicks a link** (rationale): no rendezvous
-  (`docs/specs/one-time.md` → "Service and hosts"), managed voice
-  (`docs/specs/alert.md` → "Managed voice"), or update check
-  (`docs/specs/auto-update.md` → "How it works"); VS Code's Marketplace updates
-  are `docs/specs/vscode.md` → "Build and development".
+  unless the user clicks a link** (rationale). **Every Hosted-reaching host
+  feature takes the nullable `hostedOrigin` and does nothing on `null`**: no
+  rendezvous (`docs/specs/one-time.md` → "Service and hosts"), no managed voice
+  (`docs/specs/alert.md` → "Managed voice"). The standalone webview never checks
+  for updates (`docs/specs/auto-update.md` → "How it works"), and its binary has
+  no updater endpoint (`docs/specs/standalone.md` → "Build and development");
+  VS Code's Marketplace updates are `docs/specs/vscode.md` → "Build and
+  development".
 - **The stock binary reaches only the default origin**, so self-hosting takes a
   source build whose `DORMOUSE_RELAY_ORIGIN` is exactly its Relay's
   `DORMOUSE_ORIGIN` (`SELF_HOST.md` → "Prerequisites").
@@ -157,12 +160,12 @@ compare as `new URL(...).origin`. **An enrollment whose Relay reports another
 `DORMOUSE_ORIGIN` is where every setup code sends a phone.
 
 **Both build failure modes are silent, so the build catches both** (rationale):
-`resolveRelayOrigin` validates the variables and `assertRelayOriginBaked` greps
-the bundle for the esbuild `define`, which `bakedRelayOrigin()` and
-`bakedRelayMode()` **read as a `declare const`, never an import**. The `.mjs`
-duplicates the default and the accepted-origin rule, a build script being
-unable to import TypeScript; `lib/src/host/relay-origin.test.ts` pins the copies
-equal.
+a bad variable, and a bundle the `define` did not reach, the readers taking the
+value **as a `declare const`, never an import**. **The standalone webview bakes
+the same pair** through Vite's `define`: the dev server under the dev rule,
+`vite build` under the release rule. The `.mjs` duplicates only the default, a
+build script being unable to import TypeScript; `lib/src/host/relay-origin.test.ts`
+pins it.
 
 **Enrollment and Burrow-authenticated push fetches must use `redirect: 'error'`** —
 a Node process does not re-check a redirect target, so following one could carry
@@ -170,8 +173,10 @@ the setup password, Burrow bearer token, or notification metadata to another
 origin.
 
 Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in
-`scripts/relay-origin.mjs`; `bakedRelayOrigin` and `bakedRelayMode` in
-`lib/src/host/relay-origin.ts`; `BurrowService` in
+`scripts/relay-origin.mjs`; `isAcceptedRelayOrigin` in
+`remote-lib-common/src/security/one-time-link.ts`; `standalone/vite.config.ts`; `bakedRelay`,
+`bakedRelayMode`, and `hostedOrigin` in `lib/src/host/relay-origin.ts`;
+`BurrowService`, `canEnroll`, and `loadEnrollmentFor` in
 `lib/src/host/remote/service.ts`. Pinned by `lib/src/host/relay-origin.test.ts`
 and `lib/src/host/remote/service.test.ts`.
 
@@ -851,19 +856,17 @@ exists to honor:
   **folded with `hidden`, never unmounted**, so typed input survives the
   disclosure and an offer appearing underneath it. **Reading the file is bounded
   to the un-enrolled state of a self-host build** (rationale).
-- **The offer's token never enters a webview.** `status` carries only the origin;
-  `enrollOffer` re-reads the file in the Burrow service, so an old card cannot
-  reuse a spent offer (`docs/specs/security-remote.md` -> "Credentials at rest").
-- **The click echoes the origin the card displayed**, and the service refuses a
-  file that no longer names it — an installer rerun rewrites the offer with an
-  origin nobody reviewed — or names any origin but the baked one, the only one
-  enrolled against. `enrollOffer` takes `{ origin, label }`.
+- **The offer's token never enters a webview.** `status` carries only whether
+  there is one (`docs/specs/security-remote.md` -> "Credentials at rest").
+- **The click re-reads the file**, so an old card cannot reuse a spent offer:
+  `enrollOffer` takes `{ label }` alone and refuses a file that no longer names
+  the baked origin.
 - **The card outlives its offer**, so a late refusal is not silence over a spent
   token.
 - **Only one enrollment may run.** One synchronous gate covers both forms and
   pre-render double clicks.
 - **The password is passed through, never held**, cleared on success; `enroll`
-  answers `{ burrowId, relayUrl }`, so `burrowToken` never re-enters the webview.
+  answers `{ burrowId }`, so `burrowToken` never re-enters the webview.
 - **Refusals are shown, not swallowed**, the offer card included: the service's
   own error is what the form renders, never a generic wrong-password message.
 - **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
@@ -901,18 +904,18 @@ exists to honor:
   answer** — `enroll`, `reconnect`, `clearEnrollment` and losing the last
   subscriber each drop the read in flight (rationale).
 
-Source of truth: `RelayChoices` and `useSetupQr` in
+Source of truth: `RelayChoices`, `UnenrolledRelay`, and `useSetupQr` in
 `lib/src/components/RemoteControlSection.tsx`, `ScannableCode` in
 `lib/src/components/ScannableCode.tsx` over `lib/src/components/QrCode.tsx`
 (`uqr` encodes; that draws, lazily, so the encoder stays out of every main
 bundle); `describePushTargets` in `lib/src/components/SettingsDialog.tsx`;
 `dropInFlightRead` in `lib/src/remote/burrow/burrow-status-store.ts`;
 `lib/src/host/remote/enroll-offer.ts` for the offer's well-known per-platform
-path, read by `#enrollOffer` in `lib/src/host/remote/service.ts`.
+path, read by `readUsableOffer` in `lib/src/host/remote/service.ts`.
 
 The `window.dormouseBurrow` console hook — the scripting seam — exposes the
 five enrollment commands: `enroll(password, label)`,
-`enrollOffer(origin, label)` (its origin from `status().offer.origin`), `status`,
+`enrollOffer(label)`, `status`,
 `reconnect`, `clearEnrollment`. **Pairing confirmation is never here**: it is a
 modal because it must interrupt, and because the digits it takes are read off a
 phone ([remote-security-model.md](./remote-security-model.md) -> Pairing). The
@@ -1070,8 +1073,8 @@ there, audited by the `FAIL IF` lines in `docs/specs/security-remote.md` and che
 Two couplings stay on this side of the seam: the Relay writes
 `DORMOUSE_RUNTIME_FILE` / `DORMOUSE_RELEASE_ID` once bound (Configuration above)
 so the installers' health checks can prove *which* release answered rather than
-accepting any 200 on the port; and a Burrow reaching an installed Relay needs a
-build baked with exactly its `DORMOUSE_ORIGIN` ("Relay origin" above).
+accepting any 200 on the port; and the build a Burrow reaching it needs
+("Relay origin" above).
 
 ## Future
 

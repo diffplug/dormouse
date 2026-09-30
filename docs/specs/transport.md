@@ -217,7 +217,7 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 ### Managed voice
 
-**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in standalone (Tauri and the browser-dev harness); VS Code, Pocket, and the website omit it. Behavior: `docs/specs/alert.md` → "Managed voice".
+**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in a Hosted standalone build (Tauri and the browser-dev harness); VS Code, Pocket, the website, and a self-host build omit it. Behavior: `docs/specs/alert.md` → "Managed voice".
 
 | Direction | Standalone carrier | Payload |
 | --- | --- | --- |
@@ -227,7 +227,7 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 
 **Every window caches the status**: it asks `status` once its `voice:status` listener is live, and again when the harness's event stream reconnects, then takes each broadcast; **an answer never overrides a broadcast that arrived after its request**. Shapes: `ManagedVoicePort` and the wire types beside it.
 
-Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `managed_voice` in `standalone/src-tauri/src/lib.rs`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
+Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `managedVoicePortForBuild` and `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `managed_voice` in `standalone/src-tauri/src/lib.rs`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 
 ## Persisted session types
 

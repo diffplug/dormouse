@@ -129,11 +129,10 @@ webview, where `TauriAdapter` converts dor control requests into the
 
 The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
 — runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow
-side", which owns that split and what the webview keeps): the same
+side"): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
-with the relay origin baked in (`docs/specs/relay.md` → "Relay origin").
-**Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
+(§Build and development). **Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
 as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStore`
@@ -1294,19 +1293,21 @@ Source of truth: `standalone/package.json` (package scripts),
 `standalone/src-tauri/tauri.conf.json` (`build`, `bundle.resources`), and the root
 `package.json` for the `dev:standalone` and `innerdogfood` orchestration;
 `runDev` in `standalone/scripts/dev-standalone.mjs`;
+`SELF_HOST_BUILD_CONFIG` in `standalone/scripts/tauri.mjs`;
 `standalone/scripts/clean-dev-sidecar.mjs`.
 
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
   `lib/src/host/` sources into the sidecar `.cjs` files).
-- The `tauri` script runs `standalone/scripts/tauri.mjs`, which stages —
-  `stage:dev` for `dev`, as `pnpm innerdogfood` does, `stage` otherwise — then
-  delegates to the Tauri CLI, except `dev`, which it routes through `runDev`
-  below. `build-sidecar-proxy.mjs` bakes `DORMOUSE_RELAY_ORIGIN` into the
-  sidecar's Burrow bundle, a dev build only under `--dev`
-  (`docs/specs/relay.md` → "Relay origin"). The webview CSP contains no relay sources, pinned by
-  `standalone/scripts/tauri-conf.test.mjs`
-  (`docs/specs/relay.md` → "Relay origin").
+- `tauri dev` stages `stage:dev`, as `pnpm innerdogfood` does, then runs
+  `runDev` below; other subcommands reach the Tauri CLI unstaged, `build`
+  staging via `beforeBuildCommand`. The sidecar bundle (a dev build under
+  `--dev`) and the webview bake `DORMOUSE_RELAY_ORIGIN` (`docs/specs/relay.md`
+  → "Relay origin"); the webview CSP has no relay sources
+  (`standalone/scripts/tauri-conf.test.mjs`).
+- **A self-host `tauri build` overlays no updater endpoint and no updater
+  artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing
+  key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
@@ -1332,10 +1333,9 @@ Source of truth: `standalone/package.json` (package scripts),
   sources.** Frontend edits hot-reload; Tauri watches Rust.
 - `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
   browser-dev harness instead of the Tauri WebView (below).
-- **May build a dev build with `DORMOUSE_RELAY_ORIGIN=http://localhost:<port>
-  DORMOUSE_RELAY_IS_HOSTED=1`**, the origin a local `pnpm dev:hosted` prints, to
-  speak managed voice through it; it answers no other `Host`
-  (`docs/specs/security-local.md` -> "Persisted state").
+- **May point a dev build at a local `pnpm dev:hosted`** — the origin it prints,
+  with `DORMOUSE_RELAY_IS_HOSTED=1` — to speak managed voice through it; it
+  answers no other `Host` (`docs/specs/security-local.md` -> "Persisted state").
 
 ### Standalone browser-dev harness
 

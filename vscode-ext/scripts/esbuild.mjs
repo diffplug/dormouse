@@ -1,15 +1,6 @@
-// Bundles the extension host and the PTY host, and is the single place that
-// bakes the Burrow's one relay origin into the build.
-//
-// The published extension reaches Hosted only. A selfhoster bakes their own
-// Relay's origin, which makes a self-host build that reaches nothing else:
-//
-//   DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:vscode
-//
-// This mirrors the standalone binary (`standalone/scripts/build-sidecar-proxy.mjs`,
-// which bakes the same pair into the sidecar's Burrow). `scripts/relay-origin.mjs`
-// is the one definition of the default and the rules for both. See
-// docs/specs/relay.md → "Relay origin".
+// Bundles the extension host and the PTY host, and bakes the Burrow's one relay
+// origin into the extension host as `standalone/scripts/build-sidecar-proxy.mjs`
+// does into the sidecar (docs/specs/relay.md → "Relay origin").
 
 import { fileURLToPath } from 'node:url';
 
@@ -23,7 +14,7 @@ import {
 } from '../../scripts/relay-origin.mjs';
 
 const watch = process.argv.includes('--watch');
-// The watch build is VS Code's one dev build; every other is a release build.
+// `--watch` is VS Code's dev build (docs/specs/relay.md → "Relay origin").
 const relay = resolveRelayOrigin(process.env, 'esbuild', { dev: watch });
 
 // Staged into `dist/node_modules` by `stage-native-direct.mjs`, so it must stay

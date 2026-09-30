@@ -163,14 +163,12 @@ It lasts for 24 hours or until the first Burrow enrolls, whichever comes first.
 Press **Enroll** and the machine is connected.
 
 The one thing the card is careful about: **the token never reaches the webview.**
-The status the card renders from carries the origin and nothing else; pressing
-Enroll sends the name and an echo of that origin, and the Burrow service re-reads
-the file itself. That re-read is also why a card left on screen for an hour is
-safe to press: redeeming an offer unlinks it, so a spent one fails with a
-message saying so rather than half-enrolling. The echo covers the other half of
-the same hour — if the installer ran again and rewrote the offer, the origin on
-disk no longer matches the one you read, and the service refuses rather than
-spend a one-time token on a Relay you were never shown.
+The status the card renders from says only that there is an offer; pressing
+Enroll sends the name, and the Burrow service re-reads the file itself, spending
+its token only if it still names the origin this build was made for. That
+re-read is also why a card left on screen for an hour is safe to press:
+redeeming an offer unlinks it, so a spent one fails with a message saying so
+rather than half-enrolling.
 
 ### The typed form, when there is no offer
 
@@ -194,7 +192,7 @@ self-hoster cannot skip. Three rules it exists to honor:
   unreachable Relay never reads as a wrong password.
 
 - **The bearer token never comes back.** Enrollment answers
-  `{ burrowId, relayUrl }`; the `burrowToken` stays in the Burrow service and on
+  `{ burrowId }`; the `burrowToken` stays in the Burrow service and on
   disk, and never enters the webview.
 
 On success the section flips to the enrolled view. Note the last line —

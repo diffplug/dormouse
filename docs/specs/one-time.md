@@ -421,26 +421,22 @@ enrolled runtime's.
   control of every terminal here until it disconnects or you end it. Nothing is
   saved." beside a "Confirm and allow" button.
 
-**The origin is the build's baked relay origin, and only a Hosted build has
-one** (`docs/specs/relay.md` -> "Relay origin"; rationale). **`oneTimeAvailability`
-decides before any socket exists**: `self-host` in a self-host build;
-`origin-invalid` for anything but a bare HTTPS origin, or HTTP on a link
-loopback host, of at most 167 characters, which the build already refuses;
-either makes the state `unavailable`.
+**The origin is the build's Hosted origin, which only a Hosted build has**
+(`docs/specs/relay.md` -> "Relay origin", whose "Accepted origins" bounds it). **Availability is decided before any socket exists**:
+without a Hosted origin the state is `unavailable` with reason `self-host`, and
+the service builds no runtime.
 
-**Standalone** passes the baked origin from the sidecar entry; Rust broadcasts
+**Standalone** passes the baked pair from the sidecar entry; Rust broadcasts
 every `burrow:event` unchanged. VS Code's bootstrap, idle answers, and serving
 marker are `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
 
-Source of truth: `BurrowService`, `idleOneTimeState`, and `oneTimeServing` in
-`lib/src/host/remote/service.ts`; `OneTimeEvent`, `servingOf`, and
-`approvalKind` in `lib/src/host/remote/service-protocol.ts`; `oneTimeAvailability` in
-`lib/src/host/remote/one-time-origin.ts`; `bakedRelayOrigin` / `bakedRelayMode` in
-`lib/src/host/relay-origin.ts`;
+Source of truth: `BurrowService` and `oneTimeServing` in
+`lib/src/host/remote/service.ts`; `idleOneTimeState`, `OneTimeEvent`,
+`servingOf`, and `approvalKind` in `lib/src/host/remote/service-protocol.ts`;
+`bakedRelay` / `hostedOrigin` in `lib/src/host/relay-origin.ts`;
 `mirrorPairingQueue` in `lib/src/remote/burrow/activation.ts`;
 `RemotePairingModal` in `lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by
-`lib/src/host/remote/service.test.ts` and
-`lib/src/host/remote/one-time-origin.test.ts`.
+`lib/src/host/remote/service.test.ts`.
 
 ## Laptop UI
 
