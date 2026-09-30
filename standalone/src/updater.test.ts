@@ -11,7 +11,12 @@ const mocks = vi.hoisted(() => ({
   shellOpen: vi.fn(),
   invoke: vi.fn(),
   requestAppRestart: vi.fn(),
-  platform: null as { requestAppRestart?: () => Promise<boolean> } | null,
+  /** The sidecar's Burrow `status`, whose `relayMode` gates every check. */
+  burrowStatus: vi.fn(),
+  platform: null as {
+    requestAppRestart?: () => Promise<boolean>;
+    burrow?: { command: (cmd: string) => Promise<unknown> };
+  } | null,
 }));
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
@@ -88,7 +93,11 @@ describe('updater', () => {
     mocks.check.mockResolvedValue(null);
     mocks.shellOpen.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue('');
-    mocks.platform = { requestAppRestart: mocks.requestAppRestart };
+    mocks.burrowStatus.mockResolvedValue({ relayMode: 'hosted' });
+    mocks.platform = {
+      requestAppRestart: mocks.requestAppRestart,
+      burrow: { command: mocks.burrowStatus },
+    };
   });
 
   // Drive check → approve → download so an approved, downloaded update is pending.
@@ -199,6 +208,25 @@ describe('updater', () => {
 
       await vi.advanceTimersByTimeAsync(1);
       expect(mocks.check).toHaveBeenCalledOnce();
+      expect(mocks.burrowStatus).toHaveBeenCalledWith('status');
+    });
+
+    // A self-host build never polls dormouse.sh: the manifest names the stock
+    // binaries, and installing one would replace its Relay
+    // (docs/specs/relay.md → "Relay origin"). Fails closed.
+    it.each([
+      ['a self-host build', () => mocks.burrowStatus.mockResolvedValue({ relayMode: 'self-host' })],
+      ['a status with no mode', () => mocks.burrowStatus.mockResolvedValue({ enrolled: false })],
+      ['a sidecar that cannot answer', () => mocks.burrowStatus.mockRejectedValue(new Error('no sidecar'))],
+      ['no Burrow service at all', () => { mocks.platform = { requestAppRestart: mocks.requestAppRestart }; }],
+    ])('never checks in %s', async (_case, arrange) => {
+      arrange();
+      const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mocks.check).not.toHaveBeenCalled();
+      expect(readBannerState()).toEqual({ status: 'idle' });
+      info.mockRestore();
     });
 
     it('does not download until the user approves the update', async () => {

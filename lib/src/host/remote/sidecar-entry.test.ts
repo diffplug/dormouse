@@ -908,7 +908,7 @@ describe('the sidecar host', () => {
     await vi.waitFor(() => {
       expect(out.find((line) => line.event === 'voice:result')?.data).toEqual({
         requestId: 'req-1',
-        result: { configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID },
+        result: { available: true, configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID },
       });
     });
   });
@@ -919,7 +919,7 @@ describe('the sidecar host', () => {
     try {
       saving.handleCommand('voice:command', { op: 'configure', update: { voiceId: 'abc123' }, requestId: 'req-2' });
       await vi.waitFor(() => {
-        expect(out.find((line) => line.event === 'voice:status')?.data).toEqual({ configured: false, voiceId: 'abc123' });
+        expect(out.find((line) => line.event === 'voice:status')?.data).toEqual({ available: true, configured: false, voiceId: 'abc123' });
       });
     } finally {
       saving.dispose();

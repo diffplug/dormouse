@@ -15,25 +15,26 @@ function harness(answer: (payload: Record<string, unknown>) => unknown) {
 
 describe("createManagedVoicePort", () => {
   it("caches the status it is asked for, then each broadcast, and tells its subscribers", async () => {
-    const { port } = harness(() => ({ configured: true, voiceId: "v1" }));
+    const { port } = harness(() => ({ available: true, configured: true, voiceId: "v1" }));
     const heard = vi.fn();
     port.subscribe(heard);
     expect(port.status()).toBeNull();
 
     port.refresh();
-    await vi.waitFor(() => expect(port.status()).toEqual({ configured: true, voiceId: "v1" }));
-    port.receiveStatus({ configured: false, voiceId: "v2" });
-    expect(port.status()).toEqual({ configured: false, voiceId: "v2" });
-    // Not a status: ignored, never cached.
+    await vi.waitFor(() => expect(port.status()).toEqual({ available: true, configured: true, voiceId: "v1" }));
+    port.receiveStatus({ available: true, configured: false, voiceId: "v2" });
+    expect(port.status()).toEqual({ available: true, configured: false, voiceId: "v2" });
+    // Not a status: ignored, never cached — an availability missing included.
     port.receiveStatus({ configured: "yes" });
-    expect(port.status()).toEqual({ configured: false, voiceId: "v2" });
+    port.receiveStatus({ configured: true, voiceId: "v3" });
+    expect(port.status()).toEqual({ available: true, configured: false, voiceId: "v2" });
     expect(heard).toHaveBeenCalledTimes(2);
   });
 
   it("caches a saved edit's status without waiting for the broadcast", async () => {
-    const { port } = harness(() => ({ ok: true, configured: true, voiceId: "v1" }));
-    expect(await port.configure({ token: "dmv_x" })).toEqual({ ok: true, configured: true, voiceId: "v1" });
-    expect(port.status()).toEqual({ configured: true, voiceId: "v1" });
+    const { port } = harness(() => ({ ok: true, available: true, configured: true, voiceId: "v1" }));
+    expect(await port.configure({ token: "dmv_x" })).toEqual({ ok: true, available: true, configured: true, voiceId: "v1" });
+    expect(port.status()).toEqual({ available: true, configured: true, voiceId: "v1" });
   });
 
   it.each([
@@ -44,10 +45,10 @@ describe("createManagedVoicePort", () => {
     const { port } = harness(() => new Promise((resolve) => { answer = resolve; }));
     ask(port);
     // Another window saved a token: its broadcast lands before this older answer.
-    port.receiveStatus({ configured: true, voiceId: "v2" });
-    answer({ ok: true, configured: false, voiceId: "v1" });
+    port.receiveStatus({ available: true, configured: true, voiceId: "v2" });
+    answer({ ok: true, available: true, configured: false, voiceId: "v1" });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(port.status()).toEqual({ configured: true, voiceId: "v2" });
+    expect(port.status()).toEqual({ available: true, configured: true, voiceId: "v2" });
   });
 
   it("reports a configure the sidecar failed as unavailable", async () => {

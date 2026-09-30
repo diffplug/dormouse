@@ -64,10 +64,10 @@ const audioResponse = () => new Response(new Uint8Array([9, 8, 7]), {
 
 describe('configuration', () => {
   it('reports and broadcasts configured without ever carrying the token', async () => {
-    expect(await host.handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
+    expect(await host.handle({ op: 'status' })).toEqual({ available: true, configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
     const result = await host.handle({ op: 'configure', update: { token: `  ${TOKEN}\n` } });
-    expect(result).toEqual({ ok: true, configured: true, voiceId: DEFAULT_MANAGED_VOICE_ID });
-    expect(broadcasts).toEqual([{ configured: true, voiceId: DEFAULT_MANAGED_VOICE_ID }]);
+    expect(result).toEqual({ ok: true, available: true, configured: true, voiceId: DEFAULT_MANAGED_VOICE_ID });
+    expect(broadcasts).toEqual([{ available: true, configured: true, voiceId: DEFAULT_MANAGED_VOICE_ID }]);
     expect(JSON.stringify([result, broadcasts])).not.toContain(TOKEN);
     expect(JSON.stringify(await host.handle({ op: 'status' }))).not.toContain(TOKEN);
   });
@@ -78,7 +78,7 @@ describe('configuration', () => {
       host.handle({ op: 'configure', update: { voiceId: 'abc123' } }),
     ]);
     expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({ token: TOKEN, voiceId: 'abc123' });
-    expect(broadcasts.at(-1)).toEqual({ configured: true, voiceId: 'abc123' });
+    expect(broadcasts.at(-1)).toEqual({ available: true, configured: true, voiceId: 'abc123' });
   });
 
   it('persists owner-only and survives a restart', async () => {
@@ -86,25 +86,25 @@ describe('configuration', () => {
     const file = join(dir, MANAGED_VOICE_FILE);
     if (process.platform !== 'win32') expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: 'abc123' });
-    expect(await make().handle({ op: 'status' })).toEqual({ configured: true, voiceId: 'abc123' });
+    expect(await make().handle({ op: 'status' })).toEqual({ available: true, configured: true, voiceId: 'abc123' });
   });
 
   it('refuses malformed tokens and voice ids without storing them', async () => {
     expect(await host.handle({ op: 'configure', update: { token: 'sk-nope' } })).toEqual({ ok: false, reason: 'invalid-token' });
     expect(await host.handle({ op: 'configure', update: { voiceId: '../x' } })).toEqual({ ok: false, reason: 'invalid-voice' });
-    expect(await host.handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
+    expect(await host.handle({ op: 'status' })).toEqual({ available: true, configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
     expect(broadcasts).toEqual([]);
   });
 
   it('clears the token', async () => {
     await host.handle({ op: 'configure', update: { token: TOKEN } });
-    expect(await host.handle({ op: 'configure', update: { token: null } })).toMatchObject({ configured: false });
+    expect(await host.handle({ op: 'configure', update: { token: null } })).toMatchObject({ available: true, configured: false });
     expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8')).token).toBeNull();
   });
 
   it('treats a corrupt or hand-edited file as unconfigured', async () => {
     await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: 'dmv_short', voiceId: 7 }));
-    expect(await make().handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
+    expect(await make().handle({ op: 'status' })).toEqual({ available: true, configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
   });
 
   it('keeps a saved token through a read error, and reads again next time', async () => {
@@ -117,7 +117,7 @@ describe('configuration', () => {
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: DEFAULT_MANAGED_VOICE_ID });
 
     expect(await restarted.handle({ op: 'configure', update: { voiceId: 'abc123' } }))
-      .toEqual({ ok: true, configured: true, voiceId: 'abc123' });
+      .toEqual({ ok: true, available: true, configured: true, voiceId: 'abc123' });
     expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: 'abc123' });
   });
 
@@ -187,5 +187,54 @@ describe('speak', () => {
     expect(await host.handle({ op: 'speak', text: '   ' })).toEqual({ ok: false, reason: 'bad-request' });
     expect(await host.handle({ op: 'speak', text: 'x'.repeat(201) })).toEqual({ ok: false, reason: 'bad-request' });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('the build it runs in', () => {
+  it('speaks to a Hosted build’s relay origin, a dev build’s local Hosted included', async () => {
+    const local = createManagedVoiceHost({
+      stateDir: dir,
+      onStatus: () => {},
+      fetch: fetchMock as unknown as typeof fetch,
+      relayOrigin: 'http://localhost:8787',
+      relayMode: 'hosted',
+    });
+    await local.handle({ op: 'configure', update: { token: TOKEN } });
+    fetchMock.mockResolvedValue(audioResponse());
+
+    expect(await local.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(fetchMock.mock.calls[0]![0]).toBe('http://localhost:8787/api/voice/speak');
+  });
+
+  it('sends nothing from a self-host build, whatever a Hosted build saved', async () => {
+    // A token saved by a Hosted build on this machine is still on disk; a
+    // self-host build reaches nothing of Dormouse's (docs/specs/relay.md →
+    // "Relay origin"), so it reads none of it and says it is unavailable.
+    await host.handle({ op: 'configure', update: { token: TOKEN } });
+    const selfHost = createManagedVoiceHost({
+      stateDir: dir,
+      onStatus: (status) => void broadcasts.push(status),
+      fetch: fetchMock as unknown as typeof fetch,
+      relayOrigin: 'https://relay.example.ts.net',
+      relayMode: 'self-host',
+    });
+    broadcasts = [];
+
+    expect(await selfHost.handle({ op: 'status' })).toEqual({
+      available: false,
+      configured: false,
+      voiceId: DEFAULT_MANAGED_VOICE_ID,
+    });
+    expect(await selfHost.handle({ op: 'configure', update: { voiceId: 'abc123' } })).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+    expect(await selfHost.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(broadcasts).toEqual([]);
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({
+      token: TOKEN,
+      voiceId: DEFAULT_MANAGED_VOICE_ID,
+    });
   });
 });

@@ -38,8 +38,12 @@ export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePo
 
   const apply = (data: unknown): void => {
     const next = data as Partial<ManagedVoiceStatus> | null;
-    if (typeof next?.configured !== "boolean" || typeof next.voiceId !== "string") return;
-    status = { configured: next.configured, voiceId: next.voiceId };
+    if (
+      typeof next?.available !== "boolean" ||
+      typeof next.configured !== "boolean" ||
+      typeof next.voiceId !== "string"
+    ) return;
+    status = { available: next.available, configured: next.configured, voiceId: next.voiceId };
     for (const listener of listeners) listener();
   };
   const ask = async <T>(payload: Record<string, unknown>): Promise<T> => {

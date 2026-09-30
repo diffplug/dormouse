@@ -141,6 +141,24 @@ export function openIssueSearch(error: string): void {
 
 // --- Lifecycle ---
 
+/**
+ * Whether this build may check for updates at all: only a Hosted build, as its
+ * sidecar's Burrow `status` reports it — the one place the relay origin is
+ * baked. A self-host build never checks, since the manifest names the stock
+ * binaries and installing one would replace its Relay; a sidecar that answers
+ * nothing counts as one (docs/specs/auto-update.md → "How it works").
+ */
+async function isHostedBuild(): Promise<boolean> {
+  const burrow = getPlatformOrNull()?.burrow;
+  if (!burrow) return false;
+  try {
+    const status = (await burrow.command('status')) as { relayMode?: unknown } | null;
+    return status?.relayMode === 'hosted';
+  } catch {
+    return false;
+  }
+}
+
 export function startUpdateCheck(): void {
   if (BROWSER_DEV_HOST) return;
   void runUpdateCheck().catch((e) => console.error('[updater] Startup failed:', e));
@@ -205,6 +223,11 @@ async function runUpdateCheck(): Promise<void> {
   }
 
   await new Promise((resolve) => setTimeout(resolve, 5_000));
+
+  if (!(await isHostedBuild())) {
+    console.info('[updater] not a Hosted build: no update check');
+    return;
+  }
 
   try {
     const update = await checkForUpdate();

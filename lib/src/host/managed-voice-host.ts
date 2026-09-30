@@ -2,12 +2,13 @@
  * The host half of managed voice (`docs/specs/alert.md` -> "Managed voice"):
  * holds the token, adds it and the voice id to the webview's text, and answers
  * with audio or a diagnostic failure. Where the request may go:
- * `docs/specs/security-local.md` -> "Persisted state".
+ * `docs/specs/security-local.md` -> "Persisted state" — a Hosted build's relay
+ * origin, and in a self-host build nowhere.
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
-import { bakedRelayOrigin } from './relay-origin';
+import { bakedRelayMode, bakedRelayOrigin, type RelayMode } from './relay-origin';
 import { createSerialQueue } from './remote/serial-queue';
 import {
   DEFAULT_MANAGED_VOICE_ID,
@@ -51,7 +52,11 @@ export function createManagedVoiceHost(options: {
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
   log?: (message: string) => void;
+  /** This build's relay origin and mode; the baked pair by default (`relay-origin.ts`). */
+  relayOrigin?: string;
+  relayMode?: RelayMode;
 }): { handle(command: unknown): Promise<unknown> } {
+  if ((options.relayMode ?? bakedRelayMode()) !== 'hosted') return selfHostVoice();
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? MANAGED_VOICE_REQUEST_TIMEOUT_MS;
   const log = options.log ?? (() => {});
@@ -59,7 +64,7 @@ export function createManagedVoiceHost(options: {
     ? { dir: options.stateDir, file: join(options.stateDir, MANAGED_VOICE_FILE) }
     : undefined;
   // The only place the token may go (`docs/specs/security-local.md` -> "Persisted state").
-  const speakUrl = bakedRelayOrigin() + MANAGED_VOICE_SPEAK_PATH;
+  const speakUrl = (options.relayOrigin ?? bakedRelayOrigin()) + MANAGED_VOICE_SPEAK_PATH;
   let loaded: Promise<StoredConfig> | null = null;
   // Each edit reads, then rewrites the whole file: two at once would drop a field.
   const serialize = createSerialQueue();
@@ -84,7 +89,7 @@ export function createManagedVoiceHost(options: {
   };
 
   const status = (config: StoredConfig): ManagedVoiceStatus =>
-    ({ configured: config.token !== null, voiceId: config.voiceId });
+    ({ available: true, configured: config.token !== null, voiceId: config.voiceId });
 
   async function configure(update: unknown): Promise<ManagedVoiceConfigResult> {
     if (!store) return { ok: false, reason: 'unavailable' };
@@ -176,6 +181,30 @@ export function createManagedVoiceHost(options: {
         case 'configure': return serialize(() => configure(message.update));
         case 'speak':
           return typeof message.text === 'string' ? speak(message.text) : { ok: false, reason: 'bad-request' };
+        default: return undefined;
+      }
+    },
+  };
+}
+
+/**
+ * A self-host build's managed voice: it sends nothing to Hosted
+ * (`docs/specs/relay.md` → "Relay origin"), so it reads no token, makes no
+ * request, and says so — the Settings group hides and the engine goes straight
+ * to Web Speech.
+ */
+function selfHostVoice(): { handle(command: unknown): Promise<unknown> } {
+  const status: ManagedVoiceStatus = {
+    available: false,
+    configured: false,
+    voiceId: DEFAULT_MANAGED_VOICE_ID,
+  };
+  return {
+    async handle(command) {
+      switch ((command as Record<string, unknown> | null)?.op) {
+        case 'status': return status;
+        case 'configure': return { ok: false, reason: 'unavailable' } satisfies ManagedVoiceConfigResult;
+        case 'speak': return { ok: false, reason: 'self-host' } satisfies ManagedVoiceHostSpeakResult;
         default: return undefined;
       }
     },

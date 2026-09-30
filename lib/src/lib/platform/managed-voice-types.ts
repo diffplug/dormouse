@@ -8,6 +8,12 @@
 export const DEFAULT_MANAGED_VOICE_ID = '21m00Tcm4TlvDq8ikWAM';
 
 export interface ManagedVoiceStatus {
+  /**
+   * `false` in a self-host build, which sends nothing to Hosted: the Settings
+   * group hides and nothing is spoken through it (`docs/specs/alert.md` ->
+   * "Managed voice").
+   */
+  available: boolean;
   configured: boolean;
   voiceId: string;
 }

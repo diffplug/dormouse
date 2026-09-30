@@ -18,9 +18,16 @@ let root: Root;
 let stored: { token: string | null; voiceId: string };
 let updates: ManagedVoiceConfigUpdate[];
 
-/** The host's cached status, updated and announced on every saved edit. */
-function makePort(offerSetup = true): ManagedVoicePort {
-  const snapshot = (): ManagedVoiceStatus => ({ configured: stored.token !== null, voiceId: stored.voiceId });
+/**
+ * The host's cached status, updated and announced on every saved edit.
+ * `available: false` is a self-host build's host, which sends nothing to Hosted.
+ */
+function makePort(offerSetup = true, available = true): ManagedVoicePort {
+  const snapshot = (): ManagedVoiceStatus => ({
+    available,
+    configured: stored.token !== null,
+    voiceId: stored.voiceId,
+  });
   let status = snapshot();
   const listeners = new Set<() => void>();
   return {
@@ -77,6 +84,13 @@ afterEach(async () => {
 describe('ManagedVoiceSection', () => {
   it('renders nothing where the host has no managed voice', async () => {
     await render(new FakePtyAdapter());
+    expect(container.innerHTML).toBe('');
+  });
+
+  it('stays hidden in a self-host build, a dev build’s setup and a saved token included', async () => {
+    // Its host sends nothing to Hosted (docs/specs/relay.md → "Relay origin").
+    stored.token = TOKEN;
+    await render(Object.assign(new FakePtyAdapter(), { managedVoice: makePort(true, false) }));
     expect(container.innerHTML).toBe('');
   });
 
