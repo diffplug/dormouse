@@ -3,7 +3,8 @@
 Account frontend and Hono/Cloudflare Worker for `https://hosted.dormouse.sh`,
 which also serves the one-time connection's rendezvous and its `/connect/`
 phone page ([its spec](../docs/specs/one-time.md)). The marketing website is a separate
-application. Hosted voice and the managed Relay are not implemented. See
+application. Managed voice exists only as an admin-only test slice; the managed
+Relay is not implemented. See
 [the spec](../docs/specs/hosted.md).
 
 This file is the whole operator runbook, in the order an operator works: run
@@ -26,7 +27,9 @@ URL it prints. Request a code for a test address and read it at
 `/api/dev/emails` on that same origin. No real mail is sent, and the development database is isolated by
 the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what
 the local entry serves and what production omits. The port is OS-assigned
-unless you set `PORT`. Do not share this local inbox publicly.
+unless you set `PORT`. Do not share this local inbox publicly. Set
+`ELEVENLABS_API_KEY` in the environment of `pnpm dev:hosted` to hear real
+speech; see `docs/specs/hosted.md` -> "Managed voice".
 
 ```sh
 pnpm test:hosted
@@ -294,7 +297,14 @@ pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
 pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
 pnpm exec wrangler secret put MICROSOFT_CLIENT_SECRET
 pnpm exec wrangler secret put APPLE_CLIENT_SECRET
+pnpm exec wrangler secret put ELEVENLABS_API_KEY
 ```
+
+Create `ELEVENLABS_API_KEY` in an ElevenLabs account dedicated to Dormouse
+voice — the Worker deletes that account's entire speech history on a schedule,
+so never point it at a shared account. Restrict the key to text-to-speech plus
+speech-history access, and set a spending limit in the ElevenLabs console. How
+the Worker uses the key is `docs/specs/hosted.md` -> "Managed voice".
 
 Generate a fresh cryptographically random `AUTH_SECRET` with at least 32 bytes
 of entropy in your secret manager. Client IDs are public but may be stored
@@ -348,21 +358,31 @@ credential pair do and do not enable. Facebook is outside this milestone.
 5. Log in on two devices and confirm both remain signed in. Log out on one;
    the other must remain signed in. Provider-only accounts display no email
    and repeat login preserves their account ID.
-6. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
+6. Sign in as the admin address, create a voice token, and speak one short
+   phrase with it from Dormouse desktop; revoke it and confirm the next speak
+   fails. Confirm another account sees no Voice tokens section.
+7. Confirm the history sweep's Cron Trigger is registered: the deploy log lists
+   `schedule: */5 * * * *`, and the dashboard shows it under Workers & Pages ->
+   `dormouse-hosted` -> Settings -> Trigger Events. After the speak in step 6,
+   the ElevenLabs console's speech history should be empty within a few
+   minutes. The Worker's Cron Events list each run; a failed run means the key
+   cannot list or delete history. Recheck them for failed runs after any key
+   change.
+8. Confirm `/api/dev/emails`, `/dev/emails`, and `/__test/time` are absent, and
    check the live responses against the origin, caching, and cookie rules in
    `docs/specs/security-hosted.md` -> "Origin boundary".
-7. Confirm the release smoke's one-time half passed: `/connect/` answers the
+9. Confirm the release smoke's one-time half passed: `/connect/` answers the
    page under its own policy with its script beside it, and the rendezvous
    mints a room, is refused with a browser `Origin`, joins from the app origin,
    crosses a frame each way, and is refused a second phone. Load `/connect/`
    in a browser and confirm no injected script or third-party request.
-8. With a desktop build pointed at this origin, open a one-time link on a real
-   iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi
-   as the laptop and each by scanning the QR code with the native camera, which
-   must keep the fragment. Connect, type the digits, run a command, and End
-   from the laptop. Then turn the phone's Wi-Fi off mid-session: both ends
-   report the end. On a guest or client-isolated network the attempt ends on
-   the same-Wi-Fi copy.
+10. With a desktop build pointed at this origin, open a one-time link on a real
+    iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi
+    as the laptop and each by scanning the QR code with the native camera, which
+    must keep the fragment. Connect, type the digits, run a command, and End
+    from the laptop. Then turn the phone's Wi-Fi off mid-session: both ends
+    report the end. On a guest or client-isolated network the attempt ends on
+    the same-Wi-Fi copy.
 
 Do not mark all five login methods complete until email and all four providers
 pass in real browsers; a simulated callback certifies nothing. No real-provider
@@ -383,4 +403,4 @@ Current provisioning status is discoverable with `gh secret list --env NAME`,
 `gh variable list --env NAME`, and each provider console. Configuration presence
 alone is not acceptance. The account limitations an operator will be asked about
 — login lifetime, no device revocation or sign-out-everywhere, no merge or
-recovery, no paid-service activation — are in `docs/specs/hosted.md`.
+recovery, admin-only managed voice, no paid-service activation — are in `docs/specs/hosted.md`.

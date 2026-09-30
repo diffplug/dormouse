@@ -378,6 +378,12 @@ describe('paneMouseOverride', () => {
 });
 
 describe('MobileTerminalUi edge scroll', () => {
+  function startClock() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance'] });
+    // React treats a zero native timestamp as missing and substitutes Date.now.
+    vi.advanceTimersByTime(1);
+  }
+
   function setup(capturing = false) {
     const onSendInput = vi.fn();
     const onGestureInput = vi.fn();
@@ -396,12 +402,87 @@ describe('MobileTerminalUi edge scroll', () => {
     vi.spyOn(screen, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 32, right: 370, bottom: 500, width: 370, height: 468 } as DOMRect);
     vi.spyOn(registry, 'getTerminalInstance').mockReturnValue({
       element: ui.terminal, modes: { mouseTrackingMode: capturing ? 'any' : 'none' }, scrollLines,
+      buffer: { active: { viewportY: 100, baseY: 200 } },
     } as unknown as Terminal);
-    const pointer = (type: string, x: number, y: number) => act(() => {
-      ui.terminal.dispatchEvent(pointerEvent(type, { clientX: x, clientY: y }));
+    const pointer = (type: string, x: number, y: number, overrides: Partial<PointerEvent> = {}) => act(() => {
+      ui.terminal.dispatchEvent(pointerEvent(type, { clientX: x, clientY: y, ...overrides }));
     });
     return { ...ui, props, onSendInput, onGestureInput, onGestureScroll, scrollLines, pointer };
   }
+
+  function flick(pointer: ReturnType<typeof setup>['pointer'], end = 'pointerup', pointerType = 'touch') {
+    pointer('pointerdown', 10, 200, { timeStamp: performance.now(), pointerType });
+    act(() => vi.advanceTimersByTime(40));
+    pointer('pointermove', 10, 164, { timeStamp: performance.now(), pointerType });
+    pointer(end, 10, 164, { timeStamp: performance.now(), pointerType });
+  }
+
+  it('coasts after a flick, reports its lines, and settles without sending keys', () => {
+    startClock();
+    const { pointer, scrollLines, onGestureScroll, onSendInput } = setup();
+    flick(pointer);
+    expect(scrollLines.mock.calls).toEqual([[2]]);
+    act(() => vi.advanceTimersByTime(500));
+    expect(scrollLines.mock.calls.length).toBeGreaterThan(2);
+    expect(scrollLines.mock.calls.every(([lines]) => lines > 0)).toBe(true);
+    expect(onGestureScroll.mock.calls).toEqual(scrollLines.mock.calls);
+    act(() => vi.advanceTimersByTime(4000));
+    const settled = scrollLines.mock.calls.length;
+    act(() => vi.advanceTimersByTime(1000));
+    expect(scrollLines).toHaveBeenCalledTimes(settled);
+    expect(onSendInput).not.toHaveBeenCalled();
+  });
+
+  it.each(['pointercancel', 'mouse', 'pause'])('does not coast after %s', (stop) => {
+    startClock();
+    const { pointer, scrollLines } = setup();
+    if (stop === 'pause') {
+      pointer('pointerdown', 10, 200, { timeStamp: performance.now() });
+      act(() => vi.advanceTimersByTime(40));
+      pointer('pointermove', 10, 164, { timeStamp: performance.now() });
+      act(() => vi.advanceTimersByTime(100));
+      pointer('pointerup', 10, 164, { timeStamp: performance.now() });
+    } else {
+      flick(pointer, stop === 'pointercancel' ? stop : 'pointerup', stop === 'mouse' ? 'mouse' : 'touch');
+    }
+    act(() => vi.advanceTimersByTime(1000));
+    expect(scrollLines.mock.calls).toEqual([[2]]);
+  });
+
+  it.each(['touch', 'second finger', 'session', 'mode', 'disabled', 'unmount', 'hidden', 'boundary', 'missing terminal'])('stops a running coast on %s', (stop) => {
+    startClock();
+    const { pointer, scrollLines, props, renderWith } = setup();
+    flick(pointer);
+    act(() => vi.advanceTimersByTime(150));
+    expect(scrollLines.mock.calls.length).toBeGreaterThan(1);
+    if (stop === 'touch') pointer('pointerdown', 100, 200);
+    if (stop === 'second finger') pointer('pointerdown', 100, 200, { pointerId: 8, isPrimary: false });
+    if (stop === 'session') renderWith({ ...props, sessions: [{ id: 'other', title: 'other', active: true, episode: null }] });
+    if (stop === 'mode') renderWith({ ...props, activeTouchMode: 'selection' });
+    if (stop === 'disabled') renderWith({ ...props, interactive: false });
+    if (stop === 'unmount') act(() => roots.pop()!.unmount());
+    if (stop === 'hidden') {
+      vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+      act(() => document.dispatchEvent(new Event('visibilitychange')));
+    }
+    if (stop === 'boundary') registry.getTerminalInstance('scroll-test')!.buffer.active.viewportY = 200;
+    if (stop === 'missing terminal') vi.mocked(registry.getTerminalInstance).mockReturnValue(undefined);
+    const stopped = scrollLines.mock.calls.length;
+    act(() => vi.advanceTimersByTime(1000));
+    expect(scrollLines).toHaveBeenCalledTimes(stopped);
+  });
+
+  it('coasts through capturing-TUI wheels with clamped coordinates', () => {
+    startClock();
+    const { pointer, terminal, scrollLines } = setup(true);
+    const wheels: WheelEvent[] = [];
+    terminal.addEventListener('wheel', (event) => wheels.push(event));
+    flick(pointer);
+    act(() => vi.advanceTimersByTime(300));
+    expect(wheels.length).toBeGreaterThan(2);
+    expect(wheels.every((event) => event.deltaY === 1 && event.clientX === 10 && event.clientY === 164)).toBe(true);
+    expect(scrollLines).not.toHaveBeenCalled();
+  });
 
   it.each([10, 380])('scrolls history in both directions from x=%i and keeps an edge drag out of the compass', (edgeX) => {
     const { pointer, scrollLines, onSendInput, onGestureScroll } = setup();
@@ -417,6 +498,19 @@ describe('MobileTerminalUi edge scroll', () => {
     pointer('pointerup', 100, 118);
     pointer('pointermove', 100, 200);
     expect(scrollLines).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a live edge drag owned by the first finger when a second finger presses', () => {
+    const { pointer, scrollLines, onSendInput } = setup();
+    pointer('pointerdown', 10, 200);
+    pointer('pointermove', 10, 164);
+    pointer('pointerdown', 100, 200, { pointerId: 8, isPrimary: false });
+    pointer('pointermove', 100, 100, { pointerId: 8, isPrimary: false });
+    pointer('pointerup', 100, 100, { pointerId: 8, isPrimary: false });
+    pointer('pointermove', 10, 146);
+    expect(scrollLines.mock.calls).toEqual([[2], [1]]);
+    expect(onSendInput).not.toHaveBeenCalled();
+    pointer('pointercancel', 10, 146);
   });
 
   it.each([[0, 1], [380, 369]])('routes synthesized wheels from x=%i into the capturing terminal at x=%i', (edgeX, cellX) => {

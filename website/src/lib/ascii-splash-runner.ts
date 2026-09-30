@@ -55,6 +55,7 @@ import {
 } from "dormouse-lib/lib/ansi";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import type { InteractiveProgram } from "./tutorial-shell";
+import websitePackage from "../../package.json";
 
 interface AsciiSplashRunnerOptions {
   adapter: FakePtyAdapter;
@@ -79,7 +80,7 @@ interface KeyInput {
   data: { isCharacter: boolean; codepoint?: number };
 }
 
-const VERSION = "0.6.0";
+const VERSION = websitePackage.dependencies["ascii-splash"];
 
 const ARROW_KEY_NAMES: Record<string, string> = { A: "UP", B: "DOWN", C: "RIGHT", D: "LEFT" };
 
@@ -425,8 +426,8 @@ export class AsciiSplashRunner implements InteractiveProgram {
   handleInput(data: string): void {
     if (this.disposed) return;
     let index = 0;
-    while (index < data.length) {
-      if (data[index] === "\x1b" && data[index + 1] === "[") {
+    while (index < data.length && !this.disposed) {
+      if (data[index] === "\x1b" && index + 1 < data.length) {
         const remaining = data.slice(index);
         const mouse = remaining.match(/^\x1b\[<(\d+);(\d+);(\d+)([Mm])/);
         if (mouse) {
@@ -440,6 +441,11 @@ export class AsciiSplashRunner implements InteractiveProgram {
           index += arrow[0].length;
           continue;
         }
+        // Any other CSI/SS3 sequence (Home, Delete, PgUp, F-keys) or an
+        // Alt-prefixed key is dropped whole; only a lone ESC quits.
+        const other = remaining.match(/^\x1b(?:\[[0-?]*[ -/]*[@-~]|O.|[^[O])/);
+        index += other ? other[0].length : remaining.length;
+        continue;
       }
 
       this.handleKey(decodeKey(data[index]));
@@ -577,6 +583,7 @@ export class AsciiSplashRunner implements InteractiveProgram {
     if (!pattern) return;
     const pos: Point = { x, y };
     const isMotion = (code & 32) === 32;
+    if ((code & 64) === 64) return; // wheel, not a button
     const button = code & 3;
     if (final === "M" && isMotion && pattern.onMouseMove) {
       pattern.onMouseMove(pos);
