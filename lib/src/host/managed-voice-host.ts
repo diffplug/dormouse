@@ -69,8 +69,15 @@ export function createManagedVoiceHost(options: {
       if (!store) return normalizeStored(null);
       try {
         return normalizeStored(JSON.parse(await readFile(store.file, 'utf8')));
-      } catch {
-        return normalizeStored(null);
+      } catch (error) {
+        // Only a missing or unparsable file is "no config": a transient lock
+        // (EBUSY, EPERM, EMFILE) cached as defaults would let the next edit
+        // overwrite the saved token. Anything else is retried on the next read.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) {
+          return normalizeStored(null);
+        }
+        loaded = null;
+        throw error;
       }
     })();
     return loaded;
@@ -82,23 +89,24 @@ export function createManagedVoiceHost(options: {
   async function configure(update: unknown): Promise<ManagedVoiceConfigResult> {
     if (!store) return { ok: false, reason: 'unavailable' };
     const edit = update && typeof update === 'object' ? update as Record<string, unknown> : {};
-    const next = { ...await load() };
-    if ('token' in edit) {
-      if (edit.token === null) next.token = null;
-      else if (typeof edit.token === 'string' && MANAGED_VOICE_TOKEN_PATTERN.test(edit.token.trim())) {
-        next.token = edit.token.trim();
-      } else return { ok: false, reason: 'invalid-token' };
-    }
-    if ('voiceId' in edit) {
-      if (typeof edit.voiceId !== 'string' || !MANAGED_VOICE_ID_PATTERN.test(edit.voiceId.trim())) {
-        return { ok: false, reason: 'invalid-voice' };
-      }
-      next.voiceId = edit.voiceId.trim();
-    }
+    let next: StoredConfig;
     try {
+      next = { ...await load() };
+      if ('token' in edit) {
+        if (edit.token === null) next.token = null;
+        else if (typeof edit.token === 'string' && MANAGED_VOICE_TOKEN_PATTERN.test(edit.token.trim())) {
+          next.token = edit.token.trim();
+        } else return { ok: false, reason: 'invalid-token' };
+      }
+      if ('voiceId' in edit) {
+        if (typeof edit.voiceId !== 'string' || !MANAGED_VOICE_ID_PATTERN.test(edit.voiceId.trim())) {
+          return { ok: false, reason: 'invalid-voice' };
+        }
+        next.voiceId = edit.voiceId.trim();
+      }
       await writeJsonAtomic(store.dir, store.file, next);
     } catch (error) {
-      log(`[managed-voice] could not save: ${String(error)}`);
+      log(`[managed-voice] could not read or save: ${String(error)}`);
       return { ok: false, reason: 'unavailable' };
     }
     loaded = Promise.resolve(next);
@@ -107,7 +115,8 @@ export function createManagedVoiceHost(options: {
   }
 
   async function request(text: string): Promise<ManagedVoiceHostSpeakResult> {
-    const config = await load();
+    const config = await load().catch(() => null);
+    if (!config) return { ok: false, reason: 'config unreadable' };
     if (!config.token) return { ok: false, reason: 'unconfigured' };
     const trimmed = text.trim();
     if (trimmed.length === 0 || trimmed.length > MAX_TEXT_LENGTH) return { ok: false, reason: 'bad-request' };

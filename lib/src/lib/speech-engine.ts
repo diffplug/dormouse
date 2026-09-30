@@ -89,7 +89,9 @@ export function withFallback(primary: SpeechEngine, secondary: SpeechEngine): Sp
       };
       const first = primary.prepare(input, { ...callbacks, onFail: fallBack });
       return {
-        start: () => first.start(),
+        start() {
+          try { first.start(); } catch { fallBack(); }
+        },
         dispose(cancel) {
           first.dispose(cancel);
           second?.dispose(cancel);

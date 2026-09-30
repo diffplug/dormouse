@@ -11,6 +11,21 @@ import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
 
 const MANAGED_VOICE_SPEAK_URL = 'https://hosted.dormouse.sh/api/voice/speak';
 
+/** The next `readFile` fails with this, once: a Windows antivirus lock, say. */
+const readFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    readFile: (async (...args: Parameters<typeof actual.readFile>) => {
+      const fault = readFault.next;
+      readFault.next = null;
+      if (fault) throw fault;
+      return actual.readFile(...args);
+    }) as typeof actual.readFile,
+  };
+});
+
 /**
  * The host half of managed voice (`docs/specs/alert.md` -> "Spoken alarms"):
  * the token stays here, the request is shaped per the wire contract, and every
@@ -90,6 +105,20 @@ describe('configuration', () => {
   it('treats a corrupt or hand-edited file as unconfigured', async () => {
     await writeFile(join(dir, MANAGED_VOICE_FILE), JSON.stringify({ token: 'dmv_short', voiceId: 7 }));
     expect(await make().handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
+  });
+
+  it('keeps a saved token through a read error, and reads again next time', async () => {
+    await host.handle({ op: 'configure', update: { token: TOKEN } });
+    const file = join(dir, MANAGED_VOICE_FILE);
+    const restarted = make();
+    readFault.next = Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    expect(await restarted.handle({ op: 'configure', update: { voiceId: 'abc123' } }))
+      .toEqual({ ok: false, reason: 'unavailable' });
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: DEFAULT_MANAGED_VOICE_ID });
+
+    expect(await restarted.handle({ op: 'configure', update: { voiceId: 'abc123' } }))
+      .toEqual({ ok: true, configured: true, voiceId: 'abc123' });
+    expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ token: TOKEN, voiceId: 'abc123' });
   });
 
   it('refuses to hold a token with nowhere owner-only to keep it', async () => {

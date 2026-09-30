@@ -36,6 +36,25 @@ describe("createManagedVoicePort", () => {
     expect(port.status()).toEqual({ configured: true, voiceId: "v1" });
   });
 
+  it.each([
+    ["status", (port: ReturnType<typeof createManagedVoicePort>) => { port.refresh(); }],
+    ["configure", (port: ReturnType<typeof createManagedVoicePort>) => { void port.configure({ voiceId: "v1" }); }],
+  ])("keeps a broadcast that overtook the %s answer requested before it", async (_op, ask) => {
+    let answer!: (value: unknown) => void;
+    const { port } = harness(() => new Promise((resolve) => { answer = resolve; }));
+    ask(port);
+    // Another window saved a token: its broadcast lands before this older answer.
+    port.receiveStatus({ configured: true, voiceId: "v2" });
+    answer({ ok: true, configured: false, voiceId: "v1" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(port.status()).toEqual({ configured: true, voiceId: "v2" });
+  });
+
+  it("reports a configure the sidecar failed as unavailable", async () => {
+    const { port } = harness(() => null);
+    expect(await port.configure({ voiceId: "v1" })).toEqual({ ok: false, reason: "unavailable" });
+  });
+
   it("decodes the host's base64 audio once", async () => {
     const { port, payloads } = harness(() => ({ ok: true, audioBase64: btoa("\x01\x02\xff") }));
     expect(await port.speak("build finished")).toEqual({ ok: true, audio: new Uint8Array([1, 2, 255]) });

@@ -280,6 +280,16 @@ describe('managed voice engine', () => {
     expect(fallbackCalls.map(c => c.text)).toEqual(['say a']);
   });
 
+  it('falls back when the primary refuses by throwing from start', () => {
+    const refusing: SpeechEngine = {
+      available: () => true,
+      prepare: () => ({ start() { throw new Error('refused'); }, dispose() {} }),
+    };
+    queue = new SpeechQueue(withFallback(refusing, fallback));
+    queue.enqueue(job('a'));
+    expect(fallbackCalls.map(c => c.text)).toEqual(['say a']);
+  });
+
   it('admits jobs with no Web Speech only while the host has a token', () => {
     fallbackAvailable = false;
     expect(queue.enqueue(job('a'))).toBe(true);

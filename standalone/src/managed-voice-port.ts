@@ -15,7 +15,7 @@ import type {
 type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
 export interface StandaloneManagedVoicePort extends ManagedVoicePort {
-  /** A `voice:status` broadcast, or a `status` answer. */
+  /** A `voice:status` broadcast. */
   receiveStatus(data: unknown): void;
   /** Ask the host for its status; call once the `voice:status` listener is live. */
   refresh(): void;
@@ -32,12 +32,21 @@ export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePo
   const call = <T>(payload: Record<string, unknown>) => invoke<T>("managed_voice", { payload });
   let status: ManagedVoiceStatus | null = null;
   const listeners = new Set<() => void>();
+  // Invoke answers and broadcasts ride separate channels: an answer is applied
+  // only if no broadcast, which is newer, arrived after its request was sent.
+  let broadcasts = 0;
 
-  const receiveStatus = (data: unknown): void => {
+  const apply = (data: unknown): void => {
     const next = data as Partial<ManagedVoiceStatus> | null;
     if (typeof next?.configured !== "boolean" || typeof next.voiceId !== "string") return;
     status = { configured: next.configured, voiceId: next.voiceId };
     for (const listener of listeners) listener();
+  };
+  const ask = async <T>(payload: Record<string, unknown>): Promise<T> => {
+    const sent = broadcasts;
+    const result = await call<T>(payload);
+    if (broadcasts === sent) apply(result);
+    return result;
   };
 
   return {
@@ -47,15 +56,18 @@ export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePo
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
-    receiveStatus,
+    receiveStatus(data) {
+      broadcasts++;
+      apply(data);
+    },
     refresh() {
-      call<unknown>({ op: "status" }).then(receiveStatus, () => {});
+      ask({ op: "status" }).catch(() => {});
     },
     configure: async (update) => {
       try {
-        const result = await call<ManagedVoiceConfigResult>({ op: "configure", update });
-        if (result.ok) receiveStatus(result);
-        return result;
+        // Null when the sidecar answered with an error.
+        return (await ask<ManagedVoiceConfigResult | null>({ op: "configure", update }))
+          ?? { ok: false, reason: "unavailable" };
       } catch {
         return { ok: false, reason: "unavailable" };
       }
