@@ -4,6 +4,7 @@
   "license": "FSL-1.1-MIT",
   "type": "module",
   "scripts": {
+    "predev": "pnpm --filter remote-lib-common build",
     "dev": "vite",
     "innerdogfood": "pnpm run stage:dev && node scripts/dev-agent-browser.mjs",
     "prebuild": "pnpm --filter remote-lib-common build",
