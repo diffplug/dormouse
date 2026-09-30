@@ -23,7 +23,7 @@ import {
   fromBase64Url,
 } from 'remote-lib-common';
 
-import { DEFAULT_RELAY_ORIGIN, hostedOrigin } from '../relay-origin';
+import { DEFAULT_RELAY_ORIGIN, hostedOrigin, type RelayMode } from '../relay-origin';
 import {
   idleOneTimeState,
   type InvitationEvent,
@@ -32,6 +32,7 @@ import {
 } from './service-protocol';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import { levelsFor, type NetworkPolicyResult } from '../../remote/network-policy';
 import type { BurrowLink } from '../../lib/platform/types';
 
 /** The self-host Relay the fixtures' build was baked for (`docs/specs/relay.md` → "Relay origin"). */
@@ -142,6 +143,22 @@ export function oneTimeWaiting(
   };
 }
 
+/**
+ * What `networkPolicy` answers for a build with its network on — Local networks
+ * over one Wi-Fi, or My Relay only — which the Remote control section's
+ * fixtures assume.
+ */
+export function networkOn(relayMode: RelayMode): NetworkPolicyResult {
+  const lan = '192.168.1.0/24';
+  return {
+    policy: relayMode === 'self-host'
+      ? { level: 'relay', allowed: [], autoUpdate: false }
+      : { level: 'local', allowed: [lan], autoUpdate: false },
+    levels: levelsFor(relayMode),
+    interfaces: [{ id: 'en0', label: 'Local network', kind: 'lan', prefixes: [lan] }],
+  };
+}
+
 /** A link that answers through its `command` and relays {@link emit} to its subscribers. */
 export interface EventedBurrowLink<C extends BurrowLink['command']> extends BurrowLink {
   /** Exactly the `command` it was made with, so a caller's spy reads its calls here. */
@@ -214,6 +231,8 @@ export interface PrimedBurrow {
   oneTimeOpen?: OneTimeState;
   /** Make `oneTimeOpen` reject — a build that cannot open one, or a phone already connected. */
   oneTimeOpenError?: string;
+  /** What `networkPolicy` answers; {@link networkOn} for the status's build by default. */
+  network?: NetworkPolicyResult;
 }
 
 /**
@@ -239,9 +258,14 @@ export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
         if (primed.setupQrError) throw new Error(primed.setupQrError);
         return primed.setupQr ?? setupQrResult();
       }
+      const { relayOrigin, relayMode } = primed.status ?? UNENROLLED_STATUS;
+      const network = primed.network ?? networkOn(relayMode);
+      if (cmd === 'networkPolicy') return network;
       if (cmd === 'oneTimeStatus') {
-        const { relayOrigin, relayMode } = primed.status ?? UNENROLLED_STATUS;
-        return primed.oneTime ?? idleOneTimeState(hostedOrigin({ origin: relayOrigin, mode: relayMode }));
+        return (
+          primed.oneTime ??
+          idleOneTimeState(hostedOrigin({ origin: relayOrigin, mode: relayMode }), network.policy.level)
+        );
       }
       if (cmd === 'oneTimeOpen') {
         if (primed.oneTimeOpenError) throw new Error(primed.oneTimeOpenError);

@@ -424,7 +424,9 @@ enrolled runtime's.
 **The origin is the build's Hosted origin, which only a Hosted build has**
 (`docs/specs/relay.md` -> "Relay origin", whose "Accepted origins" bounds it). **Availability is decided before any socket exists**:
 without a Hosted origin the state is `unavailable` with reason `self-host`, and
-the service builds no runtime.
+the service builds no runtime; the network policy's `nothing` makes it
+`unavailable` with reason `network-off`, and a policy change ends a live
+connection (`docs/specs/remote-network.md` -> "Policy").
 
 **Standalone** passes the baked pair from the sidecar entry; Rust broadcasts
 every `burrow:event` unchanged. VS Code's bootstrap, idle answers, and serving

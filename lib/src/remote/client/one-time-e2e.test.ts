@@ -439,7 +439,7 @@ describe('size authority across a one-time connection, end to end', () => {
       .at(-1);
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     toUi = [];
     responders = new Map();
     listeners = new Map();
@@ -467,8 +467,12 @@ describe('size authority across a one-time connection, end to end', () => {
         },
       },
     );
+    // Local networks: a new install is at Nothing, which opens no link
+    // (`docs/specs/remote-network.md` → "Policy").
+    const store = createEphemeralBurrowStateStore(() => {});
+    await store.saveNetworkPolicy({ level: 'local', allowed: ['192.168.1.0/24'], autoUpdate: false });
     service = new BurrowService({
-      store: createEphemeralBurrowStateStore(() => {}),
+      store,
       provider,
       kind: 'standalone',
       sendToUi: toWebview,

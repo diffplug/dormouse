@@ -2,13 +2,7 @@
 
 Evidence for `docs/specs/remote-network.md`, keyed by its headings.
 
-## Levels
-
-**Three personas set the levels (2026-09-30).** One wants no network requests at
-all; one will try Pocket but only over their LAN or VPN; one wants it to work
-anywhere. One choice per persona, with the connections it implies listed beside
-it, replaced a transport matrix (persistent vs one-time × restricted vs not)
-whose rows the UI never needed to distinguish.
+## Policy
 
 **Nothing is the default because defaults are for the cautious.** A user who
 wants more makes one click; a user who wants less may never find the setting.
@@ -22,6 +16,20 @@ desktop code found every background connection behind the Burrow service
 (relay, one-time rendezvous, push, the direct path), the managed-voice host, or
 the Standalone updater. No telemetry, remote fonts, CDN loaders, or browser
 downloads exist.
+
+**Why `autoUpdate` alone ends nothing.** The rule that a change ends the live
+one-time session exists so a narrowed policy cannot leave an old path exempt.
+`autoUpdate` governs no path a phone uses, so ending a phone's session because
+the person toggled update checks would cost them the connection and protect
+nothing.
+
+## Levels
+
+**Three personas set the levels (2026-09-30).** One wants no network requests at
+all; one will try Pocket but only over their LAN or VPN; one wants it to work
+anywhere. One choice per persona, with the connections it implies listed beside
+it, replaced a transport matrix (persistent vs one-time × restricted vs not)
+whose rows the UI never needed to distinguish.
 
 ## Local networks
 

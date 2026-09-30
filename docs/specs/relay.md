@@ -152,7 +152,8 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 **The Burrow composes every Relay URL from the baked origin and takes none as
 input**: `enroll` and `enrollOffer` post to it, carrying no Relay URL, and **a
 Hosted build refuses both**, Hosted running no Relay
-(`docs/specs/hosted.md` → Future); **a command still naming a Relay** (an older
+(`docs/specs/hosted.md` → Future), as does any build under the network
+policy's `nothing` (`docs/specs/remote-network.md` → "Policy"); **a command still naming a Relay** (an older
 webview's) **is refused unless it names the baked origin**. **An enrollment
 whose Relay URL or `origin` names another origin reads as none** wherever one is
 read — `start`, `status`, VS Code's activation — and stays on disk untouched, so
@@ -726,7 +727,9 @@ memo invalidation — live in that burrow's spec.
   `noiseStaticPublicKey` this Burrow mints locally **before** the request and
   never sends in it —
   [remote-security-model.md](./remote-security-model.md)) through its
-  `BurrowStateStore`, then opens and maintains `GET /ws/burrow`. **Must persist the operator's
+  `BurrowStateStore`, then opens and maintains `GET /ws/burrow` — unless the
+  network policy is `nothing`, which holds the enrollment without a socket
+  ([remote-network.md](./remote-network.md) -> Policy). **Must persist the operator's
   `label` locally and disclose it only inside encrypted outcomes** — the request body
   carries the credential and the baked `origin`, nothing else
   ([remote-security-model.md](./remote-security-model.md) -> Burrow identity) — and

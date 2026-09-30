@@ -1,15 +1,42 @@
 # Network policy and remote transport
 
-> Status: design — nothing here is implemented yet.
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
 > Owns the network policy — the one setting that decides every connection Dormouse opens on its own — and the transport each level allows. Authorization belongs to `docs/specs/remote-security-model.md`, the wire to `docs/specs/remote-api.md`, the one-time runtime to `docs/specs/one-time.md`, and the updater to `docs/specs/auto-update.md`.
 > Read `docs/specs/remote-security-model.md` -> "Direct path" first.
+
+## Policy
+
+**The policy is one record, `{ level, allowed, autoUpdate }`, held host-side** in the Burrow state store beside the enrollment: `network` in the sidecar's `burrow.json`, `dormouse.burrow.network-policy` in VS Code's `globalState`. **Never take it from a Client, Relay, or Hosted response**; the webview reads it with `networkPolicy` and writes it with `setNetworkPolicy`, and the Burrow service is its only writer.
+
+| Level | Offered in | What Dormouse opens on its own |
+|---|---|---|
+| `nothing` | every build | nothing |
+| `local` (Local networks) | Hosted builds | one-time links |
+| `relay` (My Relay only) | self-host builds | the relay socket, and push through it |
+
+Reserved: `anywhere`, which the policy's shape accepts and no build offers, is the Anywhere level (`## Future`).
+
+- **A new install starts at Nothing.** **Must save the default at the first read, so it never flips**: `relay` where an enrollment for the baked origin exists — an upgraded self-host install — else `nothing` (rationale).
+- **A stored level the build does not offer, or a stored record that is not a policy, reads as `nothing`**; the first stays on disk, as an enrollment for another origin does.
+- **Until the policy is read, the service reads it as `nothing`**; a read that fails leaves the Burrow down.
+- **`setNetworkPolicy` takes a policy only exactly**: its three keys, a level the build offers, at most 32 canonical CIDRs (`canonicalCidr` returns each unchanged) listed once, and a boolean `autoUpdate`. **Must save before acting**: a save that fails changes nothing.
+- **A change to the level or the allowed networks ends the live one-time link or session with `user-ended`, and starts or stops the relay socket to match**; a narrowed policy never leaves an old path exempt. `autoUpdate` alone ends nothing (rationale).
+- **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, and this machine's interfaces, each with its addresses' canonical prefixes (loopback and IPv6 link-local left out) and a `lan`, `vpn`, or `virtual` kind.
+
+**Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater (`## Future`); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
+
+- **The Burrow service never opens the relay socket.** An enrollment is held and reported — `enrolled`, `connection: 'stopped'`, not `serving` — so push, the device list, a test push, and setup codes, which need a running Burrow, make no request.
+- **It refuses `enroll` and `enrollOffer` before any request**, the offer file unread.
+- **It offers no one-time link**: the resting state is `unavailable` with reason `network-off`, and `oneTimeOpen` is refused, as under `local` with no network allowed.
+- **Managed voice asks the service before every speak** and answers `network-off` without a request.
+
+Source of truth: `NetworkPolicy`, `levelsFor`, and `storedNetworkPolicy` in `lib/src/remote/network-policy.ts`; `loadNetworkPolicyFor` and `BurrowService` in `lib/src/host/remote/service.ts`; `canonicalCidr`, `addressAllowed`, and `classifyNetworkInterfaces` in `lib/src/host/remote/network-interfaces.ts`; `NETWORK_POLICY_KEY` in `vscode-ext/src/burrow-store.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `subscribeToNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`. Pinned by `lib/src/host/remote/service.test.ts` and `lib/src/host/remote/network-interfaces.test.ts`.
 
 ## Future
 
 **Scope: remote-network** — build in order:
 
-1. **Policy and Nothing**: the persisted policy, its choke points, Settings → Network, and the update reminder.
+1. **Policy and Nothing**: the updater's choke point and the update reminder ("Updates"), then Settings → Network.
 2. **Local networks**: the path check, for one-time sessions.
 3. **Anywhere**: Cloudflare STUN, for one-time sessions.
 4. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`; Local networks and Anywhere then cover paired phones.
@@ -25,12 +52,6 @@ The UI contract is the prototype `NetworkSettings` in `lib/src/components/Networ
 | Anywhere | Hosted builds | `stun:stun.cloudflare.com:3478` | paired phones only, via Hosted | any network |
 | My Relay only | self-host builds | none | via the baked Relay | any network |
 
-- **A new install starts at Nothing.** An install upgraded with an enrollment starts at My Relay only, every other at Nothing (rationale).
-- **Must hold one policy record host-side**, `{ level, allowed, autoUpdate }`, in the Burrow state store beside the enrollment. The webview reads and writes it through the Burrow service; no Client, Relay, or Hosted response is an input to it.
-- **Must enforce it at three choke points**: the Burrow service (relay socket, one-time links, push), the managed-voice host, and the updater. A new outbound path adds a fourth here before it ships.
-- **Nothing opens nothing**: no relay socket while enrolled (the enrollment stays), no one-time link, no managed voice, no automatic update check. What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections.
-- **A policy change ends every live one-time link and session** with `user-ended`, and starts or stops the relay socket to match; a narrowed policy never leaves an old path exempt.
-
 ### Updates
 
 - **Must check automatically only when the level is not Nothing and `autoUpdate` is on**, at launch as today; **Check now** always checks, being a click.
@@ -39,7 +60,7 @@ The UI contract is the prototype `NetworkSettings` in `lib/src/components/Networ
 
 ### Local networks
 
-- **Must represent allowed networks as canonical IPv4 or IPv6 CIDRs** from the interface's own netmask. Choosing Local networks first allows every prefix, both families, of the active LAN interface; a VPN, bridge, container, or VM interface is never allowed by default.
+- **Choosing Local networks must first allow every prefix, both families, of the active LAN interface**; a VPN, bridge, container, or VM interface is never allowed by default.
 - **Must check the selected candidate pair on the Burrow before its channel reports open**: both ends parse as IP addresses, IPv4-mapped IPv6 unwrapped, each inside an allowed CIDR. A hostname, an mDNS name, or a missing pair refuses. Must re-check on every ICE state change while connected; a violation disposes the session.
 - **The check gates terminal traffic, not approval** (rationale): an off-network phone holding a link can reach the two-digit prompt and still receives no terminal byte.
 - **Never trust SDP candidates, Hosted-observed addresses, or Client claims** as path evidence; only the Burrow's own ICE agent answers.

@@ -2,7 +2,8 @@
  * Where a Node-resident Burrow keeps the two things it must survive a restart
  * with: the enrollment (which carries `burrowToken`, a bearer credential) and the
  * ACL (the authorization primitive, which per the security model lives on the
- * Burrow and nowhere else — docs/specs/remote-security-model.md).
+ * Burrow and nowhere else — docs/specs/remote-security-model.md). The network
+ * policy rides beside them (`docs/specs/remote-network.md` -> "Policy").
  *
  * The interface is async because the hosts that implement it are: a file the
  * sidecar owns here, `VsCodeBurrowStateStore` there (enrollment in
@@ -15,6 +16,7 @@ import { join } from 'node:path';
 import type { BurrowAclRecord } from 'remote-lib-common';
 import { filterAclRecords } from '../../remote/burrow/acl';
 import { isEnrollment, type BurrowEnrollment } from '../../remote/burrow/enrollment';
+import { storedNetworkPolicy, type NetworkPolicy } from '../../remote/network-policy';
 import { writeJsonAtomic } from '../atomic-json-file';
 import { createSerialQueue } from './serial-queue';
 
@@ -38,6 +40,13 @@ export interface BurrowStateStore {
   clearEnrollment(): Promise<void>;
   loadAcl(burrowId: string): Promise<BurrowAclRecord[]>;
   saveAcl(burrowId: string, records: readonly BurrowAclRecord[]): Promise<void>;
+  /**
+   * `null` where none was ever saved, which the service turns into this build's
+   * default and saves; a record that is not a policy reads as Nothing
+   * (`storedNetworkPolicy`).
+   */
+  loadNetworkPolicy(): Promise<NetworkPolicy | null>;
+  saveNetworkPolicy(policy: NetworkPolicy): Promise<void>;
 }
 
 const FILE_NAME = 'burrow.json';
@@ -65,18 +74,20 @@ interface BurrowStateFile {
   enrollment: BurrowEnrollment | null;
   /** Keyed by burrowId so a re-enrollment cannot inherit a stale ACL. */
   acl: Record<string, BurrowAclRecord[]>;
+  network: NetworkPolicy | null;
 }
 
 function emptyState(): BurrowStateFile {
-  return { version: 1, enrollment: null, acl: {} };
+  return { version: 1, enrollment: null, acl: {}, network: null };
 }
 
 function parseState(raw: string): BurrowStateFile {
   const parsed: unknown = JSON.parse(raw);
   if (!parsed || typeof parsed !== 'object') throw new Error('not an object');
-  const { enrollment, acl } = parsed as { enrollment?: unknown; acl?: unknown };
+  const { enrollment, acl, network } = parsed as { enrollment?: unknown; acl?: unknown; network?: unknown };
   const state = emptyState();
   if (isEnrollment(enrollment)) state.enrollment = enrollment;
+  state.network = storedNetworkPolicy(network);
   if (acl && typeof acl === 'object') {
     for (const [burrowId, records] of Object.entries(acl as Record<string, unknown>)) {
       if (Array.isArray(records)) state.acl[burrowId] = records as BurrowAclRecord[];
@@ -131,6 +142,16 @@ export class FileBurrowStateStore implements BurrowStateStore {
   saveAcl(burrowId: string, records: readonly BurrowAclRecord[]): Promise<void> {
     return this.#mutate((state) => {
       state.acl[burrowId] = [...records];
+    });
+  }
+
+  async loadNetworkPolicy(): Promise<NetworkPolicy | null> {
+    return (await this.#read()).network;
+  }
+
+  saveNetworkPolicy(policy: NetworkPolicy): Promise<void> {
+    return this.#mutate((state) => {
+      state.network = { ...policy, allowed: [...policy.allowed] };
     });
   }
 
@@ -221,6 +242,7 @@ export function createEphemeralBurrowStateStore(onWarn: (message: string) => voi
   };
   let enrollment: BurrowEnrollment | null = null;
   const acl = new Map<string, BurrowAclRecord[]>();
+  let network: NetworkPolicy | null = null;
   return {
     persistent: false,
     loadEnrollment: async () => enrollment,
@@ -235,6 +257,11 @@ export function createEphemeralBurrowStateStore(onWarn: (message: string) => voi
     saveAcl: async (burrowId, records) => {
       warnOnce();
       acl.set(burrowId, [...records]);
+    },
+    loadNetworkPolicy: async () => network,
+    saveNetworkPolicy: async (policy) => {
+      warnOnce();
+      network = { ...policy, allowed: [...policy.allowed] };
     },
   };
 }

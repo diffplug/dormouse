@@ -12,10 +12,13 @@ import {
   createNativeDirectPeerFactory,
   disposeNativeDirectPeers,
 } from '../../lib/src/host/remote/native-direct-peer';
+import { listNetworkInterfaces } from '../../lib/src/host/remote/network-interfaces';
 import { bakedRelay, hostedOrigin } from '../../lib/src/host/relay-origin';
 import {
   BurrowService,
   loadEnrollmentFor,
+  loadNetworkPolicyFor,
+  networkPolicyResult,
   oneTimeServing,
   readUsableOffer,
   unenrolledStatus,
@@ -390,7 +393,12 @@ function drainQueuedCommands(): void {
 }
 
 /** The commands that bootstrap an installation with no Burrow; see {@link handleBurrowCommand}. */
-const CONTENTION_STARTERS: ReadonlySet<string> = new Set(['enroll', 'enrollOffer', 'oneTimeOpen']);
+const CONTENTION_STARTERS: ReadonlySet<string> = new Set([
+  'enroll',
+  'enrollOffer',
+  'oneTimeOpen',
+  'setNetworkPolicy',
+]);
 
 /**
  * Hand one of this window's webview commands to the Burrow.
@@ -406,13 +414,15 @@ const CONTENTION_STARTERS: ReadonlySet<string> = new Set(['enroll', 'enrollOffer
  * an enrolled machine's webview it has no Burrow moments before it gets one,
  * leaving the gates that arm on that answer down.
  *
- * `enroll`, `enrollOffer`, and `oneTimeOpen` are the commands that may start
- * the contention: they are how an installation with no Burrow at all
- * bootstraps — `enrollOffer` from the one-click card an idle `status`
- * advertises ({@link idleStatus}), `oneTimeOpen` from the idle one-time panel,
- * which needs no enrollment. Everything else refuses only where there is
- * genuinely nothing to reach — never contending, or settled with no service
- * and no broker.
+ * `enroll`, `enrollOffer`, `oneTimeOpen`, and `setNetworkPolicy` are the
+ * commands that may start the contention: they are how an installation with no
+ * Burrow at all bootstraps — `enrollOffer` from the one-click card an idle
+ * `status` advertises ({@link idleStatus}), `oneTimeOpen` from the idle
+ * one-time panel, which needs no enrollment, and `setNetworkPolicy` because the
+ * service is the policy's only writer: a window writing it with a service
+ * elsewhere would leave that service holding the old one. Everything else
+ * refuses only where there is genuinely nothing to reach — never contending, or
+ * settled with no service and no broker.
  */
 export function handleBurrowCommand(payload: BurrowCommand | undefined): void {
   if (!isBurrowCommand(payload)) return;
@@ -516,8 +526,9 @@ function refuse(burrowRequestId: string): void {
 
 /**
  * What an idle service answers, for the read-only commands a window with no
- * Burrow at all is still asked. `status` is the third of them and lives in
- * {@link idleStatus}, which needs the disk.
+ * Burrow at all is still asked. `status` reads the offer file
+ * ({@link idleStatus}); `oneTimeStatus` and `networkPolicy` read the network
+ * policy through the same reader the service uses, so the two cannot drift.
  *
  * Reaching the refusal below means this window sees no enrollment — it contends
  * at activation when there is one, and again the moment another window writes
@@ -530,17 +541,28 @@ function refuse(burrowRequestId: string): void {
  * The sidecar has no such path — it always has a service — so these are exactly
  * what one with no enrollment returns (`lib/src/host/remote/service.ts`). The
  * one-time pair is the same: no service means no connection, so its status is
- * the idle one this build's origin allows, and ending it is already done; and
+ * the idle one this build's origin and policy allow, and ending it is already done; and
  * with no service there is no session to take a pane back from.
  */
-function idleAnswer(cmd: string): { result: unknown } | null {
+async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
   switch (cmd) {
+    case 'status':
+      return { result: await idleStatus() };
     case 'pushDevices':
       return { result: null satisfies PushDevicesResult };
     case 'pairingQueue':
       return { result: [] satisfies PairingQueueItem[] };
-    case 'oneTimeStatus':
-      return { result: idleOneTimeState(hostedOrigin(bakedRelay())) };
+    // A policy that cannot be read offers no link, as the service's own
+    // `#level` reads it.
+    case 'oneTimeStatus': {
+      const level = await idleNetworkPolicy().then(
+        (policy) => policy.level,
+        () => 'nothing' as const,
+      );
+      return { result: idleOneTimeState(hostedOrigin(bakedRelay()), level) };
+    }
+    case 'networkPolicy':
+      return { result: networkPolicyResult(await idleNetworkPolicy(), bakedRelay(), listNetworkInterfaces()) };
     case 'oneTimeEnd':
       return { result: {} };
     // No service holds any session, so none holds a pane: the strip clears itself.
@@ -551,9 +573,14 @@ function idleAnswer(cmd: string): { result: unknown } | null {
   }
 }
 
+/** The network policy as a service starting now would read it — saving the default, if none is saved. */
+function idleNetworkPolicy() {
+  if (!context) return Promise.reject(new Error(NO_BURROW));
+  return loadNetworkPolicyFor(burrowStateStore(context), bakedRelay());
+}
+
 /**
- * The idle `status` — the one that has to look at the disk, and the reason it is
- * async where the rest of {@link idleAnswer} is not.
+ * The idle `status` — the one that has to look at the disk.
  *
  * This process is the same kind of process the service runs in, so it can read
  * the installer's offer itself (`lib/src/host/remote/enroll-offer.ts`) and
@@ -574,21 +601,12 @@ async function idleStatus(): Promise<BurrowConsoleStatus> {
 
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */
 function refuseCommand(payload: BurrowCommand): void {
-  if (payload.cmd === 'status') {
-    // Neither half can reject, but this is the extension host: an unhandled
-    // rejection here is a crash, so the ordinary refusal is the fallback.
-    void idleStatus().then(
-      (result) => answerIdle(payload.burrowRequestId, result),
-      () => refuse(payload.burrowRequestId),
-    );
-    return;
-  }
-  const idle = idleAnswer(payload.cmd);
-  if (!idle) {
-    refuse(payload.burrowRequestId);
-    return;
-  }
-  answerIdle(payload.burrowRequestId, idle.result);
+  // This is the extension host: an unhandled rejection here is a crash, so a
+  // read that fails gets the ordinary refusal.
+  void idleAnswer(payload.cmd).then(
+    (idle) => (idle ? answerIdle(payload.burrowRequestId, idle.result) : refuse(payload.burrowRequestId)),
+    () => refuse(payload.burrowRequestId),
+  );
 }
 
 function answerIdle(burrowRequestId: string, result: unknown): void {

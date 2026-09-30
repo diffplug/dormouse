@@ -879,12 +879,13 @@ describe('the sidecar host', () => {
     expect(after.seen.get('flagged')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
   });
 
-  it('gives its Burrow the baked rendezvous, so a one-time connection is on offer', async () => {
+  it('gives its Burrow the baked rendezvous, so only the network policy keeps a one-time link off', async () => {
+    // A new install is at Nothing; a build without the rendezvous would say `self-host`.
     host.handleCommand('burrow:command', { burrowRequestId: 'b-1', cmd: 'oneTimeStatus' });
     await vi.waitFor(() => {
       expect(out.find((line) => line.event === 'burrow:result')?.data).toEqual({
         burrowRequestId: 'b-1',
-        result: { status: 'idle' },
+        result: { status: 'unavailable', reason: 'network-off' },
       });
     });
   });
@@ -899,6 +900,18 @@ describe('the sidecar host', () => {
       expect(out.find((line) => line.event === 'burrow:result')?.data).toEqual({
         burrowRequestId: 'b-2',
         result: { ended: false },
+      });
+    });
+  });
+
+  it('asks its Burrow for the network policy before managed voice speaks', async () => {
+    // A new install is at Nothing: no request, token or not
+    // (`docs/specs/remote-network.md` → "Policy").
+    host.handleCommand('voice:command', { op: 'speak', text: 'build finished', requestId: 'req-0' });
+    await vi.waitFor(() => {
+      expect(out.find((line) => line.event === 'voice:result')?.data).toEqual({
+        requestId: 'req-0',
+        result: { ok: false, reason: 'network-off' },
       });
     });
   });

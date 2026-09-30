@@ -142,6 +142,26 @@ describe('FileBurrowStateStore', () => {
     expect(await new FileBurrowStateStore(dir).loadAcl('burrow-1')).toEqual([]);
   });
 
+  it('keeps the network policy beside the enrollment, reading a damaged one as Nothing', async () => {
+    const policy = { level: 'relay', allowed: ['192.168.1.0/24'], autoUpdate: true } as const;
+    const store = new FileBurrowStateStore(dir);
+    expect(await store.loadNetworkPolicy()).toBeNull();
+    await store.saveNetworkPolicy({ ...policy, allowed: [...policy.allowed] });
+    await store.saveEnrollment(ENROLLMENT);
+
+    // One file, so a later save keeps it, and a restart reads it back.
+    expect(await new FileBurrowStateStore(dir).loadNetworkPolicy()).toEqual(policy);
+
+    // Hand-edited, it must not open what the user may have turned off.
+    const raw = JSON.parse(await readFile(file(), 'utf8')) as Record<string, unknown>;
+    await writeFile(file(), JSON.stringify({ ...raw, network: { ...policy, level: 'everything' } }));
+    expect(await new FileBurrowStateStore(dir).loadNetworkPolicy()).toEqual({
+      level: 'nothing',
+      allowed: [],
+      autoUpdate: false,
+    });
+  });
+
   it('clearing the enrollment leaves the records alone', async () => {
     const store = new FileBurrowStateStore(dir);
     await store.saveEnrollment(ENROLLMENT);
@@ -316,8 +336,11 @@ describe('createEphemeralBurrowStateStore', () => {
 
     await store.saveEnrollment(ENROLLMENT);
     await store.saveAcl('burrow-1', [aclRecord('burrow-1', 'client-1')]);
+    expect(await store.loadNetworkPolicy()).toBeNull();
+    await store.saveNetworkPolicy({ level: 'relay', allowed: [], autoUpdate: false });
     expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
     expect(await store.loadAcl('burrow-1')).toHaveLength(1);
+    expect(await store.loadNetworkPolicy()).toEqual({ level: 'relay', allowed: [], autoUpdate: false });
     expect(warnings).toHaveLength(1);
 
     await store.clearEnrollment();

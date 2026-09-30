@@ -35,6 +35,8 @@ const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
   'self-host':
     'Not available in a self-host build: one-time links are made at hosted.dormouse.sh, which this ' +
     'build never contacts.',
+  'network-off':
+    'Off while Settings → Network is set to Nothing: this computer opens no connections on its own.',
 };
 
 /**

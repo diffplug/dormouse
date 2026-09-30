@@ -18,7 +18,7 @@
   "docs/specs/pocket-app.md": 5050,
   "docs/specs/relay.md": 10500,
   "docs/specs/remote-api.md": 5250,
-  "docs/specs/remote-network.md": 950,
+  "docs/specs/remote-network.md": 1300,
   "docs/specs/remote-security-model.md": 5400,
   "docs/specs/security-audit.md": 2100,
   "docs/specs/security-ci.md": 2950,
@@ -36,7 +36,7 @@
   "docs/specs/tiling-engine.md": 4650,
   "docs/specs/transport.md": 4950,
   "docs/specs/tutorial.md": 2050,
-  "docs/specs/vscode.md": 7250,
+  "docs/specs/vscode.md": 7300,
   "docs/specs/webgl-text.md": 1200,
   "docs/specs/website-docs.md": 5000
 }

@@ -16,7 +16,7 @@ import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
 import { FakeSocket } from '../../lib/src/remote/test-fake-socket';
 import { createTestRendezvous, type TestRendezvous } from '../../lib/src/remote/test-rendezvous';
-import { ONE_TIME_SERVING_KEY } from '../src/burrow-store';
+import { NETWORK_POLICY_KEY, ONE_TIME_SERVING_KEY } from '../src/burrow-store';
 import type { ExtensionMessage } from '../src/message-types';
 import { FrameDecoder, encodeFrame } from '../src/peer-link-protocol';
 import {
@@ -139,7 +139,7 @@ interface PendingGlobalWrite {
 /** The slice of `ExtensionContext` the store reads, in memory. */
 function fakeContext(options: { deferGlobalWrites?: PendingGlobalWrite[] } = {}) {
   const secrets = new Map<string, string>();
-  const global = new Map<string, string>();
+  const global = new Map<string, unknown>();
   const watchers = new Set<SecretWatcher>();
   /** Every keychain round trip, so a test can see the memo working. */
   const reads: string[] = [];
@@ -175,7 +175,7 @@ function fakeContext(options: { deferGlobalWrites?: PendingGlobalWrite[] } = {})
         update: (key: string, value: unknown) => {
           const apply = () => {
             if (value === undefined) global.delete(key);
-            else global.set(key, value as string);
+            else global.set(key, value);
           };
           if (!options.deferGlobalWrites) {
             apply();
@@ -357,6 +357,19 @@ function stubRendezvous(): TestRendezvous {
     },
   );
   return rendezvous;
+}
+
+/**
+ * Local networks over one Wi-Fi, which a one-time case needs: a new install
+ * is at Nothing (`docs/specs/remote-network.md` → "Policy").
+ */
+const LOCAL_ON = { level: 'local', allowed: ['192.168.1.0/24'], autoUpdate: false };
+
+/** A context whose `globalState` holds {@link LOCAL_ON}, as every window's would. */
+function localNetworkContext() {
+  const made = fakeContext();
+  made.store.global.set(NETWORK_POLICY_KEY, LOCAL_ON);
+  return made;
 }
 
 function results(posted: ExtensionMessage[]) {
@@ -568,6 +581,26 @@ describe('burrow state store', () => {
     expect(await target.loadAcl('burrow-9')).toEqual([]);
   });
 
+  it('keeps the network policy in globalState, reading a damaged one as Nothing', async () => {
+    const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
+    const { context, store } = fakeContext();
+    const target = new VsCodeBurrowStateStore(context);
+
+    expect(await target.loadNetworkPolicy()).toBeNull();
+    await target.saveNetworkPolicy({ level: 'local', allowed: ['192.168.1.0/24'], autoUpdate: true });
+    // No secret in it, so not the keychain.
+    expect(store.secrets.size).toBe(0);
+    expect(await new VsCodeBurrowStateStore(context).loadNetworkPolicy()).toEqual({
+      level: 'local',
+      allowed: ['192.168.1.0/24'],
+      autoUpdate: true,
+    });
+
+    // Hand-edited, it must not open what the user may have turned off.
+    store.global.set(NETWORK_POLICY_KEY, { level: 'anywhere', allowed: 'all', autoUpdate: true });
+    expect(await target.loadNetworkPolicy()).toEqual({ level: 'nothing', allowed: [], autoUpdate: false });
+  });
+
   it('serializes ACL snapshots so an older approval cannot land last', async () => {
     const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
     const pending: PendingGlobalWrite[] = [];
@@ -675,7 +708,7 @@ describe('burrow service glue', () => {
     const mod = await freshBurrow();
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
-    mod.initBurrow(fakeContext().context);
+    mod.initBurrow(localNetworkContext().context);
     expect(opened!.isPeerBroker()).toBe(false);
 
     mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
@@ -690,12 +723,30 @@ describe('burrow service glue', () => {
     expect(rendezvous.room().burrowUrl).toBe('wss://hosted.dormouse.sh/api/one-time/burrow');
   });
 
+  it('bootstraps the contention on setNetworkPolicy, so the service is its one writer', async () => {
+    // Written from a window with no service, it would leave a service in
+    // another window holding the policy it replaced.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'setNetworkPolicy', params: { policy: LOCAL_ON } });
+
+    await waitFor(() => results(bound.posted).length > 0);
+    expect(opened!.isPeerBroker()).toBe(true);
+    expect(results(bound.posted)[0]).toMatchObject({ burrowRequestId: 'rh-1', result: { policy: LOCAL_ON } });
+    expect(store.global.get(NETWORK_POLICY_KEY)).toEqual(LOCAL_ON);
+  });
+
   it('marks the connection serving for every window, and clears the mark when it stops', async () => {
     stubRendezvous();
     const mod = await freshBurrow();
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
-    const { context, store } = fakeContext();
+    const { context, store } = localNetworkContext();
     mod.initBurrow(context);
 
     mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
@@ -714,7 +765,7 @@ describe('burrow service glue', () => {
     const mod = await freshBurrow();
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
-    const { context, store } = fakeContext();
+    const { context, store } = localNetworkContext();
     const activation = mod.initBurrow(context);
     mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
     await waitFor(() => store.secrets.has(ONE_TIME_SERVING_KEY));
@@ -780,7 +831,7 @@ describe('burrow service glue', () => {
     const brokerSide = fakeDeps();
     broker.configureBurrow(brokerSide.deps());
     bridgeLinkToBurrow(broker, brokerLink, brokerSide);
-    const brokerActivation = broker.initBurrow(fakeContext().context);
+    const brokerActivation = broker.initBurrow(localNetworkContext().context);
     broker.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
     await waitFor(() => results(brokerSide.posted).length > 0);
     expect(brokerLink.isPeerBroker()).toBe(true);
@@ -790,8 +841,9 @@ describe('burrow service glue', () => {
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
     bridgeLinkToBurrow(mod, link, bound);
-    // The mark the broker wrote, as `SecretStorage` shares it across windows.
-    const { context, store } = fakeContext();
+    // The mark the broker wrote, as `SecretStorage` shares it across windows,
+    // and the policy, as `globalState` does.
+    const { context, store } = localNetworkContext();
     store.secrets.set(ONE_TIME_SERVING_KEY, '1');
     mod.initBurrow(context);
     await waitFor(() => oneTime(bound.posted).at(-1) === 'waiting');
@@ -949,15 +1001,18 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({ burrowRequestId: 'rh-status', cmd: 'status' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-pushDevices', cmd: 'pushDevices' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-pairingQueue', cmd: 'pairingQueue' });
-    // A window with no service has no one-time connection either: idle, and
-    // nothing to end.
+    // A window with no service has no one-time connection either — none to
+    // open under a new install's Nothing, and nothing to end — and reads the
+    // policy a service would.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeStatus', cmd: 'oneTimeStatus' });
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-networkPolicy', cmd: 'networkPolicy' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeEnd', cmd: 'oneTimeEnd' });
     // No service holds a pane either, so a Take back ends nothing and the
     // strip clears itself.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-takeBack', cmd: 'takeBack', params: { holder: 'nobody' } });
     // Everything else still says there is nothing to reach.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-clear', cmd: 'clearEnrollment' });
+    await waitFor(() => results(bound.posted).length === 8);
     expect(results(bound.posted).find((r) => r.burrowRequestId === 'rh-clear')).toEqual({
       burrowRequestId: 'rh-clear',
       error: 'no Burrow is reachable',
@@ -986,13 +1041,18 @@ describe('burrow service glue', () => {
       relay: { ...relayBuild },
     });
     await idle.start();
-    for (const cmd of ['status', 'pushDevices', 'pairingQueue', 'oneTimeStatus', 'oneTimeEnd', 'takeBack']) {
+    for (const cmd of [
+      'status',
+      'pushDevices',
+      'pairingQueue',
+      'oneTimeStatus',
+      'networkPolicy',
+      'oneTimeEnd',
+      'takeBack',
+    ]) {
       await idle.handleCommand({ burrowRequestId: `rh-${cmd}`, cmd, params: { holder: 'nobody' } });
     }
     idle.dispose();
-    // The glue's `status` is the one idle answer that reads a file, so it
-    // settles a tick later than the ones that do not.
-    await waitFor(() => results(bound.posted).length === 7);
 
     const byId = (entries: Array<{ burrowRequestId: string; result?: unknown }>) =>
       Object.fromEntries(
@@ -1001,7 +1061,14 @@ describe('burrow service glue', () => {
     expect(byId(results(bound.posted))).toEqual(
       byId(sent.filter((message) => message.event === 'burrow:result').map((m) => m.data)),
     );
-    expect(byId(results(bound.posted))['rh-oneTimeStatus']).toEqual({ status: 'idle' });
+    expect(byId(results(bound.posted))['rh-oneTimeStatus']).toEqual({
+      status: 'unavailable',
+      reason: 'network-off',
+    });
+    expect(byId(results(bound.posted))['rh-networkPolicy']).toMatchObject({
+      policy: { level: 'nothing', allowed: [], autoUpdate: false },
+      levels: ['nothing', 'local'],
+    });
     expect(byId(results(bound.posted))['rh-takeBack']).toEqual({ ended: false });
   });
 
@@ -1476,7 +1543,7 @@ describe('serving the other windows', () => {
     // whether anything is served, and the one-time panel's state.
     expect(far.uiEvents).toEqual([
       { name: 'status', enrolled: false, serving: false, serviceId: expect.any(String) },
-      { name: 'one-time', state: { status: 'idle' } },
+      { name: 'one-time', state: { status: 'unavailable', reason: 'network-off' } },
     ]);
   });
 

@@ -99,10 +99,12 @@ export type OneTimeEndReason =
 /**
  * Why the service offers no one-time connection at all. The service's to
  * decide, never this runtime's: a runtime exists only in a build with a Hosted
- * origin (`idleOneTimeState` in `lib/src/host/remote/service.ts`). The one
- * reason is a self-host build, which reaches no rendezvous.
+ * origin, under a network policy that allows one (`idleOneTimeState` in
+ * `lib/src/host/remote/service-protocol.ts`). `self-host`: a self-host build,
+ * which reaches no rendezvous. `network-off`: the policy is Nothing
+ * (`docs/specs/remote-network.md` -> "Policy").
  */
-export type OneTimeUnavailableReason = 'self-host';
+export type OneTimeUnavailableReason = 'self-host' | 'network-off';
 
 /**
  * What the one-time connection is doing, as the laptop's panel renders it.
