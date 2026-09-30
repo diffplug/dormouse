@@ -488,4 +488,4 @@ Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
 
 ## Future
 
-**Scope: one-time-anywhere** — unrestricted direct discovery and the default local-network gate follow the **remote-network** scope in [remote-network.md](./remote-network.md). A per-IP cap on concurrent rooms remains beside the mint limit.
+**Scope: one-time-anywhere** — the Local networks path check and Anywhere's STUN follow the **remote-network** scope in [remote-network.md](./remote-network.md). A per-IP cap on concurrent rooms remains beside the mint limit.
