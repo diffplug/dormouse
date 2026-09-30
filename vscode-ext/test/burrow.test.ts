@@ -1084,7 +1084,7 @@ describe('the relay socket', () => {
 
   it('uses the bundled ws where the extension host has no global WebSocket', async () => {
     // `globalThis.WebSocket` arrived in Node 22, and `engines.vscode` is
-    // `^1.85.0` — VS Code 1.85 shipped Node 18, so the supported range spans
+    // `^1.92.0` — VS Code 1.92 shipped Node 20.14, so the supported range spans
     // the boundary and the fallback is the only implementation on the old side.
     const mod = await freshBurrow();
     const relay = await wsServer();

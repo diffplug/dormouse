@@ -15,7 +15,7 @@
     "url": "https://github.com/diffplug/dormouse/issues"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.92.0"
   },
   "categories": [
     "Other"
