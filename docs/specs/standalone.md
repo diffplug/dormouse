@@ -132,7 +132,7 @@ The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
 side", which owns that split and what the webview keeps): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
-with the relay-origin allowlist and the one-time rendezvous origin baked in
+with the relay-origin allowlist and the Hosted origin baked in
 (`docs/specs/relay.md`, `docs/specs/one-time.md`).
 **Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
 
@@ -243,8 +243,8 @@ that feeds it: one `AlertManager`, every window a realm under its label
 
 - **Must offer every stdin line to `createSidecarHost`'s `handleCommand` before
   `main.js` dispatches it**: it owns the PTY commands the alerts must see —
-  spawn, input, resize, kill, reap, `pty:requestInit` — every alert and Burrow
-  command, the theme push.
+  spawn, input, resize, kill, reap, `pty:requestInit` — every alert, Burrow, and
+  managed-voice command, the theme push.
 - **Webview → sidecar is one passthrough, `alert_command(payload)`**, and **Rust
   stamps the invoking window's label on it as `window`**, over any the payload
   claimed, exactly as on `burrow_command`. **An unstamped `alert:command` is
