@@ -25,7 +25,12 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import { DirectPeer, type DirectPathPolicy, type DirectPeerFactory } from './direct-peer';
+import {
+  DirectPeer,
+  type DirectPathPolicy,
+  type DirectPeerFactory,
+  type DirectViolationCause,
+} from './direct-peer';
 import { realTimer, type RemoteTimer } from '../ws';
 
 /**
@@ -44,8 +49,11 @@ export type DirectCarrier = 'relay' | 'channel';
 export interface DirectEndpointDeps {
   /** How this runtime builds a peer connection, or `null` where it has none. */
   readonly createPeer: DirectPeerFactory | null;
-  /** What the Burrow's network policy holds each peer to, if anything; see {@link DirectPathPolicy}. */
-  readonly pathPolicy?: DirectPathPolicy | null;
+  /**
+   * What the Burrow's network policy holds each attempt to, if anything; see
+   * {@link DirectPathPolicy}. Handed to {@link createPeer} and to the peer.
+   */
+  readonly pathPolicy?: DirectPathPolicy;
   /**
    * Encrypt one signal as a control message and put it on the relay path;
    * `false` if the session could not send it.
@@ -70,9 +78,10 @@ export interface DirectEndpointDeps {
   /**
    * The session is unrecoverable: the endpoint's owner disposes it (the Burrow
    * through `EstablishedE2eSession`'s `onFatal`, the Client through
-   * `ClientSessionCore.loseBurrow`).
+   * `ClientSessionCore.loseBurrow`). `cause` is the peer's, where a path
+   * policy refused the path.
    */
-  fatal(reason: string): void;
+  fatal(reason: string, cause?: DirectViolationCause): void;
   /**
    * Whether this endpoint's session is still the live one. Both ends re-check
    * it after every await, because a promotion or a teardown can replace the
@@ -338,7 +347,7 @@ export class DirectEndpoint {
     if (!factory) return null;
     let connection;
     try {
-      connection = factory();
+      connection = factory(this.#deps.pathPolicy);
     } catch (error) {
       console.warn('[direct] could not build a peer connection', error);
       return null;
@@ -352,7 +361,7 @@ export class DirectEndpoint {
         onOpen: () => this.#onOpen(),
         onFrame: (frame) => this.#onFrame(frame),
         onClosed: (reason) => this.#onClosed(reason),
-        onViolation: (reason) => this.#onViolation(reason),
+        onViolation: (reason, cause) => this.#onViolation(reason, cause),
       },
     });
     return this.#peer;
@@ -419,9 +428,9 @@ export class DirectEndpoint {
    * session's, so it is gated like every other channel event: a leftover
    * channel must never end the session that replaced it.
    */
-  #onViolation(reason: string): void {
+  #onViolation(reason: string, cause: DirectViolationCause | undefined): void {
     if (!this.#alive()) return;
-    this.#deps.fatal(reason);
+    this.#deps.fatal(reason, cause);
   }
 
   /**

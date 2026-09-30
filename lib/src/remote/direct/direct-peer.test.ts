@@ -18,29 +18,39 @@ import {
 } from 'remote-lib-common';
 
 import {
+  DIRECT_PATH_RECHECK_MS,
   DirectPeer,
   type DirectPathPolicy,
   type DirectPeerHandlers,
-  type DirectSelectedPair,
 } from './direct-peer';
-import { FakeDirectNetwork, flushMicrotasks, type FakeDirectNetworkOptions } from './test-fake-peer';
+import {
+  FAKE_LAN_PAIR,
+  FakeDirectNetwork,
+  flushMicrotasks,
+  lanOnlyPolicy,
+  type FakeDirectNetworkOptions,
+} from './test-fake-peer';
 import { fakeTimers } from '../test-timers';
 
+/** Every report one end hears; a path policy's violations are `refusals`. */
 function handlers(): DirectPeerHandlers & {
   frames: Uint8Array[];
   opens: number;
   closes: string[];
   violations: string[];
+  refusals: string[];
 } {
   const record = {
     frames: [] as Uint8Array[],
     opens: 0,
     closes: [] as string[],
     violations: [] as string[],
+    refusals: [] as string[],
     onOpen: () => void (record.opens += 1),
     onFrame: (frame: Uint8Array) => void record.frames.push(frame),
     onClosed: (reason: string) => void record.closes.push(reason),
-    onViolation: (reason: string) => void record.violations.push(reason),
+    onViolation: (reason: string, cause?: string) =>
+      void (cause === 'path-refused' ? record.refusals : record.violations).push(reason),
   };
   return record;
 }
@@ -428,117 +438,120 @@ describe('DirectPeer', () => {
   });
 
   describe('the path policy', () => {
-    /**
-     * A policy allowing only `192.168.1.0/24` pairs, by string prefix — the
-     * address math is the host's, and `local-networks.test.ts` pins it — that
-     * records every pair it was asked about.
-     */
-    function lanOnly(describe: DirectPathPolicy['describe'] = (sdp) => sdp) {
-      const asked: Array<DirectSelectedPair | null> = [];
-      const onLan = (address: string | null) => address?.startsWith('192.168.1.') ?? false;
-      const policy: DirectPathPolicy = {
-        describe,
-        refusal: (pair) => {
-          asked.push(pair);
-          return pair && onLan(pair.local) && onLan(pair.remote) ? null : 'off the LAN';
-        },
-      };
-      return { policy, asked };
-    }
+    const OFF_LAN = { local: '10.0.0.2', remote: '10.0.0.3' };
 
     it('checks the selected pair before reporting the open', async () => {
-      const { policy, asked } = lanOnly();
+      const policy = lanOnlyPolicy();
       const { burrowPeer, burrow } = await connected({}, policy);
 
-      expect(asked).toEqual([{ local: '192.168.1.2', remote: '192.168.1.3' }]);
+      expect(policy.asked).toEqual([FAKE_LAN_PAIR]);
       expect(burrow.opens).toBe(1);
       expect(burrowPeer.isOpen).toBe(true);
     });
 
     it('refuses a path it does not allow as a violation, before anything rides it', async () => {
-      const { policy } = lanOnly();
-      const run = pair({}, policy);
-      run.answerer.selectedPair = { local: '10.0.0.2', remote: '10.0.0.3' };
-      const offer = await run.clientPeer.offer();
-      await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
-      await flushMicrotasks();
+      const run = await connected({ selectedPair: OFF_LAN }, lanOnlyPolicy());
 
       expect(run.burrow.opens).toBe(0);
-      expect(run.burrow.violations).toEqual(['off the LAN']);
+      expect(run.burrow.refusals).toEqual(['off the LAN']);
+      expect(run.burrow.violations).toEqual([]);
       expect(run.burrow.closes).toEqual([]);
       expect(run.answerer.closed).toBe(true);
       expect(run.burrowPeer.isOpen).toBe(false);
     });
 
     it('refuses where the stack reports no pair', async () => {
-      const { policy, asked } = lanOnly();
-      const run = pair({}, policy);
-      run.answerer.selectedPair = null;
-      const offer = await run.clientPeer.offer();
-      await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
-      await flushMicrotasks();
+      const policy = lanOnlyPolicy();
+      const run = await connected({ selectedPair: null }, policy);
 
-      expect(asked).toEqual([null]);
-      expect(run.burrow.violations).toEqual(['off the LAN']);
+      expect(policy.asked).toEqual([null]);
+      expect(run.burrow.refusals).toEqual(['off the LAN']);
     });
 
     it('checks again when the connection comes back connected, on whatever pair it has', async () => {
-      const { policy } = lanOnly();
-      const { answerer, burrow } = await connected({}, policy);
+      const { answerer, burrow } = await connected({}, lanOnlyPolicy());
 
       answerer.setConnectionState('disconnected');
       answerer.selectedPair = { local: '10.0.0.2', remote: '192.168.1.3' };
       answerer.setConnectionState('connected');
 
-      expect(burrow.violations).toEqual(['off the LAN']);
+      expect(burrow.refusals).toEqual(['off the LAN']);
       expect(answerer.closed).toBe(true);
     });
 
     it('checks again when ICE moves an open connection onto another pair', async () => {
-      const { policy } = lanOnly();
-      const { answerer, burrow } = await connected({}, policy);
+      const { answerer, burrow } = await connected({}, lanOnlyPolicy());
       answerer.setConnectionState('connected');
-      expect(burrow.violations).toEqual([]);
+      expect(burrow.refusals).toEqual([]);
 
       answerer.reselect({ local: '192.168.1.2', remote: '10.0.0.3' });
 
-      expect(burrow.violations).toEqual(['off the LAN']);
+      expect(burrow.refusals).toEqual(['off the LAN']);
+    });
+
+    it('re-reads the pair while open, since ICE can move it with no event at all', async () => {
+      const { answerer, burrow, timers } = await connected({}, lanOnlyPolicy());
+      answerer.setConnectionState('connected');
+      timers.fireAt(DIRECT_PATH_RECHECK_MS);
+      expect(burrow.refusals).toEqual([]);
+
+      // A later nomination the stack reports to no one.
+      answerer.selectedPair = { local: '192.168.1.2', remote: '10.0.0.3' };
+      timers.fireAt(DIRECT_PATH_RECHECK_MS);
+
+      expect(burrow.refusals).toEqual(['off the LAN']);
+      expect(answerer.closed).toBe(true);
+      expect(timers.live.map(({ delayMs }) => delayMs)).not.toContain(DIRECT_PATH_RECHECK_MS);
+    });
+
+    it('leaves a reading with no pair, once open, to the connection’s own state', async () => {
+      const { answerer, burrow, timers } = await connected({}, lanOnlyPolicy());
+      answerer.setConnectionState('connected');
+      answerer.reselect(null);
+      timers.fireAt(DIRECT_PATH_RECHECK_MS);
+      expect(burrow.refusals).toEqual([]);
+
+      answerer.setConnectionState('failed');
+      expect(burrow.closes).toEqual(['the direct connection failed']);
+      expect(burrow.refusals).toEqual([]);
+    });
+
+    it('arms no re-read for a peer no policy holds', async () => {
+      const { timers } = await connected();
+      expect(timers.live.map(({ delayMs }) => delayMs)).not.toContain(DIRECT_PATH_RECHECK_MS);
     });
 
     it('leaves a connection on its way down to the connection’s own rules', async () => {
-      const { policy } = lanOnly();
-      const { answerer, burrow, timers } = await connected({}, policy);
+      const { answerer, burrow, timers } = await connected({}, lanOnlyPolicy());
       answerer.setConnectionState('disconnected');
       // ICE reselecting under a gap is not a path to check: the grace decides.
       answerer.reselect(null);
-      expect(burrow.violations).toEqual([]);
+      expect(burrow.refusals).toEqual([]);
 
       timers.fireAt(DIRECT_DISCONNECTED_GRACE_MS);
       expect(burrow.closes).toEqual(['the direct connection stayed disconnected']);
-      expect(burrow.violations).toEqual([]);
+      expect(burrow.refusals).toEqual([]);
     });
 
     it('checks a frame that arrives before the open, which no stack should deliver', async () => {
-      const { policy } = lanOnly();
-      const run = pair({ opening: 'manual' }, policy);
-      run.answerer.selectedPair = { local: '10.0.0.2', remote: '10.0.0.3' };
+      const run = pair({ opening: 'manual', selectedPair: OFF_LAN }, lanOnlyPolicy());
       const offer = await run.clientPeer.offer();
       await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
 
       run.network.answererChannel!.receiveRaw(new ArrayBuffer(8));
 
       expect(run.burrow.frames).toEqual([]);
-      expect(run.burrow.violations).toEqual(['off the LAN']);
+      expect(run.burrow.refusals).toEqual(['off the LAN']);
     });
 
     it('sends its description as the policy describes it, and refuses when nothing is left', async () => {
-      const stripped = pair({}, lanOnly((sdp) => `${sdp}a=described\r\n`).policy);
+      const stripped = pair({}, lanOnlyPolicy((sdp) => `${sdp}a=described\r\n`));
       const offer = await stripped.clientPeer.offer();
       expect(await stripped.burrowPeer.answer(offer!)).toMatch(/a=described\r\n$/);
 
-      const empty = pair({}, lanOnly(() => null).policy);
+      const empty = pair({}, lanOnlyPolicy(() => null));
       expect(await empty.burrowPeer.answer((await empty.clientPeer.offer())!)).toBeNull();
-      expect(empty.burrow.violations).toEqual(['no candidate of this end is on an allowed network']);
+      expect(empty.burrow.refusals).toEqual(['no candidate of this end is on an allowed network']);
       expect(empty.answerer.closed).toBe(true);
     });
   });

@@ -25,7 +25,12 @@ so the path check refused every phone on the tailnet. Tailscale assigns every no
 `100.64.0.0/10` and `fd7a:115c:a1e0::/48`, so those are what the row means. A
 CGNAT address with a real netmask, a hotspot's, keeps its own prefix. Another
 VPN's host route stays as reported, since nothing says what range its peers
-use; the user adds that range by hand.
+use; the user adds that range by hand. A CGNAT address alone does not say
+Tailscale — Cloudflare WARP assigns devices from `100.96.0.0/12`, and a carrier
+link or hotspot can carry one — so the interface needs the tailnet's IPv6
+address, which only Tailscale draws from, or Tailscale's name. Once allowed, the
+range is still an address range: an address inside it on another interface,
+WARP's included, passes the path check as the level's proximity caveat says.
 
 **Why `autoUpdate` alone ends nothing.** The rule that a change ends the live
 one-time session exists so a narrowed policy cannot leave an old path exempt.
@@ -64,7 +69,30 @@ answered ICE connectivity checks under the attempt's ufrag and password, which
 reach the peer only inside the session. SDP text, mDNS names, and addresses
 Hosted observed are claims; the pair is an observation. `node-datachannel`
 0.33.4 exposes it as `getSelectedCandidatePair()` on the native `PeerConnection`
-and on the polyfill's `RTCIceTransport`.
+and on the polyfill's `RTCIceTransport`. Unbound, the socket sits on the
+unspecified address and the kernel routes each datagram by its destination, so
+the pair's local end is the ICE agent's record, not the egress interface; the
+remote end inside an allowed range is what holds the path. A route that carries
+an allowed range elsewhere — a VPN claiming the LAN's range — is the proximity
+caveat again.
+
+**Why a timer as well as the state events.** libjuice, the ICE agent under
+`node-datachannel`, makes the first nominated pair in its priority order the
+selected one on every bookkeeping pass, and changes state only through a
+function that returns early on an unchanged state (`agent_bookkeeping` and
+`agent_change_state` in `src/agent.c`, read 2026-09-30): once `completed`, a
+pair the controlling phone nominates later carries the session with no event
+at all. The polyfill declares `onselectedcandidatepairchange` and never
+dispatches it. A one-second re-read bounds how long such a move carries
+terminal bytes; it costs one native call a second, only on a held session.
+
+**Why an open connection with no pair is not refused.** libjuice's
+`agent_send` returns an error without sending while it has no selected entry
+(read 2026-09-30), so a connection reporting no pair carries nothing, and a
+pair lost for good fails the connection by its state. Refusing the reading
+would end a phone that simply left as `network-not-allowed`, more often with a
+re-read every second. Before the open nothing has been sent, so there a missing
+pair still refuses.
 
 **Why bind only the single-address case.** `bindAddress` takes one address,
 and a policy may allow several networks, so binding narrows the listener only

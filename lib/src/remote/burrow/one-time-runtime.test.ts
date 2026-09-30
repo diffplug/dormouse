@@ -38,10 +38,11 @@ import {
   type OneTimeState,
 } from './one-time-runtime';
 import type { RemoteApiSessionLike } from './established-session';
-import { DirectPeer, type DirectPathPolicy, type DirectPeerFactory } from '../direct/direct-peer';
+import { DIRECT_PATH_RECHECK_MS, DirectPeer, type DirectPeerFactory } from '../direct/direct-peer';
 import {
   FakeDirectNetwork,
   collect,
+  lanOnlyPolicy,
   type FakeDirectNetworkOptions,
   type FakePeer,
 } from '../direct/test-fake-peer';
@@ -59,6 +60,7 @@ import {
   createTestRendezvous,
   joinOneTimeRoom,
   negotiateOneTimeDirect,
+  offerOneTimeDirect,
   oneTimeEndReason,
   oneTimeFrameText,
   oneTimeInitiator,
@@ -527,13 +529,8 @@ describe('OneTimeRuntime: the session', () => {
   it('declines, tells the phone, then ends direct-failed where it builds no peer', async () => {
     makeRuntime({ createDirectPeer: null });
     const { phone } = await connecting();
-    const peer = new DirectPeer({
-      peer: network.createOfferer(),
-      setTimer: clock.setTimer,
-      handlers: { onOpen: () => {}, onFrame: () => {}, onClosed: () => {}, onViolation: () => {} },
-    });
-    phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await peer.offer())! });
-    expect(await phone.next()).toEqual({ v: 1, t: 'direct-decline' });
+    const { reply } = await offerOneTimeDirect(phone, network, clock.setTimer);
+    expect(reply).toEqual({ v: 1, t: 'direct-decline' });
     await settleUntil(() => runtime.state.status === 'ended');
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');
     expect(phone.socket.closeCode).toBe(4013);
@@ -568,46 +565,18 @@ describe('OneTimeRuntime: the session', () => {
   });
 
   describe('held to a path policy', () => {
-    /**
-     * Local networks as the fake pair's addresses read it — the address math is
-     * `lib/src/host/remote/local-networks.test.ts`'s — describing as given.
-     */
-    const lanOnly = (describe: DirectPathPolicy['describe'] = (sdp) => sdp): DirectPathPolicy => ({
-      describe,
-      refusal: (pair) =>
-        pair?.local?.startsWith('192.168.1.') && pair.remote?.startsWith('192.168.1.') ? null : 'off the LAN',
-    });
     const OFF_LAN = { local: '10.0.0.2', remote: '10.0.0.3' };
 
-    /** Offer from the phone and read back the Burrow's answer, as far as the Burrow lets it get. */
-    async function offerFrom(phone: TestOneTimePhone): Promise<void> {
-      const peer = new DirectPeer({
-        peer: network.createOfferer(),
-        setTimer: clock.setTimer,
-        handlers: { onOpen: () => {}, onFrame: () => {}, onClosed: () => {}, onViolation: () => {} },
-      });
-      phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await peer.offer())! });
-      const answer = (await phone.next()) as { sdp: string };
-      await peer.acceptAnswer(answer.sdp);
-    }
-
     it('connects over a pair the policy allows', async () => {
-      makeRuntime({ directPathPolicy: lanOnly() });
+      makeRuntime({ directPathPolicy: lanOnlyPolicy() });
       await connected();
       expect(runtime.state.status).toBe('connected');
     });
 
     it('ends network-not-allowed on a pair it refuses, before anything is served', async () => {
-      makeRuntime({
-        directPathPolicy: lanOnly(),
-        createDirectPeer: collect(answerers, () => {
-          const answerer = network.createAnswerer();
-          answerer.selectedPair = OFF_LAN;
-          return answerer;
-        }),
-      });
+      makeRuntime({ directPathPolicy: lanOnlyPolicy(), network: { selectedPair: OFF_LAN } });
       const { phone } = await connecting();
-      await offerFrom(phone);
+      await offerOneTimeDirect(phone, network, clock.setTimer);
       await settleUntil(() => runtime.state.status === 'ended');
       expect(oneTimeEndReason(runtime)).toBe('network-not-allowed');
       expect(answerers[0]!.closed).toBe(true);
@@ -616,7 +585,7 @@ describe('OneTimeRuntime: the session', () => {
     });
 
     it('ends network-not-allowed, not phone-left, when ICE moves a connected session off it', async () => {
-      makeRuntime({ directPathPolicy: lanOnly() });
+      makeRuntime({ directPathPolicy: lanOnlyPolicy() });
       await connected();
       answerers[0]!.setConnectionState('connected');
       answerers[0]!.reselect(OFF_LAN);
@@ -625,8 +594,18 @@ describe('OneTimeRuntime: the session', () => {
       expect(answerers[0]!.closed).toBe(true);
     });
 
+    it('ends network-not-allowed when ICE moves a connected session off it with no event', async () => {
+      makeRuntime({ directPathPolicy: lanOnlyPolicy() });
+      await connected();
+      answerers[0]!.setConnectionState('connected');
+      answerers[0]!.selectedPair = OFF_LAN;
+      clock.advance(DIRECT_PATH_RECHECK_MS);
+      await settleUntil(() => runtime.state.status === 'ended');
+      expect(oneTimeEndReason(runtime)).toBe('network-not-allowed');
+    });
+
     it('ends network-not-allowed when no candidate of its own is on an allowed network', async () => {
-      makeRuntime({ directPathPolicy: lanOnly(() => null) });
+      makeRuntime({ directPathPolicy: lanOnlyPolicy(() => null) });
       const { phone } = await connecting();
       phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await network.createOfferer().createOffer()).sdp! });
       await settleUntil(() => runtime.state.status === 'ended');

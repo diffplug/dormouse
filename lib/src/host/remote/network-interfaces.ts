@@ -112,29 +112,38 @@ export function addressAllowed(address: string, cidrs: readonly string[]): boole
 const VPN_NAME = /^(utun|tun|wg|tailscale)/i;
 /** Bridge, container, and VM interfaces; `veth` also covers Windows' `vEthernet`. */
 const VIRTUAL_NAME = /^(bridge|docker|vmnet|vboxnet|veth|br-|virbr)/i;
-/** Tailscale's CGNAT range, which marks its interface whatever the OS named it. */
-const TAILSCALE = blockListOf(['100.64.0.0/10']);
-/** Tailscale's two ranges, each with the family and host-route prefix its interface reports. */
-const TAILNET_RANGES = [
-  { range: '100.64.0.0/10', family: 4, hostRoute: 32 },
-  { range: 'fd7a:115c:a1e0::/48', family: 6, hostRoute: 128 },
-] as const;
-const IPV6_LINK_LOCAL = blockListOf(['fe80::/10']);
+/** Tailscale's two ranges, the ones its host routes widen to. */
+const TAILNET_RANGES = ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'].map((range) => ({
+  range,
+  contains: allowedAddressTest([range]),
+}));
+const tailnetRangeOf = (address: string) => TAILNET_RANGES.find(({ contains }) => contains(address));
+/**
+ * Tailscale's own IPv6 range, which marks its interface whatever the OS named
+ * it. Its IPv4 range is CGNAT's, which a carrier or another VPN draws from too.
+ */
+const isTailnetV6 = TAILNET_RANGES[1]!.contains;
+const TAILSCALE_NAME = /^tailscale/i;
+const isIpv6LinkLocal = allowedAddressTest(['fe80::/10']);
 
 /**
- * The network one address offers: its own prefix, or — for a Tailscale
- * address reported as a host route, which admits no other device — the tailnet
- * range it is drawn from (`docs/specs/remote-network.md` -> "Policy").
+ * Whether one `os.networkInterfaces()` address is one this machine offers a
+ * phone: neither loopback nor otherwise internal, nor IPv6 link-local.
  */
-function offeredPrefix(entry: OsAddress): string | null {
+export function isOfferedAddress(entry: OsAddress): boolean {
+  return !entry.internal && !isIpv6LinkLocal(entry.address);
+}
+
+/**
+ * The network one address offers: its own prefix, or — for an address of a
+ * Tailscale interface reported as a host route, which admits no other device —
+ * the tailnet range it is drawn from (`docs/specs/remote-network.md` -> "Policy").
+ */
+function offeredPrefix(entry: OsAddress, tailnet: boolean): string | null {
   const canonical = entry.cidr === null ? null : canonicalCidr(entry.cidr);
-  const family = isIP(entry.address);
-  for (const { range, family: rangeFamily, hostRoute } of TAILNET_RANGES) {
-    if (family === rangeFamily && canonical?.endsWith(`/${hostRoute}`) && addressAllowed(entry.address, [range])) {
-      return range;
-    }
-  }
-  return canonical;
+  // By the address, never `family`, which Node 18.0–18.3 reported as a number.
+  const hostRoute = canonical?.endsWith(isIP(entry.address) === 4 ? '/32' : '/128');
+  return (tailnet && hostRoute && tailnetRangeOf(entry.address)?.range) || canonical;
 }
 
 const LABELS: Record<NetworkInterfaceInfo['kind'], string> = {
@@ -154,18 +163,14 @@ export function classifyNetworkInterfaces(
 ): NetworkInterfaceInfo[] {
   const interfaces: NetworkInterfaceInfo[] = [];
   for (const [id, addresses] of Object.entries(raw)) {
-    // By the address, never `family`, which Node 18.0–18.3 reported as a number.
-    const external = (addresses ?? []).filter((entry) => !entry.internal);
+    const offered = (addresses ?? []).filter(isOfferedAddress);
+    const tailscale = TAILSCALE_NAME.test(id) || offered.some((entry) => isTailnetV6(entry.address));
     const prefixes = new Set<string>();
-    for (const entry of external) {
-      if (isIP(entry.address) === 6 && IPV6_LINK_LOCAL.check(entry.address, 'ipv6')) continue;
-      const prefix = offeredPrefix(entry);
+    for (const entry of offered) {
+      const prefix = offeredPrefix(entry, tailscale);
       if (prefix) prefixes.add(prefix);
     }
     if (prefixes.size === 0) continue;
-    const tailscale = external.some(
-      (entry) => isIP(entry.address) === 4 && TAILSCALE.check(entry.address, 'ipv4'),
-    );
     const kind = tailscale || VPN_NAME.test(id) ? 'vpn' : VIRTUAL_NAME.test(id) ? 'virtual' : 'lan';
     interfaces.push({ id, label: tailscale ? 'Tailscale' : LABELS[kind], kind, prefixes: [...prefixes] });
   }

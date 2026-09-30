@@ -6,7 +6,18 @@
  */
 
 import type { NetworkInterfaceInfo as OsAddress } from 'node:os';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+/** What `os.networkInterfaces()` answers next, or `'throw'` for a platform that will not list them. */
+const os = vi.hoisted(() => ({ interfaces: {} as NodeJS.Dict<OsAddress[]> | 'throw' }));
+vi.mock('node:os', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:os')>()),
+  networkInterfaces: () => {
+    if (os.interfaces === 'throw') throw new Error('uv_interface_addresses');
+    return os.interfaces;
+  },
+}));
+
 import { bindAddressFor, localNetworksPath } from './local-networks';
 
 /** One `os.networkInterfaces()` address, with the fields the bind choice reads. */
@@ -71,6 +82,19 @@ describe('bindAddressFor', () => {
     expect(bindAddressFor(['127.0.0.0/8', '::1/128'], LAPTOP)).toBeNull();
     // An allowed link-local range still leaves en0's other addresses the choice.
     expect(bindAddressFor(['fe80::/10', '192.168.86.0/24'], LAPTOP)).toBe('192.168.86.160');
+  });
+});
+
+describe('localNetworksPath: the bind', () => {
+  it('reads this machine’s interfaces at each attempt, binding nothing where it cannot list them', () => {
+    const path = localNetworksPath(['192.168.86.0/24']);
+    os.interfaces = LAPTOP;
+    expect(path.bindAddress()).toBe('192.168.86.160');
+    // The laptop moved: the next attempt binds what is there now.
+    os.interfaces = { en0: [address('192.168.86.23')] };
+    expect(path.bindAddress()).toBe('192.168.86.23');
+    os.interfaces = 'throw';
+    expect(path.bindAddress()).toBeNull();
   });
 });
 

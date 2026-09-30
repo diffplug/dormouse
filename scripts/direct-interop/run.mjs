@@ -40,7 +40,7 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { networkInterfaces, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -104,28 +104,30 @@ const [, browserBundle] = await Promise.all([
 ]);
 const requireBundle = createRequire(import.meta.url);
 const { DirectPeer } = requireBundle(join(temp, 'direct-peer.cjs'));
-const { bindAddressFor, localNetworksPath } = requireBundle(join(temp, 'local-networks.cjs'));
+const { localNetworksPath } = requireBundle(join(temp, 'local-networks.cjs'));
 const javascript = browserBundle.outputFiles[0].text;
 
 // `iceServers: []` as both shipped factories pass it: host candidates only.
 const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill');
 const addon = sidecarRequire('node-datachannel');
 
+const policy = allowed && localNetworksPath(allowed);
 /** What the Local networks hold saw, under `--allow`; see question 4. */
-const path = allowed && {
+const path = policy && {
   allowed,
-  bindAddress: bindAddressFor(allowed, networkInterfaces()),
+  bindAddress: policy.bindAddress(),
   answerCandidates: null,
   /** The selected pair as the addon reported it at each check, raw candidates included. */
   checks: [],
 };
+// As `createNativeDirectPeerFactory` builds one, bound where the policy names an address.
 const connection = new RTCPeerConnection({
   iceServers: [],
   ...(path?.bindAddress ? { bindAddress: path.bindAddress } : {}),
 });
-const policy = allowed && localNetworksPath(allowed);
 /** The shipped policy, recording what the addon's selected pair said each time it was asked. */
 const pathPolicy = policy && {
+  bindAddress: () => path.bindAddress,
   describe: policy.describe,
   refusal: (pair) => {
     const raw = connection.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();

@@ -61,7 +61,7 @@ import type {
 } from '../../remote/burrow/burrow-surface-provider';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
 import { nothingPolicy, type NetworkInterfaceInfo, type NetworkPolicy } from '../../remote/network-policy';
-import { DirectPeer } from '../../remote/direct/direct-peer';
+import type { DirectPathPolicy, DirectPeerFactory } from '../../remote/direct/direct-peer';
 import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
@@ -80,6 +80,7 @@ import {
   createTestRendezvous,
   joinOneTimeRoom,
   negotiateOneTimeDirect,
+  offerOneTimeDirect,
   type TestOneTimePhone,
   type TestRendezvous,
 } from '../../remote/test-rendezvous';
@@ -1782,40 +1783,39 @@ describe('one-time connection', () => {
   });
 
   describe('under Local networks', () => {
-    /** An answerer whose selected pair is `remote` from this end on the allowed LAN. */
-    function answererTo(remote: string, handed: Array<readonly string[] | undefined>) {
-      return (allowed?: readonly string[]) => {
-        handed.push(allowed);
+    /**
+     * A factory whose answerer selects `remote` from this end on the allowed
+     * LAN, recording the path policy each attempt hands it.
+     */
+    function answererTo(remote: string, handed: Array<DirectPathPolicy | undefined>): DirectPeerFactory {
+      return (pathPolicy) => {
+        handed.push(pathPolicy);
         const answerer = network.createAnswerer();
         answerer.selectedPair = { local: '192.168.1.2', remote };
         return answerer;
       };
     }
 
-    it('hands the attempt the allowed networks, and connects over them', async () => {
-      const handed: Array<readonly string[] | undefined> = [];
+    it('hands the attempt a policy over the allowed networks, and connects over them', async () => {
+      const handed: Array<DirectPathPolicy | undefined> = [];
       createHostedService(undefined, { createDirectPeer: answererTo('192.168.1.3', handed) });
       const phone = await join((await open()).url);
       await approve(await request(phone));
       expect(await phone.next()).toMatchObject({ ok: true });
 
       await switchDirect(phone);
-      expect(handed).toEqual([[LAN]]);
+      expect(handed).toHaveLength(1);
+      expect(handed[0]!.refusal({ local: '192.168.1.2', remote: '192.168.1.3' })).toBeNull();
+      expect(handed[0]!.refusal({ local: '192.168.1.2', remote: '10.0.0.3' })).not.toBeNull();
     });
 
     it('ends network-not-allowed when the phone’s end of the pair is off them', async () => {
-      const handed: Array<readonly string[] | undefined> = [];
-      createHostedService(undefined, { createDirectPeer: answererTo('10.0.0.3', handed) });
+      createHostedService(undefined, { createDirectPeer: answererTo('10.0.0.3', []) });
       const phone = await join((await open()).url);
       await approve(await request(phone));
       expect(await phone.next()).toMatchObject({ ok: true });
 
-      const peer = new DirectPeer({
-        peer: network.createOfferer(),
-        handlers: { onOpen: () => {}, onFrame: () => {}, onClosed: () => {}, onViolation: () => {} },
-      });
-      phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await peer.offer())! });
-      await peer.acceptAnswer(((await phone.next()) as { sdp: string }).sdp);
+      await offerOneTimeDirect(phone, network);
       await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
       expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
       expect(servingEvents().at(-1)).toBe(false);

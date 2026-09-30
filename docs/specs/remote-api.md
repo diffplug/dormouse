@@ -95,8 +95,8 @@ Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
 signal always fits one control body.
 
 **No ICE servers**, and **never a public STUN or TURN default**: `iceServers:
-[]` at both ends, host candidates only. (rationale) **Local networks holds a
-one-time attempt to the allowed networks**
+[]` at both ends, host candidates only. (rationale) Local networks restricts a
+one-time attempt further
 ([remote-network.md](./remote-network.md) -> "Local networks").
 
 **The two shipped stacks are proven against each other by hand**, by

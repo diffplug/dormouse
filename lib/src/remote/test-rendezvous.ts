@@ -468,16 +468,14 @@ export async function joinOneTimeRoom(
 }
 
 /**
- * The phone's half of the direct path, up to the Burrow's own switch: offer,
- * answer, and the channel open. The phone's own `direct-switch` is the
- * caller's to send. Throws where the Burrow declines, or answers the offer
- * with anything but its switch after the answer.
+ * The phone's offer and the Burrow's reply to it, accepted where it is an
+ * answer. `reply` is that first message, whatever it was.
  */
-export async function negotiateOneTimeDirect(
+export async function offerOneTimeDirect(
   phone: TestOneTimePhone,
   network: FakeDirectNetwork,
   setTimer?: RemoteTimer,
-): Promise<{ peer: DirectPeer; inbound: Uint8Array[] }> {
+): Promise<{ peer: DirectPeer; inbound: Uint8Array[]; reply: Record<string, unknown> }> {
   const inbound: Uint8Array[] = [];
   const peer = new DirectPeer({
     peer: network.createOfferer(),
@@ -492,9 +490,24 @@ export async function negotiateOneTimeDirect(
   const offer = await peer.offer();
   if (offer === null) throw new Error('the test peer could not describe an offer');
   phone.sendControl({ v: 1, t: 'direct-offer', sdp: offer });
-  const answer = (await phone.next()) as Record<string, unknown>;
-  if (answer.t !== 'direct-answer') throw new Error(`expected an answer, got ${String(answer.t)}`);
-  await peer.acceptAnswer(answer.sdp as string);
+  const reply = (await phone.next()) as Record<string, unknown>;
+  if (reply.t === 'direct-answer') await peer.acceptAnswer(reply.sdp as string);
+  return { peer, inbound, reply };
+}
+
+/**
+ * The phone's half of the direct path, up to the Burrow's own switch: offer,
+ * answer, and the channel open. The phone's own `direct-switch` is the
+ * caller's to send. Throws where the Burrow declines, or answers the offer
+ * with anything but its switch after the answer.
+ */
+export async function negotiateOneTimeDirect(
+  phone: TestOneTimePhone,
+  network: FakeDirectNetwork,
+  setTimer?: RemoteTimer,
+): Promise<{ peer: DirectPeer; inbound: Uint8Array[] }> {
+  const { peer, inbound, reply } = await offerOneTimeDirect(phone, network, setTimer);
+  if (reply.t !== 'direct-answer') throw new Error(`expected an answer, got ${String(reply.t)}`);
   // The Burrow's switch is its last message on the rendezvous.
   const switched = (await phone.next()) as Record<string, unknown>;
   if (switched.v !== 1 || switched.t !== 'direct-switch' || Object.keys(switched).length !== 2) {

@@ -506,8 +506,7 @@ What this model adds is what is *underneath* them.
 attempt.** The standalone Burrow's addon binds one socket on the unspecified
 address and advertises each routable interface at that port; a browser binds per
 interface. Either way the host answers UDP from anyone who can route to it on
-any of those networks. (rationale) **Under Local networks a Burrow binds the one
-allowed address instead, where exactly one is present**
+any of those networks. (rationale) Local networks may bind one address instead
 ([remote-network.md](./remote-network.md) -> "Local networks").
 **Two parsers sit behind it and both are attack surface**: before DTLS, ICE's
 own STUN parser, which answers a binding request only under this attempt's

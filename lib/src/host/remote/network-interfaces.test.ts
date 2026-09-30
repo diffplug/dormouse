@@ -1,7 +1,7 @@
 /**
  * The network policy's address math (`docs/specs/remote-network.md` ->
  * "Policy"): canonical CIDRs, the containment check the Local networks path
- * check will run, and the interfaces the Allowed networks list offers.
+ * check runs, and the interfaces the Allowed networks list offers.
  */
 
 import type { NetworkInterfaceInfo as OsAddress } from 'node:os';
@@ -142,8 +142,11 @@ describe('classifyNetworkInterfaces', () => {
   it('names VPNs by interface or by Tailscale’s range, and virtual networks by interface', () => {
     const classified = classifyNetworkInterfaces({
       utun4: [address('100.101.102.103/32'), address('fd7a:115c:a1e0::1/128')],
-      // Tailscale's range marks it whatever the OS calls it.
+      // Tailscale's IPv6 range marks it whatever the OS calls it; its IPv4
+      // range is CGNAT's, a carrier's or another VPN's as well.
+      en9: [address('fd7a:115c:a1e0::9/128')],
       en7: [address('100.64.5.6/10')],
+      utun7: [address('100.96.0.2/32')],
       wg0: [address('10.8.0.2/24')],
       tun0: [address('10.9.0.2/24')],
       bridge100: [address('192.168.64.1/24')],
@@ -157,7 +160,9 @@ describe('classifyNetworkInterfaces', () => {
     });
     expect(classified.map(({ id, label, kind }) => [id, label, kind])).toEqual([
       ['utun4', 'Tailscale', 'vpn'],
-      ['en7', 'Tailscale', 'vpn'],
+      ['en9', 'Tailscale', 'vpn'],
+      ['en7', 'Local network', 'lan'],
+      ['utun7', 'VPN', 'vpn'],
       ['wg0', 'VPN', 'vpn'],
       ['tun0', 'VPN', 'vpn'],
       ['bridge100', 'Virtual network', 'virtual'],
@@ -182,12 +187,19 @@ describe('classifyNetworkInterfaces', () => {
       en7: [address('100.64.5.6/24')],
       // A host route outside Tailscale's ranges admits only this machine, as reported.
       wg0: [address('10.8.0.2/32')],
+      // Tailscale by name, as Linux and Windows call it, with no IPv6 address.
+      Tailscale: [address('100.100.1.2/32')],
+      // A CGNAT host route with no Tailscale IPv6 address beside it — another
+      // VPN's, or a carrier's — admits only this machine, as reported.
+      utun7: [address('100.96.0.2/32')],
     });
     expect(classified.map(({ id, prefixes }) => [id, prefixes])).toEqual([
       ['utun4', ['100.64.0.0/10', 'fd7a:115c:a1e0::/48']],
       ['tailscale0', ['100.64.0.0/10', 'fd7a:115c:a1e0::/48']],
       ['en7', ['100.64.5.0/24']],
       ['wg0', ['10.8.0.2/32']],
+      ['Tailscale', ['100.64.0.0/10']],
+      ['utun7', ['100.96.0.2/32']],
     ]);
   });
 });

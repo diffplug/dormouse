@@ -59,7 +59,7 @@ export const ONE_TIME_ENDED_COPY: Record<Exclude<OneTimeEndReason, 'user-ended'>
   'network-not-allowed':
     'The phone’s connection didn’t come over a network allowed in Settings → Network. Connect ' +
     'both to an allowed network, then get a new link.',
-  idle:'The phone stopped responding, so the connection ended.',
+  idle: 'The phone stopped responding, so the connection ended.',
   unreachable:
     'Couldn’t reach hosted.dormouse.sh to make a link. Check this computer’s internet connection, ' +
     'then try again.',

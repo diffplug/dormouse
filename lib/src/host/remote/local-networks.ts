@@ -1,23 +1,19 @@
 /**
  * The Local networks level's hold on a direct path (`docs/specs/remote-network.md`
- * -> "Local networks"): the one address an attempt's socket binds, where there
- * is one, and the {@link DirectPathPolicy} that strips the Burrow's answer and
- * checks the selected pair. Node-only, like the address math it runs on.
+ * -> "Local networks"): the {@link DirectPathPolicy} that picks the one address
+ * an attempt's socket binds, where there is one, strips the Burrow's answer,
+ * and checks the selected pair. Node-only, like the address math it runs on.
  */
 
 import { isIP } from 'node:net';
-import type { NetworkInterfaceInfo as OsAddress } from 'node:os';
+import { networkInterfaces, type NetworkInterfaceInfo as OsAddress } from 'node:os';
 import type { DirectPathPolicy } from '../../remote/direct/direct-peer';
-import { allowedAddressTest } from './network-interfaces';
-
-const isLinkLocal = allowedAddressTest(['fe80::/10']);
+import { allowedAddressTest, isOfferedAddress } from './network-interfaces';
 
 /**
- * The one address an attempt's socket binds under Local networks, or `null` to
- * bind every interface. **Exactly one interface must carry allowed addresses**,
- * loopback and IPv6 link-local aside; its IPv4 address is preferred where it
- * has both families, and a family with more than one address binds nothing,
- * since there is no single address to choose.
+ * The one address of `raw` an attempt's socket binds under `allowed`, or `null`
+ * to bind every interface: the spec's single-address rule, over the addresses
+ * the Allowed networks list offers ({@link isOfferedAddress}).
  */
 export function bindAddressFor(
   allowed: readonly string[],
@@ -27,7 +23,7 @@ export function bindAddressFor(
   let only: { id: string; v4: string[]; v6: string[] } | null = null;
   for (const [id, addresses] of Object.entries(raw)) {
     for (const entry of addresses ?? []) {
-      if (entry.internal || isLinkLocal(entry.address) || !inAllowed(entry.address)) continue;
+      if (!isOfferedAddress(entry) || !inAllowed(entry.address)) continue;
       if (only && only.id !== id) return null;
       only ??= { id, v4: [], v6: [] };
       (isIP(entry.address) === 4 ? only.v4 : only.v6).push(entry.address);
@@ -43,15 +39,22 @@ const CONNECTION_LINE = /^c=IN IP[46] (\S+)$/;
 const CANDIDATE_LINE = /^a=candidate:\S+ \S+ \S+ \S+ (\S+) /;
 
 /**
- * The Burrow's hold on one attempt under Local networks. **Both ends of the
- * selected pair must be IP literals inside `allowed`**: a hostname, an mDNS
- * name, or a pair the stack cannot report refuses, since only the Burrow's own
- * ICE agent is evidence. The answer loses every candidate outside `allowed`,
- * and a default connection address outside it becomes `0.0.0.0`.
+ * The Burrow's hold on one attempt under Local networks: the bind is read from
+ * this machine's interfaces at the attempt, since a laptop moves between
+ * networks, and a platform that will not list them binds nothing and leaves
+ * the path check to decide. Both ends of the selected pair must be IP literals
+ * inside `allowed`.
  */
 export function localNetworksPath(allowed: readonly string[]): DirectPathPolicy {
   const inAllowed = allowedAddressTest(allowed);
   return {
+    bindAddress() {
+      try {
+        return bindAddressFor(allowed, networkInterfaces());
+      } catch {
+        return null;
+      }
+    },
     describe(sdp) {
       const eol = sdp.includes('\r\n') ? '\r\n' : '\n';
       let candidates = 0;

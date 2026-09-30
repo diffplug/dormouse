@@ -397,7 +397,7 @@ describe('the direct path over the native addon', () => {
    * fake pair can only assert. Before the teardown case, which ends the addon.
    */
   it.skipIf(!EXTERNAL_V4)('binds the one allowed address, and advertises it alone', async () => {
-    const peer = createNativeDirectPeerFactory()([`${EXTERNAL_V4}/32`])!;
+    const peer = createNativeDirectPeerFactory()(localNetworksPath([`${EXTERNAL_V4}/32`]))!;
     try {
       peer.createDataChannel(DIRECT_CHANNEL_LABEL, { ordered: true });
       await peer.setLocalDescription(await peer.createOffer());
@@ -414,7 +414,7 @@ describe('the direct path over the native addon', () => {
   it.skipIf(!EXTERNAL_V4)(
     'opens a bound channel whose selected pair the path policy reads as IP addresses',
     async () => {
-      const allowed = [`${EXTERNAL_V4}/32`];
+      const pathPolicy = localNetworksPath([`${EXTERNAL_V4}/32`]);
       const run = await untilOpen(async (attempt) => {
         let opened = 0;
         const lost: string[] = [];
@@ -424,11 +424,9 @@ describe('the direct path over the native addon', () => {
           onClosed: (reason: string) => lost.push(reason),
           onViolation: (reason: string) => lost.push(reason),
         };
-        const bound = attempt.keep(createNativeDirectPeerFactory()(allowed)!);
+        const bound = attempt.keep(createNativeDirectPeerFactory()(pathPolicy)!);
         const offerer = attempt.keep(new DirectPeer({ peer: buildPeer(), handlers }));
-        const answerer = attempt.keep(
-          new DirectPeer({ peer: bound, handlers, pathPolicy: localNetworksPath(allowed) }),
-        );
+        const answerer = attempt.keep(new DirectPeer({ peer: bound, handlers, pathPolicy }));
         const offer = await offerer.offer();
         expect(offer).not.toBeNull();
         const answer = await answerer.answer(offer!);

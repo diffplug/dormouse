@@ -25,7 +25,7 @@ import {
 } from 'remote-lib-common';
 
 import { DirectEndpoint, type DirectCarrier } from '../direct/direct-endpoint';
-import type { DirectPathPolicy, DirectPeerFactory } from '../direct/direct-peer';
+import type { DirectPathPolicy, DirectPeerFactory, DirectViolationCause } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
 
 /**
@@ -96,9 +96,9 @@ export interface EstablishedE2eSessionDeps {
   /**
    * What the network policy holds this session's direct path to, if anything
    * (`docs/specs/remote-network.md` -> "Local networks"); a refusal ends the
-   * session through {@link onFatal}.
+   * session through {@link onFatal}, `path-refused`.
    */
-  readonly directPathPolicy?: DirectPathPolicy | null;
+  readonly directPathPolicy?: DirectPathPolicy;
   /**
    * Put one transport ciphertext on the relay path, in whatever envelope the
    * owner's socket carries. Every Burrow→Client byte this session sends before
@@ -108,9 +108,10 @@ export interface EstablishedE2eSessionDeps {
   /**
    * The session is unrecoverable: the owner disposes it and drops its record.
    * **Never called once this session is disposed**, so a report can never end
-   * whatever replaced it.
+   * whatever replaced it. `cause` is set where the direct path's policy
+   * refused the path.
    */
-  onFatal(reason: string): void;
+  onFatal(reason: string, cause?: DirectViolationCause): void;
   /**
    * Notified whenever the direct path's {@link DirectPath} or
    * {@link DirectRelayCause} changes — `direct` once **both** directions have
@@ -142,7 +143,7 @@ export class EstablishedE2eSession {
    */
   readonly #direct: DirectEndpoint;
   readonly #sendRelay: (ciphertext: Uint8Array) => void;
-  readonly #onFatal: (reason: string) => void;
+  readonly #onFatal: EstablishedE2eSessionDeps['onFatal'];
   readonly #onRelayedApp: (() => void) | null;
   readonly #now: () => number;
   #lastClientActivityAt: number;
@@ -161,9 +162,9 @@ export class EstablishedE2eSession {
       sendSignal: (signal) => this.#sendSignal(signal),
       sendRelay: this.#sendRelay,
       receive: (ciphertext, carrier) => this.#receive(ciphertext, carrier),
-      fatal: (reason) => {
+      fatal: (reason, cause) => {
         console.warn(`[burrow] the direct path ended this session: ${reason}`);
-        this.#fatal(reason);
+        this.#fatal(reason, cause);
       },
       // **Disposal is this session's one test for being over.** Its owner
       // disposes it on every route that replaces or tears one down, so a
@@ -228,9 +229,9 @@ export class EstablishedE2eSession {
     this.#api.dispose();
   }
 
-  #fatal(reason: string): void {
+  #fatal(reason: string, cause?: DirectViolationCause): void {
     if (this.#disposed) return;
-    this.#onFatal(reason);
+    this.#onFatal(reason, cause);
   }
 
   /**

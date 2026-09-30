@@ -16,16 +16,7 @@
  * gets no `direct-offer` never opens it at all.
  */
 
-import { networkInterfaces } from 'node:os';
 import type { DirectPeerFactory, DirectPeerLike } from '../../remote/direct/direct-peer';
-import { bindAddressFor } from './local-networks';
-
-/**
- * A Burrow's peer factory, which Local networks hands its allowed networks
- * (`docs/specs/remote-network.md` -> "Local networks"); called without them,
- * as every runtime's {@link DirectPeerFactory} is, the peer is unrestricted.
- */
-export type HostDirectPeerFactory = (allowed?: readonly string[]) => DirectPeerLike | null;
 
 /**
  * The polyfill's configuration, which it spreads into the native
@@ -81,21 +72,7 @@ function requireNative(): NativeDirect {
 }
 
 /**
- * The address `allowed` binds on this machine now ({@link bindAddressFor}), or
- * `null` — nothing allowed, or interfaces the platform will not list, both of
- * which leave the socket on every interface and the path check to decide.
- */
-function bindAddressNow(allowed: readonly string[] | undefined): string | null {
-  if (!allowed) return null;
-  try {
-    return bindAddressFor(allowed, networkInterfaces());
-  } catch {
-    return null;
-  }
-}
-
-/**
- * A {@link HostDirectPeerFactory} over the native polyfill.
+ * A {@link DirectPeerFactory} over the native polyfill.
  *
  * **A load failure is warned once and declines forever after.** A missing
  * platform package or a wrong ABI is a property of the installation, not of the
@@ -103,12 +80,11 @@ function bindAddressNow(allowed: readonly string[] | undefined): string | null {
  * native load attempt each time — and the Burrow's answer is the same either
  * way: `direct-decline`, and the session stays on the relay.
  *
- * **Handed allowed networks, the attempt's socket binds their one address on
- * this machine, where there is exactly one**, read at the attempt rather than
- * at the open, since a laptop moves between networks.
+ * Handed a path policy, the attempt's socket binds the address it names, if
+ * any (`docs/specs/remote-network.md` -> "Local networks").
  */
-export function createNativeDirectPeerFactory(): HostDirectPeerFactory {
-  return (allowed) => {
+export function createNativeDirectPeerFactory(): DirectPeerFactory {
+  return (pathPolicy) => {
     if (!native && !declined) {
       try {
         native = requireNative();
@@ -118,7 +94,7 @@ export function createNativeDirectPeerFactory(): HostDirectPeerFactory {
       }
     }
     if (!native) return null;
-    const bindAddress = bindAddressNow(allowed);
+    const bindAddress = pathPolicy?.bindAddress() ?? null;
     // `iceServers: []` here and nowhere else: host candidates only, never a
     // public STUN or TURN default (`docs/specs/remote-api.md` → "Direct path").
     return new native.polyfill.RTCPeerConnection({

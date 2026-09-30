@@ -19,6 +19,7 @@
 import { DIRECT_CHANNEL_LABEL, NOISE_MAX_MESSAGE_LENGTH } from 'remote-lib-common';
 import {
   type DirectChannelLike,
+  type DirectPathPolicy,
   type DirectPeerLike,
   type DirectSctpLike,
   type DirectSelectedPair,
@@ -58,6 +59,42 @@ export interface FakeDirectNetworkOptions {
    * *peer* created, while the offerer only re-reads its own request.
    */
   readonly channelSide?: FakePeerRole;
+  /**
+   * What each end's transport first reports as its selected pair, as the
+   * answerer sees it: {@link FAKE_LAN_PAIR} by default, `null` for none.
+   */
+  readonly selectedPair?: DirectSelectedPair | null;
+}
+
+/** The pair a run selects unless it says otherwise: both ends on one LAN. */
+export const FAKE_LAN_PAIR: DirectSelectedPair = { local: '192.168.1.2', remote: '192.168.1.3' };
+
+/** The one host candidate each end describes itself with: its half of {@link FAKE_LAN_PAIR}. */
+const HOST_CANDIDATE: Record<FakePeerRole, string> = {
+  answerer: FAKE_LAN_PAIR.local!,
+  offerer: FAKE_LAN_PAIR.remote!,
+};
+
+/**
+ * A path policy allowing only {@link FAKE_LAN_PAIR}'s LAN, by string prefix —
+ * the address math is the host's, and `lib/src/host/remote/local-networks.test.ts`
+ * pins it — recording every pair it is asked about. It binds nothing, and
+ * describes as `describe` does: as given, by default.
+ */
+export function lanOnlyPolicy(
+  describe: DirectPathPolicy['describe'] = (sdp) => sdp,
+): DirectPathPolicy & { readonly asked: Array<DirectSelectedPair | null> } {
+  const asked: Array<DirectSelectedPair | null> = [];
+  const onLan = (address: string | null) => address?.startsWith('192.168.1.') ?? false;
+  return {
+    asked,
+    bindAddress: () => null,
+    describe,
+    refusal: (pair) => {
+      asked.push(pair);
+      return pair && onLan(pair.local) && onLan(pair.remote) ? null : 'off the LAN';
+    },
+  };
 }
 
 /** One end of the linked pair; the offerer creates the channel. */
@@ -170,10 +207,10 @@ export class FakePeer implements DirectPeerLike {
   #connectionState = 'connecting';
   closed = false;
   /**
-   * What the transport's `getSelectedCandidatePair()` reports, as addresses: a
-   * pair on one LAN unless a case says otherwise, `null` for none.
+   * What the transport's `getSelectedCandidatePair()` reports, as addresses;
+   * `null` for none. See {@link FakeDirectNetworkOptions.selectedPair}.
    */
-  selectedPair: DirectSelectedPair | null = { local: '192.168.1.2', remote: '192.168.1.3' };
+  selectedPair: DirectSelectedPair | null;
 
   constructor(
     role: FakePeerRole,
@@ -184,6 +221,7 @@ export class FakePeer implements DirectPeerLike {
     this.#options = options;
     this.#network = network;
     this.#gathering = options.gathering === 'pending' ? 'gathering' : 'complete';
+    this.selectedPair = options.selectedPair === undefined ? FAKE_LAN_PAIR : options.selectedPair;
   }
 
   get iceGatheringState(): string {
@@ -220,7 +258,10 @@ export class FakePeer implements DirectPeerLike {
     this.#emit('connectionstatechange', {});
   }
 
-  /** ICE moves the connection onto another pair, firing the one event a stack gives for it. */
+  /**
+   * ICE moves the connection onto another pair and says so with an ICE state
+   * change; a move it reports to no one is a plain {@link selectedPair} write.
+   */
   reselect(pair: DirectSelectedPair | null): void {
     this.selectedPair = pair;
     this.#emit('iceconnectionstatechange', {});
@@ -277,9 +318,9 @@ export class FakePeer implements DirectPeerLike {
   }
 
   #describe(kind: 'offer' | 'answer'): string {
-    // One host candidate, at this end's half of the pair it will select, for a
-    // policy that strips the rest.
-    const host = this.selectedPair?.local ?? '192.168.1.2';
+    // One host candidate, whatever pair ICE goes on to select: a description
+    // is a claim, never the path.
+    const host = HOST_CANDIDATE[this.#role];
     const body =
       'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' +
       'm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\n' +
