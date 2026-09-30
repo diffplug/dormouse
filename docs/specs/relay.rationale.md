@@ -24,9 +24,17 @@
 
 **Why the origin is normalized rather than compared as typed.** A trailing slash reads as correct in an `.env` file and then fails every compare it reaches, unless every compare site re-parses it first.
 
-## Where a Burrow may reach a Relay (self-host builds)
+## Relay origin
 
-**The two build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped `*.dormouse.sh` default instead of the selfhoster's origins — a build that looks correct and refuses the only Relay it was meant for, so `assertConnectSrcBaked` greps the emitted bundle for the value. An override outside the grammar (trailing slash, path, bare host, foreign scheme, out-of-range port) matches nothing at runtime, so without `resolveRemoteConnectSrc`'s check the build goes green and ships the same silent refusal.
+**Why one origin rather than an allowlist.** The retired `DORMOUSE_REMOTE_CONNECT_SRC` default, `https://*.dormouse.sh wss://*.dormouse.sh`, was a wildcard only to leave room for BYOT's per-tenant hosts, which nothing shipped used; any DNS name added under `dormouse.sh` widened what every stock binary would talk to. The Hosted origin was a second baked value (`DORMOUSE_HOSTED_ORIGIN`) that had to agree with the list, or one-time links went dark. One exact origin is both narrower and one fact: a build is Hosted or points at exactly one self-host Relay, and nothing else it reaches in the background is left to configure.
+
+**Why a self-host build reaches nothing of Dormouse's in the background.** A self-hoster runs their own Relay to keep their traffic off infrastructure they do not control. An update check, a rendezvous room, or a voice request would each tell `dormouse.sh` that the machine exists and when it runs, and the updater would do worse: the manifest names the stock binaries, so installing one over a source build replaces its baked origin with Hosted's and silently drops its Relay.
+
+**Why a release build refuses the Hosted flag and a loopback origin.** The flag turns on Hosted behavior — the voice token, the rendezvous — for an origin Dormouse may not operate; that is useful against a local `pnpm dev:hosted` or a PR preview and wrong in anything installed. A loopback `http:` origin in an installed binary points it at whatever listens on that port of the user's own machine.
+
+**Why an enrollment for another origin is kept rather than deleted.** The `burrowToken` in it cannot be re-minted without the setup password, so a user moving between a stock build and a self-host build — or between two dogfood builds — would lose every pairing on each switch. Reading it as none is enough: nothing connects to an origin the build was not baked with.
+
+**The build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped default — Hosted — instead of the self-hoster's Relay: a build that looks correct and has no Relay at all, so `assertRelayOriginBaked` greps the emitted bundle for the value. An origin outside the accepted rule would never match what the runtime composes, and a retired variable left over from older instructions would build a stock Hosted binary without a word, so `resolveRelayOrigin` fails the build on both.
 
 ## State files
 

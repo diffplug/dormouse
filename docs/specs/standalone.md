@@ -132,8 +132,7 @@ The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
 side", which owns that split and what the webview keeps): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
-with the relay-origin allowlist and the Hosted origin baked in
-(`docs/specs/relay.md`, `docs/specs/one-time.md`).
+with the relay origin baked in (`docs/specs/relay.md` → "Relay origin").
 **Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
@@ -1302,10 +1301,10 @@ Source of truth: `standalone/package.json` (package scripts),
   `lib/src/host/` sources into the sidecar `.cjs` files).
 - The `tauri` script stages, then runs `standalone/scripts/tauri.mjs`, which
   delegates to the Tauri CLI — except `dev`, which it routes through `runDev`
-  below. `build-sidecar-proxy.mjs` bakes `DORMOUSE_REMOTE_CONNECT_SRC` into the
+  below. `build-sidecar-proxy.mjs` bakes `DORMOUSE_RELAY_ORIGIN` into the
   sidecar's Burrow bundle. The webview CSP contains no relay sources, pinned by
-  `standalone/scripts/tauri-conf.test.mjs` (`docs/specs/relay.md`, "Where a Burrow
-  may reach a Relay").
+  `standalone/scripts/tauri-conf.test.mjs`
+  (`docs/specs/relay.md` → "Relay origin").
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
@@ -1331,10 +1330,10 @@ Source of truth: `standalone/package.json` (package scripts),
   sources.** Frontend edits hot-reload; Tauri watches Rust.
 - `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
   browser-dev harness instead of the Tauri WebView (below).
-- **May build with `DORMOUSE_HOSTED_ORIGIN=http://localhost:<port>`**, the
-  origin a local `pnpm dev:hosted` prints, to speak managed voice through it;
-  it answers no other `Host` (`docs/specs/security-local.md` -> "Persisted
-  state").
+- **May build a dev build with `DORMOUSE_RELAY_ORIGIN=http://localhost:<port>
+  DORMOUSE_RELAY_IS_HOSTED=1`**, the origin a local `pnpm dev:hosted` prints, to
+  speak managed voice through it; it answers no other `Host`
+  (`docs/specs/security-local.md` -> "Persisted state").
 
 ### Standalone browser-dev harness
 

@@ -2,6 +2,10 @@
 
 > Informative companion to [auto-update.md](auto-update.md): evidence and design history keyed by that spec's headings. Nothing here is normative.
 
+## How it works
+
+**Why a self-host build never checks.** The manifest at `dormouse.sh` names the stock binaries, so installing one over a source build replaces its baked relay origin with Hosted's: the machine silently loses its self-host Relay, its enrollment reading as none from then on. The check alone is also a background request to `dormouse.sh`, which a self-host build never makes (`docs/specs/relay.rationale.md` → "Relay origin"). Reading the mode from the sidecar keeps one bake as the source of truth; a sidecar that never answers fails closed, costing a stock build one launch's check.
+
 ## Quit-time install
 
 **Why install runs last.** On Windows `install()` starts NSIS and then calls `std::process::exit` itself (`tauri-plugin-updater-2.11.0/src/updater.rs`, checked 2026-09), so starting it early interrupts teardown. This ordering originally protected persisted scrollback; what it protects now is the window's structure, which standalone does persist. The retained save/drain hooks and their completion semantics are explained in `docs/specs/standalone.rationale.md` → Quit flow.

@@ -13,7 +13,7 @@ import * as PocketWall from '../../lib/src/stories/PocketWall.stories';
 # Pairing a phone with your laptop
 
 Everything it takes to control a laptop's terminals from a phone, in the order
-you meet it: stand up a Relay, build a Burrow that is allowed to reach it, enroll
+you meet it: stand up a Relay, build a Burrow pointed at it, enroll
 the laptop, scan its code with the phone, approve the pairing, connect.
 
 The screens below are the real components, rendered from the same stories
@@ -120,21 +120,23 @@ passkey. `show-password` is the enrollment fallback.
 
 ---
 
-## 2. Build a Burrow that is allowed to reach it
+## 2. Build a Burrow pointed at it
 
-Shipped Dormouse builds bake in a relay allowlist of
-`https://*.dormouse.sh wss://*.dormouse.sh` and nothing else, enforced inside
-the Node process that holds the relay socket rather than by any webview CSP. A
-self-host origin needs a local build that widens it:
+Shipped Dormouse builds bake in exactly one relay origin,
+`https://hosted.dormouse.sh`, enforced inside the Node process that holds the
+relay socket rather than by any webview CSP. A self-host Relay needs a local
+build baked with its origin, byte for byte:
 
 ```sh
-DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:standalone
-DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
+DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:standalone
+DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:vscode
 ```
 
-Skipping this has a specific, recognizable symptom, and you will see it in the
-next section rather than as a mysterious failure: enrollment is refused
-locally, before any credential leaves the machine.
+That makes it a self-host build, which contacts nothing of Dormouse's on its
+own: no one-time links, no managed voice, no update checks. Skipping this has a
+specific, recognizable symptom, and you will see it in the next section rather
+than as a mysterious failure: a stock build's **Persistent Relay** offers only a
+disabled "Use hosted.dormouse.sh", with nothing to enroll.
 
 ---
 
@@ -147,10 +149,12 @@ nothing to type:
 
 <Canvas of={RemoteControl.OfferAvailable} />
 
-> The other button, **One-time connection**, needs none of this walkthrough —
-> no Relay, no enrollment, no passkey, no pairing. It shows a link good for one
-> phone on the same Wi-Fi, for one session, confirmed with the same two digits
-> and saving nothing; `docs/specs/one-time.md` owns it.
+> The other button, **One-time connection**, is disabled in a self-host build
+> like this one: its links are made at `hosted.dormouse.sh`. In a stock build it
+> needs none of this walkthrough — no Relay, no enrollment, no passkey, no
+> pairing. It shows a link good for one phone on the same Wi-Fi, for one
+> session, confirmed with the same two digits and saving nothing;
+> `docs/specs/one-time.md` owns it.
 
 The installer left a `run/enroll-offer.json` next to its state — this install's
 origin plus a one-time token the Relay redeems in place of the setup password
@@ -168,11 +172,12 @@ the same hour — if the installer ran again and rewrote the offer, the origin o
 disk no longer matches the one you read, and the service refuses rather than
 spend a one-time token on a Relay you were never shown.
 
-### The typed form, for a Relay somewhere else
+### The typed form, when there is no offer
 
-"Enroll with a different Relay…" unfolds the original three-field form, which
-is also what **Persistent Relay** unfolds to on a laptop with no local install
-— a second machine enrolling against the first one’s Relay, or an offer already
+"Enroll with the setup password…" unfolds the typed form: the setup password
+and a name, sent to the origin the build was baked with. It is also what
+**Persistent Relay** unfolds to on a laptop with no local install — a second
+machine enrolling against the first one’s Relay — or with an offer already
 redeemed.
 
 <Canvas of={RemoteControl.Unenrolled} />
@@ -182,15 +187,11 @@ self-hoster cannot skip. Three rules it exists to honor:
 
 - **The password is passed through, never held.** It goes straight to the Burrow
   service — the party that actually talks to the Relay — and is cleared on
-  success only. A failed enroll is usually a typo in one of the other fields,
+  success only. A failed enroll is usually a Relay that is down or unreachable,
   and wiping the password would make every retry a fresh trip to the password
   manager.
-- **Refusals are shown, not swallowed**, in the same words the card uses:
-
-<Canvas of={RemoteControl.EnrollRefused} />
-
-  The build refuses the origin before the password is sent anywhere. Saying so
-  in those words is what keeps it from reading as a wrong password.
+- **Refusals are shown, not swallowed**, in the same words the card uses, so an
+  unreachable Relay never reads as a wrong password.
 
 - **The bearer token never comes back.** Enrollment answers
   `{ burrowId, relayUrl }`; the `burrowToken` stays in the Burrow service and on

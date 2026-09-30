@@ -16,7 +16,7 @@ Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `SELF_HOST.md`, and then
 the code they point at — `remote-lib-common/src/security/`, `relay/src/`,
 `lib/src/remote/`, `lib/src/host/remote/`, `vscode-ext/src/burrow*.ts`,
-`scripts/csp-defaults.mjs`, and all three installers —
+`scripts/relay-origin.mjs`, and all three installers —
 `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`, and
 `deploy/local/install-linux.sh`. The three hold the same invariants through
 different native mechanisms, so read them against each other: a control present
@@ -36,10 +36,10 @@ run — `docs/specs/security-remote.md` -> "Direct path");
 `established-session.ts` (an authorized session's decrypt, idle clock, and
 direct path), and `one-time-runtime.ts` (the one-time ceremony, which grants
 nothing and must reach the direct path — `docs/specs/security-remote.md` ->
-"One-time connection"); `lib/src/host/hosted-origin.ts`,
+"One-time connection"); `lib/src/host/relay-origin.ts`,
 `lib/src/host/remote/one-time-origin.ts`, and the one-time half of `service.ts`
-(the baked rendezvous origin, its gate before any socket, the single runtime,
-and the approval routed by `kind`);
+(the one baked origin, the rendezvous gate before any socket, the single
+runtime, and the approval routed by `kind`);
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they
 promote), `one-time-client.ts` (the one-time phone, which keeps nothing and
@@ -101,6 +101,13 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   default; `DORMOUSE_SETUP_PASSWORD` must not be a runtime input. A malformed
   existing record must stop startup rather than rotate the credential or fall
   back to configuration.
+- **Does a self-host build reach Dormouse's servers with nobody clicking?**
+  Follow `DORMOUSE_RELAY_ORIGIN` from `scripts/relay-origin.mjs` into both host
+  bundles, then list every request a build baked with a non-default origin
+  could make to `dormouse.sh` or `hosted.dormouse.sh` — the one-time half of
+  `service.ts`, `lib/src/host/managed-voice-host.ts`, `standalone/src/updater.ts`,
+  and anything else that fetches. A release build that accepts
+  `DORMOUSE_RELAY_IS_HOSTED` or a loopback `http:` origin is the same finding.
 - Can anything reach a Burrow's ACL without a human approving on that Burrow? Trace
   every writer — including the ACL read filter, anything that rehydrates a
   record from disk, and what a compromised webview or a compromised Relay could

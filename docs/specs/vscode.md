@@ -179,9 +179,9 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 **`frame-src` is loopback-only** — `dor iframe` frames its target through the transparent proxy the extension host stands up, so the only origin ever embedded is loopback on an OS-assigned port; without the override `default-src 'none'` blocks the frame and leaves a blank white pane (`docs/specs/dor-browser.md`).
 
-**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the host's guarded browser viewer sockets (`docs/specs/dor-browser.md` → Viewer Socket) — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the origin allowlist is enforced there instead (see "Burrow: a service in the extension host").
+**The webview CSP carries no relay sources.** Its `connect-src` loopback `ws:` entries are for the host's guarded browser viewer sockets (`docs/specs/dor-browser.md` → Viewer Socket) — the Burrow holds its `/ws/burrow` socket from the *extension host*, which no CSP fences, so the relay origin is enforced there instead (see "Burrow: a service in the extension host").
 
-**That allowlist is a build-time constant, never a runtime value**: `vscode-ext/scripts/esbuild.mjs` substitutes `__DORMOUSE_REMOTE_CONNECT_SRC__` into `dist/extension.js`. The default, the replace-not-add override rule, and the two build-time guards are `docs/specs/relay.md` → "Where a Burrow may reach a Relay".
+**That origin is a build-time constant, never a runtime value**: `vscode-ext/scripts/esbuild.mjs` bakes `DORMOUSE_RELAY_ORIGIN` into `dist/extension.js`. The default, the modes, and the build-time guards are `docs/specs/relay.md` → "Relay origin".
 
 `unsafe-inline` for styles covers the theme CSS variables VS Code injects as inline styles on the body element. Scripts stay nonce-gated on a fresh per-render nonce of 24 CSPRNG bytes (`node:crypto` `randomBytes`) base64url-encoded to 32 characters — **never `Math.random()`**. Vite builds the webview HTML from the `lib` package; at runtime `webview-html.ts` rewrites asset URLs to webview URIs, injects the CSP meta tag, swaps Vite's nonce placeholder for the real one, and appends a nonce-gated inline script carrying the boot globals (message token, initial state, selected shell, recovery commands).
 
@@ -198,7 +198,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 Chromium enforces CSP and a failure presents remote from its cause, so **string inspection proves nothing** (rationale) and two checks cover it, **neither replacing the other**: `vscode-ext/test/webview-boot.smoketest.ts` loads the real bundle under the real policy in a real engine, and `vscode-ext/test/webview-html.test.ts` pins the transform against a fixture of real Vite output.
 
-Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `CSP_NONCE_PLACEHOLDER` in `vscode-ext/src/csp-nonce-placeholder.ts`, `assertConnectSrcBaked` in `scripts/csp-defaults.mjs`, `bakedConnectSrc` in `lib/src/host/remote/connect-src.ts`.
+Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `CSP_NONCE_PLACEHOLDER` in `vscode-ext/src/csp-nonce-placeholder.ts`, `assertRelayOriginBaked` in `scripts/relay-origin.mjs`, `bakedRelayOrigin` in `lib/src/host/relay-origin.ts`.
 
 ### Webview message authentication
 
@@ -252,7 +252,7 @@ Source of truth: `VsCodeBurrowStateStore` and `ONE_TIME_SERVING_KEY` in `vscode-
 
 **Domain-separate the two proofs (`client:` / `server:`)** — without it a fake server could reflect the client's own proof back as its welcome. **The client verifies the welcome before it sends or answers anything else** (until then it forwards no notifies — they queue — answers no requests, streams no PTY, forwards no commands), and a welcome it cannot verify closes the socket, so squatting the path buys nothing (rationale). **Fresh nonces per connection** make a captured proof worthless on the next one. **Parseable JSON values that are not frame objects are rejected on both ends**, a first frame that is not a valid hello drops the socket, and **each side bounds the opening handshake to `HANDSHAKE_BUDGET_MS`**.
 
-**Nothing starts until there is a Burrow to run.** Contention begins when activation finds an enrollment or the serving marker in `SecretStorage`, when `secrets.onDidChange` reports that another window wrote one, or on the first `enroll` / `enrollOffer` / `oneTimeOpen` command from any webview — the bootstrap for an un-enrolled machine, so a user who never enrolls or opens a link never sees a socket. **The service runs independently of webview lifetime**: a broker window with zero Dormouse webviews still relays, contributing an empty directory.
+**Nothing starts until there is a Burrow to run.** Contention begins when activation finds an enrollment for the baked origin or the serving marker in `SecretStorage`, when `secrets.onDidChange` reports that another window wrote one, or on the first `enroll` / `enrollOffer` / `oneTimeOpen` command from any webview — the bootstrap for an un-enrolled machine, so a user who never enrolls or opens a link never sees a socket. **The service runs independently of webview lifetime**: a broker window with zero Dormouse webviews still relays, contributing an empty directory.
 
 **A command that arrives mid-contention is held, not refused** (rationale). Commands queue (bounded at a dozen, oldest refused on overflow) and drain when a role settles — to the service if this window brokered, over the link if it did not. **Each carries its own deadline, under the adapter's 15 s timeout**, so a contention that never settles produces a reason rather than a timeout. `enroll`, `enrollOffer`, and `oneTimeOpen` are the only commands that may *start* the contention; everything else refuses only where there is genuinely nothing to reach.
 
@@ -380,6 +380,8 @@ settings, extensions, and workspaces. Use the F5 Extension Development Host for
 debugger can attach to.
 
 `vscode-ext/vite.config.ts` sets `root: ../lib` and `outDir: ./media`, building the shared React frontend directly into the extension's media folder.
+
+**The extension makes no update check of its own**: VS Code updates it from the Marketplace, but from 1.92 never one installed from a VSIX (rationale). A self-host VSIX keeps the Marketplace identity, so on an older VS Code (`engines.vscode` admits 1.85) or with its auto-update switched back on, the Marketplace build — a Hosted one — replaces it and reads its enrollment as none (`docs/specs/relay.md` → "Relay origin").
 
 ## Future
 

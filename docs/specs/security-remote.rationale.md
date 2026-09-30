@@ -87,17 +87,24 @@ negotiation, no plaintext path, no legacy discriminant" a build failure rather t
 reading; the self-test is what keeps a rule from passing for the wrong reason, which is
 a textual lint's characteristic failure.
 
-## Where a Burrow may reach a Relay
+## Relay origin
 
 **Why the build asserts the define landed.** A lost esbuild define compiles green and
-shows up only as a Burrow silently using the shipped default instead of the selfhoster's
-origins. The watch branch of the VS Code script is named explicitly because it is the
-build people iterate in, and therefore where a lost define most plausibly survives.
+shows up only as a Burrow silently using the shipped default — Hosted — instead of the
+self-hoster's Relay. The watch branch of the VS Code script is named explicitly because
+it is the build people iterate in, and therefore where a lost define most plausibly
+survives.
 
-**Why `redirect: 'error'`.** A Node process does not re-check a redirect target the way
-a browser re-applies CSP, so a followed redirect could carry the setup password or the
-`burrowToken` outside the allowlist. That is also why any new Burrow→Relay call goes
-through `burrowFetch`.
+**Why a release build refuses `DORMOUSE_RELAY_IS_HOSTED` and a loopback origin.** The
+flag sends the managed-voice token and the one-time rendezvous to an origin Dormouse may
+not operate, and a loopback origin points every install at whatever listens on that port
+of its own machine; both are dev conveniences that must not survive into an installed
+binary (`docs/specs/relay.rationale.md` → "Relay origin").
+
+**Why `redirect: 'error'`.** A Node process does not re-check a redirect target, so a
+followed redirect could carry the setup password or the `burrowToken` to an origin the
+build was never pointed at. That is also why any new Burrow→Relay call goes through
+`burrowFetch`.
 
 ## Credentials at rest
 
