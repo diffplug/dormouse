@@ -3,6 +3,7 @@ import type { Env } from "./worker";
 import { queryDatabase } from "pgstencil/postgres";
 import { secureHeaders } from "./headers";
 import { oneTimePageRoutes, oneTimeRoutes } from "./one-time";
+import { elevenLabs, sweepOnCron, voiceRoutes } from "./voice";
 
 export function workerApp(
   fetchAuth: (
@@ -11,7 +12,14 @@ export function workerApp(
     ctx: ExecutionContext,
   ) => Response | Promise<Response>,
   bindings: (env: Env) => Env,
-  configure?: (app: Hono<{ Bindings: Env }>) => void,
+  {
+    configure,
+    sweepDelayMs,
+  }: {
+    configure?: (app: Hono<{ Bindings: Env }>) => void;
+    /** Delay of the history sweep after a successful speech. */
+    sweepDelayMs?: number;
+  } = {},
 ) {
   const app = new Hono<{ Bindings: Env }>();
   secureHeaders(app);
@@ -45,6 +53,20 @@ export function workerApp(
   });
   app.all("/api/auth/*", (c) => fetchAuth(c.req.raw, c.env, c.executionCtx));
   app.get("/api/providers", (c) => fetchAuth(c.req.raw, c.env, c.executionCtx));
+  voiceRoutes(app, (c) => {
+    const key = c.env.ELEVENLABS_API_KEY;
+    return {
+      databaseUrl: c.env.HYPERDRIVE.connectionString,
+      auth: (request) => fetchAuth(request, c.env, c.executionCtx),
+      synthesize: key
+        ? elevenLabs(
+            key,
+            (pass) => c.executionCtx.waitUntil(pass),
+            sweepDelayMs,
+          )
+        : undefined,
+    };
+  });
   app.all("/api/*", (c) => c.json({ message: "Not found." }, 404));
   app.all("/dev/*", (c) => c.notFound());
   app.all("/__test/*", (c) => c.notFound());
@@ -56,5 +78,13 @@ export function workerApp(
     ),
   );
 
-  return app;
+  return {
+    fetch: (request: Request, env: Env, ctx: ExecutionContext) =>
+      app.fetch(request, env, ctx),
+    // The Cron Trigger: the same mapper decides whether a key reaches the sweep.
+    async scheduled(_controller: unknown, env: Env) {
+      const key = bindings(env).ELEVENLABS_API_KEY;
+      if (key) await sweepOnCron(key);
+    },
+  };
 }

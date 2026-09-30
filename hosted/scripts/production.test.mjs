@@ -19,6 +19,7 @@ test("production config keeps canonical domain and production entry, excludes pu
   assert.equal(config.workers_dev, false);
   assert.equal(config.preview_urls, false);
   assert.equal(config.hyperdrive[0].id, env.HYPERDRIVE_ID);
+  assert.deepEqual(config.triggers, { crons: ["*/5 * * * *"] });
   assert.throws(() =>
     productionConfig(base, { ...env, HYPERDRIVE_ID: "0".repeat(32) }),
   );
@@ -47,7 +48,7 @@ function provider({
   database = "neondb",
   user = "runtime",
   disabled = true,
-  secrets = ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN"],
+  secrets = ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN", "ELEVENLABS_API_KEY"],
 } = {}) {
   return async (path) => {
     if (path.startsWith("hyperdrive/configs/"))
@@ -60,7 +61,7 @@ function provider({
 }
 test("preflight rejects wrong databases, caching, reused roles, and incomplete provider secrets", async () => {
   const configuredSecrets = [
-    "AUTH_SECRET", "POSTMARK_SERVER_TOKEN",
+    "AUTH_SECRET", "POSTMARK_SERVER_TOKEN", "ELEVENLABS_API_KEY",
     ...config.vars.OAUTH_PROVIDERS.split(",").filter(Boolean).flatMap((name) => [
       `${name.toUpperCase()}_CLIENT_ID`, `${name.toUpperCase()}_CLIENT_SECRET`,
     ]),
@@ -96,6 +97,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete p
       secrets: [
         "AUTH_SECRET",
         "POSTMARK_SERVER_TOKEN",
+        "ELEVENLABS_API_KEY",
         "GITHUB_CLIENT_ID",
         "GITHUB_CLIENT_SECRET",
       ],
