@@ -104,7 +104,7 @@ export function handlePaneShortcuts(
   if (e.key === ',' && sid) {
     e.preventDefault();
     e.stopPropagation();
-    // Only a visible terminal header mounts the rename editor. Setting the
+    // Only a visible terminal or Tool header mounts the rename editor. Setting the
     // global rename gate for a Door/browser would strand keyboard dispatch.
     if (ctx.selectedTypeRef.current !== 'pane' || !hasTerminal(surfaceKindFromParams(ctx.nav.paneParams(sid)))) return true;
     ctx.setRenamingPaneId(sid);

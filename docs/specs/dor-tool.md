@@ -28,7 +28,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`;
 - **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched.
 - **Must classify Tool params before browser params**, since a serving Tool carries `renderMode` too.
 
-Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` / `requestKill` / `isUntouchedShell` in `lib/src/components/Wall.tsx`; `isToolRender` in `lib/src/lib/platform/tool-types.ts`; `lib/src/components/wall/tool-surface.test.ts`; `never swaps a Tool to a render it cannot declare` in `lib/src/components/Wall.test.tsx`.
+Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` / `requestKill` / `isUntouchedShell` in `lib/src/components/Wall.tsx`; `isToolRender` in `lib/src/lib/platform/tool-types.ts`; `lib/src/components/wall/tool-surface.test.ts`; `allows a Tool to use playwright screencast but refuses popouts` in `lib/src/components/Wall.test.tsx`.
 
 ## Declaring tools
 
