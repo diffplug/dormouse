@@ -1,0 +1,160 @@
+// The one relay origin a desktop build bakes, and the mode it sets
+// (docs/specs/relay.md → "Relay origin"). Both host builds read it here —
+// `standalone/scripts/build-sidecar-proxy.mjs` and `vscode-ext/scripts/esbuild.mjs`
+// — and esbuild-`define` the result into the Node bundle that holds the relay
+// socket, where `lib/src/host/relay-origin.ts` is the only reader.
+//
+// The default and the accepted-origin rule are duplicated from that `.ts`,
+// because a build script cannot import TypeScript;
+// `lib/src/host/relay-origin.test.ts` pins the copies equal.
+
+import { readFileSync } from 'node:fs';
+
+/** The identifiers esbuild substitutes; read by `lib/src/host/relay-origin.ts`. */
+export const RELAY_ORIGIN_PLACEHOLDER = '__DORMOUSE_RELAY_ORIGIN__';
+export const RELAY_MODE_PLACEHOLDER = '__DORMOUSE_RELAY_MODE__';
+
+/** The origin a stock build reaches: Hosted. */
+export const DEFAULT_RELAY_ORIGIN = 'https://hosted.dormouse.sh';
+
+/**
+ * The longest origin a build may bake: the longest a one-time link still fits
+ * (`MAX_RELAY_ORIGIN_LENGTH` in `lib/src/host/relay-origin.ts`).
+ */
+export const MAX_RELAY_ORIGIN_LENGTH = 167;
+
+/**
+ * The hosts plain HTTP is accepted on, duplicated from `LINK_LOOPBACK_HOSTS` in
+ * `remote-lib-common/src/security/link-url.ts`: a phone parses a link under
+ * that rule.
+ */
+export const RELAY_LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+/**
+ * Variables that once chose an origin `DORMOUSE_RELAY_ORIGIN` now chooses.
+ * Ignoring one would build a stock Hosted binary for someone following older
+ * instructions, with nothing to say so.
+ */
+export const RETIRED_RELAY_VARIABLES = [
+  'DORMOUSE_REMOTE_CONNECT_SRC',
+  'DORMOUSE_HOSTED_ORIGIN',
+  'DORMOUSE_ONE_TIME_ORIGIN',
+];
+
+/**
+ * Whether `origin` is one a build may bake: a bare origin — `new URL`'s own
+ * spelling of it, so no path, trailing slash, query, fragment, or credentials
+ * — on HTTPS, or on HTTP at a loopback host, and short enough to fit a link.
+ * The copy of `isAcceptedRelayOrigin` in `lib/src/host/relay-origin.ts`.
+ */
+export function isAcceptedRelayOrigin(origin) {
+  if (typeof origin !== 'string' || origin.length > MAX_RELAY_ORIGIN_LENGTH) return false;
+  let url;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (url.origin !== origin) return false;
+  return (
+    url.protocol === 'https:' ||
+    (url.protocol === 'http:' && RELAY_LOOPBACK_HOSTS.includes(url.hostname))
+  );
+}
+
+function blank(value) {
+  return value === undefined || value.trim() === '';
+}
+
+/**
+ * The origin and mode this build bakes, from `DORMOUSE_RELAY_ORIGIN` and, in a
+ * dev build only, `DORMOUSE_RELAY_IS_HOSTED`. Fails the build, naming the
+ * variable, on:
+ *
+ * - a retired variable set to anything non-blank;
+ * - an origin outside {@link isAcceptedRelayOrigin};
+ * - in any build but a dev build, `DORMOUSE_RELAY_IS_HOSTED` set at all, or a
+ *   loopback `http:` origin (docs/specs/relay.md → "Relay origin").
+ *
+ * `dev` is passed only by the dev entry points: `pnpm dev:standalone`,
+ * `pnpm innerdogfood`, and VS Code's `watch`. Every other build is a release
+ * build. Logs to stderr whenever the result is not the stock one.
+ */
+export function resolveRelayOrigin(env = process.env, label = 'build', { dev = false } = {}) {
+  for (const name of RETIRED_RELAY_VARIABLES) {
+    if (!blank(env[name])) {
+      throw new Error(
+        `[${label}] ${name} is retired: a build bakes exactly one relay origin, ` +
+          'DORMOUSE_RELAY_ORIGIN (docs/specs/relay.md → "Relay origin"). Unset it.',
+      );
+    }
+  }
+
+  const override = env.DORMOUSE_RELAY_ORIGIN?.trim();
+  const origin = override || DEFAULT_RELAY_ORIGIN;
+  if (!isAcceptedRelayOrigin(origin)) {
+    throw new Error(
+      `[${label}] DORMOUSE_RELAY_ORIGIN: "${origin}" is not an origin a build can bake. It must ` +
+        `be a bare https:// origin, or http:// on ${RELAY_LOOPBACK_HOSTS.join(', ')} in a dev ` +
+        `build, with no path or trailing slash, at most ${MAX_RELAY_ORIGIN_LENGTH} characters ` +
+        `(e.g. "${DEFAULT_RELAY_ORIGIN}").`,
+    );
+  }
+
+  const flag = env.DORMOUSE_RELAY_IS_HOSTED?.trim();
+  if (!dev) {
+    if (flag) {
+      throw new Error(
+        `[${label}] DORMOUSE_RELAY_IS_HOSTED is for dev builds only (pnpm dev:standalone, ` +
+          'pnpm innerdogfood, VS Code watch); a release build is Hosted only at ' +
+          `${DEFAULT_RELAY_ORIGIN}.`,
+      );
+    }
+    if (new URL(origin).protocol === 'http:') {
+      throw new Error(
+        `[${label}] DORMOUSE_RELAY_ORIGIN: "${origin}" is a loopback http:// origin, which only a ` +
+          'dev build (pnpm dev:standalone, pnpm innerdogfood, VS Code watch) may bake.',
+      );
+    }
+  } else if (flag && flag !== '1') {
+    throw new Error(`[${label}] DORMOUSE_RELAY_IS_HOSTED must be 1 or unset, not "${flag}".`);
+  }
+
+  const mode = origin === DEFAULT_RELAY_ORIGIN || flag === '1' ? 'hosted' : 'self-host';
+  if (origin !== DEFAULT_RELAY_ORIGIN) {
+    console.error(`[${label}] relay origin ${origin} (${mode} build)`);
+  }
+  return { origin, mode };
+}
+
+/** The esbuild `define` entries for a {@link resolveRelayOrigin} result. */
+export function relayOriginDefine({ origin, mode }) {
+  return {
+    [RELAY_ORIGIN_PLACEHOLDER]: JSON.stringify(origin),
+    [RELAY_MODE_PLACEHOLDER]: JSON.stringify(mode),
+  };
+}
+
+/**
+ * Fail the build if the `define` did not reach `bundlePath`.
+ *
+ * The readers use the placeholders as `declare const`s, so a lost define
+ * compiles fine and shows up only at runtime — as a Burrow that silently uses
+ * the default, Hosted, instead of the self-hoster's Relay. Both bundles bake
+ * the same pair, so both fail on the same class of drift: someone re-inlines
+ * the esbuild call, or adds an entry point that pulls in the Burrow without it.
+ */
+export function assertRelayOriginBaked(bundlePath, { origin }) {
+  const bundle = readFileSync(bundlePath, 'utf8');
+  for (const placeholder of [RELAY_ORIGIN_PLACEHOLDER, RELAY_MODE_PLACEHOLDER]) {
+    if (bundle.includes(placeholder)) {
+      throw new Error(
+        `relay origin: ${placeholder} survived into ${bundlePath} — the esbuild define did not ` +
+          'apply, and the Burrow would use the built-in default.',
+      );
+    }
+  }
+  if (!bundle.includes(origin)) {
+    throw new Error(`relay origin: ${bundlePath} does not contain the resolved origin (${origin}).`);
+  }
+}

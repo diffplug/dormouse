@@ -26,6 +26,12 @@ async function fixture(t) {
   const cli = path.join(bin, 'cli.cjs');
   await writeFile(cli, `
     const args = process.argv.slice(2);
+    // \`pnpm run stage[:dev]\`, which tauri.mjs runs first: which one says
+    // whether the sidecar is baked as a dev build (docs/specs/relay.md).
+    if (args[0] === 'run') {
+      console.log('STAGE ' + args[1]);
+      process.exit(0);
+    }
     console.log('CLI_ARGS ' + JSON.stringify(args));
     if (args[2] !== 'dev') process.exit(0);
     const config = JSON.parse(args[args.lastIndexOf('--config') + 1]);
@@ -99,6 +105,10 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
     b.start(['dev'], { DORMOUSE_LOG_FILE: path.join(b.root, 'custom.log') }).ready(),
   ]);
   assert.equal(custom.logFile, path.join(b.root, 'custom.log'));
+  // A dev run stages a dev build, the only kind that may bake the Hosted flag
+  // or a loopback relay origin.
+  assert.match(custom.output, /STAGE stage:dev\b/);
+  assert.doesNotMatch(custom.output, /STAGE stage\r?\n/);
   await custom.stop();
   assert.notEqual(one.url, two.url);
   assert.notEqual(one.config.identifier, two.config.identifier);
@@ -151,5 +161,8 @@ test('non-dev Tauri commands retain their arguments and production configuration
   const run = a.start(['build', '--debug']);
   assert.equal((await run.exited).code, 0);
   assert.deepEqual(JSON.parse((await run.wait(/CLI_ARGS (.+)/))[1]), ['exec', 'tauri', 'build', '--debug']);
+  // Every subcommand but `dev` stages a release build.
+  assert.match(run.output, /STAGE stage\r?\n/);
+  assert.doesNotMatch(run.output, /STAGE stage:dev/);
   assert.doesNotMatch(run.output, /app URL|NATIVE_CONFIG/);
 });

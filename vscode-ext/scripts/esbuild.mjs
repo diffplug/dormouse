@@ -1,17 +1,15 @@
 // Bundles the extension host and the PTY host, and is the single place that
-// bakes the Burrow's allowed relay origins into the build.
+// bakes the Burrow's one relay origin into the build.
 //
-// The published extension is scoped to the SaaS origin only, so the Burrow will
-// not enroll with, or connect to, an arbitrary server. A selfhoster whose relay
-// is on their own domain or tailnet widens it for their own build:
+// The published extension reaches Hosted only. A selfhoster bakes their own
+// Relay's origin, which makes a self-host build that reaches nothing else:
 //
-//   DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
+//   DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:vscode
 //
-// This mirrors the standalone binary's build-time override
-// (`standalone/scripts/build-sidecar-proxy.mjs`, which bakes the same value into
-// the sidecar's Burrow) so both Burrows widen the same way with the same variable.
-// `scripts/csp-defaults.mjs` is the one definition of the default for both. See
-// docs/specs/relay.md → "Where a Burrow may reach a Relay".
+// This mirrors the standalone binary (`standalone/scripts/build-sidecar-proxy.mjs`,
+// which bakes the same pair into the sidecar's Burrow). `scripts/relay-origin.mjs`
+// is the one definition of the default and the rules for both. See
+// docs/specs/relay.md → "Relay origin".
 
 import { fileURLToPath } from 'node:url';
 
@@ -19,27 +17,20 @@ import * as esbuild from 'esbuild';
 
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 import {
-  assertConnectSrcBaked,
-  assertHostedOriginBaked,
-  CONNECT_SRC_PLACEHOLDER,
-  HOSTED_ORIGIN_PLACEHOLDER,
-  resolveHostedOrigin,
-  resolveRemoteConnectSrc,
-} from '../../scripts/csp-defaults.mjs';
-
-const remoteSrc = resolveRemoteConnectSrc(process.env, 'esbuild');
-// The Hosted origin, whose one-time rendezvous the allowlist fences
-// (docs/specs/one-time.md): `DORMOUSE_HOSTED_ORIGIN`, same as the sidecar's.
-const hostedOrigin = resolveHostedOrigin(process.env, 'esbuild');
+  assertRelayOriginBaked,
+  relayOriginDefine,
+  resolveRelayOrigin,
+} from '../../scripts/relay-origin.mjs';
 
 const watch = process.argv.includes('--watch');
+// The watch build is VS Code's one dev build; every other is a release build.
+const relay = resolveRelayOrigin(process.env, 'esbuild', { dev: watch });
 
 // Staged into `dist/node_modules` by `stage-native-direct.mjs`, so it must stay
 // a runtime `require` (`requireNative` in `native-direct-peer.ts`).
 const NATIVE_DIRECT = ['node-datachannel'];
 const assertBuilt = ({ metafile }) => {
-  assertConnectSrcBaked('dist/extension.js', remoteSrc);
-  assertHostedOriginBaked('dist/extension.js', hostedOrigin);
+  assertRelayOriginBaked('dist/extension.js', relay);
   assertNothingInlined(metafile, NATIVE_DIRECT, 'esbuild dist/extension.js');
 };
 
@@ -67,10 +58,7 @@ const builds = [
     ...common,
     entryPoints: ['src/extension.ts'],
     outdir: 'dist',
-    define: {
-      [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
-      [HOSTED_ORIGIN_PLACEHOLDER]: JSON.stringify(hostedOrigin),
-    },
+    define: relayOriginDefine(relay),
     metafile: true,
   },
   {

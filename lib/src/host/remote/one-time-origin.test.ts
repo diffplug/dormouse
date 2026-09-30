@@ -1,18 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
-import { LINK_LOOPBACK_HOSTS } from 'remote-lib-common';
-// The build scripts read the `.mjs` and the Burrow service reads the `.ts`; the
-// cases below are what keep them one fact.
-import {
-  DEFAULT_HOSTED_ORIGIN as BUILD_DEFAULT,
-  MAX_ONE_TIME_ORIGIN_LENGTH as BUILD_MAX_LENGTH,
-  ONE_TIME_LOOPBACK_HOSTS as BUILD_LOOPBACK_HOSTS,
-  HOSTED_ORIGIN_PLACEHOLDER,
-  assertHostedOriginBaked,
-  resolveHostedOrigin,
-} from '../../../../scripts/csp-defaults.mjs';
+import { describe, expect, it } from 'vitest';
 import { DEFAULT_HOSTED_ORIGIN, bakedHostedOrigin } from '../hosted-origin';
 import { DEFAULT_REMOTE_CONNECT_SRC } from './connect-src';
 import { MAX_ONE_TIME_ORIGIN_LENGTH, oneTimeAvailability } from './one-time-origin';
@@ -101,61 +87,5 @@ describe('oneTimeAvailability', () => {
 
   it('bounds the origin at what still fits a 256-character link', () => {
     expect(MAX_ONE_TIME_ORIGIN_LENGTH).toBe(167);
-  });
-});
-
-describe('the build-time Hosted origin', () => {
-  it('keeps the same default, bound, and loopback hosts as the runtime', () => {
-    expect(BUILD_DEFAULT).toBe(DEFAULT_HOSTED_ORIGIN);
-    expect(BUILD_MAX_LENGTH).toBe(MAX_ONE_TIME_ORIGIN_LENGTH);
-    expect([...BUILD_LOOPBACK_HOSTS].sort()).toEqual([...LINK_LOOPBACK_HOSTS].sort());
-  });
-
-  it('fails the build on exactly the overrides the runtime would call invalid', () => {
-    // A copy that drifted would fail a build over an origin the Burrow takes,
-    // or pass one whose button then reads unavailable.
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    for (const origin of [
-      'https://hosted.dormouse.sh',
-      'https://hosted.dormouse.sh/',
-      'https://hosted.dormouse.sh/connect',
-      'https://user@hosted.dormouse.sh',
-      'http://hosted.dormouse.sh',
-      'http://localhost:8787',
-      'http://127.0.0.1:8787',
-      'http://[::1]:8787',
-      'http://127.0.0.2:8787',
-      'wss://hosted.dormouse.sh',
-      'hosted.dormouse.sh',
-      originOfLength(MAX_ONE_TIME_ORIGIN_LENGTH),
-      originOfLength(MAX_ONE_TIME_ORIGIN_LENGTH + 1),
-    ]) {
-      const invalid = oneTimeAvailability(origin, ANY) === 'origin-invalid';
-      const resolve = () => resolveHostedOrigin({ DORMOUSE_HOSTED_ORIGIN: origin }, 'test');
-      if (invalid) expect(resolve, origin).toThrow(/DORMOUSE_HOSTED_ORIGIN/);
-      else expect(resolve(), origin).toBe(origin);
-    }
-    log.mockRestore();
-  });
-
-  it('passes an unset override through to the default', () => {
-    expect(resolveHostedOrigin({}, 'test')).toBe(DEFAULT_HOSTED_ORIGIN);
-    expect(resolveHostedOrigin({ DORMOUSE_HOSTED_ORIGIN: '  ' }, 'test')).toBe(DEFAULT_HOSTED_ORIGIN);
-  });
-
-  it('fails a bundle the define did not reach', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'hosted-origin-'));
-    try {
-      const bundle = join(dir, 'bundle.js');
-      writeFileSync(bundle, `const origin = ${HOSTED_ORIGIN_PLACEHOLDER};`);
-      expect(() => assertHostedOriginBaked(bundle, DEFAULT_HOSTED_ORIGIN)).toThrow(/survived/);
-      writeFileSync(bundle, 'const origin = "https://hosted.dormouse.sh";');
-      expect(() => assertHostedOriginBaked(bundle, 'http://127.0.0.1:8787')).toThrow(
-        /does not contain/,
-      );
-      expect(() => assertHostedOriginBaked(bundle, DEFAULT_HOSTED_ORIGIN)).not.toThrow();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });

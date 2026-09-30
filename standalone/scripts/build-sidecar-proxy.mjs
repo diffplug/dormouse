@@ -17,25 +17,22 @@ import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
-  assertConnectSrcBaked,
-  assertHostedOriginBaked,
-  CONNECT_SRC_PLACEHOLDER,
-  HOSTED_ORIGIN_PLACEHOLDER,
-  resolveHostedOrigin,
-  resolveRemoteConnectSrc,
-} from '../../scripts/csp-defaults.mjs';
+  assertRelayOriginBaked,
+  relayOriginDefine,
+  resolveRelayOrigin,
+} from '../../scripts/relay-origin.mjs';
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const libHost = path.resolve(here, '../../lib/src/host');
 const sidecar = path.resolve(here, '../sidecar');
 
-// Where the Burrow may reach a Relay. The Burrow runs in the sidecar,
-// so this is the enforcement point — there is no webview CSP in front of it.
-const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
-// The Hosted origin: the one-time rendezvous, fenced by the allowlist above at
-// runtime (docs/specs/one-time.md), and managed voice.
-const hostedOrigin = resolveHostedOrigin(process.env, 'sidecar');
+// The one relay origin, and the mode it sets (docs/specs/relay.md → "Relay
+// origin"). The Burrow runs in the sidecar, so this bundle is the enforcement
+// point — there is no webview CSP in front of it. `--dev` comes only from the
+// dev entry points (`stage:dev`, which `pnpm dev:standalone` and
+// `pnpm innerdogfood` run); every other build is a release build.
+const relay = resolveRelayOrigin(process.env, 'sidecar', { dev: process.argv.includes('--dev') });
 
 // What the sidecar installs at runtime, read from the manifest that installs
 // it: `node-datachannel` resolves its platform package and `detect-libc`
@@ -77,10 +74,7 @@ const bundles = [
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'burrow.cjs',
-    define: {
-      [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
-      [HOSTED_ORIGIN_PLACEHOLDER]: JSON.stringify(hostedOrigin),
-    },
+    define: relayOriginDefine(relay),
     assertBaked: true,
     external: NATIVE_DIRECT,
   },
@@ -88,7 +82,7 @@ const bundles = [
 
 // `tauri.conf.json`'s `bundle.resources` globs this whole directory, so a
 // pre-rename `remote-host.cjs` left in an older checkout would ship inside the
-// app — a dead Burrow with its own baked connect-src allowlist — and so would
+// app — a dead Burrow with its own baked relay origin — and so would
 // an `alert-store.cjs` from before the alerts joined `burrow.cjs`.
 for (const retired of ['remote-host.cjs', 'alert-store.cjs']) {
   await rm(path.resolve(sidecar, retired), { force: true });
@@ -113,10 +107,7 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     // Only the bundle with externals to check reads one.
     ...(external ? { metafile: true } : {}),
   });
-  if (assertBaked) {
-    assertConnectSrcBaked(outfile, remoteSrc);
-    assertHostedOriginBaked(outfile, hostedOrigin);
-  }
+  if (assertBaked) assertRelayOriginBaked(outfile, relay);
   if (external) assertNothingInlined(result.metafile, SIDECAR_RUNTIME_DEPS, `sidecar ${out}`);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }
