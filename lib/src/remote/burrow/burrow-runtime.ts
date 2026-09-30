@@ -756,7 +756,17 @@ export class BurrowRuntime {
     this.#status = 'connecting';
     const wsBase = this.#enrollment.relayUrl.replace(/^http/, 'ws');
     const url = `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${encodeURIComponent(this.#enrollment.burrowToken)}`;
-    const ws = this.#createWebSocket(url);
+    let ws: WebSocketLike;
+    try {
+      ws = this.#createWebSocket(url);
+    } catch (error) {
+      // A factory that refuses — the service's transport guard under Nothing
+      // (`lib/src/host/remote/service.ts`) — is a socket that closed at once:
+      // thrown from the reconnect timer, it would take the host process down.
+      console.warn('[burrow] could not open the relay socket', error);
+      this.#onClose(undefined);
+      return;
+    }
     this.#ws = ws;
     ws.addEventListener('open', () => {
       if (this.#ws !== ws) return;

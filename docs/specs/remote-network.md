@@ -18,14 +18,14 @@ Reserved: `anywhere`, which the policy's shape accepts and no build offers, is t
 
 - **A new install starts at Nothing.** **Must save the default at the service's first read, so it never flips**: `relay` where an enrollment for the baked origin exists — an upgraded self-host install — else `nothing` (rationale). A VS Code window with no service reads the default unsaved.
 - **A stored level the build does not offer, or a stored record that is not a policy — an unparseable file included — reads as `nothing`**; the first stays on disk, as an enrollment for another origin does.
-- **Until the policy is read, the service reads it as `nothing`**; a read that fails leaves the Burrow down.
+- **Until the policy is read, the service reads it as `nothing`**; a read that fails leaves the Burrow down, and `setNetworkPolicy` saves over it.
 - **`setNetworkPolicy` takes a policy only exactly**: its three keys, a level the build offers, at most 32 canonical CIDRs (`canonicalCidr` returns each unchanged) listed once, and a boolean `autoUpdate`. **Must save before acting**: a save that fails changes nothing.
 - **A change to the level or the allowed networks ends the live one-time link or session with `user-ended`, and starts or stops the relay socket to match**; a narrowed policy never leaves an old path exempt. `autoUpdate` alone ends nothing (rationale).
 - **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, and this machine's interfaces, each with its addresses' canonical prefixes (loopback and IPv6 link-local left out) and a `lan`, `vpn`, or `virtual` kind.
 
 **Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater ("Updates"); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
 
-- **The Burrow service's socket factory and fetch refuse at the call while the level is `nothing` or unread** — the factory throws, fetch rejects — so a path that forgets its own check still opens nothing. Every socket and request the service opens, the enrollment exchange included, goes through them; the checks below stay, for the error a person reads.
+- **The Burrow service's socket factory, fetch, and direct-peer factory refuse at the call while the level is `nothing` or unread** — the socket factory throws (a runtime reads it as a closed socket), fetch rejects, the peer factory answers `null` — so a path that forgets its own check still opens nothing. Everything the service opens, the enrollment exchange included, goes through them; the checks below stay, for the error a person reads.
 - **The Burrow service never opens the relay socket.** An enrollment is held and reported — `enrolled`, `connection: 'stopped'`, not `serving` — so push, the device list, a test push, and setup codes, which need a running Burrow, make no request.
 - **It refuses `enroll` and `enrollOffer` before any request**, the offer file unread.
 - **It offers no one-time link**: the resting state is `unavailable` with reason `network-off`, and `oneTimeOpen` is refused, as under `local` with no network allowed.
@@ -36,7 +36,7 @@ Source of truth: `NetworkPolicy`, `levelsFor`, and `storedNetworkPolicy` in `lib
 ## Updates
 
 - **The Standalone updater must check automatically only when the level is not `nothing` and `autoUpdate` is on**, reading the policy at launch; **a read that fails counts as `nothing`**. **Check now** always checks, being a click.
-- **With automatic checks off, must remind in the Baseboard once the last successful check is 7 days old, and at most once per 7 days.** Before any check, the clock starts at the first launch. The reminder reads local timestamps and contacts nothing.
+- **Must remind in the Baseboard once the last successful check is 7 days old, and at most once per 7 days**, automatic checks on or off (rationale). Before any check, the clock starts at the first launch. The reminder reads local timestamps and contacts nothing.
 - **Never in a self-host build or VS Code**, which have no updater.
 
 The lifecycle is `docs/specs/auto-update.md` → "How it works". Source of truth: `runUpdateCheck`, `remindIfDue`, and `checkNow` in `standalone/src/updater.ts`, pinned by `standalone/src/updater.test.ts`.

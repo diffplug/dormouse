@@ -23,6 +23,14 @@ one-time session exists so a narrowed policy cannot leave an old path exempt.
 the person toggled update checks would cost them the connection and protect
 nothing.
 
+## Updates
+
+**The reminder runs with automatic checks on too (2026-09-30).** Standalone
+checks only at launch, a terminal app stays open for weeks, and a launch check
+fails offline; a reminder gated on automatic checks being off left exactly those
+users with neither a check nor a warning. It reads local timestamps alone, so it
+needs no policy to run.
+
 ## Levels
 
 **Three personas set the levels (2026-09-30).** One wants no network requests at

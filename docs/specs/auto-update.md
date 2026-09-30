@@ -6,7 +6,7 @@ The standalone app checks for updates on launch, where the network policy allows
 
 ## How it works
 
-**Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then read the network policy with `networkPolicy` over the Burrow link and, as it allows (`docs/specs/remote-network.md` → "Updates"), either `check()` — no update is silent, an update raises the approval prompt — or the reminder: `check-due`, recording `remindedAt`. Version-lookup and check failures are logged. **Only approval starts the background `download()`**; a failed one is logged and the prompt returns.
+**Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then read the network policy with `networkPolicy` over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), `check()` — no update is silent, an update raises the approval prompt; then the reminder, if due: `check-due`, recording `remindedAt`. **The reminder is re-evaluated hourly while the app runs**, reading no policy and never checking; **never over an undismissed notice, nor while the clock reads before 2026-09**, not yet set. Version-lookup and check failures are logged. **Only approval starts the background `download()`**; a failed one is logged and the prompt returns.
 
 **Check now** — the `check-due` and `check-failed` links, and the `updates` port — shows `checking`, then `available`, `up-to-date`, or `check-failed`. **A second ask joins the check in flight. An update already approved is shown again, `downloading` or `downloaded`, instead of checked for**, which would offer it for approval twice. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage).
 
@@ -84,7 +84,7 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 **Must write the success marker *before* `install()`** — on Windows `install()` never returns. **Must confirm its target against the running app version on next launch**; a mismatch becomes a failure notice and suppresses the update check. **A throwing `install()` overwrites it with a failure entry.** An unapproved update writes nothing. **Must ignore corrupt markers**, including invalid field types. `standalone/src/updater.test.ts` pins marker validation and confirmation.
 
-`dormouse:update-check`, the check clock: `{ "checkedAt": number | null, "since": number, "remindedAt": number | null }`, epoch ms — the last successful check, when this machine started counting, and the last reminder. Written by the first launch or check that finds none, with `since` then; never cleared. **A value of the wrong shape counts as none**, restarting the clock.
+`dormouse:update-check`, the check clock: `{ "checkedAt": number | null, "since": number, "remindedAt": number | null }`, epoch ms — the last successful check, when this machine started counting, and the last reminder. Written by the first launch, tick, or check that finds none, with `since` then; never cleared. **A value of the wrong shape counts as none**, restarting the clock. **A time ahead of the clock is saved as now**, the others kept, so a clock set back delays the reminder a week at most.
 
 ## Files
 

@@ -114,8 +114,6 @@ export class FileBurrowStateStore implements BurrowStateStore {
   readonly #path: string;
   readonly #policyPath: string;
   #state: Promise<BurrowStateFile> | null = null;
-  /** The policy file as last read or written, memoized like {@link #state}. */
-  #policy: Promise<NetworkPolicy | null> | null = null;
   /**
    * Serializes mutations, the way `relay/src/state.ts` does: every save is a
    * read-modify-write of the whole file, so two of them running together can
@@ -155,23 +153,27 @@ export class FileBurrowStateStore implements BurrowStateStore {
     });
   }
 
-  loadNetworkPolicy(): Promise<NetworkPolicy | null> {
-    // Memoized, and a failure forgotten, for the reasons `#read` gives.
-    this.#policy ??= this.#readPolicyOnce().catch((error: unknown) => {
-      this.#policy = null;
-      throw error;
-    });
-    return this.#policy;
+  /**
+   * Not memoized: the service, its one reader, keeps what it read.
+   * `null` for no file, which the service turns into the default and saves.
+   * **A file that is there but not a policy reads as Nothing** — never `null`,
+   * which would let a damaged file's default reopen what the user turned off.
+   */
+  async loadNetworkPolicy(): Promise<NetworkPolicy | null> {
+    const raw = await readIfPresent(this.#policyPath);
+    if (raw === null) return null;
+    try {
+      return storedNetworkPolicy(JSON.parse(raw)) ?? nothingPolicy();
+    } catch (error) {
+      console.warn(`[burrow] could not read ${this.#policyPath}; reading it as Nothing`, error);
+      return nothingPolicy();
+    }
   }
 
   saveNetworkPolicy(policy: NetworkPolicy): Promise<void> {
     // A whole-record replace, so no read first; on the same chain as `#mutate`,
     // so two saves land in the order they were made.
-    return this.#serialize(async () => {
-      const saved: NetworkPolicy = { ...policy, allowed: [...policy.allowed] };
-      await writeJsonAtomic(this.#dir, this.#policyPath, saved);
-      this.#policy = Promise.resolve(saved);
-    });
+    return this.#serialize(() => writeJsonAtomic(this.#dir, this.#policyPath, policy));
   }
 
   /** Apply one change to the in-memory state and flush it, one at a time. */
@@ -225,22 +227,6 @@ export class FileBurrowStateStore implements BurrowStateStore {
       // every device, so it must at least be explicable from a log.
       console.warn(`[burrow] could not read ${this.#path}; starting empty`, error);
       return emptyState();
-    }
-  }
-
-  /**
-   * `null` for no file, which the service turns into the default and saves.
-   * **A file that is there but not a policy reads as Nothing** — never `null`,
-   * which would let a damaged file's default reopen what the user turned off.
-   */
-  async #readPolicyOnce(): Promise<NetworkPolicy | null> {
-    const raw = await readIfPresent(this.#policyPath);
-    if (raw === null) return null;
-    try {
-      return storedNetworkPolicy(JSON.parse(raw)) ?? nothingPolicy();
-    } catch (error) {
-      console.warn(`[burrow] could not read ${this.#policyPath}; reading it as Nothing`, error);
-      return nothingPolicy();
     }
   }
 

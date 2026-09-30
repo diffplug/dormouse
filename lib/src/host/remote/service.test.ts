@@ -15,6 +15,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
  */
 const handedTransport = vi.hoisted(() => ({
   createWebSocket: null as ((url: string) => unknown) | null,
+  createDirectPeer: null as (() => unknown) | null,
   fetch: null as typeof globalThis.fetch | null,
 }));
 
@@ -24,6 +25,7 @@ vi.mock('../../remote/burrow/burrow-runtime', async (importOriginal) => {
     constructor(options: ConstructorParameters<typeof real.BurrowRuntime>[0]) {
       super(options);
       handedTransport.createWebSocket = options.createWebSocket ?? null;
+      handedTransport.createDirectPeer = options.createDirectPeer ?? null;
     }
   }
   return { ...real, BurrowRuntime };
@@ -1982,6 +1984,18 @@ describe('network policy', () => {
       expect(sockets).toEqual([]);
       expect(await service.networkAllowed()).toBe(false);
     });
+
+    it('saves a choice over a policy it cannot read, and acts on it', async () => {
+      createService({ enrollment: ENROLLMENT });
+      store.loadNetworkPolicy = async () => {
+        throw new Error('EACCES');
+      };
+      await expect(service.start()).rejects.toThrow('EACCES');
+
+      expect((await setPolicy(RELAY_ON)).error).toBeUndefined();
+      expect(store.network).toEqual(RELAY_ON);
+      expect(sockets).toHaveLength(1);
+    });
   });
 
   describe('Nothing', () => {
@@ -2046,18 +2060,22 @@ describe('network policy', () => {
       expect(rendezvous.rooms).toEqual([]);
     });
 
-    it('refuses a socket or a request at the transport, for a path that forgot its check', async () => {
+    it('refuses a socket, a request, or a direct peer at the transport, for a path that forgot its check', async () => {
       createService({ network: RELAY_ON });
       expect((await command('enroll', { password: 'setup', label: 'Laptop' })).error).toBeUndefined();
-      const { createWebSocket, fetch } = handedTransport;
+      const { createWebSocket, createDirectPeer, fetch } = handedTransport;
       expect(sockets).toHaveLength(1);
       const made = requests.length;
+      const answerers = vi.spyOn(network, 'createAnswerer');
 
       await setPolicy(NOTHING);
       expect(() => createWebSocket!(`${ORIGIN.replace(/^http/, 'ws')}/ws/burrow`)).toThrow('set to Nothing');
       await expect(fetch!(`${ORIGIN}${API_ROUTES.pushDevices}`)).rejects.toThrow('set to Nothing');
+      // Its `null` declines the direct path, as a host without one does.
+      expect(createDirectPeer!()).toBeNull();
       expect(sockets).toHaveLength(1);
       expect(requests).toHaveLength(made);
+      expect(answerers).not.toHaveBeenCalled();
     });
 
     it('refuses managed voice', async () => {

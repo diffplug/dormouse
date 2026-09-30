@@ -439,23 +439,26 @@ export class BurrowService {
     this.#oneTimeState = idleOneTimeState(this.#hostedOrigin, this.#level());
     this.#kind = options.kind;
     // The transport guard (`docs/specs/remote-network.md` → "Policy"): every
-    // socket and request this service opens goes through these two, which
-    // refuse at the call while the level is `nothing` or unread, so a path that
-    // forgets its own check still opens nothing. Each feature keeps its own
-    // check, for the error a person reads.
+    // socket, request, and direct peer this service opens goes through these
+    // three, which refuse at the call while the level is `nothing` or unread,
+    // so a path that forgets its own check still opens nothing. Each feature
+    // keeps its own check, for the error a person reads.
     const createWebSocket =
       options.createWebSocket ?? ((url: string) => new WebSocket(url) as unknown as WebSocketLike);
     this.#createWebSocket = (url) => {
-      if (this.#level() === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
+      this.#refuseNothing();
       return createWebSocket(url);
     };
     const injectedFetch = options.fetch;
-    this.#fetch = (input, init) =>
-      this.#level() === 'nothing'
-        ? Promise.reject(new Error(NETWORK_OFF_REFUSAL))
-        : // Looked up at the call, like `burrowFetch`'s default.
-          (injectedFetch ?? globalThis.fetch)(input, init);
-    this.#createDirectPeer = options.createDirectPeer;
+    this.#fetch = async (input, init) => {
+      this.#refuseNothing();
+      // Looked up at the call, like `burrowFetch`'s default.
+      return (injectedFetch ?? globalThis.fetch)(input, init);
+    };
+    // A factory's `null` is a direct path declined, the session kept relayed.
+    const createDirectPeer = options.createDirectPeer;
+    this.#createDirectPeer =
+      createDirectPeer && (() => (this.#level() === 'nothing' ? null : createDirectPeer()));
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
     this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
@@ -584,9 +587,10 @@ export class BurrowService {
   }
 
   /**
-   * The policy as it stands, refused under `nothing` before any request.
-   * **Called after awaiting `#networkPolicy()` and before the next await**, so
-   * a `setNetworkPolicy` that landed during that await is the one it reads.
+   * The policy as it stands, refused under `nothing` or unread before any
+   * request — by the transport guard at the call, and by a command **after
+   * awaiting `#networkPolicy()` and before the next await**, so a
+   * `setNetworkPolicy` that landed during that await is the one it reads.
    */
   #refuseNothing(): NetworkPolicy {
     const policy = this.#policy;
@@ -956,7 +960,9 @@ export class BurrowService {
    */
   async #setNetworkPolicy(params: SetNetworkPolicyParams | undefined): Promise<NetworkPolicyResult> {
     const next = requestedNetworkPolicy(params?.policy, this.#relay);
-    const previous = await this.#networkPolicy();
+    // One that cannot be read is `nothing` here as everywhere, so the user's
+    // choice can still be saved over it.
+    const previous = await this.#networkPolicy().catch(() => nothingPolicy());
     await this.#store.saveNetworkPolicy(next);
     this.#policy = next;
     if (!samePaths(previous, next)) {
