@@ -20,6 +20,8 @@ import { pendingShellOpts } from '../../lib/terminal-store';
 import { doubleClick, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall-test-utils';
 import { getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
+import { applyLiveToolEvents } from '../../lib/tool-events';
+import { parseReplay } from '../../lib/platform/replay-parse';
 import type { LathNode } from '../../lib/lath/model';
 import { recordToolAnnounce, resetToolAnnounces } from '../../lib/tool-announce-store';
 import { PREVIEW_READY_FALLBACK_MS, resetPreviewTransitions } from '../../lib/preview-transition-store';
@@ -850,6 +852,84 @@ describe('a folder in the slot', () => {
     expect(await paramsOf(result.surfaceId)).toMatchObject({ toolPreview: true, toolTarget: '/repo/docs/a.md' });
     expect(await leafOrder()).toEqual(['pane-a', 'slot', result.surfaceId]);
     startTool(result.surfaceId, result.command);
+  });
+});
+
+describe('an OSC 367 open', () => {
+  const folder = {
+    surfaceType: 'tool', command: 'dor __view-folder /repo/docs', toolArgv: ['dor', '__view-folder', '/repo/docs'], cwd: '/repo',
+    toolName: 'folder', toolScope: 'builtin', toolRender: 'iframe', toolPort: 'announced', toolKey: ['folder', '/repo/docs'],
+    toolTarget: '/repo/docs',
+  };
+  const failure = "no Tool matches '/repo/docs/x.pdf'; add an open rule";
+  const open = (path: string, preview: boolean) => ({ kind: 'toolOpen' as const, open: { path, preview } });
+  /** Live output from Session `id`, as its host forwards it. */
+  const emit = (id: string, ...events: ReturnType<typeof open>[]) => act(async () => applyLiveToolEvents(id, events));
+
+  /** The host: `x.pdf` has no Tool; anything else opens in the viewer. */
+  async function mountFolder(running = folder.command) {
+    const toolControl = vi.fn(async (request: { op: string; target?: string }) => request.target === '/repo/docs/x.pdf'
+      ? { status: 'error' as const, message: failure }
+      : openLookup(request.target!.slice('/repo/'.length)));
+    Object.assign(fake, { toolControl });
+    await mountWall([{ id: 'folder', params: folder }]);
+    shell('pane-a', null);
+    shell('folder', running);
+    return toolControl;
+  }
+  /** The slot the requests created beside the folder viewer, its command
+   *  then observed running, which releases the launch lock. */
+  async function createdSlot(): Promise<Record<string, unknown> | undefined> {
+    await waitUntil(() => container.querySelectorAll('[data-lath-leaf]').length === 3);
+    const id = (await leafOrder())[2];
+    const params = await paramsOf(id);
+    startTool(id, String(params?.command));
+    return params;
+  }
+
+  it('previews a running Tool\'s select as its Session\'s dor open, and replay never opens again', async () => {
+    const toolControl = await mountFolder();
+    await emit('folder', open('/repo/docs/a.md', true));
+    expect(await createdSlot()).toMatchObject({ toolPreview: true, toolTarget: '/repo/docs/a.md' });
+    expect(toolControl.mock.calls.map(([request]) => request)).toEqual([
+      { op: 'open', target: '/repo/docs/a.md', cwd: '/repo', tool: undefined, preview: true },
+    ]);
+    act(() => { parseReplay('folder', `\x1b]367;open;${JSON.stringify({ v: 1, path: '/repo/docs/b.md', preview: true })}\x07`); });
+    await flush();
+    expect(toolControl).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a failed select in the slot through the error viewer', async () => {
+    await mountFolder();
+    await emit('folder', open('/repo/docs/x.pdf', true));
+    expect(await createdSlot()).toMatchObject({
+      toolPreview: true, toolScope: 'builtin', toolName: 'error', toolTarget: '/repo/docs/x.pdf',
+      toolArgv: ['dor', '__view-error', '/repo/docs/x.pdf', failure],
+    });
+  });
+
+  it('shows a failed activate in the slot too, unless a newer open from that Tool followed', async () => {
+    const toolControl = await mountFolder();
+    await emit('folder', open('/repo/docs/x.pdf', false));
+    expect(await createdSlot()).toMatchObject({ toolPreview: true, toolName: 'error', toolTarget: '/repo/docs/x.pdf' });
+    expect(toolControl.mock.calls.map(([request]) => (request as { preview?: boolean }).preview)).toEqual([undefined, true]);
+  });
+
+  it('drops a failed activate\'s retry once a newer open follows it', async () => {
+    const toolControl = await mountFolder();
+    await emit('folder', open('/repo/docs/x.pdf', false), open('/repo/docs/a.md', true));
+    expect(await createdSlot()).toMatchObject({ toolPreview: true, toolTarget: '/repo/docs/a.md' });
+    await flush();
+    expect(toolControl.mock.calls.map(([request]) => request.target)).toEqual(['/repo/docs/x.pdf', '/repo/docs/a.md']);
+  });
+
+  it('ignores an ordinary terminal and a later command in a Tool\'s pane', async () => {
+    const toolControl = await mountFolder('cat notes.txt');
+    await emit('folder', open('/repo/docs/a.md', true));
+    await emit('pane-a', open('/repo/docs/a.md', true));
+    await flush();
+    expect(toolControl).not.toHaveBeenCalled();
+    expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
   });
 });
 

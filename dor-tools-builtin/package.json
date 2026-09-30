@@ -5,6 +5,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./error-viewer": {
+      "types": "./dist/error-viewer.d.ts",
+      "default": "./dist/error-viewer.js"
+    },
     "./file-viewer": {
       "types": "./dist/file-viewer.d.ts",
       "default": "./dist/file-viewer.js"

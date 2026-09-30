@@ -76,3 +76,13 @@ it('consumes chunked OSC 367 and forwards the announcement without a terminal re
   ]);
   expect(collectTerminalProtocolResponses(parsed.events)).toEqual([]);
 });
+
+it('parses an OSC 367 open as a request the host forwards, which recording ignores', () => {
+  const parsed = new TerminalProtocolParser().process(`before\x1b]367;open;${JSON.stringify({ v: 1, path: '/repo/a.md', preview: true })}\x1b\\after`);
+  expect(parsed.visibleData).toBe('beforeafter');
+  expect(parsed.events).toEqual([{ kind: 'toolOpen', open: { path: '/repo/a.md', preview: true } }]);
+  expect(collectTerminalToolEvents(parsed.events)).toEqual(parsed.events);
+  expect(collectTerminalProtocolResponses(parsed.events)).toEqual([]);
+  recordToolEvents('open-only', parsed.events);
+  expect(getToolAnnounce('open-only')).toBeNull();
+});

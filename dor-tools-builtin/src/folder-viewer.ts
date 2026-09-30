@@ -2,6 +2,7 @@ import type { Dirent } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
+import { openSequence } from 'dor-tools-lib/osc';
 import { folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 
@@ -19,8 +20,6 @@ export interface FolderEntry { name: string; kind: FolderEntryKind; ignored: boo
 export type FolderOpenResult = { ok: true; status: string } | { ok: false; error: string };
 /** Opens a canonical path inside the root: `preview` for select, pinned for activate. */
 export type FolderOpen = (path: string, preview: boolean) => Promise<FolderOpenResult>;
-/** How the host that launched the viewer opens `file`, resolving open rules from `cwd`. */
-export type FolderOpenRequest = (request: { file: string; preview: boolean; cwd: string }) => Promise<FolderOpenResult>;
 
 const compare = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
 type Ordered = { dir: boolean; folded: string; entry: { name: string } };
@@ -158,11 +157,15 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
 
 /** The `dor __view-folder <dir>` entry: starts the viewer, which outlives the
  * call, and returns its title and OSC 367 announcement for the caller to print.
- * Select and activate go to the host through `request`. */
-export async function runFolderViewer(dir: string, request: FolderOpenRequest): Promise<string> {
+ * Select and activate write OSC 367 `open` to this Tool's terminal, in the
+ * order the page sends them; the host answers nothing, showing a failure in
+ * the preview slot. */
+export async function runFolderViewer(dir: string): Promise<string> {
   const viewer = await startFolderViewer(dir, {
-    // Requests are served only after `viewer` is assigned.
-    open: (file, preview) => request({ file, preview, cwd: viewer.root }),
+    open: async (path, preview) => {
+      process.stdout.write(openSequence({ path, preview }));
+      return { ok: true, status: 'sent' };
+    },
   });
   return announceViewer(viewer, viewer.root);
 }

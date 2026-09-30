@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { parseToolAnnounce, parseToolState, serveSequence, stateSequence } from '../dist/osc.js';
+import { openSequence, parseToolAnnounce, parseToolOpen, parseToolState, serveSequence, stateSequence } from '../dist/osc.js';
 
 const serve = payload => `serve;${JSON.stringify(payload)}`;
 /** What a host's parser receives: the sequence without `ESC ] 367 ;` and its terminator. */
@@ -84,6 +84,26 @@ test('the encoders write what the parsers read', () => {
   assert.deepEqual(parseToolAnnounce(content(serveSequence({ port: 6006 }))), { port: 6006, name: null, key: null, dehydrate: false, persist: null });
   assert.equal(parseToolAnnounce(content(serveSequence({ port: 6006, path: '/token/view' })))?.path, '/token/view');
   for (const dirty of [true, false]) assert.deepEqual(parseToolState(content(stateSequence({ dirty }))), { dirty });
+  for (const preview of [true, false]) {
+    assert.deepEqual(parseToolOpen(content(openSequence({ path: '/repo/a b.md', preview }))), { path: '/repo/a b.md', preview });
+  }
+  assert.deepEqual(parseToolOpen(content(openSequence({ path: 'C:\\repo\\a.md' }))), { path: 'C:\\repo\\a.md', preview: false });
+});
+
+test('parseToolOpen reads only a v1 absolute local path', () => {
+  const open = payload => parseToolOpen(`open;${JSON.stringify(payload)}`);
+  assert.deepEqual(open({ v: 1, path: '/a' }), { path: '/a', preview: false });
+  assert.deepEqual(open({ v: 1, path: 'D:/a', preview: true }), { path: 'D:/a', preview: true });
+  for (const payload of [{ path: '/a' }, { v: 2, path: '/a' }, { v: 1 }, { v: 1, path: 'a/b' }, { v: 1, path: 'file:///a' },
+    { v: 1, path: 'C:a' }, { v: 1, path: '/a\x07b' }, { v: 1, path: '/a\u009bb' },
+    { v: 1, path: `/${'a'.repeat(2048)}` }, { v: 1, path: '/a', preview: 'true' }]) {
+    assert.equal(open(payload), null, JSON.stringify(payload));
+  }
+  assert.equal(parseToolOpen('serve;{"v":1,"path":"/a"}'), null);
+});
+
+test('openSequence refuses a path the host would ignore', () => {
+  for (const path of ['relative', 'file:///a', '/a\nb']) assert.throws(() => openSequence({ path }), RangeError);
 });
 
 test('serveSequence refuses a value the host would ignore', () => {

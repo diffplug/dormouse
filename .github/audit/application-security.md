@@ -74,8 +74,12 @@ file, compare disk revisions, reject substituted symlinks, and never expose
 arbitrary assets or execute the source document. The folder viewer shares that
 listener and guard: read `dor-tools-builtin/src/folder-viewer.ts` and
 `dor-tools-builtin/src/folder-viewer-page.ts` for path containment, the POST
-gate, how names reach the page, and the git invocation, and `openThroughControl`
-in `dor/src/cli.ts`, which turns its POSTs into `dor open`.
+gate, how names reach the page, and the git invocation; its POSTs become OSC
+367 `open`. The error viewer, `dor-tools-builtin/src/error-viewer.ts`, shares
+them too. For the OSC 367 `open` rule under `## Terminal output`, read
+`lib/src/lib/tool-open-requests.ts`, the `oscOpen` argument in
+`lib/src/lib/platform/dor-control-dispatch.ts`, and the `oscOpen` gate in
+`lib/src/components/wall/use-dor-control.ts`.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,

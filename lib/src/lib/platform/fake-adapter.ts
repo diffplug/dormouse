@@ -14,7 +14,7 @@ import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
-import { recordToolEvents } from '../tool-events';
+import { applyLiveToolEvents } from '../tool-events';
 
 /** This renderer is its host's one realm. */
 const LOCAL_VIEWER = 'local';
@@ -467,7 +467,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
     // The Tool stores are this renderer's own.
-    recordToolEvents(id, parsed.events);
+    applyLiveToolEvents(id, parsed.events);
     applyTerminalSemanticEvents(id, applyTerminalEvents(this.alertManager, id, parsed.events));
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
