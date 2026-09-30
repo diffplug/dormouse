@@ -22,6 +22,7 @@ Optional booleans:
 |---|---|---|---|
 | `hostOwnsTheme?` | `false` | `VSCodeAdapter` → `true` | Settings hides its theme picker (`docs/specs/theme.md` → "Where the user picks a theme") |
 | `hostOwnsShells?` | `false` | `VSCodeAdapter` → `true` | Settings hides its Shell row for the native QuickPick (`docs/specs/vscode.md` → "Shell selection") |
+| `hostOwnsUpdates?` | `false` | `VSCodeAdapter` → `true` | Settings → Network names the Marketplace instead of an update check (`docs/specs/remote-network.md` → "Settings → Network") |
 
 ## PTY lifecycle
 

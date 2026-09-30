@@ -474,7 +474,9 @@ function BurrowNameField({
 /**
  * The two ways a phone can reach this machine — a one-time connection, or a
  * persistent Relay this machine enrolls with so a phone running Dormouse Pocket
- * can pair with it.
+ * can pair with it — as Settings → Network's Phones section shows them under
+ * any level but Nothing (`NetworkPhones` in `NetworkSettings.tsx`), which
+ * labels them.
  *
  * Renders nothing at all on a build with no Burrow service behind it (the
  * website, the lib dev server): there is no Burrow to enroll, and offering the
@@ -494,21 +496,15 @@ export function RemoteControlSection() {
   useEffect(() => void refreshBurrowStatus(), []);
 
   if (state.kind === 'unsupported') return null;
-
-  return (
-    <section className="mt-4 border-t border-border pt-3">
-      <div className="text-sm text-foreground">Remote control</div>
-      {state.kind === 'loading' ? (
-        <div className="mt-1.5 text-sm text-muted">Checking…</div>
-      ) : state.kind === 'error' ? (
-        <div className="mt-1.5 text-sm leading-relaxed text-muted">
-          Could not reach this machine’s remote-control service: {state.message}
-        </div>
-      ) : (
-        <RelayChoices status={state.status} />
-      )}
-    </section>
-  );
+  if (state.kind === 'loading') return <div className="mt-1.5 text-sm text-muted">Checking…</div>;
+  if (state.kind === 'error') {
+    return (
+      <div className="mt-1.5 text-sm leading-relaxed text-muted">
+        Could not reach this machine’s remote-control service: {state.message}
+      </div>
+    );
+  }
+  return <RelayChoices status={state.status} />;
 }
 
 /**

@@ -132,9 +132,12 @@ const FOREIGN_ORIGIN = 'https://someone-elses-dormouse.example';
  */
 const SETUP_QR = 'svg[aria-label="Setup code for this machine"]';
 
-/** The Settings dialog's Remote control section, which every Burrow step reads. */
-const REMOTE_SECTION = `[...document.querySelectorAll('[role="dialog"] section')]
-  .find((el) => el.innerText.startsWith('Remote control'))`;
+/**
+ * Settings → Network's Phones section, which holds the Remote control choices
+ * every Burrow step reads — by the id its label carries
+ * (`lib/src/components/NetworkSettings.tsx`), rather than by copy.
+ */
+const REMOTE_SECTION = `document.querySelector('[role="dialog"] section[aria-labelledby="network-phones-label"]')`;
 
 /**
  * What a person types to prove the terminal is real, and where its answer lands.
@@ -343,18 +346,31 @@ async function stepBurrow(ctx) {
   await ctx.shot('01-burrow-booted.png');
 }
 
-/** Open Settings from the baseboard and scroll to Remote control. */
+/**
+ * Open Settings from the baseboard, choose Network → My Relay only, and scroll
+ * to the Phones section it opens. A fresh Burrow's network policy is Nothing
+ * (`docs/specs/remote-network.md` -> "Policy"), which refuses enrollment before
+ * any request, so this click is what lets the next step reach the Relay.
+ */
 async function stepSettings(ctx) {
   const ab = ctx.state.burrowBrowser;
   await ab.run(['click', 'button[aria-label="Settings"]']);
+  await ab.waitUntil(
+    `const radio = [...document.querySelectorAll('[role="dialog"] [role="radio"]')]
+       .find((el) => el.innerText.startsWith('My Relay only'));
+     if (!radio) return null;
+     if (radio.getAttribute('aria-checked') !== 'true') radio.click();
+     return true;`,
+    { what: 'Settings → Network to offer My Relay only' },
+  );
   // The section is below the fold in a short window, and a screenshot is
   // viewport-only — so the wait scrolls it into view as it finds it.
   await ab.waitUntil(
     `const section = ${REMOTE_SECTION};
-     if (!section) return null;
+     if (!section || !/Persistent Relay/.test(section.innerText)) return null;
      section.scrollIntoView({ block: 'center' });
      return true;`,
-    { what: 'the Settings dialog to show Remote control' },
+    { what: 'the Phones section to show the Remote control choices' },
   );
   await ctx.shot('02-settings-open.png');
 }
@@ -1342,7 +1358,7 @@ async function fillField(ctx, selector, value, ab = ctx.state.burrowBrowser) {
 const SETUP = [
   { name: 'relay', title: 'Start the coordinating Relay', run: stepRelay },
   { name: 'burrow', title: 'Start the Burrow in the agent-browser harness', run: stepBurrow },
-  { name: 'settings', title: 'Open Settings → Remote control', run: stepSettings },
+  { name: 'settings', title: 'Open Settings → Network and choose My Relay only', run: stepSettings },
   { name: 'enroll', title: 'Enroll this machine through the form', run: stepEnroll },
   { name: 'qr', title: 'Open the phone-setup panel and capture its QR', run: stepQr },
   {

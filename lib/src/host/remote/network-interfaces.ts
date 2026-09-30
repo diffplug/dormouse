@@ -124,14 +124,19 @@ const tailnetRangeOf = (address: string) => TAILNET_RANGES.find(({ contains }) =
  */
 const isTailnetV6 = TAILNET_RANGES[1]!.contains;
 const TAILSCALE_NAME = /^tailscale/i;
-const isIpv6LinkLocal = allowedAddressTest(['fe80::/10']);
+/**
+ * Link-local in either family: IPv6's on every interface, and IPv4's
+ * self-assigned address where no network answered — neither a network a phone
+ * joins.
+ */
+const isLinkLocal = allowedAddressTest(['fe80::/10', '169.254.0.0/16']);
 
 /**
  * Whether one `os.networkInterfaces()` address is one this machine offers a
- * phone: neither loopback nor otherwise internal, nor IPv6 link-local.
+ * phone: neither loopback nor otherwise internal, nor link-local.
  */
 export function isOfferedAddress(entry: OsAddress): boolean {
-  return !entry.internal && !isIpv6LinkLocal(entry.address);
+  return !entry.internal && !isLinkLocal(entry.address);
 }
 
 /**
@@ -155,8 +160,8 @@ const LABELS: Record<NetworkInterfaceInfo['kind'], string> = {
 /**
  * `os.networkInterfaces()` as the Allowed networks list offers it: loopback and
  * other internal interfaces left out, each address's own netmask as a canonical
- * prefix ({@link offeredPrefix}), IPv6 link-local left out, and an interface
- * with no prefix left dropped.
+ * prefix ({@link offeredPrefix}), link-local left out, and an interface with
+ * no prefix left dropped.
  */
 export function classifyNetworkInterfaces(
   raw: NodeJS.Dict<OsAddress[]>,

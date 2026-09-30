@@ -39,7 +39,7 @@ export interface NetworkInterfaceInfo {
   label: string;
   /** `virtual` covers bridge, container, and VM interfaces. */
   kind: (typeof INTERFACE_KINDS)[number];
-  /** Canonical CIDRs from the interface's own netmask, both families, IPv6 link-local left out. */
+  /** Canonical CIDRs from the interface's own netmask, both families, link-local left out. */
   prefixes: string[];
 }
 

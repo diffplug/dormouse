@@ -46,6 +46,19 @@ fails offline; a reminder gated on automatic checks being off left exactly those
 users with neither a check nor a warning. It reads local timestamps alone, so it
 needs no policy to run.
 
+## Settings → Network
+
+**Why the list states only what is built (2026-09-30).** The list is what a
+person reads to decide which level to trust, so a row for a connection no code
+makes — Anywhere's STUN, the Hosted Relay — would promise traffic that never
+happens, and a missing row would hide one that does. The prototype listed the
+whole design; the real list drops each row until its stage ships.
+
+**Why the panel fills the LAN prefixes.** `setNetworkPolicy` takes a policy
+only exactly and answers what it saved; filling in networks there would save
+something the request did not say. The panel already holds the interfaces the
+person is looking at, and the switches show at once what was allowed.
+
 ## Levels
 
 **Three personas set the levels (2026-09-30).** One wants no network requests at

@@ -23,8 +23,8 @@ import {
 } from '../remote/burrow/one-time-store';
 
 const IDLE_HINT =
-  'Open a link on your phone for a one-off connection. Phone and computer must be on the same ' +
-  'Wi-Fi. No account needed.';
+  'Open a link on your phone for a one-off connection. Your phone must be on an allowed network. ' +
+  'No account needed.';
 
 /**
  * Why this build offers none, in fixed copy per reason; a reason this build
@@ -54,11 +54,9 @@ export const ONE_TIME_ENDED_COPY: Record<Exclude<OneTimeEndReason, 'user-ended'>
   expired: 'The link ran out of time before a phone finished connecting.',
   'phone-left': 'The phone disconnected.',
   'direct-failed':
-    'The phone couldn’t reach this computer directly. Make sure both are on the same Wi-Fi, then ' +
+    'The phone couldn’t reach this computer directly. Make sure it is on an allowed network, then ' +
     'get a new link.',
-  'network-not-allowed':
-    'The phone’s connection didn’t come over a network allowed in Settings → Network. Connect ' +
-    'both to an allowed network, then get a new link.',
+  'network-not-allowed': 'The phone wasn’t on one of your allowed networks, so the connection ended.',
   idle: 'The phone stopped responding, so the connection ended.',
   unreachable:
     'Couldn’t reach hosted.dormouse.sh to make a link. Check this computer’s internet connection, ' +
@@ -91,7 +89,7 @@ function atRest(state: OneTimeState): boolean {
 }
 
 /**
- * The one-time connection in Settings' Remote control section, enrolled or not
+ * The one-time connection in Settings → Network's Phones section, enrolled or not
  * (`docs/specs/one-time.md` -> "Laptop UI"): a button at rest, and a framed
  * panel for everything from opening a link to reporting how it ended.
  *
@@ -280,8 +278,8 @@ function WaitingLink({
   return (
     <>
       <div className="mt-1 text-sm leading-relaxed text-muted">
-        Scan this with your phone’s camera, or open the link below on it. Phone and computer must be
-        on the same Wi-Fi.
+        Scan this with your phone’s camera, or open the link below on it. Your phone must be on an
+        allowed network.
       </div>
       <ExpiringCode
         url={url}

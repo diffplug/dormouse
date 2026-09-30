@@ -1,7 +1,7 @@
 # Local Security
 
 > See `docs/specs/glossary.md` for Pane, Session, and the Surface model; this spec uses them bare.
-> Owns the boundaries a user of the local application has: terminal output, browser panes, `dor`, loopback listeners, and what persists on disk. Defers every mechanism to the spec named at its rule, and the network boundary to `docs/specs/security-remote.md`.
+> Owns the boundaries a user of the local application has: terminal output, browser panes, `dor`, loopback listeners, the network policy's Nothing, and what persists on disk. Defers every mechanism to the spec named at its rule, and the network boundary to `docs/specs/security-remote.md`.
 > Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
 ## Terminal output
@@ -153,6 +153,13 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 **FAIL IF** `gitIgnored` runs git by bare name or lets `core.fsmonitor` run, which the browsed folder's own `.git/config` can name.
 
 Source of truth: `startCapabilityViewer` / `isInsideRoot` / `pathSegments` in `dor/src/viewer-server.ts`; `viewerTitle` in `dor/src/file-viewer-format.ts`; `startFileViewer` in `dor/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor/src/file-viewer-loopback-guard.ts`; `startFolderViewer` / `resolveInside` / `gitIgnored` in `dor/src/folder-viewer.ts`; `folderViewerPage` in `dor/src/folder-viewer-page.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor/test/file-viewer.test.mjs`, `dor/test/folder-viewer.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
+
+## Network policy
+
+The exposure is traffic the user never chose, which under Nothing is none. `docs/specs/remote-network.md` -> "Policy" owns the rule these checks audit.
+
+- **FAIL IF** anything opens a connection on its own while the network policy is `nothing` or unread. `BurrowService` in `lib/src/host/remote/service.ts` must route every socket, request, and direct peer through its transport guard, which refuses at the call; start no `BurrowRuntime` under any level but `relay`; and refuse `enroll`, `enrollOffer`, and `oneTimeOpen` before any request. `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts` must ask `networkAllowed` before every speak, and `runUpdateCheck` in `standalone/src/updater.ts` must not call `check()` unless the policy it read is not `nothing` and `autoUpdate` is on, a failed read counting as `nothing`. Search the rest of `lib/src/host/`, `standalone/src/`, and `vscode-ext/src/` for a request outside these three. Pinned by `lib/src/host/remote/service.test.ts`, `lib/src/host/managed-voice-host.test.ts`, and `standalone/src/updater.test.ts`.
+- **FAIL IF** the policy can be written by anything but the user's own choice. `setNetworkPolicy` is the only writer and takes a policy only exactly (`parseNetworkPolicy` in `lib/src/remote/network-policy.ts`, `requestedNetworkPolicy` in `lib/src/host/remote/service.ts`); no Client, Relay, or Hosted answer may reach the store, and a stored record that is not a policy must read as `nothing`.
 
 ## Persisted state
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
 /**
- * What the Remote control section's two QR panels share: the Relay's "Set up a
+ * What the Remote control choices' two QR panels share: the Relay's "Set up a
  * phone" (`RemoteControlSection.tsx`) and the one-time connection
  * (`OneTimeConnection.tsx`), whose Baseboard indicator (`OneTimeIndicator.tsx`)
  * repeats its connected sentence.

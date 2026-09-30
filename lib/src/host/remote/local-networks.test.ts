@@ -82,6 +82,8 @@ describe('bindAddressFor', () => {
     expect(bindAddressFor(['127.0.0.0/8', '::1/128'], LAPTOP)).toBeNull();
     // An allowed link-local range still leaves en0's other addresses the choice.
     expect(bindAddressFor(['fe80::/10', '192.168.86.0/24'], LAPTOP)).toBe('192.168.86.160');
+    const selfAssigned = { ...LAPTOP, en11: [address('169.254.235.129')] };
+    expect(bindAddressFor(['169.254.0.0/16', '192.168.86.0/24'], selfAssigned)).toBe('192.168.86.160');
   });
 });
 

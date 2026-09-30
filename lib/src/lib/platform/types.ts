@@ -225,6 +225,16 @@ export interface PlatformAdapter {
   hostOwnsShells?: boolean;
 
   /**
+   * Whether the host updates Dormouse itself, so Settings → Network offers no
+   * update check of its own. Absent reads as `false`.
+   *
+   * `VSCodeAdapter` sets it `true`: the Marketplace installs the extension's
+   * updates, following VS Code's own setting (`docs/specs/remote-network.md`
+   * -> "Settings → Network").
+   */
+  hostOwnsUpdates?: boolean;
+
+  /**
    * Agent resume invocations the host captured when it last tore down, keyed by
    * surface id — consumed once by a cold restore (`session-restore.ts`).
    *

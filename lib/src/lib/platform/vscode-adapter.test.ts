@@ -606,3 +606,14 @@ describe('VSCodeAdapter port deadline', () => {
     expect(await answer).toEqual(ports);
   });
 });
+
+describe('VSCodeAdapter host capabilities', () => {
+  beforeEach(stubWebviewEnv);
+  afterEach(() => vi.unstubAllGlobals());
+  it('owns the theme, the shell, and updates, and offers no updater port', () => {
+    const adapter = new VSCodeAdapter();
+    expect([adapter.hostOwnsTheme, adapter.hostOwnsShells, adapter.hostOwnsUpdates]).toEqual([true, true, true]);
+    // The Marketplace updates the extension, so Settings → Network names it.
+    expect(adapter.updates).toBeUndefined();
+  });
+});

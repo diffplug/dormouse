@@ -356,7 +356,7 @@ describe('one-time connection, end to end', () => {
     expect(await result).toEqual({ ok: false, message: ONE_TIME_ENDED_MESSAGE });
   });
 
-  it('gives the same-Wi-Fi copy when the laptop builds no peer', async () => {
+  it('gives the allowed-network copy when the laptop builds no peer', async () => {
     makeRuntime({ createDirectPeer: null });
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
     approval.approve(shown);
@@ -365,7 +365,7 @@ describe('one-time connection, end to end', () => {
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');
   });
 
-  it('gives the same-Wi-Fi copy when no channel opens by the direct deadline', async () => {
+  it('gives the allowed-network copy when no channel opens by the direct deadline', async () => {
     makeRuntime({ network: { opening: 'never' } });
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
     approval.approve(shown);

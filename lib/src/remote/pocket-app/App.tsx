@@ -681,7 +681,7 @@ export const BURROWS_TITLE = 'Burrows';
  */
 export const BURROWS_EMPTY =
   `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open Settings → `
-  + 'Remote control → Set up a phone, then scan the code.';
+  + 'Network → Set up a phone, then scan the code.';
 
 /** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
@@ -800,7 +800,7 @@ export function SetupOrSignin({
           <p className={clsx(PK.lead, 'mt-1')}>
             {signinLeads
               ? 'Sign in with your passkey to reach the Burrows this phone is paired with, or scan a code to pair a new one.'
-              : 'On the computer: Settings → Remote control → Set up a phone. Scan the code it shows.'}
+              : 'On the computer: Settings → Network → Set up a phone. Scan the code it shows.'}
           </p>
         </div>
         {/* Above the actions, never below: the passkey this screen mints

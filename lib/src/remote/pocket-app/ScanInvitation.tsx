@@ -270,7 +270,7 @@ export function ScanInvitation({
       </header>
       <div className={PK.body}>
         <p className={PK.lead}>
-          On the computer: <strong>Settings → Remote control → Set up a phone</strong>. Point this
+          On the computer: <strong>Settings → Network → Set up a phone</strong>. Point this
           phone at the code it shows.
         </p>
         {error ? <ErrorRow message={error} /> : null}

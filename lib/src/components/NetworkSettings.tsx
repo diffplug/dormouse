@@ -1,76 +1,101 @@
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { SwitchRow } from './AlarmSettingsControls';
 import { OnOffSwitch, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, TextInput, UNDER_SWITCH_INDENT, modalActionButton } from './design';
+import { useManagedVoiceConfigured } from './ManagedVoiceSection';
+import { RemoteControlSection } from './RemoteControlSection';
+import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
+import type { RelayMode } from '../host/relay-origin';
+import { getPlatform } from '../lib/platform';
+import type { UpdatesPort, UpdatesSnapshot } from '../lib/platform/types';
+import { getAlertSettings, subscribeToAlertSettings } from '../lib/terminal-registry';
+import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
+import {
+  getNetworkPolicySnapshot,
+  setNetworkPolicy,
+  subscribeToNetworkPolicy,
+} from '../remote/burrow/network-policy-store';
+import {
+  MAX_ALLOWED_NETWORKS,
+  type NetworkInterfaceInfo,
+  type NetworkLevel,
+  type NetworkPolicy,
+  type NetworkPolicyResult,
+} from '../remote/network-policy';
 
 /**
- * PROTOTYPE — the Network topic of Settings, for settling the UI before the
- * architecture (`docs/specs/remote-network.md`). Presentational only: every
- * value arrives as a prop and every change leaves as a callback, so the story
- * can drive each state without a Burrow service.
+ * Settings → Network (`docs/specs/remote-network.md` -> "Settings → Network"):
+ * one choice decides every connection Dormouse opens on its own, and
+ * {@link connectionsFor} lists exactly those connections. Three parts, each its
+ * own search group in the Settings dialog — {@link NetworkSettings} (the
+ * choice, the list, the allowed networks), {@link NetworkPhones}, and
+ * {@link NetworkUpdates} — and all three render nothing without a Burrow
+ * service, which holds the policy.
  *
- * The contract it proposes: one choice decides every connection Dormouse opens
- * on its own, and {@link connectionsFor} lists exactly those connections. That
- * list is the promise; each row must be backed by code before this ships.
- *
- * A new install starts at `nothing`. With automatic update checks off — always,
- * under `nothing` — the Baseboard reminds the user once a check is
- * {@link UPDATE_REMINDER_DAYS} old, and at most once per that interval; the
- * reminder itself contacts nothing.
+ * **The service is the only writer.** Every change goes out as a whole policy
+ * through `setNetworkPolicy`, and what renders is the store's mirror of the
+ * service's answer, never a local draft.
  */
 
-export const UPDATE_REMINDER_DAYS = 7;
+/** The Burrow service's two answers every part reads: the policy, and the build it runs in. */
+type NetworkView =
+  | { kind: 'unsupported' }
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready'; network: NetworkPolicyResult; status: BurrowConsoleStatus };
 
-export type NetworkLevel = 'nothing' | 'local' | 'anywhere';
-
-export type NetworkBuild = { kind: 'hosted' } | { kind: 'self-host'; relayOrigin: string };
-
-export interface NetworkInterfaceInfo {
-  /** The OS name, e.g. `en0`, `utun4`. */
-  id: string;
-  /** What a person calls it, e.g. `Wi-Fi`, `Tailscale`. */
-  label: string;
-  /** `virtual` covers bridge, container, and VM interfaces: never allowed by default. */
-  kind: 'wifi' | 'ethernet' | 'vpn' | 'virtual';
-  /** Canonical CIDRs from the interface's own netmask, both families. */
-  prefixes: string[];
+function useNetworkView(): NetworkView {
+  const network = useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot);
+  const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
+  if (network.kind === 'unsupported' || burrow.kind === 'unsupported') return { kind: 'unsupported' };
+  if (network.kind === 'error') return network;
+  if (burrow.kind === 'error') return burrow;
+  if (network.kind === 'loading' || burrow.kind === 'loading') return { kind: 'loading' };
+  return { kind: 'ready', network: network.network, status: burrow.status };
 }
 
-export interface PairedPhone {
-  id: string;
-  label: string;
-  detail: string;
+/** The level as the service holds it, or `null` before it answers or without a service. */
+export function useNetworkLevel(): NetworkLevel | null {
+  const network = useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot);
+  return network.kind === 'ready' ? network.network.policy.level : null;
 }
 
-export interface NetworkSettingsState {
-  build: NetworkBuild;
-  host: 'standalone' | 'vscode';
-  level: NetworkLevel;
-  /** CIDRs a phone's direct path must fall within, under `local`. */
-  allowed: string[];
-  interfaces: NetworkInterfaceInfo[];
-  autoUpdate: boolean;
-  /** Epoch ms of the last successful check, or null since this version was installed. */
-  lastUpdateCheck: number | null;
-  phones: PairedPhone[];
-  /** Mirrors of Notifications settings, for the connection list only. */
-  pushEnabled: boolean;
-  managedVoice: boolean;
+/** A change sent to the service, and the refusal it answered, if any. */
+function useSave() {
+  const [error, setError] = useState<string | null>(null);
+  const save = useCallback(async (next: NetworkPolicy): Promise<boolean> => {
+    setError(null);
+    try {
+      await setNetworkPolicy(next);
+      return true;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      return false;
+    }
+  }, []);
+  return { error, save };
 }
 
-export interface NetworkSettingsActions {
-  onLevel: (level: NetworkLevel) => void;
-  onAllowed: (allowed: string[]) => void;
-  onAutoUpdate: (on: boolean) => void;
-  onCheckForUpdates: () => void;
-  onPair: () => void;
-  onOneTime: () => void;
-  onRemovePhone: (id: string) => void;
+/**
+ * The policy choosing `level` makes. **Local networks chosen with nothing
+ * allowed first allows every prefix of this machine's `lan` interfaces**, never
+ * a VPN or virtual one; the service never fills them in.
+ */
+export function policyForLevel(network: NetworkPolicyResult, level: NetworkLevel): NetworkPolicy {
+  const { policy, interfaces } = network;
+  if (level !== 'local' || policy.allowed.length > 0) return { ...policy, level };
+  const lan = interfaces.filter((item) => item.kind === 'lan').flatMap((item) => item.prefixes);
+  return { ...policy, level, allowed: [...new Set(lan)].slice(0, MAX_ALLOWED_NETWORKS) };
 }
 
-const HOSTED = 'hosted.dormouse.sh';
-const STUN = 'stun.cloudflare.com';
-const UPDATES = 'dormouse.sh';
+/** An origin's host, as the copy names it. */
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+}
 
 interface LevelChoice {
   level: NetworkLevel;
@@ -78,32 +103,39 @@ interface LevelChoice {
   detail: string;
 }
 
-function choicesFor(build: NetworkBuild): LevelChoice[] {
-  const nothing: LevelChoice = {
-    level: 'nothing',
-    title: 'Nothing',
-    detail: 'Dormouse opens no connections on its own. Phones can’t reach this computer.',
-  };
-  if (build.kind === 'self-host') {
-    return [nothing, {
-      level: 'anywhere',
-      title: 'My Relay only',
-      detail: `Phones reach this computer through ${build.relayOrigin}. Nothing else is contacted.`,
-    }];
+/**
+ * What the picker says for `level`, or `null` for one this build has no copy
+ * for, which is not offered: `anywhere` until its stage ships.
+ */
+function choiceFor(level: NetworkLevel, relayOrigin: string): LevelChoice | null {
+  const relay = hostOf(relayOrigin);
+  switch (level) {
+    case 'nothing':
+      return {
+        level,
+        title: 'Nothing',
+        detail: 'Dormouse opens no connections on its own. Phones can’t reach this computer.',
+      };
+    case 'local':
+      return {
+        level,
+        title: 'Local networks',
+        detail: `Phones connect only over networks you choose. ${relay} introduces them but never carries your terminals.`,
+      };
+    case 'relay':
+      return {
+        level,
+        title: 'My Relay only',
+        detail: `Phones reach this computer through ${relay}. Nothing else is contacted.`,
+      };
+    case 'anywhere':
+      return null;
   }
-  return [
-    nothing,
-    {
-      level: 'local',
-      title: 'Local networks',
-      detail: `Phones connect only over networks you choose. ${HOSTED} introduces them but never carries your terminals.`,
-    },
-    {
-      level: 'anywhere',
-      title: 'Anywhere',
-      detail: `Phones connect from any network: directly when possible, otherwise through ${HOSTED}.`,
-    },
-  ];
+}
+
+/** The choices the service offers, in its order. */
+function choicesFor(network: NetworkPolicyResult, status: BurrowConsoleStatus): LevelChoice[] {
+  return network.levels.flatMap((level) => choiceFor(level, status.relayOrigin) ?? []);
 }
 
 export interface ConnectionRow {
@@ -112,63 +144,80 @@ export interface ConnectionRow {
   carries: string;
 }
 
-/**
- * Every connection this computer opens on its own under `state`, and nothing
- * else. Terminals and browser panes reach whatever the user points them at;
- * those are the user's connections, not Dormouse's.
- */
-export function connectionsFor(state: NetworkSettingsState): ConnectionRow[] {
-  if (state.level === 'nothing') return [];
-  const rows: ConnectionRow[] = [];
-  const paired = state.phones.length > 0;
-  const coordinator = state.build.kind === 'self-host' ? state.build.relayOrigin : HOSTED;
+/** What {@link connectionsFor} reads. */
+export interface NetworkFacts {
+  policy: NetworkPolicy;
+  /** The build's baked relay origin and mode, as `status` carries them. */
+  relayOrigin: string;
+  relayMode: RelayMode;
+  enrolled: boolean;
+  pairedClients: number;
+  /** Push notifications are on in the application's alert settings. */
+  pushEnabled: boolean;
+  /** A managed-voice token is saved. */
+  managedVoice: boolean;
+  /** This window has the updater's port: a Standalone build that checks for updates. */
+  updater: boolean;
+}
 
-  if (state.build.kind === 'self-host') {
-    rows.push({
-      to: coordinator,
-      when: 'Always',
-      carries: 'Encrypted handshakes, and terminal traffic when a phone can’t connect directly.',
-    });
-  } else {
-    rows.push({
-      to: coordinator,
-      when: paired ? 'Always, so paired phones can find this computer' : 'Only while a one-time link is open',
-      carries: state.level === 'local'
-        ? 'Encrypted handshakes. Never terminal traffic.'
-        : 'Encrypted handshakes, and terminal traffic when a phone can’t connect directly.',
-    });
-    if (state.level === 'anywhere') {
+const UPDATES_HOST = 'dormouse.sh';
+
+/**
+ * Every connection this computer opens on its own under `facts`, and nothing
+ * else — each row backed by code (`docs/specs/remote-network.md` -> "Settings →
+ * Network"). Terminals and browser panes reach whatever the user points them
+ * at; those are the user's connections, not Dormouse's.
+ */
+export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
+  const { policy } = facts;
+  if (policy.level === 'nothing') return [];
+  const relay = hostOf(facts.relayOrigin);
+  const rows: ConnectionRow[] = [];
+  if (policy.level === 'local' && policy.allowed.length > 0) {
+    rows.push(
+      {
+        to: relay,
+        when: 'Only while a one-time link is open',
+        carries: 'Encrypted handshakes. Never terminal traffic.',
+      },
+      {
+        to: 'Your phone, on an allowed network',
+        when: 'While connected',
+        carries: 'Terminal traffic, end-to-end encrypted.',
+      },
+    );
+  }
+  if (policy.level === 'relay') {
+    rows.push(
+      {
+        to: relay,
+        when: facts.enrolled ? 'Always' : 'Always, once this computer is enrolled',
+        carries: 'Encrypted handshakes, and terminal traffic when a phone can’t connect directly.',
+      },
+      {
+        to: 'Your phone, directly',
+        when: 'While connected',
+        carries: 'Terminal traffic, end-to-end encrypted.',
+      },
+    );
+    if (facts.pushEnabled && facts.pairedClients > 0) {
       rows.push({
-        to: STUN,
-        when: 'When a phone connects',
-        carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
+        to: `${relay} → your phone’s push service`,
+        when: 'When an alert goes unattended',
+        carries: 'An end-to-end encrypted notification.',
       });
     }
   }
-
-  rows.push({
-    to: state.level === 'local' ? 'Your phone, on an allowed network' : 'Your phone, directly',
-    when: 'While connected',
-    carries: 'Terminal traffic, end-to-end encrypted.',
-  });
-
-  if (paired && state.pushEnabled) {
+  if (facts.managedVoice && facts.relayMode === 'hosted') {
     rows.push({
-      to: `${coordinator} → your phone’s push service`,
-      when: 'When an alert goes unattended',
-      carries: 'An end-to-end encrypted notification.',
-    });
-  }
-  if (state.managedVoice && state.build.kind === 'hosted' && state.host === 'standalone') {
-    rows.push({
-      to: HOSTED,
+      to: relay,
       when: 'When an alert is spoken in the managed voice',
-      carries: 'The pane’s name, which Hosted passes to ElevenLabs.',
+      carries: 'The pane’s name and the voice id, which Hosted passes to ElevenLabs.',
     });
   }
-  if (state.autoUpdate && state.host === 'standalone' && state.build.kind === 'hosted') {
+  if (policy.autoUpdate && facts.updater) {
     rows.push({
-      to: UPDATES,
+      to: UPDATES_HOST,
       when: 'Each launch',
       carries: 'A request for the newest version number. Downloading one waits for you.',
     });
@@ -179,18 +228,48 @@ export function connectionsFor(state: NetworkSettingsState): ConnectionRow[] {
 const SECTION = 'mt-4 border-t border-border pt-3';
 const LABEL = 'text-sm text-foreground';
 const HINT = 'mt-1 text-sm leading-relaxed text-muted';
+const ERROR = 'mt-2 text-sm leading-relaxed text-error';
+/** A link-like action inside running text. */
+const INLINE_ACTION = clsx('rounded px-0.5', SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS);
 
-export function NetworkSettings({ state, actions }: { state: NetworkSettingsState; actions: NetworkSettingsActions }) {
-  const choices = choicesFor(state.build);
+/** The choice, what it connects to, and — under Local networks — the allowed networks. */
+export function NetworkSettings() {
+  const view = useNetworkView();
+  const { error, save } = useSave();
+  const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+  const managedVoice = useManagedVoiceConfigured();
+
+  if (view.kind === 'unsupported') return null;
+  if (view.kind === 'loading') return <div className={`mt-4 ${HINT}`}>Checking…</div>;
+  if (view.kind === 'error') {
+    return <div className={`mt-4 ${HINT}`}>Could not read this computer’s network setting: {view.message}</div>;
+  }
+  const { network, status } = view;
+  const { policy } = network;
+  const rows = connectionsFor({
+    policy,
+    relayOrigin: status.relayOrigin,
+    relayMode: status.relayMode,
+    enrolled: status.enrolled,
+    pairedClients: status.pairedClients,
+    pushEnabled: settings.pushEnabled,
+    managedVoice,
+    updater: getPlatform().updates !== undefined,
+  });
   return (
     <div className="mt-4">
-      <LevelPicker choices={choices} level={state.level} onLevel={actions.onLevel} />
-      <ConnectionList rows={connectionsFor(state)} />
-      {state.level === 'local' ? (
-        <AllowedNetworks interfaces={state.interfaces} allowed={state.allowed} onAllowed={actions.onAllowed} />
+      <LevelPicker
+        choices={choicesFor(network, status)}
+        level={policy.level}
+        onLevel={(level) => {
+          if (level !== policy.level) void save(policyForLevel(network, level));
+        }}
+      />
+      {error ? <div className={ERROR}>{error}</div> : null}
+      <ConnectionList rows={rows} />
+      {policy.level === 'local' ? (
+        <AllowedNetworks interfaces={network.interfaces} policy={policy} />
       ) : null}
-      <Phones state={state} actions={actions} />
-      <Updates state={state} actions={actions} />
     </div>
   );
 }
@@ -273,51 +352,49 @@ function ConnectionList({ rows }: { rows: ConnectionRow[] }) {
   );
 }
 
-/** A loose CIDR shape check; the Burrow canonicalizes and is the real gate. */
+/** A loose CIDR shape check to enable Add; the service's canonical check is the gate. */
 function looksLikeCidr(text: string): boolean {
   return /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(text) || /^[0-9a-f:]+\/\d{1,3}$/i.test(text);
 }
 
-function AllowedNetworks({ interfaces, allowed, onAllowed }: {
-  interfaces: NetworkInterfaceInfo[];
-  allowed: string[];
-  onAllowed: (allowed: string[]) => void;
-}) {
+function AllowedNetworks({ interfaces, policy }: { interfaces: NetworkInterfaceInfo[]; policy: NetworkPolicy }) {
   const [draft, setDraft] = useState('');
-  const known = new Set(interfaces.flatMap((item) => item.prefixes));
+  const { error, save } = useSave();
+  const { allowed } = policy;
+  // An interface with no prefix to allow (IPv6 link-local only) has no row.
+  const offered = interfaces.filter((item) => item.prefixes.length > 0);
+  const known = new Set(offered.flatMap((item) => item.prefixes));
   const typed = allowed.filter((cidr) => !known.has(cidr));
-  const add = (cidrs: string[]) => onAllowed([...allowed, ...cidrs.filter((cidr) => !allowed.includes(cidr))]);
-  const remove = (cidrs: string[]) => onAllowed(allowed.filter((cidr) => !cidrs.includes(cidr)));
-  const draftValid = looksLikeCidr(draft.trim());
+  const change = (next: string[]) => save({ ...policy, allowed: next });
+  const add = (cidrs: string[]) => change([...allowed, ...cidrs.filter((cidr) => !allowed.includes(cidr))]);
+  const remove = (cidrs: string[]) => change(allowed.filter((cidr) => !cidrs.includes(cidr)));
+  const range = draft.trim().toLowerCase();
 
   return (
     <section className={SECTION} aria-labelledby="network-allowed-label">
       <div id="network-allowed-label" className={LABEL}>Allowed networks</div>
       <div className={HINT}>A phone connects only when both ends of its connection are on one of these.</div>
       <div className="mt-2 flex flex-col gap-1.5">
-        {interfaces.map((item) => {
-          const on = item.prefixes.every((cidr) => allowed.includes(cidr));
-          return (
-            <NetworkRow
-              key={item.id}
-              control={<OnOffSwitch
-                on={on}
-                label={`Allow ${item.label}`}
-                onEnable={() => add(item.prefixes)}
-                onDisable={() => remove(item.prefixes)}
-              />}
-              name={`${item.label} · ${item.id}`}
-              prefixes={item.prefixes}
-            />
-          );
-        })}
+        {offered.map((item) => (
+          <NetworkRow
+            key={item.id}
+            control={<OnOffSwitch
+              on={item.prefixes.every((cidr) => allowed.includes(cidr))}
+              label={`Allow ${item.label}`}
+              onEnable={() => void add(item.prefixes)}
+              onDisable={() => void remove(item.prefixes)}
+            />}
+            name={`${item.label} · ${item.id}`}
+            prefixes={item.prefixes}
+          />
+        ))}
         {typed.map((cidr) => (
           <NetworkRow
             key={cidr}
             control={<button
               type="button"
               className={clsx('h-6 w-15 shrink-0 rounded px-1 text-left text-sm', SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS)}
-              onClick={() => remove([cidr])}
+              onClick={() => void remove([cidr])}
             >
               Remove
             </button>}
@@ -330,9 +407,10 @@ function AllowedNetworks({ interfaces, allowed, onAllowed }: {
         className={`${UNDER_SWITCH_INDENT} mt-2 flex items-center gap-2`}
         onSubmit={(event) => {
           event.preventDefault();
-          if (!draftValid) return;
-          add([draft.trim()]);
-          setDraft('');
+          if (!looksLikeCidr(range)) return;
+          void add([range]).then((saved) => {
+            if (saved) setDraft('');
+          });
         }}
       >
         <TextInput
@@ -342,10 +420,11 @@ function AllowedNetworks({ interfaces, allowed, onAllowed }: {
           aria-label="Add an allowed network range"
           className="text-sm"
         />
-        <button type="submit" disabled={!draftValid} className={modalActionButton()}>Add</button>
+        <button type="submit" disabled={!looksLikeCidr(range)} className={modalActionButton()}>Add</button>
       </form>
+      {error ? <div className={`${UNDER_SWITCH_INDENT} ${ERROR}`}>{error}</div> : null}
       {allowed.length === 0 ? (
-        <div className={`${UNDER_SWITCH_INDENT} mt-2 text-sm leading-relaxed text-error`}>
+        <div className={`${UNDER_SWITCH_INDENT} ${ERROR}`}>
           No network is allowed, so no phone can connect.
         </div>
       ) : null}
@@ -369,39 +448,30 @@ function NetworkRow({ control, name, prefixes }: { control: ReactNode; name: str
   );
 }
 
-function Phones({ state, actions }: { state: NetworkSettingsState; actions: NetworkSettingsActions }) {
-  const off = state.level === 'nothing';
-  const blocked = state.level === 'local' && state.allowed.length === 0;
+/**
+ * The ways a phone reaches this computer: under any level but Nothing, the
+ * Remote control choices; under Nothing, the levels that allow one, each a
+ * shortcut to itself.
+ */
+export function NetworkPhones() {
+  const view = useNetworkView();
+  const { error, save } = useSave();
+  if (view.kind !== 'ready') return null;
+  const { network, status } = view;
+  const choices = choicesFor(network, status).filter((choice) => choice.level !== 'nothing');
   return (
     <section className={SECTION} aria-labelledby="network-phones-label">
       <div id="network-phones-label" className={LABEL}>Phones</div>
-      {state.phones.length ? (
-        <ul className="mt-1.5 flex flex-col gap-1">
-          {state.phones.map((phone) => (
-            <li key={phone.id} className="flex items-baseline gap-3 text-sm">
-              <span className="text-foreground">{phone.label}</span>
-              <span className="min-w-0 flex-1 text-muted">{off ? 'Can’t connect while set to Nothing' : phone.detail}</span>
-              <button
-                type="button"
-                className={clsx('rounded px-1', SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS)}
-                onClick={() => actions.onRemovePhone(phone.id)}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {off ? (
+      {network.policy.level === 'nothing' ? (
         <div className={HINT}>
           Choose{' '}
-          {choicesFor(state.build).filter((choice) => choice.level !== 'nothing').map((choice, position, rest) => (
+          {choices.map((choice, position) => (
             <span key={choice.level}>
-              {position > 0 ? (position === rest.length - 1 ? ' or ' : ', ') : null}
+              {position > 0 ? (position === choices.length - 1 ? ' or ' : ', ') : null}
               <button
                 type="button"
-                className={clsx('rounded px-0.5', SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS)}
-                onClick={() => actions.onLevel(choice.level)}
+                className={INLINE_ACTION}
+                onClick={() => void save(policyForLevel(network, choice.level))}
               >
                 {choice.title}
               </button>
@@ -410,38 +480,34 @@ function Phones({ state, actions }: { state: NetworkSettingsState; actions: Netw
           {' '}to connect a phone.
         </div>
       ) : (
-        <>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <button type="button" disabled={blocked} className={modalActionButton({ tone: 'primary' })} onClick={actions.onPair}>
-              Pair a phone
-            </button>
-            {state.build.kind === 'hosted' ? (
-              <button type="button" disabled={blocked} className={modalActionButton()} onClick={actions.onOneTime}>
-                One-time link
-              </button>
-            ) : null}
-          </div>
-          <div className={HINT}>
-            {state.build.kind === 'hosted'
-              ? 'A paired phone reconnects any time. A one-time link connects once, with no account, and saves nothing.'
-              : 'A paired phone reconnects any time.'}
-          </div>
-        </>
+        <RemoteControlSection />
       )}
+      {error ? <div className={ERROR}>{error}</div> : null}
     </section>
   );
 }
 
-function Updates({ state, actions }: { state: NetworkSettingsState; actions: NetworkSettingsActions }) {
-  if (state.host === 'vscode') {
-    return (
-      <section className={SECTION}>
-        <div className={LABEL}>Updates</div>
-        <div className={HINT}>VS Code installs Dormouse updates from the Marketplace, following its own extension update setting.</div>
-      </section>
-    );
-  }
-  if (state.build.kind === 'self-host') {
+/** The updater's snapshot, or `null` where this window has no port. */
+function useUpdates(port: UpdatesPort | undefined): UpdatesSnapshot | null {
+  const subscribe = useCallback((listener: () => void) => port?.subscribe(listener) ?? (() => {}), [port]);
+  const snapshot = useCallback(() => port?.getSnapshot() ?? null, [port]);
+  return useSyncExternalStore(subscribe, snapshot);
+}
+
+/**
+ * Update checks: the switch under any level but Nothing, and — where this
+ * window has the updater's port — the last check and Check now. A self-host
+ * build and VS Code have no updater of Dormouse's to show.
+ */
+export function NetworkUpdates() {
+  const view = useNetworkView();
+  const { error, save } = useSave();
+  const port = getPlatform().updates;
+  const updates = useUpdates(port);
+  if (view.kind !== 'ready') return null;
+  const { policy } = view.network;
+
+  if (view.status.relayMode === 'self-host') {
     return (
       <section className={SECTION}>
         <div className={LABEL}>Updates</div>
@@ -449,31 +515,47 @@ function Updates({ state, actions }: { state: NetworkSettingsState; actions: Net
       </section>
     );
   }
-  const off = state.level === 'nothing';
-  const auto = !off && state.autoUpdate;
-  const last = state.lastUpdateCheck === null
-    ? 'Not checked since this version was installed.'
-    : `Last checked ${daysAgo(state.lastUpdateCheck)}.`;
+  if (getPlatform().hostOwnsUpdates) {
+    return (
+      <section className={SECTION}>
+        <div className={LABEL}>Updates</div>
+        <div className={HINT}>VS Code installs Dormouse updates from the Marketplace, following its own extension update setting.</div>
+      </section>
+    );
+  }
+  const off = policy.level === 'nothing';
+  const auto = !off && policy.autoUpdate;
   return (
     <section className={SECTION}>
       {off ? (
         <div className={LABEL}>Updates</div>
       ) : (
-        <SwitchRow label="Check for updates automatically" on={state.autoUpdate} onChange={actions.onAutoUpdate} />
+        <SwitchRow
+          label="Check for updates automatically"
+          on={policy.autoUpdate}
+          onChange={(autoUpdate) => void save({ ...policy, autoUpdate })}
+        />
       )}
       <div className={off ? HINT : `${UNDER_SWITCH_INDENT} ${HINT}`}>
-        {auto ? 'Checked at each launch. ' : off ? 'Checked only when you ask. ' : ''}
-        {last}{' '}
-        <button
-          type="button"
-          className={clsx('rounded px-0.5', SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS)}
-          onClick={actions.onCheckForUpdates}
-        >
-          Check now
-        </button>
-        {auto ? null : (
-          <div>After a week without a check, the bottom bar reminds you. The reminder contacts nothing.</div>
-        )}
+        {auto ? 'Checked at each launch.' : 'Checked only when you ask.'}
+        {port && updates ? (
+          <>
+            {' '}
+            {updates.checkedAt === null
+              ? 'Never checked on this computer.'
+              : `Last checked ${daysAgo(updates.checkedAt)}.`}{' '}
+            <button
+              type="button"
+              disabled={updates.checking}
+              className={INLINE_ACTION}
+              onClick={() => port.checkNow()}
+            >
+              {updates.checking ? 'Checking…' : 'Check now'}
+            </button>
+            <div>The bottom bar reminds you after a week without a successful check.</div>
+          </>
+        ) : null}
+        {error ? <div className={ERROR}>{error}</div> : null}
       </div>
     </section>
   );

@@ -35,6 +35,11 @@ export function useManagedVoiceOffered(): boolean {
   return isOffered(port, useManagedVoiceStatus(port));
 }
 
+/** Whether a voice token is saved, so alerts may reach Hosted in the managed voice. */
+export function useManagedVoiceConfigured(): boolean {
+  return useManagedVoiceStatus(getPlatform().managedVoice)?.configured === true;
+}
+
 /** Managed voice setup; visibility and the write-only token follow
  *  `docs/specs/alert.md` -> "Settings dialog". */
 export function ManagedVoiceSection() {

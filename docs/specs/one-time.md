@@ -446,20 +446,21 @@ Source of truth: `BurrowService` and `oneTimeServing` in
 
 ## Laptop UI
 
-**`OneTimeConnection` sits in Settings' Remote control choices, above
-Persistent Relay, enrolled or not**; `OneTimeIndicator` sits in the Baseboard's
-right cluster (`docs/specs/layout.md` -> "Baseboard").
+**`OneTimeConnection` sits in the Remote control choices of Settings →
+Network's Phones section, above Persistent Relay, enrolled or not**
+(`docs/specs/remote-network.md` -> "Settings → Network"); `OneTimeIndicator`
+sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
 
 | State | The panel shows | Actions |
 | --- | --- | --- |
-| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Phone and computer must be on the same Wi-Fi. No account needed." | the button opens |
+| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Your phone must be on an allowed network. No account needed." | the button opens |
 | `unavailable` | the button disabled, the reason's copy for the hint | — |
 | `opening` | "Getting a link…" | Cancel |
 | `waiting` | the link as a QR code and as selectable text; "Good for one phone. Expires in N min." | Copy link, New link, Cancel |
 | `confirming` | "Type the two digits your phone shows into the dialog." | Cancel |
 | `connecting` | "Connecting directly…" | Cancel |
 | `connected` | the phone's label, then "has full control of your terminals." | End |
-| `ended` | one fixed sentence per reason, `direct-failed`'s naming the same Wi-Fi, `network-not-allowed`'s Settings → Network | New link, Done |
+| `ended` | one fixed sentence per reason, `direct-failed`'s and `network-not-allowed`'s naming the allowed networks | New link, Done |
 
 - **The panel renders the service's state and owns only its busy and error**; a
   refused `oneTimeOpen` renders inline. **Closing Settings changes nothing**:

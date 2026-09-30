@@ -78,6 +78,12 @@ listener and guard: read `dor/src/folder-viewer.ts` and
 `dor/src/folder-viewer-page.ts` for path containment, the POST gate, how names
 reach the page, and the git invocation.
 
+For `## Network policy`, read `docs/specs/remote-network.md` -> "Policy", then
+`lib/src/remote/network-policy.ts`, the policy half of
+`lib/src/host/remote/service.ts` (the transport guard, and each level's hold
+on the Burrow), and its two other choke points,
+`lib/src/host/managed-voice-host.ts` and `standalone/src/updater.ts`.
+
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,
 `docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message

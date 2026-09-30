@@ -1,5 +1,6 @@
 import { Meta, Canvas } from '@storybook/addon-docs/blocks';
 
+import * as Network from '../../lib/src/stories/NetworkSettings.stories';
 import * as RemoteControl from '../../lib/src/stories/RemoteControlSection.stories';
 import * as Pairing from '../../lib/src/stories/RemotePairingModal.stories';
 import * as SetupOrSignin from '../../lib/src/stories/SetupOrSignin.stories';
@@ -142,19 +143,25 @@ disabled "Use hosted.dormouse.sh", with nothing to enroll.
 
 ## 3. Enroll the laptop
 
-**Settings → Remote control**, at the bottom of the app-global Settings dialog
-(the sliders icon at the far right of the baseboard). Because the Relay from
-section 1 is installed on this very laptop, pressing **Persistent Relay** leaves
-nothing to type:
+**Settings → Network**, at the bottom of the app-global Settings dialog (the
+sliders icon at the far right of the baseboard). A new install opens nothing on
+its own — Network starts at **Nothing** — so first choose **My Relay only**,
+which lets this laptop reach the Relay it was built for and nothing else:
+
+<Canvas of={Network.SelfHostNothing} />
+
+The Phones section below it then holds the remote-control choices. Because the
+Relay from section 1 is installed on this very laptop, pressing **Persistent
+Relay** leaves nothing to type:
 
 <Canvas of={RemoteControl.OfferAvailable} />
 
 > The other button, **One-time connection**, is disabled in a self-host build
-> like this one: its links are made at `hosted.dormouse.sh`. In a stock build it
-> needs none of this walkthrough — no Relay, no enrollment, no passkey, no
-> pairing. It shows a link good for one phone on the same Wi-Fi, for one
-> session, confirmed with the same two digits and saving nothing;
-> `docs/specs/one-time.md` owns it.
+> like this one: its links are made at `hosted.dormouse.sh`. In a stock build,
+> under **Local networks**, it needs none of this walkthrough — no Relay, no
+> enrollment, no passkey, no pairing. It shows a link good for one phone on an
+> allowed network, for one session, confirmed with the same two digits and
+> saving nothing; `docs/specs/one-time.md` owns it.
 
 The installer left a `run/enroll-offer.json` next to its state — this install's
 origin plus a one-time token the Relay redeems in place of the setup password

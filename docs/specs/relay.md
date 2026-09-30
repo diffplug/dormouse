@@ -828,8 +828,10 @@ webview's client half).
 ### Remote control, in the Settings dialog
 
 Enrolling is the one step a self-hoster cannot skip, so it is UI, not a console
-incantation: a **Remote control** section in the Relay topic of the app-global
-Settings dialog ([alert.md](./alert.md) -> Settings dialog).
+incantation: the **Remote control** choices in the Phones section of Settings →
+Network, shown under any level but Nothing
+([remote-network.md](./remote-network.md) -> "Settings → Network"). A self-host
+build enrolls only under **My Relay only**, which the user chooses first.
 Its managed-Relay link follows [website-docs.md](./website-docs.md) ->
 `/hosted` preview.
 
@@ -840,7 +842,7 @@ the build cannot do.
 **The push-devices line above it must key on that same seam, not on its own
 `no-burrow`**, a superset covering both a Burrow service that has not enrolled *and*
 a build with no Burrow service at all ([alert.md](./alert.md) -> Push
-notifications). Only the first has a section beneath it, so only the first says
+notifications). Only the first has a Network topic beneath it, so only the first says
 "below"; the `PushNoBurrow` / `PushNotEnrolled` story pair holds the two apart.
 
 **Two choices: One-time connection (`docs/specs/one-time.md` -> "Laptop UI")
@@ -1017,10 +1019,11 @@ Hosted (Relay origin), so a local Relay needs a dev build baked with its origin 
 DORMOUSE_RELAY_ORIGIN=http://localhost:3000 pnpm dev:standalone
 ```
 
-Then enroll once, in **Settings → Remote control** (the sliders icon at the far
-right of the baseboard): the setup password and a name for this machine. Read
-`password` from the generated `setup-password.json` state record. The same from
-the webview's devtools console, the scripting seam:
+Then enroll once, in **Settings → Network** (the sliders icon at the far
+right of the baseboard): choose **My Relay only**, then the setup password and a
+name for this machine. Read `password` from the generated `setup-password.json`
+state record. Once My Relay only is chosen, the same from the webview's devtools
+console, the scripting seam:
 
 ```js
 await window.dormouseBurrow.enroll('<64 hex characters>', 'My Laptop')
@@ -1032,7 +1035,7 @@ themselves. For a headless stand-in burrow instead:
 — it reads the same state, prints a pairing URL, auto-approves, and logs.
 
 **3. Phone** (or any other browser profile): open the Relay origin there first,
-then show a code on the laptop (**Settings → Remote control → Set up a phone**).
+then show a code on the laptop (**Settings → Network → Set up a phone**).
 A browser that has never been here leads with **Scan a setup code**; scanning or
 pasting it creates the passkey and signs you in. Read the two digits off the
 phone into the laptop's modal; the phone then answers its own biometric prompt

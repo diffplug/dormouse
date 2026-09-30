@@ -1,4 +1,4 @@
-import { BellIcon, BroadcastIcon, GearIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
+import { BellIcon, GearIcon, GlobeIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
 import type { AlertSink } from '../lib/alert-delivery-model';
@@ -10,6 +10,8 @@ import {
   ModalCloseButton,
   ModalFrame,
   OVERLAY_MAX_HEIGHT,
+  SUBTLE_ACTION_COLOR_CLASS,
+  SUBTLE_ACTION_INTERACTION_CLASS,
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
@@ -17,7 +19,7 @@ import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
-import { RemoteControlSection } from './RemoteControlSection';
+import { NetworkPhones, NetworkSettings, NetworkUpdates, useNetworkLevel } from './NetworkSettings';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
@@ -44,10 +46,28 @@ const SECTION = 'mt-4 border-t border-border pt-3';
 const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
 
 /**
+ * Where Settings → Network is named from another topic: a link to it inside the
+ * dialog, and its path in the Baseboard's preview, which has no topic to reach.
+ */
+function NetworkTopicLink({ onShow }: { onShow?: () => void }) {
+  if (!onShow) return <>Settings → Network</>;
+  return (
+    <button
+      type="button"
+      className={`rounded px-0.5 ${SUBTLE_ACTION_COLOR_CLASS} ${SUBTLE_ACTION_INTERACTION_CLASS}`}
+      onClick={onShow}
+    >
+      Network
+    </button>
+  );
+}
+
+/**
  * The "Push will be sent to …" line. Every state names a cause, because a push
  * that silently goes nowhere is indistinguishable from one that is broken.
  * `no-burrow` covers two of those causes, which is why `remoteControlBelow` is a
- * separate argument — see the comment on that branch below.
+ * separate argument — see the comment on that branch below. The network
+ * policy's Nothing, which sends none, is the caller's line (`AlarmSettingsSection`).
  *
  * The list is deliberately scoped to *this* machine, not the account: the ACL
  * that authorizes these devices lives on the Burrow and never on the Relay
@@ -60,7 +80,7 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
   // The preview never shows Remote control, so it also omits "below".
   // `no-burrow` covers two builds: one whose Burrow service simply has not enrolled,
   // and one with no Burrow service at all (`push-devices.ts` — the website leaves
-  // it here forever). Only the first has a Remote control section beneath this
+  // it here forever). Only the first has Network's Remote control choices beneath this
   // line, because the second is exactly where that section renders nothing, so
   // "below" has to key on the same seam the section gates on rather than on
   // `no-burrow`.
@@ -84,7 +104,7 @@ const TOPICS = [
   { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell'] },
   { id: 'activity', label: 'Activity', icon: PulseIcon, groups: ['watcher', 'inactivity'] },
   { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
-  { id: 'relay', label: 'Relay', icon: BroadcastIcon, groups: ['relay'] },
+  { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
 ] as const;
 type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
@@ -240,6 +260,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setOpenMenu(null);
     scrollToTopic(id);
   };
+  const showNetwork = () => chooseTopic('network');
 
   useLayoutEffect(() => {
     followScroll();
@@ -420,16 +441,22 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <TopicSection id="notifications" hidden={!visible('notifications')}>
               {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
               <div data-setting="speech" hidden={!matches('speech')}>
-                <AlarmSettingsSection sink="speech" />
+                <AlarmSettingsSection sink="speech" onShowNetwork={showNetwork} />
               </div>
               <div data-setting="push" hidden={!matches('push')}>
-                <AlarmSettingsSection sink="push" />
+                <AlarmSettingsSection sink="push" onShowNetwork={showNetwork} />
               </div>
             </TopicSection>
-            {/* Relay stays below push, whose `no-burrow` copy says "below". */}
-            <TopicSection id="relay" hidden={!visible('relay')}>
-              <div data-setting="relay" hidden={!matches('relay')}>
-                <RemoteControlSection />
+            {/* Network stays below push, whose `no-burrow` copy says "below". */}
+            <TopicSection id="network" hidden={!visible('network')}>
+              <div data-setting="network" hidden={!matches('network')}>
+                <NetworkSettings />
+              </div>
+              <div data-setting="phones" hidden={!matches('phones')}>
+                <NetworkPhones />
+              </div>
+              <div data-setting="updates" hidden={!matches('updates')}>
+                <NetworkUpdates />
               </div>
             </TopicSection>
           </div>
@@ -440,13 +467,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Shared by the full dialog and the brief, inert baseboard confirmation. */
-export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSink; preview?: boolean }) {
+/**
+ * Shared by the full dialog and the brief, inert baseboard confirmation.
+ * `onShowNetwork` is the dialog's way to its Network topic, which the lines
+ * naming the network policy's Nothing link to.
+ */
+export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
+  sink: AlertSink;
+  preview?: boolean;
+  onShowNetwork?: () => void;
+}) {
   // The dialog edits application defaults; only the baseboard preview shows the Workspace's effective value.
   const { policy: settings } = useWorkspaceAlertPolicy(preview);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasBurrowService = getPlatform().burrow !== undefined;
   const managedVoiceOffered = useManagedVoiceOffered();
+  // Under Nothing the service sends no push and managed voice asks nothing
+  // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
+  const networkOff = useNetworkLevel() === 'nothing';
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -466,7 +504,12 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
         onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
         action={preview ? null : <SpeakTestButton />}
       >
-        {managedVoiceOffered ? (
+        {managedVoiceOffered && networkOff ? (
+          <>
+            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
+            so alerts use your browser or system voice.
+          </>
+        ) : managedVoiceOffered ? (
           'Uses managed voice while a voice token is saved, otherwise your browser or system voice.'
         ) : (
           <>
@@ -494,7 +537,11 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
       onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
       action={preview ? null : <PushTestButton />}
     >
-      {describePushTargets(push, hasBurrowService && !preview)}
+      {networkOff ? (
+        <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
+      ) : (
+        describePushTargets(push, hasBurrowService && !preview)
+      )}
     </AlarmSinkSection>
   );
 }

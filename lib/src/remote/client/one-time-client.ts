@@ -68,8 +68,8 @@ export const ONE_TIME_ENDED_MESSAGE =
  * by the computer's network policy, which a phone is never told of.
  */
 export const ONE_TIME_DIRECT_FAILED_MESSAGE =
-  "Couldn't reach your computer directly. Make sure your phone is on the same Wi-Fi, or a network " +
-  "allowed in your computer's Settings → Network, then open a new link.";
+  "Couldn't reach your computer directly. Make sure your phone is on a network allowed in your " +
+  "computer's Settings → Network, then open a new link.";
 
 /** Shown when the rendezvous never opened: offline, refused, or rate-limited. Nothing was spent. */
 export const ONE_TIME_UNREACHABLE_MESSAGE =

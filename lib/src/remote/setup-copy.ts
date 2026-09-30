@@ -12,7 +12,7 @@
 
 /**
  * Pocket's one way in, named for the thing the laptop is actually showing — the
- * setup code under **Settings → Remote control → Set up a phone**.
+ * setup code under **Settings → Network → Set up a phone**.
  *
  * Mirrored, deliberately unpinned, in `scripts/pairing-walkthrough/steps.mjs`,
  * which is a Node harness that cannot import this file.

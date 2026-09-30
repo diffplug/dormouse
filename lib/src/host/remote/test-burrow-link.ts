@@ -152,7 +152,7 @@ export const LOCAL_ON: NetworkPolicy = { level: 'local', allowed: [LAN], autoUpd
 
 /**
  * What `networkPolicy` answers for a build with its network on, which the
- * Remote control section's fixtures assume.
+ * Remote control choices' fixtures assume.
  */
 export function networkOn(relayMode: RelayMode): NetworkPolicyResult {
   return networkPolicyResult(relayMode === 'self-host' ? RELAY_ON : LOCAL_ON, relayMode, [
@@ -243,11 +243,15 @@ export interface PrimedBurrow {
  * `enrollOffer`, `reconnect`, `clearEnrollment` and `oneTimeEnd` resolve without
  * changing the answer. The exception is `enrollError`, because a refused enrollment is a state the
  * form must render (`docs/specs/relay.md`, "Remote control, in the Settings
- * dialog") and a rejected enroll is the only way to reach it.
+ * dialog") and a rejected enroll is the only way to reach it. And
+ * `setNetworkPolicy` holds what it was sent and answers it, as the service
+ * does, so a story can walk Settings → Network's choices.
  */
 export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
+  const { relayOrigin, relayMode } = primed.status ?? UNENROLLED_STATUS;
+  let network = primed.network ?? networkOn(relayMode);
   return {
-    command: async (cmd) => {
+    command: async (cmd, params) => {
       if (cmd === 'status') {
         if (primed.statusError) throw new Error(primed.statusError);
         return primed.status ?? UNENROLLED_STATUS;
@@ -259,9 +263,12 @@ export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
         if (primed.setupQrError) throw new Error(primed.setupQrError);
         return primed.setupQr ?? setupQrResult();
       }
-      const { relayOrigin, relayMode } = primed.status ?? UNENROLLED_STATUS;
-      const network = primed.network ?? networkOn(relayMode);
       if (cmd === 'networkPolicy') return network;
+      if (cmd === 'setNetworkPolicy') {
+        const { policy } = params as { policy: NetworkPolicy };
+        network = networkPolicyResult(policy, relayMode, network.interfaces);
+        return network;
+      }
       if (cmd === 'oneTimeStatus') {
         return (
           primed.oneTime ??

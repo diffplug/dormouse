@@ -1,7 +1,7 @@
 # Network policy and remote transport
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
-> Owns the network policy — the one setting that decides every connection Dormouse opens on its own — and the transport each level allows. Authorization belongs to `docs/specs/remote-security-model.md`, the wire to `docs/specs/remote-api.md`, the one-time runtime to `docs/specs/one-time.md`, and the updater to `docs/specs/auto-update.md`.
+> Owns the network policy — the one setting that decides every connection Dormouse opens on its own — the transport each level allows, and Settings → Network, where it is chosen. Authorization belongs to `docs/specs/remote-security-model.md`, the wire to `docs/specs/remote-api.md`, the one-time runtime to `docs/specs/one-time.md`, and the updater to `docs/specs/auto-update.md`.
 > Read `docs/specs/remote-security-model.md` -> "Direct path" first.
 
 ## Policy
@@ -22,7 +22,7 @@ Reserved: `anywhere`, which the policy's shape accepts and no build offers, is t
 - **Only `relay` runs the persistent Burrow.** Under any other level an enrollment is held and reported — `enrolled`, `connection: 'stopped'` — and the relay socket stays shut, since no other level has a path rule for a persistent session yet (`## Future`).
 - **`setNetworkPolicy` takes a policy only exactly**: its three keys, a level the build offers, at most 32 canonical CIDRs (`canonicalCidr` returns each unchanged) listed once, and a boolean `autoUpdate`. **Must save before acting**: a save that fails changes nothing.
 - **A change to the level or the allowed networks ends the live one-time link or session with `user-ended`, and starts or stops the relay socket to match**; a narrowed policy never leaves an old path exempt. `autoUpdate` alone ends nothing (rationale).
-- **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, and this machine's interfaces, each with its addresses' canonical prefixes (loopback and IPv6 link-local left out) and a `lan`, `vpn`, or `virtual` kind. **A Tailscale interface — named `tailscale*`, or carrying an `fd7a:115c:a1e0::/48` address — offers a host route as its tailnet range**, `100.64.0.0/10` or `fd7a:115c:a1e0::/48`, since a `/32` admits no phone; any other host route is offered as reported (rationale).
+- **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, and this machine's interfaces, each with its addresses' canonical prefixes (loopback and link-local, `169.254.0.0/16` included, left out) and a `lan`, `vpn`, or `virtual` kind. **A Tailscale interface — named `tailscale*`, or carrying an `fd7a:115c:a1e0::/48` address — offers a host route as its tailnet range**, `100.64.0.0/10` or `fd7a:115c:a1e0::/48`, since a `/32` admits no phone; any other host route is offered as reported (rationale).
 
 **Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater ("Updates"); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
 
@@ -38,7 +38,7 @@ Source of truth: `NetworkPolicy`, `levelsFor`, and `storedNetworkPolicy` in `lib
 
 Under `local` each one-time runtime is held to the networks allowed at its open; a change ends it ("Policy").
 
-- **The attempt's UDP socket binds the one allowed address when exactly one is present**: a single interface holds every address in the allowed networks, loopback and IPv6 link-local aside, and exactly one in its preferred family, IPv4 over IPv6. **Otherwise it listens on every interface** (`docs/specs/remote-security-model.md` -> "Direct path"), and the level restricts the path, not the listener. Chosen per attempt (rationale).
+- **The attempt's UDP socket binds the one allowed address when exactly one is present**: a single interface holds every address in the allowed networks, loopback and link-local aside, and exactly one in its preferred family, IPv4 over IPv6. **Otherwise it listens on every interface** (`docs/specs/remote-security-model.md` -> "Direct path"), and the level restricts the path, not the listener. Chosen per attempt (rationale).
 - **Must strip every candidate outside the allowed networks from the Burrow's answer**, and send a default address outside them as `0.0.0.0`. **An answer left with no candidate refuses the attempt.**
 - **Must strip the phone's offer the same way before the Burrow applies it**, a hostname or mDNS name included, so its ICE agent sends no check and makes no lookup toward an address the level does not hold. **An offer left with no candidate is still answered**: the phone's checks reach the answer's candidates, and the pair forms peer-reflexive (rationale).
 - **Must check the selected candidate pair on the Burrow before its channel reports open**, and again while it is open and `connected` — on every ICE or connection state change, and every `DIRECT_PATH_RECHECK_MS` (rationale): both ends parse as IP addresses — IPv4-mapped IPv6 matching its IPv4 range — each inside an allowed CIDR. **A hostname, an mDNS name, or a pair the stack will not report refuses**, and a frame arriving before the open is checked first; once open, a reading with no pair is left to the connection's own state (rationale).
@@ -57,15 +57,41 @@ Source of truth: `bindAddressFor` and `localNetworksPath` in `lib/src/host/remot
 
 The lifecycle is `docs/specs/auto-update.md` → "How it works". Source of truth: `runUpdateCheck`, `remindIfDue`, and `checkNow` in `standalone/src/updater.ts`, pinned by `standalone/src/updater.test.ts`.
 
+## Settings → Network
+
+The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog") holds three search groups: the choice, with its connection list and allowed networks; Phones; and Updates.
+
+- **Renders nothing without a Burrow service**, which holds the policy.
+- **Never keep a draft**: every change sends a whole policy through `setNetworkPolicy`, and the panel renders the store's mirror of the answer; a refusal shows where the change was made.
+- **Offer the service's `levels`, in its order**, `relay` titled "My Relay only"; a level the panel has no copy for — `anywhere` — is not offered.
+- **Choosing Local networks with nothing allowed must first allow every prefix of this machine's `lan` interfaces**, never a `vpn` or `virtual` one; the panel fills them, not the service (rationale).
+- **The connection list states only what is built** (rationale): `connectionsFor` answers these rows and no others. Under `nothing` it answers none, and the list reads "Nothing. Terminals and browser panes still reach whatever you open in them, including panes restored at launch."
+
+| Row | Listed when |
+|---|---|
+| the Hosted origin: only while a one-time link is open, handshakes and never terminal traffic | `local`, a network allowed |
+| your phone, on an allowed network | `local`, a network allowed |
+| the Relay origin: always (unenrolled, "once this computer is enrolled") | `relay` |
+| your phone, directly | `relay` |
+| the Relay origin to the phone's push service | `relay`, push on, a phone paired |
+| the Hosted origin, speaking in the managed voice | a Hosted build, a voice token saved |
+| `dormouse.sh`, each launch | `autoUpdate` on, and this window holds the `updates` port |
+
+- **Allowed networks**, under `local`: one switch per interface with a prefix, on when all its prefixes are allowed; an allowed range no interface offers is listed with Remove; a typed range goes to the service, whose canonical check is the gate. **With nothing allowed it says no phone can connect.**
+- **Phones**: under any level but `nothing`, the Remote control choices (`docs/specs/relay.md` -> "Remote control, in the Settings dialog"); under `nothing`, the levels that allow a phone, each choosing itself.
+- **Updates**: a self-host build says it never updates itself, and a host with `hostOwnsUpdates` (VS Code) names the Marketplace. Otherwise the automatic-check switch, absent under `nothing`, over "Checked at each launch." or "Checked only when you ask."; **only with the platform's `updates` port** (`docs/specs/auto-update.md` -> "Threading") the last successful check — "Never checked on this computer." for none — Check now, and the week the Baseboard waits.
+- **Under `nothing`, Notifications' push and managed-voice lines say they are off because Network is set to Nothing**, each linking to this topic.
+
+Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connectionsFor`, and `policyForLevel` in `lib/src/components/NetworkSettings.tsx`; `AlarmSettingsSection` in `lib/src/components/SettingsDialog.tsx`. Pinned by `lib/src/components/NetworkSettings.test.tsx`, `lib/src/components/SettingsDialog.test.tsx`, and `lib/src/stories/NetworkSettings.stories.tsx`.
+
 ## Future
 
 **Scope: remote-network** — build in order:
 
-1. **Policy and Nothing**: Settings → Network.
-2. **Anywhere**: Cloudflare STUN, for one-time sessions.
-3. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`; Local networks and Anywhere then cover paired phones.
+1. **Anywhere**: Cloudflare STUN, for one-time sessions.
+2. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`; Local networks and Anywhere then cover paired phones.
 
-The UI contract is the prototype `NetworkSettings` in `lib/src/components/NetworkSettings.tsx` (story `Prototypes/NetworkSettings`); its `connectionsFor` list is this table in the user's words, and each stage changes the two together.
+Each stage adds its connections to `connectionsFor` (Settings → Network) in the same change as its row of the table below.
 
 ### Levels
 
@@ -78,7 +104,6 @@ The UI contract is the prototype `NetworkSettings` in `lib/src/components/Networ
 
 ### Allowed networks
 
-- **Choosing Local networks must first allow every prefix, both families, of the active LAN interface**; a VPN, bridge, container, or VM interface is never allowed by default.
 - **Where several addresses are allowed, a per-attempt UDP forwarder may narrow the listener** (rationale): the peer binds loopback, one socket per allowed address relays to it, dropping sources outside the allowed networks, and the answer names those sockets.
 
 ### Anywhere

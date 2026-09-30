@@ -125,8 +125,9 @@ describe('classifyNetworkInterfaces', () => {
           address('192.168.86.161/24'),
           address('fd65:c3d1:3e82:67d9:18f0:7985:d3e0:19c0/64'),
         ],
-        // Link-local only: nothing to allow.
+        // Link-local only: nothing to allow, a self-assigned IPv4 address included.
         awdl0: [address('fe80::14f7:e4ff:fe1e:5ccb/64')],
+        en11: [address('fe80::469:e290:270e:74e8/64'), address('169.254.235.129/16')],
         en1: [{ ...address('10.0.0.2/24'), cidr: null }],
       }),
     ).toEqual([

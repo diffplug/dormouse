@@ -561,7 +561,7 @@ describe('OneTimeClient: the direct path', () => {
     expect(await result).toEqual({ ok: false, message: ONE_TIME_ENDED_MESSAGE });
   });
 
-  it('fails with the same-Wi-Fi copy when the computer declines', async () => {
+  it('fails with the allowed-network copy when the computer declines', async () => {
     const client = makeClient();
     const burrow = await ScriptedBurrow.create();
     const { result } = await connecting(client, burrow);
@@ -571,7 +571,7 @@ describe('OneTimeClient: the direct path', () => {
     expect(offerers[0]!.closed).toBe(true);
   });
 
-  it('fails with the same-Wi-Fi copy when no switch lands by the direct deadline', async () => {
+  it('fails with the allowed-network copy when no switch lands by the direct deadline', async () => {
     const client = makeClient();
     const burrow = await ScriptedBurrow.create();
     const { result } = await connecting(client, burrow);
@@ -590,7 +590,7 @@ describe('OneTimeClient: the direct path', () => {
     expect(clock.armed).toBe(0);
   });
 
-  it('fails with the same-Wi-Fi copy at once when the session dies before the switch', async () => {
+  it('fails with the allowed-network copy at once when the session dies before the switch', async () => {
     const client = makeClient();
     const burrow = await ScriptedBurrow.create();
     const { result } = await connecting(client, burrow);
@@ -602,7 +602,7 @@ describe('OneTimeClient: the direct path', () => {
     expect(offerers[0]!.closed).toBe(true);
   });
 
-  it('fails with the same-Wi-Fi copy where this browser builds no peer', async () => {
+  it('fails with the allowed-network copy where this browser builds no peer', async () => {
     const client = makeClient({ createDirectPeer: null });
     const burrow = await ScriptedBurrow.create();
     const { result } = await confirming(client, burrow);

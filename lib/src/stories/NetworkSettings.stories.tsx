@@ -1,217 +1,233 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { BellIcon, GearIcon, GlobeIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
-import { useState } from 'react';
-import { expect, userEvent, within } from 'storybook/test';
-import { ELEVATED_PANE_SHADOW, MODAL_OVERLAY_INSET, ModalCloseButton, ModalFrame, OVERLAY_MAX_HEIGHT } from '../components/design';
-import { NetworkSettings, type NetworkInterfaceInfo, type NetworkSettingsState } from '../components/NetworkSettings';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
+import { ModalSurface } from '../components/design';
+import { NetworkPhones, NetworkSettings, NetworkUpdates } from '../components/NetworkSettings';
+import {
+  LOCAL_ON,
+  RELAY_ON,
+  SELF_HOST_UNENROLLED_STATUS,
+  UNENROLLED_STATUS,
+  enrolledStatus,
+} from '../host/remote/test-burrow-link';
+import {
+  networkPolicyResult,
+  nothingPolicy,
+  type NetworkInterfaceInfo,
+  type NetworkPolicy,
+} from '../remote/network-policy';
 
 /**
- * PROTOTYPE of Settings → Network (`docs/specs/remote-network.md`), framed in
- * a copy of the Settings dialog's chrome so it reads at its real width. Every
- * control works against local state; nothing reaches a Burrow service.
+ * Settings → Network (`docs/specs/remote-network.md` -> "Settings → Network"):
+ * its three groups as the Settings dialog stacks them, on a surface its width.
+ * `SettingsDialog`'s `Network` stories cover it in place.
+ *
+ * Every state comes from the stub link's `network` option under `primedBurrow`
+ * — the policy, the build's levels, this machine's interfaces — and the
+ * `primedUpdates` / `primedManagedVoice` ports, since the panel reads its whole
+ * world from the platform. Changes go to the stub, which holds and answers
+ * them as the service does.
  */
+function NetworkStory() {
+  return (
+    <div className="flex justify-center p-6">
+      <ModalSurface padding="spacious" className="w-full max-w-[36rem]">
+        <NetworkSettings />
+        <NetworkPhones />
+        <NetworkUpdates />
+      </ModalSurface>
+    </div>
+  );
+}
 
 const WIFI: NetworkInterfaceInfo = {
-  id: 'en0', label: 'Wi-Fi', kind: 'wifi', prefixes: ['192.168.1.0/24', '2601:646:8a00:1d0::/64'],
+  id: 'en0', label: 'Local network', kind: 'lan', prefixes: ['192.168.1.0/24', '2601:646:8a00:1d0::/64'],
 };
 const TAILSCALE: NetworkInterfaceInfo = {
   id: 'utun4', label: 'Tailscale', kind: 'vpn', prefixes: ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'],
 };
 const DOCKER: NetworkInterfaceInfo = {
-  id: 'bridge100', label: 'Docker', kind: 'virtual', prefixes: ['192.168.215.0/24'],
+  id: 'bridge100', label: 'Virtual network', kind: 'virtual', prefixes: ['192.168.215.0/24'],
 };
-
-const PIXEL = { id: 'p1', label: 'Pixel 8', detail: 'Paired Sep 28 · last connected today' };
+const INTERFACES = [WIFI, TAILSCALE, DOCKER];
 
 const DAY = 86_400_000;
 
-/** What a new install opens on: Nothing, security-maxxed. */
-const BASE: NetworkSettingsState = {
-  build: { kind: 'hosted' },
-  host: 'standalone',
-  level: 'nothing',
-  allowed: [],
-  interfaces: [WIFI, TAILSCALE, DOCKER],
-  autoUpdate: false,
-  lastUpdateCheck: null,
-  phones: [],
-  pushEnabled: false,
-  managedVoice: false,
-};
-
-const TOPICS = [
-  { label: 'General', icon: GearIcon },
-  { label: 'Activity', icon: PulseIcon },
-  { label: 'Notifications', icon: BellIcon },
-  { label: 'Network', icon: GlobeIcon },
-];
-
-function NetworkSettingsStory(initial: NetworkSettingsState) {
-  const [state, setState] = useState(initial);
-  const patch = (next: Partial<NetworkSettingsState>) => setState((was) => ({ ...was, ...next }));
-  return (
-    <ModalFrame
-      titleId="network-settings-title"
-      layer="app"
-      padding="none"
-      overlayClassName={MODAL_OVERLAY_INSET}
-      className={`${OVERLAY_MAX_HEIGHT.modal} flex h-[36rem] w-full max-w-[48rem] flex-col overflow-hidden`}
-      style={{ boxShadow: ELEVATED_PANE_SHADOW }}
-    >
-      <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
-        <h2 id="network-settings-title" className="shrink-0 text-sm font-semibold text-foreground">Settings</h2>
-        <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-input-border bg-input-bg px-2 py-1.5 text-sm text-muted">
-          <MagnifyingGlassIcon size={14} className="shrink-0" aria-hidden />
-          Search settings
-        </div>
-        <ModalCloseButton />
-      </div>
-      <div className="flex min-h-0 flex-1">
-        <nav aria-label="Settings topics" className="w-12 shrink-0 border-r border-border bg-app-bg px-1 py-3 sm:w-48 sm:px-3">
-          {TOPICS.map(({ label, icon: Icon }) => (
-            <div
-              key={label}
-              className={`mb-1 flex items-center gap-2 rounded px-2 py-2 text-sm ${label === 'Network'
-                ? 'bg-header-active-bg text-header-active-fg'
-                : 'text-app-fg'}`}
-            >
-              <Icon size={16} className="shrink-0" aria-hidden />
-              <span className="sr-only sm:not-sr-only">{label}</span>
-            </div>
-          ))}
-        </nav>
-        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto px-3 py-4 break-words sm:px-6">
-          <h3 className="text-sm font-semibold text-foreground">Network</h3>
-          <NetworkSettings
-            state={state}
-            actions={{
-              onLevel: (level) => patch({
-                level,
-                // Choosing Local networks the first time allows the network this
-                // computer is on now, never a VPN or virtual interface.
-                allowed: level === 'local' && state.allowed.length === 0
-                  ? state.interfaces.find((item) => item.kind === 'wifi' || item.kind === 'ethernet')?.prefixes ?? []
-                  : state.allowed,
-              }),
-              onAllowed: (allowed) => patch({ allowed }),
-              onAutoUpdate: (autoUpdate) => patch({ autoUpdate }),
-              onCheckForUpdates: () => patch({ lastUpdateCheck: Date.now() }),
-              onPair: () => {},
-              onOneTime: () => {},
-              onRemovePhone: (id) => patch({ phones: state.phones.filter((phone) => phone.id !== id) }),
-            }}
-          />
-        </div>
-      </div>
-    </ModalFrame>
-  );
+/** A Hosted build holding `policy`, on a laptop with Wi-Fi, a tailnet, and Docker. */
+function hosted(policy: NetworkPolicy, status = UNENROLLED_STATUS) {
+  return { status, network: networkPolicyResult(policy, 'hosted', INTERFACES) };
 }
 
-const meta: Meta<typeof NetworkSettingsStory> = {
-  title: 'Prototypes/NetworkSettings',
-  component: NetworkSettingsStory,
-  args: BASE,
+/** A self-host build holding `policy`. */
+function selfHost(policy: NetworkPolicy, status = SELF_HOST_UNENROLLED_STATUS) {
+  return { status, network: networkPolicyResult(policy, 'self-host', INTERFACES) };
+}
+
+const meta: Meta<typeof NetworkStory> = {
+  title: 'Modals/NetworkSettings',
+  component: NetworkStory,
+  // The panel reads module-singleton stores, as `RemoteControlSection`'s
+  // stories explain; each needs its own frame on a docs page.
+  parameters: { docs: { story: { inline: false, height: '640px' } } },
 };
 
 export default meta;
-type Story = StoryObj<typeof NetworkSettingsStory>;
+type Story = StoryObj<typeof NetworkStory>;
 
-/** Persona 1, and every new install: nothing leaves this computer unless they click something. */
+type Body = ReturnType<typeof within>;
+
+/** The panel opens on "Checking…" until the stub answers; wait for the picker. */
+async function settled(canvasElement: HTMLElement): Promise<Body> {
+  const canvas = within(canvasElement);
+  await canvas.findByRole('radiogroup', { name: 'Connections Dormouse makes on its own' });
+  return canvas;
+}
+
+/** Every new install: nothing leaves this computer unless its user clicks something. */
 export const Nothing: Story = {
+  parameters: { primedBurrow: hosted(nothingPolicy()), primedUpdates: { checkedAt: null } },
   play: async ({ canvasElement }) => {
-    const body = within(canvasElement.ownerDocument.body);
-    await expect(body.getByRole('radio', { name: /^Nothing/ })).toHaveAttribute('aria-checked', 'true');
-    await body.findByText(/^Nothing\. Terminals and browser panes/);
+    const canvas = await settled(canvasElement);
+    await expect(canvas.getByRole('radio', { name: /^Nothing/ })).toHaveAttribute('aria-checked', 'true');
+    await canvas.findByText(/^Nothing\. Terminals and browser panes/);
+    await canvas.findByText(/Checked only when you ask\. Never checked on this computer\./);
+    // Anywhere is not built yet, so no Hosted build offers it.
+    await expect(canvas.queryByRole('radio', { name: /^Anywhere/ })).toBeNull();
   },
 };
 
-/** Persona 1 nine days after their last check: the Baseboard is reminding them (`UpdateBanner` → CheckDue). */
+/** Nine days since the last check: the Baseboard is reminding them (`UpdateBanner` → CheckDue). */
 export const NothingCheckDue: Story = {
-  args: { ...BASE, lastUpdateCheck: Date.now() - 9 * DAY },
+  parameters: { primedBurrow: hosted(nothingPolicy()), primedUpdates: { checkedAt: Date.now() - 9 * DAY } },
   play: async ({ canvasElement }) => {
-    await within(canvasElement.ownerDocument.body).findByText(/Last checked 9 days ago\./);
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/Last checked 9 days ago\./);
+    await userEvent.click(canvas.getByRole('button', { name: 'Check now' }));
+    await canvas.findByText(/Last checked today\./);
   },
 };
 
-/** The Phones hint names the choices that enable phones, and each is a shortcut to it. */
+/**
+ * The Phones hint names the choices that allow a phone, each a shortcut to
+ * itself — and Local networks chosen with nothing allowed allows the Wi-Fi,
+ * never the tailnet or Docker.
+ */
 export const NothingChooseFromPhones: Story = {
+  parameters: { primedBurrow: hosted(nothingPolicy()) },
   play: async ({ canvasElement }) => {
-    const body = within(canvasElement.ownerDocument.body);
-    await userEvent.click(body.getByRole('button', { name: 'Anywhere' }));
-    await expect(body.getByRole('radio', { name: /^Anywhere/ })).toHaveAttribute('aria-checked', 'true');
-    await body.findByRole('button', { name: 'Pair a phone' });
+    const canvas = await settled(canvasElement);
+    await userEvent.click(canvas.getByRole('button', { name: 'Local networks' }));
+    await waitFor(() =>
+      expect(canvas.getByRole('radio', { name: /^Local networks/ })).toHaveAttribute('aria-checked', 'true'));
+    await expect(canvas.getByRole('switch', { name: 'Allow Local network on' })).toBeVisible();
+    await expect(canvas.getByRole('switch', { name: 'Allow Tailscale off' })).toBeVisible();
+    await expect(canvas.getByRole('switch', { name: 'Allow Virtual network off' })).toBeVisible();
+    await canvas.findByRole('button', { name: 'One-time connection' });
   },
 };
 
-/** Persona 1 who had paired a phone before switching everything off. */
-export const NothingWithPairedPhone: Story = {
-  args: { ...BASE, phones: [PIXEL], pushEnabled: true },
-};
-
-/** Persona 2: Pocket, but terminal traffic stays on the home Wi-Fi and the tailnet. */
+/** Pocket, but terminal traffic stays on the home Wi-Fi and the tailnet; update checks on. */
 export const LocalNetworks: Story = {
-  args: {
-    ...BASE,
-    level: 'local',
-    allowed: [...WIFI.prefixes, ...TAILSCALE.prefixes],
-    phones: [PIXEL],
-    pushEnabled: true,
-    autoUpdate: true,
-    lastUpdateCheck: Date.now(),
+  parameters: {
+    primedBurrow: hosted({ level: 'local', allowed: [...WIFI.prefixes, ...TAILSCALE.prefixes], autoUpdate: true }),
+    primedUpdates: { checkedAt: Date.now() },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText('Your phone, on an allowed network');
+    await canvas.findByText('dormouse.sh');
+    await canvas.findByText(/Checked at each launch\. Last checked today\./);
   },
 };
 
-/** Persona 2 before pairing: Hosted is contacted only while a one-time link is open. */
+/** Before any phone: Hosted is contacted only while a one-time link is open. */
 export const LocalNetworksFirstRun: Story = {
-  args: { ...BASE, level: 'local', allowed: WIFI.prefixes },
+  parameters: { primedBurrow: hosted({ level: 'local', allowed: WIFI.prefixes, autoUpdate: false }) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/Only while a one-time link is open\./);
+  },
 };
 
 /** A range the user typed, for a network this computer is not on right now. */
 export const LocalNetworksTypedRange: Story = {
-  args: { ...BASE, level: 'local', allowed: [...WIFI.prefixes, '10.8.0.0/24'], phones: [PIXEL] },
-};
-
-/** Every network switched off: say so, and disable pairing rather than fail later. */
-export const LocalNetworksNoneAllowed: Story = {
-  args: { ...BASE, level: 'local', allowed: [] },
-};
-
-/** Persona 3: it just works, from anywhere. */
-export const Anywhere: Story = {
-  args: { ...BASE, level: 'anywhere', phones: [PIXEL], pushEnabled: true, managedVoice: true, autoUpdate: true, lastUpdateCheck: Date.now() },
-};
-
-/** Persona 3 on first run, before any phone is paired. */
-export const AnywhereFirstRun: Story = {
-  args: { ...BASE, level: 'anywhere', autoUpdate: true },
-};
-
-/** Walks the three choices and checks that the connection list follows. */
-export const SwitchingLevels: Story = {
+  parameters: {
+    primedBurrow: hosted({ level: 'local', allowed: [...WIFI.prefixes, '10.8.0.0/24'], autoUpdate: false }),
+  },
   play: async ({ canvasElement }) => {
-    const body = within(canvasElement.ownerDocument.body);
-    await userEvent.click(body.getByRole('radio', { name: /^Local networks/ }));
-    await body.findByText('Allowed networks');
-    await body.findByText('Your phone, on an allowed network');
-    await expect(body.getByRole('switch', { name: 'Allow Wi-Fi on' })).toBeVisible();
-    await userEvent.click(body.getByRole('radio', { name: /^Anywhere/ }));
-    await body.findByText('stun.cloudflare.com');
-    await expect(body.queryByText('Allowed networks')).toBeNull();
+    const canvas = await settled(canvasElement);
+    await canvas.findByText('Added range · not connected now');
+    await userEvent.type(canvas.getByRole('textbox', { name: 'Add an allowed network range' }), '10.9.0.0/24');
+    await userEvent.click(canvas.getByRole('button', { name: 'Add' }));
+    await canvas.findByText('10.9.0.0/24');
   },
 };
 
-/** A self-host build: its own Relay or nothing, and no updater. */
+/** Every network switched off: say so, and list no connection that cannot happen. */
+export const LocalNetworksNoneAllowed: Story = {
+  parameters: { primedBurrow: hosted({ level: 'local', allowed: [], autoUpdate: false }) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText('No network is allowed, so no phone can connect.');
+    await canvas.findByText(/^Nothing\. Terminals and browser panes/);
+  },
+};
+
+/** Walks the choices and checks that the connection list follows. */
+export const SwitchingLevels: Story = {
+  parameters: { primedBurrow: hosted(nothingPolicy()) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await userEvent.click(canvas.getByRole('radio', { name: /^Local networks/ }));
+    await canvas.findByText('Allowed networks');
+    await canvas.findByText('Your phone, on an allowed network');
+    await userEvent.click(canvas.getByRole('radio', { name: /^Nothing/ }));
+    await canvas.findByText(/^Nothing\. Terminals and browser panes/);
+    await expect(canvas.queryByText('Allowed networks')).toBeNull();
+    await canvas.findByRole('button', { name: 'Local networks' });
+  },
+};
+
+/** A managed-voice token saved: speaking an alert in it reaches Hosted. */
+export const ManagedVoice: Story = {
+  parameters: {
+    primedBurrow: hosted({ ...LOCAL_ON, allowed: WIFI.prefixes }),
+    primedManagedVoice: { configured: true },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/When an alert is spoken in the managed voice\./);
+  },
+};
+
+/** A self-host build: its own Relay or nothing, push through it, and no updater. */
 export const SelfHost: Story = {
-  args: {
-    ...BASE,
-    build: { kind: 'self-host', relayOrigin: 'relay.tail1234.ts.net' },
-    level: 'anywhere',
-    phones: [PIXEL],
-    pushEnabled: true,
+  parameters: {
+    primedBurrow: selfHost(RELAY_ON, enrolledStatus({ pairedClients: 1 })),
+    primedAlertSettings: { pushEnabled: true },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await expect(canvas.getByRole('radio', { name: /^My Relay only/ })).toHaveAttribute('aria-checked', 'true');
+    await canvas.findByText('ned-mac.tail9c2f1.ts.net → your phone’s push service');
+    await canvas.findByText('This build never updates itself. Rebuild it from source to update.');
+    await canvas.findByText('1 paired phone.');
+  },
+};
+
+/** A self-host build at Nothing, before enrolling: My Relay only is the way to a phone. */
+export const SelfHostNothing: Story = {
+  parameters: { primedBurrow: selfHost(nothingPolicy()) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByRole('button', { name: 'My Relay only' });
   },
 };
 
 /** VS Code: the Marketplace, not Dormouse, updates the extension. */
 export const VsCode: Story = {
-  args: { ...BASE, host: 'vscode', level: 'local', allowed: WIFI.prefixes },
+  parameters: { primedBurrow: hosted({ ...LOCAL_ON, allowed: WIFI.prefixes }), hostOwnsUpdates: true },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/installs Dormouse updates from the Marketplace/);
+  },
 };
