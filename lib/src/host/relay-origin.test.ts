@@ -2,29 +2,17 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LINK_LOOPBACK_HOSTS } from 'remote-lib-common';
-// The build scripts read the `.mjs` and the Burrow service reads the `.ts`; the
-// cases below are what keep them one fact (docs/specs/relay.md → "Relay origin").
+import { MAX_RELAY_ORIGIN_LENGTH, isAcceptedRelayOrigin } from 'remote-lib-common';
 import {
   DEFAULT_RELAY_ORIGIN as BUILD_DEFAULT,
-  MAX_RELAY_ORIGIN_LENGTH as BUILD_MAX_LENGTH,
-  RELAY_LOOPBACK_HOSTS as BUILD_LOOPBACK_HOSTS,
   RELAY_MODE_PLACEHOLDER,
   RELAY_ORIGIN_PLACEHOLDER,
   RETIRED_RELAY_VARIABLES,
   assertRelayOriginBaked,
-  isAcceptedRelayOrigin as buildAccepts,
   relayOriginDefine,
   resolveRelayOrigin,
 } from '../../../scripts/relay-origin.mjs';
-import {
-  DEFAULT_RELAY_ORIGIN,
-  MAX_RELAY_ORIGIN_LENGTH,
-  bakedRelayMode,
-  bakedRelayOrigin,
-  isAcceptedRelayOrigin,
-  isRelayOrigin,
-} from './relay-origin';
+import { DEFAULT_RELAY_ORIGIN, bakedRelayMode, bakedRelayOrigin, isRelayOrigin } from './relay-origin';
 
 /**
  * An `https://` origin of exactly `length` characters under `example`, built
@@ -67,7 +55,8 @@ const CANDIDATES = [
 describe('the baked relay origin', () => {
   it('defaults to exactly Hosted, in both copies', () => {
     // Changing this changes what every shipped binary talks to
-    // (docs/specs/security-remote.md → "Relay origin").
+    // (docs/specs/security-remote.md → "Relay origin"). The build scripts read
+    // the `.mjs` and the hosts read the `.ts`.
     expect(DEFAULT_RELAY_ORIGIN).toBe('https://hosted.dormouse.sh');
     expect(BUILD_DEFAULT).toBe(DEFAULT_RELAY_ORIGIN);
   });
@@ -75,40 +64,6 @@ describe('the baked relay origin', () => {
   it('reads as the Hosted default where nothing was baked (the test runner)', () => {
     expect(bakedRelayOrigin()).toBe(DEFAULT_RELAY_ORIGIN);
     expect(bakedRelayMode()).toBe('hosted');
-  });
-
-  it('accepts exactly what the build accepts', () => {
-    // A copy that drifted would fail a build over an origin the Burrow takes,
-    // or pass one the runtime then refuses.
-    expect(BUILD_MAX_LENGTH).toBe(MAX_RELAY_ORIGIN_LENGTH);
-    expect([...BUILD_LOOPBACK_HOSTS].sort()).toEqual([...LINK_LOOPBACK_HOSTS].sort());
-    for (const origin of CANDIDATES) {
-      expect(buildAccepts(origin), origin).toBe(isAcceptedRelayOrigin(origin));
-    }
-  });
-
-  it('accepts a bare HTTPS origin, or HTTP on a loopback host, that fits a link', () => {
-    for (const origin of [
-      'https://hosted.dormouse.sh',
-      'https://relay.example.ts.net',
-      'http://localhost:3000',
-      'http://127.0.0.1:8787',
-      'http://[::1]:8787',
-      originOfLength(MAX_RELAY_ORIGIN_LENGTH),
-    ]) {
-      expect(isAcceptedRelayOrigin(origin), origin).toBe(true);
-    }
-    for (const origin of [
-      'https://hosted.dormouse.sh/',
-      'https://user@hosted.dormouse.sh',
-      'http://hosted.dormouse.sh',
-      'http://127.0.0.2:8787',
-      'wss://hosted.dormouse.sh',
-      originOfLength(MAX_RELAY_ORIGIN_LENGTH + 1),
-    ]) {
-      expect(isAcceptedRelayOrigin(origin), origin).toBe(false);
-    }
-    expect(MAX_RELAY_ORIGIN_LENGTH).toBe(167);
   });
 
   it('matches a stored Relay URL by origin, and nothing else', () => {

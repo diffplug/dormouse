@@ -4,11 +4,16 @@
 // — and esbuild-`define` the result into the Node bundle that holds the relay
 // socket, where `lib/src/host/relay-origin.ts` is the only reader.
 //
-// The default and the accepted-origin rule are duplicated from that `.ts`,
-// because a build script cannot import TypeScript;
-// `lib/src/host/relay-origin.test.ts` pins the copies equal.
+// The accepted-origin rule is the built `remote-lib-common`'s, so every caller
+// builds that package first. The default is duplicated from the `.ts`, which a
+// build script cannot import; `lib/src/host/relay-origin.test.ts` pins it.
 
 import { readFileSync } from 'node:fs';
+import {
+  LINK_LOOPBACK_HOSTS,
+  MAX_RELAY_ORIGIN_LENGTH,
+  isAcceptedRelayOrigin,
+} from '../remote-lib-common/dist/index.js';
 
 /** The identifiers esbuild substitutes; read by `lib/src/host/relay-origin.ts`. */
 export const RELAY_ORIGIN_PLACEHOLDER = '__DORMOUSE_RELAY_ORIGIN__';
@@ -16,19 +21,6 @@ export const RELAY_MODE_PLACEHOLDER = '__DORMOUSE_RELAY_MODE__';
 
 /** The origin a stock build reaches: Hosted. */
 export const DEFAULT_RELAY_ORIGIN = 'https://hosted.dormouse.sh';
-
-/**
- * The longest origin a build may bake: the longest a one-time link still fits
- * (`MAX_RELAY_ORIGIN_LENGTH` in `lib/src/host/relay-origin.ts`).
- */
-export const MAX_RELAY_ORIGIN_LENGTH = 167;
-
-/**
- * The hosts plain HTTP is accepted on, duplicated from `LINK_LOOPBACK_HOSTS` in
- * `remote-lib-common/src/security/link-url.ts`: a phone parses a link under
- * that rule.
- */
-export const RELAY_LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 
 /**
  * Variables that once chose an origin `DORMOUSE_RELAY_ORIGIN` now chooses.
@@ -40,27 +32,6 @@ export const RETIRED_RELAY_VARIABLES = [
   'DORMOUSE_HOSTED_ORIGIN',
   'DORMOUSE_ONE_TIME_ORIGIN',
 ];
-
-/**
- * Whether `origin` is one a build may bake: a bare origin — `new URL`'s own
- * spelling of it, so no path, trailing slash, query, fragment, or credentials
- * — on HTTPS, or on HTTP at a loopback host, and short enough to fit a link.
- * The copy of `isAcceptedRelayOrigin` in `lib/src/host/relay-origin.ts`.
- */
-export function isAcceptedRelayOrigin(origin) {
-  if (typeof origin !== 'string' || origin.length > MAX_RELAY_ORIGIN_LENGTH) return false;
-  let url;
-  try {
-    url = new URL(origin);
-  } catch {
-    return false;
-  }
-  if (url.origin !== origin) return false;
-  return (
-    url.protocol === 'https:' ||
-    (url.protocol === 'http:' && RELAY_LOOPBACK_HOSTS.includes(url.hostname))
-  );
-}
 
 function blank(value) {
   return value === undefined || value.trim() === '';
@@ -76,9 +47,9 @@ function blank(value) {
  * - in any build but a dev build, `DORMOUSE_RELAY_IS_HOSTED` set at all, or a
  *   loopback `http:` origin (docs/specs/relay.md → "Relay origin").
  *
- * `dev` is passed only by the dev entry points: `pnpm dev:standalone`,
- * `pnpm innerdogfood`, and VS Code's `watch`. Every other build is a release
- * build. Logs to stderr whenever the result is not the stock one.
+ * `dev` marks a dev build (docs/specs/relay.md → "Relay origin"); every other
+ * build is a release build. Logs to stderr whenever the result is not the
+ * stock one.
  */
 export function resolveRelayOrigin(env = process.env, label = 'build', { dev = false } = {}) {
   for (const name of RETIRED_RELAY_VARIABLES) {
@@ -95,7 +66,7 @@ export function resolveRelayOrigin(env = process.env, label = 'build', { dev = f
   if (!isAcceptedRelayOrigin(origin)) {
     throw new Error(
       `[${label}] DORMOUSE_RELAY_ORIGIN: "${origin}" is not an origin a build can bake. It must ` +
-        `be a bare https:// origin, or http:// on ${RELAY_LOOPBACK_HOSTS.join(', ')} in a dev ` +
+        `be a bare https:// origin, or http:// on ${[...LINK_LOOPBACK_HOSTS].join(', ')} in a dev ` +
         `build, with no path or trailing slash, at most ${MAX_RELAY_ORIGIN_LENGTH} characters ` +
         `(e.g. "${DEFAULT_RELAY_ORIGIN}").`,
     );

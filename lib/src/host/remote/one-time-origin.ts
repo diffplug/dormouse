@@ -5,8 +5,9 @@
  * `lib/src/host/relay-origin.ts`).
  */
 
+import { isAcceptedRelayOrigin } from 'remote-lib-common';
 import type { OneTimeUnavailableReason } from '../../remote/burrow/one-time-runtime';
-import { isAcceptedRelayOrigin, type RelayMode } from '../relay-origin';
+import type { RelayMode } from '../relay-origin';
 
 /**
  * Why this build offers no one-time connection, or `null` when it does.

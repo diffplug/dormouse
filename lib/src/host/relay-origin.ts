@@ -7,14 +7,7 @@
  * input** — no command carries an origin.
  */
 
-import {
-  ONE_TIME_FRAGMENT_LENGTH,
-  ONE_TIME_LINK_MAX_LENGTH,
-  ONE_TIME_PAGE_PATH,
-  isLinkScheme,
-  isOrigin,
-  normalizeOrigin,
-} from 'remote-lib-common';
+import { normalizeOrigin } from 'remote-lib-common';
 
 /**
  * The origin a stock build reaches: Hosted. Kept equal to
@@ -30,14 +23,6 @@ export const DEFAULT_RELAY_ORIGIN = 'https://hosted.dormouse.sh';
  * which reaches nothing of Dormouse's in the background.
  */
 export type RelayMode = 'hosted' | 'self-host';
-
-/**
- * The longest origin a build may bake: everything else in a one-time link is
- * fixed — the page path, the `#`, and the fragment — so a longer origin mints
- * links no phone can scan. `scripts/relay-origin.mjs` keeps the same number.
- */
-export const MAX_RELAY_ORIGIN_LENGTH =
-  ONE_TIME_LINK_MAX_LENGTH - ONE_TIME_PAGE_PATH.length - '#'.length - ONE_TIME_FRAGMENT_LENGTH;
 
 /** Substituted by esbuild at build time; see `scripts/relay-origin.mjs`. */
 declare const __DORMOUSE_RELAY_ORIGIN__: string;
@@ -63,16 +48,6 @@ export function bakedRelayOrigin(): string {
 export function bakedRelayMode(): RelayMode {
   if (typeof __DORMOUSE_RELAY_MODE__ !== 'string') return 'hosted';
   return __DORMOUSE_RELAY_MODE__ === 'self-host' ? 'self-host' : 'hosted';
-}
-
-/**
- * Whether a build may bake `origin`: a bare origin on HTTPS, or on HTTP at a
- * link loopback host, of at most {@link MAX_RELAY_ORIGIN_LENGTH} characters.
- * `scripts/relay-origin.mjs` holds the copy the build fails on.
- */
-export function isAcceptedRelayOrigin(origin: string): boolean {
-  if (!isOrigin(origin) || origin.length > MAX_RELAY_ORIGIN_LENGTH) return false;
-  return isLinkScheme(new URL(origin));
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_RELAY_ORIGIN, MAX_RELAY_ORIGIN_LENGTH, bakedRelayMode, bakedRelayOrigin } from '../relay-origin';
+import { MAX_RELAY_ORIGIN_LENGTH } from 'remote-lib-common';
+import { DEFAULT_RELAY_ORIGIN, bakedRelayMode, bakedRelayOrigin } from '../relay-origin';
 import { oneTimeAvailability } from './one-time-origin';
 
 /**

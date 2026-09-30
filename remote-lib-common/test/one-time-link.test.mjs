@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 
 import {
   E2E_PROLOGUE_DOMAIN,
+  MAX_RELAY_ORIGIN_LENGTH,
   ONE_TIME_FRAGMENT_LENGTH,
   ONE_TIME_LINK_MAX_LENGTH,
   ONE_TIME_LINK_VERSION,
@@ -22,6 +23,7 @@ import {
   e2ePairingPrologue,
   formatOneTimeLinkUrl,
   fromBase64Url,
+  isAcceptedRelayOrigin,
   lengthPrefixedConcat,
   oneTimeLinkExpired,
   oneTimeLinkFields,
@@ -166,7 +168,6 @@ test('a link is live through its expiry second and dead one millisecond after', 
 // --- The length cap --------------------------------------------------------
 
 /** The longest origin a link can name: the cap less `/connect/#` and the fragment. */
-const MAX_ORIGIN_LENGTH = ONE_TIME_LINK_MAX_LENGTH - '/connect/#'.length - ONE_TIME_FRAGMENT_LENGTH;
 
 /** A real origin of about `length` characters, in DNS-legal labels; callers assert the length. */
 function originOfLength(length) {
@@ -179,9 +180,9 @@ function originOfLength(length) {
 
 test('the longest accepted origin still mints and parses', async () => {
   assert.equal(ONE_TIME_LINK_MAX_LENGTH, 256);
-  assert.equal(MAX_ORIGIN_LENGTH, 167);
-  const origin = originOfLength(MAX_ORIGIN_LENGTH);
-  assert.equal(origin.length, MAX_ORIGIN_LENGTH);
+  assert.equal(MAX_RELAY_ORIGIN_LENGTH, 167);
+  const origin = originOfLength(MAX_RELAY_ORIGIN_LENGTH);
+  assert.equal(origin.length, MAX_RELAY_ORIGIN_LENGTH);
   assert.equal(new URL(origin).origin, origin, 'the test origin must be one a URL normalizes to itself');
   const url = formatOneTimeLinkUrl(origin, LINK);
   assert.equal(url.length, ONE_TIME_LINK_MAX_LENGTH);
@@ -189,13 +190,42 @@ test('the longest accepted origin still mints and parses', async () => {
 });
 
 test('one character more is refused at mint time and by the parser', async () => {
-  const origin = originOfLength(MAX_ORIGIN_LENGTH + 1);
-  assert.equal(origin.length, MAX_ORIGIN_LENGTH + 1);
+  const origin = originOfLength(MAX_RELAY_ORIGIN_LENGTH + 1);
+  assert.equal(origin.length, MAX_RELAY_ORIGIN_LENGTH + 1);
   assert.throws(() => formatOneTimeLinkUrl(origin, LINK), /257 characters/);
   const overLong = urlOf(FIELDS, origin);
   assert.equal(overLong.length, ONE_TIME_LINK_MAX_LENGTH + 1);
   assert.equal(await parseOneTimeLinkUrl(overLong, origin, NOW), null);
   assert.equal(await parseOneTimeLinkUrl('x'.repeat(1_000_000), ORIGIN, NOW), null);
+});
+
+test('a build bakes only a bare link-scheme origin that fits a link', () => {
+  for (const origin of [
+    'https://hosted.dormouse.sh',
+    'https://hosted.dormouse.sh:8443',
+    'http://localhost:3000',
+    'http://127.0.0.1:8787',
+    'http://[::1]:8787',
+    originOfLength(MAX_RELAY_ORIGIN_LENGTH),
+  ]) {
+    assert.equal(isAcceptedRelayOrigin(origin), true, origin);
+  }
+  for (const origin of [
+    'https://hosted.dormouse.sh/',
+    'https://hosted.dormouse.sh/connect',
+    'https://user@hosted.dormouse.sh',
+    'https://hosted.dormouse.sh?x=1',
+    'HTTPS://hosted.dormouse.sh',
+    'http://hosted.dormouse.sh',
+    'http://127.0.0.2:8787',
+    'wss://hosted.dormouse.sh',
+    'hosted.dormouse.sh',
+    '',
+    undefined,
+    originOfLength(MAX_RELAY_ORIGIN_LENGTH + 1),
+  ]) {
+    assert.equal(isAcceptedRelayOrigin(origin), false, String(origin));
+  }
 });
 
 // --- One rejection per parser rule ----------------------------------------
