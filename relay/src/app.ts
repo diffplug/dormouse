@@ -1390,7 +1390,7 @@ export function createApp(config: AppConfig): CreatedApp {
   async function sweepRevokedBurrows(): Promise<number> {
     const online = hub.onlineBurrowIds();
     if (online.length === 0) return 0;
-    // One read for the whole sweep: `has()` reads the file per call, and a Burrow
+    // One read for the whole sweep: `has()` checks the file per call, and a Burrow
     // deleted mid-sweep is caught by the next one.
     //
     // **Nothing is closed on an answer this sweep did not actually read.**

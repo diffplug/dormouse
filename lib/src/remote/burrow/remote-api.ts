@@ -549,9 +549,9 @@ export class RemoteApiSession {
   }
 
   /**
-   * Give up the hold `handle` was resolved with. The owner re-fits only while
-   * that very hold is on the pane, so releasing is always safe; a provider that
-   * throws must not take a teardown down with it.
+   * Give up the hold `handle` was resolved with. The owner clears it only while
+   * that very hold is still its holder's, so releasing is always safe; a
+   * provider that throws must not take a teardown down with it.
    */
   #release(handle: SurfaceHandle): void {
     try {

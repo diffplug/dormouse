@@ -50,8 +50,9 @@ export interface SurfaceHandle {
    */
   resize(cols: number, rows: number): Promise<{ cols: number; rows: number }>;
   /**
-   * Give up the hold this handle was resolved with: the owner re-fits the pane
-   * to its own box if, and only if, this very hold is still the one on it.
+   * Give up the hold this handle was resolved with, if its holder still holds
+   * the pane through it: the pane stands at the newest remaining holder's size,
+   * or re-fits its own box once no hold remains.
    * Fire and forget — nothing waits on a release, and an owner that is gone
    * holds nothing.
    */

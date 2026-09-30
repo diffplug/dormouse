@@ -476,7 +476,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * hidden, so a phone in a pocket crosses that line on its own, and without
    * this check it comes back to a wall whose every request hangs forever with
    * no error and no way out but a reload
-   * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
+   * ([pocket-app.md](../../../../docs/specs/pocket-app.md)).
    *
    * The Burrow's deadline runs from the message it last decrypted, which is the
    * one this Client last sent, so the same constant answers the question on
@@ -493,7 +493,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * Keepalives run **only while the page is visible**, and returning to the
    * foreground sends one immediately — a tab hidden for less than the idle
    * timeout still has a session worth keeping
-   * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
+   * ([pocket-app.md](../../../../docs/specs/pocket-app.md)).
    */
   #startKeepalives(): void {
     this.#stopKeepalives();
