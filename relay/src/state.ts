@@ -474,7 +474,7 @@ export class BurrowStore extends JsonFileStore {
   }
 
   /**
-   * Whether `burrowId` is still enrolled, read fresh off disk like
+   * Whether `burrowId` is still enrolled, read through the stat-gated cache like
    * {@link findByToken}: deleting a row from `burrows.json` is the documented
    * revocation mechanism, so anything gating on a Burrow's continued existence —
    * redeeming a setup token it minted, accepting a push subscription for it —
