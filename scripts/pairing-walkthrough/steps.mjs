@@ -309,6 +309,9 @@ async function stepBurrow(ctx) {
     prefix: 'burrow',
     env: {
       DORMOUSE_RELAY_ORIGIN: ctx.relayOrigin,
+      // Blank is unset: an inherited flag would make this a Hosted build with
+      // nothing to enroll through.
+      DORMOUSE_RELAY_IS_HOSTED: '',
       DORMOUSE_BROWSER_DEV_AB_SESSION: opts.session,
       DORMOUSE_BROWSER_DEV_VITE_PORT: '0',
       DORMOUSE_BROWSER_DEV_HOST_PORT: '0',
