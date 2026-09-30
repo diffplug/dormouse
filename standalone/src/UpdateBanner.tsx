@@ -10,8 +10,8 @@ export type UpdateBannerState =
   | { status: 'dismissed' }
   | { status: 'post-update-success'; from: string; to: string }
   | { status: 'post-update-failure'; version: string; error?: string }
-  // PROTOTYPE (`docs/specs/remote-network.md`): with automatic checks off, a
-  // reminder once a week, and the check the user then asks for.
+  // With automatic checks off, the weekly reminder, and the check the user
+  // then asks for (`docs/specs/auto-update.md` → "How it works").
   | { status: 'check-due'; days: number }
   | { status: 'checking' }
   | { status: 'up-to-date'; version: string }
@@ -24,7 +24,7 @@ interface UpdateBannerProps {
   onRestart: () => void;
   onOpenChangelog: () => void;
   onOpenDebug: () => void;
-  onCheckNow?: () => void;
+  onCheckNow: () => void;
 }
 
 const linkClass = 'shrink-0 hover:underline';
@@ -81,7 +81,7 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onO
       break;
     case 'check-due':
       message = `No update check in ${state.days} days`;
-      links = onCheckNow ? [{ label: 'Check now', onClick: onCheckNow }] : [];
+      links = [{ label: 'Check now', onClick: onCheckNow }];
       break;
     case 'checking':
       message = 'Checking for updates…';
@@ -93,7 +93,7 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onO
       break;
     case 'check-failed':
       message = 'Couldn’t check for updates';
-      links = onCheckNow ? [{ label: 'Try again', onClick: onCheckNow }] : [];
+      links = [{ label: 'Try again', onClick: onCheckNow }];
       break;
     default: {
       const _exhaustive: never = state;

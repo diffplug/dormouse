@@ -22,6 +22,8 @@ import {
   restartToUpdate,
   openChangelog,
   buildDebugReport,
+  checkNow,
+  updatesPortForBuild,
 } from "./updater";
 
 function ConnectedUpdateBanner() {
@@ -50,6 +52,7 @@ function ConnectedUpdateBanner() {
         onApproveUpdate={approveUpdate}
         onRestart={restartToUpdate}
         onOpenChangelog={openChangelog}
+        onCheckNow={checkNow}
         onOpenDebug={() => {
           if (liveFailure) {
             setSnapshot({ version: liveFailure.version, error: liveFailure.error });
@@ -92,6 +95,9 @@ async function bootstrap() {
   // (`docs/specs/dor-cli.md` → "Handle Model").
   setWindowLabel(await resolveWindowLabel());
   const platform = await createPlatform();
+  // Settings → Network's view of the checks, in the one window that makes them
+  // (docs/specs/auto-update.md).
+  if (isMainWindow()) platform.updates = updatesPortForBuild();
   setPlatform(platform);
   await platform.init();
   // The Burrow runs in the sidecar, which owns the PTYs but not this

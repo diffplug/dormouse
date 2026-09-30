@@ -11,9 +11,14 @@ const mocks = vi.hoisted(() => ({
   shellOpen: vi.fn(),
   invoke: vi.fn(),
   requestAppRestart: vi.fn(),
+  /** The Burrow link's `command`, which answers `networkPolicy`. */
+  burrowCommand: vi.fn(),
   /** The webview's baked mode, which gates every check. */
   relayMode: 'hosted' as 'hosted' | 'self-host',
-  platform: null as { requestAppRestart?: () => Promise<boolean> } | null,
+  platform: null as {
+    requestAppRestart?: () => Promise<boolean>;
+    burrow?: { command: (cmd: string) => Promise<unknown> };
+  } | null,
 }));
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
@@ -48,6 +53,20 @@ vi.mock('dormouse-lib/host/relay-origin', () => ({
 // --- Helpers ---
 
 const STORAGE_KEY = 'dormouse:update-result';
+const CHECK_KEY = 'dormouse:update-check';
+const DAY = 24 * 60 * 60 * 1000;
+
+/** What `networkPolicy` answers for `policy`. */
+function networkPolicy(policy: { level: string; autoUpdate: boolean }) {
+  return {
+    policy: { allowed: [], ...policy },
+    levels: ['nothing', 'local'],
+    interfaces: [],
+  };
+}
+
+/** The level the lifecycle cases run under: automatic checks on. */
+const CHECKS_ON = networkPolicy({ level: 'local', autoUpdate: true });
 
 function makeUpdate(version = '0.5.0') {
   return {
@@ -68,6 +87,8 @@ import {
   hasPendingUpdate,
   installPendingUpdate,
   restartToUpdate,
+  checkNow,
+  updatesPortForBuild,
   _resetForTesting,
 } from './updater';
 import { UpdateBanner, type UpdateBannerState } from './UpdateBanner';
@@ -95,7 +116,10 @@ describe('updater', () => {
     mocks.shellOpen.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue('');
     mocks.relayMode = 'hosted';
-    mocks.platform = { requestAppRestart: mocks.requestAppRestart };
+    mocks.burrowCommand.mockImplementation(async (cmd: string) =>
+      cmd === 'networkPolicy' ? CHECKS_ON : null,
+    );
+    mocks.platform = { requestAppRestart: mocks.requestAppRestart, burrow: { command: mocks.burrowCommand } };
   });
 
   // Drive check → approve → download so an approved, downloaded update is pending.
@@ -286,6 +310,241 @@ describe('updater', () => {
     });
   });
 
+  // docs/specs/remote-network.md → "Updates".
+  describe('under the network policy', () => {
+    /** Launch, and wait out the 5 s before the check. */
+    async function launch() {
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(0);
+    }
+
+    function policyIs(answer: unknown) {
+      mocks.burrowCommand.mockImplementation(async () => answer);
+    }
+
+    it.each([
+      ['Nothing', networkPolicy({ level: 'nothing', autoUpdate: true })],
+      ['automatic checks off', networkPolicy({ level: 'local', autoUpdate: false })],
+      ['an answer that is not a policy', { policy: { level: 'local', autoUpdate: true } }],
+    ])('never checks on its own under %s', async (_case, answer) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      policyIs(answer);
+      await launch();
+      expect(mocks.burrowCommand).toHaveBeenCalledWith('networkPolicy');
+      expect(mocks.check).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it('checks on its own under Local networks with automatic checks on', async () => {
+      await launch();
+      expect(mocks.check).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ['a read that fails', () => mocks.burrowCommand.mockRejectedValue(new Error('no answer'))],
+      ['no Burrow service', () => { mocks.platform = { requestAppRestart: mocks.requestAppRestart }; }],
+    ])('reads %s as Nothing', async (_case, arrange) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      arrange();
+      await launch();
+      expect(mocks.check).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    describe('the reminder, with automatic checks off', () => {
+      /** When the launch below evaluates the reminder: after its 5 s. */
+      let at: number;
+
+      beforeEach(() => {
+        policyIs(networkPolicy({ level: 'nothing', autoUpdate: false }));
+        vi.setSystemTime(new Date('2026-10-01T00:00:00Z'));
+        at = Date.now() + 5_000;
+      });
+
+      const clock = () => JSON.parse(localStorage.getItem(CHECK_KEY)!) as Record<string, number | null>;
+      const setClock = (record: { checkedAt: number | null; since: number; remindedAt: number | null }) =>
+        localStorage.setItem(CHECK_KEY, JSON.stringify(record));
+
+      it('starts the clock at the first launch, and says nothing', async () => {
+        await launch();
+        expect(clock()).toEqual({ checkedAt: null, since: at, remindedAt: null });
+        expect(readBannerState()).toEqual({ status: 'idle' });
+      });
+
+      it('reminds once the last successful check is 7 days old, and not a moment before', async () => {
+        setClock({ checkedAt: at - 7 * DAY + 1, since: at - 30 * DAY, remindedAt: null });
+        await launch();
+        expect(readBannerState()).toEqual({ status: 'idle' });
+        expect(clock().remindedAt).toBeNull();
+
+        _resetForTesting();
+        at = Date.now() + 5_000;
+        setClock({ checkedAt: at - 7 * DAY, since: at - 30 * DAY, remindedAt: null });
+        await launch();
+        expect(readBannerState()).toEqual({ status: 'check-due', days: 7 });
+        expect(clock().remindedAt).toBe(at);
+        expect(mocks.check).not.toHaveBeenCalled();
+      });
+
+      it('counts from the first launch before any check', async () => {
+        setClock({ checkedAt: null, since: at - 9 * DAY, remindedAt: null });
+        await launch();
+        expect(readBannerState()).toEqual({ status: 'check-due', days: 9 });
+      });
+
+      it('reminds at most once a week', async () => {
+        setClock({ checkedAt: at - 20 * DAY, since: at - 30 * DAY, remindedAt: at - 7 * DAY + 1 });
+        await launch();
+        expect(readBannerState()).toEqual({ status: 'idle' });
+
+        _resetForTesting();
+        at = Date.now() + 5_000;
+        setClock({ checkedAt: at - 20 * DAY, since: at - 30 * DAY, remindedAt: at - 7 * DAY });
+        await launch();
+        expect(readBannerState()).toEqual({ status: 'check-due', days: 20 });
+      });
+
+      it('stays quiet after a dismissal until the week is out', async () => {
+        setClock({ checkedAt: null, since: at - 8 * DAY, remindedAt: null });
+        await launch();
+        dismissBanner();
+        const remindedAt = clock().remindedAt!;
+
+        _resetForTesting();
+        vi.setSystemTime(remindedAt + 6 * DAY);
+        await launch();
+        expect(readBannerState()).toEqual({ status: 'idle' });
+
+        _resetForTesting();
+        vi.setSystemTime(remindedAt + 7 * DAY - 5_000);
+        await launch();
+        expect(readBannerState()).toEqual({ status: 'check-due', days: 15 });
+      });
+
+      it('restarts a clock it cannot read', async () => {
+        localStorage.setItem(CHECK_KEY, JSON.stringify({ checkedAt: 'yesterday', since: 1, remindedAt: null }));
+        await launch();
+        expect(readBannerState()).toEqual({ status: 'idle' });
+        expect(clock()).toEqual({ checkedAt: null, since: at, remindedAt: null });
+      });
+
+      it('never reminds while automatic checks run, which record each check', async () => {
+        policyIs(CHECKS_ON);
+        setClock({ checkedAt: null, since: at - 30 * DAY, remindedAt: null });
+        await launch();
+        expect(mocks.check).toHaveBeenCalledOnce();
+        expect(readBannerState()).toEqual({ status: 'idle' });
+        expect(clock()).toEqual({ checkedAt: at, since: at - 30 * DAY, remindedAt: null });
+      });
+    });
+  });
+
+  describe('check now', () => {
+    const clock = () => JSON.parse(localStorage.getItem(CHECK_KEY) ?? 'null') as { checkedAt: number | null } | null;
+
+    beforeEach(() => {
+      // A click checks whatever the policy says.
+      mocks.burrowCommand.mockImplementation(async () => networkPolicy({ level: 'nothing', autoUpdate: false }));
+    });
+
+    it('checks under Nothing, says it is up to date, and records the check', async () => {
+      const port = updatesPortForBuild()!;
+      const seen: Array<{ checkedAt: number | null; checking: boolean }> = [];
+      port.subscribe(() => seen.push(port.getSnapshot()));
+      expect(port.getSnapshot()).toBe(port.getSnapshot());
+
+      checkNow();
+      expect(readBannerState()).toEqual({ status: 'checking' });
+      expect(port.getSnapshot().checking).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const now = Date.now();
+      expect(mocks.check).toHaveBeenCalledOnce();
+      expect(readBannerState()).toEqual({ status: 'up-to-date', version: '0.4.0' });
+      expect(clock()?.checkedAt).toBe(now);
+      expect(port.getSnapshot()).toEqual({ checkedAt: now, checking: false });
+      expect(seen[0]?.checking).toBe(true);
+      expect(seen[seen.length - 1]).toEqual({ checkedAt: now, checking: false });
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(readBannerState()).toEqual({ status: 'idle' });
+    });
+
+    it('offers an update it finds for approval', async () => {
+      const update = makeUpdate('0.5.0');
+      mocks.check.mockResolvedValue(update);
+
+      checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(readBannerState()).toEqual({ status: 'available', version: '0.5.0' });
+
+      approveUpdate();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(update.download).toHaveBeenCalledOnce();
+    });
+
+    it('says a failed check failed, and records none', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      mocks.check.mockRejectedValue(new Error('offline'));
+
+      checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(readBannerState()).toEqual({ status: 'check-failed' });
+      expect(clock()).toBeNull();
+      expect(updatesPortForBuild()!.getSnapshot()).toEqual({ checkedAt: null, checking: false });
+      error.mockRestore();
+    });
+
+    it('joins a check in flight, the launch’s included', async () => {
+      mocks.burrowCommand.mockImplementation(async () => CHECKS_ON);
+      let answer!: (update: null) => void;
+      mocks.check.mockReturnValue(new Promise((resolve) => { answer = resolve; }));
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.check).toHaveBeenCalledOnce();
+
+      checkNow();
+      checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.check).toHaveBeenCalledOnce();
+      expect(readBannerState()).toEqual({ status: 'checking' });
+
+      answer(null);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(readBannerState()).toEqual({ status: 'up-to-date', version: '0.4.0' });
+    });
+
+    it('shows an approved update again rather than checking for it', async () => {
+      mocks.burrowCommand.mockImplementation(async () => CHECKS_ON);
+      const update = makeUpdate('0.5.0');
+      let finish!: () => void;
+      update.download.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
+      await reachDownloadedUpdate(update);
+      dismissBanner();
+
+      checkNow();
+      expect(readBannerState()).toEqual({ status: 'downloading', version: '0.5.0' });
+      finish();
+      await vi.advanceTimersByTimeAsync(0);
+      dismissBanner();
+
+      checkNow();
+      expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
+      expect(mocks.check).toHaveBeenCalledOnce();
+    });
+
+    it('is no port, and checks nothing, in a self-host build', async () => {
+      mocks.relayMode = 'self-host';
+      expect(updatesPortForBuild()).toBeUndefined();
+      checkNow();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.check).not.toHaveBeenCalled();
+      expect(readBannerState()).toEqual({ status: 'idle' });
+    });
+  });
+
   // The quit orchestrator (standalone/src/quit.ts) — not the updater — owns quit
   // interception now. The updater just exposes hasPendingUpdate/installPendingUpdate
   // for the orchestrator to call as the last step of its teardown.
@@ -471,6 +730,7 @@ describe('updater', () => {
           onRestart,
           onOpenChangelog: vi.fn(),
           onOpenDebug: vi.fn(),
+          onCheckNow: vi.fn(),
         })));
         return { container, unmount: () => root.unmount() };
       };

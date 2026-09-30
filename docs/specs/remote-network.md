@@ -23,7 +23,7 @@ Reserved: `anywhere`, which the policy's shape accepts and no build offers, is t
 - **A change to the level or the allowed networks ends the live one-time link or session with `user-ended`, and starts or stops the relay socket to match**; a narrowed policy never leaves an old path exempt. `autoUpdate` alone ends nothing (rationale).
 - **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, and this machine's interfaces, each with its addresses' canonical prefixes (loopback and IPv6 link-local left out) and a `lan`, `vpn`, or `virtual` kind.
 
-**Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater (`## Future`); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
+**Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater ("Updates"); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
 
 - **The Burrow service's socket factory and fetch refuse at the call while the level is `nothing` or unread** — the factory throws, fetch rejects — so a path that forgets its own check still opens nothing. Every socket and request the service opens, the enrollment exchange included, goes through them; the checks below stay, for the error a person reads.
 - **The Burrow service never opens the relay socket.** An enrollment is held and reported — `enrolled`, `connection: 'stopped'`, not `serving` — so push, the device list, a test push, and setup codes, which need a running Burrow, make no request.
@@ -33,11 +33,19 @@ Reserved: `anywhere`, which the policy's shape accepts and no build offers, is t
 
 Source of truth: `NetworkPolicy`, `levelsFor`, and `storedNetworkPolicy` in `lib/src/remote/network-policy.ts`; `peekNetworkPolicyFor` and `BurrowService` in `lib/src/host/remote/service.ts`; `canonicalCidr`, `addressAllowed`, and `classifyNetworkInterfaces` in `lib/src/host/remote/network-interfaces.ts`; `NETWORK_POLICY_KEY` in `vscode-ext/src/burrow-store.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `subscribeToNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`. Pinned by `lib/src/host/remote/service.test.ts` and `lib/src/host/remote/network-interfaces.test.ts`.
 
+## Updates
+
+- **The Standalone updater must check automatically only when the level is not `nothing` and `autoUpdate` is on**, reading the policy at launch; **a read that fails counts as `nothing`**. **Check now** always checks, being a click.
+- **With automatic checks off, must remind in the Baseboard once the last successful check is 7 days old, and at most once per 7 days.** Before any check, the clock starts at the first launch. The reminder reads local timestamps and contacts nothing.
+- **Never in a self-host build or VS Code**, which have no updater.
+
+The lifecycle is `docs/specs/auto-update.md` → "How it works". Source of truth: `runUpdateCheck`, `remindIfDue`, and `checkNow` in `standalone/src/updater.ts`, pinned by `standalone/src/updater.test.ts`.
+
 ## Future
 
 **Scope: remote-network** — build in order:
 
-1. **Policy and Nothing**: the updater's choke point and the update reminder ("Updates"), then Settings → Network.
+1. **Policy and Nothing**: Settings → Network.
 2. **Local networks**: the path check, for one-time sessions.
 3. **Anywhere**: Cloudflare STUN, for one-time sessions.
 4. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`; Local networks and Anywhere then cover paired phones.
@@ -52,12 +60,6 @@ The UI contract is the prototype `NetworkSettings` in `lib/src/components/Networ
 | Local networks | Hosted builds | none | never | an allowed network |
 | Anywhere | Hosted builds | `stun:stun.cloudflare.com:3478` | paired phones only, via Hosted | any network |
 | My Relay only | self-host builds | none | via the baked Relay | any network |
-
-### Updates
-
-- **Must check automatically only when the level is not Nothing and `autoUpdate` is on**, at launch as today; **Check now** always checks, being a click.
-- **With automatic checks off, must remind in the Baseboard once the last successful check is 7 days old, and at most once per 7 days.** A fresh install's clock starts at install. The reminder reads local timestamps and contacts nothing.
-- **Never in a self-host build or VS Code**, which have no updater (`docs/specs/auto-update.md`).
 
 ### Local networks
 

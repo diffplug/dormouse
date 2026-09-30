@@ -90,7 +90,7 @@ export const NarrowViewport: Story = {
   ],
 };
 
-/** PROTOTYPE: automatic checks are off and the last check was over a week ago. */
+/** Automatic checks are off and the last check was over a week ago. */
 export const CheckDue: Story = {
   args: { state: { status: 'check-due', days: 9 } },
 };
