@@ -1299,10 +1299,12 @@ Source of truth: `standalone/package.json` (package scripts),
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
   `lib/src/host/` sources into the sidecar `.cjs` files).
-- The `tauri` script stages, then runs `standalone/scripts/tauri.mjs`, which
-  delegates to the Tauri CLI — except `dev`, which it routes through `runDev`
+- The `tauri` script runs `standalone/scripts/tauri.mjs`, which stages —
+  `stage:dev` for `dev`, as `pnpm innerdogfood` does, `stage` otherwise — then
+  delegates to the Tauri CLI, except `dev`, which it routes through `runDev`
   below. `build-sidecar-proxy.mjs` bakes `DORMOUSE_RELAY_ORIGIN` into the
-  sidecar's Burrow bundle. The webview CSP contains no relay sources, pinned by
+  sidecar's Burrow bundle, a dev build only under `--dev`
+  (`docs/specs/relay.md` → "Relay origin"). The webview CSP contains no relay sources, pinned by
   `standalone/scripts/tauri-conf.test.mjs`
   (`docs/specs/relay.md` → "Relay origin").
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources

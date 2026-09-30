@@ -142,7 +142,7 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
   build is a release build and fails when the flag is set or the origin is
   loopback `http:`** (rationale). Unflagged, a loopback origin is a local
   self-host Relay ("Running it").
-- **A retired variable set at all fails the build**:
+- **A retired variable set non-blank fails the build**:
   `DORMOUSE_REMOTE_CONNECT_SRC`, `DORMOUSE_HOSTED_ORIGIN`,
   `DORMOUSE_ONE_TIME_ORIGIN`.
 
@@ -152,7 +152,9 @@ Hosted build refuses both**, Hosted running no Relay
 (`docs/specs/hosted.md` → Future). **An enrollment naming another origin reads
 as none** wherever one is read — `start`, `status`, VS Code's activation — and
 stays on disk untouched, so switching back restores it (rationale). Origins
-compare as `new URL(...).origin`.
+compare as `new URL(...).origin`. **An enrollment whose Relay reports another
+`origin` is refused before anything is saved**, the error naming both: that
+`DORMOUSE_ORIGIN` is where every setup code sends a phone.
 
 **Both build failure modes are silent, so the build catches both** (rationale):
 `resolveRelayOrigin` validates the variables and `assertRelayOriginBaked` greps

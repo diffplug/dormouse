@@ -159,14 +159,15 @@ async function main() {
   await waitFor("the Worker", async () => (await status(port, PAGE_PATH)) === 200, 120_000);
   if (stopping) return;
 
-  const socketOrigin = origin.replace(/^http/, "ws");
   console.log(
     [
       "",
       `One-time rendezvous and phone page: ${origin}${PAGE_PATH}`,
-      "Build a Burrow that opens its links here (e.g. `pnpm innerdogfood`) with:",
-      `  DORMOUSE_HOSTED_ORIGIN=${origin}`,
-      `  DORMOUSE_REMOTE_CONNECT_SRC='${origin} ${socketOrigin}'`,
+      "Build a dev Burrow that opens its links here (e.g. `pnpm innerdogfood`) with:",
+      `  DORMOUSE_RELAY_ORIGIN=${origin}`,
+      // A local origin counts as Hosted only in a dev build
+      // (docs/specs/relay.md -> "Relay origin").
+      "  DORMOUSE_RELAY_IS_HOSTED=1",
       "",
     ].join("\n"),
   );
