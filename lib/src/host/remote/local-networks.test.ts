@@ -1,0 +1,156 @@
+/**
+ * The Local networks hold on a direct path (`docs/specs/remote-network.md` ->
+ * "Local networks"): which address an attempt binds, what the Burrow's answer
+ * keeps, and which selected pairs may carry a session. The same policy on the
+ * real addon is `native-direct-peer.test.ts`'s.
+ */
+
+import type { NetworkInterfaceInfo as OsAddress } from 'node:os';
+import { describe, expect, it } from 'vitest';
+import { bindAddressFor, localNetworksPath } from './local-networks';
+
+/** One `os.networkInterfaces()` address, with the fields the bind choice reads. */
+function address(ip: string, internal = false): OsAddress {
+  return {
+    address: ip,
+    netmask: '',
+    family: ip.includes(':') ? 'IPv6' : 'IPv4',
+    mac: '00:00:00:00:00:00',
+    internal,
+    cidr: null,
+    ...(ip.includes(':') ? { scopeid: 0 } : {}),
+  } as OsAddress;
+}
+
+const LAN = ['192.168.86.0/24', 'fd65:c3d1:3e82:67d9::/64'];
+const TAILNET = ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'];
+
+/** A laptop on Wi-Fi and a tailnet, with loopback and link-local beside them. */
+const LAPTOP = {
+  lo0: [address('127.0.0.1', true), address('::1', true)],
+  en0: [
+    address('fe80::4fc:4257:75e3:5e56'),
+    address('192.168.86.160'),
+    address('fd65:c3d1:3e82:67d9:18f0:7985:d3e0:19c0'),
+  ],
+  utun4: [address('100.97.229.25'), address('fd7a:115c:a1e0::4339:e51a')],
+  bridge100: [address('192.168.64.1')],
+};
+
+describe('bindAddressFor', () => {
+  it('binds the one allowed address', () => {
+    expect(bindAddressFor(['192.168.86.0/24'], LAPTOP)).toBe('192.168.86.160');
+    expect(bindAddressFor(['fd7a:115c:a1e0::/48'], LAPTOP)).toBe('fd7a:115c:a1e0::4339:e51a');
+  });
+
+  it('prefers the IPv4 address of the one interface allowed in both families', () => {
+    expect(bindAddressFor(LAN, LAPTOP)).toBe('192.168.86.160');
+    expect(bindAddressFor(TAILNET, LAPTOP)).toBe('100.97.229.25');
+  });
+
+  it('binds nothing where allowed addresses sit on more than one interface', () => {
+    expect(bindAddressFor([...LAN, ...TAILNET], LAPTOP)).toBeNull();
+    // One family each is still two interfaces, never the IPv4 one by preference.
+    expect(bindAddressFor(['192.168.86.0/24', 'fd7a:115c:a1e0::/48'], LAPTOP)).toBeNull();
+    // Overlapping ranges are two interfaces too, whichever the user meant.
+    expect(bindAddressFor(['192.168.0.0/16'], LAPTOP)).toBeNull();
+  });
+
+  it('binds nothing where the preferred family has no single address', () => {
+    const aliased = { en0: [address('192.168.86.160'), address('192.168.86.161')] };
+    expect(bindAddressFor(['192.168.86.0/24'], aliased)).toBeNull();
+    const temporary = {
+      en0: [address('fd65:c3d1:3e82:67d9::a'), address('fd65:c3d1:3e82:67d9::b')],
+    };
+    expect(bindAddressFor(['fd65:c3d1:3e82:67d9::/64'], temporary)).toBeNull();
+  });
+
+  it('binds nothing where no address is allowed, loopback and link-local never counting', () => {
+    expect(bindAddressFor([], LAPTOP)).toBeNull();
+    expect(bindAddressFor(['10.0.0.0/8'], LAPTOP)).toBeNull();
+    expect(bindAddressFor(['127.0.0.0/8', '::1/128'], LAPTOP)).toBeNull();
+    // An allowed link-local range still leaves en0's other addresses the choice.
+    expect(bindAddressFor(['fe80::/10', '192.168.86.0/24'], LAPTOP)).toBe('192.168.86.160');
+  });
+});
+
+/** An answer as the addon writes one: every interface a candidate at one port. */
+const ANSWER = [
+  'v=0',
+  'o=rtc 1781803978 0 IN IP4 127.0.0.1',
+  's=-',
+  't=0 0',
+  'm=application 64178 UDP/DTLS/SCTP webrtc-datachannel',
+  'c=IN IP4 192.168.86.160',
+  'a=mid:0',
+  'a=ice-ufrag:9Y67',
+  'a=candidate:2 1 UDP 2116026111 fd65:c3d1:3e82:67d9:18f0:7985:d3e0:19c0 64178 typ host',
+  'a=candidate:4 1 UDP 2116025599 fd7a:115c:a1e0::4339:e51a 64178 typ host',
+  'a=candidate:1 1 UDP 2114977791 192.168.86.160 64178 typ host',
+  'a=candidate:3 1 UDP 2114977279 100.97.229.25 64178 typ host',
+  'a=candidate:5 1 UDP 2114977279 0f1e2d3c-aaaa-bbbb-cccc-000000000000.local 64178 typ host',
+  'a=end-of-candidates',
+  '',
+].join('\r\n');
+
+const candidatesIn = (sdp: string) => sdp.split('\r\n').filter((line) => line.startsWith('a=candidate'));
+
+describe('localNetworksPath', () => {
+  it('keeps only the answer’s candidates on an allowed network', () => {
+    const described = localNetworksPath(TAILNET).describe(ANSWER)!;
+
+    expect(candidatesIn(described)).toEqual([
+      'a=candidate:4 1 UDP 2116025599 fd7a:115c:a1e0::4339:e51a 64178 typ host',
+      'a=candidate:3 1 UDP 2114977279 100.97.229.25 64178 typ host',
+    ]);
+    // The default address named a network it may not: the placeholder instead.
+    expect(described).toContain('\r\nc=IN IP4 0.0.0.0\r\n');
+    expect(described).not.toContain('192.168.86.160');
+    // Every other line as it was, in order, line endings included.
+    expect(described.split('\r\n').filter((line) => !/^(a=candidate|c=)/.test(line))).toEqual(
+      ANSWER.split('\r\n').filter((line) => !/^(a=candidate|c=)/.test(line)),
+    );
+  });
+
+  it('leaves an allowed default address alone', () => {
+    const described = localNetworksPath(['192.168.86.0/24']).describe(ANSWER)!;
+    expect(described).toContain('\r\nc=IN IP4 192.168.86.160\r\n');
+    expect(candidatesIn(described)).toEqual([
+      'a=candidate:1 1 UDP 2114977791 192.168.86.160 64178 typ host',
+    ]);
+  });
+
+  it('refuses to describe an end with no candidate on an allowed network', () => {
+    expect(localNetworksPath(['10.0.0.0/8']).describe(ANSWER)).toBeNull();
+    expect(localNetworksPath([]).describe(ANSWER)).toBeNull();
+  });
+
+  it('allows a pair whose two ends are both on allowed networks', () => {
+    const path = localNetworksPath([...LAN, ...TAILNET]);
+    expect(path.refusal({ local: '192.168.86.160', remote: '192.168.86.23' })).toBeNull();
+    expect(path.refusal({ local: '100.97.229.25', remote: '100.101.7.8' })).toBeNull();
+    // Across two allowed networks is still on allowed networks at both ends.
+    expect(path.refusal({ local: '192.168.86.160', remote: '100.101.7.8' })).toBeNull();
+    // IPv4-mapped IPv6 is its IPv4 address.
+    expect(path.refusal({ local: '::ffff:192.168.86.160', remote: '::ffff:c0a8:5617' })).toBeNull();
+  });
+
+  it('refuses a pair with either end off the allowed networks', () => {
+    const path = localNetworksPath(LAN);
+    expect(path.refusal({ local: '100.97.229.25', remote: '192.168.86.23' })).toBe(
+      'the selected pair’s local end is not on an allowed network',
+    );
+    expect(path.refusal({ local: '192.168.86.160', remote: '100.101.7.8' })).toBe(
+      'the selected pair’s remote end is not on an allowed network',
+    );
+  });
+
+  it('refuses a name, an mDNS name, a missing end, or no pair at all', () => {
+    const path = localNetworksPath(LAN);
+    for (const remote of ['phone.local', '0f1e2d3c-aaaa-bbbb-cccc-000000000000.local', null]) {
+      expect(path.refusal({ local: '192.168.86.160', remote }), String(remote)).not.toBeNull();
+    }
+    expect(path.refusal({ local: null, remote: '192.168.86.23' })).not.toBeNull();
+    expect(path.refusal(null)).toBe('the connection reports no selected candidate pair');
+  });
+});

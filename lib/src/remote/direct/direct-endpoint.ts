@@ -25,7 +25,7 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import { DirectPeer, type DirectPeerFactory } from './direct-peer';
+import { DirectPeer, type DirectPathPolicy, type DirectPeerFactory } from './direct-peer';
 import { realTimer, type RemoteTimer } from '../ws';
 
 /**
@@ -44,6 +44,8 @@ export type DirectCarrier = 'relay' | 'channel';
 export interface DirectEndpointDeps {
   /** How this runtime builds a peer connection, or `null` where it has none. */
   readonly createPeer: DirectPeerFactory | null;
+  /** What the Burrow's network policy holds each peer to, if anything; see {@link DirectPathPolicy}. */
+  readonly pathPolicy?: DirectPathPolicy | null;
   /**
    * Encrypt one signal as a control message and put it on the relay path;
    * `false` if the session could not send it.
@@ -344,6 +346,7 @@ export class DirectEndpoint {
     if (!connection) return null;
     this.#peer = new DirectPeer({
       peer: connection,
+      pathPolicy: this.#deps.pathPolicy,
       setTimer: this.#setTimer,
       handlers: {
         onOpen: () => this.#onOpen(),

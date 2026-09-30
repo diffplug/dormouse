@@ -16,11 +16,29 @@
  * gets no `direct-offer` never opens it at all.
  */
 
+import { networkInterfaces } from 'node:os';
 import type { DirectPeerFactory, DirectPeerLike } from '../../remote/direct/direct-peer';
+import { bindAddressFor } from './local-networks';
+
+/**
+ * A Burrow's peer factory, which Local networks hands its allowed networks
+ * (`docs/specs/remote-network.md` -> "Local networks"); called without them,
+ * as every runtime's {@link DirectPeerFactory} is, the peer is unrestricted.
+ */
+export type HostDirectPeerFactory = (allowed?: readonly string[]) => DirectPeerLike | null;
+
+/**
+ * The polyfill's configuration, which it spreads into the native
+ * `PeerConnection`: `bindAddress` reaches the addon unchanged.
+ */
+interface DirectPeerConfig {
+  readonly iceServers: [];
+  readonly bindAddress?: string;
+}
 
 /** The one polyfill export a direct path needs. */
 interface DirectPolyfill {
-  readonly RTCPeerConnection: new (config: { iceServers: [] }) => DirectPeerLike;
+  readonly RTCPeerConnection: new (config: DirectPeerConfig) => DirectPeerLike;
 }
 
 /** The addon's own module, for the teardown the polyfill does not expose. */
@@ -63,16 +81,34 @@ function requireNative(): NativeDirect {
 }
 
 /**
- * A {@link DirectPeerFactory} over the native polyfill.
+ * The address `allowed` binds on this machine now ({@link bindAddressFor}), or
+ * `null` — nothing allowed, or interfaces the platform will not list, both of
+ * which leave the socket on every interface and the path check to decide.
+ */
+function bindAddressNow(allowed: readonly string[] | undefined): string | null {
+  if (!allowed) return null;
+  try {
+    return bindAddressFor(allowed, networkInterfaces());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A {@link HostDirectPeerFactory} over the native polyfill.
  *
  * **A load failure is warned once and declines forever after.** A missing
  * platform package or a wrong ABI is a property of the installation, not of the
  * offer, so retrying it per session would warn on every connection and cost a
  * native load attempt each time — and the Burrow's answer is the same either
  * way: `direct-decline`, and the session stays on the relay.
+ *
+ * **Handed allowed networks, the attempt's socket binds their one address on
+ * this machine, where there is exactly one**, read at the attempt rather than
+ * at the open, since a laptop moves between networks.
  */
-export function createNativeDirectPeerFactory(): DirectPeerFactory {
-  return () => {
+export function createNativeDirectPeerFactory(): HostDirectPeerFactory {
+  return (allowed) => {
     if (!native && !declined) {
       try {
         native = requireNative();
@@ -81,9 +117,14 @@ export function createNativeDirectPeerFactory(): DirectPeerFactory {
         console.warn(`[burrow] no direct path: the WebRTC addon did not load: ${String(error)}`);
       }
     }
+    if (!native) return null;
+    const bindAddress = bindAddressNow(allowed);
     // `iceServers: []` here and nowhere else: host candidates only, never a
     // public STUN or TURN default (`docs/specs/remote-api.md` → "Direct path").
-    return native ? new native.polyfill.RTCPeerConnection({ iceServers: [] }) : null;
+    return new native.polyfill.RTCPeerConnection({
+      iceServers: [],
+      ...(bindAddress === null ? {} : { bindAddress }),
+    });
   };
 }
 

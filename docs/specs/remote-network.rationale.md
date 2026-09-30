@@ -17,6 +17,16 @@ desktop code found every background connection behind the Burrow service
 the Standalone updater. No telemetry, remote fonts, CDN loaders, or browser
 downloads exist.
 
+**Why a Tailscale host route offers the tailnet range.** macOS reports the
+tailnet's IPv4 address as a `/32` (measured on macOS 27, 2026-09-30), and
+Linux's `tailscale0` carries `/32` and `/128` (not measured here); offered as
+reported, allowing the Tailscale row admitted only the laptop's own address,
+so the path check refused every phone on the tailnet. Tailscale assigns every node from
+`100.64.0.0/10` and `fd7a:115c:a1e0::/48`, so those are what the row means. A
+CGNAT address with a real netmask, a hotspot's, keeps its own prefix. Another
+VPN's host route stays as reported, since nothing says what range its peers
+use; the user adds that range by hand.
+
 **Why `autoUpdate` alone ends nothing.** The rule that a change ends the live
 one-time session exists so a narrowed policy cannot leave an old path exempt.
 `autoUpdate` governs no path a phone uses, so ending a phone's session because
@@ -56,9 +66,32 @@ Hosted observed are claims; the pair is an observation. `node-datachannel`
 0.33.4 exposes it as `getSelectedCandidatePair()` on the native `PeerConnection`
 and on the polyfill's `RTCIceTransport`.
 
-**Why not bind the listener.** `bindAddress` takes one address, and a policy may
-allow several networks. The listener's exposure is already stated and accepted
-in the security model; the level promises a path, not a socket.
+**Why bind only the single-address case.** `bindAddress` takes one address,
+and a policy may allow several networks, so binding narrows the listener only
+where exactly one allowed address is present; elsewhere the listener stays as
+the security model states it and the path check alone holds the level. The
+single case is the common one for the users who care: a person who allows only
+their VPN has one interface, and IPv4 is preferred there because a VPN
+interface with both families still needs one address, and both shipped Clients
+reach IPv4. Probed on `node-datachannel` 0.33.4 (macOS, 2026-09-30): the
+polyfill spreads its configuration into the native `PeerConnection`, so
+`bindAddress` reaches it; with it the peer binds exactly that address and
+advertises one host candidate, without it one socket on `*:port` advertises
+every interface in both families.
+
+**The bound path against a real browser** *(2026-09-30, HeadlessChrome 150 on
+macOS 27 via `dor agent-browser`, `node-datachannel` 0.33.4 over libdatachannel
+0.24.5)*.
+`scripts/direct-interop/run.mjs --allow` with the LAN's two prefixes bound
+`192.168.86.160`, answered with that one candidate, and carried the three
+frames intact. Chrome offered one mDNS host candidate (`<uuid>.local`), and the
+addon's selected pair reported `192.168.86.160` → `192.168.86.160`, the remote
+end `prflx`: the addon learns the browser's real address from its connectivity
+check, so the pair is an IP literal even when every candidate the browser sent
+was a name. With the ULA prefix and the tailnet allowed — two interfaces,
+unbound — the stripped answer carried two candidates and `c=IN IP4 0.0.0.0`,
+Chrome accepted it, and the pair was the ULA address at both ends, again
+`prflx`.
 
 ## Anywhere
 
@@ -72,3 +105,14 @@ hence the Burrow alone depends on the level.
 **The endpoint.** Cloudflare documents `stun:stun.cloudflare.com:3478` as free
 and unlimited in its Realtime FAQ; ordinary Workers expose no UDP listener, so
 Hosted cannot run its own. Checked 2026-09-30.
+
+## Allowed networks
+
+**Why no UDP forwarder (2026-09-30).** A forwarder narrows the listener where
+several addresses are allowed: the peer binds loopback, and one Node UDP socket
+per allowed address relays to it, dropping sources outside the allowed networks.
+A native-to-native probe connected through one. It was not built because its
+cost — a relay socket per outside source, its own lifetime and bounds, and an
+answer rewritten to name it — buys narrowing only for a user who allows several
+networks, while the person most concerned allows only their VPN, which the
+single-address bind already covers.

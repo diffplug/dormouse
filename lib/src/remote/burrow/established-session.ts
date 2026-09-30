@@ -25,7 +25,7 @@ import {
 } from 'remote-lib-common';
 
 import { DirectEndpoint, type DirectCarrier } from '../direct/direct-endpoint';
-import type { DirectPeerFactory } from '../direct/direct-peer';
+import type { DirectPathPolicy, DirectPeerFactory } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
 
 /**
@@ -94,6 +94,12 @@ export interface EstablishedE2eSessionDeps {
    */
   readonly createDirectPeer: DirectPeerFactory | null;
   /**
+   * What the network policy holds this session's direct path to, if anything
+   * (`docs/specs/remote-network.md` -> "Local networks"); a refusal ends the
+   * session through {@link onFatal}.
+   */
+  readonly directPathPolicy?: DirectPathPolicy | null;
+  /**
    * Put one transport ciphertext on the relay path, in whatever envelope the
    * owner's socket carries. Every Burrow→Client byte this session sends before
    * the switch — protocol-v1 and the direct path's signals — goes through here.
@@ -151,6 +157,7 @@ export class EstablishedE2eSession {
     this.#api = deps.createApi((payload) => this.#sendApp(payload));
     this.#direct = new DirectEndpoint('answerer', {
       createPeer: deps.createDirectPeer,
+      pathPolicy: deps.directPathPolicy,
       sendSignal: (signal) => this.#sendSignal(signal),
       sendRelay: this.#sendRelay,
       receive: (ciphertext, carrier) => this.#receive(ciphertext, carrier),

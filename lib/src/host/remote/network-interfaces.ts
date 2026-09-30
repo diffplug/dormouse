@@ -87,15 +87,26 @@ function blockListOf(cidrs: readonly string[]): BlockList {
 }
 
 /**
+ * {@link addressAllowed} over one list, which is parsed once: for a caller
+ * testing many addresses against the same networks.
+ */
+export function allowedAddressTest(cidrs: readonly string[]): (address: string) => boolean {
+  const list = blockListOf(cidrs);
+  return (address) => {
+    const family = isIP(address);
+    if (family === 0 || address.includes('%')) return false;
+    return list.check(address, family === 4 ? 'ipv4' : 'ipv6');
+  };
+}
+
+/**
  * Whether `address` is an IP literal inside one of `cidrs`. A hostname, an mDNS
  * name, or a zoned address is in none; a CIDR that does not parse matches
  * nothing. An IPv4-mapped IPv6 address matches its IPv4 range: `BlockList`
  * compares it as IPv4, which `network-interfaces.test.ts` pins.
  */
 export function addressAllowed(address: string, cidrs: readonly string[]): boolean {
-  const family = isIP(address);
-  if (family === 0 || address.includes('%')) return false;
-  return blockListOf(cidrs).check(address, family === 4 ? 'ipv4' : 'ipv6');
+  return allowedAddressTest(cidrs)(address);
 }
 
 const VPN_NAME = /^(utun|tun|wg|tailscale)/i;
@@ -103,7 +114,28 @@ const VPN_NAME = /^(utun|tun|wg|tailscale)/i;
 const VIRTUAL_NAME = /^(bridge|docker|vmnet|vboxnet|veth|br-|virbr)/i;
 /** Tailscale's CGNAT range, which marks its interface whatever the OS named it. */
 const TAILSCALE = blockListOf(['100.64.0.0/10']);
+/** Tailscale's two ranges, each with the family and host-route prefix its interface reports. */
+const TAILNET_RANGES = [
+  { range: '100.64.0.0/10', family: 4, hostRoute: 32 },
+  { range: 'fd7a:115c:a1e0::/48', family: 6, hostRoute: 128 },
+] as const;
 const IPV6_LINK_LOCAL = blockListOf(['fe80::/10']);
+
+/**
+ * The network one address offers: its own prefix, or — for a Tailscale
+ * address reported as a host route, which admits no other device — the tailnet
+ * range it is drawn from (`docs/specs/remote-network.md` -> "Policy").
+ */
+function offeredPrefix(entry: OsAddress): string | null {
+  const canonical = entry.cidr === null ? null : canonicalCidr(entry.cidr);
+  const family = isIP(entry.address);
+  for (const { range, family: rangeFamily, hostRoute } of TAILNET_RANGES) {
+    if (family === rangeFamily && canonical?.endsWith(`/${hostRoute}`) && addressAllowed(entry.address, [range])) {
+      return range;
+    }
+  }
+  return canonical;
+}
 
 const LABELS: Record<NetworkInterfaceInfo['kind'], string> = {
   lan: 'Local network',
@@ -114,8 +146,8 @@ const LABELS: Record<NetworkInterfaceInfo['kind'], string> = {
 /**
  * `os.networkInterfaces()` as the Allowed networks list offers it: loopback and
  * other internal interfaces left out, each address's own netmask as a canonical
- * prefix, IPv6 link-local left out, and an interface with no prefix left
- * dropped.
+ * prefix ({@link offeredPrefix}), IPv6 link-local left out, and an interface
+ * with no prefix left dropped.
  */
 export function classifyNetworkInterfaces(
   raw: NodeJS.Dict<OsAddress[]>,
@@ -127,8 +159,8 @@ export function classifyNetworkInterfaces(
     const prefixes = new Set<string>();
     for (const entry of external) {
       if (isIP(entry.address) === 6 && IPV6_LINK_LOCAL.check(entry.address, 'ipv6')) continue;
-      const canonical = entry.cidr === null ? null : canonicalCidr(entry.cidr);
-      if (canonical) prefixes.add(canonical);
+      const prefix = offeredPrefix(entry);
+      if (prefix) prefixes.add(prefix);
     }
     if (prefixes.size === 0) continue;
     const tailscale = external.some(

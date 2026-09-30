@@ -47,7 +47,6 @@ import {
   type OneTimeApprovalRequest,
   type OneTimeState,
 } from '../../remote/burrow/one-time-runtime';
-import type { DirectPeerFactory } from '../../remote/direct/direct-peer';
 import {
   MAX_ALLOWED_NETWORKS,
   levelsFor,
@@ -62,6 +61,8 @@ import {
 import { hostedOrigin, isRelayOrigin, type RelayBuild } from '../relay-origin';
 import { readEnrollmentOffer } from './enroll-offer';
 import type { BurrowStateStore } from './burrow-state-store';
+import { localNetworksPath } from './local-networks';
+import type { HostDirectPeerFactory } from './native-direct-peer';
 import { canonicalCidr, listNetworkInterfaces } from './network-interfaces';
 import { createSerialQueue } from './serial-queue';
 import {
@@ -120,9 +121,11 @@ export interface BurrowServiceOptions {
    * How this host builds a peer connection for the direct path
    * (`docs/specs/remote-api.md` → Transport → "Direct path"). Threaded rather
    * than defaulted: the runtimes that have one differ per host, and a Burrow
-   * without it declines every offer and stays relayed.
+   * without it declines every offer and stays relayed. Under Local networks a
+   * one-time attempt hands it the allowed networks
+   * (`docs/specs/remote-network.md` → "Local networks").
    */
-  createDirectPeer?: DirectPeerFactory;
+  createDirectPeer?: HostDirectPeerFactory;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   /**
@@ -357,7 +360,7 @@ export class BurrowService {
   readonly #kind: BurrowKind;
   /** The injected socket factory behind the transport guard (constructor). */
   readonly #createWebSocket: (url: string) => WebSocketLike;
-  readonly #createDirectPeer?: DirectPeerFactory;
+  readonly #createDirectPeer?: HostDirectPeerFactory;
   /** The injected fetch, or the global one, behind the transport guard. */
   readonly #fetch: typeof globalThis.fetch;
   readonly #now: () => number;
@@ -458,7 +461,8 @@ export class BurrowService {
     // A factory's `null` is a direct path declined, the session kept relayed.
     const createDirectPeer = options.createDirectPeer;
     this.#createDirectPeer =
-      createDirectPeer && (() => (this.#level() === 'nothing' ? null : createDirectPeer()));
+      createDirectPeer &&
+      ((allowed) => (this.#level() === 'nothing' ? null : createDirectPeer(allowed)));
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
     this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
@@ -855,11 +859,16 @@ export class BurrowService {
         'A phone is already connected through a one-time link. End it before opening another.',
       );
     }
+    // Local networks holds the attempt to the networks allowed at the open: a
+    // change to them ends this runtime before any later attempt could run.
+    const allowed = policy.level === 'local' ? policy.allowed : undefined;
+    const createDirectPeer = this.#createDirectPeer;
     const runtime: OneTimeRuntime = new OneTimeRuntime({
       origin: hosted,
       createWebSocket: this.#createWebSocket,
       createSession: (opts) => this.#createApiSession(opts),
-      createDirectPeer: this.#createDirectPeer ?? null,
+      createDirectPeer: createDirectPeer ? () => createDirectPeer(allowed) : null,
+      directPathPolicy: allowed && localNetworksPath(allowed),
       // The name the phone shows: the one this machine enrolled under, else the
       // one the enrollment form would have suggested.
       burrowLabel: this.#enrollment?.label || suggestedBurrowLabel(this.#kind),

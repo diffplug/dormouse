@@ -3,7 +3,7 @@
  * Transport -> "Direct path"). Manual, and test data only.
  *
  * ```sh
- * dor ensure -- pnpm exec node scripts/direct-interop/run.mjs
+ * dor ensure -- pnpm exec node scripts/direct-interop/run.mjs [--allow <cidr>[,<cidr>…]]
  * dor agent-browser --key direct-interop open "$(cat "$TMPDIR/dormouse-direct-interop.url")"
  * ```
  *
@@ -25,6 +25,12 @@
  *   2. Does a real association carry a whole `NOISE_MAX_MESSAGE_LENGTH` frame
  *      between the two stacks, in order, byte for byte?
  *   3. Do the two `DirectPeerLike` implementations satisfy the seam as written?
+ *   4. With `--allow`, the addon answers as a Burrow under Local networks does
+ *      (`docs/specs/remote-network.md` -> "Local networks"): bound where the
+ *      allowed networks name one address here, its answer stripped, its
+ *      selected pair checked. Does that connect to a real browser, and does
+ *      the pair the addon selected report IP literals or the browser's mDNS
+ *      names?
  *
  * Run it on a machine with the interfaces you care about — a tailnet, a VPN,
  * docker bridges — since question 1 is a property of the host, not the code.
@@ -34,7 +40,7 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -58,6 +64,11 @@ const sidecarRequire = createRequire(here('../../standalone/sidecar/package.json
 const buildRequire = createRequire(here('../../standalone/package.json'));
 const { build } = buildRequire('esbuild');
 
+const allowFlag = process.argv.indexOf('--allow');
+/** The allowed networks, under `--allow`; `null` runs the unrestricted Burrow. */
+const allowed = allowFlag < 0 ? null : (process.argv[allowFlag + 1] ?? '').split(',').filter(Boolean);
+if (allowed?.length === 0) throw new Error('--allow takes a comma-separated list of CIDRs');
+
 const token = randomBytes(24).toString('hex');
 const temp = await mkdtemp(join(tmpdir(), 'dormouse-direct-interop-'));
 
@@ -66,8 +77,13 @@ const temp = await mkdtemp(join(tmpdir(), 'dormouse-direct-interop-'));
 // bundles share nothing, so they are built together.
 const [, browserBundle] = await Promise.all([
   build({
-    entryPoints: [here('../../lib/src/remote/direct/direct-peer.ts')],
-    outfile: join(temp, 'direct-peer.cjs'),
+    // The shipped wrapper, and the shipped Local networks hold on it.
+    entryPoints: {
+      'direct-peer': here('../../lib/src/remote/direct/direct-peer.ts'),
+      'local-networks': here('../../lib/src/host/remote/local-networks.ts'),
+    },
+    outdir: temp,
+    outExtension: { '.js': '.cjs' },
     bundle: true,
     platform: 'node',
     format: 'cjs',
@@ -86,12 +102,43 @@ const [, browserBundle] = await Promise.all([
     define: { __INTEROP_TOKEN__: JSON.stringify(token) },
   }),
 ]);
-const { DirectPeer } = createRequire(import.meta.url)(join(temp, 'direct-peer.cjs'));
+const requireBundle = createRequire(import.meta.url);
+const { DirectPeer } = requireBundle(join(temp, 'direct-peer.cjs'));
+const { bindAddressFor, localNetworksPath } = requireBundle(join(temp, 'local-networks.cjs'));
 const javascript = browserBundle.outputFiles[0].text;
 
 // `iceServers: []` as both shipped factories pass it: host candidates only.
 const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill');
 const addon = sidecarRequire('node-datachannel');
+
+/** What the Local networks hold saw, under `--allow`; see question 4. */
+const path = allowed && {
+  allowed,
+  bindAddress: bindAddressFor(allowed, networkInterfaces()),
+  answerCandidates: null,
+  /** The selected pair as the addon reported it at each check, raw candidates included. */
+  checks: [],
+};
+const connection = new RTCPeerConnection({
+  iceServers: [],
+  ...(path?.bindAddress ? { bindAddress: path.bindAddress } : {}),
+});
+const policy = allowed && localNetworksPath(allowed);
+/** The shipped policy, recording what the addon's selected pair said each time it was asked. */
+const pathPolicy = policy && {
+  describe: policy.describe,
+  refusal: (pair) => {
+    const raw = connection.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+    const refusal = policy.refusal(pair);
+    path.checks.push({
+      pair,
+      local: raw && { type: raw.local.type, candidate: raw.local.candidate },
+      remote: raw && { type: raw.remote.type, candidate: raw.remote.candidate },
+      refusal,
+    });
+    return refusal;
+  },
+};
 
 const frames = FRAME_SIZES.map((size, index) => Buffer.alloc(size, index + 1));
 /** What the addon got back, in the order it got it. */
@@ -122,7 +169,8 @@ const maybeFinish = () => {
 };
 
 const peer = new DirectPeer({
-  peer: new RTCPeerConnection({ iceServers: [] }),
+  peer: connection,
+  pathPolicy,
   handlers: {
     // The addon sends; a failure comes back through `onClosed` in its own words.
     onOpen: () => {
@@ -190,6 +238,12 @@ const server = createServer(async (req, res) => {
         finish({ ok: false, error: 'the addon declined the browser offer' });
         return;
       }
+      if (path) {
+        path.answerCandidates = answer
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith('a=candidate'))
+          .map((line) => line.split(' ')[4]);
+      }
       send(200, { sdp: answer });
       return;
     }
@@ -236,6 +290,7 @@ console.log(
     {
       ...verdict,
       browser: browserReport,
+      ...(path ? { path } : {}),
       addon: {
         received: returned.map((frame) => frame.length),
         expected: FRAME_SIZES,

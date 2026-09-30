@@ -21,6 +21,7 @@ import {
   type DirectChannelLike,
   type DirectPeerLike,
   type DirectSctpLike,
+  type DirectSelectedPair,
   type DirectSessionDescription,
 } from './direct-peer';
 import { FakeEventTarget } from '../test-fake-socket';
@@ -168,6 +169,11 @@ export class FakePeer implements DirectPeerLike {
   #gathering: string;
   #connectionState = 'connecting';
   closed = false;
+  /**
+   * What the transport's `getSelectedCandidatePair()` reports, as addresses: a
+   * pair on one LAN unless a case says otherwise, `null` for none.
+   */
+  selectedPair: DirectSelectedPair | null = { local: '192.168.1.2', remote: '192.168.1.3' };
 
   constructor(
     role: FakePeerRole,
@@ -191,7 +197,17 @@ export class FakePeer implements DirectPeerLike {
   get sctp(): DirectSctpLike | null {
     const limit = this.#options.maxMessageSize;
     if (limit === null) return null;
-    return { maxMessageSize: limit ?? NOISE_MAX_MESSAGE_LENGTH };
+    const pair = this.selectedPair;
+    const candidate = (address: string | null) => ({ address });
+    return {
+      maxMessageSize: limit ?? NOISE_MAX_MESSAGE_LENGTH,
+      transport: {
+        iceTransport: {
+          getSelectedCandidatePair: () =>
+            pair && { local: candidate(pair.local), remote: candidate(pair.remote) },
+        },
+      },
+    };
   }
 
   get connectionState(): string {
@@ -202,6 +218,12 @@ export class FakePeer implements DirectPeerLike {
   setConnectionState(state: string): void {
     this.#connectionState = state;
     this.#emit('connectionstatechange', {});
+  }
+
+  /** ICE moves the connection onto another pair, firing the one event a stack gives for it. */
+  reselect(pair: DirectSelectedPair | null): void {
+    this.selectedPair = pair;
+    this.#emit('iceconnectionstatechange', {});
   }
 
   /** This end's channel defect, if the run put one on this side. */
@@ -255,10 +277,14 @@ export class FakePeer implements DirectPeerLike {
   }
 
   #describe(kind: 'offer' | 'answer'): string {
+    // One host candidate, at this end's half of the pair it will select, for a
+    // policy that strips the rest.
+    const host = this.selectedPair?.local ?? '192.168.1.2';
     const body =
       'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' +
       'm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\n' +
-      `a=setup:${kind === 'offer' ? 'actpass' : 'active'}\r\na=mid:0\r\na=sctp-port:5000\r\n`;
+      `a=setup:${kind === 'offer' ? 'actpass' : 'active'}\r\na=mid:0\r\na=sctp-port:5000\r\n` +
+      `a=candidate:1 1 udp 2130706431 ${host} 9 typ host\r\n`;
     // A machine with many interfaces describes itself in more candidates than a
     // signal can carry; the attempt is skipped or declined rather than sent.
     return this.#options.oversize === kind ? `${body}a=x:${'c'.repeat(4000)}\r\n` : body;

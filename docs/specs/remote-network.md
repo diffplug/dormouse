@@ -21,7 +21,7 @@ Reserved: `anywhere`, which the policy's shape accepts and no build offers, is t
 - **Until the policy is read, the service reads it as `nothing`**; a read that fails leaves the Burrow down, and `setNetworkPolicy` saves over it.
 - **`setNetworkPolicy` takes a policy only exactly**: its three keys, a level the build offers, at most 32 canonical CIDRs (`canonicalCidr` returns each unchanged) listed once, and a boolean `autoUpdate`. **Must save before acting**: a save that fails changes nothing.
 - **A change to the level or the allowed networks ends the live one-time link or session with `user-ended`, and starts or stops the relay socket to match**; a narrowed policy never leaves an old path exempt. `autoUpdate` alone ends nothing (rationale).
-- **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, and this machine's interfaces, each with its addresses' canonical prefixes (loopback and IPv6 link-local left out) and a `lan`, `vpn`, or `virtual` kind.
+- **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, and this machine's interfaces, each with its addresses' canonical prefixes (loopback and IPv6 link-local left out) and a `lan`, `vpn`, or `virtual` kind. **A Tailscale address reported as a host route offers its tailnet range** — `100.64.0.0/10` or `fd7a:115c:a1e0::/48` — since a `/32` admits no phone; any other host route is offered as reported (rationale).
 
 **Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater ("Updates"); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
 
@@ -32,6 +32,20 @@ Reserved: `anywhere`, which the policy's shape accepts and no build offers, is t
 - **Managed voice asks the service before every speak** and answers `network-off` without a request.
 
 Source of truth: `NetworkPolicy`, `levelsFor`, and `storedNetworkPolicy` in `lib/src/remote/network-policy.ts`; `peekNetworkPolicyFor` and `BurrowService` in `lib/src/host/remote/service.ts`; `canonicalCidr`, `addressAllowed`, and `classifyNetworkInterfaces` in `lib/src/host/remote/network-interfaces.ts`; `NETWORK_POLICY_KEY` in `vscode-ext/src/burrow-store.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `subscribeToNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`. Pinned by `lib/src/host/remote/service.test.ts` and `lib/src/host/remote/network-interfaces.test.ts`.
+
+## Local networks
+
+Under `local` each one-time runtime is held to the networks allowed at its open; a change ends it ("Policy").
+
+- **The attempt's UDP socket binds the one allowed address when exactly one is present**: a single interface holds every address in the allowed networks, loopback and IPv6 link-local aside, and exactly one in its preferred family, IPv4 over IPv6. **Otherwise it listens on every interface** (`docs/specs/remote-security-model.md` -> "Direct path"), and the level restricts the path, not the listener. Chosen per attempt (rationale).
+- **Must strip every candidate outside the allowed networks from the Burrow's answer**, and send a default address outside them as `0.0.0.0`. **An answer left with no candidate refuses the attempt.**
+- **Must check the selected candidate pair on the Burrow before its channel reports open**, and again on every ICE or connection state change while it is open and `connected`: both ends parse as IP addresses — IPv4-mapped IPv6 matching its IPv4 range — each inside an allowed CIDR. **A hostname, an mDNS name, or a pair the stack will not report refuses**, and a frame arriving before the open is checked first.
+- **Never trust SDP candidates, Hosted-observed addresses, or Client claims** as path evidence; only the Burrow's own ICE agent answers (rationale).
+- **A refusal is a violation**: it ends the connection `network-not-allowed` (`docs/specs/one-time.md` -> "Burrow runtime"), switched or not.
+- **The check gates terminal traffic, not approval** (rationale): an off-network phone holding a link can reach the two-digit prompt and still receives no terminal byte.
+- **Never describe the level as proof of proximity** — a range is an address range, which another network can reuse, and a permitted peer can forward.
+
+Source of truth: `bindAddressFor` and `localNetworksPath` in `lib/src/host/remote/local-networks.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `DirectPathPolicy` and `DirectPeer` in `lib/src/remote/direct/direct-peer.ts`; `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`; `BurrowService` in `lib/src/host/remote/service.ts`. Pinned by `lib/src/host/remote/local-networks.test.ts`, `lib/src/remote/direct/direct-peer.test.ts`, `lib/src/remote/burrow/one-time-runtime.test.ts`, `lib/src/host/remote/service.test.ts`, and on the real addon `lib/src/host/remote/native-direct-peer.test.ts`; against a browser by hand, `scripts/direct-interop/run.mjs --allow` (rationale).
 
 ## Updates
 
@@ -46,9 +60,8 @@ The lifecycle is `docs/specs/auto-update.md` → "How it works". Source of truth
 **Scope: remote-network** — build in order:
 
 1. **Policy and Nothing**: Settings → Network.
-2. **Local networks**: the path check, for one-time sessions.
-3. **Anywhere**: Cloudflare STUN, for one-time sessions.
-4. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`; Local networks and Anywhere then cover paired phones.
+2. **Anywhere**: Cloudflare STUN, for one-time sessions.
+3. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`; Local networks and Anywhere then cover paired phones.
 
 The UI contract is the prototype `NetworkSettings` in `lib/src/components/NetworkSettings.tsx` (story `Prototypes/NetworkSettings`); its `connectionsFor` list is this table in the user's words, and each stage changes the two together.
 
@@ -61,14 +74,10 @@ The UI contract is the prototype `NetworkSettings` in `lib/src/components/Networ
 | Anywhere | Hosted builds | `stun:stun.cloudflare.com:3478` | paired phones only, via Hosted | any network |
 | My Relay only | self-host builds | none | via the baked Relay | any network |
 
-### Local networks
+### Allowed networks
 
 - **Choosing Local networks must first allow every prefix, both families, of the active LAN interface**; a VPN, bridge, container, or VM interface is never allowed by default.
-- **Must check the selected candidate pair on the Burrow before its channel reports open**: both ends parse as IP addresses, IPv4-mapped IPv6 unwrapped, each inside an allowed CIDR. A hostname, an mDNS name, or a missing pair refuses. Must re-check on every ICE state change while connected; a violation disposes the session.
-- **The check gates terminal traffic, not approval** (rationale): an off-network phone holding a link can reach the two-digit prompt and still receives no terminal byte.
-- **Never trust SDP candidates, Hosted-observed addresses, or Client claims** as path evidence; only the Burrow's own ICE agent answers.
-- **Must strip candidates outside the allowed networks from the Burrow's answer.**
-- **Allowed networks restrict the path, not the listener**: the attempt's UDP socket still answers on every interface (`docs/specs/remote-security-model.md` -> "Direct path"). Never describe the level as a listener restriction, or as proof of proximity — a range is an address range, which another network can reuse, and a permitted peer can forward.
+- **Where several addresses are allowed, a per-attempt UDP forwarder may narrow the listener** (rationale): the peer binds loopback, one socket per allowed address relays to it, dropping sources outside the allowed networks, and the answer names those sockets. Until then the listener in that case is every interface.
 
 ### Anywhere
 

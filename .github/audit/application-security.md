@@ -39,7 +39,10 @@ nothing and must reach the direct path — `docs/specs/security-remote.md` ->
 "One-time connection"); `lib/src/host/relay-origin.ts` and the one-time half
 of `service.ts` (the one baked origin and its nullable Hosted origin, the
 rendezvous gate before any socket, the single runtime, and the approval routed
-by `kind`);
+by `kind`); `lib/src/host/remote/local-networks.ts` and
+`native-direct-peer.ts` (Local networks' hold on a one-time direct path: the
+bound socket, the stripped answer, and the selected-pair check —
+`docs/specs/security-remote.md` -> "One-time connection");
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they
 promote), `one-time-client.ts` (the one-time phone, which keeps nothing and
@@ -51,6 +54,7 @@ harnesses that already exercise this are
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
 `lib/src/remote/burrow/one-time-runtime.test.ts`,
 `lib/src/remote/client/one-time-e2e.test.ts`,
+`lib/src/host/remote/local-networks.test.ts`,
 `lib/src/host/remote/service.test.ts`,
 `relay/test/malicious-relay.test.mjs`,
 `remote-lib-common/test/security-guarantees.test.mjs`,

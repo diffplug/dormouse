@@ -38,7 +38,7 @@ import {
   type OneTimeState,
 } from './one-time-runtime';
 import type { RemoteApiSessionLike } from './established-session';
-import { DirectPeer, type DirectPeerFactory } from '../direct/direct-peer';
+import { DirectPeer, type DirectPathPolicy, type DirectPeerFactory } from '../direct/direct-peer';
 import {
   FakeDirectNetwork,
   collect,
@@ -116,7 +116,7 @@ function makeRuntime(
     rendezvous?: TestRendezvousOptions;
     network?: FakeDirectNetworkOptions;
     createDirectPeer?: DirectPeerFactory | null;
-  } & Partial<Pick<OneTimeRuntimeOptions, 'burrowLabel'>> = {},
+  } & Partial<Pick<OneTimeRuntimeOptions, 'burrowLabel' | 'directPathPolicy'>> = {},
 ): OneTimeRuntime {
   rendezvous = createTestRendezvous({ now: clock.now, setTimer: clock.setTimer, ...options.rendezvous });
   if (options.network) network = new FakeDirectNetwork(options.network);
@@ -138,6 +138,7 @@ function makeRuntime(
       } satisfies RemoteApiSessionLike;
     },
     createDirectPeer,
+    directPathPolicy: options.directPathPolicy,
     burrowLabel: options.burrowLabel ?? BURROW_LABEL,
     requestApproval: (request) => void approvals.push(request),
     dismissApproval: () => void (dismissals += 1),
@@ -564,6 +565,73 @@ describe('OneTimeRuntime: the session', () => {
     apis[0]!.send({ requestId: '1', ok: true, result: {} });
     await settleUntil(() => inbound.length > 0);
     expect(runtime.state.status).toBe('connected');
+  });
+
+  describe('held to a path policy', () => {
+    /**
+     * Local networks as the fake pair's addresses read it — the address math is
+     * `lib/src/host/remote/local-networks.test.ts`'s — describing as given.
+     */
+    const lanOnly = (describe: DirectPathPolicy['describe'] = (sdp) => sdp): DirectPathPolicy => ({
+      describe,
+      refusal: (pair) =>
+        pair?.local?.startsWith('192.168.1.') && pair.remote?.startsWith('192.168.1.') ? null : 'off the LAN',
+    });
+    const OFF_LAN = { local: '10.0.0.2', remote: '10.0.0.3' };
+
+    /** Offer from the phone and read back the Burrow's answer, as far as the Burrow lets it get. */
+    async function offerFrom(phone: TestOneTimePhone): Promise<void> {
+      const peer = new DirectPeer({
+        peer: network.createOfferer(),
+        setTimer: clock.setTimer,
+        handlers: { onOpen: () => {}, onFrame: () => {}, onClosed: () => {}, onViolation: () => {} },
+      });
+      phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await peer.offer())! });
+      const answer = (await phone.next()) as { sdp: string };
+      await peer.acceptAnswer(answer.sdp);
+    }
+
+    it('connects over a pair the policy allows', async () => {
+      makeRuntime({ directPathPolicy: lanOnly() });
+      await connected();
+      expect(runtime.state.status).toBe('connected');
+    });
+
+    it('ends network-not-allowed on a pair it refuses, before anything is served', async () => {
+      makeRuntime({
+        directPathPolicy: lanOnly(),
+        createDirectPeer: collect(answerers, () => {
+          const answerer = network.createAnswerer();
+          answerer.selectedPair = OFF_LAN;
+          return answerer;
+        }),
+      });
+      const { phone } = await connecting();
+      await offerFrom(phone);
+      await settleUntil(() => runtime.state.status === 'ended');
+      expect(oneTimeEndReason(runtime)).toBe('network-not-allowed');
+      expect(answerers[0]!.closed).toBe(true);
+      expect(apis[0]!.handled).toEqual([]);
+      expect(apis[0]!.disposed).toBe(true);
+    });
+
+    it('ends network-not-allowed, not phone-left, when ICE moves a connected session off it', async () => {
+      makeRuntime({ directPathPolicy: lanOnly() });
+      await connected();
+      answerers[0]!.setConnectionState('connected');
+      answerers[0]!.reselect(OFF_LAN);
+      await settleUntil(() => runtime.state.status === 'ended');
+      expect(oneTimeEndReason(runtime)).toBe('network-not-allowed');
+      expect(answerers[0]!.closed).toBe(true);
+    });
+
+    it('ends network-not-allowed when no candidate of its own is on an allowed network', async () => {
+      makeRuntime({ directPathPolicy: lanOnly(() => null) });
+      const { phone } = await connecting();
+      phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await network.createOfferer().createOffer()).sdp! });
+      await settleUntil(() => runtime.state.status === 'ended');
+      expect(oneTimeEndReason(runtime)).toBe('network-not-allowed');
+    });
   });
 
   it('ends phone-left when the channel is lost after the switch', async () => {

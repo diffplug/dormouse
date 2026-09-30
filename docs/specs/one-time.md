@@ -184,6 +184,7 @@ decides them; a runtime never enters either.
 | `expired` | a link past its expiry, claimed or not; a late request or confirmation; room close `4010` or `4014` |
 | `phone-left` | room close `4013` before the switch; any session failure after it |
 | `direct-failed` | a decline, an abandoned attempt, a session failure before the switch, or the direct deadline |
+| `network-not-allowed` | the path check refused the direct path (`docs/specs/remote-network.md` -> "Local networks") |
 | `idle` | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` without a decrypted phone message |
 | `unreachable` | no room frame by the open deadline, a first message that is not one, or a socket lost before it |
 | `rendezvous-lost` | any other close before the switch |
@@ -391,7 +392,8 @@ Source of truth: `devConfig` in `hosted/scripts/dev-one-time.mjs`. Pinned by
 enrollment**: it works un-enrolled, survives `clearEnrollment` and
 `reconnect`, and `dispose()` ends it. Its label is the enrollment's, else
 `suggestedBurrowLabel(kind)`; its provider and direct-peer factory are the
-enrolled runtime's.
+enrolled runtime's, held under Local networks to the allowed networks
+(`docs/specs/remote-network.md` -> "Local networks").
 
 | Command | Answers |
 | --- | --- |
@@ -457,7 +459,7 @@ right cluster (`docs/specs/layout.md` -> "Baseboard").
 | `confirming` | "Type the two digits your phone shows into the dialog." | Cancel |
 | `connecting` | "Connecting directly…" | Cancel |
 | `connected` | the phone's label, then "has full control of your terminals." | End |
-| `ended` | one fixed sentence per reason, `direct-failed`'s naming the same Wi-Fi | New link, Done |
+| `ended` | one fixed sentence per reason, `direct-failed`'s naming the same Wi-Fi, `network-not-allowed`'s Settings → Network | New link, Done |
 
 - **The panel renders the service's state and owns only its busy and error**; a
   refused `oneTimeOpen` renders inline. **Closing Settings changes nothing**:
@@ -492,4 +494,4 @@ Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
 
 ## Future
 
-**Scope: one-time-anywhere** — the Local networks path check and Anywhere's STUN follow the **remote-network** scope in [remote-network.md](./remote-network.md). A per-IP cap on concurrent rooms remains beside the mint limit.
+**Scope: one-time-anywhere** — Anywhere's STUN follows the **remote-network** scope in [remote-network.md](./remote-network.md). A per-IP cap on concurrent rooms remains beside the mint limit.

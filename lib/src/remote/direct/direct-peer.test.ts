@@ -17,7 +17,12 @@ import {
   NOISE_MAX_MESSAGE_LENGTH,
 } from 'remote-lib-common';
 
-import { DirectPeer, type DirectPeerHandlers } from './direct-peer';
+import {
+  DirectPeer,
+  type DirectPathPolicy,
+  type DirectPeerHandlers,
+  type DirectSelectedPair,
+} from './direct-peer';
 import { FakeDirectNetwork, flushMicrotasks, type FakeDirectNetworkOptions } from './test-fake-peer';
 import { fakeTimers } from '../test-timers';
 
@@ -40,8 +45,11 @@ function handlers(): DirectPeerHandlers & {
   return record;
 }
 
-/** Both ends of one negotiation, sharing a clock the test drives. */
-function pair(options: FakeDirectNetworkOptions = {}) {
+/**
+ * Both ends of one negotiation, sharing a clock the test drives; the Burrow's
+ * held to `burrowPolicy` where a case gives one.
+ */
+function pair(options: FakeDirectNetworkOptions = {}, burrowPolicy?: DirectPathPolicy) {
   const network = new FakeDirectNetwork(options);
   const timers = fakeTimers();
   const client = handlers();
@@ -57,13 +65,18 @@ function pair(options: FakeDirectNetworkOptions = {}) {
     offerer,
     answerer,
     clientPeer: new DirectPeer({ peer: offerer, handlers: client, setTimer: timers.setTimer }),
-    burrowPeer: new DirectPeer({ peer: answerer, handlers: burrow, setTimer: timers.setTimer }),
+    burrowPeer: new DirectPeer({
+      peer: answerer,
+      handlers: burrow,
+      pathPolicy: burrowPolicy,
+      setTimer: timers.setTimer,
+    }),
   };
 }
 
 /** One negotiated pair with both channels open, as most cases start. */
-async function connected(options: FakeDirectNetworkOptions = {}) {
-  const run = pair(options);
+async function connected(options: FakeDirectNetworkOptions = {}, burrowPolicy?: DirectPathPolicy) {
+  const run = pair(options, burrowPolicy);
   const offer = await run.clientPeer.offer();
   await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
   await flushMicrotasks();
@@ -411,6 +424,122 @@ describe('DirectPeer', () => {
       expect(timers.live).toEqual([]);
       expect(client.closes).toEqual([]);
       expect(clientPeer.isOpen).toBe(true);
+    });
+  });
+
+  describe('the path policy', () => {
+    /**
+     * A policy allowing only `192.168.1.0/24` pairs, by string prefix — the
+     * address math is the host's, and `local-networks.test.ts` pins it — that
+     * records every pair it was asked about.
+     */
+    function lanOnly(describe: DirectPathPolicy['describe'] = (sdp) => sdp) {
+      const asked: Array<DirectSelectedPair | null> = [];
+      const onLan = (address: string | null) => address?.startsWith('192.168.1.') ?? false;
+      const policy: DirectPathPolicy = {
+        describe,
+        refusal: (pair) => {
+          asked.push(pair);
+          return pair && onLan(pair.local) && onLan(pair.remote) ? null : 'off the LAN';
+        },
+      };
+      return { policy, asked };
+    }
+
+    it('checks the selected pair before reporting the open', async () => {
+      const { policy, asked } = lanOnly();
+      const { burrowPeer, burrow } = await connected({}, policy);
+
+      expect(asked).toEqual([{ local: '192.168.1.2', remote: '192.168.1.3' }]);
+      expect(burrow.opens).toBe(1);
+      expect(burrowPeer.isOpen).toBe(true);
+    });
+
+    it('refuses a path it does not allow as a violation, before anything rides it', async () => {
+      const { policy } = lanOnly();
+      const run = pair({}, policy);
+      run.answerer.selectedPair = { local: '10.0.0.2', remote: '10.0.0.3' };
+      const offer = await run.clientPeer.offer();
+      await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
+      await flushMicrotasks();
+
+      expect(run.burrow.opens).toBe(0);
+      expect(run.burrow.violations).toEqual(['off the LAN']);
+      expect(run.burrow.closes).toEqual([]);
+      expect(run.answerer.closed).toBe(true);
+      expect(run.burrowPeer.isOpen).toBe(false);
+    });
+
+    it('refuses where the stack reports no pair', async () => {
+      const { policy, asked } = lanOnly();
+      const run = pair({}, policy);
+      run.answerer.selectedPair = null;
+      const offer = await run.clientPeer.offer();
+      await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
+      await flushMicrotasks();
+
+      expect(asked).toEqual([null]);
+      expect(run.burrow.violations).toEqual(['off the LAN']);
+    });
+
+    it('checks again when the connection comes back connected, on whatever pair it has', async () => {
+      const { policy } = lanOnly();
+      const { answerer, burrow } = await connected({}, policy);
+
+      answerer.setConnectionState('disconnected');
+      answerer.selectedPair = { local: '10.0.0.2', remote: '192.168.1.3' };
+      answerer.setConnectionState('connected');
+
+      expect(burrow.violations).toEqual(['off the LAN']);
+      expect(answerer.closed).toBe(true);
+    });
+
+    it('checks again when ICE moves an open connection onto another pair', async () => {
+      const { policy } = lanOnly();
+      const { answerer, burrow } = await connected({}, policy);
+      answerer.setConnectionState('connected');
+      expect(burrow.violations).toEqual([]);
+
+      answerer.reselect({ local: '192.168.1.2', remote: '10.0.0.3' });
+
+      expect(burrow.violations).toEqual(['off the LAN']);
+    });
+
+    it('leaves a connection on its way down to the connection’s own rules', async () => {
+      const { policy } = lanOnly();
+      const { answerer, burrow, timers } = await connected({}, policy);
+      answerer.setConnectionState('disconnected');
+      // ICE reselecting under a gap is not a path to check: the grace decides.
+      answerer.reselect(null);
+      expect(burrow.violations).toEqual([]);
+
+      timers.fireAt(DIRECT_DISCONNECTED_GRACE_MS);
+      expect(burrow.closes).toEqual(['the direct connection stayed disconnected']);
+      expect(burrow.violations).toEqual([]);
+    });
+
+    it('checks a frame that arrives before the open, which no stack should deliver', async () => {
+      const { policy } = lanOnly();
+      const run = pair({ opening: 'manual' }, policy);
+      run.answerer.selectedPair = { local: '10.0.0.2', remote: '10.0.0.3' };
+      const offer = await run.clientPeer.offer();
+      await run.clientPeer.acceptAnswer((await run.burrowPeer.answer(offer!))!);
+
+      run.network.answererChannel!.receiveRaw(new ArrayBuffer(8));
+
+      expect(run.burrow.frames).toEqual([]);
+      expect(run.burrow.violations).toEqual(['off the LAN']);
+    });
+
+    it('sends its description as the policy describes it, and refuses when nothing is left', async () => {
+      const stripped = pair({}, lanOnly((sdp) => `${sdp}a=described\r\n`).policy);
+      const offer = await stripped.clientPeer.offer();
+      expect(await stripped.burrowPeer.answer(offer!)).toMatch(/a=described\r\n$/);
+
+      const empty = pair({}, lanOnly(() => null).policy);
+      expect(await empty.burrowPeer.answer((await empty.clientPeer.offer())!)).toBeNull();
+      expect(empty.burrow.violations).toEqual(['no candidate of this end is on an allowed network']);
+      expect(empty.answerer.closed).toBe(true);
     });
   });
 });

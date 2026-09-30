@@ -169,7 +169,26 @@ describe('classifyNetworkInterfaces', () => {
       ['vboxnet0', 'Virtual network', 'virtual'],
       ['virbr0', 'Virtual network', 'virtual'],
     ]);
-    expect(classified[0]!.prefixes).toEqual(['100.101.102.103/32', 'fd7a:115c:a1e0::1/128']);
+    expect(classified.find(({ id }) => id === 'wg0')!.prefixes).toEqual(['10.8.0.0/24']);
+  });
+
+  it('offers a Tailscale host route as the tailnet range it is drawn from', () => {
+    const classified = classifyNetworkInterfaces({
+      // macOS: a /32 and the tailnet's own /48.
+      utun4: [address('100.101.102.103/32'), address('fd7a:115c:a1e0::4339:e51a/48')],
+      // Linux: host routes in both families.
+      tailscale0: [address('100.64.0.9/32'), address('fd7a:115c:a1e0::9/128')],
+      // A CGNAT address with a real netmask is a network of its own, kept as it is.
+      en7: [address('100.64.5.6/24')],
+      // A host route outside Tailscale's ranges admits only this machine, as reported.
+      wg0: [address('10.8.0.2/32')],
+    });
+    expect(classified.map(({ id, prefixes }) => [id, prefixes])).toEqual([
+      ['utun4', ['100.64.0.0/10', 'fd7a:115c:a1e0::/48']],
+      ['tailscale0', ['100.64.0.0/10', 'fd7a:115c:a1e0::/48']],
+      ['en7', ['100.64.5.0/24']],
+      ['wg0', ['10.8.0.2/32']],
+    ]);
   });
 });
 

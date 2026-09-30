@@ -56,7 +56,7 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import type { DirectPeerFactory } from '../direct/direct-peer';
+import type { DirectPathPolicy, DirectPeerFactory } from '../direct/direct-peer';
 import { parseOneTimeFrame, RendezvousHold } from '../one-time-rendezvous';
 import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import {
@@ -87,6 +87,8 @@ export type OneTimeEndReason =
   | 'phone-left'
   /** No direct path: declined, abandoned, or not switched by `ONE_TIME_DIRECT_DEADLINE_MS`. */
   | 'direct-failed'
+  /** The direct path's policy refused it: no allowed network carried it, before the switch or after. */
+  | 'network-not-allowed'
   /** The session went `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` without a word from the phone. */
   | 'idle'
   /** The rendezvous never announced a room. */
@@ -161,6 +163,13 @@ export interface OneTimeRuntimeOptions {
    * `direct-failed`.
    */
   readonly createDirectPeer: DirectPeerFactory | null;
+  /**
+   * What the network policy holds the direct path to — under Local networks,
+   * the allowed networks (`docs/specs/remote-network.md` -> "Local networks") —
+   * or absent for no restriction. A refusal ends the connection
+   * `network-not-allowed`.
+   */
+  readonly directPathPolicy?: DirectPathPolicy | null;
   /** This machine's name, as the phone shows it; bounded here before it is sent. */
   readonly burrowLabel: string;
   /** Surface the request for local approval. */
@@ -213,6 +222,13 @@ export class OneTimeRuntime {
   readonly #createWebSocket: (url: string) => RemoteWebSocket;
   readonly #createSession: OneTimeRuntimeOptions['createSession'];
   readonly #createDirectPeer: DirectPeerFactory | null;
+  /** The options' policy, noting in {@link #pathRefused} whether it has refused. */
+  readonly #directPathPolicy: DirectPathPolicy | null;
+  /**
+   * Whether the path policy refused this connection's direct path. Its refusal
+   * reaches here as a session failure like any other, so this is what names it.
+   */
+  #pathRefused = false;
   readonly #burrowLabel: string;
   readonly #requestApproval: (request: OneTimeApprovalRequest) => void;
   readonly #dismissApproval: () => void;
@@ -275,6 +291,19 @@ export class OneTimeRuntime {
     this.#createWebSocket = options.createWebSocket;
     this.#createSession = options.createSession;
     this.#createDirectPeer = options.createDirectPeer;
+    const policy = options.directPathPolicy ?? null;
+    this.#directPathPolicy = policy && {
+      describe: (sdp) => {
+        const described = policy.describe(sdp);
+        if (described === null) this.#pathRefused = true;
+        return described;
+      },
+      refusal: (pair) => {
+        const refusal = policy.refusal(pair);
+        if (refusal !== null) this.#pathRefused = true;
+        return refusal;
+      },
+    };
     this.#burrowLabel = options.burrowLabel;
     this.#requestApproval = options.requestApproval;
     this.#dismissApproval = options.dismissApproval;
@@ -601,6 +630,7 @@ export class OneTimeRuntime {
             },
           }),
         createDirectPeer: this.#createDirectPeer,
+        directPathPolicy: this.#directPathPolicy,
         sendRelay: (relayed) => this.#sendFrame('transport', relayed),
         onFatal: (reason) => this.#onSessionFatal(e2e, reason),
         onRelayedApp: () => this.#onRelayedApp(e2e),
@@ -662,11 +692,15 @@ export class OneTimeRuntime {
     this.#end('burrow-error');
   }
 
-  /** The session is over: before the switch no direct path formed, after it the phone went. */
+  /**
+   * The session is over: the path policy refused its path, or else before the
+   * switch no direct path formed and after it the phone went.
+   */
   #onSessionFatal(e2e: EstablishedE2eSession, reason: string): void {
     if (this.#established !== e2e) return;
     console.warn(`[one-time] the session ended: ${reason}`);
-    this.#end(this.#state.status === 'connected' ? 'phone-left' : 'direct-failed');
+    if (this.#pathRefused) this.#end('network-not-allowed');
+    else this.#end(this.#state.status === 'connected' ? 'phone-left' : 'direct-failed');
   }
 
   // --- Deadlines -------------------------------------------------------------
