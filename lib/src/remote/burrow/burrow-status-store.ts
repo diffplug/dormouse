@@ -106,6 +106,8 @@ const STATUS_FIELDS: {
   enrolled: Object.is,
   serving: Object.is,
   relayUrl: Object.is,
+  relayOrigin: Object.is,
+  relayMode: Object.is,
   burrowId: Object.is,
   connection: Object.is,
   pairedClients: Object.is,
@@ -266,22 +268,17 @@ async function readBurrowStatus(): Promise<void> {
 }
 
 /**
- * Enroll this machine with a coordinating Relay.
+ * Enroll this machine with its build's Relay.
  *
  * The password is a bearer credential and is passed straight through to the
- * service, which is what talks to the Relay; it is never stored here. The
- * service refuses an origin outside this build's baked relay allowlist *before*
- * the password leaves the machine (`docs/specs/relay.md`, "Where a Burrow may
- * reach a Relay"), so a mistyped origin fails closed rather than leaking
- * it. Rejections propagate verbatim — the caller renders them.
+ * service, which is what talks to the Relay; it is never stored here. There is
+ * no origin to pass: the service posts only to the build's baked relay origin
+ * (`docs/specs/relay.md` → "Relay origin"). Rejections propagate verbatim —
+ * the caller renders them.
  */
-export async function enrollBurrow(
-  relayUrl: string,
-  password: string,
-  label: string,
-): Promise<void> {
+export async function enrollBurrow(password: string, label: string): Promise<void> {
   const active = requireBurrowLink();
-  await active.command('enroll', { relayUrl, password, label });
+  await active.command('enroll', { password, label });
   await refreshAfterMutation();
 }
 
@@ -291,12 +288,8 @@ export async function enrollBurrow(
  * (`service-protocol.ts` → `BurrowConsoleStatus.offer`).
  *
  * `origin` is the one the card *displayed*, echoed so the service can refuse a
- * file rewritten since — it is not what gets enrolled against, which comes off
- * the file along with the token this realm never sees.
- *
- * Rejections propagate verbatim, including the same allowlist refusal the typed
- * form gets: a Relay installed on this machine can still be an origin this
- * build was not compiled to reach.
+ * file rewritten since; the token comes off the file, which this realm never
+ * sees. Rejections propagate verbatim, like the typed form's.
  */
 export async function enrollOfferBurrow(origin: string, label: string): Promise<void> {
   const active = requireBurrowLink();

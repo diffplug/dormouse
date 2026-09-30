@@ -516,9 +516,12 @@ export function RemoteControlSection() {
  * is the same whether or not this machine enrolled (`OneTimeConnection.tsx`).
  *
  * **Enrolled, the Relay's view is always shown.** Un-enrolled, Persistent Relay
- * is a disclosure that **stays folded until clicked**, installer's offer or not.
- * **Folding hides the enroll view, never unmounts it**, for the same reason
- * {@link EnrollView} folds its own.
+ * is a disclosure that **stays folded until clicked**, installer's offer or not,
+ * and holds what the build's mode allows (`docs/specs/relay.md` → "Relay
+ * origin"): in a Hosted build only the disabled Hosted button, since the one
+ * Relay this build reaches is Hosted's; in a self-host build the enroll view
+ * against its baked origin. **Folding hides the enroll view, never unmounts it**,
+ * for the same reason {@link EnrollView} folds its own.
  */
 function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
   const [unfolded, setUnfolded] = useState(false);
@@ -544,8 +547,9 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
         )}
         {status.enrolled ? null : (
           <div className={FIELD_HINT}>
-            Enroll this Dormouse with hosted.dormouse.sh or a Relay you run, so paired phones
-            can reconnect any time.
+            {status.relayMode === 'self-host'
+              ? 'Enroll this Dormouse with the Relay it was built for, so paired phones can reconnect any time.'
+              : 'Enroll this Dormouse with hosted.dormouse.sh, so paired phones can reconnect any time.'}
           </div>
         )}
 
@@ -562,20 +566,29 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
         ) : (
           // The same framed panel as "Set up a phone", the other disclosure here.
           <div className="mt-2 rounded border border-border p-2" hidden={!unfolded}>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <button type="button" disabled className={modalActionButton()}>
-                Use hosted.dormouse.sh
-              </button>
-              <span className="text-xs text-muted">
-                Coming soon.{' '}
-                <ExternalTextLink href={HOSTED_REMOTE_URL}>Get updates on Hosted.</ExternalTextLink>
-              </span>
-            </div>
-            <div className={`${FIELD_LABEL} mt-3`}>
-              Or a <ExternalTextLink href={SELF_HOST_URL}>self-hosted Relay</ExternalTextLink> you
-              run
-            </div>
-            <EnrollView offer={status.offer} suggestedLabel={status.suggestedLabel} />
+            {status.relayMode === 'self-host' ? (
+              <EnrollView
+                relayOrigin={status.relayOrigin}
+                offer={status.offer}
+                suggestedLabel={status.suggestedLabel}
+              />
+            ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <button type="button" disabled className={modalActionButton()}>
+                    Use hosted.dormouse.sh
+                  </button>
+                  <span className="text-xs text-muted">
+                    Coming soon.{' '}
+                    <ExternalTextLink href={HOSTED_REMOTE_URL}>Get updates on Hosted.</ExternalTextLink>
+                  </span>
+                </div>
+                <div className={`${FIELD_HINT} mt-3`}>
+                  A <ExternalTextLink href={SELF_HOST_URL}>self-hosted Relay</ExternalTextLink> takes
+                  a Dormouse built for its address.
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -584,11 +597,12 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
 }
 
 /**
- * Un-enrolled, with or without an installer's offer on this machine.
+ * Un-enrolled in a self-host build, with or without an installer's offer for
+ * its Relay on this machine.
  *
  * With one, the offer leads and the typed form folds away behind a disclosure:
- * a user who ran the installer here has nothing to type, and a Relay somewhere
- * else is the rarer case. Without one, nothing about the form changes.
+ * a user who ran the installer here has nothing to type, and the setup password
+ * is the rarer case. Without one, nothing about the form changes.
  *
  * **One tree, whichever of those it is.** `offer` flips underneath this
  * component — the 2 s poll sees the installer mint one, and sees the file
@@ -599,9 +613,11 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
  * appeared on disk (`docs/specs/relay.md`).
  */
 function EnrollView({
+  relayOrigin,
   offer,
   suggestedLabel,
 }: {
+  relayOrigin: string;
   offer: BurrowConsoleStatus['offer'];
   suggestedLabel: string;
 }) {
@@ -645,21 +661,20 @@ function EnrollView({
             >
               {/* The same `+`/`−` affordance as Pocket's "First-time setup"
                   disclosure, so a fold reads as one before it is clicked. */}
-              {showForm ? '− ' : '+ '}Enroll with a different Relay…
+              {showForm ? '− ' : '+ '}Enroll with the setup password…
             </button>
           </div>
         </>
       ) : null}
       {/* Hidden, never unmounted — see the note above. */}
       <EnrollForm
+        relayOrigin={relayOrigin}
         suggestedLabel={suggestedLabel}
         hidden={origin !== null && !showForm}
         busy={busy === 'form'}
         disabled={busy !== null}
         error={formError}
-        onEnroll={(relayUrl, password, label) =>
-          run('form', () => enrollBurrow(relayUrl, password, label))
-        }
+        onEnroll={(password, label) => run('form', () => enrollBurrow(password, label))}
       />
     </div>
   );
@@ -670,9 +685,9 @@ function EnrollView({
  *
  * The origin is shown but not editable, and the label is all the user chooses
  * (`service-protocol.ts` → `BurrowConsoleStatus.offer`). Every refusal the
- * typed form can hit applies here too — an installed Relay can still sit on an
- * origin this build was not compiled to reach — so the error renders in the same
- * place, in the same words. The busy/error pair belongs to {@link EnrollView},
+ * typed form can hit applies here too — the Relay can still report an origin
+ * this build was not made for — so the error renders in the same place, in the
+ * same words. The busy/error pair belongs to {@link EnrollView},
  * because this card is unmounted by a successful enroll and must not be by an
  * offer file that vanished under a failing one.
  */
@@ -934,13 +949,16 @@ function SetupPhonePanel({
 }
 
 /**
- * The three-field form, prefilled with the same suggested name the card uses.
+ * The two-field form under the one Relay this build reaches, prefilled with the
+ * same suggested name the card uses. The origin is named, never typed
+ * (`docs/specs/relay.md` → "Relay origin").
  *
  * `hidden` rather than an unmount, because what is typed here has to survive
  * both of the things that fold it away: refolding the disclosure, and an offer
  * file appearing on disk mid-typing ({@link EnrollView}).
  */
 function EnrollForm({
+  relayOrigin,
   suggestedLabel,
   hidden,
   busy,
@@ -948,29 +966,29 @@ function EnrollForm({
   error,
   onEnroll,
 }: {
+  relayOrigin: string;
   suggestedLabel: string;
   hidden?: boolean;
   busy: boolean;
   disabled: boolean;
   error: string | null;
-  onEnroll: (relayUrl: string, password: string, label: string) => Promise<boolean>;
+  onEnroll: (password: string, label: string) => Promise<boolean>;
 }) {
-  const [relayUrl, setRelayUrl] = useState('');
   const [password, setPassword] = useState('');
   const [label, setLabel] = useState(suggestedLabel);
 
-  const ready = relayUrl.trim() !== '' && password !== '' && label.trim() !== '';
+  const ready = password !== '' && label.trim() !== '';
 
   const submit = useCallback(
     () =>
-      onEnroll(relayUrl.trim(), password, label.trim()).then((succeeded) => {
+      onEnroll(password, label.trim()).then((succeeded) => {
         if (!succeeded) return;
-        // Only on success: a failed enroll is usually a typo in one of the other
-        // fields, and clearing the password would make every retry a re-fetch
-        // from the password manager.
+        // Only on success: a failed enroll is usually a Relay that is down or
+        // unreachable, and clearing the password would make every retry a
+        // re-fetch from the password manager.
         setPassword('');
       }),
-    [onEnroll, relayUrl, password, label],
+    [onEnroll, password, label],
   );
 
   return (
@@ -982,21 +1000,10 @@ function EnrollForm({
         if (ready && !disabled) void submit();
       }}
     >
-      <div className="text-sm leading-relaxed text-muted">
-        Needs a Dormouse build that allows your Relay’s address.
-      </div>
-
-      <label className="mt-2 block">
-        <span className={FIELD_LABEL}>Relay</span>
-        <TextInput
-          value={relayUrl}
-          onChange={setRelayUrl}
-          type="url"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder="https://your-relay"
-        />
-      </label>
+      <div className="text-sm leading-relaxed text-muted">This Dormouse was built for this Relay:</div>
+      <ModalReviewBlock className="mt-1.5" wrap="breakAll">
+        {relayOrigin}
+      </ModalReviewBlock>
 
       <label className="mt-2 block">
         <span className={FIELD_LABEL}>Setup password</span>

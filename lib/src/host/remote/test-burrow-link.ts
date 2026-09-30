@@ -23,22 +23,37 @@ import {
   fromBase64Url,
 } from 'remote-lib-common';
 
-import { DEFAULT_HOSTED_ORIGIN } from '../hosted-origin';
+import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import type { InvitationEvent, BurrowConsoleStatus, SetupQrResult } from './service-protocol';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
 import type { BurrowLink } from '../../lib/platform/types';
 
-/** A machine that has never enrolled: the section shows its three-field form. */
+/** The self-host Relay the fixtures' build was baked for (`docs/specs/relay.md` → "Relay origin"). */
+export const SELF_HOST_RELAY_ORIGIN = 'https://ned-mac.tail9c2f1.ts.net';
+
+/**
+ * A self-host build that has never enrolled: the section shows its two-field
+ * form under the origin it was built for.
+ */
 export const UNENROLLED_STATUS: BurrowConsoleStatus = {
   enrolled: false,
   serving: false,
   relayUrl: null,
+  relayOrigin: SELF_HOST_RELAY_ORIGIN,
+  relayMode: 'self-host',
   burrowId: null,
   connection: 'idle',
   pairedClients: 0,
   suggestedLabel: 'ned-mac',
   offer: null,
+};
+
+/** A stock build: its Relay is Hosted's, so Persistent Relay offers nothing to enroll. */
+export const HOSTED_UNENROLLED_STATUS: BurrowConsoleStatus = {
+  ...UNENROLLED_STATUS,
+  relayOrigin: DEFAULT_RELAY_ORIGIN,
+  relayMode: 'hosted',
 };
 
 /**
@@ -47,7 +62,7 @@ export const UNENROLLED_STATUS: BurrowConsoleStatus = {
  */
 export const OFFER_STATUS: BurrowConsoleStatus = {
   ...UNENROLLED_STATUS,
-  offer: { origin: 'https://ned-mac.tail9c2f1.ts.net' },
+  offer: { origin: SELF_HOST_RELAY_ORIGIN },
 };
 
 /** An enrolled machine, with the fields a caller is likely to vary. */
@@ -57,7 +72,9 @@ export function enrolledStatus(
   return {
     enrolled: true,
     serving: true,
-    relayUrl: 'https://ned-mac.tail9c2f1.ts.net',
+    relayUrl: SELF_HOST_RELAY_ORIGIN,
+    relayOrigin: SELF_HOST_RELAY_ORIGIN,
+    relayMode: 'self-host',
     burrowId: 'burrow-6f1c2a90',
     connection: 'connected',
     pairedClients: 0,
@@ -111,7 +128,7 @@ export function oneTimeWaiting(
   const ephPubBase64Url = '7Hq2LmZx9cVb4NtRkWpYsD0aFgJ1uEiO3yTnC6hQ5Ks';
   return {
     status: 'waiting',
-    url: formatOneTimeLinkUrl(DEFAULT_HOSTED_ORIGIN, {
+    url: formatOneTimeLinkUrl(DEFAULT_RELAY_ORIGIN, {
       roomId: 'Rm4qT0vXc8LbN2kZyPaE1w',
       expiry,
       ephPub: fromBase64Url(ephPubBase64Url),
@@ -189,7 +206,10 @@ export interface PrimedBurrow {
    * (`service-protocol.ts` → `InvitationEvent`).
    */
   setupOutcome?: PairingOutcome;
-  /** What `oneTimeStatus` answers; `idle` by default. */
+  /**
+   * What `oneTimeStatus` answers; by default what the status's build would —
+   * `idle` in a Hosted build, `unavailable` (`self-host`) in a self-host one.
+   */
   oneTime?: OneTimeState;
   /** What `oneTimeOpen` answers; {@link oneTimeWaiting} by default. */
   oneTimeOpen?: OneTimeState;
@@ -202,7 +222,7 @@ export interface PrimedBurrow {
  *
  * Deliberately not a scenario engine: a story is one frame, so `enroll`,
  * `enrollOffer`, `reconnect`, `clearEnrollment` and `oneTimeEnd` resolve without
- * changing the answer. The exception is `enrollError`, because a refused origin is a state the
+ * changing the answer. The exception is `enrollError`, because a refused enrollment is a state the
  * form must render (`docs/specs/relay.md`, "Remote control, in the Settings
  * dialog") and a rejected enroll is the only way to reach it.
  */
@@ -220,7 +240,13 @@ export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
         if (primed.setupQrError) throw new Error(primed.setupQrError);
         return primed.setupQr ?? setupQrResult();
       }
-      if (cmd === 'oneTimeStatus') return primed.oneTime ?? { status: 'idle' };
+      if (cmd === 'oneTimeStatus') {
+        if (primed.oneTime) return primed.oneTime;
+        const relayMode = (primed.status ?? UNENROLLED_STATUS).relayMode;
+        return relayMode === 'self-host'
+          ? ({ status: 'unavailable', reason: 'self-host' } satisfies OneTimeState)
+          : ({ status: 'idle' } satisfies OneTimeState);
+      }
       if (cmd === 'oneTimeOpen') {
         if (primed.oneTimeOpenError) throw new Error(primed.oneTimeOpenError);
         return primed.oneTimeOpen ?? oneTimeWaiting();

@@ -295,10 +295,11 @@ async function stepRelay(ctx) {
 /**
  * Boot the real Burrow in the `innerdogfood` harness and wait for the app.
  *
- * `DORMOUSE_REMOTE_CONNECT_SRC` has to be set *here*, at launch, not later: the
- * harness re-runs `pnpm stage` on the way up, which is what bakes the allowed
- * relay origins into `sidecar/burrow.cjs`. Without it the Burrow refuses a
- * plain-HTTP localhost Relay and enrollment fails with a policy error.
+ * `DORMOUSE_RELAY_ORIGIN` has to be set *here*, at launch, not later: the
+ * harness re-runs `pnpm stage:dev` on the way up, which is what bakes the one
+ * relay origin into `sidecar/burrow.cjs` — a dev build, the only kind that may
+ * bake a plain-HTTP localhost Relay (docs/specs/relay.md → "Relay origin").
+ * Without it the Burrow is a Hosted build with no form to enroll through.
  */
 async function stepBurrow(ctx) {
   const { repoRoot, opts } = ctx;
@@ -307,7 +308,7 @@ async function stepBurrow(ctx) {
     logPath: ctx.path('burrow.log'),
     prefix: 'burrow',
     env: {
-      DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.relayOrigin} ${ctx.relayOrigin.replace(/^http/, 'ws')}`,
+      DORMOUSE_RELAY_ORIGIN: ctx.relayOrigin,
       DORMOUSE_BROWSER_DEV_AB_SESSION: opts.session,
       DORMOUSE_BROWSER_DEV_VITE_PORT: '0',
       DORMOUSE_BROWSER_DEV_HOST_PORT: '0',
@@ -368,7 +369,6 @@ async function stepEnroll(ctx) {
 
   // A Burrow with no enrollment and no offer opens with Persistent Relay folded.
   await ab.run(['find', 'role', 'button', 'click', '--name', 'Persistent Relay', '--exact']);
-  await fillField(ctx, 'input[type="url"]', ctx.relayOrigin);
   await fillField(ctx, 'input[type="password"]', ctx.state.setupPassword);
   await fillField(ctx, 'input[placeholder="e.g. Work laptop"]', opts.machineName);
   await ctx.shot('03-enroll-form.png');

@@ -27,16 +27,18 @@ const IDLE_HINT =
   'Wi-Fi. No account needed.';
 
 /**
- * Why this build offers none, in fixed copy per reason. The origin is baked into
- * the host bundle and never crosses to the webview, so the copy names the
- * shipped one.
+ * Why this build offers none, in fixed copy per reason, and a fallback for a
+ * reason this build does not know — an older VS Code broker's
+ * `origin-not-allowed`, or a newer one's.
  */
 const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
-  'origin-not-allowed':
-    'Not available in this build: it isn’t allowed to reach hosted.dormouse.sh, where one-time ' +
-    'links are made.',
+  'self-host':
+    'Not available in a self-host build: one-time links are made at hosted.dormouse.sh, which this ' +
+    'build never contacts.',
   'origin-invalid': 'Not available in this build: its one-time link address is misconfigured.',
 };
+
+export const ONE_TIME_UNAVAILABLE_FALLBACK = 'Not available in this build.';
 
 /**
  * How a connection ended, as the person at this machine reads it — **fixed copy
@@ -141,7 +143,7 @@ export function OneTimeConnection() {
         <div className={FIELD_HINT}>
           {unavailable === null
             ? IDLE_HINT
-            : (own(UNAVAILABLE_COPY, unavailable) ?? 'Not available in this build.')}
+            : (own(UNAVAILABLE_COPY, unavailable) ?? ONE_TIME_UNAVAILABLE_FALLBACK)}
         </div>
         {error ? (
           <div className="mt-1.5 text-error">{error}</div>

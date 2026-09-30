@@ -6,19 +6,20 @@ import {
   createAskSurfaceProvider,
   type AskSurfaceProvider,
 } from '../../lib/src/host/remote/ask-surface-provider';
-import { bakedConnectSrc } from '../../lib/src/host/remote/connect-src';
 import { readEnrollmentOffer } from '../../lib/src/host/remote/enroll-offer';
 import { BURROW_COMMAND_TIMEOUT_MS } from '../../lib/src/host/remote/link-client';
 import {
   createNativeDirectPeerFactory,
   disposeNativeDirectPeers,
 } from '../../lib/src/host/remote/native-direct-peer';
-import { bakedHostedOrigin } from '../../lib/src/host/hosted-origin';
+import { bakedRelayMode, bakedRelayOrigin, isRelayOrigin } from '../../lib/src/host/relay-origin';
 import {
   BurrowService,
   idleOneTimeState,
   oneTimeServing,
+  readsEnrollmentOffer,
   unenrolledStatus,
+  type RelayBuild,
 } from '../../lib/src/host/remote/service';
 import {
   BURROW_EVENT_EVENT,
@@ -279,8 +280,8 @@ function startService(): void {
         }
       }
     },
-    connectSrc: bakedConnectSrc(),
-    oneTimeOrigin: bakedHostedOrigin(),
+    relayOrigin: bakedRelayOrigin(),
+    relayMode: bakedRelayMode(),
     // Building the factory loads nothing: the addon is opened inside the first
     // offer, if one ever comes (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),
@@ -540,7 +541,7 @@ function idleAnswer(cmd: string): { result: unknown } | null {
     case 'pairingQueue':
       return { result: [] satisfies PairingQueueItem[] };
     case 'oneTimeStatus':
-      return { result: idleOneTimeState(bakedHostedOrigin(), bakedConnectSrc()) };
+      return { result: idleOneTimeState(bakedRelay()) };
     case 'oneTimeEnd':
       return { result: {} };
     // No service holds any session, so none holds a pane: the strip clears itself.
@@ -568,7 +569,14 @@ async function idleStatus(): Promise<BurrowConsoleStatus> {
   // The snapshot itself is the service's own builder, so the two answers to the
   // same question — including the offer's origin-only projection — cannot drift.
   // `readEnrollmentOffer` never rejects (its own doc), hence no guard here.
-  return unenrolledStatus(await readEnrollmentOffer(), 'vscode');
+  const relay = bakedRelay();
+  const offer = readsEnrollmentOffer(relay) ? await readEnrollmentOffer() : null;
+  return unenrolledStatus(offer, 'vscode', relay);
+}
+
+/** This build's baked relay origin and mode (`docs/specs/relay.md` → "Relay origin"). */
+function bakedRelay(): RelayBuild {
+  return { origin: bakedRelayOrigin(), mode: bakedRelayMode() };
 }
 
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */
@@ -645,8 +653,12 @@ async function contendIfServing(ctx: vscode.ExtensionContext): Promise<void> {
   if (serving.status === 'rejected') {
     log.error(`[burrow] could not read the one-time serving marker: ${String(serving.reason)}`);
   }
+  // An enrollment for another origin reads as none — the service would not
+  // start it — so it is no reason to contend (docs/specs/relay.md → "Relay origin").
   if (
-    (enrollment.status === 'fulfilled' && enrollment.value) ||
+    (enrollment.status === 'fulfilled' &&
+      enrollment.value &&
+      isRelayOrigin(enrollment.value.relayUrl, bakedRelayOrigin())) ||
     (serving.status === 'fulfilled' && serving.value)
   ) {
     contendForBurrow();

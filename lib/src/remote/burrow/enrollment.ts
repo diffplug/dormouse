@@ -16,7 +16,11 @@ import {
 import { BURROW_REQUEST_TIMEOUT_MS } from './burrow-fetch';
 
 export interface BurrowEnrollment {
-  /** Origin the Relay is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
+  /**
+   * Origin the Relay is reachable at, e.g. `https://dormouse.tailnet.ts.net`:
+   * the build's baked relay origin at enrollment. A build baked with any other
+   * reads this enrollment as none (`docs/specs/relay.md` → "Relay origin").
+   */
   relayUrl: string;
   burrowId: string;
   /** Bearer credential for the `token` query param of `/ws/burrow`. */
@@ -146,7 +150,7 @@ function refusalMessage(status: number, detail: string): string {
     const error = refusedError(detail);
     if (error === BAD_PASSWORD_ERROR) return 'The Relay did not accept that setup password.';
     if (error === UNAUTHORIZED_ERROR) {
-      return 'This machine’s enrollment offer is no longer valid. Enroll with the Relay address and setup password instead.';
+      return 'This machine’s enrollment offer is no longer valid. Enroll with the setup password instead.';
     }
   }
   const shown = boundedDetail(detail);
@@ -194,9 +198,9 @@ export async function performEnrollment(
     // chain, where everything that starts or stops the Burrow queues behind it.
     signal: AbortSignal.timeout(BURROW_REQUEST_TIMEOUT_MS),
     // The Node-resident Burrow has no browser CSP to check each redirect hop.
-    // Failing here keeps an allowed origin's open redirect from forwarding the
+    // Failing here keeps the Relay's open redirect from forwarding the
     // credential — the setup password or the offer's one-time token, whichever
-    // this body carries — to a Relay outside the build-time allowlist.
+    // this body carries — to an origin the build was never baked with.
     redirect: 'error',
     headers: { 'content-type': 'application/json' },
     // The credential and nothing else — in particular no `label`, which stays

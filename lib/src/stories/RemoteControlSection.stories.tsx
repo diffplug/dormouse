@@ -4,7 +4,9 @@ import { ModalSurface } from '../components/design';
 import { RemoteControlSection } from '../components/RemoteControlSection';
 import {
   enrolledStatus,
+  HOSTED_UNENROLLED_STATUS,
   OFFER_STATUS,
+  SELF_HOST_RELAY_ORIGIN,
   UNENROLLED_STATUS,
 } from '../host/remote/test-burrow-link';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
@@ -86,26 +88,42 @@ async function openPersistent(canvasElement: HTMLElement) {
 }
 
 /**
- * What a machine that has never enrolled opens on: a one-time connection and a
- * folded Persistent Relay.
+ * What a stock build that has never enrolled opens on: a one-time connection and
+ * a folded Persistent Relay.
  */
 export const Choices: Story = {
   parameters: {
-    primedBurrow: { status: UNENROLLED_STATUS },
+    primedBurrow: { status: HOSTED_UNENROLLED_STATUS },
     docs: { story: { height: '310px' } },
   },
   play: settled('Persistent Relay'),
 };
 
 /**
- * A machine that has never enrolled, Persistent Relay unfolded: hosted.dormouse.sh
- * (coming soon), then the typed form for a Relay you run — server, setup
- * password, name.
+ * A stock build, Persistent Relay unfolded: its one Relay is Hosted's, coming
+ * soon, so there is nothing to enroll — a Relay you run takes a build made for
+ * its origin (`docs/specs/relay.md` → "Relay origin").
+ */
+export const HostedPersistentRelay: Story = {
+  parameters: {
+    primedBurrow: { status: HOSTED_UNENROLLED_STATUS },
+    docs: { story: { height: '420px' } },
+  },
+  play: async ({ canvasElement }) => {
+    await openPersistent(canvasElement);
+    await within(canvasElement).findByRole('button', { name: 'Use hosted.dormouse.sh' });
+  },
+};
+
+/**
+ * A self-host build that has never enrolled, Persistent Relay unfolded: the
+ * origin it was built for over the typed form — setup password, name. Its
+ * one-time connection is off.
  */
 export const Unenrolled: Story = {
   parameters: {
     primedBurrow: { status: UNENROLLED_STATUS },
-    docs: { story: { height: '690px' } },
+    docs: { story: { height: '640px' } },
   },
   play: async ({ canvasElement }) => {
     await openPersistent(canvasElement);
@@ -114,47 +132,47 @@ export const Unenrolled: Story = {
 };
 
 /**
- * The refusal that matters most. A Burrow bundle only talks to the origins baked
- * into it at build time, so a stock build pointed at a self-host server fails
- * *before* the password leaves the machine — and the form has to say that,
- * rather than let it read as a wrong password.
+ * A Relay whose `DORMOUSE_ORIGIN` is not the origin this build was made for:
+ * enrollment is refused, naming both, and nothing is saved — and the form says
+ * so in the service's words rather than letting it read as a wrong password.
  */
 export const EnrollRefused: Story = {
   parameters: {
     primedBurrow: {
       status: UNENROLLED_STATUS,
       enrollError:
-        'This build will not connect to https://ned-mac.tail9c2f1.ts.net. Allowed: https://*.dormouse.sh wss://*.dormouse.sh',
+        `The Relay says its origin is https://ned-mac.local, but this build was made for ${SELF_HOST_RELAY_ORIGIN}. ` +
+        'Rebuild Dormouse with DORMOUSE_RELAY_ORIGIN=https://ned-mac.local, or set the Relay\'s ' +
+        `DORMOUSE_ORIGIN to ${SELF_HOST_RELAY_ORIGIN}.`,
     },
-    docs: { story: { height: '760px' } },
+    docs: { story: { height: '740px' } },
   },
   // `fireEvent.change` rather than `userEvent.type`: these are controlled
-  // inputs, so per-character typing costs a render each — ten seconds to fill
-  // three fields, long enough that a reader scrolling past sees a half-typed
-  // form — and typing them without awaiting a render between keystrokes
-  // (`delay: null`) loses every character but the last. One change event with
-  // the whole value is what a paste does anyway.
+  // inputs, so per-character typing costs a render each — long enough that a
+  // reader scrolling past sees a half-typed form — and typing them without
+  // awaiting a render between keystrokes (`delay: null`) loses every character
+  // but the last. One change event with the whole value is what a paste does
+  // anyway.
   play: async (context) => {
     const canvas = within(context.canvasElement);
     const fill = (label: string, value: string) =>
       fireEvent.change(canvas.getByLabelText(label), { target: { value } });
 
     await openPersistent(context.canvasElement);
-    await canvas.findByLabelText('Relay');
-    fill('Relay', 'https://ned-mac.tail9c2f1.ts.net');
+    await canvas.findByLabelText('Setup password');
     fill('Setup password', TEST_SETUP_PASSWORD);
     fill('Name for this Burrow', 'Work laptop');
     await userEvent.click(canvas.getByRole('button', { name: 'Connect' }));
-    await canvas.findByText(/This build will not connect/);
+    await canvas.findByText(/The Relay says its origin is/);
   },
 };
 
 /**
  * The installer ran on this machine, so once Persistent Relay is unfolded there
- * is nothing to type: the offer card leads with the origin it found and a name
- * already filled in, and the
- * three-field form folds away behind "Enroll with a different Relay…". The
- * refusal {@link EnrollRefused} shows reaches this card in the same words —
+ * is nothing to type: the offer card leads with the origin it found — the one
+ * this build was made for — and a name already filled in, and the typed form
+ * folds away behind "Enroll with the setup password…". The refusal
+ * {@link EnrollRefused} shows reaches this card in the same words —
  * `RemoteControlSection.test.tsx` pins that.
  */
 export const OfferAvailable: Story = {
@@ -402,7 +420,7 @@ export const BurrowServiceError: Story = {
  */
 export const OneTimeWaiting: Story = {
   parameters: {
-    primedBurrow: { status: UNENROLLED_STATUS },
+    primedBurrow: { status: HOSTED_UNENROLLED_STATUS },
     docs: { story: { height: '720px' } },
   },
   play: async (context) => {
@@ -413,20 +431,11 @@ export const OneTimeWaiting: Story = {
   },
 };
 
-/** The same panel on a machine that also enrolled with a Relay. */
-export const OneTimeWaitingEnrolled: Story = {
-  parameters: {
-    primedBurrow: { status: enrolledStatus({ pairedClients: 1 }) },
-    docs: { story: { height: '800px' } },
-  },
-  play: OneTimeWaiting.play,
-};
-
 /** A phone used the link and its request is up in the approval modal. */
 export const OneTimeConfirming: Story = {
   parameters: {
     primedBurrow: {
-      status: UNENROLLED_STATUS,
+      status: HOSTED_UNENROLLED_STATUS,
       oneTime: { status: 'confirming', label: 'Android phone', expiresAt: STORY_NOW + 60_000 },
     },
     docs: { story: { height: '380px' } },
@@ -438,7 +447,7 @@ export const OneTimeConfirming: Story = {
 export const OneTimeConnecting: Story = {
   parameters: {
     primedBurrow: {
-      status: UNENROLLED_STATUS,
+      status: HOSTED_UNENROLLED_STATUS,
       oneTime: { status: 'connecting', label: 'Android phone' },
     },
     docs: { story: { height: '360px' } },
@@ -450,7 +459,7 @@ export const OneTimeConnecting: Story = {
 export const OneTimeConnected: Story = {
   parameters: {
     primedBurrow: {
-      status: UNENROLLED_STATUS,
+      status: HOSTED_UNENROLLED_STATUS,
       oneTime: { status: 'connected', label: 'Android phone', since: STORY_NOW },
     },
     docs: { story: { height: '360px' } },
@@ -466,7 +475,7 @@ export const OneTimeConnected: Story = {
 export const OneTimeEndedDirectFailed: Story = {
   parameters: {
     primedBurrow: {
-      status: UNENROLLED_STATUS,
+      status: HOSTED_UNENROLLED_STATUS,
       oneTime: { status: 'ended', reason: 'direct-failed' },
     },
     docs: { story: { height: '380px' } },
@@ -478,7 +487,7 @@ export const OneTimeEndedDirectFailed: Story = {
 export const OneTimeEndedMismatch: Story = {
   parameters: {
     primedBurrow: {
-      status: UNENROLLED_STATUS,
+      status: HOSTED_UNENROLLED_STATUS,
       oneTime: { status: 'ended', reason: 'confirmation-mismatch' },
     },
     docs: { story: { height: '360px' } },
@@ -487,17 +496,16 @@ export const OneTimeEndedMismatch: Story = {
 };
 
 /**
- * A build whose allowed remote addresses leave the rendezvous out — a
- * self-host build that narrowed them, say — offers the button disabled, and
- * says why.
+ * A self-host build reaches nothing of Dormouse's, the rendezvous included, so
+ * it offers the button disabled and says why.
  */
 export const OneTimeUnavailable: Story = {
   parameters: {
     primedBurrow: {
       status: UNENROLLED_STATUS,
-      oneTime: { status: 'unavailable', reason: 'origin-not-allowed' },
+      oneTime: { status: 'unavailable', reason: 'self-host' },
     },
     docs: { story: { height: '330px' } },
   },
-  play: settled(/it isn’t allowed to reach hosted\.dormouse\.sh/),
+  play: settled(/Not available in a self-host build/),
 };

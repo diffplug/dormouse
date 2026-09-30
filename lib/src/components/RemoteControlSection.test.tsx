@@ -33,7 +33,11 @@ vi.mock('./QrCode', async (importOriginal) => {
   };
 });
 
-import { ONE_TIME_ENDED_COPY, ONE_TIME_OUTCOME_LABEL } from './OneTimeConnection';
+import {
+  ONE_TIME_ENDED_COPY,
+  ONE_TIME_OUTCOME_LABEL,
+  ONE_TIME_UNAVAILABLE_FALLBACK,
+} from './OneTimeConnection';
 import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
 import {
   isOneTimeState,
@@ -42,10 +46,12 @@ import {
 } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
+  HOSTED_UNENROLLED_STATUS as HOSTED_NOT_ENROLLED,
   makeEventedBurrowLink,
   makeStubBurrowLink,
   OFFER_STATUS,
   oneTimeWaiting,
+  SELF_HOST_RELAY_ORIGIN,
   setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-burrow-link';
@@ -186,18 +192,18 @@ function buttonLabelled(label: string): HTMLButtonElement | undefined {
 /** The disclosure carries a `+`/`−` prefix, so match on its words rather than all of it. */
 function disclosure(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')].find((button) =>
-    button.textContent?.includes('Enroll with a different Relay'),
+    button.textContent?.includes('Enroll with the setup password'),
   ) as HTMLButtonElement | undefined;
 }
 
 /**
- * The three-field form, which is always mounted: folding it away is the
- * `hidden` attribute, so what is typed into it survives both the disclosure and
- * an offer appearing on disk underneath it.
+ * The two-field form a self-host build shows, which is always mounted: folding
+ * it away is the `hidden` attribute, so what is typed into it survives both the
+ * disclosure and an offer appearing on disk underneath it.
  */
 function typedForm(): HTMLFormElement {
   const form = [...container.querySelectorAll('form')].find((candidate) =>
-    candidate.textContent?.includes('Needs a Dormouse build that allows your Relay’s address'),
+    candidate.textContent?.includes('This Dormouse was built for this Relay:'),
   );
   if (!form) throw new Error('the typed enroll form is not mounted');
   return form;
@@ -210,7 +216,9 @@ async function openPersistent() {
 
 /** The panel Persistent Relay unfolds, which is what `hidden` toggles. */
 function persistentPanel(): HTMLElement {
-  const panel = typedForm().closest<HTMLElement>('div.rounded');
+  const panel = buttonLabelled('Persistent Relay')?.parentElement?.querySelector<HTMLElement>(
+    ':scope > div.rounded',
+  );
   if (!panel) throw new Error('the Persistent Relay panel is not mounted');
   return panel;
 }
@@ -258,9 +266,9 @@ describe('RemoteControlSection', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('offers a one-time connection and a folded Persistent Relay', async () => {
+  it('offers a stock build a one-time connection and a folded Persistent Relay with nothing to enroll', async () => {
     const openExternal = vi.fn();
-    platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
+    platform = { burrow: makeLink(async () => HOSTED_NOT_ENROLLED), openExternal };
     await render();
     expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
     expect(text()).toContain(
@@ -273,21 +281,36 @@ describe('RemoteControlSection', () => {
     await openPersistent();
     expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('true');
     expect(persistentPanel().hidden).toBe(false);
-    expect(text()).toContain('Needs a Dormouse build that allows your Relay’s address.');
-    expect(text()).toContain('Or a self-hosted Relay you run');
+    // Its one Relay is Hosted's (docs/specs/relay.md → "Relay origin"): no form,
+    // no offer card, and the self-host path named as a build.
+    expect(container.querySelector('form')).toBeNull();
+    expect(buttonLabelled('Connect')).toBeUndefined();
+    expect(text()).toContain('A self-hosted Relay takes a Dormouse built for its address.');
     await act(async () => buttonLabelled('self-hosted Relay')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/self-host/');
-    expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
   it('offers hosted.dormouse.sh as coming soon, linking the Hosted preview', async () => {
     const openExternal = vi.fn();
-    platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
+    platform = { burrow: makeLink(async () => HOSTED_NOT_ENROLLED), openExternal };
     await render();
     await openPersistent();
     expect(buttonLabelled('Use hosted.dormouse.sh')!.disabled).toBe(true);
     await act(async () => buttonLabelled('Get updates on Hosted.')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/#remote-control');
+  });
+
+  it('offers a self-host build its form under the origin it was built for, and no Hosted button', async () => {
+    platform = { burrow: makeLink(async () => NOT_ENROLLED) };
+    await render();
+    await openPersistent();
+
+    expect(typedForm().hidden).toBe(false);
+    expect(typedForm().textContent).toContain(SELF_HOST_RELAY_ORIGIN);
+    // The origin is named, never typed: no field for it.
+    expect(container.querySelector('input[type="url"]')).toBeNull();
+    expect(buttonLabelled('Use hosted.dormouse.sh')).toBeUndefined();
+    expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
   it('keeps Persistent Relay folded until clicked, even with an offer waiting', async () => {
@@ -315,12 +338,12 @@ describe('RemoteControlSection', () => {
     platform = { burrow: makeLink(async () => NOT_ENROLLED) };
     await render();
     await openPersistent();
-    await type('input[type="url"]', 'https://elsewhere.example');
+    await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await openPersistent();
     expect(persistentPanel().hidden).toBe(true);
     await openPersistent();
-    expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
-      'https://elsewhere.example',
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe(
+      TEST_SETUP_PASSWORD,
     );
   });
 
@@ -349,8 +372,6 @@ describe('RemoteControlSection', () => {
     const name = 'input:not([type])';
     expect(container.querySelector<HTMLInputElement>(name)!.value).toBe('ned-mac');
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
-    await type('input[type="url"]', 'https://laptop.tailnet.ts.net');
-    expect(buttonLabelled('Connect')!.disabled).toBe(true);
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
     expect(buttonLabelled('Connect')!.disabled).toBe(false);
     // And it is still a required field, not a decoration.
@@ -371,13 +392,12 @@ describe('RemoteControlSection', () => {
     await render();
     await openPersistent();
 
-    await type('input[type="url"]', '  https://laptop.tailnet.ts.net  ');
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await type('input:not([type])', '  Work laptop  ');
     await act(async () => buttonLabelled('Connect')!.click());
 
+    // No origin: the service enrolls only at the build's own.
     expect(link.command).toHaveBeenCalledWith('enroll', {
-      relayUrl: 'https://laptop.tailnet.ts.net',
       password: TEST_SETUP_PASSWORD,
       label: 'Work laptop',
     });
@@ -387,22 +407,26 @@ describe('RemoteControlSection', () => {
   });
 
   it('surfaces an enrollment refusal instead of silently failing', async () => {
+    const refusal =
+      `The Relay says its origin is https://ned-mac.local, but this build was made for ${SELF_HOST_RELAY_ORIGIN}.`;
     const link = makeLink(async (cmd) => {
-      if (cmd === 'enroll') throw new Error('relay origin is not allowed by this build');
+      if (cmd === 'enroll') throw new Error(refusal);
       return NOT_ENROLLED;
     });
     platform = { burrow: link };
     await render();
     await openPersistent();
 
-    await type('input[type="url"]', 'https://evil.example.com');
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await type('input:not([type])', 'Work laptop');
     await act(async () => buttonLabelled('Connect')!.click());
 
-    expect(text()).toContain('relay origin is not allowed by this build');
-    // Still on the form, so the user can correct the origin and retry.
+    expect(text()).toContain(refusal);
+    // Still on the form, with the password kept for a retry.
     expect(buttonLabelled('Connect')).toBeTruthy();
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe(
+      TEST_SETUP_PASSWORD,
+    );
   });
 
   it('leads with the installer’s offer and folds the typed form away', async () => {
@@ -413,7 +437,7 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('A Dormouse Relay is installed on this machine.');
     expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
     expect(buttonLabelled('Enroll')).toBeTruthy();
-    // The three-field form is behind the disclosure, not beside the card —
+    // The typed form is behind the disclosure, not beside the card —
     // hidden rather than unmounted, so a half-typed one survives the flip.
     expect(typedForm().hidden).toBe(true);
     expect(container.querySelector('input[type="password"]')).toBeTruthy();
@@ -461,7 +485,7 @@ describe('RemoteControlSection', () => {
       await render();
       await openPersistent();
 
-      await type('input[type="url"]', 'https://elsewhere.example');
+      await type('input[type="password"]', TEST_SETUP_PASSWORD);
       status = OFFER_STATUS;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -469,8 +493,8 @@ describe('RemoteControlSection', () => {
 
       expect(text()).toContain('A Dormouse Relay is installed on this machine.');
       expect(typedForm().hidden).toBe(true);
-      expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
-        'https://elsewhere.example',
+      expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe(
+        TEST_SETUP_PASSWORD,
       );
     } finally {
       vi.useRealTimers();
@@ -532,7 +556,7 @@ describe('RemoteControlSection', () => {
     expect(disclosure()).toBeTruthy();
   });
 
-  it('unfolds the typed form for a Relay that is somewhere else', async () => {
+  it('unfolds the typed form behind the offer', async () => {
     platform = { burrow: makeLink(async () => OFFER_STATUS) };
     await render();
     await openPersistent();
@@ -545,12 +569,12 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Enroll')).toBeTruthy();
 
     // And refolding hides what was typed rather than discarding it.
-    await type('input[type="url"]', 'https://elsewhere.example');
+    await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await act(async () => disclosure()!.click());
     expect(typedForm().hidden).toBe(true);
     await act(async () => disclosure()!.click());
-    expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
-      'https://elsewhere.example',
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe(
+      TEST_SETUP_PASSWORD,
     );
   });
 
@@ -570,7 +594,6 @@ describe('RemoteControlSection', () => {
     await openPersistent();
 
     await act(async () => disclosure()!.click());
-    await type('input[type="url"]', 'https://elsewhere.example');
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
 
     await act(async () => {
@@ -1390,7 +1413,7 @@ describe('RemoteControlSection', () => {
     platform = { burrow: link };
     await render();
     await openPersistent();
-    expect(text()).toContain('Needs a Dormouse build that allows your Relay’s address');
+    expect(text()).toContain('This Dormouse was built for this Relay:');
 
     // Another window enrolled: the event carries only `{ enrolled }`, so the
     // section must re-read rather than patch a field.
@@ -1727,10 +1750,18 @@ describe('One-time connection', () => {
     expect(oneTimeCode()).toBeTruthy();
   });
 
-  it('disables the button on a build that cannot reach its rendezvous, saying why', async () => {
-    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'origin-not-allowed' }));
+  it('disables the button in a self-host build, saying why', async () => {
+    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'self-host' }));
     expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
-    expect(text()).toContain('it isn’t allowed to reach hosted.dormouse.sh');
+    expect(text()).toContain('Not available in a self-host build');
+    expect(text()).not.toContain('Open a link on your phone');
+  });
+
+  it('renders a reason this build does not know with the fallback', async () => {
+    // An older VS Code broker in another window still says `origin-not-allowed`.
+    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'origin-not-allowed' } as never));
+    expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
+    expect(text()).toContain(ONE_TIME_UNAVAILABLE_FALLBACK);
     expect(text()).not.toContain('Open a link on your phone');
   });
 

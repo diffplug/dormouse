@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_HOSTED_ORIGIN, bakedHostedOrigin } from '../hosted-origin';
-import { DEFAULT_REMOTE_CONNECT_SRC } from './connect-src';
-import { MAX_ONE_TIME_ORIGIN_LENGTH, oneTimeAvailability } from './one-time-origin';
+import { DEFAULT_RELAY_ORIGIN, MAX_RELAY_ORIGIN_LENGTH, bakedRelayMode, bakedRelayOrigin } from '../relay-origin';
+import { oneTimeAvailability } from './one-time-origin';
 
 /**
  * An `https://` origin of exactly `length` characters under `example`, built
@@ -18,40 +17,26 @@ function originOfLength(length: number): string {
   return `https://${host}`;
 }
 
-/** Admits every origin these cases use, so only `origin-invalid` can refuse one. */
-const ANY = 'https://*.example:* https://*.dormouse.sh:* http://localhost:* http://127.0.0.1:*';
-
 describe('oneTimeAvailability', () => {
-  it('offers the shipped rendezvous under the shipped allowlist', () => {
-    expect(oneTimeAvailability(DEFAULT_HOSTED_ORIGIN, DEFAULT_REMOTE_CONNECT_SRC)).toBeNull();
-    // With no define — the test runner's case — the baked value is that default.
-    expect(bakedHostedOrigin()).toBe(DEFAULT_HOSTED_ORIGIN);
+  it('offers the shipped rendezvous in the shipped build', () => {
+    expect(oneTimeAvailability(DEFAULT_RELAY_ORIGIN, 'hosted')).toBeNull();
+    // With no define — the test runner's case — the baked pair is that default.
+    expect(oneTimeAvailability(bakedRelayOrigin(), bakedRelayMode())).toBeNull();
   });
 
-  it('refuses an origin the allowlist does not admit', () => {
-    expect(oneTimeAvailability('https://rendezvous.example', DEFAULT_REMOTE_CONNECT_SRC)).toBe(
-      'origin-not-allowed',
-    );
-    // The bare domain is not under its own wildcard.
-    expect(oneTimeAvailability('https://dormouse.sh', DEFAULT_REMOTE_CONNECT_SRC)).toBe(
-      'origin-not-allowed',
-    );
-    expect(oneTimeAvailability('http://127.0.0.1:8787', DEFAULT_REMOTE_CONNECT_SRC)).toBe(
-      'origin-not-allowed',
-    );
+  it('offers none in a self-host build, whatever its origin', () => {
+    for (const origin of [
+      'https://relay.example.ts.net',
+      'http://localhost:3000',
+      // Even Hosted's: a self-host build reaches nothing of Dormouse's.
+      DEFAULT_RELAY_ORIGIN,
+      'not an origin',
+    ]) {
+      expect(oneTimeAvailability(origin, 'self-host'), origin).toBe('self-host');
+    }
   });
 
-  it('admits the socket the runtime dials with the page, as one scheme', () => {
-    // The page is `https://`, the socket `wss://`; a list naming either admits both.
-    expect(oneTimeAvailability('https://rendezvous.example', 'wss://rendezvous.example')).toBeNull();
-    expect(oneTimeAvailability('https://rendezvous.example', 'https://rendezvous.example')).toBeNull();
-    expect(oneTimeAvailability('http://127.0.0.1:8787', 'ws://127.0.0.1:8787')).toBeNull();
-    expect(oneTimeAvailability('http://127.0.0.1:8787', 'http://127.0.0.1:9999')).toBe(
-      'origin-not-allowed',
-    );
-  });
-
-  it('refuses what a link cannot carry, before the allowlist is read', () => {
+  it('refuses what a link cannot carry', () => {
     for (const origin of [
       'https://hosted.dormouse.sh/',
       'https://hosted.dormouse.sh/connect',
@@ -64,28 +49,23 @@ describe('oneTimeAvailability', () => {
       'wss://hosted.dormouse.sh',
       'not an origin',
       '',
-      originOfLength(MAX_ONE_TIME_ORIGIN_LENGTH + 1),
+      originOfLength(MAX_RELAY_ORIGIN_LENGTH + 1),
     ]) {
-      expect(oneTimeAvailability(origin, ANY), origin).toBe('origin-invalid');
+      expect(oneTimeAvailability(origin, 'hosted'), origin).toBe('origin-invalid');
     }
   });
 
-  it('takes HTTPS, and HTTP on exactly the link loopback hosts', () => {
+  it('takes HTTPS, and HTTP on exactly the link loopback hosts — a dev build pointed at a local Hosted', () => {
     for (const origin of [
       'https://hosted.dormouse.sh',
       'https://hosted.dormouse.sh:8443',
+      'https://preview.example',
       'http://localhost:8787',
       'http://127.0.0.1:8787',
-      originOfLength(MAX_ONE_TIME_ORIGIN_LENGTH),
+      'http://[::1]:8787',
+      originOfLength(MAX_RELAY_ORIGIN_LENGTH),
     ]) {
-      expect(oneTimeAvailability(origin, ANY), origin).toBeNull();
+      expect(oneTimeAvailability(origin, 'hosted'), origin).toBeNull();
     }
-    // A link may carry the IPv6 loopback; whether a build may reach it is the
-    // allowlist's call, whose source grammar has no IPv6 literal.
-    expect(oneTimeAvailability('http://[::1]:8787', ANY)).toBe('origin-not-allowed');
-  });
-
-  it('bounds the origin at what still fits a 256-character link', () => {
-    expect(MAX_ONE_TIME_ORIGIN_LENGTH).toBe(167);
   });
 });

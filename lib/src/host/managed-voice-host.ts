@@ -7,7 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
-import { bakedHostedOrigin } from './hosted-origin';
+import { bakedRelayOrigin } from './relay-origin';
 import { createSerialQueue } from './remote/serial-queue';
 import {
   DEFAULT_MANAGED_VOICE_ID,
@@ -59,7 +59,7 @@ export function createManagedVoiceHost(options: {
     ? { dir: options.stateDir, file: join(options.stateDir, MANAGED_VOICE_FILE) }
     : undefined;
   // The only place the token may go (`docs/specs/security-local.md` -> "Persisted state").
-  const speakUrl = bakedHostedOrigin() + MANAGED_VOICE_SPEAK_PATH;
+  const speakUrl = bakedRelayOrigin() + MANAGED_VOICE_SPEAK_PATH;
   let loaded: Promise<StoredConfig> | null = null;
   // Each edit reads, then rewrites the whole file: two at once would drop a field.
   const serialize = createSerialQueue();

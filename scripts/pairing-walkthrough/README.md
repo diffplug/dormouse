@@ -74,7 +74,7 @@ it.
 | # | Step | What happens |
 | --- | --- | --- |
 | 1 | `relay` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then reads its bound origin and waits for it to answer. |
-| 2 | `burrow` | `pnpm innerdogfood` with `DORMOUSE_REMOTE_CONNECT_SRC` pointed at that Relay, then waits for the app's first terminal. → `01-burrow-booted.png` |
+| 2 | `burrow` | `pnpm innerdogfood` with `DORMOUSE_RELAY_ORIGIN` set to that Relay's origin, then waits for the app's first terminal. → `01-burrow-booted.png` |
 | 3 | `settings` | Clicks the baseboard's Settings button and scrolls to Remote control. → `02-settings-open.png` |
 | 4 | `enroll` | Unfolds **Persistent Relay**, types the Relay URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
 | 5 | `qr` | Clicks **Set up a phone**, waits for the code, screenshots, crops to the QR, makes a camera-shaped Y4M, and decodes the crop to prove it is legible. → `qr-full.png`, `qr.png`, `qr.y4m`, `invitation-url.txt` |

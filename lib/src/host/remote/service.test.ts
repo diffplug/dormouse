@@ -59,10 +59,10 @@ import type {
   SetupQrResult,
 } from './service-protocol';
 
-const CONNECT_SRC = 'https://*.dormouse.sh wss://*.dormouse.sh';
 const BURROW_ID = testRoutingId();
+/** The self-host Relay the default service here was baked for. */
 const ORIGIN = 'https://relay.dormouse.sh';
-/** The shipped rendezvous, which the shipped allowlist admits. */
+/** The shipped relay origin: a Hosted build's, where one-time links are made. */
 const ONE_TIME_ORIGIN = 'https://hosted.dormouse.sh';
 
 /**
@@ -163,6 +163,8 @@ let commandSeq = 0;
 let setupTokensMinted: number;
 /** Make `POST /api/burrow/setup-token` answer a 200 that is not a setup token. */
 let setupTokenMalformed: boolean;
+/** The `origin` the fake Relay's enroll answer reports; its own URL's by default. */
+let enrollReportedOrigin: string | null;
 /** What the fake Relay puts in `expiresAt`; a test moves it to expire one. */
 let setupTokenTtlMs: number;
 
@@ -191,7 +193,7 @@ function fakeFetch(): typeof globalThis.fetch {
         json: async () => ({
           burrowId: BURROW_ID,
           burrowToken: 'tok',
-          origin: new URL(url).origin,
+          origin: enrollReportedOrigin ?? new URL(url).origin,
           rpId: new URL(url).hostname,
         }),
       } as Response;
@@ -241,8 +243,9 @@ function createService(
     provider: fakeProvider(),
     kind: 'vscode',
     sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-    connectSrc: CONNECT_SRC,
-    oneTimeOrigin: ONE_TIME_ORIGIN,
+    // A self-host build: the only kind that enrolls (docs/specs/relay.md → "Relay origin").
+    relayOrigin: ORIGIN,
+    relayMode: 'self-host',
     // One factory for both sockets, as each host passes: the rendezvous route
     // reaches the in-memory room, everything else the fake relay.
     createWebSocket: (url) => {
@@ -263,6 +266,22 @@ function createService(
     ...over,
   });
   return service;
+}
+
+/**
+ * A Hosted build — the only kind with one-time connections (`one-time-origin.ts`).
+ * A seeded enrollment is moved to the Hosted origin, since one naming any other
+ * reads as none.
+ */
+function createHostedService(
+  seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>,
+  over: Partial<BurrowServiceOptions> = {},
+): BurrowService {
+  const enrollment = seed?.enrollment ? { ...seed.enrollment, relayUrl: ONE_TIME_ORIGIN } : seed?.enrollment;
+  return createService(
+    seed ? { ...seed, enrollment } : seed,
+    { relayOrigin: ONE_TIME_ORIGIN, relayMode: 'hosted', ...over },
+  );
 }
 
 /** The JSON body of the nth request, for asserting what a credential carried. */
@@ -334,6 +353,7 @@ beforeEach(() => {
   offerGate = null;
   setupTokensMinted = 0;
   setupTokenMalformed = false;
+  enrollReportedOrigin = null;
   setupTokenTtlMs = 5 * 60 * 1000;
   vi.stubGlobal('fetch', fakeFetch());
 });
@@ -351,12 +371,39 @@ describe('status', () => {
       enrolled: false,
       serving: false,
       relayUrl: null,
+      relayOrigin: ORIGIN,
+      relayMode: 'self-host',
       burrowId: null,
       connection: 'stopped',
       pairedClients: 0,
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: null,
     } satisfies BurrowConsoleStatus);
+  });
+
+  it('names a Hosted build, and reads no offer there', async () => {
+    // A Hosted build enrolls nowhere, so an installer's offer is no card it could
+    // show — and the 2 s poll must not stat a file for one.
+    offer = OFFER;
+    createHostedService();
+    await service.start();
+
+    expect((await command('status')).result).toMatchObject({
+      enrolled: false,
+      relayOrigin: ONE_TIME_ORIGIN,
+      relayMode: 'hosted',
+      offer: null,
+    });
+    expect(offerReads).toBe(0);
+  });
+
+  it('offers no installer offer that names another origin', async () => {
+    // This build could never enroll against it (docs/specs/relay.md → "Relay origin").
+    offer = { ...OFFER, origin: 'https://elsewhere.example' };
+    createService();
+    await service.start();
+
+    expect((await command('status')).result).toMatchObject({ enrolled: false, offer: null });
   });
 
   it('offers the installer’s enrollment while un-enrolled, without its token', async () => {
@@ -368,6 +415,8 @@ describe('status', () => {
       enrolled: false,
       serving: false,
       relayUrl: null,
+      relayOrigin: ORIGIN,
+      relayMode: 'self-host',
       burrowId: null,
       connection: 'stopped',
       pairedClients: 0,
@@ -399,6 +448,8 @@ describe('status', () => {
       enrolled: true,
       serving: true,
       relayUrl: ENROLLMENT.relayUrl,
+      relayOrigin: ORIGIN,
+      relayMode: 'self-host',
       burrowId: BURROW_ID,
       connection: 'connected',
       pairedClients: 1,
@@ -427,11 +478,7 @@ describe('status', () => {
 
     // Now enroll, all the way through the `{ enrolled: true }` event...
     offerGate = null;
-    await command('enroll', {
-      relayUrl: 'https://relay.dormouse.sh',
-      password: 'setup',
-      label: 'Laptop',
-    });
+    await command('enroll', { password: 'setup', label: 'Laptop' });
     expect(statusEvents()).toEqual([true]);
 
     // ...and only then let the status read finish.
@@ -446,31 +493,43 @@ describe('status', () => {
 });
 
 describe('enroll', () => {
-  it('refuses an origin outside the build’s allowed sources', async () => {
+  it('refuses in a Hosted build, before the setup password leaves the machine', async () => {
+    // Its one Relay is Hosted's, which runs none yet (docs/specs/relay.md → "Relay origin").
+    createHostedService();
+    const result = await command('enroll', { password: 'setup', label: 'Laptop' });
+
+    expect(result.error).toMatch(/Dormouse Hosted/);
+    expect(requests).toEqual([]);
+    expect(store.enrollment).toBeNull();
+  });
+
+  it('enrolls, persists, and starts against the baked origin, whatever the params say', async () => {
     createService();
     const result = await command('enroll', {
+      // A caller naming another Relay names nothing: no command carries an origin.
       relayUrl: 'https://relay.example.com',
       password: 'setup',
       label: 'Laptop',
     });
 
-    expect(result.error).toContain(CONNECT_SRC);
-    // Refused before the setup password leaves the machine.
-    expect(requests).toEqual([]);
-    expect(store.enrollment).toBeNull();
-  });
-
-  it('enrolls, persists, and starts against an allowed origin', async () => {
-    createService();
-    const result = await command('enroll', {
-      relayUrl: 'https://relay.dormouse.sh/',
-      password: 'setup',
-      label: 'Laptop',
-    });
-
     expect(result.result).toEqual({ burrowId: BURROW_ID, relayUrl: ORIGIN });
+    expect(requests.map((request) => request.url)).toEqual([`${ORIGIN}${API_ROUTES.burrowEnroll}`]);
     expect(store.enrollment?.burrowToken).toBe('tok');
     expect(sockets).toHaveLength(1);
+  });
+
+  it('refuses an enrollment whose Relay reports another origin, saving nothing', async () => {
+    // A Relay whose DORMOUSE_ORIGIN is not the origin this build was made for
+    // would send every phone somewhere else; the mismatch is named, both ways.
+    enrollReportedOrigin = 'https://relay.example.com';
+    createService();
+    const result = await command('enroll', { password: 'setup', label: 'Laptop' });
+
+    expect(result.error).toContain('https://relay.example.com');
+    expect(result.error).toContain(ORIGIN);
+    expect(store.enrollment).toBeNull();
+    expect(sockets).toEqual([]);
+    expect(statusEvents()).toEqual([]);
   });
 
   it('replaces a running Burrow rather than adding one', async () => {
@@ -478,11 +537,7 @@ describe('enroll', () => {
     await service.start();
     sockets[0]!.open();
 
-    await command('enroll', {
-      relayUrl: 'https://other.dormouse.sh',
-      password: 'setup',
-      label: 'Laptop',
-    });
+    await command('enroll', { password: 'setup', label: 'Laptop' });
     expect(sockets).toHaveLength(2);
     expect(sockets[0]!.readyState).toBe(3);
   });
@@ -498,11 +553,7 @@ describe('enroll', () => {
       throw new Error('keychain is locked');
     };
 
-    const result = await command('enroll', {
-      relayUrl: 'https://other.dormouse.sh',
-      password: 'setup',
-      label: 'Laptop',
-    });
+    const result = await command('enroll', { password: 'setup', label: 'Laptop' });
 
     expect(result.error).toContain('keychain is locked');
     expect(sockets).toHaveLength(1);
@@ -524,11 +575,7 @@ describe('enroll', () => {
     sockets[0]!.open();
     expect(statusEvents()).toEqual([true]);
 
-    await command('enroll', {
-      relayUrl: 'https://other.dormouse.sh',
-      password: 'setup',
-      label: 'Laptop',
-    });
+    await command('enroll', { password: 'setup', label: 'Laptop' });
 
     expect(statusEvents()).toEqual([true, false, true]);
   });
@@ -586,10 +633,9 @@ describe('enrollOffer', () => {
     expect(store.enrollment).toBeNull();
   });
 
-  it('refuses an offer origin outside the build’s allowed sources', async () => {
-    // The allowlist gate is the typed form's, unchanged: a Relay installed on
-    // this machine is not thereby an origin this build may reach, and the
-    // one-time token must not leave before that is checked.
+  it('refuses an offer for any origin but the baked one', async () => {
+    // A Relay installed on this machine is not thereby one this build may reach,
+    // and the one-time token must not leave before that is checked.
     offer = { ...OFFER, origin: 'https://relay.example.com' };
     createService();
 
@@ -598,22 +644,59 @@ describe('enrollOffer', () => {
       label: 'Laptop',
     });
 
-    expect(result.error).toContain(CONNECT_SRC);
+    expect(result.error).toContain('https://relay.example.com');
+    expect(result.error).toContain(ORIGIN);
     expect(requests).toEqual([]);
+    expect(store.enrollment).toBeNull();
+  });
+
+  it('refuses in a Hosted build, before the offer is read', async () => {
+    offer = { ...OFFER, origin: ONE_TIME_ORIGIN };
+    createHostedService();
+
+    const result = await command('enrollOffer', { origin: ONE_TIME_ORIGIN, label: 'Laptop' });
+
+    expect(result.error).toMatch(/Dormouse Hosted/);
+    expect(offerReads).toBe(0);
+    expect(requests).toEqual([]);
+  });
+
+  it('refuses an offer whose Relay reports another origin, saving nothing', async () => {
+    offer = OFFER;
+    enrollReportedOrigin = 'https://relay.example.com';
+    createService();
+
+    const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
+
+    expect(result.error).toContain('https://relay.example.com');
+    expect(result.error).toContain(ORIGIN);
     expect(store.enrollment).toBeNull();
   });
 });
 
 describe('start', () => {
-  it('stays idle, loudly, when the persisted Relay is no longer allowed', async () => {
+  it('reads an enrollment for another origin as none, loudly, and keeps it on disk', async () => {
+    // Enrolled by another build — a stock one, or one baked for a Relay that
+    // moved. Nothing connects to it, and switching back restores it
+    // (docs/specs/relay.md → "Relay origin").
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    createService({ enrollment: { ...ENROLLMENT, relayUrl: 'https://relay.example.com' } });
+    const elsewhere = { ...ENROLLMENT, relayUrl: 'https://relay.example.com' };
+    createService({ enrollment: elsewhere });
     await service.start();
 
     expect(sockets).toEqual([]);
     expect(warn).toHaveBeenCalled();
-    expect((await command('status')).result).toMatchObject({ connection: 'stopped' });
+    expect((await command('status')).result).toMatchObject({ enrolled: false, connection: 'stopped' });
+    expect(statusEvents()).toEqual([false]);
+    expect(store.enrollment).toEqual(elsewhere);
     warn.mockRestore();
+  });
+
+  it('reads an enrollment for its own origin, however it was spelled', async () => {
+    createService({ enrollment: { ...ENROLLMENT, relayUrl: `${ORIGIN}/` } });
+    await service.start();
+
+    expect(sockets).toHaveLength(1);
   });
 
   it('reconnect is the way back, and start()s a Burrow that never ran', async () => {
@@ -676,7 +759,7 @@ describe('start', () => {
     expect(sockets).toEqual([]);
     // Only what a start says at once, before the disposal: its one-time state.
     expect(sent.map((message) => message.data)).toEqual([
-      { name: 'one-time', state: { status: 'idle' } },
+      { name: 'one-time', state: { status: 'unavailable', reason: 'self-host' } },
     ]);
   });
 
@@ -735,7 +818,7 @@ describe('status events', () => {
     await service.start();
     await command('status');
     expect(uiEvents()).toEqual([
-      { name: 'one-time', state: { status: 'idle' } },
+      { name: 'one-time', state: { status: 'unavailable', reason: 'self-host' } },
       { name: 'status', enrolled: false, serving: false, serviceId: service.statusEvent().serviceId },
     ]);
   });
@@ -756,7 +839,7 @@ describe('status events', () => {
     };
 
     const starting = service.start();
-    expect(uiEvents()).toEqual([{ name: 'one-time', state: { status: 'idle' } }]);
+    expect(uiEvents()).toEqual([{ name: 'one-time', state: { status: 'unavailable', reason: 'self-host' } }]);
     release();
     await starting;
     expect(statusEvents()).toEqual([true]);
@@ -1204,8 +1287,8 @@ describe('push', () => {
       provider: fakeProvider(),
       kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-      connectSrc: CONNECT_SRC,
-      oneTimeOrigin: ONE_TIME_ORIGIN,
+      relayOrigin: ORIGIN,
+      relayMode: 'self-host',
       createWebSocket: () => new FakeSocket(),
       fetch: (async () => ({ ok: false, status: 401 })) as unknown as typeof globalThis.fetch,
     });
@@ -1252,8 +1335,8 @@ describe('pushDevices', () => {
       provider: fakeProvider(),
       kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-      connectSrc: CONNECT_SRC,
-      oneTimeOrigin: ONE_TIME_ORIGIN,
+      relayOrigin: ORIGIN,
+      relayMode: 'self-host',
       createWebSocket: () => new FakeSocket(),
       fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
     });
@@ -1308,8 +1391,8 @@ describe('pushTest', () => {
       provider: fakeProvider(),
       kind: 'vscode',
       sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-      connectSrc: CONNECT_SRC,
-      oneTimeOrigin: ONE_TIME_ORIGIN,
+      relayOrigin: ORIGIN,
+      relayMode: 'self-host',
       createWebSocket: () => new FakeSocket(),
       fetch: (async () => ({ ok: false, status: 500 })) as unknown as typeof globalThis.fetch,
     });
@@ -1365,7 +1448,7 @@ describe('one-time connection', () => {
   }
 
   it('is idle on a machine that never enrolled, serving nothing', async () => {
-    createService();
+    createHostedService();
     await service.start();
 
     expect((await command('oneTimeStatus')).result).toEqual({ status: 'idle' });
@@ -1380,7 +1463,7 @@ describe('one-time connection', () => {
   });
 
   it('opens a link un-enrolled, on the baked origin whatever the webview sends', async () => {
-    createService();
+    createHostedService();
     await service.start();
 
     // The command takes no parameters: an origin in them reaches nothing.
@@ -1403,7 +1486,7 @@ describe('one-time connection', () => {
   });
 
   it('serves while a connection is open, and announces each flip', async () => {
-    createService();
+    createHostedService();
     await service.start();
     await open();
     // `serving` rose at `opening` from the start's announcement; `enrolled` never did.
@@ -1427,21 +1510,23 @@ describe('one-time connection', () => {
     expect(uiEvents()).toHaveLength(quiet);
   });
 
-  it('is unavailable, and opens nothing, where connect-src does not admit the origin', async () => {
-    createService(undefined, { oneTimeOrigin: 'https://rendezvous.example.com' });
+  it('is unavailable, and opens nothing, in a self-host build', async () => {
+    // Its one origin is the user's own Relay, which serves no rendezvous, and it
+    // reaches nothing of Dormouse's (docs/specs/relay.md → "Relay origin").
+    createService();
 
     expect((await command('oneTimeStatus')).result).toEqual({
       status: 'unavailable',
-      reason: 'origin-not-allowed',
+      reason: 'self-host',
     });
-    expect((await command('oneTimeOpen')).error).toContain(CONNECT_SRC);
+    expect((await command('oneTimeOpen')).error).toMatch(/self-host build/);
     expect(rendezvous.rooms).toEqual([]);
     expect(oneTimeStates()).toEqual([]);
   });
 
   it('is unavailable for an origin no link can carry', async () => {
     // Plain HTTP off loopback: the phone would refuse every link it minted.
-    createService(undefined, { oneTimeOrigin: 'http://hosted.dormouse.sh' });
+    createHostedService(undefined, { relayOrigin: 'http://hosted.dormouse.sh' });
     expect((await command('oneTimeStatus')).result).toEqual({
       status: 'unavailable',
       reason: 'origin-invalid',
@@ -1449,15 +1534,19 @@ describe('one-time connection', () => {
     expect((await command('oneTimeOpen')).error).toMatch(/unavailable/);
     expect(rendezvous.rooms).toEqual([]);
     // The same answer a window with no service gives (`vscode-ext/src/burrow.ts`).
-    expect(idleOneTimeState('http://hosted.dormouse.sh', CONNECT_SRC)).toEqual({
+    expect(idleOneTimeState({ origin: 'http://hosted.dormouse.sh', mode: 'hosted' })).toEqual({
       status: 'unavailable',
       reason: 'origin-invalid',
     });
-    expect(idleOneTimeState(ONE_TIME_ORIGIN, CONNECT_SRC)).toEqual({ status: 'idle' });
+    expect(idleOneTimeState({ origin: ONE_TIME_ORIGIN, mode: 'hosted' })).toEqual({ status: 'idle' });
+    expect(idleOneTimeState({ origin: ORIGIN, mode: 'self-host' })).toEqual({
+      status: 'unavailable',
+      reason: 'self-host',
+    });
   });
 
   it('joins an open in flight rather than minting a second room', async () => {
-    createService();
+    createHostedService();
     const [first, second] = await Promise.all([command('oneTimeOpen'), command('oneTimeOpen')]);
     expect(rendezvous.rooms).toHaveLength(1);
     expect(first.result).toMatchObject({ status: 'waiting' });
@@ -1465,7 +1554,7 @@ describe('one-time connection', () => {
   });
 
   it('replaces a waiting link, whose room goes with it unannounced', async () => {
-    createService();
+    createHostedService();
     const first = await open();
     const firstRoom = rendezvous.room();
 
@@ -1485,7 +1574,7 @@ describe('one-time connection', () => {
   });
 
   it('replaces a link a phone is confirming, and its modal with it', async () => {
-    createService();
+    createHostedService();
     const phone = await join((await open()).url);
     const item = await request(phone);
 
@@ -1497,7 +1586,7 @@ describe('one-time connection', () => {
   });
 
   it('queues the request in its own slot, and routes the answer by kind', async () => {
-    createService();
+    createHostedService();
     const phone = await join((await open()).url);
     const item = await request(phone);
     expect(item).toEqual({
@@ -1534,7 +1623,7 @@ describe('one-time connection', () => {
   });
 
   it('denies by kind, which ends the connection', async () => {
-    createService();
+    createHostedService();
     const phone = await join((await open()).url);
     const item = await request(phone);
 
@@ -1548,7 +1637,7 @@ describe('one-time connection', () => {
   it('answers a one-time request without waiting behind an enrollment', async () => {
     // An enroll holds the lifecycle chain across its round trip to the Relay,
     // and the one attempt must not wait that out past the link's expiry.
-    createService();
+    createHostedService();
     const phone = await join((await open()).url);
     const item = await request(phone);
     const relay = Promise.withResolvers<Response>();
@@ -1567,7 +1656,7 @@ describe('one-time connection', () => {
     // A provider whose one pane records the hold an attach takes and gives back.
     const holds: SurfaceHold[] = [];
     const released: SurfaceHold[] = [];
-    createService(undefined, {
+    createHostedService(undefined, {
       provider: {
         ...fakeProvider(),
         resolveSurface: async (_surfaceId, _size, hold) => {
@@ -1611,7 +1700,7 @@ describe('one-time connection', () => {
   });
 
   it('refuses a new link while a phone holds this one, connecting or connected', async () => {
-    createService();
+    createHostedService();
     const phone = await join((await open()).url);
     await approve(await request(phone));
     expect(await phone.next()).toMatchObject({ ok: true });
@@ -1645,7 +1734,7 @@ describe('one-time connection', () => {
   });
 
   it('survives the enrollment going, and a reconnect', async () => {
-    createService({ enrollment: ENROLLMENT });
+    createHostedService({ enrollment: ENROLLMENT });
     await service.start();
     sockets[0]!.open();
     const waiting = await open();
@@ -1667,7 +1756,7 @@ describe('one-time connection', () => {
 
   it('keeps its request beside the pairings, and through a clearEnrollment', async () => {
     const authenticator = await createTestAuthenticator({ rpId: ENROLLMENT.rpId, origin: ORIGIN });
-    createService({ enrollment: ENROLLMENT });
+    createHostedService({ enrollment: ENROLLMENT });
     await service.start();
     const socket = sockets[0]!;
     socket.open();
@@ -1698,7 +1787,7 @@ describe('one-time connection', () => {
   });
 
   it('ends with the service, and says nothing after', async () => {
-    createService();
+    createHostedService();
     await open();
     const before = sent.length;
 
@@ -1724,11 +1813,7 @@ describe('one-time connection', () => {
     });
     try {
       const origin = `http://127.0.0.1:${port}`;
-      createService(undefined, {
-        oneTimeOrigin: origin,
-        connectSrc: `${origin} ws://127.0.0.1:${port}`,
-        createWebSocket: undefined,
-      });
+      createHostedService(undefined, { relayOrigin: origin, createWebSocket: undefined });
       expect(await open()).toMatchObject({ status: 'waiting' });
       expect(upgrades).toEqual([{ url: ONE_TIME_WS_ROUTES.burrow, origin: undefined }]);
     } finally {

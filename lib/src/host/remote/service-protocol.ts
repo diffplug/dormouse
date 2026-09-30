@@ -27,6 +27,7 @@ import type {
   BurrowStatus,
 } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import type { RelayMode } from '../relay-origin';
 
 /** Transport event names for what the service sends back. */
 export const BURROW_RESULT_EVENT = 'burrow:result';
@@ -253,8 +254,11 @@ export interface InvitationEvent {
 
 // --- Command parameter shapes ---
 
+/**
+ * No Relay URL: the only Relay a Burrow enrolls with is its build's baked
+ * origin (`docs/specs/relay.md` → "Relay origin").
+ */
 export interface EnrollParams {
-  relayUrl: string;
   password: string;
   label: string;
 }
@@ -266,9 +270,9 @@ export interface EnrollParams {
 export interface EnrollOfferParams {
   /**
    * The origin the card displayed, echoed back so the service can refuse an
-   * offer file that was rewritten between the render and the click. **Not the
-   * origin that is enrolled against** — that comes off the file, along with the
-   * token this shape deliberately does not carry.
+   * offer file that was rewritten between the render and the click. The token
+   * comes off the file, which this shape deliberately does not carry, and is
+   * spent only at the build's baked origin.
    */
   origin: string;
   label: string;
@@ -357,6 +361,18 @@ export interface BurrowConsoleStatus {
   /** {@link BurrowStatusEvent.serving}, which this seeds. */
   serving: boolean;
   relayUrl: string | null;
+  /**
+   * The one relay origin this build was baked with, enrolled or not — what the
+   * enroll view names (`docs/specs/relay.md` → "Relay origin").
+   */
+  relayOrigin: string;
+  /**
+   * What that origin makes this build. `hosted`: Persistent Relay is Hosted's
+   * and not offered yet. `self-host`: the enroll view, and a build that reaches
+   * nothing of Dormouse's in the background — the standalone updater reads this
+   * to decide whether to check at all (`docs/specs/auto-update.md`).
+   */
+  relayMode: RelayMode;
   burrowId: string | null;
   /**
    * The relay socket's state. `displaced` is the one that needs acting on:
@@ -369,8 +385,9 @@ export interface BurrowConsoleStatus {
   /** What to prefill a "name for this machine" field with: the hostname. */
   suggestedLabel: string;
   /**
-   * The installer's enrollment offer on this machine, when there is one and this
-   * Burrow has not enrolled — the Settings dialog's one-click path
+   * The installer's enrollment offer on this machine, when there is one naming
+   * the baked origin and this self-host Burrow has not enrolled — the Settings
+   * dialog's one-click path
    * (`docs/specs/relay.md` → "Remote control, in the Settings dialog", which
    * owns the re-read-at-click rule and what makes the card safe to press).
    *

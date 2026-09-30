@@ -104,8 +104,8 @@ export type OneTimeEndReason =
 export type OneTimeUnavailableReason =
   /** Not a bare HTTPS or loopback-HTTP origin a link can carry. */
   | 'origin-invalid'
-  /** Outside this build's baked connect-src allowlist. */
-  | 'origin-not-allowed';
+  /** A self-host build, which reaches no rendezvous (`docs/specs/relay.md` → "Relay origin"). */
+  | 'self-host';
 
 /**
  * What the one-time connection is doing, as the laptop's panel renders it.
