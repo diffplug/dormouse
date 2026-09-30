@@ -11,12 +11,9 @@ const mocks = vi.hoisted(() => ({
   shellOpen: vi.fn(),
   invoke: vi.fn(),
   requestAppRestart: vi.fn(),
-  /** The sidecar's Burrow `status`, whose `relayMode` gates every check. */
-  burrowStatus: vi.fn(),
-  platform: null as {
-    requestAppRestart?: () => Promise<boolean>;
-    burrow?: { command: (cmd: string) => Promise<unknown> };
-  } | null,
+  /** The webview's baked mode, which gates every check. */
+  relayMode: 'hosted' as 'hosted' | 'self-host',
+  platform: null as { requestAppRestart?: () => Promise<boolean> } | null,
 }));
 
 vi.mock('@tauri-apps/plugin-updater', () => ({
@@ -42,6 +39,10 @@ vi.mock('dormouse-lib/lib/platform', () => ({
   PLATFORM_STRING: 'Windows',
   IS_WINDOWS: true,
   getPlatformOrNull: () => mocks.platform,
+}));
+
+vi.mock('dormouse-lib/host/relay-origin', () => ({
+  bakedRelayMode: () => mocks.relayMode,
 }));
 
 // --- Helpers ---
@@ -93,11 +94,8 @@ describe('updater', () => {
     mocks.check.mockResolvedValue(null);
     mocks.shellOpen.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue('');
-    mocks.burrowStatus.mockResolvedValue({ relayMode: 'hosted' });
-    mocks.platform = {
-      requestAppRestart: mocks.requestAppRestart,
-      burrow: { command: mocks.burrowStatus },
-    };
+    mocks.relayMode = 'hosted';
+    mocks.platform = { requestAppRestart: mocks.requestAppRestart };
   });
 
   // Drive check → approve → download so an approved, downloaded update is pending.
@@ -208,23 +206,16 @@ describe('updater', () => {
 
       await vi.advanceTimersByTimeAsync(1);
       expect(mocks.check).toHaveBeenCalledOnce();
-      expect(mocks.burrowStatus).toHaveBeenCalledWith('status');
     });
 
-    // A self-host build never polls dormouse.sh: the manifest names the stock
-    // binaries, and installing one would replace its Relay
-    // (docs/specs/relay.md → "Relay origin"). Fails closed.
-    it.each([
-      ['a self-host build', () => mocks.burrowStatus.mockResolvedValue({ relayMode: 'self-host' })],
-      ['a status with no mode', () => mocks.burrowStatus.mockResolvedValue({ enrolled: false })],
-      ['a sidecar that cannot answer', () => mocks.burrowStatus.mockRejectedValue(new Error('no sidecar'))],
-      ['no Burrow service at all', () => { mocks.platform = { requestAppRestart: mocks.requestAppRestart }; }],
-    ])('never checks in %s', async (_case, arrange) => {
-      arrange();
+    // docs/specs/relay.md → "Relay origin".
+    it('never checks in a self-host build', async () => {
+      mocks.relayMode = 'self-host';
       const info = vi.spyOn(console, 'info').mockImplementation(() => {});
       startUpdateCheck();
       await vi.advanceTimersByTimeAsync(10_000);
       expect(mocks.check).not.toHaveBeenCalled();
+      expect(mocks.getVersion).not.toHaveBeenCalled();
       expect(readBannerState()).toEqual({ status: 'idle' });
       info.mockRestore();
     });

@@ -9,12 +9,11 @@
     "prebuild": "pnpm --filter remote-lib-common build",
     "build": "pnpm run stage && tsc -b && vite build",
     "stage": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy",
-    "stage:dev": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy:dev",
+    "stage:dev": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy --dev",
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
     "stage:sidecar-proxy": "pnpm --filter remote-lib-common build && node scripts/build-sidecar-proxy.mjs",
-    "stage:sidecar-proxy:dev": "pnpm --filter remote-lib-common build && node scripts/build-sidecar-proxy.mjs --dev",
-    "tauri": "node scripts/tauri.mjs",
-    "pretest": "pnpm --filter dor-lib-common build",
+    "tauri": "pnpm --filter remote-lib-common build && node scripts/tauri.mjs",
+    "pretest": "pnpm --filter dor-lib-common build && pnpm --filter remote-lib-common build",
     "test": "vitest run && node --test scripts/*.test.mjs"
   },
   "dependencies": {

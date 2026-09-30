@@ -89,7 +89,7 @@ export function createManagedVoiceHost(options: {
   };
 
   const status = (config: StoredConfig): ManagedVoiceStatus =>
-    ({ available: speakUrl !== null, configured: config.token !== null, voiceId: config.voiceId });
+    ({ configured: config.token !== null, voiceId: config.voiceId });
 
   async function configure(update: unknown): Promise<ManagedVoiceConfigResult> {
     if (!store) return { ok: false, reason: 'unavailable' };

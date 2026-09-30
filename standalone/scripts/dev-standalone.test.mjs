@@ -26,8 +26,7 @@ async function fixture(t) {
   const cli = path.join(bin, 'cli.cjs');
   await writeFile(cli, `
     const args = process.argv.slice(2);
-    // \`pnpm run stage[:dev]\`, which tauri.mjs runs first: which one says
-    // whether the sidecar is baked as a dev build (docs/specs/relay.md).
+    // \`pnpm run stage:dev\`, which tauri.mjs runs ahead of a dev run.
     if (args[0] === 'run') {
       console.log('STAGE ' + args[1]);
       process.exit(0);
@@ -105,10 +104,8 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
     b.start(['dev'], { DORMOUSE_LOG_FILE: path.join(b.root, 'custom.log') }).ready(),
   ]);
   assert.equal(custom.logFile, path.join(b.root, 'custom.log'));
-  // A dev run stages a dev build, the only kind that may bake the Hosted flag
-  // or a loopback relay origin.
-  assert.match(custom.output, /STAGE stage:dev\b/);
-  assert.doesNotMatch(custom.output, /STAGE stage\r?\n/);
+  // A dev run stages a dev build (docs/specs/relay.md → "Relay origin").
+  assert.match(custom.output, /STAGE stage:dev\r?\n/);
   await custom.stop();
   assert.notEqual(one.url, two.url);
   assert.notEqual(one.config.identifier, two.config.identifier);
@@ -161,8 +158,27 @@ test('non-dev Tauri commands retain their arguments and production configuration
   const run = a.start(['build', '--debug']);
   assert.equal((await run.exited).code, 0);
   assert.deepEqual(JSON.parse((await run.wait(/CLI_ARGS (.+)/))[1]), ['exec', 'tauri', 'build', '--debug']);
-  // Every subcommand but `dev` stages a release build.
-  assert.match(run.output, /STAGE stage\r?\n/);
-  assert.doesNotMatch(run.output, /STAGE stage:dev/);
+  // `beforeBuildCommand` stages a release build; staging here too would bake twice.
+  assert.doesNotMatch(run.output, /STAGE/);
   assert.doesNotMatch(run.output, /app URL|NATIVE_CONFIG/);
+});
+
+test('a self-host build overlays no updater endpoint and no updater artifacts', async t => {
+  const a = await fixture(t);
+  const run = a.start(['build', '--debug'], { DORMOUSE_RELAY_ORIGIN: 'https://relay.example.ts.net' });
+  assert.equal((await run.exited).code, 0);
+  const args = JSON.parse((await run.wait(/CLI_ARGS (.+)/))[1]);
+  assert.deepEqual(args.slice(0, 4).concat(args.slice(5)), ['exec', 'tauri', 'build', '--config', '--debug']);
+  // Tauri merges `--config` as a JSON merge patch, so the empty list replaces
+  // tauri.conf.json's endpoints outright (docs/specs/standalone.md → "Build and
+  // development").
+  assert.deepEqual(JSON.parse(args[4]), {
+    bundle: { createUpdaterArtifacts: false },
+    plugins: { updater: { endpoints: [] } },
+  });
+
+  const refused = a.start(['build'], { DORMOUSE_RELAY_IS_HOSTED: '1' });
+  assert.notEqual((await refused.exited).code, 0);
+  assert.match(refused.output, /DORMOUSE_RELAY_IS_HOSTED is for dev builds only/);
+  assert.doesNotMatch(refused.output, /CLI_ARGS/);
 });

@@ -4,6 +4,7 @@
  * `voice:status` broadcast reaches `receiveStatus`
  * (`docs/specs/transport.md` -> "Managed voice").
  */
+import { bakedRelayMode } from "dormouse-lib/host/relay-origin";
 import { messageOf } from "dormouse-lib/lib/errors";
 import type {
   ManagedVoiceConfigResult,
@@ -28,6 +29,15 @@ function decodeBase64(base64: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * This build's port: none in a self-host build, whose Settings then hide the
+ * section and whose alerts speak through Web Speech alone
+ * (`docs/specs/alert.md` -> "Managed voice").
+ */
+export function managedVoicePortForBuild(invoke: Invoke): StandaloneManagedVoicePort | undefined {
+  return bakedRelayMode() === "hosted" ? createManagedVoicePort(invoke) : undefined;
+}
+
 export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePort {
   const call = <T>(payload: Record<string, unknown>) => invoke<T>("managed_voice", { payload });
   let status: ManagedVoiceStatus | null = null;
@@ -38,12 +48,8 @@ export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePo
 
   const apply = (data: unknown): void => {
     const next = data as Partial<ManagedVoiceStatus> | null;
-    if (
-      typeof next?.available !== "boolean" ||
-      typeof next.configured !== "boolean" ||
-      typeof next.voiceId !== "string"
-    ) return;
-    status = { available: next.available, configured: next.configured, voiceId: next.voiceId };
+    if (typeof next?.configured !== "boolean" || typeof next.voiceId !== "string") return;
+    status = { configured: next.configured, voiceId: next.voiceId };
     for (const listener of listeners) listener();
   };
   const ask = async <T>(payload: Record<string, unknown>): Promise<T> => {

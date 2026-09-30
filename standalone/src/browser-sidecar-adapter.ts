@@ -35,7 +35,7 @@ import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
 import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import { createManagedVoicePort } from "./managed-voice-port";
+import { managedVoicePortForBuild } from "./managed-voice-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
@@ -107,11 +107,11 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     // managed voice asks for its status again.
     this.unlistenReconnect = this.host.onReconnect(() => {
       this.alerts.sync();
-      this.managedVoice.refresh();
+      this.managedVoice?.refresh();
     });
     // A reload is a new realm under the same label; see TauriAdapter.
     this.alerts.hello();
-    this.managedVoice.refresh();
+    this.managedVoice?.refresh();
     this.installConsoleForwarder();
     this.unlistenRegistry = await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
@@ -312,7 +312,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     return this.windowSlot.read();
   }
 
-  readonly managedVoice = createManagedVoicePort((cmd, args) => this.host.invoke(cmd, args));
+  readonly managedVoice = managedVoicePortForBuild((cmd, args) => this.host.invoke(cmd, args));
 
   private handleHostEvent(event: string, data: unknown): void {
     if (event === "dormouse://workspaces") {
@@ -321,7 +321,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     }
     if (this.alerts.onEvent(event, data)) return;
     if (event === "voice:status") {
-      this.managedVoice.receiveStatus(data);
+      this.managedVoice?.receiveStatus(data);
     } else if (event === "pty:data") {
       // Already parsed by the sidecar, which owns the PTY; its events arrive as
       // the two messages below (docs/specs/terminal-escapes.md).

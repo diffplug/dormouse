@@ -22,7 +22,7 @@ import type {
   SpawnPtyOptions,
   WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
-import { createManagedVoicePort } from "./managed-voice-port";
+import { managedVoicePortForBuild } from "./managed-voice-port";
 import {
   answerAskCommand,
   createBurrowLinkClient,
@@ -249,9 +249,9 @@ export class TauriAdapter implements PlatformAdapter {
       ...ALERT_EVENTS.map((name) =>
         listenToWindow<unknown>(name, (event) => void this.alerts.onEvent(name, event.payload))),
 
-      listenToWindow<unknown>("voice:status", (event) => this.managedVoice.receiveStatus(event.payload)),
+      listenToWindow<unknown>("voice:status", (event) => this.managedVoice?.receiveStatus(event.payload)),
     ])));
-    this.managedVoice.refresh();
+    this.managedVoice?.refresh();
     // This realm is new, whether the window just opened or reloaded: the
     // engagement and awaits of the one before it are gone (same label).
     this.alerts.hello();
@@ -629,6 +629,6 @@ export class TauriAdapter implements PlatformAdapter {
     return this.windowSlot.read();
   }
 
-  readonly managedVoice = createManagedVoicePort(rawInvoke);
+  readonly managedVoice = managedVoicePortForBuild(rawInvoke);
 
 }

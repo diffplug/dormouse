@@ -36,14 +36,12 @@ let fallbackCalls: Array<{ text: string; callbacks: SpeechEngineCallbacks; dispo
 let fallbackAvailable: boolean;
 let portPresent: boolean;
 let configured: boolean | null;
-/** `false` is a self-host build's host (`docs/specs/alert.md` -> "Managed voice"). */
-let available: boolean;
 
 const port: ManagedVoicePort = {
   offerSetup: true,
-  status: () => (configured === null ? null : { available, configured, voiceId: 'v' }),
+  status: () => (configured === null ? null : { configured, voiceId: 'v' }),
   subscribe: () => () => {},
-  configure: async () => ({ ok: true, available: true, configured: true, voiceId: 'v' }),
+  configure: async () => ({ ok: true, configured: true, voiceId: 'v' }),
   speak: (text) => new Promise((resolve) => speaks.push({ text, resolve })),
 };
 
@@ -94,7 +92,6 @@ beforeEach(() => {
   fallbackAvailable = true;
   portPresent = true;
   configured = true;
-  available = true;
   events = [];
   queue = new SpeechQueue(withFallback(
     createManagedVoiceEngine({ port: () => (portPresent ? port : undefined), playback }),
@@ -298,14 +295,5 @@ describe('managed voice engine', () => {
     expect(queue.enqueue(job('a'))).toBe(true);
     configured = false;
     expect(queue.enqueue(job('b'))).toBe(false);
-  });
-
-  it('goes straight to Web Speech in a self-host build, asking its host nothing', () => {
-    // Its host sends nothing to Hosted (docs/specs/relay.md → "Relay origin"),
-    // even should one report a token.
-    available = false;
-    queue.enqueue(job('a'));
-    expect(speaks).toEqual([]);
-    expect(fallbackCalls.map((c) => c.text)).toEqual(['say a']);
   });
 });

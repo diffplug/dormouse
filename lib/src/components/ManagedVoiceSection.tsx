@@ -25,13 +25,9 @@ function useManagedVoiceStatus(port: ManagedVoicePort | undefined): ManagedVoice
   return useSyncExternalStore(subscribe, snapshot);
 }
 
-/**
- * Settings offers managed voice for a dev build's port, or once a token is
- * saved — never in a self-host build, whose host reports it unavailable, nor
- * before the host has said which it is.
- */
+/** Settings offers managed voice for a dev build's port, or once a token is saved. */
 function isOffered(port: ManagedVoicePort | undefined, status: ManagedVoiceStatus | null): port is ManagedVoicePort {
-  return !!port && status?.available === true && (port.offerSetup || status.configured);
+  return !!port && (port.offerSetup || status?.configured === true);
 }
 
 export function useManagedVoiceOffered(): boolean {
