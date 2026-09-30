@@ -1761,6 +1761,7 @@ describe('One-time connection', () => {
     // An older VS Code broker in another window still says `origin-not-allowed`.
     await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'origin-not-allowed' } as never));
     expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
+    expect(ONE_TIME_UNAVAILABLE_FALLBACK).toBe('Not available in this build.');
     expect(text()).toContain(ONE_TIME_UNAVAILABLE_FALLBACK);
     expect(text()).not.toContain('Open a link on your phone');
   });
