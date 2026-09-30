@@ -270,4 +270,65 @@ describe('an answer from an older broker', () => {
       unsubscribe();
     }
   });
+
+  it('reads the shape from before one baked relay origin, and does not republish it', async () => {
+    // `offer` was `{ origin }`, a fresh object every poll; there was no
+    // `relayOrigin` or `relayMode` (docs/specs/relay.md → "Relay origin").
+    vi.useFakeTimers();
+    const command = vi.fn(async () => ({
+      enrolled: false,
+      serving: false,
+      relayUrl: null,
+      burrowId: null,
+      connection: 'stopped',
+      pairedClients: 0,
+      suggestedLabel: 'ned-mac',
+      offer: { origin: 'https://ned-mac.tail9c2f1.ts.net' },
+    }));
+    burrowLink = { command, respond: () => {}, notify: () => {}, on: () => () => {} };
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeToBurrowStatus(listener);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getBurrowStatusSnapshot()).toMatchObject({
+        kind: 'ready',
+        // No mode reads as Hosted: no enroll form the old broker's `enroll`
+        // could be sent from.
+        status: { offer: true, relayOrigin: '', relayMode: 'hosted' },
+      });
+      await vi.advanceTimersByTimeAsync(3 * 2000);
+      expect(command.mock.calls.length).toBeGreaterThan(1);
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('names an older broker\'s enrolled Relay from its `relayUrl`', async () => {
+    burrowLink = {
+      command: async () => ({
+        enrolled: true,
+        relayUrl: 'https://laptop.tailnet.ts.net',
+        burrowId: 'burrow-1',
+        connection: 'connected',
+        pairedClients: 1,
+        suggestedLabel: 'ned-mac',
+        offer: null,
+      }),
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+    const unsubscribe = subscribeToBurrowStatus(() => {});
+    try {
+      await vi.waitFor(() =>
+        expect(getBurrowStatusSnapshot()).toMatchObject({
+          status: { relayOrigin: 'https://laptop.tailnet.ts.net', offer: false },
+        }),
+      );
+    } finally {
+      unsubscribe();
+    }
+  });
 });

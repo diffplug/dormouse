@@ -241,9 +241,23 @@ function refreshAfterMutation(): Promise<void> {
  * whole section away rather than degrading, so it is defaulted here — at the
  * seam where the untrusted shape becomes the typed one — instead of at each of
  * the two forms that read it. `serving` is read through `servingOf`.
+ *
+ * A broker from before the one baked relay origin answers `offer` as
+ * `{ origin } | null` — a fresh object every poll, which the field-wise compare
+ * would republish every 2 s — and names its Relay `relayUrl` with no
+ * `relayOrigin` or `relayMode`. The mode it lacks reads as Hosted, which shows
+ * no enroll form it could not serve.
  */
 function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
-  return { ...status, serving: servingOf(status), suggestedLabel: status.suggestedLabel ?? '' };
+  const { relayUrl } = status as { relayUrl?: unknown };
+  return {
+    ...status,
+    serving: servingOf(status),
+    suggestedLabel: status.suggestedLabel ?? '',
+    relayOrigin: status.relayOrigin ?? (typeof relayUrl === 'string' ? relayUrl : ''),
+    relayMode: status.relayMode === 'self-host' ? 'self-host' : 'hosted',
+    offer: Boolean(status.offer),
+  };
 }
 
 async function readBurrowStatus(): Promise<void> {
