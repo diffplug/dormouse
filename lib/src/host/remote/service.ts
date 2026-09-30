@@ -53,6 +53,7 @@ import {
   BURROW_EVENT_EVENT,
   BURROW_RESULT_EVENT,
   approvalKind,
+  idleOneTimeState,
   isBurrowCommand,
   type ApproveParams,
   type BurrowUiEvent,
@@ -224,16 +225,6 @@ export function oneTimeServing(state: OneTimeState): boolean {
   return ONE_TIME_SERVING.has(state.status);
 }
 
-/**
- * The one-time state of a Burrow with no connection, from this build's
- * `hostedOrigin` (`../relay-origin.ts`): `unavailable` without one — a
- * self-host build, which opens no rendezvous — else `idle`. One builder,
- * because two processes answer it — the service, and the VS Code glue for a
- * window with no service at all (`vscode-ext/src/burrow.ts` → `refuseCommand`).
- */
-export function idleOneTimeState(hosted: string | null): OneTimeState {
-  return hosted === null ? { status: 'unavailable', reason: 'self-host' } : { status: 'idle' };
-}
 
 /** Bytes of the random ticket a one-time request is answered by, as `pairingId`. */
 const ONE_TIME_TICKET_BYTES = 16;

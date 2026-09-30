@@ -42,12 +42,12 @@ import {
 } from '../host/remote/service-protocol';
 import {
   enrolledStatus,
-  HOSTED_UNENROLLED_STATUS as HOSTED_NOT_ENROLLED,
   makeEventedBurrowLink,
   makeStubBurrowLink,
   OFFER_STATUS,
   oneTimeWaiting,
   SELF_HOST_RELAY_ORIGIN,
+  SELF_HOST_UNENROLLED_STATUS as SELF_HOST_NOT_ENROLLED,
   setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-burrow-link';
@@ -264,7 +264,7 @@ describe('RemoteControlSection', () => {
 
   it('offers a stock build a one-time connection and a folded Persistent Relay with nothing to enroll', async () => {
     const openExternal = vi.fn();
-    platform = { burrow: makeLink(async () => HOSTED_NOT_ENROLLED), openExternal };
+    platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
     await render();
     expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
     expect(text()).toContain(
@@ -288,7 +288,7 @@ describe('RemoteControlSection', () => {
 
   it('offers hosted.dormouse.sh as coming soon, linking the Hosted preview', async () => {
     const openExternal = vi.fn();
-    platform = { burrow: makeLink(async () => HOSTED_NOT_ENROLLED), openExternal };
+    platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
     await render();
     await openPersistent();
     expect(buttonLabelled('Use hosted.dormouse.sh')!.disabled).toBe(true);
@@ -297,7 +297,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('offers a self-host build its form under the origin it was built for, and no Hosted button', async () => {
-    platform = { burrow: makeLink(async () => NOT_ENROLLED) };
+    platform = { burrow: makeLink(async () => SELF_HOST_NOT_ENROLLED) };
     await render();
     await openPersistent();
 
@@ -331,7 +331,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('keeps what was typed through folding Persistent Relay', async () => {
-    platform = { burrow: makeLink(async () => NOT_ENROLLED) };
+    platform = { burrow: makeLink(async () => SELF_HOST_NOT_ENROLLED) };
     await render();
     await openPersistent();
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
@@ -346,7 +346,7 @@ describe('RemoteControlSection', () => {
   it('folds Persistent Relay after a Disconnect', async () => {
     let status: unknown = enrolled();
     const link = makeLink(async (cmd) => {
-      if (cmd === 'clearEnrollment') status = NOT_ENROLLED;
+      if (cmd === 'clearEnrollment') status = SELF_HOST_NOT_ENROLLED;
       return status;
     });
     platform = { burrow: link };
@@ -359,7 +359,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('keeps Connect disabled until every field is filled', async () => {
-    platform = { burrow: makeLink(async () => NOT_ENROLLED) };
+    platform = { burrow: makeLink(async () => SELF_HOST_NOT_ENROLLED) };
     await render();
     await openPersistent();
 
@@ -376,7 +376,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('enrolls with trimmed values and re-reads the status', async () => {
-    let status: unknown = NOT_ENROLLED;
+    let status: unknown = SELF_HOST_NOT_ENROLLED;
     const link = makeLink(async (cmd) => {
       if (cmd === 'enroll') {
         status = enrolled();
@@ -407,7 +407,7 @@ describe('RemoteControlSection', () => {
       `The Relay says its origin is https://ned-mac.local, but this build was made for ${SELF_HOST_RELAY_ORIGIN}.`;
     const link = makeLink(async (cmd) => {
       if (cmd === 'enroll') throw new Error(refusal);
-      return NOT_ENROLLED;
+      return SELF_HOST_NOT_ENROLLED;
     });
     platform = { burrow: link };
     await render();
@@ -471,7 +471,7 @@ describe('RemoteControlSection', () => {
     // the offer up. Folding the form away must not empty it.
     vi.useFakeTimers();
     try {
-      let status: unknown = NOT_ENROLLED;
+      let status: unknown = SELF_HOST_NOT_ENROLLED;
       platform = { burrow: makeLink(async () => status) };
       await render();
       await openPersistent();
@@ -503,7 +503,7 @@ describe('RemoteControlSection', () => {
       let failEnroll: (error: Error) => void = () => {};
       const link = makeLink(async (cmd) => {
         if (cmd === 'enrollOffer') {
-          status = NOT_ENROLLED;
+          status = SELF_HOST_NOT_ENROLLED;
           return new Promise<unknown>((_resolve, reject) => {
             failEnroll = reject;
           });
@@ -1400,7 +1400,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('re-reads the status when the service announces a change', async () => {
-    let status: unknown = NOT_ENROLLED;
+    let status: unknown = SELF_HOST_NOT_ENROLLED;
     const link = makeLink(async () => status);
     platform = { burrow: link };
     await render();

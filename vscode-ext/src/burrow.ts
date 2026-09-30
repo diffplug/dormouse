@@ -15,7 +15,6 @@ import {
 import { bakedRelay, hostedOrigin } from '../../lib/src/host/relay-origin';
 import {
   BurrowService,
-  idleOneTimeState,
   loadEnrollmentFor,
   oneTimeServing,
   readUsableOffer,
@@ -24,6 +23,7 @@ import {
 import {
   BURROW_EVENT_EVENT,
   BURROW_RESULT_EVENT,
+  idleOneTimeState,
   isBurrowCommand,
   isOneTimeState,
   type OneTimeEvent,

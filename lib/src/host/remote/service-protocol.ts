@@ -199,6 +199,18 @@ export interface OneTimeEvent {
 export type BurrowUiEvent = BurrowStatusEvent | PairingQueueEvent | InvitationEvent | OneTimeEvent;
 
 /**
+ * The one-time state of a Burrow with no connection, from this build's
+ * `hostedOrigin` (`../relay-origin.ts`): `unavailable` without one — a
+ * self-host build, which opens no rendezvous — else `idle`. One builder for
+ * every process that answers it: the service, the VS Code glue for a window
+ * with no service at all (`vscode-ext/src/burrow.ts` → `refuseCommand`), and
+ * the Storybook stub.
+ */
+export function idleOneTimeState(hosted: string | null): OneTimeState {
+  return hosted === null ? { status: 'unavailable', reason: 'self-host' } : { status: 'idle' };
+}
+
+/**
  * Whether `value` is a {@link OneTimeState} a panel can render: a known
  * `status` carrying the fields that status needs. A reason is only checked to
  * be a string — a panel keeps fixed copy per reason and falls back for one this

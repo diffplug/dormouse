@@ -105,8 +105,8 @@ export function getWebviewHtml(
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
     // browser surfaces; see docs/specs/dor-browser.md). No relay origin here:
-    // the Burrow holds its `/ws/burrow` socket from the extension host, so
-    // the origin allowlist is enforced there instead (burrow.ts).
+    // the Burrow holds its `/ws/burrow` socket from the extension host, which
+    // reaches only its baked relay origin (docs/specs/relay.md → "Relay origin").
     `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:*`,
     // `dor iframe` frames its target through a loopback transparent proxy that
     // the extension host stands up (iframe-proxy-host.ts), so the only origin we
@@ -132,7 +132,7 @@ export function getWebviewHtml(
   // Serving an unmarked document would leave every script un-nonced against a
   // nonce-gated policy, and the only symptom is a blank panel — the silent
   // failure this placeholder exists to end. Same reasoning as
-  // `assertConnectSrcBaked` in `scripts/esbuild.mjs`: a lost build-time
+  // `assertRelayOriginBaked` in `scripts/relay-origin.mjs`: a lost build-time
   // substitution must not look recoverable at runtime.
   if (!html.includes(CSP_NONCE_PLACEHOLDER)) {
     throw new Error(

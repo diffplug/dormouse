@@ -4,9 +4,9 @@ import { ModalSurface } from '../components/design';
 import { RemoteControlSection } from '../components/RemoteControlSection';
 import {
   enrolledStatus,
-  HOSTED_UNENROLLED_STATUS,
   OFFER_STATUS,
   SELF_HOST_RELAY_ORIGIN,
+  SELF_HOST_UNENROLLED_STATUS,
   UNENROLLED_STATUS,
 } from '../host/remote/test-burrow-link';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
@@ -93,7 +93,7 @@ async function openPersistent(canvasElement: HTMLElement) {
  */
 export const Choices: Story = {
   parameters: {
-    primedBurrow: { status: HOSTED_UNENROLLED_STATUS },
+    primedBurrow: { status: UNENROLLED_STATUS },
     docs: { story: { height: '310px' } },
   },
   play: settled('Persistent Relay'),
@@ -106,7 +106,7 @@ export const Choices: Story = {
  */
 export const HostedPersistentRelay: Story = {
   parameters: {
-    primedBurrow: { status: HOSTED_UNENROLLED_STATUS },
+    primedBurrow: { status: UNENROLLED_STATUS },
     docs: { story: { height: '420px' } },
   },
   play: async ({ canvasElement }) => {
@@ -122,7 +122,7 @@ export const HostedPersistentRelay: Story = {
  */
 export const Unenrolled: Story = {
   parameters: {
-    primedBurrow: { status: UNENROLLED_STATUS },
+    primedBurrow: { status: SELF_HOST_UNENROLLED_STATUS },
     docs: { story: { height: '640px' } },
   },
   play: async ({ canvasElement }) => {
@@ -139,7 +139,7 @@ export const Unenrolled: Story = {
 export const EnrollRefused: Story = {
   parameters: {
     primedBurrow: {
-      status: UNENROLLED_STATUS,
+      status: SELF_HOST_UNENROLLED_STATUS,
       enrollError:
         `The Relay says its origin is https://ned-mac.local, but this build was made for ${SELF_HOST_RELAY_ORIGIN}. ` +
         'Rebuild Dormouse with DORMOUSE_RELAY_ORIGIN=https://ned-mac.local, or set the Relay\'s ' +
@@ -420,7 +420,7 @@ export const BurrowServiceError: Story = {
  */
 export const OneTimeWaiting: Story = {
   parameters: {
-    primedBurrow: { status: HOSTED_UNENROLLED_STATUS },
+    primedBurrow: { status: UNENROLLED_STATUS },
     docs: { story: { height: '720px' } },
   },
   play: async (context) => {
@@ -435,7 +435,7 @@ export const OneTimeWaiting: Story = {
 export const OneTimeConfirming: Story = {
   parameters: {
     primedBurrow: {
-      status: HOSTED_UNENROLLED_STATUS,
+      status: UNENROLLED_STATUS,
       oneTime: { status: 'confirming', label: 'Android phone', expiresAt: STORY_NOW + 60_000 },
     },
     docs: { story: { height: '380px' } },
@@ -447,7 +447,7 @@ export const OneTimeConfirming: Story = {
 export const OneTimeConnecting: Story = {
   parameters: {
     primedBurrow: {
-      status: HOSTED_UNENROLLED_STATUS,
+      status: UNENROLLED_STATUS,
       oneTime: { status: 'connecting', label: 'Android phone' },
     },
     docs: { story: { height: '360px' } },
@@ -459,7 +459,7 @@ export const OneTimeConnecting: Story = {
 export const OneTimeConnected: Story = {
   parameters: {
     primedBurrow: {
-      status: HOSTED_UNENROLLED_STATUS,
+      status: UNENROLLED_STATUS,
       oneTime: { status: 'connected', label: 'Android phone', since: STORY_NOW },
     },
     docs: { story: { height: '360px' } },
@@ -475,7 +475,7 @@ export const OneTimeConnected: Story = {
 export const OneTimeEndedDirectFailed: Story = {
   parameters: {
     primedBurrow: {
-      status: HOSTED_UNENROLLED_STATUS,
+      status: UNENROLLED_STATUS,
       oneTime: { status: 'ended', reason: 'direct-failed' },
     },
     docs: { story: { height: '380px' } },
@@ -487,7 +487,7 @@ export const OneTimeEndedDirectFailed: Story = {
 export const OneTimeEndedMismatch: Story = {
   parameters: {
     primedBurrow: {
-      status: HOSTED_UNENROLLED_STATUS,
+      status: UNENROLLED_STATUS,
       oneTime: { status: 'ended', reason: 'confirmation-mismatch' },
     },
     docs: { story: { height: '360px' } },
@@ -501,10 +501,7 @@ export const OneTimeEndedMismatch: Story = {
  */
 export const OneTimeUnavailable: Story = {
   parameters: {
-    primedBurrow: {
-      status: UNENROLLED_STATUS,
-      oneTime: { status: 'unavailable', reason: 'self-host' },
-    },
+    primedBurrow: { status: SELF_HOST_UNENROLLED_STATUS },
     docs: { story: { height: '330px' } },
   },
   play: settled(/Not available in a self-host build/),

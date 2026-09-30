@@ -48,8 +48,8 @@ import {
 } from '../../remote/test-rendezvous';
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
-import { BurrowService, idleOneTimeState, type BurrowServiceOptions } from './service';
-import { isOneTimeState } from './service-protocol';
+import { BurrowService, type BurrowServiceOptions } from './service';
+import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
   BurrowStatusEvent,
   InvitationEvent,
