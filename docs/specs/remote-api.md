@@ -433,7 +433,7 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 **Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and both Burrows speak today. What remains is to **dogfood** it across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
 
-Relay-supplied ICE servers are unstaged (SaaS), as is a session surviving relay loss.
+STUN discovery and network restrictions follow the **remote-network** scope in [remote-network.md](./remote-network.md). A session surviving relay loss remains unstaged.
 
 ### 9. Audio
 
