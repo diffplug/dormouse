@@ -152,12 +152,17 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 **The Burrow composes every Relay URL from the baked origin and takes none as
 input**: `enroll` and `enrollOffer` post to it, carrying no Relay URL, and **a
 Hosted build refuses both**, Hosted running no Relay
-(`docs/specs/hosted.md` → Future). **An enrollment naming another origin reads
-as none** wherever one is read — `start`, `status`, VS Code's activation — and
-stays on disk untouched, so switching back restores it (rationale). Origins
-compare as `new URL(...).origin`. **An enrollment whose Relay reports another
-`origin` is refused before anything is saved**, the error naming both: that
-`DORMOUSE_ORIGIN` is where every setup code sends a phone.
+(`docs/specs/hosted.md` → Future); **a command still naming a Relay** (an older
+webview's) **is refused unless it names the baked origin**. **An enrollment
+whose Relay URL or `origin` names another origin reads as none** wherever one is
+read — `start`, `status`, VS Code's activation — and stays on disk untouched, so
+switching back restores it (rationale). Origins compare as `new URL(...).origin`.
+
+**The enroll request carries the baked origin, which a Relay served from
+another refuses before spending or saving anything** ("HTTP API"); the error
+names both, that `DORMOUSE_ORIGIN` being where every setup code sends a phone.
+**An older Relay enrolls anyway, so the Burrow refuses a reported `origin` other
+than its own before persisting**, naming the `burrows.json` row left behind.
 
 **Both build failure modes are silent, so the build catches both** (rationale):
 a bad variable, and a bundle the `define` did not reach, the readers taking the
@@ -318,7 +323,7 @@ The Relay owns the fixed `/api/hello` health response, pinned by
 | `POST /api/signin/finish`        | —              | Verifies the assertion and issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin`         | session token  | Takes a required, kind-tagged `PresenceBinding`, mints a single-use 2-minute `relayNonce`, and answers `presenceChallenge(binding, nonce)` with the RP ID, the nonce, and the bound credential as the sole `allowCredentials` entry. 404 for a credential this account has not registered; 400 for a missing or malformed binding |
 | `POST /api/reauth/finish`        | session token  | Consumes the nonce, recomputes the challenge, and verifies the assertion against the **stored** key for exactly that credential. **Extends nothing** — not the session, not the relay socket |
-| `POST /api/burrow/enroll`          | setup password or one-time enroll token | Enrolls a Burrow, appends `burrows.json`, mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400. **Takes no label**: a Client learns the machine's name only inside an encrypted outcome. Capped at `MAX_ENROLLED_BURROWS`, answering 409 naming the file to edit — checked inside the store mutex and **after** the credential (rationale) |
+| `POST /api/burrow/enroll`          | setup password or one-time enroll token | Enrolls a Burrow, appends `burrows.json`, mirrors the user-verification policy. Exactly one credential — both, or neither, is a 400. **Takes no label**: a Client learns the machine's name only inside an encrypted outcome. An `origin` other than the Relay's is a 409 `ORIGIN_MISMATCH_ERROR` naming the Relay's, ahead of the credential (rationale); absent, it enrolls (an older Burrow). Capped at `MAX_ENROLLED_BURROWS`, answering 409 naming the file to edit — checked inside the store mutex and **after** the credential (rationale) |
 | `POST /api/burrow/setup-token`     | burrow token     | Mints the single-use, short-TTL token behind this Burrow's QR (below) |
 | `GET /api/burrows`                 | session token  | Enrolled burrows + whether each is currently connected |
 | `GET /api/push/config`           | —              | Returns the public VAPID key, or `null` when push is unconfigured |
@@ -723,7 +728,7 @@ memo invalidation — live in that burrow's spec.
   [remote-security-model.md](./remote-security-model.md)) through its
   `BurrowStateStore`, then opens and maintains `GET /ws/burrow`. **Must persist the operator's
   `label` locally and disclose it only inside encrypted outcomes** — the request body
-  carries the credential and nothing else
+  carries the credential and the baked `origin`, nothing else
   ([remote-security-model.md](./remote-security-model.md) -> Burrow identity) — and
   **`burrowToken` never enters a webview realm**. **A 200 that is not an enrollment
   fails the exchange**: the response goes through the same `isEnrollment` guard
@@ -894,6 +899,9 @@ exists to honor:
     costs a retry rather than the app-wide ErrorBoundary.
 - **Disconnect asks first**: clearing the enrollment drops every paired phone
   until each pairs again.
+- **An older broker's status is read into this shape**: an `offer` object as
+  `true`, `relayUrl` as `relayOrigin`, and a missing `relayMode` as Hosted, so
+  it shows no enroll form.
 - **Status is re-read, not patched**: the service's `status` event carries only
   `{ enrolled, serving, serviceId }`, so every event triggers a full `status` command, and the dialog
   re-reads on open since another window may have enrolled meanwhile. **The

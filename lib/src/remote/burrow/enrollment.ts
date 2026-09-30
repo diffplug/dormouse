@@ -6,11 +6,13 @@
 import {
   API_ROUTES,
   BAD_PASSWORD_ERROR,
+  ORIGIN_MISMATCH_ERROR,
   UNAUTHORIZED_ERROR,
   isE2eId,
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   normalizeOrigin,
+  type BurrowEnrollRequest,
   type BurrowEnrollResponse,
 } from 'remote-lib-common';
 import { BURROW_REQUEST_TIMEOUT_MS } from './burrow-fetch';
@@ -142,10 +144,18 @@ function boundedDetail(detail: string): string {
  * through to the generic message rather than confidently sending the user to
  * retype a password that was fine.
  *
+ * A 409 naming another origin is a build made for another Relay, and says how
+ * to line the two up ({@link originMismatchMessage}).
+ *
  * Every other status keeps the number and the Relay's own text: there is no
  * user action to name, and an operator debugging a reverse proxy needs both.
  */
-function refusalMessage(status: number, detail: string): string {
+function refusalMessage(status: number, detail: string, relayOrigin: string): string {
+  if (status === 409) {
+    const body = refusedBody(detail);
+    const reported = body?.error === ORIGIN_MISMATCH_ERROR ? normalizeOrigin(body.origin) : null;
+    if (reported) return originMismatchMessage(reported, relayOrigin);
+  }
   if (status === 401) {
     const error = refusedError(detail);
     if (error === BAD_PASSWORD_ERROR) return 'The Relay did not accept that setup password.';
@@ -157,14 +167,33 @@ function refusalMessage(status: number, detail: string): string {
   return `The Relay refused the enrollment (HTTP ${status})${shown ? `: ${shown}` : ''}`;
 }
 
-/** The `error` a JSON refusal names, or `null` for a body that is not one. */
-function refusedError(detail: string): string | null {
+/** A JSON refusal's body, or `null` for one that is not an object. */
+function refusedBody(detail: string): Record<string, unknown> | null {
   try {
-    const error = (JSON.parse(detail) as { error?: unknown } | null)?.error;
-    return typeof error === 'string' ? error : null;
+    const body: unknown = JSON.parse(detail);
+    return body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
   } catch {
     return null;
   }
+}
+
+/** The `error` a JSON refusal names, or `null` for a body that is not one. */
+function refusedError(detail: string): string | null {
+  const error = refusedBody(detail)?.error;
+  return typeof error === 'string' ? error : null;
+}
+
+/**
+ * What a Relay served from `reported` tells a Burrow built for `relayOrigin`:
+ * both, and the two ways to make them agree (`docs/specs/relay.md` → "Relay
+ * origin").
+ */
+export function originMismatchMessage(reported: string, relayOrigin: string): string {
+  return (
+    `The Relay says its origin is ${reported}, but this build was made for ${relayOrigin}. ` +
+    `Rebuild Dormouse with DORMOUSE_RELAY_ORIGIN=${reported}, or set the Relay's ` +
+    `DORMOUSE_ORIGIN to ${relayOrigin}.`
+  );
 }
 
 /**
@@ -202,13 +231,15 @@ export async function performEnrollment(
     // this body carries — to an origin the build was never baked with.
     redirect: 'error',
     headers: { 'content-type': 'application/json' },
-    // The credential and nothing else — in particular no `label`, which stays
-    // local (`docs/specs/remote-security-model.md` -> Burrow identity).
-    body: JSON.stringify(credential),
+    // The credential and the baked origin, which a Relay served from another
+    // refuses before saving anything, and nothing else — in particular no
+    // `label`, which stays local (`docs/specs/remote-security-model.md` ->
+    // Burrow identity).
+    body: JSON.stringify({ ...credential, origin: relayOrigin } satisfies BurrowEnrollRequest),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new Error(refusalMessage(response.status, detail));
+    throw new Error(refusalMessage(response.status, detail, relayOrigin));
   }
   // The response body is untrusted like any other, so it goes through the same
   // guard every *read* of an enrollment uses. Without it a Relay that answers

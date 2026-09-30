@@ -60,6 +60,8 @@
 
 **What three route answers are protecting.** `POST /api/setup/retire` exists so a QR a phone scanned but will not register with cannot stay redeemable in a photograph. `/api/burrow/enroll` checks its `MAX_ENROLLED_BURROWS` cap after the credential so a caller that proved nothing cannot learn the Relay is full. `/api/push/subscribe` 404s an unknown `burrowId` so no subscription row strands where no Burrow can read or prune it.
 
+**Why the enroll origin check runs ahead of the credential, unlike the cap.** Its answer is the Relay's own origin, which every page it serves already names, where the cap would tell a caller that proved nothing how full the Relay is. Checked first, it also refuses before the first password enrollment takes the installer's offer with it, and a Burrow built for another Relay learns what to fix even through a mistyped password (review, 2026-09).
+
 **Why only Burrow enrollment pays the failure delay.** A delay retains a request. The setup password route is protected by the process-global admission bucket, so its retained work is bounded. Setup, Burrow, and session tokens are random bearer capabilities with no plausible online search; delaying their rejection buys public traffic held connections without protecting a human secret.
 
 ## Setup tokens and the pairing QR

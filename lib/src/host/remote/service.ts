@@ -17,6 +17,7 @@ import {
   type EnrollmentOffer,
 } from 'remote-lib-common';
 import {
+  originMismatchMessage,
   performEnrollment,
   type BurrowEnrollCredential,
   type BurrowEnrollment,
@@ -163,18 +164,26 @@ export async function readUsableOffer(
 }
 
 /**
- * The stored enrollment, or `null` — including for one naming another origin,
- * which **reads as none** and stays on disk (`docs/specs/relay.md` → "Relay
- * origin"). One reader for the service's start and VS Code's contention.
+ * The stored enrollment, or `null` — including for one whose Relay URL or
+ * phone-facing `origin` names another origin, which **reads as none** and stays
+ * on disk (`docs/specs/relay.md` → "Relay origin"). Both are checked because an
+ * enrollment from before the one baked origin could carry an `origin` apart from
+ * its Relay URL. One reader for the service's start and VS Code's contention.
  */
 export async function loadEnrollmentFor(
   store: Pick<BurrowStateStore, 'loadEnrollment'>,
   origin: string,
 ): Promise<BurrowEnrollment | null> {
   const enrollment = await store.loadEnrollment();
-  if (!enrollment || isRelayOrigin(enrollment.relayUrl, origin)) return enrollment;
+  if (
+    !enrollment ||
+    (isRelayOrigin(enrollment.relayUrl, origin) && isRelayOrigin(enrollment.origin, origin))
+  ) {
+    return enrollment;
+  }
   console.warn(
-    `[burrow] enrolled Relay ${enrollment.relayUrl} is not this build's relay origin (${origin}); reading it as un-enrolled`,
+    `[burrow] enrolled Relay ${enrollment.relayUrl} (origin ${enrollment.origin}) is not this ` +
+      `build's relay origin (${origin}); reading it as un-enrolled`,
   );
   return null;
 }
@@ -444,7 +453,22 @@ export class BurrowService {
 
   #enroll(params: EnrollParams): Promise<EnrollResult> {
     if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    this.#refuseOtherOrigin((params as { relayUrl?: unknown }).relayUrl);
     return this.#enrollWith({ password: params.password }, params.label);
+  }
+
+  /**
+   * An older webview still names the Relay — `enroll`'s `relayUrl`, or
+   * `enrollOffer`'s echoed `origin` — and one naming any but the baked origin
+   * is refused, rather than enrolled with this build's Relay instead.
+   */
+  #refuseOtherOrigin(named: unknown): void {
+    if (named === undefined) return;
+    if (typeof named === 'string' && isRelayOrigin(named, this.#relay.origin)) return;
+    throw new Error(
+      `This Dormouse enrolls only with ${this.#relay.origin}, the Relay it was built for, ` +
+        `not ${String(named)}.`,
+    );
   }
 
   /**
@@ -453,6 +477,7 @@ export class BurrowService {
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    this.#refuseOtherOrigin((params as { origin?: unknown }).origin);
     // Re-read at the click, and refused before the token leaves the machine
     // unless it names the one Relay this build enrolls with.
     const offer = await readUsableOffer(this.#relay, this.#readOffer);
@@ -474,14 +499,12 @@ export class BurrowService {
   async #enrollWith(credential: BurrowEnrollCredential, label: string): Promise<EnrollResult> {
     const enrollment = await performEnrollment(this.#relay.origin, credential, label);
     if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
-      // The Relay says it is served from somewhere else — a `DORMOUSE_ORIGIN`
-      // that differs from the origin this build was baked with. Every setup code
-      // would send a phone there, so the mismatch is named now and nothing is
-      // persisted (docs/specs/relay.md → "Relay origin").
+      // An older Relay, which ignores the request's `origin` and so enrolled a
+      // Burrow built for another: nothing is persisted here, and the row it
+      // appended is named for the operator (docs/specs/relay.md → "Relay origin").
       throw new Error(
-        `The Relay says its origin is ${enrollment.origin}, but this build was made for ` +
-          `${this.#relay.origin}. Rebuild Dormouse with DORMOUSE_RELAY_ORIGIN=${enrollment.origin}, ` +
-          `or set the Relay's DORMOUSE_ORIGIN to ${this.#relay.origin}.`,
+        `${originMismatchMessage(enrollment.origin, this.#relay.origin)} The Relay has already ` +
+          `recorded Burrow ${enrollment.burrowId}; remove it from burrows.json.`,
       );
     }
     // Persist before touching the running Burrow. The credential we just minted
