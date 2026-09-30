@@ -39,14 +39,13 @@ export const SELF_HOST_RELAY_ORIGIN = 'https://ned-mac.tail9c2f1.ts.net';
 export const UNENROLLED_STATUS: BurrowConsoleStatus = {
   enrolled: false,
   serving: false,
-  relayUrl: null,
   relayOrigin: SELF_HOST_RELAY_ORIGIN,
   relayMode: 'self-host',
   burrowId: null,
   connection: 'idle',
   pairedClients: 0,
   suggestedLabel: 'ned-mac',
-  offer: null,
+  offer: false,
 };
 
 /** A stock build: its Relay is Hosted's, so Persistent Relay offers nothing to enroll. */
@@ -62,7 +61,7 @@ export const HOSTED_UNENROLLED_STATUS: BurrowConsoleStatus = {
  */
 export const OFFER_STATUS: BurrowConsoleStatus = {
   ...UNENROLLED_STATUS,
-  offer: { origin: SELF_HOST_RELAY_ORIGIN },
+  offer: true,
 };
 
 /** An enrolled machine, with the fields a caller is likely to vary. */
@@ -72,7 +71,6 @@ export function enrolledStatus(
   return {
     enrolled: true,
     serving: true,
-    relayUrl: SELF_HOST_RELAY_ORIGIN,
     relayOrigin: SELF_HOST_RELAY_ORIGIN,
     relayMode: 'self-host',
     burrowId: 'burrow-6f1c2a90',
@@ -80,7 +78,7 @@ export function enrolledStatus(
     pairedClients: 0,
     suggestedLabel: 'ned-mac',
     // An enrolled Burrow reports no offer, whatever is on disk.
-    offer: null,
+    offer: false,
     ...over,
   };
 }

@@ -268,13 +268,7 @@ export interface EnrollParams {
  * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  */
 export interface EnrollOfferParams {
-  /**
-   * The origin the card displayed, echoed back so the service can refuse an
-   * offer file that was rewritten between the render and the click. The token
-   * comes off the file, which this shape deliberately does not carry, and is
-   * spent only at the build's baked origin.
-   */
-  origin: string;
+  /** No token: it comes off the file, which the service re-reads at the click. */
   label: string;
 }
 
@@ -320,7 +314,6 @@ export interface AnswerParams {
 
 export interface EnrollResult {
   burrowId: string;
-  relayUrl: string;
 }
 
 /**
@@ -360,18 +353,12 @@ export interface BurrowConsoleStatus {
   enrolled: boolean;
   /** {@link BurrowStatusEvent.serving}, which this seeds. */
   serving: boolean;
-  relayUrl: string | null;
   /**
-   * The one relay origin this build was baked with, enrolled or not — what the
-   * enroll view names (`docs/specs/relay.md` → "Relay origin").
+   * The one relay origin this build was baked with, enrolled or not, and the
+   * mode it sets — what the Settings dialog renders (`docs/specs/relay.md` →
+   * "Relay origin").
    */
   relayOrigin: string;
-  /**
-   * What that origin makes this build. `hosted`: Persistent Relay is Hosted's
-   * and not offered yet. `self-host`: the enroll view, and a build that reaches
-   * nothing of Dormouse's in the background — the standalone updater reads this
-   * to decide whether to check at all (`docs/specs/auto-update.md`).
-   */
   relayMode: RelayMode;
   burrowId: string | null;
   /**
@@ -385,17 +372,16 @@ export interface BurrowConsoleStatus {
   /** What to prefill a "name for this machine" field with: the hostname. */
   suggestedLabel: string;
   /**
-   * The installer's enrollment offer on this machine, when there is one naming
-   * the baked origin and this self-host Burrow has not enrolled — the Settings
-   * dialog's one-click path
-   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog", which
-   * owns the re-read-at-click rule and what makes the card safe to press).
+   * Whether the installer left an enrollment offer for `relayOrigin` on this
+   * machine, while this self-host Burrow has not enrolled — the Settings
+   * dialog's one-click path (`docs/specs/relay.md` → "Remote control, in the
+   * Settings dialog").
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and
    * the token is a bearer credential exactly like `burrowToken` (`docs/specs/security-remote.md` → "Trust boundary",
    * the no-`burrowToken`-in-a-webview FAIL IF).
    */
-  offer: { origin: string } | null;
+  offer: boolean;
 }
 
 /**

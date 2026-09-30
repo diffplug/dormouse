@@ -63,9 +63,8 @@ describe('burrow enrollment', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    // Trailing slash should be stripped before appending the route.
     const enrollment = await performEnrollment(
-      'https://dormouse.example/',
+      'https://dormouse.example',
       { password: TEST_SETUP_PASSWORD },
       'My Laptop',
     );

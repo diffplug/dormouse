@@ -134,23 +134,58 @@ function safeHostname(): string {
 }
 
 /**
- * Whether this build reads the installer's offer at all: only a self-host
- * build, since a Hosted one enrolls nowhere (`docs/specs/relay.md` → "Remote
- * control, in the Settings dialog").
+ * Whether this build enrolls at all: only a self-host build, a Hosted one's
+ * Relay being Hosted's, which runs none yet (`docs/specs/relay.md` → "Relay
+ * origin").
  */
-export function readsEnrollmentOffer(relay: RelayBuild): boolean {
+export function canEnroll(relay: RelayBuild): boolean {
   return relay.mode === 'self-host';
 }
 
+/** What `enroll` and `enrollOffer` answer where {@link canEnroll} is false. */
+const HOSTED_ENROLLMENT_REFUSAL =
+  'This build’s Relay is Dormouse Hosted, which is not running one yet. A Relay you run takes ' +
+  'a Dormouse built with its origin (DORMOUSE_RELAY_ORIGIN).';
+
 /**
- * What a Burrow with no enrollment reports. One builder, because two processes
- * answer this: the service's own `status`, and the VS Code glue for a window
- * that has no service at all (`vscode-ext/src/burrow.ts` → `idleStatus`).
- * The origin-only projection of the offer is the security-relevant half — the
- * one-time token is a bearer credential and never enters a webview
- * (`service-protocol.ts` → `BurrowConsoleStatus.offer`) — so the two must
- * not drift. **An offer naming any origin but the baked one is none**: this
- * build could not enroll against it.
+ * The installer's offer this build could spend: read only where
+ * {@link canEnroll}, and `null` unless it names the baked origin. One reader
+ * for the service and the VS Code glue, which both answer `status`.
+ */
+export async function readUsableOffer(
+  relay: RelayBuild,
+  read: () => Promise<EnrollmentOffer | null>,
+): Promise<EnrollmentOffer | null> {
+  if (!canEnroll(relay)) return null;
+  const offer = await read();
+  return offer && isRelayOrigin(offer.origin, relay.origin) ? offer : null;
+}
+
+/**
+ * The stored enrollment, or `null` — including for one naming another origin,
+ * which **reads as none** and stays on disk (`docs/specs/relay.md` → "Relay
+ * origin"). One reader for the service's start and VS Code's contention.
+ */
+export async function loadEnrollmentFor(
+  store: Pick<BurrowStateStore, 'loadEnrollment'>,
+  origin: string,
+): Promise<BurrowEnrollment | null> {
+  const enrollment = await store.loadEnrollment();
+  if (!enrollment || isRelayOrigin(enrollment.relayUrl, origin)) return enrollment;
+  console.warn(
+    `[burrow] enrolled Relay ${enrollment.relayUrl} is not this build's relay origin (${origin}); reading it as un-enrolled`,
+  );
+  return null;
+}
+
+/**
+ * What a Burrow with no enrollment reports, given what {@link readUsableOffer}
+ * found. One builder, because two processes answer this: the service's own
+ * `status`, and the VS Code glue for a window that has no service at all
+ * (`vscode-ext/src/burrow.ts` → `idleStatus`). The offer crosses as a boolean
+ * — its one-time token is a bearer credential and never enters a webview
+ * (`service-protocol.ts` → `BurrowConsoleStatus.offer`) — so the two must not
+ * drift.
  */
 export function unenrolledStatus(
   offer: EnrollmentOffer | null,
@@ -158,18 +193,16 @@ export function unenrolledStatus(
   relay: RelayBuild,
   serving = false,
 ): BurrowConsoleStatus {
-  const usable = offer && readsEnrollmentOffer(relay) && isRelayOrigin(offer.origin, relay.origin);
   return {
     enrolled: false,
     serving,
-    relayUrl: null,
     relayOrigin: relay.origin,
     relayMode: relay.mode,
     burrowId: null,
     connection: 'stopped',
     pairedClients: 0,
     suggestedLabel: suggestedBurrowLabel(kind),
-    offer: usable ? { origin: offer.origin } : null,
+    offer: offer !== null,
   };
 }
 
@@ -341,19 +374,8 @@ export class BurrowService {
   }
 
   async #start(): Promise<void> {
-    const enrollment = await this.#store.loadEnrollment();
-    if (!enrollment) return;
-    if (!isRelayOrigin(enrollment.relayUrl, this.#relay.origin)) {
-      // Enrolled by another build — a stock build after a self-host one, or a
-      // Relay that moved. It reads as none: nothing connects to an origin this
-      // build was not baked with, and the record stays on disk, so switching
-      // back restores it (docs/specs/relay.md → "Relay origin").
-      console.warn(
-        `[burrow] enrolled Relay ${enrollment.relayUrl} is not this build's relay origin (${this.#relay.origin}); reading it as un-enrolled`,
-      );
-      return;
-    }
-    await this.#startBurrow(enrollment);
+    const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
+    if (enrollment) await this.#startBurrow(enrollment);
   }
 
   /** Stop the Burrow, end any one-time connection, and forget the connection-scoped state. */
@@ -430,20 +452,8 @@ export class BurrowService {
   // --- Commands ---
 
   #enroll(params: EnrollParams): Promise<EnrollResult> {
-    this.#refuseHostedEnrollment();
+    if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
     return this.#enrollWith({ password: params.password }, params.label);
-  }
-
-  /**
-   * A Hosted build enrolls nowhere: its Relay is Hosted's, which runs none yet
-   * (`docs/specs/relay.md` → "Relay origin").
-   */
-  #refuseHostedEnrollment(): void {
-    if (this.#relay.mode === 'self-host') return;
-    throw new Error(
-      'This build’s Relay is Dormouse Hosted, which is not running one yet. A Relay you run takes ' +
-        'a Dormouse built with its origin (DORMOUSE_RELAY_ORIGIN).',
-    );
   }
 
   /**
@@ -451,29 +461,14 @@ export class BurrowService {
    * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
-    this.#refuseHostedEnrollment();
-    const offer = await this.#readOffer();
+    if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    // Re-read at the click, and refused before the token leaves the machine
+    // unless it names the one Relay this build enrolls with.
+    const offer = await readUsableOffer(this.#relay, this.#readOffer);
     if (!offer) {
       throw new Error(
-        'There is no enrollment offer on this machine — it may have been redeemed already. ' +
-          'Re-run the installer to mint a new one, or enroll with the setup password.',
-      );
-    }
-    if (offer.origin !== params.origin) {
-      // The webview echoes the origin its card displayed, and this is where that
-      // echo is spent: an installer re-run between the render and the click
-      // rewrites the file, and enrolling against the new origin would spend a
-      // one-time token on a Relay the user never reviewed.
-      throw new Error(
-        `The enrollment offer changed — it now names ${offer.origin}, not ${params.origin}. ` +
-          'Reopen this dialog to review the new one.',
-      );
-    }
-    if (!isRelayOrigin(offer.origin, this.#relay.origin)) {
-      // Refused before the token leaves the machine: the only Relay this build
-      // enrolls with is its own.
-      throw new Error(
-        `The enrollment offer names ${offer.origin}, but this build reaches only ${this.#relay.origin}.`,
+        `There is no enrollment offer for ${this.#relay.origin} on this machine — it may have been ` +
+          'redeemed already. Re-run the installer to mint a new one, or enroll with the setup password.',
       );
     }
     return await this.#enrollWith({ enrollToken: offer.token }, params.label);
@@ -487,7 +482,7 @@ export class BurrowService {
    */
   async #enrollWith(credential: BurrowEnrollCredential, label: string): Promise<EnrollResult> {
     const enrollment = await performEnrollment(this.#relay.origin, credential, label);
-    if (enrollment.origin !== this.#relay.origin) {
+    if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
       // The Relay says it is served from somewhere else — a `DORMOUSE_ORIGIN`
       // that differs from the origin this build was baked with. Every setup code
       // would send a phone there, so the mismatch is named now and nothing is
@@ -518,7 +513,7 @@ export class BurrowService {
       this.#emitStatus();
     }
     await this.#startBurrow(enrollment);
-    return { burrowId: enrollment.burrowId, relayUrl: enrollment.relayUrl };
+    return { burrowId: enrollment.burrowId };
   }
 
   /**
@@ -535,21 +530,19 @@ export class BurrowService {
    * nothing to offer, so the 2 s poll must not stat a file every tick.
    */
   async #status(): Promise<BurrowConsoleStatus> {
-    const offer =
-      this.#enrollment || !readsEnrollmentOffer(this.#relay) ? null : await this.#readOffer();
+    const offer = this.#enrollment ? null : await readUsableOffer(this.#relay, this.#readOffer);
     const enrollment = this.#enrollment;
     if (!enrollment) return unenrolledStatus(offer, this.#kind, this.#relay, this.#serving());
     return {
       enrolled: true,
       serving: true,
-      relayUrl: enrollment.relayUrl,
       relayOrigin: this.#relay.origin,
       relayMode: this.#relay.mode,
       burrowId: enrollment.burrowId,
       connection: this.#burrow?.status ?? 'stopped',
       pairedClients: this.#burrow?.activeRecords.length ?? 0,
       suggestedLabel: suggestedBurrowLabel(this.#kind),
-      offer: null,
+      offer: false,
     };
   }
 

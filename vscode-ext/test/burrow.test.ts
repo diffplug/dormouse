@@ -12,7 +12,9 @@ import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import type { EnrollmentOffer } from 'remote-lib-common';
 
+import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
+import { FakeSocket } from '../../lib/src/remote/test-fake-socket';
 import { createTestRendezvous, type TestRendezvous } from '../../lib/src/remote/test-rendezvous';
 import { ONE_TIME_SERVING_KEY } from '../src/burrow-store';
 import type { ExtensionMessage } from '../src/message-types';
@@ -93,16 +95,18 @@ vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
  * network: the glue's factory prefers the host's global `WebSocket`.
  */
 function stubSilentRelay(): void {
-  vi.stubGlobal(
-    'WebSocket',
-    class {
-      readyState = 0;
-      addEventListener() {}
-      removeEventListener() {}
-      send() {}
-      close() {}
-    },
-  );
+  vi.stubGlobal('WebSocket', FakeSocket);
+}
+
+/** A stored enrollment at `origin`, as the keychain holds it. */
+function enrollmentJson(origin: string): string {
+  return JSON.stringify({
+    relayUrl: origin,
+    burrowId: BURROW_ID,
+    burrowToken: 'token',
+    origin,
+    rpId: new URL(origin).hostname,
+  });
 }
 
 const OFFER: EnrollmentOffer = {
@@ -366,7 +370,7 @@ beforeEach(async () => {
   realTmp = process.env.TMPDIR;
   process.env.TMPDIR = dir;
   offer = null;
-  relayBuild.origin = 'https://hosted.dormouse.sh';
+  relayBuild.origin = DEFAULT_RELAY_ORIGIN;
   relayBuild.mode = 'hosted';
 });
 
@@ -651,7 +655,7 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enrollOffer',
-      params: { origin: OFFER.origin, label: 'Laptop' },
+      params: { label: 'Laptop' },
     });
 
     await waitFor(() => results(bound.posted).length > 0);
@@ -824,14 +828,13 @@ describe('burrow service glue', () => {
         result: {
           enrolled: false,
           serving: false,
-          relayUrl: null,
           relayOrigin: OFFER.origin,
           relayMode: 'self-host',
           burrowId: null,
           connection: 'stopped',
           pairedClients: 0,
           suggestedLabel: `${hostname()} (VS Code)`,
-          offer: { origin: OFFER.origin },
+          offer: true,
         },
       },
     ]);
@@ -889,16 +892,7 @@ describe('burrow service glue', () => {
     const { context, store } = fakeContext();
     // Enrolled at this build's own origin, with a relay socket that never opens.
     stubSilentRelay();
-    store.secrets.set(
-      ENROLLMENT_KEY,
-      JSON.stringify({
-        relayUrl: relayBuild.origin,
-        burrowId: BURROW_ID,
-        burrowToken: 'token',
-        origin: relayBuild.origin,
-        rpId: 'hosted.dormouse.sh',
-      }),
-    );
+    store.secrets.set(ENROLLMENT_KEY, enrollmentJson(relayBuild.origin));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mod.initBurrow(context);
     // Enough microtasks for the enrollment probe to land and the contention to
@@ -1024,16 +1018,7 @@ describe('burrow service glue', () => {
     expect(opened!.isPeerBroker()).toBe(false);
 
     stubSilentRelay();
-    store.secrets.set(
-      ENROLLMENT_KEY,
-      JSON.stringify({
-        relayUrl: relayBuild.origin,
-        burrowId: BURROW_ID,
-        burrowToken: 'token',
-        origin: relayBuild.origin,
-        rpId: 'hosted.dormouse.sh',
-      }),
-    );
+    store.secrets.set(ENROLLMENT_KEY, enrollmentJson(relayBuild.origin));
     store.announce(ENROLLMENT_KEY);
 
     await waitFor(() => opened!.isPeerBroker());
@@ -1047,20 +1032,17 @@ describe('burrow service glue', () => {
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
     const { context, store } = fakeContext();
-    const elsewhere = JSON.stringify({
-      relayUrl: 'https://relay.example.com',
-      burrowId: BURROW_ID,
-      burrowToken: 'token',
-      origin: 'https://relay.example.com',
-      rpId: 'relay.example.com',
-    });
+    const elsewhere = enrollmentJson('https://relay.example.com');
     store.secrets.set(ENROLLMENT_KEY, elsewhere);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mod.initBurrow(context);
     await tick();
     store.announce(ENROLLMENT_KEY);
     await tick();
 
     expect(opened!.isPeerBroker()).toBe(false);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
     // Kept, so switching back to the build that made it restores it.
     expect(store.secrets.get(ENROLLMENT_KEY)).toBe(elsewhere);
   });

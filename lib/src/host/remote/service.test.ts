@@ -370,14 +370,13 @@ describe('status', () => {
     expect((await command('status')).result).toEqual({
       enrolled: false,
       serving: false,
-      relayUrl: null,
       relayOrigin: ORIGIN,
       relayMode: 'self-host',
       burrowId: null,
       connection: 'stopped',
       pairedClients: 0,
       suggestedLabel: `${hostname()} (VS Code)`,
-      offer: null,
+      offer: false,
     } satisfies BurrowConsoleStatus);
   });
 
@@ -392,7 +391,7 @@ describe('status', () => {
       enrolled: false,
       relayOrigin: HOSTED_ORIGIN,
       relayMode: 'hosted',
-      offer: null,
+      offer: false,
     });
     expect(offerReads).toBe(0);
   });
@@ -403,7 +402,7 @@ describe('status', () => {
     createService();
     await service.start();
 
-    expect((await command('status')).result).toMatchObject({ enrolled: false, offer: null });
+    expect((await command('status')).result).toMatchObject({ enrolled: false, offer: false });
   });
 
   it('offers the installer’s enrollment while un-enrolled, without its token', async () => {
@@ -414,14 +413,13 @@ describe('status', () => {
     expect((await command('status')).result).toEqual({
       enrolled: false,
       serving: false,
-      relayUrl: null,
       relayOrigin: ORIGIN,
       relayMode: 'self-host',
       burrowId: null,
       connection: 'stopped',
       pairedClients: 0,
       suggestedLabel: `${hostname()} (VS Code)`,
-      offer: { origin: OFFER.origin },
+      offer: true,
     } satisfies BurrowConsoleStatus);
     // The one-time token is a bearer credential and this is a service→webview
     // shape (docs/specs/security-remote.md -> "Trust boundary"), so it must not appear anywhere in what was sent.
@@ -435,7 +433,7 @@ describe('status', () => {
     createService({ enrollment: ENROLLMENT });
     await service.start();
 
-    expect((await command('status')).result).toMatchObject({ enrolled: true, offer: null });
+    expect((await command('status')).result).toMatchObject({ enrolled: true, offer: false });
     expect(offerReads).toBe(0);
   });
 
@@ -447,14 +445,13 @@ describe('status', () => {
     expect((await command('status')).result).toEqual({
       enrolled: true,
       serving: true,
-      relayUrl: ENROLLMENT.relayUrl,
       relayOrigin: ORIGIN,
       relayMode: 'self-host',
       burrowId: BURROW_ID,
       connection: 'connected',
       pairedClients: 1,
       suggestedLabel: `${hostname()} (VS Code)`,
-      offer: null,
+      offer: false,
     } satisfies BurrowConsoleStatus);
   });
 
@@ -483,7 +480,7 @@ describe('status', () => {
 
     // ...and only then let the status read finish.
     release();
-    expect((await status).result).toMatchObject({ enrolled: true, offer: null });
+    expect((await status).result).toMatchObject({ enrolled: true, offer: false });
   });
 
   it('rejects a command it does not know', async () => {
@@ -512,7 +509,7 @@ describe('enroll', () => {
       label: 'Laptop',
     });
 
-    expect(result.result).toEqual({ burrowId: BURROW_ID, relayUrl: ORIGIN });
+    expect(result.result).toEqual({ burrowId: BURROW_ID });
     expect(requests.map((request) => request.url)).toEqual([`${ORIGIN}${API_ROUTES.burrowEnroll}`]);
     expect(store.enrollment?.burrowToken).toBe('tok');
     expect(sockets).toHaveLength(1);
@@ -560,7 +557,7 @@ describe('enroll', () => {
     expect(sockets[0]!.readyState).toBe(1);
     expect((await command('status')).result).toMatchObject({
       enrolled: true,
-      relayUrl: ENROLLMENT.relayUrl,
+      burrowId: ENROLLMENT.burrowId,
       connection: 'connected',
     });
   });
@@ -586,9 +583,9 @@ describe('enrollOffer', () => {
     offer = OFFER;
     createService();
 
-    const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
+    const result = await command('enrollOffer', { label: 'Laptop' });
 
-    expect(result.result).toEqual({ burrowId: BURROW_ID, relayUrl: OFFER.origin });
+    expect(result.result).toEqual({ burrowId: BURROW_ID });
     expect(requests).toHaveLength(1);
     // The credential and nothing else: the label the operator typed stays local.
     expect(requestBody(0)).toEqual({ enrollToken: OFFER.token });
@@ -608,43 +605,24 @@ describe('enrollOffer', () => {
     await command('status');
     offer = null;
 
-    const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
+    const result = await command('enrollOffer', { label: 'Laptop' });
 
-    expect(result.error).toMatch(/no enrollment offer on this machine/i);
+    expect(result.error).toMatch(/no enrollment offer for .* on this machine/i);
     expect(requests).toEqual([]);
     expect(store.enrollment).toBeNull();
   });
 
-  it('refuses an offer whose origin is not the one the card displayed', async () => {
-    // An installer rerun between the render and the click rewrites the file.
-    // Enrolling against the new origin would spend a one-time token on a Relay
-    // the user was never shown, so the webview's echo is what authorizes it.
+  it('refuses an offer for any origin but the baked one, rewritten at the click included', async () => {
+    // A Relay installed on this machine is not thereby one this build may reach,
+    // and the one-time token must not leave before that is checked.
     offer = OFFER;
     createService();
     await command('status');
-    offer = { ...OFFER, origin: 'https://elsewhere.dormouse.sh' };
-
-    const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
-
-    expect(result.error).toMatch(/offer changed/i);
-    expect(result.error).toContain('https://elsewhere.dormouse.sh');
-    // Nothing left the machine: not the token, and not against either origin.
-    expect(requests).toEqual([]);
-    expect(store.enrollment).toBeNull();
-  });
-
-  it('refuses an offer for any origin but the baked one', async () => {
-    // A Relay installed on this machine is not thereby one this build may reach,
-    // and the one-time token must not leave before that is checked.
     offer = { ...OFFER, origin: 'https://relay.example.com' };
-    createService();
 
-    const result = await command('enrollOffer', {
-      origin: 'https://relay.example.com',
-      label: 'Laptop',
-    });
+    const result = await command('enrollOffer', { label: 'Laptop' });
 
-    expect(result.error).toContain('https://relay.example.com');
+    expect(result.error).toMatch(/no enrollment offer for/i);
     expect(result.error).toContain(ORIGIN);
     expect(requests).toEqual([]);
     expect(store.enrollment).toBeNull();
@@ -654,7 +632,7 @@ describe('enrollOffer', () => {
     offer = { ...OFFER, origin: HOSTED_ORIGIN };
     createHostedService();
 
-    const result = await command('enrollOffer', { origin: HOSTED_ORIGIN, label: 'Laptop' });
+    const result = await command('enrollOffer', { label: 'Laptop' });
 
     expect(result.error).toMatch(/Dormouse Hosted/);
     expect(offerReads).toBe(0);
@@ -666,7 +644,7 @@ describe('enrollOffer', () => {
     enrollReportedOrigin = 'https://relay.example.com';
     createService();
 
-    const result = await command('enrollOffer', { origin: OFFER.origin, label: 'Laptop' });
+    const result = await command('enrollOffer', { label: 'Laptop' });
 
     expect(result.error).toContain('https://relay.example.com');
     expect(result.error).toContain(ORIGIN);
@@ -792,7 +770,7 @@ describe('start', () => {
     expect(sockets[0]!.readyState).toBe(1);
     expect((await command('status')).result).toMatchObject({
       enrolled: true,
-      relayUrl: ENROLLMENT.relayUrl,
+      burrowId: ENROLLMENT.burrowId,
       connection: 'connected',
     });
     expect(statusEvents()).toEqual([true]);
@@ -861,7 +839,7 @@ describe('status events', () => {
 
   it('announces the Burrow an enroll started', async () => {
     createService();
-    await command('enroll', { relayUrl: ORIGIN, password: 'setup', label: 'Laptop' });
+    await command('enroll', { password: 'setup', label: 'Laptop' });
     expect(statusEvents()).toEqual([true]);
   });
 });
@@ -1210,7 +1188,7 @@ describe('setup QR', () => {
     const { invitation } = await mint();
 
     await command('clearEnrollment');
-    await command('enroll', { relayUrl: ORIGIN, password: 'setup', label: 'Laptop' });
+    await command('enroll', { password: 'setup', label: 'Laptop' });
     const reconnected = sockets.at(-1)!;
     reconnected.open();
 
@@ -1603,7 +1581,7 @@ describe('one-time connection', () => {
     const item = await request(phone);
     const relay = Promise.withResolvers<Response>();
     vi.stubGlobal('fetch', () => relay.promise);
-    const enrolling = command('enroll', { relayUrl: ORIGIN, password: 'setup', label: 'Laptop' });
+    const enrolling = command('enroll', { password: 'setup', label: 'Laptop' });
     await settle();
 
     await approve(item);

@@ -209,7 +209,7 @@ export const ConnectedManyDevices: Story = {
   parameters: {
     primedBurrow: {
       status: enrolledStatus({
-        relayUrl: 'https://neds-16-inch-macbook-pro-2026.tail9c2f1.ts.net',
+        relayOrigin: 'https://neds-16-inch-macbook-pro-2026.tail9c2f1.ts.net',
         pairedClients: 4,
       }),
     },

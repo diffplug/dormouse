@@ -14,7 +14,7 @@
  * Enroll from the devtools console:
  *
  *   await window.dormouseBurrow.enroll('SETUP_PASSWORD', 'My Laptop')   // at the build's relay origin
- *   await window.dormouseBurrow.enrollOffer('https://your-relay', 'My Laptop')  // installer's offer, this machine
+ *   await window.dormouseBurrow.enrollOffer('My Laptop')                 // installer's offer, this machine
  *   window.dormouseBurrow.status()
  *   window.dormouseBurrow.reconnect()      // needed after `displaced`
  *   window.dormouseBurrow.clearEnrollment()
@@ -113,15 +113,11 @@ function installBridgeMode(link: BurrowLink): void {
   // → "Running it"), one round trip further away — so `status()` and
   // `reconnect()` are promises here.
   target.dormouseBurrow = {
-    // No Relay argument: the only Relay is the build's baked origin
-    // (`docs/specs/relay.md` → "Relay origin").
+    // No Relay argument, and no token: the only Relay is the build's baked
+    // origin (`docs/specs/relay.md` → "Relay origin"), and the service reads the
+    // installer's token off its file.
     enroll: (password: string, label: string) => link.command('enroll', { password, label }),
-    // Origin-first: an *echo* of the origin the caller reviewed
-    // (`status().offer.origin`). The one-time token comes off the installer's
-    // file in the service, which refuses if the file no longer names the origin
-    // passed here, or names any but the build's own.
-    enrollOffer: (origin: string, label: string) =>
-      link.command('enrollOffer', { origin, label }),
+    enrollOffer: (label: string) => link.command('enrollOffer', { label }),
     status: () => link.command('status'),
     reconnect: () => link.command('reconnect'),
     clearEnrollment: () => link.command('clearEnrollment'),

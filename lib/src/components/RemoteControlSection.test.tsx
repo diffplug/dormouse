@@ -85,7 +85,7 @@ function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
 /** The shared fixture, keeping this file's own Relay/burrow values. */
 const enrolled = (over: Partial<BurrowConsoleStatus> = {}) =>
   enrolledStatus({
-    relayUrl: 'https://laptop.tailnet.ts.net',
+    relayOrigin: 'https://laptop.tailnet.ts.net',
     burrowId: 'burrow-1',
     pairedClients: 1,
     ...over,
@@ -380,7 +380,7 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async (cmd) => {
       if (cmd === 'enroll') {
         status = enrolled();
-        return { burrowId: 'burrow-1', relayUrl: 'https://laptop.tailnet.ts.net' };
+        return { burrowId: 'burrow-1' };
       }
       return status;
     });
@@ -446,7 +446,7 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async (cmd) => {
       if (cmd === 'enrollOffer') {
         status = enrolled();
-        return { burrowId: 'burrow-1', relayUrl: 'https://laptop.tailnet.ts.net' };
+        return { burrowId: 'burrow-1' };
       }
       return status;
     });
@@ -460,13 +460,8 @@ describe('RemoteControlSection', () => {
     await type('input:not([type])', '  Work laptop  ');
     await act(async () => buttonLabelled('Enroll')!.click());
 
-    // The origin is an echo of what the card displayed, so the service can
-    // refuse a file rewritten since; no token, and the origin enrolled against
-    // is still the file's.
-    expect(link.command).toHaveBeenCalledWith('enrollOffer', {
-      origin: 'https://ned-mac.tail9c2f1.ts.net',
-      label: 'Work laptop',
-    });
+    // The name and nothing else: the service re-reads the token off the file.
+    expect(link.command).toHaveBeenCalledWith('enrollOffer', { label: 'Work laptop' });
     expect(text()).toContain('https://laptop.tailnet.ts.net');
     expect(text()).toContain('Connected');
   });
@@ -524,7 +519,7 @@ describe('RemoteControlSection', () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
       // The card is still here, on the origin the user reviewed.
-      expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
+      expect(text()).toContain(SELF_HOST_RELAY_ORIGIN);
 
       await act(async () => {
         failEnroll(new Error('The Relay did not accept that setup password.'));
@@ -537,8 +532,9 @@ describe('RemoteControlSection', () => {
   });
 
   it('renders a one-click refusal where the typed form renders its own', async () => {
+    const refusal = 'This machine’s enrollment offer is no longer valid. Enroll with the setup password instead.';
     const link = makeLink(async (cmd) => {
-      if (cmd === 'enrollOffer') throw new Error('relay origin is not allowed by this build');
+      if (cmd === 'enrollOffer') throw new Error(refusal);
       return OFFER_STATUS;
     });
     platform = { burrow: link };
@@ -546,7 +542,7 @@ describe('RemoteControlSection', () => {
     await openPersistent();
 
     await act(async () => buttonLabelled('Enroll')!.click());
-    expect(text()).toContain('relay origin is not allowed by this build');
+    expect(text()).toContain(refusal);
     // Still on the card, and the typed form is still one click away.
     expect(buttonLabelled('Enroll')).toBeTruthy();
     expect(disclosure()).toBeTruthy();
@@ -582,7 +578,7 @@ describe('RemoteControlSection', () => {
           finishOffer = resolve;
         });
       }
-      if (cmd === 'enroll') return { burrowId: 'wrong-racer', relayUrl: 'https://elsewhere' };
+      if (cmd === 'enroll') return { burrowId: 'wrong-racer' };
       return OFFER_STATUS;
     });
     platform = { burrow: link };
@@ -607,7 +603,7 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
 
     await act(async () => {
-      finishOffer({ burrowId: 'burrow-1', relayUrl: OFFER_STATUS.offer!.origin });
+      finishOffer({ burrowId: 'burrow-1' });
       await Promise.resolve();
     });
   });
@@ -1096,7 +1092,7 @@ describe('RemoteControlSection', () => {
       await settleQrChunk();
       expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
-      status = enrolled({ burrowId: 'burrow-2', relayUrl: 'https://other.tailnet.ts.net' });
+      status = enrolled({ burrowId: 'burrow-2', relayOrigin: 'https://other.tailnet.ts.net' });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
       });

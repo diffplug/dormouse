@@ -92,10 +92,7 @@ function setState(next: BurrowStatusState): void {
  * others last changed — stale for as long as the dialog stays open, and nothing
  * else would catch it. The mapped type makes the *omission* a compile error;
  * it cannot make a nested field's comparator right, since `Object.is`
- * type-checks for one of those too. `offer` is compared by its origin because
- * the service mints a fresh object per read, and "compares the offer by its
- * origin, not by the object the poll minted" in `burrow-status-store.test.ts` is
- * what pins that.
+ * type-checks for one of those too.
  */
 const STATUS_FIELDS: {
   [K in keyof BurrowConsoleStatus]: (
@@ -105,14 +102,13 @@ const STATUS_FIELDS: {
 } = {
   enrolled: Object.is,
   serving: Object.is,
-  relayUrl: Object.is,
   relayOrigin: Object.is,
   relayMode: Object.is,
   burrowId: Object.is,
   connection: Object.is,
   pairedClients: Object.is,
   suggestedLabel: Object.is,
-  offer: (a, b) => a?.origin === b?.origin,
+  offer: Object.is,
 };
 
 function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
@@ -285,15 +281,13 @@ export async function enrollBurrow(password: string, label: string): Promise<voi
 /**
  * Enroll against the offer the installer left on this machine — the one-click
  * path, where the only thing the user chooses is what to call the machine
- * (`service-protocol.ts` → `BurrowConsoleStatus.offer`).
- *
- * `origin` is the one the card *displayed*, echoed so the service can refuse a
- * file rewritten since; the token comes off the file, which this realm never
- * sees. Rejections propagate verbatim, like the typed form's.
+ * (`service-protocol.ts` → `BurrowConsoleStatus.offer`). The token comes off
+ * the file, which this realm never sees. Rejections propagate verbatim, like
+ * the typed form's.
  */
-export async function enrollOfferBurrow(origin: string, label: string): Promise<void> {
+export async function enrollOfferBurrow(label: string): Promise<void> {
   const active = requireBurrowLink();
-  await active.command('enrollOffer', { origin, label });
+  await active.command('enrollOffer', { label });
   await refreshAfterMutation();
 }
 

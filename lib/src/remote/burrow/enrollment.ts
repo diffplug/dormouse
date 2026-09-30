@@ -180,18 +180,17 @@ function refusedError(detail: string): string | null {
  * exchange, and a second copy of it could drift from the Relay's contract.
  */
 export async function performEnrollment(
-  relayUrl: string,
+  relayOrigin: string,
   credential: BurrowEnrollCredential,
   label: string,
 ): Promise<BurrowEnrollment> {
-  const base = relayUrl.replace(/\/+$/, '');
   // Minted BEFORE the exchange. A successful POST appends a `burrows.json` row
   // and spends the installer's single-use `enrollToken`, neither of which this
   // side can undo — so a runtime that cannot produce an X25519 key must fail
   // while the Relay still has nothing to forget. Nothing about it reaches the
   // request body below.
   const noiseStatic = await mintNoiseStatic();
-  const response = await fetch(`${base}${API_ROUTES.burrowEnroll}`, {
+  const response = await fetch(`${relayOrigin}${API_ROUTES.burrowEnroll}`, {
     method: 'POST',
     // The same budget every Burrow→Relay call runs under (`burrow-fetch.ts`), and
     // this is the one that most needs it: it runs on the service's lifecycle
@@ -228,7 +227,7 @@ export async function performEnrollment(
   }
   const enrolled = body as Partial<BurrowEnrollResponse> | null;
   const enrollment = {
-    relayUrl: base,
+    relayUrl: relayOrigin,
     burrowId: enrolled?.burrowId,
     burrowToken: enrolled?.burrowToken,
     // Untrusted like the rest of the body, and `isEnrollment` only checks that

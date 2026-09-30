@@ -12,12 +12,13 @@ import {
   createNativeDirectPeerFactory,
   disposeNativeDirectPeers,
 } from '../../lib/src/host/remote/native-direct-peer';
-import { bakedRelay, hostedOrigin, isRelayOrigin } from '../../lib/src/host/relay-origin';
+import { bakedRelay, hostedOrigin } from '../../lib/src/host/relay-origin';
 import {
   BurrowService,
   idleOneTimeState,
+  loadEnrollmentFor,
   oneTimeServing,
-  readsEnrollmentOffer,
+  readUsableOffer,
   unenrolledStatus,
 } from '../../lib/src/host/remote/service';
 import {
@@ -564,12 +565,11 @@ function idleAnswer(cmd: string): { result: unknown } | null {
  * which bootstraps the contention like `enroll`.
  */
 async function idleStatus(): Promise<BurrowConsoleStatus> {
-  // The snapshot itself is the service's own builder, so the two answers to the
-  // same question — including the offer's origin-only projection — cannot drift.
-  // `readEnrollmentOffer` never rejects (its own doc), hence no guard here.
+  // The reader and the snapshot are the service's own, so the two answers to
+  // the same question cannot drift. `readEnrollmentOffer` never rejects (its own
+  // doc), hence no guard here.
   const relay = bakedRelay();
-  const offer = readsEnrollmentOffer(relay) ? await readEnrollmentOffer() : null;
-  return unenrolledStatus(offer, 'vscode', relay);
+  return unenrolledStatus(await readUsableOffer(relay, readEnrollmentOffer), 'vscode', relay);
 }
 
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */
@@ -637,7 +637,7 @@ async function contendIfServing(ctx: vscode.ExtensionContext): Promise<void> {
   const store = burrowStateStore(ctx);
   if (contending) return;
   const [enrollment, serving] = await Promise.allSettled([
-    store.loadEnrollment(),
+    loadEnrollmentFor(store, bakedRelay().origin),
     store.loadOneTimeServing(),
   ]);
   if (enrollment.status === 'rejected') {
@@ -646,12 +646,8 @@ async function contendIfServing(ctx: vscode.ExtensionContext): Promise<void> {
   if (serving.status === 'rejected') {
     log.error(`[burrow] could not read the one-time serving marker: ${String(serving.reason)}`);
   }
-  // An enrollment for another origin reads as none — the service would not
-  // start it — so it is no reason to contend (docs/specs/relay.md → "Relay origin").
   if (
-    (enrollment.status === 'fulfilled' &&
-      enrollment.value &&
-      isRelayOrigin(enrollment.value.relayUrl, bakedRelay().origin)) ||
+    (enrollment.status === 'fulfilled' && enrollment.value) ||
     (serving.status === 'fulfilled' && serving.value)
   ) {
     contendForBurrow();
