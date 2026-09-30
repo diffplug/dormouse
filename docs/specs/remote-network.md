@@ -6,7 +6,7 @@
 
 ## Policy
 
-**The policy is one record, `{ level, allowed, autoUpdate }`, held host-side** in the Burrow state store beside the enrollment: `network` in the sidecar's `burrow.json`, `dormouse.burrow.network-policy` in VS Code's `globalState`. **Never take it from a Client, Relay, or Hosted response**; the webview reads it with `networkPolicy` and writes it with `setNetworkPolicy`, and the Burrow service is its only writer.
+**The policy is one record, `{ level, allowed, autoUpdate }`, held host-side** in the Burrow state store: `dormouse.burrow.network-policy` in VS Code's `globalState`, and the sidecar's own `network-policy.json`, 0600 beside `burrow.json`. **Never keep it in `burrow.json`**, which a build from before the policy rewrites without it, letting the default recompute. **Never take it from a Client, Relay, or Hosted response**; the webview reads it with `networkPolicy` and writes it with `setNetworkPolicy`, and the Burrow service is its only writer.
 
 | Level | Offered in | What Dormouse opens on its own |
 |---|---|---|
@@ -17,7 +17,7 @@
 Reserved: `anywhere`, which the policy's shape accepts and no build offers, is the Anywhere level (`## Future`).
 
 - **A new install starts at Nothing.** **Must save the default at the service's first read, so it never flips**: `relay` where an enrollment for the baked origin exists — an upgraded self-host install — else `nothing` (rationale). A VS Code window with no service reads the default unsaved.
-- **A stored level the build does not offer, or a stored record that is not a policy, reads as `nothing`**; the first stays on disk, as an enrollment for another origin does.
+- **A stored level the build does not offer, or a stored record that is not a policy — an unparseable file included — reads as `nothing`**; the first stays on disk, as an enrollment for another origin does.
 - **Until the policy is read, the service reads it as `nothing`**; a read that fails leaves the Burrow down.
 - **`setNetworkPolicy` takes a policy only exactly**: its three keys, a level the build offers, at most 32 canonical CIDRs (`canonicalCidr` returns each unchanged) listed once, and a boolean `autoUpdate`. **Must save before acting**: a save that fails changes nothing.
 - **A change to the level or the allowed networks ends the live one-time link or session with `user-ended`, and starts or stops the relay socket to match**; a narrowed policy never leaves an old path exempt. `autoUpdate` alone ends nothing (rationale).
@@ -25,6 +25,7 @@ Reserved: `anywhere`, which the policy's shape accepts and no build offers, is t
 
 **Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater (`## Future`); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
 
+- **The Burrow service's socket factory and fetch refuse at the call while the level is `nothing` or unread** — the factory throws, fetch rejects — so a path that forgets its own check still opens nothing. Every socket and request the service opens, the enrollment exchange included, goes through them; the checks below stay, for the error a person reads.
 - **The Burrow service never opens the relay socket.** An enrollment is held and reported — `enrolled`, `connection: 'stopped'`, not `serving` — so push, the device list, a test push, and setup codes, which need a running Burrow, make no request.
 - **It refuses `enroll` and `enrollOffer` before any request**, the offer file unread.
 - **It offers no one-time link**: the resting state is `unavailable` with reason `network-off`, and `oneTimeOpen` is refused, as under `local` with no network allowed.

@@ -7,6 +7,38 @@
 
 import { hostname } from 'node:os';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * The socket factory and fetch the service handed on, kept so a case can play a
+ * path that forgot its own policy check. The runtime and the exchange are the
+ * real ones.
+ */
+const handedTransport = vi.hoisted(() => ({
+  createWebSocket: null as ((url: string) => unknown) | null,
+  fetch: null as typeof globalThis.fetch | null,
+}));
+
+vi.mock('../../remote/burrow/burrow-runtime', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../remote/burrow/burrow-runtime')>();
+  class BurrowRuntime extends real.BurrowRuntime {
+    constructor(options: ConstructorParameters<typeof real.BurrowRuntime>[0]) {
+      super(options);
+      handedTransport.createWebSocket = options.createWebSocket ?? null;
+    }
+  }
+  return { ...real, BurrowRuntime };
+});
+
+vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../remote/burrow/enrollment')>();
+  return {
+    ...real,
+    performEnrollment: (...args: Parameters<typeof real.performEnrollment>) => {
+      handedTransport.fetch = args[3] ?? null;
+      return real.performEnrollment(...args);
+    },
+  };
+});
 import {
   API_ROUTES,
   ONE_TIME_WS_ROUTES,
@@ -2012,6 +2044,20 @@ describe('network policy', () => {
       });
       expect((await command('oneTimeOpen')).error).toContain('set to Nothing');
       expect(rendezvous.rooms).toEqual([]);
+    });
+
+    it('refuses a socket or a request at the transport, for a path that forgot its check', async () => {
+      createService({ network: RELAY_ON });
+      expect((await command('enroll', { password: 'setup', label: 'Laptop' })).error).toBeUndefined();
+      const { createWebSocket, fetch } = handedTransport;
+      expect(sockets).toHaveLength(1);
+      const made = requests.length;
+
+      await setPolicy(NOTHING);
+      expect(() => createWebSocket!(`${ORIGIN.replace(/^http/, 'ws')}/ws/burrow`)).toThrow('set to Nothing');
+      await expect(fetch!(`${ORIGIN}${API_ROUTES.pushDevices}`)).rejects.toThrow('set to Nothing');
+      expect(sockets).toHaveLength(1);
+      expect(requests).toHaveLength(made);
     });
 
     it('refuses managed voice', async () => {

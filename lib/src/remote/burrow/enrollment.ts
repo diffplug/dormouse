@@ -212,6 +212,9 @@ export async function performEnrollment(
   relayOrigin: string,
   credential: BurrowEnrollCredential,
   label: string,
+  // The service passes its own, which the network policy guards
+  // (`lib/src/host/remote/service.ts`).
+  fetch: typeof globalThis.fetch = globalThis.fetch,
 ): Promise<BurrowEnrollment> {
   // Minted BEFORE the exchange. A successful POST appends a `burrows.json` row
   // and spends the installer's single-use `enrollToken`, neither of which this

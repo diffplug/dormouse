@@ -112,7 +112,8 @@ export interface BurrowServiceOptions {
    * Opens the relay socket and the one-time rendezvous alike. **Must send no
    * `Origin` header** — the rendezvous refuses one, so that no browser page can
    * mint a room — which Node's global `WebSocket` (the default) and `ws` both
-   * already do.
+   * already do. Reached only through the service's transport guard, as is
+   * {@link BurrowServiceOptions.fetch}.
    */
   createWebSocket?: (url: string) => WebSocketLike;
   /**
@@ -354,9 +355,11 @@ export class BurrowService {
   /** `hostedOrigin(#relay)`: where one-time links are made, or `null` for none. */
   readonly #hostedOrigin: string | null;
   readonly #kind: BurrowKind;
+  /** The injected socket factory behind the transport guard (constructor). */
   readonly #createWebSocket: (url: string) => WebSocketLike;
   readonly #createDirectPeer?: DirectPeerFactory;
-  readonly #fetch?: typeof globalThis.fetch;
+  /** The injected fetch, or the global one, behind the transport guard. */
+  readonly #fetch: typeof globalThis.fetch;
   readonly #now: () => number;
   readonly #readOffer: () => Promise<EnrollmentOffer | null>;
   readonly #listInterfaces: () => NetworkInterfaceInfo[];
@@ -435,10 +438,24 @@ export class BurrowService {
     this.#hostedOrigin = hostedOrigin(options.relay);
     this.#oneTimeState = idleOneTimeState(this.#hostedOrigin, this.#level());
     this.#kind = options.kind;
-    this.#createWebSocket =
-      options.createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
+    // The transport guard (`docs/specs/remote-network.md` → "Policy"): every
+    // socket and request this service opens goes through these two, which
+    // refuse at the call while the level is `nothing` or unread, so a path that
+    // forgets its own check still opens nothing. Each feature keeps its own
+    // check, for the error a person reads.
+    const createWebSocket =
+      options.createWebSocket ?? ((url: string) => new WebSocket(url) as unknown as WebSocketLike);
+    this.#createWebSocket = (url) => {
+      if (this.#level() === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
+      return createWebSocket(url);
+    };
+    const injectedFetch = options.fetch;
+    this.#fetch = (input, init) =>
+      this.#level() === 'nothing'
+        ? Promise.reject(new Error(NETWORK_OFF_REFUSAL))
+        : // Looked up at the call, like `burrowFetch`'s default.
+          (injectedFetch ?? globalThis.fetch)(input, init);
     this.#createDirectPeer = options.createDirectPeer;
-    this.#fetch = options.fetch;
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
     this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
@@ -619,7 +636,7 @@ export class BurrowService {
    * the status edge the webview gate needs.
    */
   async #enrollWith(credential: BurrowEnrollCredential, label: string): Promise<EnrollResult> {
-    const enrollment = await performEnrollment(this.#relay.origin, credential, label);
+    const enrollment = await performEnrollment(this.#relay.origin, credential, label, this.#fetch);
     if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
       // An older Relay, which ignores the request's `origin` and so enrolled a
       // Burrow built for another: nothing is persisted here, and the row it
@@ -1313,7 +1330,6 @@ export class BurrowService {
     const burrow = this.#burrow;
     const enrollment = this.#enrollment;
     if (!burrow || !enrollment) return null;
-    const fetch = this.#fetch ?? globalThis.fetch;
     return {
       enrollment,
       activeRecords: () => burrow.activeRecords,
@@ -1321,7 +1337,7 @@ export class BurrowService {
         burrow.sealPushForClient(clientStaticPublicKey, plaintext),
       fetch: (input, init) =>
         this.#burrow === burrow
-          ? fetch(input, init)
+          ? this.#fetch(input, init)
           : Promise.reject(new Error('the Burrow stopped before the request was sent')),
     };
   }
