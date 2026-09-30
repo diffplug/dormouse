@@ -13,6 +13,8 @@ import { dirname } from 'node:path';
 import type { EnrollmentOffer } from 'remote-lib-common';
 
 import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
+import { LOCAL_ON } from '../../lib/src/host/remote/test-burrow-link';
+import { nothingPolicy } from '../../lib/src/remote/network-policy';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
 import { FakeSocket } from '../../lib/src/remote/test-fake-socket';
 import { createTestRendezvous, type TestRendezvous } from '../../lib/src/remote/test-rendezvous';
@@ -360,12 +362,10 @@ function stubRendezvous(): TestRendezvous {
 }
 
 /**
- * Local networks over one Wi-Fi, which a one-time case needs: a new install
- * is at Nothing (`docs/specs/remote-network.md` → "Policy").
+ * A context whose `globalState` holds `LOCAL_ON`, as every window's would: a
+ * one-time case needs a network on, and a new install is at Nothing
+ * (`docs/specs/remote-network.md` → "Policy").
  */
-const LOCAL_ON = { level: 'local', allowed: ['192.168.1.0/24'], autoUpdate: false };
-
-/** A context whose `globalState` holds {@link LOCAL_ON}, as every window's would. */
 function localNetworkContext() {
   const made = fakeContext();
   made.store.global.set(NETWORK_POLICY_KEY, LOCAL_ON);
@@ -598,7 +598,7 @@ describe('burrow state store', () => {
 
     // Hand-edited, it must not open what the user may have turned off.
     store.global.set(NETWORK_POLICY_KEY, { level: 'anywhere', allowed: 'all', autoUpdate: true });
-    expect(await target.loadNetworkPolicy()).toEqual({ level: 'nothing', allowed: [], autoUpdate: false });
+    expect(await target.loadNetworkPolicy()).toEqual(nothingPolicy());
   });
 
   it('serializes ACL snapshots so an older approval cannot land last', async () => {
@@ -993,7 +993,8 @@ describe('burrow service glue', () => {
     const mod = await freshBurrow();
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
-    mod.initBurrow(fakeContext().context);
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
     await tick();
 
     // Including the offer, which both sides read from the same file.
@@ -1017,6 +1018,9 @@ describe('burrow service glue', () => {
       burrowRequestId: 'rh-clear',
       error: 'no Burrow is reachable',
     });
+    // Read, never written: the default is the service's to save, and a save
+    // from here could land over a choice a service in another window just made.
+    expect(store.global.has(NETWORK_POLICY_KEY)).toBe(false);
 
     // And they are exactly what a real service with nothing in its store says,
     // which is the answer the sidecar's webviews get for the same commands.
@@ -1066,7 +1070,7 @@ describe('burrow service glue', () => {
       reason: 'network-off',
     });
     expect(byId(results(bound.posted))['rh-networkPolicy']).toMatchObject({
-      policy: { level: 'nothing', allowed: [], autoUpdate: false },
+      policy: nothingPolicy(),
       levels: ['nothing', 'local'],
     });
     expect(byId(results(bound.posted))['rh-takeBack']).toEqual({ ended: false });

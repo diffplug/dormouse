@@ -11,12 +11,12 @@
 | Level | Offered in | What Dormouse opens on its own |
 |---|---|---|
 | `nothing` | every build | nothing |
-| `local` (Local networks) | Hosted builds | one-time links |
+| `local` (Local networks) | Hosted builds | one-time links, managed voice |
 | `relay` (My Relay only) | self-host builds | the relay socket, and push through it |
 
 Reserved: `anywhere`, which the policy's shape accepts and no build offers, is the Anywhere level (`## Future`).
 
-- **A new install starts at Nothing.** **Must save the default at the first read, so it never flips**: `relay` where an enrollment for the baked origin exists — an upgraded self-host install — else `nothing` (rationale).
+- **A new install starts at Nothing.** **Must save the default at the service's first read, so it never flips**: `relay` where an enrollment for the baked origin exists — an upgraded self-host install — else `nothing` (rationale). A VS Code window with no service reads the default unsaved.
 - **A stored level the build does not offer, or a stored record that is not a policy, reads as `nothing`**; the first stays on disk, as an enrollment for another origin does.
 - **Until the policy is read, the service reads it as `nothing`**; a read that fails leaves the Burrow down.
 - **`setNetworkPolicy` takes a policy only exactly**: its three keys, a level the build offers, at most 32 canonical CIDRs (`canonicalCidr` returns each unchanged) listed once, and a boolean `autoUpdate`. **Must save before acting**: a save that fails changes nothing.
@@ -30,7 +30,7 @@ Reserved: `anywhere`, which the policy's shape accepts and no build offers, is t
 - **It offers no one-time link**: the resting state is `unavailable` with reason `network-off`, and `oneTimeOpen` is refused, as under `local` with no network allowed.
 - **Managed voice asks the service before every speak** and answers `network-off` without a request.
 
-Source of truth: `NetworkPolicy`, `levelsFor`, and `storedNetworkPolicy` in `lib/src/remote/network-policy.ts`; `loadNetworkPolicyFor` and `BurrowService` in `lib/src/host/remote/service.ts`; `canonicalCidr`, `addressAllowed`, and `classifyNetworkInterfaces` in `lib/src/host/remote/network-interfaces.ts`; `NETWORK_POLICY_KEY` in `vscode-ext/src/burrow-store.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `subscribeToNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`. Pinned by `lib/src/host/remote/service.test.ts` and `lib/src/host/remote/network-interfaces.test.ts`.
+Source of truth: `NetworkPolicy`, `levelsFor`, and `storedNetworkPolicy` in `lib/src/remote/network-policy.ts`; `peekNetworkPolicyFor` and `BurrowService` in `lib/src/host/remote/service.ts`; `canonicalCidr`, `addressAllowed`, and `classifyNetworkInterfaces` in `lib/src/host/remote/network-interfaces.ts`; `NETWORK_POLICY_KEY` in `vscode-ext/src/burrow-store.ts`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`; `subscribeToNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`. Pinned by `lib/src/host/remote/service.test.ts` and `lib/src/host/remote/network-interfaces.test.ts`.
 
 ## Future
 

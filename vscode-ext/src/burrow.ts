@@ -13,13 +13,13 @@ import {
   disposeNativeDirectPeers,
 } from '../../lib/src/host/remote/native-direct-peer';
 import { listNetworkInterfaces } from '../../lib/src/host/remote/network-interfaces';
+import { networkPolicyResult, type NetworkPolicy } from '../../lib/src/remote/network-policy';
 import { bakedRelay, hostedOrigin } from '../../lib/src/host/relay-origin';
 import {
   BurrowService,
   loadEnrollmentFor,
-  loadNetworkPolicyFor,
-  networkPolicyResult,
   oneTimeServing,
+  peekNetworkPolicyFor,
   readUsableOffer,
   unenrolledStatus,
 } from '../../lib/src/host/remote/service';
@@ -528,7 +528,8 @@ function refuse(burrowRequestId: string): void {
  * What an idle service answers, for the read-only commands a window with no
  * Burrow at all is still asked. `status` reads the offer file
  * ({@link idleStatus}); `oneTimeStatus` and `networkPolicy` read the network
- * policy through the same reader the service uses, so the two cannot drift.
+ * policy through the same reader the service uses, so the two cannot drift —
+ * and never save its default, which is the service's to write.
  *
  * Reaching the refusal below means this window sees no enrollment — it contends
  * at activation when there is one, and again the moment another window writes
@@ -541,8 +542,8 @@ function refuse(burrowRequestId: string): void {
  * The sidecar has no such path — it always has a service — so these are exactly
  * what one with no enrollment returns (`lib/src/host/remote/service.ts`). The
  * one-time pair is the same: no service means no connection, so its status is
- * the idle one this build's origin and policy allow, and ending it is already done; and
- * with no service there is no session to take a pane back from.
+ * the idle one this build's origin and policy allow, and ending it is already
+ * done; and with no service there is no session to take a pane back from.
  */
 async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
   switch (cmd) {
@@ -562,7 +563,9 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
       return { result: idleOneTimeState(hostedOrigin(bakedRelay()), level) };
     }
     case 'networkPolicy':
-      return { result: networkPolicyResult(await idleNetworkPolicy(), bakedRelay(), listNetworkInterfaces()) };
+      return {
+        result: networkPolicyResult(await idleNetworkPolicy(), bakedRelay().mode, listNetworkInterfaces()),
+      };
     case 'oneTimeEnd':
       return { result: {} };
     // No service holds any session, so none holds a pane: the strip clears itself.
@@ -573,10 +576,10 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
   }
 }
 
-/** The network policy as a service starting now would read it — saving the default, if none is saved. */
-function idleNetworkPolicy() {
-  if (!context) return Promise.reject(new Error(NO_BURROW));
-  return loadNetworkPolicyFor(burrowStateStore(context), bakedRelay());
+/** The network policy as a service starting now would read it, the default unsaved. */
+async function idleNetworkPolicy(): Promise<NetworkPolicy> {
+  if (!context) throw new Error(NO_BURROW);
+  return (await peekNetworkPolicyFor(burrowStateStore(context), bakedRelay())).policy;
 }
 
 /**

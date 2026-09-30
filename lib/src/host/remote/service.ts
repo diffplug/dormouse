@@ -49,9 +49,11 @@ import {
 } from '../../remote/burrow/one-time-runtime';
 import type { DirectPeerFactory } from '../../remote/direct/direct-peer';
 import {
-  isNetworkPolicy,
+  MAX_ALLOWED_NETWORKS,
   levelsFor,
+  networkPolicyResult,
   nothingPolicy,
+  parseNetworkPolicy,
   type NetworkInterfaceInfo,
   type NetworkLevel,
   type NetworkPolicy,
@@ -169,38 +171,24 @@ const NO_NETWORK_ALLOWED_REFUSAL =
 
 /**
  * The policy this build reads (`docs/specs/remote-network.md` → "Policy"): the
- * stored one, or — where none was ever saved — the default, **saved at once so
- * it never flips later**: `relay` for an enrollment this build may reach and a
- * build that offers it, else `nothing`. **A stored level this build does not
- * offer reads as `nothing`** and stays on disk, as an enrollment for another
- * origin does. One reader for the service and VS Code's idle answers.
+ * stored one, or — where none was ever saved, `stored: false` — the default:
+ * `relay` for an enrollment this build may reach and a build that offers it,
+ * else `nothing`. **A stored level this build does not offer reads as
+ * `nothing`** and stays on disk, as an enrollment for another origin does.
+ * Writes nothing: the service saves the default, VS Code's idle answers never do.
  */
-export async function loadNetworkPolicyFor(
-  store: Pick<BurrowStateStore, 'loadEnrollment' | 'loadNetworkPolicy' | 'saveNetworkPolicy'>,
+export async function peekNetworkPolicyFor(
+  store: Pick<BurrowStateStore, 'loadEnrollment' | 'loadNetworkPolicy'>,
   relay: RelayBuild,
-): Promise<NetworkPolicy> {
+): Promise<{ policy: NetworkPolicy; stored: boolean }> {
   const levels = levelsFor(relay.mode);
   const stored = await store.loadNetworkPolicy();
-  if (stored) return levels.includes(stored.level) ? stored : { ...stored, level: 'nothing' };
+  if (stored) {
+    return { policy: levels.includes(stored.level) ? stored : { ...stored, level: 'nothing' }, stored: true };
+  }
   const enrolled = (await loadEnrollmentFor(store, relay.origin)) !== null;
-  const policy: NetworkPolicy = {
-    ...nothingPolicy(),
-    level: enrolled && levels.includes('relay') ? 'relay' : 'nothing',
-  };
-  await store.saveNetworkPolicy(policy);
-  return policy;
-}
-
-/**
- * What `networkPolicy` answers and the `network-policy` event carries. One
- * builder for the service and VS Code's idle answer.
- */
-export function networkPolicyResult(
-  policy: NetworkPolicy,
-  relay: RelayBuild,
-  interfaces: NetworkInterfaceInfo[],
-): NetworkPolicyResult {
-  return { policy, levels: levelsFor(relay.mode), interfaces };
+  const level = enrolled && levels.includes('relay') ? 'relay' : 'nothing';
+  return { policy: { ...nothingPolicy(), level }, stored: false };
 }
 
 /**
@@ -208,20 +196,23 @@ export function networkPolicyResult(
  * offers, and every allowed network a canonical CIDR, listed once. Throws what
  * the webview shows.
  */
-function readNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolicy {
-  if (!isNetworkPolicy(value)) {
-    throw new Error('A network policy is { level, allowed (at most 32 CIDRs), autoUpdate }, and nothing else.');
+function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolicy {
+  const policy = parseNetworkPolicy(value);
+  if (!policy) {
+    throw new Error(
+      `A network policy is { level, allowed (at most ${MAX_ALLOWED_NETWORKS} CIDRs), autoUpdate }, and nothing else.`,
+    );
   }
-  if (!levelsFor(relay.mode).includes(value.level)) {
-    throw new Error(`This build does not offer the ${value.level} level.`);
+  if (!levelsFor(relay.mode).includes(policy.level)) {
+    throw new Error(`This build does not offer the ${policy.level} level.`);
   }
-  if (value.allowed.some((cidr) => canonicalCidr(cidr) !== cidr)) {
+  if (policy.allowed.some((cidr) => canonicalCidr(cidr) !== cidr)) {
     throw new Error('Each allowed network must be a range in canonical form, such as 192.168.1.0/24.');
   }
-  if (new Set(value.allowed).size !== value.allowed.length) {
+  if (new Set(policy.allowed).size !== policy.allowed.length) {
     throw new Error('An allowed network is listed twice.');
   }
-  return { level: value.level, allowed: [...value.allowed], autoUpdate: value.autoUpdate };
+  return policy;
 }
 
 /** Whether two policies allow the same paths: the level, and the networks as a set. */
@@ -455,17 +446,21 @@ export class BurrowService {
 
   /**
    * Start from a persisted enrollment, if there is one this build may reach
-   * and the network policy lets it run — and announce this instance either way, since a webview that outlived the
-   * one before it holds panes under sessions that are gone, and shows that
-   * one's one-time connection: a VS Code window that takes the broker over from
-   * one with a phone connected, or a restarted sidecar.
+   * and the network policy lets it run — and announce this instance either
+   * way, since a webview that outlived the one before it holds panes under
+   * sessions that are gone, and shows that one's one-time connection: a VS Code
+   * window that takes the broker over from one with a phone connected, or a
+   * restarted sidecar.
    */
   start(): Promise<void> {
     if (this.#disposed) return Promise.resolve();
-    // At once, since it needs no enrollment: the panel stops offering End on a
-    // connection that is gone before the keychain read below answers. It is
-    // `nothing`'s resting state until the policy is read (`#level`).
-    this.#emitOneTime();
+    // Once the policy is read, whose level decides the resting state, and not
+    // behind the enrollment read below: the panel stops offering End on a
+    // connection that is gone. A read that moved the state has said so already.
+    const announced = this.#oneTimeState;
+    void this.#settledLevel().then(() => {
+      if (this.#oneTimeState === announced) this.#emitOneTime();
+    });
     return this.#serialize(async () => {
       try {
         await this.#start();
@@ -541,11 +536,11 @@ export class BurrowService {
         return this.#endOneTime();
       case 'oneTimeStatus':
         // After the policy's first read, so a panel seeding from it is not told
-        // `network-off` only to be told otherwise; a failed read answers that.
-        await this.#networkPolicy().catch(() => null);
+        // `network-off` only to be told otherwise.
+        await this.#settledLevel();
         return this.#oneTimeState;
       case 'networkPolicy':
-        return networkPolicyResult(await this.#networkPolicy(), this.#relay, this.#listInterfaces());
+        return networkPolicyResult(await this.#networkPolicy(), this.#relay.mode, this.#listInterfaces());
       case 'setNetworkPolicy':
         return this.#serialize(() => this.#setNetworkPolicy(params as SetNetworkPolicyParams | undefined));
       case 'pushTest':
@@ -565,14 +560,21 @@ export class BurrowService {
 
   async #enroll(params: EnrollParams): Promise<EnrollResult> {
     if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
-    await this.#refuseNothing();
+    await this.#networkPolicy();
+    this.#refuseNothing();
     this.#refuseOtherOrigin((params as { relayUrl?: unknown }).relayUrl);
     return this.#enrollWith({ password: params.password }, params.label);
   }
 
-  /** Refuse under `nothing` before any request; a policy that cannot be read refuses too. */
-  async #refuseNothing(): Promise<void> {
-    if ((await this.#networkPolicy()).level === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
+  /**
+   * The policy as it stands, refused under `nothing` before any request.
+   * **Called after awaiting `#networkPolicy()` and before the next await**, so
+   * a `setNetworkPolicy` that landed during that await is the one it reads.
+   */
+  #refuseNothing(): NetworkPolicy {
+    const policy = this.#policy;
+    if (!policy || policy.level === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
+    return policy;
   }
 
   /**
@@ -595,7 +597,8 @@ export class BurrowService {
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
-    await this.#refuseNothing();
+    await this.#networkPolicy();
+    this.#refuseNothing();
     this.#refuseOtherOrigin((params as { origin?: unknown }).origin);
     // Re-read at the click, and refused before the token leaves the machine
     // unless it names the one Relay this build enrolls with.
@@ -815,13 +818,15 @@ export class BurrowService {
           `Dormouse Hosted, and this build reaches only its own Relay (${this.#relay.origin}).`,
       );
     }
-    const policy = await this.#networkPolicy();
-    if (policy.level === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
+    await this.#networkPolicy();
+    // Synchronous from here to the runtime's open: a `setNetworkPolicy` that
+    // landed during the await is read here, since it ends only a live runtime,
+    // and a second click that awaited the same read joins this one rather than
+    // minting a second room.
+    const policy = this.#refuseNothing();
     if (policy.level === 'local' && policy.allowed.length === 0) {
       throw new Error(NO_NETWORK_ALLOWED_REFUSAL);
     }
-    // Synchronous from here to the runtime's open, so a second click that
-    // awaited the same read joins this one rather than minting a second room.
     const state = this.#oneTimeState;
     if (this.#oneTimeOpening) return this.#oneTimeOpening;
     if (state.status === 'connecting' || state.status === 'connected') {
@@ -867,18 +872,13 @@ export class BurrowService {
     return {};
   }
 
-  /** The one-time state with no connection, under the policy as it stands. */
-  #restingOneTime(): OneTimeState {
-    return idleOneTimeState(this.#hostedOrigin, this.#level());
-  }
-
   /**
    * Put a one-time connection that is not live at rest under the policy as it
    * stands, announcing only a change. A live one is its runtime's to move.
    */
   #restOneTime(): void {
     if (this.#oneTime) return;
-    const resting = this.#restingOneTime();
+    const resting = idleOneTimeState(this.#hostedOrigin, this.#level());
     const state = this.#oneTimeState;
     const reason = (value: OneTimeState) => ('reason' in value ? value.reason : null);
     if (state.status === resting.status && reason(state) === reason(resting)) return;
@@ -892,17 +892,22 @@ export class BurrowService {
    * (`#setNetworkPolicy`). **A read that fails rejects**, every caller fails
    * closed on it, and the next call reads again.
    */
-  async #networkPolicy(): Promise<NetworkPolicy> {
-    if (this.#policy) return this.#policy;
-    this.#policyRead ??= loadNetworkPolicyFor(this.#store, this.#relay).finally(() => {
-      this.#policyRead = null;
-    });
-    const read = await this.#policyRead;
-    if (!this.#policy) {
-      this.#policy = read;
-      this.#restOneTime();
-    }
-    return this.#policy;
+  #networkPolicy(): Promise<NetworkPolicy> {
+    if (this.#policy) return Promise.resolve(this.#policy);
+    // Held before any reader resumes; a `setNetworkPolicy` joins this read
+    // for its `previous`, so none can land first.
+    this.#policyRead ??= peekNetworkPolicyFor(this.#store, this.#relay)
+      .then(async ({ policy, stored }) => {
+        // The default is saved at once, so it never flips later.
+        if (!stored) await this.#store.saveNetworkPolicy(policy);
+        this.#policy = policy;
+        this.#restOneTime();
+        return policy;
+      })
+      .finally(() => {
+        this.#policyRead = null;
+      });
+    return this.#policyRead;
   }
 
   /** The level as it stands: `nothing` until the policy has been read. */
@@ -910,14 +915,18 @@ export class BurrowService {
     return this.#policy?.level ?? 'nothing';
   }
 
+  /** The level once the policy has been read — `nothing` for a read that fails. */
+  async #settledLevel(): Promise<NetworkLevel> {
+    await this.#networkPolicy().catch(() => {});
+    return this.#level();
+  }
+
   /**
    * Whether the policy lets this process reach Hosted on its own — managed
-   * voice's check (`sidecar-entry.ts`). Anything but `nothing`; a read that
-   * fails is `nothing`.
+   * voice's check (`sidecar-entry.ts`): anything but `nothing`.
    */
   async networkAllowed(): Promise<boolean> {
-    const policy = await this.#networkPolicy().catch(() => null);
-    return policy !== null && policy.level !== 'nothing';
+    return (await this.#settledLevel()) !== 'nothing';
   }
 
   /**
@@ -929,7 +938,7 @@ export class BurrowService {
    * level: stopped under `nothing`, the enrollment kept; started out of it.
    */
   async #setNetworkPolicy(params: SetNetworkPolicyParams | undefined): Promise<NetworkPolicyResult> {
-    const next = readNetworkPolicy(params?.policy, this.#relay);
+    const next = requestedNetworkPolicy(params?.policy, this.#relay);
     const previous = await this.#networkPolicy();
     await this.#store.saveNetworkPolicy(next);
     this.#policy = next;
@@ -937,7 +946,7 @@ export class BurrowService {
       this.#oneTime?.end('user-ended');
       this.#restOneTime();
     }
-    const result = networkPolicyResult(next, this.#relay, this.#listInterfaces());
+    const result = networkPolicyResult(next, this.#relay.mode, this.#listInterfaces());
     try {
       if (next.level === 'nothing') {
         if (this.#burrow) {
@@ -1027,9 +1036,10 @@ export class BurrowService {
 
   /** Why there is no Burrow to ask: the policy, or no enrollment. */
   async #notConnected(): Promise<Error> {
-    const policy = await this.#networkPolicy().catch(() => null);
     return new Error(
-      policy?.level === 'nothing' ? NETWORK_OFF_REFUSAL : 'This machine is not connected to a Dormouse Relay.',
+      (await this.#settledLevel()) === 'nothing'
+        ? NETWORK_OFF_REFUSAL
+        : 'This machine is not connected to a Dormouse Relay.',
     );
   }
 
@@ -1294,17 +1304,25 @@ export class BurrowService {
     } satisfies PairingQueueEvent);
   }
 
-  /** Push delivery needs a live Burrow: the ACL it reads is the running one's. */
+  /**
+   * Push delivery needs a live Burrow: the ACL it reads is the running one's.
+   * **Its fetch asks again at the request**: sealing awaits, and a Burrow
+   * stopped meanwhile — Nothing, a clear, a swap — sends nothing.
+   */
   #pushDeps(): AlertPushDeps | null {
     const burrow = this.#burrow;
     const enrollment = this.#enrollment;
     if (!burrow || !enrollment) return null;
+    const fetch = this.#fetch ?? globalThis.fetch;
     return {
       enrollment,
       activeRecords: () => burrow.activeRecords,
       seal: (clientStaticPublicKey, plaintext) =>
         burrow.sealPushForClient(clientStaticPublicKey, plaintext),
-      fetch: this.#fetch,
+      fetch: (input, init) =>
+        this.#burrow === burrow
+          ? fetch(input, init)
+          : Promise.reject(new Error('the Burrow stopped before the request was sent')),
     };
   }
 }

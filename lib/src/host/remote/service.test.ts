@@ -26,7 +26,7 @@ import type {
   SurfaceHold,
 } from '../../remote/burrow/burrow-surface-provider';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
-import type { NetworkInterfaceInfo, NetworkPolicy } from '../../remote/network-policy';
+import { nothingPolicy, type NetworkInterfaceInfo, type NetworkPolicy } from '../../remote/network-policy';
 import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
@@ -51,9 +51,11 @@ import {
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import { BurrowService, type BurrowServiceOptions } from './service';
+import { LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
   BurrowStatusEvent,
+  BurrowUiEvent,
   InvitationEvent,
   NetworkPolicyEvent,
   OneTimeEvent,
@@ -119,14 +121,11 @@ interface MemoryStore extends BurrowStateStore {
 type Seed = Partial<Pick<MemoryStore, 'enrollment' | 'acl' | 'network'>>;
 
 /**
- * The policies the builds' own cases run under: their network on, so a case
- * about a Relay or a one-time link is not also a case about the policy. The
- * `network policy` cases seed their own, `null` included.
+ * The builds' own cases run under `RELAY_ON` / `LOCAL_ON`, their network on, so
+ * a case about a Relay or a one-time link is not also a case about the policy.
+ * The `network policy` cases seed their own, `null` included.
  */
-const RELAY_ON: NetworkPolicy = { level: 'relay', allowed: [], autoUpdate: false };
-const LAN = '192.168.1.0/24';
-const LOCAL_ON: NetworkPolicy = { level: 'local', allowed: [LAN], autoUpdate: false };
-const NOTHING: NetworkPolicy = { level: 'nothing', allowed: [], autoUpdate: false };
+const NOTHING = nothingPolicy();
 
 /** What the injected interface list answers. */
 const INTERFACES: NetworkInterfaceInfo[] = [
@@ -346,20 +345,10 @@ function queueEvents(): PairingQueueEvent[] {
   return uiEvents().filter((event): event is PairingQueueEvent => event.name === 'pairing-queue');
 }
 
-function uiEvents(): Array<
-  PairingQueueEvent | BurrowStatusEvent | InvitationEvent | OneTimeEvent | NetworkPolicyEvent
-> {
+function uiEvents(): BurrowUiEvent[] {
   return sent
     .filter((message) => message.event === 'burrow:event')
-    .map(
-      (message) =>
-        message.data as unknown as
-          | PairingQueueEvent
-          | BurrowStatusEvent
-          | InvitationEvent
-          | OneTimeEvent
-          | NetworkPolicyEvent,
-    );
+    .map((message) => message.data as unknown as BurrowUiEvent);
 }
 
 function invitationEvents(): InvitationEvent[] {
@@ -919,6 +908,8 @@ describe('status events', () => {
     };
 
     const starting = service.start();
+    // Once the policy is read, the enrollment read still held.
+    await flushUntil(() => (uiEvents().length > 0 ? true : undefined));
     expect(uiEvents()).toEqual([{ name: 'one-time', state: { status: 'unavailable', reason: 'self-host' } }]);
     release();
     await starting;
@@ -1353,6 +1344,19 @@ describe('push', () => {
     expect(body).not.toContain('pty-1');
   });
 
+  it('sends nothing once the Burrow stops mid-seal', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    await service.start();
+
+    // Sealing awaits WebCrypto; the change to Nothing lands first.
+    const pushing = service.push('pty-1', 'x');
+    await command('setNetworkPolicy', { policy: nothingPolicy() });
+    await pushing;
+    expect(requests.some((request) => request.url.endsWith('/api/push/send'))).toBe(false);
+    warn.mockRestore();
+  });
+
   it('sends nothing with no Burrow running', async () => {
     createService();
     await service.push('pty-1', 'x');
@@ -1538,14 +1542,8 @@ describe('one-time connection', () => {
     expect(sockets).toEqual([]);
     expect(requests).toEqual([]);
 
-    // The start's announcement — `nothing`'s until the policy is read — then
-    // the policy's, then the open.
-    expect(oneTimeStates().map((state) => state.status)).toEqual([
-      'unavailable',
-      'idle',
-      'opening',
-      'waiting',
-    ]);
+    // The start's announcement, once the policy is read, then the open.
+    expect(oneTimeStates().map((state) => state.status)).toEqual(['idle', 'opening', 'waiting']);
     expect((await command('oneTimeStatus')).result).toEqual(waiting);
     expect(service.oneTimeEvent().state).toEqual(waiting);
   });
@@ -2082,6 +2080,29 @@ describe('network policy', () => {
 
       await setPolicy(LOCAL_ON);
       expect(oneTimeStates().at(-1)).toEqual({ status: 'idle' });
+    });
+
+    it('opens no one-time link for a click that lands while a change to Nothing saves', async () => {
+      createHostedService();
+      await service.start();
+      let saved!: () => void;
+      const saving = new Promise<void>((resolve) => {
+        saved = resolve;
+      });
+      store.saveNetworkPolicy = (policy) => {
+        store.network = policy;
+        return saving;
+      };
+      const set = setPolicy(NOTHING);
+      await flushUntil(() => (store.network?.level === 'nothing' ? true : undefined));
+
+      // The save lands first, then the click reads the policy it resumed on.
+      saved();
+      const open = command('oneTimeOpen');
+      await set;
+      expect((await open).error).toContain('set to Nothing');
+      expect(rendezvous.rooms).toEqual([]);
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'unavailable', reason: 'network-off' });
     });
 
     it('rejects anything but an exact policy this build offers, changing nothing', async () => {

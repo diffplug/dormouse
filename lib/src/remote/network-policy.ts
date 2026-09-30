@@ -8,14 +8,18 @@
  */
 
 import type { RelayMode } from '../host/relay-origin';
+import { isRecord, isStringArray } from '../lib/is-record';
+
+const LEVELS = ['nothing', 'local', 'anywhere', 'relay'] as const;
 
 /**
  * `relay` is the UI's "My Relay only". `anywhere` is reserved for Cloudflare
  * STUN (`docs/specs/remote-network.md` -> "Anywhere"): no build offers it yet.
  */
-export type NetworkLevel = 'nothing' | 'local' | 'anywhere' | 'relay';
+export type NetworkLevel = (typeof LEVELS)[number];
 
-const LEVELS: ReadonlySet<string> = new Set<NetworkLevel>(['nothing', 'local', 'anywhere', 'relay']);
+const isLevel = (value: unknown): value is NetworkLevel =>
+  (LEVELS as readonly unknown[]).includes(value);
 
 export interface NetworkPolicy {
   level: NetworkLevel;
@@ -25,6 +29,8 @@ export interface NetworkPolicy {
   autoUpdate: boolean;
 }
 
+const INTERFACE_KINDS = ['lan', 'vpn', 'virtual'] as const;
+
 /** One of this machine's interfaces, as the Allowed networks list offers it. */
 export interface NetworkInterfaceInfo {
   /** The OS name, e.g. `en0`, `utun4`. */
@@ -32,12 +38,10 @@ export interface NetworkInterfaceInfo {
   /** What a person calls it, e.g. `Tailscale`. */
   label: string;
   /** `virtual` covers bridge, container, and VM interfaces. */
-  kind: 'lan' | 'vpn' | 'virtual';
+  kind: (typeof INTERFACE_KINDS)[number];
   /** Canonical CIDRs from the interface's own netmask, both families, IPv6 link-local left out. */
   prefixes: string[];
 }
-
-const INTERFACE_KINDS: ReadonlySet<string> = new Set<NetworkInterfaceInfo['kind']>(['lan', 'vpn', 'virtual']);
 
 /** What `networkPolicy` answers and the `network-policy` event carries. */
 export interface NetworkPolicyResult {
@@ -63,27 +67,30 @@ export function levelsFor(mode: RelayMode): NetworkLevel[] {
   return mode === 'self-host' ? ['nothing', 'relay'] : ['nothing', 'local'];
 }
 
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === 'string');
+/** What `networkPolicy` answers, for a build of `mode`. */
+export function networkPolicyResult(
+  policy: NetworkPolicy,
+  mode: RelayMode,
+  interfaces: NetworkInterfaceInfo[],
+): NetworkPolicyResult {
+  return { policy, levels: levelsFor(mode), interfaces };
+}
 
 /**
- * Whether `value` is a policy, exactly: its three keys and no others, a known
- * level, at most {@link MAX_ALLOWED_NETWORKS} strings. Whether each string is a
- * canonical CIDR, and whether this build offers the level, are the service's
- * checks.
+ * `value` as a fresh policy if it is one exactly — its three keys and no
+ * others, a known level, at most {@link MAX_ALLOWED_NETWORKS} strings — else
+ * `null`. Whether each string is a canonical CIDR, and whether this build
+ * offers the level, are the service's checks.
  */
+export function parseNetworkPolicy(value: unknown): NetworkPolicy | null {
+  if (!isRecord(value) || Object.keys(value).length !== 3) return null;
+  const { level, allowed, autoUpdate } = value;
+  if (!isLevel(level) || !isStringArray(allowed) || allowed.length > MAX_ALLOWED_NETWORKS) return null;
+  return typeof autoUpdate === 'boolean' ? { level, allowed: [...allowed], autoUpdate } : null;
+}
+
 export function isNetworkPolicy(value: unknown): value is NetworkPolicy {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const record = value as Record<string, unknown>;
-  const keys = Object.keys(record);
-  return (
-    keys.length === 3 &&
-    typeof record.level === 'string' &&
-    LEVELS.has(record.level) &&
-    isStringArray(record.allowed) &&
-    record.allowed.length <= MAX_ALLOWED_NETWORKS &&
-    typeof record.autoUpdate === 'boolean'
-  );
+  return parseNetworkPolicy(value) !== null;
 }
 
 /**
@@ -93,32 +100,27 @@ export function isNetworkPolicy(value: unknown): value is NetworkPolicy {
  */
 export function storedNetworkPolicy(value: unknown): NetworkPolicy | null {
   if (value === undefined || value === null) return null;
-  return isNetworkPolicy(value)
-    ? { level: value.level, allowed: [...value.allowed], autoUpdate: value.autoUpdate }
-    : nothingPolicy();
+  return parseNetworkPolicy(value) ?? nothingPolicy();
 }
 
 function isNetworkInterfaceInfo(value: unknown): value is NetworkInterfaceInfo {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
   return (
-    typeof record.id === 'string' &&
-    typeof record.label === 'string' &&
-    typeof record.kind === 'string' &&
-    INTERFACE_KINDS.has(record.kind) &&
-    isStringArray(record.prefixes)
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.label === 'string' &&
+    (INTERFACE_KINDS as readonly unknown[]).includes(value.kind) &&
+    isStringArray(value.prefixes)
   );
 }
 
 /** Whether `value` is a {@link NetworkPolicyResult} a Settings panel can render. */
 export function isNetworkPolicyResult(value: unknown): value is NetworkPolicyResult {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
   return (
-    isNetworkPolicy(record.policy) &&
-    Array.isArray(record.levels) &&
-    record.levels.every((level) => typeof level === 'string' && LEVELS.has(level)) &&
-    Array.isArray(record.interfaces) &&
-    record.interfaces.every(isNetworkInterfaceInfo)
+    isRecord(value) &&
+    isNetworkPolicy(value.policy) &&
+    Array.isArray(value.levels) &&
+    value.levels.every(isLevel) &&
+    Array.isArray(value.interfaces) &&
+    value.interfaces.every(isNetworkInterfaceInfo)
   );
 }

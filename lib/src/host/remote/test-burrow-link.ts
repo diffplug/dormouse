@@ -32,7 +32,7 @@ import {
 } from './service-protocol';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
-import { levelsFor, type NetworkPolicyResult } from '../../remote/network-policy';
+import { networkPolicyResult, type NetworkPolicy, type NetworkPolicyResult } from '../../remote/network-policy';
 import type { BurrowLink } from '../../lib/platform/types';
 
 /** The self-host Relay the fixtures' build was baked for (`docs/specs/relay.md` → "Relay origin"). */
@@ -143,20 +143,21 @@ export function oneTimeWaiting(
   };
 }
 
+/** The one Wi-Fi the fixtures' Local networks allows. */
+export const LAN = '192.168.1.0/24';
+/** A self-host build's network on: My Relay only. */
+export const RELAY_ON: NetworkPolicy = { level: 'relay', allowed: [], autoUpdate: false };
+/** A Hosted build's network on: Local networks over {@link LAN}. */
+export const LOCAL_ON: NetworkPolicy = { level: 'local', allowed: [LAN], autoUpdate: false };
+
 /**
- * What `networkPolicy` answers for a build with its network on — Local networks
- * over one Wi-Fi, or My Relay only — which the Remote control section's
- * fixtures assume.
+ * What `networkPolicy` answers for a build with its network on, which the
+ * Remote control section's fixtures assume.
  */
 export function networkOn(relayMode: RelayMode): NetworkPolicyResult {
-  const lan = '192.168.1.0/24';
-  return {
-    policy: relayMode === 'self-host'
-      ? { level: 'relay', allowed: [], autoUpdate: false }
-      : { level: 'local', allowed: [lan], autoUpdate: false },
-    levels: levelsFor(relayMode),
-    interfaces: [{ id: 'en0', label: 'Local network', kind: 'lan', prefixes: [lan] }],
-  };
+  return networkPolicyResult(relayMode === 'self-host' ? RELAY_ON : LOCAL_ON, relayMode, [
+    { id: 'en0', label: 'Local network', kind: 'lan', prefixes: [LAN] },
+  ]);
 }
 
 /** A link that answers through its `command` and relays {@link emit} to its subscribers. */

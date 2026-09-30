@@ -404,8 +404,10 @@ enrolled runtime's.
   connection (ending it unannounced), and is **refused while `connecting` or
   `connected`**, and while `unavailable`.
 - **Every state change is a `{ name: 'one-time', state }` event, and so is a
-  service's start**, ahead of its enrollment read (rationale).
-- **`status` and its event carry `serving`**: `enrolled`, or a one-time status
+  service's start**, after its policy read, ahead of its enrollment read
+  (rationale).
+- **`status` and its event carry `serving`**: a running Burrow (none under
+  Nothing), or a one-time status
   of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip
   emits `status`. **A reader missing `serving` takes `enrolled`** (an older VS
   Code broker). What arms on each: `docs/specs/vscode.md` -> "Burrow: a
