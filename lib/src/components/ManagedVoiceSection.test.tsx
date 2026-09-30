@@ -8,6 +8,7 @@ import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import type { ManagedVoiceConfigUpdate, ManagedVoicePort, ManagedVoiceStatus } from '../lib/platform/managed-voice-types';
 import { ManagedVoiceSection } from './ManagedVoiceSection';
+import { AlarmSettingsSection } from './SettingsDialog';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -17,11 +18,18 @@ let root: Root;
 let stored: { token: string | null; voiceId: string };
 let updates: ManagedVoiceConfigUpdate[];
 
+/** The host's cached status, updated and announced on every saved edit. */
 function makePort(offerSetup = true): ManagedVoicePort {
-  const status = (): ManagedVoiceStatus => ({ configured: stored.token !== null, voiceId: stored.voiceId });
+  const snapshot = (): ManagedVoiceStatus => ({ configured: stored.token !== null, voiceId: stored.voiceId });
+  let status = snapshot();
+  const listeners = new Set<() => void>();
   return {
     offerSetup,
-    status: async () => status(),
+    status: () => status,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
     configure: async (update) => {
       updates.push(update);
       if ('token' in update) {
@@ -29,7 +37,9 @@ function makePort(offerSetup = true): ManagedVoicePort {
         stored.token = update.token ?? null;
       }
       if (update.voiceId) stored.voiceId = update.voiceId;
-      return { ok: true, ...status() };
+      status = snapshot();
+      for (const listener of listeners) listener();
+      return { ok: true, ...status };
     },
     speak: vi.fn(),
   };
@@ -127,5 +137,18 @@ describe('ManagedVoiceSection', () => {
     await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     await act(async () => {});
     expect(updates).toEqual([{ voiceId: 'other1' }]);
+  });
+});
+
+describe('the spoken-alarm copy', () => {
+  it.each([
+    ['no port', undefined, 'Managed ElevenLabs voice is coming soon.'],
+    ['a public build with no token', false, 'Managed ElevenLabs voice is coming soon.'],
+    ['a port that offers setup', true, 'Uses managed voice while a voice token is saved'],
+  ])('with %s', async (_label, offerSetup, copy) => {
+    const adapter = new FakePtyAdapter();
+    setPlatform(offerSetup === undefined ? adapter : Object.assign(adapter, { managedVoice: makePort(offerSetup) }));
+    await act(async () => root.render(<AlarmSettingsSection sink="speech" />));
+    expect(text()).toContain(copy);
   });
 });

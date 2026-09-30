@@ -5,7 +5,7 @@
  * (`docs/specs/alert.md` -> "Spoken alarms").
  */
 export interface SpeechEngine {
-  /** False when this engine could never speak here. */
+  /** False when this engine cannot speak now. */
   available(): boolean;
   /**
    * Prepare one attempt without dispatching it. The queue records the returned
@@ -52,8 +52,7 @@ export const webSpeechEngine: SpeechEngine = {
       utterance.voice = synth.getVoices?.().find(candidate => candidate.voiceURI === input.voice) ?? null;
     }
     let started = false;
-    // Registered before dispatch: the handlers close over the utterance, never
-    // over a value assigned after `speak()` returns.
+    // `docs/specs/alert.md` -> "Spoken alarms": registered before dispatch.
     utterance.onstart = () => { started = true; callbacks.onStart(); };
     utterance.onend = utterance.onerror = () => (started ? callbacks.onEnd() : callbacks.onFail());
     return {
@@ -69,43 +68,30 @@ export const webSpeechEngine: SpeechEngine = {
 
 /**
  * `primary` where available, else `secondary`; a `primary` attempt that fails
- * before anything was heard is retried once through `secondary` within the same
- * attempt (`docs/specs/alert.md` -> "Managed voice").
+ * is retried once through `secondary` within the same attempt
+ * (`docs/specs/alert.md` -> "Managed voice"). `onFail` means nothing was heard,
+ * and a disposed engine calls back no more, so the two never both play.
  */
 export function withFallback(primary: SpeechEngine, secondary: SpeechEngine): SpeechEngine {
   return {
     available: () => primary.available() || secondary.available(),
     prepare(input, callbacks) {
       if (!primary.available()) return secondary.prepare(input, callbacks);
-      let live = true;
-      let heard = false;
-      let first: SpeechAttemptHandle | null = null;
       let second: SpeechAttemptHandle | null = null;
       const fallBack = () => {
-        if (!live) return;
-        // Never both: a primary that was heard ends the attempt instead.
-        if (heard || !secondary.available()) { (heard ? callbacks.onEnd : callbacks.onFail)(); return; }
-        first?.dispose(false);
-        first = null;
+        if (!secondary.available()) { callbacks.onFail(); return; }
         try {
           second = secondary.prepare(input, callbacks);
           second.start();
         } catch {
-          if (live) callbacks.onFail();
+          callbacks.onFail();
         }
       };
-      first = primary.prepare(input, {
-        onStart: () => { heard = true; callbacks.onStart(); },
-        onEnd: callbacks.onEnd,
-        onFail: fallBack,
-      });
+      const first = primary.prepare(input, { ...callbacks, onFail: fallBack });
       return {
-        start() {
-          try { first?.start(); } catch { fallBack(); }
-        },
+        start: () => first.start(),
         dispose(cancel) {
-          live = false;
-          first?.dispose(cancel);
+          first.dispose(cancel);
           second?.dispose(cancel);
         },
       };

@@ -1,4 +1,4 @@
-import { webSpeechEngine, type SpeechAttemptHandle, type SpeechEngine } from './speech-engine';
+import type { SpeechAttemptHandle, SpeechEngine } from './speech-engine';
 
 /** The engine owns only our current utterance. Pending jobs remain cancellable here. */
 export interface SpeechJob {
@@ -25,8 +25,8 @@ interface Attempt {
  * The one seam between Dormouse's pending spoken alarms and a speech engine
  * (`docs/specs/alert.md` -> "Spoken alarms" owns the behavior; the bounds and
  * the timeout are here). **Only one utterance at a time is admitted per
- * renderer** — Settings test sounds included, since they share one queue
- * (`alert-speech-queue.ts`) — so the engine never interleaves two panes and an
+ * renderer** — Settings test sounds included, since they share `speechQueue`
+ * (`alert-speech.ts`) — so the engine never interleaves two panes and an
  * ineligible job can still be dropped while it is only pending here.
  *
  * Bounded in both directions, because a wedged or callback-less engine must not
@@ -42,7 +42,7 @@ export class SpeechQueue {
   private active: Attempt | null = null;
   private pumping = false;
 
-  constructor(private readonly engine: SpeechEngine = webSpeechEngine) {}
+  constructor(private readonly engine: SpeechEngine) {}
 
   /** False when no engine exists or the queue is full; a job that fails later reports through `onFinish(false)`. */
   enqueue(job: SpeechJob): boolean {
@@ -102,12 +102,8 @@ export class SpeechQueue {
             onEnd: () => this.finish(attempt),
             onFail: () => this.finish(attempt),
           });
-        } catch {
-          this.finish(attempt);
-          continue;
-        }
-        try { attempt.handle.start(); }
-        catch { this.finish(attempt); }
+          attempt.handle.start();
+        } catch { this.finish(attempt); }
         // Synchronous completion clears active; loop advances without recursion.
       }
     } finally { this.pumping = false; }

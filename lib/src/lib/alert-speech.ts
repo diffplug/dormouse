@@ -1,5 +1,8 @@
 import { getSessionAlertPolicy, subscribeToAlertDeliveryPolicy } from './alert-delivery-policy';
-import { speechQueue } from './alert-speech-queue';
+import { createManagedVoiceEngine } from './managed-voice-engine';
+import { getPlatformOrNull } from './platform';
+import { SpeechQueue } from './speech-queue';
+import { webSpeechEngine, withFallback } from './speech-engine';
 import {
   clearAlertSpeechState,
   clearAllAlertSpeechStates,
@@ -35,6 +38,13 @@ export function toSpokenText(label: string): string {
   // would hand the engine a lone half.
   return Array.from(cleaned).slice(0, SPEECH_LIMIT).join('').trim() || 'terminal';
 }
+
+/** Settings previews and real alerts share one engine admission: managed voice
+ *  where the host has a token, Web Speech otherwise and as its fallback. */
+export const speechQueue = new SpeechQueue(withFallback(
+  createManagedVoiceEngine({ port: () => getPlatformOrNull()?.managedVoice }),
+  webSpeechEngine,
+));
 
 let testUtterances = 0;
 /** Play the Settings test through the same queue as alarms, without Session state.

@@ -223,8 +223,9 @@ OSC parsing/stripping rules for those rows, and the rule that **only the process
 | --- | --- | --- |
 | Webview → host | `managed_voice { payload }` → sidecar `voice:command` | op `status`, `configure`, or `speak` |
 | Host → webview | sidecar `voice:result` → invoke result | that op's answer; `speak`'s audio as base64 |
+| Host → every webview | sidecar `voice:status` | the status after each saved `configure` |
 
-Shapes: `ManagedVoicePort` and the wire types beside it.
+**Every window caches the status**: it asks `status` once its `voice:status` listener is live, and again when the harness's event stream reconnects, then takes each broadcast. Shapes: `ManagedVoicePort` and the wire types beside it.
 
 Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `managed_voice` in `standalone/src-tauri/src/lib.rs`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 

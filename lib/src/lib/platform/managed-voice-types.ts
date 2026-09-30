@@ -35,7 +35,10 @@ export type ManagedVoiceSpeakResult =
 export interface ManagedVoicePort {
   /** Show the Settings setup even with no token saved (dev builds). */
   offerSetup: boolean;
-  status(): Promise<ManagedVoiceStatus>;
+  /** The host's last broadcast status; `null` until the first arrives. */
+  status(): ManagedVoiceStatus | null;
+  /** Called after every change to `status()`. */
+  subscribe(listener: () => void): () => void;
   configure(update: ManagedVoiceConfigUpdate): Promise<ManagedVoiceConfigResult>;
   /** Never rejects: every failure is an `ok: false` answer. */
   speak(text: string): Promise<ManagedVoiceSpeakResult>;

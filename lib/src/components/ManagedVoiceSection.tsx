@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState, useSyncExternalStore } from 'react';
 import { TextInput, modalActionButton } from './design';
 import { getPlatform } from '../lib/platform';
 import {
   DEFAULT_MANAGED_VOICE_ID,
   type ManagedVoiceConfigResult,
   type ManagedVoiceConfigUpdate,
+  type ManagedVoicePort,
   type ManagedVoiceStatus,
 } from '../lib/platform/managed-voice-types';
 
@@ -17,36 +18,41 @@ const REFUSAL: Record<Exclude<ManagedVoiceConfigResult, { ok: true }>['reason'],
   unavailable: 'This app could not save the managed voice setting.',
 };
 
+/** The port's cached status; `null` without a port or before the host answers. */
+function useManagedVoiceStatus(port: ManagedVoicePort | undefined): ManagedVoiceStatus | null {
+  const subscribe = useCallback((listener: () => void) => port?.subscribe(listener) ?? (() => {}), [port]);
+  const snapshot = useCallback(() => port?.status() ?? null, [port]);
+  return useSyncExternalStore(subscribe, snapshot);
+}
+
+/** Settings offers managed voice for a dev build's port, or once a token is saved. */
+function isOffered(port: ManagedVoicePort | undefined, status: ManagedVoiceStatus | null): port is ManagedVoicePort {
+  return !!port && (port.offerSetup || status?.configured === true);
+}
+
+export function useManagedVoiceOffered(): boolean {
+  const port = getPlatform().managedVoice;
+  return isOffered(port, useManagedVoiceStatus(port));
+}
+
 /** Managed voice setup; visibility and the write-only token follow
  *  `docs/specs/alert.md` -> "Settings dialog". */
 export function ManagedVoiceSection() {
   const port = getPlatform().managedVoice;
-  const [status, setStatus] = useState<ManagedVoiceStatus | null>(null);
+  const status = useManagedVoiceStatus(port);
   const [token, setToken] = useState('');
   const [voiceDraft, setVoiceDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (!port) return;
-    let live = true;
-    port.status().then(
-      (next) => { if (live) setStatus(next); },
-      () => { if (live) setError(REFUSAL.unavailable); },
-    );
-    return () => { live = false; };
-  }, [port]);
-
-  if (!port || !(port.offerSetup || status?.configured)) return null;
+  if (!isOffered(port, status)) return null;
 
   const apply = async (update: ManagedVoiceConfigUpdate): Promise<boolean> => {
     setBusy(true);
     try {
       const result = await port.configure(update);
-      if (!result.ok) { setError(REFUSAL[result.reason]); return false; }
-      setStatus({ configured: result.configured, voiceId: result.voiceId });
-      setError(null);
-      return true;
+      setError(result.ok ? null : REFUSAL[result.reason]);
+      return result.ok;
     } finally {
       setBusy(false);
     }
@@ -59,6 +65,46 @@ export function ManagedVoiceSection() {
     void apply({ voiceId: draft });
   };
 
+  const tokenControl = status?.configured ? (
+    <div className="mt-2 flex items-center gap-2 text-sm text-foreground">
+      <span>Voice token configured.</span>
+      <button
+        type="button"
+        className={modalActionButton()}
+        disabled={busy}
+        onClick={() => { void apply({ token: null }); }}
+      >
+        Clear token
+      </button>
+    </div>
+  ) : (
+    <form
+      className="mt-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!token.trim()) return;
+        void apply({ token }).then((ok) => { if (ok) setToken(''); });
+      }}
+    >
+      <label className="block">
+        <span className={FIELD_LABEL}>Voice token</span>
+        <TextInput
+          value={token}
+          onChange={setToken}
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="dmv_…"
+        />
+      </label>
+      <div className="mt-2">
+        <button type="submit" className={modalActionButton()} disabled={busy || !token.trim()}>
+          Use managed voice
+        </button>
+      </div>
+    </form>
+  );
+
   return (
     <div className="mt-3">
       <div className="text-sm text-foreground">Managed voice</div>
@@ -68,63 +114,28 @@ export function ManagedVoiceSection() {
         seconds, always within minutes. If it cannot answer, the alarm uses your
         system voice.
       </p>
-      {status && (<>{status.configured ? (
-        <div className="mt-2 flex items-center gap-2 text-sm text-foreground">
-          <span>Voice token configured.</span>
-          <button
-            type="button"
-            className={modalActionButton()}
-            disabled={busy}
-            onClick={() => { void apply({ token: null }); }}
-          >
-            Clear token
-          </button>
-        </div>
-      ) : (
-        <form
-          className="mt-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!token.trim()) return;
-            void apply({ token }).then((ok) => { if (ok) setToken(''); });
-          }}
-        >
-          <label className="block">
-            <span className={FIELD_LABEL}>Voice token</span>
+      {status && (
+        <>
+          {tokenControl}
+          <label className="mt-2 block">
+            <span className={FIELD_LABEL}>Voice id</span>
             <TextInput
-              value={token}
-              onChange={setToken}
-              type="password"
+              value={voiceDraft ?? status.voiceId}
+              onChange={setVoiceDraft}
               autoComplete="off"
               spellCheck={false}
-              placeholder="dmv_…"
+              placeholder={DEFAULT_MANAGED_VOICE_ID}
+              onBlur={commitVoice}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitVoice();
+                }
+              }}
             />
           </label>
-          <div className="mt-2">
-            <button type="submit" className={modalActionButton()} disabled={busy || !token.trim()}>
-              Use managed voice
-            </button>
-          </div>
-        </form>
+        </>
       )}
-        <label className="mt-2 block">
-          <span className={FIELD_LABEL}>Voice id</span>
-          <TextInput
-            value={voiceDraft ?? status.voiceId}
-            onChange={setVoiceDraft}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={DEFAULT_MANAGED_VOICE_ID}
-            onBlur={commitVoice}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                event.preventDefault();
-                commitVoice();
-              }
-            }}
-          />
-        </label>
-      </>)}
       {error ? <div className="mt-2 text-sm leading-relaxed text-error">{error}</div> : null}
     </div>
   );

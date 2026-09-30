@@ -499,6 +499,8 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
 
   const voice = createManagedVoiceHost({
     stateDir: options.stateDir,
+    // Unaddressed, so Rust hands it to every window.
+    onStatus: (status) => send('voice:status', status),
     log: (message) => console.error(message),
   });
 

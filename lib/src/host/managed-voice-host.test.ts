@@ -20,11 +20,13 @@ const MANAGED_VOICE_SPEAK_URL = 'https://hosted.dormouse.sh/api/voice/speak';
 const TOKEN = `dmv_${'A'.repeat(43)}`;
 let dir: string;
 let fetchMock: ReturnType<typeof vi.fn>;
+let broadcasts: unknown[];
 let host: ReturnType<typeof make>;
 
 function make(options: { timeoutMs?: number; stateDir?: string } = {}) {
   return createManagedVoiceHost({
     stateDir: 'stateDir' in options ? options.stateDir : dir,
+    onStatus: (status) => void broadcasts.push(status),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
   });
@@ -33,6 +35,7 @@ function make(options: { timeoutMs?: number; stateDir?: string } = {}) {
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'managed-voice-'));
   fetchMock = vi.fn();
+  broadcasts = [];
   host = make();
 });
 
@@ -45,12 +48,22 @@ const audioResponse = () => new Response(new Uint8Array([9, 8, 7]), {
 });
 
 describe('configuration', () => {
-  it('reports configured without ever returning the token', async () => {
+  it('reports and broadcasts configured without ever carrying the token', async () => {
     expect(await host.handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
     const result = await host.handle({ op: 'configure', update: { token: `  ${TOKEN}\n` } });
     expect(result).toEqual({ ok: true, configured: true, voiceId: DEFAULT_MANAGED_VOICE_ID });
-    expect(JSON.stringify(result)).not.toContain(TOKEN);
+    expect(broadcasts).toEqual([{ configured: true, voiceId: DEFAULT_MANAGED_VOICE_ID }]);
+    expect(JSON.stringify([result, broadcasts])).not.toContain(TOKEN);
     expect(JSON.stringify(await host.handle({ op: 'status' }))).not.toContain(TOKEN);
+  });
+
+  it('keeps both of two edits sent at once', async () => {
+    await Promise.all([
+      host.handle({ op: 'configure', update: { token: TOKEN } }),
+      host.handle({ op: 'configure', update: { voiceId: 'abc123' } }),
+    ]);
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({ token: TOKEN, voiceId: 'abc123' });
+    expect(broadcasts.at(-1)).toEqual({ configured: true, voiceId: 'abc123' });
   });
 
   it('persists owner-only and survives a restart', async () => {
@@ -65,6 +78,7 @@ describe('configuration', () => {
     expect(await host.handle({ op: 'configure', update: { token: 'sk-nope' } })).toEqual({ ok: false, reason: 'invalid-token' });
     expect(await host.handle({ op: 'configure', update: { voiceId: '../x' } })).toEqual({ ok: false, reason: 'invalid-voice' });
     expect(await host.handle({ op: 'status' })).toEqual({ configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID });
+    expect(broadcasts).toEqual([]);
   });
 
   it('clears the token', async () => {

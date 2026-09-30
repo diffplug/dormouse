@@ -35,10 +35,12 @@ let nextPlayResult: Promise<void> | null;
 let fallbackCalls: Array<{ text: string; callbacks: SpeechEngineCallbacks; disposed: boolean | null }>;
 let fallbackAvailable: boolean;
 let portPresent: boolean;
+let configured: boolean | null;
 
 const port: ManagedVoicePort = {
   offerSetup: true,
-  status: async () => ({ configured: true, voiceId: 'v' }),
+  status: () => (configured === null ? null : { configured, voiceId: 'v' }),
+  subscribe: () => () => {},
   configure: async () => ({ ok: true, configured: true, voiceId: 'v' }),
   speak: (text) => new Promise((resolve) => speaks.push({ text, resolve })),
 };
@@ -89,6 +91,7 @@ beforeEach(() => {
   fallbackCalls = [];
   fallbackAvailable = true;
   portPresent = true;
+  configured = true;
   events = [];
   queue = new SpeechQueue(withFallback(
     createManagedVoiceEngine({ port: () => (portPresent ? port : undefined), playback }),
@@ -260,10 +263,27 @@ describe('managed voice engine', () => {
     expect(fallbackCalls.map(c => c.text)).toEqual(['say a']);
   });
 
-  it('admits jobs with no Web Speech when the host has managed voice', () => {
+  it.each([
+    ['no token', false],
+    ['no status yet', null],
+  ])('goes straight to the fallback engine with %s, in the same call', (_label, status) => {
+    configured = status;
+    queue.enqueue(job('a'));
+    expect(speaks).toHaveLength(0);
+    expect(fallbackCalls.map(c => c.text)).toEqual(['say a']);
+  });
+
+  it('still falls back when the host answers unconfigured', async () => {
+    queue.enqueue(job('a'));
+    speaks[0].resolve({ ok: false, reason: 'unconfigured' });
+    await flush();
+    expect(fallbackCalls.map(c => c.text)).toEqual(['say a']);
+  });
+
+  it('admits jobs with no Web Speech only while the host has a token', () => {
     fallbackAvailable = false;
     expect(queue.enqueue(job('a'))).toBe(true);
-    portPresent = false;
+    configured = false;
     expect(queue.enqueue(job('b'))).toBe(false);
   });
 });

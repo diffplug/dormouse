@@ -38,7 +38,9 @@ export function createManagedVoiceEngine(options: {
 }): SpeechEngine {
   const playback = options.playback ?? browserPlayback;
   return {
-    available: () => options.port() !== undefined,
+    // A port whose host has no token is unavailable, so `withFallback` goes
+    // straight to Web Speech; an `unconfigured` answer still falls back.
+    available: () => options.port()?.status()?.configured === true,
     prepare(input, callbacks) {
       // Only ever after `available()`, in the same call stack.
       const port = options.port()!;

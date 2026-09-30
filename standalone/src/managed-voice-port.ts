@@ -1,6 +1,7 @@
 /**
  * The standalone `managedVoice` port, shared by the Tauri adapter and the
- * browser-dev harness adapter, which differ only in `invoke`
+ * browser-dev harness adapter, which differ only in `invoke` and in how the
+ * `voice:status` broadcast reaches `receiveStatus`
  * (`docs/specs/transport.md` -> "Managed voice").
  */
 import { messageOf } from "dormouse-lib/lib/errors";
@@ -13,6 +14,13 @@ import type {
 
 type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
+export interface StandaloneManagedVoicePort extends ManagedVoicePort {
+  /** A `voice:status` broadcast, or a `status` answer. */
+  receiveStatus(data: unknown): void;
+  /** Ask the host for its status; call once the `voice:status` listener is live. */
+  refresh(): void;
+}
+
 function decodeBase64(base64: string): Uint8Array {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -20,14 +28,34 @@ function decodeBase64(base64: string): Uint8Array {
   return bytes;
 }
 
-export function createManagedVoicePort(invoke: Invoke): ManagedVoicePort {
+export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePort {
   const call = <T>(payload: Record<string, unknown>) => invoke<T>("managed_voice", { payload });
+  let status: ManagedVoiceStatus | null = null;
+  const listeners = new Set<() => void>();
+
+  const receiveStatus = (data: unknown): void => {
+    const next = data as Partial<ManagedVoiceStatus> | null;
+    if (typeof next?.configured !== "boolean" || typeof next.voiceId !== "string") return;
+    status = { configured: next.configured, voiceId: next.voiceId };
+    for (const listener of listeners) listener();
+  };
+
   return {
     offerSetup: import.meta.env.DEV,
-    status: () => call<ManagedVoiceStatus>({ op: "status" }),
+    status: () => status,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+    receiveStatus,
+    refresh() {
+      call<unknown>({ op: "status" }).then(receiveStatus, () => {});
+    },
     configure: async (update) => {
       try {
-        return await call<ManagedVoiceConfigResult>({ op: "configure", update });
+        const result = await call<ManagedVoiceConfigResult>({ op: "configure", update });
+        if (result.ok) receiveStatus(result);
+        return result;
       } catch {
         return { ok: false, reason: "unavailable" };
       }

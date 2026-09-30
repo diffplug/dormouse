@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
 import { bakedHostedOrigin } from './hosted-origin';
+import { createSerialQueue } from './remote/serial-queue';
 import {
   DEFAULT_MANAGED_VOICE_ID,
   type ManagedVoiceConfigResult,
@@ -45,6 +46,8 @@ function normalizeStored(value: unknown): StoredConfig {
 export function createManagedVoiceHost(options: {
   /** The owner-only state directory; without one no token can be stored. */
   stateDir?: string;
+  /** Each saved change's status, for every window; never the token. */
+  onStatus: (status: ManagedVoiceStatus) => void;
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
   log?: (message: string) => void;
@@ -58,6 +61,8 @@ export function createManagedVoiceHost(options: {
   // The only place the token may go (`docs/specs/security-local.md` -> "Persisted state").
   const speakUrl = bakedHostedOrigin() + MANAGED_VOICE_SPEAK_PATH;
   let loaded: Promise<StoredConfig> | null = null;
+  // Each edit reads, then rewrites the whole file: two at once would drop a field.
+  const serialize = createSerialQueue();
 
   const load = (): Promise<StoredConfig> => {
     loaded ??= (async () => {
@@ -97,6 +102,7 @@ export function createManagedVoiceHost(options: {
       return { ok: false, reason: 'unavailable' };
     }
     loaded = Promise.resolve(next);
+    options.onStatus(status(next));
     return { ok: true, ...status(next) };
   }
 
@@ -158,7 +164,7 @@ export function createManagedVoiceHost(options: {
       const message = (command ?? {}) as Record<string, unknown>;
       switch (message.op) {
         case 'status': return status(await load());
-        case 'configure': return configure(message.update);
+        case 'configure': return serialize(() => configure(message.update));
         case 'speak':
           return typeof message.text === 'string' ? speak(message.text) : { ok: false, reason: 'bad-request' };
         default: return undefined;

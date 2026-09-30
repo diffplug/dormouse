@@ -1,5 +1,4 @@
 import { SPEECH_ENGINE_TIMEOUT_MS } from './speech-queue';
-import { speechQueue } from './alert-speech-queue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./platform', () => ({
@@ -7,7 +6,7 @@ vi.mock('./platform', () => ({
   getPlatformOrNull: () => null,
 }));
 
-import { startAlertSpeech, toSpokenText, type AlertSpeaker } from './alert-speech';
+import { speechQueue, startAlertSpeech, toSpokenText, type AlertSpeaker } from './alert-speech';
 import { getAlertSpeechState } from './alert-speech-state';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
 import { createAlertEpisode } from './alert-episode';

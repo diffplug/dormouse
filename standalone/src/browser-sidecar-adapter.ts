@@ -35,7 +35,6 @@ import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
 import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
-import type { ManagedVoicePort } from "dormouse-lib/lib/platform/managed-voice-types";
 import { createManagedVoicePort } from "./managed-voice-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
@@ -104,10 +103,15 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     // The SSE stream is the only way the alerts' events reach this adapter,
     // and whatever the sidecar sent while it was down is lost: `sync` has the
-    // sidecar re-send this window's Sessions' state and both stores.
-    this.unlistenReconnect = this.host.onReconnect(() => this.alerts.sync());
+    // sidecar re-send this window's Sessions' state and both stores, and
+    // managed voice asks for its status again.
+    this.unlistenReconnect = this.host.onReconnect(() => {
+      this.alerts.sync();
+      this.managedVoice.refresh();
+    });
     // A reload is a new realm under the same label; see TauriAdapter.
     this.alerts.hello();
+    this.managedVoice.refresh();
     this.installConsoleForwarder();
     this.unlistenRegistry = await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
@@ -308,7 +312,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     return this.windowSlot.read();
   }
 
-  readonly managedVoice: ManagedVoicePort = createManagedVoicePort((cmd, args) => this.host.invoke(cmd, args));
+  readonly managedVoice = createManagedVoicePort((cmd, args) => this.host.invoke(cmd, args));
 
   private handleHostEvent(event: string, data: unknown): void {
     if (event === "dormouse://workspaces") {
@@ -316,7 +320,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       return;
     }
     if (this.alerts.onEvent(event, data)) return;
-    if (event === "pty:data") {
+    if (event === "voice:status") {
+      this.managedVoice.receiveStatus(data);
+    } else if (event === "pty:data") {
       // Already parsed by the sidecar, which owns the PTY; its events arrive as
       // the two messages below (docs/specs/terminal-escapes.md).
       const payload = data as PtyDataDetail;
