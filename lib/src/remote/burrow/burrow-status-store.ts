@@ -92,10 +92,7 @@ function setState(next: BurrowStatusState): void {
  * others last changed — stale for as long as the dialog stays open, and nothing
  * else would catch it. The mapped type makes the *omission* a compile error;
  * it cannot make a nested field's comparator right, since `Object.is`
- * type-checks for one of those too. `offer` is compared by its origin because
- * the service mints a fresh object per read, and "compares the offer by its
- * origin, not by the object the poll minted" in `burrow-status-store.test.ts` is
- * what pins that.
+ * type-checks for one of those too.
  */
 const STATUS_FIELDS: {
   [K in keyof BurrowConsoleStatus]: (
@@ -105,12 +102,13 @@ const STATUS_FIELDS: {
 } = {
   enrolled: Object.is,
   serving: Object.is,
-  relayUrl: Object.is,
+  relayOrigin: Object.is,
+  relayMode: Object.is,
   burrowId: Object.is,
   connection: Object.is,
   pairedClients: Object.is,
   suggestedLabel: Object.is,
-  offer: (a, b) => a?.origin === b?.origin,
+  offer: Object.is,
 };
 
 function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
@@ -243,9 +241,23 @@ function refreshAfterMutation(): Promise<void> {
  * whole section away rather than degrading, so it is defaulted here — at the
  * seam where the untrusted shape becomes the typed one — instead of at each of
  * the two forms that read it. `serving` is read through `servingOf`.
+ *
+ * A broker from before the one baked relay origin answers `offer` as
+ * `{ origin } | null` — a fresh object every poll, which the field-wise compare
+ * would republish every 2 s — and names its Relay `relayUrl` with no
+ * `relayOrigin` or `relayMode`. The mode it lacks reads as Hosted, which shows
+ * no enroll form it could not serve.
  */
 function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
-  return { ...status, serving: servingOf(status), suggestedLabel: status.suggestedLabel ?? '' };
+  const { relayUrl } = status as { relayUrl?: unknown };
+  return {
+    ...status,
+    serving: servingOf(status),
+    suggestedLabel: status.suggestedLabel ?? '',
+    relayOrigin: status.relayOrigin ?? (typeof relayUrl === 'string' ? relayUrl : ''),
+    relayMode: status.relayMode === 'self-host' ? 'self-host' : 'hosted',
+    offer: Boolean(status.offer),
+  };
 }
 
 async function readBurrowStatus(): Promise<void> {
@@ -266,41 +278,30 @@ async function readBurrowStatus(): Promise<void> {
 }
 
 /**
- * Enroll this machine with a coordinating Relay.
+ * Enroll this machine with its build's Relay.
  *
  * The password is a bearer credential and is passed straight through to the
- * service, which is what talks to the Relay; it is never stored here. The
- * service refuses an origin outside this build's baked relay allowlist *before*
- * the password leaves the machine (`docs/specs/relay.md`, "Where a Burrow may
- * reach a Relay"), so a mistyped origin fails closed rather than leaking
- * it. Rejections propagate verbatim — the caller renders them.
+ * service, which is what talks to the Relay; it is never stored here. There is
+ * no origin to pass: the service posts only to the build's baked relay origin
+ * (`docs/specs/relay.md` → "Relay origin"). Rejections propagate verbatim —
+ * the caller renders them.
  */
-export async function enrollBurrow(
-  relayUrl: string,
-  password: string,
-  label: string,
-): Promise<void> {
+export async function enrollBurrow(password: string, label: string): Promise<void> {
   const active = requireBurrowLink();
-  await active.command('enroll', { relayUrl, password, label });
+  await active.command('enroll', { password, label });
   await refreshAfterMutation();
 }
 
 /**
  * Enroll against the offer the installer left on this machine — the one-click
  * path, where the only thing the user chooses is what to call the machine
- * (`service-protocol.ts` → `BurrowConsoleStatus.offer`).
- *
- * `origin` is the one the card *displayed*, echoed so the service can refuse a
- * file rewritten since — it is not what gets enrolled against, which comes off
- * the file along with the token this realm never sees.
- *
- * Rejections propagate verbatim, including the same allowlist refusal the typed
- * form gets: a Relay installed on this machine can still be an origin this
- * build was not compiled to reach.
+ * (`service-protocol.ts` → `BurrowConsoleStatus.offer`). The token comes off
+ * the file, which this realm never sees. Rejections propagate verbatim, like
+ * the typed form's.
  */
-export async function enrollOfferBurrow(origin: string, label: string): Promise<void> {
+export async function enrollOfferBurrow(label: string): Promise<void> {
   const active = requireBurrowLink();
-  await active.command('enrollOffer', { origin, label });
+  await active.command('enrollOffer', { label });
   await refreshAfterMutation();
 }
 

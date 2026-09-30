@@ -3,7 +3,8 @@
  * compared rather than merely displayed: the Relay's `DORMOUSE_ORIGIN`
  * (`relay/src/config.ts`), the `origin` a Burrow reads back off an enrollment
  * response (`lib/src/remote/burrow/enrollment.ts`), the offer file's own field
- * ({@link isEnrollmentOffer}), and the relay/push allowlist checks.
+ * ({@link isEnrollmentOffer}), and a stored enrollment against the Burrow's
+ * baked relay origin (`isRelayOrigin` in `lib/src/host/relay-origin.ts`).
  */
 
 /**

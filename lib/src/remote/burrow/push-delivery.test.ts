@@ -230,7 +230,7 @@ describe('sendPush', () => {
     expect(requests[0]!.url).toContain('/api/push/send');
   });
 
-  it('refuses redirects instead of sending Burrow data outside the allowlist', async () => {
+  it('refuses redirects instead of sending Burrow data to another origin', async () => {
     await loadPushDevices(deps());
     expect(requests[0]!.init?.redirect).toBe('error');
 

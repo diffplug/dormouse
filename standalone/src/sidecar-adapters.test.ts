@@ -6,6 +6,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async () => undefined) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("@tauri-apps/plugin-shell", () => ({ open: vi.fn(async () => {}) }));
+/** The webview's baked mode, read as each adapter is built. */
+const build = vi.hoisted(() => ({ mode: "hosted" as "hosted" | "self-host" }));
+vi.mock("dormouse-lib/host/relay-origin", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("dormouse-lib/host/relay-origin")>()),
+  bakedRelayMode: () => build.mode,
+}));
 
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -98,6 +104,17 @@ describe.each([
   afterEach(() => {
     resetToolDirty();
     vi.restoreAllMocks();
+    build.mode = "hosted";
+  });
+
+  // docs/specs/relay.md → "Relay origin".
+  it("offers managed voice only in a Hosted build", async () => {
+    expect((await open()).adapter.managedVoice).toBeDefined();
+    build.mode = "self-host";
+    const { adapter, deliver } = await open();
+    expect(adapter.managedVoice).toBeUndefined();
+    // A stray broadcast has nowhere to go, and breaks nothing.
+    deliver("voice:status", { configured: true, voiceId: "v1" });
   });
 
   it("applies dirty live/replay reports in order and preserves explicit clean across exit", async () => {

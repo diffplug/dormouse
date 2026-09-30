@@ -13,18 +13,23 @@ const scripts = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * A temp worktree that Vite can serve: `<root>/standalone` holding the real
- * `vite.config.ts` plus a one-line page, and an empty `<root>/bin` for shims.
- * Removing `root` is the caller's `t.after`, which must stop its runs first.
+ * `vite.config.ts` plus a one-line page, what that config reads the relay
+ * origin through (`<root>/scripts/relay-origin.mjs` and the built
+ * `remote-lib-common`), and an empty `<root>/bin` for shims. Removing `root` is
+ * the caller's `t.after`, which must stop its runs first.
  */
 export async function devWorkspace(prefix) {
   const root = await realpath(await mkdtemp(path.join(tmpdir(), `${prefix}-`)));
   const standalone = path.join(root, 'standalone');
   const bin = path.join(root, 'bin');
   await mkdir(path.join(standalone, 'scripts'), { recursive: true });
+  await mkdir(path.join(root, 'scripts'));
   await mkdir(bin);
   await mirrorNodeModules(standalone);
   await Promise.all([
     copyFile(path.resolve(scripts, '../vite.config.ts'), path.join(standalone, 'vite.config.ts')),
+    copyFile(path.resolve(scripts, '../../scripts/relay-origin.mjs'), path.join(root, 'scripts/relay-origin.mjs')),
+    symlink(path.resolve(scripts, '../../remote-lib-common'), path.join(root, 'remote-lib-common'), 'junction'),
     writeFile(path.join(standalone, 'index.html'), '<script type="module" src="/app.js"></script>'),
     writeFile(path.join(standalone, 'app.js'), 'console.log(import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST);'),
   ]);

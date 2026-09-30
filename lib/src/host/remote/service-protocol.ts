@@ -27,6 +27,7 @@ import type {
   BurrowStatus,
 } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import type { RelayMode } from '../relay-origin';
 
 /** Transport event names for what the service sends back. */
 export const BURROW_RESULT_EVENT = 'burrow:result';
@@ -198,6 +199,18 @@ export interface OneTimeEvent {
 export type BurrowUiEvent = BurrowStatusEvent | PairingQueueEvent | InvitationEvent | OneTimeEvent;
 
 /**
+ * The one-time state of a Burrow with no connection, from this build's
+ * `hostedOrigin` (`../relay-origin.ts`): `unavailable` without one — a
+ * self-host build, which opens no rendezvous — else `idle`. One builder for
+ * every process that answers it: the service, the VS Code glue for a window
+ * with no service at all (`vscode-ext/src/burrow.ts` → `refuseCommand`), and
+ * the Storybook stub.
+ */
+export function idleOneTimeState(hosted: string | null): OneTimeState {
+  return hosted === null ? { status: 'unavailable', reason: 'self-host' } : { status: 'idle' };
+}
+
+/**
  * Whether `value` is a {@link OneTimeState} a panel can render: a known
  * `status` carrying the fields that status needs. A reason is only checked to
  * be a string — a panel keeps fixed copy per reason and falls back for one this
@@ -253,8 +266,11 @@ export interface InvitationEvent {
 
 // --- Command parameter shapes ---
 
+/**
+ * No Relay URL: the only Relay a Burrow enrolls with is its build's baked
+ * origin (`docs/specs/relay.md` → "Relay origin").
+ */
 export interface EnrollParams {
-  relayUrl: string;
   password: string;
   label: string;
 }
@@ -264,13 +280,7 @@ export interface EnrollParams {
  * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  */
 export interface EnrollOfferParams {
-  /**
-   * The origin the card displayed, echoed back so the service can refuse an
-   * offer file that was rewritten between the render and the click. **Not the
-   * origin that is enrolled against** — that comes off the file, along with the
-   * token this shape deliberately does not carry.
-   */
-  origin: string;
+  /** No token: it comes off the file, which the service re-reads at the click. */
   label: string;
 }
 
@@ -316,7 +326,6 @@ export interface AnswerParams {
 
 export interface EnrollResult {
   burrowId: string;
-  relayUrl: string;
 }
 
 /**
@@ -356,7 +365,13 @@ export interface BurrowConsoleStatus {
   enrolled: boolean;
   /** {@link BurrowStatusEvent.serving}, which this seeds. */
   serving: boolean;
-  relayUrl: string | null;
+  /**
+   * The one relay origin this build was baked with, enrolled or not, and the
+   * mode it sets — what the Settings dialog renders (`docs/specs/relay.md` →
+   * "Relay origin").
+   */
+  relayOrigin: string;
+  relayMode: RelayMode;
   burrowId: string | null;
   /**
    * The relay socket's state. `displaced` is the one that needs acting on:
@@ -369,16 +384,16 @@ export interface BurrowConsoleStatus {
   /** What to prefill a "name for this machine" field with: the hostname. */
   suggestedLabel: string;
   /**
-   * The installer's enrollment offer on this machine, when there is one and this
-   * Burrow has not enrolled — the Settings dialog's one-click path
-   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog", which
-   * owns the re-read-at-click rule and what makes the card safe to press).
+   * Whether the installer left an enrollment offer for `relayOrigin` on this
+   * machine, while this self-host Burrow has not enrolled — the Settings
+   * dialog's one-click path (`docs/specs/relay.md` → "Remote control, in the
+   * Settings dialog").
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and
    * the token is a bearer credential exactly like `burrowToken` (`docs/specs/security-remote.md` → "Trust boundary",
    * the no-`burrowToken`-in-a-webview FAIL IF).
    */
-  offer: { origin: string } | null;
+  offer: boolean;
 }
 
 /**

@@ -4,7 +4,7 @@
 
 ## Workspaces
 
-**Why this window counts as a viewer, and only when `active`.** Only Dormouse webviews were viewers, so a push reached the phone while the user worked in VS Code outside the webview — the editor, VS Code's own terminal (2026-09-23). Focus alone never lapses: a user who walked away from a focused VS Code would never be pushed. `WindowState.active`, which lapses after a short time without input, was finalized in VS Code 1.89 (April 2024); the supported range starts at 1.85, where only the webviews' own presence counts.
+**Why this window counts as a viewer, and only when `active`.** Only Dormouse webviews were viewers, so a push reached the phone while the user worked in VS Code outside the webview — the editor, VS Code's own terminal (2026-09-23). Focus alone never lapses: a user who walked away from a focused VS Code would never be pushed. `WindowState.active`, which lapses after a short time without input, was finalized in VS Code 1.89 (April 2024), below the 1.92 floor, so every supported VS Code reports it.
 
 ## Surfacing union status on native chrome
 
@@ -66,7 +66,7 @@
 
 **Why a mid-contention command waits rather than being refused.** While the contention runs the window is neither broker nor client, and a bind plus a handshake is not instant. Refusing there would tell an enrolled machine's webview it has no Burrow seconds before it gets one, and the gates that arm on that answer (`enrolled-gate.ts`) would stay down.
 
-**Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.85 — the floor `engines.vscode` declares — shipped Node 18, so an older extension host has no global to use.
+**Where the `WebSocket` boundary falls.** `globalThis.WebSocket` arrived in Node 22, and VS Code 1.92 — the floor `engines.vscode` declares — shipped Node 20.14 (its release notes, July 2024), so an older extension host has no global to use.
 
 ## The direct path
 
@@ -106,5 +106,7 @@ macOS host, hence copying only the declared platform packages.
 **Why `pushDevices` answers `null` instead of refusing.** When an un-enrolled window refused the read-only commands, the Settings dialog reported an unreachable server on machines that had simply never enrolled.
 
 ## Build and development
+
+**Why a self-host VSIX needs no update switch of its own.** VS Code treats a VSIX install as a pinned version and leaves it out of Marketplace auto-update (microsoft/vscode#219932, fixed by #219933 in the July 2024 iteration, 1.92; the diff covers the CLI's VSIX path, `code --install-extension`, which `pnpm dogfood:vscode` takes — checked 2026-09). An extension cannot opt itself out of Marketplace updates, and a distinct extension id would collide with the Marketplace build's command, view, and keybinding contributions when both are installed, and would strand the enrollment in another id's `SecretStorage`.
 
 **Why the separate typecheck is wired into `test`.** A reference to a deleted function once reached a commit and surfaced only as a runtime throw during `deactivate()`, which — having no `try`/`catch` — skipped every teardown step behind it. `tsc` is the package's only automated check for that class of error.

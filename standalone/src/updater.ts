@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { bakedRelayMode } from 'dormouse-lib/host/relay-origin';
 import { getPlatformOrNull, IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdateBannerState } from './UpdateBanner';
 import type { Update } from '@tauri-apps/plugin-updater';
@@ -143,6 +144,11 @@ export function openIssueSearch(error: string): void {
 
 export function startUpdateCheck(): void {
   if (BROWSER_DEV_HOST) return;
+  // docs/specs/auto-update.md → "How it works".
+  if (bakedRelayMode() !== 'hosted') {
+    console.info('[updater] a self-host build: no update check');
+    return;
+  }
   void runUpdateCheck().catch((e) => console.error('[updater] Startup failed:', e));
 }
 

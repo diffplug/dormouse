@@ -23,22 +23,44 @@ import {
   fromBase64Url,
 } from 'remote-lib-common';
 
-import { DEFAULT_HOSTED_ORIGIN } from '../hosted-origin';
-import type { InvitationEvent, BurrowConsoleStatus, SetupQrResult } from './service-protocol';
+import { DEFAULT_RELAY_ORIGIN, hostedOrigin } from '../relay-origin';
+import {
+  idleOneTimeState,
+  type InvitationEvent,
+  type BurrowConsoleStatus,
+  type SetupQrResult,
+} from './service-protocol';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
 import type { BurrowLink } from '../../lib/platform/types';
 
-/** A machine that has never enrolled: the section shows its three-field form. */
+/** The self-host Relay the fixtures' build was baked for (`docs/specs/relay.md` → "Relay origin"). */
+export const SELF_HOST_RELAY_ORIGIN = 'https://ned-mac.tail9c2f1.ts.net';
+
+/**
+ * A stock build that has never enrolled: its Relay is Hosted's, so Persistent
+ * Relay offers nothing to enroll, and its one-time connection is on.
+ */
 export const UNENROLLED_STATUS: BurrowConsoleStatus = {
   enrolled: false,
   serving: false,
-  relayUrl: null,
+  relayOrigin: DEFAULT_RELAY_ORIGIN,
+  relayMode: 'hosted',
   burrowId: null,
   connection: 'idle',
   pairedClients: 0,
   suggestedLabel: 'ned-mac',
-  offer: null,
+  offer: false,
+};
+
+/**
+ * A self-host build that has never enrolled: the section shows its two-field
+ * form under the origin it was built for, and no one-time connection.
+ */
+export const SELF_HOST_UNENROLLED_STATUS: BurrowConsoleStatus = {
+  ...UNENROLLED_STATUS,
+  relayOrigin: SELF_HOST_RELAY_ORIGIN,
+  relayMode: 'self-host',
 };
 
 /**
@@ -46,8 +68,8 @@ export const UNENROLLED_STATUS: BurrowConsoleStatus = {
  * leads with the one-click offer card and folds the typed form away.
  */
 export const OFFER_STATUS: BurrowConsoleStatus = {
-  ...UNENROLLED_STATUS,
-  offer: { origin: 'https://ned-mac.tail9c2f1.ts.net' },
+  ...SELF_HOST_UNENROLLED_STATUS,
+  offer: true,
 };
 
 /** An enrolled machine, with the fields a caller is likely to vary. */
@@ -55,15 +77,12 @@ export function enrolledStatus(
   over: Partial<BurrowConsoleStatus> = {},
 ): BurrowConsoleStatus {
   return {
+    // An enrolled Burrow reports no offer, whatever is on disk.
+    ...SELF_HOST_UNENROLLED_STATUS,
     enrolled: true,
     serving: true,
-    relayUrl: 'https://ned-mac.tail9c2f1.ts.net',
     burrowId: 'burrow-6f1c2a90',
     connection: 'connected',
-    pairedClients: 0,
-    suggestedLabel: 'ned-mac',
-    // An enrolled Burrow reports no offer, whatever is on disk.
-    offer: null,
     ...over,
   };
 }
@@ -111,7 +130,7 @@ export function oneTimeWaiting(
   const ephPubBase64Url = '7Hq2LmZx9cVb4NtRkWpYsD0aFgJ1uEiO3yTnC6hQ5Ks';
   return {
     status: 'waiting',
-    url: formatOneTimeLinkUrl(DEFAULT_HOSTED_ORIGIN, {
+    url: formatOneTimeLinkUrl(DEFAULT_RELAY_ORIGIN, {
       roomId: 'Rm4qT0vXc8LbN2kZyPaE1w',
       expiry,
       ephPub: fromBase64Url(ephPubBase64Url),
@@ -189,7 +208,7 @@ export interface PrimedBurrow {
    * (`service-protocol.ts` → `InvitationEvent`).
    */
   setupOutcome?: PairingOutcome;
-  /** What `oneTimeStatus` answers; `idle` by default. */
+  /** What `oneTimeStatus` answers; by default what the status's build would. */
   oneTime?: OneTimeState;
   /** What `oneTimeOpen` answers; {@link oneTimeWaiting} by default. */
   oneTimeOpen?: OneTimeState;
@@ -202,7 +221,7 @@ export interface PrimedBurrow {
  *
  * Deliberately not a scenario engine: a story is one frame, so `enroll`,
  * `enrollOffer`, `reconnect`, `clearEnrollment` and `oneTimeEnd` resolve without
- * changing the answer. The exception is `enrollError`, because a refused origin is a state the
+ * changing the answer. The exception is `enrollError`, because a refused enrollment is a state the
  * form must render (`docs/specs/relay.md`, "Remote control, in the Settings
  * dialog") and a rejected enroll is the only way to reach it.
  */
@@ -220,7 +239,10 @@ export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
         if (primed.setupQrError) throw new Error(primed.setupQrError);
         return primed.setupQr ?? setupQrResult();
       }
-      if (cmd === 'oneTimeStatus') return primed.oneTime ?? { status: 'idle' };
+      if (cmd === 'oneTimeStatus') {
+        const { relayOrigin, relayMode } = primed.status ?? UNENROLLED_STATUS;
+        return primed.oneTime ?? idleOneTimeState(hostedOrigin({ origin: relayOrigin, mode: relayMode }));
+      }
       if (cmd === 'oneTimeOpen') {
         if (primed.oneTimeOpenError) throw new Error(primed.oneTimeOpenError);
         return primed.oneTimeOpen ?? oneTimeWaiting();

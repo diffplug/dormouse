@@ -13,11 +13,11 @@ import {
   formatPairingInvitationUrl,
   isSetupTokenResponse,
   mintNoiseStaticKeyPair,
-  normalizeOrigin,
   randomBase64Url,
   type EnrollmentOffer,
 } from 'remote-lib-common';
 import {
+  originMismatchMessage,
   performEnrollment,
   type BurrowEnrollCredential,
   type BurrowEnrollment,
@@ -44,18 +44,17 @@ import {
   OneTimeRuntime,
   type OneTimeApprovalRequest,
   type OneTimeState,
-  type OneTimeUnavailableReason,
 } from '../../remote/burrow/one-time-runtime';
 import type { DirectPeerFactory } from '../../remote/direct/direct-peer';
-import { originAllowedByConnectSrc } from './connect-src';
+import { hostedOrigin, isRelayOrigin, type RelayBuild } from '../relay-origin';
 import { readEnrollmentOffer } from './enroll-offer';
-import { oneTimeAvailability } from './one-time-origin';
 import type { BurrowStateStore } from './burrow-state-store';
 import { createSerialQueue } from './serial-queue';
 import {
   BURROW_EVENT_EVENT,
   BURROW_RESULT_EVENT,
   approvalKind,
+  idleOneTimeState,
   isBurrowCommand,
   type ApproveParams,
   type BurrowUiEvent,
@@ -87,15 +86,13 @@ export interface BurrowServiceOptions {
   kind: BurrowKind;
   /** Emit one of the `burrow:*` events to the webview. */
   sendToUi: (event: string, data: unknown) => void;
-  /** The CSP-shaped allowlist this build was compiled with (`connect-src.ts`). */
-  connectSrc: string;
   /**
-   * The one-time rendezvous origin this build was compiled with
-   * (`one-time-origin.ts`). **Never webview input**: `oneTimeOpen` takes no
-   * parameters, and this is checked against {@link connectSrc} once, here,
-   * before any socket.
+   * This build's `bakedRelay()` (`docs/specs/relay.md` → "Relay origin"): the
+   * only Relay this Burrow enrolls with or connects to, and in a Hosted build
+   * the one-time rendezvous too. **Never webview input**: no command carries
+   * an origin.
    */
-  oneTimeOrigin: string;
+  relay: RelayBuild;
   /**
    * Opens the relay socket and the one-time rendezvous alike. **Must send no
    * `Origin` header** — the rendezvous refuses one, so that no browser page can
@@ -139,28 +136,83 @@ function safeHostname(): string {
 }
 
 /**
- * What a Burrow with no enrollment reports. One builder, because two processes
- * answer this: the service's own `status`, and the VS Code glue for a window
- * that has no service at all (`vscode-ext/src/burrow.ts` → `idleStatus`).
- * The origin-only projection of the offer is the security-relevant half — the
- * one-time token is a bearer credential and never enters a webview
- * (`service-protocol.ts` → `BurrowConsoleStatus.offer`) — so the two must
- * not drift.
+ * Whether this build enrolls at all: only a self-host build, a Hosted one's
+ * Relay being Hosted's, which runs none yet (`docs/specs/relay.md` → "Relay
+ * origin").
+ */
+export function canEnroll(relay: RelayBuild): boolean {
+  return relay.mode === 'self-host';
+}
+
+/** What `enroll` and `enrollOffer` answer where {@link canEnroll} is false. */
+const HOSTED_ENROLLMENT_REFUSAL =
+  'This build’s Relay is Dormouse Hosted, which is not running one yet. A Relay you run takes ' +
+  'a Dormouse built with its origin (DORMOUSE_RELAY_ORIGIN).';
+
+/**
+ * The installer's offer this build could spend: read only where
+ * {@link canEnroll}, and `null` unless it names the baked origin. One reader
+ * for the service and the VS Code glue, which both answer `status`.
+ */
+export async function readUsableOffer(
+  relay: RelayBuild,
+  read: () => Promise<EnrollmentOffer | null>,
+): Promise<EnrollmentOffer | null> {
+  if (!canEnroll(relay)) return null;
+  const offer = await read();
+  return offer && isRelayOrigin(offer.origin, relay.origin) ? offer : null;
+}
+
+/**
+ * The stored enrollment, or `null` — including for one whose Relay URL or
+ * phone-facing `origin` names another origin, which **reads as none** and stays
+ * on disk (`docs/specs/relay.md` → "Relay origin"). Both are checked because an
+ * enrollment from before the one baked origin could carry an `origin` apart from
+ * its Relay URL. One reader for the service's start and VS Code's contention.
+ */
+export async function loadEnrollmentFor(
+  store: Pick<BurrowStateStore, 'loadEnrollment'>,
+  origin: string,
+): Promise<BurrowEnrollment | null> {
+  const enrollment = await store.loadEnrollment();
+  if (
+    !enrollment ||
+    (isRelayOrigin(enrollment.relayUrl, origin) && isRelayOrigin(enrollment.origin, origin))
+  ) {
+    return enrollment;
+  }
+  console.warn(
+    `[burrow] enrolled Relay ${enrollment.relayUrl} (origin ${enrollment.origin}) is not this ` +
+      `build's relay origin (${origin}); reading it as un-enrolled`,
+  );
+  return null;
+}
+
+/**
+ * What a Burrow with no enrollment reports, given what {@link readUsableOffer}
+ * found. One builder, because two processes answer this: the service's own
+ * `status`, and the VS Code glue for a window that has no service at all
+ * (`vscode-ext/src/burrow.ts` → `idleStatus`). The offer crosses as a boolean
+ * — its one-time token is a bearer credential and never enters a webview
+ * (`service-protocol.ts` → `BurrowConsoleStatus.offer`) — so the two must not
+ * drift.
  */
 export function unenrolledStatus(
   offer: EnrollmentOffer | null,
   kind: BurrowKind,
+  relay: RelayBuild,
   serving = false,
 ): BurrowConsoleStatus {
   return {
     enrolled: false,
     serving,
-    relayUrl: null,
+    relayOrigin: relay.origin,
+    relayMode: relay.mode,
     burrowId: null,
     connection: 'stopped',
     pairedClients: 0,
     suggestedLabel: suggestedBurrowLabel(kind),
-    offer: offer ? { origin: offer.origin } : null,
+    offer: offer !== null,
   };
 }
 
@@ -182,25 +234,6 @@ export function oneTimeServing(state: OneTimeState): boolean {
   return ONE_TIME_SERVING.has(state.status);
 }
 
-/**
- * The one-time state of a Burrow with no connection: `unavailable` when this
- * build's origin fails {@link oneTimeAvailability}, else `idle`. One builder,
- * because two processes answer it — the service, and the VS Code glue for a
- * window with no service at all (`vscode-ext/src/burrow.ts` → `refuseCommand`).
- */
-export function idleOneTimeState(origin: string, connectSrc: string): OneTimeState {
-  const reason = oneTimeAvailability(origin, connectSrc);
-  return reason ? { status: 'unavailable', reason } : { status: 'idle' };
-}
-
-/** What `oneTimeOpen` answers on a build that cannot open one. */
-function unavailableMessage(reason: OneTimeUnavailableReason, origin: string, connectSrc: string): string {
-  return reason === 'origin-not-allowed'
-    ? `One-time connections are unavailable: this build's rendezvous (${origin}) is outside its ` +
-        `allowed remote sources (${connectSrc}).`
-    : `One-time connections are unavailable: this build's rendezvous (${origin}) is not an ` +
-        'https:// origin a link can carry.';
-}
 
 /** Bytes of the random ticket a one-time request is answered by, as `pairingId`. */
 const ONE_TIME_TICKET_BYTES = 16;
@@ -237,8 +270,9 @@ export class BurrowService {
   readonly #store: BurrowStateStore;
   readonly #provider: BurrowSurfaceProvider;
   readonly #sendToUi: (event: string, data: unknown) => void;
-  readonly #connectSrc: string;
-  readonly #oneTimeOrigin: string;
+  readonly #relay: RelayBuild;
+  /** `hostedOrigin(#relay)`: where one-time links are made, or `null` for none. */
+  readonly #hostedOrigin: string | null;
   readonly #kind: BurrowKind;
   readonly #createWebSocket: (url: string) => WebSocketLike;
   readonly #createDirectPeer?: DirectPeerFactory;
@@ -305,9 +339,9 @@ export class BurrowService {
     this.#store = options.store;
     this.#provider = options.provider;
     this.#sendToUi = options.sendToUi;
-    this.#connectSrc = options.connectSrc;
-    this.#oneTimeOrigin = options.oneTimeOrigin;
-    this.#oneTimeState = idleOneTimeState(options.oneTimeOrigin, options.connectSrc);
+    this.#relay = options.relay;
+    this.#hostedOrigin = hostedOrigin(options.relay);
+    this.#oneTimeState = idleOneTimeState(this.#hostedOrigin);
     this.#kind = options.kind;
     this.#createWebSocket =
       options.createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
@@ -340,18 +374,8 @@ export class BurrowService {
   }
 
   async #start(): Promise<void> {
-    const enrollment = await this.#store.loadEnrollment();
-    if (!enrollment) return;
-    if (!this.#allowed(enrollment.relayUrl)) {
-      // Enrolled against an origin this build cannot connect to — a binary
-      // downgraded from a custom build, or a moved Relay. Idle rather than
-      // connect: the allowlist is the whole boundary (docs/specs/relay.md).
-      console.warn(
-        `[burrow] enrolled Relay ${enrollment.relayUrl} is outside this build's allowed sources (${this.#connectSrc}); staying idle`,
-      );
-      return;
-    }
-    await this.#startBurrow(enrollment);
+    const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
+    if (enrollment) await this.#startBurrow(enrollment);
   }
 
   /** Stop the Burrow, end any one-time connection, and forget the connection-scoped state. */
@@ -428,7 +452,23 @@ export class BurrowService {
   // --- Commands ---
 
   #enroll(params: EnrollParams): Promise<EnrollResult> {
-    return this.#enrollWith(params.relayUrl, { password: params.password }, params.label);
+    if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    this.#refuseOtherOrigin((params as { relayUrl?: unknown }).relayUrl);
+    return this.#enrollWith({ password: params.password }, params.label);
+  }
+
+  /**
+   * An older webview still names the Relay — `enroll`'s `relayUrl`, or
+   * `enrollOffer`'s echoed `origin` — and one naming any but the baked origin
+   * is refused, rather than enrolled with this build's Relay instead.
+   */
+  #refuseOtherOrigin(named: unknown): void {
+    if (named === undefined) return;
+    if (typeof named === 'string' && isRelayOrigin(named, this.#relay.origin)) return;
+    throw new Error(
+      `This Dormouse enrolls only with ${this.#relay.origin}, the Relay it was built for, ` +
+        `not ${String(named)}.`,
+    );
   }
 
   /**
@@ -436,46 +476,37 @@ export class BurrowService {
    * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
-    const offer = await this.#readOffer();
+    if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    this.#refuseOtherOrigin((params as { origin?: unknown }).origin);
+    // Re-read at the click, and refused before the token leaves the machine
+    // unless it names the one Relay this build enrolls with.
+    const offer = await readUsableOffer(this.#relay, this.#readOffer);
     if (!offer) {
       throw new Error(
-        'There is no enrollment offer on this machine — it may have been redeemed already. ' +
-          'Re-run the installer to mint a new one, or enroll with the setup password.',
+        `There is no enrollment offer for ${this.#relay.origin} on this machine — it may have been ` +
+          'redeemed already. Re-run the installer to mint a new one, or enroll with the setup password.',
       );
     }
-    if (offer.origin !== params.origin) {
-      // The webview echoes the origin its card displayed, and this is where that
-      // echo is spent: an installer re-run between the render and the click
-      // rewrites the file, and enrolling against the new origin would spend a
-      // one-time token on a Relay the user never reviewed.
-      throw new Error(
-        `The enrollment offer changed — it now names ${offer.origin}, not ${params.origin}. ` +
-          'Reopen this dialog to review the new one.',
-      );
-    }
-    return await this.#enrollWith(offer.origin, { enrollToken: offer.token }, params.label);
+    return await this.#enrollWith({ enrollToken: offer.token }, params.label);
   }
 
   /**
    * The one enrollment flow, whichever credential proves the right to it: the
-   * allowlist gate, then the exchange, then store-first persistence and the
-   * status edge the webview gate needs.
+   * exchange with the baked origin — the only Relay this build reaches — then
+   * the Relay's own origin checked against it, then store-first persistence and
+   * the status edge the webview gate needs.
    */
-  async #enrollWith(
-    relayUrl: string,
-    credential: BurrowEnrollCredential,
-    label: string,
-  ): Promise<EnrollResult> {
-    if (!this.#allowed(relayUrl)) {
-      // Refused before the credential leaves the machine — including an offer's
-      // token, which is a bearer credential like the password. Self-hosters widen
-      // the list in their own build (docs/specs/relay.md → "Where a Burrow may reach a Relay").
+  async #enrollWith(credential: BurrowEnrollCredential, label: string): Promise<EnrollResult> {
+    const enrollment = await performEnrollment(this.#relay.origin, credential, label);
+    if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
+      // An older Relay, which ignores the request's `origin` and so enrolled a
+      // Burrow built for another: nothing is persisted here, and the row it
+      // appended is named for the operator (docs/specs/relay.md → "Relay origin").
       throw new Error(
-        `${relayUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
-          'A self-host build bakes its own via DORMOUSE_REMOTE_CONNECT_SRC.',
+        `${originMismatchMessage(enrollment.origin, this.#relay.origin)} The Relay has already ` +
+          `recorded Burrow ${enrollment.burrowId}; remove it from burrows.json.`,
       );
     }
-    const enrollment = await performEnrollment(relayUrl, credential, label);
     // Persist before touching the running Burrow. The credential we just minted
     // exists nowhere else and cannot be minted again from the same exchange — a
     // spent offer's token least of all — so a save that fails after the old Burrow
@@ -496,7 +527,7 @@ export class BurrowService {
       this.#emitStatus();
     }
     await this.#startBurrow(enrollment);
-    return { burrowId: enrollment.burrowId, relayUrl: enrollment.relayUrl };
+    return { burrowId: enrollment.burrowId };
   }
 
   /**
@@ -513,18 +544,19 @@ export class BurrowService {
    * nothing to offer, so the 2 s poll must not stat a file every tick.
    */
   async #status(): Promise<BurrowConsoleStatus> {
-    const offer = this.#enrollment ? null : await this.#readOffer();
+    const offer = this.#enrollment ? null : await readUsableOffer(this.#relay, this.#readOffer);
     const enrollment = this.#enrollment;
-    if (!enrollment) return unenrolledStatus(offer, this.#kind, this.#serving());
+    if (!enrollment) return unenrolledStatus(offer, this.#kind, this.#relay, this.#serving());
     return {
       enrolled: true,
       serving: true,
-      relayUrl: enrollment.relayUrl,
+      relayOrigin: this.#relay.origin,
+      relayMode: this.#relay.mode,
       burrowId: enrollment.burrowId,
       connection: this.#burrow?.status ?? 'stopped',
       pairedClients: this.#burrow?.activeRecords.length ?? 0,
       suggestedLabel: suggestedBurrowLabel(this.#kind),
-      offer: null,
+      offer: false,
     };
   }
 
@@ -606,8 +638,8 @@ export class BurrowService {
     // machine whose screen it photographed.
     const invitation = await burrow.mintInvitation(body.token, body.expiresAt);
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
-    // served and where the passkey will be registered — not necessarily the
-    // `relayUrl` this Burrow posts to. The formatter refuses a URL too long to
+    // served and where the passkey will be registered — which enrollment checked
+    // equals this build's relay origin. The formatter refuses a URL too long to
     // scan before any encoder sees it.
     return {
       url: formatPairingInvitationUrl(enrollment.origin, invitation),
@@ -659,10 +691,14 @@ export class BurrowService {
    * connected one is refused**: a phone holds it, and only End lets it go.
    */
   async #openOneTime(): Promise<OneTimeState> {
-    const state = this.#oneTimeState;
-    if (state.status === 'unavailable') {
-      throw new Error(unavailableMessage(state.reason, this.#oneTimeOrigin, this.#connectSrc));
+    const hosted = this.#hostedOrigin;
+    if (hosted === null) {
+      throw new Error(
+        'One-time connections are unavailable in a self-host build: their links are made at ' +
+          `Dormouse Hosted, and this build reaches only its own Relay (${this.#relay.origin}).`,
+      );
     }
+    const state = this.#oneTimeState;
     if (this.#oneTimeOpening) return this.#oneTimeOpening;
     if (state.status === 'connecting' || state.status === 'connected') {
       throw new Error(
@@ -670,7 +706,7 @@ export class BurrowService {
       );
     }
     const runtime: OneTimeRuntime = new OneTimeRuntime({
-      origin: this.#oneTimeOrigin,
+      origin: hosted,
       createWebSocket: this.#createWebSocket,
       createSession: (opts) => this.#createApiSession(opts),
       createDirectPeer: this.#createDirectPeer ?? null,
@@ -786,11 +822,6 @@ export class BurrowService {
   }
 
   // --- Burrow lifecycle ---
-
-  #allowed(relayUrl: string): boolean {
-    const origin = normalizeOrigin(relayUrl);
-    return origin !== null && originAllowedByConnectSrc(origin, this.#connectSrc);
-  }
 
   /**
    * The Noise static gate. **A Burrow without a usable one does not start**, and

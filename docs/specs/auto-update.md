@@ -8,6 +8,8 @@ The standalone app checks for updates on launch and prompts in the Baseboard. **
 
 **Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then `check()`: no update is silent, an update raises the approval prompt. Version-lookup and check failures are logged. **Only approval starts the background `download()`**; a failed one is logged and the prompt returns.
 
+**A self-host build never checks** (`docs/specs/relay.md` → "Relay origin"): `startUpdateCheck()` returns at once unless the webview's own baked mode, `bakedRelayMode()`, is `hosted`.
+
 **A failed download leaves the *available* update in place** so a second approval retries rather than no-ops; only a successful `download()` promotes `check()`'s in-memory *available* `Update` to *pending*.
 
 **`startUpdateCheck()` is a no-op under the browser-dev harness** (`VITE_DORMOUSE_BROWSER_DEV_HOST`), which has no Tauri updater behind it.

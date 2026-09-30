@@ -27,15 +27,14 @@ const IDLE_HINT =
   'Wi-Fi. No account needed.';
 
 /**
- * Why this build offers none, in fixed copy per reason. The origin is baked into
- * the host bundle and never crosses to the webview, so the copy names the
- * shipped one.
+ * Why this build offers none, in fixed copy per reason; a reason this build
+ * does not know — an older VS Code broker's, or a newer one's — renders the
+ * generic line below.
  */
 const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
-  'origin-not-allowed':
-    'Not available in this build: it isn’t allowed to reach hosted.dormouse.sh, where one-time ' +
-    'links are made.',
-  'origin-invalid': 'Not available in this build: its one-time link address is misconfigured.',
+  'self-host':
+    'Not available in a self-host build: one-time links are made at hosted.dormouse.sh, which this ' +
+    'build never contacts.',
 };
 
 /**

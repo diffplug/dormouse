@@ -8,8 +8,9 @@ import {
   MANAGED_VOICE_FILE,
 } from './managed-voice-host';
 import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
+import { DEFAULT_RELAY_ORIGIN } from './relay-origin';
 
-const MANAGED_VOICE_SPEAK_URL = 'https://hosted.dormouse.sh/api/voice/speak';
+const MANAGED_VOICE_SPEAK_URL = `${DEFAULT_RELAY_ORIGIN}/api/voice/speak`;
 
 /** The next `readFile` fails with this, once: a Windows antivirus lock, say. */
 const readFault = vi.hoisted(() => ({ next: null as NodeJS.ErrnoException | null }));
@@ -44,6 +45,7 @@ function make(options: { timeoutMs?: number; stateDir?: string } = {}) {
     onStatus: (status) => void broadcasts.push(status),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
+    relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
   });
 }
 
@@ -187,5 +189,51 @@ describe('speak', () => {
     expect(await host.handle({ op: 'speak', text: '   ' })).toEqual({ ok: false, reason: 'bad-request' });
     expect(await host.handle({ op: 'speak', text: 'x'.repeat(201) })).toEqual({ ok: false, reason: 'bad-request' });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('the build it runs in', () => {
+  it('speaks to a Hosted build’s relay origin, a dev build’s local Hosted included', async () => {
+    const local = createManagedVoiceHost({
+      stateDir: dir,
+      onStatus: () => {},
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: 'http://localhost:8787', mode: 'hosted' },
+    });
+    await local.handle({ op: 'configure', update: { token: TOKEN } });
+    fetchMock.mockResolvedValue(audioResponse());
+
+    expect(await local.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(fetchMock.mock.calls[0]![0]).toBe('http://localhost:8787/api/voice/speak');
+  });
+
+  it('sends nothing from a self-host build, whatever a Hosted build saved', async () => {
+    // A token saved by a Hosted build on this machine is still on disk; a
+    // self-host build reaches nothing of Dormouse's (docs/specs/relay.md →
+    // "Relay origin"), so it reads none of it.
+    await host.handle({ op: 'configure', update: { token: TOKEN } });
+    const selfHost = createManagedVoiceHost({
+      stateDir: dir,
+      onStatus: (status) => void broadcasts.push(status),
+      fetch: fetchMock as unknown as typeof fetch,
+      relay: { origin: 'https://relay.example.ts.net', mode: 'self-host' },
+    });
+    broadcasts = [];
+
+    expect(await selfHost.handle({ op: 'status' })).toEqual({
+      configured: false,
+      voiceId: DEFAULT_MANAGED_VOICE_ID,
+    });
+    expect(await selfHost.handle({ op: 'configure', update: { voiceId: 'abc123' } })).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+    expect(await selfHost.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(broadcasts).toEqual([]);
+    expect(JSON.parse(await readFile(join(dir, MANAGED_VOICE_FILE), 'utf8'))).toEqual({
+      token: TOKEN,
+      voiceId: DEFAULT_MANAGED_VOICE_ID,
+    });
   });
 });

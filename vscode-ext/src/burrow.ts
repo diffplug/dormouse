@@ -6,23 +6,24 @@ import {
   createAskSurfaceProvider,
   type AskSurfaceProvider,
 } from '../../lib/src/host/remote/ask-surface-provider';
-import { bakedConnectSrc } from '../../lib/src/host/remote/connect-src';
 import { readEnrollmentOffer } from '../../lib/src/host/remote/enroll-offer';
 import { BURROW_COMMAND_TIMEOUT_MS } from '../../lib/src/host/remote/link-client';
 import {
   createNativeDirectPeerFactory,
   disposeNativeDirectPeers,
 } from '../../lib/src/host/remote/native-direct-peer';
-import { bakedHostedOrigin } from '../../lib/src/host/hosted-origin';
+import { bakedRelay, hostedOrigin } from '../../lib/src/host/relay-origin';
 import {
   BurrowService,
-  idleOneTimeState,
+  loadEnrollmentFor,
   oneTimeServing,
+  readUsableOffer,
   unenrolledStatus,
 } from '../../lib/src/host/remote/service';
 import {
   BURROW_EVENT_EVENT,
   BURROW_RESULT_EVENT,
+  idleOneTimeState,
   isBurrowCommand,
   isOneTimeState,
   type OneTimeEvent,
@@ -279,8 +280,7 @@ function startService(): void {
         }
       }
     },
-    connectSrc: bakedConnectSrc(),
-    oneTimeOrigin: bakedHostedOrigin(),
+    relay: bakedRelay(),
     // Building the factory loads nothing: the addon is opened inside the first
     // offer, if one ever comes (`native-direct-peer.ts`).
     createDirectPeer: createNativeDirectPeerFactory(),
@@ -540,7 +540,7 @@ function idleAnswer(cmd: string): { result: unknown } | null {
     case 'pairingQueue':
       return { result: [] satisfies PairingQueueItem[] };
     case 'oneTimeStatus':
-      return { result: idleOneTimeState(bakedHostedOrigin(), bakedConnectSrc()) };
+      return { result: idleOneTimeState(hostedOrigin(bakedRelay())) };
     case 'oneTimeEnd':
       return { result: {} };
     // No service holds any session, so none holds a pane: the strip clears itself.
@@ -565,10 +565,11 @@ function idleAnswer(cmd: string): { result: unknown } | null {
  * which bootstraps the contention like `enroll`.
  */
 async function idleStatus(): Promise<BurrowConsoleStatus> {
-  // The snapshot itself is the service's own builder, so the two answers to the
-  // same question — including the offer's origin-only projection — cannot drift.
-  // `readEnrollmentOffer` never rejects (its own doc), hence no guard here.
-  return unenrolledStatus(await readEnrollmentOffer(), 'vscode');
+  // The reader and the snapshot are the service's own, so the two answers to
+  // the same question cannot drift. `readEnrollmentOffer` never rejects (its own
+  // doc), hence no guard here.
+  const relay = bakedRelay();
+  return unenrolledStatus(await readUsableOffer(relay, readEnrollmentOffer), 'vscode', relay);
 }
 
 /** Refuse one command — or answer it as an idle service would ({@link idleAnswer}). */
@@ -636,7 +637,7 @@ async function contendIfServing(ctx: vscode.ExtensionContext): Promise<void> {
   const store = burrowStateStore(ctx);
   if (contending) return;
   const [enrollment, serving] = await Promise.allSettled([
-    store.loadEnrollment(),
+    loadEnrollmentFor(store, bakedRelay().origin),
     store.loadOneTimeServing(),
   ]);
   if (enrollment.status === 'rejected') {

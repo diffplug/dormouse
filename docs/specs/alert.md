@@ -353,6 +353,7 @@ Source of truth: `toSpokenText` / `startAlertSpeech` in `lib/src/lib/alert-speec
 Every rule above holds for both engines.
 
 - **Must try managed voice first while the adapter's `managedVoice` status says a token is saved** (`docs/specs/transport.md` → "Managed voice"); otherwise the utterance goes straight to Web Speech.
+- **A self-host build's host has no Hosted origin** and makes no request (`docs/specs/relay.md` → "Relay origin").
 - **Must fall back to Web Speech for the same utterance, inside the same attempt, on any failure before managed audio starts** — `unconfigured`, offline, non-2xx, host timeout, undecodable or refused playback. **Never play both**: audio that started and then failed ends the attempt instead (rationale). Nothing is retried.
 - `speaking` / `spoken` follow the audio element's `playing` / `ended`. **Cut-off and teardown must stop the audio**; a request still in flight runs out in the host and its answer is ignored.
 - **Never let the voice token reach a renderer**; the host adds it to the request (rationale). Where it may go: `docs/specs/security-local.md` → "Persisted state".
@@ -390,7 +391,7 @@ Reached from the baseboard sliders; `docs/specs/layout.md` owns placement.
 - **Must show only application-wide settings**, excluding Workspace overrides.
 - **Must open a separate Workspace alert dialog from either baseboard alarm button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope. Preserve per-field inheritance, reset-all, and local voice selection/testing; close on Escape, backdrop click, or close button and return focus to the invoking alarm button. Pinned by `lib/src/components/Baseboard.test.tsx` and `lib/src/components/WorkspaceAlarmSettings.test.tsx`.
 - **Must use the elevated-pane halo and theme-dropdown fades toward overflow.** **Must match Shell and Theme trigger sizing and inset borders**, without a Shell swatch.
-- **The Managed voice group never shows the token**: a saved token reads as configured with a clear action, and what is sent to Hosted, and how long ElevenLabs keeps it, is stated before one is saved. The voice id commits on blur or `Enter`. Hidden without `managedVoice`, and **hidden unless the port offers setup (`offerSetup`, a dev build's adapter) or a token is already configured**, since managed voice is an admin-only test slice; wherever it shows, the speech row names managed voice instead of linking the `/hosted` preview. Pinned by `lib/src/components/ManagedVoiceSection.test.tsx`.
+- **The Managed voice group never shows the token**: a saved token reads as configured with a clear action, and what is sent to Hosted, and how long ElevenLabs keeps it, is stated before one is saved. The voice id commits on blur or `Enter`. Hidden without `managedVoice`, which a self-host build's adapter omits, and **hidden unless the port offers setup (`offerSetup`, a dev build's adapter) or a token is already configured**, since managed voice is an admin-only test slice; wherever it shows, the speech row names managed voice instead of linking the `/hosted` preview. Pinned by `lib/src/components/ManagedVoiceSection.test.tsx`.
 - Each alarm sink carries a **try it now** control outside the switch's dimming; both report inline and clear after a few seconds.
 
   | Control | Path and result |

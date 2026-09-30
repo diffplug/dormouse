@@ -4,6 +4,7 @@
  * `voice:status` broadcast reaches `receiveStatus`
  * (`docs/specs/transport.md` -> "Managed voice").
  */
+import { bakedRelayMode } from "dormouse-lib/host/relay-origin";
 import { messageOf } from "dormouse-lib/lib/errors";
 import type {
   ManagedVoiceConfigResult,
@@ -26,6 +27,15 @@ function decodeBase64(base64: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+/**
+ * This build's port: none in a self-host build, whose Settings then hide the
+ * section and whose alerts speak through Web Speech alone
+ * (`docs/specs/alert.md` -> "Managed voice").
+ */
+export function managedVoicePortForBuild(invoke: Invoke): StandaloneManagedVoicePort | undefined {
+  return bakedRelayMode() === "hosted" ? createManagedVoicePort(invoke) : undefined;
 }
 
 export function createManagedVoicePort(invoke: Invoke): StandaloneManagedVoicePort {

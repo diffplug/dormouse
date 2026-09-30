@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   shellOpen: vi.fn(),
   invoke: vi.fn(),
   requestAppRestart: vi.fn(),
+  /** The webview's baked mode, which gates every check. */
+  relayMode: 'hosted' as 'hosted' | 'self-host',
   platform: null as { requestAppRestart?: () => Promise<boolean> } | null,
 }));
 
@@ -37,6 +39,10 @@ vi.mock('dormouse-lib/lib/platform', () => ({
   PLATFORM_STRING: 'Windows',
   IS_WINDOWS: true,
   getPlatformOrNull: () => mocks.platform,
+}));
+
+vi.mock('dormouse-lib/host/relay-origin', () => ({
+  bakedRelayMode: () => mocks.relayMode,
 }));
 
 // --- Helpers ---
@@ -88,6 +94,7 @@ describe('updater', () => {
     mocks.check.mockResolvedValue(null);
     mocks.shellOpen.mockResolvedValue(undefined);
     mocks.invoke.mockResolvedValue('');
+    mocks.relayMode = 'hosted';
     mocks.platform = { requestAppRestart: mocks.requestAppRestart };
   });
 
@@ -199,6 +206,18 @@ describe('updater', () => {
 
       await vi.advanceTimersByTimeAsync(1);
       expect(mocks.check).toHaveBeenCalledOnce();
+    });
+
+    // docs/specs/relay.md → "Relay origin".
+    it('never checks in a self-host build', async () => {
+      mocks.relayMode = 'self-host';
+      const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+      startUpdateCheck();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mocks.check).not.toHaveBeenCalled();
+      expect(mocks.getVersion).not.toHaveBeenCalled();
+      expect(readBannerState()).toEqual({ status: 'idle' });
+      info.mockRestore();
     });
 
     it('does not download until the user approves the update', async () => {

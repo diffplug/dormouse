@@ -7,7 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
-import { bakedHostedOrigin } from './hosted-origin';
+import { hostedOrigin, type RelayBuild } from './relay-origin';
 import { createSerialQueue } from './remote/serial-queue';
 import {
   DEFAULT_MANAGED_VOICE_ID,
@@ -51,6 +51,8 @@ export function createManagedVoiceHost(options: {
   fetch?: typeof globalThis.fetch;
   timeoutMs?: number;
   log?: (message: string) => void;
+  /** This build's `bakedRelay()`; see `speakUrl`. */
+  relay: RelayBuild;
 }): { handle(command: unknown): Promise<unknown> } {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? MANAGED_VOICE_REQUEST_TIMEOUT_MS;
@@ -58,8 +60,11 @@ export function createManagedVoiceHost(options: {
   const store = options.stateDir
     ? { dir: options.stateDir, file: join(options.stateDir, MANAGED_VOICE_FILE) }
     : undefined;
-  // The only place the token may go (`docs/specs/security-local.md` -> "Persisted state").
-  const speakUrl = bakedHostedOrigin() + MANAGED_VOICE_SPEAK_PATH;
+  // The only place the token may go (`docs/specs/security-local.md` -> "Persisted state"),
+  // and `null` in a self-host build: no token is read, nothing is sent, and
+  // every edit and speak is refused.
+  const hosted = hostedOrigin(options.relay);
+  const speakUrl = hosted === null ? null : hosted + MANAGED_VOICE_SPEAK_PATH;
   let loaded: Promise<StoredConfig> | null = null;
   // Each edit reads, then rewrites the whole file: two at once would drop a field.
   const serialize = createSerialQueue();
@@ -114,7 +119,7 @@ export function createManagedVoiceHost(options: {
     return { ok: true, ...status(next) };
   }
 
-  async function request(text: string): Promise<ManagedVoiceHostSpeakResult> {
+  async function request(speakUrl: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
     const config = await load().catch(() => null);
     if (!config) return { ok: false, reason: 'config unreadable' };
     if (!config.token) return { ok: false, reason: 'unconfigured' };
@@ -162,8 +167,8 @@ export function createManagedVoiceHost(options: {
     }
   }
 
-  async function speak(text: string): Promise<ManagedVoiceHostSpeakResult> {
-    const result = await request(text);
+  async function speak(speakUrl: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
+    const result = await request(speakUrl, text);
     if (!result.ok && result.reason !== 'unconfigured') log(`[managed-voice] speak failed: ${result.reason}`);
     return result;
   }
@@ -172,10 +177,16 @@ export function createManagedVoiceHost(options: {
     async handle(command) {
       const message = (command ?? {}) as Record<string, unknown>;
       switch (message.op) {
-        case 'status': return status(await load());
-        case 'configure': return serialize(() => configure(message.update));
+        case 'status': return status(speakUrl === null ? normalizeStored(null) : await load());
+        case 'configure':
+          return speakUrl === null
+            ? { ok: false, reason: 'unavailable' } satisfies ManagedVoiceConfigResult
+            : serialize(() => configure(message.update));
         case 'speak':
-          return typeof message.text === 'string' ? speak(message.text) : { ok: false, reason: 'bad-request' };
+          if (speakUrl === null) return { ok: false, reason: 'self-host' } satisfies ManagedVoiceHostSpeakResult;
+          return typeof message.text === 'string'
+            ? speak(speakUrl, message.text)
+            : { ok: false, reason: 'bad-request' };
         default: return undefined;
       }
     },

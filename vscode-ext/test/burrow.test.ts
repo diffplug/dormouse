@@ -12,7 +12,9 @@ import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import type { EnrollmentOffer } from 'remote-lib-common';
 
+import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
+import { FakeSocket } from '../../lib/src/remote/test-fake-socket';
 import { createTestRendezvous, type TestRendezvous } from '../../lib/src/remote/test-rendezvous';
 import { ONE_TIME_SERVING_KEY } from '../src/burrow-store';
 import type { ExtensionMessage } from '../src/message-types';
@@ -73,6 +75,39 @@ vi.mock('../../lib/src/host/remote/native-direct-peer', () => ({
     nativeDirect.disposed += 1;
   },
 }));
+
+/**
+ * The build's baked relay origin and mode, as the glue reads them. The test
+ * runner has no esbuild define, so the real readers answer the Hosted default;
+ * a case about a self-host build sets these (docs/specs/relay.md → "Relay origin").
+ */
+const relayBuild = vi.hoisted(() => ({
+  origin: 'https://hosted.dormouse.sh',
+  mode: 'hosted' as 'hosted' | 'self-host',
+}));
+vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/src/host/relay-origin')>()),
+  bakedRelay: () => ({ ...relayBuild }),
+}));
+
+/**
+ * A relay socket that never opens, for a case that needs a started Burrow and no
+ * network: the glue's factory prefers the host's global `WebSocket`.
+ */
+function stubSilentRelay(): void {
+  vi.stubGlobal('WebSocket', FakeSocket);
+}
+
+/** A stored enrollment at `origin`, as the keychain holds it. */
+function enrollmentJson(origin: string): string {
+  return JSON.stringify({
+    relayUrl: origin,
+    burrowId: BURROW_ID,
+    burrowToken: 'token',
+    origin,
+    rpId: new URL(origin).hostname,
+  });
+}
 
 const OFFER: EnrollmentOffer = {
   origin: 'https://ned-mac.tail9c2f1.ts.net',
@@ -335,6 +370,8 @@ beforeEach(async () => {
   realTmp = process.env.TMPDIR;
   process.env.TMPDIR = dir;
   offer = null;
+  relayBuild.origin = DEFAULT_RELAY_ORIGIN;
+  relayBuild.mode = 'hosted';
 });
 
 afterEach(async () => {
@@ -567,16 +604,17 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enroll',
-      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
 
     await waitFor(() => results(bound.posted).length > 0);
-    // The service ran it (and refused the origin), rather than the interim
-    // "another window" answer — which is what proves this window took the Burrow.
+    // The service ran it (and refused, this being a Hosted build), rather than
+    // the interim "another window" answer — which is what proves this window
+    // took the Burrow.
     expect(opened!.isPeerBroker()).toBe(true);
     expect(results(bound.posted)[0]).toMatchObject({
       burrowRequestId: 'rh-1',
-      error: expect.stringContaining('allowed remote sources'),
+      error: expect.stringContaining('Dormouse Hosted'),
     });
   });
 
@@ -591,7 +629,7 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enroll',
-      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
     await waitFor(() => results(bound.posted).length > 0);
     // Built with the service, so a Pocket offering a direct path gets an answer
@@ -617,16 +655,16 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enrollOffer',
-      params: { origin: OFFER.origin, label: 'Laptop' },
+      params: { label: 'Laptop' },
     });
 
     await waitFor(() => results(bound.posted).length > 0);
     expect(opened!.isPeerBroker()).toBe(true);
-    // The service ran it and refused the origin this build was not built for —
-    // which is the proof it reached a service at all.
+    // The service ran it and refused, this being a Hosted build — which is the
+    // proof it reached a service at all.
     expect(results(bound.posted)[0]).toMatchObject({
       burrowRequestId: 'rh-1',
-      error: expect.stringContaining('allowed remote sources'),
+      error: expect.stringContaining('Dormouse Hosted'),
     });
   });
 
@@ -777,7 +815,10 @@ describe('burrow service glue', () => {
     // than refused: this window sees no enrollment, which is what "not enrolled"
     // *is*, and an error there tells `enrolled-gate.ts` nothing it can act on.
     // The offer is read from the disk of this same process, so the one-click
-    // card renders on exactly the machines it is for — un-enrolled ones.
+    // card renders on exactly the machines it is for — un-enrolled ones, of a
+    // self-host build made for the offer's Relay.
+    relayBuild.origin = OFFER.origin;
+    relayBuild.mode = 'self-host';
     offer = OFFER;
     mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'status' });
     await waitFor(() => results(bound.posted).length > 0);
@@ -787,12 +828,13 @@ describe('burrow service glue', () => {
         result: {
           enrolled: false,
           serving: false,
-          relayUrl: null,
+          relayOrigin: OFFER.origin,
+          relayMode: 'self-host',
           burrowId: null,
           connection: 'stopped',
           pairedClients: 0,
           suggestedLabel: `${hostname()} (VS Code)`,
-          offer: { origin: OFFER.origin },
+          offer: true,
         },
       },
     ]);
@@ -801,7 +843,7 @@ describe('burrow service glue', () => {
 
     // `enroll` bootstraps the contention, which this window loses — so even the
     // bootstrap ends up forwarded rather than starting a second Burrow.
-    const params = { relayUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' };
+    const params = { password: 'p', label: 'Laptop' };
     mod.handleBurrowCommand({ burrowRequestId: 'rh-2', cmd: 'enroll', params });
 
     await waitFor(() => squat.frames.some((frame) => frame.kind === 'command'));
@@ -848,18 +890,9 @@ describe('burrow service glue', () => {
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
     const { context, store } = fakeContext();
-    // Outside this build's allowed sources, so the service starts and idles
-    // rather than opening a real relay socket.
-    store.secrets.set(
-      ENROLLMENT_KEY,
-      JSON.stringify({
-        relayUrl: 'https://relay.example.com',
-        burrowId: BURROW_ID,
-        burrowToken: 'token',
-        origin: 'https://relay.example.com',
-        rpId: 'relay.example.com',
-      }),
-    );
+    // Enrolled at this build's own origin, with a relay socket that never opens.
+    stubSilentRelay();
+    store.secrets.set(ENROLLMENT_KEY, enrollmentJson(relayBuild.origin));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mod.initBurrow(context);
     // Enough microtasks for the enrollment probe to land and the contention to
@@ -891,7 +924,7 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enroll',
-      params: { relayUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
 
     await tick(0);
@@ -950,8 +983,7 @@ describe('burrow service glue', () => {
       },
       kind: 'vscode',
       sendToUi: (event, data) => void sent.push({ event, data: data as never }),
-      connectSrc: 'https://*.dormouse.sh wss://*.dormouse.sh',
-      oneTimeOrigin: 'https://hosted.dormouse.sh',
+      relay: { ...relayBuild },
     });
     await idle.start();
     for (const cmd of ['status', 'pushDevices', 'pairingQueue', 'oneTimeStatus', 'oneTimeEnd', 'takeBack']) {
@@ -985,21 +1017,34 @@ describe('burrow service glue', () => {
     await tick();
     expect(opened!.isPeerBroker()).toBe(false);
 
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    store.secrets.set(
-      ENROLLMENT_KEY,
-      JSON.stringify({
-        relayUrl: 'https://relay.example.com',
-        burrowId: BURROW_ID,
-        burrowToken: 'token',
-        origin: 'https://relay.example.com',
-        rpId: 'relay.example.com',
-      }),
-    );
+    stubSilentRelay();
+    store.secrets.set(ENROLLMENT_KEY, enrollmentJson(relayBuild.origin));
     store.announce(ENROLLMENT_KEY);
 
     await waitFor(() => opened!.isPeerBroker());
+  });
+
+  it('does not contend for an enrollment another build made', async () => {
+    // It reads as none (docs/specs/relay.md → "Relay origin"): the service would
+    // not start it, so it is no reason to bind the peer socket — at activation
+    // or when another window writes it.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    const elsewhere = enrollmentJson('https://relay.example.com');
+    store.secrets.set(ENROLLMENT_KEY, elsewhere);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mod.initBurrow(context);
+    await tick();
+    store.announce(ENROLLMENT_KEY);
+    await tick();
+
+    expect(opened!.isPeerBroker()).toBe(false);
+    expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+    // Kept, so switching back to the build that made it restores it.
+    expect(store.secrets.get(ENROLLMENT_KEY)).toBe(elsewhere);
   });
 });
 
@@ -1019,7 +1064,7 @@ describe('the relay socket', () => {
 
   it('uses the bundled ws where the extension host has no global WebSocket', async () => {
     // `globalThis.WebSocket` arrived in Node 22, and `engines.vscode` is
-    // `^1.85.0` — VS Code 1.85 shipped Node 18, so the supported range spans
+    // `^1.92.0` — VS Code 1.92 shipped Node 20.14, so the supported range spans
     // the boundary and the fallback is the only implementation on the old side.
     const mod = await freshBurrow();
     const relay = await wsServer();
@@ -1419,7 +1464,7 @@ describe('serving the other windows', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-0',
       cmd: 'enroll',
-      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
     await waitFor(() => opened!.isPeerBroker());
 
@@ -1446,7 +1491,7 @@ describe('serving the other windows', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-0',
       cmd: 'enroll',
-      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
     await waitFor(() => opened!.isPeerBroker());
     const { BurrowService } = await import('../../lib/src/host/remote/service');
@@ -1478,7 +1523,7 @@ describe('serving the other windows', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enroll',
-      params: { relayUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
     await waitFor(() => squat.frames.some((frame) => frame.kind === 'command'));
     mod.pushAlert('pty-1', 'pnpm build');
@@ -1499,7 +1544,7 @@ describe('serving the other windows', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-0',
       cmd: 'enroll',
-      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
     await waitFor(() => opened!.isPeerBroker());
 

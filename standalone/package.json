@@ -4,15 +4,17 @@
   "license": "FSL-1.1-MIT",
   "type": "module",
   "scripts": {
+    "predev": "pnpm --filter remote-lib-common build",
     "dev": "vite",
-    "innerdogfood": "pnpm run stage && node scripts/dev-agent-browser.mjs",
+    "innerdogfood": "pnpm run stage:dev && node scripts/dev-agent-browser.mjs",
     "prebuild": "pnpm --filter remote-lib-common build",
     "build": "pnpm run stage && tsc -b && vite build",
     "stage": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy",
+    "stage:dev": "pnpm run stage:dor-cli && pnpm run stage:sidecar-proxy --dev",
     "stage:dor-cli": "pnpm --filter dor build && node scripts/stage-dor-cli.mjs",
     "stage:sidecar-proxy": "pnpm --filter remote-lib-common build && node scripts/build-sidecar-proxy.mjs",
-    "tauri": "pnpm run stage && node scripts/tauri.mjs",
-    "pretest": "pnpm --filter dor-lib-common build",
+    "tauri": "pnpm --filter remote-lib-common build && node scripts/tauri.mjs",
+    "pretest": "pnpm --filter dor-lib-common build && pnpm --filter remote-lib-common build",
     "test": "vitest run && node --test scripts/*.test.mjs"
   },
   "dependencies": {

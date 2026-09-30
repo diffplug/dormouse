@@ -16,7 +16,7 @@ import type { AlertManager, AlertState } from '../../lib/alert-manager';
 import type { TerminalColorProvider, TerminalColors } from '../../lib/terminal-protocol';
 import { createAlertHost, type AlertRealm } from '../alert-host';
 import type { AlertEvents } from '../alert-protocol';
-import { bakedHostedOrigin } from '../hosted-origin';
+import { bakedRelay } from '../relay-origin';
 import { createManagedVoiceHost } from '../managed-voice-host';
 import { alertedPty, createOwnerPtyStream } from '../owner-pty';
 import type {
@@ -24,7 +24,6 @@ import type {
   PtySink,
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
-import { bakedConnectSrc } from './connect-src';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 import {
   createEphemeralBurrowStateStore,
@@ -481,13 +480,14 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const bridge = createSidecarSurfaceBridge({ send, mgr, alerts });
   const pty = alertedPty(alerts, mgr);
 
+  // Read once, here: the Burrow and managed voice take the same baked pair.
+  const relay = bakedRelay();
   const service = new BurrowService({
     store,
     provider: bridge.provider,
     kind: 'standalone',
     sendToUi: send,
-    connectSrc: bakedConnectSrc(),
-    oneTimeOrigin: bakedHostedOrigin(),
+    relay,
     // The one host that answers a `direct-offer` today. Building the factory
     // loads nothing: the addon is opened inside the first offer, if one ever
     // comes (`native-direct-peer.ts`).
@@ -502,6 +502,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     // Unaddressed, so Rust hands it to every window.
     onStatus: (status) => send('voice:status', status),
     log: (message) => console.error(message),
+    relay,
   });
 
   function handleBurrowCommand(data: unknown): void {

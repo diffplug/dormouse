@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   BAD_PASSWORD_ERROR,
+  ORIGIN_MISMATCH_ERROR,
   UNAUTHORIZED_ERROR,
   fromBase64Url,
   mintNoiseStaticKeyPair,
@@ -48,7 +49,7 @@ function stubLocalStorage(): Map<string, string> {
 describe('burrow enrollment', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('posts to /api/burrow/enroll, normalizes the url, and persists nothing', async () => {
+  it('posts the credential and the baked origin to /api/burrow/enroll, and persists nothing', async () => {
     const store = stubLocalStorage();
     const fetchMock = vi.fn(async () =>
       new Response(
@@ -63,9 +64,8 @@ describe('burrow enrollment', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    // Trailing slash should be stripped before appending the route.
     const enrollment = await performEnrollment(
-      'https://dormouse.example/',
+      'https://dormouse.example',
       { password: TEST_SETUP_PASSWORD },
       'My Laptop',
     );
@@ -75,7 +75,7 @@ describe('burrow enrollment', () => {
       expect.objectContaining({ method: 'POST', redirect: 'error' }),
     );
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body).toEqual({ password: TEST_SETUP_PASSWORD });
+    expect(body).toEqual({ password: TEST_SETUP_PASSWORD, origin: 'https://dormouse.example' });
 
     expect(enrollment).toEqual({
       relayUrl: 'https://dormouse.example',
@@ -130,7 +130,7 @@ describe('burrow enrollment', () => {
       string,
       unknown
     >;
-    expect(body).toEqual({ password: TEST_SETUP_PASSWORD });
+    expect(body).toEqual({ password: TEST_SETUP_PASSWORD, origin: 'https://dormouse.example' });
   });
 
   it('refuses to enroll when the runtime cannot mint the static it needs', async () => {
@@ -180,7 +180,7 @@ describe('burrow enrollment', () => {
     await performEnrollment('https://dormouse.example', { enrollToken: 'f'.repeat(64) }, 'My Laptop');
 
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
-    expect(body).toEqual({ enrollToken: 'f'.repeat(64) });
+    expect(body).toEqual({ enrollToken: 'f'.repeat(64), origin: 'https://dormouse.example' });
     expect(body).not.toHaveProperty('password');
   });
 
@@ -247,6 +247,25 @@ describe('burrow enrollment', () => {
     await expect(
       performEnrollment('https://dormouse.example', { enrollToken: 'spent' }, 'x'),
     ).rejects.toThrow(/enrollment offer is no longer valid/);
+  });
+
+  it('names both origins when the Relay is served from another', async () => {
+    stubLocalStorage();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: ORIGIN_MISMATCH_ERROR, origin: 'https://relay.example' }), {
+          status: 409,
+        }),
+      ),
+    );
+    await expect(
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
+    ).rejects.toThrow(
+      'The Relay says its origin is https://relay.example, but this build was made for ' +
+        "https://dormouse.example. Rebuild Dormouse with DORMOUSE_RELAY_ORIGIN=https://relay.example, or set the Relay's " +
+        'DORMOUSE_ORIGIN to https://dormouse.example.',
+    );
   });
 
   it('does not blame a credential for a 401 the Relay did not raise', async () => {

@@ -181,7 +181,7 @@ behind do carry transcripts (rationale).
 state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
 buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The managed-voice token is a bearer credential at rest** — `<state dir>/managed-voice.json` beside the Burrow's enrollment, written by `writeJsonAtomic` (`0700`/`0600`; on Windows the owner-only DACL `burrow_state_dir` applies before the sidecar spawns), with the voice id (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. **The token must go only to the baked Hosted origin**, never following a redirect (`redirect: 'error'`): `bakedHostedOrigin()`, production unless the build set `DORMOUSE_HOSTED_ORIGIN` (`docs/specs/one-time.md` -> "Service and hosts"), which `.github/workflows/release.yml` never does.
+**The managed-voice token is a bearer credential at rest** — `<state dir>/managed-voice.json` beside the Burrow's enrollment, written by `writeJsonAtomic` (`0700`/`0600`; on Windows the owner-only DACL `burrow_state_dir` applies before the sidecar spawns), with the voice id (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. **The token must go only to a Hosted build's baked relay origin**, never following a redirect (`redirect: 'error'`); a self-host build sends it nowhere (`docs/specs/relay.md` -> "Relay origin").
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
@@ -208,8 +208,8 @@ does. A gap, not an accepted risk.
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in
 `standalone/src-tauri/src/lib.rs`, `createManagedVoiceHost` in
-`lib/src/host/managed-voice-host.ts`, `bakedHostedOrigin` in
-`lib/src/host/hosted-origin.ts`.
+`lib/src/host/managed-voice-host.ts`, `hostedOrigin` in
+`lib/src/host/relay-origin.ts`.
 
 ## Terminal context directory actions
 

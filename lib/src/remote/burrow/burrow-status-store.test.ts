@@ -77,7 +77,7 @@ describe('re-reading after a mutation', () => {
 
     const statusAnswer = () => ({
       enrolled,
-      relayUrl: 'https://laptop.tailnet.ts.net',
+      relayOrigin: 'https://laptop.tailnet.ts.net',
       burrowId: 'burrow-1',
       connection: 'connected',
       pairedClients: 1,
@@ -140,7 +140,7 @@ describe('re-subscribing', () => {
           releases.push(() =>
             resolve({
               enrolled: true,
-              relayUrl: 'https://laptop.tailnet.ts.net',
+              relayOrigin: 'https://laptop.tailnet.ts.net',
               burrowId: 'burrow-1',
               connection: 'connected',
               pairedClients: 1,
@@ -188,7 +188,7 @@ describe('publishing', () => {
     vi.useFakeTimers();
     const status = {
       enrolled: true,
-      relayUrl: 'https://laptop.tailnet.ts.net',
+      relayOrigin: 'https://laptop.tailnet.ts.net',
       burrowId: 'burrow-1',
       connection: 'connected',
       pairedClients: 1,
@@ -216,56 +216,6 @@ describe('publishing', () => {
       status.pairedClients = 2;
       await vi.advanceTimersByTimeAsync(2000);
       expect(listener).toHaveBeenCalledTimes(2);
-    } finally {
-      unsubscribe();
-    }
-  });
-
-  /**
-   * `offer` is the one nested field, so it is the one the mapped type cannot
-   * help with — `Object.is` type-checks there too, and would re-render the
-   * section every 2 s on an un-enrolled machine that has an offer, since the
-   * service mints a fresh `{ origin }` per read. This test is the guard.
-   */
-  it('compares the offer by its origin, not by the object the poll minted', async () => {
-    vi.useFakeTimers();
-    let origin: string | null = 'https://ned-mac.tail9c2f1.ts.net';
-    const command = vi.fn(async () => ({
-      enrolled: false,
-      relayUrl: null,
-      burrowId: null,
-      connection: 'stopped',
-      pairedClients: 0,
-      suggestedLabel: 'ned-mac',
-      // A new object every read, exactly as a round trip through the service gives.
-      offer: origin === null ? null : { origin },
-    }));
-    burrowLink = {
-      command,
-      respond: () => {},
-      notify: () => {},
-      on: () => () => {},
-    };
-
-    const listener = vi.fn();
-    const unsubscribe = subscribeToBurrowStatus(listener);
-    try {
-      await vi.advanceTimersByTimeAsync(0);
-      expect(listener).toHaveBeenCalledTimes(1);
-
-      await vi.advanceTimersByTimeAsync(3 * 2000);
-      expect(command.mock.calls.length).toBeGreaterThan(1);
-      expect(listener).toHaveBeenCalledTimes(1);
-
-      // A different origin is a different offer, and must reach the card.
-      origin = 'https://ned-mac-2.tail9c2f1.ts.net';
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(listener).toHaveBeenCalledTimes(2);
-
-      // And so is one that went away — redeeming an offer unlinks the file.
-      origin = null;
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(listener).toHaveBeenCalledTimes(3);
     } finally {
       unsubscribe();
     }
@@ -316,6 +266,67 @@ describe('an answer from an older broker', () => {
       await vi.advanceTimersByTimeAsync(2000);
       expect(getBurrowStatusSnapshot()).toMatchObject({ status: { enrolled: false, serving: true } });
       expect(listener.mock.calls.length).toBe(calls + 1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('reads the shape from before one baked relay origin, and does not republish it', async () => {
+    // `offer` was `{ origin }`, a fresh object every poll; there was no
+    // `relayOrigin` or `relayMode` (docs/specs/relay.md → "Relay origin").
+    vi.useFakeTimers();
+    const command = vi.fn(async () => ({
+      enrolled: false,
+      serving: false,
+      relayUrl: null,
+      burrowId: null,
+      connection: 'stopped',
+      pairedClients: 0,
+      suggestedLabel: 'ned-mac',
+      offer: { origin: 'https://ned-mac.tail9c2f1.ts.net' },
+    }));
+    burrowLink = { command, respond: () => {}, notify: () => {}, on: () => () => {} };
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeToBurrowStatus(listener);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getBurrowStatusSnapshot()).toMatchObject({
+        kind: 'ready',
+        // No mode reads as Hosted: no enroll form the old broker's `enroll`
+        // could be sent from.
+        status: { offer: true, relayOrigin: '', relayMode: 'hosted' },
+      });
+      await vi.advanceTimersByTimeAsync(3 * 2000);
+      expect(command.mock.calls.length).toBeGreaterThan(1);
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('names an older broker\'s enrolled Relay from its `relayUrl`', async () => {
+    burrowLink = {
+      command: async () => ({
+        enrolled: true,
+        relayUrl: 'https://laptop.tailnet.ts.net',
+        burrowId: 'burrow-1',
+        connection: 'connected',
+        pairedClients: 1,
+        suggestedLabel: 'ned-mac',
+        offer: null,
+      }),
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+    const unsubscribe = subscribeToBurrowStatus(() => {});
+    try {
+      await vi.waitFor(() =>
+        expect(getBurrowStatusSnapshot()).toMatchObject({
+          status: { relayOrigin: 'https://laptop.tailnet.ts.net', offer: false },
+        }),
+      );
     } finally {
       unsubscribe();
     }
