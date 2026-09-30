@@ -1857,18 +1857,18 @@ describe('one-time connection', () => {
   });
 
   it('survives the enrollment going, and a reconnect', async () => {
+    // Held, not run: Local networks runs no Burrow (`network policy` below).
     createHostedService({ enrollment: ENROLLMENT });
     await service.start();
-    sockets[0]!.open();
     const waiting = await open();
 
     await command('clearEnrollment');
     await command('reconnect');
     expect((await command('oneTimeStatus')).result).toEqual(waiting);
     expect(rendezvous.room().burrow.readyState).toBe(1);
-    // The enrollment gate cycled; the serving one never dropped.
-    expect(statusEvents()).toEqual([true, false]);
-    expect(servingEvents()).toEqual([true, true]);
+    // The enrollment gate cycled; the serving one never dropped once up.
+    expect(statusEvents()).toEqual([true, true, false]);
+    expect(servingEvents()).toEqual([false, true, true]);
 
     // And the link still works end to end, the phone told the enrolled name
     // the connection opened under.
@@ -1877,36 +1877,12 @@ describe('one-time connection', () => {
     expect(await phone.next()).toEqual({ ok: true, burrowLabel: ENROLLMENT.label });
   });
 
-  it('keeps its request beside the pairings, and through a clearEnrollment', async () => {
-    const authenticator = await createTestAuthenticator({
-      rpId: new URL(HOSTED_ORIGIN).hostname,
-      origin: HOSTED_ORIGIN,
-    });
+  it('keeps its request through a clearEnrollment', async () => {
     createHostedService({ enrollment: ENROLLMENT });
     await service.start();
-    const socket = sockets[0]!;
-    socket.open();
-    const qr = (await command('setupQr')).result as SetupQrResult;
-    const invitation = await parsePairingInvitationUrl(qr.url, HOSTED_ORIGIN);
-    await pairThroughSocket({
-      socket,
-      burrowId: ENROLLMENT.burrowId,
-      clientId: 'c1',
-      invitation: invitation!,
-      authenticator,
-      until: () => queueEvents().length > 0,
-    });
-
     const phone = await join((await open()).url);
     await request(phone);
-    // Pairings first, the one-time request after them.
-    expect(queueEvents().at(-1)!.queue.map((item) => [item.kind, item.clientId])).toEqual([
-      ['pairing', 'c1'],
-      ['one-time', ''],
-    ]);
 
-    // Clearing the enrollment drops the pairing, whose Relay is gone, and
-    // nothing else.
     await command('clearEnrollment');
     expect(queueEvents().at(-1)!.queue.map((item) => item.kind)).toEqual(['one-time']);
     expect(oneTimeStates().at(-1)).toMatchObject({ status: 'confirming' });
@@ -2127,6 +2103,20 @@ describe('network policy', () => {
       createHostedService({ network: LOCAL_ON });
       expect(await service.networkAllowed()).toBe(true);
     });
+  });
+
+  it('holds an enrollment without running it under Local networks, which has no persistent path', async () => {
+    createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON });
+    await service.start();
+    expect(sockets).toEqual([]);
+    expect((await command('status')).result).toMatchObject({ enrolled: true, connection: 'stopped' });
+    await command('reconnect');
+
+    // Nor on entering Local networks from Nothing.
+    await setPolicy(NOTHING);
+    await setPolicy(LOCAL_ON);
+    expect(sockets).toEqual([]);
+    expect(servingEvents()).not.toContain(true);
   });
 
   it('opens no one-time link under Local networks with no network allowed', async () => {

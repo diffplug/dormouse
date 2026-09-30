@@ -140,6 +140,13 @@ export interface DirectPathPolicy {
    */
   describe(sdp: string): string | null;
   /**
+   * The peer's description as this end applies it: every candidate that is not
+   * an IP address inside the allowed networks removed, a name included, so the
+   * ICE agent sends no check and makes no lookup toward one. None left is not a
+   * refusal: the peer's own checks still reach this end's allowed candidates.
+   */
+  acceptRemote(sdp: string): string;
+  /**
    * Why the connection's selected candidate pair may not carry the session,
    * or `null` when it may. `pair` is `null` where the peer reports none.
    */
@@ -288,7 +295,10 @@ export class DirectPeer {
         const channel = (ev as { channel?: DirectChannelLike } | null)?.channel;
         if (channel) this.#adopt(channel);
       });
-      await this.#peer.setRemoteDescription({ type: 'offer', sdp: offerSdp });
+      await this.#peer.setRemoteDescription({
+        type: 'offer',
+        sdp: this.#pathPolicy ? this.#pathPolicy.acceptRemote(offerSdp) : offerSdp,
+      });
       const answer = await this.#peer.createAnswer();
       await this.#peer.setLocalDescription(answer);
       return await this.#gatheredSdp();

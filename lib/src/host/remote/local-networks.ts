@@ -1,8 +1,8 @@
 /**
  * The Local networks level's hold on a direct path (`docs/specs/remote-network.md`
  * -> "Local networks"): the {@link DirectPathPolicy} that picks the one address
- * an attempt's socket binds, where there is one, strips the Burrow's answer,
- * and checks the selected pair. Node-only, like the address math it runs on.
+ * an attempt's socket binds, where there is one, strips the Burrow's answer and
+ * the phone's offer, and checks the selected pair. Node-only, like the address math it runs on.
  */
 
 import { isIP } from 'node:net';
@@ -39,11 +39,31 @@ const CONNECTION_LINE = /^c=IN IP[46] (\S+)$/;
 const CANDIDATE_LINE = /^a=candidate:\S+ \S+ \S+ \S+ (\S+) /;
 
 /**
+ * `sdp` with every candidate outside `inAllowed` removed and a default address
+ * outside it written as `0.0.0.0`, and how many candidates are left.
+ */
+function keepAllowed(sdp: string, inAllowed: (address: string) => boolean): { sdp: string; candidates: number } {
+  const eol = sdp.includes('\r\n') ? '\r\n' : '\n';
+  let candidates = 0;
+  const lines: string[] = [];
+  for (const line of sdp.split(eol)) {
+    const candidate = CANDIDATE_LINE.exec(line);
+    if (candidate) {
+      if (!inAllowed(candidate[1]!)) continue;
+      candidates += 1;
+    }
+    const connection = CONNECTION_LINE.exec(line);
+    lines.push(connection && !inAllowed(connection[1]!) ? 'c=IN IP4 0.0.0.0' : line);
+  }
+  return { sdp: lines.join(eol), candidates };
+}
+
+/**
  * The Burrow's hold on one attempt under Local networks: the bind is read from
  * this machine's interfaces at the attempt, since a laptop moves between
  * networks, and a platform that will not list them binds nothing and leaves
- * the path check to decide. Both ends of the selected pair must be IP literals
- * inside `allowed`.
+ * the path check to decide. Both descriptions keep only candidates inside
+ * `allowed`, and both ends of the selected pair must be IP literals inside it.
  */
 export function localNetworksPath(allowed: readonly string[]): DirectPathPolicy {
   const inAllowed = allowedAddressTest(allowed);
@@ -56,20 +76,12 @@ export function localNetworksPath(allowed: readonly string[]): DirectPathPolicy 
       }
     },
     describe(sdp) {
-      const eol = sdp.includes('\r\n') ? '\r\n' : '\n';
-      let candidates = 0;
-      const lines: string[] = [];
-      for (const line of sdp.split(eol)) {
-        const candidate = CANDIDATE_LINE.exec(line);
-        if (candidate) {
-          if (!inAllowed(candidate[1]!)) continue;
-          candidates += 1;
-        }
-        const connection = CONNECTION_LINE.exec(line);
-        lines.push(connection && !inAllowed(connection[1]!) ? 'c=IN IP4 0.0.0.0' : line);
-      }
-      return candidates === 0 ? null : lines.join(eol);
+      const described = keepAllowed(sdp, inAllowed);
+      return described.candidates === 0 ? null : described.sdp;
     },
+    // A browser that offers only mDNS names is left none: its checks reach the
+    // answer's candidates, and the pair forms peer-reflexive (rationale).
+    acceptRemote: (sdp) => keepAllowed(sdp, inAllowed).sdp,
     refusal(pair) {
       if (!pair) return 'the connection reports no selected candidate pair';
       if (pair.local === null || !inAllowed(pair.local)) {

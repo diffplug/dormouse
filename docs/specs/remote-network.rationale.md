@@ -121,6 +121,16 @@ unbound — the stripped answer carried two candidates and `c=IN IP4 0.0.0.0`,
 Chrome accepted it, and the pair was the ULA address at both ends, again
 `prflx`.
 
+**Stripping the offer against a real browser** *(2026-09-30, HeadlessChrome 150
+on macOS 27 via `dor agent-browser`, `node-datachannel` 0.33.4 over
+libdatachannel 0.24.5)*. `scripts/direct-interop/run.mjs --allow
+192.168.86.0/24` with the offer stripped: Chrome offered one mDNS candidate,
+the Burrow applied none, bound `192.168.86.160`, and answered with that one
+candidate. The pair formed from Chrome's own checks — local `host`
+`192.168.86.160`, remote `prflx` `192.168.86.160` — and the three frames came
+back intact. So an offer stripped to nothing costs no connection, and
+`native-direct-peer.test.ts` pins the same open on the addon alone.
+
 ## Anywhere
 
 **Why Hosted-served Clients always use STUN.** Hosted runs on Cloudflare, so a

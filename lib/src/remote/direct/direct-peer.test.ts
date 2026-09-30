@@ -544,6 +544,13 @@ describe('DirectPeer', () => {
       expect(run.burrow.refusals).toEqual(['off the LAN']);
     });
 
+    it('applies the peer’s description as the policy accepts it', async () => {
+      const run = pair({}, lanOnlyPolicy(undefined, (sdp) => `${sdp}a=accepted\r\n`));
+      const offer = await run.clientPeer.offer();
+      await run.burrowPeer.answer(offer!);
+      expect(run.answerer.remoteDescription).toEqual({ type: 'offer', sdp: `${offer}a=accepted\r\n` });
+    });
+
     it('sends its description as the policy describes it, and refuses when nothing is left', async () => {
       const stripped = pair({}, lanOnlyPolicy((sdp) => `${sdp}a=described\r\n`));
       const offer = await stripped.clientPeer.offer();

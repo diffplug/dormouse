@@ -27,10 +27,10 @@
  *   3. Do the two `DirectPeerLike` implementations satisfy the seam as written?
  *   4. With `--allow`, the addon answers as a Burrow under Local networks does
  *      (`docs/specs/remote-network.md` -> "Local networks"): bound where the
- *      allowed networks name one address here, its answer stripped, its
- *      selected pair checked. Does that connect to a real browser, and does
- *      the pair the addon selected report IP literals or the browser's mDNS
- *      names?
+ *      allowed networks name one address here, the offer and its answer
+ *      stripped, its selected pair checked. Does that connect to a real
+ *      browser, and does the pair the addon selected report IP literals or the
+ *      browser's mDNS names?
  *
  * Run it on a machine with the interfaces you care about — a tailnet, a VPN,
  * docker bridges — since question 1 is a property of the host, not the code.
@@ -111,11 +111,20 @@ const javascript = browserBundle.outputFiles[0].text;
 const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill');
 const addon = sidecarRequire('node-datachannel');
 
+/** The address each `a=candidate` line of `sdp` names. */
+const candidateAddresses = (sdp) =>
+  sdp
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('a=candidate'))
+    .map((line) => line.split(' ')[4]);
+
 const policy = allowed && localNetworksPath(allowed);
 /** What the Local networks hold saw, under `--allow`; see question 4. */
 const path = policy && {
   allowed,
   bindAddress: policy.bindAddress(),
+  /** The browser's candidates, and those the Burrow applied. */
+  offerCandidates: null,
   answerCandidates: null,
   /** The selected pair as the addon reported it at each check, raw candidates included. */
   checks: [],
@@ -129,6 +138,11 @@ const connection = new RTCPeerConnection({
 const pathPolicy = policy && {
   bindAddress: () => path.bindAddress,
   describe: policy.describe,
+  acceptRemote: (sdp) => {
+    const accepted = policy.acceptRemote(sdp);
+    path.offerCandidates = { offered: candidateAddresses(sdp), accepted: candidateAddresses(accepted) };
+    return accepted;
+  },
   refusal: (pair) => {
     const raw = connection.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
     const refusal = policy.refusal(pair);
@@ -240,12 +254,7 @@ const server = createServer(async (req, res) => {
         finish({ ok: false, error: 'the addon declined the browser offer' });
         return;
       }
-      if (path) {
-        path.answerCandidates = answer
-          .split(/\r?\n/)
-          .filter((line) => line.startsWith('a=candidate'))
-          .map((line) => line.split(' ')[4]);
-      }
+      if (path) path.answerCandidates = candidateAddresses(answer);
       send(200, { sdp: answer });
       return;
     }

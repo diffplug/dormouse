@@ -411,43 +411,71 @@ describe('the direct path over the native addon', () => {
     }
   });
 
+  /**
+   * A bound answerer under the path policy, opened against an unbound offerer
+   * whose offer `rewrite` edits in transit.
+   */
+  const openBound = (rewrite: (offer: string) => string = (offer) => offer) => {
+    const pathPolicy = localNetworksPath([`${EXTERNAL_V4}/32`]);
+    return untilOpen(async (attempt) => {
+      let opened = 0;
+      const lost: string[] = [];
+      const handlers = {
+        onOpen: () => (opened += 1),
+        onFrame: () => {},
+        onClosed: (reason: string) => lost.push(reason),
+        onViolation: (reason: string) => lost.push(reason),
+      };
+      const bound = attempt.keep(createNativeDirectPeerFactory()(pathPolicy)!);
+      const offerer = attempt.keep(new DirectPeer({ peer: buildPeer(), handlers }));
+      const answerer = attempt.keep(new DirectPeer({ peer: bound, handlers, pathPolicy }));
+      const offer = await offerer.offer();
+      expect(offer).not.toBeNull();
+      const answer = await answerer.answer(rewrite(offer!));
+      expect(answer).not.toBeNull();
+      await offerer.acceptAnswer(answer!);
+      return {
+        bound,
+        lost,
+        open: () => opened === 2,
+        abandon: () => {
+          offerer.close();
+          answerer.close();
+        },
+      };
+    }, 'both ends of the bound channel to open');
+  };
+
   it.skipIf(!EXTERNAL_V4)(
     'opens a bound channel whose selected pair the path policy reads as IP addresses',
     async () => {
-      const pathPolicy = localNetworksPath([`${EXTERNAL_V4}/32`]);
-      const run = await untilOpen(async (attempt) => {
-        let opened = 0;
-        const lost: string[] = [];
-        const handlers = {
-          onOpen: () => (opened += 1),
-          onFrame: () => {},
-          onClosed: (reason: string) => lost.push(reason),
-          onViolation: (reason: string) => lost.push(reason),
-        };
-        const bound = attempt.keep(createNativeDirectPeerFactory()(pathPolicy)!);
-        const offerer = attempt.keep(new DirectPeer({ peer: buildPeer(), handlers }));
-        const answerer = attempt.keep(new DirectPeer({ peer: bound, handlers, pathPolicy }));
-        const offer = await offerer.offer();
-        expect(offer).not.toBeNull();
-        const answer = await answerer.answer(offer!);
-        expect(answer).not.toBeNull();
-        await offerer.acceptAnswer(answer!);
-        return {
-          bound,
-          lost,
-          open: () => opened === 2,
-          abandon: () => {
-            offerer.close();
-            answerer.close();
-          },
-        };
-      }, 'both ends of the bound channel to open');
-
+      const run = await openBound();
       try {
         // Both ends on this machine, so both are the one allowed address: the
         // addon reports the pair as literals, never a name.
         const pair = run.bound.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
         expect(pair?.local?.address).toBe(EXTERNAL_V4);
+        expect(pair?.remote?.address).toBe(EXTERNAL_V4);
+        expect(run.lost).toEqual([]);
+      } finally {
+        run.abandon();
+      }
+    },
+    CASE_BUDGET_MS,
+  );
+
+  it.skipIf(!EXTERNAL_V4)(
+    'opens from an offer naming only mDNS hosts, which the policy strips, on the offerer’s own checks',
+    async () => {
+      // A browser's offer: every host candidate a name, which the Burrow drops.
+      const run = await openBound((offer) =>
+        offer.replace(
+          /^(a=candidate:\S+ \S+ \S+ \S+ )\S+/gm,
+          (_, head: string) => `${head}${crypto.randomUUID()}.local`,
+        ),
+      );
+      try {
+        const pair = run.bound.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
         expect(pair?.remote?.address).toBe(EXTERNAL_V4);
         expect(run.lost).toEqual([]);
       } finally {

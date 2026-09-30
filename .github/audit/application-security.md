@@ -41,7 +41,7 @@ of `service.ts` (the one baked origin and its nullable Hosted origin, the
 rendezvous gate before any socket, the single runtime, and the approval routed
 by `kind`); `lib/src/host/remote/local-networks.ts` and
 `native-direct-peer.ts` (Local networks' hold on a one-time direct path: the
-bound socket, the stripped answer, and the selected-pair check —
+bound socket, the stripped offer and answer, and the selected-pair check —
 `docs/specs/security-remote.md` -> "One-time connection");
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they

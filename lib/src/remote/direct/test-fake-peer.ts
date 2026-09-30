@@ -78,11 +78,13 @@ const HOST_CANDIDATE: Record<FakePeerRole, string> = {
 /**
  * A path policy allowing only {@link FAKE_LAN_PAIR}'s LAN, by string prefix —
  * the address math is the host's, and `lib/src/host/remote/local-networks.test.ts`
- * pins it — recording every pair it is asked about. It binds nothing, and
- * describes as `describe` does: as given, by default.
+ * pins it — recording every pair it is asked about. It binds nothing,
+ * describes as `describe` does, and accepts the peer's description as
+ * `acceptRemote` does: both as given, by default.
  */
 export function lanOnlyPolicy(
   describe: DirectPathPolicy['describe'] = (sdp) => sdp,
+  acceptRemote: DirectPathPolicy['acceptRemote'] = (sdp) => sdp,
 ): DirectPathPolicy & { readonly asked: Array<DirectSelectedPair | null> } {
   const asked: Array<DirectSelectedPair | null> = [];
   const onLan = (address: string | null) => address?.startsWith('192.168.1.') ?? false;
@@ -90,6 +92,7 @@ export function lanOnlyPolicy(
     asked,
     bindAddress: () => null,
     describe,
+    acceptRemote,
     refusal: (pair) => {
       asked.push(pair);
       return pair && onLan(pair.local) && onLan(pair.remote) ? null : 'off the LAN';
@@ -203,6 +206,8 @@ export class FakePeer implements DirectPeerLike {
   readonly #network: FakeDirectNetwork;
   readonly #events = new FakeEventTarget();
   #local: DirectSessionDescription | null = null;
+  /** The peer's description as this end was handed it. */
+  remoteDescription: DirectSessionDescription | null = null;
   #gathering: string;
   #connectionState = 'connecting';
   closed = false;
@@ -292,6 +297,7 @@ export class FakePeer implements DirectPeerLike {
   }
 
   async setRemoteDescription(description: DirectSessionDescription): Promise<void> {
+    this.remoteDescription = description;
     if (description.type === 'offer') {
       // The answerer learns of the channel here, exactly as a real one does.
       const channel = new FakeChannel(DIRECT_CHANNEL_LABEL, this.#defect);

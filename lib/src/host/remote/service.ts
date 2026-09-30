@@ -169,6 +169,16 @@ export function canEnroll(relay: RelayBuild): boolean {
 const NETWORK_OFF_REFUSAL =
   'Settings → Network is set to Nothing, so this computer opens no connections on its own.';
 
+/**
+ * Whether `level` runs the persistent Burrow — the relay socket and everything
+ * that needs it: `relay` alone today. **Every other level holds an enrollment
+ * without running it**, since only My Relay only has a path rule for a
+ * persistent session (`docs/specs/remote-network.md` → "Policy").
+ */
+function runsBurrow(level: NetworkLevel): boolean {
+  return level === 'relay';
+}
+
 /** What `oneTimeOpen` answers under `local` with no network allowed. */
 const NO_NETWORK_ALLOWED_REFUSAL =
   'No network is allowed under Local networks, so no phone can connect. Allow one in Settings → Network.';
@@ -369,8 +379,8 @@ export class BurrowService {
 
   #burrow: BurrowRuntime | null = null;
   /**
-   * The enrollment this service reports: the running Burrow's, or — under
-   * `nothing` — the one it holds without running (`#startBurrow`).
+   * The enrollment this service reports: the running Burrow's, or — under a
+   * level that runs none — the one it holds without running (`#startBurrow`).
    */
   #enrollment: BurrowEnrollment | null = null;
   /**
@@ -963,7 +973,8 @@ export class BurrowService {
    * to the level or the allowed networks ends the live one-time connection,
    * `user-ended`, so a narrowed policy never leaves an old path exempt;
    * `autoUpdate` alone touches no connection. Then the relay socket follows the
-   * level: stopped under `nothing`, the enrollment kept; started out of it.
+   * level: stopped under one that runs no Burrow, the enrollment kept; started
+   * on entering one that does ({@link runsBurrow}).
    */
   async #setNetworkPolicy(params: SetNetworkPolicyParams | undefined): Promise<NetworkPolicyResult> {
     const next = requestedNetworkPolicy(params?.policy, this.#relay);
@@ -978,12 +989,12 @@ export class BurrowService {
     }
     const result = networkPolicyResult(next, this.#relay.mode, this.#listInterfaces());
     try {
-      if (next.level === 'nothing') {
+      if (!runsBurrow(next.level)) {
         if (this.#burrow) {
           this.#stopBurrow();
           this.#emitStatus();
         }
-      } else if (previous.level === 'nothing' && !this.#burrow) {
+      } else if (!runsBurrow(previous.level) && !this.#burrow) {
         await this.#start();
       }
     } finally {
@@ -1143,9 +1154,9 @@ export class BurrowService {
     // replacement is explicit rather than implied by the assignment below.
     this.#stopBurrow();
     // The one gate on the relay socket, and on everything that needs a running
-    // Burrow — push, the device list, setup codes: under `nothing` the
-    // enrollment is held and reported, `stopped`, and nothing is opened.
-    if (this.#level() === 'nothing') {
+    // Burrow — push, the device list, setup codes: under a level that runs
+    // none the enrollment is held and reported, `stopped`, and nothing is opened.
+    if (!runsBurrow(this.#level())) {
       this.#enrollment = enrollment;
       return;
     }

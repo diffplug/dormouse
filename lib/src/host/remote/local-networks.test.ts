@@ -1,7 +1,7 @@
 /**
  * The Local networks hold on a direct path (`docs/specs/remote-network.md` ->
  * "Local networks"): which address an attempt binds, what the Burrow's answer
- * keeps, and which selected pairs may carry a session. The same policy on the
+ * and the phone's offer keep, and which selected pairs may carry a session. The same policy on the
  * real addon is `native-direct-peer.test.ts`'s.
  */
 
@@ -147,6 +147,29 @@ describe('localNetworksPath', () => {
   it('refuses to describe an end with no candidate on an allowed network', () => {
     expect(localNetworksPath(['10.0.0.0/8']).describe(ANSWER)).toBeNull();
     expect(localNetworksPath([]).describe(ANSWER)).toBeNull();
+  });
+
+  it('accepts only the offer’s candidates that are IP addresses on an allowed network', () => {
+    // A phone's offer: its Wi-Fi, its tailnet, a carrier address, and a browser's mDNS name.
+    const offer = [
+      'v=0',
+      'm=application 9 UDP/DTLS/SCTP webrtc-datachannel',
+      'c=IN IP4 203.0.113.7',
+      'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host',
+      'a=candidate:2 1 udp 2113937151 100.101.7.8 51235 typ host',
+      'a=candidate:3 1 udp 2113937151 203.0.113.7 51236 typ host',
+      'a=candidate:4 1 udp 2113937151 0f1e2d3c-aaaa-bbbb-cccc-000000000000.local 51237 typ host',
+      'a=end-of-candidates',
+      '',
+    ].join('\r\n');
+
+    const accepted = localNetworksPath(LAN).acceptRemote(offer);
+    expect(candidatesIn(accepted)).toEqual(['a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host']);
+    expect(accepted).toContain('\r\nc=IN IP4 0.0.0.0\r\n');
+    expect(accepted).toContain('\r\na=end-of-candidates\r\n');
+
+    // None left is still an offer to answer: the phone's own checks form the pair.
+    expect(candidatesIn(localNetworksPath(['10.0.0.0/8']).acceptRemote(offer))).toEqual([]);
   });
 
   it('allows a pair whose two ends are both on allowed networks', () => {
