@@ -15,7 +15,6 @@
 import {
   DIRECT_ONLY_DEADLINE_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
-  SESSION_END_V1,
   type DirectPath,
   type DirectRelayCause,
   type DirectSignalV1,
@@ -26,7 +25,8 @@ import {
 } from 'remote-lib-common';
 
 import { DirectEndpoint, type DirectCarrier } from '../direct/direct-endpoint';
-import type { DirectPeering, DirectViolationCause } from '../direct/direct-peer';
+import type { DirectPeering } from '../direct/direct-peer';
+import { goodbyeFor, pathRefusal, type PathRefusal } from '../direct/path-refusal';
 import type { RemoteTimer } from '../ws';
 
 /**
@@ -54,11 +54,12 @@ export function sealControl(session: NoiseTransportSession, value: object): Uint
 /**
  * Why a direct-only session can no longer be carried
  * ({@link EstablishedE2eSessionDeps.onDirectOnlyBroken}): an application
- * message arrived over the relay, the direct attempt was given up, or — read by
- * the owner's reaper off {@link EstablishedE2eSession.directDeadlineAt} — the
- * deadline passed with the session not yet direct.
+ * message arrived over the relay, the path policy refused the path, the direct
+ * attempt was given up, or — {@link EstablishedE2eSession.expireDirectOnly},
+ * from the owner's reaper off {@link EstablishedE2eSession.directDeadlineAt} —
+ * the deadline passed with the session not yet direct.
  */
-export type DirectOnlyBreak = 'relayed-app' | 'given-up' | 'deadline';
+export type DirectOnlyBreak = 'relayed-app' | 'path-refused' | 'given-up' | 'deadline';
 
 /** The remote-api handler an established session drives. */
 export interface RemoteApiSessionLike {
@@ -100,8 +101,8 @@ export interface EstablishedE2eSessionDeps {
   /**
    * How this host takes the direct path: with no factory every `direct-offer`
    * is declined and the session stays relayed; a path policy's refusal
-   * (`docs/specs/remote-network.md` -> "Local networks") ends the session
-   * through {@link onFatal}, `path-refused`.
+   * (`docs/specs/remote-network.md` -> "Local networks") breaks a direct-only
+   * session, `path-refused`, and ends any other through {@link onFatal}.
    */
   readonly directPeering: DirectPeering;
   /**
@@ -113,10 +114,9 @@ export interface EstablishedE2eSessionDeps {
   /**
    * The session is unrecoverable: the owner disposes it and drops its record.
    * **Never called once this session is disposed**, so a report can never end
-   * whatever replaced it. `cause` is set where the direct path's policy
-   * refused the path.
+   * whatever replaced it.
    */
-  onFatal(reason: string, cause?: DirectViolationCause): void;
+  onFatal(reason: string): void;
   /**
    * Notified whenever the direct path's {@link DirectPath} or
    * {@link DirectRelayCause} changes — `direct` once **both** directions have
@@ -136,8 +136,10 @@ export interface EstablishedE2eSessionDeps {
   readonly directOnly?: boolean;
   /**
    * A direct-only session can no longer be carried: the owner ends it, which
-   * is what makes this the last report. Like {@link onFatal}, never called once
-   * this session is disposed. A given-up attempt is reported a microtask later, so the decline
+   * is what makes this the last report — with {@link EstablishedE2eSession.end},
+   * whose goodbye carries {@link EstablishedE2eSession.pathRefusal}, where the
+   * path ended it. Like {@link onFatal}, never called once this session is
+   * disposed. A given-up attempt is reported a microtask later, so the decline
    * the endpoint sends right after giving up goes out first.
    */
   onDirectOnlyBroken?(reason: DirectOnlyBreak): void;
@@ -162,6 +164,10 @@ export class EstablishedE2eSession {
   readonly #onDirectOnlyBroken: ((reason: DirectOnlyBreak) => void) | null;
   /** When a direct-only session must be direct by; `null` for one the relay may carry. */
   readonly #directOnlyBy: number | null;
+  /** Whether a path policy holds this session's direct path. */
+  readonly #pathHeld: boolean;
+  /** Set where the path ended this session; see {@link pathRefusal}. */
+  #pathRefusal: PathRefusal | null = null;
   readonly #now: () => number;
   #lastClientActivityAt: number;
   #disposed = false;
@@ -174,6 +180,7 @@ export class EstablishedE2eSession {
     const directOnly = deps.directOnly === true;
     this.#onDirectOnlyBroken = directOnly ? (deps.onDirectOnlyBroken ?? null) : null;
     this.#directOnlyBy = directOnly ? this.#now() + DIRECT_ONLY_DEADLINE_MS : null;
+    this.#pathHeld = deps.directPeering.pathPolicy !== undefined;
     this.#api = deps.createApi((payload) => this.#sendApp(payload));
     this.#direct = new DirectEndpoint('answerer', {
       peering: deps.directPeering,
@@ -182,7 +189,8 @@ export class EstablishedE2eSession {
       receive: (ciphertext, carrier) => this.#receive(ciphertext, carrier),
       fatal: (reason, cause) => {
         console.warn(`[burrow] the direct path ended this session: ${reason}`);
-        this.#fatal(reason, cause);
+        if (cause === 'path-refused' && directOnly) this.#breakDirectOnly('path-refused');
+        else this.#fatal(reason);
       },
       // **Disposal is this session's one test for being over.** Its owner
       // disposes it on every route that replaces or tears one down, so a
@@ -222,6 +230,29 @@ export class EstablishedE2eSession {
   }
 
   /**
+   * Why the path ended this session, where it did
+   * (`docs/specs/remote-network.md` -> "Local networks"), else `null`: set by a
+   * break of a direct-only session a path policy holds — a refused path, or a
+   * given-up attempt or a missed deadline once the phone offered one — before
+   * the owner hears of it. Its address is the remote end of the selected pair
+   * the policy refused, else the first public address the phone's offer
+   * carried, which is a diagnostic and decides nothing.
+   */
+  get pathRefusal(): PathRefusal | null {
+    return this.#pathRefusal;
+  }
+
+  /**
+   * The owner's reaper found {@link directDeadlineAt} passed: break the session
+   * `deadline`, as every other break is, through
+   * {@link EstablishedE2eSessionDeps.onDirectOnlyBroken}. A no-op once over.
+   */
+  expireDirectOnly(): void {
+    if (this.directDeadlineAt === null) return;
+    this.#breakDirectOnly('deadline');
+  }
+
+  /**
    * One transport frame's `ct` off the relay. Every rule about a frame on an
    * authorized session — which path may carry it, and that its `ct` must
    * decode — is the endpoint's (`docs/specs/remote-api.md` → Transport →
@@ -250,7 +281,7 @@ export class EstablishedE2eSession {
    */
   end({ flush = true }: { flush?: boolean } = {}): void {
     if (this.#disposed) return;
-    const goodbye = sealControl(this.#session, SESSION_END_V1);
+    const goodbye = sealControl(this.#session, goodbyeFor(this.#pathRefusal));
     // Before the send: a channel that refuses the goodbye reports its close,
     // and a session that is already over has nothing left to report it to.
     this.#disposed = true;
@@ -268,13 +299,23 @@ export class EstablishedE2eSession {
     this.#api.dispose();
   }
 
-  #fatal(reason: string, cause?: DirectViolationCause): void {
+  #fatal(reason: string): void {
     if (this.#disposed) return;
-    this.#onFatal(reason, cause);
+    this.#onFatal(reason);
   }
 
+  /**
+   * Report a break, recording the refusal first where the path is why: a
+   * refused path always, and a given-up attempt or a missed deadline only once
+   * the phone offered one — a phone that never tried says nothing about the
+   * path.
+   */
   #breakDirectOnly(reason: DirectOnlyBreak): void {
     if (this.#disposed) return;
+    const forPath = reason === 'path-refused' || (reason !== 'relayed-app' && this.#direct.attempted);
+    if (this.#pathHeld && forPath) {
+      this.#pathRefusal = pathRefusal(this.#now(), reason as PathRefusal['kind'], this.#direct.pathAddress);
+    }
     this.#onDirectOnlyBroken?.(reason);
   }
 

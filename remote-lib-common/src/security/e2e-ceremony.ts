@@ -11,6 +11,7 @@
  */
 
 import { isBoundedString } from './bytes.js';
+import { PATH_ADDRESS_SOURCES, isIpLiteral, type PathAddressSource } from './direct-path.js';
 import {
   hashPasskeyPublicKey,
   verifyPasskeyAssertion,
@@ -402,22 +403,38 @@ export function isOneTimeOutcomeV1(value: unknown): value is OneTimeOutcomeV1 {
 /**
  * The Burrow's goodbye: it is ending this established session on purpose, so
  * the Client reports the session over rather than waiting on requests nothing
- * will answer (`docs/specs/remote-api.md` → Transport). **Exact keys and no
- * payload**, like the direct path's signals, so nothing can ride on it; a
- * Client that does not know it ignores it, as it does every unknown control
- * shape.
+ * will answer (`docs/specs/remote-api.md` → Transport). **Exact keys**, like
+ * the direct path's signals, so nothing can ride on it: bare, or — for a
+ * direct-only session the path ended (`docs/specs/remote-network.md` -> "Local
+ * networks") — `reason: 'network-not-allowed'`, with the one IP literal the
+ * Burrow can name and where it came from, or none. A Client that does not know
+ * it ignores it, as it does every unknown control shape.
  */
-export interface SessionEndV1 {
-  readonly v: 1;
-  readonly t: 'session-end';
-}
+export type SessionEndV1 =
+  | { readonly v: 1; readonly t: 'session-end' }
+  | { readonly v: 1; readonly t: 'session-end'; readonly reason: 'network-not-allowed' }
+  | {
+      readonly v: 1;
+      readonly t: 'session-end';
+      readonly reason: 'network-not-allowed';
+      /** An IP literal ({@link isIpLiteral}), never a name. */
+      readonly address: string;
+      readonly addressSource: PathAddressSource;
+    };
 
 export const SESSION_END_V1: SessionEndV1 = Object.freeze({ v: 1, t: 'session-end' });
 
 export function isSessionEndV1(value: unknown): value is SessionEndV1 {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const message = value as Record<string, unknown>;
-  return message.v === 1 && message.t === 'session-end' && Object.keys(message).length === 2;
+  if (message.v !== 1 || message.t !== 'session-end') return false;
+  const keys = Object.keys(message).length;
+  if (keys === 2) return true;
+  if (message.reason !== 'network-not-allowed') return false;
+  if (keys === 3) return true;
+  return (
+    keys === 5 && isIpLiteral(message.address) && includesCode(PATH_ADDRESS_SOURCES, message.addressSource)
+  );
 }
 
 /** Membership in a denial list, without widening the list's literal type. */

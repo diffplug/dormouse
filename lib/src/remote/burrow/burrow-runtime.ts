@@ -59,6 +59,7 @@ import {
 import type { BurrowEnrollment } from './enrollment';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import type { DirectPeering } from '../direct/direct-peer';
+import type { PathRefusal } from '../direct/path-refusal';
 import {
   RelayHeartbeat,
   closeCode,
@@ -299,6 +300,12 @@ export interface BurrowOptions {
    * policy's refusal ends the session.
    */
   directPeering?: DirectPeering;
+  /**
+   * The path ended a direct-only session (`EstablishedE2eSession.pathRefusal`);
+   * the service holds the latest (`docs/specs/remote-network.md` -> "Local
+   * networks").
+   */
+  onPathRefused?: (refusal: PathRefusal) => void;
 }
 
 const INITIAL_BACKOFF_MS = 1_000;
@@ -321,6 +328,7 @@ export class BurrowRuntime {
   readonly #setTimer: RemoteTimer;
   readonly #reconnect: boolean;
   readonly #directPeering: DirectPeering;
+  readonly #onPathRefused: (refusal: PathRefusal) => void;
 
   /**
    * Per-client lifecycle state keyed by clientId. Folding the three concerns
@@ -440,6 +448,7 @@ export class BurrowRuntime {
     this.#setTimer = options.setTimer ?? realTimer;
     this.#reconnect = options.reconnect ?? true;
     this.#directPeering = options.directPeering ?? { createPeer: null };
+    this.#onPathRefused = options.onPathRefused ?? (() => {});
   }
 
   get status(): BurrowStatus {
@@ -622,7 +631,7 @@ export class BurrowRuntime {
       const directBy = established?.e2e.directDeadlineAt ?? null;
       if (established && directBy !== null) {
         const { e2e } = established;
-        out.push({ at: directBy, expire: () => this.#endDirectOnly(clientId, e2e, 'deadline') });
+        out.push({ at: directBy, expire: () => e2e.expireDirectOnly() });
       }
       if (established) {
         out.push({
@@ -1523,8 +1532,6 @@ export class BurrowRuntime {
       directPeering: this.#directPeering,
       sendRelay: (ciphertext) =>
         this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext),
-      // A refused path ends it with no goodbye, which could only ride the
-      // refused channel; the phone reads the channel's close.
       onFatal: () => this.#disposeEstablished(clientId),
       directOnly,
       onDirectOnlyBroken: (reason) => this.#endDirectOnly(clientId, e2e, reason),
@@ -1538,12 +1545,15 @@ export class BurrowRuntime {
   /**
    * End a direct-only session the relay would otherwise have to carry: with
    * the goodbye, so the phone reads the computer's ending rather than a
-   * silence (`docs/specs/remote-network.md` -> "Local networks"). `e2e` names
-   * the session meant, so a late call cannot end its replacement.
+   * silence, and why where the path was (`docs/specs/remote-network.md` ->
+   * "Local networks"). `e2e` names the session meant, so a late call cannot
+   * end its replacement.
    */
   #endDirectOnly(clientId: string, e2e: EstablishedE2eSession, reason: DirectOnlyBreak): void {
     if (this.#clients.get(clientId)?.established?.e2e !== e2e) return;
     console.warn(`[burrow] ended a direct-only session: ${reason}`);
+    const refusal = e2e.pathRefusal;
+    if (refusal) this.#onPathRefused(refusal);
     this.#disposeEstablished(clientId, { goodbye: true, only: e2e });
     this.#armReaper();
   }

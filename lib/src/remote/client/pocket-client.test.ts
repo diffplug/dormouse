@@ -1334,12 +1334,14 @@ describe('a direct-only session, end to end', () => {
     expect(unsupported.harness.client.connectedBurrowId).toBeNull();
     expect(relayedApp(unsupported.harness)).toEqual([]);
 
-    // A path off the allowed networks, which the Burrow refuses.
+    // A path off the allowed networks, which the Burrow refuses — and says so
+    // in its goodbye, naming the address its ICE agent saw.
     const refused = await directOnly({ network: { selectedPair: OFF_LAN_PAIR } });
-    // The closed channel gives the attempt up here too, before the deadline.
     expect(await refused.harness.client.connect(refused.harness.burrowId)).toMatchObject({
       ok: false,
-      message: DIRECT_ONLY_FAILED_MESSAGE,
+      message:
+        'This computer only accepts phones on its allowed networks. Yours connected from 10.0.0.3 — ' +
+        'join the same Wi-Fi or VPN as the computer and try again.',
     });
     expect(refused.harness.burrow.establishedSessionCount).toBe(0);
     expect(relayedApp(refused.harness)).toEqual([]);

@@ -642,6 +642,52 @@ describe('DirectPeer', () => {
       expect(run.burrow.refusals).toEqual(['off the LAN']);
     });
 
+    it('names a refused pair’s remote end as observed, over what the offer reported', async () => {
+      const offered: string[] = [];
+      const run = await connected(
+        { selectedPair: OFF_LAN },
+        lanOnlyPolicy({
+          reportedAddress: (sdp) => {
+            offered.push(sdp);
+            return '203.0.113.7';
+          },
+          // Stripped of everything: what is reported is read before this.
+          acceptRemote: () => 'v=0\r\n',
+        }),
+      );
+      expect(offered).toHaveLength(1);
+      expect(offered[0]).toContain(`a=candidate:1 1 udp 2130706431 ${FAKE_LAN_PAIR.remote}`);
+      expect(run.burrowPeer.pathAddress).toEqual({ address: OFF_LAN.remote, source: 'observed' });
+    });
+
+    it('names what the offer reported where no pair was refused, and nothing without a policy', async () => {
+      const policy = lanOnlyPolicy({ reportedAddress: () => '203.0.113.7' });
+      // A public address in the offer decides nothing: the allowed pair carries
+      // the session, and is no evidence of where a refused phone was.
+      const allowed = await connected({}, policy);
+      expect(allowed.burrow.opens).toBe(1);
+      expect(allowed.burrow.refusals).toEqual([]);
+      expect(allowed.burrowPeer.pathAddress).toEqual({ address: '203.0.113.7', source: 'reported' });
+
+      const unheld = await connected({ selectedPair: OFF_LAN });
+      expect(unheld.burrowPeer.pathAddress).toBeNull();
+    });
+
+    it('names only an IP literal, an IPv4-mapped one as its IPv4 half', async () => {
+      const mapped = await connected(
+        { selectedPair: { local: '10.0.0.2', remote: '::ffff:172.58.12.9' } },
+        lanOnlyPolicy({ reportedAddress: () => '203.0.113.7' }),
+      );
+      expect(mapped.burrowPeer.pathAddress).toEqual({ address: '172.58.12.9', source: 'observed' });
+
+      const named = await connected(
+        { selectedPair: { local: '10.0.0.2', remote: '0b1c5f3a-1d2e.local' } },
+        lanOnlyPolicy({ reportedAddress: () => 'phone.local' }),
+      );
+      expect(named.burrow.refusals).toEqual(['off the LAN']);
+      expect(named.burrowPeer.pathAddress).toBeNull();
+    });
+
     it('applies the peer’s description as the policy accepts it', async () => {
       const run = pair({}, lanOnlyPolicy({ acceptRemote: (sdp) => `${sdp}a=accepted\r\n` }));
       const offer = await run.clientPeer.offer();

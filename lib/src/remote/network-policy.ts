@@ -9,6 +9,7 @@
 
 import type { RelayMode } from '../host/relay-origin';
 import { isRecord, isStringArray } from '../lib/is-record';
+import { isPathRefusal, type PathRefusal } from './direct/path-refusal';
 
 /** Every level a policy may name, whichever build offers it. */
 export const NETWORK_LEVELS = ['nothing', 'local', 'anywhere', 'relay'] as const;
@@ -51,6 +52,12 @@ export interface NetworkPolicyResult {
   /** The levels this build offers, in the order the picker lists them. */
   levels: NetworkLevel[];
   interfaces: NetworkInterfaceInfo[];
+  /**
+   * The last direct-only session the path ended, this service run, until
+   * dismissed (`docs/specs/remote-network.md` -> "Local networks"); absent with
+   * none, and from a broker older than the field.
+   */
+  refusal?: PathRefusal;
 }
 
 /** The most CIDRs a policy may allow. */
@@ -126,8 +133,9 @@ export function networkPolicyResult(
   policy: NetworkPolicy,
   mode: RelayMode,
   interfaces: NetworkInterfaceInfo[],
+  refusal: PathRefusal | null = null,
 ): NetworkPolicyResult {
-  return { policy, levels: levelsFor(mode), interfaces };
+  return { policy, levels: levelsFor(mode), interfaces, ...(refusal ? { refusal } : {}) };
 }
 
 /**
@@ -171,6 +179,7 @@ export function isNetworkPolicyResult(value: unknown): value is NetworkPolicyRes
     Array.isArray(value.levels) &&
     value.levels.every(isLevel) &&
     Array.isArray(value.interfaces) &&
-    value.interfaces.every(isNetworkInterfaceInfo)
+    value.interfaces.every(isNetworkInterfaceInfo) &&
+    (value.refusal === undefined || isPathRefusal(value.refusal))
   );
 }

@@ -41,7 +41,7 @@ import {
   PAIRING_OUTCOME_LABEL,
   RemoteControlSection,
 } from './RemoteControlSection';
-import { hostOf } from './remote-control-shared';
+import { hostOf, pathRefusalSentence } from './remote-control-shared';
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import {
   isOneTimeState,
@@ -1945,6 +1945,13 @@ describe('One-time connection', () => {
     }
     // The failure this whole feature is most likely to hit names its fix.
     expect(copy['direct-failed']).toContain('allowed network');
+  });
+
+  it('names where the phone connected from when the path ended it, in the Network panel’s words', async () => {
+    const refusal = { at: NOW, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' } as const;
+    await renderOneTime(oneTimeService({ status: 'ended', reason: 'network-not-allowed', refusal }));
+    expect(oneTimeOutcome()?.textContent).toBe(pathRefusalSentence(refusal, 'one-time'));
+    expect(oneTimeOutcome()?.textContent).toContain('172.58.12.9');
   });
 
   it('names the rendezvous by this build’s relay host, a dev build’s included', async () => {

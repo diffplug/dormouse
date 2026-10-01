@@ -34,10 +34,13 @@ import {
   NetworkPhones,
   NetworkSettings,
   NetworkUpdates,
+  PATH_REFUSAL_LABEL,
   connectionsFor,
   policyForLevel,
   type NetworkFacts,
 } from './NetworkSettings';
+import { pathRefusalSentence } from './remote-control-shared';
+import type { PathRefusal } from '../remote/direct/path-refusal';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -225,6 +228,41 @@ describe('policyForLevel', () => {
       allowed: [LAN],
       autoUpdate: true,
     });
+  });
+});
+
+/** 10:42 on this machine's clock, whatever its zone. */
+const AT_10_42 = new Date(2026, 9, 1, 10, 42).getTime();
+const CLOCK_10_42 = new Date(AT_10_42).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+describe('pathRefusalSentence', () => {
+  const observed: PathRefusal = { at: AT_10_42, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' };
+  const reported: PathRefusal = { ...observed, kind: 'given-up', addressSource: 'reported' };
+  const none: PathRefusal = { at: AT_10_42, kind: 'deadline' };
+
+  it('says when, and where the phone connected from, above the allowed networks', () => {
+    expect(pathRefusalSentence(observed, 'network-panel')).toBe(
+      `At ${CLOCK_10_42} a phone tried to connect from 172.58.12.9, which isn’t on a network allowed below.`,
+    );
+    // The phone's own claim is named as its claim.
+    expect(pathRefusalSentence(reported, 'network-panel')).toBe(
+      `At ${CLOCK_10_42} a phone reported 172.58.12.9, which isn’t on a network allowed below.`,
+    );
+    expect(pathRefusalSentence(none, 'network-panel')).toBe(
+      `At ${CLOCK_10_42} a phone couldn’t reach this computer over an allowed network.`,
+    );
+  });
+
+  it('words a one-time ending the same way, as the ending', () => {
+    expect(pathRefusalSentence(observed, 'one-time')).toBe(
+      'The phone tried to connect from 172.58.12.9, which isn’t on one of your allowed networks, so the connection ended.',
+    );
+    expect(pathRefusalSentence(reported, 'one-time')).toBe(
+      'The phone reported 172.58.12.9, which isn’t on one of your allowed networks, so the connection ended.',
+    );
+    expect(pathRefusalSentence(none, 'one-time')).toBe(
+      'The phone couldn’t reach this computer over one of your allowed networks, so the connection ended.',
+    );
   });
 });
 
@@ -423,6 +461,25 @@ describe('Settings → Network', () => {
     await act(async () =>
       container.querySelector<HTMLElement>('[role="switch"][aria-label="Allow Local network en5 on"]')!.click());
     expect(sentPolicies()).toEqual([{ ...both, allowed: [LAN, 'fd00:1::/64'] }]);
+  });
+
+  it('shows the last refused phone above the allowed networks until it is dismissed', async () => {
+    const refusal: PathRefusal = { at: AT_10_42, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES, refusal) });
+    await render();
+    const notice = () => container.querySelector(`[role="status"][aria-label="${PATH_REFUSAL_LABEL}"]`);
+    expect(notice()?.textContent).toContain(pathRefusalSentence(refusal, 'network-panel'));
+
+    await act(async () => button('Dismiss').click());
+    expect(command.mock.calls.map(([cmd]) => cmd)).toContain('dismissPathRefusal');
+    expect(notice()).toBeNull();
+  });
+
+  it('shows no refused phone under a level that holds no path', async () => {
+    const refusal: PathRefusal = { at: AT_10_42, kind: 'deadline' };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(ANYWHERE, 'hosted', INTERFACES, refusal) });
+    await render();
+    expect(text()).not.toContain('couldn’t reach this computer');
   });
 
   it('says how many ranges may be allowed rather than sending one too many', async () => {

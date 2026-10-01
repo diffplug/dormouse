@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
+import type { PathRefusal } from '../remote/direct/path-refusal';
 import type { NetworkPolicy } from '../remote/network-policy';
 
 /**
@@ -52,6 +53,30 @@ export function useBusyAction() {
   }, []);
 
   return { busy, error, run };
+}
+
+/**
+ * What the person at this machine reads when the path ended a phone's session
+ * (`docs/specs/remote-network.md` -> "Local networks"): one wording for
+ * Settings → Network, which says when, above its allowed networks, and for a
+ * one-time connection's ending. An address the phone `reported` is named as
+ * its claim, never as where it connected from.
+ */
+export function pathRefusalSentence(refusal: PathRefusal, place: 'network-panel' | 'one-time'): string {
+  const panel = place === 'network-panel';
+  const phone = panel ? `At ${clockTime(refusal.at)} a phone` : 'The phone';
+  const end = panel ? '.' : ', so the connection ended.';
+  if (refusal.address === undefined) {
+    return `${phone} couldn’t reach this computer over ${panel ? 'an allowed network' : 'one of your allowed networks'}${end}`;
+  }
+  const said = refusal.addressSource === 'observed' ? 'tried to connect from' : 'reported';
+  const networks = panel ? 'a network allowed below' : 'one of your allowed networks';
+  return `${phone} ${said} ${refusal.address}, which isn’t on ${networks}${end}`;
+}
+
+/** `at` as this machine's clock shows it, hours and minutes. */
+function clockTime(at: number): string {
+  return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
 /** What a connected one-time phone can do, as the panel and the indicator's tooltip say it. */

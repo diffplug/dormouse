@@ -54,7 +54,8 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import type { DirectPeering, DirectViolationCause } from '../direct/direct-peer';
+import type { DirectPeering } from '../direct/direct-peer';
+import type { PathRefusal } from '../direct/path-refusal';
 import { parseOneTimeFrame, RendezvousHold } from '../one-time-rendezvous';
 import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import {
@@ -86,7 +87,7 @@ export type OneTimeEndReason =
   | 'phone-left'
   /** No direct path: declined, abandoned, or not switched by `DIRECT_ONLY_DEADLINE_MS`. */
   | 'direct-failed'
-  /** The direct path's policy refused it: no allowed network carried it, before the switch or after. */
+  /** The path ended a session held to the allowed networks, before the switch or after: its `refusal` says how. */
   | 'network-not-allowed'
   /** The session went `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` without a word from the phone. */
   | 'idle'
@@ -121,7 +122,8 @@ export type OneTimeState =
   | { readonly status: 'confirming'; readonly label: string; readonly expiresAt: number }
   | { readonly status: 'connecting'; readonly label: string }
   | { readonly status: 'connected'; readonly label: string; readonly since: number }
-  | { readonly status: 'ended'; readonly reason: OneTimeEndReason };
+  /** `refusal` is `network-not-allowed`'s, and only its (`EstablishedE2eSession.pathRefusal`). */
+  | { readonly status: 'ended'; readonly reason: OneTimeEndReason; readonly refusal?: PathRefusal };
 
 /**
  * One request surfaced for local approval. **The expected code is not here**:
@@ -158,12 +160,16 @@ export interface OneTimeRuntimeOptions {
   createSession(opts: RemoteApiSessionContext): RemoteApiSessionLike;
   /**
    * How this host takes the direct path: with no factory every offer is
-   * declined, and the connection ends `direct-failed`; a path policy's refusal
-   * — under Local networks, the allowed networks
-   * (`docs/specs/remote-network.md` -> "Local networks") — ends it
-   * `network-not-allowed`.
+   * declined, and the connection ends `direct-failed`; under a path policy —
+   * Local networks, the allowed networks (`docs/specs/remote-network.md` ->
+   * "Local networks") — a session the path ended ends `network-not-allowed`.
    */
   readonly directPeering: DirectPeering;
+  /**
+   * The path ended the session ({@link OneTimeState}'s `refusal`), reported as
+   * the paired Burrow reports its own (`BurrowOptions.onPathRefused`).
+   */
+  onPathRefused?(refusal: PathRefusal): void;
   /** This machine's name, as the phone shows it; bounded here before it is sent. */
   readonly burrowLabel: string;
   /** Surface the request for local approval. */
@@ -197,11 +203,11 @@ type RendezvousWork =
 
 /**
  * The endings this laptop chose while the session's cipher is healthy, which
- * the phone is told of with the goodbye (`EstablishedE2eSession.end`). Every
- * other ending is the phone's own, the path's, or a failure with nothing sound
- * left to say it on.
+ * the phone is told of with the goodbye (`EstablishedE2eSession.end`) — a
+ * refused path's carrying why. Every other ending is the phone's own, a path
+ * that never formed, or a failure with nothing sound left to say it on.
  */
-const ENDS_WITH_GOODBYE: ReadonlySet<OneTimeEndReason> = new Set(['user-ended', 'idle']);
+const ENDS_WITH_GOODBYE: ReadonlySet<OneTimeEndReason> = new Set(['user-ended', 'idle', 'network-not-allowed']);
 
 /** What each denial ends the connection as. */
 const END_REASON_FOR_DENIAL: Record<OneTimeDenialCode, OneTimeEndReason> = {
@@ -220,6 +226,7 @@ export class OneTimeRuntime {
   readonly #requestApproval: (request: OneTimeApprovalRequest) => void;
   readonly #dismissApproval: () => void;
   readonly #onChange: (state: OneTimeState) => void;
+  readonly #onPathRefused: (refusal: PathRefusal) => void;
   readonly #now: () => number;
   readonly #setTimer: RemoteTimer;
 
@@ -281,6 +288,7 @@ export class OneTimeRuntime {
     this.#requestApproval = options.requestApproval;
     this.#dismissApproval = options.dismissApproval;
     this.#onChange = options.onChange;
+    this.#onPathRefused = options.onPathRefused ?? (() => {});
     this.#now = options.now ?? (() => Date.now());
     this.#setTimer = options.setTimer ?? realTimer;
     this.#rendezvous = new RendezvousHold(this.#setTimer);
@@ -604,7 +612,7 @@ export class OneTimeRuntime {
           }),
         directPeering: this.#directPeering,
         sendRelay: (relayed) => this.#sendFrame('transport', relayed),
-        onFatal: (reason, cause) => this.#onSessionFatal(e2e, reason, cause),
+        onFatal: (reason) => this.#onSessionFatal(e2e, reason),
         directOnly: true,
         onDirectOnlyBroken: (reason) => this.#onDirectOnlyBroken(e2e, reason),
         onTransportChanged: (path) => this.#onTransportChanged(e2e, path),
@@ -643,8 +651,9 @@ export class OneTimeRuntime {
   /**
    * The session cannot be direct, which is the only way it runs. **Application
    * data never crosses the rendezvous**, so a phone that sends it there is not
-   * one this Burrow serves; a given-up attempt or a missed deadline has no
-   * relay to fall back to (`EstablishedE2eSession`'s `directOnly`).
+   * one this Burrow serves; a refused path, a given-up attempt, or a missed
+   * deadline has no relay to fall back to (`EstablishedE2eSession`'s
+   * `directOnly`), and ends `network-not-allowed` where the path was why.
    */
   #onDirectOnlyBroken(e2e: EstablishedE2eSession, reason: DirectOnlyBreak): void {
     if (this.#established !== e2e) return;
@@ -653,22 +662,20 @@ export class OneTimeRuntime {
       this.#end('burrow-error');
       return;
     }
-    this.#end('direct-failed');
+    const refusal = e2e.pathRefusal;
+    if (!refusal) {
+      this.#end('direct-failed');
+      return;
+    }
+    this.#onPathRefused(refusal);
+    this.#end('network-not-allowed', refusal);
   }
 
-  /**
-   * The session is over: the path policy refused its path, or else before the
-   * switch no direct path formed and after it the phone went.
-   */
-  #onSessionFatal(
-    e2e: EstablishedE2eSession,
-    reason: string,
-    cause: DirectViolationCause | undefined,
-  ): void {
+  /** The session is over: before the switch no direct path formed, and after it the phone went. */
+  #onSessionFatal(e2e: EstablishedE2eSession, reason: string): void {
     if (this.#established !== e2e) return;
     console.warn(`[one-time] the session ended: ${reason}`);
-    if (cause === 'path-refused') this.#end('network-not-allowed');
-    else this.#end(this.#state.status === 'connected' ? 'phone-left' : 'direct-failed');
+    this.#end(this.#state.status === 'connected' ? 'phone-left' : 'direct-failed');
   }
 
   // --- Deadlines -------------------------------------------------------------
@@ -702,7 +709,7 @@ export class OneTimeRuntime {
         const directBy = e2e?.directDeadlineAt ?? null;
         return [
           ...(e2e && directBy !== null
-            ? [{ at: directBy, expire: () => this.#onDirectOnlyBroken(e2e, 'deadline') }]
+            ? [{ at: directBy, expire: () => e2e.expireDirectOnly() }]
             : []),
           ...this.#idleDeadline(),
         ];
@@ -767,11 +774,11 @@ export class OneTimeRuntime {
    * timer, and the socket — closed normally, after being detached. Nothing is
    * written anywhere, and nothing resumes.
    */
-  #end(reason: OneTimeEndReason): void {
+  #end(reason: OneTimeEndReason, refusal?: PathRefusal): void {
     const previous = this.#state;
     if (previous.status === 'ended') return;
     // First, so nothing the teardown below re-enters can end it twice.
-    this.#state = { status: 'ended', reason };
+    this.#state = refusal ? { status: 'ended', reason, refusal } : { status: 'ended', reason };
     this.#clearDeadline();
     this.#work.length = 0;
     const e2e = this.#established;

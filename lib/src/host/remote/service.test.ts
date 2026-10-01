@@ -1841,14 +1841,25 @@ describe('one-time connection', () => {
       expect(pathPolicy!.refusal({ local: '192.168.1.2', remote: '10.0.0.3' })).not.toBeNull();
     });
 
-    it('ends network-not-allowed when the phone’s end of the pair is off them', async () => {
+    it('ends network-not-allowed when the phone’s end of the pair is off them, naming it', async () => {
       createHostedService(undefined, { createDirectPeer: answererTo('10.0.0.3', []) });
       const phone = await approvedPhone();
 
       await offerOneTimeDirect(phone, network);
       await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
-      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
+      const refusal = { at: expect.any(Number), kind: 'path-refused', address: '10.0.0.3', addressSource: 'observed' };
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed', refusal });
       expect(servingEvents().at(-1)).toBe(false);
+
+      // Held for Settings → Network too, the one record either runtime reports,
+      // until it is dismissed.
+      const events = () => uiEvents().filter((event) => event.name === 'network-policy');
+      expect(events().at(-1)).toMatchObject({ refusal });
+      expect((await command('networkPolicy')).result).toMatchObject({ refusal });
+      const dismissed = (await command('dismissPathRefusal')).result as Record<string, unknown>;
+      expect(dismissed).not.toHaveProperty('refusal');
+      expect(events().at(-1)).not.toHaveProperty('refusal');
+      expect((await command('networkPolicy')).result).not.toHaveProperty('refusal');
     });
 
     it('rests that ending, its runtime gone, on a change of path, so no other level reports it', async () => {
@@ -1858,7 +1869,7 @@ describe('one-time connection', () => {
 
       // `autoUpdate` alone changes no path, so the ending stays to report.
       await setPolicy({ ...LOCAL_ON, autoUpdate: true });
-      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
+      expect(oneTimeStates().at(-1)).toMatchObject({ status: 'ended', reason: 'network-not-allowed' });
       await setPolicy(ANYWHERE_ON);
       expect(oneTimeStates().at(-1)).toEqual({ status: 'idle' });
     });
@@ -1926,6 +1937,7 @@ describe('one-time connection', () => {
       { status: 'waiting', expiresAt: 1 },
       { status: 'connected', label: 'x' },
       { status: 'ended' },
+      { status: 'ended', reason: 'network-not-allowed', refusal: { at: 1, kind: 'deadline', address: 'phone.local', addressSource: 'observed' } },
       { status: 'unheard-of' },
     ]) {
       expect(isOneTimeState(malformed), JSON.stringify(malformed)).toBe(false);
@@ -2637,6 +2649,16 @@ describe('Hosted enrollment', () => {
     hosted({ network: NOTHING });
     expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('set to Nothing');
     expect(requests).toEqual([]);
+  });
+
+  it('says which host it could not reach and why, never undici’s bare `fetch failed`', async () => {
+    const unresolved = Object.assign(new TypeError('fetch failed'), {
+      cause: Object.assign(new Error('getaddrinfo ENOTFOUND relay.dormouse.sh'), { code: 'ENOTFOUND' }),
+    });
+    hosted(undefined, { fetch: () => Promise.reject(unresolved) });
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toBe(
+      'Couldn’t reach relay.dormouse.sh: the name doesn’t resolve.',
+    );
   });
 
   it('refuses a begin answer that is not an enrollment code, waiting on nothing', async () => {

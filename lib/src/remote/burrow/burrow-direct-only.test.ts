@@ -2,15 +2,17 @@
  * A paired phone's session under a held path policy — Local networks
  * (`docs/specs/remote-network.md` -> "Local networks"): the outcome says it is
  * direct-only, an application message off the relay ends it unread, and so do
- * a given-up attempt and the direct deadline, each with the goodbye. Without a
- * path policy the relay carries protocol-v1 as ever. And every `stop()` tells
- * its sessions so.
+ * a given-up attempt and the direct deadline, each with the goodbye — which,
+ * where the path was why, says so and names the address the Burrow can, as
+ * the refusal it reports does. Without a path policy the relay carries
+ * protocol-v1 as ever. And every `stop()` tells its sessions so.
  */
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   DEFAULT_PAIRING_TTL_MS,
+  DIRECT_ANSWER_TIMEOUT_MS,
   DIRECT_BUFFER_HIGH,
   DIRECT_ONLY_DEADLINE_MS,
   SESSION_END_V1,
@@ -29,7 +31,8 @@ import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
 import { createTestClock } from '../test-timers';
 import { FakeDirectNetwork, OFF_LAN_PAIR, lanOnlyPolicy } from '../direct/test-fake-peer';
-import type { DirectPeering } from '../direct/direct-peer';
+import { DirectPeer, type DirectPathPolicy, type DirectPeering } from '../direct/direct-peer';
+import type { PathRefusal } from '../direct/path-refusal';
 import {
   createTestAuthenticator,
   e2eFramesFor,
@@ -58,6 +61,7 @@ describe('BurrowRuntime direct-only sessions', () => {
   let approvals: PendingPairing[];
   let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }>;
   let warn: ReturnType<typeof vi.spyOn>;
+  let refusals: PathRefusal[];
 
   beforeAll(async () => {
     const material = await mintNoiseStaticKeyPair();
@@ -77,6 +81,7 @@ describe('BurrowRuntime direct-only sessions', () => {
   beforeEach(() => {
     approvals = [];
     sessions = [];
+    refusals = [];
     clock = createTestClock(1_700_000_000_000);
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
@@ -106,6 +111,7 @@ describe('BurrowRuntime direct-only sessions', () => {
           },
         } satisfies RemoteApiSessionLike;
       },
+      onPathRefused: (refusal) => refusals.push(refusal),
       now: clock.now,
       setTimer: clock.setTimer,
     });
@@ -115,9 +121,27 @@ describe('BurrowRuntime direct-only sessions', () => {
   }
 
   /** Under Local networks: a peer factory on the fake network, and the LAN-only hold. */
-  function localNetworks(network = new FakeDirectNetwork()): FakeDirectNetwork {
-    makeBurrow({ createPeer: () => network.createAnswerer(), pathPolicy: lanOnlyPolicy() });
+  function localNetworks(
+    network = new FakeDirectNetwork(),
+    pathPolicy: DirectPathPolicy = lanOnlyPolicy(),
+  ): FakeDirectNetwork {
+    makeBurrow({ createPeer: () => network.createAnswerer(), pathPolicy });
     return network;
+  }
+
+  /** The phone's offer on the relay, and the Burrow's answer read back; the channel is the network's to open. */
+  async function offerOnly(
+    live: { session: NoiseTransportSession; connectionId: string; clientId: string },
+    network: FakeDirectNetwork,
+  ): Promise<void> {
+    const phone = new DirectPeer({
+      peer: network.createOfferer(),
+      setTimer: clock.setTimer,
+      handlers: { onOpen: () => {}, onFrame: () => {}, onClosed: () => {}, onViolation: () => {} },
+    });
+    const sdp = await phone.offer();
+    send(live.clientId, live.connectionId, live.session.sendControl({ v: 1, t: 'direct-offer', sdp }));
+    expect(await lastControl(live, 1)).toMatchObject({ t: 'direct-answer' });
   }
 
   async function pairClient(clientId: string): Promise<NoiseKeyPair> {
@@ -240,7 +264,9 @@ describe('BurrowRuntime direct-only sessions', () => {
     clock.advance(1);
     expect(burrow.establishedSessionCount).toBe(0);
     expect(sessions[0]!.disposed).toBe(true);
+    // A phone that never offered says nothing about the path.
     expect(await lastControl(live, 1)).toEqual(SESSION_END_V1);
+    expect(refusals).toEqual([]);
   });
 
   it('ends a session whose attempt was given up, after the decline', async () => {
@@ -260,11 +286,15 @@ describe('BurrowRuntime direct-only sessions', () => {
     expect(burrow.establishedSessionCount).toBe(0);
   });
 
-  it('ends a session whose path the policy refuses, with no goodbye on that path', async () => {
-    const network = localNetworks(new FakeDirectNetwork({ selectedPair: OFF_LAN_PAIR }));
+  it('ends a session whose path the policy refuses with a goodbye on the relay naming the pair’s remote end', async () => {
+    const network = localNetworks(
+      new FakeDirectNetwork({ selectedPair: OFF_LAN_PAIR }),
+      // Offered, and outranked: the pair the ICE agent reported is evidence.
+      lanOnlyPolicy({ reportedAddress: () => '203.0.113.7' }),
+    );
     const live = await connect();
     const before = transportCount(live.connectionId);
-    await openDirectPath({
+    const { signals } = await openDirectPath({
       socket,
       burrowId: enrollment.burrowId,
       clientId: live.clientId,
@@ -272,14 +302,68 @@ describe('BurrowRuntime direct-only sessions', () => {
       session: live.session,
       network,
       setTimer: clock.setTimer,
-    }).catch(() => undefined);
+    });
     await settle();
 
     expect(burrow.establishedSessionCount).toBe(0);
     expect(sessions[0]!.disposed).toBe(true);
-    // The answer, and nothing after it: no goodbye followed the refusal. (The
-    // test's own wait for the Burrow's switch is what timed out above.)
-    expect(transportCount(live.connectionId)).toBe(before + 1);
+    // The answer, then the goodbye — on the relay, since the refused channel
+    // never carried this session.
+    expect(transportCount(live.connectionId)).toBe(before + 2);
+    expect(signals.at(-1)).toEqual({
+      ...SESSION_END_V1,
+      reason: 'network-not-allowed',
+      address: OFF_LAN_PAIR.remote,
+      addressSource: 'observed',
+    });
+    expect(refusals).toEqual([
+      { at: clock.now(), kind: 'path-refused', address: OFF_LAN_PAIR.remote, addressSource: 'observed' },
+    ]);
+  });
+
+  it('names the address the phone’s offer reported where no pair formed, as a refusal', async () => {
+    const offered: string[] = [];
+    const network = localNetworks(
+      new FakeDirectNetwork({ opening: 'never' }),
+      lanOnlyPolicy({
+        reportedAddress: (sdp) => {
+          offered.push(sdp);
+          return '203.0.113.7';
+        },
+      }),
+    );
+    const live = await connect();
+    await offerOnly(live, network);
+    // Read off the offer as the phone sent it.
+    expect(offered).toHaveLength(1);
+    expect(offered[0]).toContain('a=candidate:');
+
+    clock.advance(DIRECT_ANSWER_TIMEOUT_MS);
+    await settle();
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(await lastControl(live, 2)).toEqual({
+      ...SESSION_END_V1,
+      reason: 'network-not-allowed',
+      address: '203.0.113.7',
+      addressSource: 'reported',
+    });
+    expect(refusals).toEqual([
+      { at: clock.now(), kind: 'given-up', address: '203.0.113.7', addressSource: 'reported' },
+    ]);
+  });
+
+  it('says the path ended a session it tried and missed the deadline on, with no address to name', async () => {
+    const network = localNetworks(new FakeDirectNetwork({ opening: 'never' }));
+    const live = await connect();
+    // An offer late enough that the session's deadline comes before the answer's.
+    clock.advance(DIRECT_ONLY_DEADLINE_MS - 2_000);
+    await offerOnly(live, network);
+    expect(burrow.establishedSessionCount).toBe(1);
+    clock.advance(2_000);
+    await settle();
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(refusals).toEqual([{ at: clock.now(), kind: 'deadline' }]);
+    expect(await lastControl(live, 2)).toEqual({ ...SESSION_END_V1, reason: 'network-not-allowed' });
   });
 
   it('relays protocol-v1 as ever without a path policy, and says nothing of the direct path in the outcome', async () => {

@@ -174,6 +174,30 @@ describe('localNetworksPath', () => {
     expect(candidatesIn(localNetworksPath(['10.0.0.0/8']).acceptRemote(offer))).toEqual([]);
   });
 
+  it('reports the offer’s first public candidate, whatever the allowed networks, as a diagnostic', () => {
+    // A phone on cellular: its carrier's CGNAT host, a link-local, a ULA, an
+    // mDNS name, then the srflx Cloudflare STUN gave it — and another after.
+    const offer = [
+      'v=0',
+      'c=IN IP4 198.51.100.1',
+      'a=candidate:1 1 udp 2113937151 100.70.1.2 51234 typ host',
+      'a=candidate:2 1 udp 2113937151 169.254.3.4 51235 typ host',
+      'a=candidate:3 1 udp 2113937151 fd12:3456::1 51236 typ host',
+      'a=candidate:4 1 udp 2113937151 fe80::1%en0 51239 typ host',
+      'a=candidate:5 1 udp 2113937151 0f1e2d3c-aaaa-bbbb-cccc-000000000000.local 51237 typ host',
+      'a=candidate:6 1 udp 1677729535 172.58.12.9 40000 typ srflx raddr 0.0.0.0 rport 0',
+      'a=candidate:7 1 udp 1677729535 2607:fb90:1:2::9 40001 typ srflx raddr :: rport 0',
+      '',
+    ].join('\r\n');
+    expect(localNetworksPath(LAN).reportedAddress(offer)).toBe('172.58.12.9');
+    // The same whatever is allowed: it is never read against the allowed networks.
+    expect(localNetworksPath(['172.58.0.0/16']).reportedAddress(offer)).toBe('172.58.12.9');
+    expect(localNetworksPath(LAN).reportedAddress(offer.replace(/^a=candidate:6 .*$/m, ''))).toBe('2607:fb90:1:2::9');
+    // Private addresses only, or none at all: nothing to report.
+    expect(localNetworksPath(LAN).reportedAddress(LAN_OFFER_PRIVATE)).toBeNull();
+    expect(localNetworksPath(LAN).reportedAddress('v=0\r\n')).toBeNull();
+  });
+
   it('allows a pair whose two ends are both on allowed networks', () => {
     const path = localNetworksPath([...LAN, ...TAILNET]);
     expect(path.refusal({ local: '192.168.86.160', remote: '192.168.86.23' })).toBeNull();
@@ -203,3 +227,12 @@ describe('localNetworksPath', () => {
     expect(path.refusal(null)).toBe('the connection reports no selected candidate pair');
   });
 });
+
+/** An offer from a phone on a private network, behind no STUN. */
+const LAN_OFFER_PRIVATE = [
+  'v=0',
+  'a=candidate:1 1 udp 2113937151 192.168.86.23 51234 typ host',
+  'a=candidate:2 1 udp 2113937151 10.1.2.3 51235 typ host',
+  'a=candidate:3 1 udp 2113937151 172.16.4.5 51236 typ host',
+  '',
+].join('\r\n');

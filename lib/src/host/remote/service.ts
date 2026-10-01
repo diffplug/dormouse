@@ -32,7 +32,7 @@ import {
   type EnrollmentStatic,
 } from '../../remote/burrow/enrollment';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
-import { burrowFetch } from '../../remote/burrow/burrow-fetch';
+import { burrowFetch, describingFetchFailures } from '../../remote/burrow/burrow-fetch';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import {
   loadPushDevices,
@@ -42,6 +42,7 @@ import {
   type AlertPushDeps,
 } from '../../remote/burrow/push-delivery';
 import type { RemoteApiSessionContext } from '../../remote/burrow/established-session';
+import type { PathRefusal } from '../../remote/direct/path-refusal';
 import { RemoteApiSession } from '../../remote/burrow/remote-api';
 import {
   BurrowRuntime,
@@ -484,6 +485,12 @@ export class BurrowService {
   /** The first read in flight, which every reader joins. */
   #policyRead: Promise<NetworkPolicy> | null = null;
   /**
+   * The last session either runtime ended for its path, until dismissed or
+   * replaced (`docs/specs/remote-network.md` -> "Local networks"). Memory
+   * only: a restart forgets it.
+   */
+  #pathRefusal: PathRefusal | null = null;
+  /**
    * Lifecycle changes and pairing approvals run one at a time on this chain.
    *
    * Each of those reads `#burrow`, awaits a store round trip, and then acts on
@@ -567,11 +574,14 @@ export class BurrowService {
       this.#refuseNothing();
       return createWebSocket(url);
     };
-    const injectedFetch = options.fetch;
+    // Looked up at the call, like `burrowFetch`'s default; a request that gets
+    // no answer says which host and why, never undici's bare `fetch failed`.
+    const injectedFetch = describingFetchFailures((input, init) =>
+      (options.fetch ?? globalThis.fetch)(input, init),
+    );
     this.#fetch = async (input, init) => {
       this.#refuseNothing();
-      // Looked up at the call, like `burrowFetch`'s default.
-      return (injectedFetch ?? globalThis.fetch)(input, init);
+      return injectedFetch(input, init);
     };
     // A factory's `null` is a direct path declined, the session kept relayed.
     const createDirectPeer = options.createDirectPeer;
@@ -686,7 +696,9 @@ export class BurrowService {
         await this.#settledLevel();
         return this.#oneTimeState;
       case 'networkPolicy':
-        return networkPolicyResult(await this.#networkPolicy(), this.#relay.mode, this.#listInterfaces());
+        return this.#networkPolicyResult(await this.#networkPolicy());
+      case 'dismissPathRefusal':
+        return this.#dismissPathRefusal();
       case 'setNetworkPolicy':
         return this.#serialize(() => this.#setNetworkPolicy(params as SetNetworkPolicyParams | undefined));
       case 'pushTest':
@@ -1262,6 +1274,7 @@ export class BurrowService {
       requestApproval: (request) => this.#requestOneTimeApproval(runtime, request),
       dismissApproval: () => this.#dismissOneTimeApproval(runtime),
       onChange: (next) => this.#onOneTimeChanged(runtime, next),
+      onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
       now: this.#now,
     });
     // Swapped in before either runtime moves: the one being replaced ends
@@ -1370,7 +1383,7 @@ export class BurrowService {
       this.#oneTime?.end('user-ended');
       this.#restOneTime();
     }
-    const result = networkPolicyResult(next, this.#relay.mode, this.#listInterfaces());
+    const result = this.#networkPolicyResult(next);
     try {
       // A running Burrow holds the paths it started under for its life
       // (`directPeeringFor`), so any change to them restarts it; its sessions
@@ -1384,6 +1397,28 @@ export class BurrowService {
       // Saved either way, so said either way: a start that failed is its own error.
       this.#emit({ name: 'network-policy', ...result });
     }
+    return result;
+  }
+
+  /** What `networkPolicy` answers for `policy`: this build's levels, the interfaces now, and the refusal held. */
+  #networkPolicyResult(policy: NetworkPolicy): NetworkPolicyResult {
+    return networkPolicyResult(policy, this.#relay.mode, this.#listInterfaces(), this.#pathRefusal);
+  }
+
+  /** Hold `refusal` as the latest, and say so to every window. */
+  #recordPathRefusal(refusal: PathRefusal): void {
+    if (this.#disposed) return;
+    this.#pathRefusal = refusal;
+    if (this.#policy) this.#emit({ name: 'network-policy', ...this.#networkPolicyResult(this.#policy) });
+  }
+
+  /** Forget the refusal held — the panel's Dismiss — and say so to every window. */
+  async #dismissPathRefusal(): Promise<NetworkPolicyResult> {
+    const policy = await this.#networkPolicy();
+    const had = this.#pathRefusal !== null;
+    this.#pathRefusal = null;
+    const result = this.#networkPolicyResult(policy);
+    if (had) this.#emit({ name: 'network-policy', ...result });
     return result;
   }
 
@@ -1566,6 +1601,7 @@ export class BurrowService {
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
       onInvitationChanged: (inviteId, state, outcome) =>
         this.#emitInvitation(inviteId, state, outcome),
+      onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
       now: this.#now,
     });
     this.#burrow.start();

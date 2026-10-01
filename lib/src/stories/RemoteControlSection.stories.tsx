@@ -603,6 +603,27 @@ export const OneTimeEndedDirectFailedAnywhere: Story = {
   play: settled(/such as cellular/),
 };
 
+/**
+ * Local networks ended it for the path: the sentence names the address the
+ * Burrow saw, in Settings → Network's words.
+ */
+export const OneTimeEndedNetworkNotAllowed: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: {
+        status: 'ended',
+        reason: 'network-not-allowed',
+        refusal: { at: Date.now(), kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' },
+      },
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: settled(
+    'The phone tried to connect from 172.58.12.9, which isn’t on one of your allowed networks, so the connection ended.',
+  ),
+};
+
 /** The one attempt was spent on digits the phone was not showing. */
 export const OneTimeEndedMismatch: Story = {
   parameters: {

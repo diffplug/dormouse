@@ -108,8 +108,12 @@ describe('isNetworkPolicyResult', () => {
 
   it('takes what the service answers, and nothing a panel could not render', () => {
     expect(isNetworkPolicyResult(result)).toBe(true);
+    const refusal = { at: 1, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' };
+    expect(isNetworkPolicyResult({ ...result, refusal })).toBe(true);
     for (const value of [
       null,
+      { ...result, refusal: null },
+      { ...result, refusal: { ...refusal, address: '<b>hi</b>' } },
       { ...result, policy: { ...LOCAL, extra: 1 } },
       { ...result, levels: ['nothing', 'everything'] },
       { ...result, interfaces: [{ ...result.interfaces[0], kind: 'wifi' }] },

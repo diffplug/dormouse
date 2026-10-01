@@ -29,6 +29,8 @@ import {
   MAX_DIRECT_PENDING_FRAMES,
   NOISE_MAX_MESSAGE_LENGTH,
   isDirectSdp,
+  isIpLiteral,
+  type PathAddressSource,
 } from 'remote-lib-common';
 import { realTimer, type RemoteTimer } from '../ws';
 
@@ -143,6 +145,25 @@ export interface DirectSelectedPair {
 }
 
 /**
+ * The one address a path refusal can name, and where it came from
+ * (`docs/specs/remote-network.md` -> "Local networks"): an IP literal, never a
+ * name.
+ */
+export interface PathAddress {
+  readonly address: string;
+  readonly source: PathAddressSource;
+}
+
+/**
+ * `address` as a refusal names it — an IPv4-mapped IPv6 address as its IPv4
+ * half — or `null` for anything that is not an IP literal.
+ */
+function shownAddress(address: string | null): string | null {
+  const unmapped = address?.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, '') ?? null;
+  return isIpLiteral(unmapped) ? unmapped : null;
+}
+
+/**
  * What a Burrow whose network policy restricts the direct path holds one
  * attempt to (`docs/specs/remote-network.md` -> "Local networks"). Built
  * host-side, where the address math is; a peer without one is unrestricted.
@@ -166,6 +187,13 @@ export interface DirectPathPolicy {
    * refusal: the peer's own checks still reach this end's allowed candidates.
    */
   acceptRemote(sdp: string): string;
+  /**
+   * The first public IP literal among the candidates of the peer's description
+   * as it arrived, before {@link acceptRemote} — a phone's server-reflexive
+   * candidate, most often — or `null`. **A diagnostic for the person reading a
+   * refusal, never path evidence**: nothing decides on it.
+   */
+  reportedAddress(sdp: string): string | null;
   /**
    * Why the connection's selected candidate pair may not carry the session,
    * or `null` when it may. `pair` is `null` where the peer reports none.
@@ -258,6 +286,10 @@ export class DirectPeer {
   readonly #flushWaiters: Array<() => void> = [];
   #open = false;
   #closed = false;
+  /** The remote address of the selected pair the path policy refused; see {@link pathAddress}. */
+  #observed: string | null = null;
+  /** {@link DirectPathPolicy.reportedAddress} of the offer this end answered; see {@link pathAddress}. */
+  #reported: string | null = null;
 
   constructor(deps: DirectPeerDeps) {
     this.#peer = deps.peer;
@@ -276,6 +308,19 @@ export class DirectPeer {
   /** Whether the channel has opened and not since gone. */
   get isOpen(): boolean {
     return this.#open && !this.#closed;
+  }
+
+  /**
+   * The address a refusal of this attempt names, under a path policy: the
+   * remote end of the selected pair it refused, as this end's ICE agent
+   * reported it (`observed`), the only path evidence; else the first public
+   * address the peer's offer carried (`reported`), a diagnostic alone; else
+   * `null`.
+   */
+  get pathAddress(): PathAddress | null {
+    if (this.#observed !== null) return { address: this.#observed, source: 'observed' };
+    if (this.#reported !== null) return { address: this.#reported, source: 'reported' };
+    return null;
   }
 
   /**
@@ -315,9 +360,13 @@ export class DirectPeer {
         const channel = (ev as { channel?: DirectChannelLike } | null)?.channel;
         if (channel) this.#adopt(channel);
       });
+      const policy = this.#pathPolicy;
+      // Read before the strip, which is what removes it: a phone off every
+      // allowed network offers nothing the ICE agent may check.
+      if (policy) this.#reported = shownAddress(policy.reportedAddress(offerSdp));
       await this.#peer.setRemoteDescription({
         type: 'offer',
-        sdp: this.#pathPolicy ? this.#pathPolicy.acceptRemote(offerSdp) : offerSdp,
+        sdp: policy ? policy.acceptRemote(offerSdp) : offerSdp,
       });
       const answer = await this.#peer.createAnswer();
       await this.#peer.setLocalDescription(answer);
@@ -714,6 +763,8 @@ export class DirectPeer {
     if (!policy) return false;
     const refusal = policy.refusal(pair);
     if (refusal === null) return false;
+    // The one address a refusal may name as where the phone connected from.
+    this.#observed = shownAddress(pair?.remote ?? null);
     this.#refuse(refusal);
     return true;
   }

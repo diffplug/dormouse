@@ -11,6 +11,7 @@ import {
   enrolledStatus,
 } from '../host/remote/test-burrow-link';
 import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
+import type { PathRefusal } from '../remote/direct/path-refusal';
 import {
   networkPolicyResult,
   nothingPolicy,
@@ -55,9 +56,12 @@ const INTERFACES = [WIFI, TAILSCALE, DOCKER];
 const DAY = 86_400_000;
 
 /** A Hosted build holding `policy`, on a laptop with Wi-Fi, a tailnet, and Docker. */
-function hosted(policy: NetworkPolicy, status = UNENROLLED_STATUS) {
-  return { status, network: networkPolicyResult(policy, 'hosted', INTERFACES) };
+function hosted(policy: NetworkPolicy, status = UNENROLLED_STATUS, refusal: PathRefusal | null = null) {
+  return { status, network: networkPolicyResult(policy, 'hosted', INTERFACES, refusal) };
 }
+
+/** 10:42 this morning, on whatever clock renders the story. */
+const AT_10_42 = new Date(2026, 9, 1, 10, 42).getTime();
 
 /** A self-host build holding `policy`. */
 function selfHost(policy: NetworkPolicy, status = SELF_HOST_UNENROLLED_STATUS) {
@@ -160,6 +164,62 @@ export const LocalNetworksTypedRange: Story = {
     await userEvent.type(canvas.getByRole('textbox', { name: 'Add an allowed network range' }), '10.9.0.0/24');
     await userEvent.click(canvas.getByRole('button', { name: 'Add' }));
     await canvas.findByText('10.9.0.0/24');
+  },
+};
+
+/**
+ * A phone on cellular reached the code and no further: the Burrow saw its
+ * address on the selected pair, and says so above the networks it could join.
+ * Dismiss forgets it.
+ */
+export const LocalNetworksRefusedObserved: Story = {
+  parameters: {
+    primedBurrow: hosted(
+      { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
+      UNENROLLED_STATUS,
+      { at: AT_10_42, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    const notice = await canvas.findByRole('status', { name: 'Last refused phone' });
+    await expect(notice).toHaveTextContent(/a phone tried to connect from 172\.58\.12\.9, which isn’t on a network allowed below\./);
+    await userEvent.click(within(notice).getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(canvas.queryByRole('status', { name: 'Last refused phone' })).toBeNull());
+  },
+};
+
+/** No pair formed, so the address is the one the phone's offer reported, named as its claim. */
+export const LocalNetworksRefusedReported: Story = {
+  parameters: {
+    primedBurrow: hosted(
+      { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
+      UNENROLLED_STATUS,
+      { at: AT_10_42, kind: 'given-up', address: '2607:fb90:1:2::9', addressSource: 'reported' },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await expect(await canvas.findByRole('status', { name: 'Last refused phone' })).toHaveTextContent(
+      /a phone reported 2607:fb90:1:2::9, which isn’t on a network allowed below\./,
+    );
+  },
+};
+
+/** Nothing to name: the phone offered no public address and no pair formed. */
+export const LocalNetworksRefusedNoAddress: Story = {
+  parameters: {
+    primedBurrow: hosted(
+      { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
+      UNENROLLED_STATUS,
+      { at: AT_10_42, kind: 'deadline' },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await expect(await canvas.findByRole('status', { name: 'Last refused phone' })).toHaveTextContent(
+      /a phone couldn’t reach this computer over an allowed network\./,
+    );
   },
 };
 

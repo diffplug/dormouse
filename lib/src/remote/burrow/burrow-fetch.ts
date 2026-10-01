@@ -25,6 +25,74 @@ import type { BurrowEnrollment } from './enrollment';
  */
 export const BURROW_REQUEST_TIMEOUT_MS = 10_000;
 
+/** Node's TLS verification codes, which undici puts on a failed fetch's `cause`. */
+const CERTIFICATE_CODES = new Set([
+  'CERT_HAS_EXPIRED',
+  'CERT_NOT_YET_VALID',
+  'CERT_UNTRUSTED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'ERR_TLS_CERT_ALTNAME_INVALID',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+]);
+
+const TIMEOUT_CODES = new Set(['ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT']);
+
+/** `value`'s string `code`, or that of the first error an `AggregateError` holds. */
+function codeOf(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const { code, errors } = value as { code?: unknown; errors?: unknown };
+  if (typeof code === 'string') return code;
+  return Array.isArray(errors) ? codeOf(errors[0]) : null;
+}
+
+/**
+ * What a person reads for a request to `url` that never got an answer, in
+ * place of undici's bare `fetch failed`: the host — never the whole URL, which
+ * can carry a path a person need not see — and why, from the error's `cause`.
+ * Never for an HTTP status, which got an answer and has its own sentence.
+ */
+export function describeFetchFailure(url: string, error: unknown): string {
+  let host: string;
+  try {
+    host = new URL(url).host;
+  } catch {
+    host = 'the server';
+  }
+  const cause = (error as { cause?: unknown } | null)?.cause;
+  const code = codeOf(cause) ?? codeOf(error);
+  const name = (error as { name?: unknown } | null)?.name;
+  let why: string;
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') why = 'the name doesn’t resolve';
+  else if (code === 'ECONNREFUSED') why = 'the connection was refused';
+  else if ((code !== null && TIMEOUT_CODES.has(code)) || name === 'TimeoutError' || name === 'AbortError') {
+    why = 'it didn’t answer in time';
+  } else if (code !== null && (CERTIFICATE_CODES.has(code) || code.startsWith('ERR_TLS_'))) {
+    why = 'its certificate was rejected';
+  } else {
+    why = code ?? (cause instanceof Error ? cause.message : error instanceof Error ? error.message : String(error));
+  }
+  return `Couldn’t reach ${host}: ${why}.`;
+}
+
+/**
+ * `fetch`, rejecting with {@link describeFetchFailure}'s sentence where the
+ * request got no answer. The service's guarded fetch is built on it, so every
+ * Burrow request whose failure reaches a person says where and why.
+ */
+export function describingFetchFailures(fetch: typeof globalThis.fetch): typeof globalThis.fetch {
+  return async (input, init) => {
+    try {
+      return await fetch(input, init);
+    } catch (error) {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      throw new Error(describeFetchFailure(url, error));
+    }
+  };
+}
+
 export interface BurrowFetchOptions {
   /** Who this Burrow is to that Relay, and the bearer that proves it. */
   readonly enrollment: Pick<BurrowEnrollment, 'relayUrl' | 'burrowToken'>;

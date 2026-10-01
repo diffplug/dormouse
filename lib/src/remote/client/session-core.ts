@@ -33,6 +33,7 @@ import {
   type NoiseTransportSession,
   type RemoteEventMsg,
   type RemoteResponse,
+  type SessionEndV1,
   type TerminalAttachResult,
   type TerminalClosedEvent,
   type TerminalDataEvent,
@@ -59,6 +60,25 @@ export interface CeremonyRoute {
  * by its owner — a replacing Connect, a teardown — which reports nothing.
  */
 export type DirectWaitFailure = DirectRelayCause | 'timeout' | 'lost' | 'ended-by-burrow' | 'retired';
+
+/**
+ * What a phone reads when the computer's goodbye says the path ended a
+ * direct-only session (`docs/specs/remote-network.md` -> "Local networks"), or
+ * `null` for a goodbye that says nothing of why. One sentence for Pocket and
+ * the one-time page, naming the address the computer named and never the
+ * computer's allowed networks, which the phone is not told.
+ */
+export function networkNotAllowedMessage(goodbye: SessionEndV1 | null): string | null {
+  if (!goodbye || !('reason' in goodbye)) return null;
+  const lead = 'This computer only accepts phones on its allowed networks.';
+  const fix = 'join the same Wi-Fi or VPN as the computer and try again.';
+  if (!('address' in goodbye)) return `${lead} Yours wasn’t on one — ${fix}`;
+  const yours =
+    goodbye.addressSource === 'observed'
+      ? `Yours connected from ${goodbye.address}`
+      : `Yours reported the address ${goodbye.address}`;
+  return `${lead} ${yours} — ${fix}`;
+}
 
 /**
  * Whether this page is in front of the user, and a way to be told when that
@@ -160,6 +180,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   #cancelVisibility: (() => void) | null = null;
   /** The one {@link awaitDirect} in flight, answered by the switch or by its end. */
   #directWaiter: ((failure: DirectWaitFailure | null) => void) | null = null;
+  /** The goodbye that ended the last session, until the next is established; see {@link goodbye}. */
+  #goodbye: SessionEndV1 | null = null;
 
   /**
    * In-flight ceremony waiters, keyed by `${kind}:${id}:${step}`.
@@ -181,6 +203,15 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     this.#setTimer = deps.setTimer ?? realTimer;
     this.#visibility = deps.visibility ?? documentVisibility();
     this.#createDirectPeer = deps.createDirectPeer ?? null;
+  }
+
+  /**
+   * The Burrow's goodbye that ended the last session — which says why, where
+   * the path ended a direct-only one ({@link networkNotAllowedMessage}) — or
+   * `null`: none arrived, or a session has been established since.
+   */
+  get goodbye(): SessionEndV1 | null {
+    return this.#goodbye;
   }
 
   /** The established session's route, or null while there is none. */
@@ -304,6 +335,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // the owner's own retire before its request cannot see: without it that
     // session's endpoint and peer would be overwritten below rather than closed.
     this.disposeSession();
+    this.#goodbye = null;
     // Declared first so the endpoint's deps can name the session they serve;
     // assigned before anything can reach them.
     let established: EstablishedSession<R>;
@@ -679,6 +711,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // flight will be answered. Taken here rather than by the endpoint, which
     // both ends run, because only a Client is ever told.
     if (receipt.kind === 'control' && isSessionEndV1(receipt.value)) {
+      this.#goodbye = receipt.value;
       this.loseBurrow(this.#messages.ended, { endedByBurrow: true });
       return null;
     }

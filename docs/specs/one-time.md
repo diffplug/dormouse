@@ -175,7 +175,7 @@ decides them; a runtime never enters either.
 - **`end()` releases everything**: the session and its peer connection (a
   switched one once the goodbye has left it: `docs/specs/remote-api.md` →
   Transport), a pending approval, the key, queued work, every timer, and the
-  socket. Nothing is written. **A `user-ended` or `idle` ending sends the goodbye first, before
+  socket. Nothing is written. **A `user-ended`, `idle`, or `network-not-allowed` ending sends the goodbye first, before
   the room closes** (`docs/specs/remote-api.md` → Transport), so a phone still
   connecting hears it over the rendezvous.
 
@@ -186,7 +186,7 @@ decides them; a runtime never enters either.
 | `expired` | a link past its expiry, claimed or not; a late request or confirmation; room close `4010` or `4014` |
 | `phone-left` | room close `4013` before the switch; any session failure after it |
 | `direct-failed` | a decline, an abandoned attempt, a session failure before the switch, or the direct deadline |
-| `network-not-allowed` | the path check refused the direct path (`docs/specs/remote-network.md` -> "Local networks") |
+| `network-not-allowed` | the path ended it, the state carrying the `refusal` (`docs/specs/remote-network.md` -> "Local networks") |
 | `idle` | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` without a decrypted phone message |
 | `unreachable` | no room frame by the open deadline, a first message that is not one, or a socket lost before it |
 | `rendezvous-lost` | any other close before the switch |
@@ -235,7 +235,7 @@ Every failure resolves `{ok: false, message}` with fixed copy:
 | room close `4011` or `4012` | `ONE_TIME_LINK_USED_MESSAGE` |
 | an expired link, room close `4010` or `4014`, any other close before an outcome past the link's expiry, or no answer by the room's deadline | `ONE_TIME_LINK_EXPIRED_MESSAGE` |
 | between an `ok` outcome and the switch: a decline, a lost session, the deadline, or any other close | `ONE_TIME_DIRECT_FAILED_MESSAGE` |
-| between an `ok` outcome and the switch: the laptop's goodbye | `ONE_TIME_ENDED_MESSAGE` |
+| between an `ok` outcome and the switch: the laptop's goodbye | `networkNotAllowedMessage` where it names the path, else `ONE_TIME_ENDED_MESSAGE` |
 | a socket that never opened | `ONE_TIME_UNREACHABLE_MESSAGE` |
 | any other close, `close()`, or a session lost between the switch and the resolve | `ONE_TIME_ENDED_MESSAGE` |
 | a payload on message 2, or an outcome its guard refuses | `ONE_TIME_DENIAL_MESSAGES['burrow-error']` |
@@ -469,7 +469,7 @@ sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
 | `confirming` | "Type the two digits your phone shows into the dialog." | Cancel |
 | `connecting` | "Connecting directly…" | Cancel |
 | `connected` | the phone's label, then "has full control of your terminals." | End |
-| `ended` | the reason's sentence | New link, Done |
+| `ended` | the reason's sentence, a refusal's from `pathRefusalSentence` | New link, Done |
 
 - **The panel renders the service's state and owns only its busy and error**; a
   refused `oneTimeOpen` renders inline. **Closing Settings changes nothing**:

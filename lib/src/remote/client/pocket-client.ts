@@ -82,7 +82,12 @@ import {
 } from './pocket-db';
 import { SCAN_LABEL } from '../setup-copy';
 import { RelayHeartbeat, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
-import { ClientSessionCore, type ClientSessionCoreDeps, type DirectWaitFailure } from './session-core';
+import {
+  ClientSessionCore,
+  networkNotAllowedMessage,
+  type ClientSessionCoreDeps,
+  type DirectWaitFailure,
+} from './session-core';
 import type { TerminalHandlers } from './remote-adapter';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
@@ -174,9 +179,9 @@ export const BURROW_SESSION_REAPED_MESSAGE =
 
 /**
  * What a connection the computer holds to the direct path reports when no
- * direct path formed in time, or the computer ended it for that — the phone
- * off its allowed networks, most often (`docs/specs/remote-network.md` ->
- * "Local networks").
+ * direct path formed in time, or the computer ended it without saying why; a
+ * goodbye that says the path was why reads {@link networkNotAllowedMessage}
+ * instead (`docs/specs/remote-network.md` -> "Local networks").
  */
 export const DIRECT_ONLY_FAILED_MESSAGE =
   'This computer accepts phones only over a direct connection on a network it allows, and one couldn’t be made. ' +
@@ -940,7 +945,9 @@ export class PocketClient {
         // A replacing Connect retired this one, and its session is the live
         // one now: answered without touching it.
         if (failure === 'retired') return { ok: false, message: BURROW_UNAVAILABLE_MESSAGE, pairingRequired: false };
-        const message = directOnlyFailureMessage(failure);
+        const message =
+          (failure === 'ended-by-burrow' ? networkNotAllowedMessage(this.#core.goodbye) : null) ??
+          directOnlyFailureMessage(failure);
         if (this.#core.establishedRoute === route) this.#core.endSession(message, { notifyGone: false });
         return { ok: false, message, pairingRequired: false };
       }

@@ -567,7 +567,9 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
       );
       return { result: idleOneTimeState(hostedOrigin(bakedRelay()), level) };
     }
+    // With no service there is no session for the path to have ended.
     case 'networkPolicy':
+    case 'dismissPathRefusal':
       return {
         result: networkPolicyResult(await idleNetworkPolicy(), bakedRelay().mode, listNetworkInterfaces()),
       };

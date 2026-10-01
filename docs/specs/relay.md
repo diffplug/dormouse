@@ -975,7 +975,9 @@ exists to honor:
 - **The password is passed through, never held**, cleared on success; `enroll`
   answers `{ burrowId }`, so `burrowToken` never re-enters the webview.
 - **Refusals are shown, not swallowed**, the offer card included: the service's
-  own error is what the form renders, never a generic wrong-password message.
+  own error is what the form renders, never a generic wrong-password message —
+  for a Relay that never answered, the host and why
+  (`docs/specs/remote-network.md` -> "Policy").
 - **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
   by pointing a camera at the laptop rather than typing an origin and a 64-hex
   password. It mints on open and never before, re-mints shortly before

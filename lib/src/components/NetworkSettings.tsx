@@ -12,7 +12,7 @@ import {
   modalActionButton,
 } from './design';
 import { useManagedVoiceConfigured } from './ManagedVoiceSection';
-import { hostOf, useBusyAction } from './remote-control-shared';
+import { hostOf, pathRefusalSentence, useBusyAction } from './remote-control-shared';
 import { HeldEnrollment, RemoteControlSection } from './RemoteControlSection';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { HOSTED_VOICE_ORIGIN } from '../host/relay-origin';
@@ -20,8 +20,10 @@ import { getPlatform } from '../lib/platform';
 import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
 import type { UpdatesPort, UpdatesSnapshot } from '../lib/platform/types';
 import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
+import type { PathRefusal } from '../remote/direct/path-refusal';
 import {
   changeNetworkPolicy,
+  dismissPathRefusal,
   getNetworkPolicySnapshot,
   refreshNetworkPolicy,
   subscribeToNetworkPolicy,
@@ -420,6 +422,7 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
     <section className={SETTINGS_SECTION} aria-labelledby="network-allowed-label">
       <div id="network-allowed-label" className={LABEL}>Allowed networks</div>
       <div className={HINT}>A phone connects only when both ends of its connection are on one of these.</div>
+      {network.refusal ? <PathRefusalNotice refusal={network.refusal} /> : null}
       <div className="mt-2 flex flex-col gap-1.5">
         {interfaces.map((item) => (
           <NetworkRow
@@ -483,6 +486,23 @@ function AllowedNetworks({ network }: { network: NetworkPolicyResult }) {
         192.168.1.0/24 too. Pairing still decides which phones may connect.
       </div>
     </section>
+  );
+}
+
+/** The accessible name of the line saying the path ended a phone's session. */
+export const PATH_REFUSAL_LABEL = 'Last refused phone';
+
+/** The last session the path ended, above the allowed networks it names, until dismissed. */
+function PathRefusalNotice({ refusal }: { refusal: PathRefusal }) {
+  const { busy, error, run } = useBusyAction();
+  return (
+    <div role="status" aria-label={PATH_REFUSAL_LABEL} className="mt-2 text-sm leading-relaxed text-foreground">
+      {pathRefusalSentence(refusal, 'network-panel')}{' '}
+      <button type="button" disabled={busy} className={INLINE_ACTION_CLASS} onClick={() => void run(dismissPathRefusal)}>
+        Dismiss
+      </button>
+      {error ? <div className={ERROR}>{error}</div> : null}
+    </div>
   );
 }
 

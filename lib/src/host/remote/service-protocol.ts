@@ -27,6 +27,7 @@ import type {
   BurrowStatus,
 } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import { isPathRefusal } from '../../remote/direct/path-refusal';
 import type { NetworkLevel, NetworkPolicy, NetworkPolicyResult } from '../../remote/network-policy';
 import type { RelayMode } from '../relay-origin';
 
@@ -198,8 +199,9 @@ export interface OneTimeEvent {
 
 /**
  * service → webview: the network policy changed (`docs/specs/remote-network.md`
- * -> "Policy"). Complete every time, so a reader replaces rather than merges;
- * `networkPolicy` answers the same shape, for a reader that arrives after it.
+ * -> "Policy"), or the path refusal it carries did. Complete every time, so a
+ * reader replaces rather than merges; `networkPolicy` and `dismissPathRefusal`
+ * answer the same shape, for a reader that arrives after it.
  */
 export interface NetworkPolicyEvent extends NetworkPolicyResult {
   name: 'network-policy';
@@ -230,7 +232,8 @@ export function idleOneTimeState(hosted: string | null, level: NetworkLevel): On
  * Whether `value` is a {@link OneTimeState} a panel can render: a known
  * `status` carrying the fields that status needs. A reason is only checked to
  * be a string — a panel keeps fixed copy per reason and falls back for one this
- * build does not know, since a VS Code broker may be a newer build.
+ * build does not know, since a VS Code broker may be a newer build — and an
+ * ending's `refusal`, where present, to pass `isPathRefusal`.
  */
 export function isOneTimeState(value: unknown): value is OneTimeState {
   if (!value || typeof value !== 'object') return false;
@@ -240,8 +243,9 @@ export function isOneTimeState(value: unknown): value is OneTimeState {
     case 'opening':
       return true;
     case 'unavailable':
-    case 'ended':
       return typeof state.reason === 'string';
+    case 'ended':
+      return typeof state.reason === 'string' && (state.refusal === undefined || isPathRefusal(state.refusal));
     case 'waiting':
       return typeof state.url === 'string' && typeof state.expiresAt === 'number';
     case 'confirming':

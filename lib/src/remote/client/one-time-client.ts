@@ -49,7 +49,7 @@ import {
 import { parseOneTimeFrame, RendezvousHold } from '../one-time-rendezvous';
 import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import type { RemoteAdapterClient, TerminalHandlers } from './remote-adapter';
-import { ClientSessionCore, type ClientSessionCoreDeps } from './session-core';
+import { ClientSessionCore, networkNotAllowedMessage, type ClientSessionCoreDeps } from './session-core';
 
 /** Shown when the room refused the join: another phone holds the link, or the room is gone. */
 export const ONE_TIME_LINK_USED_MESSAGE =
@@ -257,9 +257,9 @@ export class OneTimeClient implements RemoteAdapterClient {
       // `establish`, so asking after it misses nothing.
       const failure = await this.#race(this.#core.awaitDirect(DIRECT_ONLY_DEADLINE_MS));
       if (failure !== null) {
-        // A computer that said it ended the connection is the end; anything
-        // else before the switch is no direct path.
-        this.#fail(failure === 'ended-by-burrow' ? ONE_TIME_ENDED_MESSAGE : ONE_TIME_DIRECT_FAILED_MESSAGE);
+        // A computer that said it ended the connection is the end, for the
+        // reason it gave; anything else before the switch is no direct path.
+        this.#fail(failure === 'ended-by-burrow' ? this.#endedByBurrowMessage() : ONE_TIME_DIRECT_FAILED_MESSAGE);
         throw new Error(this.#failure ?? ONE_TIME_DIRECT_FAILED_MESSAGE);
       }
       this.#announced = true;
@@ -352,7 +352,7 @@ export class OneTimeClient implements RemoteAdapterClient {
    */
   #onSessionGone(endedByBurrow: boolean): void {
     if (this.#phase === 'connecting') {
-      this.#fail(endedByBurrow ? ONE_TIME_ENDED_MESSAGE : ONE_TIME_DIRECT_FAILED_MESSAGE);
+      this.#fail(endedByBurrow ? this.#endedByBurrowMessage() : ONE_TIME_DIRECT_FAILED_MESSAGE);
       return;
     }
     if (this.#phase !== 'connected') return;
@@ -363,6 +363,11 @@ export class OneTimeClient implements RemoteAdapterClient {
     }
     this.#teardown();
     this.#onEnded?.(ONE_TIME_ENDED_MESSAGE);
+  }
+
+  /** What the laptop's goodbye before the switch reads as: why the path ended it, where it said. */
+  #endedByBurrowMessage(): string {
+    return networkNotAllowedMessage(this.#core.goodbye) ?? ONE_TIME_ENDED_MESSAGE;
   }
 
   // --- The rendezvous socket -------------------------------------------------

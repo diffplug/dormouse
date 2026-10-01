@@ -19,7 +19,7 @@ import {
   type E2eClientStep,
 } from 'remote-lib-common';
 
-import { ClientSessionCore, type CeremonyRoute } from './session-core';
+import { ClientSessionCore, networkNotAllowedMessage, type CeremonyRoute } from './session-core';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { FakeDirectNetwork, flushMicrotasks, type FakePeer } from '../direct/test-fake-peer';
 import { FORGED_CT, noiseSessionPair, openReceipt } from '../test-e2e-client';
@@ -304,6 +304,35 @@ describe('an established session', () => {
     expect(endedByBurrow).toEqual([true]);
     expect(core.establishedRoute).toBeNull();
     await expect(inFlight).rejects.toThrow(MESSAGES.ended);
+  });
+
+  it('keeps the goodbye that ended the session, for its owner’s copy, until the next is established', async () => {
+    const { core } = makeCore();
+    const first = await noiseSessionPair();
+    core.establish(ROUTE, first.client);
+    expect(core.goodbye).toBeNull();
+    const refused = { ...SESSION_END_V1, reason: 'network-not-allowed', address: '172.58.12.9', addressSource: 'observed' };
+    core.onFrame(ROUTE, 'transport', toBase64Url(first.burrow.sendControl(refused)));
+    expect(core.goodbye).toEqual(refused);
+
+    core.establish(ROUTE, (await noiseSessionPair()).client);
+    expect(core.goodbye).toBeNull();
+  });
+
+  it('words a goodbye the path ended by what it names, and nothing for one that names no reason', () => {
+    const refused = { ...SESSION_END_V1, reason: 'network-not-allowed' } as const;
+    const lead = 'This computer only accepts phones on its allowed networks.';
+    const fix = 'join the same Wi-Fi or VPN as the computer and try again.';
+    expect(networkNotAllowedMessage({ ...refused, address: '172.58.12.9', addressSource: 'observed' })).toBe(
+      `${lead} Yours connected from 172.58.12.9 — ${fix}`,
+    );
+    // The phone's own claim is never worded as where it connected from.
+    expect(networkNotAllowedMessage({ ...refused, address: '172.58.12.9', addressSource: 'reported' })).toBe(
+      `${lead} Yours reported the address 172.58.12.9 — ${fix}`,
+    );
+    expect(networkNotAllowedMessage(refused)).toBe(`${lead} Yours wasn’t on one — ${fix}`);
+    expect(networkNotAllowedMessage(SESSION_END_V1)).toBeNull();
+    expect(networkNotAllowedMessage(null)).toBeNull();
   });
 
   it('ignores a control shape it does not know, and stays connected', async () => {
