@@ -239,7 +239,7 @@ export function WorkspaceStrip({
       {moveError && !pendingSurfaceMove && !pendingClose && !pendingMove && !renamingId && (
         <ModalFrame titleId="workspace-move-error" targetElement={confirmTarget}
           onEscape={() => setWorkspaceMoveError(null)} className={clsx("w-80 max-w-full overflow-auto text-sm", OVERLAY_MAX_HEIGHT.modal)}>
-          <h2 id="workspace-move-error" className="mb-2 font-semibold">Workspace could not move</h2>
+          <h2 id="workspace-move-error" className="mb-2 font-semibold">Move could not complete</h2>
           <p role="alert" className="mb-3 break-words">{moveError.reason}</p>
           <button type="button" className={modalActionButton()} onClick={() => setWorkspaceMoveError(null)}>Close</button>
         </ModalFrame>

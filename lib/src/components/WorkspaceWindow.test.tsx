@@ -1111,6 +1111,25 @@ describe('Surface moves between Workspaces', () => {
     expect(getWallHandle('ws-2')!.ownsSurface('frame')).toBe(true);
   });
 
+  it('rechecks a Tool that becomes dirty in the final preparation microtask', async () => {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    terminalRegistry.applyTerminalSemanticEvents('editor', [{ type: 'commandLine', commandLine: 'file-editor' }, { type: 'commandStart', source: 'osc633_boundaries' }]);
+    const meta = toolLeafMeta('Editor', { surfaceType: 'tool', command: 'file-editor', toolArgv: ['dor', 'builtin:file', '/tmp/file.txt'], renderMode: 'iframe', toolRender: 'iframe', url: 'http://localhost:3000/saved' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { restoredLathLayout: { version: 1, tree: leafTree('editor'), leafMeta: { editor: meta } } }, 'ws-2': { initialPaneIds: ['pane-x'] } }} /></>);
+    const handle = getWallHandle(source)!;
+    const prepare = handle.prepareSurfaceMove;
+    let calls = 0;
+    vi.spyOn(handle, 'prepareSurfaceMove').mockImplementation(id => {
+      const prepared = prepare(id);
+      if (++calls === 2) queueMicrotask(() => recordToolDirty(id, true));
+      return prepared;
+    });
+    await act(async () => { await expect(moveSurface('editor', { ...request({ workspace: 'workspace:2' }), dangerouslyDestroyIframePageState: true })).rejects.toThrow('edits'); });
+    expect(handle.ownsSurface('editor')).toBe(true);
+    expect(getWallHandle('ws-2')!.ownsSurface('editor')).toBe(false);
+  });
+
   it('asks again when a Surface becomes an iframe during the persistence flush: dor refuses, the GUI prompts', async () => {
     const source = getActiveWorkspaceId();
     createWorkspace({ id: 'ws-2', activate: false });

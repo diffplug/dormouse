@@ -99,9 +99,10 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
       if (!target) throw new Error('The new Workspace did not mount');
       // Revalidate after the new Wall's passive registration; no prompt here.
       checkEndpoints();
-      prepared = source.prepareSurfaceMove(id);
-      if (prepared.iframe && !iframeConsented) throw new Error('This Surface started serving an iframe; retry the move to confirm its refresh');
     }
+    // No await may separate this final dirty/kind check from departure.
+    prepared = source.prepareSurfaceMove(id);
+    if (prepared.iframe && !iframeConsented) throw new Error('This Surface started serving an iframe; retry the move to confirm its refresh');
     targetRecord = previousWorkspaceSession(targetId);
     invalidateWorkspaceSaves(targetId);
     const receiver = target!;

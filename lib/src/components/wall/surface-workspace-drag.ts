@@ -10,24 +10,15 @@ export interface SurfaceWorkspaceDrag {
   end(): void;
 }
 
-type Measured = { strip: HTMLElement; stripRect: DOMRect; targets: [HTMLElement, DOMRect][] };
-// The strip cannot reorder under a pane drag, so one measurement serves the gesture.
-let measured: Measured | null | undefined;
-let hovered: HTMLElement | null = null;
 let highlighted: HTMLElement | null = null;
 
 const inside = (r: DOMRect, x: number, y: number) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-function measure(): Measured | null {
-  const strip = workspaceStripElement();
-  if (!strip) return null;
-  const elements = [...workspaceTabElements(), workspaceTabElement(null)].filter((element): element is HTMLElement => element !== null);
-  return { strip, stripRect: strip.getBoundingClientRect(), targets: elements.map(element => [element, element.getBoundingClientRect()]) };
-}
-/** The tab or + under the pointer, the strip itself over a gap, or null off the strip. */
+/** Read live bounds: titles, tab scrolling and CLI reorders can change them mid-drag. */
 function targetAt(x: number, y: number): HTMLElement | null {
-  if (measured === undefined) measured = measure();
-  if (!measured || !inside(measured.stripRect, x, y)) return null;
-  return measured.targets.find(([, rect]) => inside(rect, x, y))?.[0] ?? measured.strip;
+  const strip = workspaceStripElement();
+  if (!strip || !inside(strip.getBoundingClientRect(), x, y)) return null;
+  const targets = [...workspaceTabElements(), workspaceTabElement(null)];
+  return targets.find(target => target && inside(target.getBoundingClientRect(), x, y)) ?? strip;
 }
 function eligible(id: string, target: HTMLElement): boolean {
   const source = wallHandleOwning(id);
@@ -43,16 +34,11 @@ function highlight(target: HTMLElement | null): void {
 }
 function end(): void {
   highlight(null);
-  hovered = null;
-  measured = undefined;
 }
 export const surfaceWorkspaceDrag: SurfaceWorkspaceDrag = {
   hover(id, x, y) {
     const target = targetAt(x, y);
-    if (target !== hovered) {
-      hovered = target;
-      highlight(target && eligible(id, target) ? target : null);
-    }
+    highlight(target && eligible(id, target) ? target : null);
     return target !== null; // Strip gaps and disabled targets consume the drop too.
   },
   drop(id, x, y) {
