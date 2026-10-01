@@ -85,31 +85,16 @@ export function doubleClick(target: Element): void {
   act(() => fire(['mousedown', 'mouseup', 'click', 'dblclick'], 2));
 }
 
-/** A stand-in for the copy editor's portal, in the DOM alone: a hidden anchor
- *  in `owner` mapped to a `[data-portal-anchored]` root on `document.body`
- *  holding one button, which is returned. */
-export function portalAnchoredButton(owner: Element): HTMLButtonElement {
-  const anchor = document.createElement('span');
-  anchor.hidden = true;
-  owner.append(anchor);
-  const root = document.createElement('div');
-  root.dataset.portalAnchored = '';
-  const button = document.createElement('button');
-  root.append(button);
-  document.body.append(root);
-  setPortalAnchor(root, anchor);
-  return button;
-}
-
-/** The same through a React portal, so React events from its button bubble up
- *  the rendering tree as the copy editor's do. */
+/** A stand-in for the copy editor's portal: a hidden anchor where it renders,
+ *  mapped to a root on `document.body` holding one button, so React events
+ *  from the button bubble up the rendering tree as the copy editor's do. */
 export function PortalAnchoredButton(): ReactElement {
   const anchor = useRef<HTMLSpanElement>(null);
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => setPortalAnchor(root.current!, anchor.current!), []);
   return createElement(Fragment, null,
     createElement('span', { hidden: true, ref: anchor }),
-    createPortal(createElement('div', { 'data-portal-anchored': '', ref: root }, createElement('button', { type: 'button', 'data-portaled': '' }, 'Portaled')), document.body));
+    createPortal(createElement('div', { ref: root }, createElement('button', { type: 'button', 'data-portaled': '' }, 'Portaled')), document.body));
 }
 
 /** jsdom lacks the native modal `<dialog>` API that `NativeModalDialog` calls. */

@@ -3,7 +3,6 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleMouseSelectionKeys } from './handle-mouse-selection-keys';
-import { setPortalAnchor } from '../../../lib/dom';
 import type { WallKeyboardCtx } from './types';
 
 vi.mock('../../../lib/clipboard', () => ({
@@ -245,26 +244,6 @@ describe('handleMouseSelectionKeys', () => {
       }
       expect(setSelection).not.toHaveBeenCalled();
       expect(copySelection).not.toHaveBeenCalled();
-    });
-
-    it('takes a key from a Tool\'s portaled editor as its context terminal\'s, behind the browser face', async () => {
-      const { stepCopyScope } = await open();
-      const browser = { surfaceType: 'tool', command: 'pnpm storybook', url: 'http://localhost:6006/', renderMode: 'iframe' };
-      const contextTerminal = document.createElement('div');
-      contextTerminal.dataset.contextTerminal = 'pane-a';
-      const anchor = document.createElement('span');
-      contextTerminal.append(anchor);
-      const portaled = document.createElement('div');
-      portaled.dataset.portalAnchored = '';
-      const button = document.createElement('button');
-      portaled.append(button);
-      document.body.append(contextTerminal, portaled);
-      const unmap = setPortalAnchor(portaled, anchor);
-      expect(handleMouseSelectionKeys(fakeEvent(button, { key: 'e' }), makeCtx(browser))).toBe(true);
-      expect(stepCopyScope).toHaveBeenCalledWith('pane-a', 1);
-      unmap();
-      contextTerminal.remove();
-      portaled.remove();
     });
 
     it('leaves command mode its own keys, but still copies on the chord', async () => {

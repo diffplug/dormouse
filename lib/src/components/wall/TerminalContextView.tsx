@@ -364,7 +364,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   useEffect(() => {
     if (p.closing) return;
     // A portaled copy editor counts as where its anchor sits.
-    const outside = (e: PointerEvent) => { if (!surface.current?.contains(anchoredTarget(e.target) as Node)) close(); };
+    const outside = (e: PointerEvent) => { if (!surface.current?.contains(anchoredTarget(e.target))) close(); };
     document.addEventListener('pointerdown', outside, true);
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [p.closing, close]);
@@ -402,7 +402,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
     onContextMenu={event => event.preventDefault()}
     onKeyDown={event => {
       if (isComposingKey(event.nativeEvent)) return;
-      if ((anchoredTarget(event.target) as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
+      if ((event.target as HTMLElement).closest('[data-helper-terminal], [data-context-terminal]') && !detail) return;
       if (detail && event.key === 'Tab') {
         event.preventDefault();
         stepFocus(Array.from(detailRoot.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input,select') ?? []), event.shiftKey ? -1 : 1);

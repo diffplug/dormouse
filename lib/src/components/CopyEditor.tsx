@@ -270,12 +270,16 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     <div
       ref={rootRef}
       data-copy-editor-for={terminalId}
-      data-portal-anchored=""
       style={ROOT_STYLE}
       className={modalSurface({ padding: 'none', elevation: 'modal', class: 'flex flex-col overflow-hidden border-foreground/20 text-sm' })}
       // Portaled, its React events still bubble to the pane: keep its presses
-      // from focusing the pane and its right-click from opening the terminal context.
-      onMouseDown={(e) => e.stopPropagation()}
+      // from focusing the pane and its right-click from opening the terminal
+      // context. It never takes focus, so keys stay with the pane (§4.5), but
+      // a press on the preview's own box, its scrollbar, keeps its drag.
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        if (e.target !== previewRef.current) e.preventDefault();
+      }}
       onContextMenu={(e) => e.stopPropagation()}
     >
       <div ref={headerRef} className="flex shrink-0 flex-col gap-1 border-b border-border px-2 py-1.5">
@@ -320,6 +324,7 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
         {keys(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
         <button
           type="button"
+          tabIndex={-1}
           onClick={() => void copySelection(terminalId)}
           className={modalActionButton({ tone: 'primary', class: 'flex shrink-0 items-center gap-1 py-0.5' })}
         >
@@ -355,6 +360,7 @@ function Segment<T extends string | number>({ value, items, onPick }: {
         <button
           key={it.id}
           type="button"
+          tabIndex={-1}
           title={it.title}
           aria-pressed={it.id === value}
           onClick={() => onPick(it.id)}
@@ -375,6 +381,7 @@ function Mark({ index, kind, auto, onFlip }: { index: number; kind: BreakKind; a
   return (
     <button
       type="button"
+      tabIndex={-1}
       title={`${MARK_TITLE[kind]}${edited ? ' (changed by hand)' : ''}. Click to cycle.`}
       onClick={() => onFlip(index, kind)}
       className={clsx(

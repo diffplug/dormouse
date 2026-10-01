@@ -41,22 +41,25 @@ export function setNativeFieldValue(el: HTMLInputElement | HTMLTextAreaElement, 
 /** Each portaled root's in-place anchor, by root. */
 const portalAnchors = new WeakMap<Element, Element>();
 
-/** Map `root`, a subtree portaled out of its owner and marked
- *  `[data-portal-anchored]`, to `anchor`, an element left where it belongs.
- *  Returns the unmapping, for an effect's cleanup. */
+/** Mark `root`, a subtree portaled out of its owner, `[data-portal-anchored]`
+ *  and map it to `anchor`, an element left where it belongs. Returns the
+ *  unmapping, for an effect's cleanup. */
 export function setPortalAnchor(root: Element, anchor: Element): () => void {
+  root.setAttribute('data-portal-anchored', '');
   portalAnchors.set(root, anchor);
   return () => {
+    root.removeAttribute('data-portal-anchored');
     portalAnchors.delete(root);
   };
 }
 
-/** The target DOM containment checks should test: for one inside a mapped
- *  `[data-portal-anchored]` root, that root's anchor, so the portaled subtree
- *  counts as part of its owner; any other target as is. A portal already
- *  passes React events up the owner's tree; this does the same for `contains`
- *  and `closest`. */
-export function anchoredTarget(target: EventTarget | null): EventTarget | null {
-  const root = target instanceof Element ? target.closest('[data-portal-anchored]') : null;
+/** The element DOM containment checks should test: for a target inside a
+ *  mapped portal root, that root's anchor, so the portaled subtree counts as
+ *  part of its owner; any other element as is, and null for a target that is
+ *  no element. A portal already passes React events up the owner's tree; this
+ *  does the same for `contains` and `closest`. */
+export function anchoredTarget(target: EventTarget | null): Element | null {
+  if (!(target instanceof Element)) return null;
+  const root = target.closest('[data-portal-anchored]');
   return (root && portalAnchors.get(root)) ?? target;
 }

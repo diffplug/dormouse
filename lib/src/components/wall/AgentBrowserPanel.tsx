@@ -3,7 +3,7 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { clsx } from 'clsx';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../design';
-import { anchoredTarget, isEditableTarget } from '../../lib/dom';
+import { isEditableTarget } from '../../lib/dom';
 import type { RenderMode } from './agent-browser-screen';
 import { tabDisplayTitle } from './browser-url';
 import { resolveRenderMode } from './browser-surface';
@@ -310,9 +310,7 @@ export function AgentBrowserPanel({ id, params: rawParams, parked, renderMode: r
       // A screen modal (or any dialog) renders outside the pane element, so the
       // contains() check above misses it; without this, typing into the modal's
       // Custom W/H/DPI fields would be swallowed and forwarded to the browser.
-      // A portaled copy editor counts as where its anchor sits.
-      const target = anchoredTarget(e.target);
-      if (target instanceof Element && target.closest('[role="dialog"], [data-terminal-context]')) return;
+      if (e.target instanceof Element && e.target.closest('[role="dialog"], [data-terminal-context]')) return;
       // Likewise never hijack keystrokes destined for an editable field that
       // lives outside the pane — notably the header's URL editor.
       if (isEditableTarget(e.target)) return;

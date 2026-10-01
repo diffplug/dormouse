@@ -356,7 +356,7 @@ describe('CopyEditor: following its pane', () => {
     drag(2, 25, 5, 27);
     render(<StrictMode><CopyEditor terminalId="term-1" /></StrictMode>);
     expect(box()).toEqual(px(104, 114, 792, 150));
-    expect(container.contains(anchoredTarget(button('Copy')) as Node)).toBe(true);
+    expect(container.contains(anchoredTarget(button('Copy')))).toBe(true);
     dims.viewportY = 2;
     act(() => bumpRenderTick());
     frame();
@@ -365,13 +365,29 @@ describe('CopyEditor: following its pane', () => {
 });
 
 describe('CopyEditor: presses inside it belong to its pane', () => {
+  it('never takes focus from the pane, but leaves its scrollbar its drag', () => {
+    drag(2, 2, 5, 27);
+    render();
+    const pressed = (target: Element) => {
+      const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      act(() => { target.dispatchEvent(down); });
+      return down.defaultPrevented;
+    };
+    expect(pressed(button('Exact'))).toBe(true);
+    expect(pressed(button('␣'))).toBe(true);
+    expect(pressed(editor()!.querySelector('.overflow-auto')!)).toBe(false);
+    const buttons = Array.from(editor()!.querySelectorAll('button'));
+    expect(buttons.filter((b) => b.tabIndex !== -1)).toEqual([]);
+    expect(getMouseSelectionState('term-1').selection).not.toBeNull();
+  });
+
   it('dismisses on a press outside, not inside, and keeps inside presses from the pane', () => {
     const paneDown = vi.fn();
     const paneMenu = vi.fn();
     drag(2, 2, 5, 27);
     render(<div onMouseDown={paneDown} onContextMenu={paneMenu}><CopyEditor terminalId="term-1" /></div>);
     // DOM containment checks see the editor where its anchor sits.
-    expect(container.contains(anchoredTarget(button('Copy')) as Node)).toBe(true);
+    expect(container.contains(anchoredTarget(button('Copy')))).toBe(true);
     act(() => { button('Copy').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
     act(() => { editor()!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })); });
     expect(getMouseSelectionState('term-1').selection).not.toBeNull();

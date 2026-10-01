@@ -17,7 +17,7 @@ import {
 } from './agent-browser-surface-controller';
 import type { RenderMode } from './agent-browser-screen';
 import { ModeContext, PaneWriteContext, SelectedIdContext, WallActionsContext, WorkspaceActiveContext, type PaneWriteActions } from './wall-context';
-import { installBrowserHost, portalAnchoredButton, stubWallActions as stubActions } from './wall-test-utils';
+import { installBrowserHost, stubWallActions as stubActions } from './wall-test-utils';
 import { encodeViewerFrame } from '../../lib/platform/browser-automation';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -865,20 +865,6 @@ describe('AgentBrowserPanel canvas input forwarding', () => {
     await renderWithMode('passthrough', 'ab-panel', true);
     await press();
     expect(sentKeyEvents().length).toBeGreaterThan(whileHidden);
-  });
-
-  it('leaves keys from a copy editor portaled out of a terminal context to that terminal', async () => {
-    await renderWithMode('passthrough', 'ab-panel');
-    const context = document.createElement('section');
-    context.dataset.terminalContext = '';
-    document.body.append(context);
-    const button = portalAnchoredButton(context);
-    const key = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true });
-    await act(async () => { button.dispatchEvent(key); });
-    expect(sentKeyEvents()).toHaveLength(0);
-    expect(key.defaultPrevented).toBe(false);
-    context.remove();
-    button.parentElement!.remove();
   });
 });
 

@@ -7,7 +7,6 @@ import { handleKillConfirm } from './keyboard/handle-kill-confirm';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
-import { anchoredTarget } from '../../lib/dom';
 import { isProxyOrigin } from '../../lib/iframe-proxy-registry';
 import { chromeKeyboardHeld } from './chrome-keyboard-lease';
 import type { NavHistoryRef, WallKeyboardCtx } from './keyboard/types';
@@ -45,13 +44,11 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       // Any other key cancels a pending leader: a left-Shift capital, a word,
       // then a right-Shift capital is typing, not the gesture.
       if (e.key !== 'Meta' && e.key !== 'Shift') lastCmdSide.current = lastShiftSide.current = null;
-      // A key from a portaled copy editor counts as where its anchor sits.
-      const target = anchoredTarget(e.target) as HTMLElement | null;
-      const context = target?.closest?.('[data-terminal-context]');
+      const context = (e.target as HTMLElement | null)?.closest?.('[data-terminal-context]');
       if (context) {
         if (handleContextCopy(e)) return;
         if (handleEditableClipboard(e)) return;
-        const terminalElement = target!.closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
+        const terminalElement = (e.target as HTMLElement).closest<HTMLElement>('[data-helper-terminal], [data-context-terminal]');
         const helperId = terminalElement?.dataset.helperTerminal ?? terminalElement?.dataset.contextTerminal;
         if (helperId) handleMouseSelectionKeys(e, { ...c, selectedIdRef: { current: helperId } });
         return;
