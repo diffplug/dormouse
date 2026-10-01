@@ -8,6 +8,10 @@ export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
 export type OverrideState = 'off' | 'temporary' | 'permanent';
 export type SelectionShape = 'linewise' | 'block';
 
+/** A drag's shape: Alt held, or a latched block, makes it a block (spec §3.2). */
+export const dragShape = (altKey: boolean, blockLatched: boolean | undefined): SelectionShape =>
+  altKey || blockLatched ? 'block' : 'linewise';
+
 export interface Selection {
   /** Absolute buffer row (scrollback + viewport), 0-indexed. */
   startRow: number;
@@ -222,7 +226,7 @@ export function beginDrag(
     startCol: args.col,
     endRow: args.row,
     endCol: args.col,
-    shape: args.altKey || args.blockLatched ? 'block' : 'linewise',
+    shape: dragShape(args.altKey, args.blockLatched),
     ...(args.blockLatched ? { blockLatched: true } : {}),
     dragging: true,
     startedInScrollback: args.startedInScrollback,
@@ -243,7 +247,7 @@ export function updateDrag(
   const s = ensure(id);
   const sel = s.selection;
   if (!sel || !sel.dragging) return;
-  const shape: SelectionShape = args.altKey || sel.blockLatched ? 'block' : 'linewise';
+  const shape = dragShape(args.altKey, sel.blockLatched);
   const startRow = args.anchor?.row ?? sel.startRow;
   const startCol = args.anchor?.col ?? sel.startCol;
   if (sel.endRow === args.row && sel.endCol === args.col && sel.shape === shape && sel.startRow === startRow && sel.startCol === startCol) return;

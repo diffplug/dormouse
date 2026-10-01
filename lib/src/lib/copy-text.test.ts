@@ -288,7 +288,7 @@ describe('copy-text nudge', () => {
     [3, 1, 'start', 4], [7, -1, 'end', 6],
     [7, 1, 'start', 8], [3, -1, 'end', 2],
     [3, -1, 'start', 0], [3, 1, 'end', 6],
-  ] as const)('moves from whitespace at %s in direction %s to the adjacent word %s', (col, dir, edge, target) => {
+  ] as const)('moves from whitespace at col %s, direction %s, %s edge, to the adjacent word at col %s', (col, dir, edge, target) => {
     const buf = lines(['one two three'], { cols: 20 });
     expect(nudge(buf, { row: 0, col }, dir, edge)).toEqual({ row: 0, col: target });
   });

@@ -230,7 +230,7 @@ Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/termin
 
 ## 5. Smart Extension (URL / Path Detection)
 
-**Must re-examine the URL/path token under the cursor on each drag update**, including surrounding content and soft-wrap boundaries when the probed cell is unchanged. Offer **e** to extend over it, alongside Alt (§3.2–§3.3).
+**Must re-examine the URL/path token under the cursor on every drag update, never reusing an answer for an unchanged cell.** Offer **e** to extend over it, alongside Alt (§3.2–§3.3).
 
 ### 5.1 Detection
 

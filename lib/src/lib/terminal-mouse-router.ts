@@ -1,6 +1,7 @@
 import type { Terminal } from '@xterm/xterm';
 import {
   beginDrag,
+  dragShape,
   endDrag,
   getMouseSelectionState,
   isDragging,
@@ -95,7 +96,7 @@ export function attachTerminalMouseRouter({
   const applyDrag = (altKey: boolean) => {
     const sel = getMouseSelectionState(id).selection;
     if (!dragAnchor || !dragHead || !sel?.dragging) return;
-    const { anchor, head } = dragCells(dragAnchor, dragHead, altKey || !!sel.blockLatched, terminal.cols);
+    const { anchor, head } = dragCells(dragAnchor, dragHead, dragShape(altKey, sel.blockLatched) === 'block', terminal.cols);
     updateDrag(id, { row: head.row, col: head.col, altKey, anchor });
   };
   // Touch has no Alt key, so a double-tap-then-drag is how a block selection is
@@ -418,9 +419,8 @@ export function attachTerminalMouseRouter({
   const onAltChange = (ev: KeyboardEvent) => {
     const sel = getMouseSelectionState(id).selection;
     if (!sel?.dragging) return;
-    const shape = ev.altKey || sel.blockLatched ? 'block' : 'linewise';
     // Unrelated keys must keep the edge e extended (§5.3).
-    if (sel.shape !== shape) applyDrag(ev.altKey);
+    if (sel.shape !== dragShape(ev.altKey, sel.blockLatched)) applyDrag(ev.altKey);
   };
 
   element.addEventListener('mousedown', onMouseDown, true);
