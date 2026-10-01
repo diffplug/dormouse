@@ -47,6 +47,7 @@ import {
   settle,
 } from './app-test-utils';
 import { setNativeFieldValue } from '../../lib/dom';
+import { POCKET_DEPLOYMENT_PATH, deploymentUnreachableMessage } from './deployment';
 
 const fake = vi.hoisted(() => ({
   keyStorage: vi.fn<() => Promise<void>>(),
@@ -192,10 +193,25 @@ async function knownBurrow(burrowId: string, label = 'First laptop', accountId =
   };
 }
 
+/**
+ * What this page's own origin answers at {@link POCKET_DEPLOYMENT_PATH}, one
+ * per read; empty is a self-host Relay's shell.
+ */
+let deploymentAnswers: Array<() => Promise<Response>>;
+const deploymentReads = vi.fn<() => void>();
+
 /** A real pairing URL for the origin this app is served from. */
 const invitationUrl = () => sharedInvitationUrl(location.origin);
 
 beforeEach(() => {
+  deploymentAnswers = [];
+  deploymentReads.mockReset();
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+    if (String(input) !== POCKET_DEPLOYMENT_PATH) throw new Error(`unexpected fetch ${String(input)}`);
+    deploymentReads();
+    const answer = deploymentAnswers.shift();
+    return answer ? answer() : new Response('<!doctype html>', { headers: { 'content-type': 'text/html' } });
+  });
   fake.keyStorage.mockReset().mockResolvedValue(undefined);
   fake.noiseSupported = true;
   fake.hasPriorUse = false;
@@ -229,6 +245,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 async function boot(props: Partial<Parameters<typeof App>[0]> = {}): Promise<void> {
@@ -778,6 +795,44 @@ it('leads with the camera-bootstrap copy when the fragment brought us here', asy
   // Nothing was spent: the run has no token, and no Relay call was made.
   expect(fake.setup).not.toHaveBeenCalled();
   expect(fake.retireSetupToken).not.toHaveBeenCalled();
+});
+
+describe('the deployment read', () => {
+  /** Hosted's Pocket must never build a peer before it knows it is Hosted's. */
+  it('fails a Connect it has not completed, retryably, and reads again on the next', async () => {
+    deploymentAnswers.push(
+      () => Promise.reject(new TypeError('offline')),
+      () => Promise.reject(new TypeError('offline')),
+    );
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1', 'First laptop')]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: '', online: true }]);
+    await boot();
+    await click(container, 'Sign in with passkey');
+    const readsAtMount = deploymentReads.mock.calls.length;
+
+    await click(container, 'Connect');
+    expect(alertText(container)).toBe(deploymentUnreachableMessage(location.host));
+    expect(fake.connect).not.toHaveBeenCalled();
+    expect(deploymentReads.mock.calls.length).toBe(readsAtMount + 1);
+
+    await click(container, 'Connect');
+    expect(fake.connect).toHaveBeenCalledWith('burrow-1');
+    expect(deploymentReads.mock.calls.length).toBe(readsAtMount + 2);
+  });
+
+  it('spends nothing on a scan before the read completes', async () => {
+    deploymentAnswers.push(
+      () => Promise.reject(new TypeError('offline')),
+      () => Promise.reject(new TypeError('offline')),
+    );
+    await boot();
+    await pasteCode((await invitationUrl()).url);
+    expect(alertText(container)).toBe(deploymentUnreachableMessage(location.host));
+    expect(fake.setup).not.toHaveBeenCalled();
+    expect(fake.signin).not.toHaveBeenCalled();
+    expect(fake.pair).not.toHaveBeenCalled();
+  });
 });
 
 describe('a Burrow the Relay no longer lists', () => {

@@ -26,7 +26,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { deploymentDirectPeer, readPocketDeployment, type PocketDeployment } from './deployment';
+import { deploymentDirectPeer, pocketDeploymentSource, type PocketDeployment } from './deployment';
 import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
@@ -118,18 +118,22 @@ export default function App({
   /** Test/story seam for the camera; see {@link ScanInvitation}. */
   startScan?: StartScan;
 }): React.ReactElement {
-  /** Who serves this Pocket, read once off its own origin; never rejects. */
-  const deploymentRead = useMemo(() => readPocketDeployment(window.fetch.bind(window)), []);
+  /**
+   * Who serves this Pocket, read off its own origin: read at mount, and **awaited
+   * before every Connect and pairing**, which fail retryably on a read that does
+   * not complete, so no direct peer is built before it is known.
+   */
+  const deploymentSource = useMemo(() => pocketDeploymentSource(window.fetch.bind(window), location.host), []);
   const [deployment, setDeployment] = useState<PocketDeployment>('self-host');
+  const requireDeployment = useCallback(async (): Promise<PocketDeployment> => {
+    const which = await deploymentSource.require();
+    setDeployment(which);
+    return which;
+  }, [deploymentSource]);
   useEffect(() => {
-    let live = true;
-    void deploymentRead.then((which) => {
-      if (live) setDeployment(which);
-    });
-    return () => {
-      live = false;
-    };
-  }, [deploymentRead]);
+    // A failure here is reported by the Connect or pairing that reads again.
+    requireDeployment().catch(() => {});
+  }, [requireDeployment]);
   const client = useMemo(
     () =>
       new PocketClient({
@@ -139,11 +143,11 @@ export default function App({
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
         // Hosted's Pocket gathers through Cloudflare STUN, a self-host Relay's
         // through none: one bundle, told apart by what its origin serves.
-        createDirectPeer: deploymentDirectPeer(deploymentRead),
+        createDirectPeer: deploymentDirectPeer(deploymentSource),
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),
-    [deploymentRead],
+    [deploymentSource],
   );
 
   /**
@@ -387,6 +391,7 @@ export default function App({
   /** The connect half, shared so a fresh pairing can continue straight into it. */
   const connectTo = useCallback(
     async (burrow: BurrowView) => {
+      const which = await requireDeployment();
       const decision: ConnectResult = await client.connect(burrow.burrowId);
       if (!decision.ok) {
         // The record has already been rewritten where the Burrow said
@@ -398,7 +403,7 @@ export default function App({
         if (decision.message === BURROW_UNAVAILABLE_MESSAGE) {
           const views = await loadBurrows().catch(() => null);
           if (views?.find((view) => view.burrowId === burrow.burrowId)?.removed) {
-            throw new Error(BURROW_REMOVED_COPY[deployment]);
+            throw new Error(BURROW_REMOVED_COPY[which]);
           }
         }
         throw new Error(decision.message);
@@ -417,7 +422,7 @@ export default function App({
 
       setPhase({ at: 'wall', burrow });
     },
-    [client, deployment, endSession, loadBurrows],
+    [client, endSession, loadBurrows, requireDeployment],
   );
 
   const onConnect = (burrow: BurrowView) => run('connect', () => connectTo(burrow));
@@ -438,6 +443,8 @@ export default function App({
     (invitation: PairingInvitation) =>
       run('pair', async () => {
         await requirePocketKeyStorage();
+        // Before anything is spent: a pairing continues into a connect.
+        await requireDeployment();
         cancelledPairingRef.current = false;
         const label = deviceLabel();
         let spentOnSetup = false;
@@ -523,7 +530,7 @@ export default function App({
           throw err;
         }
       }),
-    [client, connectTo, loadBurrows, passkeyAlreadyRegistered, run],
+    [client, connectTo, loadBurrows, passkeyAlreadyRegistered, requireDeployment, run],
   );
 
   const onCancelPairing = () => {
