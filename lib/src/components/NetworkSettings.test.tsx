@@ -34,10 +34,13 @@ import {
   NetworkPhones,
   NetworkSettings,
   NetworkUpdates,
+  PATH_REFUSAL_LABEL,
   connectionsFor,
   policyForLevel,
   type NetworkFacts,
 } from './NetworkSettings';
+import { pathRefusalSentence } from './remote-control-shared';
+import type { PathRefusal } from '../remote/direct/path-refusal';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -73,7 +76,7 @@ describe('connectionsFor', () => {
   it('lists Hosted only while a link is open, and the phone on an allowed network, under Local networks', () => {
     expect(connectionsFor(facts())).toEqual([
       {
-        to: 'hosted.dormouse.sh',
+        to: 'relay.dormouse.sh',
         when: 'Only while a one-time link is open',
         carries: 'Encrypted handshakes. Never terminal traffic.',
       },
@@ -86,7 +89,7 @@ describe('connectionsFor', () => {
   it('lists Hosted while a link is open, Cloudflare’s STUN as a phone connects, and the phone on any network, under Anywhere', () => {
     const rows = [
       {
-        to: 'hosted.dormouse.sh',
+        to: 'relay.dormouse.sh',
         when: 'Only while a one-time link is open',
         carries: 'Encrypted handshakes. Never terminal traffic.',
       },
@@ -98,10 +101,59 @@ describe('connectionsFor', () => {
       { to: 'Your phone, on any network', when: 'While connected', carries: 'Terminal traffic, end-to-end encrypted.' },
     ];
     expect(connectionsFor(facts({ policy: ANYWHERE }))).toEqual(rows);
-    // Anywhere runs no persistent Burrow, so an enrollment with a paired phone
-    // adds no Relay or push row; the networks left allowed add nothing either.
+    // The networks left allowed add nothing.
+    expect(connectionsFor(facts({ policy: { ...ANYWHERE, allowed: [LAN] } }))).toEqual(rows);
+  });
+
+  it('lists Hosted always once enrolled, terminal traffic through it only under Anywhere, and push once a phone is paired', () => {
     const enrolled = { ...UNENROLLED_STATUS, enrolled: true, pairedClients: 1 };
-    expect(connectionsFor(facts({ policy: { ...ANYWHERE, allowed: [LAN] }, status: enrolled }))).toEqual(rows);
+    const push = {
+      to: 'relay.dormouse.sh → your phone’s push service',
+      when: 'When an alert goes unattended, where push is on',
+      carries: 'An end-to-end encrypted notification.',
+    };
+    expect(connectionsFor(facts({ policy: ANYWHERE, status: enrolled }))).toEqual([
+      {
+        to: 'relay.dormouse.sh',
+        when: 'Always',
+        carries:
+          'Encrypted handshakes and one-time links, requests for setup codes and the push device list, and terminal traffic when a phone can’t connect directly.',
+      },
+      {
+        to: CLOUDFLARE_STUN_HOST,
+        when: 'When a phone connects',
+        carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
+      },
+      { to: 'Your phone, directly', when: 'While connected', carries: 'Terminal traffic, end-to-end encrypted.' },
+      push,
+    ]);
+    // Local networks holds a paired phone to the direct path: never terminal
+    // traffic through Hosted, and the phone only on an allowed network.
+    expect(connectionsFor(facts({ status: enrolled }))).toEqual([
+      {
+        to: 'relay.dormouse.sh',
+        when: 'Always',
+        carries:
+          'Encrypted handshakes and one-time links, requests for setup codes and the push device list. Never terminal traffic.',
+      },
+      {
+        to: 'Your phone, directly, on an allowed network',
+        when: 'While connected',
+        carries: 'Terminal traffic, end-to-end encrypted.',
+      },
+      push,
+    ]);
+    // With nothing allowed no phone connects and no link opens, but the
+    // socket still runs.
+    expect(connectionsFor(facts({ policy: { ...LOCAL, allowed: [] }, status: enrolled }))).toEqual([
+      {
+        to: 'relay.dormouse.sh',
+        when: 'Always',
+        carries: 'Encrypted handshakes, requests for setup codes and the push device list. Never terminal traffic.',
+      },
+      push,
+    ]);
+    expect(destinations({ policy: ANYWHERE, status: { ...enrolled, pairedClients: 0 } })).not.toContain(push.to);
   });
 
   it('lists the Relay always, once enrolled, and the phone directly, under My Relay only', () => {
@@ -111,6 +163,20 @@ describe('connectionsFor', () => {
     ]);
     const unenrolled = facts({ policy: RELAY_ON, status: SELF_HOST_UNENROLLED_STATUS });
     expect(connectionsFor(unenrolled)[0]!.when).toBe('Always, once this computer is enrolled');
+  });
+
+  it('lists no relay socket while the Relay refuses this Burrow, which opens nothing', () => {
+    for (const connection of ['removed', 'not-entitled'] as const) {
+      // Hosted: only the one-time links that still ride its origin.
+      expect(
+        connectionsFor(facts({ status: { ...UNENROLLED_STATUS, enrolled: true, pairedClients: 1, connection } })),
+        connection,
+      ).toEqual(connectionsFor(facts()));
+      // Self-host under My Relay only: nothing reaches this computer at all.
+      expect(connectionsFor(facts({ ...relayFacts(1), status: enrolledStatus({ pairedClients: 1, connection }) }))).toEqual([]);
+    }
+    // A socket merely down is still the standing connection.
+    expect(connectionsFor(facts({ ...relayFacts(1), status: enrolledStatus({ pairedClients: 1, connection: 'disconnected' }) }))[0]!.when).toBe('Always');
   });
 
   it('lists push through the Relay once a phone is paired, naming the push setting as its condition', () => {
@@ -130,7 +196,7 @@ describe('connectionsFor', () => {
       connectionsFor(facts({ policy: { ...LOCAL, allowed: [] }, ...over }));
     expect(voice({ managedVoice: true })).toEqual([
       {
-        to: 'hosted.dormouse.sh',
+        to: 'voice.dormouse.sh',
         when: 'When an alert is spoken in the managed voice',
         carries: 'The pane’s name and the voice id, which Hosted passes to ElevenLabs.',
       },
@@ -176,6 +242,74 @@ describe('policyForLevel', () => {
       allowed: [LAN],
       autoUpdate: true,
     });
+  });
+});
+
+/** 10:42 on this machine's clock, whatever its zone. */
+const AT_10_42 = new Date(2026, 9, 1, 10, 42).getTime();
+const CLOCK_10_42 = new Date(AT_10_42).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+
+describe('pathRefusalSentence', () => {
+  const observed: PathRefusal = {
+    at: AT_10_42,
+    kind: 'path-refused',
+    end: 'remote',
+    address: '172.58.12.9',
+    addressSource: 'observed',
+  };
+  const reported: PathRefusal = { ...observed, kind: 'given-up', addressSource: 'reported' };
+  const remote: PathRefusal = { at: AT_10_42, kind: 'path-refused', end: 'remote' };
+  const local: PathRefusal = { at: AT_10_42, kind: 'path-refused', end: 'local', localAddress: '10.0.0.2' };
+  const localUnnamed: PathRefusal = { at: AT_10_42, kind: 'path-refused', end: 'local' };
+  const none: PathRefusal = { at: AT_10_42, kind: 'deadline' };
+  const SAME_DAY = AT_10_42 + 60 * 60 * 1000;
+
+  it('says when, and which end was off the networks allowed below', () => {
+    expect(pathRefusalSentence(observed, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone tried to connect from 172.58.12.9, which isn’t on a network allowed below.`,
+    );
+    // The phone's own claim is named as its claim, never as off the networks.
+    expect(pathRefusalSentence(reported, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone couldn’t connect directly over an allowed network (it reported 172.58.12.9).`,
+    );
+    expect(pathRefusalSentence(remote, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone tried to connect from outside the networks allowed below.`,
+    );
+    // This computer's own end: never the phone's network.
+    expect(pathRefusalSentence(local, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone couldn’t connect: this computer wasn’t on a network allowed below (its address was 10.0.0.2).`,
+    );
+    expect(pathRefusalSentence(localUnnamed, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone couldn’t connect: this computer wasn’t on a network allowed below.`,
+    );
+    expect(pathRefusalSentence(none, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone couldn’t reach this computer over an allowed network.`,
+    );
+  });
+
+  it('names the date of a refusal from another day', () => {
+    const day = new Date(AT_10_42).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const nextDay = new Date(2026, 9, 2, 9, 0).getTime();
+    expect(pathRefusalSentence(none, 'network-panel', nextDay)).toBe(
+      `On ${day} at ${CLOCK_10_42} a phone couldn’t reach this computer over an allowed network.`,
+    );
+    const withYear = new Date(AT_10_42).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    expect(pathRefusalSentence(none, 'network-panel', new Date(2027, 0, 2).getTime())).toContain(`On ${withYear} at`);
+  });
+
+  it('words a one-time ending the same way, as the ending', () => {
+    expect(pathRefusalSentence(observed, 'one-time')).toBe(
+      'The phone tried to connect from 172.58.12.9, which isn’t on one of your allowed networks, so the connection ended.',
+    );
+    expect(pathRefusalSentence(reported, 'one-time')).toBe(
+      'The phone couldn’t connect directly over one of your allowed networks (it reported 172.58.12.9), so the connection ended.',
+    );
+    expect(pathRefusalSentence(local, 'one-time')).toBe(
+      'This computer wasn’t on one of your allowed networks (its address was 10.0.0.2), so the connection ended.',
+    );
+    expect(pathRefusalSentence(none, 'one-time')).toBe(
+      'The phone couldn’t reach this computer over one of your allowed networks, so the connection ended.',
+    );
   });
 });
 
@@ -374,6 +508,25 @@ describe('Settings → Network', () => {
     await act(async () =>
       container.querySelector<HTMLElement>('[role="switch"][aria-label="Allow Local network en5 on"]')!.click());
     expect(sentPolicies()).toEqual([{ ...both, allowed: [LAN, 'fd00:1::/64'] }]);
+  });
+
+  it('shows the last refused phone above the allowed networks until it is dismissed', async () => {
+    const refusal: PathRefusal = { at: AT_10_42, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES, refusal) });
+    await render();
+    const notice = () => container.querySelector(`[role="status"][aria-label="${PATH_REFUSAL_LABEL}"]`);
+    expect(notice()?.textContent).toContain(pathRefusalSentence(refusal, 'network-panel'));
+
+    await act(async () => button('Dismiss').click());
+    expect(command.mock.calls.map(([cmd]) => cmd)).toContain('dismissPathRefusal');
+    expect(notice()).toBeNull();
+  });
+
+  it('shows no refused phone under a level that holds no path', async () => {
+    const refusal: PathRefusal = { at: AT_10_42, kind: 'deadline' };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(ANYWHERE, 'hosted', INTERFACES, refusal) });
+    await render();
+    expect(text()).not.toContain('couldn’t reach this computer');
   });
 
   it('says how many ranges may be allowed rather than sending one too many', async () => {

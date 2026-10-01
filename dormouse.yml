@@ -30,7 +30,7 @@ tools:
     port: auto
     prespawn_dedupe: [relay, $PROJECT_ROOT]
 
-  # HMR for the frontend of hosted.dormouse.sh (backend needs a restart; needs Docker for Postgres)
+  # HMR for the frontend of hosted.dormouse.sh, Burrow approval at /enroll included (backend needs a restart; needs Docker for Postgres)
   hosted:
     run: pnpm dev:hosted
     render: agent-browser-screencast

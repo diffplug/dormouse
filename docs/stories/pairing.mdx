@@ -124,7 +124,7 @@ passkey. `show-password` is the enrollment fallback.
 ## 2. Build a Burrow pointed at it
 
 Shipped Dormouse builds bake in exactly one relay origin,
-`https://hosted.dormouse.sh`, enforced inside the Node process that holds the
+`https://relay.dormouse.sh`, enforced inside the Node process that holds the
 relay socket rather than by any webview CSP. A self-host Relay needs a local
 build baked with its origin, byte for byte:
 
@@ -136,8 +136,8 @@ DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:vscode
 That makes it a self-host build, which contacts nothing of Dormouse's on its
 own: no one-time links, no managed voice, no update checks. Skipping this has a
 specific, recognizable symptom, and you will see it in the next section rather
-than as a mysterious failure: a stock build's **Persistent Relay** offers only a
-disabled "Use hosted.dormouse.sh", with nothing to enroll.
+than as a mysterious failure: a stock build's **Persistent Relay** offers only
+"Enroll with hosted.dormouse.sh", and no setup password.
 
 ---
 
@@ -157,7 +157,7 @@ Relay** leaves nothing to type:
 <Canvas of={RemoteControl.OfferAvailable} />
 
 > The other button, **One-time connection**, is disabled in a self-host build
-> like this one: its links are made at `hosted.dormouse.sh`. In a stock build,
+> like this one: its links are made at `relay.dormouse.sh`. In a stock build,
 > under **Local networks** or **Anywhere**, it needs none of this walkthrough —
 > no Relay, no enrollment, no passkey, no pairing. It shows a link good for one
 > phone, for one session, confirmed with the same two digits and saving nothing;
@@ -473,13 +473,22 @@ lands hours late, or on another paired phone, cannot masquerade as a real
 alarm. (The spoken alarm has a sibling **Play test sound**; both live in
 `docs/specs/alert.md` → Alarm settings.)
 
-**Displaced** is the one connection state that needs a person. Another Dormouse
+**Displaced** is one of three connection states that need a person. Another Dormouse
 instance enrolled with the same `burrowId` took the relay slot, and this one stood
 down — terminally, on purpose, because two instances fighting over a slot is
 worse than one stopping. Reconnect takes it back, and displaces the other in
 turn.
 
 <Canvas of={RemoteControl.Displaced} />
+
+**Removed** is the second: the computer was removed from the account (or from
+`burrows.json`), so the Relay closed its socket and this machine stood down
+rather than retrying a token nothing will accept. On Hosted, Enroll again begins
+a fresh code; a self-host machine is disconnected and enrolled again from the
+form. The third, **not entitled**, is a Hosted plan that no longer includes
+remote control, and offers Reconnect.
+
+<Canvas of={RemoteControl.RemovedHosted} />
 
 **Disconnect** asks first, because forgetting the enrollment drops every paired
 phone until each pairs again.

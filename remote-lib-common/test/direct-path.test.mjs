@@ -19,6 +19,7 @@ import {
   DIRECT_DISCONNECTED_GRACE_MS,
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_HANDOFF_TIMEOUT_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   DIRECT_SRFLX_GRACE_MS,
   DirectCutover,
@@ -26,13 +27,64 @@ import {
   MAX_DIRECT_PENDING_BYTES,
   MAX_DIRECT_PENDING_FRAMES,
   MAX_DIRECT_SDP_LENGTH,
+  MAX_PATH_ADDRESS_LENGTH,
   encodeTransportPlaintext,
   isDirectSdp,
   isDirectSignalV1,
+  isIpLiteral,
   utf8Encode,
 } from '../dist/index.js';
 
 const SDP = 'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n';
+
+// --- Path addresses ----------------------------------------------------------
+
+test('isIpLiteral takes one IP literal and never a name, a zone, or a port', () => {
+  for (const address of [
+    '172.58.12.9',
+    '0.0.0.0',
+    '255.255.255.255',
+    '::',
+    '::1',
+    'fe80::1',
+    '2607:fb90:1:2::9',
+    '2001:db8:0:0:0:0:0:1',
+    '::ffff:192.168.1.20',
+    '64:ff9b::192.0.2.33',
+    'ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255',
+  ]) {
+    assert.equal(isIpLiteral(address), true, address);
+  }
+  assert.equal('ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255'.length, MAX_PATH_ADDRESS_LENGTH);
+  for (const value of [
+    '',
+    '1.2.3',
+    '1.2.3.4.5',
+    '256.1.1.1',
+    '01.2.3.4',
+    '1.2.3.4:443',
+    'phone.local',
+    '0b1c5f3a-1d2e-4c1b-9a1e-1234567890ab.local',
+    'fe80::1%en0',
+    '1::2::3',
+    '1:2:3:4:5:6:7',
+    '1:2:3:4:5:6:7:8:9',
+    '1:2:3:4:5:6:7::8',
+    '12345::1',
+    ':1::2',
+    '1::2:',
+    '1.2.3.4::',
+    '1.2.3.4::1',
+    '::1.2.3.4:1',
+    '[::1]',
+    ' 1.2.3.4',
+    `${'0:'.repeat(20)}1`,
+    42,
+    null,
+  ]) {
+    assert.equal(isIpLiteral(value), false, String(value));
+  }
+});
 
 // --- The signaling guard ----------------------------------------------------
 
@@ -125,6 +177,11 @@ test('the timings the spec names are the values that ship', () => {
   // its own. Asserted as the alias it is: `>=` would be a tautology through it,
   // and a literal would fail a legitimate re-tuning of the budget.
   assert.equal(DIRECT_HANDOFF_TIMEOUT_MS, DIRECT_SETUP_TIMEOUT_MS);
+  // A direct-only session's deadline runs from the Burrow's outcome; the phone
+  // arms its own setup bound only once that outcome reaches it, and its switch
+  // then crosses the relay. A deadline any shorter beats a phone that is
+  // within both of its own bounds.
+  assert.equal(DIRECT_ONLY_DEADLINE_MS, DIRECT_SETUP_TIMEOUT_MS + DIRECT_HANDOFF_TIMEOUT_MS);
   // Long enough that a gap ICE recovers from is waited out rather than charged
   // a fresh handshake and a WebAuthn prompt.
   assert.equal(DIRECT_DISCONNECTED_GRACE_MS, 5_000);

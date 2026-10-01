@@ -1,9 +1,11 @@
 // Rules: docs/specs/hosted.md -> "Managed voice".
-import type { Context, Hono, MiddlewareHandler } from "hono";
+import type { Context, Hono } from "hono";
 import { digest } from "@pgstencil/auth/security";
 import { SecureRandom, token as randomToken } from "pgstencil";
-import { queryDatabase, withClient } from "pgstencil/postgres";
+import { withClient } from "pgstencil/postgres";
+import { parseBearer } from "remote-lib-common";
 import { isAdmin } from "./admin";
+import { accountQuery, cookieAdmin, type AccountHost } from "./account-gate";
 
 export const VOICE_DAILY_CAP = 500;
 const TOKEN = /^dmv_[A-Za-z0-9_-]{43}$/;
@@ -40,11 +42,9 @@ export function elevenLabs(
   };
 }
 
-/** What one request's deployment provides. */
-export interface VoiceHost {
+/** What one request's voice deployment provides to speak. */
+export interface SpeakHost {
   databaseUrl: string;
-  /** The Better Auth handler, asked for the cookie's login. */
-  auth(request: Request): Response | Promise<Response>;
   /** Undefined when this deployment has no upstream. */
   synthesize: Synthesize | undefined;
 }
@@ -61,82 +61,62 @@ const notAdmin = (c: Context) =>
 const badBody = (c: Context) =>
   fail(c, 400, "Send JSON with text and voiceId.");
 
-/** Registers /api/voice/*; call before any /api/* catch-all. */
-export function voiceRoutes(app: Hono<any>, host: (c: Context) => VoiceHost) {
-  // Cookie routes: same-site pages share the login cookie, so only this origin
-  // may change tokens. Sets `voiceUser` to the admin's user ID.
-  const cookieAdmin: MiddlewareHandler<{
-    Variables: { voiceUser: string };
-  }> = async (c, next) => {
-    const origin = new URL(c.req.url).origin;
-    if (
-      c.req.method !== "GET" &&
-      c.req.method !== "HEAD" &&
-      c.req.header("origin") !== origin
-    )
-      return fail(c, 403, "Invalid origin.");
-    const headers = new Headers();
-    for (const name of ["cookie", "cf-connecting-ip"]) {
-      const value = c.req.header(name);
-      if (value) headers.set(name, value);
-    }
-    const response = await host(c).auth(
-      new Request(new URL("/api/auth/get-session", origin), { headers }),
-    );
-    if (!response.ok) throw new Error("Login lookup failed");
-    const session = (await response.json()) as {
-      user?: { id: string; email?: unknown; emailVerified?: unknown };
-    } | null;
-    if (!session?.user) return fail(c, 401, "Sign in first.");
-    if (!isAdmin(session.user)) return notAdmin(c);
-    c.set("voiceUser", session.user.id);
-    await next();
-  };
-  const query = <Row extends Record<string, unknown>>(
-    c: Context,
-    text: string,
-    values: unknown[],
-  ) => queryDatabase<Row>(host(c).databaseUrl, text, values);
+/**
+ * Registers the account's /api/voice/tokens routes; call before any /api/*
+ * catch-all.
+ */
+export function voiceTokenRoutes(
+  app: Hono<any>,
+  host: (c: Context) => AccountHost,
+) {
+  // Cookie routes: only this origin may change tokens, and only the admin.
+  const cookieGate = cookieAdmin(host, notAdmin);
 
-  app.get("/api/voice/tokens", cookieAdmin, async (c) => {
-    const tokens = await query(
-      c,
+  app.get("/api/voice/tokens", cookieGate, async (c) => {
+    const tokens = await accountQuery(
+      host(c),
       `SELECT id, "createdAt", "lastUsedAt", "revokedAt" FROM dormouse_voice_tokens
       WHERE "userId" = $1 ORDER BY "createdAt" DESC, id`,
-      [c.get("voiceUser")],
+      [c.get("login").userId],
     );
     return c.json({ tokens });
   });
 
-  app.post("/api/voice/tokens", cookieAdmin, async (c) => {
+  app.post("/api/voice/tokens", cookieGate, async (c) => {
     const token = "dmv_" + randomToken(new SecureRandom());
-    const [row] = await query<{ id: string; createdAt: Date }>(
-      c,
+    const [row] = await accountQuery<{ id: string; createdAt: Date }>(
+      host(c),
       `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)
       RETURNING id, "createdAt"`,
-      [c.get("voiceUser"), digest(token)],
+      [c.get("login").userId, digest(token)],
     );
     return c.json({ id: row.id, token, createdAt: row.createdAt }, 201);
   });
 
-  app.delete("/api/voice/tokens/:id", cookieAdmin, async (c) => {
+  app.delete("/api/voice/tokens/:id", cookieGate, async (c) => {
     const id = c.req.param("id");
     const revoked =
       UUID.test(id) &&
       (
-        await query(
-          c,
+        await accountQuery(
+          host(c),
           `UPDATE dormouse_voice_tokens SET "revokedAt" = coalesce("revokedAt", now())
           WHERE id = $1 AND "userId" = $2 RETURNING id`,
-          [id, c.get("voiceUser")],
+          [id, c.get("login").userId],
         )
       ).length > 0;
     return revoked ? c.body(null, 204) : fail(c, 404, "Token not found.");
   });
+}
 
+/**
+ * Registers the voice origin's bearer-only POST /api/voice/speak; call before
+ * any /api/* catch-all. It reads no cookie and never asks auth.
+ */
+export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
   app.post("/api/voice/speak", async (c) => {
-    const bearer = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "");
-    if (!bearer || !TOKEN.test(bearer[1])) return tokenRequired(c);
+    const bearer = parseBearer(c.req.header("authorization"));
+    if (!bearer || !TOKEN.test(bearer)) return tokenRequired(c);
     const { databaseUrl, synthesize } = host(c);
     // One connection for the owner lookup and the count; released before the upstream call.
     const speech = await withClient(databaseUrl, async (db) => {
@@ -151,7 +131,7 @@ export function voiceRoutes(app: Hono<any>, host: (c: Context) => VoiceHost) {
         `SELECT t.id, t."userId", u.email, u."emailVerified"
         FROM dormouse_voice_tokens t JOIN "user" u ON u.id = t."userId"
         WHERE t.hash = $1 AND t."revokedAt" IS NULL`,
-        [digest(bearer[1])],
+        [digest(bearer)],
       );
       if (!owner) return tokenRequired(c);
       if (!isAdmin(owner)) return notAdmin(c);

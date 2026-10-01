@@ -57,7 +57,7 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 **A `RemoteApiSession` exists only for an authorized session.** Created at promotion — presence proof and ACL conjunction both passed ([remote-security-model.md](./remote-security-model.md) → Connection) — and disposed when the Client disconnects, when the Burrow reaps the session, and by any promotion that replaces it, so **a re-authorizing Client can never inherit the previous session's attachment**.
 
-**The Burrow says goodbye before an ending it chose**: `SessionEndV1` (`{ v: 1, t: 'session-end' }`, exact keys, no payload), one padded control message on whichever path carries the session, sent by `EstablishedE2eSession.end` — Take back, an idle reap, a one-time End, and a replacement from the same Client static. **Never on a poisoned session, never instead of the dispose.** **The session is over at the goodbye**: nothing after it is read, and the remote-api handler goes with it. **A switched channel closes only once the goodbye has left it** — the sender's queue empty and `bufferedAmount` zero — **or after `SESSION_END_FLUSH_MS` (500 ms)**, sending nothing more meanwhile; the relay send is synchronous onto the socket, and the dispose follows at once (rationale). A Client reports it as burrow loss (`endedByBurrow`); an older one ignores it as an unknown control shape (rationale).
+**The Burrow says goodbye before an ending it chose**: `SessionEndV1` (`{ v: 1, t: 'session-end' }`, exact keys), one padded control message on whichever path carries the session, sent by `EstablishedE2eSession.end` — Take back, an idle reap, a one-time End, a replacement from the same Client static, and a direct-only session's ending. **A path's ending adds `reason: 'network-not-allowed'`, and may add one IP literal `address` (≤ 45 characters) with its `addressSource`** (`docs/specs/remote-network.md` -> "Local networks"). **Never on a poisoned session, never instead of the dispose.** **The session is over at the goodbye**: nothing after it is read, and the remote-api handler goes with it. **A switched channel closes only once the goodbye has left it** — the sender's queue empty and `bufferedAmount` zero — **or after `SESSION_END_FLUSH_MS` (500 ms)**, sending nothing more meanwhile; the relay send is synchronous onto the socket, and the dispose follows at once (rationale). A Client reports it as burrow loss (`endedByBurrow`); an older one ignores it as an unknown control shape (rationale).
 
 Source of truth: `BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`, `EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts`, `DirectEndpoint.disposeAfterFlush` in `lib/src/remote/direct/direct-endpoint.ts`, `SessionEndV1` in `remote-lib-common/src/security/e2e-ceremony.ts`, `ClientSessionCore` in `lib/src/remote/client/session-core.ts`.
 
@@ -98,7 +98,7 @@ signal always fits one control body.
 
 Which ICE servers each end gathers through:
 [remote-network.md](./remote-network.md) -> "Anywhere"; Local networks
-restricts a one-time attempt further
+restricts an attempt further
 ([remote-network.md](./remote-network.md) -> "Local networks").
 
 **The two shipped stacks are proven against each other by hand**, by
@@ -437,7 +437,7 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 **Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and both Burrows speak today. What remains is to **dogfood** it across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
 
-A paired phone's network levels follow the **remote-network** scope in [remote-network.md](./remote-network.md). A session surviving relay loss remains unstaged.
+A session surviving relay loss remains unstaged.
 
 ### 9. Audio
 

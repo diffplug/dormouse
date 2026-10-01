@@ -162,7 +162,7 @@ Source of truth: `startCapabilityViewer` / `isInsideRoot` / `pathSegments` in `d
 
 The exposure is traffic the user never chose, which under Nothing is none. `docs/specs/remote-network.md` -> "Policy" owns the rule these checks audit.
 
-- **FAIL IF** anything opens a connection on its own while the network policy is `nothing` or unread. `BurrowService` in `lib/src/host/remote/service.ts` must route every socket, request, and direct peer through its transport guard, which refuses at the call; start no `BurrowRuntime` under any level but `relay`; and refuse `enroll`, `enrollOffer`, and `oneTimeOpen` before any request. `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts` must ask `networkAllowed` before every speak, and `runUpdateCheck` in `standalone/src/updater.ts` must not call `check()` unless the policy it read is not `nothing` and `autoUpdate` is on, a failed read counting as `nothing`. Search the rest of `lib/src/host/`, `standalone/src/`, and `vscode-ext/src/` for a request outside these three. Pinned by `lib/src/host/remote/service.test.ts`, `lib/src/host/managed-voice-host.test.ts`, and `standalone/src/updater.test.ts`.
+- **FAIL IF** anything opens a connection on its own while the network policy is `nothing` or unread. `BurrowService` in `lib/src/host/remote/service.ts` must route every socket, request, and direct peer through its transport guard, which refuses at the call; start no `BurrowRuntime` under `nothing`; and refuse `enroll`, `enrollOffer`, `beginHostedEnrollment`, and `oneTimeOpen` before any request. `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts` must ask `networkAllowed` before every speak, and `runUpdateCheck` in `standalone/src/updater.ts` must not call `check()` unless the policy it read is not `nothing` and `autoUpdate` is on, a failed read counting as `nothing`. Search the rest of `lib/src/host/`, `standalone/src/`, and `vscode-ext/src/` for a request outside these three. Pinned by `lib/src/host/remote/service.test.ts`, `lib/src/host/managed-voice-host.test.ts`, and `standalone/src/updater.test.ts`.
 - **FAIL IF** the policy can be written by anything but the user's own choice. `setNetworkPolicy` is the only writer and takes a policy only exactly (`parseNetworkPolicy` in `lib/src/remote/network-policy.ts`, `requestedNetworkPolicy` in `lib/src/host/remote/service.ts`); no Client, Relay, or Hosted answer may reach the store, and a stored record that is not a policy must read as `nothing`.
 
 ## Persisted state
@@ -192,7 +192,7 @@ behind do carry transcripts (rationale).
 state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
 buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
-**The managed-voice token is a bearer credential at rest** — `<state dir>/managed-voice.json` beside the Burrow's enrollment, written by `writeJsonAtomic` (`0700`/`0600`; on Windows the owner-only DACL `burrow_state_dir` applies before the sidecar spawns), with the voice id (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. **The token must go only to a Hosted build's baked relay origin**, never following a redirect (`redirect: 'error'`); a self-host build sends it nowhere (`docs/specs/relay.md` -> "Relay origin").
+**The managed-voice token is a bearer credential at rest** — `<state dir>/managed-voice.json` beside the Burrow's enrollment, written by `writeJsonAtomic` (`0700`/`0600`; on Windows the owner-only DACL `burrow_state_dir` applies before the sidecar spawns), with the voice id (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. **The token must go only to `hostedVoiceOrigin`'s answer**, never following a redirect (`redirect: 'error'`); a self-host build, answered `null`, sends it nowhere (`docs/specs/relay.md` -> "Relay origin").
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
@@ -219,7 +219,7 @@ does. A gap, not an accepted risk.
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in
 `standalone/src-tauri/src/lib.rs`, `createManagedVoiceHost` in
-`lib/src/host/managed-voice-host.ts`, `hostedOrigin` in
+`lib/src/host/managed-voice-host.ts`, `hostedVoiceOrigin` in
 `lib/src/host/relay-origin.ts`.
 
 ## Terminal context directory actions

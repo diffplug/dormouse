@@ -34,28 +34,69 @@ export function bindAddressFor(
   return family.length === 1 ? family[0]! : null;
 }
 
-/** `c=` and `a=candidate` lines, with the address each names. */
-const CONNECTION_LINE = /^c=IN IP[46] (\S+)$/;
+/**
+ * `sdp` with every candidate outside `inAllowed`, or with no address to read,
+ * removed and a default address outside it written as `0.0.0.0`, and how many
+ * candidates are left. Lines end at any of CRLF, LF, or CR and fields at the
+ * C-locale whitespace libdatachannel splits on, never JavaScript's wider `\s`,
+ * so no line the native parser reads as a candidate escapes this one; lines
+ * rejoin with the first ending found.
+ */
+function keepAllowed(sdp: string, inAllowed: (address: string) => boolean): { sdp: string; candidates: number } {
+  const eol = /\r\n|\r|\n/.exec(sdp)?.[0] ?? '\n';
+  let candidates = 0;
+  const lines: string[] = [];
+  for (const line of sdp.split(/\r\n|\r|\n/)) {
+    const fields = line.split(/[ \t\v\f]+/).filter((field) => field !== '');
+    if (/^a=candidate:/i.test(fields[0] ?? '')) {
+      const address = fields[4];
+      if (!address || !inAllowed(address)) continue;
+      candidates += 1;
+    } else if (/^c=/i.test(fields[0] ?? '')) {
+      const address = fields[2];
+      if (!address || !inAllowed(address)) {
+        lines.push('c=IN IP4 0.0.0.0');
+        continue;
+      }
+    }
+    lines.push(line);
+  }
+  return { sdp: lines.join(eol), candidates };
+}
+
+/**
+ * Every range an address a phone reports could be private to some network:
+ * RFC 1918, carrier-grade NAT, loopback, link-local, unspecified, and IPv6
+ * unique-local. What is left is an address the internet routes.
+ */
+const isPrivateAddress = allowedAddressTest([
+  '0.0.0.0/8',
+  '10.0.0.0/8',
+  '100.64.0.0/10',
+  '127.0.0.0/8',
+  '169.254.0.0/16',
+  '172.16.0.0/12',
+  '192.168.0.0/16',
+  '::/128',
+  '::1/128',
+  'fc00::/7',
+  'fe80::/10',
+]);
+
 const CANDIDATE_LINE = /^a=candidate:\S+ \S+ \S+ \S+ (\S+) /;
 
 /**
- * `sdp` with every candidate outside `inAllowed` removed and a default address
- * outside it written as `0.0.0.0`, and how many candidates are left.
+ * The first candidate of `sdp` that is an IP literal outside every private
+ * range — a phone's server-reflexive candidate, most often — and outside
+ * `skip`, or `null`.
  */
-function keepAllowed(sdp: string, inAllowed: (address: string) => boolean): { sdp: string; candidates: number } {
-  const eol = sdp.includes('\r\n') ? '\r\n' : '\n';
-  let candidates = 0;
-  const lines: string[] = [];
-  for (const line of sdp.split(eol)) {
-    const candidate = CANDIDATE_LINE.exec(line);
-    if (candidate) {
-      if (!inAllowed(candidate[1]!)) continue;
-      candidates += 1;
-    }
-    const connection = CONNECTION_LINE.exec(line);
-    lines.push(connection && !inAllowed(connection[1]!) ? 'c=IN IP4 0.0.0.0' : line);
+export function firstPublicCandidate(sdp: string, skip: (address: string) => boolean = () => false): string | null {
+  for (const line of sdp.split(/\r?\n/)) {
+    const address = CANDIDATE_LINE.exec(line)?.[1];
+    if (address === undefined || address.includes('%') || isIP(address) === 0) continue;
+    if (!isPrivateAddress(address) && !skip(address)) return address;
   }
-  return { sdp: lines.join(eol), candidates };
+  return null;
 }
 
 /**
@@ -82,13 +123,17 @@ export function localNetworksPath(allowed: readonly string[]): DirectPathPolicy 
     // A browser that offers only mDNS names is left none: its checks reach the
     // answer's candidates, and the pair forms peer-reflexive (rationale).
     acceptRemote: (sdp) => keepAllowed(sdp, inAllowed).sdp,
+    // Never evidence: the phone wrote it, and nothing here decides on it.
+    reportedAddress: (sdp) => firstPublicCandidate(sdp, inAllowed),
+    // This end first: a phone's address says nothing while this machine is
+    // itself off the allowed networks.
     refusal(pair) {
-      if (!pair) return 'the connection reports no selected candidate pair';
+      if (!pair) return { reason: 'the connection reports no selected candidate pair', end: null };
       if (pair.local === null || !inAllowed(pair.local)) {
-        return 'the selected pair’s local end is not on an allowed network';
+        return { reason: 'the selected pair’s local end is not on an allowed network', end: 'local' };
       }
       if (pair.remote === null || !inAllowed(pair.remote)) {
-        return 'the selected pair’s remote end is not on an allowed network';
+        return { reason: 'the selected pair’s remote end is not on an allowed network', end: 'remote' };
       }
       return null;
     },

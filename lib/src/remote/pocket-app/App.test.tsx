@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  BURROW_REMOVED_COPY,
   BURROWS_EMPTY,
   CAMERA_BOOTSTRAP_MESSAGE,
   BurrowsView,
@@ -16,6 +17,7 @@ import {
   type BurrowView,
   type PushConfigStatus,
 } from './App';
+import type { PocketDeployment } from './deployment';
 import { PairingCodeView } from './views';
 import type { PushAvailability } from '../client/push-subscribe';
 import {
@@ -53,6 +55,7 @@ function renderBurrows(
     onForget?: (burrow: BurrowView) => void;
     onEnablePush?: () => void;
     onRetryPushConfig?: () => void;
+    deployment?: PocketDeployment;
   } = {},
 ) {
   act(() => {
@@ -60,6 +63,7 @@ function renderBurrows(
       <StrictMode>
         <BurrowsView
           burrows={overrides.burrows ?? BURROWS}
+          deployment={overrides.deployment}
           busy={overrides.busy ?? null}
           error={null}
           isPushSubscribed={overrides.isPushSubscribed ?? (() => false)}
@@ -384,6 +388,18 @@ describe('BurrowsView actions', () => {
 
     expect(rowFor('First laptop').querySelector('button')!.disabled).toBe(true);
     expect(rowFor('Second laptop').querySelector('button')!.disabled).toBe(false);
+  });
+
+  it('offers a removed row Forget alone, enabled offline, naming who removed it', () => {
+    const onForget = vi.fn();
+    const removed: BurrowView[] = [{ ...BURROWS[0]!, online: false, removed: true }];
+    for (const deployment of ['hosted', 'self-host'] as const) {
+      renderBurrows({ burrows: removed, onForget, deployment });
+      expect(rowFor('First laptop').textContent).toContain(BURROW_REMOVED_COPY[deployment]);
+      expect(actionsIn(rowFor('First laptop'))).toEqual(['Forget']);
+    }
+    act(() => rowFor('First laptop').querySelector('button')!.click());
+    expect(onForget).toHaveBeenCalledWith(removed[0]);
   });
 
   it('offers the scanner from the list, paired Burrows or none', () => {

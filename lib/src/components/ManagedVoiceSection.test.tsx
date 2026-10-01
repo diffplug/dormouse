@@ -98,7 +98,7 @@ describe('ManagedVoiceSection', () => {
   it('states what is sent before a token is configured, and never echoes the token back', async () => {
     const adapter = Object.assign(new FakePtyAdapter(), { managedVoice: makePort() });
     await render(adapter);
-    expect(text()).toContain('Only the spoken pane label and voice id are sent to hosted.dormouse.sh');
+    expect(text()).toContain('Only the spoken pane label and voice id are sent to voice.dormouse.sh');
     expect(text()).toContain("ElevenLabs' copy is usually deleted within seconds");
 
     await act(async () => type(input('password'), TOKEN));

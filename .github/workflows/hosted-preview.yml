@@ -62,6 +62,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:hosted
       - run: pnpm build:hosted
+      # Every Worker's static files, each under its own `dist/<worker>/`.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: preview-assets
@@ -132,17 +133,17 @@ jobs:
         run: pnpm --filter dormouse-hosted db:migrate --preview && pnpm --filter dormouse-hosted db:validate --preview
         env:
           DATABASE_URL: ${{ steps.database.outputs.db_url }}
-      - name: Deploy Worker and Hyperdrive
+      - name: Deploy the account, relay, and voice Workers and Hyperdrive
         id: deploy
         run: pnpm --filter dormouse-hosted preview:deploy
         env:
           DATABASE_URL: ${{ steps.database.outputs.db_url }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           PREVIEW_AUTH_SECRET: ${{ secrets.PREVIEW_AUTH_SECRET }}
-      - name: Check deployed revision, database, cookies and routes
-        run: pnpm --filter dormouse-hosted preview:smoke "$PREVIEW_ORIGIN" "$BUILD_SHA"
+      - name: Check deployed revisions, database, cookies, routes and the rendezvous
+        run: pnpm --filter dormouse-hosted preview:smoke "$PREVIEW_ORIGINS" "$BUILD_SHA"
         env:
-          PREVIEW_ORIGIN: ${{ steps.deploy.outputs.url }}
+          PREVIEW_ORIGINS: ${{ steps.deploy.outputs.origins }}
 
   cleanup:
     if: >-
@@ -162,7 +163,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: package.json
-      - name: Remove this PR's Worker, Hyperdrive and Neon branch
+      - name: Remove this PR's Workers, Hyperdrive and Neon branch
         run: node hosted/scripts/preview.mjs cleanup
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

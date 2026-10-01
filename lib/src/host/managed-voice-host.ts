@@ -7,7 +7,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { writeJsonAtomic } from './atomic-json-file';
-import { hostedOrigin, type RelayBuild } from './relay-origin';
+import { hostedVoiceOrigin, type RelayBuild } from './relay-origin';
 import { createSerialQueue } from './remote/serial-queue';
 import {
   DEFAULT_MANAGED_VOICE_ID,
@@ -69,8 +69,8 @@ export function createManagedVoiceHost(options: {
   // The only place the token may go (`docs/specs/security-local.md` -> "Persisted state"),
   // and `null` in a self-host build: no token is read, nothing is sent, and
   // every edit and speak is refused.
-  const hosted = hostedOrigin(options.relay);
-  const speakUrl = hosted === null ? null : hosted + MANAGED_VOICE_SPEAK_PATH;
+  const voice = hostedVoiceOrigin(options.relay);
+  const speakUrl = voice === null ? null : voice + MANAGED_VOICE_SPEAK_PATH;
   let loaded: Promise<StoredConfig> | null = null;
   // Each edit reads, then rewrites the whole file: two at once would drop a field.
   const serialize = createSerialQueue();

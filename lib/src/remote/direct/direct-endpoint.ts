@@ -25,7 +25,7 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import { DirectPeer, type DirectPeering, type DirectViolationCause } from './direct-peer';
+import { DirectPeer, type DirectPeering, type DirectViolationCause, type RefusedEnd } from './direct-peer';
 import { realTimer, type RemoteTimer } from '../ws';
 
 /**
@@ -96,6 +96,10 @@ export class DirectEndpoint {
   readonly #cutover = new DirectCutover();
   readonly #setTimer: RemoteTimer;
   #peer: DirectPeer | null = null;
+  /** Whether this end built a peer for an attempt; see {@link attempted}. */
+  #attempted = false;
+  /** The given-up attempt's {@link DirectPeer.refusedEnd}, kept past its peer. */
+  #givenUpEnd: RefusedEnd | null = null;
   #disposed = false;
   #cause: DirectRelayCause | null = null;
   /** Whether an offer has been taken up and not yet answered or declined. */
@@ -133,6 +137,23 @@ export class DirectEndpoint {
    */
   get relayCause(): DirectRelayCause | null {
     return this.#cause;
+  }
+
+  /**
+   * Whether this end built a peer for this session's attempt — an offer taken
+   * up, or made — so a path that never formed was tried rather than never
+   * asked for.
+   */
+  get attempted(): boolean {
+    return this.#attempted;
+  }
+
+  /**
+   * The end a refusal of this session's attempt names
+   * ({@link DirectPeer.refusedEnd}), live or given up; `null` with none.
+   */
+  get refusedEnd(): RefusedEnd | null {
+    return this.#peer?.refusedEnd ?? this.#givenUpEnd;
   }
 
   /**
@@ -346,6 +367,7 @@ export class DirectEndpoint {
       return null;
     }
     if (!connection) return null;
+    this.#attempted = true;
     this.#peer = new DirectPeer({
       peer: connection,
       pathPolicy,
@@ -445,6 +467,7 @@ export class DirectEndpoint {
     // actually was, and staying relayed is the outcome an operator most often
     // has to explain. Once per session at most: the attempt is not retried.
     console.warn(`[direct] staying on the relay: ${reason}`);
+    this.#givenUpEnd = this.#peer?.refusedEnd ?? this.#givenUpEnd;
     this.#peer?.close();
     this.#peer = null;
     this.#cutover.abandon();
