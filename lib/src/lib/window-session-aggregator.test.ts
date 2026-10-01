@@ -4,6 +4,7 @@
 // and there is no unload without a `window`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  beginWorkspaceSessionBatch,
   clearWorkspaceTransferring,
   flushWindowSession,
   forgetWorkspaceSession,
@@ -270,4 +271,27 @@ describe('window session aggregator', () => {
       await expect(flushWindowSession()).resolves.toBeUndefined();
     });
   });
+});
+
+
+it('holds the prior complete snapshot through a Surface move, including pagehide and explicit flush', async () => {
+  const first = getWorkspacesSnapshot().workspaces[0].id;
+  const second = createWorkspace({ name: 'Second' }).id;
+  publishWorkspaceSession(first, session('moving'));
+  publishWorkspaceSession(second, session('other'));
+  const write = vi.fn();
+  installWindowSessionWriter(write);
+  const before = getWindowSnapshot();
+  const end = beginWorkspaceSessionBatch();
+  publishWorkspaceSession(first, { version: 3, panes: [] });
+  expect(getWindowSnapshot()).toEqual(before);
+  window.dispatchEvent(new Event('pagehide'));
+  await flushWindowSession();
+  expect(write).not.toHaveBeenCalled();
+  publishWorkspaceSession(second, { version: 3, panes: [...session('other').panes, ...session('moving').panes] });
+  end();
+  expect(write).toHaveBeenCalledTimes(1);
+  const saved = write.mock.calls[0][0] as PersistedWindow;
+  expect(saved.workspaces[0].session.panes).toEqual([]);
+  expect(saved.workspaces[1].session.panes.map(p => p.id)).toEqual(['other', 'moving']);
 });

@@ -1,3 +1,4 @@
+import { moveSurface } from './surface-move';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
@@ -83,6 +84,9 @@ import type { DooredItem } from './wall-types';
  *  verbs' own) are the router's, not a Wall's: `WindowControlParams` in
  *  `workspace-control.ts`. */
 export type DorControlParams = {
+  destination?: unknown;
+  focus?: unknown;
+  dangerouslyDestroyIframePageState?: unknown;
   provider?: unknown;
   proposed?: unknown;
   command?: unknown;
@@ -1886,6 +1890,24 @@ export function useDorControl({
           waitedMs: outcome.waitedMs,
         },
       });
+      return;
+    }
+
+    if (detail.method === SURFACE_CONTROL_METHODS.move) {
+      const target = requireListedSurface(params.surface, detail);
+      if (!target) return;
+      const destination = params.destination;
+      if (!destination || typeof destination !== 'object'
+        || !((Object.keys(destination).length === 1) && (('new' in destination && destination.new === true) || ('workspace' in destination && typeof destination.workspace === 'string')))) {
+        detail.respond({ ok: false, error: 'Specify exactly one destination Workspace or --new' }); return;
+      }
+      try {
+        const result = await moveSurface(target.id, {
+          destination: destination as { new: true } | { workspace: string }, focus: params.focus === true,
+          dangerouslyDestroyIframePageState: params.dangerouslyDestroyIframePageState === true,
+        });
+        detail.respond({ ok: true, result });
+      } catch (error) { detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) }); }
       return;
     }
 

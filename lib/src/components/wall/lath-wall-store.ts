@@ -61,6 +61,9 @@ export type LathWallStore = {
   /** `useSyncExternalStore` subscriber — returns an unsubscribe. */
   subscribe(listener: () => void): () => void;
 
+  /** Roll back a failed cross-Wall adoption, including parked DOM and zoom. */
+  restoreSnapshot(snapshot: LathWallSnapshot): void;
+
   /** Initial hydration: replace the tree and meta wholesale (clears zoom). */
   seed(tree: LathTree, meta: ReadonlyArray<readonly [LeafId, LeafMeta]>): void;
 
@@ -293,6 +296,8 @@ export function createLathWallStore(): LathWallStore {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+
+    restoreSnapshot(saved) { commit(saved); },
 
     seed(tree, meta) {
       // `meta` carries the incoming Wall whole: the tree's leaves AND any Doors seeded

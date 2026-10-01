@@ -418,6 +418,8 @@ Source of truth: `SettingsDialog` and `TOPICS` in `lib/src/components/SettingsDi
 
 **Must project every Workspace, active or not.** The Activity store spans the whole Window, so what scopes it to one Workspace is the membership each mounted Wall publishes — panes ∪ doors, on every layout commit.
 
+**Must retain TODO and attention by stable Surface ID across a Workspace move and republish membership on both sides**, without replaying notifications on remount. GUI focus acknowledges without input; CLI movement alone does not acknowledge. Pinned by `preserves Session identity, TODO and retained cwd, retires the source ref, and recomputes both unions` in `lib/src/components/WorkspaceWindow.test.tsx`.
+
 Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`; `setWorkspaceSurfaces` in `lib/src/lib/workspace-surfaces.ts`; `lib/src/lib/workspace-union.test.ts`.
 
 Where it surfaces is host-specific:

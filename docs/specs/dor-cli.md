@@ -267,9 +267,7 @@ and each host's hop in `standalone/src/tauri-adapter.ts`,
 
 ## Handle Model
 
-`Window ⊃ Workspace ⊃ Pane ⊃ Surface` (`docs/specs/glossary.md`). **A command's
-positional target is always a Surface; a container is named by `--workspace
-<ref>`** ([dor workspace](#dor-workspace)). `Reserved:` no command targets
+`Window ⊃ Workspace ⊃ Pane ⊃ Surface` (`docs/specs/glossary.md`). **Must treat a command's primary target as a Surface; `dor move` also takes a destination Workspace, while `--workspace <ref>` scopes the source** ([dor workspace](#dor-workspace)). `Reserved:` no command targets
 another Window; a request reaches the window that owns its Surface instead
 (§Standalone), and the ref grammar for one is [Future](#future).
 
@@ -283,12 +281,12 @@ Invariants:
   layout/list positions: each Workspace starts at `surface:1` and assigns the
   next number when a Surface is created/restored. The map and its counter
   persist in the session snapshot, which is what keeps a retired number from
-  being reused (`docs/specs/transport.md` → "Persisted session types"). **Only
-  creation assigns a ref** — layout churn (reorder,
+  being reused (`docs/specs/transport.md` → "Persisted session types"). **Must assign a ref on creation or adoption into another Workspace** — layout churn (reorder,
   minimize/reattach, zoom, focus), replacing an untouched terminal with a
   browser Surface, and browser render-mode swaps all leave it unchanged.
   **Killing a Surface retires its ref; a later target that names it must fail
   rather than silently retarget.**
+- **Must retire a moved Surface's source ref and allocate the destination's next unused ref**, retaining its stable ID. **Must route a moved caller by that stable ID**: its cached `surface:N` refs now resolve in the destination and may name strangers; unscoped `ensure` searches there and may duplicate work left behind. Agents must use stable IDs across moves or explicitly scope the original Workspace. Print a renderer-local notice in the moved terminal with old/new handles and these scope changes, once after success, without PTY input or Activity changes.
 - Surface targets also accept `title:<exact display title>`, for human recovery;
   a title can drift, so automation should prefer refs from command responses or
   `dor list`. Action commands (`read`, `send`, `await`, `kill`, `dor agent-browser
@@ -456,6 +454,14 @@ Source of truth: `dor/src/commands/`, `HELP_PATTERN_TOKENS` and pre-parsing in
 `lib/src/components/Wall.tsx`, `dorCommandString` and host dispatch in
 `lib/src/components/wall/use-dor-control.ts`; help snapshots in
 `dor/test/snapshots/help/`, pinned exhaustive by `dor/test/cli-help.test.mjs`.
+
+## dor move
+
+**Must move one Surface within this Window through the shared move coordinator.** Syntax and response fields are owned by `dor move --help` and `MoveSurfaceRequest` / `MoveSurfaceResponse` in `dor/src/commands/types.ts`; interaction and refusal rules follow `docs/specs/layout.md` → Moving Surfaces between Workspaces.
+
+**Must require exactly one destination: a Workspace argument or `--new`.** Never reserve the bare name `new`; `--workspace` scopes the source. CLI moves preserve focus unless `--focus` follows the pane; if the active source disappears, activate the destination in command mode. **Must refuse iframe moves unless `--dangerously-destroy-iframe-page-state` is explicit**, without a GUI prompt; that flag cannot bypass dirty/pending Tool refusals. Single-Workspace hosts refuse `surface.move` through `spansWorkspaces`.
+
+Source of truth: `moveCommand` in `dor/src/commands/move.ts`; `moveSurface` in `lib/src/components/wall/surface-move.ts`. Tests: `dor/test/move.test.mjs`, `lib/src/components/WorkspaceWindow.test.tsx`.
 
 ## dor workspace
 

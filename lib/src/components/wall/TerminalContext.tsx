@@ -1,5 +1,7 @@
 import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { messageOf } from '../../lib/errors';
+import { wallHandleOwning } from './wall-handles';
+import { MoveWorkspaceAction } from './MoveWorkspaceAction';
 import { TerminalPane } from '../TerminalPane';
 import { TerminalContextView, type ContextScan, type TerminalContextViewProps } from './TerminalContextView';
 import { TerminalContextContext, WallActionsContext, type TerminalContextState } from './wall-context';
@@ -55,7 +57,7 @@ export function TerminalContext({ id, title, closing, origin, warning: openWarni
   const mismatch = !!helper && !!cwd && !!helperCwd && (cwd.path !== helperCwd.path || cwd.isRemote !== helperCwd.isRemote || (cwd.isRemote && cwd.host !== helperCwd.host));
   const warning = openWarning ?? (helperError || (helper && helper.status !== 'waiting' && (!cwd || !helperCwd) ? 'Directory comparison unavailable: a terminal has not reported its directory.' : undefined));
   return <TerminalContextView placement={placement} terminalRole={tool ? 'tool' : 'helper'} closing={closing} origin={origin} title={deriveSurfaceLabel(state, appTitleForPane, title ?? id)} surfaceRef={actions.resolveSurfaceRef(id)}
-    titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
+    workspaceMove={wallHandleOwning(id)?.canMoveSurfaces ? <MoveWorkspaceAction id={id} /> : undefined} titleSources={titleSources} cwd={cwd ? display(cwd) : 'Directory unknown'} helperCwd={helperCwd && display(helperCwd)} mismatch={mismatch}
     scan={scan} watchRule={offeredRule} watching={watchRule !== null} todo={activities.get(id)?.todo === true} notification={activities.get(id)?.notification}
     status={tool ? (state.currentCommand ? 'running' : 'completed') : helper?.status ?? 'waiting'} command={tool ? state.currentCommand?.rawCommandLine ?? state.lastCommand?.rawCommandLine ?? '' : helper?.command ?? defaultCommand} defaultCommand={defaultCommand} warning={warning}
     explorerLabel={IS_MAC ? 'Open in Finder' : IS_WINDOWS ? 'Open in Explorer' : 'Open folder'} canExplore={!!platform.terminalContext && !!cwd && !cwd.isRemote}

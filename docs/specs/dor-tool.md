@@ -333,6 +333,8 @@ The Tool-specific local boundaries are `docs/specs/security-local.md` → Dor To
 
 **Must cold-restore an approved Tool by starting its saved command through integration-gated shell readiness**, then rediscover its port. Agent-resume commands do not override the saved Tool command. Pending approvals restore as ordinary terminals and execute nothing. **Must rebuild visible Tool metadata from its pane row when layout geometry is unusable**, rather than starting the command in a plain terminal with no serving behavior.
 
+**Must refuse same-Window Surface moves while dirty or pending**, even with iframe-state consent; move interaction follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
+
 **Must retain live Tool browser params and OSC announcements in volatile Workspace-transfer content**, applying them to the destination plan without mutating the durable record. A serving iframe Tool participates in the ordinary iframe move confirmation. **Must refuse transfer while a Tool awaits approval or its browser startup has no session binding.**
 
 **Must pause serving updates during Workspace closure or transfer**, and recheck that a Workspace remains available after asynchronous launch lookup. Approval completion must not launch into a closing or transferring Workspace.

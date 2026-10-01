@@ -65,6 +65,7 @@ export interface TerminalContextViewProps {
   /** Viewport coordinates the reveal grows from; absent, the top-left corner. */
   origin?: { x: number; y: number };
   defaultCommand?: string; title: string; surfaceRef: string; cwd: string; helperCwd?: string; mismatch?: boolean;
+  workspaceMove?: ReactNode;
   titleSources: { source: string; value: string; note?: string }[];
   scan: ContextScan; watchRule?: string | null; watching: boolean; todo: boolean;
   notification?: { title: string | null; body: string | null } | null;
@@ -182,8 +183,8 @@ const EXPLORE_ICON = <ArrowSquareOutIcon size={15} />;
 const EXPLAIN_ICON = <BugBeetleIcon size={15} />;
 
 /** The title, its explanation, the copyable Surface ref, and `actions` on one line. */
-function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions }: {
-  title: string; surfaceRef: string; actions: ReactNode;
+function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions, workspaceMove }: {
+  title: string; surfaceRef: string; actions: ReactNode; workspaceMove?: ReactNode;
   onExplain(): void; onCopyRef(): Promise<boolean>;
 }) {
   const row = useRef<HTMLDivElement>(null);
@@ -195,7 +196,7 @@ function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions }: {
     const rest = (actionsRef.current?.offsetWidth ?? 0) + 3 * gap;
     setRefCompact(Math.min(text, least) + explainIcon + refFull + rest > width);
   }, [title, surfaceRef], [actionsRef]);
-  return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 items-center gap-1.5">
+  return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 flex-wrap items-center gap-1.5">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       <span className="whitespace-nowrap">{title}</span>
       <span className="w-[8ch] shrink-0" />
@@ -206,8 +207,12 @@ function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions }: {
       <span className="min-w-0 truncate" title={title}>{title}</span>
       <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}</ContextAction>
     </span>
-    <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={refCompact ? COPY_CHECK : undefined} onCopy={onCopyRef}>{!refCompact && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>
+    {!workspaceMove && <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={refCompact ? COPY_CHECK : undefined} onCopy={onCopyRef}>{!refCompact && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>}
     <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5">{actions}</div>
+    {workspaceMove && <div className="flex w-full min-w-0 flex-wrap items-center gap-1.5">
+      <ContextCopyAction label={`Copy ${surfaceRef}`} onCopy={onCopyRef}>{surfaceRef}{COPY_ICON}</ContextCopyAction>
+      {workspaceMove}
+    </div>}
   </div>;
 }
 
@@ -412,7 +417,7 @@ export function TerminalContextView(p: TerminalContextViewProps) {
       <div className="shrink-0 max-h-[45%] overflow-auto px-3 py-2">
         <div className="grid grid-cols-[3rem_minmax(0,1fr)] items-center gap-y-1">
           <span className="text-muted">Title</span>
-          <TitleRow title={p.title} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
+          <TitleRow workspaceMove={p.workspaceMove} title={p.title} surfaceRef={p.surfaceRef} onExplain={() => setDetail('title')} onCopyRef={() => attempt(p.onCopyRef)} actions={<>
             {placement && <div role="group" aria-label="Helper placement" className="flex shrink-0 items-center gap-0.5">{placement.available.map(side =>
               <ContextAction key={side} label={`Place helper at ${side}`} pressed={placement.side === side} keepFocus onClick={() => placement.onChange(side)}><PlacementIcon side={side} /></ContextAction>)}</div>}
             <ContextAction label="Close terminal context" onClick={close} muted><XIcon size={15} /></ContextAction>

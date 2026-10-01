@@ -17,10 +17,11 @@ export interface WorkspaceUiState {
   /** A move between Windows awaiting its typed confirmation, because it would
    *  destroy the page state of `iframeCount` iframe Surfaces; `proceed` runs the
    *  move (`docs/specs/layout.md` → "Workspaces"). */
+  pendingSurfaceMove: { id: WorkspaceId; char: string; answer: (accepted: boolean) => void } | null;
   pendingMove: { id: WorkspaceId; char: string; iframeCount: number; proceed: () => void } | null;
 }
 
-const EMPTY: WorkspaceUiState = { renamingId: null, pendingClose: null, pendingMove: null, moveError: null };
+const EMPTY: WorkspaceUiState = { renamingId: null, pendingClose: null, pendingMove: null, pendingSurfaceMove: null, moveError: null };
 
 let state: WorkspaceUiState = EMPTY;
 const listeners = new Set<() => void>();
@@ -57,6 +58,10 @@ export function setPendingWorkspaceMove(pending: WorkspaceUiState['pendingMove']
   emit({ ...state, pendingMove: pending });
 }
 
+export function setPendingSurfaceMove(pending: WorkspaceUiState['pendingSurfaceMove']): void {
+  emit({ ...state, pendingSurfaceMove: pending });
+}
+
 export function setWorkspaceMoveError(error: WorkspaceUiState['moveError']): void {
   emit({ ...state, moveError: error });
 }
@@ -65,14 +70,17 @@ export function setWorkspaceMoveError(error: WorkspaceUiState['moveError']): voi
  *  teardown dialog taking the window, and tests. */
 export function resetWorkspaceUi(): void {
   if (state === EMPTY) return;
+  state.pendingSurfaceMove?.answer(false);
   emit(EMPTY);
 }
 
 /** Forget only the departing Workspace's chrome, preserving sibling dialogs. */
 export function dismissWorkspaceUi(id: WorkspaceId): void {
-  const { renamingId, pendingClose, pendingMove, moveError } = state;
-  if (renamingId !== id && pendingClose?.id !== id && pendingMove?.id !== id && moveError?.id !== id) return;
+  const { renamingId, pendingClose, pendingMove, pendingSurfaceMove, moveError } = state;
+  if (renamingId !== id && pendingClose?.id !== id && pendingMove?.id !== id && pendingSurfaceMove?.id !== id && moveError?.id !== id) return;
+  if (pendingSurfaceMove?.id === id) pendingSurfaceMove.answer(false);
   emit({
+    pendingSurfaceMove: pendingSurfaceMove?.id === id ? null : pendingSurfaceMove,
     renamingId: renamingId === id ? null : renamingId,
     pendingClose: pendingClose?.id === id ? null : pendingClose,
     pendingMove: pendingMove?.id === id ? null : pendingMove,

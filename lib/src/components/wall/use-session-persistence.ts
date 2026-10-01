@@ -4,7 +4,7 @@ import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
 import { buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
-import { previousWorkspaceSession, publishWorkspaceSession, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
+import { previousWorkspaceSession, publishWorkspaceSession, workspaceSessionRevision, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
 import {
   subscribeToActivity,
@@ -132,8 +132,12 @@ export function useSessionPersistence({
 
   const doSave = useCallback((options?: SaveOptions): Promise<void> => {
     const { panes, doors, lathLayout, surfaceRefs } = collect();
-    return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
-  }, [collect, sink, saveOptions]);
+    if (workspaceId === undefined) return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
+    const revision = workspaceSessionRevision(workspaceId);
+    return buildPersistedSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink?.previous() ?? null, saveOptions(options)).then(session => {
+      if (revision === workspaceSessionRevision(workspaceId) && hasWorkspace(workspaceId)) publishWorkspaceSession(workspaceId, session);
+    });
+  }, [collect, sink, saveOptions, workspaceId]);
 
   /** The same record a save would publish, handed back instead. The Workspace
    *  is leaving, so nothing here may touch this Window's aggregator. */

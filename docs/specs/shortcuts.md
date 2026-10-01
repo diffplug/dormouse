@@ -94,6 +94,8 @@ Mirrored workbench chords — the terminal still receives the key too; [vscode.m
 | `⌘⇧P` / `Ctrl+Shift+P`, or `F1` (unmodified) | `workbench.action.showCommands` |
 | `⌘B` / `Ctrl+B` | `workbench.action.toggleSidebarVisibility` |
 
+Surface moves have no command-mode binding; see `docs/specs/layout.md` → Moving Surfaces between Workspaces.
+
 The standalone host contributes no chords; `docs/specs/standalone.md` owns its native-menu contract.
 
 ## Implementation references
