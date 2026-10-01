@@ -216,6 +216,8 @@ CGNAT, link-local, documentation, benchmark, multicast, reserved, IPv4-mapped,
 unique-local, and site-local ranges — rejecting a hostname wholesale if *any* answer is
 blocked, and handing the socket the exact address it checked so rebinding cannot create
 a second unchecked resolution.
+The Hosted Relay, which cannot pin a resolution, admits only known push services' hosts
+instead (`docs/specs/security-hosted.md` -> "Relay boundary").
 
 - **FAIL IF** `relay/src/push-endpoint.ts` stops rejecting non-public push endpoints at registration, stops applying `createPublicLookup` / `createPublicPushAgent` to delivery, or stops rejecting a hostname whose DNS answers are mixed public and blocked.
 - **FAIL IF** `/api/push/send` stops taking the `burrowId` from the Burrow's own token, begins selecting recipients when `recipients` is absent or empty, stops clamping them at `MAX_PUSH_QUERY_DELIVERY_IDS`, or if any read endpoint begins reporting on a delivery id the caller did not present. Possession of the 256-bit `deliveryId` is the whole authorization for the Client-facing push routes, so the Relay must never *list* one to a session.

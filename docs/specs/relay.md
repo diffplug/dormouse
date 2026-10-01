@@ -282,7 +282,8 @@ stale row rather than leave one per rotation:
   wrote**. Eviction covers every Burrow, so a hand-edited file over the cap
   converges on the next write.
 
-Source of truth: `relay/src/state.ts`.
+Source of truth: `relay/src/state.ts`; the caps and field bounds in
+`remote-lib-common/src/remote/relay-common.ts`.
 
 ## WebAuthn without a WebAuthn library
 
@@ -369,8 +370,9 @@ the body, never on the caller**: a correct credential inside an over-long body i
 still 413. **One route is exempt**, its legitimate body being larger:
 `/api/push/send`, whose `MAX_PUSH_SEND_BODY_BYTES` is *derived* from
 `MAX_PUSH_QUERY_DELIVERY_IDS` and `MAX_SEALED_PUSH_LENGTH` so it cannot drift
-from what a maximal fan-out costs. Source of truth: `relay/src/app.ts`, pinned
-by `relay/test/body-limit.test.mjs`.
+from what a maximal fan-out costs. Source of truth: `relay/src/app.ts` and
+`MAX_PUSH_SEND_BODY_BYTES` in `remote-lib-common/src/remote/relay-common.ts`,
+pinned by `relay/test/body-limit.test.mjs`.
 
 **Must admit Burrow enrollment through one process-global bucket before body
 parsing**, at `BURROW_ENROLL_ATTEMPT_BURST` and `BURROW_ENROLL_ATTEMPT_REFILL_MS`;
@@ -385,7 +387,7 @@ Burrow, or session bearer requests would give public traffic a resource sink for
 tokens nobody can guess (rationale); the delayed route is the one the bucket
 already bounds. Burrow tokens still use a constant-time full-row scan.
 **Must reject a `burrowToken` outside its minted 32-byte base64url shape before
-reading `burrows.json`**, as `isDeliveryId` guards push routes. **That read is
+reading `burrows.json`**, as `isPushDeliveryId` guards push routes. **That read is
 cached against the file's stat**, so a well-shaped guess buys no `readFile` or
 `JSON.parse`; a hand edit still revokes, the stat being the gate rather than a
 TTL. Source of truth: `readCached` in `relay/src/state.ts`.
@@ -544,7 +546,8 @@ Relay's Web Push dependency. Burrow and webview halves:
 
 Source of truth: `relay/src/push-endpoint.ts`, wired into registration by the
 push routes in `relay/src/app.ts` and into delivery by `relay/src/push.ts`,
-which also holds `defaultVapidSubject` / `assertVapidSubject`.
+which also holds `assertVapidSubject`; `defaultVapidSubject` in
+`remote-lib-common/src/remote/web-push.ts`.
 
 ## Routing
 
@@ -1151,7 +1154,7 @@ Unstaged but adjacent: origin migration (re-binding the passkey and enrollments
 after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
 
-**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes, Pocket, the device-code enrollment, and the per-account relay sockets [hosted.md](./hosted.md) → "Relay", "Relay sockets", and "Burrow enrollment" serve: push. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
+**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes, push, Pocket, the device-code enrollment, and the per-account relay sockets [hosted.md](./hosted.md) → "Relay", "Relay sockets", and "Burrow enrollment" serve: the Hosted transport below. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
 
 ### From single-owner to multi-tenant
 

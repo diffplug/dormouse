@@ -110,6 +110,22 @@ export function database(
   return withClient(c.env.HYPERDRIVE.connectionString, action);
 }
 
+/** Runs `action` in a transaction holding `key`'s advisory lock, so a cap check and its insert cannot interleave. */
+export async function locked<T>(db: Client, key: string, action: () => Promise<T>) {
+  await db.query("BEGIN");
+  try {
+    await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      `dormouse-relay:${key}`,
+    ]);
+    const result = await action();
+    await db.query("COMMIT");
+    return result;
+  } catch (error) {
+    await db.query("ROLLBACK").catch(() => {});
+    throw error;
+  }
+}
+
 export const unauthorized = (c: Context) => c.json({ error: UNAUTHORIZED_ERROR }, 401);
 
 /**

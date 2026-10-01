@@ -247,6 +247,7 @@ test("the Durable Objects are the relay's, each rate limit its Worker's, and Dur
   assert.equal(configs.voice.ratelimits, undefined);
   assert.equal(configs.voice.migrations, undefined);
 });
+const relaySecrets = ["RELAY_ENROLL_SECRET", "RELAY_VAPID_PUBLIC_KEY", "RELAY_VAPID_PRIVATE_KEY"];
 const accountSecrets = [
   "AUTH_SECRET",
   "POSTMARK_SERVER_TOKEN",
@@ -262,7 +263,7 @@ function provider({
   disabled = true,
   secrets = {
     "dormouse-hosted": accountSecrets,
-    "dormouse-relay": ["RELAY_ENROLL_SECRET"],
+    "dormouse-relay": relaySecrets,
     "dormouse-voice": ["ELEVENLABS_API_KEY"],
   },
   read = [],
@@ -290,7 +291,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
         provider({
           secrets: {
             "dormouse-hosted": accountSecrets.filter((name) => name !== missing),
-            "dormouse-relay": ["RELAY_ENROLL_SECRET"],
+            "dormouse-relay": relaySecrets,
             "dormouse-voice": ["ELEVENLABS_API_KEY"],
           },
         }),
@@ -305,28 +306,29 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
       provider({
         secrets: {
           "dormouse-hosted": [...accountSecrets, "ELEVENLABS_API_KEY"],
-          "dormouse-relay": ["RELAY_ENROLL_SECRET"],
+          "dormouse-relay": relaySecrets,
           "dormouse-voice": [],
         },
       }),
     ),
     { message: "Missing dormouse-voice secret: ELEVENLABS_API_KEY" },
   );
-  // The relay's enrollment secret, on the account Worker, does not count either.
-  await assert.rejects(
-    preflight(
-      env,
-      configs,
-      provider({
-        secrets: {
-          "dormouse-hosted": [...accountSecrets, "RELAY_ENROLL_SECRET"],
-          "dormouse-relay": [],
-          "dormouse-voice": ["ELEVENLABS_API_KEY"],
-        },
-      }),
-    ),
-    { message: "Missing dormouse-relay secret: RELAY_ENROLL_SECRET" },
-  );
+  // The relay's secrets, on the account Worker, do not count either.
+  for (const missing of relaySecrets)
+    await assert.rejects(
+      preflight(
+        env,
+        configs,
+        provider({
+          secrets: {
+            "dormouse-hosted": [...accountSecrets, missing],
+            "dormouse-relay": relaySecrets.filter((name) => name !== missing),
+            "dormouse-voice": ["ELEVENLABS_API_KEY"],
+          },
+        }),
+      ),
+      { message: `Missing dormouse-relay secret: ${missing}` },
+    );
   // Each case supplies every configured secret, so it fails on its own check.
   for (const [override, message] of [
     [{ host: "ep-preview.neon.tech" }, "Migration and runtime databases must use the same host"],
@@ -348,7 +350,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
     provider({
       secrets: {
         "dormouse-hosted": ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN", ...extra],
-        "dormouse-relay": ["RELAY_ENROLL_SECRET"],
+        "dormouse-relay": relaySecrets,
         "dormouse-voice": ["ELEVENLABS_API_KEY"],
       },
     });

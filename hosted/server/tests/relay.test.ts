@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createDecipheriv, createECDH, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { digest } from "@pgstencil/auth/security";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
@@ -8,12 +8,20 @@ import {
   API_ROUTES,
   MAX_ENROLLED_BURROWS,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
+  MAX_PUSH_QUERY_DELIVERY_IDS,
+  MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT,
+  MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
   MAX_TOKENS_PER_BURROW,
   NOT_ENTITLED_ERROR,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   enrollUserCode,
   fromBase64Url,
+  generateNoiseKeyPair,
+  openPush,
+  pushSubscriptionDeletePath,
+  sealPush,
+  utf8Encode,
   isEnrollUserCode,
   isRelayBearer,
   toBase64Url,
@@ -36,7 +44,14 @@ import {
   MAX_SETUP_CHALLENGES_PER_BURROW,
   restoreSetupToken,
 } from "../relay-api";
-import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions } from "./bundle";
+import {
+  ENTRIES,
+  ORIGINS,
+  TEST_ENROLL_SECRET,
+  bundleWorker,
+  miniflareOptions,
+  testVapidKeys,
+} from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
 
 // The Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay") in real
@@ -50,21 +65,44 @@ const script = bundleWorker(ENTRIES.relay);
 
 type Authenticator = Awaited<ReturnType<typeof SimAuthenticator.create>>;
 
-async function fixture() {
+/** One request the relay sent a push service. */
+interface Pushed {
+  url: string;
+  headers: Record<string, string>;
+  body: Buffer;
+}
+
+async function fixture({ bindings = {} }: { bindings?: Record<string, string | undefined> } = {}) {
   const context = await createTestContext({ migrations });
+  // The push services: every request is recorded, then answered by `answer`.
+  const pushed: Pushed[] = [];
+  let answer: (url: URL) => WorkerResponse | Promise<WorkerResponse> = () =>
+    new WorkerResponse(null, { status: 201 });
   const relay = new Miniflare(
     miniflareOptions("relay", (await script).outputFiles[0].text, {
-      bindings: {
-        APP_ORIGIN: origin,
-        ACCOUNT_ORIGIN: ORIGINS.account,
-        RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
-      },
+      bindings: Object.fromEntries(
+        Object.entries({
+          APP_ORIGIN: origin,
+          ACCOUNT_ORIGIN: ORIGINS.account,
+          RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
+          ...testVapidKeys(),
+          ...bindings,
+        }).filter(([, value]) => value !== undefined),
+      ) as Record<string, string>,
       hyperdrives: { HYPERDRIVE: context.database.url },
       serviceBindings: {
         ASSETS: () =>
           new WorkerResponse("<!doctype html>", {
             headers: { "content-type": "text/html" },
           }),
+      },
+      async outboundService(request) {
+        pushed.push({
+          url: request.url,
+          headers: Object.fromEntries(request.headers),
+          body: Buffer.from(await request.arrayBuffer()),
+        });
+        return answer(new URL(request.url));
       },
     }),
   );
@@ -261,6 +299,10 @@ async function fixture() {
   return {
     sql,
     cron,
+    pushed,
+    answerPushes: (respond: typeof answer) => {
+      answer = respond;
+    },
     entitle,
     url: context.database.url,
     call,
@@ -924,4 +966,505 @@ test("begin refuses another origin", async ({ onTestFinished }) => {
     });
   // A trailing slash is the same origin.
   expect((await f.call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin: `${origin}/` } })).status).toBe(200);
+});
+
+// --- Web Push: the self-host Relay's push routes over account-scoped rows ---
+
+const FCM = "https://fcm.googleapis.com/fcm/send/";
+
+/** A live session for `userId`, as sign-in writes one. */
+async function sessionFor(f: Awaited<ReturnType<typeof fixture>>, userId: string) {
+  const token = randomSecret();
+  await f.sql(
+    `INSERT INTO dormouse_relay_sessions ("tokenHash", "userId", "expiresAt")
+    VALUES ($1, $2, now() + interval '1 hour')`,
+    [digest(token), userId],
+  );
+  return token;
+}
+
+/** A subscription a browser holds: a P-256 keypair from Node and an auth secret. */
+function browserSubscription(endpoint = FCM + randomSecret()) {
+  const ecdh = createECDH("prime256v1");
+  ecdh.generateKeys();
+  return {
+    ecdh,
+    subscription: {
+      endpoint,
+      keys: { p256dh: ecdh.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") },
+    },
+  };
+}
+
+/** RFC 8291 decryption on Node's `crypto`, independent of the sender under test. */
+function decryptPush(body: Buffer, { ecdh, subscription }: ReturnType<typeof browserSubscription>) {
+  const salt = body.subarray(0, 16);
+  const senderPublic = body.subarray(21, 21 + body[20]);
+  const record = body.subarray(21 + body[20]);
+  const uaPublic = Buffer.from(subscription.keys.p256dh, "base64url");
+  const ikm = Buffer.from(
+    hkdfSync(
+      "sha256",
+      ecdh.computeSecret(senderPublic),
+      Buffer.from(subscription.keys.auth, "base64url"),
+      Buffer.concat([Buffer.from("WebPush: info\0"), uaPublic, senderPublic]),
+      32,
+    ),
+  );
+  const derive = (info: string, length: number) =>
+    Buffer.from(hkdfSync("sha256", ikm, salt, Buffer.from(info), length));
+  const decipher = createDecipheriv(
+    "aes-128-gcm",
+    derive("Content-Encoding: aes128gcm\0", 16),
+    derive("Content-Encoding: nonce\0", 12),
+  );
+  decipher.setAuthTag(record.subarray(-16));
+  const padded = Buffer.concat([decipher.update(record.subarray(0, -16)), decipher.final()]);
+  expect(padded.at(-1)).toBe(2);
+  return JSON.parse(padded.subarray(0, -1).toString("utf8"));
+}
+
+/** A well-formed sealed envelope with no key behind it: the Relay checks shape alone. */
+const fakeSealed = () => ({ v: 1, salt: randomSecret(), ct: randomSecret() + randomSecret() });
+const to = (...deliveryIds: string[]) => ({
+  recipients: deliveryIds.map((deliveryId) => ({ deliveryId, sealed: fakeSealed() })),
+});
+
+/** An entitled account with one Burrow and a session, and the push calls Pocket and the Burrow make. */
+async function pushFixture(options?: Parameters<typeof fixture>[0]) {
+  const f = await fixture(options);
+  const owner = await f.account(ADMIN_EMAIL);
+  const laptop = await f.burrow(owner);
+  const session = await sessionFor(f, owner);
+  const subscribe = (
+    deliveryId: string,
+    subscription = browserSubscription().subscription,
+    { burrowId = laptop.burrowId, bearer = session } = {},
+  ) =>
+    f.call("POST", API_ROUTES.pushSubscribe, {
+      bearer,
+      body: { burrowId, deliveryId, subscription },
+    });
+  const query = (deliveryIds: string[], bearer = session) =>
+    f.call("POST", API_ROUTES.pushSubscriptionsQuery, { bearer, body: { deliveryIds } });
+  const devices = (bearer = laptop.token) => f.call("GET", API_ROUTES.pushDevices, { bearer });
+  const send = (body: unknown, bearer = laptop.token) =>
+    f.call("POST", API_ROUTES.pushSend, { bearer, body });
+  const rows = () =>
+    f.sql<{ burrowId: string; deliveryId: string; endpoint: string }>(
+      `SELECT "burrowId", "deliveryId", endpoint FROM dormouse_relay_push_subscriptions
+      ORDER BY "subscribedAt", "burrowId", "deliveryId"`,
+    );
+  return { ...f, owner, laptop, sessionToken: session, subscribe, query, devices, send, rows };
+}
+
+test("push end to end: a Burrow's sealed envelope reaches the push service encrypted to the phone, and nothing else", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const keys = testVapidKeys();
+  expect((await f.call("GET", API_ROUTES.pushConfig)).json).toEqual({
+    applicationServerKey: keys.RELAY_VAPID_PUBLIC_KEY,
+  });
+  const phone = browserSubscription();
+  const deliveryId = randomSecret();
+  const subscribed = await f.subscribe(deliveryId, phone.subscription);
+  expect(subscribed.status).toBe(200);
+  expect(subscribed.json).toEqual({ subscribedAt: expect.any(Number), burrowIds: [f.laptop.burrowId] });
+  expect((await f.devices()).json).toEqual({
+    devices: [{ deliveryId, subscribedAt: subscribed.json!.subscribedAt }],
+  });
+  expect((await f.query([deliveryId, randomSecret()])).json).toEqual({
+    registered: [{ burrowId: f.laptop.burrowId, deliveryId }],
+  });
+
+  const burrowStatic = await generateNoiseKeyPair();
+  const clientStatic = await generateNoiseKeyPair();
+  const notification = utf8Encode(JSON.stringify({ title: "build finished", body: "zsh", tag: "pty-1" }));
+  const sealed = await sealPush({
+    burrowStaticPrivateKey: burrowStatic.privateKey,
+    clientStaticPublicKey: clientStatic.publicKey,
+    plaintext: notification,
+  });
+  // Extra fields ride along on the envelope; none reaches the phone, the
+  // `burrowId` least of all.
+  const sent = await f.send({
+    recipients: [{ deliveryId, sealed: { ...sealed, burrowId: randomRoutingId(), title: "leak" } }],
+  });
+  expect(sent.json).toEqual({ delivered: 1, expired: 0, unknown: 0, failed: 0 });
+  expect(f.pushed).toHaveLength(1);
+  const [request] = f.pushed;
+  expect(request.url).toBe(phone.subscription.endpoint);
+  expect(request.headers["content-encoding"]).toBe("aes128gcm");
+  expect(request.headers.ttl).toBe("300");
+  expect(request.headers.urgency).toBe("high");
+
+  // The VAPID JWT: signed by the relay's key, for the push service's origin, from the relay's origin.
+  const [, jwt, k] = /^vapid t=([^,]+), k=(.+)$/.exec(request.headers.authorization)!;
+  expect(k).toBe(keys.RELAY_VAPID_PUBLIC_KEY);
+  const [header, claims, signature] = jwt.split(".");
+  const verifyKey = await crypto.subtle.importKey(
+    "raw",
+    Buffer.from(keys.RELAY_VAPID_PUBLIC_KEY, "base64url"),
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["verify"],
+  );
+  expect(
+    await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      verifyKey,
+      Buffer.from(signature, "base64url"),
+      Buffer.from(`${header}.${claims}`),
+    ),
+  ).toBe(true);
+  const { aud, sub, exp } = JSON.parse(Buffer.from(claims, "base64url").toString("utf8"));
+  expect([aud, sub]).toEqual(["https://fcm.googleapis.com", origin]);
+  expect(exp * 1000 - Date.now()).toBeGreaterThan(0);
+  expect(exp * 1000 - Date.now()).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+
+  // Exactly the four fields, the `burrowId` the token's, and the phone opens it.
+  const payload = decryptPush(request.body, phone);
+  expect(Object.keys(payload).sort()).toEqual(["burrowId", "ct", "salt", "v"]);
+  expect(payload.burrowId).toBe(f.laptop.burrowId);
+  expect(
+    await openPush({
+      clientStaticPrivateKey: clientStatic.privateKey,
+      burrowStaticPublicKey: burrowStatic.publicKey,
+      sealed: payload,
+    }),
+  ).toEqual(notification);
+
+  // Deleting is always 204, and the row is gone.
+  const remove = (id: string) =>
+    f.call("DELETE", pushSubscriptionDeletePath(id), { bearer: f.sessionToken });
+  expect((await remove(deliveryId)).status).toBe(204);
+  expect((await remove(deliveryId)).status).toBe(204);
+  expect((await remove("not-a-delivery-id")).status).toBe(204);
+  expect(await f.rows()).toEqual([]);
+});
+
+test("push rows are the account's: another account's session or Burrow subscribes, reads, deletes, and reaches none of them", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const shared = browserSubscription().subscription;
+  const deliveryA = randomSecret();
+  expect((await f.subscribe(deliveryA, shared)).status).toBe(200);
+
+  const b = await f.account();
+  const laptopB = await f.burrow(b);
+  const sessionB = await sessionFor(f, b);
+  // While A is entitled, B's session is the expired session's 401.
+  expect(await f.query([deliveryA], sessionB)).toMatchObject({
+    status: 401,
+    json: { error: UNAUTHORIZED_ERROR },
+  });
+  await f.entitle(b);
+  // A's Burrow is unknown to B.
+  expect(await f.subscribe(randomSecret(), shared, { burrowId: f.laptop.burrowId, bearer: sessionB })).toMatchObject({
+    status: 404,
+    json: { error: "unknown burrow" },
+  });
+  // Possession of A's id buys B nothing: no readback, no delete.
+  expect((await f.query([deliveryA], sessionB)).json).toEqual({ registered: [] });
+  expect((await f.call("DELETE", pushSubscriptionDeletePath(deliveryA), { bearer: sessionB })).status).toBe(204);
+  // B's own row at A's address answers only B's Burrow.
+  const ownB = randomSecret();
+  expect((await f.subscribe(ownB, shared, { burrowId: laptopB.burrowId, bearer: sessionB })).json).toMatchObject({
+    burrowIds: [laptopB.burrowId],
+  });
+  // B registering A's id at a new address moves nothing of A's: A's address is
+  // not one B's delivery is moving off, so B's row there stays too.
+  const moved = browserSubscription().subscription;
+  expect(
+    (await f.subscribe(deliveryA, moved, { burrowId: laptopB.burrowId, bearer: sessionB })).json,
+  ).toMatchObject({ burrowIds: [laptopB.burrowId] });
+  expect((await f.query([ownB], sessionB)).json).toEqual({
+    registered: [{ burrowId: laptopB.burrowId, deliveryId: ownB }],
+  });
+  // B moving its own row off A's address drops B's rows there, never A's.
+  expect(
+    (await f.subscribe(ownB, browserSubscription().subscription, { burrowId: laptopB.burrowId, bearer: sessionB }))
+      .json,
+  ).toMatchObject({ burrowIds: [laptopB.burrowId] });
+  // B's Burrow neither lists nor reaches A's subscriber.
+  const onlyA = randomSecret();
+  await f.entitle(f.owner);
+  expect((await f.subscribe(onlyA)).status).toBe(200);
+  await f.entitle(b);
+  expect((await f.devices(laptopB.token)).json!.devices).toHaveLength(2);
+  expect((await f.send(to(onlyA), laptopB.token)).json).toEqual({
+    delivered: 0,
+    expired: 0,
+    unknown: 1,
+    failed: 0,
+  });
+  expect(f.pushed).toEqual([]);
+  // A's rows are all still there.
+  await f.entitle(f.owner);
+  expect((await f.query([deliveryA, onlyA])).json).toEqual({
+    registered: [
+      { burrowId: f.laptop.burrowId, deliveryId: deliveryA },
+      { burrowId: f.laptop.burrowId, deliveryId: onlyA },
+    ],
+  });
+  // A de-entitled owner's Burrow sends nothing.
+  await f.entitle(b);
+  expect(await f.send(to(onlyA))).toMatchObject({ status: 403, json: { error: NOT_ENTITLED_ERROR } });
+});
+
+test("subscribe upserts as the self-host Relay does: a moved endpoint takes its stale rows with it", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const other = await f.burrow(f.owner);
+  const sub = (endpoint: string) => browserSubscription(FCM + endpoint).subscription;
+  const reset = () => f.sql(`DELETE FROM dormouse_relay_push_subscriptions`);
+  const endpoints = async () => (await f.rows()).map((row) => row.endpoint);
+
+  // Re-subscribing replaces the row rather than accumulating one per rotation.
+  const deliveryId = randomSecret();
+  await f.subscribe(deliveryId, sub("1"));
+  await f.subscribe(deliveryId, sub("2"));
+  expect(await endpoints()).toEqual([FCM + "2"]);
+  await reset();
+
+  // Rotating the endpoint drops every row still carrying the replaced one.
+  const [forLaptop, forOther] = [randomSecret(), randomSecret()];
+  await f.subscribe(forLaptop, sub("original"));
+  await f.subscribe(forOther, sub("original"), { burrowId: other.burrowId });
+  expect((await f.subscribe(forLaptop, sub("replacement"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
+  expect(await f.rows()).toEqual([
+    { burrowId: f.laptop.burrowId, deliveryId: forLaptop, endpoint: FCM + "replacement" },
+  ]);
+  await reset();
+
+  // A moved delivery drops its own stale rows under every Burrow that holds it.
+  await f.subscribe(deliveryId, sub("old"), { burrowId: other.burrowId });
+  expect((await f.subscribe(deliveryId, sub("new"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
+  expect(await endpoints()).toEqual([FCM + "new"]);
+  expect((await f.query([deliveryId])).json!.registered).toEqual([{ burrowId: f.laptop.burrowId, deliveryId }]);
+  await reset();
+
+  // Subscribe answers every Burrow whose rows carry the presented endpoint, and only that endpoint's.
+  expect((await f.subscribe(forLaptop, sub("phone"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
+  expect(
+    [...(await f.subscribe(forOther, sub("phone"), { burrowId: other.burrowId })).json!.burrowIds].sort(),
+  ).toEqual([f.laptop.burrowId, other.burrowId].sort());
+  expect((await f.subscribe(randomSecret(), sub("other-phone"))).json!.burrowIds).toEqual([f.laptop.burrowId]);
+  await reset();
+
+  // A retried subscribe whose first response was lost still reports the truth.
+  await f.subscribe(forLaptop, sub("first"));
+  await f.subscribe(forOther, sub("first"), { burrowId: other.burrowId });
+  const rotated = sub("rotated");
+  expect((await f.subscribe(forLaptop, rotated)).json!.burrowIds).toEqual([f.laptop.burrowId]);
+  expect((await f.subscribe(forLaptop, rotated)).json!.burrowIds).toEqual([f.laptop.burrowId]);
+  await reset();
+
+  // A brand-new delivery id cannot know its scope's previous address: those rows survive.
+  await f.subscribe(forLaptop, sub("before"));
+  await f.subscribe(randomSecret(), sub("after"));
+  expect((await endpoints()).sort()).toEqual([FCM + "after", FCM + "before"]);
+});
+
+test("subscriptions are capped per Burrow and per account, evicting the oldest and never the new row or another account's", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const vapid = testVapidKeys().RELAY_VAPID_PUBLIC_KEY;
+  /** `count` rows for `burrowId`, the oldest first, all older than any subscribe. */
+  const seed = (burrowId: string, count: number, prefix: string) =>
+    f.sql(
+      `INSERT INTO dormouse_relay_push_subscriptions
+        ("burrowId", "deliveryId", endpoint, p256dh, auth, "vapidPublicKey", "subscribedAt")
+      SELECT $1, lpad($3 || i::text, 43, 'A'), $4 || $3 || i::text, 'BPoint', 'Auth', $5,
+        now() - interval '1 day' + i * interval '1 second'
+      FROM generate_series(1, $2::int) AS i`,
+      [burrowId, count, prefix, FCM, vapid],
+    );
+  const count = async (where: string, values: unknown[]) =>
+    (
+      await f.sql<{ n: number }>(
+        `SELECT count(*)::int AS n FROM dormouse_relay_push_subscriptions s
+        JOIN dormouse_relay_burrows b ON b."burrowId" = s."burrowId" WHERE ${where}`,
+        values,
+      )
+    )[0].n;
+  // Another account already past both caps: nothing here touches it.
+  const stranger = await f.account();
+  const strangers = await f.burrow(stranger);
+  await seed(strangers.burrowId, MAX_PUSH_SUBSCRIPTIONS_PER_BURROW + 8, "z");
+
+  await seed(f.laptop.burrowId, MAX_PUSH_SUBSCRIPTIONS_PER_BURROW, "a");
+  const newest = randomSecret();
+  expect((await f.subscribe(newest)).status).toBe(200);
+  expect(await count(`s."burrowId" = $1`, [f.laptop.burrowId])).toBe(MAX_PUSH_SUBSCRIPTIONS_PER_BURROW);
+  expect(await count(`s."deliveryId" = $1`, [newest])).toBe(1);
+  expect(await count(`s."deliveryId" = $1`, ["a1".padStart(43, "A")])).toBe(0);
+  expect(await count(`s."deliveryId" = $1`, ["a2".padStart(43, "A")])).toBe(1);
+
+  // Fill the account to its cap across further Burrows, then subscribe on one more.
+  const perAccount = MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT / MAX_PUSH_SUBSCRIPTIONS_PER_BURROW;
+  for (let i = 1; i < perAccount; i++) await seed((await f.burrow(f.owner)).burrowId, MAX_PUSH_SUBSCRIPTIONS_PER_BURROW, `b${i}x`);
+  const last = await f.burrow(f.owner);
+  const latest = randomSecret();
+  expect((await f.subscribe(latest, undefined, { burrowId: last.burrowId })).status).toBe(200);
+  expect(await count(`b."userId" = $1`, [f.owner])).toBe(MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT);
+  expect(await count(`s."deliveryId" = $1`, [latest])).toBe(1);
+  // The account's oldest row went: the first of the `b1x` Burrow, older than every `a` row.
+  expect(await count(`s."deliveryId" = $1`, ["b1x1".padStart(43, "A")])).toBe(0);
+  expect(await count(`b."userId" = $1`, [stranger])).toBe(MAX_PUSH_SUBSCRIPTIONS_PER_BURROW + 8);
+});
+
+test("removing a Burrow drops its subscriptions; views are VAPID-current; push is off, not half-working, without a matching pair", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const [kept, stale] = [randomSecret(), randomSecret()];
+  await f.subscribe(kept);
+  await f.subscribe(stale);
+  // A row registered under another key is stale: no readback, no device, no delivery.
+  await f.sql(`UPDATE dormouse_relay_push_subscriptions SET "vapidPublicKey" = $1 WHERE "deliveryId" = $2`, [
+    testVapidKeys("rotated").RELAY_VAPID_PUBLIC_KEY,
+    stale,
+  ]);
+  expect((await f.query([kept, stale])).json!.registered).toEqual([{ burrowId: f.laptop.burrowId, deliveryId: kept }]);
+  expect((await f.devices()).json!.devices.map((d: { deliveryId: string }) => d.deliveryId)).toEqual([kept]);
+  expect((await f.send(to(stale))).json).toEqual({ delivered: 0, expired: 0, unknown: 1, failed: 0 });
+  expect(f.pushed).toEqual([]);
+  expect(await f.rows()).toHaveLength(2);
+  // Removing the Burrow, as the account's Computers section does, drops its rows.
+  await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [f.laptop.burrowId]);
+  expect(await f.rows()).toEqual([]);
+
+  for (const bindings of [
+    { RELAY_VAPID_PUBLIC_KEY: undefined },
+    { RELAY_VAPID_PRIVATE_KEY: testVapidKeys("mismatched").RELAY_VAPID_PRIVATE_KEY },
+  ]) {
+    const off = await pushFixture({ bindings });
+    try {
+      expect((await off.call("GET", API_ROUTES.pushConfig)).json).toEqual({ applicationServerKey: null });
+      expect(await off.subscribe(randomSecret())).toMatchObject({
+        status: 503,
+        json: { error: "push is not configured" },
+      });
+      expect(await off.send(to(randomSecret()))).toMatchObject({ status: 503 });
+      expect((await off.query([randomSecret()])).json).toEqual({ registered: [] });
+      expect((await off.devices()).json).toEqual({ devices: [] });
+    } finally {
+      await off.close();
+    }
+  }
+});
+
+test("send outcomes: 404 and 410 prune, a refusal, a redirect, or a throw is failed and kept, and siblings deliver", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const outcomes = ["ok", "gone404", "gone410", "refused", "redirect", "throw"];
+  const ids = Object.fromEntries(outcomes.map((name) => [name, randomSecret()]));
+  for (const name of outcomes) await f.subscribe(ids[name], browserSubscription(FCM + name).subscription);
+  f.answerPushes((url) => {
+    const name = url.pathname.split("/").at(-1);
+    if (name === "throw") throw new Error("connection reset");
+    if (name === "redirect")
+      return new WorkerResponse(null, { status: 307, headers: { location: `${FCM}ok` } });
+    const status = { ok: 201, gone404: 404, gone410: 410, refused: 500 }[name!]!;
+    return new WorkerResponse(status === 500 ? '{"reason":"Overloaded"}' : null, { status });
+  });
+  // A repeated recipient is not sent twice.
+  const body = to(...outcomes.map((name) => ids[name]), ids.ok);
+  expect((await f.send(body)).json).toEqual({ delivered: 1, expired: 2, unknown: 1, failed: 3 });
+  // One request per subscription: the redirect was not followed.
+  expect(f.pushed.map((request) => request.url).sort()).toEqual(outcomes.map((name) => FCM + name).sort());
+  expect((await f.rows()).map((row) => row.endpoint).sort()).toEqual(
+    ["ok", "refused", "redirect", "throw"].map((name) => FCM + name).sort(),
+  );
+});
+
+test("a send waits at most its deadline for a hung push service, keeping the row", async ({ onTestFinished }) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const [hung, ok] = [randomSecret(), randomSecret()];
+  await f.subscribe(hung, browserSubscription(FCM + "hung").subscription);
+  await f.subscribe(ok, browserSubscription(FCM + "ok").subscription);
+  f.answerPushes((url) =>
+    url.pathname.endsWith("/hung") ? new Promise(() => {}) : new WorkerResponse(null, { status: 201 }),
+  );
+  const started = Date.now();
+  expect((await f.send(to(hung, ok))).json).toEqual({ delivered: 1, expired: 0, unknown: 0, failed: 1 });
+  const elapsed = Date.now() - started;
+  expect(elapsed).toBeGreaterThanOrEqual(15_000 - 500);
+  expect(elapsed).toBeLessThan(30_000);
+  expect(await f.rows()).toHaveLength(2);
+});
+
+test("only a known push service's endpoint registers, and a row naming any other is never fetched", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  for (const endpoint of [
+    "http://fcm.googleapis.com/fcm/send/abc",
+    "https://fcm.googleapis.com:8443/fcm/send/abc",
+    "https://user:pass@fcm.googleapis.com/fcm/send/abc",
+    "https://fcm.googleapis.com.evil.test/fcm/send/abc",
+    "https://push.example.com/sub/abc",
+    "https://100.64.0.1/sub/abc",
+    "https://localhost/sub/abc",
+  ])
+    expect(await f.subscribe(randomSecret(), browserSubscription(endpoint).subscription), endpoint).toMatchObject({
+      status: 400,
+      json: { error: "endpoint must be a known push service" },
+    });
+  for (const endpoint of [
+    "https://web.push.apple.com/QGuQyavXutnMH-5",
+    "https://updates.push.services.mozilla.com/wpush/v2/gAAAA",
+    "https://wns2-par02p.notify.windows.com/w/?token=BQYAAAB",
+  ])
+    expect((await f.subscribe(randomSecret(), browserSubscription(endpoint).subscription)).status, endpoint).toBe(200);
+  expect(await f.rows()).toHaveLength(3);
+  // A row the allowlist no longer admits, however it got there, is never fetched.
+  const legacy = randomSecret();
+  await f.sql(
+    `INSERT INTO dormouse_relay_push_subscriptions ("burrowId", "deliveryId", endpoint, p256dh, auth, "vapidPublicKey")
+    VALUES ($1, $2, 'https://push.example.com/sub/abc', $3, 'BTBZMqHH6r4Tts7J_aSIgg', $4)`,
+    [f.laptop.burrowId, legacy, browserSubscription().subscription.keys.p256dh, testVapidKeys().RELAY_VAPID_PUBLIC_KEY],
+  );
+  expect((await f.send(to(legacy))).json).toEqual({ delivered: 0, expired: 0, unknown: 0, failed: 1 });
+  expect(f.pushed).toEqual([]);
+});
+
+test("send requires and bounds its recipients, and the push routes refuse an id no Burrow minted", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const refused = {
+    status: 400,
+    json: { error: `recipients must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} { deliveryId, sealed } pairs` },
+  };
+  expect(await f.send({})).toMatchObject(refused);
+  expect(await f.send({ recipients: [] })).toMatchObject(refused);
+  expect(
+    await f.send(to(...Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 1 }, () => randomSecret()))),
+  ).toMatchObject(refused);
+  expect(await f.send({ recipients: [{ deliveryId: randomSecret(), sealed: { v: 2, salt: "x", ct: "y" } }] })).toMatchObject(
+    refused,
+  );
+  expect(await f.send(to("short"))).toMatchObject(refused);
+  expect(await f.query(["short"])).toMatchObject({ status: 400 });
+  expect(await f.query([])).toMatchObject({ status: 400 });
+  expect(await f.subscribe("short")).toMatchObject({ status: 400, json: { error: "malformed request" } });
+  // A session is not a Burrow token, nor the reverse.
+  expect((await f.devices(f.sessionToken)).status).toBe(401);
+  expect((await f.query([randomSecret()], f.laptop.token)).status).toBe(401);
 });

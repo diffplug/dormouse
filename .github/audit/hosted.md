@@ -17,12 +17,15 @@ unreachable, report those two checks as `UNVERIFIABLE`.
 
 Read `docs/specs/hosted.md`, `docs/specs/one-time.md` (its "Wire contract",
 "Hosted rendezvous", and "Phone page"), `docs/specs/relay.md` (its "HTTP API",
-"Setup tokens and the pairing QR", "WebAuthn without a WebAuthn library", and
-"Routing", whose semantics the Hosted Relay keeps), `hosted/server/`, `hosted/src/`,
+"Setup tokens and the pairing QR", "WebAuthn without a WebAuthn library",
+"Routing", "Web Push", and "State files", whose semantics the Hosted Relay
+keeps), `hosted/server/`, `hosted/src/`,
 `hosted/scripts/`, `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`,
 `hosted/wrangler.voice.jsonc`,
 `remote-lib-common/src/remote/one-time-wire.ts`,
-`remote-lib-common/src/remote/relay-common.ts`, the Pocket build the relay
+`remote-lib-common/src/remote/relay-common.ts`,
+`remote-lib-common/src/remote/web-push.ts` and its test
+`remote-lib-common/test/web-push.test.mjs`, the Pocket build the relay
 serves (`lib/vite.pocket.config.ts`, `lib/pocket/`), the phone page it serves —
 `lib/vite.one-time.config.ts`, `lib/one-time/`, `lib/src/remote/one-time-app/`,
 and `lib/scripts/assert-pocket-worker.mjs` — and
@@ -98,7 +101,8 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   `hosted/server/bindings.ts` and each Wrangler config: the relay and voice
   Workers must hold and pass no auth secret and never import Better Auth, and
   the account and relay no ElevenLabs key, and the account and voice no
-  `RELAY_ENROLL_SECRET`. The relay's Hyperdrive reaches only
+  `RELAY_ENROLL_SECRET` or VAPID private key, which must be a relay Worker
+  secret and never a `vars` entry. The relay's Hyperdrive reaches only
   its own tables and the entitlement's user row.
 - **Can one account reach another's Relay rows?** Trace every query in
   `hosted/server/relay-api.ts`: a session or Burrow token of account B must not
@@ -122,6 +126,19 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   approver; and a removed Burrow's row must be gone, its token opening nothing
   on any relay route. Look for a user code predictable without the secret, an
   unlimited approval loop, and a table an unauthenticated caller can grow.
+- **Can push leak text, cross an account, or reach somewhere it should not?**
+  Trace a send through `relayPushRoutes` in `hosted/server/relay-push.ts`: the
+  Relay must forward exactly the sealed envelope's three fields plus the
+  token's `burrowId`, read and log no notification text, and reach only the
+  calling Burrow's rows. A session must not register against, read back, or
+  delete another account's rows, even holding its `deliveryId`, and an
+  upsert's endpoint rotation, its caps, and the 404/410 prune must stay inside
+  the account. Every fetch must go to an endpoint `knownPushEndpoint` admits,
+  follow no redirect, and read only a bounded reason. Check the sender against
+  RFC 8291 and RFC 8292 yourself: the test's expected bytes must come from the
+  RFC, not the code, and a JWT's `aud` must be the endpoint's origin. Look for
+  an endpoint string that parses to an allowlisted host in one place and
+  another host in another.
 - **Can a Hosted login become terminal access, or an account become someone
   else's?** `authPolicy` must keep explicit linking and independent logins; a
   callback whose initiating login was revoked must fail; an unused or unknown

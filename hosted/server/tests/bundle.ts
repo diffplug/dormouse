@@ -1,5 +1,6 @@
 import { build } from "esbuild";
 import { convertV4MiniflareOptions } from "miniflare";
+import { createECDH, createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
 import { WORKERS, parseConfig } from "../../scripts/workers.mjs";
@@ -37,6 +38,16 @@ const each = <T>(pick: (config: WranglerConfig) => T) =>
 export const ORIGINS = each((config) => config.vars.APP_ORIGIN);
 /** The relay's `RELAY_ENROLL_SECRET` in every test; production's is a Worker secret. */
 export const TEST_ENROLL_SECRET = "dormouse-hosted-test-enroll-secret";
+/** A VAPID pair for tests, as the relay's two secrets hold one; `seed` names another. */
+export function testVapidKeys(seed = "dormouse-hosted-test-vapid") {
+  const scalar = createHash("sha256").update(seed).digest();
+  const ecdh = createECDH("prime256v1");
+  ecdh.setPrivateKey(scalar);
+  return {
+    RELAY_VAPID_PUBLIC_KEY: ecdh.getPublicKey().toString("base64url"),
+    RELAY_VAPID_PRIVATE_KEY: scalar.toString("base64url"),
+  };
+}
 /** Each Worker's production entry, from its config. */
 export const ENTRIES = each((config) => config.main);
 

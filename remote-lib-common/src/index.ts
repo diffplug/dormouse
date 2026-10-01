@@ -20,6 +20,7 @@ export * from './remote/origin.js';
 export * from './remote/enroll-code.js';
 export * from './remote/relay-common.js';
 export * from './remote/relay-routing.js';
+export * from './remote/web-push.js';
 export * from './security/webcrypto.js';
 export * from './security/bytes.js';
 export * from './security/ecdsa.js';

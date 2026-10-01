@@ -8,9 +8,11 @@
  * (`docs/specs/relay.md`, `docs/specs/hosted.md` -> "Relay").
  */
 
+import { DELIVERY_ID_LENGTH } from '../security/acl.js';
 import {
   fromBase64Url,
   isBoundedBase64Url,
+  isExactBase64Url,
   toBase64Url,
   utf8Decode,
 } from '../security/bytes.js';
@@ -22,6 +24,7 @@ import {
   type PasskeyAssertion,
 } from '../security/passkey.js';
 import { boundedPushText } from '../security/push.js';
+import { MAX_SEALED_PUSH_LENGTH, isSealedPushV1 } from '../security/push-seal.js';
 import { getWebCrypto } from '../security/webcrypto.js';
 import {
   E2E_ID_LENGTH,
@@ -37,6 +40,9 @@ import {
   UNKNOWN_CHALLENGE_ERROR,
   UNKNOWN_CREDENTIAL_ERROR,
   assertionRejectedError,
+  MAX_PUSH_QUERY_DELIVERY_IDS,
+  type PushSubscriptionPayload,
+  type SealedPushRecipient,
 } from './wire.js';
 
 /** The bearer shape lives in the wire contract; re-exported for the Relays. */
@@ -151,6 +157,107 @@ export const MAX_PASSKEY_LABEL_LENGTH = 64;
  * is orders of magnitude above real use.
  */
 export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+
+// ---------------------------------------------------------------------------
+// Web Push bounds (`docs/specs/relay.md` -> "Web Push" and "State files").
+
+/**
+ * How many push subscriptions one Burrow, and one account, may hold.
+ *
+ * `POST /api/push/subscribe` needs a session token and a `deliveryId` the
+ * caller picks for itself — the Relay cannot check one against a Burrow's ACL,
+ * by design — so without a cap one signed-in caller appends a durable row per
+ * request, and every push route thereafter reads it. Every sibling transient
+ * store is capped (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`,
+ * `MAX_TOKENS_PER_BURROW`); this is the durable one, so it matters more.
+ *
+ * Far above any real use: the per-Burrow cap is phones paired with one laptop,
+ * the per-account cap that across every laptop an account enrolled. A
+ * self-host Relay has one account, so its per-account cap is its total.
+ */
+export const MAX_PUSH_SUBSCRIPTIONS_PER_BURROW = 32;
+export const MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT = 256;
+
+/**
+ * Longest push endpoint a Relay will store. A real one is a provider URL a
+ * couple of hundred characters long (FCM, APNs and Mozilla autopush all sit
+ * well under this), so the cap is several times the headroom any of them needs
+ * — and it is what keeps a stored row a known size.
+ */
+export const MAX_PUSH_ENDPOINT_LENGTH = 1024;
+
+/**
+ * Longest `keys.p256dh` / `keys.auth` a Relay will store. RFC 8291 fixes
+ * both: `p256dh` is an uncompressed P-256 point (65 bytes) and `auth` is the
+ * 16-byte auth secret, so the caps are their base64 encodings *with* padding —
+ * browsers emit unpadded base64url, and a padded serialization must not be the
+ * thing that breaks a real subscription.
+ */
+export const MAX_PUSH_KEY_P256DH_LENGTH = 88;
+export const MAX_PUSH_KEY_AUTH_LENGTH = 24;
+
+/**
+ * The push service's TTL on every delivery. Short on purpose: an alarm that
+ * arrives an hour late is noise, not information, so a push service holding
+ * one for an offline phone should drop it rather than deliver it stale.
+ */
+export const PUSH_TTL_SECONDS = 300;
+
+/**
+ * The one route whose legitimate body outgrows {@link MAX_REQUEST_BODY_BYTES}:
+ * `/api/push/send`, a fan-out of `MAX_PUSH_QUERY_DELIVERY_IDS` sealed
+ * envelopes, each already bounded by `MAX_SEALED_PUSH_LENGTH`. Derived from
+ * those two rather than written out, so tightening either tightens this with
+ * it; the per-recipient allowance covers the delivery id, the salt, and the
+ * JSON around them.
+ */
+const PUSH_SEND_RECIPIENT_OVERHEAD_BYTES = 256;
+export const MAX_PUSH_SEND_BODY_BYTES =
+  MAX_PUSH_QUERY_DELIVERY_IDS *
+    (DELIVERY_ID_LENGTH + MAX_SEALED_PUSH_LENGTH + PUSH_SEND_RECIPIENT_OVERHEAD_BYTES) +
+  PUSH_SEND_RECIPIENT_OVERHEAD_BYTES;
+
+/**
+ * Base64url of exactly {@link DELIVERY_ID_LENGTH} characters — the Burrow mints
+ * 32 random bytes, so anything else is not an id any Burrow ever issued and must
+ * be refused before it becomes a row key.
+ */
+export function isPushDeliveryId(value: unknown): value is string {
+  return isExactBase64Url(value, DELIVERY_ID_LENGTH);
+}
+
+/**
+ * True if `value` is a `PushSubscriptionPayload` with both encryption keys,
+ * each of a length RFC 8291 could actually have produced. Non-empty, because a
+ * blank key is a row no sender can ever encrypt to. **Every stored field is
+ * bounded**: these three are the whole row.
+ */
+export function isPushSubscriptionPayload(value: unknown): value is PushSubscriptionPayload {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as PushSubscriptionPayload;
+  return (
+    isBoundedNonEmptyString(v.endpoint, MAX_PUSH_ENDPOINT_LENGTH) &&
+    !!v.keys &&
+    typeof v.keys === 'object' &&
+    isBoundedNonEmptyString(v.keys.p256dh, MAX_PUSH_KEY_P256DH_LENGTH) &&
+    isBoundedNonEmptyString(v.keys.auth, MAX_PUSH_KEY_AUTH_LENGTH)
+  );
+}
+
+/**
+ * One `{ deliveryId, sealed }` pair on a send. Shape and bounds are the whole
+ * of what a Relay can check — it holds no key — and the envelope's bound is
+ * its only defense against forwarding megabytes at a phone.
+ */
+export function isSealedPushRecipient(value: unknown): value is SealedPushRecipient {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as SealedPushRecipient;
+  return isPushDeliveryId(v.deliveryId) && isSealedPushV1(v.sealed);
+}
+
+function isBoundedNonEmptyString(value: unknown, max: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= max;
+}
 
 /**
  * A registration's label as a Relay stores it: reduced rather than refused, so

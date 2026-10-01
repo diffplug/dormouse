@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   previewName,
@@ -504,10 +504,32 @@ test("each preview Worker with a secret gets its own, derived from the preview s
   const configs = previewConfigs(await readConfigs(), env, "c".repeat(32));
   const secret = "p".repeat(32);
   const derived = (name) => createHmac("sha256", secret).update(name).digest("hex");
-  assert.deepEqual(previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: secret }), {
-    account: { AUTH_SECRET: derived("dormouse-hosted-pr-42") },
-    relay: { RELAY_ENROLL_SECRET: derived("dormouse-relay-pr-42") },
-  });
+  const secrets = previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: secret });
+  const { RELAY_VAPID_PUBLIC_KEY, RELAY_VAPID_PRIVATE_KEY, ...relay } = secrets.relay;
+  assert.deepEqual(
+    { ...secrets, relay },
+    {
+      account: { AUTH_SECRET: derived("dormouse-hosted-pr-42") },
+      relay: { RELAY_ENROLL_SECRET: derived("dormouse-relay-pr-42") },
+    },
+  );
+  // The relay's VAPID scalar is the HMAC of its name, and its point signs as one pair.
+  assert.equal(
+    RELAY_VAPID_PRIVATE_KEY,
+    createHmac("sha256", secret).update("dormouse-relay-pr-42/vapid").digest("base64url"),
+  );
+  const point = Buffer.from(RELAY_VAPID_PUBLIC_KEY, "base64url");
+  assert.equal(point.length, 65);
+  const jwk = { kty: "EC", crv: "P-256", x: point.subarray(1, 33).toString("base64url"), y: point.subarray(33).toString("base64url") };
+  const signature = sign("sha256", Buffer.from("probe"), createPrivateKey({ key: { ...jwk, d: RELAY_VAPID_PRIVATE_KEY }, format: "jwk" }));
+  assert.ok(verify("sha256", Buffer.from("probe"), createPublicKey({ key: jwk, format: "jwk" }), signature));
+  // Stable across redeploys of one PR, distinct across PRs and secrets.
+  assert.deepEqual(previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: secret }), secrets);
+  const otherPr = previewConfigs(await readConfigs(), { ...env, PR_NUMBER: "43" }, "c".repeat(32));
+  assert.notEqual(
+    previewSecrets(otherPr, { ...env, PREVIEW_AUTH_SECRET: secret }).relay.RELAY_VAPID_PRIVATE_KEY,
+    RELAY_VAPID_PRIVATE_KEY,
+  );
   assert.throws(() => previewSecrets(configs, env), /Missing PREVIEW_AUTH_SECRET/);
   assert.throws(
     () => previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: "short" }),
