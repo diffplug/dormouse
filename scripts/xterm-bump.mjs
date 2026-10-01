@@ -137,11 +137,10 @@ if (canopyFlag !== -1) {
     (dryRun ? '  (--dry-run: no files written)' : ''),
   );
   console.log(`upstream base commit: ${head}`);
-  console.log(
-    '\nAlso update the version-correspondence comment at the UpstreamWebglAddon import in\n' +
-    'canopy/src/GlTerminal.stories.tsx and the same triple in canopy/README.md, then run ' +
-    '`pnpm install`.',
-  );
+  // No reminder to update the recorded triple in canopy/src/GlTerminal.stories.tsx
+  // and canopy/README.md: `scripts/xterm-lint.mjs` check 4 fails until both agree
+  // with the pins written above.
+  console.log('\nRun `pnpm install`.');
   process.exit(0);
 }
 

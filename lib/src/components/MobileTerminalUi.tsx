@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  type SyntheticEvent,
 } from 'react';
 import {
   ArticleNyTimesIcon,
@@ -19,7 +20,6 @@ import {
   TextTIcon,
 } from '@phosphor-icons/react';
 import { clsx } from 'clsx';
-import { AlertBell } from './AlertBell';
 import {
   MobileGestureConfirmDialog,
   MobileGestureRadialMenu,
@@ -31,6 +31,7 @@ import {
   finishMobileGesture,
   MOBILE_GESTURE_COMPLETE_MS,
   MOBILE_GESTURE_IDLE_STATE,
+  RADIUS_FADE_START,
   updateMobileGesture,
   type MobileGestureAction,
   type MobileGestureInputId,
@@ -38,9 +39,15 @@ import {
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
 import { useDynamicPalette } from '../lib/themes/use-dynamic-palette';
-import { isEditableTarget } from '../lib/dom';
+import { isComposingKey, isEditableTarget } from '../lib/dom';
 import { TouchUiContext } from './touch-ui-context';
-import type { SessionStatus } from '../lib/terminal-registry';
+import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
+import type { AlertEpisode } from '../lib/alert-episode';
+import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
+import { EdgeScrollMotion, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobileTerminal } from '../lib/mobile-terminal-scroll';
+import { acknowledgeSession } from '../lib/session-activity-store';
+import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
+import { TERMINAL_TAP_EVENT, type TerminalTapDetail } from '../lib/terminal-mouse-router';
 
 export type MobileTerminalKeyboardMode = 'sessions' | 'recent' | 'type' | 'draft';
 export type MobileTerminalTouchMode = 'gestures' | 'selection' | 'cursor';
@@ -52,8 +59,9 @@ export interface MobileTerminalSessionItem {
   secondary?: string | null;
   active?: boolean;
   status?: SessionStatus;
-  /** `ActivityState.ringSeq`; a change replays the ringing burst. */
-  ringSeq: number;
+  /** `ActivityState.episode` — the Session's current ringing interval, which
+   *  anchors the row's arrival burst; `null` while it is quiet. */
+  episode: AlertEpisode | null;
   todo?: boolean;
 }
 
@@ -84,6 +92,24 @@ const KEYBOARD_MODES: Array<{ id: MobileTerminalKeyboardMode; label: string; Ico
   { id: 'draft', label: 'Draft', Icon: ArticleNyTimesIcon },
 ];
 
+/**
+ * The mouse override one pane gets, from the global touch mode and that pane's
+ * *own* mouse reporting.
+ *
+ * A pure function rather than each consumer's own conditional: touch mode is
+ * one UI state for the whole wall, so every mounted pane has to be reconfigured
+ * on a change — a pane switched away from that kept `permanent` would swallow
+ * the inner program's mouse input for as long as it stayed mounted. Both
+ * compositions call it in a loop over their panes
+ * (`docs/specs/mobile-terminal-ui.md` -> "Touch mode selector").
+ */
+export function paneMouseOverride(
+  touchMode: MobileTerminalTouchMode,
+  reporting: MouseTrackingMode,
+): OverrideState {
+  return touchMode === 'selection' && reporting !== 'none' ? 'permanent' : 'off';
+}
+
 const TOUCH_MODES: Array<{
   id: MobileTerminalTouchMode;
   label: string;
@@ -98,9 +124,6 @@ const TOUCH_MODES: Array<{
 
 export interface MobileTerminalUiProps {
   terminal: ReactNode;
-  activeSection?: MobileTerminalKeyboardMode;
-  defaultSection?: MobileTerminalKeyboardMode;
-  onSectionChange?: (section: MobileTerminalKeyboardMode) => void;
   activeKeyboardMode?: MobileTerminalKeyboardMode;
   defaultKeyboardMode?: MobileTerminalKeyboardMode;
   onKeyboardModeChange?: (mode: MobileTerminalKeyboardMode) => void;
@@ -110,6 +133,7 @@ export interface MobileTerminalUiProps {
   cursorTouchAvailable?: boolean;
   onSendInput?: (data: string) => void;
   onGestureInput?: (input: MobileGestureInputId, data: string) => void;
+  onGestureScroll?: (lines: number) => void;
   onPaste?: () => void | Promise<void>;
   onFocusInput?: () => void;
   sessions?: MobileTerminalSessionItem[];
@@ -321,56 +345,59 @@ function SessionsPane({
   return (
     <div className="h-full overflow-auto p-2">
       <div className="grid gap-1">
-        {sessions.map((session) => {
-          const active = session.active === true;
-          const ringing = session.status === 'ALERT_RINGING' || session.status === 'MIGHT_NEED_ATTENTION';
-          return (
-            <button
-              key={session.id}
-              type="button"
-              disabled={disabled}
-              aria-current={active ? 'page' : undefined}
-              onClick={() => onSelect?.(session.id)}
-              className={clsx(
-                'flex min-h-10 min-w-0 items-center gap-2 rounded px-2 text-left font-mono text-xs transition-colors',
-                'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
-                'disabled:pointer-events-none disabled:opacity-60',
-                // Rows sit on the header-inactive reserve, so the inactive row
-                // recesses to the app pair — the guaranteed app↔inactive delta
-                // (theme.md's three-pair rule); surface-raised is unreliable here.
-                active
-                  ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
-                  : 'bg-app-bg text-app-fg',
-              )}
-            >
-              <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium">{session.title}</span>
-                {session.secondary ? (
-                  <span className="block truncate opacity-70">{session.secondary}</span>
-                ) : null}
-              </span>
-              {session.todo ? (
-                <span className="shrink-0 rounded border border-current px-1 py-px text-[0.55rem] font-semibold leading-none tracking-[0.08em]">
-                  TODO
-                </span>
-              ) : null}
-              {ringing ? (
-                <AlertBell
-                  size={14}
-                  status={session.status ?? 'ALERT_RINGING'}
-                  ringSeq={session.ringSeq}
-                  className={clsx(
-                    'shrink-0',
-                    active ? 'text-alarm-vs-header-active' : 'text-alarm-vs-door',
-                  )}
-                />
-              ) : null}
-            </button>
-          );
-        })}
+        {sessions.map((session) => (
+          <SessionRow key={session.id} session={session} disabled={disabled} onSelect={onSelect} />
+        ))}
       </div>
     </div>
+  );
+}
+
+/** A row is its own component so it can hold the burst hook; the mobile list has
+ *  no speech sink, so the unlabelled row is the only one it ever wears. */
+function SessionRow({ session, disabled, onSelect }: {
+  session: MobileTerminalSessionItem;
+  disabled: boolean;
+  onSelect?: (id: string) => void;
+}) {
+  const active = session.active === true;
+  const row = alertRingRow(session.status, null);
+  const burst = useAlertRingBurst(row, session.episode);
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      aria-current={active ? 'page' : undefined}
+      onClick={() => onSelect?.(session.id)}
+      className={clsx(
+        'relative flex min-h-10 min-w-0 items-center gap-2 overflow-hidden rounded px-2 text-left font-mono text-xs transition-colors',
+        'focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-focus-ring',
+        'disabled:pointer-events-none disabled:opacity-60',
+        // Rows sit on the header-inactive reserve, so the inactive row recesses
+        // to the app pair — the guaranteed app↔inactive delta (theme.md's
+        // three-pair rule); surface-raised is unreliable here.
+        active
+          ? 'bg-header-active-bg text-header-active-fg shadow-[inset_0_0_0_1px_var(--color-focus-ring)]'
+          : 'bg-app-bg text-app-fg',
+      )}
+    >
+      <TerminalWindowIcon size={15} weight={active ? 'bold' : 'regular'} className="shrink-0" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{session.title}</span>
+        {session.secondary ? (
+          <span className="block truncate opacity-70">{session.secondary}</span>
+        ) : null}
+      </span>
+      {session.todo ? (
+        <span className="shrink-0 rounded border border-current px-1 py-px text-[0.55rem] font-semibold leading-none tracking-[0.08em]">
+          TODO
+        </span>
+      ) : null}
+      {/* No alarm token is computed against `app-bg`, so an inactive row borrows
+          the Door's — the nearest recessed ground the palette does cover. */}
+      {row && <AlertRingInset ground={active ? 'header-active' : 'door'} burst={burst} className="rounded" />}
+    </button>
   );
 }
 
@@ -384,11 +411,35 @@ function localPointerPoint(event: PointerEvent<HTMLElement>): MobileGesturePoint
   };
 }
 
+/** A press that may yet end as a tap, and the Session it would acknowledge. */
+interface PendingTap {
+  pointerId: number;
+  clientX: number;
+  clientY: number;
+  sessionId: string;
+}
+
+/** Whether a press's pointer is still where a tap stays: inside the radial
+ *  menu's `RADIUS_FADE_START`, before any direction has begun to steer. */
+function withinTapSlop(tap: PendingTap, event: PointerEvent<HTMLElement>): boolean {
+  return Math.hypot(event.clientX - tap.clientX, event.clientY - tap.clientY) <= RADIUS_FADE_START;
+}
+
+/** A press inside a portaled descendant (the copy editor) reaches the host's
+ *  capture handlers only through React. It is not pane content, so it begins no
+ *  touch mode, tap, or keyboard dismissal. Only the press is checked: a press
+ *  the host took captures its pointer, and a portaled press forgets the
+ *  pending tap, as any new press replaces it. */
+function isPortaledTarget(event: SyntheticEvent<HTMLElement>): boolean {
+  return !event.currentTarget.contains(event.target as Node);
+}
+
 function isGestureDialogTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[data-mobile-gesture-dialog]') !== null;
 }
 
 function consumeNativeTouchOrScrollEvent(event: Event): void {
+  if (isMobileScrollWheel(event)) return;
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation();
@@ -454,11 +505,8 @@ class RetrySchedule {
 
 export function MobileTerminalUi({
   terminal,
-  activeSection,
-  defaultSection = 'type',
-  onSectionChange,
   activeKeyboardMode,
-  defaultKeyboardMode,
+  defaultKeyboardMode = 'type',
   onKeyboardModeChange,
   activeTouchMode,
   defaultTouchMode = 'gestures',
@@ -466,6 +514,7 @@ export function MobileTerminalUi({
   cursorTouchAvailable = false,
   onSendInput,
   onGestureInput,
+  onGestureScroll,
   onPaste,
   onFocusInput,
   sessions = [],
@@ -477,25 +526,45 @@ export function MobileTerminalUi({
   style,
 }: MobileTerminalUiProps) {
   useDynamicPalette();
-  const resolvedDefaultKeyboardMode = defaultKeyboardMode ?? defaultSection;
-  const [internalKeyboardMode, setInternalKeyboardMode] = useState<MobileTerminalKeyboardMode>(resolvedDefaultKeyboardMode);
+  const [internalKeyboardMode, setInternalKeyboardMode] = useState<MobileTerminalKeyboardMode>(defaultKeyboardMode);
   const [internalTouchMode, setInternalTouchMode] = useState<MobileTerminalTouchMode>(defaultTouchMode);
-  const keyboardMode = activeKeyboardMode ?? activeSection ?? internalKeyboardMode;
+  const keyboardMode = activeKeyboardMode ?? internalKeyboardMode;
   const touchMode = activeTouchMode ?? internalTouchMode;
+  const activeSessionId = sessions.find((session) => session.active)?.id;
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
+  const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; motion: EdgeScrollMotion } | null>(null);
+  const edgeMomentumFrameRef = useRef<number | null>(null);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const completedGesturePointerIdRef = useRef<number | null>(null);
   const gestureCompletionTimerRef = useRef<number | null>(null);
   const cursorPointerIdRef = useRef<number | null>(null);
   const cursorPointerTargetRef = useRef<EventTarget | null>(null);
+  const pendingTapRef = useRef<PendingTap | null>(null);
   // Cancelled on unmount, including after test DOM teardown.
   const [blurRetries] = useState(() => new RetrySchedule());
   const [focusRetries] = useState(() => new RetrySchedule());
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
   const [inputValue, setInputValue] = useState('');
+
+  const stopEdgeScroll = useCallback(() => {
+    edgeScrollRef.current = null;
+    if (edgeMomentumFrameRef.current !== null) {
+      window.cancelAnimationFrame(edgeMomentumFrameRef.current);
+      edgeMomentumFrameRef.current = null;
+    }
+  }, []);
+
+  const scrollEdgeLines = useCallback((sessionId: string, lines: number, x: number, y: number): boolean => {
+    const terminal = sessionId === activeSessionId ? getTerminalInstance(sessionId) : undefined;
+    if (!terminal) return false;
+    if (!lines) return true;
+    const scrolling = scrollMobileTerminal(terminal, lines, x, y);
+    onGestureScroll?.(lines);
+    return scrolling;
+  }, [activeSessionId, onGestureScroll]);
 
   const sendInput = useCallback((data: string) => {
     if (!interactive || data.length === 0) return;
@@ -562,17 +631,14 @@ export function MobileTerminalUi({
   }, [blurRetries, configurePaneTextInputs, focusRetries]);
 
   const setKeyboardMode = useCallback((nextMode: MobileTerminalKeyboardMode) => {
-    if (activeKeyboardMode === undefined && activeSection === undefined) {
-      setInternalKeyboardMode(nextMode);
-    }
+    if (activeKeyboardMode === undefined) setInternalKeyboardMode(nextMode);
     onKeyboardModeChange?.(nextMode);
-    onSectionChange?.(nextMode);
     if (nextMode === 'type') {
       focusInput();
     } else {
       blurInput();
     }
-  }, [activeKeyboardMode, activeSection, blurInput, focusInput, onKeyboardModeChange, onSectionChange]);
+  }, [activeKeyboardMode, blurInput, focusInput, onKeyboardModeChange]);
 
   const setTouchMode = useCallback((nextMode: MobileTerminalTouchMode) => {
     if (nextMode === 'cursor' && !cursorTouchAvailable) return;
@@ -610,8 +676,9 @@ export function MobileTerminalUi({
     if (!action) return;
     if (action.kind === 'input') {
       const data = MOBILE_TERMINAL_KEY_SEQUENCES[action.input];
-      sendInput(data);
+      // Before sending: the input may leave the screen that credits it.
       onGestureInput?.(action.input, data);
+      sendInput(data);
       return;
     }
     if (action.kind === 'text') {
@@ -686,19 +753,60 @@ export function MobileTerminalUi({
     return () => observer.disconnect();
   }, [configurePaneTextInputs, terminal]);
 
+  // Also cancels a coast on unmount, rather than keeping an old Session alive
+  // through the animation callback after switching away from it.
+  useEffect(() => stopEdgeScroll, [activeSessionId, interactive, touchMode, stopEdgeScroll]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.hidden) stopEdgeScroll();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [stopEdgeScroll]);
+
   useEffect(() => {
     if (touchMode === 'gestures' && interactive) return;
+    stopEdgeScroll();
     clearGestureCompletionTimer();
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
     setPendingGestureConfirmation(null);
-  }, [clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
+  }, [clearGestureCompletionTimer, commitGestureState, interactive, touchMode, stopEdgeScroll]);
 
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 
   useEffect(() => blurRetries.cancel, [blurRetries]);
 
+  // Select mode's router owns a touch on the terminal and consumes its release,
+  // so it reports the tap itself.
+  useEffect(() => {
+    const host = terminalHostRef.current;
+    if (!host) return;
+    const onTap = (event: Event) => {
+      const tap = pendingTapRef.current;
+      if (tap?.pointerId !== (event as CustomEvent<TerminalTapDetail>).detail?.pointerId) return;
+      pendingTapRef.current = null;
+      acknowledgeSession(tap.sessionId);
+    };
+    host.addEventListener(TERMINAL_TAP_EVENT, onTap);
+    return () => host.removeEventListener(TERMINAL_TAP_EVENT, onTap);
+  }, []);
+
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    // A second finger may stop a coast, but must not steal a live edge drag.
+    if (edgeMomentumFrameRef.current !== null) stopEdgeScroll();
+    if (isPortaledTarget(event)) {
+      pendingTapRef.current = null;
+      return;
+    }
     if (isGestureDialogTarget(event.target)) return;
+    // A tap acknowledges the active Session, a drag or swipe never
+    // (`docs/specs/alert.md` -> Engagement): judged on release, and tracked in
+    // capture on the host, before any mode below consumes the press.
+    const sessionId = interactive ? activeSessionId : undefined;
+    pendingTapRef.current = sessionId
+      ? { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, sessionId }
+      : null;
     blurPaneTextInputs();
     if (interactive && touchMode === 'cursor' && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
@@ -710,7 +818,7 @@ export function MobileTerminalUi({
       return;
     }
     if (!interactive || touchMode !== 'gestures') return;
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -719,14 +827,21 @@ export function MobileTerminalUi({
     completedGesturePointerIdRef.current = null;
 
     const origin = localPointerPoint(event);
-    commitGestureState(beginMobileGesture(
-      event.pointerId,
-      origin,
-      displayOriginAwayFromThumb(origin, event.currentTarget.getBoundingClientRect()),
-    ));
-  }, [blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
+    const rect = event.currentTarget.getBoundingClientRect();
+    // The starting point owns the whole drag, even if it later leaves the edge.
+    if (sessionId && isEdgeScrollOrigin(origin.x, rect.width)) {
+      edgeScrollRef.current = {
+        pointerId: event.pointerId, sessionId, motion: new EdgeScrollMotion(event.clientY, event.timeStamp),
+      };
+      commitGestureState(MOBILE_GESTURE_IDLE_STATE);
+      return;
+    }
+    commitGestureState(beginMobileGesture(event.pointerId, origin, displayOriginAwayFromThumb(origin, rect)));
+  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode, stopEdgeScroll]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const tap = pendingTapRef.current;
+    if (tap?.pointerId === event.pointerId && !withinTapSlop(tap, event)) pendingTapRef.current = null;
     if (touchMode === 'cursor' && cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
@@ -736,6 +851,16 @@ export function MobileTerminalUi({
       return;
     }
 
+    const scroll = edgeScrollRef.current;
+    if (scroll?.pointerId === event.pointerId) {
+      event.preventDefault();
+      event.stopPropagation();
+      const samples = event.nativeEvent.getCoalescedEvents?.() ?? [];
+      for (const sample of samples.length ? samples : [event]) {
+        scrollEdgeLines(scroll.sessionId, scroll.motion.move(sample.clientY, sample.timeStamp), event.clientX, event.clientY);
+      }
+      return;
+    }
     const state = gestureStateRef.current;
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -751,9 +876,39 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(nextState);
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear, touchMode]);
+  }, [commitGestureState, executeGestureAction, scrollEdgeLines, scheduleGestureCompletionClear, touchMode]);
+
+  const endEdgeScroll = useCallback((event: PointerEvent<HTMLDivElement>): boolean => {
+    const scroll = edgeScrollRef.current;
+    if (scroll?.pointerId !== event.pointerId) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    edgeScrollRef.current = null;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.type === 'pointerup') {
+      scrollEdgeLines(scroll.sessionId, scroll.motion.move(event.clientY, event.timeStamp), event.clientX, event.clientY);
+      // Mouse drags still work in desktop previews, but do not fling on release.
+      if (event.pointerType !== 'mouse' && scroll.motion.release(event.timeStamp)) {
+        const { clientX, clientY } = event;
+        const coast = (time: number) => {
+          edgeMomentumFrameRef.current = null;
+          const lines = scroll.motion.step(time);
+          if (lines === null || !scrollEdgeLines(scroll.sessionId, lines, clientX, clientY)) return;
+          edgeMomentumFrameRef.current = window.requestAnimationFrame(coast);
+        };
+        edgeMomentumFrameRef.current = window.requestAnimationFrame(coast);
+      }
+    }
+    return true;
+  }, [scrollEdgeLines]);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const tap = pendingTapRef.current;
+    if (tap?.pointerId === event.pointerId) {
+      pendingTapRef.current = null;
+      if (withinTapSlop(tap, event)) acknowledgeSession(tap.sessionId);
+    }
+    if (endEdgeScroll(event)) return;
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
@@ -791,13 +946,16 @@ export function MobileTerminalUi({
     commitGestureState(completionState ?? result.state);
     executeGestureAction(result.action);
     if (completionState) scheduleGestureCompletionClear();
-  }, [commitGestureState, executeGestureAction, scheduleGestureCompletionClear]);
+  }, [commitGestureState, endEdgeScroll, executeGestureAction, scheduleGestureCompletionClear]);
 
-  const handlePaneFocusStartCapture = useCallback(() => {
+  const handlePaneFocusStartCapture = useCallback((event: SyntheticEvent<HTMLDivElement>) => {
+    if (isPortaledTarget(event)) return;
     blurPaneTextInputs();
   }, [blurPaneTextInputs]);
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (pendingTapRef.current?.pointerId === event.pointerId) pendingTapRef.current = null;
+    if (endEdgeScroll(event)) return;
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
       event.preventDefault();
       event.stopPropagation();
@@ -820,7 +978,7 @@ export function MobileTerminalUi({
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
-  }, [commitGestureState]);
+  }, [commitGestureState, endEdgeScroll]);
 
   return (
     <TouchUiContext.Provider value={true}>
@@ -913,9 +1071,8 @@ export function MobileTerminalUi({
         inputMode="text"
         enterKeyHint="enter"
         onKeyDown={(event) => {
-          // IME navigation and confirmation belong to the composition. Safari
-          // can clear isComposing before its final keydown but still reports 229.
-          if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
+          // IME navigation and confirmation belong to the composition.
+          if (composingRef.current || isComposingKey(event.nativeEvent)) return;
           const sequence = keyDownSequence(event);
           if (!sequence) return;
           event.preventDefault();

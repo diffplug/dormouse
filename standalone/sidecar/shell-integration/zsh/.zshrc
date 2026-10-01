@@ -34,11 +34,11 @@ if [[ -z ${DORMOUSE_SHELL_INTEGRATION} ]]; then
 
   autoload -Uz add-zsh-hook
 
-  # The three byte sequences that end an OSC string, and therefore the three no
-  # field of ours may contain raw: BEL, ESC (which begins ST, "ESC \\"), and the
-  # C1 ST U+009C. The last is held as its UTF-8 bytes because that is how it
-  # reaches us from a filename, and because [[:cntrl:]] does not cover it under
-  # LC_ALL=C — verified, not assumed.
+  # The three byte sequences that end an OSC string, and therefore the three
+  # that no field of ours may contain raw: BEL, ESC (which begins ST, "ESC \\"),
+  # and the C1 ST U+009C. The last is held as its UTF-8 bytes because that is
+  # how it reaches us from a filename, and because [[:cntrl:]] does not cover it
+  # under LC_ALL=C — verified, not assumed.
   __dormouse_633_c1st=$'\302\234'
 
   # Escape a value for the E command field, leaving the result in

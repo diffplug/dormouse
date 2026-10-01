@@ -60,6 +60,35 @@ describe('burrow status polling', () => {
       unsubscribe();
     }
   });
+
+  it('keeps a status already read through a failed poll, and takes the next answer', async () => {
+    vi.useFakeTimers();
+    let answer: () => unknown = () => ({ enrolled: true, connection: 'connecting' });
+    burrowLink = {
+      command: vi.fn(async () => answer()),
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+
+    const unsubscribe = subscribeToBurrowStatus(() => {});
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ kind: 'ready', status: { connection: 'connecting' } });
+
+      answer = () => {
+        throw new Error('bridge timed out');
+      };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ kind: 'ready', status: { connection: 'connecting' } });
+
+      answer = () => ({ enrolled: true, connection: 'connected' });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ kind: 'ready', status: { connection: 'connected' } });
+    } finally {
+      unsubscribe();
+    }
+  });
 });
 
 describe('re-reading after a mutation', () => {
@@ -77,7 +106,7 @@ describe('re-reading after a mutation', () => {
 
     const statusAnswer = () => ({
       enrolled,
-      relayUrl: 'https://laptop.tailnet.ts.net',
+      relayOrigin: 'https://laptop.tailnet.ts.net',
       burrowId: 'burrow-1',
       connection: 'connected',
       pairedClients: 1,
@@ -140,7 +169,7 @@ describe('re-subscribing', () => {
           releases.push(() =>
             resolve({
               enrolled: true,
-              relayUrl: 'https://laptop.tailnet.ts.net',
+              relayOrigin: 'https://laptop.tailnet.ts.net',
               burrowId: 'burrow-1',
               connection: 'connected',
               pairedClients: 1,
@@ -188,7 +217,7 @@ describe('publishing', () => {
     vi.useFakeTimers();
     const status = {
       enrolled: true,
-      relayUrl: 'https://laptop.tailnet.ts.net',
+      relayOrigin: 'https://laptop.tailnet.ts.net',
       burrowId: 'burrow-1',
       connection: 'connected',
       pairedClients: 1,
@@ -220,28 +249,28 @@ describe('publishing', () => {
       unsubscribe();
     }
   });
+});
 
+
+describe('an answer from an older broker', () => {
   /**
-   * `offer` is the one nested field, so it is the one the mapped type cannot
-   * help with — `Object.is` type-checks there too, and would re-render the
-   * section every 2 s on an un-enrolled machine that has an offer, since the
-   * service mints a fresh `{ origin }` per read. This test is the guard.
+   * A VS Code broker window may run the extension from before a field existed
+   * (`docs/specs/vscode.md` → the peer link), so the typed shape is filled in
+   * at the one seam where the untrusted one becomes it.
    */
-  it('compares the offer by its origin, not by the object the poll minted', async () => {
+  it('reads a missing `serving` as `enrolled`, and publishes when it flips', async () => {
     vi.useFakeTimers();
-    let origin: string | null = 'https://ned-mac.tail9c2f1.ts.net';
-    const command = vi.fn(async () => ({
-      enrolled: false,
-      relayUrl: null,
-      burrowId: null,
-      connection: 'stopped',
+    let status: Record<string, unknown> = {
+      enrolled: true,
+      relayUrl: 'https://laptop.tailnet.ts.net',
+      burrowId: 'burrow-1',
+      connection: 'connected',
       pairedClients: 0,
       suggestedLabel: 'ned-mac',
-      // A new object every read, exactly as a round trip through the service gives.
-      offer: origin === null ? null : { origin },
-    }));
+      offer: null,
+    };
     burrowLink = {
-      command,
+      command: async () => ({ ...status }),
       respond: () => {},
       notify: () => {},
       on: () => () => {},
@@ -251,24 +280,84 @@ describe('publishing', () => {
     const unsubscribe = subscribeToBurrowStatus(listener);
     try {
       await vi.advanceTimersByTimeAsync(0);
-      expect(listener).toHaveBeenCalledTimes(1);
+      expect(getBurrowStatusSnapshot()).toMatchObject({
+        kind: 'ready',
+        status: { enrolled: true, serving: true },
+      });
 
+      status = { ...status, enrolled: false, relayUrl: null, burrowId: null };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ status: { enrolled: false, serving: false } });
+
+      // A current service's own answer wins, and `serving` alone moving is a change.
+      status = { ...status, serving: true };
+      const calls = listener.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ status: { enrolled: false, serving: true } });
+      expect(listener.mock.calls.length).toBe(calls + 1);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('reads the shape from before one baked relay origin, and does not republish it', async () => {
+    // `offer` was `{ origin }`, a fresh object every poll; there was no
+    // `relayOrigin` or `relayMode` (docs/specs/relay.md → "Relay origin").
+    vi.useFakeTimers();
+    const command = vi.fn(async () => ({
+      enrolled: false,
+      serving: false,
+      relayUrl: null,
+      burrowId: null,
+      connection: 'stopped',
+      pairedClients: 0,
+      suggestedLabel: 'ned-mac',
+      offer: { origin: 'https://ned-mac.tail9c2f1.ts.net' },
+    }));
+    burrowLink = { command, respond: () => {}, notify: () => {}, on: () => () => {} };
+
+    const listener = vi.fn();
+    const unsubscribe = subscribeToBurrowStatus(listener);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getBurrowStatusSnapshot()).toMatchObject({
+        kind: 'ready',
+        // No mode reads as Hosted: no enroll form the old broker's `enroll`
+        // could be sent from.
+        status: { offer: true, relayOrigin: '', relayMode: 'hosted' },
+      });
       await vi.advanceTimersByTimeAsync(3 * 2000);
       expect(command.mock.calls.length).toBeGreaterThan(1);
       expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      unsubscribe();
+    }
+  });
 
-      // A different origin is a different offer, and must reach the card.
-      origin = 'https://ned-mac-2.tail9c2f1.ts.net';
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(listener).toHaveBeenCalledTimes(2);
-
-      // And so is one that went away — redeeming an offer unlinks the file.
-      origin = null;
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(listener).toHaveBeenCalledTimes(3);
+  it('names an older broker\'s enrolled Relay from its `relayUrl`', async () => {
+    burrowLink = {
+      command: async () => ({
+        enrolled: true,
+        relayUrl: 'https://laptop.tailnet.ts.net',
+        burrowId: 'burrow-1',
+        connection: 'connected',
+        pairedClients: 1,
+        suggestedLabel: 'ned-mac',
+        offer: null,
+      }),
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+    const unsubscribe = subscribeToBurrowStatus(() => {});
+    try {
+      await vi.waitFor(() =>
+        expect(getBurrowStatusSnapshot()).toMatchObject({
+          status: { relayOrigin: 'https://laptop.tailnet.ts.net', offer: false },
+        }),
+      );
     } finally {
       unsubscribe();
     }
   });
 });
-

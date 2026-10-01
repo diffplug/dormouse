@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { AsciiSplashRunner } from "./ascii-splash-runner";
@@ -132,6 +133,55 @@ describe("AsciiSplashRunner", () => {
     expect(data).toContain("\x1b[?1003l");
     expect(data).toContain("\x1b[?1049l");
     expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores escape sequences it does not handle, and quits only on a lone ESC", () => {
+    const { onExit, runner } = createHarness(["--pattern", "waves"]);
+    runner.start();
+
+    // Home, Delete, PgUp, F1 (SS3), Alt+x, Ctrl+Right.
+    for (const seq of ["\x1b[H", "\x1b[3~", "\x1b[5~", "\x1bOP", "\x1bx", "\x1b[1;5C"]) {
+      runner.handleInput(seq);
+    }
+    expect(onExit).not.toHaveBeenCalled();
+
+    runner.handleInput("\x1b");
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats wheel events as neither clicks nor moves", () => {
+    const { runner } = createHarness(["--pattern", "waves"]);
+    runner.start();
+    const pattern = getRunnerState(runner).runtime?.getCurrentPattern() as {
+      onMouseClick?: unknown;
+      onMouseMove?: unknown;
+    };
+    const onMouseClick = vi.fn();
+    const onMouseMove = vi.fn();
+    pattern.onMouseClick = onMouseClick;
+    pattern.onMouseMove = onMouseMove;
+
+    try {
+      runner.handleInput("\x1b[<64;10;5M\x1b[<65;10;5M");
+      expect(onMouseClick).not.toHaveBeenCalled();
+      expect(onMouseMove).not.toHaveBeenCalled();
+
+      runner.handleInput("\x1b[<0;10;5M");
+      expect(onMouseClick).toHaveBeenCalledTimes(1);
+    } finally {
+      runner.dispose();
+    }
+  });
+
+  it("reports the pinned ascii-splash version", async () => {
+    const pin = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"))
+      .dependencies["ascii-splash"];
+    const { output, runner } = createHarness(["--version"]);
+
+    runner.start();
+    await Promise.resolve();
+
+    expect(output.join("")).toContain(`${pin}\r\n`);
   });
 
   it("prints help and returns to the shell", async () => {

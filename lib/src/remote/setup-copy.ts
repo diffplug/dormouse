@@ -10,9 +10,15 @@
  * copy.
  */
 
+/** The laptop's button that shows a setup code. */
+export const SETUP_BUTTON = 'Set up a phone';
+
+/** Where that button is, as the phone directs a person to it. */
+export const SETUP_PATH = `Settings → Network → ${SETUP_BUTTON}`;
+
 /**
  * Pocket's one way in, named for the thing the laptop is actually showing — the
- * setup code under **Settings → Remote control → Set up a phone**.
+ * setup code under {@link SETUP_PATH}.
  *
  * Mirrored, deliberately unpinned, in `scripts/pairing-walkthrough/steps.mjs`,
  * which is a Node harness that cannot import this file.

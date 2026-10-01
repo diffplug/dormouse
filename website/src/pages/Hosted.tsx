@@ -59,6 +59,7 @@ export const HOSTED_TOC: TocEntry[] = [
   { id: "voice", text: "Managed voices", children: [] },
   { id: "remote-control", text: "The managed Relay", children: [] },
   { id: "self-hosting", text: "Self-hosting stays free", children: [] },
+  { id: "account", text: "Your Hosted account", children: [] },
   { id: "faq", text: "Questions", children: [] },
 ];
 
@@ -364,7 +365,7 @@ export default function Hosted() {
         </AnchoredHeading>
         <p className="mb-4 text-lg leading-relaxed">
           Nothing that ships free is ever moved behind this page: the terminal, the{" "}
-          <a href={sitePath("/docs/dor")} className={LINK_CLASS}>
+          <a href={sitePath("/dor")} className={LINK_CLASS}>
             dor CLI
           </a>
           , browser panes, the notepad, alerts with your system voice, the Relay itself,
@@ -374,10 +375,26 @@ export default function Hosted() {
           The Relay stays in the repository under FSL-1.1-MIT and free for internal use.
           Hosted is the paid convenience, not the replacement — if you would rather
           operate it, the{" "}
-          <a href={sitePath("/docs/self-host")} className={LINK_CLASS}>
+          <a href={sitePath("/self-host")} className={LINK_CLASS}>
             self-hosting guide
           </a>{" "}
           is ready now.
+        </p>
+      </section>
+
+      <section className="mt-14">
+        <AnchoredHeading id="account" spacing="mt-0 mb-3">Your Hosted account</AnchoredHeading>
+        <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
+          Dormouse Hosted, operated by DiffPlug LLC, provides an account where you can
+          manage your sign-in methods. Use an email code or a supported identity
+          provider, and explicitly connect additional methods from your account.
+          Creating an account does not upload your terminal contents or subscribe
+          you to the devlog.
+        </p>
+        <p className={BODY_TEXT_CLASS}>
+          <a href="https://hosted.dormouse.sh" className={LINK_CLASS}>Manage your Hosted account</a>.
+          Read the <a href={sitePath("/privacy")} className={LINK_CLASS}>privacy policy</a> and{" "}
+          <a href={sitePath("/terms")} className={LINK_CLASS}>terms of service</a>.
         </p>
       </section>
 
@@ -404,7 +421,7 @@ export default function Hosted() {
           </FaqEntry>
           <FaqEntry question="What if Dormouse Hosted shuts down?">
             The Relay is source-available and the{" "}
-            <a href={sitePath("/docs/self-host")} className={LINK_CLASS}>
+            <a href={sitePath("/self-host")} className={LINK_CLASS}>
               self-hosting runbook
             </a>{" "}
             is published, so remote control survives me. Spoken alarms fall back to your

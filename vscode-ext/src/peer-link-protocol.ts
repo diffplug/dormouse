@@ -8,7 +8,13 @@ import {
   type BurrowResult,
 } from '../../lib/src/host/remote/service-protocol';
 
-/** Must exceed the nested webview fan-out budget plus its two socket hops. */
+/**
+ * The broker's wait for one peer window. Derived, not chosen: that wait strictly
+ * contains the peer's own full-budget fan-out to its webviews plus two socket
+ * hops, so it must exceed `ASK_BUDGET_MS` and the margin is what covers the
+ * hops. Equal budgets would make a slow sibling look like a timeout on the
+ * broker's side and throw away results that were on their way.
+ */
 export const PEER_REPLY_BUDGET_MS = ASK_BUDGET_MS + 2_000;
 
 /** Broker → peer window. `op` is intentionally opaque to this transport. */
@@ -30,7 +36,9 @@ export type PeerLinkResponse =
   | { kind: 'data'; ptyId: string; data: string; textData?: string }
   | { kind: 'exit'; ptyId: string; exitCode: number }
   | { kind: 'notify' }
-  | { kind: 'command'; payload: BurrowCommand };
+  | { kind: 'command'; payload: BurrowCommand }
+  /** A due alarm push for the broker's Burrow to send; nothing answers it. */
+  | { kind: 'push'; sessionId: string; title: string };
 
 export type PeerLinkFrame = PeerLinkRequest | PeerLinkResponse;
 

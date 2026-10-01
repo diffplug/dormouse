@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: dor workspace move needs --window, --index, or both

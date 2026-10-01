@@ -11,7 +11,7 @@
 # repo or the ci-and-secrets domain will report FAILs that are really 403s.
 #
 # Usage:
-#   scripts/security-audit-local.sh            # all three domains
+#   scripts/security-audit-local.sh            # all four domains
 #   scripts/security-audit-local.sh application-security   # one domain
 #
 # Reports land in ./audit-*.md, which .gitignore covers.
@@ -21,13 +21,20 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 AUDIT_DIR=.github/audit
 export GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-diffplug/dormouse}"
+# `_preamble.md`'s delegate wait persists its deadline under `$RUNNER_TEMP`,
+# which only Actions sets. No domain reaches that block here — `run_domain`
+# denies `Task`/`Agent`, so a local domain cannot delegate, and the
+# orchestrator never runs locally — but a fresh directory per run keeps the
+# wait bounded if that ever changes, where a repo-root fallback would hand the
+# next run an expired deadline.
+export RUNNER_TEMP="${RUNNER_TEMP:-$(mktemp -d)}"
 
 if ! command -v claude >/dev/null 2>&1; then
   echo "error: the \`claude\` CLI is not on PATH." >&2
   exit 1
 fi
 
-for f in _preamble orchestrator supply-chain ci-and-secrets application-security; do
+for f in _preamble orchestrator supply-chain ci-and-secrets application-security hosted; do
   [ -f "$AUDIT_DIR/$f.md" ] || { echo "error: missing $AUDIT_DIR/$f.md" >&2; exit 1; }
 done
 
@@ -40,26 +47,27 @@ run_domain() {
     supply-chain) out=audit-supply-chain.md ;;
     ci-and-secrets) out=audit-ci-secrets.md ;;
     application-security) out=audit-application.md ;;
-    *) echo "error: unknown domain '$domain' (supply-chain|ci-and-secrets|application-security)" >&2; return 64 ;;
+    hosted) out=audit-hosted.md ;;
+    *) echo "error: unknown domain '$domain' (supply-chain|ci-and-secrets|application-security|hosted)" >&2; return 64 ;;
   esac
   # Same model split as CI (`.github/workflows/security-audit.yaml` ->
-  # `--agents`): the two mechanical domains run on the default, and
-  # application-security — the one that reads code adversarially — runs on
-  # Opus. Local and CI must agree here, or the domain where the model matters
-  # most is the one they disagree about.
+  # `--agents`): the two mechanical domains run on the default, and the two
+  # code-reading domains — application-security and hosted — run on Opus.
+  # Local and CI must agree here, or the domains where the model matters most
+  # are the ones they disagree about.
   # BOTH sides are pinned, not just the strong one. Leaving the mechanical
   # domains unpinned inherits whatever the operator's `~/.claude/settings.json`
   # names, which is not necessarily weaker than Opus — on a machine defaulting
   # to `opus[1m]` it is *stronger* (same family, larger context), inverting the
   # relation docs/specs/security-audit.md requires and making a local run no longer a rehearsal
   # of the nightly. CI gets this for free: its session default is Sonnet and
-  # only application-security carries an override.
+  # only the code-reading domains carry an override.
   #
   # A plain string, not an array: macOS ships bash 3.2, where `"${arr[@]}"` on
   # an EMPTY array is an unbound-variable error under `set -u`. These are fixed
   # literals with no whitespace, so the unquoted expansion below is safe.
   local model_args="--model sonnet"
-  [ "$domain" = "application-security" ] && model_args="--model opus"
+  case "$domain" in application-security|hosted) model_args="--model opus" ;; esac
 
   echo "==> $domain -> $out${model_args:+ ($model_args)}"
   rm -f "$out"
@@ -73,6 +81,16 @@ run_domain() {
   fi
   if [ -s "$out" ]; then
     echo "==> wrote $out"
+    # Same sentinel CI reads, for the same reason: the domain appends findings
+    # as it determines them, so a fragment without its last line is one whose
+    # domain stopped early — and its first line may already say PASS.
+    # Last non-blank line, not `tail -n1`: a trailing blank line after the
+    # sentinel still ends a finished report.
+    if [ "$(sed -e '/^[[:space:]]*$/d' "$out" | tail -n1)" != "<!-- END OF REPORT -->" ]; then
+      echo "==> $domain was cut off before finishing $out — findings kept, its verdict line covers less than it appears to" >&2
+      case "$(head -n1 "$out")" in 'VERDICT: FAIL'*) echo "==> $domain reports FAIL" >&2 ;; esac
+      return 1
+    fi
     # The same grammar CI applies in .github/workflows/security-audit.yaml, and
     # for the same reason: a failure with an appended explanation is still a
     # finding, so only the PASS arm matches exactly. Drifting from CI here would
@@ -94,11 +112,11 @@ if [ $# -gt 0 ]; then
   exit $?
 fi
 
-# All three, sequentially rather than fanned out. CI parallelises because it is
+# All four, sequentially rather than fanned out. CI parallelises because it is
 # paying wall-clock for a nightly; locally, serial output is readable and a
 # each domain's failure is recorded while the remaining domains still run.
 status=0
-for domain in supply-chain ci-and-secrets application-security; do
+for domain in supply-chain ci-and-secrets application-security hosted; do
   run_domain "$domain" || status=1
 done
 

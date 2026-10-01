@@ -87,14 +87,27 @@ export function trackedFiles() {
   return trackedCache;
 }
 
+/** Run one of the lints in a child and capture the result. */
+export function runLint(script) {
+  try {
+    return {
+      ok: true,
+      stdout: execFileSync('node', [join(repoRoot, 'scripts', script)], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: typeof error?.stdout === 'string' ? error.stdout : '',
+    };
+  }
+}
+
 /** Run one of the lints in a child, so a thrown rule cannot pass as a failure. */
 export function lintFails(script) {
-  try {
-    execFileSync('node', [join(repoRoot, 'scripts', script)], { stdio: 'pipe' });
-    return false;
-  } catch {
-    return true;
-  }
+  return !runLint(script).ok;
 }
 
 /**
@@ -107,16 +120,18 @@ export function lintFails(script) {
 export function makeSelftest(script, backupSuffix) {
   const weak = [];
   let held = 0;
+  const appendTo = (text) => (path) =>
+    writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text);
 
   /** Edit `relative` with `mutate`, run the lint, restore, and record. */
-  function withMutation(relative, mutate, label) {
+  function runMutation(relative, mutate, check, label) {
     const path = join(repoRoot, relative);
     const existed = existsSync(path);
     const backup = `${path}${backupSuffix}`;
     if (existed) copyFileSync(path, backup);
     try {
       mutate(path);
-      if (lintFails(script)) held += 1;
+      if (check()) held += 1;
       else weak.push(label);
     } finally {
       if (existed) {
@@ -130,12 +145,28 @@ export function makeSelftest(script, backupSuffix) {
 
   return {
     weak,
-    withMutation,
+    /** Apply any mutation and require the lint to fail. */
+    withMutation(relative, mutate, label) {
+      runMutation(relative, mutate, () => lintFails(script), label);
+    },
     /** Append `text` to `relative` — the shape every "put it back" case takes. */
     withAppended(relative, text, label) {
-      withMutation(
+      runMutation(
         relative,
-        (path) => writeFileSync(path, (existsSync(path) ? readFileSync(path, 'utf8') : '') + text),
+        appendTo(text),
+        () => lintFails(script),
+        label,
+      );
+    },
+    /** Append `text`, require the lint to pass, and find `expected` in its output. */
+    withAppendedOutput(relative, text, expected, label) {
+      runMutation(
+        relative,
+        appendTo(text),
+        () => {
+          const result = runLint(script);
+          return result.ok && result.stdout.includes(expected);
+        },
         label,
       );
     },

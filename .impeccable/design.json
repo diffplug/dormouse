@@ -120,7 +120,7 @@
       },
       "alarm": {
         "role": "primary",
-        "displayName": "Alarm / Bell (terminal ANSI yellow, runtime-rotated per surface)",
+        "displayName": "Alarm (terminal ANSI yellow, runtime-rotated per surface)",
         "canonical": "var(--vscode-terminal-ansiYellow)",
         "tonalRamp": ["#4a3818", "#6e5424", "#917030", "#b58c45", "#d3a85c", "#f9d181", "#fbdda3", "#fee9b3"]
       },
@@ -155,13 +155,13 @@
     "motion": [
       { "name": "ease-quart-out",      "value": "cubic-bezier(0.22, 1, 0.36, 1)",  "purpose": "Default for pane spawn/kill and any layout-adjacent transition. Exponential ease-out, no bounce." },
       { "name": "spring-overshoot",    "value": "cubic-bezier(0.34, 1.56, 0.64, 1)", "purpose": "Reserved for celebratory state-resolution: TODO check pop-in, kill-confirm letter flash, copy-confirm scale. Used only at 220–500ms; never on layout." },
-      { "name": "ease-in-out-bell",    "value": "ease-in-out", "purpose": "Bell ring continuous animation (800ms, infinite, alternating ±45deg rotation)." },
+      { "name": "ease-in-out-alarm",   "value": "ease-in-out", "purpose": "Alarm pulse (650ms, one bounded burst on arrival, infinite while speaking)." },
       { "name": "ease-out-shake",      "value": "ease-out",    "purpose": "Kill-overlay shake-x (400ms, x-axis only)." },
       { "name": "duration-pane",       "value": "440ms", "purpose": "Pane spawn and kill choreography." },
       { "name": "duration-flourish",   "value": "500ms", "purpose": "TODO pill dismiss sequence." },
       { "name": "duration-confirm",    "value": "220ms", "purpose": "Kill-overlay confirm letter flash." },
       { "name": "duration-copy-flash", "value": "260ms", "purpose": "Selection popup copy-confirm scale flash." },
-      { "name": "duration-bell-ring",  "value": "800ms", "purpose": "One full ring cycle." },
+      { "name": "duration-alarm-pulse","value": "650ms", "purpose": "One full alarm pulse cycle." },
       { "name": "duration-shake",      "value": "400ms", "purpose": "Kill-cancel shake-x." }
     ],
     "breakpoints": [
@@ -174,8 +174,8 @@
       "kind": "custom",
       "refersTo": "door",
       "description": "Pane-header indicator on the baseboard. Top corners rounded, square bottom; the signature component of the system.",
-      "html": "<button class=\"ds-door\" type=\"button\" title=\"build\"><span class=\"ds-door__title\">build</span><span class=\"ds-door__badges\"><span class=\"ds-todo-pill\">TODO</span><svg class=\"ds-door__bell\" viewBox=\"0 0 256 256\" width=\"11\" height=\"11\" aria-hidden=\"true\"><path fill=\"currentColor\" d=\"M221.8 175.94C216.25 166.38 208 139.33 208 104a80 80 0 1 0-160 0c0 35.34-8.26 62.38-13.81 71.94A16 16 0 0 0 48 200h40.81a40 40 0 0 0 78.38 0H208a16 16 0 0 0 13.8-24.06ZM128 216a24 24 0 0 1-22.62-16h45.24A24 24 0 0 1 128 216Z\"/></svg></span></button>",
-      "css": ".ds-door { display: flex; align-items: center; gap: 8px; height: 24px; min-width: 68px; max-width: 220px; padding: 0 10px; overflow: hidden; border: none; border-radius: 8px 8px 0 0; background: var(--color-door-bg, #5e452e); color: var(--color-door-fg, #d3af86); font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.75rem; line-height: 1rem; font-weight: 500; cursor: pointer; } .ds-door__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; } .ds-door__badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; } .ds-door__bell { color: var(--vscode-terminal-ansiYellow, #f9d181); }"
+      "html": "<button class=\"ds-door\" type=\"button\" title=\"build\"><span class=\"ds-door__title\">build</span><span class=\"ds-door__badges\"><span class=\"ds-todo-pill\">TODO</span></span></button>",
+      "css": ".ds-door { display: flex; align-items: center; gap: 8px; height: 24px; min-width: 68px; max-width: 220px; padding: 0 10px; overflow: hidden; border: none; border-radius: 8px 8px 0 0; background: var(--color-door-bg, #5e452e); color: var(--color-door-fg, #d3af86); font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 0.75rem; line-height: 1rem; font-weight: 500; cursor: pointer; } .ds-door__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; } .ds-door__badges { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }"
     },
     {
       "name": "Pane Header (Active)",

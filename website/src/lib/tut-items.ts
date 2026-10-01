@@ -2,7 +2,7 @@
 const THEME_ITEM_IDS = ["th-theme"] as const;
 
 const GESTURE_ITEM_IDS = [
-  "gn-touch-mode",
+  "gn-scroll",
   "gn-arrows",
   "gn-enter",
   "gn-esc",
@@ -21,7 +21,6 @@ const KEYBOARD_ITEM_IDS = [
 const ALERT_ITEM_IDS = [
   "al-watch-cmd",
   "al-spreads",
-  "al-busy",
   "al-ring",
   "al-todo-auto",
   "al-todo-clear",
@@ -67,29 +66,33 @@ export interface TutorialProfile {
   initialSectionId?: string;
 }
 
+const OPEN_COMPASS = 'Touch away from either edge to open the gesture compass.';
+const diagonalHint = (key: string) =>
+  `${OPEN_COMPASS} Drag towards the diagonal that has \`${key}\`, and then drag back in the other direction to choose which \`kind\` of ${key}.`;
+
 const GESTURE_NAVIGATION_SECTION: Section = {
   id: 'gesture',
   title: 'Gesture navigation',
   items: [
     {
-      id: 'gn-touch-mode',
-      title: 'Switch between Select and Gestures',
-      hint: 'Tap `Select`, then tap `Gestures` again. This mode determines what happens when you touch the terminal.',
+      id: 'gn-scroll',
+      title: 'Scroll up and down',
+      hint: 'Glide up and down along either edge of the terminal. The background scrolls; these instructions stay put.',
     },
     {
       id: 'gn-arrows',
-      title: 'Use Gestures to send an arrow key',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Then drag directly up, down, left, or right past the circle.',
+      title: 'Send all four arrow keys',
+      hint: `${OPEN_COMPASS} Drag up, down, left, and right past the circle. Try all four.`,
     },
     {
       id: 'gn-enter',
-      title: 'Use Gestures to press Enter',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Drag towards the diagonal that has `Enter`, and then drag back in the other direction to choose which `kind` of Enter.',
+      title: 'Send Enter',
+      hint: diagonalHint('Enter'),
     },
     {
       id: 'gn-esc',
-      title: 'Use Gestures to press Esc',
-      hint: 'Touch anywhere on the terminal to open the gesture compass. Drag towards the diagonal that has `Esc`, and then drag back in the other direction to choose which `kind` of Esc.',
+      title: 'Send Escape',
+      hint: diagonalHint('Esc'),
     },
   ],
 };
@@ -105,12 +108,12 @@ const COPY_PASTE_SECTION: Section = {
     },
     {
       id: 'cp-raw',
-      title: 'Copy-paste it somewhere else with "Copy Raw"',
-      hint: 'When you paste, notice how it keeps all the line-breaks. Gross!',
+      title: 'Copy-paste it somewhere else in "Exact"',
+      hint: 'Press `f` to switch format. When you paste, notice how it keeps all the line-breaks. Gross!',
     },
     {
       id: 'cp-rewrap',
-      title: 'Copy-paste it somewhere else with "Copy Rewrapped"',
+      title: 'Copy-paste it somewhere else in "Auto"',
       hint:
         'When you paste, notice how the line-breaks were removed, and the text rewraps neatly wherever you paste it?',
     },
@@ -198,52 +201,46 @@ export const DESKTOP_SECTIONS: readonly Section[] = [
       {
         id: 'al-watch-cmd',
         title: 'Alert me whenever `longtask` runs',
-        hint: 'Press `s` to start a fake `longtask`, then click that pane\'s bell (or select it and press `a`). Alerts belong to the command, not the tab — the bell says "Alert on all longtask".',
+        hint: 'Press `s` to start a fake `longtask`, then right-click that pane\'s header (or select it and press `a`) and turn on "Watch all longtask commands". Alerts belong to the command, not the tab.',
       },
       {
         id: 'al-spreads',
         title: 'The rule covers every pane running that command',
-        hint: 'Both fake tasks light up from the one bell you clicked. Any pane you open later that runs `longtask` will watch too, with no extra clicks.',
-      },
-      {
-        id: 'al-busy',
-        title: 'The bell tilts while the command works',
-        hint: 'Press `s` again if the task already finished.',
+        hint: 'Both fake tasks are covered by the one rule you set. Any pane you open later that runs `longtask` will watch too, with no extra clicks.',
       },
       {
         id: 'al-ring',
         title: 'It rings when the command goes quiet',
         hint:
-          `Don't type! If you type, Dormouse will think you are paying attention to this task and the bell will not ring. The bell waits until you attend another pane or stop interacting for the inactivity timeout in Alarm settings.`,
+          `It rings when the command goes quiet, unless you are looking at that pane. The pane you are typing in or clicked into counts as looked at while you keep using Dormouse; stop for the inactivity timeout in Alarm settings and it rings.`,
       },
       {
         id: 'al-todo-auto',
         title: 'Dismissing a ringing alert leaves a TODO behind',
-        hint: 'Click the bell or interact with the pane to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
+        hint: 'Click the pane, or press `a`, to dismiss. The TODO is there so a ring you waved away does not vanish without a trace.',
       },
       {
         id: 'al-todo-clear',
-        title: 'Press `Enter` inside the pane to clear the TODO',
+        title: 'Type anything inside the pane to clear the TODO',
       },
       {
         id: 'al-todo-manual',
         title: 'Add a TODO by hand',
-        hint: 'Press `t` in command mode, or right-click the bell.',
+        hint: 'Press `t` in command mode, or right-click the header and use the TODO switch.',
       },
       {
         id: 'al-notif',
-        title: 'A program can ring the bell itself',
-        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and its message shows on the TODO tag.',
+        title: 'A program can ring on its own',
+        hint: 'Press `n` for a fake build that sends a notification. This needs no rule at all — any program that emits `BEL`, `OSC 9`, `OSC 777`, or `OSC 99` rings, and once you look its message stays on the TODO tag.',
       },
       {
         id: 'al-cmd-exit',
-        title: 'A long command that finished while you were away',
-        hint:
-          `Press \`x\` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command that ran longer than the inactivity timeout in Alarm settings and finished after you walked away — again, no rule needed.`,
+        title: 'A command that finished while you were away',
+        hint: 'Press `x` to start a slow build in another pane, click into that pane, then click back here and wait. Dormouse rings for any command you looked at that finished after you walked away — again, no rule needed.',
       },
     ],
     prose: [
-      'Three different things can ring the bell: a rule you set on a command name, a notification the program sends, and a long command finishing while you were elsewhere. None of them ring while you are actually looking at the pane.',
+      'Three different things can make a pane ring: a rule you set on a command name, a notification the program sends, and a command finishing while you were elsewhere. None of them ring while you are looking at the pane — they wait until you go idle.',
     ],
   },
   COPY_PASTE_SECTION,
@@ -267,14 +264,3 @@ export const POCKET_TUTORIAL_PROFILE: TutorialProfile = {
   sections: POCKET_SECTIONS,
   initialSectionId: "gesture",
 };
-
-export const SECTIONS = DESKTOP_SECTIONS;
-
-export const ALL_ITEM_IDS: readonly ItemId[] = ITEM_IDS;
-
-export function itemSection(
-  id: ItemId,
-  sections: readonly Section[] = SECTIONS,
-): Section | undefined {
-  return sections.find((s) => s.items.some((i) => i.id === id));
-}

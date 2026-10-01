@@ -30,7 +30,9 @@ vi.mock('./terminal-registry', () => ({
   getDefaultShellOpts: () => ({ shell: '/bin/bash' }),
   getTerminalShellKind: () => mocks.shellKind,
   getTerminalInstance: () => null,
-  markSessionTouched: vi.fn(),
+  // The acknowledging write every human-originated input takes; the registry
+  // test pins what it does.
+  writeUserInput: (id: string, data: string) => mocks.writePty(id, data),
 }));
 
 import { doPaste } from './clipboard';

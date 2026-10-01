@@ -3,10 +3,30 @@
  * about the webview's *view* of them asked over the bridge.
  */
 
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProcessedPtyChunk, PtySink } from '../../remote/burrow/burrow-surface-provider';
-import { createSidecarSurfaceBridge, type SidecarSurfaceBridge } from './sidecar-entry';
+import type {
+  ProcessedPtyChunk,
+  PtySink,
+  SurfaceHold,
+} from '../../remote/burrow/burrow-surface-provider';
+import {
+  createSidecarHost,
+  createSidecarSurfaceBridge,
+  type SidecarHost,
+  type SidecarSurfaceBridge,
+} from './sidecar-entry';
 import { ASK_BUDGET_MS, type BurrowAsk } from './service-protocol';
+import { BurrowService } from './service';
+import { AlertManager, type AlertState } from '../../lib/alert-manager';
+import { REPORT } from '../../lib/alert-manager-test-utils';
+import { createAlertClient } from '../alert-client';
+import type { AlertStateDetail } from '../../lib/platform/types';
+import { DEFAULT_MANAGED_VOICE_ID } from '../../lib/platform/managed-voice-types';
+
+const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1' };
 
 let sent: Array<{ event: string; data: unknown }>;
 let written: Array<{ id: string; data: string }>;
@@ -15,6 +35,10 @@ let livePtys: Set<string>;
 /** A PTY that died between the read and a reply write. */
 let writeThrows: boolean;
 let bridge: SidecarSurfaceBridge;
+/** The app's one manager, which the parse feeds. */
+let alerts: AlertManager;
+/** Called as each PTY write lands, to observe what preceded it. */
+let onWrite: ((id: string) => void) | null;
 
 /** The ask the bridge is waiting on, most recent last. */
 function asks(): BurrowAsk[] {
@@ -28,8 +52,9 @@ function emitted<T>(event: string): T[] {
   return sent.filter((message) => message.event === event).map((message) => message.data as T);
 }
 
-function answer(ask: BurrowAsk, results: unknown[]): void {
-  bridge.onAnswer({ burrowRequestId: ask.burrowRequestId, results });
+/** One window's reply. `from` is the label the host stamps on it. */
+function answer(ask: BurrowAsk, results: unknown[], from?: string): void {
+  bridge.onAnswer({ burrowRequestId: ask.burrowRequestId, results }, from);
 }
 
 function sink(): PtySink & { chunks: ProcessedPtyChunk[]; data: string[]; exits: number[] } {
@@ -52,11 +77,15 @@ beforeEach(() => {
   resized = [];
   livePtys = new Set(['pty-1', 'pty-2']);
   writeThrows = false;
+  alerts = new AlertManager();
+  onWrite = null;
   bridge = createSidecarSurfaceBridge({
+    alerts,
     send: (event, data) => sent.push({ event, data }),
     mgr: {
       write: (id, data) => {
         if (writeThrows) throw new Error('write EIO');
+        onWrite?.(id);
         written.push({ id, data });
       },
       resize: (id, cols, rows, repaint) => void resized.push({
@@ -69,6 +98,7 @@ beforeEach(() => {
 
 afterEach(() => {
   bridge.dispose();
+  alerts.dispose();
   vi.useRealTimers();
 });
 
@@ -83,13 +113,129 @@ describe('asking the webview', () => {
     expect(await pending).toEqual([{ surfaceId: 's1' }]);
   });
 
-  it('settles on the first answer and ignores a later one', async () => {
-    // Standalone ships one window, so one answerer; a second is a stale reply.
+  it('settles on the one answer while one window is open', async () => {
     const pending = bridge.provider.collectDirectory();
     const ask = asks()[0]!;
     answer(ask, [{ surfaceId: 'first' }]);
+    // Settled: a later reply is stale and cannot reopen it.
     answer(ask, [{ surfaceId: 'second' }]);
     expect(await pending).toEqual([{ surfaceId: 'first' }]);
+  });
+
+  it('collects one answer per window and concatenates them', async () => {
+    // Each window sees only its own Workspaces, so a directory built from the
+    // first answer would list one window's panes and omit the rest.
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
+  });
+
+  it('a second answer from one window cannot settle the ask', async () => {
+    vi.useFakeTimers();
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    // A reload racing its own reply. Counting answers would settle here, on a
+    // directory that has never heard from ws-2 — and duplicate main's panes.
+    answer(ask, [{ surfaceId: 'in-main-again' }], 'main');
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
+  });
+
+  it('answers with what it has when a window never replies', async () => {
+    vi.useFakeTimers();
+    bridge.setWindows(['main', 'ws-2', 'ws-3']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    await vi.advanceTimersByTimeAsync(ASK_BUDGET_MS);
+    // A partial directory beats an empty one; the next change re-collects.
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('a window closing mid-fan-out settles the ask instead of holding it open', async () => {
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    // The second window went away without answering.
+    bridge.setWindows(['main']);
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('a window opening mid-fan-out never received the ask, so it is not waited on', async () => {
+    bridge.setWindows(['main']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    bridge.setWindows(['main', 'ws-2']);
+    // ws-2's own answer is not part of a snapshot it was never asked for.
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('settles a Surface op on its owner alone, without waiting out the others', async () => {
+    // The host routes an ask naming a Surface to the window that owns its PTY —
+    // `attach` and `resize` MUTATE that pane — and tells the collector where it
+    // went. Waiting on the rest would spend the whole budget on every attach.
+    vi.useFakeTimers();
+    bridge.setWindows(['main', 'ws-2', 'ws-3']);
+    const pending = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 });
+    const ask = asks()[0]!;
+    bridge.setAskDelivery({ burrowRequestId: ask.burrowRequestId, windows: ['ws-2'] });
+    answer(ask, [{ ptyId: 'p1', cols: 80, rows: 24 }], 'ws-2');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await pending).toMatchObject({ ptyId: 'p1' });
+  });
+
+  it('takes a delivery line that arrives after the answer', async () => {
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    bridge.setAskDelivery({ burrowRequestId: ask.burrowRequestId, windows: ['ws-2'] });
+    expect(await pending).toEqual([{ surfaceId: 'in-ws-2' }]);
+  });
+
+  it('never widens an ask, whatever the delivery names', async () => {
+    vi.useFakeTimers();
+    bridge.setWindows(['main']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    // A window that never received this ask cannot be put back into it.
+    bridge.setAskDelivery({ burrowRequestId: ask.burrowRequestId, windows: ['main', 'ws-9'] });
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }]);
+  });
+
+  it('ignores a delivery line that is not a usable one', async () => {
+    bridge.setWindows(['main', 'ws-2']);
+    const pending = bridge.provider.collectDirectory();
+    const ask = asks()[0]!;
+    for (const bad of [undefined, null, 2, { burrowRequestId: 7, windows: ['main'] },
+      { burrowRequestId: ask.burrowRequestId }, { burrowRequestId: 'ask-nope', windows: ['main'] }]) {
+      bridge.setAskDelivery(bad);
+    }
+    answer(ask, [{ surfaceId: 'in-main' }], 'main');
+    answer(ask, [{ surfaceId: 'in-ws-2' }], 'ws-2');
+    expect(await pending).toEqual([{ surfaceId: 'in-main' }, { surfaceId: 'in-ws-2' }]);
+  });
+
+  it('ignores a window list that is not a usable one', async () => {
+    for (const bad of [[], 2, 'main', undefined, null]) bridge.setWindows(bad);
+    const pending = bridge.provider.collectDirectory();
+    answer(asks()[0]!, [{ surfaceId: 's1' }]);
+    expect(await pending).toEqual([{ surfaceId: 's1' }]);
   });
 
   it('gives up at the budget rather than hanging', async () => {
@@ -144,10 +290,10 @@ describe('directory invalidation', () => {
 
 describe('resolveSurface', () => {
   it('attaches at the requested size and reports what the owner settled at', async () => {
-    const pending = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 });
+    const pending = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 }, HOLD);
     const ask = asks()[0]!;
     expect(ask.op).toBe('surfaceOp');
-    expect(ask.params).toEqual({ surfaceId: 's1', op: 'attach', cols: 80, rows: 24 });
+    expect(ask.params).toEqual({ surfaceId: 's1', op: 'attach', cols: 80, rows: 24, hold: HOLD });
 
     answer(ask, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
     const handle = (await pending)!;
@@ -162,18 +308,30 @@ describe('resolveSurface', () => {
   });
 
   it('resizes through the owner and remembers what it reported', async () => {
-    const attach = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 });
+    const attach = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 }, HOLD);
     answer(asks()[0]!, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
     const handle = (await attach)!;
 
     const pending = handle.resize(100, 30);
     const ask = asks()[1]!;
-    expect(ask.params).toEqual({ surfaceId: 's1', op: 'resize', cols: 100, rows: 30 });
+    expect(ask.params).toEqual({ surfaceId: 's1', op: 'resize', cols: 100, rows: 30, hold: HOLD });
     // The owner clamped it.
     answer(ask, [{ ptyId: 'pty-1', cols: 100, rows: 28 }]);
 
     expect(await pending).toEqual({ cols: 100, rows: 28 });
     expect([handle.cols, handle.rows]).toEqual([100, 28]);
+  });
+
+  it('releases as an ask naming the Surface, so the host routes it to the owner alone', async () => {
+    const attach = bridge.provider.resolveSurface('s1', { cols: 80, rows: 24 }, HOLD);
+    answer(asks()[0]!, [{ ptyId: 'pty-1', cols: 80, rows: 24 }]);
+    const handle = (await attach)!;
+
+    handle.release();
+    const ask = asks()[1]!;
+    expect(ask.op).toBe('surfaceOp');
+    expect(ask.params).toEqual({ surfaceId: 's1', op: 'release', hold: HOLD });
+    answer(ask, []);
   });
 
   it('fails when nobody answers a resize and retains only the cached dimensions', async () => {
@@ -189,6 +347,35 @@ describe('resolveSurface', () => {
 });
 
 describe('PTYs', () => {
+  // A Client's keystrokes are a human's input like a local one's, and the host
+  // acknowledges them before the write, echo window included
+  // (docs/specs/alert.md → Engagement).
+  it('acknowledges a Client\'s input before writing it', () => {
+    alerts.notifyFromProtocol('pty-1', REPORT);
+    const atWrite: unknown[] = [];
+    onWrite = (id) => {
+      const { status, todo } = alerts.getState(id);
+      atWrite.push({ status, todo });
+    };
+    bridge.provider.writePty('pty-1', 'y');
+    expect(atWrite).toEqual([{ status: 'WATCHING_DISABLED', todo: false }]);
+  });
+
+  // A phone's tap or scroll in tmux or vim reaches the PTY, as the desktop's does.
+  it.each(['\x1b[<64;10;5M', '\x1b[M`!!', '\x1b[64;10;5M'])('acknowledges nothing for a Client\'s mouse report %j', (report) => {
+    alerts.notifyFromProtocol('pty-1', REPORT);
+    bridge.provider.writePty('pty-1', report);
+    expect(written).toEqual([{ id: 'pty-1', data: report }]);
+    expect(alerts.getState('pty-1')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+  });
+
+  it('gives a Client\'s repaint bounce the resize grace', () => {
+    const onResize = vi.spyOn(alerts, 'onResize');
+    bridge.provider.resizePty('pty-1', 80, 24, true);
+    expect(onResize).toHaveBeenCalledWith('pty-1');
+    expect(resized).toEqual([{ id: 'pty-1', cols: 80, rows: 24, repaint: true }]);
+  });
+
   it('writes and resizes straight through to the manager', () => {
     bridge.provider.writePty('pty-1', 'ls\r');
     bridge.provider.resizePty('pty-1', 80, 24);
@@ -353,20 +540,62 @@ describe('the webview’s half of the parse', () => {
     expect(emitted<{ id: string; events: unknown[] }>('terminal:semanticEvents')).toHaveLength(1);
   });
 
-  it('forwards the alert half of a parse, and the semantic half, in that order', () => {
+  it('keeps a report for the manager, forwarding only the semantic state it carries', () => {
     bridge.onPtyEvent('data', { id: 'pty-1', data: `\x1b]9;Build finished\x07` });
 
-    expect(sent.map((message) => message.event)).toEqual([
-      'terminal:protocolEvents',
-      'terminal:semanticEvents',
+    // The notification's title candidate is pane state; the report itself
+    // rang the sidecar's manager and reaches no webview as an event.
+    expect(sent.map((message) => message.event)).toEqual(['terminal:semanticEvents']);
+    expect(alerts.getState('pty-1')).toMatchObject({
+      status: 'ALERT_RINGING',
+      notification: { source: 'OSC 9', title: null, body: 'Build finished' },
+    });
+  });
+
+  it('feeds reports to the manager in stream order with the boundaries around them', async () => {
+    // A precmd hook reports after the shell's finish, in the same read: judged
+    // after the finish, the await resolves on the exit rather than the bell.
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]633;E;./build.sh\x07\x1b]633;C\x07' });
+    const parked = alerts.awaitCompletion('pty-1', { until: 'quiet', timeoutMs: 600_000 });
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]633;D;0\x07\x1b]777;notify;Command completed;./build.sh\x1b\\' });
+    await expect(parked.promise).resolves.toMatchObject({ kind: 'resolved', cause: 'exit' });
+  });
+
+  it('sends an OSC 52 write to the webview as an offer and writes nothing back', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]52;c;SGVsbG8=\x07' });
+    expect(sent.map((message) => message.event)).toEqual(['terminal:clipboardOffer']);
+    expect(emitted('terminal:clipboardOffer')).toEqual([{ id: 'pty-1', text: 'Hello' }]);
+  });
+
+  it('counts visible output as the Session working, and protocol alone as nothing', () => {
+    const onData = vi.spyOn(alerts, 'onData');
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]7;file:///tmp\x07' });
+    expect(onData).not.toHaveBeenCalled();
+    bridge.onPtyEvent('data', { id: 'pty-1', data: 'compiling…' });
+    expect(onData).toHaveBeenCalledWith('pty-1');
+  });
+
+  it('tells the manager a PTY exited, stream or none', () => {
+    const onExit = vi.spyOn(alerts, 'onExit');
+    bridge.onPtyEvent('exit', { id: 'pty-9', exitCode: 3 });
+    expect(onExit).toHaveBeenCalledWith('pty-9', 3);
+  });
+
+  it('forwards dirty state and command resets separately from serve metadata', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]367;state;{"v":1,"dirty":true}\x07\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07' });
+    expect(emitted<{ events: unknown[] }>('terminal:toolEvents')[0]?.events).toEqual([
+      { kind: 'toolState', state: { dirty: true } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolState', state: { dirty: false } },
     ]);
-    expect(emitted('terminal:protocolEvents')).toEqual([
-      {
-        id: 'pty-1',
-        events: [
-          { kind: 'notification', notification: { source: 'OSC 9', title: null, body: 'Build finished' } },
-        ],
-      },
+  });
+
+  it('preserves command-start resets between forwarded Tool announcements', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]367;serve;{"port":6006}\x07\x1b]633;C\x07\x1b]367;serve;{"port":6007}\x07' });
+    expect(emitted<{ events: unknown[] }>('terminal:toolEvents')[0]?.events).toEqual([
+      { kind: 'toolAnnounce', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc633_boundaries' } },
+      { kind: 'toolAnnounce', announce: { port: 6007, name: null, key: null, dehydrate: false, persist: null } },
     ]);
   });
 
@@ -440,5 +669,285 @@ describe('the webview’s half of the parse', () => {
     bridge.onPtyEvent('data', { id: 'pty-1', data: 'plain' });
 
     expect(emitted('pty:data')).toEqual([{ id: 'pty-1', data: 'plain' }]);
+  });
+});
+
+/**
+ * Every PTY, alert and Burrow command the sidecar's bundle owns, as `main.js`
+ * hands them over: the alerts see each PTY change in the order a host must
+ * make it (`docs/specs/standalone.md` → "Alerts").
+ */
+describe('the sidecar host', () => {
+  let host: SidecarHost;
+  let out: Array<{ event: string; data: unknown }>;
+  /** Each PTY-manager call, with the Session's alert state as the call landed. */
+  let calls: Array<{ op: string; args: unknown[]; state?: Pick<AlertState, 'status' | 'todo'> }>;
+  /** Run inside `mgr.spawn`, as `pty-core` reports a helper decision there. */
+  let duringSpawn: ((id: string) => void) | null;
+
+  const stateOf = (id: unknown) => {
+    const { status, todo } = host.alerts.getState(id as string);
+    return { status, todo };
+  };
+  const record = (op: string, id?: unknown) => (...args: unknown[]) =>
+    void calls.push({ op, args, ...(id === undefined ? {} : { state: stateOf(args[0]) }) });
+  const states = (id: string) => out
+    .filter((line) => line.event === 'alert:state' && (line.data as { id: string }).id === id)
+    .map((line) => line.data as AlertStateDetail);
+  const command = (window: string | undefined, body: Record<string, unknown>) =>
+    host.handleCommand('alert:command', window === undefined ? body : { ...body, window });
+
+  beforeEach(() => {
+    out = [];
+    calls = [];
+    duringSpawn = null;
+    // The Burrow's memory-only store says so once.
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    host = createSidecarHost({
+      send: (event, data) => void out.push({ event, data }),
+      mgr: {
+        spawn: (id, options) => {
+          calls.push({ op: 'spawn', args: [id, options], state: stateOf(id) });
+          duringSpawn?.(id);
+        },
+        write: record('write', true),
+        resize: record('resize', true),
+        kill: record('kill'),
+        gracefulKill: record('gracefulKill'),
+        list: record('list'),
+        hasPty: () => true,
+      },
+    });
+  });
+
+  afterEach(() => {
+    host.dispose();
+    vi.restoreAllMocks();
+  });
+
+  it('starts a spawned Session over from its persisted TODO, before the PTY spawns', () => {
+    host.alerts.notifyFromProtocol('pty-1', REPORT);
+    host.handleCommand('pty:spawn', {
+      id: 'pty-1',
+      options: { cols: 80, alert: { status: 'ALERT_RINGING', todo: true, notification: REPORT } },
+    });
+    // The reminder, never the ring; and `pty-core` never sees the alert.
+    expect(calls).toEqual([{ op: 'spawn', args: ['pty-1', { cols: 80 }], state: { status: 'WATCHING_DISABLED', todo: true } }]);
+    // The window learns it the way it learns every change.
+    expect(states('pty-1').at(-1)).toMatchObject({ todo: true, notification: REPORT });
+  });
+
+  it('keeps a helper `pty-core` reports at its spawn inert', () => {
+    duringSpawn = (id) => host.alerts.setHelper(id, true);
+    host.handleCommand('pty:spawn', { id: 'helper-1', options: { helper: { parentId: 'pty-1', command: 'git status' } } });
+    host.alerts.notifyFromProtocol('helper-1', REPORT);
+    expect(states('helper-1')).toEqual([]);
+  });
+
+  it('acknowledges human input before its write, and nothing else that is written', () => {
+    host.alerts.notifyFromProtocol('pty-1', REPORT);
+    host.handleCommand('pty:input', { id: 'pty-1', data: '\x1b[I', paced: true });
+    host.handleCommand('pty:input', { id: 'pty-1', data: 'y', userInput: true });
+    expect(calls).toEqual([
+      { op: 'write', args: ['pty-1', '\x1b[I', { paced: true }], state: { status: 'ALERT_RINGING', todo: false } },
+      { op: 'write', args: ['pty-1', 'y', undefined], state: { status: 'WATCHING_DISABLED', todo: false } },
+    ]);
+  });
+
+  it('opens the resize grace before the PTY resizes', () => {
+    const graced: string[] = [];
+    vi.spyOn(host.alerts, 'onResize').mockImplementation((id) => void graced.push(`grace ${id} after ${calls.length} calls`));
+    host.handleCommand('pty:resize', { id: 'pty-1', cols: 100, rows: 30 });
+    expect(graced).toEqual(['grace pty-1 after 0 calls']);
+    expect(calls.map((call) => [call.op, call.args])).toEqual([['resize', ['pty-1', 100, 30, undefined]]]);
+  });
+
+  it('removes a killed Session\'s alert state', () => {
+    host.alerts.notifyFromProtocol('pty-1', REPORT);
+    host.handleCommand('pty:kill', { id: 'pty-1' });
+    expect(host.alerts.has('pty-1')).toBe(false);
+    expect(calls.map((call) => [call.op, call.args])).toEqual([['kill', ['pty-1']]]);
+  });
+
+  // Rust reaps what a closed window left behind. Its alert state goes with it,
+  // and all that goes out for those Sessions is the empty state, which no
+  // window can persist as a TODO — Rust drops it anyway, owner gone.
+  it('leaves no alert state for the PTYs a closed window left, and kills them gracefully', () => {
+    host.alerts.notifyFromProtocol('left-1', REPORT);
+    host.alerts.toggleTodo('left-2');
+    host.alerts.notifyFromProtocol('kept', REPORT);
+    out = [];
+
+    host.handleCommand('pty:reap', { ids: ['left-1', 'left-2', 7], timeout: 2000 });
+    expect(host.alerts.has('left-1')).toBe(false);
+    expect(host.alerts.has('left-2')).toBe(false);
+    expect(host.alerts.has('kept')).toBe(true);
+    expect(calls.map((call) => [call.op, call.args])).toEqual([['gracefulKill', [['left-1', 'left-2'], 2000]]]);
+    for (const line of out) expect(line.data).toMatchObject({ todo: false, notification: null, status: 'WATCHING_DISABLED' });
+
+    // The quit flush's kill is not a reap: its windows still own their PTYs.
+    expect(host.handleCommand('pty:gracefulKill', { ids: ['kept'] })).toBe(false);
+  });
+
+  it('answers a window collecting its PTYs with their state, behind the list', () => {
+    host.alerts.notifyFromProtocol('pty-1', REPORT);
+    host.alerts.toggleTodo('pty-2');
+    host.alerts.setHelper('helper-1', true);
+    host.alerts.onData('helper-1');
+    out = [];
+
+    host.handleCommand('pty:requestInit', { ids: ['pty-1', 'never-seen', 'helper-1'], forWindow: 'main', requestId: 'r1' });
+    expect(calls.map((call) => [call.op, call.args])).toEqual([['list', [['pty-1', 'never-seen', 'helper-1'], 'main', 'r1', undefined]]]);
+    expect(out.map((line) => (line.data as { id: string }).id)).toEqual(['pty-1']);
+
+    out = [];
+    host.handleCommand('pty:requestInit', {});
+    expect(out.map((line) => (line.data as { id: string }).id).sort()).toEqual(['pty-1', 'pty-2']);
+  });
+
+  it('answers an await to the window that parked it, by name', async () => {
+    command('ws-2', { op: 'await', awaitId: 'await-1', id: 'pty-1', until: 'quiet', timeoutMs: 600_000 });
+    host.alerts.notifyFromProtocol('pty-1', REPORT);
+    await Promise.resolve();
+    const [result] = out.filter((line) => line.event === 'alert:awaitResult').map((line) => line.data);
+    // Routed like `pty:list`: never by a Session `id`, never a `requestId`.
+    expect(result).toEqual({ awaitId: 'await-1', forWindow: 'ws-2', outcome: expect.objectContaining({ cause: 'bell' }) });
+  });
+
+  // A spoken alarm names its Session, so Rust routes it to the window showing
+  // it; a push goes to this process's Burrow, whichever window shows it.
+  it('sends a due spoken alarm naming its Session, and a due push to its own Burrow', () => {
+    vi.useFakeTimers();
+    const push = vi.spyOn(BurrowService.prototype, 'push').mockResolvedValue();
+    command('main', { op: 'initializeSettings', settings: { speakEnabled: true, speakDelayMs: 1_000, pushEnabled: true, pushDelayMs: 1_000 } });
+    command('main', { op: 'sessions', sessions: { 'pty-1': { label: 'pnpm build', overrides: {} } } });
+    host.alerts.notifyFromProtocol('pty-1', REPORT);
+    vi.advanceTimersByTime(1_000);
+    expect(out.filter((line) => line.event === 'alert:speak').map((line) => line.data)).toEqual([
+      { id: 'pty-1', episodeId: host.alerts.getState('pty-1').episode!.id },
+    ]);
+    expect(push).toHaveBeenCalledExactlyOnceWith('pty-1', 'pnpm build');
+  });
+
+  it('ignores an alert command no host stamped', () => {
+    command(undefined, { op: 'engagement', state: { present: true, focusId: 'pty-1' } });
+    expect(host.alerts.viewerIds()).toEqual([]);
+  });
+
+  it('ends the realms of windows that went away', () => {
+    command('main', { op: 'engagement', state: { present: true, focusId: 'pty-a' } });
+    command('ws-2', { op: 'await', awaitId: 'await-ws2', id: 'pty-c', until: 'quiet', timeoutMs: 600_000 });
+    host.handleCommand('burrow:windows', { labels: ['main'] });
+    expect(out.filter((line) => line.event === 'alert:awaitResult').map((line) => line.data)).toEqual([
+      { awaitId: 'await-ws2', forWindow: 'ws-2', outcome: expect.objectContaining({ kind: 'cancelled' }) },
+    ]);
+    expect(host.alerts.viewerIds()).toEqual(['main']);
+  });
+
+  it('re-sends a window that asks to sync its own Sessions\' state, and both stores to it alone', () => {
+    command('main', { op: 'initializeWatchedCommands', names: ['npm test'] });
+    command('main', { op: 'initializeSettings', settings: {} });
+    host.alerts.notifyFromProtocol('pty-1', REPORT);
+    host.alerts.notifyFromProtocol('pty-2', REPORT);
+    out = [];
+    command('main', { op: 'sync', ids: ['pty-1'] });
+    expect(out.map((line) => [line.event, (line.data as { id?: string; forWindow?: string }).id ?? (line.data as { forWindow?: string }).forWindow])).toEqual([
+      ['alert:state', 'pty-1'],
+      ['alert:watchedCommands', 'main'],
+      ['alert:settings', 'main'],
+    ]);
+  });
+
+  /**
+   * The whole path a reload takes, with a real client: the manager never lived
+   * in the webview, so a reloaded window gets its rings and TODOs back from the
+   * answer to its collection, without seeding.
+   */
+  it('gives a reloaded window its rings and TODOs back', () => {
+    const open = () => {
+      const realm = createAlertClient((body) => command('main', body as Record<string, unknown>));
+      const seen = new Map<string, AlertStateDetail>();
+      realm.methods.onAlertState((detail) => void seen.set(detail.id, detail));
+      return { realm, seen };
+    };
+    const before = open();
+    before.realm.methods.alertEngagement({ present: true, focusId: 'watched' });
+    host.alerts.notifyFromProtocol('ringing', REPORT);
+    before.realm.methods.alertToggleTodo('flagged');
+
+    const after = open();
+    after.realm.hello();
+    out = [];
+    host.handleCommand('pty:requestInit', { ids: ['ringing', 'flagged'], forWindow: 'main' });
+    for (const line of out) after.realm.onEvent(line.event, line.data);
+
+    expect(after.seen.get('ringing')).toMatchObject({ status: 'ALERT_RINGING', todo: false });
+    expect(after.seen.get('flagged')).toMatchObject({ status: 'WATCHING_DISABLED', todo: true });
+  });
+
+  it('gives its Burrow the baked rendezvous, so only the network policy keeps a one-time link off', async () => {
+    // A new install is at Nothing; a build without the rendezvous would say `self-host`.
+    host.handleCommand('burrow:command', { burrowRequestId: 'b-1', cmd: 'oneTimeStatus' });
+    await vi.waitFor(() => {
+      expect(out.find((line) => line.event === 'burrow:result')?.data).toEqual({
+        burrowRequestId: 'b-1',
+        result: { status: 'unavailable', reason: 'network-off' },
+      });
+    });
+  });
+
+  it('gives its Burrow Take back, which answers for a holder no session holds under', async () => {
+    host.handleCommand('burrow:command', {
+      burrowRequestId: 'b-2',
+      cmd: 'takeBack',
+      params: { holder: 'nobody' },
+    });
+    await vi.waitFor(() => {
+      expect(out.find((line) => line.event === 'burrow:result')?.data).toEqual({
+        burrowRequestId: 'b-2',
+        result: { ended: false },
+      });
+    });
+  });
+
+  it('asks its Burrow for the network policy before managed voice speaks', async () => {
+    // A new install is at Nothing: no request, token or not
+    // (`docs/specs/remote-network.md` → "Policy").
+    host.handleCommand('voice:command', { op: 'speak', text: 'build finished', requestId: 'req-0' });
+    await vi.waitFor(() => {
+      expect(out.find((line) => line.event === 'voice:result')?.data).toEqual({
+        requestId: 'req-0',
+        result: { ok: false, reason: 'network-off' },
+      });
+    });
+  });
+
+  it('answers a managed-voice command under its request id', async () => {
+    expect(host.handleCommand('voice:command', { op: 'status', requestId: 'req-1' })).toBe(true);
+    await vi.waitFor(() => {
+      expect(out.find((line) => line.event === 'voice:result')?.data).toEqual({
+        requestId: 'req-1',
+        result: { configured: false, voiceId: DEFAULT_MANAGED_VOICE_ID },
+      });
+    });
+  });
+
+  it('broadcasts managed voice\'s status to every window once an edit is saved', async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), 'sidecar-voice-'));
+    const saving = createSidecarHost({ send: (event, data) => void out.push({ event, data }), mgr: {} as never, stateDir });
+    try {
+      saving.handleCommand('voice:command', { op: 'configure', update: { voiceId: 'abc123' }, requestId: 'req-2' });
+      await vi.waitFor(() => {
+        expect(out.find((line) => line.event === 'voice:status')?.data).toEqual({ configured: false, voiceId: 'abc123' });
+      });
+    } finally {
+      saving.dispose();
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves every other command to main.js', () => {
+    expect(host.handleCommand('pty:getCwd', { id: 'pty-1' })).toBe(false);
+    expect(calls).toEqual([]);
   });
 });

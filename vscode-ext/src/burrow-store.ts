@@ -1,6 +1,7 @@
 /**
  * Where the VS Code Burrow keeps the two things it must survive a restart with:
- * the enrollment and the ACL (`lib/src/host/remote/burrow-state-store.ts`).
+ * the enrollment and the ACL (`lib/src/host/remote/burrow-state-store.ts`), and
+ * the network policy beside them.
  *
  * Split by sensitivity. The enrollment blob carries `burrowToken` — a bearer
  * credential that grants the `/ws/burrow` socket — so it goes to `SecretStorage`
@@ -12,6 +13,11 @@
  * cutover are dropped on read by `isBurrowAclRecord`, which is the whole of the
  * Burrow-state version: the machine shows the enrollment form again and every
  * phone pairs once more.
+ *
+ * One more `SecretStorage` entry rides here, and it is not a credential: the
+ * one-time serving marker ({@link ONE_TIME_SERVING_KEY}), which lives in
+ * `SecretStorage` only because that is the store whose changes every window of
+ * the extension hears.
  */
 
 import type * as vscode from 'vscode';
@@ -20,9 +26,19 @@ import type { BurrowAclRecord, BurrowStateStore } from '../../lib/src/host/remot
 import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
 import { filterAclRecords } from '../../lib/src/remote/burrow/acl';
 import { isEnrollment, type BurrowEnrollment } from '../../lib/src/remote/burrow/enrollment';
+import { storedNetworkPolicy, type NetworkPolicy } from '../../lib/src/remote/network-policy';
 // Imported, not mirrored: a key that drifted between the two sides would strand
 // an enrollment that is still on disk.
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
+
+/**
+ * Present while the broker window's one-time connection is serving
+ * (`docs/specs/vscode.md` → "Burrow: a service in the extension host"), so a
+ * window with no enrollment still joins the peer net and its terminals reach
+ * the phone. Its value means nothing; the broker writes it on the flip and
+ * deletes it when serving stops and whenever a service starts.
+ */
+export const ONE_TIME_SERVING_KEY = 'dormouse.burrow.one-time-serving';
 
 export class VsCodeBurrowStateStore implements BurrowStateStore {
   /** Writes here survive a restart (`BurrowStateStore.persistent`). */
@@ -40,20 +56,20 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
   readonly #mutate = createSerialQueue();
 
   /**
-   * @param onEnrollmentChanged Some window of this extension wrote or cleared
-   * the enrollment. Fires after the memo is dropped, so a reader called from it
-   * sees the new value.
+   * @param onServingChanged Some window of this extension wrote or cleared the
+   * enrollment or the one-time serving marker. Fires after the enrollment memo
+   * is dropped, so a reader called from it sees the new value.
    */
-  constructor(context: vscode.ExtensionContext, onEnrollmentChanged?: () => void) {
+  constructor(context: vscode.ExtensionContext, onServingChanged?: () => void) {
     this.#context = context;
     // Cross-window invalidation. `SecretStorage` is shared by every window of
     // an extension and `onDidChange` fires in all of them, so without this a
     // window that read the enrollment once could keep serving a Burrow another
     // window cleared — or miss one another window created.
     this.#watch = context.secrets.onDidChange?.((event) => {
-      if (event.key !== ENROLLMENT_KEY) return;
-      this.#enrollment = null;
-      onEnrollmentChanged?.();
+      if (event.key === ENROLLMENT_KEY) this.#enrollment = null;
+      else if (event.key !== ONE_TIME_SERVING_KEY) return;
+      onServingChanged?.();
     });
   }
 
@@ -109,6 +125,27 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
     }
   }
 
+  /** Whether some window's one-time connection is serving; never memoized, since it flips. */
+  async loadOneTimeServing(): Promise<boolean> {
+    return (await this.#context.secrets.get(ONE_TIME_SERVING_KEY)) !== undefined;
+  }
+
+  /**
+   * Set or clear the marker, in call order with every other write here. A
+   * clear reads first, so clearing an absent marker — every service start —
+   * announces nothing to the other windows.
+   */
+  saveOneTimeServing(serving: boolean): Promise<void> {
+    return this.#mutate(async () => {
+      if (serving) {
+        await this.#context.secrets.store(ONE_TIME_SERVING_KEY, '1');
+        return;
+      }
+      if ((await this.#context.secrets.get(ONE_TIME_SERVING_KEY)) === undefined) return;
+      await this.#context.secrets.delete(ONE_TIME_SERVING_KEY);
+    });
+  }
+
   async loadAcl(burrowId: string): Promise<BurrowAclRecord[]> {
     const raw = this.#context.globalState.get<string>(aclKey(burrowId));
     if (typeof raw !== 'string') return [];
@@ -127,7 +164,23 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
       this.#context.globalState.update(aclKey(burrowId), JSON.stringify(records)),
     );
   }
+
+  /** Not memoized, like the ACL: `globalState` is in-process, and shared by every window. */
+  async loadNetworkPolicy(): Promise<NetworkPolicy | null> {
+    return storedNetworkPolicy(this.#context.globalState.get<unknown>(NETWORK_POLICY_KEY));
+  }
+
+  saveNetworkPolicy(policy: NetworkPolicy): Promise<void> {
+    return this.#mutate(() => this.#context.globalState.update(NETWORK_POLICY_KEY, policy));
+  }
 }
+
+/**
+ * The network policy's `globalState` key (`docs/specs/remote-network.md` ->
+ * "Policy"): no secret in it, so not the keychain, and machine-wide like the
+ * enrollment.
+ */
+export const NETWORK_POLICY_KEY = 'dormouse.burrow.network-policy';
 
 /**
  * This store's own `globalState` key prefix. It lives here rather than in `lib`

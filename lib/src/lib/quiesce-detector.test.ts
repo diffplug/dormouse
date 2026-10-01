@@ -94,6 +94,40 @@ describe('QuiesceDetector', () => {
     expect(settled).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])('forgets stale candidate history before a short redraw (failed confirmation: %s)', (failedConfirmation) => {
+    const { monitor, settled } = createMonitor();
+    monitor.onData();
+    vi.advanceTimersByTime(1_500);
+    if (failedConfirmation) monitor.onData();
+    vi.advanceTimersByTime(218_342);
+
+    monitor.onData();
+    vi.advanceTimersByTime(62);
+    monitor.onData();
+    expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+    vi.advanceTimersByTime(5_000);
+    expect(settled).not.toHaveBeenCalled();
+
+    driveMonitorToBusy(monitor);
+    vi.advanceTimersByTime(5_000);
+    expect(settled).toHaveBeenCalledOnce();
+  });
+
+  it('expires candidate history even when the confirmation timer has not run', () => {
+    const { monitor, settled } = createMonitor();
+    monitor.onData();
+    vi.advanceTimersByTime(1_500);
+    monitor.onData();
+    expect(monitor.getStatus()).toBe('MIGHT_BE_BUSY');
+    vi.setSystemTime(Date.now() + 218_342);
+    monitor.onData();
+    expect(monitor.getStatus()).toBe('NOTHING_TO_SHOW');
+    vi.advanceTimersByTime(62);
+    monitor.onData();
+    vi.advanceTimersByTime(5_000);
+    expect(settled).not.toHaveBeenCalled();
+  });
+
   it('transitions BUSY to MIGHT_NEED_ATTENTION after silence', () => {
     const { monitor, changes, settled } = createMonitor();
     driveMonitorToMightNeedAttention(monitor);

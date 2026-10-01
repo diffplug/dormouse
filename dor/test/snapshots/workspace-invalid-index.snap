@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: Failed to parse "x" for index: invalid --index 'x'

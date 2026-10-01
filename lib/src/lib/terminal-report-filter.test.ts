@@ -61,6 +61,14 @@ describe('terminal-report-filter: inputIsReplayTerminalReport', () => {
     expect(inputIsReplayTerminalReport('\x1b_Gi=1;OK\x1b\\')).toBe(true); // Kitty graphics response
   });
 
+  it('distinguishes kitty keyboard query replies from key events and mixed user input', () => {
+    expect(inputIsReplayTerminalReport('\x1b[?0u')).toBe(true);
+    expect(inputIsReplayTerminalReport('\x1b[?31u\x1b[?1;2c')).toBe(true);
+    expect(inputIsReplayTerminalReport('\x1b[120u')).toBe(false);
+    expect(inputIsReplayTerminalReport('\x1b[120;5u')).toBe(false);
+    expect(inputIsReplayTerminalReport('\x1b[?0ux')).toBe(false);
+  });
+
   it('rejects empty input', () => {
     expect(inputIsReplayTerminalReport('')).toBe(false);
   });

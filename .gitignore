@@ -8,6 +8,7 @@ dor/src/generated-version.ts
 dor/src/generated-skill.ts
 lib/dist/
 lib/dist-pocket/
+lib/dist-one-time/
 *.tsbuildinfo
 
 # Vite cache
@@ -33,11 +34,18 @@ standalone/src-tauri/gen/
 standalone/dist/
 standalone/sidecar/dor-cli/
 standalone/sidecar/iframe-proxy.cjs
+standalone/sidecar/recovery.cjs
+standalone/sidecar/browser-host.cjs
 standalone/sidecar/agent-browser-host.cjs
+standalone/sidecar/playwright-host.cjs
 standalone/sidecar/burrow.cjs
-# Kept beside it: a checkout that built before the Burrow rename still holds
-# the old bundle, and `bundle.resources` would ship it.
+# Kept beside it: a checkout that built before the Burrow rename, or before the
+# alerts joined its bundle, still holds the old bundle, and `bundle.resources`
+# would ship it.
 standalone/sidecar/remote-host.cjs
+standalone/sidecar/alert-store.cjs
+standalone/sidecar/tool-host.cjs
+standalone/sidecar/git-info.cjs
 standalone/sidecar/node_modules/
 standalone/node_modules/
 
@@ -58,13 +66,19 @@ website/public/guide/
 
 # Environment
 .env.local
+hosted/.env
+hosted/.dev.vars*
+hosted/.wrangler/
+hosted/.pgstencil/
+hosted/dist-worker/
 
-# Storybook / Chromatic
+# Storybook / Chromatic / Argos
 storybook-static/
 build-storybook.log
 chromatic.log
 chromatic-build-*.xml
 chromatic-diagnostics.json
+lib/screenshots/
 
 # symlinked skill files
 .agents/skills/
@@ -90,3 +104,6 @@ audit-status.txt
 # Impeccable per-developer state and generated critiques (design.json is shared).
 .impeccable/config.local.json
 .impeccable/critique/
+
+# Native Playwright CLI snapshots and traces
+.playwright-cli/

@@ -6,17 +6,21 @@ import type {
   DorCommandContext,
   EnsureSurfaceResponse,
   ParseResult,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   callerWorkingDirectory,
   errorMessage,
   renderJson,
   requireControlClient,
+  scanPreDelimiterArgs,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 
-interface EnsureFlags {
+interface EnsureFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly restart?: boolean;
@@ -35,35 +39,27 @@ const RESTART_TIMEOUT_MS = 60_000;
 // surfaces still respond instantly; this only raises the ceiling for the slow case.
 const ENSURE_TIMEOUT_MS = 20_000;
 
+// Keep in sync with `parameters.flags`.
+const BOOLEAN_FLAGS = new Set(['--json', '--minimize', '--restart']);
+const FLAGS_WITH_VALUES = new Set(['--cwd', '--surface', '--workspace']);
+
 // stricli treats a bare `--` as "rest are positionals", but it can't express
 // "everything after `--` is one required command tail, and only these flags may
 // precede it". `cli.ts` runs this before stricli parses so the argv-tail contract
-// (and its friendly messages) is enforced next to the flag definitions above —
-// keep the allowed-flag list here in sync with `parameters.flags`.
+// (and its friendly messages) is enforced next to the flag definitions above.
 export function validateEnsureDelimiter(args: string[]): ParseResult<void> {
   const delimiterIndex = args.indexOf('--');
   if (delimiterIndex === -1) {
     return { ok: false, message: 'dor ensure requires -- <command...>' };
   }
 
-  for (let index = 0; index < delimiterIndex; index += 1) {
-    const arg = args[index];
-    if (arg === '--json' || arg === '--minimize' || arg === '--restart') {
-      continue;
-    }
-    if (arg === '--cwd' || arg === '--surface') {
-      const value = args[index + 1];
-      if (!value || value.startsWith('-') || index + 1 >= delimiterIndex) {
-        return { ok: false, message: `${arg} requires a value` };
-      }
-      index += 1;
-      continue;
-    }
-    if (arg.startsWith('-')) {
-      return { ok: false, message: `unknown option '${arg}'` };
-    }
-    return { ok: false, message: `unexpected argument '${arg}' before --` };
-  }
+  // ensure has no positional of its own: everything it runs comes after `--`.
+  const scan = scanPreDelimiterArgs(args.slice(0, delimiterIndex), {
+    booleans: BOOLEAN_FLAGS,
+    valued: FLAGS_WITH_VALUES,
+    positionals: 'reject',
+  });
+  if (!scan.ok) return scan;
 
   const command = args.slice(delimiterIndex + 1).join(' ').trim();
   if (!command) {
@@ -80,15 +76,15 @@ export const ensureCommand: Command = {
     {
       scope: 'root',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
       scope: 'command-usage',
       findReplace: [
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path]<TO-EOL>',
-        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...\n',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref]<TO-EOL>',
+        '  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...\n',
       ],
     },
     {
@@ -141,6 +137,7 @@ JSON output:
         restart: { kind: 'boolean', brief: 'Restart a matching surface in place.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to split when creating.', optional: true, placeholder: 'id|ref' },
         cwd: { kind: 'parsed', parse: stringParser, brief: 'Working directory for matching and for the new command.', optional: true, placeholder: 'path' },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'array',
@@ -167,6 +164,7 @@ async function runEnsureCommand(this: DorCommandContext, flags: EnsureFlags, ...
       restart: flags.restart === true,
       surface: flags.surface,
       cwd: callerWorkingDirectory(flags.cwd, this.options.env),
+      ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderEnsureResponse(response, flags.json === true));
     return undefined;

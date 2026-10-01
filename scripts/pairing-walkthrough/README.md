@@ -12,9 +12,10 @@ checked on the side that cannot fake it: the file the laptop's shell wrote, the
 authenticator's own `signCount`, the Burrow's alert arriving in the phone's session
 list.
 
-It is a development tool, not a test. **It is deliberately not wired into
-`pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, an exclusive
-`:3000`, and several minutes.
+It is a development tool, not a test. **The run is deliberately not wired into
+`pnpm test` or any CI workflow**: it wants Chrome, `ffmpeg`, and several
+minutes. `proc.test.mjs`, which pins the line plumbing and needs none of them,
+is.
 
 ```sh
 node scripts/pairing-walkthrough/run.mjs
@@ -35,8 +36,6 @@ selectors), `ab.mjs` (`agent-browser`), `chrome.mjs` (the Pocket browser),
 | Chrome / Chromium | `agent-browser install` puts one where it wants it. |
 | `ffmpeg` on `PATH` | Every pixel operation: crop, upscale, Y4M. Override with `FFMPEG_BIN`. |
 | `pnpm install` already run | The Relay, the Burrow and the QR decoder all come from the workspace. |
-| A free `:3000` | Not negotiable — see *Ports* below. The run refuses to start otherwise. |
-| Two free ports from `:15540` | The Burrow harness's Vite server and its dev bridge; picked at startup. |
 
 Every line about `agent-browser` and Chrome here was probed against
 `agent-browser` 0.31.1 and Chrome for Testing 150, not assumed.
@@ -74,14 +73,14 @@ it.
 
 | # | Step | What happens |
 | --- | --- | --- |
-| 1 | `relay` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then waits for `:3000` to answer. |
-| 2 | `burrow` | `pnpm innerdogfood` with `DORMOUSE_REMOTE_CONNECT_SRC` pointed at that Relay, then waits for the app's first terminal. → `01-burrow-booted.png` |
-| 3 | `settings` | Clicks the baseboard's Settings button and scrolls to Remote control. → `02-settings-open.png` |
-| 4 | `enroll` | Types the Relay URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
+| 1 | `relay` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then reads its bound origin and waits for it to answer. |
+| 2 | `burrow` | `pnpm innerdogfood` with `DORMOUSE_RELAY_ORIGIN` set to that Relay's origin, then waits for the app's first terminal. → `01-burrow-booted.png` |
+| 3 | `settings` | Clicks the baseboard's Settings button, chooses **Network → My Relay only** (a fresh Burrow starts at Nothing, which refuses enrollment), and scrolls to the Phones section. → `02-settings-open.png` |
+| 4 | `enroll` | Unfolds **Persistent Relay**, types the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
 | 5 | `qr` | Clicks **Set up a phone**, waits for the code, screenshots, crops to the QR, makes a camera-shaped Y4M, and decodes the crop to prove it is legible. → `qr-full.png`, `qr.png`, `qr.y4m`, `invitation-url.txt` |
 | 6 | `pocket` | Launches a second, isolated Chrome with the fake camera pointed at `qr.y4m`, attaches with `agent-browser connect <port>`, opens the **plain origin**, and gives the page a CDP virtual authenticator. → `05-pocket-first-run.png` |
 | 7 | `code` | Taps **Scan a setup code**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Burrow's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-burrow-pairing-modal.png`, `pairing-code.txt` |
-| 8 | `terminal` | Types the two digits into the Burrow's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Burrow and finds the bell on the phone; then leaves to the Burrows view and connects again. → `09-burrow-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
+| 8 | `terminal` | Types the two digits into the Burrow's modal and authorizes; waits for Pocket to connect itself and land on the terminal; runs a command from the phone and reads the file it wrote; rings the Burrow and finds the alarm on the phone; then leaves to the Burrows view and connects again. → `09-burrow-approved.png` … `14-pocket-reconnected.png`, `terminal-proof.txt`, `notify-proof.txt`, `reconnect-proof.txt` |
 | 8′ | `mismatch` | (`wrong-code`) Types the *next* two digits instead, and waits for the panel to report a mismatch; checks the paired count did not move and follows the phone back to its list. → `09-burrow-mismatch.png`, `10-pocket-mismatch.png` |
 | 8′ | `cancel` | (`denied`) Presses the modal's Cancel and waits for the panel to report it; same two checks. → `09-burrow-cancelled.png`, `10-pocket-cancelled.png` |
 | 7′ | `dead-code` | (`expired-code`) Replaces the camera's Y4M with a blank frame, opens the scanner, and pastes the Burrow's own code re-issued twice — once stamped with a 2023 expiry, once for another origin as well. Waits for the phone's own sentence each time, and checks the two differ. → `06-pocket-expired.png`, `07-pocket-foreign.png` |
@@ -107,8 +106,8 @@ to tap something there would have found a bug.
 | --- | --- | --- |
 | `--scenario <name>` | `happy` | Which ending to drive — see *Scenarios*. |
 | `--until <step>` | the scenario's last | Stop after this step. |
-| `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>` | Run directory. |
-| `--skip-build` | off | Reuse `lib/dist-pocket` and `relay/dist` instead of rebuilding them. Ignored (with a warning) when either is missing. |
+| `--out <dir>` | `$TMPDIR/pairing-walkthrough/<timestamp>-<random>` | Run directory. |
+| `--skip-build` | off | Reuse `lib/dist-pocket` and `relay/dist` instead of rebuilding them — same dev runner either way. Ignored (with a warning) when either is missing. |
 | `--machine-name <n>` | `Walkthrough Mac` | The name the Burrow enrolls under. |
 | `--keep` | off | Leave everything running when the run ends — including a failed one, which is when poking by hand is most useful. Ctrl-C stops it. |
 
@@ -160,7 +159,7 @@ not healthier than one that has them.
 
 `summary.json` also carries what only a run can know: the decoded pairing URL
 and how much of its TTL was left, the round trip from Enter to the file the
-laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-bell
+laptop's shell wrote (`terminal.roundTripMs`, ~220 ms here), the Enter-to-alarm
 time, and the authenticator's `signCount` after each ceremony. `options` holds
 what the run chose for itself. The setup password is not among them — the
 Relay mints its own, and a `--keep` run is signed into by hand with the
@@ -187,12 +186,11 @@ a store of their own. The *why* of each is at the code; what it means for you:
 
 ## Ports
 
-`:3000` is fixed, and the run refuses to start when something else holds it:
-the Burrow's allowed relay origins are baked into `sidecar/burrow.cjs` at
-stage time, and Pocket must be same-origin with its own API
-([`docs/specs/pocket-app.md`](../../docs/specs/pocket-app.md) → Deployment). The
-Burrow harness's two ports are searched for from `:15540` and passed in, and the
-Pocket browser's debugging port from 100 above the second of them.
+The Relay, Burrow harness, and Pocket Chrome bind OS-assigned ports. The run
+reads the Relay's origin before staging the Burrow's allowed origins, and opens
+Pocket at that same origin. Vite reports its app URL; Chrome reports its debugging
+port through `DevToolsActivePort` in the run's own profile. No port is probed and
+released before its owner binds it.
 
 `localhost`, never `127.0.0.1` — WebAuthn's secure-context rule and the `rpId`
 the Relay derives from its own origin
@@ -239,4 +237,7 @@ already are, and a step that adds one holds to the same rule
 - **The Pocket browser is launched by the harness, not by `agent-browser`.**
   `agent-browser --args` can carry launch flags, so it could be — see the head
   of `chrome.mjs` for what the harness gets by owning the process instead.
-- **One run at a time.** `:3000` and the agent-browser daemon are both global.
+- **Concurrent runs need separate worktrees for build output.** Each run has its
+  own Relay state, ports, browser sessions, and default artifact directory, but
+  Burrow staging still writes into the worktree. Explicit `--out` directories
+  must be distinct for concurrent runs of the same scenario.

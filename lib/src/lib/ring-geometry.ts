@@ -95,7 +95,7 @@ const dist = ([ax, ay]: Point, [bx, by]: Point) => Math.hypot(bx - ax, by - ay);
  * Verified against Simpson's rule and a 3M-segment polyline of the real curve to
  * 1e-12; `ring-geometry.test.ts` re-checks it against a flattened path.
  */
-const QUARTER_TURN = 1.6232252401402307;
+export const QUARTER_TURN = 1.6232252401402307;
 
 /**
  * Exact length of the ring outline, for sizing the marching-ants dash.

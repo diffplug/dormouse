@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: Restart needs a packaged build

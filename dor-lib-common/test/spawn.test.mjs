@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { spawnAndCapture } from '../dist/index.js';
+import { mkdtemp, rm, realpath } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnAndCapture, treeKillCommand, SPAWN_TIMEOUT_CODE } from '../dist/index.js';
 
 const node = process.execPath;
 
@@ -112,4 +115,66 @@ test('releases inherited pipes so the capture caller can exit while the daemon l
       }
     }
   }
+});
+
+test('runs relative paths in the requested cwd without changing the caller cwd', async () => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'dor-spawn-cwd-'));
+  const before = process.cwd();
+  try {
+    const result = await spawnAndCapture(node, ['-e', 'process.stdout.write(process.cwd())'], { cwd });
+    assert.equal(result.ok, true);
+    assert.equal(result.stdout, await realpath(cwd));
+    assert.equal(process.cwd(), before);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test('a timeout kills a hung child and resolves with a distinct error', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'dormouse-spawn-timeout-'));
+  try {
+    const pidFile = path.join(dir, 'pid');
+    const started = Date.now();
+    const result = await spawnAndCapture(node, ['-e', `
+      require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+      setTimeout(() => {}, 60000);
+    `], { timeoutMs: 500 });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, SPAWN_TIMEOUT_CODE);
+    assert.ok(Date.now() - started < 5000);
+    const { readFile } = await import('node:fs/promises');
+    const pid = Number(await readFile(pidFile, 'utf8'));
+    // The kill is not awaited; give the signal a moment to land.
+    for (let i = 0; i < 50; i++) {
+      try { process.kill(pid, 0); } catch { return; }
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    assert.fail(`child ${pid} survived its timeout`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('a command that finishes inside its timeout resolves normally', async () => {
+  const result = await spawnAndCapture(node, ['-e', 'process.stdout.write("done")'], { timeoutMs: 10000 });
+  assert.deepEqual(result, { ok: true, exitCode: 0, stdout: 'done', stderr: '' });
+});
+
+test('Windows ends a timed-out child\'s whole tree with taskkill by absolute path', () => {
+  assert.equal(treeKillCommand(42, {}, false), null);
+  assert.deepEqual(treeKillCommand(42, { SystemRoot: 'D:\\Win' }, true), {
+    binary: 'D:\\Win\\System32\\taskkill.exe', args: ['/PID', '42', '/T', '/F'],
+  });
+  assert.equal(treeKillCommand(42, {}, true).binary, 'C:\\Windows\\System32\\taskkill.exe');
+});
+
+test('bounds combined output without returning captured secrets', async () => {
+  const result = await spawnAndCapture(node, ['-e', 'process.stdout.write("secret".repeat(1000)); setInterval(() => {}, 1000)'], { maxOutputBytes: 100, timeoutMs: 2000 });
+  assert.deepEqual(result, { ok: false, error: { code: 'ENOBUFS', message: 'Child output exceeded the capture limit' } });
+});
+
+test('writes input to stdin, and a child that never reads it still resolves', async () => {
+  const echo = await spawnAndCapture(node, ['-e', 'process.stdin.pipe(process.stdout)'], { input: 'a\0b/\0' });
+  assert.deepEqual(echo, { ok: true, exitCode: 0, stdout: 'a\0b/\0', stderr: '' });
+  // Larger than any pipe buffer, so the write fails with EPIPE once the child exits.
+  const unread = await spawnAndCapture(node, ['-e', 'process.exit(1)'], { input: 'x'.repeat(8 * 1024 * 1024) });
+  assert.deepEqual(unread, { ok: true, exitCode: 1, stdout: '', stderr: '' });
 });

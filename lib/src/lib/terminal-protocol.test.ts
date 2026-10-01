@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectTerminalSemanticEvents, formatOscColorResponse, ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
-import { createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
+import {
+  CLIPBOARD_OFFER_LIMIT,
+  collectTerminalClipboardOffers,
+  collectTerminalProtocolResponses,
+  collectTerminalSemanticEvents,
+  formatOscColorResponse,
+  ITERM2_DEVICE_ATTRIBUTES_RESPONSE,
+  TerminalProtocolParser,
+} from './terminal-protocol';
+import { commandWatchKey, createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
 
 describe('TerminalProtocolParser', () => {
   it('parses and strips standalone terminal bells', () => {
@@ -59,6 +67,16 @@ describe('TerminalProtocolParser', () => {
     ]);
   });
 
+  it.each([
+    ['a mid-cycle progress update', '\x1b]9;4;1;40\x07\x07'],
+    ['a progress clear', '\x07\x1b]9;4;0;\x07'],
+  ])('keeps a bell that shares its batch with %s', (_label, chunk) => {
+    const result = new TerminalProtocolParser().process(chunk);
+    expect(result.events).toContainEqual(
+      { kind: 'notification', notification: { source: 'BEL', title: 'Terminal bell', body: null } },
+    );
+  });
+
   it('handles chunked OSC sequences terminated by ST', () => {
     const parser = new TerminalProtocolParser();
 
@@ -82,6 +100,22 @@ describe('TerminalProtocolParser', () => {
     ]);
     expect(parser.process('\x1b]9;4\x07').events).toEqual([
       { kind: 'progress', progress: { state: 'clear', percent: null } },
+    ]);
+  });
+
+  // ConEmu's numbered subcommands (docs/specs/alert.md -> Terminal reports).
+  it.each([
+    '9;1;500', '9;2;msg', '9;3;my tab', '9;5', '9;6;Close(0)', '9;8;USERNAME', '9;10;1', '9;12', '9;9',
+  ])('consumes the ConEmu subcommand OSC %s with no notification or title', (payload) => {
+    const result = new TerminalProtocolParser().process(`a\x1b]${payload}\x07b`);
+    expect(result.visibleData).toBe('ab');
+    expect(result.events).toEqual([]);
+    expect(collectTerminalSemanticEvents(result.events)).toEqual([]);
+  });
+
+  it.each(['Build finished', '3 tests failed', '42%', '12 done'])('still notifies for the message OSC 9;%s', (body) => {
+    expect(new TerminalProtocolParser().process(`\x1b]9;${body}\x07`).events).toEqual([
+      { kind: 'notification', notification: { source: 'OSC 9', title: null, body } },
     ]);
   });
 
@@ -404,12 +438,50 @@ describe('TerminalProtocolParser', () => {
     expect(result.textData).toBe('done');
   });
 
-  it('strips known unsupported iTerm2 and clipboard OSC sequences', () => {
+  it('strips an OSC 52 write into a clipboard offer and an OSC 50 into nothing', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('a\x1b]52;c;SGVsbG8=\x07b\x1b]50;Monaco\x07c');
 
     expect(result.visibleData).toBe('abc');
-    expect(result.events).toEqual([]);
+    expect(result.events).toEqual([{ kind: 'clipboardOffer', text: 'Hello' }]);
+  });
+
+  describe('OSC 52', () => {
+    const offer = (payload: string) => new TerminalProtocolParser().process(`\x1b]52;${payload}\x07`);
+    const b64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+
+    it('decodes UTF-8 and keeps line breaks and tabs', () => {
+      expect(offer(`c;${b64('pnpm test\r\n\tdone ✓')}`).events).toEqual([{ kind: 'clipboardOffer', text: 'pnpm test\n\tdone ✓' }]);
+    });
+
+    it('removes every other control character, escape included', () => {
+      expect(offer(`c;${b64('rm\x1b[201~ -rf\x07\x9b x')}`).events).toEqual([{ kind: 'clipboardOffer', text: 'rm[201~ -rf x' }]);
+    });
+
+    it('never answers a read, and offers nothing for an empty or malformed write', () => {
+      for (const payload of ['c;?', 'c;', ';', 'c;!!!notbase64', '']) {
+        const result = offer(payload);
+        expect(result.visibleData).toBe('');
+        expect(result.events).toEqual([]);
+      }
+    });
+
+    it('drops an offer over the limit rather than truncating it, wherever the reads split', () => {
+      const atLimit = b64('x'.repeat((CLIPBOARD_OFFER_LIMIT / 4) * 3));
+      expect(atLimit).toHaveLength(CLIPBOARD_OFFER_LIMIT);
+      expect(offer(`c;${atLimit}`).events).toHaveLength(1);
+      expect(offer(`c;${atLimit}AAAA`).events).toEqual([]);
+      const parser = new TerminalProtocolParser();
+      parser.process(`\x1b]52;c;${atLimit.slice(0, 9_000)}`);
+      expect(parser.process(`${atLimit.slice(9_000)}\x07`).events).toHaveLength(1);
+    });
+
+    it('reaches the renderer only through its own collector', () => {
+      const { events } = offer(`c;${b64('hi')}`);
+      expect(collectTerminalClipboardOffers(events)).toEqual(['hi']);
+      expect(collectTerminalProtocolResponses(events)).toEqual([]);
+      expect(collectTerminalSemanticEvents(events)).toEqual([]);
+    });
   });
 
   it('parses and strips CWD OSC sequences into semantic events', () => {
@@ -545,11 +617,15 @@ describe('TerminalProtocolParser', () => {
   // derivation, and the key `dor ensure --restart` matches on — so it is bounded
   // and sanitized like a title rather than stored as it arrived. The `\xNN`
   // unescape is what puts control characters back, so the sanitize runs after it.
+  // Its line breaks survive, since a newline separates commands.
   it('bounds and sanitizes the OSC 633 command line', () => {
     const parser = new TerminalProtocolParser();
 
-    expect(parser.process('\x1b]633;E;git\\x0a\\x1bcommit\x07').events).toEqual([
-      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git commit' } },
+    expect(parser.process('\x1b]633;E;git\\x0a\\x1bcommit\\x07now\x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git\ncommit now' } },
+    ]);
+    expect(parser.process('\x1b]633;E;cat <<EOF\\x0d\\x0a  hi\\x0d\\x0dEOF \x07').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'cat <<EOF\nhi\nEOF' } },
     ]);
 
     const long = parser.process(`\x1b]633;E;${'a'.repeat(100_000)}\x07`).events;
@@ -560,6 +636,78 @@ describe('TerminalProtocolParser', () => {
 
     // Nothing but control characters is nothing, not an empty command line.
     expect(parser.process('\x1b]633;E;\\x01\\x02\x07').events).toEqual([]);
+  });
+
+  // fish >= 4 (`cmdline_url`) and kitty's shell integration (`cmdline`, printf
+  // %q) report the command line on 133;C itself, staged before the start.
+  it.each([
+    ['cmdline_url=claude%20--resume', 'claude --resume'],
+    ['cmdline_url=echo%20%27hi%20there%27%20%7C%20cat%3B%20true%20%26%26%20ls', "echo 'hi there' | cat; true && ls"],
+    ['cmdline_url=echo%20%E2%9C%93', 'echo ✓'],
+    ['cmdline_url=echo%2', 'echo%2'],
+    ['cmdline_url=bad%E2%9Cbyte', 'bad�byte'],
+    ['k=v;cmdline_url=pnpm%20dev', 'pnpm dev'],
+    ['cmdline=claude\\ --resume', 'claude --resume'],
+    ['cmdline=echo\\ a\;\\ b', 'echo a; b'],
+    ["cmdline=printf\\ $'a;b\\tc'\\ \\'x\\'", "printf a;b c 'x'"],
+    ["cmdline=echo\\ ''", 'echo'],
+    ['cmdline_url=first;cmdline=second', 'first'],
+  ])('reads the OSC 133;C command line from %j', (params, commandLine) => {
+    const events = new TerminalProtocolParser().process(`\x1b]133;C;${params}\x1b\\`).events;
+    expect(events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc133_boundaries' } },
+    ]);
+  });
+
+  it('starts an OSC 133 command with no command line when C carries none', () => {
+    const parser = new TerminalProtocolParser();
+    for (const payload of ['133;C', '133;C;', '133;C;k=v', '133;C;cmdline_url=', '133;C;cmdline_url=%01%1b']) {
+      expect(parser.process(`\x1b]${payload}\x07`).events, payload).toEqual([
+        { kind: 'semantic', event: { type: 'commandStart', source: 'osc133_boundaries' } },
+      ]);
+    }
+  });
+
+  it('reads an OSC 133;C command line split across PTY reads', () => {
+    const parser = new TerminalProtocolParser();
+    expect(parser.process('\x1b]133;C;cmdline_url=pnpm%2').events).toEqual([]);
+    expect(parser.process('0dev\x1b\\').events).toEqual([
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'pnpm dev' } },
+      { kind: 'semantic', event: { type: 'commandStart', source: 'osc133_boundaries' } },
+    ]);
+  });
+
+  it('bounds and sanitizes the OSC 133;C command line', () => {
+    const parser = new TerminalProtocolParser();
+    expect(parser.process('\x1b]133;C;cmdline_url=git%0A%1Bcommit\x07').events[0]).toEqual(
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git\ncommit' } },
+    );
+    expect(parser.process("\x1b]133;C;cmdline=git$'\\n\\E'commit\x07").events[0]).toEqual(
+      { kind: 'semantic', event: { type: 'commandLine', commandLine: 'git\ncommit' } },
+    );
+    for (const params of [`cmdline_url=${'%E2%9C%93'.repeat(30_000)}`, `cmdline=${'a'.repeat(100_000)}`]) {
+      const [event] = parser.process(`\x1b]133;C;${params}\x07`).events;
+      if (event?.kind !== 'semantic' || event.event.type !== 'commandLine') throw new Error('expected a commandLine');
+      expect(Array.from(event.event.commandLine)).toHaveLength(2048);
+    }
+  });
+
+  it('gives a fish pane its real command name in the header', () => {
+    const parser = new TerminalProtocolParser();
+    const pane = reduceSemanticEvents(collectTerminalSemanticEvents(parser.process('\x1b]133;A;click_events=1\x07$ \x1b]133;B\x07\x1b]133;C;cmdline_url=pnpm%20test%20--watch\x07').events));
+    expect(pane.currentCommand?.rawCommandLine).toBe('pnpm test --watch');
+    expect(deriveHeader(pane, [pane]).primary).toBe('pnpm test --watch');
+  });
+
+  // zsh's `E` escapes a newline as `\x0a`, fish's `cmdline_url` as `%0A`.
+  it.each([
+    ['\x1b]633;E;cd web\\x0apnpm dev\x07\x1b]633;C\x07'],
+    ['\x1b]133;C;cmdline_url=cd%20web%0Apnpm%20dev\x07'],
+  ])('keys a multi-line command line %j on its last command', (stream) => {
+    const pane = reduceSemanticEvents(collectTerminalSemanticEvents(new TerminalProtocolParser().process(stream).events));
+    expect(commandWatchKey(pane.currentCommand?.rawCommandLine ?? '')).toBe('pnpm dev');
+    expect(pane.currentCommand?.displayCommand).toBe('cd web ...');
   });
 
   // W1: the OSC terminator scan runs on raw bytes, so a `Cwd=` payload holding

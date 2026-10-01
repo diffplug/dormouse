@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemePicker } from './ThemePicker';
 import { installLocalStorageStub } from '../lib/test-local-storage';
-import { ensureResizeObserver } from './wall/wall-test-utils';
+import { setNativeFieldValue } from '../lib/dom';
+import { ensureDialogModal, ensureResizeObserver } from './wall/wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -16,6 +17,7 @@ let root: Root;
 
 beforeEach(() => {
   ensureResizeObserver();
+  ensureDialogModal();
   installLocalStorageStub();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -103,5 +105,49 @@ describe('ThemePicker', () => {
     const again = container.querySelector<HTMLDivElement>('[role="menu"]')!;
     act(() => again.querySelector<HTMLButtonElement>('button')!.click());
     expect(onPick).toHaveBeenCalledTimes(2);
+  });
+  // The store dialog is mounted only while open, so no request that settles
+  // after a close can reach the next open. Driven through the picker because
+  // that conditional mount is what holds it.
+  it('reopens the theme store on a clean slate after a close with work in flight', async () => {
+    let failInstall!: () => void;
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.includes('/-/search')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            extensions: [{
+              namespace: 'test', name: 'dracula', displayName: 'Dracula Official',
+              description: '', version: '1.0.0', downloadCount: 1,
+            }],
+          }),
+        });
+      }
+      return new Promise((resolve) => { failInstall = () => resolve({ ok: false, status: 503 }); });
+    }));
+    const button = (text: string) => [...container.querySelectorAll('button')]
+      .find((candidate) => candidate.textContent === text || candidate.getAttribute('aria-label') === text)!;
+    const openStore = () => {
+      act(() => (container.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!).click());
+      act(() => button('Install theme from OpenVSX').click());
+    };
+
+    vi.useFakeTimers();
+    try {
+      act(() => root.render(<ThemePicker variant="settings-dialog" />));
+      openStore();
+      act(() => setNativeFieldValue(container.querySelector('input')!, 'dracula'));
+      await act(async () => { vi.advanceTimersByTime(300); });
+      act(() => button('Install').click());
+
+      act(() => button('Close theme store').click());
+      await act(async () => { failInstall(); });
+      openStore();
+
+      expect(container.querySelector('input')!.value).toBe('');
+      expect(container.textContent).not.toContain('503');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

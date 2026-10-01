@@ -6,17 +6,23 @@
 import {
   API_ROUTES,
   BAD_PASSWORD_ERROR,
+  ORIGIN_MISMATCH_ERROR,
   UNAUTHORIZED_ERROR,
   isE2eId,
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
   normalizeOrigin,
+  type BurrowEnrollRequest,
   type BurrowEnrollResponse,
 } from 'remote-lib-common';
 import { BURROW_REQUEST_TIMEOUT_MS } from './burrow-fetch';
 
 export interface BurrowEnrollment {
-  /** Origin the Relay is reachable at, e.g. `https://dormouse.tailnet.ts.net`. */
+  /**
+   * Origin the Relay is reachable at, e.g. `https://dormouse.tailnet.ts.net`:
+   * the build's baked relay origin at enrollment. A build baked with any other
+   * reads this enrollment as none (`docs/specs/relay.md` → "Relay origin").
+   */
   relayUrl: string;
   burrowId: string;
   /** Bearer credential for the `token` query param of `/ws/burrow`. */
@@ -138,29 +144,56 @@ function boundedDetail(detail: string): string {
  * through to the generic message rather than confidently sending the user to
  * retype a password that was fine.
  *
+ * A 409 naming another origin is a build made for another Relay, and says how
+ * to line the two up ({@link originMismatchMessage}).
+ *
  * Every other status keeps the number and the Relay's own text: there is no
  * user action to name, and an operator debugging a reverse proxy needs both.
  */
-function refusalMessage(status: number, detail: string): string {
+function refusalMessage(status: number, detail: string, relayOrigin: string): string {
+  if (status === 409) {
+    const body = refusedBody(detail);
+    const reported = body?.error === ORIGIN_MISMATCH_ERROR ? normalizeOrigin(body.origin) : null;
+    if (reported) return originMismatchMessage(reported, relayOrigin);
+  }
   if (status === 401) {
     const error = refusedError(detail);
     if (error === BAD_PASSWORD_ERROR) return 'The Relay did not accept that setup password.';
     if (error === UNAUTHORIZED_ERROR) {
-      return 'This machine’s enrollment offer is no longer valid. Enroll with the Relay address and setup password instead.';
+      return 'This machine’s enrollment offer is no longer valid. Enroll with the setup password instead.';
     }
   }
   const shown = boundedDetail(detail);
   return `The Relay refused the enrollment (HTTP ${status})${shown ? `: ${shown}` : ''}`;
 }
 
-/** The `error` a JSON refusal names, or `null` for a body that is not one. */
-function refusedError(detail: string): string | null {
+/** A JSON refusal's body, or `null` for one that is not an object. */
+function refusedBody(detail: string): Record<string, unknown> | null {
   try {
-    const error = (JSON.parse(detail) as { error?: unknown } | null)?.error;
-    return typeof error === 'string' ? error : null;
+    const body: unknown = JSON.parse(detail);
+    return body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
   } catch {
     return null;
   }
+}
+
+/** The `error` a JSON refusal names, or `null` for a body that is not one. */
+function refusedError(detail: string): string | null {
+  const error = refusedBody(detail)?.error;
+  return typeof error === 'string' ? error : null;
+}
+
+/**
+ * What a Relay served from `reported` tells a Burrow built for `relayOrigin`:
+ * both, and the two ways to make them agree (`docs/specs/relay.md` → "Relay
+ * origin").
+ */
+export function originMismatchMessage(reported: string, relayOrigin: string): string {
+  return (
+    `The Relay says its origin is ${reported}, but this build was made for ${relayOrigin}. ` +
+    `Rebuild Dormouse with DORMOUSE_RELAY_ORIGIN=${reported}, or set the Relay's ` +
+    `DORMOUSE_ORIGIN to ${relayOrigin}.`
+  );
 }
 
 /**
@@ -176,36 +209,40 @@ function refusedError(detail: string): string | null {
  * exchange, and a second copy of it could drift from the Relay's contract.
  */
 export async function performEnrollment(
-  relayUrl: string,
+  relayOrigin: string,
   credential: BurrowEnrollCredential,
   label: string,
+  // The service's own, which the network policy guards
+  // (`lib/src/host/remote/service.ts`); no default, so no caller goes around it.
+  fetch: typeof globalThis.fetch,
 ): Promise<BurrowEnrollment> {
-  const base = relayUrl.replace(/\/+$/, '');
   // Minted BEFORE the exchange. A successful POST appends a `burrows.json` row
   // and spends the installer's single-use `enrollToken`, neither of which this
   // side can undo — so a runtime that cannot produce an X25519 key must fail
   // while the Relay still has nothing to forget. Nothing about it reaches the
   // request body below.
   const noiseStatic = await mintNoiseStatic();
-  const response = await fetch(`${base}${API_ROUTES.burrowEnroll}`, {
+  const response = await fetch(`${relayOrigin}${API_ROUTES.burrowEnroll}`, {
     method: 'POST',
     // The same budget every Burrow→Relay call runs under (`burrow-fetch.ts`), and
     // this is the one that most needs it: it runs on the service's lifecycle
     // chain, where everything that starts or stops the Burrow queues behind it.
     signal: AbortSignal.timeout(BURROW_REQUEST_TIMEOUT_MS),
     // The Node-resident Burrow has no browser CSP to check each redirect hop.
-    // Failing here keeps an allowed origin's open redirect from forwarding the
+    // Failing here keeps the Relay's open redirect from forwarding the
     // credential — the setup password or the offer's one-time token, whichever
-    // this body carries — to a Relay outside the build-time allowlist.
+    // this body carries — to an origin the build was never baked with.
     redirect: 'error',
     headers: { 'content-type': 'application/json' },
-    // The credential and nothing else — in particular no `label`, which stays
-    // local (`docs/specs/remote-security-model.md` -> Burrow identity).
-    body: JSON.stringify(credential),
+    // The credential and the baked origin, which a Relay served from another
+    // refuses before saving anything, and nothing else — in particular no
+    // `label`, which stays local (`docs/specs/remote-security-model.md` ->
+    // Burrow identity).
+    body: JSON.stringify({ ...credential, origin: relayOrigin } satisfies BurrowEnrollRequest),
   });
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
-    throw new Error(refusalMessage(response.status, detail));
+    throw new Error(refusalMessage(response.status, detail, relayOrigin));
   }
   // The response body is untrusted like any other, so it goes through the same
   // guard every *read* of an enrollment uses. Without it a Relay that answers
@@ -224,7 +261,7 @@ export async function performEnrollment(
   }
   const enrolled = body as Partial<BurrowEnrollResponse> | null;
   const enrollment = {
-    relayUrl: base,
+    relayUrl: relayOrigin,
     burrowId: enrolled?.burrowId,
     burrowToken: enrolled?.burrowToken,
     // Untrusted like the rest of the body, and `isEnrollment` only checks that

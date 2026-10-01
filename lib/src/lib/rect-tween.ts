@@ -1,11 +1,13 @@
-// Focus-ring tween core — the selection ring's travel between panes/doors as a
-// pure function of time (animator style: `now` is always passed in; no DOM,
-// React, timers, or Date/performance). The overlay drives it from a rAF loop and
+// Focus-ring tween core — the selection ring's travel between panes/doors, and
+// the copy editor's rect-only travel (`RectTween`), as a pure function of time
+// (animator style: `now` is always passed in; no DOM, React, timers, or
+// Date/performance). The overlay drives it from a rAF loop and
 // tests assert real interpolated values against a fake clock, exactly like the
 // Lath animator (lib/src/lib/lath/animator.ts). It reuses that module's house
 // easing rather than re-deriving the curve.
 
 import { LATH_EASING } from './lath/animator';
+import { unionBounds } from './rect-union-outline';
 
 /** The ring's measured box in viewport (fixed-position) coordinates. */
 export interface RingRect {
@@ -14,6 +16,9 @@ export interface RingRect {
   width: number;
   height: number;
 }
+
+export const rectsEqual = (a: RingRect, b: RingRect): boolean =>
+  a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
 
 /** The ring's corner radii + stroke inset. Carried alongside the rect so a
  *  pane↔door selection morphs its shape (radii lerp) instead of popping. */
@@ -29,6 +34,8 @@ export interface RingShape {
 export interface RingFrame {
   rect: RingRect;
   shape: RingShape;
+  /** Two overlapping rectangles whose outer contour is the focus ring. */
+  union?: readonly [RingRect, RingRect];
 }
 
 /** Perpendicular speed of each ring edge while it travels (px/ms). See
@@ -94,7 +101,7 @@ export function retargetRingTween(tween: RingTween, to: RingFrame): RingTween {
  *  is evaluated at. Position and velocity MUST read the clock the same way or the
  *  smear desynchronizes from the ring it describes, so both go through here. A
  *  zero-duration tween reads as already complete. */
-function progressAt(tween: RingTween, now: number): { raw: number; clamped: number } {
+function progressAt(tween: Pick<RingTween, 'start' | 'durationMs'>, now: number): { raw: number; clamped: number } {
   const raw = tween.durationMs <= 0 ? 1 : (now - tween.start) / tween.durationMs;
   return { raw, clamped: raw < 0 ? 0 : raw > 1 ? 1 : raw };
 }
@@ -103,11 +110,16 @@ function progressAt(tween: RingTween, now: number): { raw: number; clamped: numb
  *  (`LATH_EASING` returns 0/1 at the bounds, so the lerp resolves to `from`/`to`
  *  identically); a zero-duration tween reads as done at `to`. `done` flips true
  *  once the clock reaches the completion instant. */
-export function sampleRingTween(tween: RingTween, now: number): { rect: RingRect; shape: RingShape; done: boolean } {
+export function sampleRingTween(tween: RingTween, now: number): RingFrame & { done: boolean } {
   const { clamped } = progressAt(tween, now);
   const eased = LATH_EASING(clamped);
+  const fromUnion = tween.from.union ?? [tween.from.rect, tween.from.rect];
+  const toUnion = tween.to.union ?? [tween.to.rect, tween.to.rect];
+  const union = clamped >= 1 ? tween.to.union : tween.from.union || tween.to.union
+    ? [lerpRect(fromUnion[0], toUnion[0], eased), lerpRect(fromUnion[1], toUnion[1], eased)] as const : undefined;
   return {
-    rect: lerpRect(tween.from.rect, tween.to.rect, eased),
+    union,
+    rect: union ? unionBounds(...union) : lerpRect(tween.from.rect, tween.to.rect, eased),
     shape: lerpShape(tween.from.shape, tween.to.shape, eased),
     done: clamped >= 1,
   };
@@ -147,4 +159,26 @@ export function sampleRingVelocity(tween: RingTween, now: number): RingEdgeSpeed
     left: edge(from.left, to.left),
     right: edge(from.left + from.width, to.left + to.width),
   };
+}
+
+/** A rect-only motion segment, for chrome that moves and resizes but carries no
+ *  ring shape (the copy editor). It has no retarget. */
+export interface RectTween {
+  from: RingRect;
+  to: RingRect;
+  start: number;
+  durationMs: number;
+}
+
+/** Begin a tween from the displayed rect `from` toward `to`, clock starting at
+ *  `now`. A zero (or negative) duration samples as already complete at `to`. */
+export function startRectTween(from: RingRect, to: RingRect, now: number, durationMs: number): RectTween {
+  return { from, to, start: now, durationMs };
+}
+
+/** Sample the tween at `now` on the house curve, exact at both endpoints, the
+ *  same clock reading as `sampleRingTween`. */
+export function sampleRectTween(tween: RectTween, now: number): { rect: RingRect; done: boolean } {
+  const { clamped } = progressAt(tween, now);
+  return { rect: lerpRect(tween.from, tween.to, LATH_EASING(clamped)), done: clamped >= 1 };
 }

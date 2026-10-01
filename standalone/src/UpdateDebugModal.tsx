@@ -5,6 +5,7 @@ import {
   modalActionButton,
   modalReviewBlock,
 } from '../../lib/src/components/design';
+import { writeTextToClipboard } from 'dormouse-lib/lib/clipboard';
 import { openIssueSearch } from './updater';
 
 interface UpdateDebugModalProps {
@@ -25,12 +26,8 @@ export function UpdateDebugModal({ onClose, failure, body }: UpdateDebugModalPro
 
   const handleCopy = async () => {
     if (!body) return;
-    try {
-      await navigator.clipboard.writeText(body);
-      setCopied(true);
-    } catch (e) {
-      console.error('[updater] Failed to copy report:', e);
-    }
+    if (await writeTextToClipboard(body)) setCopied(true);
+    else console.error('[updater] Failed to copy report');
   };
 
   const errorPreview = failure.error ?? '';

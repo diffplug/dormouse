@@ -1,27 +1,31 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { BellIcon, GearIcon, GlobeIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
+import { SecondsField, SwitchRow } from './AlarmSettingsControls';
+import { ScrollFades } from './ScrollFades';
+import type { AlertSink } from '../lib/alert-delivery-model';
+import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
+  ELEVATED_PANE_SHADOW,
   MODAL_OVERLAY_INSET,
   ModalCloseButton,
   ModalFrame,
+  INLINE_ACTION_CLASS,
   OVERLAY_MAX_HEIGHT,
-  NumericInput,
-  OnOffSwitch,
+  SETTINGS_SECTION,
   Shortcut,
   UNDER_SWITCH_INDENT,
-  modalActionButton,
 } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
-import { NotepadArchiveView } from './NotepadArchiveView';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
-import { RemoteControlSection } from './RemoteControlSection';
+import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
+import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
+import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
-import { hasNotepadArchive } from '../lib/notepad/archive-service';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
-  clampAlertDelayMs,
   getAlertSettings,
   getPushDevices,
   refreshPushDevicesNow,
@@ -36,14 +40,28 @@ import {
 const TITLE_ID = 'settings-dialog-title';
 const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
-/** Every section but the first draws its own divider. */
-const SECTION = 'mt-4 border-t border-border pt-3';
+/** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
+const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
+
+/**
+ * Where Settings → Network is named from another topic: a link to it inside the
+ * dialog, and its path in the Baseboard's preview, which has no topic to reach.
+ */
+function NetworkTopicLink({ onShow }: { onShow?: () => void }) {
+  if (!onShow) return <>Settings → Network</>;
+  return (
+    <button type="button" className={INLINE_ACTION_CLASS} onClick={onShow}>
+      Network
+    </button>
+  );
+}
 
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
  * that silently goes nowhere is indistinguishable from one that is broken.
  * `no-burrow` covers two of those causes, which is why `remoteControlBelow` is a
- * separate argument — see the comment on that branch below.
+ * separate argument — see the comment on that branch below. The network
+ * policy's Nothing, which sends none, is the caller's line (`AlarmSettingsSection`).
  *
  * The list is deliberately scoped to *this* machine, not the account: the ACL
  * that authorizes these devices lives on the Burrow and never on the Relay
@@ -56,7 +74,7 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
   // The preview never shows Remote control, so it also omits "below".
   // `no-burrow` covers two builds: one whose Burrow service simply has not enrolled,
   // and one with no Burrow service at all (`push-devices.ts` — the website leaves
-  // it here forever). Only the first has a Remote control section beneath this
+  // it here forever). Only the first has Network's Remote control choices beneath this
   // line, because the second is exactly where that section renders nothing, so
   // "below" has to key on the same seam the section gates on rather than on
   // `no-burrow`.
@@ -76,29 +94,90 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
   return `Push will be sent to ${push.devices.map((device) => device.label).join(', ')}`;
 }
 
-/**
- * The app-global Settings dialog, opened from the far right of the baseboard.
- * Theme first (`docs/specs/theme.md`), then the shell new terminals spawn with
- * (`lib/src/lib/shell-store.ts`), then the alarm settings
- * (`docs/specs/alert.md` -> Alarm settings).
- *
- * Rules are removable here but not addable: WATCHING is keyed on a running
- * command's name, so a rule is created by pressing `a` in the tab running it.
- * This dialog and the bell popover are the two places a rule set on a
- * since-closed Pane can be found and removed.
- */
+const TOPICS = [
+  { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell'] },
+  { id: 'activity', label: 'Activity', icon: PulseIcon, groups: ['watcher', 'inactivity'] },
+  { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
+  { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
+] as const;
+type TopicId = typeof TOPICS[number]['id'];
+type GroupId = typeof TOPICS[number]['groups'][number];
+/** Search matches a group by its topic's label as well as its own text. */
+const TOPIC_LABEL_OF = Object.fromEntries(
+  TOPICS.flatMap((topic) => topic.groups.map((group) => [group, topic.label.toLocaleLowerCase()])),
+) as Record<GroupId, string>;
+
+/** Where a chosen topic's heading lands below the scroller's top: its `py-4`. */
+export const TOPIC_GAP_PX = 16;
+/** A slower, consistent pace than the browser's native smooth scrolling. */
+export const SETTINGS_SCROLL_MS = 700;
+
+/** Search the mounted controls themselves so descriptions, options, and live
+ * command/device names have no second copy to drift. Hidden groups stay mounted
+ * to preserve drafts and in-flight actions when navigating or searching. */
+function useSettingsSearch(content: React.RefObject<HTMLDivElement | null>) {
+  const [index, setIndex] = useState<Record<string, string>>({});
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    const refresh = () => {
+      const next: Record<string, string> = {};
+      element.querySelectorAll<HTMLElement>('[data-setting]').forEach((group) => {
+        const words: string[] = [];
+        const walker = document.createTreeWalker(group, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) words.push(walker.currentNode.textContent ?? '');
+        group.querySelectorAll('[aria-label], [placeholder]').forEach((control) => {
+          words.push(control.getAttribute('aria-label') ?? '', control.getAttribute('placeholder') ?? '');
+        });
+        next[group.dataset.setting!] = words.join(' ').trim().toLocaleLowerCase();
+      });
+      setIndex((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+    };
+    refresh();
+    const observer = new MutationObserver(refresh);
+    observer.observe(element, {
+      subtree: true, childList: true, characterData: true,
+      attributes: true, attributeFilter: ['aria-label', 'placeholder'],
+    });
+    return () => observer.disconnect();
+  }, [content]);
+  return index;
+}
+
+function TopicSection({ id, hidden, children }: { id: TopicId; hidden: boolean; children: React.ReactNode }) {
+  return (
+    <section
+      id={`settings-topic-${id}`}
+      role="region"
+      data-settings-topic={id}
+      aria-labelledby={`settings-heading-${id}`}
+      hidden={hidden}
+      className="mb-6"
+    >
+      <h3 id={`settings-heading-${id}`} className="text-sm font-semibold text-foreground">
+        {TOPICS.find((topic) => topic.id === id)!.label}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+/** App-global settings. */
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const watched = useSyncExternalStore(subscribeToWatchedCommands, getWatchedCommandsSnapshot);
   const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
   const shellState = useSyncExternalStore(subscribeToShells, getShellsSnapshot);
-  const closeRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const scrollFrame = useRef<number | null>(null);
+  const [topic, setTopic] = useState<TopicId>('general');
+  const [hoveredTopic, setHoveredTopic] = useState<TopicId | null>(null);
+  const [above, setAbove] = useState(false);
+  const [below, setBelow] = useState(false);
+  const [query, setQuery] = useState('');
   // One union rather than a boolean per picker, so two menus can never be open
   // at once and Escape has a single thing to close.
   const [openMenu, setOpenMenu] = useState<'theme' | 'shell' | null>(null);
-  // The archive replaces this dialog's content rather than stacking a second
-  // modal on it: one dialog, two views, so the baseboard button that opened it
-  // still owns exactly one thing (docs/specs/notepad.md -> Archive).
-  const [view, setView] = useState<'settings' | 'archive'>('settings');
   // Stable, because an open picker feeds this to `useCloseOnOutsideAndEscape`:
   // a fresh arrow each render would tear down and re-add its three window
   // listeners on every re-render of this dialog.
@@ -113,134 +192,297 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   // to offer. That also covers every host whose adapter detects no shells and
   // every burrow that never seeds the store (fake = 1, remote = 0).
   const showShell = !getPlatform().hostOwnsShells && shellState.shells.length >= 2;
-  const showArchive = hasNotepadArchive();
+  const index = useSettingsSearch(contentRef);
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const searching = terms.length > 0;
+  const matches = (group: GroupId) =>
+    terms.every((term) => `${group} ${TOPIC_LABEL_OF[group]} ${index[group] ?? ''}`.includes(term));
+  // A topic shows once one of its groups renders matching text, so the host
+  // gates in the JSX below are the only ones.
+  const visibleTopics = TOPICS.filter((item) => item.groups.some((group) => index[group] && matches(group)));
+  const visible = (id: TopicId) => visibleTopics.some((item) => item.id === id);
+  const highlighted = hoveredTopic ?? topic;
+  const visibleTopicIds = visibleTopics.map((item) => item.id).join(',');
 
-  if (view === 'archive') {
-    return <NotepadArchiveView onBack={() => setView('settings')} onClose={onClose} />;
-  }
+  const followScroll = useCallback(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    setAbove(content.scrollTop > 1);
+    setBelow(content.scrollHeight - content.clientHeight - content.scrollTop > 1);
+    const sections = [...content.querySelectorAll<HTMLElement>('[data-settings-topic]:not([hidden])')];
+    if (!sections.length) return;
+    // Follow the heading at the reading edge. The final short section cannot
+    // reach that edge, so reaching the bottom selects it explicitly.
+    const edge = content.getBoundingClientRect().top + TOPIC_GAP_PX + 1;
+    const atBottom = content.scrollTop > 0 && content.scrollTop + content.clientHeight >= content.scrollHeight - 1;
+    let current = sections[0];
+    for (const section of sections) {
+      if (atBottom || section.getBoundingClientRect().top <= edge) current = section;
+    }
+    setTopic(current.dataset.settingsTopic as TopicId);
+  }, []);
+
+  const cancelScroll = useCallback(() => {
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = null;
+  }, []);
+
+  const scrollToTopic = useCallback((id: TopicId | null) => {
+    cancelScroll();
+    const content = contentRef.current;
+    const section = id ? content?.querySelector<HTMLElement>(`[data-settings-topic="${id}"]`) : null;
+    if (!content || (id && !section)) return;
+    const from = content.scrollTop;
+    const started = performance.now();
+    const step = (now: number) => {
+      // Re-read the destination while animating: fonts and live settings can
+      // move it. Once done, later layout changes must not pull the reader back.
+      const destination = section
+        ? content.scrollTop + section.getBoundingClientRect().top - content.getBoundingClientRect().top - TOPIC_GAP_PX
+        : 0;
+      const to = Math.max(0, Math.min(destination, content.scrollHeight - content.clientHeight));
+      const progress = Math.min((now - started) / SETTINGS_SCROLL_MS, 1);
+      const eased = (1 - Math.cos(Math.PI * progress)) / 2;
+      content.scrollTo({ top: from + (to - from) * eased, behavior: 'instant' });
+      scrollFrame.current = progress < 1 ? requestAnimationFrame(step) : null;
+    };
+    scrollFrame.current = requestAnimationFrame(step);
+  }, [cancelScroll]);
+
+  const chooseTopic = (id: TopicId) => {
+    setTopic(id);
+    setOpenMenu(null);
+    scrollToTopic(id);
+  };
+  // A search can hide the topic its link names, so the link clears it first.
+  const showNetwork = () => {
+    setQuery('');
+    chooseTopic('network');
+  };
+
+  useLayoutEffect(() => {
+    followScroll();
+    const content = contentRef.current;
+    if (!content) return;
+    const observer = new ResizeObserver(followScroll);
+    observer.observe(content);
+    content.querySelectorAll('[data-settings-topic]').forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, [followScroll, visibleTopicIds]);
+
+  useEffect(() => cancelScroll, [cancelScroll]);
 
   return (
     <ModalFrame
       titleId={TITLE_ID}
       layer="app"
-      padding="spacious"
+      padding="none"
       overlayClassName={MODAL_OVERLAY_INSET}
-      className={`${OVERLAY_MAX_HEIGHT.modal} w-full max-w-[26rem] overflow-y-auto`}
-      initialFocusRef={closeRef}
+      className={`${OVERLAY_MAX_HEIGHT.modal} flex h-[36rem] w-full max-w-[48rem] flex-col overflow-hidden`}
+      style={{ boxShadow: ELEVATED_PANE_SHADOW }}
+      initialFocusRef={searchRef}
+      onOutsideClick={onClose}
       // ModalFrame's Escape handler is a capture-phase window listener that
       // stops propagation, so a picker's own Escape never fires. Route it:
       // whichever dropdown is open closes first, the dialog only on the next
       // press.
       onEscape={() => (openMenu ? setOpenMenu(null) : onClose())}
     >
-      <div className="flex items-start gap-3">
-        <h2 id={TITLE_ID} className="min-w-0 flex-1 text-sm leading-5 font-semibold text-foreground">
+      <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+        <h2 id={TITLE_ID} className="shrink-0 text-sm font-semibold text-foreground">
           Settings
         </h2>
-        <ModalCloseButton ref={closeRef} onClick={onClose} />
+        <label className="flex min-w-0 flex-1 items-center gap-1.5 rounded border border-input-border bg-input-bg px-2 py-1.5 text-muted focus-within:outline focus-within:outline-focus-ring">
+          <MagnifyingGlassIcon size={14} className="shrink-0" aria-hidden />
+          <input
+            ref={searchRef}
+            type="search"
+            aria-label="Search settings"
+            placeholder="Search settings"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpenMenu(null);
+              setHoveredTopic(null);
+              scrollToTopic(null);
+            }}
+            className="min-w-0 w-full bg-transparent text-sm text-foreground outline-none"
+          />
+        </label>
+        <ModalCloseButton onClick={onClose} />
       </div>
-
-      {showTheme ? (
-        <section className="mt-4 flex items-center gap-1.5 text-sm text-foreground">
-          <span>Theme:</span>
-          <ThemePicker
-            variant="settings-dialog"
-            open={openMenu === 'theme'}
-            onOpenChange={onThemeOpenChange}
-          />
-        </section>
-      ) : null}
-
-      {/* Grouped with the Theme row rather than divided from it: both name what
-          this Window looks and runs like. */}
-      {showShell ? (
-        <section
-          className={`${showTheme ? 'mt-2' : 'mt-4'} flex items-center gap-1.5 text-sm text-foreground`}
+      <div className="flex min-h-0 flex-1">
+        <nav
+          aria-label="Settings topics"
+          className="w-12 shrink-0 overflow-y-auto border-r border-border bg-app-bg px-1 py-3 sm:w-48 sm:px-3"
+          onPointerLeave={() => setHoveredTopic(null)}
         >
-          <span>Shell:</span>
-          <ShellPicker
-            open={openMenu === 'shell'}
-            onOpenChange={onShellOpenChange}
-            onSelect={onClose}
-          />
-        </section>
-      ) : null}
-
-      <section className={showTheme || showShell ? SECTION : 'mt-4'}>
-        <div className="text-sm text-foreground">
-          Animation watcher enabled for commands that start with:
-        </div>
-        {watched.length > 0 ? (
-          <div className="mt-1.5">
-            <WatchedCommandList />
-          </div>
-        ) : (
-          <div className="mt-1.5 text-sm leading-relaxed text-muted">
-            Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab to
-            alert on every tab running it.
-          </div>
-        )}
-        <div className="mt-3">
-          <SwitchRow
-            label="Defer alerts until animation stops"
-            on={settings.deferAlertsUntilQuiet}
-            onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
-          />
-          <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
-            When the animation watcher is fully armed, terminal notifications wait
-            for the pane to become quiet.
-          </div>
-        </div>
-      </section>
-
-      <section className={SECTION}>
-        <SecondsField
-          label="Inactivity timeout:"
-          valueMs={settings.inactivityTimeoutMs}
-          onCommit={(inactivityTimeoutMs) => updateAlertSettings({ inactivityTimeoutMs })}
-        />
-        <div className="mt-1 text-sm leading-relaxed text-muted">
-          User has walked away after this much inactivity.
-        </div>
-      </section>
-
-      <AlarmSettingsSection sink="speech" />
-      <AlarmSettingsSection sink="push" />
-
-      {/* Directly under the push section that points at it: push is
-          the feature that makes a reader care, and "no Burrow" is the reason it
-          has nowhere to go. Renders nothing on a build with no Burrow service. */}
-      <RemoteControlSection />
-
-      {/* Last: the only row here that leads somewhere instead of setting
-          something, so it reads as the door it is. */}
-      {showArchive ? (
-        <section className={SECTION}>
-          <div className="text-sm text-foreground">Notepad archive</div>
-          <div className="mt-1 text-sm leading-relaxed text-muted">
-            Notes kept from terminals and browsers that have closed. They stay
-            until you delete them.
-          </div>
-          <button
-            type="button"
-            className={`${modalActionButton()} mt-2`}
-            onClick={() => setView('archive')}
+          {visibleTopics.map(({ id, label, icon: Icon }, position) => (
+            <button
+              key={id}
+              type="button"
+              title={label}
+              aria-current={highlighted === id ? 'location' : undefined}
+              aria-controls={`settings-topic-${id}`}
+              onClick={() => chooseTopic(id)}
+              onPointerEnter={(event) => {
+                if (event.pointerType !== 'mouse') return;
+                setHoveredTopic(id);
+                chooseTopic(id);
+              }}
+              onKeyDown={(event) => {
+                const count = visibleTopics.length;
+                const next = event.key === 'ArrowDown' ? (position + 1) % count
+                  : event.key === 'ArrowUp' ? (position + count - 1) % count
+                  : event.key === 'Home' ? 0 : event.key === 'End' ? count - 1 : null;
+                if (next === null) return;
+                event.preventDefault();
+                setHoveredTopic(null);
+                chooseTopic(visibleTopics[next].id);
+                // The nav's buttons are exactly `visibleTopics`, in order.
+                (event.currentTarget.parentElement!.children[next] as HTMLElement).focus({ preventScroll: true });
+              }}
+              className={`mb-1 flex w-full items-center gap-2 rounded px-2 py-2 text-left text-sm focus-visible:outline focus-visible:outline-focus-ring ${highlighted === id
+                ? 'bg-header-active-bg text-header-active-fg'
+                : 'text-app-fg hover:bg-foreground/10'}`}
+            >
+              <Icon size={16} className="shrink-0" aria-hidden />
+              <span className="sr-only sm:not-sr-only">{label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div
+            id="settings-content"
+            ref={contentRef}
+            onPointerOver={(event) => {
+              if (event.pointerType !== 'mouse') return;
+              const section = (event.target as Element).closest<HTMLElement>('[data-settings-topic]');
+              setHoveredTopic(section ? section.dataset.settingsTopic as TopicId : null);
+            }}
+            onPointerLeave={() => setHoveredTopic(null)}
+            onScroll={followScroll}
+            // The user's own input takes over from a chosen topic.
+            onWheel={cancelScroll}
+            onPointerDown={cancelScroll}
+            onKeyDown={cancelScroll}
+            className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-smooth px-3 py-4 break-words sm:px-6 [&_label]:flex-wrap"
           >
-            Open archive
-          </button>
-        </section>
-      ) : null}
+            {searching && (
+              <div role="status" className="mb-4 text-sm text-muted">
+                {visibleTopics.length ? 'Search results' : 'No settings found.'}
+              </div>
+            )}
+            <TopicSection id="general" hidden={!visible('general')}>
+              <div className="mt-4 flex flex-col gap-2">
+                {showTheme && (
+                  <section data-setting="theme" hidden={!matches('theme')} className={PICKER_ROW}>
+                    <span>Theme:</span>
+                    <ThemePicker
+                      variant="settings-dialog"
+                      open={openMenu === 'theme'}
+                      onOpenChange={onThemeOpenChange}
+                    />
+                  </section>
+                )}
+                {showShell && (
+                  <section data-setting="shell" hidden={!matches('shell')} className={PICKER_ROW}>
+                    <span>Shell:</span>
+                    <ShellPicker
+                      open={openMenu === 'shell'}
+                      onOpenChange={onShellOpenChange}
+                      onSelect={onClose}
+                    />
+                  </section>
+                )}
+              </div>
+            </TopicSection>
+            <TopicSection id="activity" hidden={!visible('activity')}>
+              <section data-setting="watcher" hidden={!matches('watcher')} className="mt-4">
+                <div className="text-sm text-foreground">
+                  Animation watcher enabled for commands that start with:
+                </div>
+                {watched.length > 0 ? (
+                  <div className="mt-1.5">
+                    <WatchedCommandList />
+                  </div>
+                ) : (
+                  <div className="mt-1.5 text-sm leading-relaxed text-muted">
+                    Nothing yet. Start a command, then press <Shortcut>a</Shortcut> in its tab and
+                    turn on <em>Watch all …</em> to alert on every tab running it.
+                  </div>
+                )}
+                <div className="mt-3">
+                  <SwitchRow
+                    label="Defer alerts until animation stops"
+                    on={settings.deferAlertsUntilQuiet}
+                    onChange={(deferAlertsUntilQuiet) => updateAlertSettings({ deferAlertsUntilQuiet })}
+                  />
+                  <div className={`${UNDER_SWITCH_INDENT} mt-1 text-sm leading-relaxed text-muted`}>
+                    When the animation watcher is fully armed, terminal notifications wait
+                    for the pane to become quiet, and a ring raised by silence goes away if
+                    the watched command starts working again.
+                  </div>
+                </div>
+              </section>
+              <section data-setting="inactivity" hidden={!matches('inactivity')} className={SETTINGS_SECTION}>
+                <SecondsField
+                  label="Inactivity timeout:"
+                  valueMs={settings.inactivityTimeoutMs}
+                  onCommit={(inactivityTimeoutMs) => updateAlertSettings({ inactivityTimeoutMs })}
+                />
+                <div className="mt-1 text-sm leading-relaxed text-muted">
+                  User has walked away after this much inactivity.
+                </div>
+              </section>
+            </TopicSection>
+            <TopicSection id="notifications" hidden={!visible('notifications')}>
+              {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
+              <div data-setting="speech" hidden={!matches('speech')}>
+                <AlarmSettingsSection sink="speech" onShowNetwork={showNetwork} />
+              </div>
+              <div data-setting="push" hidden={!matches('push')}>
+                <AlarmSettingsSection sink="push" onShowNetwork={showNetwork} />
+              </div>
+            </TopicSection>
+            {/* Network stays below push, whose `no-burrow` copy says "below". */}
+            <TopicSection id="network" hidden={!visible('network')}>
+              <div data-setting="network" hidden={!matches('network')}>
+                <NetworkSettings />
+              </div>
+              <div data-setting="phones" hidden={!matches('phones')}>
+                <NetworkPhones />
+              </div>
+              <div data-setting="updates" hidden={!matches('updates')}>
+                <NetworkUpdates />
+              </div>
+            </TopicSection>
+          </div>
+          <ScrollFades above={above} below={below} />
+        </div>
+      </div>
     </ModalFrame>
   );
 }
 
-export type AlarmSink = 'speech' | 'push';
-
-/** Shared by the full dialog and the brief, inert baseboard confirmation. */
-export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSink; preview?: boolean }) {
-  const settings = useSyncExternalStore(subscribeToAlertSettings, getAlertSettings);
+/**
+ * Shared by the full dialog and the brief, inert baseboard confirmation.
+ * `onShowNetwork` is the dialog's way to its Network topic, which the lines
+ * naming the network policy's Nothing link to.
+ */
+export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
+  sink: AlertSink;
+  preview?: boolean;
+  onShowNetwork?: () => void;
+}) {
+  // The dialog edits application defaults; only the baseboard preview shows the Workspace's effective value.
+  const { policy: settings } = useWorkspaceAlertPolicy(preview);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasBurrowService = getPlatform().burrow !== undefined;
+  const managedVoiceOffered = useManagedVoiceOffered();
+  // Under Nothing the service sends no push and managed voice asks nothing
+  // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
+  const networkOff = useNetworkPolicy()?.level === 'nothing';
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -249,24 +491,42 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSin
   }, [sink, preview]);
 
   return sink === 'speech' ? (
-    <AlarmSinkSection
-      className={preview ? '' : SECTION}
-      switchLabel="Speak out loud if not attended"
-      delayLabel="Delay before speaking:"
-      enabled={settings.speakEnabled}
-      delayMs={settings.speakDelayMs}
-      onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
-      onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
-      action={preview ? null : <SpeakTestButton />}
-    >
-      Uses your browser or system voice.{' '}
-      <ExternalTextLink href={HOSTED_VOICE_URL}>
-        Managed ElevenLabs voice is coming soon.
-      </ExternalTextLink>
-    </AlarmSinkSection>
+    <>
+      <AlarmSinkSection
+        className={preview ? '' : SETTINGS_SECTION}
+        switchLabel="Speak out loud if not attended"
+        delayLabel="Delay before speaking:"
+        enabled={settings.speakEnabled}
+        delayMs={settings.speakDelayMs}
+        onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
+        onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
+        action={preview ? null : <SpeakTestButton />}
+      >
+        {!managedVoiceOffered ? (
+          <>
+            Uses your browser or system voice.{' '}
+            <ExternalTextLink href={HOSTED_VOICE_URL}>
+              Managed ElevenLabs voice is coming soon.
+            </ExternalTextLink>
+          </>
+        ) : networkOff ? (
+          <>
+            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
+            so alerts use your browser or system voice.
+          </>
+        ) : (
+          'Uses managed voice while a voice token is saved, otherwise your browser or system voice.'
+        )}
+      </AlarmSinkSection>
+      {preview ? null : (
+        <div className={UNDER_SWITCH_INDENT}>
+          <ManagedVoiceSection />
+        </div>
+      )}
+    </>
   ) : (
     <AlarmSinkSection
-      className={preview ? '' : SECTION}
+      className={preview ? '' : SETTINGS_SECTION}
       switchLabel="Send push notification if not attended"
       delayLabel="Delay before push:"
       enabled={settings.pushEnabled}
@@ -275,7 +535,11 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlarmSin
       onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
       action={preview ? null : <PushTestButton />}
     >
-      {describePushTargets(push, hasBurrowService && !preview)}
+      {networkOff ? (
+        <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
+      ) : (
+        describePushTargets(push, hasBurrowService && !preview)
+      )}
     </AlarmSinkSection>
   );
 }
@@ -330,74 +594,5 @@ function AlarmSinkSection({
         {action ? <div className="mt-2">{action}</div> : null}
       </div>
     </section>
-  );
-}
-
-function SwitchRow({
-  label,
-  on,
-  onChange,
-}: {
-  label: string;
-  on: boolean;
-  /** Absent inside a disabled fieldset, where the switch can never fire. */
-  onChange?: (next: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <OnOffSwitch on={on} onEnable={() => onChange?.(true)} onDisable={() => onChange?.(false)} label={label} />
-      <span className="min-w-0 text-sm text-foreground">{label}</span>
-    </div>
-  );
-}
-
-/**
- * A delay expressed in seconds, committed on blur or Enter rather than per
- * keystroke: typing "3" on the way to "30" must not briefly install a 3s timer.
- *
- * `draft === null` means "show the stored value", so committing always clears
- * the draft and lets the store win. That covers the snap-back for an empty or
- * out-of-range entry — including the case where the clamp makes the store a
- * no-op and no change notification arrives.
- */
-function SecondsField({
-  label,
-  valueMs,
-  disabled,
-  onCommit,
-}: {
-  label: string;
-  valueMs: number;
-  disabled?: boolean;
-  /** Absent inside a disabled fieldset, where the field can never be edited. */
-  onCommit?: (ms: number) => void;
-}) {
-  const [draft, setDraft] = useState<string | null>(null);
-
-  const commit = (): void => {
-    const seconds = Number(draft ?? '');
-    setDraft(null);
-    if (draft === null || !Number.isFinite(seconds) || seconds <= 0) return;
-    onCommit?.(clampAlertDelayMs(seconds * 1000));
-  };
-
-  return (
-    <label className="flex items-center gap-1.5 text-sm text-foreground">
-      <span>{label}</span>
-      <NumericInput
-        value={draft ?? String(Math.round(valueMs / 1000))}
-        onChange={setDraft}
-        chars={3}
-        disabled={disabled}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            commit();
-          }
-        }}
-      />
-      <span className="text-muted">seconds</span>
-    </label>
   );
 }

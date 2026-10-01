@@ -7,16 +7,19 @@ import type {
   KillSurfaceConfirmation,
   KillSurfaceResponse,
   ParseResult,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorMessage,
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 
-interface KillFlags {
+interface KillFlags extends WorkspaceScopedFlags {
   readonly confirmDangerously?: boolean;
   readonly confirmIfRead?: string;
   readonly json?: boolean;
@@ -29,14 +32,14 @@ export const killCommand: Command = {
       scope: 'root',
       findReplace: [
         '  dor kill [--confirm-dangerously] [--confirm-if-read text] [--json]<TO-EOL>',
-        '  dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json]\n',
+        '  dor kill <surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]\n',
       ],
     },
   ],
   command: buildCommand<KillFlags, [string], DorCommandContext>({
     docs: {
       brief: 'Kill a surface.',
-      customUsage: ['<surface> [--confirm-if-read text|--confirm-dangerously] [--json]'],
+      customUsage: ['<surface> [--confirm-if-read text|--confirm-dangerously] [--json] [--workspace ref]'],
       fullDescription: `Kills a surface. One confirmation mode is required.
 
 --confirm-if-read kills only if dor read <surface> would return visible text containing the provided text. The text must contain at least 4 non-whitespace characters.
@@ -58,6 +61,7 @@ JSON output:
         confirmDangerously: { kind: 'boolean', brief: 'Kill without further confirmation.', optional: true, withNegated: false },
         confirmIfRead: { kind: 'parsed', parse: stringParser, brief: 'Kill only if dor read contains this text.', optional: true, placeholder: 'text' },
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'tuple',
@@ -81,6 +85,7 @@ async function runKillCommand(this: DorCommandContext, flags: KillFlags, surface
     const response = await client.killSurface({
       confirmation: confirmation.value,
       surface,
+      ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderKillResponse(response, flags.json === true));
     return undefined;

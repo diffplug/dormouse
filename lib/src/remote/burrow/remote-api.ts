@@ -24,7 +24,7 @@ import {
   type TerminalWriteParams,
 } from 'remote-lib-common';
 import { inputIsReplayTerminalReport } from '../../lib/terminal-report-filter';
-import type { BurrowSurfaceProvider, SurfaceHandle } from './burrow-surface-provider';
+import type { BurrowSurfaceProvider, SurfaceHandle, SurfaceHold } from './burrow-surface-provider';
 
 /** Coalesce window for directory re-snapshots (remote-api.md: "Burrow coalesces"). */
 const DIRECTORY_DEBOUNCE_MS = 150;
@@ -48,12 +48,30 @@ export interface RemoteApiSessionOptions {
   send: (payload: RemoteResponse | RemoteEventMsg) => void;
   /** Everything below the protocol: where surfaces live, and how PTYs are driven. */
   provider: BurrowSurfaceProvider;
+  /**
+   * Who this session is to the panes it sizes (`docs/specs/remote-api.md` →
+   * "Size authority"): an id unique to it, opaque to every owner, the label a
+   * held pane's strip shows, and the service instance that serves it.
+   */
+  holder: SessionHolder;
+  /** Called once, when this session is disposed. */
+  onDispose?: () => void;
+}
+
+/** {@link RemoteApiSessionOptions.holder}. */
+export interface SessionHolder {
+  readonly id: string;
+  readonly label: string;
+  /** {@link SurfaceHold.serviceId}; absent where no service instance names itself. */
+  readonly serviceId?: string;
 }
 
 export class RemoteApiSession {
   readonly #burrowId: string;
   readonly #send: (payload: RemoteResponse | RemoteEventMsg) => void;
   readonly #provider: BurrowSurfaceProvider;
+  readonly #holder: SessionHolder;
+  readonly #onDispose: (() => void) | null;
 
   #directorySubId: string | null = null;
   #unsubDirectory: (() => void) | null = null;
@@ -67,6 +85,8 @@ export class RemoteApiSession {
     this.#burrowId = options.burrowId;
     this.#send = options.send;
     this.#provider = options.provider;
+    this.#holder = options.holder;
+    this.#onDispose = options.onDispose ?? null;
   }
 
   handle(data: unknown): void {
@@ -108,6 +128,7 @@ export class RemoteApiSession {
     this.#unsubDirectory?.();
     this.#unsubDirectory = null;
     this.#teardownAttachment();
+    this.#onDispose?.();
   }
 
   // --- Responses ---
@@ -250,14 +271,34 @@ export class RemoteApiSession {
     // microtask, so one shared epoch would let the older, slower attach land
     // last and take the attachment.
     const generation = ++this.#attachGeneration;
-    void this.#provider.resolveSurface(params.surfaceId, params).then(
+    // Per attach too: a release names the attachment it gives up, so one from
+    // an attachment this session has since replaced — the same pane included —
+    // cannot free the hold its successor took.
+    const { id, label, serviceId } = this.#holder;
+    const hold: SurfaceHold = {
+      holder: id,
+      label,
+      lease: String(generation),
+      ...(serviceId === undefined ? {} : { serviceId }),
+    };
+    void this.#provider.resolveSurface(params.surfaceId, params, hold).then(
       (handle) => {
-        if (this.#disposed || this.#attachGeneration !== generation) {
-          this.#failAttach(request, params.surfaceId, generation);
+        if (!handle) {
+          // Nobody owns it — or its owner answered past the budget, having
+          // taken the hold all the same.
+          this.#releaseUnresolved(params.surfaceId, hold);
+          this.#failAttach(
+            request,
+            params.surfaceId,
+            generation,
+            `no such surface: ${params.surfaceId}`,
+          );
           return;
         }
-        if (!handle) {
-          this.#fail(request, `no such surface: ${params.surfaceId}`);
+        if (this.#disposed || this.#attachGeneration !== generation) {
+          // The owner took the hold inside the resolve; nothing will attach it.
+          this.#release(handle);
+          this.#failAttach(request, params.surfaceId, generation);
           return;
         }
         try {
@@ -266,6 +307,7 @@ export class RemoteApiSession {
           // `streamPty` / the repaint bounce are provider calls too, and may
           // throw before an attachment is fully installed.
           if (this.#attachment?.handle === handle) this.#teardownAttachment();
+          else this.#release(handle);
           this.#failAttach(
             request,
             params.surfaceId,
@@ -275,6 +317,8 @@ export class RemoteApiSession {
         }
       },
       (error) => {
+        // No handle to release through, and the owner may hold the pane anyway.
+        this.#releaseUnresolved(params.surfaceId, hold);
         this.#failAttach(
           request,
           params.surfaceId,
@@ -341,6 +385,7 @@ export class RemoteApiSession {
     });
     if (closedWhileSubscribing) {
       stream.stop();
+      this.#release(handle);
       this.#failAttach(
         request,
         params.surfaceId,
@@ -491,10 +536,42 @@ export class RemoteApiSession {
     );
   }
 
+  /**
+   * Stop streaming the attachment and give its pane's size back — every way an
+   * attachment ends: detach, a newer attach, exit, a failed attach, disposal.
+   */
   #teardownAttachment(): void {
-    if (!this.#attachment) return;
-    this.#attachment.stopStream();
+    const attachment = this.#attachment;
+    if (!attachment) return;
+    attachment.stopStream();
     this.#attachment = null;
+    this.#release(attachment.handle);
+  }
+
+  /**
+   * Give up the hold `handle` was resolved with. The owner clears it only while
+   * that very hold is still its holder's, so releasing is always safe; a
+   * provider that throws must not take a teardown down with it.
+   */
+  #release(handle: SurfaceHandle): void {
+    try {
+      handle.release();
+    } catch (error) {
+      console.warn('burrow: releasing a surface failed', error);
+    }
+  }
+
+  /**
+   * Give up `hold` on a surface no handle was resolved for, at every owner
+   * that could have taken it — as safe as {@link #release}, and for the same
+   * reason.
+   */
+  #releaseUnresolved(surfaceId: string, hold: SurfaceHold): void {
+    try {
+      this.#provider.releaseSurface(surfaceId, hold);
+    } catch (error) {
+      console.warn('burrow: releasing a surface failed', error);
+    }
   }
 }
 

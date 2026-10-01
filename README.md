@@ -12,15 +12,16 @@ A multitasking terminal for VS Code and the desktop — a real tiling layout, tm
 
 ## Documentation
 
-- [CLI reference](https://dormouse.sh/docs/dor) — every `dor` command
-- [Agent skill](https://dormouse.sh/docs/agent-skill) — the operating guide Dormouse bundles for coding agents
-- [Self-host](https://dormouse.sh/docs/self-host) — run the coordinating Relay on your own tailnet
+- [CLI reference](https://dormouse.sh/dor) — every `dor` command
+- [Compatible agents](https://dormouse.sh/compatible-agents) — conversation recovery, watching, and contributing an agent integration
+- [Agent skill](https://dormouse.sh/agent-skill) — the operating guide Dormouse bundles for coding agents
+- [Self-host](https://dormouse.sh/self-host) — run the coordinating Relay on your own tailnet
 - [Hosted](https://dormouse.sh/hosted/) — upcoming managed Relay and ElevenLabs voice options
-- [Security](https://dormouse.sh/docs/security) — what Dormouse guarantees, what it does not, and how that is checked
+- [Security](https://dormouse.sh/security) — what Dormouse guarantees, what it does not, and how that is checked
 
 ## Features
 
-- **Alerts when something needs you.** Terminal notification protocols (`BEL`, `OSC 9/9;4/99/777`) and unattended command exits alert with no setup; opt in per command name to also be alerted when a watched command goes quiet.
+- **Alerts when something needs you.** Terminal notification protocols (`BEL`, `OSC 9/9;4/99/777`) and unattended command exits alert with no setup; supported agents are watched by default when no watch list has been saved, and you can watch other command names to be alerted when they go quiet.
 - **tmux-compatible keybindings.** Same prefix, same splits, same pane navigation. Muscle memory transfers.
 - **Full mouse support.** Click to split, drag to resize, scroll to navigate. Or stay on the keyboard.
 - **Copy-paste that works.** Click and drag selects text the way you'd expect, even in mouse-aware TUIs that normally swallow it as escape codes.
@@ -43,7 +44,7 @@ pnpm dev:standalone # tauri hotreload
 pnpm dev:relay      # selfhost Relay + Pocket, for remote control
 
 pnpm dogfood:vscode # builds the VSCode extension and installs it into your local VSCode
-pnpm dogfood:standalone              # installs your local build overtop of your existing system installation
+pnpm dogfood:standalone              # installs your local build overtop of your existing system installation (then `dor app restart`)
 pnpm dogfood:standalone --no-install # builds and runs the standalone app from the build dir, without installing
 
 pnpm storybook    # http://localhost:6006

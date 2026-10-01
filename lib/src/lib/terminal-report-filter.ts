@@ -1,10 +1,6 @@
 import { ESC, RESET } from './ansi';
 import type { TerminalEntry } from './terminal-store';
 
-export function inputContainsEnter(data: string): boolean {
-  return data.includes('\r');
-}
-
 const REPORT_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/;
 const REPORT_SS3 = /\x1bO[@-~]/;
 const REPORT_OSC = /\x1b\][\s\S]*?(?:\x07|\x1b\\)/;
@@ -16,7 +12,7 @@ const validator = (...parts: RegExp[]) => new RegExp(`^(?:${parts.map((p) => p.s
 const REPORT_PARTS = [REPORT_CSI, REPORT_SS3, REPORT_OSC, REPORT_APC];
 const REPORT_TOKENS = tokenizer(...REPORT_PARTS);
 const REPORT_VALIDATE = validator(...REPORT_PARTS);
-const REPLAY_REPORT_CSI = /\x1b\[(?:\??\d+(?:;\d+)*[Rn]|[?>=]?\d*(?:;\d+)*c|\d+(?:;\d+)*[tx]|\??\d+(?:;\d+)*\$y|\?\d+(?:;\d+)*S)/;
+const REPLAY_REPORT_CSI = /\x1b\[(?:\??\d+(?:;\d+)*[Rn]|[?>=]?\d*(?:;\d+)*c|\d+(?:;\d+)*[tx]|\??\d+(?:;\d+)*\$y|\?\d+(?:;\d+)*S|\?\d*u)/;
 const REPLAY_REPORT_FOCUS = /\x1b\[[IO]/;
 const REPORT_DCS = /\x1bP[\s\S]*?\x1b\\/;
 const REPLAY_REPORT_PARTS = [REPLAY_REPORT_CSI, REPLAY_REPORT_FOCUS, REPORT_OSC, REPORT_DCS, REPORT_APC];

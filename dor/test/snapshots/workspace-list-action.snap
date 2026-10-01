@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: dor list --workspaces prints the Workspace overview; dor workspace only mutates

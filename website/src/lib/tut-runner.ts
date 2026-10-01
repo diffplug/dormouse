@@ -7,11 +7,16 @@ import {
   FG_DEFAULT,
   ITALIC,
   LEAVE_ALT_SCREEN,
+  MOUSE_ENABLE,
+  MOUSE_DISABLE,
   RESET,
   fg,
 } from "dormouse-lib/lib/ansi";
 import { cfg } from "dormouse-lib/cfg";
 import type { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
+import type { MobileGestureInputId } from "dormouse-lib/lib/mobile-gesture-menu";
+import { parseColorRgb } from "dormouse-lib/lib/css-color";
+import { prefersReducedMotion } from "dormouse-lib/lib/ui-geometry";
 import type { InteractiveProgram } from "./tutorial-shell";
 import {
   DESKTOP_TUTORIAL_PROFILE,
@@ -21,7 +26,7 @@ import {
 import type { TutorialState } from "./tutorial-state";
 
 /** Snapshot each launch: both the countdown and the fake command use this
- *  duration. The floor keeps a shortened attention setting from ending output
+ *  duration. The floor keeps a shortened inactivity setting from ending output
  *  before the WATCHING detector can confirm BUSY. */
 function getDemoDurationMs(inactivityTimeoutMs: number): number {
   return Math.max(
@@ -49,10 +54,105 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 const SPINNER_INTERVAL_MS = 100;
 
 /** Static "your turn" pointer for the active section item — deliberately not
- *  animated, so the checklist doesn't compete for attention with the bell the
- *  Alerts section is teaching. (Runner frames are written with
- *  `skipActivity`, so animation would no longer tilt the bell either way.) */
+ *  animated, so the checklist doesn't compete for attention with the alarm the
+ *  Alerts section is teaching. (Runner frames are written with `skipActivity`,
+ *  so animation would no longer move the detector either way.) */
 const ACTIVE_ITEM_GLYPH = "●";
+const DONE_MARK = `${fg(32)}✓${RESET}`;
+const ACTIVE_MARK = `${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}`;
+const GESTURE_ARROWS: readonly MobileGestureInputId[] = ["up", "down", "left", "right"];
+/** The starfield world, independent of the viewport so scrolling and resizing
+ *  never regenerate its stars. */
+export const STARFIELD_HEIGHT = 256;
+const STARFIELD_WIDTH = 128;
+const STAR_COUNT = 1152;
+/** Share of each twinkle cycle a star spends fully dark. */
+const STAR_DARK_SHARE = 0.15;
+export const GESTURE_BACKGROUND_TICK_MS = 33;
+
+interface Star {
+  x: number;
+  y: number;
+  glyph: string;
+  /** Opacity at the height of each twinkle. */
+  peak: number;
+  phase: number;
+  pulseSeconds: number;
+  cycle: number;
+  opacity: number;
+}
+
+/** Each star twinkles through one cosine cycle and relocates at the cycle
+ *  boundary, which falls inside its dark interval, so relocation never moves a
+ *  visible star. Offscreen stars advance too, independent of scroll. */
+class GestureStarfield {
+  private seed = 42;
+  private frame = 0;
+  readonly stars: readonly Star[] = Array.from({ length: STAR_COUNT }, () => {
+    const x = Math.floor(this.random() * STARFIELD_WIDTH);
+    const y = Math.floor(this.random() * STARFIELD_HEIGHT);
+    const depth = this.random();
+    return {
+      x,
+      y,
+      glyph: depth > 0.85 ? "✦" : depth > 0.6 ? "+" : "·",
+      peak: 0.36 + depth * 0.16,
+      phase: this.random(),
+      pulseSeconds: (10 + this.random() * 10) / 3,
+      cycle: 0,
+      opacity: 0,
+    };
+  });
+
+  constructor() {
+    this.settle();
+  }
+
+  /** Steps one background tick. */
+  advance(): void {
+    this.frame++;
+    this.settle();
+  }
+
+  private settle(): void {
+    const seconds = this.frame * GESTURE_BACKGROUND_TICK_MS / 1000;
+    for (const star of this.stars) {
+      const age = seconds / star.pulseSeconds + star.phase;
+      const cycle = Math.floor(age);
+      if (cycle !== star.cycle) {
+        star.cycle = cycle;
+        this.respawn(star);
+      }
+      const pulse = (1 - Math.cos((age - cycle) * Math.PI * 2)) / 2;
+      // Smoothstep eases both ends of each fade to rest.
+      const visibility = Math.max(0, (pulse - STAR_DARK_SHARE) / (1 - STAR_DARK_SHARE));
+      star.opacity = star.peak * visibility * visibility * (3 - 2 * visibility);
+    }
+  }
+
+  private respawn(star: Star): void {
+    const area = STARFIELD_WIDTH * STARFIELD_HEIGHT;
+    // Choose uniformly among every world cell except this star's old one.
+    const position = (star.y * STARFIELD_WIDTH + star.x + 1 + Math.floor(this.random() * (area - 1))) % area;
+    star.x = position % STARFIELD_WIDTH;
+    star.y = Math.floor(position / STARFIELD_WIDTH);
+  }
+
+  private random(): number {
+    this.seed = (Math.imul(this.seed, 1664525) + 1013904223) >>> 0;
+    return this.seed / 2 ** 32;
+  }
+}
+
+/** SGR foregrounds for 256 opacity levels, blending the terminal background
+ *  toward its foreground; dim default text when either color is unreadable. */
+function starPalette(theme: Record<string, string> | undefined): readonly string[] {
+  const foreground = theme && parseColorRgb(theme.foreground);
+  const background = theme && parseColorRgb(theme.background);
+  return Array.from({ length: 256 }, (_, level) => foreground && background
+    ? `\x1b[38;2;${background.map((channel, i) => Math.round(channel + (foreground[i] - channel) * level / 255)).join(";")}m`
+    : `${DIM}${FG_DEFAULT}`);
+}
 const STAR_PROMPT_TITLE = "Starred on GitHub";
 const FLAPPY_TITLE = "🐭 FlappyTerm 🐭";
 const FLAPPY_DESKTOP_GAME_OVER_PROMPT = "Read about Dormouse Pocket  [p]";
@@ -129,6 +229,9 @@ interface TutRunnerOptions {
   /** Current Pocket touch mode, used for live non-progress tutorial prompts. */
   getPocketTouchMode?: () => PocketTutorialTouchMode;
   subscribeToPocketTouchMode?: (listener: () => void) => () => void;
+  /** Terminal colors the Pocket gesture starfield blends between. */
+  getTerminalTheme?: () => Record<string, string>;
+  subscribeToTerminalTheme?: (listener: () => void) => () => void;
 }
 
 type Screen = "menu" | "section" | "reset" | "flappy";
@@ -152,6 +255,8 @@ export class TutRunner implements InteractiveProgram {
   private onNotifyPocket?: () => void;
   private getPocketTouchMode?: () => PocketTutorialTouchMode;
   private subscribeToPocketTouchMode?: (listener: () => void) => () => void;
+  private getTerminalTheme?: () => Record<string, string>;
+  private subscribeToTerminalTheme?: (listener: () => void) => () => void;
 
   private screen: Screen = "menu";
   private menuIndex = 0;
@@ -165,11 +270,23 @@ export class TutRunner implements InteractiveProgram {
   private stateUnsub: (() => void) | null = null;
   private pocketTouchModeUnsub: (() => void) | null = null;
   private resizeUnsub: (() => void) | null = null;
+  private themeUnsub: (() => void) | null = null;
   private busyDemoStart: number | null = null;
   private busyDemoDurationMs = 0;
+  /** How long the fake `longtask` runs — the countdown and the re-press guard.
+   *  Longer than the pump, which stops so the pane can go silent and ring. */
+  private busyDemoCommandMs = 0;
   private commandExitDemoStart: number | null = null;
   private commandExitDemoDurationMs = 0;
   private disposed = false;
+  private gestureScrollDirections = new Set<number>();
+  private gestureArrows = new Set<MobileGestureInputId>();
+  private backgroundOffset = 0;
+  private starfield: GestureStarfield | null = null;
+  /** Rebuilt on the first paint after entering the screen or a theme change. */
+  private starColors: readonly string[] | null = null;
+  private backgroundTimer: ReturnType<typeof setInterval> | null = null;
+  private capturingMouse = false;
 
   constructor(options: TutRunnerOptions) {
     this.adapter = options.adapter;
@@ -177,7 +294,7 @@ export class TutRunner implements InteractiveProgram {
     this.state = options.state;
     this.profile = options.profile ?? DESKTOP_TUTORIAL_PROFILE;
     this.onExit = options.onExit;
-    this.getInactivityTimeoutMs = options.getInactivityTimeoutMs ?? (() => cfg.alert.userAttention);
+    this.getInactivityTimeoutMs = options.getInactivityTimeoutMs ?? (() => cfg.alert.inactivityTimeout);
     this.onTriggerBusyDemo = options.onTriggerBusyDemo;
     this.onTriggerNotifyDemo = options.onTriggerNotifyDemo;
     this.onTriggerCommandExitDemo = options.onTriggerCommandExitDemo;
@@ -187,6 +304,8 @@ export class TutRunner implements InteractiveProgram {
     this.onNotifyPocket = options.onNotifyPocket;
     this.getPocketTouchMode = options.getPocketTouchMode;
     this.subscribeToPocketTouchMode = options.subscribeToPocketTouchMode;
+    this.getTerminalTheme = options.getTerminalTheme;
+    this.subscribeToTerminalTheme = options.subscribeToTerminalTheme;
     this.returnToInitialScreen();
   }
 
@@ -229,6 +348,20 @@ export class TutRunner implements InteractiveProgram {
     if (!this.flappyTimer) return;
     clearInterval(this.flappyTimer);
     this.flappyTimer = null;
+  }
+
+  private startBackgroundTicks(): void {
+    if (this.backgroundTimer) return;
+    this.backgroundTimer = setInterval(() => {
+      this.starfield?.advance();
+      this.render();
+    }, GESTURE_BACKGROUND_TICK_MS);
+  }
+
+  private stopBackgroundTicks(): void {
+    if (!this.backgroundTimer) return;
+    clearInterval(this.backgroundTimer);
+    this.backgroundTimer = null;
   }
 
   private resetFlappyGame(): void {
@@ -326,6 +459,29 @@ export class TutRunner implements InteractiveProgram {
     }
   }
 
+  private isPocketGestureScreen(): boolean {
+    return !this.disposed && this.profile.id === "pocket" && this.screen === "section" && this.sectionId === "gesture";
+  }
+
+  handleGestureScroll(lines: number): void {
+    if (!this.isPocketGestureScreen() || !lines) return;
+    this.gestureScrollDirections.add(Math.sign(lines));
+    if (this.gestureScrollDirections.size === 2) this.state.markComplete("gn-scroll");
+  }
+
+  handleGestureInput(input: MobileGestureInputId): void {
+    if (!this.isPocketGestureScreen() || !this.state.isComplete("gn-scroll")) return;
+    if (GESTURE_ARROWS.includes(input)) {
+      this.gestureArrows.add(input);
+      if (this.gestureArrows.size === GESTURE_ARROWS.length) this.state.markComplete("gn-arrows");
+      else this.render();
+    } else if (input === "enter" && this.state.isComplete("gn-arrows")) {
+      this.state.markComplete("gn-enter");
+    } else if (input === "esc" && this.state.isComplete("gn-enter")) {
+      this.state.markComplete("gn-esc");
+    }
+  }
+
   handleInput(data: string): void {
     if (this.disposed) return;
     let i = 0;
@@ -337,8 +493,20 @@ export class TutRunner implements InteractiveProgram {
       }
       if (ch === "\x1b") {
         const tail = data.slice(i);
-        // Consume complete key sequences, including unsupported Home/Delete
-        // and modified arrows, without mistaking their prefix for a bare Esc.
+        // Consume complete key sequences, including unsupported Home/Delete,
+        // modified arrows, and SGR mouse reports, without mistaking their
+        // prefix for a bare Esc.
+        const wheel = tail.match(/^\x1b\[<6([45]);\d+;\d+M/);
+        if (wheel) {
+          if (this.isPocketGestureScreen()) {
+            // A periodic field has no top or bottom; only its origin moves.
+            const step = wheel[1] === "4" ? -1 : 1;
+            this.backgroundOffset = (this.backgroundOffset + step + STARFIELD_HEIGHT) % STARFIELD_HEIGHT;
+            this.render();
+          }
+          i += wheel[0].length;
+          continue;
+        }
         const csi = tail.match(/^\x1b\[([0-?]*)([ -/]*)([@-~])/);
         if (csi) {
           if (csi[1] === "" && csi[2] === "") this.handleArrow(csi[3]);
@@ -537,6 +705,8 @@ export class TutRunner implements InteractiveProgram {
     }
     if (this.screen === "reset") {
       if (this.resetBuffer.trim().toLowerCase() === RESET_CONFIRM_WORD) {
+        this.gestureScrollDirections.clear();
+        this.gestureArrows.clear();
         this.state.reset();
         this.resetBuffer = "";
         this.resetMismatch = false;
@@ -584,15 +754,18 @@ export class TutRunner implements InteractiveProgram {
     this.cleanup(true);
   }
 
+  /** Spans the whole fake command, not just the countdown, so a replay anywhere
+   *  inside it is ignored. Per instance — the page cancels across runners. */
   private busyDemoInProgress(): boolean {
     if (this.busyDemoStart === null) return false;
-    return Date.now() - this.busyDemoStart < this.busyDemoDurationMs;
+    return Date.now() - this.busyDemoStart < this.busyDemoCommandMs;
   }
 
   private startBusyDemo(): void {
     this.busyDemoStart = Date.now();
     this.busyDemoDurationMs = getDemoDurationMs(this.getInactivityTimeoutMs());
-    this.onTriggerBusyDemo?.(this.busyDemoDurationMs, getWatchCommandDurationMs(this.busyDemoDurationMs));
+    this.busyDemoCommandMs = getWatchCommandDurationMs(this.busyDemoDurationMs);
+    this.onTriggerBusyDemo?.(this.busyDemoDurationMs, this.busyDemoCommandMs);
     this.startSpinnerTicks();
     this.render();
   }
@@ -614,6 +787,7 @@ export class TutRunner implements InteractiveProgram {
 
   private render(): void {
     if (this.disposed) return;
+    const gestureScreen = this.syncGestureScreen();
     if (this.screen === "flappy") {
       this.renderFlappy();
       return;
@@ -624,10 +798,61 @@ export class TutRunner implements InteractiveProgram {
         : this.screen === "reset"
         ? this.renderReset()
         : this.renderSection();
+    if (gestureScreen) {
+      this.renderGestureBackground(lines);
+      return;
+    }
     let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
     for (const line of lines) {
       out += `${highlightKeys(line)}\r\n`;
     }
+    this.write(out);
+  }
+
+  /** Level-triggered from render and cleanup: the Pocket gesture screen alone
+   *  captures the mouse and animates its background. */
+  private syncGestureScreen(): boolean {
+    const gestureScreen = this.isPocketGestureScreen();
+    if (gestureScreen !== this.capturingMouse) {
+      this.capturingMouse = gestureScreen;
+      this.write(gestureScreen ? MOUSE_ENABLE : MOUSE_DISABLE);
+      this.starColors = null;
+      if (gestureScreen) {
+        this.themeUnsub = this.subscribeToTerminalTheme?.(() => {
+          this.starColors = null;
+          this.render();
+        }) ?? null;
+        if (!prefersReducedMotion()) this.startBackgroundTicks();
+      } else {
+        this.themeUnsub?.();
+        this.themeUnsub = null;
+        this.stopBackgroundTicks();
+      }
+    }
+    return gestureScreen;
+  }
+
+  private renderGestureBackground(lines: string[]): void {
+    const { cols, rows } = this.adapter.getPtySize(this.terminalId);
+    const starfield = (this.starfield ??= new GestureStarfield());
+    const colors = (this.starColors ??= starPalette(this.getTerminalTheme?.()));
+    let out = `${CURSOR_HOME}${CLEAR_SCREEN}`;
+    for (const star of starfield.stars) {
+      const y = (star.y - this.backgroundOffset + STARFIELD_HEIGHT) % STARFIELD_HEIGHT;
+      if (y >= rows || star.x >= cols || star.opacity === 0) continue;
+      const color = colors[Math.round(star.opacity * (colors.length - 1))];
+      for (let row = y; row < rows; row += STARFIELD_HEIGHT) {
+        for (let col = star.x; col < cols; col += STARFIELD_WIDTH) {
+          out += `${moveTo(row + 1, col + 1)}${color}${star.glyph}`;
+        }
+      }
+    }
+    out += RESET;
+    // Absolute cursor positions keep the foreground fixed and prevent a final
+    // newline at the bottom of the viewport from scrolling the whole screen.
+    lines.slice(0, rows).forEach((line, row) => {
+      if (line.trim()) out += `${moveTo(row + 1, 1)}${RESET}${highlightKeys(line)} `;
+    });
     this.write(out);
   }
 
@@ -823,7 +1048,10 @@ export class TutRunner implements InteractiveProgram {
     lines.push(`  ${DIM}\`Esc\` to cancel${RESET}`);
     lines.push("");
     lines.push(
-      `  This will clear all checkmarks and the GitHub star prompt.`,
+      `  This will clear all checkmarks, the GitHub star prompt, and your`,
+    );
+    lines.push(
+      `  FlappyTerm high score.`,
     );
     lines.push(
       `  ${DIM}Type \`reset\` and press \`Enter\` to confirm.${RESET}`,
@@ -908,8 +1136,10 @@ export class TutRunner implements InteractiveProgram {
 
   private renderBusyDemoLines(): string[] {
     return [
-      this.renderDemoLine("s", "longtask", "Fake task", this.busyDemoStart, this.busyDemoDurationMs),
-      `  ${DIM}Press \`n\` for a program that rings the bell itself.${RESET}`,
+      // Counts down the fake command, not the pump: `longtask` keeps running
+      // after `tut-boxed` goes quiet, which is the whole point of the demo.
+      this.renderDemoLine("s", "longtask", "Fake task", this.busyDemoStart, this.busyDemoCommandMs),
+      `  ${DIM}Press \`n\` for a program that rings on its own.${RESET}`,
       this.renderDemoLine("x", "slowbuild", "Slow build", this.commandExitDemoStart, this.commandExitDemoDurationMs),
     ];
   }
@@ -937,20 +1167,19 @@ export class TutRunner implements InteractiveProgram {
   private renderItem(item: Item, index: number, activeIndex: number): string[] {
     const complete = this.state.isComplete(item.id);
     const isActive = !complete && index === activeIndex;
-    let mark: string;
-    if (complete) {
-      mark = `${fg(32)}✓${RESET}`;
-    } else if (isActive) {
-      mark = `${fg(33)}${ACTIVE_ITEM_GLYPH}${RESET}`;
-    } else {
-      mark = `${DIM}·${RESET}`;
+    const mark = complete ? DONE_MARK : isActive ? ACTIVE_MARK : `${DIM}·${RESET}`;
+    const style = complete ? DIM : isActive ? BOLD : "";
+    // The gesture screen places rows absolutely, so a title must not soft-wrap.
+    const lines = this.isPocketGestureScreen()
+      ? this.wrapText(item.title, 6).map((part, i) => `${i === 0 ? `   ${mark}  ` : "      "}${style}${part}${RESET}`)
+      : [`   ${mark}  ${style ? `${style}${item.title}${RESET}` : item.title}`];
+    if (item.id === "gn-arrows" && (isActive || complete)) {
+      const arrows = GESTURE_ARROWS.map((direction) => {
+        const sent = complete || this.gestureArrows.has(direction);
+        return `${sent ? DONE_MARK : ACTIVE_MARK}${fg(37)}${sent ? "" : BOLD}${direction}${RESET}`;
+      });
+      lines.push(`        ${arrows.join(" ")}`);
     }
-    const title = complete
-      ? `${DIM}${item.title}${RESET}`
-      : isActive
-      ? `${BOLD}${item.title}${RESET}`
-      : item.title;
-    const lines = [`   ${mark}  ${title}`];
     if (isActive && item.hint) {
       const indent = "        ";
       for (const wrapped of this.wrapText(item.hint, indent.length)) {
@@ -1002,6 +1231,7 @@ export class TutRunner implements InteractiveProgram {
     if (this.disposed) return;
     this.disposed = true;
     this.stopSpinnerTicks();
+    this.syncGestureScreen();
     this.stopFlappyTicks();
     this.flappy = null;
     this.busyDemoStart = null;
@@ -1018,7 +1248,7 @@ export class TutRunner implements InteractiveProgram {
 
   private write(data: string): void {
     // Runner frames are UI chrome, not task output — skip the activity
-    // tick so enabling WATCHING on the runner pane doesn't tilt the bell
+    // tick so enabling WATCHING on the runner pane doesn't look busy
     // every time the menu re-renders.
     this.adapter.sendOutput(this.terminalId, data, { skipActivity: true });
   }

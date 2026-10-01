@@ -1,12 +1,12 @@
 /**
- * `/docs/security` — docs/specs/security.md, every section of it.
+ * `/security` — docs/specs/security.md, every section of it.
  *
  * The file is canonical in `docs/specs/`: it is a spec, budgeted by
  * `scripts/spec-lint.mjs` and read by the nightly audit that runs against it.
  * The generator's delta withholds only the `#` title and the front matter; see
- * docs/specs/website-docs.md -> `/docs/security` spec. The page renders
+ * docs/specs/website-docs.md -> `/security` spec. The page renders
  * `pageBlocks`, so the guarantees table and the two lists carry this audience's
- * entries only — the other two are on `/docs/self-host` and `/supply-chain`,
+ * entries only — the other two are on `/self-host` and `/supply-chain`,
  * and the spec file on GitHub is where every entry appears together.
  */
 import { type MetaArgs } from "react-router";
@@ -29,7 +29,7 @@ const SPECS_URL = "https://github.com/diffplug/dormouse/tree/main/docs/specs";
 export default function SecurityDocs() {
   return (
     <DocsLayout
-      activePath="/docs/security"
+      activePath="/security"
       title={security.title}
       intro="What Dormouse promises, what it does not, and the audit that holds it to the difference."
       toc={security.toc}
@@ -39,14 +39,14 @@ export default function SecurityDocs() {
         repository — not a summary of one. It shows the guarantees for the
         local application and the release pipeline; remote control and
         self-hosting are on the{" "}
-        <a href={sitePath("/docs/self-host")} className={LINK_CLASS}>
+        <a href={sitePath("/self-host")} className={LINK_CLASS}>
           self-host runbook
         </a>
         , and what reaches your machine is on the{" "}
         <a href={sitePath("/supply-chain")} className={LINK_CLASS}>
           supply-chain disclosure
         </a>
-        . The five audited checklists behind all three live beside the spec, in{" "}
+        . The audited checklists behind all three live beside the spec, in{" "}
         <a href={SPECS_URL} className={LINK_CLASS} target="_blank" rel="noopener noreferrer">
           the specs directory on GitHub
         </a>

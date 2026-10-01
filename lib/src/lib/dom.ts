@@ -12,6 +12,12 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable === true;
 }
 
+/** True while an IME composition owns the key. WebKit sends the key that ends a
+ *  composition with `isComposing` false but `keyCode` 229, so both count. */
+export function isComposingKey(e: KeyboardEvent): boolean {
+  return e.isComposing || e.keyCode === 229;
+}
+
 /** True for the `<textarea>` xterm keeps offscreen as the terminal's input
  *  proxy — the one editable element that is not a text field of ours. Callers
  *  that treat the terminal as *non*-editable pair this with
@@ -30,4 +36,30 @@ export function setNativeFieldValue(el: HTMLInputElement | HTMLTextAreaElement, 
   if (setValue) setValue.call(el, value);
   else el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/** Each portaled root's in-place anchor, by root. */
+const portalAnchors = new WeakMap<Element, Element>();
+
+/** Mark `root`, a subtree portaled out of its owner, `[data-portal-anchored]`
+ *  and map it to `anchor`, an element left where it belongs. Returns the
+ *  unmapping, for an effect's cleanup. */
+export function setPortalAnchor(root: Element, anchor: Element): () => void {
+  root.setAttribute('data-portal-anchored', '');
+  portalAnchors.set(root, anchor);
+  return () => {
+    root.removeAttribute('data-portal-anchored');
+    portalAnchors.delete(root);
+  };
+}
+
+/** The element DOM containment checks should test: for a target inside a
+ *  mapped portal root, that root's anchor, so the portaled subtree counts as
+ *  part of its owner; any other element as is, and null for a target that is
+ *  no element. A portal already passes React events up the owner's tree; this
+ *  does the same for `contains` and `closest`. */
+export function anchoredTarget(target: EventTarget | null): Element | null {
+  if (!(target instanceof Element)) return null;
+  const root = target.closest('[data-portal-anchored]');
+  return (root && portalAnchors.get(root)) ?? target;
 }

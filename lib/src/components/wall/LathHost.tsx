@@ -21,18 +21,22 @@ import { layout, sashes } from '../../lib/lath/layout';
 import { LATH_LAYER_DYING, LATH_LAYER_ELEVATED, LATH_LAYER_TILED } from '../../lib/lath/animator';
 import { type DropTarget, resize } from '../../lib/lath/ops';
 import { useFocusRingColor } from '../../lib/themes/use-focus-ring-color';
-import { PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
+import { ELEVATED_PANE_SHADOW, PANE_HEADER_HEIGHT_PX, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import type { PaneProps } from './pane-props';
 import { type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { nowMs, type LathWallEngine } from './lath-wall-engine';
 import { type DragController, createDragController } from './lath-drag-controller';
 import { TerminalPanel } from './TerminalPanel';
 import { BrowserPanel } from './BrowserPanel';
+import { ToolPanel } from './ToolPanel';
+import { isPreviewSlotParams, isToolParams } from './browser-surface';
+import { ToolPaneHeader } from './ToolPaneHeader';
 import { TerminalPaneHeader } from './TerminalPaneHeader';
 import { SurfacePaneHeader } from './SurfacePaneHeader';
-import { AlertSpeechIndicator } from './AlertSpeechIndicator';
-import { TerminalContext } from './TerminalContext';
-import { TerminalContextContext } from './wall-context';
+import { AlertRingIndicator } from './AlertRingIndicator';
+import { TerminalContextOverlay } from './TerminalContextOverlay';
+import type { ContextSide } from './terminal-context-placement';
+import { LayoutFramesContext, TerminalContextContext, TerminalResizeContext } from './wall-context';
 
 /** Widened pointer target over each (thin) sash band, in px. */
 const SASH_HIT = 8;
@@ -48,7 +52,7 @@ const Z_PREVIEW = 45;
 /** Reveal half a pane header of tiled layout around an elevated zoomed pane. */
 export const LATH_ZOOM_MARGIN = PANE_HEADER_HEIGHT_PX / 2;
 /** Soft app-chrome halo separates the elevated pane from tiled content below. */
-export const LATH_ZOOM_SHADOW = '0 0 5px 5px var(--color-app-bg)';
+export const LATH_ZOOM_SHADOW = ELEVATED_PANE_SHADOW;
 
 const PANE_HEADER_STYLE: CSSProperties = {
   flex: `0 0 ${PANE_HEADER_HEIGHT_PX}px`,
@@ -95,23 +99,19 @@ export type LathComponentsOverride = {
 const BODY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPanel,
   browser: BrowserPanel,
+  // A tool is both, one Session deep; ToolPanel keeps each mounted and flips
+  // visibility (docs/specs/dor-tool.md).
+  tool: ToolPanel,
 };
 const TAB_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalPaneHeader,
   surface: SurfacePaneHeader,
+  tool: ToolPaneHeader,
 };
 
-/** For a terminal Surface the pane id is its session id (docs/specs/layout.md).
- *  The terminal context floats over the whole leaf, so it lives here rather than
- *  in the body, whose clipping box it must escape. */
-function TerminalLeafOverlay({ id, title }: PaneProps) {
-  const { mounted } = useContext(TerminalContextContext);
-  return (
-    <>
-      <AlertSpeechIndicator sessionId={id} />
-      {mounted?.id === id && <TerminalContext {...mounted} title={title} />}
-    </>
-  );
+/** Alerts stay attached to their source leaf; context lives above the Wall. */
+function TerminalLeafOverlay({ id }: PaneProps) {
+  return <AlertRingIndicator sessionId={id} />;
 }
 
 // Whole-leaf overlays keyed by `leafMeta.component`: chrome spanning header *and*
@@ -120,6 +120,8 @@ function TerminalLeafOverlay({ id, title }: PaneProps) {
 // surface-kind branch in the render path.
 const OVERLAY_COMPONENTS: Record<string, ComponentType<PaneProps>> = {
   terminal: TerminalLeafOverlay,
+  // A tool has a PTY, so it rings like a terminal whichever half is forward.
+  tool: TerminalLeafOverlay,
 };
 
 type DragState = {
@@ -296,15 +298,24 @@ export function LathHost({
   onExternalDrop?: (target: DropTarget | null) => void;
   componentsOverride?: LathComponentsOverride;
 }) {
+  const { mounted: terminalContext } = useContext(TerminalContextContext);
+  const contextPreferences = useRef(new Map<string, ContextSide>());
   const store = lath.store;
   const animator = lath.animator;
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
 
+  useEffect(() => {
+    for (const id of contextPreferences.current.keys()) {
+      if (!snapshot.leafMeta.has(id)) contextPreferences.current.delete(id);
+    }
+  }, [snapshot.leafMeta]);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
 
-  // Measure the container and track resizes. `getBoundingClientRect` (not
-  // `entry.contentRect`) so the measurement is trivially stubbable in jsdom.
+  // Measure before the ancestor's entrance layout effect, then use the observer's
+  // untransformed content box while workspace presentation is moving (equal to the
+  // border box: `.lath-host` has no padding or border). The direct call keeps
+  // `getBoundingClientRect`, which jsdom tests can stub.
   // Reporting geometry from the measurement itself — not a passive effect reading
   // the rendered `size` — is load-bearing: this runs in the layout phase with the
   // real laid-out rect, so it is set before the Wall's seed passive effect reads it
@@ -314,8 +325,9 @@ export function LathHost({
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => {
-      const r = el.getBoundingClientRect();
+    const measure = (entries?: ResizeObserverEntry[]) => {
+      // Workspace presentation can scale this subtree; layout stays full-size.
+      const r = entries?.[0]?.contentRect ?? el.getBoundingClientRect();
       store.setLayoutGeometry({ x: 0, y: 0, width: r.width, height: r.height }, LATH_LAYOUT_OPTS);
       setSize((prev) => (prev.width === r.width && prev.height === r.height ? prev : { width: r.width, height: r.height }));
     };
@@ -366,6 +378,17 @@ export function LathHost({
   // otherwise be the pre-drag rects (the preview never touched it). Cleared by the
   // retarget effect that consumes it.
   const snapNextRef = useRef(false);
+  const framesSettledRef = useRef(false);
+  const terminalFitListeners = useRef(new Set<() => void>());
+  const terminalResize = useMemo(() => ({
+    // Read painted settlement, not elapsed animation time: the final frame may
+    // still be waiting for rAF. Sash previews and dying panes must never resize PTYs.
+    canFit: (id: string) => framesSettledRef.current && !dragRef.current && !lath.isDying(id),
+    subscribe: (listener: () => void) => {
+      terminalFitListeners.current.add(listener);
+      return () => { terminalFitListeners.current.delete(listener); };
+    },
+  }), [lath]);
 
   // The single pane/Door drag controller, built once (window handlers stay stable for
   // the whole gesture; nothing re-subscribes on a Wall re-render).
@@ -435,6 +458,8 @@ export function LathHost({
 
   const activeTree = preview ?? snapshot.tree;
   const { targets: frames, layers } = presentationTargets(activeTree, rect, snapshot.zoomedId);
+  const contextSource = terminalContext && frames.get(terminalContext.id);
+  const contextMeta = terminalContext && snapshot.leafMeta.get(terminalContext.id);
   const sashList = sashes(activeTree, rect, LATH_LAYOUT_OPTS);
 
   // DOM order is sorted-by-id and STABLE across layout changes; z-index (not DOM
@@ -499,17 +524,22 @@ export function LathHost({
   }, [externalDragId]);
 
   // Swallow the one click the browser synthesizes after a real drag (so a drop over a
-  // header/button/door does not also fire its click). Capture phase, so React's own
-  // bubble-phase onClick never runs.
+  // header/button/door does not also fire its click), and the dblclick after it when
+  // the drag was a burst's second press (so it never keeps a preview slot). Capture
+  // phase, so React's own bubble-phase handlers never run.
   useEffect(() => {
     const onClickCapture = (e: MouseEvent): void => {
       if (!suppressNextClickRef.current) return;
-      suppressNextClickRef.current = false;
+      if (e.type === 'dblclick' || e.detail !== 2) suppressNextClickRef.current = false;
       e.stopPropagation();
       e.preventDefault();
     };
     window.addEventListener('click', onClickCapture, true);
-    return () => window.removeEventListener('click', onClickCapture, true);
+    window.addEventListener('dblclick', onClickCapture, true);
+    return () => {
+      window.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('dblclick', onClickCapture, true);
+    };
   }, []);
 
   // --- Animation: imperatively apply the animator's interpolated frames to the leaf
@@ -537,18 +567,27 @@ export function LathHost({
         // pane inert while it fades.
         el.style.pointerEvents = animator.isDying(id) ? 'none' : '';
       }
+      lath.placeContext(paint);
     },
-    [animator],
+    [animator, lath],
   );
 
   // The single tick body and the loop's entry point (from the retarget effects and the
   // markDying wake): paint now — this runs pre-paint when called from a layout effect,
   // so the first frame is correct — tell chrome, and schedule the loop while anything is
   // still moving. Reschedules only when no frame is already pending.
-  const pump = useCallback(() => {
+  const pump = useCallback((layoutCommit = false) => {
     const t = nowMs();
     applyFrames(t);
     const settled = animator.settledAt(t);
+    // Terminals fit on painted, final geometry: whenever motion starts or ends, and on
+    // every layout commit (which may land already-settled). Fitting is gated by
+    // `canFit`, so the starting edge only drops a pending fit.
+    const settlementChanged = framesSettledRef.current !== settled;
+    framesSettledRef.current = settled;
+    if (settlementChanged || layoutCommit) {
+      for (const listener of terminalFitListeners.current) listener();
+    }
     lath.notifyFrames(settled);
     if (!settled && rafRef.current === null) rafRef.current = requestAnimationFrame(stepRef.current);
   }, [applyFrames, animator, lath]);
@@ -568,7 +607,10 @@ export function LathHost({
     const { targets, layers } = presentationTargets(snapshot.tree, rectRef.current, snapshot.zoomedId);
     animator.retarget(targets, nowMs(), lath.store.consumeEnterHints(), { snap: snapNextRef.current, layers });
     snapNextRef.current = false;
-    pump();
+    // Notify fitting AFTER painting the committed geometry: a sash commit can land on
+    // its last preview size, so neither a ResizeObserver event nor a settlement change
+    // would fire — including a final pointermove whose rAF never ran before pointerup.
+    pump(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.tree, snapshot.zoomedId]);
 
@@ -608,7 +650,7 @@ export function LathHost({
   const resolveOverlay = (component: string): ComponentType<PaneProps> | undefined =>
     componentsOverride?.overlays?.[component] ?? OVERLAY_COMPONENTS[component];
 
-  return (
+  const content = (
     <div ref={containerRef} className="lath-host">
       {sortedIds.map((id) => {
         const cb = leafCallbacks(id);
@@ -697,6 +739,13 @@ export function LathHost({
         );
       })}
 
+      {contextSource && (
+        <TerminalContextOverlay key={terminalContext!.id} context={terminalContext!}
+          title={contextMeta?.title} tool={isToolParams(contextMeta?.params)} preview={isPreviewSlotParams(contextMeta?.params)}
+          lath={lath} wall={rect} source={contextSource}
+          multiPane={!snapshot.zoomedId && frames.size > 1} preferences={contextPreferences.current} />
+      )}
+
       {/* Drop-preview overlay: the exact rect the current candidate would commit to,
           painted in the selection color (translucent fill + solid border). */}
       {dragPreview && (
@@ -716,5 +765,10 @@ export function LathHost({
         />
       )}
     </div>
+  );
+  return (
+    <LayoutFramesContext.Provider value={lath.subscribeFrames}>
+      <TerminalResizeContext.Provider value={terminalResize}>{content}</TerminalResizeContext.Provider>
+    </LayoutFramesContext.Provider>
   );
 }

@@ -26,6 +26,9 @@ import type {
   PairingOutcome,
   BurrowStatus,
 } from '../../remote/burrow/burrow-runtime';
+import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import type { NetworkLevel, NetworkPolicy, NetworkPolicyResult } from '../../remote/network-policy';
+import type { RelayMode } from '../relay-origin';
 
 /** Transport event names for what the service sends back. */
 export const BURROW_RESULT_EVENT = 'burrow:result';
@@ -45,6 +48,14 @@ export interface BurrowCommand {
   burrowRequestId: string;
   cmd: string;
   params?: unknown;
+  /**
+   * Which webview sent this, stamped by a host that has more than one
+   * (`burrow_command` in `standalone/src-tauri/src/lib.rs`). The webview never
+   * sets it — it does not know its own label to the Burrow — and a host with one
+   * unnamed webview omits it. Read only by the N-answer collector, which settles
+   * an ask on having heard from every window rather than on a count.
+   */
+  window?: string;
 }
 
 /** Validate the untrusted edge of either Burrow bridge before routing a command. */
@@ -69,7 +80,24 @@ export interface BurrowAsk {
 }
 
 /**
- * One pairing awaiting local confirmation, as the webview mirrors it.
+ * Which ceremony a request awaiting local confirmation belongs to: a pairing,
+ * which writes an ACL record, or a one-time connection, which authorizes one
+ * session and writes nothing (`docs/specs/one-time.md`).
+ *
+ * **A message that names none is a `pairing`.** A webview or broker from before
+ * the field existed sends none, and reading that as a pairing fails closed: the
+ * one-time request is never in the pairing queue, so an old modal's answer
+ * finds nothing to approve.
+ */
+export type ApprovalKind = 'pairing' | 'one-time';
+
+/** The kind an untrusted message names, with a missing or unknown one read as `pairing`. */
+export function approvalKind(value: { kind?: unknown } | null | undefined): ApprovalKind {
+  return value?.kind === 'one-time' ? 'one-time' : 'pairing';
+}
+
+/**
+ * One request awaiting local confirmation, as the webview mirrors it.
  *
  * **The expected two-digit code is deliberately absent.** The webview echoes
  * what a person typed and the Burrow compares it; a mirrored code would make the
@@ -80,10 +108,16 @@ export interface BurrowAsk {
  * asking.
  */
 export interface PairingQueueItem {
+  /** Which modal copy it gets, and which half of the service its answer goes to. */
+  kind: ApprovalKind;
+  /** The Relay's client socket id; `''` for a one-time request, which has no Relay. */
   clientId: string;
   /** Immutable ceremony id, echoed by approve/deny. */
   pairingId: string;
-  /** The Client's own name for itself, already bounded and stripped by the Burrow. */
+  /**
+   * The Client's own name for itself, already bounded and stripped by the
+   * Burrow; a one-time request's is a member of `ONE_TIME_DEVICE_LABELS`.
+   */
   label: string;
   requestedAt: number;
 }
@@ -99,13 +133,126 @@ export interface PairingQueueEvent {
 
 /**
  * service → webview, whenever the Burrow's lifecycle changes whether there is one
- * at all. What a webview does for the Burrow costs a crossing per pane-state,
- * activity, and focus change, so an installation that never enrolled must pay
- * none of it (`lib/src/remote/burrow/enrolled-gate.ts`).
+ * at all, and once as the service starts. What a webview does for the Burrow
+ * costs a crossing per pane-state, activity, and focus change, so an
+ * installation that never enrolled must pay none of it
+ * (`lib/src/remote/burrow/enrolled-gate.ts`).
  */
 export interface BurrowStatusEvent {
   name: 'status';
   enrolled: boolean;
+  /**
+   * Whether anything can reach this machine's terminals: enrolled, or a
+   * one-time connection opening, waiting, confirming, or live. What the
+   * surface responder and the approval mirror arm on; push stays on
+   * `enrolled`. Absent from a broker older than the field: read it through
+   * {@link servingOf}.
+   */
+  serving: boolean;
+  /**
+   * Which service instance is speaking: minted per `BurrowService`, and
+   * carried on every size hold its sessions take (`SurfaceHold.serviceId`). A
+   * webview drops the holds of any other instance — a VS Code broker window
+   * that closed, a sidecar that restarted — since nothing will release them
+   * (`docs/specs/remote-api.md` → "Size authority"). Absent from a broker
+   * older than the field: read it through {@link serviceIdOf}.
+   */
+  serviceId: string;
+}
+
+/**
+ * Whether a `status` answer or event says something can reach this machine's
+ * terminals. **A missing `serving` reads as `enrolled`**: a VS Code broker from
+ * before one-time connections sends none, and enrolled is all it could be
+ * serving on.
+ */
+export function servingOf(
+  status: Partial<Pick<BurrowStatusEvent, 'enrolled' | 'serving'>> | null | undefined,
+): boolean {
+  return typeof status?.serving === 'boolean' ? status.serving : !!status?.enrolled;
+}
+
+/**
+ * The service instance a `status` event names, or `null` where it names none —
+ * a broker older than the field — which drops no hold.
+ */
+export function serviceIdOf(status: { serviceId?: unknown } | null | undefined): string | null {
+  return typeof status?.serviceId === 'string' && status.serviceId ? status.serviceId : null;
+}
+
+/**
+ * service → webview: the one-time connection moved, or the service started
+ * (`docs/specs/one-time.md`). The state is complete every time, so a panel
+ * replaces rather than merges; `oneTimeStatus` answers the same state, for a
+ * panel that opens after it.
+ *
+ * **Its `waiting.url` is the link itself** — the room id and the one-use
+ * public key, a capability to ask for the one confirmation — and crosses for the
+ * reason `SetupQrResult.url` does: it exists to be shown to the person at this
+ * machine. Single-use and short-lived; the private half never leaves the Burrow.
+ */
+export interface OneTimeEvent {
+  name: 'one-time';
+  state: OneTimeState;
+}
+
+/**
+ * service → webview: the network policy changed (`docs/specs/remote-network.md`
+ * -> "Policy"). Complete every time, so a reader replaces rather than merges;
+ * `networkPolicy` answers the same shape, for a reader that arrives after it.
+ */
+export interface NetworkPolicyEvent extends NetworkPolicyResult {
+  name: 'network-policy';
+}
+
+/** Every `burrow:event` the service sends, by `name`. */
+export type BurrowUiEvent =
+  | BurrowStatusEvent
+  | PairingQueueEvent
+  | InvitationEvent
+  | OneTimeEvent
+  | NetworkPolicyEvent;
+
+/**
+ * The one-time state of a Burrow with no connection, from this build's
+ * `hostedOrigin` (`../relay-origin.ts`) and the network policy's level:
+ * `unavailable` without a Hosted origin — a self-host build, which opens no
+ * rendezvous — or under `nothing`, else `idle`. One builder for every process
+ * that answers it: the service, the VS Code glue for a window with no service
+ * at all (`vscode-ext/src/burrow.ts` → `refuseCommand`), and the Storybook stub.
+ */
+export function idleOneTimeState(hosted: string | null, level: NetworkLevel): OneTimeState {
+  if (hosted === null) return { status: 'unavailable', reason: 'self-host' };
+  return level === 'nothing' ? { status: 'unavailable', reason: 'network-off' } : { status: 'idle' };
+}
+
+/**
+ * Whether `value` is a {@link OneTimeState} a panel can render: a known
+ * `status` carrying the fields that status needs. A reason is only checked to
+ * be a string — a panel keeps fixed copy per reason and falls back for one this
+ * build does not know, since a VS Code broker may be a newer build.
+ */
+export function isOneTimeState(value: unknown): value is OneTimeState {
+  if (!value || typeof value !== 'object') return false;
+  const state = value as Record<string, unknown>;
+  switch (state.status) {
+    case 'idle':
+    case 'opening':
+      return true;
+    case 'unavailable':
+    case 'ended':
+      return typeof state.reason === 'string';
+    case 'waiting':
+      return typeof state.url === 'string' && typeof state.expiresAt === 'number';
+    case 'confirming':
+      return typeof state.label === 'string' && typeof state.expiresAt === 'number';
+    case 'connecting':
+      return typeof state.label === 'string';
+    case 'connected':
+      return typeof state.label === 'string' && typeof state.since === 'number';
+    default:
+      return false;
+  }
 }
 
 /**
@@ -135,8 +282,11 @@ export interface InvitationEvent {
 
 // --- Command parameter shapes ---
 
+/**
+ * No Relay URL: the only Relay a Burrow enrolls with is its build's baked
+ * origin (`docs/specs/relay.md` → "Relay origin").
+ */
 export interface EnrollParams {
-  relayUrl: string;
   password: string;
   label: string;
 }
@@ -146,17 +296,14 @@ export interface EnrollParams {
  * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  */
 export interface EnrollOfferParams {
-  /**
-   * The origin the card displayed, echoed back so the service can refuse an
-   * offer file that was rewritten between the render and the click. **Not the
-   * origin that is enrolled against** — that comes off the file, along with the
-   * token this shape deliberately does not carry.
-   */
-  origin: string;
+  /** No token: it comes off the file, which the service re-reads at the click. */
   label: string;
 }
 
+/** `kind`, `clientId`, and `pairingId` echo the {@link PairingQueueItem} the modal displayed. */
 export interface ApproveParams {
+  /** Read through {@link approvalKind}: absent is a `pairing`. */
+  kind?: ApprovalKind;
   clientId: string;
   pairingId: string;
   /** The two digits the person read off the phone; the Burrow compares them. */
@@ -164,14 +311,35 @@ export interface ApproveParams {
 }
 
 export interface DenyParams {
+  /** Read through {@link approvalKind}: absent is a `pairing`. */
+  kind?: ApprovalKind;
   clientId: string;
   pairingId: string;
 }
 
-/** The webview names the Session and what to call it; recipients are never its call. */
-export interface PushParams {
-  sessionId: string;
-  title: string;
+/**
+ * A pane strip's Take back (`docs/specs/remote-api.md` → "Size authority"):
+ * end the remote session whose holder id the pane was held under. The id is
+ * opaque and names one live session; knowing one lets a webview end that
+ * session, which its person can already do from the panel, and nothing else.
+ */
+export interface TakeBackParams {
+  holder: string;
+}
+
+/** Whether a session was ended. `false` when none holds under that id any more. */
+export interface TakeBackResult {
+  ended: boolean;
+}
+
+/**
+ * The whole policy to hold from now on (`docs/specs/remote-network.md` ->
+ * "Policy"). The service takes it only exactly: a level this build offers, at
+ * most `MAX_ALLOWED_NETWORKS` CIDRs, a boolean `autoUpdate` — and saves, and
+ * answers, each CIDR in its canonical form.
+ */
+export interface SetNetworkPolicyParams {
+  policy: NetworkPolicy;
 }
 
 /** Answers an outstanding {@link BurrowAsk}; `burrowRequestId` is the ask's, not a new one. */
@@ -184,7 +352,6 @@ export interface AnswerParams {
 
 export interface EnrollResult {
   burrowId: string;
-  relayUrl: string;
 }
 
 /**
@@ -222,7 +389,15 @@ export interface SetupQrResult {
  */
 export interface BurrowConsoleStatus {
   enrolled: boolean;
-  relayUrl: string | null;
+  /** {@link BurrowStatusEvent.serving}, which this seeds. */
+  serving: boolean;
+  /**
+   * The one relay origin this build was baked with, enrolled or not, and the
+   * mode it sets — what the Settings dialog renders (`docs/specs/relay.md` →
+   * "Relay origin").
+   */
+  relayOrigin: string;
+  relayMode: RelayMode;
   burrowId: string | null;
   /**
    * The relay socket's state. `displaced` is the one that needs acting on:
@@ -235,16 +410,16 @@ export interface BurrowConsoleStatus {
   /** What to prefill a "name for this machine" field with: the hostname. */
   suggestedLabel: string;
   /**
-   * The installer's enrollment offer on this machine, when there is one and this
-   * Burrow has not enrolled — the Settings dialog's one-click path
-   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog", which
-   * owns the re-read-at-click rule and what makes the card safe to press).
+   * Whether the installer left an enrollment offer for `relayOrigin` on this
+   * machine, while this self-host Burrow has not enrolled — the Settings
+   * dialog's one-click path (`docs/specs/relay.md` → "Remote control, in the
+   * Settings dialog").
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and
    * the token is a bearer credential exactly like `burrowToken` (`docs/specs/security-remote.md` → "Trust boundary",
    * the no-`burrowToken`-in-a-webview FAIL IF).
    */
-  offer: { origin: string } | null;
+  offer: boolean;
 }
 
 /**

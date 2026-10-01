@@ -1,25 +1,31 @@
+import { clearToolAnnounce } from './tool-announce-store';
+import { clearToolDirty } from './tool-dirty-store';
+import { clearPreviewTransition } from './preview-transition-store';
+import { serializeTransferTerminal, type TerminalGrid } from './terminal-transfer';
 import { Terminal, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { SerializeAddon } from '@xterm/addon-serialize';
 import { ImageAddon, type IImageAddonOptions } from '@xterm/addon-image';
 import { UnicodeGraphemesAddon } from '@xterm/addon-unicode-graphemes';
-import { WebglAddon } from '@xterm/addon-webgl';
+import { TerminalWebglRenderer } from './terminal-webgl';
 import { shellCommandKind, type ShellCommandKind } from 'dor/commands/shell-quote';
 import { getPlatform, IS_MAC, IS_WINDOWS, PLATFORM_STRING } from './platform';
 import type { PtyDataDetail } from './platform/types';
 import type { HelperIdentity } from './terminal-context-types';
+import type { PersistedAlertState } from './session-types';
 import { DIM, RESET } from './ansi';
 import { cfg } from '../cfg';
-import { requestExternalLinkConfirmation } from './external-link-confirmation';
+import { activateTerminalLink } from './terminal-link-activation';
 import { attachMouseModeObserver } from './mouse-mode-observer';
 import { attachKeyboardProtocolArbiter } from './keyboard-protocol-arbiter';
+import { xtermVtExtensions } from './xterm-options';
 import {
   bumpRenderTick,
   getMouseSelectionState,
   removeMouseSelectionState,
   setSelection as setMouseSelection,
 } from './mouse-selection';
-import { dropSourcesForTerminal } from './notepad/notepad-store';
-import { extractSelectionText } from './selection-text';
+import { watchSelection, type SelectionWatch } from './selection-watch';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
@@ -28,10 +34,10 @@ import {
   type TerminalEntry,
   type TerminalOverlayDims,
 } from './terminal-store';
-import { clearTerminalActivity, getActivity, notifyActivityListeners } from './session-activity-store';
+import { clearTerminalActivity, notifyActivityListeners } from './session-activity-store';
+import { clearSizeHold } from './size-hold-store';
 import { attachTerminalMouseRouter } from './terminal-mouse-router';
 import {
-  inputContainsEnter,
   inputIsReplayTerminalReport,
   inputIsSyntheticTerminalReport,
   REPLAY_MODE_RESET,
@@ -55,7 +61,7 @@ import {
   setTerminalUserTitle,
   type PromptLineReader,
 } from './terminal-state-store';
-import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
+import { readLogicalLineFromBuffer } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
 
@@ -89,19 +95,7 @@ function makePromptLineReader(terminal: Terminal): PromptLineReader {
     readLine() {
       const buffer = terminal.buffer?.active;
       if (!buffer) return null;
-      const cursorAbsRow = buffer.baseY + buffer.cursorY;
-      const bufferLike: BufferLike = {
-        getLine(index) {
-          const line = buffer.getLine(index);
-          if (!line) return undefined;
-          return {
-            isWrapped: line.isWrapped,
-            translateToString: (trimRight, startColumn, endColumn) =>
-              line.translateToString(trimRight, startColumn, endColumn),
-          };
-        },
-      };
-      return readLogicalLineFromBuffer(bufferLike, cursorAbsRow, buffer.cursorX);
+      return readLogicalLineFromBuffer(buffer, buffer.baseY + buffer.cursorY, buffer.cursorX);
     },
   };
 }
@@ -112,9 +106,10 @@ function seedProcessCwdAfterSpawn(id: string): void {
 
 // Reconstructs the visible text from an OSC 8 hyperlink's buffer range. xterm
 // passes the URL as the second arg to linkHandler.activate but not the rendered
-// link text; we read it ourselves so the dialog can tell the user whether the
-// label they clicked matched the URL. Wrapped lines concatenate without a
-// separator (the wrap is visual, not a semantic break).
+// link text; we read it ourselves so a local file link can be checked against
+// the path it names, and the dialog can tell the user whether the label they
+// clicked matched the URL. Wrapped lines concatenate without a separator (the
+// wrap is visual, not a semantic break).
 function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): string {
   try {
     const buffer = terminal.buffer.active;
@@ -132,86 +127,25 @@ function readDisplayTextFromBuffer(terminal: Terminal, range: IBufferRange): str
   }
 }
 
-/**
- * Swap xterm's DOM renderer for the WebGL one, and record which one this
- * terminal ended up on as `data-renderer` on its host element.
- *
- * The DOM renderer emits one `<span>` per style run per row, so a TUI that
- * paints every cell a different truecolor (an animated pattern, `btop`, a
- * syntax-highlighted pager) turns into one span-with-inline-style per cell,
- * rebuilt every frame. On a 99x25 pane that is ~1150 elements of style
- * recalc + layout per frame; WebKit spends ~95ms/frame on it and the whole
- * page drops to ~9fps. The WebGL renderer rasterizes the same grid from a
- * glyph atlas and leaves the DOM untouched.
- *
- * Called on first MOUNT, not on create: a GL context is a scarce per-page
- * resource (16 in Safari, evicted oldest-first), and cold restore builds a
- * session for every persisted pane *including minimized doors*, which never
- * paint. Claiming contexts at create would spend the budget on invisible
- * surfaces and, because eviction is oldest-first and one-way, permanently
- * demote the earliest-restored panes.
- *
- * Falls back to the DOM renderer whenever WebGL is unavailable: no GL
- * context (headless/jsdom, blocklisted GPU) throws at construction, and
- * exceeding the browser's live-context budget fires `onContextLoss` later.
- * Both paths dispose the addon, which is xterm's documented signal to
- * resume DOM rendering — degraded, never broken.
- */
-function tryEnableWebglRenderer(terminal: Terminal, host: HTMLElement): void {
-  const markDom = () => host.setAttribute('data-renderer', 'dom');
-  // Cheap pre-check so environments that could never succeed don't pay for a
-  // doomed context request. jsdom in particular has no `getContext`, and
-  // attempting one makes every terminal-creating unit test log a
-  // "Not implemented" error through the virtual console.
-  if (!cfg.terminal.webglRenderer || typeof WebGL2RenderingContext === 'undefined') {
-    markDom();
-    return;
-  }
-  let addon: WebglAddon;
-  try {
-    addon = new WebglAddon();
-  } catch {
-    markDom();
-    return;
-  }
-  addon.onContextLoss(() => {
-    addon.dispose();
-    markDom();
-  });
-  try {
-    terminal.loadAddon(addon);
-    host.setAttribute('data-renderer', 'webgl');
-  } catch {
-    addon.dispose();
-    markDom();
-  }
-}
-
-function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDivElement } {
+function createXtermHost(id: string, grid?: TerminalGrid): { terminal: Terminal; fit: FitAddon; serialize: SerializeAddon; element: HTMLDivElement } {
   const styles = getComputedStyle(document.body);
   const editorFontSize = parseInt(styles.getPropertyValue('--vscode-editor-font-size'), 10) || 12;
   const editorFontFamily = styles.getPropertyValue('--vscode-editor-font-family').trim() || "'SF Mono', Menlo, Monaco, monospace";
 
   const theme = getTerminalTheme();
   const terminal = new Terminal({
+    ...grid,
     allowProposedApi: true,
     fontSize: editorFontSize,
     fontFamily: editorFontFamily,
     cursorBlink: cfg.terminal.cursorBlink,
     theme,
-    // kittyKeyboard disambiguates Shift+Enter from Enter for TUIs that read
-    // raw VT (Claude Code everywhere; Codex on macOS/Linux). win32InputMode
-    // covers Windows TUIs that read via the Console API behind ConPTY (Codex),
-    // which can't negotiate the kitty protocol there: when conhost enables it
-    // (CSI ? 9001 h), xterm sends faithful Win32 INPUT_RECORD key events so
-    // Shift+Enter and Ctrl+J reach the app intact. Both are opt-in/negotiated,
-    // so they coexist — each program turns on whichever it understands.
-    vtExtensions: { kittyKeyboard: true, win32InputMode: IS_WINDOWS },
+    vtExtensions: xtermVtExtensions(),
     linkHandler: {
       activate: (event, uri, range) => {
         event.preventDefault();
         // Closure capture: `terminal` is defined by the time a click fires.
-        requestExternalLinkConfirmation(uri, readDisplayTextFromBuffer(terminal, range));
+        activateTerminalLink(id, event, uri, readDisplayTextFromBuffer(terminal, range));
       },
       allowNonHttpProtocols: true,
     },
@@ -234,6 +168,8 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.loadAddon(new UnicodeGraphemesAddon());
   const fit = new FitAddon();
   terminal.loadAddon(fit);
+  const serialize = new SerializeAddon();
+  terminal.loadAddon(serialize);
   if (cfg.terminal.inlineImages) terminal.loadAddon(new ImageAddon(IMAGE_ADDON_OPTIONS));
 
   const element = document.createElement('div');
@@ -242,7 +178,7 @@ function createXtermHost(): { terminal: Terminal; fit: FitAddon; element: HTMLDi
   terminal.open(element);
   paintTerminalHost(element, terminal, theme.background);
 
-  return { terminal, fit, element };
+  return { terminal, fit, serialize, element };
 }
 
 /** PTY data/exit listeners. Returns the unsubscribe pair. */
@@ -275,18 +211,21 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
   };
 }
 
-/** xterm input/resize/render handlers. Returns a dispose. The render
- *  handler watches selectionBaseline (mutated by the mouse router) so the
- *  baseline is read by reference rather than captured. */
+/** xterm input/resize/render handlers. Returns a dispose. */
 function wireXtermHandlers(
   id: string,
   terminal: Terminal,
-  selectionBaselineRef: { current: string | null },
+  selection: SelectionWatch,
 ): () => void {
   const inputDisposable = terminal.onData((data) => {
+    // One strip, two readers. While an override is active the reports must not
+    // reach the PTY at all (belt and braces behind DOM interception), so the
+    // stripped chunk *is* the input; with no override the inside program that
+    // asked for them still gets them, but they are never keystrokes either way.
+    const withoutMouseReports = stripMouseReportsFromInput(data);
     let input = data;
     if (getMouseSelectionState(id).override !== 'off') {
-      input = stripMouseReportsFromInput(input);
+      input = withoutMouseReports;
       if (input.length === 0) return;
     }
 
@@ -294,45 +233,33 @@ function wireXtermHandlers(
 
     if (isReplayTerminalReport && registry.get(id)?.isReplaying) return;
 
-    if (!isReplayTerminalReport) {
-      markSessionTouched(id);
+    // Inside programs can request hover and wheel reports. Mouse-only chunks
+    // are not keystrokes; actual clicks acknowledge through the Pane's DOM
+    // handler. Terminal replies are never keystrokes either.
+    if (isReplayTerminalReport || withoutMouseReports.length === 0) {
+      // Forwarded mouse interaction still counts as touched for kill confirmation.
+      if (!isReplayTerminalReport) markSessionTouched(id);
+      getPlatform().writePty(id, input);
+      return;
     }
 
-    const isSyntheticTerminalReport = inputIsSyntheticTerminalReport(input);
-
-    if (!isSyntheticTerminalReport) {
+    // CSI/SS3 can encode real keys. The broader filter protects the prompt
+    // recorder only.
+    if (!inputIsSyntheticTerminalReport(input)) {
       recordTerminalUserInput(id, input, makePromptLineReader(terminal));
-      const hadTodo = getActivity(id).todo;
-      getPlatform().alertAttend(id);
-      if (hadTodo && inputContainsEnter(input)) {
-        getPlatform().alertClearTodo(id);
-      }
     }
-
-    getPlatform().writePty(id, input);
+    writeUserInput(id, input);
   });
 
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
-    getPlatform().alertResize(id);
     getPlatform().resizePty(id, cols, rows);
     bumpRenderTick();
-    if (getMouseSelectionState(id).selection) setMouseSelection(id, null);
-    selectionBaselineRef.current = null;
+    selection.onResize();
   });
 
   const renderDisposable = terminal.onRender(() => {
     bumpRenderTick();
-    if (selectionBaselineRef.current === null) return;
-    const sel = getMouseSelectionState(id).selection;
-    if (!sel || sel.dragging) {
-      selectionBaselineRef.current = null;
-      return;
-    }
-    const current = extractSelectionText(terminal, sel);
-    if (current !== selectionBaselineRef.current) {
-      setMouseSelection(id, null);
-      selectionBaselineRef.current = null;
-    }
+    selection.onRender();
   });
 
   return () => {
@@ -342,17 +269,13 @@ function wireXtermHandlers(
   };
 }
 
-function setupTerminalEntry(id: string, options: { shell?: string; untouched?: boolean; helper?: HelperIdentity } = {}): TerminalEntry {
-  const { terminal, fit, element } = createXtermHost();
-  const selectionBaselineRef = { current: null as string | null };
-  // Every module that finalizes a selection arms the render handler through
-  // this one setter: the mouse router at drag end, a note's pin on reveal.
-  const setSelectionBaseline = (baseline: string | null) => {
-    selectionBaselineRef.current = baseline;
-  };
+interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: HelperIdentity; grid?: TerminalGrid }
 
+function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
+  const { terminal, fit, serialize, element } = createXtermHost(id, options.grid);
+  const selectionWatch = watchSelection(id, terminal);
   const disposePty = wirePtyEvents(id, terminal);
-  const disposeXterm = wireXtermHandlers(id, terminal, selectionBaselineRef);
+  const disposeXterm = wireXtermHandlers(id, terminal, selectionWatch);
   const mouseModeObserver = attachMouseModeObserver(id, terminal);
   // Windows-only: keep win32-input-mode from clobbering kitty-protocol TUIs.
   // Off-Windows win32-input-mode is never advertised, so kitty already wins.
@@ -362,10 +285,10 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     terminal,
     element,
     getOverlayDims: getTerminalOverlayDims,
-    setSelectionBaseline,
   });
 
   const cleanup = () => {
+    selectionWatch.dispose();
     disposePty();
     disposeXterm();
     mouseModeObserver.dispose();
@@ -378,16 +301,16 @@ function setupTerminalEntry(id: string, options: { shell?: string; untouched?: b
     shellKind: shellCommandKind(options.shell, PLATFORM_STRING),
     terminal,
     fit,
+    serialize,
     element,
     cleanup,
-    setSelectionBaseline,
     isReplaying: false,
     untouched: options.untouched ?? false,
   };
 
   registry.set(id, entry);
   ensureTerminalPaneState(id);
-  notifyActivityListeners();
+  notifyActivityListeners(id);
   startThemeObserver();
   return entry;
 }
@@ -487,15 +410,19 @@ export function getOrCreateTerminal(id: string): TerminalEntry {
   return entry;
 }
 
+/** A PTY `resumeTerminal` rebuilds: its entry options plus its liveness and saved title. */
+export interface TerminalResumeInfo extends TerminalEntryOptions { alive: boolean; exitCode?: number; title?: string | null }
+
 export function resumeTerminal(
   id: string,
   replayData: string | null,
-  exitInfo?: { alive: boolean; exitCode?: number; shell?: string; title?: string | null; untouched?: boolean; helper?: HelperIdentity },
+  exitInfo?: TerminalResumeInfo,
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
 
   const entry = setupTerminalEntry(id, {
+    grid: exitInfo?.grid,
     helper: exitInfo?.helper,
     shell: exitInfo?.shell,
     untouched: exitInfo?.untouched ?? false,
@@ -525,7 +452,18 @@ export function resumeTerminal(
 // agent the host interrupted on its way down, which this pane re-runs itself.
 export function restoreTerminal(
   id: string,
-  opts: { cwd?: string | null; title?: string | null; cwdWarning?: string | null; shell?: string; args?: string[]; untouched?: boolean; resumeCommand?: string | null },
+  opts: {
+    cwd?: string | null;
+    title?: string | null;
+    shell?: string;
+    args?: string[];
+    untouched?: boolean;
+    resumeCommand?: string | null;
+    command?: string | null;
+    requireIntegration?: boolean;
+    /** The pane's persisted TODO, seeded by the host at the spawn. */
+    alert?: PersistedAlertState | null;
+  },
 ): TerminalEntry {
   const existing = registry.get(id);
   if (existing) return existing;
@@ -541,10 +479,6 @@ export function restoreTerminal(
     setTerminalUserTitle(id, trimmedTitle);
   }
 
-  if (opts.cwdWarning) {
-    entry.terminal.write(`\r\n\x1b[33m${opts.cwdWarning}\x1b[0m\r\n`);
-  }
-
   const dims = entry.fit.proposeDimensions();
   getPlatform().spawnPty(id, {
     cols: dims?.cols || 80,
@@ -552,42 +486,65 @@ export function restoreTerminal(
     cwd: opts.cwd ?? undefined,
     shell: opts.shell,
     args: opts.args,
+    ...(opts.alert ? { alert: opts.alert } : {}),
   });
   seedProcessCwdAfterSpawn(id);
 
   // Revalidated rather than trusted: the snapshot may have been written by an
   // older detector, and this string is about to be executed.
-  const resume = opts.resumeCommand ? normalizeResumeCommand(opts.resumeCommand) : null;
-  if (resume) {
+  const restoredCommand = opts.command?.trim() ? opts.command : null;
+  const resume = !restoredCommand && opts.resumeCommand ? normalizeResumeCommand(opts.resumeCommand) : null;
+  const command = restoredCommand ?? resume;
+  if (command) {
     // A passive notice, not a dialog: the pane has no transcript, so without it
     // an agent simply appears. It also states the discontinuity the resume hides
     // — the interrupted turn did not continue.
-    entry.terminal.write(`${DIM}⟲ resuming agent session: ${resume}${RESET}\r\n`);
+    if (resume) entry.terminal.write(`${DIM}⟲ resuming agent session: ${resume}${RESET}\r\n`);
     // Seeded before the write because this bypasses xterm's keystroke fallback,
     // and typed only once the fresh shell reaches a prompt — spawn-then-type is
     // exactly the window shell startup swallows keystrokes in.
-    seedLaunchedCommand(id, resume, opts.cwd ?? undefined);
-    typeCommandWhenPromptReady(id, resume, false);
+    seedLaunchedCommand(id, command, opts.cwd ?? undefined);
+    typeCommandWhenPromptReady(id, command, opts.requireIntegration === true);
   }
 
   return entry;
 }
 
+/** Reveal a Session's element in `container`. The caller owns fitting: only it knows
+ *  whether the container's geometry has settled (`docs/specs/layout.md` -> Animations). */
 export function mountElement(id: string, container: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry) return;
   container.appendChild(entry.element);
-  // First paint is the earliest point worth claiming a GL context — see
-  // `tryEnableWebglRenderer` on why create is too early.
-  if (!entry.webglAttempted) {
-    entry.webglAttempted = true;
-    tryEnableWebglRenderer(entry.terminal, entry.element);
-  }
-  requestAnimationFrame(() => entry.fit.fit());
+  // The renderer owns only this mount's GPU resources; xterm state survives it.
+  (entry.webglRenderer ??= new TerminalWebglRenderer(entry.terminal, entry.element)).mount();
+}
+
+/**
+ * The buffer as the escape stream that rebuilds it — scrollback, cursor, modes
+ * — for a Session about to be handed to another Window
+ * (`docs/specs/transport.md` → "Transferring a Workspace"). **Flushed first**:
+ * xterm parses writes asynchronously, and the split point the host stamped is
+ * everything this Session was *sent*, so anything still queued is drained into
+ * the buffer before it is read. Null for a Session this webview does not hold.
+ */
+export async function serializeTerminal(id: string): Promise<string | null> {
+  const entry = registry.get(id);
+  if (!entry) return null;
+  await flushTerminal(id);
+  return serializeTransferTerminal(entry.terminal, entry.serialize);
+}
+
+/** Resolves once everything written to the Session so far is in its buffer.
+ *  xterm parses asynchronously, so transfer waits here before reading or mounting a rebuilt buffer. */
+export function flushTerminal(id: string): Promise<void> {
+  const entry = registry.get(id);
+  if (!entry) return Promise.resolve();
+  return new Promise<void>((resolve) => entry.terminal.write('', resolve));
 }
 
 /** Where a hidden helper's xterm element waits between reveals: still in the
- *  document, so its renderer and scrollback survive
+ *  document, preserving its DOM state and scrollback
  *  (docs/specs/terminal-context.md → Helper lifecycle). */
 let helperParking: HTMLElement | null = null;
 
@@ -596,6 +553,7 @@ let helperParking: HTMLElement | null = null;
 export function parkElement(id: string): void {
   const entry = registry.get(id);
   if (!entry) return;
+  entry.webglRenderer?.unmount();
   // Revalidated, not just cached: a host that replaces the body (a docs iframe,
   // a test teardown) would otherwise park every helper in a detached subtree.
   if (!helperParking?.isConnected) {
@@ -613,7 +571,10 @@ export function unmountElement(id: string, container?: HTMLElement): void {
   const entry = registry.get(id);
   if (!entry || (container && entry.element.parentElement !== container)) return;
   if (entry.helper) parkElement(id);
-  else entry.element.remove();
+  else {
+    entry.webglRenderer?.unmount();
+    entry.element.remove();
+  }
 }
 
 export function disposeAllSessions(): void {
@@ -622,21 +583,54 @@ export function disposeAllSessions(): void {
   }
 }
 
-export function disposeSession(id: string): void {
+/**
+ * Tear this webview's half of a Session down: the listeners,
+ * the element and the xterm instance, plus the registry, pane, selection and
+ * activity state keyed to it.
+ *
+ * `kill` is the only difference between the two verbs below, and it is the
+ * whole difference between ending a Session and letting another Window take it:
+ * the host removes a killed Session's alert entry, and keeps a released one's
+ * for the Window that takes the Session over (`docs/specs/alert.md` → Live
+ * Workspace transfer).
+ */
+function teardownSession(id: string, { kill }: { kill: boolean }): void {
   const entry = registry.get(id);
   if (!entry) return;
-  getPlatform().alertRemove(id);
-  // Before the xterm instance goes: its markers are what notepad pins hold, and
-  // a disposed marker cannot be dropped cleanly afterwards. The notes stay.
-  dropSourcesForTerminal(id);
   entry.cleanup();
-  getPlatform().killPty(id);
+  if (kill) getPlatform().killPty(id);
+  // Detach before releasing: unlike a minimize, nothing here has to survive, so the
+  // fallback renderer the addon's disposal constructs never touches the document.
+  // A released Session's context goes too: the target Window mounts its own.
   entry.element.remove();
+  entry.webglRenderer?.unmount();
   entry.terminal.dispose();
   registry.delete(id);
   removeTerminalPaneState(id);
   removeMouseSelectionState(id);
+  clearToolAnnounce(id);
+  clearToolDirty(id);
+  clearPreviewTransition(id);
   clearTerminalActivity(id);
+  clearSizeHold(id);
+}
+
+/** End a Session: the process goes with it. */
+export function disposeSession(id: string): void {
+  teardownSession(id, { kill: true });
+}
+
+/**
+ * Detach a Session from this Window WITHOUT killing it — the process keeps
+ * running and another Window resumes over it
+ * (`docs/specs/transport.md` → "Transferring a Workspace").
+ *
+ * **Never reachable from a Wall unmount.** A Wall unmounts on a reload, a
+ * StrictMode double-mount, and a Workspace switch, and releasing there would
+ * silently strand every PTY the Window still owns. Only explicit transfer departure and refused-adoption cleanup may call it.
+ */
+export function releaseSession(id: string): void {
+  teardownSession(id, { kill: false });
 }
 
 export function refitSession(id: string): void {
@@ -675,6 +669,8 @@ export function getTerminalOverlayDims(id: string): TerminalOverlayDims | null {
     rows: entry.terminal.rows,
     viewportY: entry.terminal.buffer.active.viewportY,
     baseY: entry.terminal.buffer.active.baseY,
+    elementLeft: elementRect.left,
+    elementTop: elementRect.top,
     elementWidth: elementRect.width,
     elementHeight: elementRect.height,
     cellWidth,
@@ -686,6 +682,26 @@ export function getTerminalOverlayDims(id: string): TerminalOverlayDims | null {
 
 export function isUntouched(id: string): boolean {
   return registry.get(id)?.untouched ?? false;
+}
+
+/** Counts the human input a Session has received (`markSessionTouched`), so a
+ *  caller can tell whether the user touched it since an earlier read. */
+export function getSessionInputVersion(id: string): number {
+  return registry.get(id)?.inputVersion ?? 0;
+}
+
+/**
+ * Write human-originated input — a keystroke, a paste, a file drop, the mobile
+ * input bar — so every path acknowledges alike (`docs/specs/alert.md` ->
+ * Engagement): the host acknowledges it with input as it writes it.
+ */
+export function writeUserInput(id: string, data: string): void {
+  // Typing, a paste, or Pocket's input bar ends a finalized selection — the
+  // copy editor over it, or a shadowed drag — on every path alike
+  // (docs/specs/mouse-and-clipboard.md §4.3, §3.8).
+  if (getMouseSelectionState(id).selection?.dragging === false) setMouseSelection(id, null);
+  markSessionTouched(id);
+  getPlatform().writePty(id, data, { userInput: true });
 }
 
 export function markSessionTouched(id: string): void {
@@ -716,10 +732,10 @@ export function registerSurfaceFocusHandle(id: string, handle: SurfaceFocusHandl
   };
 }
 
-export function focusSession(id: string, focused: boolean): void {
+export function focusSession(id: string, focused: boolean, target: 'surface' | 'terminal' = 'surface'): void {
   // Non-terminal surfaces (iframe) aren't in the xterm registry — route to
   // their focus handle so onClickPanel → enterTerminalMode focuses them too.
-  const handle = surfaceFocusHandles.get(id);
+  const handle = target === 'surface' ? surfaceFocusHandles.get(id) : undefined;
   if (handle) {
     if (focused) handle.focus();
     else handle.blur();
@@ -729,10 +745,8 @@ export function focusSession(id: string, focused: boolean): void {
   const entry = registry.get(id);
   if (!entry) return;
 
-  if (focused) {
-    entry.terminal.focus();
-  } else {
-    entry.terminal.blur();
-    getPlatform().alertClearAttention(id);
-  }
+  // DOM focus is never engagement: the Wall reports that from its mode and
+  // selection (`docs/specs/alert.md` -> Engagement).
+  if (focused) entry.terminal.focus();
+  else entry.terminal.blur();
 }

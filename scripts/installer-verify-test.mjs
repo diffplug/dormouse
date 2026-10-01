@@ -6,7 +6,9 @@
  * already claims the root path — plus the install's reading of a possibly
  * half-written `config/relay.env`, credential ownership, and exclusive release
  * staging. Env-reader cases also execute the shipped wrapper parser. Runs
- * from the repo root via `pnpm test`.
+ * from the repo root via `pnpm test`. `--help` is checked the same way: its
+ * output is a behavior of the extraction the script runs, not of the header it
+ * is supposed to reproduce.
  *
  * Why this exists: `deploy-lint.mjs` is textual, so it can say a control is
  * still present and nothing more. These are controls where "present" was not
@@ -41,7 +43,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { readRepoFile } from './lint-kit.mjs';
+import { readRepoFile, repoRoot } from './lint-kit.mjs';
+
+/**
+ * The script's own header comment, de-commented: every line after the shebang
+ * down to the first that is not a comment. Derived here rather than read off
+ * the installer's own `--help`, which is the thing under test.
+ */
+function headerComment(text) {
+  const lines = [];
+  for (const line of text.split('\n').slice(1)) {
+    if (!line.startsWith('#')) break;
+    lines.push(`${line.replace(/^# ?/, '')}\n`);
+  }
+  return lines.join('');
+}
 
 /**
  * One shell function, taken from `text` by name. The last definition wins: the
@@ -324,6 +340,34 @@ export function run() {
         failures.push(`${platform}: ${err.message} in ${file}`);
         continue;
       }
+      // `--help` reprints this script's own header comment. A control that names
+      // the header's LAST LINE goes stale the moment the header grows, silently
+      // and only in the part that grew: the Linux range still ended where the
+      // header did before `DORMOUSE_INSTALL_ORIGIN` was documented, so `--help`
+      // never mentioned the one variable only that installer has. Compared
+      // against the header read out of the file, so either side drifting reddens.
+      checked += 1;
+      const help = spawnSync('bash', [join(repoRoot, file), '--help'], {
+        encoding: 'utf8',
+        // Emptied rather than inherited: the installer rejects these two before
+        // it reaches the argument loop unless test mode is on, so a developer
+        // who exported them would see this check fail for the wrong reason.
+        env: { ...process.env, DORMOUSE_INSTALL_ROOT: '', DORMOUSE_INSTALL_ORIGIN: '' },
+      });
+      const printedHelp = help.stdout ?? '';
+      const header = headerComment(text);
+      if (help.status !== 0 || printedHelp !== header) {
+        const missing = header
+          .split('\n')
+          .filter((line) => line.trim() && !printedHelp.includes(line))
+          .slice(0, 3);
+        failures.push(
+          `${platform.padEnd(6)} --help does not reprint the whole header comment of ${file}` +
+            (help.status === 0 ? '' : ` (bash exited ${help.status}: ${(help.stderr ?? '').trim()})`) +
+            (missing.length ? `\n    first missing line(s): ${missing.join(' / ')}` : ''),
+        );
+      }
+
       const allCases = cases(platform, env);
       const stagePath = join(fixtureDir, `stage-${platform}`);
       const quotedStage = "'" + stagePath.replaceAll("'", "'\\''") + "'";
@@ -376,7 +420,10 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
         'reads as "no match" (docs/specs/security-remote.md -> "Network posture (self-hosted)").\n' +
         '`env_missing_keys` must name every installer-owned key a half-written\n' +
         'config/relay.env lacks, so the install says `rm` rather than "fix it"\n' +
-        '(docs/specs/security-remote.md -> "Credentials at rest").',
+        '(docs/specs/security-remote.md -> "Credentials at rest").\n' +
+        '`--help` must print the whole header comment, derived from the file rather\n' +
+        'than a hardcoded last line, so documenting a new option cannot silently\n' +
+        'leave it out of the help text.',
     );
     process.exit(1);
   }

@@ -10,7 +10,7 @@
 |-----|--------|-------------|
 | Left ⌘ → Right ⌘ (within 500 ms) | Enter command mode | Only exits passthrough; inert in command mode. |
 | Left ⇧ → Right ⇧ (within 500 ms) | Enter command mode | Independent of the ⌘ track; the gesture for keyboards with no right ⌘. |
-| `Enter` (command) | Enter passthrough mode | Focus the selected pane; reattach the selected door and focus it. |
+| `Enter` (command) | Enter passthrough or activate | Focus the selected pane or reattach a door; Workspace targets follow the table below. |
 
 A focused cross-origin iframe surface swallows the gesture; the proxy shim detects it in-frame and re-posts it to the Wall (`docs/specs/dor-browser.md`).
 
@@ -23,17 +23,30 @@ A focused cross-origin iframe surface swallows the gesture; the proxy shim detec
 | `z` | Zoom and focus | Enters passthrough; on the pane that already owns zoom, unzooms. |
 | `m` or `d` | Minimize / reattach | Stays in command mode, unlike `Enter` on a door. |
 | `k` or `x` | Kill | Kills the selected pane or door behind a random-letter prompt; an untouched Surface skips it. |
-| `,` | Rename | Inline rename of the selected terminal pane's title; consumed no-op on browser surfaces and doors. |
-| `a` | Toggle alert | Dismiss or toggle the bell alert. Terminal Surfaces only; doors excluded. |
+| `,` | Rename selected item | Rename the selected terminal or Tool pane or Workspace tab; consumed no-op on browser surfaces, doors, and `+`. |
+| `a` | Alert | Dismiss the ring if any, then open the terminal context. Terminal Surfaces only; doors excluded. |
 | `t` | Toggle todo | Toggle the TODO marker on the selected Surface, terminal or browser; doors excluded. |
 | `>` | Terminal context | Terminal panes only; consumed no-op on browser panes, inert on doors. |
+
+## Workspaces (command mode)
+
+Standalone only — a bare Wall (VS Code, the website playground) leaves these keys unbound.
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `1`–`9` | Select by position | The nth Workspace in strip order; out of range is a consumed no-op. |
+| `,` | Rename selected item | Edit the highlighted Workspace tab, without activating it. |
+| `k` or `x` | Close Workspace | Close the highlighted tab through its `×` action, including its confirmation. |
+| `Enter` (Workspace tab) | Activate / focus | An inactive tab activates in command mode; an active tab enters its terminal in passthrough. |
+| `Enter` (`+`) | New Workspace | Creates and focuses its terminal in passthrough after mount. |
 
 ## Navigation (command mode)
 
 | Key | Action | Description |
 |-----|--------|-------------|
-| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. |
-| `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on doors. |
+| `↑` / `↓` / `←` / `→` | Move selection | Navigate panes and doors; opposite directions backtrack between panes. Down with no pane below selects the first door; Up from a door selects the last pane. Up from a top-edge pane highlights the active Workspace tab. |
+| `←` / `→` (Workspace strip) | Highlight tab / `+` | Traverse without activation, stopping at either end. Down returns to the originating live pane, or the first if gone. |
+| `⌘`+arrows or `Ctrl`+arrows | Swap surfaces | Swap the two panes' Surfaces; the opposite chord swaps back exactly. Either modifier, every platform; consumed no-op on non-pane chrome. |
 
 ## Terminal selection & clipboard
 
@@ -43,11 +56,10 @@ Both modes, ahead of the passthrough gate, and only on a terminal **selected** S
 |-----|--------|-------------|
 | `e` | Extend to token | Mid-drag only: extend the selection to the full URL/path token at the cursor; consumed but inert with no token. |
 | `Alt` (hold) | Block / linewise | Block (rectangular) rather than linewise, live through the drag; touch latches it with a double-tap-then-drag. |
-| `Esc` | Cancel selection | Cancel the in-progress drag, or clear a finalized selection while its popup is up. |
-| *(any other key)* | — | Swallowed during a terminal-handled drag, never reaching the inside program (`docs/specs/mouse-and-clipboard.md` §3.6). |
-| `⌘C` (macOS) / `Ctrl+C` (others) | Copy raw | Copy the selection as-is; requires a finalized selection. |
-| `⌘⇧C` (macOS) / `Ctrl+Shift+C` (others) | Copy rewrapped | Copy the selection rewrapped for single-line display. |
-| `⌘N` (macOS) / `Ctrl+N` (others) | Add to notepad | Capture the finalized selection as a note on that Surface; unbound where the browser reserves the chord (`docs/specs/notepad.md`). |
+| `Esc` | Cancel selection | Cancel the in-progress drag, or in passthrough close the copy editor and clear its selection. |
+| *(any other key)* | — | Swallowed during a terminal-handled drag, never reaching the inside program (`docs/specs/mouse-and-clipboard.md` §3.6); with the copy editor open, closes it and reaches the terminal. |
+| `⌘C` (macOS) / `Ctrl+C` (others) | Copy | Copy editor: copy what it shows (`⇧` optional); over a program-owned drag, open it. |
+| `e` / `⇧E`, `f` / `⇧F`, `←` `→` / `⇧←` `⇧→`, `↵` | Copy editor | Passthrough only: scope, format, edges, copy (`docs/specs/mouse-and-clipboard.md` §4.3). |
 | `⌘V` / `⌘⇧V` / `Ctrl+V` / `Ctrl+Shift+V` | Paste | Paste into the terminal; the `Ctrl` variants are intercepted on every platform, macOS included. |
 
 On macOS `Ctrl+C` still reaches the running program; a literal `0x16` needs the shell's `quoted-insert` (`Ctrl+Q`) (`docs/specs/mouse-and-clipboard.md` §8.3).
@@ -59,7 +71,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | Key | Action | Description |
 |-----|--------|-------------|
 | `⌘V` / `Ctrl+V` | Paste into page | Replays the *local* clipboard as per-character key events — the embedded browser's own clipboard is empty. |
-| `⌘`/`Ctrl` + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `agentBrowserEdit` channel. |
+| `⌘`/`Ctrl` + `a` / `c` / `x` | Select all / copy / cut | Routed through the host's `edit` operation. |
 | `c` / `Esc` (render-swap warning) | Continue / cancel | Confirm dropping the non-active tabs when swapping a multi-tab screencast surface to the `iframe` renderer. |
 
 ## Dialogs, menus & prompts
@@ -69,6 +81,7 @@ Every key not claimed above forwards to the embedded page while a screencast pan
 | `Esc` | Close / cancel | Dismiss a dialog or popover; cancel a rename or kill confirmation; abort an in-progress sash or pane drag. |
 | `Enter` | Confirm rename | Save the new name while renaming a pane; blur commits too. |
 | `Tab` / `Shift+Tab` | Focus cycle | Cycle popover/dialog controls. In terminal context, navigate controls into the helper; once helper xterm has focus, Tab belongs to its program. |
+| `Shift+F10` / `ContextMenu` | Workspace alert settings | On a focused baseboard alarm button (`docs/specs/alert.md` → Settings dialog). |
 | Prompted letter | Confirm kill | Type the letter shown to confirm; other keys reaching the prompt cancel (see layout's dispatch order). |
 
 ## VS Code host
@@ -86,12 +99,9 @@ The standalone host contributes no chords; `docs/specs/standalone.md` owns its n
 ## Implementation references
 
 - `lib/src/components/wall/use-wall-keyboard.ts` — the capture-phase listener; the iframe-shim leader `message` listener
-- `lib/src/components/wall/keyboard/` — one module per dispatch branch: `handle-dual-tap.ts`, `handle-editable-clipboard.ts`, `handle-mouse-selection-keys.ts`, `handle-kill-confirm.ts`, `handle-pane-shortcuts.ts`, `handle-pane-navigation.ts`; platform modifiers in `chords.ts`
+- `lib/src/components/wall/keyboard/` — one module per dispatch branch: `handle-dual-tap.ts`, `handle-editable-clipboard.ts`, `handle-mouse-selection-keys.ts`, `handle-kill-confirm.ts`, `handle-workspace-shortcuts.ts`, `handle-pane-shortcuts.ts`, `handle-pane-navigation.ts`; platform modifiers in `chords.ts`
+- `lib/src/components/wall/chrome-keyboard-lease.ts`, `lib/src/lib/workspace-ui-store.ts` — the strip's keyboard suppression and rename/confirmation state
 - `lib/src/lib/vscode-keybindings.ts` — the workbench mirror allowlist
 - `lib/src/lib/terminal-mouse-router.ts` — live Alt tracking during a drag
-- `lib/src/components/SelectionPopup.tsx`, `lib/src/components/wall/TerminalContextView.tsx`, `lib/src/components/wall/InlineEditInput.tsx` — the popover/dialog handlers
+- `lib/src/components/wall/TerminalContextView.tsx`, `lib/src/components/wall/InlineEditInput.tsx` — the popover/dialog handlers
 - `lib/src/components/wall/agent-browser-surface-controller.ts` — browser key forwarding and the edit-chord bridge
-
-## Future
-
-Workspace switch / create / close / rename shortcuts (command mode) are staged with the workspaces rollout ([layout.md](layout.md#future), **Scope: workspaces-rollout**), following the tmux *window* bindings the rest of the keymap mirrors; listed here once bound.

@@ -5,12 +5,15 @@ import type {
   Command,
   DorCommandContext,
   IframeSurfaceResponse,
+  WorkspaceScopedFlags,
 } from './types.js';
 import {
   errorMessage,
   renderJson,
   requireControlClient,
   stringParser,
+  workspaceFlag,
+  workspaceParam,
   writeStdout,
 } from './shared.js';
 import {
@@ -19,7 +22,7 @@ import {
   resolveSurfaceOpenTarget,
 } from './open-target.js';
 
-interface IframeFlags {
+interface IframeFlags extends WorkspaceScopedFlags {
   readonly json?: boolean;
   readonly minimize?: boolean;
   readonly surface?: string;
@@ -30,13 +33,14 @@ export const iframeCommand: Command = {
   command: buildCommand<IframeFlags, [string], DorCommandContext>({
     docs: {
       brief: 'Open a target in an iframe surface.',
-      fullDescription: `Opens a target in a high-fidelity iframe surface for human inspection.
+      fullDescription: `Opens an http:// page in a high-fidelity iframe surface for a human to look at.
+
+Agents cannot read or drive an iframe surface, and it drops the page's cookies, so logins do not work in it. For those, and for any https:// page, which the iframe refuses, use \`dor agent-browser open <url>\`.
 
 If the caller surface is an untouched terminal, Dormouse replaces that terminal with the iframe. Otherwise Dormouse creates a split next to the caller/focused surface.
 
 The target is one of:
-  <url>          An absolute http:// or https:// URL (an explicit scheme is
-                 always honored).
+  <url>          An absolute http:// URL.
   host:port      A schemeless host:port, defaulted to http:// (e.g.
                  localhost:5173, box.ts.net:3000). The explicit port marks a
                  dev/infra server, which is http far more often than not.
@@ -64,6 +68,7 @@ JSON output:
         json: { kind: 'boolean', brief: 'Print JSON output.', optional: true, withNegated: false },
         minimize: { kind: 'boolean', brief: 'Create or replace the surface minimized.', optional: true, withNegated: false },
         surface: { kind: 'parsed', parse: stringParser, brief: 'Surface to replace or split from.', optional: true, placeholder: 'id|ref' },
+        workspace: workspaceFlag,
       },
       positional: {
         kind: 'tuple',
@@ -84,7 +89,7 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
   // concrete targets (URL / bare :port) were already normalized at parse time.
   let url = target;
   if (isSurfaceOpenTarget(target)) {
-    const resolved = await resolveSurfaceOpenTarget(target, client);
+    const resolved = await resolveSurfaceOpenTarget(target, client, flags.workspace);
     if (!resolved.ok) return new Error(resolved.message);
     url = resolved.value;
   }
@@ -94,6 +99,7 @@ async function runIframeCommand(this: DorCommandContext, flags: IframeFlags, tar
       minimized: flags.minimize === true,
       surface: flags.surface,
       url,
+      ...workspaceParam(flags.workspace),
     });
     writeStdout(this, renderIframeResponse(response, flags.json === true));
     return undefined;

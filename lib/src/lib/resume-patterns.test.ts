@@ -2,6 +2,31 @@ import { describe, it, expect } from 'vitest';
 import { detectResumeCommand } from './resume-patterns';
 
 describe('detectResumeCommand', () => {
+  it.each(['\n', '\r', '\t', ' ', '`', "'", ')', '.', '\x1b[K'])(
+    'accepts an observed separator %j after the ID', (separator) => {
+      expect(detectResumeCommand(`codex resume abc123${separator}`)).toBe('codex resume abc123');
+    },
+  );
+
+  it('waits for a separator after the newest hint without falling back to an older one', () => {
+    const output = 'codex resume older\nclaude --resume newer';
+    expect(detectResumeCommand(output)).toBeNull();
+    expect(detectResumeCommand(`${output}\n`)).toBe('claude --resume newer');
+    expect(detectResumeCommand('claude --continue')).toBeNull();
+    expect(detectResumeCommand('claude --continue\n')).toBe('claude --continue');
+  });
+
+  it.each(['\x1b[0m', '\x1b', '\x1b[38;5', '\x1b(', '\x1b]0;title'])(
+    'does not treat trailing styling or an unfinished control %j as a separator', (tail) => {
+      expect(detectResumeCommand(`codex resume abc${tail}`)).toBeNull();
+    },
+  );
+
+  it('keeps an ID intact across a split charset designator', () => {
+    expect(detectResumeCommand('codex resume abc\x1b(')).toBeNull();
+    expect(detectResumeCommand('codex resume abc\x1b(Bdef\n')).toBe('codex resume abcdef');
+  });
+
   it('detects codex resume command', () => {
     const scrollback = 'some output\ncodex resume abc123\n$ ';
     expect(detectResumeCommand(scrollback)).toBe('codex resume abc123');
@@ -101,12 +126,12 @@ describe('detectResumeCommand', () => {
   });
 
   it('prefers the rightmost pattern after a carriage-return redraw', () => {
-    const scrollback = 'codex resume old123\rclaude --resume new789';
+    const scrollback = 'codex resume old123\rclaude --resume new789\n';
     expect(detectResumeCommand(scrollback)).toBe('claude --resume new789');
   });
 
   it('prefers the rightmost repeated pattern in one raw segment', () => {
-    const scrollback = 'codex resume old123\rcodex resume new789';
+    const scrollback = 'codex resume old123\rcodex resume new789\n';
     expect(detectResumeCommand(scrollback)).toBe('codex resume new789');
   });
 });
@@ -140,7 +165,8 @@ describe('screen-region seams', () => {
   it('does not read an id out of a CSI the buffer was cut off inside', () => {
     // A tail slice routinely lands mid-sequence; the parameters must not read as
     // text and extend the id sitting in front of them.
-    expect(detectResumeCommand('codex resume abc\x1b[38;5')).toBe('codex resume abc');
+    expect(detectResumeCommand('codex resume abc\x1b[38;5')).toBeNull();
+    expect(detectResumeCommand('codex resume abc\x1b[38;5;2mdef\n')).toBe('codex resume abcdef');
   });
 
   it('still reads an id through a colour change, which does not move the cursor', () => {

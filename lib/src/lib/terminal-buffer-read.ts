@@ -6,6 +6,8 @@
 // excluded. Reading at submit keeps it timing-independent (unlike capturing a
 // prompt-boundary anchor on the first keystroke, which races shell output).
 
+import { wrapRun } from './buffer-cells';
+
 /** Minimal slice of an xterm.js `IBufferLine`, kept tiny so this is unit-testable. */
 export interface BufferLineLike {
   readonly isWrapped: boolean;
@@ -14,34 +16,24 @@ export interface BufferLineLike {
 
 /** Minimal slice of an xterm.js `IBuffer`. */
 export interface BufferLike {
+  readonly length: number;
   getLine(index: number): BufferLineLike | undefined;
 }
 
 // Read the logical line containing the cursor up to `cursorCol`. `cursorAbsRow`
-// is an absolute row (`baseY + cursorY`). Walks up through soft-wrapped rows to
-// the line's start, then concatenates forward to the cursor, bounding the final
-// row at the cursor column so anything to its right (autosuggest ghost text) is
-// dropped.
+// is an absolute row (`baseY + cursorY`). Joins the line's soft-wrapped rows
+// from its start up to the cursor's row, bounding that row at the cursor
+// column so anything to its right (autosuggest ghost text) is dropped.
 export function readLogicalLineFromBuffer(
   buffer: BufferLike,
   cursorAbsRow: number,
   cursorCol: number,
 ): string | null {
-  let start = cursorAbsRow;
-  while (start > 0) {
-    const line = buffer.getLine(start);
-    if (!line || !line.isWrapped) break;
-    start -= 1;
-  }
-
-  if (!buffer.getLine(start)) return null;
-
+  const { top, lines } = wrapRun(buffer, cursorAbsRow);
+  if (!lines.length) return null;
   let text = '';
-  for (let row = start; row <= cursorAbsRow; row += 1) {
-    const line = buffer.getLine(row);
-    if (!line) break;
-    const endColumn = row === cursorAbsRow ? cursorCol : undefined;
-    text += line.translateToString(false, 0, endColumn);
+  for (let row = top; row <= cursorAbsRow; row += 1) {
+    text += lines[row - top].translateToString(false, 0, row === cursorAbsRow ? cursorCol : undefined);
   }
   return text;
 }

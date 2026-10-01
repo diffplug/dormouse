@@ -6,34 +6,36 @@
  * The Burrow itself is a service in the process that owns the PTYs
  * (`lib/src/host/remote/service.ts`) — the Tauri sidecar, the VS Code extension
  * host. This module is its client: it forwards console commands, mirrors the
- * pairing queue, and reports rings. It starts no Burrow, holds no relay socket,
- * and reads no ACL. A host with no service behind it (the website) gets nothing
- * at all, which is why every entry point here tolerates a missing link.
+ * pairing queue, and refreshes the push device list. It starts no Burrow, holds
+ * no relay socket, and reads no ACL. A host with no service behind it (the
+ * website) gets nothing at all, which is why every entry point here tolerates a
+ * missing link.
  *
  * Enroll from the devtools console:
  *
- *   await window.dormouseBurrow.enroll('https://your-relay', 'SETUP_PASSWORD', 'My Laptop')
- *   await window.dormouseBurrow.enrollOffer('https://your-relay', 'My Laptop')  // installer's offer, this machine
+ *   await window.dormouseBurrow.enroll('SETUP_PASSWORD', 'My Laptop')   // at the build's relay origin
+ *   await window.dormouseBurrow.enrollOffer('My Laptop')                 // installer's offer, this machine
  *   window.dormouseBurrow.status()
  *   window.dormouseBurrow.reconnect()      // needed after `displaced`
  *   window.dormouseBurrow.clearEnrollment()
  */
 
-import type {
-  PairingQueueEvent,
-  PairingQueueItem,
-  PushDevicesResult,
-  BurrowConsoleStatus,
+import {
+  approvalKind,
+  type PairingQueueEvent,
+  type PairingQueueItem,
+  type PushDevicesResult,
+  type BurrowConsoleStatus,
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
-import { clearPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
-import { commitPushDevices, invalidatePushDeviceRefreshes, watchPushRings } from './alert-push';
-import { armWhileEnrolled } from './enrolled-gate';
+import { clearPushDevices, commitPushDevices, setPushDevicesRefresher } from '../../lib/push-devices';
+import { armWhile } from './enrolled-gate';
 import {
   enqueuePairingApproval,
   getPairingApprovalSnapshot,
   resolvePairingApproval,
+  sameRequest,
 } from './pairing-approval';
 
 export type { BurrowConsoleStatus };
@@ -78,31 +80,31 @@ function installBridgeMode(link: BurrowLink): void {
   // and asking then is one command that answers `no-burrow`.
   setPushDevicesRefresher(refresh);
 
-  armWhileEnrolled(link, () => {
-    // Rings are detected here — the activity store and the pane labels are
-    // webview state — and delivered there, where the ACL is.
-    const stopRings = watchPushRings((sessionId, title) => {
-      void link.command('push', { sessionId, title }).catch(() => {});
-    });
-    refresh();
-    // Seeded on every transition to enrolled, not once at install: the service
-    // pushes the queue only when it changes, so a webview that joins — or a
-    // machine that enrolls — mid-pairing would otherwise show no modal at all
-    // until the next change.
-    void link
-      .command('pairingQueue')
-      .then((queue) => mirrorPairingQueue(link, (queue ?? []) as PairingQueueItem[]))
-      .catch(() => {});
-    return () => {
-      stopRings();
-      // The Burrow is gone, so the dialog must stop naming devices nothing can
-      // reach — including any list still on the wire, which would otherwise put
-      // them back the moment it lands. The refresher stays installed: the dialog
-      // may still open on an un-enrolled machine, where asking is one command
-      // that answers `no-burrow`.
-      invalidatePushDeviceRefreshes();
-      clearPushDevices();
-    };
+  armWhile(link, {
+    // The device list is the Relay's, so it is armed on the enrollment alone.
+    enrolled: () => {
+      refresh();
+      return () => {
+        // The Burrow is gone, so the dialog must stop naming devices nothing can
+        // reach — including any list still on the wire, which would otherwise put
+        // them back the moment it lands. The refresher stays installed: the dialog
+        // may still open on an un-enrolled machine, where asking is one command
+        // that answers `no-burrow`.
+        clearPushDevices();
+      };
+    },
+    // The queue carries a one-time request too, which needs no enrollment.
+    serving: () => {
+      // Seeded on every transition to serving, not once at install: the service
+      // pushes the queue only when it changes, so a webview that joins — or a
+      // machine that enrolls — mid-pairing would otherwise show no modal at all
+      // until the next change.
+      void link
+        .command('pairingQueue')
+        .then((queue) => mirrorPairingQueue(link, (queue ?? []) as PairingQueueItem[]))
+        .catch(() => {});
+      return () => {};
+    },
   });
 
   const target = globalThis as unknown as { dormouseBurrow?: unknown };
@@ -111,29 +113,31 @@ function installBridgeMode(link: BurrowLink): void {
   // → "Running it"), one round trip further away — so `status()` and
   // `reconnect()` are promises here.
   target.dormouseBurrow = {
-    enroll: (relayUrl: string, password: string, label: string) =>
-      link.command('enroll', { relayUrl, password, label }),
-    // Origin-first, like `enroll` — but this one is an *echo* of the origin the
-    // caller reviewed (`status().offer.origin`), not what is enrolled against:
-    // that and the one-time token come off the installer's file in the service,
-    // which refuses if the file no longer names the origin passed here.
-    enrollOffer: (origin: string, label: string) =>
-      link.command('enrollOffer', { origin, label }),
+    // No Relay argument, and no token: the only Relay is the build's baked
+    // origin (`docs/specs/relay.md` → "Relay origin"), and the service reads the
+    // installer's token off its file.
+    enroll: (password: string, label: string) => link.command('enroll', { password, label }),
+    enrollOffer: (label: string) => link.command('enrollOffer', { label }),
     status: () => link.command('status'),
     reconnect: () => link.command('reconnect'),
     clearEnrollment: () => link.command('clearEnrollment'),
   };
 }
 
-/** Project the service's queue onto the modal's store. */
-function mirrorPairingQueue(link: BurrowLink, queue: readonly PairingQueueItem[]): void {
-  const present = new Set(queue.map((item) => item.clientId));
+/**
+ * Project the service's queue onto the modal's store, each request named by
+ * `(kind, clientId)`. **An item that names no kind is a pairing** — a broker
+ * older than the field sends none, and nothing it sends can be a one-time
+ * request (`service-protocol.ts` → `ApprovalKind`).
+ */
+function mirrorPairingQueue(link: BurrowLink, raw: readonly PairingQueueItem[]): void {
+  const queue = raw.map((item) => ({ ...item, kind: approvalKind(item) }));
   for (const pending of getPairingApprovalSnapshot()) {
-    if (!present.has(pending.clientId)) resolvePairingApproval(pending.clientId);
+    if (!queue.some((item) => sameRequest(item, pending))) resolvePairingApproval(pending);
   }
-  const mirrored = new Map(getPairingApprovalSnapshot().map((pending) => [pending.clientId, pending]));
+  const mirrored = getPairingApprovalSnapshot();
   for (const item of queue) {
-    const showing = mirrored.get(item.clientId);
+    const showing = mirrored.find((pending) => sameRequest(pending, item));
     // Re-enqueuing an unchanged request would reorder the queue and re-render
     // the modal for nothing. The ticket id is part of "unchanged": timestamps
     // can collide, and each approve/deny must echo the exact ticket displayed.
@@ -149,20 +153,16 @@ function mirrorPairingQueue(link: BurrowLink, queue: readonly PairingQueueItem[]
     // the Burrow, so confirming authorizes the *new* device — and the modal must
     // therefore be showing the new device, with the digits typed against the
     // old one discarded (docs/specs/remote-security-model.md).
-    if (showing) resolvePairingApproval(item.clientId);
+    if (showing) resolvePairingApproval(item);
+    // Every answer echoes the kind, so the service routes it to the half that
+    // holds this request.
+    const ticket = { kind: item.kind, clientId: item.clientId, pairingId: item.pairingId };
     enqueuePairingApproval({
-      clientId: item.clientId,
-      pairingId: item.pairingId,
+      ...ticket,
       label: item.label,
       requestedAt: item.requestedAt,
-      approve: (code) =>
-        void link
-          .command('approve', { clientId: item.clientId, pairingId: item.pairingId, code })
-          .catch(() => {}),
-      deny: () =>
-        void link
-          .command('deny', { clientId: item.clientId, pairingId: item.pairingId })
-          .catch(() => {}),
+      approve: (code) => void link.command('approve', { ...ticket, code }).catch(() => {}),
+      deny: () => void link.command('deny', ticket).catch(() => {}),
     });
   }
 }

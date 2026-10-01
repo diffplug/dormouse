@@ -28,6 +28,18 @@ describe('PTY manager lifetime and buffers', () => {
     vi.clearAllMocks();
   });
 
+  it('waits for both serial port scans before timing out the child', async () => {
+    vi.useFakeTimers();
+    try {
+      const { manager, child } = await startManager();
+      const answer = manager.getOpenPorts('pane-a');
+      await vi.advanceTimersByTimeAsync(6500);
+      const ports = [{ address: '127.0.0.1', port: 5173, pid: 1 }];
+      child.emit('message', { type: 'openPorts', id: 'pane-a', ports });
+      expect(await answer).toEqual(ports);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('caps even a single oversized output chunk and retains absolute stream positions', async () => {
     const { manager, child } = await startManager();
     const data = 'prefix' + 'x'.repeat(1_000_000);

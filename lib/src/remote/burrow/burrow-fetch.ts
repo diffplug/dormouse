@@ -53,9 +53,9 @@ export async function burrowFetch(
   const response = await doFetch(`${options.enrollment.relayUrl}${route}`, {
     ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
     // The service replaced a webview whose CSP checked every redirect target,
-    // and a Node process re-checks nothing. Do not let an allowed origin's open
-    // redirect forward the bearer token — or the notification metadata — to a
-    // destination outside the baked allowlist.
+    // and a Node process re-checks nothing. Do not let the Relay's open redirect
+    // forward the bearer token — or the notification metadata — to an origin the
+    // build was never baked with.
     redirect: 'error',
     signal: AbortSignal.timeout(options.timeoutMs ?? BURROW_REQUEST_TIMEOUT_MS),
     headers: {

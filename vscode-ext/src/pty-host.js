@@ -31,7 +31,7 @@ let dorControlEnv = null;
 process.on('message', (msg) => {
   switch (msg.type) {
     case 'spawn':   mgr.spawn(msg.id, { cols: msg.cols, rows: msg.rows, cwd: msg.cwd, shell: msg.shell, args: msg.args, helper: msg.helper, env: { ...msg.env, ...dorControlEnv } }); break;
-    case 'input':   mgr.write(msg.id, msg.data); break;
+    case 'input':   mgr.write(msg.id, msg.data, { paced: msg.paced === true }); break;
     case 'resize':  mgr.resize(msg.id, msg.cols, msg.rows, msg.repaint); break;
     case 'kill':    mgr.kill(msg.id); break;
     case 'killAll': mgr.killAll(); break;

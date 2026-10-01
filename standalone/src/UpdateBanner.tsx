@@ -6,25 +6,35 @@ export type UpdateBannerState =
   | { status: 'available'; version: string }
   | { status: 'downloading'; version: string }
   | { status: 'downloaded'; version: string }
+  | { status: 'restart-refused'; version: string; reason: string }
   | { status: 'dismissed' }
   | { status: 'post-update-success'; from: string; to: string }
-  | { status: 'post-update-failure'; version: string; error?: string };
+  | { status: 'post-update-failure'; version: string; error?: string }
+  // With automatic checks off, the weekly reminder, and the check the user
+  // then asks for (`docs/specs/auto-update.md` → "How it works").
+  | { status: 'check-due'; days: number }
+  | { status: 'checking' }
+  | { status: 'up-to-date'; version: string }
+  | { status: 'check-failed' };
 
 interface UpdateBannerProps {
   state: UpdateBannerState;
   onDismiss: () => void;
   onApproveUpdate: () => void;
+  onRestart: () => void;
   onOpenChangelog: () => void;
   onOpenDebug: () => void;
+  onCheckNow: () => void;
 }
 
 const linkClass = 'shrink-0 hover:underline';
 const linkStyle = { color: 'var(--vscode-textLink-foreground)' };
 
-export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelog, onOpenDebug }: UpdateBannerProps) {
+export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onOpenChangelog, onOpenDebug, onCheckNow }: UpdateBannerProps) {
   if (state.status === 'idle' || state.status === 'dismissed') return null;
 
   let message: ReactNode;
+  let title: string | undefined;
   let links: { label: string; onClick: () => void }[];
 
   switch (state.status) {
@@ -50,6 +60,15 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelo
       break;
     case 'downloaded':
       message = `Update downloaded (v${state.version}) — will install when you quit`;
+      links = [
+        { label: 'Changelog', onClick: onOpenChangelog },
+        { label: 'Restart now', onClick: onRestart },
+      ];
+      break;
+    case 'restart-refused':
+      // No "Restart now": the host's refusal holds until Dormouse relaunches.
+      title = `Update downloaded (v${state.version}) — will install when you quit (couldn't restart: ${state.reason})`;
+      message = title;
       links = [{ label: 'Changelog', onClick: onOpenChangelog }];
       break;
     case 'post-update-success':
@@ -60,6 +79,22 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelo
       message = 'Update failed';
       links = [{ label: 'Click here to debug', onClick: onOpenDebug }];
       break;
+    case 'check-due':
+      message = `No update check in ${state.days} days`;
+      links = [{ label: 'Check now', onClick: onCheckNow }];
+      break;
+    case 'checking':
+      message = 'Checking for updates…';
+      links = [];
+      break;
+    case 'up-to-date':
+      message = `Dormouse is up to date (v${state.version})`;
+      links = [];
+      break;
+    case 'check-failed':
+      message = 'Couldn’t check for updates';
+      links = [{ label: 'Try again', onClick: onCheckNow }];
+      break;
     default: {
       const _exhaustive: never = state;
       return _exhaustive;
@@ -68,7 +103,7 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onOpenChangelo
 
   return (
     <span className="flex items-center gap-1.5 pb-1 text-sm font-mono text-muted">
-      <span className="truncate">{message}</span>
+      <span className="truncate" title={title}>{message}</span>
       {links.map((link) => (
         <span key={link.label} className="contents">
           <span className="shrink-0">·</span>

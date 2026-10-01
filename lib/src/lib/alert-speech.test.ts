@@ -1,95 +1,64 @@
+import { SPEECH_ENGINE_TIMEOUT_MS } from './speech-queue';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./platform', () => ({
   getPlatform: () => ({ alertPublishSettings: vi.fn() }),
+  getPlatformOrNull: () => null,
 }));
 
-import { startAlertSpeech, toSpokenText } from './alert-speech';
+import { speechQueue, startAlertSpeech, toSpokenText, type AlertSpeaker } from './alert-speech';
 import { getAlertSpeechState } from './alert-speech-state';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS } from './alert-settings';
-import { clearTerminalActivity, setTerminalActivity } from './session-activity-store';
-import type { SessionStatus } from './alert-manager';
+import { createAlertEpisode } from './alert-episode';
+import { clearTerminalActivity, getActivity, setTerminalActivity } from './session-activity-store';
+import type { AlertState, SessionStatus } from './alert-manager';
 import { removeTerminalPaneState, resetTerminalPaneState } from './terminal-state-store';
 import type { TerminalTitleSource } from './terminal-state';
+import { stubSpeechSynthesis, type SpeechSynthesisStub } from './speech-synthesis-test-utils';
 
-const SPEAK_DELAY_MS = 10_000;
+/** The stubbed Web Speech engine this test drives. */
+let engine: SpeechSynthesisStub;
+let speaker: AlertSpeaker | null = null;
 
-/** Utterances passed to the stubbed Web Speech API, in order. */
-let spoken: string[];
-let utterances: StubUtterance[];
-let cancelCount: number;
-let stopSpeech: (() => void) | null = null;
-
-interface StubUtterance {
-  text: string;
-  onstart: (() => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-}
-
-/** Extra engine behavior a single test wants from the stub's `speak`. */
-let onSpeak: ((utterance: StubUtterance) => void) | null = null;
-
-function stubSpeechSynthesis(): void {
-  spoken = [];
-  utterances = [];
-  cancelCount = 0;
-  onSpeak = null;
-  vi.stubGlobal('speechSynthesis', {
-    speak: (utterance: StubUtterance) => {
-      spoken.push(utterance.text);
-      utterances.push(utterance);
-      onSpeak?.(utterance);
-    },
-    cancel: () => { cancelCount++; },
-  });
-  vi.stubGlobal('SpeechSynthesisUtterance', class {
-    text: string;
-    onstart: (() => void) | null = null;
-    onend: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    constructor(text: string) { this.text = text; }
-  });
-}
-
-/** Drive one Session's projected status through the activity store. */
-function setStatus(id: string, status: SessionStatus): void {
+/** Move one Session to a status that is not ringing. */
+function setStatus(id: string, status: Exclude<SessionStatus, 'ALERT_RINGING'>): void {
   setTerminalActivity(id, { status });
 }
 
-/**
- * Ring a Session that the store already knows about. A real pane is in the
- * activity store from the moment it is created and only reaches ALERT_RINGING
- * later, so a ring is always a transition from some earlier status — that is
- * exactly what the watcher keys on.
- */
-function ring(id: string): void {
+/** Open a new ring, and with it a new episode, as the host publishes one. */
+function ring(id: string, state: Partial<AlertState> = {}): void {
   setStatus(id, 'NOTHING_TO_SHOW');
-  setStatus(id, 'ALERT_RINGING');
+  setTerminalActivity(id, { status: 'ALERT_RINGING', episode: createAlertEpisode(), ...state });
+}
+
+/** The host's speech deliveries come due for each Session's current episode. */
+function due(...ids: string[]): void {
+  for (const id of ids) speaker!.speak(id, getActivity(id).episode!.id);
 }
 
 /**
- * Two Sessions ring inside one speak window: the first is being read aloud, the
- * second waits in the engine's queue behind it.
+ * Two Sessions' deliveries arrive together: the first is being read aloud, the
+ * second waits in Dormouse's queue behind it.
  */
 function ringTwoWithFirstSpeaking(): void {
   start();
   ring('pty-1');
   ring('pty-2');
-  vi.advanceTimersByTime(SPEAK_DELAY_MS);
-  utterances[0].onstart?.();
+  due('pty-1', 'pty-2');
+  engine.utterances[0].onstart?.();
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
-  stubSpeechSynthesis();
+  engine = stubSpeechSynthesis();
   clearTerminalActivity();
-  applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true, speakDelayMs: SPEAK_DELAY_MS });
+  applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true });
 });
 
 afterEach(() => {
-  stopSpeech?.();
-  stopSpeech = null;
+  speaker?.stop();
+  speaker = null;
+  speechQueue.clear();
   for (const id of ['osc0-title', 'osc2-title', 'osc9-title']) removeTerminalPaneState(id);
   clearTerminalActivity();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
@@ -97,9 +66,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** Start the watcher after any pre-existing state has been staged. */
+/** Start the performer after any pre-existing state has been staged. */
 function start(): void {
-  stopSpeech = startAlertSpeech();
+  speaker = startAlertSpeech();
 }
 
 /**
@@ -163,22 +132,11 @@ describe('toSpokenText', () => {
 });
 
 /**
- * Only the speech-specific half lives here: the payload that reaches the
- * engine, and that the sink is wired to `speakEnabled`. The ring/delay/cancel
- * rules are shared with push and covered in `alert-ring-watch.test.ts`.
+ * The performer: what reaches the engine once the host hands this realm a
+ * delivery, and what cuts it off. When a delivery comes due is the host's
+ * (`alert-delivery-scheduler.test.ts`).
  */
 describe('spoken alarms', () => {
-  it('speaks the pane label once the delay elapses with the ring unattended', () => {
-    start();
-    ring('pty-1');
-
-    vi.advanceTimersByTime(SPEAK_DELAY_MS - 1);
-    expect(spoken).toEqual([]);
-
-    vi.advanceTimersByTime(1);
-    expect(spoken).toEqual(['terminal']);
-  });
-
   it('speaks terminal-supplied OSC 0/2/9 titles when they are the pane label', () => {
     const sources: TerminalTitleSource[] = ['osc0', 'osc2', 'osc9'];
     for (const [index, source] of sources.entries()) {
@@ -203,105 +161,89 @@ describe('spoken alarms', () => {
 
     start();
     for (const source of sources) {
-      const id = `${source}-title`;
-      setStatus(id, 'NOTHING_TO_SHOW');
-      if (source === 'osc9') {
-        setTerminalActivity(id, {
-          status: 'ALERT_RINGING',
-          notification: { source: 'OSC 9', title: null, body: 'program title osc9' },
-        });
-      } else {
-        setStatus(id, 'ALERT_RINGING');
-      }
+      ring(`${source}-title`, source === 'osc9'
+        ? { notification: { source: 'OSC 9', title: null, body: 'program title osc9' } }
+        : {});
     }
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    due(...sources.map((source) => `${source}-title`));
 
-    expect(spoken).toEqual([
+    engine.utterances[0].onend?.();
+    engine.utterances[1].onend?.();
+    expect(engine.spoken).toEqual([
       'program title osc0',
       'program title osc2',
       'program title osc9',
     ]);
   });
 
-  it('speaks nothing while speakEnabled is off', () => {
+  it('drops a delivery that crossed speakEnabled turning off', () => {
     applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: false });
     start();
     ring('pty-1');
-
-    vi.advanceTimersByTime(60_000);
-    expect(spoken).toEqual([]);
+    due('pty-1');
+    expect(engine.spoken).toEqual([]);
   });
 
-  it('uses speakDelayMs as the delay', () => {
-    applyAlertSettingsFromHost({
-      ...DEFAULT_ALERT_SETTINGS,
-      speakEnabled: true,
-      speakDelayMs: 3_000,
-    });
+  it('drops a delivery for an episode that already ended', () => {
     start();
     ring('pty-1');
-
-    vi.advanceTimersByTime(3_000);
-    expect(spoken).toEqual(['terminal']);
+    const stale = getActivity('pty-1').episode!.id;
+    ring('pty-1');
+    speaker!.speak('pty-1', stale);
+    expect(engine.spoken).toEqual([]);
   });
 
   it('publishes SPEAKING on actual start, then SPOKEN on end', () => {
     start();
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    due('pty-1');
 
     expect(getAlertSpeechState('pty-1')).toBeNull();
-    utterances[0].onstart?.();
+    engine.utterances[0].onstart?.();
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
 
-    utterances[0].onend?.();
+    engine.utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
 
   it('keeps SPOKEN through unrelated churn while the ring remains unresolved', () => {
     start();
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    utterances[0].onstart?.();
-    utterances[0].onend?.();
+    due('pty-1');
+    engine.utterances[0].onstart?.();
+    engine.utterances[0].onend?.();
 
-    setTerminalActivity('pty-1', { status: 'ALERT_RINGING', todo: true });
+    setTerminalActivity('pty-1', { ...getActivity('pty-1'), todo: true });
     setStatus('another-pane', 'BUSY');
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
 
-  it('cuts the utterance off and clears delivery state when the ring is attended', () => {
+  it('cuts the utterance off and clears delivery state when the ring clears', () => {
     start();
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    utterances[0].onstart?.();
+    due('pty-1');
+    engine.utterances[0].onstart?.();
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
 
     setStatus('pty-1', 'NOTHING_TO_SHOW');
     // The announcement exists to summon the user, who is now here — the engine
     // is silenced, not merely un-rendered.
-    expect(cancelCount).toBe(1);
+    expect(engine.cancels).toBe(1);
     expect(getAlertSpeechState('pty-1')).toBeNull();
 
     // The engine reports the cut, and can also finish an utterance after the
-    // user attends. Either stale callback must not resurrect HAS SPOKEN.
-    utterances[0].onend?.();
+    // ring clears. Either stale callback must not resurrect HAS SPOKEN.
+    engine.utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
   });
 
-  /**
-   * Web Speech has no per-utterance stop, so cutting one Session off empties the
-   * whole queue. Attending one Pane must not silence another Pane's alarm.
-   */
-  it('re-speaks the still-ringing Sessions the cut collaterally silenced', () => {
+  it('admits the next still-ringing Session when the active alarm is cut off', () => {
     ringTwoWithFirstSpeaking();
-    expect(spoken).toHaveLength(2);
-
+    expect(engine.spoken).toHaveLength(1);
     setStatus('pty-1', 'NOTHING_TO_SHOW');
-
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(3);
-    utterances[2].onstart?.();
+    expect(engine.cancels).toBe(1);
+    expect(engine.spoken).toHaveLength(2);
+    engine.utterances[1].onstart?.();
     expect(getAlertSpeechState('pty-2')).toBe('speaking');
   });
 
@@ -309,29 +251,27 @@ describe('spoken alarms', () => {
     ringTwoWithFirstSpeaking();
 
     // Resolve pty-2 while its first utterance is still queued, then ring it
-    // again. The new ring must serve its own delay rather than inheriting the
-    // old queued entry when pty-1 is cut off.
+    // again. The new ring waits for its own delivery rather than inheriting
+    // the old queued entry when pty-1 is cut off.
     setStatus('pty-2', 'NOTHING_TO_SHOW');
     ring('pty-2');
     setStatus('pty-1', 'NOTHING_TO_SHOW');
 
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(2);
-    vi.advanceTimersByTime(SPEAK_DELAY_MS - 1);
-    expect(spoken).toHaveLength(2);
-    vi.advanceTimersByTime(1);
-    expect(spoken).toHaveLength(3);
+    expect(engine.cancels).toBe(1);
+    expect(engine.spoken).toHaveLength(1);
+    due('pty-2');
+    expect(engine.spoken).toHaveLength(2);
   });
 
-  /** A re-dispatch is a fresh decision to speak, held to the same gate as the first. */
-  it('does not re-speak the queue when the setting went off mid-utterance', () => {
+  /** Turning delivery off discards pending work before native admission. */
+  it('cancels pending speech when its setting turns off', () => {
     ringTwoWithFirstSpeaking();
     applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: false });
 
     setStatus('pty-1', 'NOTHING_TO_SHOW');
 
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(2);
+    expect(engine.cancels).toBe(1);
+    expect(engine.spoken).toHaveLength(1);
   });
 
   /** Only the Session being read aloud is cut; a queued one has nothing to stop. */
@@ -340,27 +280,27 @@ describe('spoken alarms', () => {
 
     setStatus('pty-2', 'NOTHING_TO_SHOW');
 
-    expect(cancelCount).toBe(0);
+    expect(engine.cancels).toBe(0);
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
   });
 
   it('does not publish a queued utterance that starts after the ring was resolved', () => {
     start();
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    due('pty-1');
 
     setStatus('pty-1', 'NOTHING_TO_SHOW');
-    utterances[0].onstart?.();
-    utterances[0].onend?.();
+    engine.utterances[0].onstart?.();
+    engine.utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
   });
 
   it('records SPOKEN after an engine error if the utterance really began', () => {
     start();
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    utterances[0].onstart?.();
-    utterances[0].onerror?.();
+    due('pty-1');
+    engine.utterances[0].onstart?.();
+    engine.utterances[0].onerror?.();
 
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
@@ -368,28 +308,27 @@ describe('spoken alarms', () => {
   it('ignores an older ring starting after a newer ring has begun speaking', () => {
     start();
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    const old = utterances[0];
+    due('pty-1');
+    const oldStart = engine.utterances[0].onstart;
+    const oldEnd = engine.utterances[0].onend;
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    const current = utterances[1];
+    due('pty-1');
+    const current = engine.utterances[1];
     current.onstart?.();
-    old.onstart?.();
-    old.onend?.();
+    oldStart?.();
+    oldEnd?.();
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
     current.onend?.();
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
 
-  it('ignores a captured start callback after redispatch of the same ring', () => {
+  it('never admits a resolved queued alarm to the speech engine', () => {
     ringTwoWithFirstSpeaking();
-    const staleStart = utterances[1].onstart;
-    setStatus('pty-1', 'NOTHING_TO_SHOW');
-    const replacement = utterances[2];
-    replacement.onstart?.();
-    staleStart?.();
-    replacement.onend?.();
-    expect(getAlertSpeechState('pty-2')).toBe('spoken');
+    setStatus('pty-2', 'NOTHING_TO_SHOW');
+    expect(engine.cancels).toBe(0);
+    engine.utterances[0].onend?.();
+    expect(engine.spoken).toHaveLength(1);
+    expect(getAlertSpeechState('pty-2')).toBeNull();
   });
 
   it('no-ops when the host webview has no speech backend', () => {
@@ -397,7 +336,7 @@ describe('spoken alarms', () => {
     start();
     ring('pty-1');
 
-    expect(() => vi.advanceTimersByTime(60_000)).not.toThrow();
+    expect(() => due('pty-1')).not.toThrow();
     expect(getAlertSpeechState('pty-1')).toBeNull();
   });
 
@@ -409,13 +348,13 @@ describe('spoken alarms', () => {
    * SPEAKING for the life of the ring.
    */
   it('settles an utterance the engine resolves synchronously inside speak()', () => {
-    onSpeak = (utterance) => {
+    engine.onSpeak = (utterance) => {
       utterance.onstart?.();
       utterance.onerror?.();
     };
     start();
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
+    due('pty-1');
 
     expect(getAlertSpeechState('pty-1')).toBe('spoken');
   });
@@ -428,59 +367,45 @@ describe('spoken alarms', () => {
   it('silences the engine on dispose, not just its callbacks', () => {
     start();
     ring('pty-1');
-    vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    utterances[0].onstart?.();
+    due('pty-1');
+    engine.utterances[0].onstart?.();
     expect(getAlertSpeechState('pty-1')).toBe('speaking');
 
-    stopSpeech?.();
-    stopSpeech = null;
+    speaker?.stop();
+    speaker = null;
 
-    expect(cancelCount).toBe(1);
+    expect(engine.cancels).toBe(1);
     expect(getAlertSpeechState('pty-1')).toBeNull();
     // A callback the engine still dispatches afterward finds nothing to touch.
-    utterances[0].onend?.();
+    engine.utterances[0].onend?.();
     expect(getAlertSpeechState('pty-1')).toBeNull();
   });
 
-  /**
-   * WebKit drops a wedging utterance without ever firing a callback, so nothing
-   * retires it. The tracking Set must stay bounded rather than pinning a handler
-   * closure per ring for the life of the app.
-   */
-  it('bounds tracked utterances when the engine never calls back', () => {
+  it('recovers from a callback-less engine without accepting its later callbacks', () => {
     start();
-    for (let i = 0; i < 20; i++) {
-      ring(`pty-${i}`);
-      vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    }
-    expect(spoken).toHaveLength(20);
-
-    stopSpeech?.();
-    stopSpeech = null;
-    // Dispose detaches exactly what was still tracked — the bounded tail. The
-    // evicted remainder is inert regardless: its generation token is gone.
-    expect(utterances.filter(u => u.onend === null)).toEqual(utterances.slice(-8));
-    utterances[0].onstart?.();
-    expect(getAlertSpeechState('pty-0')).toBeNull();
-    utterances[0].onend?.();
-    expect(getAlertSpeechState('pty-0')).toBeNull();
+    ring('pty-1');
+    ring('pty-2');
+    due('pty-1', 'pty-2');
+    const lateStart = engine.utterances[0].onstart;
+    const lateEnd = engine.utterances[0].onend;
+    expect(engine.spoken).toHaveLength(1);
+    vi.advanceTimersByTime(SPEECH_ENGINE_TIMEOUT_MS);
+    expect(engine.cancels).toBe(1);
+    expect(engine.spoken).toHaveLength(2);
+    engine.utterances[1].onstart?.();
+    lateStart?.();
+    lateEnd?.();
+    expect(getAlertSpeechState('pty-1')).toBeNull();
+    expect(getAlertSpeechState('pty-2')).toBe('speaking');
   });
 
-  it('bounds the queued Session index when the engine silently drops utterances', () => {
+  it('bounds the pending queue without feeding an unbounded browser backlog', () => {
     start();
-    for (let i = 0; i < 20; i++) {
-      ring(`pty-${i}`);
-      vi.advanceTimersByTime(SPEAK_DELAY_MS);
-    }
-
-    // Make the newest utterance audible, then attend it. cancel() drops the
-    // engine's entire queue, so interrupt re-dispatches every Session retained in
-    // its own queued index. Only the bounded tail (8 total minus the one that just
-    // started) may come back; an unbounded map would re-dispatch all other 19.
-    utterances[19].onstart?.();
-    setStatus('pty-19', 'NOTHING_TO_SHOW');
-
-    expect(cancelCount).toBe(1);
-    expect(spoken).toHaveLength(20 + 7);
+    for (let i = 0; i < 100; i++) ring(`pty-${i}`);
+    for (let i = 0; i < 100; i++) due(`pty-${i}`);
+    expect(engine.spoken).toHaveLength(1);
+    for (let i = 0; i < 65; i++) engine.utterances[i].onend?.();
+    expect(engine.spoken).toHaveLength(65);
+    expect(engine.utterances.every(utterance => utterance.onend === null)).toBe(true);
   });
 });

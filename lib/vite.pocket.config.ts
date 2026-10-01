@@ -77,9 +77,17 @@ export default defineConfig({
       // `dor-lib-common` has the same unbuilt-`dist` exports problem, reached via
       // `Wall` → `useDorControl` → `connect-port`.
       "dor-lib-common": fileURLToPath(new URL("../dor-lib-common/src", import.meta.url)),
+      // `dor-tools-lib` too, reached via the terminal parser's OSC 367 readers.
+      "dor-tools-lib": fileURLToPath(new URL("../dor-tools-lib/src", import.meta.url)),
     },
   },
   build: {
+    rolldownOptions: {
+      input: {
+        pocket: fileURLToPath(new URL('./pocket/index.html', import.meta.url)),
+        diagnostics: fileURLToPath(new URL('./pocket/diagnostics/index.html', import.meta.url)),
+      },
+    },
     outDir: fileURLToPath(new URL("./dist-pocket", import.meta.url)),
     emptyOutDir: true,
   },

@@ -81,6 +81,13 @@ export const SETUP_TOKEN_INVALID_ERROR = 'invalid setup token';
  */
 export const BAD_PASSWORD_ERROR = 'invalid setup password';
 
+/**
+ * The `error` `POST /api/burrow/enroll` answers 409 with when the request names
+ * an `origin` other than the Relay's own, alongside that `origin`
+ * ({@link BurrowEnrollOriginMismatch}).
+ */
+export const ORIGIN_MISMATCH_ERROR = 'origin mismatch';
+
 export const WS_ROUTES = {
   burrow: '/ws/burrow',
   client: '/ws/client',
@@ -239,9 +246,25 @@ export interface ReauthFinishResponse {
  * enrollment on the Burrow and told to a Client only inside an encrypted ceremony
  * outcome (`docs/specs/remote-security-model.md` → Burrow identity).
  */
-export type BurrowEnrollRequest =
+export type BurrowEnrollRequest = (
   | { password: string; enrollToken?: never }
-  | { password?: never; enrollToken: string };
+  | { password?: never; enrollToken: string }
+) & {
+  /**
+   * The relay origin the Burrow was built for. A Relay whose own origin differs
+   * refuses the request before it reads the credential
+   * ({@link BurrowEnrollOriginMismatch}). Optional and additive: an older
+   * Burrow sends none and enrolls as before.
+   */
+  origin?: string;
+};
+
+/** The 409 body for a {@link BurrowEnrollRequest} naming another origin. */
+export interface BurrowEnrollOriginMismatch {
+  error: typeof ORIGIN_MISMATCH_ERROR;
+  /** The Relay's own origin, its `DORMOUSE_ORIGIN`. */
+  origin: string;
+}
 export interface BurrowEnrollResponse {
   burrowId: string;
   /** Bearer credential for the `token` param of /ws/burrow. */

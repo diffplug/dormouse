@@ -16,7 +16,7 @@
 
 **Why a relative path is a `ConfigError`.** `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_ENROLL_TOKEN_FILE` come from the installer's `run-relay` wrapper, which a service manager launches with a working directory that is not the installer's — a relative value lands where neither side can predict. The same drift is why `DORMOUSE_POCKET_DIR` resolves from the compiled Relay's own location: a service manager could otherwise change what is served.
 
-**Why the runtime file sits outside the state dir.** It is runtime truth about one process — pid, port, release — not durable state a backup should capture and a restore replay.
+**Why the installers keep the runtime file outside the state dir.** It is runtime truth about one process — pid, port, release — not durable state a backup should capture and a restore replay.
 
 **Why a blank `PORT` is not zero.** `Number('')` is 0, which asks the OS for an ephemeral port and moves the Relay out from under whatever proxy is pointed at it — the same reason an explicit `PORT=0` is refused.
 
@@ -24,9 +24,17 @@
 
 **Why the origin is normalized rather than compared as typed.** A trailing slash reads as correct in an `.env` file and then fails every compare it reaches, unless every compare site re-parses it first.
 
-## Where a Burrow may reach a Relay (self-host builds)
+## Relay origin
 
-**The two build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped `*.dormouse.sh` default instead of the selfhoster's origins — a build that looks correct and refuses the only Relay it was meant for, so `assertConnectSrcBaked` greps the emitted bundle for the value. An override outside the grammar (trailing slash, path, bare host, foreign scheme, out-of-range port) matches nothing at runtime, so without `resolveRemoteConnectSrc`'s check the build goes green and ships the same silent refusal.
+**Why one origin rather than an allowlist.** The retired `DORMOUSE_REMOTE_CONNECT_SRC` default, `https://*.dormouse.sh wss://*.dormouse.sh`, was a wildcard only to leave room for BYOT's per-tenant hosts, which nothing shipped used; any DNS name added under `dormouse.sh` widened what every stock binary would talk to. The Hosted origin was a second baked value (`DORMOUSE_HOSTED_ORIGIN`) that had to agree with the list, or one-time links went dark. One exact origin is both narrower and one fact: a build is Hosted or points at exactly one self-host Relay, and nothing else it reaches in the background is left to configure.
+
+**Why a self-host build reaches nothing of Dormouse's in the background.** A self-hoster runs their own Relay to keep their traffic off infrastructure they do not control. An update check, a rendezvous room, or a voice request would each tell `dormouse.sh` that the machine exists and when it runs, and the updater would do worse: the manifest names the stock binaries, so installing one over a source build replaces its baked origin with Hosted's and silently drops its Relay.
+
+**Why a release build refuses the Hosted flag and a loopback origin.** The flag turns on Hosted behavior — the voice token, the rendezvous — for an origin Dormouse may not operate; that is useful against a local `pnpm dev:hosted` or a PR preview and wrong in anything installed. A loopback `http:` origin in an installed binary points it at whatever listens on that port of the user's own machine.
+
+**Why an enrollment for another origin is kept rather than deleted.** The `burrowToken` in it cannot be re-minted without the setup password, so a user moving between a stock build and a self-host build — or between two dogfood builds — would lose every pairing on each switch. Reading it as none is enough: nothing connects to an origin the build was not baked with.
+
+**The build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped default — Hosted — instead of the self-hoster's Relay: a build that looks correct and has no Relay at all, so `assertRelayOriginBaked` greps the emitted bundle for the value. An origin outside the accepted rule would never match what the runtime composes, and a retired variable left over from older instructions would build a stock Hosted binary without a word, so `resolveRelayOrigin` fails the build on both.
 
 ## State files
 
@@ -51,6 +59,8 @@
 **Why the body bound runs before the credential gate.** Those routes must read the body to find its credential, so an unbounded reader would let a public caller make the process buffer arbitrary input before proving anything.
 
 **What three route answers are protecting.** `POST /api/setup/retire` exists so a QR a phone scanned but will not register with cannot stay redeemable in a photograph. `/api/burrow/enroll` checks its `MAX_ENROLLED_BURROWS` cap after the credential so a caller that proved nothing cannot learn the Relay is full. `/api/push/subscribe` 404s an unknown `burrowId` so no subscription row strands where no Burrow can read or prune it.
+
+**Why the enroll origin check runs ahead of the credential, unlike the cap.** Its answer is the Relay's own origin, which every page it serves already names, where the cap would tell a caller that proved nothing how full the Relay is. Checked first, it also refuses before the first password enrollment takes the installer's offer with it, and a Burrow built for another Relay learns what to fix even through a mistyped password (review, 2026-09).
 
 **Why only Burrow enrollment pays the failure delay.** A delay retains a request. The setup password route is protected by the process-global admission bucket, so its retained work is bounded. Setup, Burrow, and session tokens are random bearer capabilities with no plausible online search; delaying their rejection buys public traffic held connections without protecting a human secret.
 

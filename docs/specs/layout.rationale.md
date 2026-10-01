@@ -2,11 +2,35 @@
 
 > Informative companion to [layout.md](layout.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative.
 
+## Pane header
+
+Italics alone mark a VS Code preview tab, and a double-click on that tab keeps it; the slot mirrors both. A Preview pill beside the italic label repeated the mark and cost a pill's width in every header from compact width up, and header width is the scarcest space Dormouse has (product decision, 2026-09-28).
+
+The keep is judged by the burst's first press, so a double-click inside a rename opened earlier still selects a word. A preview's label opens no rename because the double-click's first click would open the field under the second.
+
+Tools carry no navigation, address, or dev-server chip (Ned, 2026-09-29): a Tool is named for what it is, and a page it serves is not somewhere to navigate from, so that chrome stays with plain browser Surfaces. Its Terminal Context button had sat beside the header, outside its palette, and showed a different background.
+
+A serving preview's header changed size on every switch (standalone, 2026-09-29) because its name was the dev-server chip. The chip names a pane only once the Window's port scan resolves the page's loopback port: 600 ms of debounce, then a scan at idle. Each retarget starts a viewer on a new port, and the switch's hold ended when the new document loaded, before that scan. The chip unmounted and the address, in `text-sm font-medium` where the chip is `text-xs`, widened to the whole `localhost:<port>/<path>`; once the scan landed the chip returned and the address shrank to its path. The Wall harness in `lib/src/components/wall/preview-slot.test.tsx`, run against that header, stepped through `chip(b.md:6006) + url(/)`, `url(localhost:7007)`, then `chip(… :7007) + url(/)`. A name from params changes once, with the retarget, so nothing needs holding.
+
+## Pane header responsive sizing
+
+A viewport breakpoint says nothing about a narrow split inside a wide window: at a 1200px viewport every control stayed rendered in a 103px pane and overflowed into its neighbor (innerdogfood QC, 2026-09). Measuring the header and moving fixed controls together keeps long keys and renderer chips from pushing minimize/kill into a neighboring pane; quantizing the measurement to a tier keeps the header from re-rendering on every frame of a sash drag or tween.
+
+In the same run, real clicks exposed premature popup dismissal before the action ran. After repair, Zoom reached 716×403 pixels, Unzoom returned to the compact header, Reload worked, and Display retained modal focus. Header buttons stayed within their panes at the final 1200×800 viewport.
+
+Terminal border-box thresholds of 293/173 pixels preserve the former 280/160 content-box thresholds plus 13 pixels of horizontal padding. A content box can clamp to zero in a visible tiny leaf; treating that as hidden retained the full tier. Positive border-box width distinguishes that case from a hidden leaf.
+
+The minimal boundary keeps the pane-action group and its 5-pixel right padding intact. The group is 68 pixels (a 4-pixel `ml-1`, three 20-pixel buttons, two 2-pixel gaps); the header root adds a 6-pixel gap, and an unsaved-change dot adds 12 pixels. The 98-pixel threshold originally reserved that dot even when absent. Since the dot moved into Kill (2026-09-29), those 12 pixels leave more room for the name; the boundaries stay stable across unsaved-state changes. The group sits flush below this threshold, leaving no margin against font or icon changes (measured in Storybook, 2026-09).
+
+The browser's 94-pixel boundary is the former 72 plus the zoom button and its gap, zoom having moved into the group. Its collapsed root is `gap-0.5 px-1`, already counted, so it needs no equivalent correction. A 102-pixel variant reserved an unsaved-change dot, which only a Tool reports; it went with the Tool's own header (2026-09-29).
+
+A serving Tool's boundaries follow the same rule over its elements (derived 2026-09-29): 13 pixels of padding, 12 for the dot where the tiny tier hides Kill (elsewhere the dot rides in Kill and the 12 go to the name), Display up to 36 (robot, 2-pixel gap, presentation glyph, then its gap), Terminal Context 26, and the group's 74 with its gap. Display yields at 161, where those leave the name no width; minimize and kill at 125, 36 narrower. Full is the terminal's 293 plus both leading controls, 355. The tiny header needs 81 pixels, inside Lath's 100-pixel minimum leaf. Without a popover the Tool reaches everything it drops through zoom, as a terminal does.
+
 ## Pane body
 
 xterm.js paints only its own rendered surface, and integer row fitting leaves a sub-row remainder at the bottom of the pane: a host background differing from the terminal screen shows as a stripe under the last row, and an unclipped host squares off the rounded bottom corners.
 
-## Spoken-alarm overlay
+## Alarm overlay
 
 **Why the wash sits below the header.** `--color-alarm-vs-terminal` is picked for contrast against the *terminal body*, so it carries no contrast guarantee over the header band.
 
@@ -14,9 +38,31 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why header popovers are not a factor.** Every one — pane context menu, title candidates, notification preview, rename warning — portals to `document.body` with `position: fixed`, so it renders in the root stacking context above the whole wall regardless of leaf z-indices.
 
-## Baseboard
+## Workspaces
 
-**Why `showBaseboard={false}` is a seam.** The mobile Pocket composition — the obvious candidate — is a separate `MobileWall` (`docs/specs/mobile-terminal-ui.md`), not a baseboard-less Wall.
+**Why `visibility: hidden` in one grid cell rather than `display: none`.** A `display:none` Wall has no box, so every xterm in it would refit on the way back — including a resize that happened while it was hidden. Sharing one grid cell keeps every Wall's box identical, so a switch's reattach fit finds an unchanged grid (checked in the browser-dev harness by resizing with Workspace 2 visible and finding Workspace 1's screen already at the new size, 2026-09).
+
+**Why a hidden Workspace's terminals are detached rather than merely hidden.** xterm pauses rendering only when its screen element stops intersecting (`RenderService` in `@xterm/xterm`), and a `visibility: hidden` box still intersects, so a hidden pane kept rasterizing every output frame and holding a GL context. Reusing the minimize primitives pauses it and releases the context; the box stays laid out, so the reattach fit finds the same grid and sends no PTY resize (2026-09).
+
+**Why a move confirms for iframes but not for agent-browser Surfaces.** An agent-browser Surface's session lives in the host process; the target window reconnects its viewer and the page is as it was. A plain iframe is a document inside the source webview, and no API carries a document between webviews — the alternative, keeping every Workspace in its own native child webview and reparenting it, was prototyped on a vendored Tauri fork and rejected for the fork (2026-09). The confirmation is the kill's typed letter rather than a button because what is lost is as gone as a killed process, and the same gesture already means that.
+
+**Why `inert` is only defense in depth.** `visibility: hidden` already removes focusability, so the attribute exists for a future presentation that keeps the subtree visible.
+
+**Why the strip's reorder drag does not capture the pointer on press.** A captured pointer retargets the following `click` to the capture element, so capturing on `pointerdown` swallowed the activate button's click and no tab could be activated by mouse (found in the browser-dev harness, 2026-09). Capture is only useful once the gesture is a drag, which is where it now happens.
+
+**Why the close confirmation anchors to the Wall, not the tab.** `ModalOverlay` centers inside the target's box and does not clamp to the viewport, so a 24px tab at the top of the window left the dialog clipped. Every Wall shares one grid cell, so the anchor lands in the same place whether or not that Workspace is visible.
+
+**Why the modal hosts are gated rather than hoisted.** Each calls `useDialogKeyboardOwner`, which reads the *active* Wall's `DialogKeyboardContext`; hoisting them above `WorkspaceWindow` would leave them with no coordinator to suppress command-mode dispatch through. The cost is that a modal's React-local state resets on a switch — accepted, since every modal that matters keeps its state in a store.
+
+## Workspace tabs
+
+**Why the tab's TODO pill enters passthrough and the tab does not.** Clicking the pill is a focused task, going to deal with one TODO, so it lands where a click on that Surface would, with the keys there. A tab click is an arrival in a Workspace: it stays in command mode, where the user looks around and confirms with `Enter` (product decision, 2026-09). The pill first shipped as selection only, in command mode, which left an `Enter` between the click and the TODO (2026-09).
+
+## Workspace names
+
+**Why the name holds while git is unanswered.** Naming by directory first would flash the folder name for one round trip, then flip to `repo @ branch`, on every new directory. The hold is bounded because a mount that stays hung is durable, not slow: its `realpath` never returns, so an unbounded hold froze the name for the life of the Window and drowned out the Workspace's healthy members (found in review, 2026-09).
+
+**Why a command finish re-asks git.** `git switch` changes the branch without moving the cwd, and there is no filesystem watcher; the prompt after it is the first boundary that can notice. An agent switching branches inside a long-running command is not seen until that command exits — accepted over watching every repository's `HEAD` (2026-09).
 
 ## Mode switching
 
@@ -32,7 +78,7 @@ The passthrough `solid` variant replaced an original `border: 1px solid ${color}
 
 **The inflate arithmetic.** With `SELECTION_RING_INFLATE_PX` at 4, the 1px passthrough border spans [3px, 4px] from the pane edge — dead centre of the 7px gutter, on whole pixels because the gutter is odd. That is the whole reason `PANE_GUTTER_PX` is odd.
 
-**Why marching is burst-bound.** An infinite SVG stroke animation kept Chrome's renderer active at 60 style recalculations per second while Dormouse was otherwise idle. Measured in Chrome for Testing 150 (2026-09): five focused minutes added 3.77 MB of reclaimable embedder heap and used 24.33 seconds of renderer CPU; pausing only that animation held embedder heap flat (-29 KB) and used 0.017 seconds across a three-minute control. Four cycles preserve the mode/selection cue without leaving a standing allocator after interaction stops.
+**What endless marching costs, and why it is accepted.** An infinite SVG stroke animation keeps Chrome's renderer at 60 style recalculations per second. Measured in Chrome for Testing 150 (2026-09): five focused minutes added 3.77 MB of reclaimable embedder heap and used 24.33 seconds of renderer CPU; pausing only that animation held embedder heap flat (-29 KB) and used 0.017 seconds across a three-minute control. A four-cycle burst (PR #542) avoided that, but the ring then went still about 1.6s after a click activated a Workspace, and a still ring reads as the command-mode cue having gone. Command mode is transient, and a blurred window or reduced motion pauses the ants, so the cost falls only on a focused window left sitting in command mode (2026-09).
 
 ## Ring travel
 
@@ -60,7 +106,9 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 ## Renderer
 
-**Why the GL context is claimed lazily.** A GL context is a scarce per-page resource, and claiming at create would spend the budget on surfaces that never paint — cold restore builds a session for every persisted pane, minimized doors included. Because eviction is oldest-first and one-way, the panes it demoted would be the earliest-restored ones, permanently.
+**Why the GL context follows the mount.** Creating a renderer for minimized terminals spends scarce context slots on content that never paints. The pinned addon deletes GPU objects and removes its canvas on disposal but does not call `WEBGL_lose_context`; explicit loss avoids waiting for garbage collection to reclaim a slot. Disposing before loss removes the old renderer’s loss listeners so they cannot affect a replacement.
+
+**Why capture failure keeps WebGL.** Canvas capture depends on the pinned addon’s synchronous activation, and explicit loss depends on a browser extension. A missing canvas, failed probe, or unavailable extension is not a rendering failure. Keeping the addon avoids turning dependency drift into the sustained DOM-renderer cost below; disposal still frees GPU objects on unmount, with only context-slot reclamation reverting to GC. The scan continues past a canvas that refuses the probe, so the addon's 2D link canvas cannot hide its WebGL one. Containing exceptions from both release steps prevents a renderer failure from leaving a pane half-unmounted or a Session undisposed.
 
 **DOM-renderer cost.** The DOM renderer emits one `<span>` per style run per row, so a TUI that paints every cell its own truecolor collapses to one span-with-inline-style *per cell*, rebuilt every frame. On a 99×25 pane that is ~1150 elements of style recalc plus layout per frame: measured in Safari 26.5 (2026-08), a single such pane held the whole page at ~110ms/frame (~9fps) while the rest of the app was idle. The same pane on the WebGL renderer holds a locked 60fps (16.6ms, zero frames over 25ms).
 
@@ -68,13 +116,15 @@ Pane headers re-render on every activity, terminal-state, and palette change. An
 
 **Context budget.** The per-page live-context cap was measured at 16 in Safari 26.5, evicted oldest-first. The `onContextLoss` → dispose-the-addon → DOM-fallback path was verified live by exhausting the budget and watching the demoted panes keep painting.
 
+**Atlas sharing.** Stock addon-webgl already caches rasterized atlas canvases by font metrics/options, DPR, texture limits, glyph mode, and foreground/background/ANSI colors; terminal columns and rows are absent from the key. Each renderer uploads its own texture copy into its own WebGL context. A reattached terminal reuses the atlas while another compatible renderer owns it; no extra Dormouse cache is needed. Sharing GPU textures would require a different rendering architecture using one context across terminals.
+
 **Why image support loads before the renderer.** An ImageAddon registers protocol handlers and draws into canvas layers separate from the text renderer; its renderer hook removes those layers during a WebGL/DOM swap and the next image render recreates them. Loading it only at mount would lose graphics emitted while a Session was minimized — unlike the GL context, which no minimized pane needs. The limits themselves are `docs/specs/terminal-escapes.rationale.md` -> "Inline graphics".
 
-**Verification status.** The numbers above are Safari 26.5; Chrome was checked structurally. Not yet verified inside Tauri's WKWebView (as of 2026-08) — same engine as Safari, and Tauri does not disable the GPU; read `data-renderer` on a pane's host element to confirm.
+**Verification status.** In the standalone browser-dev harness (Chromium 150, 2026-09), 24 unmount/remount cycles explicitly lost every old context, retained the same terminal buffer, selection, and grid, emitted zero terminal resize events, and reused a second mounted terminal’s atlas canvas. Inline-image storage survived the swap and its layer repainted. The lifecycle change has not been verified inside Tauri’s WKWebView; the performance measurements above are Safari 26.5.
 
 ## Animations
 
-**Why `refitSession` is throttled.** An unthrottled ResizeObserver refits once per animated cell-boundary crossing, so one 440ms motion or a single sash drag costs dozens of xterm reflows and PTY resizes; the throttle collapses that to a handful.
+Terminal entrance motion starts at a collapsed edge. Throttling still exposes several intermediate sizes to xterm and the PTY, even when reattachment ends at the original grid. Waiting for painted settlement avoids unnecessary buffer reflows, selection loss, and TUI redraws. A timer alone cannot distinguish a paused sash preview or delayed animation frame from final geometry.
 
 ## Kill (two-phase fade + tween reclaim)
 

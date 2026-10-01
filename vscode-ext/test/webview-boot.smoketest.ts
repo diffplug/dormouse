@@ -22,7 +22,7 @@ import { launchChromium } from './launch-chromium';
  * substitutes for it. jsdom is not an option: it does not enforce CSP at all.
  *
  * Deliberately shallow. It asserts the app mounts and the policy blocked
- * nothing — not what the UI looks like, which is Storybook's and Chromatic's
+ * nothing — not what the UI looks like, which is Storybook's and Argos's
  * job.
  */
 
@@ -133,7 +133,9 @@ beforeAll(async () => {
 
   await page.goto(`${origin}/`, { waitUntil: 'load' });
   // The app mounts behind `resumeOrRestore`, which self-caps at 500ms when no
-  // host answers. Poll rather than sleep so a fast boot does not pay for it.
+  // host answers and nothing saved names a terminal pane (the retry that would
+  // add 3 s is gated on one). Poll rather than sleep so a fast boot does not
+  // pay for it.
   await page
     .waitForFunction(() => (document.getElementById('root')?.childElementCount ?? 0) > 0, {
       timeout: 15_000,

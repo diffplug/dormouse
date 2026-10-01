@@ -17,7 +17,7 @@ import { AgentBrowser } from './ab.mjs';
 import { addVirtualAuthenticator, attachPage, pageUrl, virtualCredentials } from './cdp.mjs';
 import { launchChrome, resolveChrome } from './chrome.mjs';
 import { blankY4m, crop, decodeQr, imageSize, toY4m, upscale } from './qr.mjs';
-import { delay, findFreePort, spawnLogged, waitFor, waitForLine } from './proc.mjs';
+import { delay, spawnLogged, waitFor, waitForLine } from './proc.mjs';
 
 /**
  * The Pocket browser's viewport: a phone, because every Pocket screen is laid
@@ -49,12 +49,21 @@ const SCAN_LABEL = 'Scan a setup code';
 const BURROW_STATE_DIR_LINE = /burrow state dir: (.+)$/;
 
 /**
+ * The Vite origin the harness serves the app on, and the Relay's own bound
+ * origin. Both are OS-assigned, so these lines are the only way the run learns
+ * them — and both are pinned by `lib/src/lib/mirrored-constants.test.ts` for
+ * the same reason {@link BURROW_STATE_DIR_LINE} is.
+ */
+const APP_URL_LINE = /app URL: (http:\/\/localhost:\d+)/;
+const RELAY_LISTENING_LINE = /relay listening on .* \(origin (http:\/\/localhost:\d+)\)/;
+
+/**
  * The phone's two-digit screen, by the accessible name of the live region that
  * holds the digits — the same reason {@link PAIRING_MODAL} and {@link SETUP_QR}
  * anchor where they do: the copy around it is under review and the name is a
  * contract.
  *
- * Mirrors `PAIRING_CODE_LABEL` in `lib/src/remote/pocket-app/App.tsx`; pinned by
+ * Mirrors `PAIRING_CODE_LABEL` in `lib/src/remote/pocket-app/views.tsx`; pinned by
  * `lib/src/lib/mirrored-constants.test.ts`.
  */
 const PAIRING_CODE_REGION = '[role="status"][aria-label="Pairing code"]';
@@ -123,9 +132,12 @@ const FOREIGN_ORIGIN = 'https://someone-elses-dormouse.example';
  */
 const SETUP_QR = 'svg[aria-label="Setup code for this machine"]';
 
-/** The Settings dialog's Remote control section, which every Burrow step reads. */
-const REMOTE_SECTION = `[...document.querySelectorAll('[role="dialog"] section')]
-  .find((el) => el.innerText.startsWith('Remote control'))`;
+/**
+ * Settings → Network's Phones section, which holds the Remote control choices
+ * every Burrow step reads — by the id its label carries
+ * (`lib/src/components/NetworkSettings.tsx`), rather than by copy.
+ */
+const REMOTE_SECTION = `document.querySelector('[role="dialog"] section[aria-labelledby="network-phones-label"]')`;
 
 /**
  * What a person types to prove the terminal is real, and where its answer lands.
@@ -143,8 +155,13 @@ const RECONNECT_PROOF = 'reconnect-proof.txt';
  * A terminal notification, as WezTerm's OSC 777 spells it
  * (`docs/specs/terminal-escapes.md`). Typed at the laptop's shell from the
  * phone, so what rings is the Burrow's own alert manager.
+ *
+ * `$(sleep 1)` holds it a second, past the echo window the phone's Enter
+ * opens: a notification inside it answers the keystroke and never rings
+ * (`docs/specs/alert.md` -> "Engagement"). Inside `printf`'s own arguments so
+ * the pane title the Burrow derives still starts with it.
  */
-const NOTIFY_SEQUENCE = String.raw`printf '\033]777;notify;Walkthrough;the Burrow is ringing\033\\'`;
+const NOTIFY_SEQUENCE = String.raw`printf "$(sleep 1)"'\033]777;notify;Walkthrough;the Burrow is ringing\033\\'`;
 
 /**
  * The workspace's built `remote-lib-common`, or `null` when it is not built.
@@ -218,7 +235,7 @@ async function stepRelay(ctx) {
   const stateDir = ctx.path('relay-state');
   const built =
     existsSync(join(repoRoot, 'lib', 'dist-pocket', 'index.html')) &&
-    existsSync(join(repoRoot, 'relay', 'dist', 'index.js'));
+    existsSync(join(repoRoot, 'relay', 'dist', 'start.js'));
   const skipBuild = opts.skipBuild && built;
   if (opts.skipBuild && !built) {
     ctx.log('--skip-build ignored: lib/dist-pocket or relay/dist is missing');
@@ -226,11 +243,19 @@ async function stepRelay(ctx) {
 
   const handle = spawnLogged(
     'pnpm',
-    skipBuild ? ['--filter', 'relay', 'start'] : ['dev:relay'],
+    // `dev:built` is `dev:relay` without the build, so both paths run the same
+    // dev runner and derive the origin the same way.
+    skipBuild ? ['--filter', 'relay', 'run', 'dev:built'] : ['dev:relay'],
     {
       cwd: repoRoot,
       logPath: ctx.path('relay.log'),
       prefix: 'relay',
+      // **Every inherited `DORMOUSE_` setting is dropped, not blanked.** A
+      // developer with an installed deployment's variables exported would
+      // otherwise have the run reuse its enrollment offer, publish this dev pid
+      // into its runtime record, or turn push on — and blanking cannot express
+      // "unset" for the ones `readConfig` reads with `??` rather than `||`.
+      dropEnv: /^(DORMOUSE_|PORT$)/,
       env: {
         DORMOUSE_STATE_DIR: stateDir,
         // Everything in a run is local to this machine, so the walkthrough's
@@ -238,15 +263,18 @@ async function stepRelay(ctx) {
         // of it (`docs/specs/security-remote.md` -> "Network posture
         // (self-hosted)"): unset, the Relay binds every interface.
         DORMOUSE_BIND_HOST: '127.0.0.1',
-        PORT: String(ctx.relayPort),
+        PORT: '0',
       },
     },
   );
 
-  await waitForLine(handle, /relay listening on/, {
+  const listening = await waitForLine(handle, RELAY_LISTENING_LINE, {
     timeoutMs: skipBuild ? 60_000 : 600_000,
     what: 'the Relay to bind',
   });
+  ctx.relayOrigin = listening[1];
+  ctx.record({ relayOrigin: ctx.relayOrigin });
+  ctx.log(`relay ${ctx.relayOrigin}`);
   // The log line lands from inside the `listen` callback; a request is what
   // proves the socket actually answers.
   await waitFor(
@@ -275,10 +303,11 @@ async function stepRelay(ctx) {
 /**
  * Boot the real Burrow in the `innerdogfood` harness and wait for the app.
  *
- * `DORMOUSE_REMOTE_CONNECT_SRC` has to be set *here*, at launch, not later: the
- * harness re-runs `pnpm stage` on the way up, which is what bakes the allowed
- * relay origins into `sidecar/burrow.cjs`. Without it the Burrow refuses a
- * plain-HTTP localhost Relay and enrollment fails with a policy error.
+ * `DORMOUSE_RELAY_ORIGIN` has to be set *here*, at launch, not later: the
+ * harness re-runs `pnpm stage:dev` on the way up, which is what bakes the one
+ * relay origin into `sidecar/burrow.cjs` — a dev build, the only kind that may
+ * bake a plain-HTTP localhost Relay (docs/specs/relay.md → "Relay origin").
+ * Without it the Burrow is a Hosted build with no form to enroll through.
  */
 async function stepBurrow(ctx) {
   const { repoRoot, opts } = ctx;
@@ -287,10 +316,13 @@ async function stepBurrow(ctx) {
     logPath: ctx.path('burrow.log'),
     prefix: 'burrow',
     env: {
-      DORMOUSE_REMOTE_CONNECT_SRC: `${ctx.relayOrigin} ${ctx.relayOrigin.replace(/^http/, 'ws')}`,
+      DORMOUSE_RELAY_ORIGIN: ctx.relayOrigin,
+      // Blank is unset: an inherited flag would make this a Hosted build with
+      // nothing to enroll through.
+      DORMOUSE_RELAY_IS_HOSTED: '',
       DORMOUSE_BROWSER_DEV_AB_SESSION: opts.session,
-      DORMOUSE_BROWSER_DEV_VITE_PORT: String(opts.vitePort),
-      DORMOUSE_BROWSER_DEV_HOST_PORT: String(opts.hostPort),
+      DORMOUSE_BROWSER_DEV_VITE_PORT: '0',
+      DORMOUSE_BROWSER_DEV_HOST_PORT: '0',
     },
   });
 
@@ -306,25 +338,45 @@ async function stepBurrow(ctx) {
     timeoutMs: 300_000,
     what: 'the harness to finish opening the app',
   });
-  ctx.record({ burrowStateDir: stateLine[1].trim(), viteOrigin: ctx.viteOrigin });
+  const appLine = await waitForLine(handle, APP_URL_LINE, {
+    timeoutMs: 300_000,
+    what: 'the harness to report the app URL',
+  });
+  const viteOrigin = appLine[1];
+  ctx.log(`vite ${viteOrigin}`);
+  ctx.record({ burrowStateDir: stateLine[1].trim(), viteOrigin });
 
   ctx.state.burrowBrowser = new AgentBrowser(opts.session, repoRoot);
-  await ctx.state.burrowBrowser.openUntil(ctx.viteOrigin, burrowReadyExpr(opts.vitePort));
+  await ctx.state.burrowBrowser.openUntil(viteOrigin, burrowReadyExpr(new URL(viteOrigin).port));
   await ctx.shot('01-burrow-booted.png');
 }
 
-/** Open Settings from the baseboard and scroll to Remote control. */
+/**
+ * Open Settings from the baseboard, choose Network → My Relay only, and scroll
+ * to the Phones section it opens. A fresh Burrow's network policy is Nothing
+ * (`docs/specs/remote-network.md` -> "Policy"), which refuses enrollment before
+ * any request, so this click is what lets the next step reach the Relay.
+ */
 async function stepSettings(ctx) {
   const ab = ctx.state.burrowBrowser;
   await ab.run(['click', 'button[aria-label="Settings"]']);
+  await ab.waitUntil(
+    `const radio = [...document.querySelectorAll('[role="dialog"] [role="radio"]')]
+       .find((el) => el.innerText.startsWith('My Relay only'));
+     if (!radio) return null;
+     if (radio.getAttribute('aria-checked') !== 'true') radio.click();
+     return true;`,
+    { what: 'Settings → Network to offer My Relay only' },
+  );
   // The section is below the fold in a short window, and a screenshot is
-  // viewport-only — so the wait scrolls it into view as it finds it.
+  // viewport-only — so the wait scrolls it into view as it finds it, at once
+  // rather than at the dialog's smooth pace, which the shot would catch mid-way.
   await ab.waitUntil(
     `const section = ${REMOTE_SECTION};
-     if (!section) return null;
-     section.scrollIntoView({ block: 'center' });
+     if (!section || !/Persistent Relay/.test(section.innerText)) return null;
+     section.scrollIntoView({ block: 'center', behavior: 'instant' });
      return true;`,
-    { what: 'the Settings dialog to show Remote control' },
+    { what: 'the Phones section to show the Remote control choices' },
   );
   await ctx.shot('02-settings-open.png');
 }
@@ -340,7 +392,8 @@ async function stepEnroll(ctx) {
   const ab = ctx.state.burrowBrowser;
   const { opts } = ctx;
 
-  await fillField(ctx, 'input[type="url"]', ctx.relayOrigin);
+  // A Burrow with no enrollment and no offer opens with Persistent Relay folded.
+  await ab.run(['find', 'role', 'button', 'click', '--name', 'Persistent Relay', '--exact']);
   await fillField(ctx, 'input[type="password"]', ctx.state.setupPassword);
   await fillField(ctx, 'input[placeholder="e.g. Work laptop"]', opts.machineName);
   await ctx.shot('03-enroll-form.png');
@@ -404,10 +457,12 @@ async function captureQr(ctx) {
 
   // One round trip for "it is there" and "here is where": a second read could
   // land after a rotation and measure a different code than the one captured.
+  // `instant`, because the Settings dialog scrolls smoothly (`scroll-smooth`),
+  // and a rect read mid-glide is where the code was, not where it lands.
   const measured = await ab.waitUntil(
     `const svg = document.querySelector(${JSON.stringify(SETUP_QR)});
      if (!svg) return null;
-     svg.scrollIntoView({ block: 'center' });
+     svg.scrollIntoView({ block: 'center', behavior: 'instant' });
      const r = svg.getBoundingClientRect();
      return { x: r.x, y: r.y, width: r.width, height: r.height, innerWidth: innerWidth,
        url: ${invitationUrlExpr('svg')} };`,
@@ -527,12 +582,10 @@ async function stepPocket(ctx) {
 
   const chrome = resolveChrome();
   ctx.log(`pocket browser: ${chrome.path} (${chrome.from})`);
-  const port = await findFreePort(opts.hostPort + 100);
   const userDataDir = ctx.path('pocket-profile');
   mkdirSync(userDataDir, { recursive: true });
   const launched = await launchChrome({
     binary: chrome.path,
-    port,
     userDataDir,
     // Opened at `getUserMedia` time rather than at launch (probed), so this
     // may be — and on a rotated code is — rewritten after Chrome is up.
@@ -542,6 +595,7 @@ async function stepPocket(ctx) {
     logPath: ctx.path('pocket-chrome.log'),
   });
 
+  const { port } = launched;
   const ab = new AgentBrowser(`${opts.session}-pocket`, repoRoot);
   ctx.state.pocketBrowser = ab;
   await ab.run(['connect', String(port)]);
@@ -1057,10 +1111,10 @@ async function runFromPocket(ctx) {
  *
  * The escape is typed from Pocket only because that is where the caret already
  * is; what turns it into a ring is the Burrow's own alert manager, and the phone
- * learns of it the one way it can — `ringing`/`hasTODO` on the directory
- * snapshot (`docs/specs/alert.md`,
- * `lib/src/remote/burrow/directory-collect.ts`). Push is off on a loopback
- * origin, so this is the in-session path and the whole of it.
+ * learns of it the one way it can — `ringing` on the directory snapshot
+ * (`docs/specs/alert.md`, `lib/src/remote/burrow/directory-collect.ts`). Push
+ * is off on a loopback origin, so this is the in-session path and the whole of
+ * it.
  */
 async function ringFromBurrow(ctx) {
   const pocket = ctx.state.pocketBrowser;
@@ -1070,21 +1124,22 @@ async function ringFromBurrow(ctx) {
   const startedAt = Date.now();
   const sent = await proveCommand(ctx, NOTIFY_PROOF, { prefix: `${NOTIFY_SEQUENCE}; ` });
   await pocket.run(['click', 'button[aria-label="Sessions input mode"]']);
-  // **The row has to be *this* notification's.** Waiting for any row with a
-  // TODO would be satisfied instantly by one left over from an earlier command
-  // — the assertion would pass having proved nothing — so the row must also be
-  // ringing and carry the escape in the title the Burrow derived from the command
-  // line, which is the one thing only this command could have produced.
+  // **The row has to be *this* notification's.** Waiting for any ringing row
+  // could be satisfied by one left over from an earlier command — the assertion
+  // would pass having proved nothing — so the row must also carry the escape in
+  // the title the Burrow derived from the command line, which is the one thing
+  // only this command could have produced. Ringing, not TODO: a ring never sets
+  // TODO, a look does (`docs/specs/alert.md`), and nobody has looked.
   const row = await pocket.waitUntil(
     `${sessionRowsExpr()}
-     return rows && rows.find((r) => r.todo && r.ringing && r.text.includes('777;notify')) || null;`,
+     return rows && rows.find((r) => r.ringing && r.text.includes('777;notify')) || null;`,
     { what: "the Burrow's notification to reach the phone's session list", timeoutMs: 60_000 },
   );
   ctx.record({
     notification: {
       sequence: NOTIFY_SEQUENCE,
       deliveredInMs: sent.roundTripMs,
-      // Enter to a bell on the phone, the tap that opens the session list
+      // Enter to an alarm on the phone, the tap that opens the session list
       // included — the ring is normally there before the list is looked at.
       visibleInMs: Date.now() - startedAt,
       row,
@@ -1237,7 +1292,7 @@ function wallReadyExpr() {
  * The session list as the reserve renders it, found by position rather than by
  * class: it is the block directly under the input-mode selector, and each row is
  * one button carrying the pane's title, its TODO pill, and — when the Burrow says
- * the pane is ringing — a second icon, the bell
+ * the pane is ringing — an alarm inset, an overlay span inside the button
  * (`lib/src/components/MobileTerminalUi.tsx`).
  *
  * A statement, not an expression: it leaves the rows in `rows` (falsy while the
@@ -1249,7 +1304,7 @@ function sessionRowsExpr() {
     const rows = reserve && [...reserve.querySelectorAll('button')].map((row) => ({
       text: row.innerText.trim(),
       todo: [...row.querySelectorAll('span')].some((el) => el.textContent.trim() === 'TODO'),
-      ringing: row.querySelectorAll('svg').length > 1,
+      ringing: row.querySelector('[data-alert-ring-inset]') !== null,
     }));`;
 }
 
@@ -1312,7 +1367,7 @@ async function fillField(ctx, selector, value, ab = ctx.state.burrowBrowser) {
 const SETUP = [
   { name: 'relay', title: 'Start the coordinating Relay', run: stepRelay },
   { name: 'burrow', title: 'Start the Burrow in the agent-browser harness', run: stepBurrow },
-  { name: 'settings', title: 'Open Settings → Remote control', run: stepSettings },
+  { name: 'settings', title: 'Open Settings → Network and choose My Relay only', run: stepSettings },
   { name: 'enroll', title: 'Enroll this machine through the form', run: stepEnroll },
   { name: 'qr', title: 'Open the phone-setup panel and capture its QR', run: stepQr },
   {

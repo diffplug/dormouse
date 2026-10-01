@@ -4,7 +4,7 @@ Invocation: `dor ensure --help`
 
 ```text
 USAGE
-  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] -- <command>...
+  dor ensure [--json] [--minimize] [--restart] [--surface id|ref] [--cwd path] [--workspace ref] -- <command>...
   dor ensure --help
 
 Ensures one surface in the current workspace is running the given command at the given path. If it's already running, no-op. If it isn't, then it creates a split and runs the command.
@@ -43,12 +43,13 @@ JSON output:
   }
 
 FLAGS
-     [--json]      Print JSON output.
-     [--minimize]  Create the surface minimized.
-     [--restart]   Restart a matching surface in place.
-     [--surface]   Surface to split when creating.
-     [--cwd]       Working directory for matching and for the new command.
-  -h  --help       Print help information and exit
-      --           All subsequent inputs should be interpreted as arguments
+     [--json]       Print JSON output.
+     [--minimize]   Create the surface minimized.
+     [--restart]    Restart a matching surface in place.
+     [--surface]    Surface to split when creating.
+     [--cwd]        Working directory for matching and for the new command.
+     [--workspace]  Workspace to act in, instead of the caller's.
+  -h  --help        Print help information and exit
+      --            All subsequent inputs should be interpreted as arguments
 
 ```

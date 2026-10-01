@@ -2,10 +2,6 @@
  * Process, port and log plumbing for the pairing walkthrough
  * (`scripts/pairing-walkthrough/README.md`).
  *
- * Nothing here is product code and nothing here listens: the harness only
- * *probes* ports with an outbound connect, so `scripts/loopback-lint.mjs` has
- * no listener to guard.
- *
  * `docs/specs/dor-cli.md` -> "Spawning External Binaries" requires product code
  * to spawn through `spawnAndCapture`; this file spawns raw on purpose. It is a
  * dependency-free script outside the pnpm workspace (nothing to import from),
@@ -14,13 +10,31 @@
  */
 
 import { createWriteStream } from 'node:fs';
-import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { setTimeout as delay } from 'node:timers/promises';
 
 /** Every child this run started, newest first, so teardown is reverse order. */
 const started = [];
+
+/**
+ * One byte stream's chunks, split into whole lines. A `StringDecoder` rather
+ * than `chunk.toString()`, so a multi-byte character split across two reads
+ * survives; the carry holds the trailing partial line until its newline lands.
+ *
+ * **Both pieces of state belong to one stream.** Exported so the rule is
+ * testable without a child process; `spawnLogged` builds one of these per pipe.
+ */
+export function lineAccumulator(onLine) {
+  const decoder = new StringDecoder('utf8');
+  let carry = '';
+  return (chunk) => {
+    carry += decoder.write(chunk);
+    const parts = carry.split('\n');
+    carry = parts.pop() ?? '';
+    for (const line of parts) onLine(line);
+  };
+}
 
 /**
  * Spawn a long-running child in its own process group, tee its output into
@@ -30,8 +44,16 @@ const started = [];
  * `pnpm innerdogfood` each fan out into a tree (pnpm → node → vite →
  * esbuild), and killing only the pnpm shim orphans everything under it.
  * `detached: true` plus a `process.kill(-pid)` at teardown takes the group.
+ *
+ * **`dropEnv` removes inherited variables before `env` is applied.** The child
+ * otherwise inherits the whole shell, and a developer who has an installed
+ * deployment's settings exported gets a run configured by them. Opt-in per
+ * child, because `pnpm innerdogfood` reads `DORMOUSE_` variables on purpose.
  */
-export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
+export function spawnLogged(command, args, { cwd, env, dropEnv, logPath, prefix }) {
+  const inherited = dropEnv
+    ? Object.fromEntries(Object.entries(process.env).filter(([key]) => !dropEnv.test(key)))
+    : process.env;
   const log = createWriteStream(logPath, { flags: 'a' });
   // A write stream with no `error` listener throws an uncaught exception on a
   // full or vanished run directory — losing the log is survivable, so it is
@@ -39,32 +61,36 @@ export function spawnLogged(command, args, { cwd, env, logPath, prefix }) {
   log.on('error', (err) => console.error(`[${prefix}] ${logPath}: ${err.message}`));
   const child = spawn(command, args, {
     cwd,
-    env: { ...process.env, ...env },
+    env: { ...inherited, ...env },
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   /** Everything the child has written, newest last, for `waitForLine`. */
   const lines = [];
-  // A decoder rather than `chunk.toString()`, so a multi-byte character split
-  // across two reads survives into `lines`.
-  const decoder = new StringDecoder('utf8');
-  let carry = '';
-  const consume = (chunk) => {
-    log.write(chunk);
-    carry += decoder.write(chunk);
-    const parts = carry.split('\n');
-    carry = parts.pop() ?? '';
-    for (const line of parts) lines.push(line);
+  // **One accumulator per stream.** stdout and stderr are independent pipes, so
+  // sharing a decoder and a carry between them lets a stdout chunk that ended
+  // mid-character be completed by stderr's next byte, and splices the partial
+  // stdout line onto whatever stderr wrote next — a single `lines` entry whose
+  // join `waitForLine`'s anchored patterns then capture across
+  // (`BURROW_STATE_DIR_LINE`'s `(.+)$` swallows the stderr text as part of the
+  // path). The raw log is unaffected either way: `log.write` takes the bytes.
+  const teeToLines = () => {
+    const accumulate = lineAccumulator((line) => lines.push(line));
+    return (chunk) => {
+      log.write(chunk);
+      accumulate(chunk);
+    };
   };
-  child.stdout.on('data', consume);
-  child.stderr.on('data', consume);
+  child.stdout.on('data', teeToLines());
+  child.stderr.on('data', teeToLines());
 
   let exit = null;
   child.on('exit', (code, signal) => { exit = { code, signal }; });
   // **The log ends on `close`, never on `exit`.** The tree a leader started
   // holds the same stdout pipe, so chunks keep arriving after the leader is
-  // gone — and `consume` writing them to an ended stream drops them without
-  // even raising `error`, losing exactly the tail that says why it died.
+  // gone — and a `teeToLines` handler writing them to an ended stream drops
+  // them without even raising `error`, losing exactly the tail that says why
+  // it died.
   // `exit` still has to be set where it is: `waitForLine` and `launchChrome`
   // both want the early-death signal, which `close` is too late for.
   child.on('close', (code, signal) => {
@@ -122,35 +148,6 @@ export async function waitFor(probe, { timeoutMs = 60_000, intervalMs = 400, wha
     }
     await delay(intervalMs);
   }
-}
-
-/**
- * Whether nothing is listening on `port`.
- *
- * An outbound connect rather than a trial bind: a bind-and-close would put a
- * loopback listener in this file, which `scripts/loopback-lint.mjs` reads as a
- * product listener needing a guard, and the answer would be no more accurate.
- */
-export function isPortFree(port) {
-  return new Promise((resolve) => {
-    const socket = net.connect({ port, host: '127.0.0.1' });
-    const settle = (free) => {
-      socket.destroy();
-      resolve(free);
-    };
-    socket.setTimeout(1000);
-    socket.once('connect', () => settle(false));
-    socket.once('timeout', () => settle(true));
-    socket.once('error', () => settle(true));
-  });
-}
-
-/** The first free port at or above `start`. */
-export async function findFreePort(start) {
-  for (let port = start; port < start + 200; port++) {
-    if (await isPortFree(port)) return port;
-  }
-  throw new Error(`no free port in [${start}, ${start + 200})`);
 }
 
 /**

@@ -257,6 +257,21 @@ require_stage() {
     [[ -f "$SIGN_DIR/.completed-$1" ]] || error "Release stage '$1' has not completed. Re-run that stage first."
 }
 
+# Immutable releases lock assets and the tag at publication, so a published release
+# cannot be repaired by re-uploading, and deleting it burns the tag name for good.
+# Every command that ends in a release upload calls this before it spends anything.
+require_unpublished_release() {
+    local tag="v$1"
+    local is_draft
+
+    check_command gh "brew install gh && gh auth login"
+    gh release view "$tag" --repo "$GITHUB_REPO" &>/dev/null || return 0
+
+    is_draft=$(gh release view "$tag" --repo "$GITHUB_REPO" --json isDraft --jq '.isDraft')
+    [[ "$is_draft" == "true" ]] \
+        || error "Release $tag is already published; its assets cannot be replaced. Cut the next version instead — the tag cannot be reused."
+}
+
 invalidate_updates() {
     rm -f "$SIGN_DIR/.completed-sign-updates"
     rm -rf "$WORK_DIR/release-assets"
@@ -295,8 +310,9 @@ prepare_sign_dir() {
     log "Preparing working copies from downloaded artifacts..."
     rm -rf "$SIGN_DIR"
     mkdir -p "$SIGN_DIR"
-    # Copy only the artifact directories (not marker files)
-    invalidate_updates
+    # Copy only the artifact directories (not marker files). `prepare_artifact`
+    # invalidates the updater output itself, because it is also called on its
+    # own to refresh one platform.
     for name in "${ARTIFACT_NAMES[@]}"; do
         prepare_artifact "$name"
     done
@@ -320,9 +336,11 @@ prepare_artifact() {
     fi
 }
 
+# The signed executable is not passed in: `patch-nsis-paths.pl` rewrites the
+# .nsi's CI-runner paths to point at "$SIGN_DIR/standalone-win-x64", which is
+# where `sign_windows` signed it in place.
 rebuild_windows_installer() {
-    local signed_exe="$1"
-    local installer_path="$2"
+    local installer_path="$1"
 
     check_command makensis "Install NSIS: brew install makensis"
 
@@ -629,6 +647,12 @@ sign_macos_app() {
         || error "Signed Node sidecar failed to launch"
     (cd "$sidecar_dir" && "$node_sidecar" -e "require('node-pty')") \
         || error "Signed Node sidecar failed to load node-pty"
+    # The direct path's addon, loaded through the same bare specifier the
+    # sidecar uses. Its own `.node` is signed by the sweep above, but only a
+    # load proves the hardened runtime lets it open one — and nothing before a
+    # phone's first `direct-offer` on a user's machine would otherwise find out.
+    (cd "$sidecar_dir" && "$node_sidecar" -e "require('node-datachannel/polyfill')") \
+        || error "Signed Node sidecar failed to load node-datachannel"
 
     log "macOS signing complete ($arch_label)"
 }
@@ -746,7 +770,7 @@ sign_windows() {
     local installer_path
     installer_path=$(windows_installer_path "$version")
 
-    rebuild_windows_installer "$exe_path" "$installer_path"
+    rebuild_windows_installer "$installer_path"
     log "Signing installer: $installer_path"
     EV_SIGN_PIN="$EV_SIGN_PIN" jsign \
         --storetype PIV \
@@ -920,6 +944,8 @@ create_release() {
     fi
 
     if gh release view "$tag" --repo "$GITHUB_REPO" &>/dev/null; then
+        require_unpublished_release "$version"
+
         local existing_assets
         existing_assets=$(gh release view "$tag" --repo "$GITHUB_REPO" --json assets --jq '.assets[].name')
         while IFS= read -r asset; do
@@ -928,7 +954,7 @@ create_release() {
                 *) error "Existing release contains unexpected asset: $asset. Remove it before retrying." ;;
             esac
         done <<< "$existing_assets"
-        log "Release $tag already exists — updating assets..."
+        log "Draft release $tag already exists — updating assets..."
         gh release upload "$tag" \
             --repo "$GITHUB_REPO" \
             --clobber \
@@ -936,10 +962,14 @@ create_release() {
         gh release edit "$tag" \
             --repo "$GITHUB_REPO" \
             --title "$tag" \
+            --tag "$tag" \
             --verify-tag \
             --draft=false \
             --notes-file "$notes_file"
     else
+        # `gh release create` with assets uploads them to a draft and publishes only
+        # once every upload succeeds, deleting the draft if one fails — so a release
+        # never becomes immutable with a partial asset set.
         gh release create "$tag" \
             --repo "$GITHUB_REPO" \
             --title "$tag" \
@@ -1005,6 +1035,7 @@ main() {
 
             validate_version "$version"
             check_git_clean
+            require_unpublished_release "$version"
             ensure_version "$version"
             download_artifacts "$version"
             prepare_sign_dir
@@ -1019,6 +1050,7 @@ main() {
             [[ -z "$version" ]] && error "Usage: $(basename "$0") resume <version>"
 
             validate_version "$version"
+            require_unpublished_release "$version"
             [[ -f "$WORK_DIR/.version" ]] || error "No cached release. Run all first."
             [[ "$(cat "$WORK_DIR/.version")" == "$version" ]] || error "Cached release version differs. Run all to start another version."
             resume_download "$version"

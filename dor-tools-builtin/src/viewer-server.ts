@@ -1,0 +1,113 @@
+import { randomBytes } from 'node:crypto';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { isAbsolute, relative, sep } from 'node:path';
+import { serveSequence } from 'dor-tools-lib/osc';
+import { CONTROLS, viewerTitle } from './file-viewer-format.js';
+import { allowsFileViewerRequest } from './file-viewer-loopback-guard.js';
+
+const TEXT = 'text/plain; charset=utf-8';
+const HTML_ESCAPES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+/** `s` as HTML text or a quoted attribute value. */
+export const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, c => HTML_ESCAPES[c]!);
+
+/** Thrown by a route to answer with `status` and `message` as plain text. */
+export class HttpError extends Error {
+  constructor(readonly status: number, message = '') { super(message); }
+}
+
+/** Node sends no body on a HEAD response. */
+export function reply(res: ServerResponse, status: number, body: string | Buffer = '', type = TEXT): void {
+  res.writeHead(status, { 'Content-Type': type, 'Content-Length': Buffer.byteLength(body) });
+  res.end(body);
+}
+
+/** A POST's JSON body: 415 unless typed `application/json`, 413 past `limit`
+ * bytes (read to the end, buffering none past it, so the refusal is delivered),
+ * 400 unparsable. */
+export async function readJsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
+  if ((req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') throw new HttpError(415);
+  const chunks: Buffer[] = [];
+  let size = 0;
+  await new Promise<void>((done, fail) => {
+    req.on('data', (chunk: Buffer) => { size += chunk.length; if (size <= limit) chunks.push(chunk); });
+    req.on('end', done);
+    req.on('error', fail);
+  });
+  if (size > limit) throw new HttpError(413);
+  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400); }
+}
+
+/** Whether the absolute `path` is `root` or under it. */
+export function isInsideRoot(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  return !(isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`));
+}
+
+/** `path`'s `/` segments; null when its spelling alone could leave a root: a
+ * backslash or a `.` or `..` segment, and when `strict`, an empty segment or a
+ * control character. Containment is decided on the realpath. */
+export function pathSegments(path: string, { strict = false } = {}): string[] | null {
+  const parts = path.split('/');
+  const refused = path.includes('\\') || (strict && CONTROLS.test(path))
+    || parts.some(part => part === '.' || part === '..' || (strict && part === ''));
+  return refused ? null : parts;
+}
+
+export interface CapabilityViewer { port: number; prefix: string; close(): Promise<void> }
+
+/** A loopback listener whose every URL sits under a fresh 256-bit capability
+ * `prefix`: `allowsFileViewerRequest` gates each request before `route` sees it.
+ * The scaffold answers a refused request 403, a route's `HttpError` with its
+ * status, and any other failure 500 `unavailable`; `chunked` answers those
+ * without Content-Length, as the file viewer does. `release` runs once the
+ * server has closed. */
+export async function startCapabilityViewer({ csp, post = false, chunked = false, unavailable, release, route }: {
+  csp: string;
+  post?: boolean;
+  chunked?: boolean;
+  unavailable: string;
+  release?: () => Promise<void>;
+  route(req: IncomingMessage, res: ServerResponse, prefix: string): Promise<void>;
+}): Promise<CapabilityViewer> {
+  const prefix = `/${randomBytes(32).toString('hex')}/`;
+  const answer = (res: ServerResponse, status: number, message = '') => {
+    if (!chunked) { reply(res, status, message); return; }
+    res.writeHead(status, { 'Content-Type': TEXT });
+    res.end(message);
+  };
+  let port = 0;
+  const server = createServer((req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    // The iframe proxy must retain this policy on every MIME type.
+    res.setHeader('X-Dormouse-Preserve-CSP', '1');
+    res.setHeader('Content-Security-Policy', csp);
+    if (!allowsFileViewerRequest(req, port, prefix, { post })) { answer(res, 403); return; }
+    route(req, res, prefix).catch(error => {
+      if (res.headersSent) res.destroy();
+      else if (error instanceof HttpError) answer(res, error.status, error.message);
+      else answer(res, 500, unavailable);
+    });
+  });
+  await new Promise<void>((yes, no) => { server.once('error', no); server.listen(0, '127.0.0.1', yes); });
+  port = (server.address() as { port: number }).port;
+  let closing: Promise<void> | undefined;
+  return { port, prefix,
+    close: () => closing ??= new Promise<void>((yes, no) => {
+      server.close(error => { void (release?.() ?? Promise.resolve()).then(() => error ? no(error) : yes(), no); });
+      server.closeAllConnections();
+    }),
+  };
+}
+
+/** Stops `viewer` on SIGINT or SIGTERM, and returns what the `dor __view-*`
+ * entry prints for its caller: an OSC 2 title naming `target` and the OSC 367
+ * `serve` announcement (docs/specs/dor-tools-builtin.md -> File viewer). */
+export function announceViewer(viewer: { port: number; path: string; close(): Promise<void> }, target: string): string {
+  const stop = () => { void viewer.close().then(() => { process.exitCode = 0; }); };
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  return `\x1b]2;${viewerTitle(target)}\x07${serveSequence(viewer)}`;
+}

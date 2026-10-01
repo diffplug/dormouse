@@ -32,6 +32,7 @@ import {
   type MobileGesturePoint,
   type MobileGestureTrackingState,
 } from '../lib/mobile-gesture-menu';
+import { writeUserInput } from '../lib/terminal-registry';
 import { settleTerminals } from './settle-terminals';
 
 const meta: Meta<typeof MobileTerminalUi> = {
@@ -143,7 +144,7 @@ function PocketWallFrame(args: MobileTerminalUiProps) {
   if (!adapterRef.current) adapterRef.current = initPlatform('fake');
   const [activePaneId, setActivePaneId] = useState(POCKET_WALL_PANE);
   const [keyboardMode, setKeyboardMode] = useState<MobileTerminalKeyboardMode>(
-    args.activeKeyboardMode ?? args.activeSection ?? args.defaultKeyboardMode ?? args.defaultSection ?? 'type',
+    args.activeKeyboardMode ?? args.defaultKeyboardMode ?? 'type',
   );
   const sessionItems = useMobileWallSessionItems(POCKET_WALL_SESSIONS, activePaneId);
 
@@ -164,13 +165,12 @@ function PocketWallFrame(args: MobileTerminalUiProps) {
         onKeyboardModeChange={(mode) => {
           setKeyboardMode(mode);
           args.onKeyboardModeChange?.(mode);
-          args.onSectionChange?.(mode);
         }}
         sessions={sessionItems}
         onSessionSelect={setActivePaneId}
         onSendInput={(data) => {
           args.onSendInput?.(data);
-          adapterRef.current?.writePty(activePaneId, data);
+          writeUserInput(activePaneId, data);
         }}
         onPaste={() => {
           void args.onPaste?.();
@@ -281,28 +281,28 @@ function GestureSnapshotFrame({
 
 export const TypePane: Story = {
   args: {
-    defaultSection: 'type',
+    defaultKeyboardMode: 'type',
   },
   render: (args) => <StoryFrame {...args} />,
 };
 
 export const RecentTodoPane: Story = {
   args: {
-    defaultSection: 'recent',
+    defaultKeyboardMode: 'recent',
   },
   render: (args) => <StoryFrame {...args} />,
 };
 
 export const DraftTodoPane: Story = {
   args: {
-    defaultSection: 'draft',
+    defaultKeyboardMode: 'draft',
   },
   render: (args) => <StoryFrame {...args} />,
 };
 
 export const NonInteractivePhoneMockup: Story = {
   args: {
-    defaultSection: 'type',
+    defaultKeyboardMode: 'type',
     interactive: false,
   },
   render: (args) => <StoryFrame {...args} />,
@@ -310,7 +310,7 @@ export const NonInteractivePhoneMockup: Story = {
 
 export const CursorTouchAvailable: Story = {
   args: {
-    defaultSection: 'type',
+    defaultKeyboardMode: 'type',
     cursorTouchAvailable: true,
   },
   render: (args) => <StoryFrame {...args} />,
@@ -318,7 +318,7 @@ export const CursorTouchAvailable: Story = {
 
 export const PocketWall: Story = {
   args: {
-    defaultSection: 'type',
+    defaultKeyboardMode: 'type',
   },
   parameters: {
     layout: 'fullscreen',

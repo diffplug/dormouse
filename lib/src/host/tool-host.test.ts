@@ -1,0 +1,300 @@
+import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createToolHost } from './tool-host';
+
+const YML = `
+tools:
+  storybook:
+    run: pnpm storybook
+    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+  scratch:
+    run: echo hi
+  noisy:
+    run: echo noisy
+    colour: blue
+`;
+
+let repo = '';
+let stateDir = '';
+
+beforeEach(async () => {
+  repo = await realpath(await mkdtemp(join(tmpdir(), 'dor-tool-host-')));
+  stateDir = join(repo, '.state');
+  await writeFile(join(repo, 'dormouse.yml'), YML);
+  // A host built without `userConfigPath` reads the real user file; point it
+  // into the fixture so a developer's own Tools can't change these results.
+  vi.stubEnv('XDG_CONFIG_HOME', join(repo, '.config'));
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await rm(repo, { recursive: true, force: true });
+});
+
+describe('createToolHost', () => {
+  it('reads browser settings before any Tool execution grant and merges user presets', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800, dpr: 2 }\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  default_viewport: custom\n');
+    const host = createToolHost({ userConfigPath });
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({
+      status: 'browser-config', config: { defaultViewport: 'custom', viewports: { custom: { width: 1100, height: 800, dpr: 2 } } },
+    });
+  });
+
+  it('reads browser preferences despite invalid unrelated Tool entries in either file', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1600, height: 1000 }\ntools:\n  broken:\n    render: ab-screencast\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  default_viewport: custom\ntools:\n  broken:\n    run: pnpm dev\n    render: ab-screencast\n');
+    const host = createToolHost({ userConfigPath });
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({
+      status: 'browser-config', config: { defaultViewport: 'custom', viewports: { custom: { width: 1600, height: 1000 } } },
+    });
+    expect(await host.handle({ op: 'lookup', name: 'broken', cwd: repo })).toMatchObject({ status: 'error', message: expect.stringContaining("'render' must be one of") });
+    expect(await host.handle({ op: 'lookup', name: 'broken', cwd: repo, global: true })).toMatchObject({ status: 'error', message: expect.stringContaining("'run' is required") });
+  });
+
+  it('still reports invalid browser sections and malformed YAML explicitly', async () => {
+    const host = createToolHost({ userConfigPath: join(repo, 'missing-user.yml') });
+    await writeFile(join(repo, 'dormouse.yml'), 'browser:\n  viewports:\n    broken: { width: 0, height: 900 }\ntools:\n  valid:\n    run: echo ok\n');
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({ status: 'error', message: expect.stringContaining('browser.viewports.broken') });
+    await writeFile(join(repo, 'dormouse.yml'), 'browser: [invalid\n');
+    expect(await host.handle({ op: 'browser-config', cwd: repo })).toMatchObject({ status: 'error', message: expect.stringContaining('dormouse.yml') });
+  });
+
+  it('resolves a trusted Tool viewport from project and user configuration', async () => {
+    const userConfigPath = join(repo, 'user.yml');
+    await writeFile(userConfigPath, 'browser:\n  viewports:\n    custom: { width: 1100, height: 800 }\n');
+    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  app:\n    run: pnpm dev\n    render: playwright-screencast\n    viewport: custom\n');
+    const host = createToolHost({ userConfigPath });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    expect(await host.handle({ op: 'lookup', name: 'app', cwd: repo })).toMatchObject({
+      status: 'ok', render: 'playwright-screencast', viewport: { mode: 'fixed', width: 1100, height: 800 },
+    });
+  });
+
+  it('asks for trust before resolving anything runnable', async () => {
+    const host = createToolHost({ stateDir });
+    expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
+      status: 'untrusted',
+      run: 'pnpm storybook',
+      projectRoot: repo,
+    });
+  });
+
+  it('renders the key host-side once trusted, so the webview never sees a template', async () => {
+    const host = createToolHost({ stateDir });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
+      status: 'ok',
+      run: 'pnpm storybook',
+      key: ['storybook', repo],
+    });
+  });
+
+  it('resolves an upstream grant host-side', async () => {
+    const host = createToolHost({ stateDir });
+    // This fixture is not a git checkout, so an upstream choice must fall back
+    // to a folder grant.
+    await host.handle({
+      op: 'trust',
+      kind: 'upstream',
+      projectRoot: repo,
+    });
+
+    expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
+      status: 'ok',
+    });
+  });
+
+  it('reports a null key for an entry that declared none', async () => {
+    const host = createToolHost({ stateDir });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    const result = await host.handle({ op: 'lookup', name: 'scratch', cwd: repo });
+    expect(result).toMatchObject({ status: 'ok', key: null });
+  });
+
+  it('carries lint warnings through to the caller', async () => {
+    const host = createToolHost({ stateDir });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    const result = await host.handle({ op: 'lookup', name: 'noisy', cwd: repo });
+    expect(result).toMatchObject({ status: 'ok' });
+    if (result.status !== 'ok') return;
+    expect(result.warnings).toEqual([expect.stringContaining("unknown field 'colour'")]);
+  });
+
+
+  it('persists trust to the state directory, surviving a host restart', async () => {
+    await createToolHost({ stateDir }).handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    expect(await createToolHost({ stateDir }).handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
+      status: 'ok',
+    });
+  });
+
+  it('forgets trust between runs when the host has no state directory', async () => {
+    const first = createToolHost();
+    await first.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    expect(await first.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({ status: 'ok' });
+    expect(await createToolHost().handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({
+      status: 'untrusted',
+    });
+  });
+
+  it('reports an unknown tool with the names it knows', async () => {
+    const result = await createToolHost({ stateDir }).handle({ op: 'lookup', name: 'nope', cwd: repo });
+    expect(result).toMatchObject({ status: 'unknown-tool', names: ['noisy', 'scratch', 'storybook'] });
+  });
+
+  it('reports no-file above any dormouse.yml', async () => {
+    const empty = await mkdtemp(join(tmpdir(), 'dor-tool-empty-'));
+    try {
+      expect(await createToolHost({ stateDir }).handle({ op: 'lookup', name: 'x', cwd: empty })).toEqual({
+        status: 'no-file',
+      });
+    } finally {
+      await rm(empty, { recursive: true, force: true });
+    }
+  });
+
+  it('names the user configuration and available tools after a project-file miss', async () => {
+    await rm(join(repo, 'dormouse.yml'));
+    const path = join(repo, 'user.yml');
+    await writeFile(path, 'tools:\n  viewer:\n    run: viewer\n');
+    expect(await createToolHost({ stateDir, userConfigPath: path }).handle({ op: 'lookup', name: 'viewr', cwd: repo }))
+      .toEqual({ status: 'unknown-tool', projectRoot: repo, path, names: ['viewer'] });
+  });
+
+  it('returns a parse error rather than throwing across the wire', async () => {
+    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  t:\n    run: x\n    prespawn_dedupe: [$NOPE]\n');
+    const result = await createToolHost({ stateDir }).handle({ op: 'lookup', name: 't', cwd: repo });
+    expect(result).toMatchObject({ status: 'error' });
+  });
+
+  it('resolves user tools without repo approval and keeps explicit project names ahead of them', async () => {
+    const path = join(repo, 'user.yml');
+    await writeFile(path, `tools:\n  storybook:\n    run: [user-storybook, $ARGS]\n  viewer:\n    run: [viewer, $TARGET]\n    prespawn_dedupe: [$TARGET]\n`);
+    const target = join(repo, 'a b; $(echo bad).md');
+    await writeFile(target, 'hello');
+    const host = createToolHost({ stateDir, userConfigPath: path });
+    expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo })).toMatchObject({ status: 'untrusted', run: 'pnpm storybook' });
+    expect(await host.handle({ op: 'lookup', name: 'storybook', global: true, cwd: repo, args: ['--port', '1234'] }))
+      .toMatchObject({ status: 'ok', scope: 'user', run: ['user-storybook', '--port', '1234'] });
+    expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: ['a b; $(echo bad).md'] }))
+      .toMatchObject({ status: 'ok', scope: 'user', run: ['viewer', target], key: [target] });
+    expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: ['https://example.com/a.md'] }))
+      .toMatchObject({ status: 'error', message: expect.stringContaining('local path') });
+    expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo, args: [] }))
+      .toMatchObject({ status: 'error', message: expect.stringContaining('exactly one') });
+  });
+
+  it('re-resolves input argv after project approval without shell interpolation', async () => {
+    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  viewer:\n    run: [viewer, $TARGET]\n    prespawn_dedupe: [$PROJECT_ROOT, $TARGET]\n');
+    const target = join(repo, "quoted ' document.md");
+    await writeFile(target, 'hello');
+    const host = createToolHost({ stateDir });
+    const request = { op: 'lookup' as const, name: 'viewer', cwd: repo, args: [target] };
+    expect(await host.handle(request)).toMatchObject({ status: 'untrusted', run: ['viewer', target] });
+    await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+    expect(await host.handle(request)).toMatchObject({ status: 'ok', run: ['viewer', target], key: [repo, target] });
+  });
+
+  it('does not silently ignore malformed user configuration or input to shell strings', async () => {
+    const path = join(repo, 'user.yml');
+    const host = createToolHost({ stateDir, userConfigPath: path });
+    await writeFile(path, 'tools:\n  viewer:\n    run: [viewer, $PROJECT_ROOT]\n');
+    expect(await host.handle({ op: 'lookup', name: 'viewer', cwd: repo })).toMatchObject({ status: 'error' });
+    expect(await host.handle({ op: 'lookup', name: 'storybook', cwd: repo, args: ['input'] }))
+      .toMatchObject({ status: 'error', message: expect.stringContaining('argument-list run') });
+  });
+
+  it('validates target-only dedupe inputs before asking for project approval', async () => {
+    await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  view:\n    run: [viewer, $ARGS]\n    prespawn_dedupe: [$TARGET]\n');
+    const host = createToolHost({ stateDir });
+    expect(await host.handle({ op: 'lookup', name: 'view', cwd: repo, args: ['missing.md'] }))
+      .toMatchObject({ status: 'error', message: 'no such file or folder: missing.md' });
+  });
+
+  it('names the actual user path when --global has no config', async () => {
+    const path = join(repo, 'absent-user.yml');
+    expect(await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'view', cwd: repo, global: true }))
+      .toMatchObject({ status: 'unknown-tool', path, names: [] });
+  });
+
+  it.skipIf(process.platform === 'win32')('follows a user-config dotfiles symlink', async () => {
+    const path = join(repo, 'user-link.yml');
+    const source = join(repo, 'dotfiles.yml');
+    await writeFile(source, 'tools:\n  scratch:\n    run: echo hi\n');
+    await symlink(source, path);
+    const result = await createToolHost({ userConfigPath: path }).handle({ op: 'lookup', name: 'scratch', cwd: repo, global: true });
+    expect(result).toMatchObject({ status: 'ok', scope: 'user', run: 'echo hi' });
+  });
+
+  describe('list', () => {
+    const PROJECT = `tools:
+  # The component catalog.
+  storybook:
+    run: pnpm storybook
+    port: auto
+    prespawn_dedupe: [storybook, $PROJECT_ROOT]
+  harness:
+    run: [pnpm, harness, $ARGS]
+    render: agent-browser-screencast
+    colour: blue
+`;
+    const USER = `tools:
+  # Mine, hidden here by the project's.
+  storybook:
+    run: npx storybook
+  # Render Markdown.
+  md:
+    run: [glow, $TARGET]
+`;
+
+    it('lists project then user Tools with comments, approval, and shadowing, running nothing', async () => {
+      await writeFile(join(repo, 'dormouse.yml'), PROJECT);
+      const userConfigPath = join(repo, 'user.yml');
+      await writeFile(userConfigPath, USER);
+      const host = createToolHost({ stateDir, userConfigPath });
+      const before = await host.handle({ op: 'list', cwd: join(repo) });
+      expect(before).toEqual({ status: 'list', listing: {
+        project: { path: join(repo, 'dormouse.yml'), approved: false },
+        user: { path: userConfigPath, found: true },
+        tools: [
+          { name: 'storybook', scope: 'project', run: 'pnpm storybook', render: 'iframe', port: 'auto', keyed: true, description: 'The component catalog.', shadowed: false },
+          { name: 'harness', scope: 'project', run: ['pnpm', 'harness', '$ARGS'], render: 'agent-browser-screencast', port: 'announced', keyed: false, description: null, shadowed: false },
+          { name: 'storybook', scope: 'user', run: 'npx storybook', render: 'iframe', port: 'announced', keyed: false, description: "Mine, hidden here by the project's.", shadowed: true },
+          { name: 'md', scope: 'user', run: ['glow', '$TARGET'], render: 'iframe', port: 'announced', keyed: false, description: 'Render Markdown.', shadowed: false },
+        ],
+        warnings: [`${join(repo, 'dormouse.yml')}: tools.harness: ignoring unknown field 'colour'`],
+      } });
+      await host.handle({ op: 'trust', kind: 'folder', projectRoot: repo });
+      expect(await host.handle({ op: 'list', cwd: repo })).toMatchObject({ listing: { project: { approved: true } } });
+    });
+
+    it('--global lists only user Tools, none shadowed', async () => {
+      await writeFile(join(repo, 'dormouse.yml'), PROJECT);
+      const userConfigPath = join(repo, 'user.yml');
+      await writeFile(userConfigPath, USER);
+      const result = await createToolHost({ userConfigPath }).handle({ op: 'list', cwd: repo, global: true });
+      expect(result).toMatchObject({ status: 'list', listing: { project: null, warnings: [] } });
+      expect(result.status === 'list' && result.listing.tools.map(tool => [tool.name, tool.scope, tool.shadowed])).toEqual([
+        ['storybook', 'user', false], ['md', 'user', false],
+      ]);
+    });
+
+    it('answers an empty listing when neither file exists', async () => {
+      await rm(join(repo, 'dormouse.yml'));
+      const userConfigPath = join(repo, 'missing-user.yml');
+      expect(await createToolHost({ userConfigPath }).handle({ op: 'list', cwd: repo })).toEqual({ status: 'list', listing: {
+        project: null, user: { path: userConfigPath, found: false }, tools: [], warnings: [],
+      } });
+    });
+
+    it('fails on a malformed file, as lookup does', async () => {
+      await writeFile(join(repo, 'dormouse.yml'), 'tools:\n  broken:\n    render: iframe\n');
+      expect(await createToolHost({ userConfigPath: join(repo, 'missing-user.yml') }).handle({ op: 'list', cwd: repo }))
+        .toMatchObject({ status: 'error', message: expect.stringContaining("'run' is required") });
+    });
+  });
+});

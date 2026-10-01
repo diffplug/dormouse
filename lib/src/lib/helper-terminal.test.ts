@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registry, pendingShellOpts, type TerminalEntry } from './terminal-store';
-import { applyTerminalSemanticEvents, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
+import { applyTerminalSemanticEvents, getTerminalPaneState, resetTerminalPaneState, removeTerminalPaneState } from './terminal-state-store';
 import { beginPromotion, cancelPromotion, closeHelperParent, disposeHelper, finishPromotion, getHelper, helperHasWork, openHelper, restoreHelper, setHelperVisible, subscribeHelpers } from './helper-terminal';
 
 const host = vi.hoisted(() => ({ writePty: vi.fn(), terminalContext: vi.fn() }));
@@ -136,6 +136,16 @@ describe('helper lifecycle', () => {
     expect(host.writePty).toHaveBeenCalledExactlyOnceWith(first.id, 'git status\r');
     prompt(first.id); await vi.advanceTimersByTimeAsync(500);
     expect(first.status).toBe('completed'); expect(host.writePty).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    ['a local parent cwd', false, '/work'],
+    ['no cwd from a remote parent', true, undefined],
+  ])('spawns and records %s', async (_label, isRemote, expected) => {
+    resetTerminalPaneState('parent', { cwd: { path: '/work', pathKind: 'posix', isRemote, source: 'osc7', updatedAt: 0 } });
+    const helper = await openHelper('parent');
+    expect(pendingShellOpts.get(helper.id)?.cwd).toBe(expected);
+    prompt(helper.id); await vi.advanceTimersByTimeAsync(100);
+    expect(getTerminalPaneState(helper.id).cwd?.path).toBe(expected);
   });
   it('user input during startup cancels autorun and remains preserved at idle', async () => {
     const helper = await openHelper('parent'); registry.get(helper.id)!.untouched = false;

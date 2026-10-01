@@ -6,15 +6,50 @@ import * as fs from 'fs';
 import { randomBytes } from 'crypto';
 import { CSP_NONCE_PLACEHOLDER } from './csp-nonce-placeholder';
 import { HOST_MESSAGE_TOKEN_GLOBAL } from '../../lib/src/lib/vscode-message-token';
-import { NOTEPAD_VOLATILE_GLOBAL } from '../../lib/src/lib/vscode-notepad-global';
 import { RECOVERY_COMMANDS_GLOBAL } from '../../lib/src/lib/vscode-recovery-global';
-import type { VolatileNotepadSnapshot } from '../../lib/src/lib/notepad/types';
 
 function serializeForInlineScript(value: unknown): string {
   return JSON.stringify(value ?? null)
     .replace(/</g, '\\u003c')
     .replace(/\u2028/g, '\\u2028')
     .replace(/\u2029/g, '\\u2029');
+}
+
+/**
+ * Splice `replacement` in at the first `marker`, never expanding it. Throws
+ * when the marker is absent.
+ *
+ * Every document edit uses a function replacement — this helper or a callback
+ * passed to `replace`/`replaceAll`. String replacements expand `$&`, `` $` ``,
+ * `$'`, `$<name>`, and `$$`; raw terminal state may contain those sequences.
+ * A function replacement is inserted verbatim, preserving the value escaped by
+ * `serializeForInlineScript`.
+ * Pinned by "treats a `$` in serialized state as data, not a substitution
+ * pattern" in `vscode-ext/test/webview-html.test.ts`.
+ *
+ * The marker is matched as a case-sensitive literal against whatever Vite built
+ * from `lib/index.html`, so an attribute added to `<head>` there stops it
+ * matching. Splicing nothing would serve a document with no CSP meta tag or no
+ * boot script and report neither — the same unrecoverable-looking failure the
+ * nonce-placeholder check below rejects, and one the boot smoketest could not
+ * see, because a document carrying no policy violates none. Pinned by "refuses
+ * a document whose splice marker was edited away" in
+ * `vscode-ext/test/webview-html.test.ts`.
+ */
+function spliceOnce(
+  html: string,
+  indexPath: string,
+  marker: string,
+  replacement: string,
+): string {
+  if (!html.includes(marker)) {
+    throw new Error(
+      `Webview HTML at ${indexPath} carries no \`${marker}\` to splice at. ` +
+        'The Vite entry (`lib/index.html`) must keep `<head>` and `</head>` verbatim; ' +
+        'an attribute added to `<head>` stops the match.',
+    );
+  }
+  return html.replace(marker, () => replacement);
 }
 
 /**
@@ -31,18 +66,9 @@ export function getWebviewHtml(
    * Surface id -> agent resume invocation, captured by the last teardown. Rides
    * the boot payload rather than `initialState` because it is host-owned and
    * single-use: the webview never writes it back, so no save/restore cycle can
-   * replay it (docs/specs/transport.md -> "Consuming it").
+   * replay it (docs/compatible-agents.md -> "Cold restore").
    */
   recoveryCommands?: Record<string, string> | null,
-  /**
-   * The extension host's volatile notepad mirror for this webview's live PTYs.
-   * Rides the boot payload for the same reason the recovery commands do — it is
-   * host-owned and must never enter a save/restore cycle — and is non-null on
-   * exactly one path, a live resume (docs/specs/notepad.md → Archive and
-   * Lifecycle). An editor panel always gets `null`: its own disposal archived
-   * whatever it had mirrored.
-   */
-  notepadVolatile?: VolatileNotepadSnapshot | null,
 ): { html: string; messageToken: string } {
   const indexPath = path.join(mediaPath, 'index.html');
   let html = fs.readFileSync(indexPath, 'utf-8');
@@ -55,7 +81,10 @@ export function getWebviewHtml(
   // lib/src/lib/vscode-message-token.ts.
   const messageToken = randomSecret();
 
-  html = html.replace(/(href|src)="\.?\/?assets\//g, `$1="${mediaUri}/assets/`);
+  html = html.replace(
+    /(href|src)="\.?\/?assets\//g,
+    (_match, attr: string) => `${attr}="${mediaUri}/assets/`,
+  );
 
   const csp = [
     `default-src 'none'`,
@@ -76,8 +105,8 @@ export function getWebviewHtml(
     `img-src ${webview.cspSource} data: blob:`,
     // ws: entries cover the agent-browser stream relay (frames + input for
     // browser surfaces; see docs/specs/dor-browser.md). No relay origin here:
-    // the Burrow holds its `/ws/burrow` socket from the extension host, so
-    // the origin allowlist is enforced there instead (burrow.ts).
+    // the Burrow holds its `/ws/burrow` socket from the extension host, which
+    // reaches only its baked relay origin (docs/specs/relay.md → "Relay origin").
     `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:*`,
     // `dor iframe` frames its target through a loopback transparent proxy that
     // the extension host stands up (iframe-proxy-host.ts), so the only origin we
@@ -87,7 +116,9 @@ export function getWebviewHtml(
     `frame-src http://127.0.0.1:* http://localhost:*`,
   ].join('; ');
 
-  html = html.replace(
+  html = spliceOnce(
+    html,
+    indexPath,
     '<head>',
     `<head>\n    <meta http-equiv="Content-Security-Policy" content="${csp}">`,
   );
@@ -101,7 +132,7 @@ export function getWebviewHtml(
   // Serving an unmarked document would leave every script un-nonced against a
   // nonce-gated policy, and the only symptom is a blank panel — the silent
   // failure this placeholder exists to end. Same reasoning as
-  // `assertConnectSrcBaked` in `scripts/esbuild.mjs`: a lost build-time
+  // `assertRelayOriginBaked` in `scripts/relay-origin.mjs`: a lost build-time
   // substitution must not look recoverable at runtime.
   if (!html.includes(CSP_NONCE_PLACEHOLDER)) {
     throw new Error(
@@ -109,14 +140,16 @@ export function getWebviewHtml(
         'The build dropped `html.cspNonce` (vscode-ext/vite.config.ts); rebuild with `pnpm build:vscode`.',
     );
   }
-  html = html.replaceAll(CSP_NONCE_PLACEHOLDER, nonce);
+  html = html.replaceAll(CSP_NONCE_PLACEHOLDER, () => nonce);
 
   // The inline state script is ours, not Vite's, so it carries no placeholder —
   // nonce it directly. Injected AFTER the swap so its nonce cannot be
   // substituted a second time.
-  html = html.replace(
+  html = spliceOnce(
+    html,
+    indexPath,
     '</head>',
-    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};\nglobalThis.${NOTEPAD_VOLATILE_GLOBAL} = ${serializeForInlineScript(notepadVolatile ?? null)};</script>\n  </head>`,
+    `    <script nonce="${nonce}">globalThis.${HOST_MESSAGE_TOKEN_GLOBAL} = ${serializeForInlineScript(messageToken)};\nglobalThis.__DORMOUSE_HOST_STATE__ = ${serializeForInlineScript(initialState)};\nglobalThis.__DORMOUSE_SELECTED_SHELL__ = ${serializeForInlineScript(selectedShell ?? null)};\nglobalThis.${RECOVERY_COMMANDS_GLOBAL} = ${serializeForInlineScript(recoveryCommands ?? null)};</script>\n  </head>`,
   );
 
   return { html, messageToken };

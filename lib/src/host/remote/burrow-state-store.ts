@@ -2,20 +2,22 @@
  * Where a Node-resident Burrow keeps the two things it must survive a restart
  * with: the enrollment (which carries `burrowToken`, a bearer credential) and the
  * ACL (the authorization primitive, which per the security model lives on the
- * Burrow and nowhere else — docs/specs/remote-security-model.md).
+ * Burrow and nowhere else — docs/specs/remote-security-model.md). The network
+ * policy rides beside them (`docs/specs/remote-network.md` -> "Policy").
  *
- * The interface is async because the hosts that implement it are: a file the
+ * The interface is async because the hosts that implement it are: files the
  * sidecar owns here, `VsCodeBurrowStateStore` there (enrollment in
  * `SecretStorage`, ACL in `globalState` — `docs/specs/vscode.md`). {@link FileBurrowStateStore}
- * is the sidecar's: one file, 0600, under a directory the app passes in.
+ * is the sidecar's: two files, 0600, under a directory the app passes in.
  */
 
-import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BurrowAclRecord } from 'remote-lib-common';
 import { filterAclRecords } from '../../remote/burrow/acl';
 import { isEnrollment, type BurrowEnrollment } from '../../remote/burrow/enrollment';
+import { nothingPolicy, storedNetworkPolicy, type NetworkPolicy } from '../../remote/network-policy';
+import { writeJsonAtomic } from '../atomic-json-file';
 import { createSerialQueue } from './serial-queue';
 
 // Re-exported so an implementor can name the record type without depending on
@@ -38,9 +40,23 @@ export interface BurrowStateStore {
   clearEnrollment(): Promise<void>;
   loadAcl(burrowId: string): Promise<BurrowAclRecord[]>;
   saveAcl(burrowId: string, records: readonly BurrowAclRecord[]): Promise<void>;
+  /**
+   * `null` where none was ever saved, which the service turns into this build's
+   * default and saves; a record that is not a policy reads as Nothing
+   * (`storedNetworkPolicy`).
+   */
+  loadNetworkPolicy(): Promise<NetworkPolicy | null>;
+  saveNetworkPolicy(policy: NetworkPolicy): Promise<void>;
 }
 
 const FILE_NAME = 'burrow.json';
+
+/**
+ * The network policy's own file, beside {@link FILE_NAME} and never in it: a
+ * build from before the policy rewrites that file with only the fields it
+ * knows, and a policy it dropped would let the default recompute.
+ */
+const NETWORK_POLICY_FILE_NAME = 'network-policy.json';
 
 /** What {@link FILE_NAME} was called before the Burrow rename. */
 const RETIRED_FILE_NAME = 'remote-host.json';
@@ -88,13 +104,15 @@ function parseState(raw: string): BurrowStateFile {
 /**
  * One JSON file holding both values. A single file rather than one per value so
  * a write is one atomic rename: the enrollment and the records approved under it
- * can never end up describing different Burrows.
+ * can never end up describing different Burrows. The network policy, which
+ * describes no Burrow, has its own ({@link NETWORK_POLICY_FILE_NAME}).
  */
 export class FileBurrowStateStore implements BurrowStateStore {
   readonly persistent = true;
 
   readonly #dir: string;
   readonly #path: string;
+  readonly #policyPath: string;
   #state: Promise<BurrowStateFile> | null = null;
   /**
    * Serializes mutations, the way `relay/src/state.ts` does: every save is a
@@ -106,6 +124,7 @@ export class FileBurrowStateStore implements BurrowStateStore {
   constructor(stateDir: string) {
     this.#dir = stateDir;
     this.#path = join(stateDir, FILE_NAME);
+    this.#policyPath = join(stateDir, NETWORK_POLICY_FILE_NAME);
   }
 
   async loadEnrollment(): Promise<BurrowEnrollment | null> {
@@ -132,6 +151,29 @@ export class FileBurrowStateStore implements BurrowStateStore {
     return this.#mutate((state) => {
       state.acl[burrowId] = [...records];
     });
+  }
+
+  /**
+   * Not memoized: the service, its one reader, keeps what it read.
+   * `null` for no file, which the service turns into the default and saves.
+   * **A file that is there but not a policy reads as Nothing** — never `null`,
+   * which would let a damaged file's default reopen what the user turned off.
+   */
+  async loadNetworkPolicy(): Promise<NetworkPolicy | null> {
+    const raw = await readIfPresent(this.#policyPath);
+    if (raw === null) return null;
+    try {
+      return storedNetworkPolicy(JSON.parse(raw));
+    } catch (error) {
+      console.warn(`[burrow] could not read ${this.#policyPath}; reading it as Nothing`, error);
+      return nothingPolicy();
+    }
+  }
+
+  saveNetworkPolicy(policy: NetworkPolicy): Promise<void> {
+    // A whole-record replace, so no read first; on the same chain as `#mutate`,
+    // so two saves land in the order they were made.
+    return this.#serialize(() => writeJsonAtomic(this.#dir, this.#policyPath, policy));
   }
 
   /** Apply one change to the in-memory state and flush it, one at a time. */
@@ -173,15 +215,10 @@ export class FileBurrowStateStore implements BurrowStateStore {
   }
 
   async #readOnce(): Promise<BurrowStateFile> {
-    let raw: string;
-    try {
-      raw = await readFile(this.#path, 'utf8');
-    } catch (error) {
-      // Nothing written yet is the ordinary state of a machine that never
-      // enrolled, and it is the one failure that genuinely means "empty".
-      if ((error as { code?: string } | null)?.code === 'ENOENT') return emptyState();
-      throw error;
-    }
+    const raw = await readIfPresent(this.#path);
+    // Nothing written yet is the ordinary state of a machine that never
+    // enrolled, and it is the one failure that genuinely means "empty".
+    if (raw === null) return emptyState();
     try {
       return parseState(raw);
     } catch (error) {
@@ -193,43 +230,28 @@ export class FileBurrowStateStore implements BurrowStateStore {
     }
   }
 
-  async #write(state: BurrowStateFile): Promise<void> {
-    // 0700 dir + 0600 file: the enrollment is a bearer credential, and the app
-    // data directory is not otherwise private on a shared machine.
-    await mkdir(this.#dir, { recursive: true, mode: 0o700 });
-    // `mkdir` applies its mode only when it creates the final component. Tauri
-    // creates app_data_dir before spawning us, commonly under a 0755 umask, so
-    // tighten an existing directory too. Best-effort, like `peer-link.ts`'s:
-    // failing the whole save over the directory would lose the Burrow instead.
-    //
-    // Skipped on Windows because there is nothing here to skip *to* — a Unix
-    // mode is a silent no-op on that platform, and so is the 0600 on the file
-    // below, so neither call protects anything. What protects it there is the
-    // owner-only DACL that `burrow_state_dir` in
-    // `standalone/src-tauri/src/lib.rs` applies to this directory before
-    // spawning us; the files written below inherit it. Node cannot set an ACL,
-    // which is why the guarantee lives on the Rust side rather than here.
-    if (process.platform !== 'win32') await chmod(this.#dir, 0o700).catch(() => {});
-    // Temp-then-rename in the same directory, so a crash mid-write leaves the
-    // previous state intact rather than a truncated file that reads as "no Burrow".
-    // Unique per write rather than per process: `#mutate` already keeps this
-    // process's saves apart, and a second Dormouse sharing the state directory
-    // would otherwise rename a file the first one is still writing.
-    const tmp = `${this.#path}.${randomUUID()}.tmp`;
-    let renamed = false;
-    try {
-      await writeFile(tmp, JSON.stringify(state), { mode: 0o600 });
-      await rename(tmp, this.#path);
-      renamed = true;
-    } finally {
-      // A failed rename must not accumulate bearer-credential temp files.
-      if (!renamed) await rm(tmp, { force: true }).catch(() => {});
-    }
+  /** The enrollment is a bearer credential and a truncated file reads as "no
+   *  Burrow", so the write is the shared owner-only atomic one. `#mutate`
+   *  already keeps this process's saves apart. */
+  #write(state: BurrowStateFile): Promise<void> {
+    return writeJsonAtomic(this.#dir, this.#path, state);
+  }
+}
+
+/** `path`'s contents, or `null` where there is no file; any other failure rejects. */
+async function readIfPresent(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf8');
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === 'ENOENT') return null;
+    throw error;
   }
 }
 
 /**
- * The store for a run with no state directory (the browser dev harness).
+ * The store for a run whose host could not create a state directory — the
+ * browser dev harness is *not* this case, since it passes a per-run temp
+ * `DORMOUSE_STATE_DIR` (docs/specs/standalone.md -> "Burrow service").
  *
  * Held in memory rather than dropped: a Burrow enrolled here has to keep working
  * for the rest of the session — its ACL is what authorizes every pairing it
@@ -246,6 +268,7 @@ export function createEphemeralBurrowStateStore(onWarn: (message: string) => voi
   };
   let enrollment: BurrowEnrollment | null = null;
   const acl = new Map<string, BurrowAclRecord[]>();
+  let network: NetworkPolicy | null = null;
   return {
     persistent: false,
     loadEnrollment: async () => enrollment,
@@ -260,6 +283,11 @@ export function createEphemeralBurrowStateStore(onWarn: (message: string) => voi
     saveAcl: async (burrowId, records) => {
       warnOnce();
       acl.set(burrowId, [...records]);
+    },
+    loadNetworkPolicy: async () => network,
+    saveNetworkPolicy: async (policy) => {
+      warnOnce();
+      network = { ...policy, allowed: [...policy.allowed] };
     },
   };
 }

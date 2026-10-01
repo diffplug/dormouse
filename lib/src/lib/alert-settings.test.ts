@@ -47,7 +47,11 @@ describe('normalizeAlertSettings', () => {
   });
 
   it('seeds the inactivity timeout from cfg so cfg.ts stays the shipped default', () => {
-    expect(DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs).toBe(cfg.alert.userAttention);
+    expect(DEFAULT_ALERT_SETTINGS.inactivityTimeoutMs).toBe(cfg.alert.inactivityTimeout);
+  });
+
+  it('ships animation deferral on', () => {
+    expect(normalizeAlertSettings({}).deferAlertsUntilQuiet).toBe(true);
   });
 
   it('fills in missing keys and drops unknown ones', () => {
@@ -76,7 +80,8 @@ describe('normalizeAlertSettings', () => {
   it('rejects non-boolean flags', () => {
     expect(normalizeAlertSettings({ speakEnabled: 'yes' }).speakEnabled).toBe(false);
     expect(normalizeAlertSettings({ speakEnabled: 1 }).speakEnabled).toBe(false);
-    expect(normalizeAlertSettings({ deferAlertsUntilQuiet: 'yes' }).deferAlertsUntilQuiet).toBe(false);
+    // Falsy non-booleans must not switch the on-by-default flag off either.
+    expect(normalizeAlertSettings({ deferAlertsUntilQuiet: 0 }).deferAlertsUntilQuiet).toBe(true);
   });
 });
 

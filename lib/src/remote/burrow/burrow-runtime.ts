@@ -10,7 +10,6 @@ import {
   DEFAULT_PAIRING_TTL_MS,
   E2E_INIT_BURST,
   E2E_INIT_REFILL_INTERVAL_MS,
-  ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   BurrowAcl,
   ChallengeIssuer,
   MAX_ESTABLISHED_E2E_SESSIONS,
@@ -41,7 +40,6 @@ import {
   randomBase64Url,
   sealPush,
   toBase64Url,
-  utf8Decode,
   utf8Encode,
   verifyPresenceProof,
   DELIVERY_ID_BYTE_LENGTH,
@@ -60,15 +58,16 @@ import {
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
 import { createSerialQueue } from '../../host/remote/serial-queue';
-import { realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import type { DirectPeering } from '../direct/direct-peer';
+import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import { loadBurrowAcl } from './acl';
+import {
+  EstablishedE2eSession,
+  sealControl,
+  type RemoteApiSessionContext,
+  type RemoteApiSessionLike,
+} from './established-session';
 import type { PendingPairing } from './pairing-approval';
-
-/** The remote-api handler this controller drives per authorized client. */
-export interface RemoteApiSessionLike {
-  handle(data: unknown): void;
-  dispose(): void;
-}
 
 /** Minimal WebSocket surface, so tests can inject a fake. */
 export type WebSocketLike = RemoteWebSocket;
@@ -205,15 +204,16 @@ interface PendingConnectionSession {
   readonly expiresAt: number;
 }
 
-/** An authorized session: the two cipher states plus the remote-api handler. */
+/**
+ * An authorized session, keyed as this Burrow tracks it; the session itself —
+ * cipher states, remote-api handler, direct path, idle clock — is the
+ * {@link EstablishedE2eSession}.
+ */
 interface EstablishedSession {
   readonly connectionId: string;
-  readonly session: NoiseTransportSession;
-  readonly api: RemoteApiSessionLike;
   /** The IK-authenticated Client static — what the session cap is keyed on. */
   readonly clientStaticPublicKey: string;
-  /** When this Burrow last **decrypted** a Client→Burrow transport message here. */
-  lastClientActivityAt: number;
+  readonly e2e: EstablishedE2eSession;
 }
 
 /** Per-client lifecycle state tracked by the Burrow, keyed by clientId. */
@@ -240,10 +240,7 @@ export interface BurrowOptions {
   enrollment: BurrowEnrollment;
   createWebSocket?: (url: string) => WebSocketLike;
   /** Build the remote-api handler for an authorized client (see activation.ts). */
-  createSession?: (opts: {
-    burrowId: string;
-    send: (payload: unknown) => void;
-  }) => RemoteApiSessionLike;
+  createSession?: (opts: RemoteApiSessionContext) => RemoteApiSessionLike;
   /**
    * Where the ACL comes from and goes. Required, with no webview-store default:
    * this controller runs in the Tauri sidecar and the VS Code extension host, so
@@ -253,8 +250,8 @@ export interface BurrowOptions {
    */
   loadAcl: (burrowId: string) => BurrowAclRecord[];
   saveAcl: (burrowId: string, records: readonly BurrowAclRecord[]) => void | Promise<void>;
-  /** Surface a pairing request for local approval. */
-  requestApproval: (pending: PendingPairing) => void;
+  /** Surface a pairing request for local approval; its owner names the kind. */
+  requestApproval: (pending: Omit<PendingPairing, 'kind'>) => void;
   /** Dismiss a surfaced request once resolved. */
   dismissApproval: (clientId: string) => void;
   /**
@@ -281,6 +278,13 @@ export interface BurrowOptions {
   setTimer?: RemoteTimer;
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
+  /**
+   * How this host takes the direct path (`docs/specs/remote-api.md` →
+   * Transport → "Direct path"). Absent, or with no factory, every
+   * `direct-offer` is declined and every session stays relayed; a path
+   * policy's refusal ends the session.
+   */
+  directPeering?: DirectPeering;
 }
 
 const INITIAL_BACKOFF_MS = 1_000;
@@ -296,12 +300,13 @@ export class BurrowRuntime {
   readonly #createWebSocket: (url: string) => WebSocketLike;
   readonly #createSession?: BurrowOptions['createSession'];
   readonly #saveAcl: BurrowOptions['saveAcl'];
-  readonly #requestApproval: (pending: PendingPairing) => void;
+  readonly #requestApproval: (pending: Omit<PendingPairing, 'kind'>) => void;
   readonly #dismissApproval: (clientId: string) => void;
   readonly #onInvitationChanged: NonNullable<BurrowOptions['onInvitationChanged']>;
   readonly #now: () => number;
   readonly #setTimer: RemoteTimer;
   readonly #reconnect: boolean;
+  readonly #directPeering: DirectPeering;
 
   /**
    * Per-client lifecycle state keyed by clientId. Folding the three concerns
@@ -418,6 +423,7 @@ export class BurrowRuntime {
     this.#onInvitationChanged = options.onInvitationChanged ?? (() => {});
     this.#setTimer = options.setTimer ?? realTimer;
     this.#reconnect = options.reconnect ?? true;
+    this.#directPeering = options.directPeering ?? { createPeer: null };
   }
 
   get status(): BurrowStatus {
@@ -563,8 +569,8 @@ export class BurrowRuntime {
    * **An expiry emits the applicable outcome only where a transport cipher
    * exists to encrypt one on**, and only where someone is still owed one: a
    * pending connection whose challenge is dead earns the `presence-rejected` a
-   * late request would have, while an idle session's peer stopped waiting long
-   * ago and hears nothing.
+   * late request would have, and an idle session the goodbye, in case its peer
+   * was only quiet.
    *
    * **Clients before invitations**, because a pairing shares its invitation's
    * `expiresAt` and both fall in one sweep: the pairing's own deadline is the
@@ -598,8 +604,11 @@ export class BurrowRuntime {
       }
       if (established) {
         out.push({
-          at: established.lastClientActivityAt + ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
-          expire: () => this.#disposeEstablished(clientId),
+          at: established.e2e.idleDeadlineAt,
+          // Told, in case it is only quiet: a Client that sent nothing for the
+          // whole deadline most likely stopped listening, but one that did not
+          // would otherwise wait on requests nothing answers.
+          expire: () => this.#disposeEstablished(clientId, { goodbye: true }),
         });
       }
     }
@@ -747,7 +756,17 @@ export class BurrowRuntime {
     this.#status = 'connecting';
     const wsBase = this.#enrollment.relayUrl.replace(/^http/, 'ws');
     const url = `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${encodeURIComponent(this.#enrollment.burrowToken)}`;
-    const ws = this.#createWebSocket(url);
+    let ws: WebSocketLike;
+    try {
+      ws = this.#createWebSocket(url);
+    } catch (error) {
+      // A factory that refuses — the service's transport guard under Nothing
+      // (`lib/src/host/remote/service.ts`) — is a socket that closed at once:
+      // thrown from the reconnect timer, it would take the host process down.
+      console.warn('[burrow] could not open the relay socket', error);
+      this.#onClose(undefined);
+      return;
+    }
     this.#ws = ws;
     ws.addEventListener('open', () => {
       if (this.#ws !== ws) return;
@@ -1315,7 +1334,7 @@ export class BurrowRuntime {
     const state = this.#clients.get(frame.clientId);
     if (!state) return;
     if (state.established?.connectionId === frame.id) {
-      this.#onEstablishedFrame(frame.clientId, state.established, frame.ct);
+      state.established.e2e.onRelayFrame(frame.ct);
       return;
     }
     const pending = state.connection;
@@ -1352,39 +1371,39 @@ export class BurrowRuntime {
       this.#denyConnection(frame.clientId, pending, 'presence-rejected');
       return;
     }
-    const miss = this.#aclMiss(
+    const authorized = this.#aclRecord(
       binding.passkeyCredentialId,
       pending.clientStaticPublicKey,
       request.presence.accountId,
       proof.passkeyPublicKeyHash,
     );
-    if (miss !== null) {
-      console.warn(`[burrow] connection refused: ${miss}`);
+    if (typeof authorized === 'string') {
+      console.warn(`[burrow] connection refused: ${authorized}`);
       this.#denyConnection(frame.clientId, pending, 'pairing-required');
       return;
     }
-    this.#promoteConnection(frame.clientId, pending);
+    this.#promoteConnection(frame.clientId, pending, authorized.label);
   }
 
   /**
-   * Why the ACL refuses this connection, or `null` if it authorizes it.
+   * The ACL record that authorizes this connection, or why the ACL refuses it.
    *
    * **One record must hold all four identities.** The reason is for the
    * owner-local log only — every miss answers `pairing-required`
    * (`docs/specs/remote-security-model.md` → Connection).
    */
-  #aclMiss(
+  #aclRecord(
     passkeyCredentialId: string,
     clientStaticPublicKey: string,
     accountId: string,
     passkeyPublicKeyHash: string,
-  ): string | null {
+  ): BurrowAclRecord | string {
     const authorization = this.#acl.authorize({ passkeyCredentialId, clientStaticPublicKey });
     const record = authorization.record;
     if (record === null) return authorization.reasons.join(',');
     if (record.accountId !== accountId) return 'account-mismatch';
     if (record.passkeyPublicKeyHash !== passkeyPublicKeyHash) return 'passkey-key-mismatch';
-    return null;
+    return record;
   }
 
   /**
@@ -1396,7 +1415,7 @@ export class BurrowRuntime {
    * point at which the presence proof and the ACL conjunction have both
    * succeeded, so the only thing that can fill the cap is authorized phones.
    */
-  #promoteConnection(clientId: string, pending: PendingConnectionSession): void {
+  #promoteConnection(clientId: string, pending: PendingConnectionSession, label: string): void {
     const { incumbent, others } = this.#establishedFor(
       pending.clientStaticPublicKey,
       clientId,
@@ -1409,12 +1428,17 @@ export class BurrowRuntime {
     state.connection = undefined;
     // The same static under a different relay-chosen key: its predecessor goes
     // before the replacement is promoted, so the cap is never briefly exceeded.
-    if (incumbent !== null && incumbent !== clientId) this.#disposeEstablished(incumbent);
+    // Told so, since its socket may still be open — another tab of the same
+    // Pocket — and would otherwise wait on requests nothing answers.
+    if (incumbent !== null && incumbent !== clientId) {
+      this.#disposeEstablished(incumbent, { goodbye: true });
+    }
     // Cleared with the dispose, not merely overwritten below: without a session
     // factory there is no replacement, and a leftover reference would route the
     // next frame on the old id into a handler that has already been disposed.
-    state.established?.api.dispose();
-    state.established = undefined;
+    // Never `#disposeEstablished`, whose prune would detach the `state` this
+    // promotion is about to write into.
+    this.#clearEstablished(state);
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: true,
       burrowLabel: boundedBurrowLabel(this.#enrollment.label),
@@ -1425,23 +1449,30 @@ export class BurrowRuntime {
       this.#pruneClient(clientId);
       return;
     }
-    // Destructured, so the `send` closure retains only what an established
+    // Destructured, so the session's closures retain only what an established
     // session is — the id and the two cipher states — and not the pending
     // record, whose handshake hash, Client static and challenge are spent.
     const { connectionId, session, clientStaticPublicKey } = pending;
-    const api = this.#createSession({
-      burrowId: this.#enrollment.burrowId,
-      send: (payload) => {
-        this.#sendApp(clientId, connectionId, session, payload);
-      },
-    });
-    state.established = {
-      connectionId,
+    const createSession = this.#createSession;
+    const e2e: EstablishedE2eSession = new EstablishedE2eSession({
       session,
-      api,
-      clientStaticPublicKey,
-      lastClientActivityAt: this.#now(),
-    };
+      createApi: (send) =>
+        createSession({
+          burrowId: this.#enrollment.burrowId,
+          send,
+          // Bounded again rather than trusted: a record off disk may have been
+          // written by an older build or by hand, and this is shown on a pane.
+          label: boundedPairingLabel(label),
+          end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
+        }),
+      directPeering: this.#directPeering,
+      sendRelay: (ciphertext) =>
+        this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext),
+      onFatal: () => this.#disposeEstablished(clientId),
+      now: this.#now,
+      setTimer: this.#setTimer,
+    });
+    state.established = { connectionId, clientStaticPublicKey, e2e };
     this.#armReaper();
   }
 
@@ -1530,77 +1561,46 @@ export class BurrowRuntime {
     }
   }
 
-  /** One transport frame on an authorized session: protocol-v1, or a keepalive. */
-  #onEstablishedFrame(clientId: string, established: EstablishedSession, ct: string): void {
-    let receipt;
-    try {
-      receipt = established.session.receive(fromBase64Url(ct));
-    } catch {
-      // A failed decrypt is not activity: it proves only that *something*
-      // reached the relay, and the session is dead either way.
-      this.#disposeEstablished(clientId);
-      return;
-    }
-    // The one thing that refreshes the idle deadline, keepalive or application
-    // data alike (`docs/specs/remote-security-model.md` → Burrow bounds).
-    established.lastClientActivityAt = this.#now();
-    if (receipt.kind !== 'app') return;
-    for (const message of receipt.messages) {
-      let payload: unknown;
-      try {
-        payload = JSON.parse(utf8Decode(message));
-      } catch {
-        // Authenticated, so it came from the paired Client — but a peer sending
-        // non-JSON on the application stream is not one this Burrow can talk to,
-        // and parsing failures must not reject into the frame chain.
-        console.warn('[burrow] discarding a non-JSON application message');
-        continue;
-      }
-      established.api.handle(payload);
-      // `handle` can send, and a send on a poisoned cipher disposes this
-      // session from inside this loop. Handing the rest of the receipt to an
-      // api that is already disposed would leave whatever it allocates with no
-      // owner left to tear it down.
-      if (this.#clients.get(clientId)?.established !== established) return;
-    }
-  }
-
-  #sendApp(
+  /**
+   * Tear one client's established session down and prune the entry.
+   *
+   * `goodbye` is for an ending this Burrow chose — the idle reap, a replacement
+   * from the same Client static, the person at the Burrow taking a pane back —
+   * where the Client is told with {@link EstablishedE2eSession.end} before the
+   * dispose; every other path (a fatal session, `client-gone`, `stop()`) has no
+   * one listening, or no cipher to say it on. `only` names the session the
+   * caller means, so a stale ending cannot take down the one that replaced it.
+   */
+  #disposeEstablished(
     clientId: string,
-    connectionId: string,
-    session: NoiseTransportSession,
-    payload: unknown,
+    options: { goodbye?: boolean; only?: EstablishedE2eSession } = {},
   ): void {
-    try {
-      for (const ciphertext of session.sendApp(utf8Encode(JSON.stringify(payload)))) {
-        this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext);
-      }
-    } catch {
-      // **Only a poisoned session is burrow loss.** An over-cap message is
-      // refused before the first `encryptWithAd`, so no ciphertext exists and
-      // no counter moved; disposing there would turn a caller's size error into
-      // a re-handshake, re-entrantly from inside `#onEstablishedFrame`'s loop.
-      if (!session.isPoisoned) {
-        console.warn('[burrow] discarding an application message the transport refused');
-        return;
-      }
-      this.#disposeEstablished(clientId);
-    }
-  }
-
-  #disposeEstablished(clientId: string): void {
     const state = this.#clients.get(clientId);
     if (!state?.established) return;
-    state.established.api.dispose();
-    state.established = undefined;
+    if (options.only && state.established.e2e !== options.only) return;
+    this.#clearEstablished(state, options.goodbye === true);
     this.#pruneClient(clientId);
+  }
+
+  /**
+   * Tear one established session down and clear the slot, leaving the entry
+   * itself to the caller — a promotion is about to fill it, a disposal prunes.
+   */
+  #clearEstablished(state: ClientState, goodbye = false): void {
+    if (!state.established) return;
+    const { e2e } = state.established;
+    // Cleared first, so nothing the teardown sets off can reach this session
+    // through the slot again — `end` itself reports nothing once it begins.
+    state.established = undefined;
+    if (goodbye) e2e.end();
+    else e2e.dispose();
   }
 
   // --- Shared plumbing -----------------------------------------------------
 
   /**
-   * One control message on a ceremony session; the transport pads every one to
-   * the same size (`docs/specs/relay.md` → E2E framing).
+   * One outcome on a ceremony's session. Answers `false` for a poisoned
+   * session; see {@link sealControl}.
    */
   #sendControl(
     clientId: string,
@@ -1608,15 +1608,11 @@ export class BurrowRuntime {
     id: string,
     session: NoiseTransportSession,
     value: PairingOutcomeV1 | ConnectionOutcomeV1,
-  ): void {
-    let ciphertext: Uint8Array;
-    try {
-      ciphertext = session.sendControl({ ...value });
-    } catch {
-      // A poisoned session has nothing to say; the caller disposes it anyway.
-      return;
-    }
+  ): boolean {
+    const ciphertext = sealControl(session, value);
+    if (!ciphertext) return false;
     this.#sendE2e(clientId, kind, id, 'transport', ciphertext);
+    return true;
   }
 
   /** Forget a client that holds nothing, so a relay-chosen key cannot accumulate. */
@@ -1644,10 +1640,4 @@ export class BurrowRuntime {
     this.#disposeClient(clientId);
     this.#reap();
   }
-}
-
-/** The `code` of a `CloseEvent`, or undefined if the socket gave us none. */
-function closeCode(ev: unknown): number | undefined {
-  const code = (ev as { code?: unknown } | null)?.code;
-  return typeof code === 'number' ? code : undefined;
 }

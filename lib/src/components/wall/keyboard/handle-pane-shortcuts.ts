@@ -1,19 +1,24 @@
-import {
-  dismissOrToggleAlert,
-  getActivity,
-  toggleSessionTodo,
-} from '../../../lib/terminal-registry';
+import { acknowledgeSession, dismissSessionAlert, toggleSessionTodo } from '../../../lib/terminal-registry';
 import { hasTerminal } from 'dor/commands/types';
 import { surfaceKindFromParams } from '../browser-surface';
+import { isWorkspaceSelection } from '../wall-types';
 import { ARROW_OPPOSITES, isArrowKey, type NavHistoryRef, type WallKeyboardCtx } from './types';
 
-function findAlertButtonForSession(id: string): HTMLButtonElement | null {
-  return document.querySelector<HTMLButtonElement>(`[data-alert-button-for="${CSS.escape(id)}"]`);
+/** Open the terminal context revealed from the pane header's bottom-left
+ *  corner. Browser-surface panes carry no `data-pane-header-for`, so the lookup
+ *  misses and the caller's key is a consumed no-op — the spec'd behavior for
+ *  surfaces with no header context menu. */
+function openHeaderContext(ctx: WallKeyboardCtx, id: string): void {
+  const header = document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
+  if (!header) return;
+  const rect = header.getBoundingClientRect();
+  ctx.openTerminalContext(id, { x: rect.left, y: rect.bottom });
 }
 
-function findPaneHeaderForSession(id: string): HTMLElement | null {
-  return document.querySelector<HTMLElement>(`[data-pane-header-for="${CSS.escape(id)}"]`);
-}
+/** Keep aligned with the pane handlers below. Workspace selections consume
+ *  these keys; an omitted key returns unhandled without dispatching a pane action.
+ *  Pinned by the independent key list in handle-pane-navigation.test.ts. */
+const PANE_VERB_KEYS: ReadonlySet<string> = new Set(['Enter', '|', '%', '-', '"', 'k', 'x', ',', 'm', 'd', 't', 'a', 'z', '>']);
 
 /** Command-mode shortcuts acting on the selected pane or Door. The binding
  *  table is `docs/specs/shortcuts.md`; the behavior is `docs/specs/layout.md`. */
@@ -23,16 +28,27 @@ export function handlePaneShortcuts(
   navHistory: NavHistoryRef,
 ): boolean {
   const sid = ctx.selectedIdRef.current;
+  // Workspace chrome never dispatches pane verbs.
+  if (isWorkspaceSelection(ctx.selectedTypeRef.current)) {
+    if (!PANE_VERB_KEYS.has(e.key) && !(isArrowKey(e.key) && (e.metaKey || e.ctrlKey))) return false;
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
 
+  // Entering passthrough, from a pane or through its Door, is a human gesture
+  // that acknowledges the Session (`docs/specs/alert.md` -> Engagement).
   if (e.key === 'Enter' && sid) {
     e.preventDefault();
     e.stopPropagation();
     if (ctx.selectedTypeRef.current === 'door') {
       const item = ctx.doorsRef.current.find((d) => d.id === sid);
-      if (item) ctx.handleReattachRef.current(item);
+      if (!item) return true;
+      ctx.handleReattachRef.current(item);
     } else {
       ctx.enterTerminalMode(sid);
     }
+    acknowledgeSession(sid);
     return true;
   }
 
@@ -88,7 +104,7 @@ export function handlePaneShortcuts(
   if (e.key === ',' && sid) {
     e.preventDefault();
     e.stopPropagation();
-    // Only a visible terminal header mounts the rename editor. Setting the
+    // Only a visible terminal or Tool header mounts the rename editor. Setting the
     // global rename gate for a Door/browser would strand keyboard dispatch.
     if (ctx.selectedTypeRef.current !== 'pane' || !hasTerminal(surfaceKindFromParams(ctx.nav.paneParams(sid)))) return true;
     ctx.setRenamingPaneId(sid);
@@ -119,9 +135,8 @@ export function handlePaneShortcuts(
     if (ctx.dialogKeyboardActiveRef.current) return true;
     e.preventDefault();
     e.stopPropagation();
-    const alertButton = findAlertButtonForSession(sid);
-    if (alertButton) alertButton.click();
-    else dismissOrToggleAlert(sid, getActivity(sid).status);
+    dismissSessionAlert(sid);
+    openHeaderContext(ctx, sid);
     return true;
   }
 
@@ -135,21 +150,7 @@ export function handlePaneShortcuts(
   if (e.key === '>' && sid && ctx.selectedTypeRef.current === 'pane') {
     e.preventDefault();
     e.stopPropagation();
-    // Reuse the header's own onContextMenu path: dispatch a synthetic
-    // contextmenu at the header's bottom-left corner as the reveal origin.
-    // Browser-surface panes carry no
-    // `data-pane-header-for`, so the lookup misses and the key is a consumed
-    // no-op — the spec'd behavior for surfaces with no header context menu.
-    const header = findPaneHeaderForSession(sid);
-    if (header) {
-      const rect = header.getBoundingClientRect();
-      header.dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true,
-        cancelable: true,
-        clientX: rect.left,
-        clientY: rect.bottom,
-      }));
-    }
+    openHeaderContext(ctx, sid);
     return true;
   }
 

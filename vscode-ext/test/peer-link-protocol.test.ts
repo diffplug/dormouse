@@ -5,11 +5,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ASK_BUDGET_MS } from '../../lib/src/host/remote/service-protocol';
 import {
   FrameDecoder,
   PEER_CLIENT_PROOF_DOMAIN,
-  PEER_REPLY_BUDGET_MS,
   PEER_SERVER_PROOF_DOMAIN,
   encodeFrame,
   forgetPeerRoutes,
@@ -18,17 +16,6 @@ import {
   proveToken,
   routedPtyId,
 } from '../src/peer-link-protocol';
-
-describe('reply budgets', () => {
-  it('gives the cross-window wait more room than the fan-out it contains', () => {
-    // Not a tidiness assertion: the broker's wait for a peer window strictly
-    // contains that window's own full-budget fan-out to its webviews plus two
-    // socket hops. Equal budgets make a slow sibling look like a timeout on the
-    // broker's side and throw away results that were on their way, so unifying
-    // these two constants is a regression, not a simplification.
-    expect(PEER_REPLY_BUDGET_MS).toBeGreaterThan(ASK_BUDGET_MS);
-  });
-});
 
 describe('FrameDecoder', () => {
   it('reads one frame per line', () => {

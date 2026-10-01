@@ -11,7 +11,7 @@ import { chmod, mkdtemp, readFile, readdir, unlink, writeFile } from 'node:fs/pr
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { API_ROUTES, UNAUTHORIZED_ERROR } from 'remote-lib-common';
+import { API_ROUTES, ORIGIN_MISMATCH_ERROR, UNAUTHORIZED_ERROR } from 'remote-lib-common';
 
 import { redeemEnrollToken } from '../dist/enroll-token.js';
 import { ORIGIN, PASSWORD, RP_ID, freshApp, post, sleep } from './helpers.mjs';
@@ -227,6 +227,30 @@ test('a first password enrollment stops if the offer cannot be invalidated', CAN
   } finally {
     await chmod(dirname(enrollTokenFile), 0o700);
   }
+});
+
+test('a Burrow built for another origin is refused before anything is spent or saved', async () => {
+  // Either credential: the password path would otherwise take the first
+  // enrollment's offer with it, and both would append a row nobody holds.
+  for (const credential of [{ password: PASSWORD }, { enrollToken: TOKEN }]) {
+    const { app, enrollTokenFile, stateDir } = await appWithOffer(offer());
+    const res = await enroll(app, { ...credential, origin: 'https://elsewhere.example' });
+    assert.equal(res.status, 409);
+    assert.deepEqual(await res.json(), { error: ORIGIN_MISMATCH_ERROR, origin: ORIGIN });
+    assert.equal(existsSync(join(stateDir, 'burrows.json')), false);
+    assert.equal(existsSync(enrollTokenFile), true);
+  }
+  // Refused ahead of the credential ladder, so a wrong password names the
+  // mismatch rather than the password.
+  const { app } = await appWithOffer(offer());
+  assert.equal((await enroll(app, { password: 'wrong', origin: 'https://elsewhere.example' })).status, 409);
+});
+
+test('a Burrow naming this origin, however spelled, enrolls; one naming none still does', async () => {
+  const { app } = await appWithOffer(offer());
+  assert.equal((await enroll(app, { enrollToken: TOKEN, origin: `${ORIGIN}/` })).status, 200);
+  const older = await appWithOffer(offer());
+  assert.equal((await enroll(older.app, { password: PASSWORD })).status, 200);
 });
 
 // --- redeemEnrollToken directly: the claim race and the operator warning ---

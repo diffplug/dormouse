@@ -1,15 +1,15 @@
 /**
- * `/docs/self-host` — the runbook half of SELF_HOST.md.
+ * `/self-host` — the runbook half of SELF_HOST.md.
  *
  * The file is canonical in the repository: an assistant reads it there to walk
  * someone through the install, and `scripts/deploy-lint.mjs` audits the
  * Installer contract at the end of it against `deploy/local/`. The generator's
  * delta withholds that contract and the assistant-directed sections; see
- * docs/specs/website-docs.md -> `/docs/self-host` runbook.
+ * docs/specs/website-docs.md -> `/self-host` runbook.
  *
  * The security model above the runbook is the security spec's own rows and
  * bullets for this audience, rendered from `docs.security.json` rather than
- * restated here — docs/specs/website-docs.md -> `/docs/security` spec.
+ * restated here — docs/specs/website-docs.md -> `/security` spec.
  */
 import { type MetaArgs } from "react-router";
 import { siteMeta, sitePath } from "../lib/site-meta";
@@ -51,7 +51,7 @@ export const SELF_HOST_TOC: TocEntry[] = [
 export default function SelfHostDocs() {
   return (
     <DocsLayout
-      activePath="/docs/self-host"
+      activePath="/self-host"
       title="How to self-host"
       intro={<HostingRequirementNotice mode="self-hosted" />}
       toc={SELF_HOST_TOC}
@@ -59,12 +59,12 @@ export default function SelfHostDocs() {
       <AnchoredHeading id="security-model">Security model</AnchoredHeading>
       <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
         What remote control and this deployment guarantee, rendered from the{" "}
-        <a href={sitePath("/docs/security")} className={LINK_CLASS}>
+        <a href={sitePath("/security")} className={LINK_CLASS}>
           security spec
         </a>{" "}
         the nightly audit reads. Each row names the spec that states the rule and what
         pins it on every build; the audit that checks all of them is described under{" "}
-        <a href={`${sitePath("/docs/security")}#how-the-guarantees-are-checked`} className={LINK_CLASS}>
+        <a href={`${sitePath("/security")}#how-the-guarantees-are-checked`} className={LINK_CLASS}>
           how the guarantees are checked
         </a>
         .

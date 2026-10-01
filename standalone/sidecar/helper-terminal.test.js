@@ -59,19 +59,23 @@ test('strict inspection requires the terminal process to appear in the process t
 test('helper ownership survives a live listing and promotion preserves the PTY and replay', () => {
   const events = [];
   const spawned = [];
+  // Every helper decision, as the host's alerts hear it.
+  const decisions = [];
   const manager = create((event, data) => events.push({ event, data }), {
     spawn() {
       const terminal = { pid: 42, write() {}, resize() {}, kill() {}, onData(callback) { this.output = callback; }, onExit() {} };
       spawned.push(terminal); return terminal;
     },
-  }, { replay: true });
+  }, { replay: true, onHelper: (id, helper) => decisions.push([id, helper]) });
   manager.spawn('parent');
   manager.spawn('helper', { helper: { parentId: 'parent', command: 'git status' } });
+  assert.deepEqual(decisions, [['parent', false], ['helper', true]]);
   spawned[1].output('unsaved editor text');
   manager.list();
   assert.deepEqual(events.findLast(e => e.event === 'list').data.ptys[1].helper, { parentId: 'parent', command: 'git status' });
   assert.equal(events.findLast(e => e.event === 'replay').data.data, 'unsaved editor text');
   manager.context({ op: 'promote', id: 'helper' }, 'promote-1');
+  assert.deepEqual(decisions.at(-1), ['helper', false]);
   manager.list();
   assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].helper, undefined);
   assert.equal(spawned.length, 2);
@@ -79,8 +83,12 @@ test('helper ownership survives a live listing and promotion preserves the PTY a
   manager.context({ op: 'promote', id: 'helper', restore: { parentId: 'parent', command: 'git status' } }, 'restore-1');
   manager.list();
   assert.equal(events.findLast(e => e.event === 'list').data.ptys[1].helper.parentId, 'parent');
+  assert.deepEqual(decisions.at(-1), ['helper', true]);
+  const decided = decisions.length;
   manager.context({ op: 'promote', id: 'parent', restore: { parentId: 'parent', command: '' } }, 'invalid-self');
   assert.match(events.at(-1).data.error, /Invalid helper owner/);
+  // A refused promotion decides nothing.
+  assert.equal(decisions.length, decided);
   manager.spawn('other');
   manager.context({ op: 'promote', id: 'other', restore: { parentId: 'parent', command: '' } }, 'invalid-duplicate');
   assert.match(events.at(-1).data.error, /Invalid helper owner/);

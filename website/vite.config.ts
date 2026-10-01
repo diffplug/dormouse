@@ -57,13 +57,17 @@ export default defineConfig(({ mode }) => ({
       // build never compiles. Alias it to source, exactly like `dormouse-lib`.
       "remote-lib-common": path.resolve(import.meta.dirname, "../remote-lib-common/src"),
       // Same story for `dor-lib-common`: `Wall` → `useDorControl` → `connect-port`
-      // imports its `./agent-browser` subpath. The directory alias covers both
+      // imports its `./browser-providers` subpath. The directory alias covers both
       // that subpath and the bare specifier.
       "dor-lib-common": path.resolve(import.meta.dirname, "../dor-lib-common/src"),
       // Wall also imports `dor/*` (protocol + command types); `dor` has no
       // package `exports`, and vite does not read tsconfig paths, so resolve it
       // to source — the same alias lib and standalone use.
       dor: path.resolve(import.meta.dirname, "../dor/src"),
+      // And the built-in viewers' format registry, which `IframePanel` imports.
+      "dor-tools-builtin": path.resolve(import.meta.dirname, "../dor-tools-builtin/src"),
+      // And the Tool protocol, which the terminal parser and `IframePanel` speak.
+      "dor-tools-lib": path.resolve(import.meta.dirname, "../dor-tools-lib/src"),
       "ascii-splash-internal": path.resolve(
         import.meta.dirname,
         "node_modules/ascii-splash/dist",

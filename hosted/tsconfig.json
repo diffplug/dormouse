@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "allowJs": true,
+    "types": ["node", "vite/client"],
+    "paths": {
+      "remote-lib-common": ["../remote-lib-common/src/index.ts"]
+    }
+  },
+  "include": ["src", "server", "vite.config.ts", "vitest.config.ts"]
+}

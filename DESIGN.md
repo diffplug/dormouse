@@ -94,7 +94,7 @@ components:
 
 Dormouse is a tenant in someone else's house. The house is VSCode. The user picked the furniture (their theme), the lighting (their mode), the typography (their editor font). Dormouse moves in, multiplies what the user can do with their terminals, and leaves the decor alone. The interface should be indistinguishable from a built-in panel: not because it imitates VSCode, but because it inherits from VSCode. Every color, every font, every surface is a passthrough of the host's tokens.
 
-The system is intentionally minimal and bg-only. Chrome recedes; terminals are the content. Hierarchy is conveyed through background shifts between `header-active-bg` and `header-inactive-bg`, not through borders, shadows, or accent stripes. Status is conveyed through shape and position (a bell icon, a door's alert state) and through the active terminal palette's own ANSI red/green/yellow, not through a separate design-system palette.
+The system is intentionally minimal and bg-only. Chrome recedes; terminals are the content. Hierarchy is conveyed through background shifts between `header-active-bg` and `header-inactive-bg`, not through borders, shadows, or accent stripes. Status is conveyed through shape and position (a door's alert state, a ringing Pane's outline) and through the active terminal palette's own ANSI red/green/yellow, not through a separate design-system palette.
 
 The system explicitly rejects: rounded SaaS cards, gradient accents, hacker-aesthetic green-on-black, "Slack-style" Electron chrome bloat, decorative animations, and any token that hardcodes a color. If a user installs a high-contrast theme, the chrome can look flatter than usual: that is accepted, not "fixed" with overrides.
 
@@ -137,12 +137,13 @@ This system has no "primary" accent in the brand sense. The closest analogue is 
 - **Terminal Background / Foreground** (`var(--vscode-terminal-background)` / `var(--vscode-terminal-foreground)`): the terminal content surface and xterm default text. Orthogonal to the chrome.
 - **Error** (`var(--vscode-terminal-ansiRed)`): destructive actions and kill-confirm letter flash.
 - **Success** (`var(--vscode-terminal-ansiGreen)`): TODO check, theme-store install confirm.
-- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so ringing bells and the whole-Pane spoken-alarm treatment stay maximally legible on any surface.
+- **Alarm** (`var(--vscode-terminal-ansiYellow)` baseline; runtime-overridden): alert tint. `computeDynamicPalette()` replaces each `--color-alarm-vs-*` token with plain white or black by the OKLab lightness of its background (active header, inactive header, Door, or terminal body), so every alarm inset and the whole-Pane alarm treatment stay maximally legible on any surface.
 
 ### Fixed Exceptions
 Every literal color the Host-Theme-Only Rule below permits, in full. Each is here because the surface it paints is not read as part of the theme; a literal anywhere else is a bug.
 - **Window Close Hover** (`#b92a1b`): native OS close-button hover on Windows/Linux chrome buttons; matches the platform convention across themes.
 - **Setup QR** (`#ffffff` ground, `#000000` modules, in `lib/src/components/QrCode.tsx`): a phone camera reads this control, not a person. Scanners expect dark-on-light and many refuse an inverted code, and no theme token promises either the polarity or the contrast ratio in both light and dark.
+- **Terminal last resort** (`#1e1e1e` background, `#cccccc` foreground, in `lib/src/lib/terminal-theme.ts`): xterm.js needs two readable colors to render at all, and `pnpm dev:lib` runs with no resolver and no applied theme (`docs/specs/theme.md` front matter). The rest of the terminal palette carries no literal — an unset key is omitted and xterm uses its own default, except the cursor, which derives from the resolved foreground.
 
 ### Named Rules
 **The Host-Theme-Only Rule.** Never write a hex value or `oklch()` literal into `theme-colors.css`, `theme.css`, or a component. Never use `var(..., fallback)` chains. Every color must resolve through `--vscode-*` or one of the body-published runtime picks (`--color-door-*`, `--color-focus-ring`, `--color-alarm-vs-*`). The only exceptions are the ones rostered under Fixed Exceptions above, and adding one means adding it there.
@@ -178,9 +179,9 @@ Flat by default. Pane headers, doors, the baseboard, and terminal panes carry ze
 Shadows appear only on **raised surfaces that float above content**: popovers, tooltips, dialogs. They are ambient, not structural; they say "I am temporary and on top," not "I have weight."
 
 ### Shadow Vocabulary
-- **Popover** (`box-shadow: var(--tw-shadow-md)`): tooltips (`PopupButtonRow`), selection popup, illegal-rename warning, terminal-pane header tooltips.
+- **Popover** (`box-shadow: var(--tw-shadow-md)`): tooltips (`PopupButtonRow`), illegal-rename warning, terminal-pane header tooltips.
 - **Dialog** (`box-shadow: var(--tw-shadow-lg)`): kill-confirm sheet, TODO alert dialog.
-- **Modal** (`box-shadow: var(--tw-shadow-2xl)`): theme picker dropdown (when expanded), theme debugger, theme store dialog.
+- **Modal** (`box-shadow: var(--tw-shadow-2xl)`): theme picker dropdown (when expanded), theme debugger, theme store dialog, copy editor.
 - **Inset hairline** (`box-shadow: inset 0 0 0 1px var(--color-focus-ring)` / `var(--color-border)`): mobile UI segmented controls. Used instead of `border` when the surface needs a 1px stroke that does not shift layout on state change.
 
 ### Named Rules
@@ -196,20 +197,20 @@ Shadows appear only on **raised surfaces that float above content**: popovers, t
 Doors are the pane-header indicators on the baseboard. The most signature component in the system.
 - **Shape:** top corners only — `rounded-t-lg` (8px). The bottom is square so the door visually anchors to the baseboard. The pane body owns the bottom corners (`rounded-b-lg`); together they form one continuous rounded rectangle when expanded.
 - **Surface:** `bg-door-bg` + `text-door-fg`. These resolve at runtime via `computeDynamicPalette()` and may match either the inactive-header palette or the terminal palette, whichever has stronger separation from `app-bg`.
-- **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`; the title button pads `pl-2.5` (10px), `gap-2` between its glyph, title, and badges, ending `pr-2.5` alone or `pr-1` when the notepad button follows it. The notepad button carries the trailing inset itself (`pl-0.5 pr-2`).
+- **Dimensions:** `h-6` (24px), `min-w-[68px]`, `max-w-[220px]`; the button pads `px-2.5` (10px), with `gap-2` between its glyph, title, and badges.
 - **Type:** `text-sm font-medium font-mono`.
-- **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing); optional bell icon (`size={11}`, `weight="fill"`), `text-alarm-vs-door` when ringing; trailing notepad button (`size={12}`, `weight="fill"`) when the minimized Surface holds notes.
-- **Spoken alarm:** `SPEAKING` inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label — it lasts one utterance. `SPOKEN` persists until the ring is attended, so it keeps a static 2px inset and adds its speaker icon *beside* the TODO pill and bell instead of evicting them. Both carry a speaker icon (shape, not color) and name the state in the accessible name.
-- **Hover/Focus:** no decorative hover on the door itself; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment. The door is a labelled `role="group"` wrapper holding one or two buttons rather than one button — the title button reattaches, the notepad button opens the popover and does not (`docs/specs/notepad.md` → Notepad UI) — and only the notepad button takes the standard `hover:bg-current/10` wash.
+- **Content:** leading browser-display icon cluster on a browser Surface (`size={12}` each, `gap-0.5` — a wide robot plus the presentation glyph, or the presentation glyph alone for `iframe`; named in the Door's accessible name, `docs/specs/dor-browser.md` → Browser Chrome); truncated title; optional TODO pill (`text-xs font-semibold tracking-[0.08em]`, success-tinted when flourishing).
+- **Alarm:** one 2px inset overlay (`--color-alarm-vs-door`) draws the edge for both the unlabelled ring, where it flashes once on arrival, and `SPOKEN`, which persists until the ring clears and adds a speaker icon *beside* the TODO pill instead of evicting it. `SPEAKING` instead inverts and pulses the whole Door and takes the badge slot for its speaker-plus-label, for one utterance. Both speech states carry a speaker icon (shape, not color); all three name the state in the accessible name. The row inventory is `docs/specs/layout.md` → Alarm overlay.
+- **Hover/Focus:** no decorative hover on the door itself; the focus state is conveyed by the parent pane's selection ring, not by a per-door treatment. The door is a labelled `role="group"` wrapper with one button that reattaches.
 
 ### Buttons
 
 #### Header Action Button
-The icon-and-tooltip button used inside pane headers (kill, alert toggle, todo, etc.).
+The icon-and-tooltip button used inside pane headers (kill, minimize, etc.).
 - **Shape:** `rounded` (4px) when icon-only, also `rounded` for labeled variants.
 - **Color:** `text-inherit` — inherits the header's foreground, so it tints with the active/inactive header palette.
 - **Hover:** `hover:bg-current/10` — a 10%-opacity wash of the current text color. Theme-agnostic, works light or dark.
-- **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, with `text-sm` primary line and an optional muted detail line. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
+- **Tooltip:** rendered through a portal as a `PopupButtonRow` 8px below the button, one `text-sm` line right-aligned to its edge. Keybindings inside the tooltip auto-render as `[bracketed]` shortcuts.
 
 #### Popup Button (`popupButton`)
 The flat segments inside a `PopupButtonRow` — the row owns the border, background, shadow, and `text-sm`, so a segment contributes only padding and state. Every segment currently inherits the row's foreground; these rows offer rather than ask, so none of them carries an emphasized action.
@@ -229,7 +230,7 @@ The system uses **raised surfaces**, not "cards." There are no nested cards. The
 - **Modal** (`ThemePicker` dropdown, `ThemeDebugger`, `ThemeStoreDialog`): `bg-surface-raised`, `border`, `rounded`, `shadow-2xl`, fixed-position with viewport-clamped sizing.
 - **On-palette surface** (theme previews): a surface painting a *previewed* palette rather than the host's, so its controls take `themePreviewButton` and inherit `currentColor` instead of `text-muted` / `hover:bg-foreground/10` / `outline-focus-ring`. `docs/specs/theme.md` → "Where the user picks a theme" owns candidate palettes, selection, and scroll affordances.
 
-**The Viewport-Bound Rule.** Anything floating over the viewport takes its height cap from `OVERLAY_MAX_HEIGHT` in `design.tsx` — `.modal` for a `ModalFrame` surface (the viewport minus `MODAL_OVERLAY_INSET` doubled), `.popover` for an anchored overlay (matching `clampOverlayPosition`'s margin). Don't hand-write a `vh`/`dvh` literal at the call site: the six that predated this token had drifted to five different budgets, and one silently shadowed its own overlay's padding. Each entry reads its own custom property first (`--overlay-max-h-modal` / `--overlay-max-h-popover`), so a story — or a host with less room than the window — can narrow one bound without touching the component. They are deliberately separate: a popover inside a modal is a DOM descendant of it, and custom properties inherit, so one shared knob would cap the dialog too. A deliberately *smaller* budget than the viewport (a context menu at `max-h-[70vh]`) is a different decision and stays at the call site.
+**The Viewport-Bound Rule.** Anything floating over the viewport takes its height cap from `OVERLAY_MAX_HEIGHT` in `design.tsx` — `.modal` for a `ModalFrame` surface (the viewport minus `MODAL_OVERLAY_INSET` doubled), `.popover` for an anchored overlay (matching `clampOverlayPosition`'s margin). Don't hand-write a `vh`/`dvh` literal at the call site: the six that predated this token had drifted to five different budgets, and one silently shadowed its own overlay's padding. Each entry reads its own custom property first (`--overlay-max-h-modal` / `--overlay-max-h-popover`), so a story — or a host with less room than the window — can narrow one bound without touching the component; set the modal bound on `body`, where every modal renders (docs/specs/layout.md → "Selection overlay"). They are deliberately separate: a popover inside a modal is a DOM descendant of it, and custom properties inherit, so one shared knob would cap the dialog too. A deliberately *smaller* budget than the viewport (a context menu at `max-h-[70vh]`) is a different decision and stays at the call site.
 
 ### Inputs
 - Used by `ThemePicker`. Style: `bg-input-bg`, `border border-input-border`, `rounded`, `font-mono`, `text-sm`.
@@ -240,7 +241,7 @@ The system uses **raised surfaces**, not "cards." There are no nested cards. The
 ### Navigation
 
 The system has no traditional product top-nav. Three surfaces play navigational roles:
-- **Workspace strip** (standalone app bar, top): horizontal tabs, one per Workspace, for switching between Workspaces within one window. Inactive tabs carry the union alert/TODO indicators (bell + TODO pill) borrowed from the Door vocabulary; the active tab carries none. This is standalone app-bar chrome around the Wall — see `docs/specs/layout.md` and `docs/specs/alert.md` — and its exact visual treatment is being designed in Storybook. VS Code surfaces the same status on its own native tab/badge chrome instead (`docs/specs/vscode.md`).
+- **Workspace strip** (standalone app bar, top): Door geometry, pane-header palettes, and the gradients seating the selected tab against the Wall and fading the rest into the app ground — `docs/specs/layout.md` → Workspace tabs. Union indicators belong to `docs/specs/alert.md` → Workspace union; VS Code uses its native chrome (`docs/specs/vscode.md`).
 - **Baseboard** (bottom of the app): horizontal strip of doors representing minimized panes plus chrome action buttons. Doors are the primary navigation affordance to a minimized terminal. Buttons use `chromeButton` with 24px height, muted text, and `hover:text-foreground`; Settings icons use square buttons with 2px gaps, while labeled overflow buttons keep horizontal padding.
 - **Pane Header (TerminalPaneHeader)**: the tab-replacing strip at the top of each pane. Lath is a headless tiling engine with no tab-bar chrome of its own; the React header IS the tab.
 
@@ -251,6 +252,7 @@ A tiny inline label that appears in pane headers and inside doors when a termina
 - `text-xs font-semibold tracking-[0.08em]` — the tracking is mandatory at this size.
 - Grid-stacked `<letters>` and `<check>` so width stays stable when the dismiss flourish runs.
 - **Flourish (500ms):** letters fade 0–30%, check springs in 0–40% with `cubic-bezier(0.34, 1.56, 0.64, 1)` (overshoot 1.15x, settle to 1.0x at 55%), whole pill dissolves 55–100%. Reduced-motion replaces the entire sequence with opacity:0 at zero duration.
+- **Workspace tab pill + landing spotlight:** the tab's pill is a borderless button — the text as a Door's pill draws it, on a `rounded px-1 py-0.5` hit area (20px tall in the 24px tab) that takes `hover:bg-current/10` and `active:bg-current/20`, with `cursor-pointer` and a `current`-coloured focus-visible outline; no state changes its size, so none moves the tab. The header pill of the Surface its click enters, a reattached Door's included, takes the landing spotlight (`TodoSpotlight`): a `bg-current/30` wash that rises 0–30%, holds to 45% while the focus ring arrives, and fades by 480ms, `ease-out`, no spring. It is attention, not resolution: no check, no alarm colour, no repeat; reduced motion drops it.
 
 #### Pane Spawn / Kill Choreography
 The most distinctive motion in the system. Implemented as `clip-path` reveals, not transforms, so `getBoundingClientRect` stays accurate during the animation (the selection overlay measures real bounds).
@@ -260,10 +262,13 @@ The most distinctive motion in the system. Implemented as `clip-path` reveals, n
 - **Reduced-motion:** all of the above are nulled.
 
 #### Marching Ants (Command Mode)
-The selection ring around the focused pane in command mode is an SVG with `stroke-dasharray` and a `marching-ants` keyframe that increments `stroke-dashoffset` by `var(--march-offset)`. Color: `var(--color-focus-ring)`. It is the visual signature of "you are now in command mode," so it marches in a short burst on entry and on each selection change rather than forever — an idle wall runs no animation (timing in `docs/specs/layout.md` → Selection overlay). The ring stays crisp while travelling; motion reads instead from soft directional bands drawn behind each edge, sized by how fast that edge is moving across itself.
+The selection ring around the focused pane in command mode is an SVG with `stroke-dasharray` and a `marching-ants` keyframe that increments `stroke-dashoffset` by `var(--march-offset)`. Color: `var(--color-focus-ring)`. It is the visual signature of "you are now in command mode," so it marches for as long as command mode lasts, pausing only while a Workspace title is being edited, the window is unfocused, or the user prefers reduced motion (timing in `docs/specs/layout.md` → Selection overlay). The ring stays crisp while travelling; motion reads instead from soft directional bands drawn behind each edge, sized by how fast that edge is moving across itself.
 
 #### Focus Ring Travel & Header Crossfade
 When selection moves between panes/doors, the focus ring **glides** to the new target over 220ms (`FOCUS_MOTION_MS`, half the pane-motion duration) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`, and the source/destination pane headers crossfade their active/inactive palette over the same 220ms (`HEADER_PALETTE_TRANSITION_CLASS` in `design.tsx`), so the two read as one gesture. The ring's rect is a per-frame JS tween (`rect-tween.ts`), not a CSS transition; same-identity re-measures (sash drag, window resize, animator frames) snap 1:1, and a pane↔door move lerps the corner radii so the shape never pops. Reduced motion nulls both: the ring snaps and the header palette swaps instantly.
+
+#### Copy Editor Travel
+The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`); `docs/specs/mouse-and-clipboard.md` §4.5 owns when.
 
 ## 6. Do's and Don'ts
 
@@ -285,7 +290,7 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 - **Don't** introduce a `text-muted` color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.
 - **Don't** use rounded SaaS cards, gradient accents, gradient text, or glassmorphism. PRODUCT.md names these directly: "Generic SaaS (rounded cards, gradients, startup illustrations)," "Electron bloat (Slack — heavy, slow-feeling, too much chrome)."
 - **Don't** use hacker-aesthetic green-on-black, terminal-cliché Matrix tints, or any color that signals "this is a programmer tool." The user's theme decides what color this tool is.
-- **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`) **with a CSS transition**. Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation. The one carve-out is a JS tween that writes true per-frame values on a `pointer-events: none` overlay (the Lath animator; the focus ring's `rect-tween`): it moves through real intermediate geometry every frame rather than letting the browser interpolate an opaque box, so measurements stay valid — a CSS `transition: top/left/width/height` does not qualify and stays banned.
+- **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`) **with a CSS transition**. Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation. The one carve-out is a JS tween that writes true intermediate geometry every frame (the Lath animator on the leaves; the `rect-tween` that carries the focus ring and the copy editor) rather than letting the browser interpolate an opaque box, so measurements stay valid mid-flight — a CSS `transition: top/left/width/height` does not qualify and stays banned.
 - **Don't** add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit: "Overly playful (too many animations, emojis, mascots)."
 - **Don't** gate app chrome on `window.alert` / `confirm` / `prompt`. Native dialogs are not dependable in the desktop webview: the theme uninstall was gated on `confirm` and silently did nothing there, because the call returned without ever showing a dialog. Whether a given webview suppresses the panel or never implements it, a control gated on one cannot be trusted to run. Use `ModalFrame`, or make the action a single click when it is cheap and reversible. The marketing website is exempt — it only ever runs in a real browser, where `ShareUrlButton`'s `prompt` is a reasonable last-resort clipboard fallback.
 - **Don't** wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.

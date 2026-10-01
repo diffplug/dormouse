@@ -13,7 +13,7 @@ The trust model for remote control: three primitives between the Client
   access to no Burrow.
 * **Each Client pairs explicitly, one-to-one, with each Burrow** — the Burrow keeps
   its own local ACL of approved Clients, each identified by a per-Burrow X25519
-  static generated in the browser and stored non-extractably.
+  static generated in the browser; storage follows Client statics below.
 
 Account compromise is therefore insufficient for burrow access
 ([Security Guarantees](#security-guarantees)). `docs/specs/security-remote.md` -> "Remote Control"
@@ -37,7 +37,8 @@ Non-goals: a compromised browser runtime or operating system; a user
 intentionally clearing browser data; permanent device identity across browser
 resets; **availability** — the relay is down whenever the machine is (a
 per-login user agent), and the Relay is a hard online dependency for every new
-session ([relay.md](./relay.md)); **traffic analysis**
+session but a [one-time connection](#one-time-connection)'s
+([relay.md](./relay.md)); **traffic analysis**
 ([Residual metadata](#residual-metadata)).
 
 ## Trust Model
@@ -54,9 +55,10 @@ session ([relay.md](./relay.md)); **traffic analysis**
 
 **Exactly two endpoints are trusted: the distributed Burrow binaries and the exact
 served Pocket artifact** — an operator serving modified Pocket code is outside
-the model, as is XSS in the Pocket origin. **The Relay is trusted with
-nothing**: it may drop, delay, reorder, or refuse traffic, and must gain no
-plaintext and no authorization by doing so.
+the model, as is XSS in the Pocket origin. A one-time session trusts a third,
+the page Hosted serves ([One-time connection](#one-time-connection)). **The
+Relay is trusted with nothing**: it may drop, delay, reorder, or refuse
+traffic, and must gain no plaintext and no authorization by doing so.
 
 ## Passkeys
 
@@ -89,18 +91,26 @@ Source of truth: `verifyPasskeyAssertion` / `hashPasskeyPublicKey` in
 A Client static is long-lived Client identity — the capability the Burrow actually
 authorizes.
 
-**One X25519 keypair per Burrow, generated at scan time** (rationale), persisted
-non-extractably in that Burrow's local record only after the Burrow approves, never
-shared between Burrows. The raw 32-byte public half, base64url, is the Client
+**Must generate one X25519 keypair per Burrow at scan time and persist it only
+after approval, never shared between Burrows.** (rationale) The raw 32-byte public
+half, base64url, is the Client
 identifier on the ACL; **Noise IK proves possession of the private half**
 (rationale).
 
-It is durable across restarts and non-extractable through normal browser APIs,
-but **active XSS can *use* it**, browser or OS compromise defeats the model, and
-clearing browser data destroys it ([Client static loss](#client-static-loss)).
+**Must prefer a directly persisted nonextractable private key.** Only a failed
+native storage probe may select AES-256-GCM-encrypted PKCS#8 with a per-key
+nonextractable AES key, after that format passes reopen and key agreement.
+**Must import recovered X25519 keys nonextractably, never persist plaintext
+private bytes, and leave existing native records unchanged.** (rationale)
 
-Source of truth: `generateNoiseKeyPair` in
-`remote-lib-common/src/security/noise.ts`; what Pocket stores is
+Active XSS can use either format and can extract the X25519 private bytes in
+the encrypted format. Nonextractability is therefore not a universal at-rest
+guarantee; browser/OS compromise defeats both formats. A stolen static still
+requires its paired passkey's fresh presence proof. Clearing browser data
+destroys either format ([Client static loss](#client-static-loss)).
+
+Source of truth: `generatePocketKeyPair` in
+`lib/src/remote/client/pocket-private-key.ts`; what Pocket stores is
 [pocket-app.md](./pocket-app.md).
 
 ## Burrow Authorization
@@ -279,7 +289,68 @@ the record).
 
 Source of truth: `BurrowRuntime.#onConnectionInit` / `#onConnectionTransport` /
 `#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`,
-`ChallengeIssuer` in `remote-lib-common/src/security/challenge.ts`.
+`EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts` (the
+established session), `ChallengeIssuer` in
+`remote-lib-common/src/security/challenge.ts`.
+
+## One-time connection
+
+**A third ceremony on the one suite, authorizing one session and writing
+nothing.** `docs/specs/one-time.md` owns the link, the rendezvous wire, and the
+runtime that carries these rules out ("Burrow runtime").
+
+- **IK against the link's one-use key.** The phone is the initiator with a fresh
+  nonextractable static it **never persists**, minted for the one handshake,
+  the link's `ephPub` as `rs`; both handshake payloads are empty. The link
+  carries no Burrow static, so the phone is left holding nothing to pin.
+- **The prologue binds every link field under its own kind** (field order:
+  `docs/specs/one-time.md` -> "Link"), so a one-time transcript equals no
+  pairing or connection transcript, and is useless in any other room.
+- **The first valid message 1 reserves the link**: the one-use key is erased
+  with it, a later `init` is dropped before any WebCrypto, and one that fails
+  to decrypt reserves nothing.
+- **The one carve-out from [Presence proofs](#presence-proofs): a fresh local
+  confirmation authorizes exactly one session and writes nothing.**
+  `OneTimeRequestV1` carries the phone's code and label and nothing else; the
+  Burrow opens the approval modal on it, holds the expected code as
+  [Pairing](#pairing) does, and gets **exactly one attempt** — spent before the
+  expiry check and the constant-time comparison. No ACL record, `deliveryId`,
+  or Burrow static results, and the Burrow persists nothing.
+- **The one-time modal never renders text the phone chose.** The phone picks
+  the digits and the label both, so the Burrow shows a label only as a member
+  of `ONE_TIME_DEVICE_LABELS`, and any other as `Phone browser` (rationale).
+- **One padded outcome.** `OneTimeOutcomeV1` success carries only the Burrow
+  label — no Burrow static, no `deliveryId` — and a denial only one of
+  `ONE_TIME_DENIAL_CODES` (`docs/specs/one-time.md` -> "Wire contract"), in the
+  same fixed control message as [Pairing](#pairing)'s.
+- **Direct required: application data never crosses the rendezvous.** The
+  outcome promotes the same session; the phone refuses protocol-v1 until both
+  directions are direct, and an application message the Burrow decrypts off
+  the rendezvous ends the session unread. A session with no direct path by
+  `ONE_TIME_DIRECT_DEADLINE_MS` ends at both ends, with no relayed fallback.
+- **After the switch the direct channel, not the rendezvous, is the lifecycle
+  authority** — for this ceremony alone, the carve-out from
+  [remote-api.md](./remote-api.md) -> "Direct path"'s rule that the Relay stays
+  the lifecycle authority, since no Relay carries it. Both ends close the
+  rendezvous at the switch and ignore its loss; channel loss or the idle
+  deadline ends the session, and nothing resumes.
+- **The page Hosted serves at `/connect/` is a third trusted endpoint for every
+  session confirmed through it**: the channel ends inside that page, so whoever
+  controls Hosted's deploy pipeline or Cloudflare account can serve one that
+  reads or drives the session, which Noise cannot prevent. **The rendezvous is
+  trusted with nothing**, as the Relay is ([Residual metadata](#residual-metadata)).
+
+Source of truth: `OneTimeRuntime` in
+`lib/src/remote/burrow/one-time-runtime.ts`, `OneTimeClient` in
+`lib/src/remote/client/one-time-client.ts`, `oneTimeLinkPrologue` in
+`remote-lib-common/src/security/one-time-link.ts`, `e2eOneTimePrologue` in
+`remote-lib-common/src/security/noise-transport.ts`, `OneTimeRequestV1` /
+`OneTimeOutcomeV1` / `knownOneTimeDeviceLabel` in
+`remote-lib-common/src/security/e2e-ceremony.ts`. Pinned
+by `remote-lib-common/test/one-time-link.test.mjs`,
+`remote-lib-common/test/e2e-ceremony.test.mjs`,
+`lib/src/remote/burrow/one-time-runtime.test.ts`, and
+`lib/src/remote/client/one-time-e2e.test.ts`.
 
 ## Push sealing
 
@@ -327,7 +398,9 @@ Source of truth: `sealPush` / `openPush` / `isSealedPushV1` in
 
 **Every bound is Burrow-enforced and independent of the relay** — Relay-side
 gates are defense in depth only, and Burrow correctness must survive a relay that
-omits `client-gone`, invents client IDs, or reorders frames.
+omits `client-gone`, invents client IDs, or reorders frames. The one-time
+runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
+-> "Burrow runtime").
 
 | Bound | Value | Declared in |
 | --- | --- | --- |
@@ -340,6 +413,15 @@ omits `client-gone`, invents client IDs, or reorders frames.
 | `MAX_ESTABLISHED_E2E_SESSIONS` | 16 | `remote-lib-common/src/security/e2e-bounds.ts` |
 | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` | 120 000 | same |
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
+| `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_ANSWER_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` / `DIRECT_SRFLX_GRACE_MS` | 15 000 / 10 000 / 3 000 / 500 | `remote-lib-common/src/security/direct-path.ts` |
+| `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | `= DIRECT_SETUP_TIMEOUT_MS` (15 000) / 5 000 | same |
+| `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
+| `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first; one pair for a receiver's hold and a sender's queue alike (rationale) | same |
+| `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
+| `MAX_ONE_TIME_FRAME_LENGTH` | one maximal `ct` + 512 | `remote-lib-common/src/remote/one-time-wire.ts` |
+| `MAX_ONE_TIME_FORWARDED` | 32 messages, both directions together | same |
+| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` / `ONE_TIME_DIRECT_DEADLINE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 30 000 / 15 000 | same |
+| `ONE_TIME_OPEN_TIMEOUT_MS` | 8 000 | `lib/src/remote/burrow/one-time-runtime.ts` |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative
   received-string length; both `e2e` and `client-gone` share one FIFO and one
@@ -380,7 +462,7 @@ omits `client-gone`, invents client IDs, or reorders frames.
   | --- | --- |
   | Pending pairing | `invitation-expired` |
   | Pending connection (its challenge is now dead) | `presence-rejected` |
-  | Idle established session | nothing |
+  | Idle established session | the goodbye, `SessionEndV1` ([remote-api.md](./remote-api.md) → Transport) |
   | Pending pairing evicted at its cap | `superseded` (rationale) |
   | Pending connection evicted at its cap | nothing (rationale) |
 
@@ -396,12 +478,63 @@ omits `client-gone`, invents client IDs, or reorders frames.
   **losing the Burrow's own relay socket disposes everything, invitations
   included** (rationale).
 
-Source of truth: `lib/src/remote/burrow/burrow-runtime.ts`, and `TokenBucket` in
+Source of truth: `lib/src/remote/burrow/burrow-runtime.ts`,
+`EstablishedE2eSession` in `lib/src/remote/burrow/established-session.ts` (an
+established session's decrypt and idle clock), and `TokenBucket` in
 `remote-lib-common/src/security/token-bucket.ts` — the same primitive the Relay
 admits Burrow enrollment with ([relay.md](./relay.md#http-api)). Pinned by
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
 `relay/test/malicious-relay.test.mjs` and
 `remote-lib-common/test/token-bucket.test.mjs`.
+
+## Direct path
+
+**The direct path adds no layer to this model.** A WebRTC data channel replaces
+the Relay as the carrier of an already-authorized session; every rule above
+holds unchanged, because nothing about *what* is carried changes.
+[remote-api.md](./remote-api.md) -> "Direct path" owns the design — the session
+promoted at [Connection](#connection) and its `CipherState`s, the signals that
+ride inside it, and the bound on either end's queue;
+[remote-network.md](./remote-network.md) -> "Anywhere" owns its ICE server.
+What this model adds is what is *underneath* them.
+
+- **DTLS beneath is transport hygiene this model does not rely on.** It protects
+  nothing the Noise session does not already protect, and **the fingerprints in
+  an SDP are authentic for exactly one reason — that SDP arrived inside the
+  session**. A DTLS peer is never an authenticated one.
+
+**The listener is UDP on every interface a candidate names, for the life of an
+attempt.** The standalone Burrow's addon binds one socket on the unspecified
+address and advertises each routable interface at that port; a browser binds per
+interface. Either way the host answers UDP from anyone who can route to it on
+any of those networks. (rationale) Local networks may bind one address instead
+([remote-network.md](./remote-network.md) -> "Local networks"); under Anywhere
+the NAT mapping STUN opens may admit senders beyond them.
+**Two parsers sit behind it and both are attack surface**: before DTLS, ICE's
+own STUN parser, which answers a binding request only under this attempt's
+ufrag and password (RFC 8445 requires 24 and 128 bits of randomness), both
+freshly generated and reaching the peer only inside the session; after DTLS,
+the peer implementation's TLS stack — the browser's on the phone, the addon's
+on a standalone Burrow (`docs/specs/security-supply-chain.md`). A memory-safety
+bug in either is reachable by any stranger on those networks, and nothing above
+it mitigates that.
+
+**A channel lost after a session has switched is burrow loss, and that is
+accepted**: both ends end the session rather than resume on the Relay. (rationale) The Relay
+still sees that the session exists and whether each end is online; it no longer
+sees the traffic ([Residual metadata](#residual-metadata)).
+
+Source of truth: `remote-lib-common/src/security/direct-path.ts` (the signals,
+their guard, and `DirectCutover`), `lib/src/remote/direct/direct-peer.ts`
+(`DirectPeer`), `DirectEndpoint` in
+`lib/src/remote/direct/direct-endpoint.ts` (the attempt, the peer, and the
+switch, created at promotion by `EstablishedE2eSession` in
+`lib/src/remote/burrow/established-session.ts`, which
+`BurrowRuntime.#promoteConnection` in `lib/src/remote/burrow/burrow-runtime.ts`
+and `OneTimeRuntime.#promote` in `lib/src/remote/burrow/one-time-runtime.ts`
+construct, and by `ClientSessionCore.establish` in
+`lib/src/remote/client/session-core.ts`). The audited rows are
+`docs/specs/security-remote.md` -> "Direct path".
 
 ## Noise suite
 
@@ -415,8 +548,9 @@ admits Burrow enrollment with ([relay.md](./relay.md#http-api)). Pinned by
 - **Prologues are canonical and length-prefixed** (`lengthPrefixedConcat`), each
   binding its own ceremony's identifiers so a transcript is useless against
   another Burrow, id, or ceremony ([relay.md](./relay.md) -> E2E framing owns
-  the field order). **Application authentication binds to Noise's final
-  handshake hash** — no parallel transcript, exporter, KDF, or nonce scheme.
+  the field order; `docs/specs/one-time.md` -> "Link" a one-time link's).
+  **Application authentication binds to Noise's final handshake hash** — no
+  parallel transcript, exporter, KDF, or nonce scheme.
   Sessions use the two `CipherState`s from `Split`, each from nonce zero,
   with empty associated data; routing metadata is never authenticated
   application content. **No rekey**: sessions expire on inactivity.
@@ -466,8 +600,8 @@ encrypted outcome.
 - **Both halves or neither.** `isEnrollment` rejects a single half, a malformed
   encoding, or a wrong decoded length, and accepts a record from before the
   fields existed.
-- **A Burrow missing one mints it at start**, persisting before the Burrow runs
-  (rationale).
+- **A Burrow missing one mints it at start**, persisting before the Burrow runs,
+  and **never once its service is disposed** (rationale).
 - **Whatever consumes the static checks that the halves correspond**
   (`deriveNoiseStaticPublicKey`), and **a mismatch keeps the Burrow down**, loudly
   (rationale). An enrollment carrying no usable static reads as un-enrolled and
@@ -514,6 +648,9 @@ established above and pinned by
 * Every connection requires fresh user presence, single-use and bound to that
   connection's own transcript.
 * Every access decision is ultimately made by the Burrow.
+* A one-time session is authorized only by typing, on the Burrow, the two
+  digits its phone shows; it writes nothing at either end and runs only on the
+  direct path (pinned by `lib/src/remote/client/one-time-e2e.test.ts`).
 
 **Never claim this model for paid SaaS before an independent cryptographic
 review** of the Noise integration, the WebAuthn channel binding, key storage,
@@ -525,13 +662,23 @@ such claim.
 **No traffic-analysis resistance, per-Burrow unlinkability, or metadata anonymity
 is claimed.** The Relay still observes account and passkey authentication data,
 IPs, Burrow IDs and online state, routing relationships, every session's reauth
-exchange, push endpoints, timing, ciphertext sizes, and volume. Two leaks follow
-and are accepted rather than closed (rationale): Client→Burrow timing exposes
-inter-keystroke timing while keystroke *values* stay encrypted, and one
+exchange, push endpoints, timing, ciphertext sizes, and volume — **the last
+three only while the Relay is carrying the session**, since a session that has
+switched to the [direct path](#direct-path) leaves it the fact of the session
+and each end's liveness and nothing else. Two leaks follow and are accepted
+rather than closed (rationale): Client→Burrow timing exposes inter-keystroke
+timing on a relayed session while keystroke *values* stay encrypted, ending at
+the switch — which in exchange shows each paired peer the other's addresses,
+until then known only to the Relay — and one
 `PushSubscription` per worker scope lets a shared endpoint correlate every
 `deliveryId` one Pocket profile registers across Burrows. A push carries no
 counter, so a Relay that kept an envelope can re-deliver it
 ([Push sealing](#push-sealing)).
+
+**Hosted's one-time rendezvous observes each room's timing, both ends' IP
+addresses, the room id, and the size and count of the handshake frames it
+forwards** — never plaintext, and nothing once the session is direct
+([One-time connection](#one-time-connection)).
 
 ## Future
 
@@ -540,11 +687,11 @@ Onboarding changes with security surface are staged in the
 
 ### Device verification
 
-Two properties of the shipped Pocket client are observable only on a real iOS
-device, and both are load-bearing: an X25519 `CryptoKey` surviving a structured
-clone into IndexedDB (a Client static that does not is one the phone loses on
-every reload), and `getUserMedia` working inside a Home Screen web app (without
-it the install has only the paste field).
+`getUserMedia` inside a Home Screen web app is observable only on a real iOS
+device, and without it the install has only the paste field. The Client-static
+storage format surviving an app and phone restart is no longer open: the v3
+Home Screen report is in [Client statics](#client-statics)'s rationale and in
+[pocket-app.rationale.md](./pocket-app.rationale.md).
 
 ### Revocation propagation
 

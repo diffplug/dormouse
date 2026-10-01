@@ -73,11 +73,8 @@ async function harness(): Promise<Harness> {
   const records = new Map<string, KnownBurrowV1>();
   records.set(BURROW_ID, knownBurrow(burrowStatic, clientStatic, { state: 'paired', deliveryId: 'd', approvedAt: 1 }));
 
-  const store: KnownBurrowStore = {
+  const store: Pick<KnownBurrowStore, 'get'> = {
     get: async (burrowId) => records.get(burrowId) ?? null,
-    put: async (record) => void records.set(record.burrowId, record),
-    delete: async (burrowId) => void records.delete(burrowId),
-    list: async () => [...records.values()],
   };
 
   const listeners = new Map<string, unknown>();

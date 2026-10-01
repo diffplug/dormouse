@@ -1,8 +1,17 @@
-import { vi } from 'vitest';
+import { act, createElement, Fragment, useLayoutEffect, useRef, type ReactElement } from 'react';
+import { createPortal } from 'react-dom';
+import { createRoot, type Root } from 'react-dom/client';
+import { expect, vi } from 'vitest';
+import { BROWSER_PROVIDER_IDS, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
+import { FakePtyAdapter, setPlatform } from '../../lib/platform';
+import { applyTerminalSemanticEvents } from '../../lib/terminal-registry';
+import { setPortalAnchor } from '../../lib/dom';
+import type { BrowserOp, BrowserRequest, BrowserResult } from '../../lib/platform/browser-automation';
 import type { WallActions } from './wall-context';
 import {
   registerAgentBrowserScreen,
   type ChromeSnapshot,
+  type RenderMode,
   type ScreenRegistration,
   type ScreenSnapshot,
 } from './agent-browser-screen';
@@ -13,18 +22,19 @@ export function stubWallActions(overrides: Partial<WallActions> = {}): WallActio
   return {
     onKill: vi.fn(),
     onMinimize: vi.fn(),
-    onAlertButton: vi.fn(() => 'noop'),
     onToggleTodo: vi.fn(),
     onSplitH: vi.fn(),
     onSplitV: vi.fn(),
     onZoom: vi.fn(),
     onClickPanel: vi.fn(),
+    onEnterPanel: vi.fn(),
     onFocusPane: vi.fn(),
     onStartRename: vi.fn(),
     onFinishRename: vi.fn(() => ({ accepted: true })),
     onCancelRename: vi.fn(),
     onSwapRenderMode: vi.fn(),
     resolveSurfaceRef: vi.fn((id: string) => id),
+    onPinPreview: vi.fn(),
     ...overrides,
   };
 }
@@ -38,9 +48,162 @@ export function ensureResizeObserver(): void {
   } as unknown as typeof ResizeObserver;
 }
 
+/** A dispatchable `PointerEvent`: jsdom has none, so its fields are defined on
+ *  a plain event — a primary touch with one button down unless overridden. */
+export function pointerEvent(type: string, overrides: Partial<PointerEvent> = {}): PointerEvent {
+  const event = new Event(type, { bubbles: true, cancelable: true }) as PointerEvent;
+  const values: Partial<PointerEvent> = {
+    pointerId: 7,
+    pointerType: 'touch',
+    isPrimary: true,
+    button: 0,
+    buttons: type === 'pointerup' || type === 'pointercancel' ? 0 : 1,
+    clientX: 10,
+    clientY: 12,
+    screenX: 110,
+    screenY: 112,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ...overrides,
+  };
+  for (const [key, value] of Object.entries(values)) {
+    Object.defineProperty(event, key, { configurable: true, get: () => value });
+  }
+  return event;
+}
+
+/** A double-click as a browser fires it: a press and click counted 1, then a
+ *  press, click, and `dblclick` counted 2, each click committed before the
+ *  next press. */
+export function doubleClick(target: Element): void {
+  const fire = (types: string[], detail: number) => {
+    for (const type of types) target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, detail }));
+  };
+  act(() => fire(['mousedown', 'mouseup', 'click'], 1));
+  act(() => fire(['mousedown', 'mouseup', 'click', 'dblclick'], 2));
+}
+
+/** A stand-in for the copy editor's portal: a hidden anchor where it renders,
+ *  mapped to a root on `document.body` holding one button, so React events
+ *  from the button bubble up the rendering tree as the copy editor's do. */
+export function PortalAnchoredButton(): ReactElement {
+  const anchor = useRef<HTMLSpanElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => setPortalAnchor(root.current!, anchor.current!), []);
+  return createElement(Fragment, null,
+    createElement('span', { hidden: true, ref: anchor }),
+    createPortal(createElement('div', { ref: root }, createElement('button', { type: 'button', 'data-portaled': '' }, 'Portaled')), document.body));
+}
+
+/** jsdom lacks the native modal `<dialog>` API that `NativeModalDialog` calls. */
+export function ensureDialogModal(): void {
+  HTMLDialogElement.prototype.showModal ??= function showModal(this: HTMLDialogElement) {
+    this.open = true;
+  };
+}
+
+/**
+ * A ResizeObserver whose width the test drives: every observed element is told
+ * `initialWidth` on observe, and the returned setter re-delivers a new width to
+ * all of them. Stubbed through `vi.stubGlobal`, so `vi.unstubAllGlobals()` in
+ * `afterEach` restores jsdom.
+ */
+export function stubResizeObserver(initialWidth: number): (width: number) => void {
+  let width = initialWidth;
+  const deliveries = new Set<() => void>();
+  vi.stubGlobal('ResizeObserver', class {
+    private readonly delivery = new Set<() => void>();
+    constructor(private readonly callback: ResizeObserverCallback) {}
+    observe(target: Element): void {
+      const deliver = () => this.callback([{
+        target,
+        borderBoxSize: [{ inlineSize: width, blockSize: 0 }],
+        contentRect: { width },
+      } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver);
+      this.delivery.add(deliver);
+      deliveries.add(deliver);
+      deliver();
+    }
+    unobserve(): void {}
+    disconnect(): void {
+      for (const deliver of this.delivery) deliveries.delete(deliver);
+    }
+  });
+  return (next) => {
+    width = next;
+    for (const deliver of deliveries) deliver();
+  };
+}
+
+export interface WallHarness {
+  container: HTMLDivElement;
+  root: Root;
+  /** Drain queued microtasks and 0ms timers inside `act`. */
+  flush: () => Promise<void>;
+  /** Wait out one animation frame inside `act`, where deferred focus lands. */
+  flushFrame: () => Promise<void>;
+  dispose: () => void;
+}
+
+/**
+ * The jsdom setup any Wall composition needs: the browser APIs jsdom lacks, plus
+ * a mounted root. Call from `beforeEach` and `dispose()` from `afterEach`; a
+ * test file adds only its own platform and store resets.
+ */
+export function mountWallHarness(): WallHarness {
+  ensureResizeObserver();
+  // Reduced motion so the Lath engine runs a 0 duration: the two-phase kill's
+  // deferred removal fires on a setTimeout(0) and completes within `flush()` — the
+  // instant path is also stage 3's "reduced motion" acceptance requirement.
+  globalThis.matchMedia = ((query: string) => ({
+    matches: query.includes('prefers-reduced-motion'),
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent() { return false; },
+  })) as unknown as typeof matchMedia;
+  // Baseboard / dynamic-palette read a 2d context; jsdom has none.
+  Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
+    configurable: true,
+    value: vi.fn(() => null),
+  });
+
+  const container = document.createElement('div');
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  return {
+    container,
+    root,
+    flush: async () => { await act(async () => { await new Promise((r) => setTimeout(r, 0)); }); },
+    flushFrame: async () => { await act(async () => { await new Promise((r) => requestAnimationFrame(() => r(undefined))); }); },
+    dispose: () => {
+      act(() => root.unmount());
+      container.remove();
+    },
+  };
+}
+
+/** Wait out the host's own 100ms state polls (a tool taking over a pane, a
+ *  split waiting on OSC 633), which no event can flush. Throws on timeout. */
+export const waitUntil = (ready: () => boolean): Promise<void> => vi.waitFor(async () => {
+  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+  expect(ready()).toBe(true);
+}, { timeout: 2_000, interval: 25 });
+
+/** The integrated shell in `id` reports `line` as its running command. */
+export const reportRunning = (id: string, line: string): void => applyTerminalSemanticEvents(id, [
+  { type: 'commandLine', commandLine: line },
+  { type: 'commandStart', source: 'osc633_boundaries' },
+]);
+
 export const STUB_SCREEN: ScreenSnapshot = {
   state: 'SYNCED',
-  renderMode: 'ab-screencast',
+  renderMode: 'agent-browser-screencast',
   viewport: { w: 1280, h: 720, dpr: 1 },
   paneCss: { w: 1280, h: 720 },
   displayDpr: 1,
@@ -63,21 +226,59 @@ export function registerStubScreen(
     snapshot?: ScreenSnapshot;
     chrome?: ChromeSnapshot;
     hostCapable?: boolean;
-    canPopOut?: boolean;
+    renderModes?: readonly RenderMode[];
+    viewportSetting?: () => import('dor-lib-common/browser-viewports').BrowserViewportSetting;
   } = {},
 ): ScreenRegistration {
   return registerAgentBrowserScreen(id, {
     snapshot: init.snapshot ?? STUB_SCREEN,
     actions: {
       engageSync: vi.fn(),
-      applyDevice: vi.fn(),
       applyViewport: vi.fn(),
+      applyViewportSetting: vi.fn(async () => {}),
       openModal: vi.fn(),
       setRenderMode: vi.fn(),
     },
     chrome: init.chrome ?? STUB_CHROME,
     chromeActions: { navigate: vi.fn(), back: vi.fn(), forward: vi.fn(), reload: vi.fn() },
     hostCapable: init.hostCapable ?? true,
-    canPopOut: init.canPopOut ?? true,
+    renderModes: init.renderModes ?? ['agent-browser-screencast', 'agent-browser-popout', 'playwright-screencast', 'playwright-popout', 'iframe'],
+    viewportSetting: init.viewportSetting,
   });
+}
+
+/** How a fake browser host answers one kind of request. */
+export type BrowserAnswers = {
+  [K in BrowserOp['op']]?: (request: Extract<BrowserRequest, { op: K }>) => BrowserResult | Promise<BrowserResult>;
+};
+
+/**
+ * Install a platform whose host drives `providers`, answering each typed
+ * browser request from `answers` by operation — `{ ok: true }` where none is
+ * given, and for `view` a viewer socket URL naming the stream as its port, so
+ * a test finds a Surface's socket by the stream it views. `answers` stays
+ * live, so a test may swap one mid-flight; `requests`
+ * reads back every request of one kind, in order, without the ids a Surface
+ * mints for its launches and attaches and a close's `cancels` of them — fresh
+ * UUIDs no test can predict (`browser`'s calls keep them).
+ */
+function withoutIds(request: BrowserRequest): BrowserRequest {
+  const { requestId: _id, cancels: _cancels, ...rest } = request as BrowserRequest & { requestId?: string; cancels?: string[] };
+  return rest as BrowserRequest;
+}
+
+export function installBrowserHost(
+  answers: BrowserAnswers = {},
+  providers: readonly BrowserAutomationProvider[] = BROWSER_PROVIDER_IDS,
+) {
+  const browser = vi.fn(async (request: BrowserRequest): Promise<BrowserResult> => {
+    const answer = answers[request.op] as ((r: BrowserRequest) => BrowserResult | Promise<BrowserResult>) | undefined;
+    if (!answer && request.op === 'view') return { ok: true, url: `ws://127.0.0.1:${request.stream}` };
+    return (await answer?.(request)) ?? { ok: true };
+  });
+  const platform = Object.assign(new FakePtyAdapter(), { browserProviders: providers, browser });
+  setPlatform(platform);
+  const requests = <K extends BrowserOp['op']>(op: K): Extract<BrowserRequest, { op: K }>[] =>
+    browser.mock.calls.map(([request]) => withoutIds(request)).filter((request): request is Extract<BrowserRequest, { op: K }> => request.op === op);
+  return { platform, browser, answers, requests };
 }

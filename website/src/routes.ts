@@ -11,6 +11,8 @@ export default [
   route("playground/desktop", "./pages/PlaygroundDesktop.tsx"),
   route("playground/pocket", "./pages/PocketPlayground.tsx"),
   route("pocket", "./pages/Pocket.tsx"),
+  route("privacy", "./pages/Privacy.tsx"),
+  route("terms", "./pages/Terms.tsx"),
   ...DOCS_PAGES.map((page) => route(page.path.slice(1), page.module)),
   // Not in the rail: the standalone updater deep-links it after an update
   // (standalone/src/updater.ts), so it is a parameterized view of the

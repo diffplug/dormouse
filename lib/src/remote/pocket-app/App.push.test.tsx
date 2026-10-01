@@ -42,10 +42,11 @@ vi.mock('remote-lib-common', async (importOriginal) => ({
   probeNoiseSupport: () => Promise.resolve(true),
 }));
 
+vi.mock('../client/install-state', () => ({ isInstalledWebApp: () => true }));
+
 vi.mock('../client/push-subscribe', () => ({
   getPushAvailability: () => Promise.resolve(fake.availability),
   hasCurrentPushSubscription: () => Promise.resolve(false),
-  isInstalledWebApp: () => true,
   needsHomeScreenInstall: () => false,
   subscribeToPushInBrowser: (key: string, onReplaced: () => void) =>
     fake.subscribeInBrowser(key, onReplaced),
@@ -61,6 +62,7 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     hasPriorUse = () => true;
     registeredPushEndpoint = () => null;
     setOnBurrowGone = () => undefined;
+    setOnTransportChanged = () => undefined;
     close = () => undefined;
     openSocket = async () => undefined;
     signin = async () => ({});

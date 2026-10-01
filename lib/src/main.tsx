@@ -5,6 +5,7 @@ import { resumeOrRestore } from "./lib/reconnect";
 import { initAlertStateReceiver } from "./lib/terminal-registry";
 import { installVscodeThemeVarResolver } from "./lib/themes/vscode-color-observer";
 import { installPeerSurfaceResponder } from "./remote/burrow/peer-surfaces";
+import { wallBootFromResult } from "./components/wall/wall-types";
 import App from "./App";
 import "./index.css";
 
@@ -26,11 +27,12 @@ if (isVscode) {
 initAlertStateReceiver();
 
 // Request PTY list before rendering so Wall can restore existing sessions.
-// On non-VSCode platforms (or first launch), this resolves immediately with no IDs.
+// With nothing saved (a first launch, or the fake adapter) this self-caps at
+// 500 ms; only a saved terminal pane buys the 3 s retry.
 resumeOrRestore(platform).then((result) => {
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
-      <App initialPaneIds={result.paneIds} restoredLathLayout={result.lathLayout} initialDoors={result.doors} initialSurfaceRefs={result.surfaceRefs} initialSurfaceRefsNext={result.surfaceRefsNext} enableBurrow={isVscode} />
+      <App {...wallBootFromResult(result)} enableBurrow={isVscode} />
     </StrictMode>,
   );
 });

@@ -9,11 +9,9 @@ No project-specific tend preferences yet beyond the notes below. Add guidance he
 
 When asking permission to file an issue upstream (e.g. at `max-sixty/tend`), do **not** include the standing-exception offer ("I can treat this target as file-directly going forward"). nedtwigg wants to keep approving each cross-repo issue individually — keep asking each time, and skip the offer. ([diffplug/dormouse#168](https://github.com/diffplug/dormouse/issues/168#issuecomment-4836133002))
 
-## The Chromatic `UI Tests` check is human-gated — don't wait it out in a gated-approval poll
+## CI polls skip the `Hosted PR preview` deploy jobs
 
-After approving a visually-changing PR the approval is gated, so the CI Monitoring poll runs to dismiss-on-red. One status context — **`UI Tests`** (Chromatic, `target_url` → `chromatic.com/build...`) — stays `PENDING` for the entire poll because Chromatic holds it open until a maintainer accepts or rejects the visual diffs in the Chromatic UI; it does **not** auto-terminalize in-session. Its sibling **`Storybook Publish`** (also Chromatic) *does* terminalize normally, so this applies only to `UI Tests`.
-
-When `UI Tests` is the only non-terminal check and every automated check is green (Build & Test, Visual Regression Tests, verify, Standalone Smoketest, Cloudflare Pages, Storybook Publish), treat it as human-gated: stop polling, confirm nothing flipped to FAILURE, and keep the approval standing — don't wait out the poll cap. Polling it to the cap wastes ~9–17 job-minutes per visually-changing PR with no added signal. (Observed on #203, #289, #317.)
+Append `--skip deploy --skip cleanup` after the PR number and SHA in every `poll_pr_checks.py` call (`poll` and `approval`). Those are the `Hosted PR preview` jobs bound to the `hosted-preview` environment, which requires a maintainer's approval. They sit in `waiting` until someone approves them, and `cleanup` starts on the PR's head when it merges. A poll that waits for either never finishes, and the session runs until the job timeout kills it. Neither job gates a merge. `verify`, which builds and tests Hosted, runs ungated and stays in the poll.
 
 ## A restart starts clean — don't carry a superseded PR's findings forward
 

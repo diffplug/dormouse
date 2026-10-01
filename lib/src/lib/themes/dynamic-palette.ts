@@ -56,6 +56,9 @@ export interface DoorChoice {
 export function pickDoorPair(panelLab: Lab, terminalLab: Lab, appLab: Lab): DoorChoice {
   const panelDist = deltaEOklab(panelLab, appLab);
   const termDist = deltaEOklab(terminalLab, appLab);
+  // `>=`, not `>`: an exact tie takes the panel, because doors are chrome and
+  // should anchor to the chrome palette when neither pair reads as further
+  // from the page. Pinned by dynamic-palette.picks.test.ts.
   return panelDist >= termDist
     ? { bg: '--color-header-inactive-bg', fg: '--color-header-inactive-fg' }
     : { bg: '--color-terminal-bg', fg: '--color-terminal-fg' };

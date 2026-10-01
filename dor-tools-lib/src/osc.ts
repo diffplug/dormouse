@@ -1,0 +1,160 @@
+/**
+ * OSC 367 — the Dor Tool announcement (`docs/specs/dor-tool.md` -> OSC 367).
+ * `DOR` on a phone keypad; registered in `docs/specs/terminal-escapes.md`.
+ * A Tool writes these sequences to its terminal; its host parses them.
+ *
+ * **The announcement never mints a tool.** `port` selects among the ports the
+ * scan already sees; an announced port that nothing bound frames nothing.
+ *
+ * Verb-multiplexed like OSC 633, so the contract can grow without burning
+ * registry numbers. The payload is untrusted process output that reaches UI, so
+ * it is sanitized and size-capped like OSC 9/99/777 (`docs/specs/alert.md`).
+ */
+
+import { isRecord, sanitizeText } from './sanitize.js';
+
+/** Cap on the whole payload before parsing. A tool's announcement is a handful
+ *  of fields; anything larger is a mistake or an attack, and JSON.parse on
+ *  unbounded terminal output is not something to offer. */
+const PAYLOAD_LIMIT = 4096;
+const NAME_LIMIT = 200;
+const KEY_ELEMENT_LIMIT = 512;
+const KEY_ELEMENTS_LIMIT = 8;
+
+export type ToolAnnounce = {
+  /** Which of the tool's ports to frame. Null when unstated. */
+  port: number | null;
+  /** Same-origin path/query for the discovered port; never an authority. */
+  path?: string;
+  /** Title candidate, feeding the existing channel in terminal-state.md. */
+  name: string | null;
+  /** Re-key request. Never dedupes — a runtime re-key only re-labels its own
+   *  Surface, because a late collision between two Surfaces that both hold work
+   *  cannot be resolved by killing either. */
+  key: string[] | null;
+  /** Reserved for D2: the tool can produce a dehydrate payload on graceful stop. */
+  dehydrate: boolean;
+  /** Reserved for D1/D2 restart policy. */
+  persist: 'respawn' | 'never' | null;
+};
+
+function sanitize(value: unknown, limit: number): string | null {
+  return typeof value === 'string' ? sanitizeText(value, limit) : null;
+}
+
+function readPort(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null;
+  return value >= 1 && value <= 65535 ? value : null;
+}
+
+function readKey(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > KEY_ELEMENTS_LIMIT) return null;
+  const elements: string[] = [];
+  for (const element of value) {
+    const cleaned = sanitize(element, KEY_ELEMENT_LIMIT);
+    if (cleaned === null) return null;
+    elements.push(cleaned);
+  }
+  return elements;
+}
+
+/**
+ * Split `<verb>;<json>` for one OSC 367 verb and parse its object payload.
+ * Returns null for another verb, an oversized or malformed payload, or a
+ * non-object — never throws, because this runs on arbitrary process output.
+ */
+export function parseToolPayload(content: string, verb: string): Record<string, unknown> | null {
+  if (!content.startsWith(`${verb};`)) return null;
+  const raw = content.slice(verb.length + 1);
+  if (raw.length === 0 || raw.length > PAYLOAD_LIMIT) return null;
+  try {
+    const payload: unknown = JSON.parse(raw);
+    return isRecord(payload) ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a `serve` announcement; `content` is everything after `367;`.
+ *  `dehydrate` is D2's verb; parsed as unknown here rather than half-honored. */
+export function parseToolAnnounce(content: string): ToolAnnounce | null {
+  const record = parseToolPayload(content, 'serve');
+  if (!record) return null;
+  // A payload that names a version this parser does not speak is refused whole
+  // rather than half-honored: a v2 `serve` may reuse a field name for something
+  // else. `v` is optional — an omitted one is v1, the shipped shape — but a
+  // stated one must be 1 (`docs/specs/dor-tool.md` -> OSC 367).
+  if (record.v !== undefined && record.v !== 1) return null;
+
+  const announce: ToolAnnounce = {
+    port: readPort(record.port),
+    ...(validToolServePath(record.path) ? { path: record.path } : {}),
+    name: sanitize(record.name, NAME_LIMIT),
+    key: readKey(record.key),
+    dehydrate: record.dehydrate === true,
+    persist: record.persist === 'never' ? 'never' : record.persist === 'respawn' ? 'respawn' : null,
+  };
+  // An announcement that says nothing actionable is not an announcement.
+  if (announce.port === null && announce.name === null && announce.key === null) return null;
+  return announce;
+}
+
+/** Reject authority changes rather than trying to repair process output. */
+export function validToolServePath(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 2048 && value.startsWith('/')
+    && !value.startsWith('//') && !/[\\\u0000-\u0020\u007f]/.test(value);
+}
+
+export interface ToolState { dirty: boolean }
+
+/** Parse a `state` report; `content` is everything after `367;`. State is
+ * independent of serving metadata. Reject unsupported versions and non-booleans
+ * rather than treating absent or invalid data as clean. */
+export function parseToolState(content: string): ToolState | null {
+  const record = parseToolPayload(content, 'state');
+  return record && record.v === 1 && typeof record.dirty === 'boolean' ? { dirty: record.dirty } : null;
+}
+
+export interface ToolOpen { path: string; preview: boolean }
+
+const OPEN_PATH_LIMIT = 2048;
+
+/** An absolute native path: POSIX, or a Windows drive path. Never a URL, a
+ * relative path, or one carrying a control character. */
+export function validToolOpenPath(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= OPEN_PATH_LIMIT
+    && (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+}
+
+/** Parse an `open` request; `content` is everything after `367;`. `preview`
+ * defaults to false, as `dor open` does. */
+export function parseToolOpen(content: string): ToolOpen | null {
+  const record = parseToolPayload(content, 'open');
+  if (!record || record.v !== 1 || !validToolOpenPath(record.path)) return null;
+  if (record.preview !== undefined && typeof record.preview !== 'boolean') return null;
+  return { path: record.path, preview: record.preview === true };
+}
+
+/** The `serve` announcement a Tool writes once its server listens: the port to
+ * frame and, optionally, the same-origin path to open on it. Throws on a value
+ * the host would ignore. */
+export function serveSequence({ port, path }: { port: number; path?: string }): string {
+  if (readPort(port) === null) throw new RangeError(`not a TCP port: ${port}`);
+  if (path !== undefined && !validToolServePath(path)) throw new RangeError(`not a same-origin path: ${JSON.stringify(path)}`);
+  return sequence('serve', path === undefined ? { port, v: 1 } : { port, path, v: 1 });
+}
+
+/** The `state` report a Tool writes whenever its unsaved state changes. */
+export function stateSequence({ dirty }: ToolState): string {
+  return sequence('state', { v: 1, dirty });
+}
+
+/** The `open` request a Tool writes to show `path` in the Workspace's preview
+ * slot (`preview`) or open it as `dor open` would. The host answers nothing;
+ * a failure shows in the preview slot. Throws on a path the host would ignore. */
+export function openSequence({ path, preview = false }: { path: string; preview?: boolean }): string {
+  if (!validToolOpenPath(path)) throw new RangeError(`not an absolute path: ${JSON.stringify(path)}`);
+  return sequence('open', { v: 1, path, preview });
+}
+
+const sequence = (verb: string, payload: object) => `\x1b]367;${verb};${JSON.stringify(payload)}\x07`;

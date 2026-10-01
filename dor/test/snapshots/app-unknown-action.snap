@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: unknown dor app action 'quit' (expected restart)

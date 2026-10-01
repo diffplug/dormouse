@@ -1,3 +1,4 @@
+import { getToolDirty, resetToolDirty } from '../tool-dirty-store';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakePtyAdapter, type FakeScenario } from './fake-adapter';
 import { ITERM2_DEVICE_ATTRIBUTES_RESPONSE } from '../terminal-protocol';
@@ -10,6 +11,7 @@ describe('FakePtyAdapter', () => {
 
   afterEach(() => {
     removeTerminalPaneState('pane-a');
+    resetToolDirty();
     vi.useRealTimers();
   });
 
@@ -23,6 +25,15 @@ describe('FakePtyAdapter', () => {
   }
 
   // --- Core (Story 11.1) ---
+
+  it('records ordered dirty reports from ordinary PTYs without inferring clean on exit', () => {
+    const { adapter } = createAdapter();
+    adapter.spawnPty('dirty-fake');
+    adapter.writePty('dirty-fake', '\x1b]633;C\x07\x1b]367;state;{"v":1,"dirty":false}\x07');
+    expect(getToolDirty('dirty-fake')).toBe(false);
+    adapter.writePty('dirty-fake', '\x1b]367;state;{"v":1,"dirty":true}\x07\x1b]633;D;0\x07');
+    expect(getToolDirty('dirty-fake')).toBe(true);
+  });
 
   it('init resolves without error', async () => {
     const { adapter } = createAdapter();
@@ -65,9 +76,21 @@ describe('FakePtyAdapter', () => {
     expect(alertEvents.at(-1)).toMatchObject({
       id: 't1',
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'OSC 9', title: null, body: 'Build finished' },
     });
+  });
+
+  it('judges a report after the command boundary written before it', async () => {
+    const { adapter } = createAdapter();
+    adapter.spawnPty('t1');
+    adapter.sendOutput('t1', '\x1b]633;E;./build.sh\x07\x1b]633;C\x07');
+    const handle = adapter.alertAwait('t1', { until: 'quiet', timeoutMs: 600_000 });
+
+    // A precmd hook reports after the shell's finish, in the same read.
+    adapter.sendOutput('t1', '\x1b]633;D;0\x07\x1b]777;notify;Command completed;./build.sh\x1b\\');
+
+    await expect(handle.promise).resolves.toMatchObject({ kind: 'resolved', cause: 'exit' });
   });
 
   it('parses terminal bell output into alert state without forwarding the bell byte', () => {
@@ -82,7 +105,7 @@ describe('FakePtyAdapter', () => {
     expect(alertEvents.at(-1)).toMatchObject({
       id: 't1',
       status: 'ALERT_RINGING',
-      todo: true,
+      todo: false,
       notification: { source: 'BEL', title: 'Terminal bell', body: null },
     });
   });

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DESKTOP_SECTIONS, POCKET_TUTORIAL_PROFILE } from "./tut-items";
 import { TutorialState } from "./tutorial-state";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -34,7 +35,7 @@ describe("tutorial persistence", () => {
       ["dormouse-tut-star-v1", "true"],
       ["dormouse-flappy-high-v1", "12"],
     ]));
-    const state = new TutorialState();
+    const state = new TutorialState(DESKTOP_SECTIONS);
     expect(state.totalProgress().done).toBe(1);
     expect(state.isComplete("th-theme")).toBe(true);
     expect(state.isStarPromptResolved()).toBe(true);
@@ -51,7 +52,7 @@ describe("tutorial persistence", () => {
       configurable: true,
       get: () => { throw new Error("storage denied"); },
     });
-    completeAndReset(new TutorialState());
+    completeAndReset(new TutorialState(DESKTOP_SECTIONS));
   });
 
   it("reset removes rejected storage values even when progress is already empty", () => {
@@ -60,7 +61,7 @@ describe("tutorial persistence", () => {
       ["dormouse-tut-star-v1", '"true"'],
       ["dormouse-flappy-high-v1", "-12"],
     ]));
-    const state = new TutorialState();
+    const state = new TutorialState(DESKTOP_SECTIONS);
     const listener = vi.fn();
     state.subscribe(listener);
     state.reset();
@@ -73,7 +74,7 @@ describe("tutorial persistence", () => {
     for (const method of ["getItem", "setItem", "removeItem"] as const) {
       vi.spyOn(storage, method).mockImplementation(() => { throw new Error("storage denied"); });
     }
-    completeAndReset(new TutorialState());
+    completeAndReset(new TutorialState(DESKTOP_SECTIONS));
   });
 
   it("starts fresh after malformed stored values", () => {
@@ -82,6 +83,20 @@ describe("tutorial persistence", () => {
       ["dormouse-tut-star-v1", '"true"'],
       ["dormouse-flappy-high-v1", "-12"],
     ]));
-    completeAndReset(new TutorialState());
+    completeAndReset(new TutorialState(DESKTOP_SECTIONS));
+  });
+
+  it("does not let one profile pre-check the other's checklist", () => {
+    const { values } = installStorage();
+    // Pocket's Select mode credits `cp-override` on every mouse-capturing
+    // session, but Pocket's own checklist does not carry the item — the
+    // desktop one does, and both profiles share this storage key.
+    const pocket = new TutorialState(POCKET_TUTORIAL_PROFILE.sections);
+    expect(pocket.markComplete("cp-override")).toBe(false);
+    expect(pocket.isComplete("cp-override")).toBe(false);
+    expect(values.get("dormouse-tut-v3")).toBeUndefined();
+
+    const desktop = new TutorialState(DESKTOP_SECTIONS);
+    expect(desktop.isComplete("cp-override")).toBe(false);
   });
 });

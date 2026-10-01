@@ -60,7 +60,7 @@ export interface PocketNotification {
  */
 export async function notificationForPush(
   payload: unknown,
-  store: KnownBurrowStore,
+  store: Pick<KnownBurrowStore, 'get'>,
 ): Promise<PocketNotification> {
   try {
     return (await openNotification(payload, store)) ?? GENERIC_PUSH_NOTIFICATION;
@@ -72,7 +72,7 @@ export async function notificationForPush(
 /** The readable case, or `null` for every way it can fail to be one. */
 async function openNotification(
   payload: unknown,
-  store: KnownBurrowStore,
+  store: Pick<KnownBurrowStore, 'get'>,
 ): Promise<PocketNotification | null> {
   if (!payload || typeof payload !== 'object') return null;
   const envelope = payload as { burrowId?: unknown };
@@ -123,7 +123,7 @@ function notificationOptions(notification: PocketNotification): NotificationOpti
 }
 
 /** Wire this worker's four handlers onto `scope`. */
-export function installPocketWorker(scope: WorkerScope, store: KnownBurrowStore): void {
+export function installPocketWorker(scope: WorkerScope, store: Pick<KnownBurrowStore, 'get'>): void {
   scope.addEventListener('install', () => {
     // Nothing to precache, so there is no reason to wait for the old worker.
     scope.skipWaiting();

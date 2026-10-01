@@ -1,0 +1,120 @@
+name: Hosted production release
+on:
+  workflow_dispatch:
+    inputs:
+      promote:
+        description: Deploy to hosted.dormouse.sh after verification
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: hosted-production
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:hosted
+      - run: pnpm build:hosted
+      - name: Require accepted package provenance
+        run: node --input-type=module -e 'import { verifyPackages } from "./hosted/scripts/production.mjs"; await verifyPackages();'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-production-assets
+          path: hosted/dist
+          if-no-files-found: error
+          retention-days: 3
+  deploy:
+    needs: verify
+    if: inputs.promote
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: hosted-production
+      url: https://hosted.dormouse.sh
+    outputs:
+      verified-at: ${{ steps.live.outputs.verified-at }}
+      deployment-id: ${{ steps.live.outputs.deployment-id }}
+    env:
+      BUILD_SHA: ${{ github.sha }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      HYPERDRIVE_ID: ${{ vars.HYPERDRIVE_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: hosted-production-assets
+          path: hosted/dist
+      - name: Validate production identity, uncached Hyperdrive and Worker secrets
+        run: node hosted/scripts/production.mjs preflight
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Install backup encryption tool
+        run: sudo apt-get update -qq && sudo apt-get install -y age
+      - name: Back up and verify decryption and database restore
+        run: node hosted/scripts/production-backup.mjs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BACKUP_AGE_IDENTITY: ${{ secrets.BACKUP_AGE_IDENTITY }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: hosted-backup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: hosted/.wrangler/production-backup/*.age
+          if-no-files-found: error
+          retention-days: 30
+      - name: Apply and validate production migrations
+        run: pnpm --filter dormouse-hosted db:migrate && pnpm --filter dormouse-hosted db:validate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Deploy verified build
+        run: node hosted/scripts/production.mjs deploy
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify live production revision and auth boundary
+        id: live
+        run: |
+          node hosted/scripts/production.mjs smoke
+          echo "verified-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "deployment-id=$GITHUB_RUN_ID/$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+  tag:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: hosted-release-tag
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+      - name: Record the verified Hosted deployment
+        run: node hosted/scripts/production-tag.mjs
+        env:
+          # GITHUB_TOKEN cannot bypass the repository's admin-only tag ruleset.
+          GH_TOKEN: ${{ secrets.HOSTED_TAG_TOKEN }}
+          BUILD_SHA: ${{ github.sha }}
+          DEPLOYMENT_VERIFIED_AT: ${{ needs.deploy.outputs.verified-at }}
+          DEPLOYMENT_ID: ${{ needs.deploy.outputs.deployment-id }}

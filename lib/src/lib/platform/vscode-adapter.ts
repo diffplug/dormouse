@@ -1,28 +1,22 @@
-import type { HelperIdentity, TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
-import type { AgentBrowserCommandResult, AgentBrowserEditOp, AgentBrowserEditResult, AgentBrowserOpenResult, AgentBrowserPopResult, AgentBrowserScreenshotResult, AgentBrowserStreamStatusResult, AlertStateDetail, IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
-import { OPEN_PORT_TIMEOUT_MS } from './types';
+import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
+import { BROWSER_REQUEST_TIMEOUT_MS, type BrowserRequest, type BrowserResult } from './browser-automation';
+import { applyLiveToolEvents } from '../tool-events';
+import { offerProgramCopy } from '../mouse-selection';
+import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
+import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
+import { openPortRequestTimeoutMs } from './types';
 import { createBurrowLinkClient } from '../../host/remote/link-client';
-import type { AwaitHandle, AwaitOptions, AwaitOutcome } from '../alert-manager';
-import type { AlertSettings } from '../alert-settings';
-import type {
-  NotepadArchiveLoadResult,
-  NotepadArchivePort,
-  NotepadArchiveV1,
-  VolatileNotepadSnapshot,
-} from '../notepad/types';
+import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
+import { isAlertEvent } from '../../host/alert-protocol';
 import { readInjectedRecoveryCommands } from '../vscode-recovery-global';
-import { readInjectedVolatileNotepad } from '../vscode-notepad-global';
 import { setDefaultShellOpts } from '../shell-defaults';
 import { embedderOrigins } from '../embedder-origins';
 import {
-  collectTerminalSemanticEvents,
-  TerminalProtocolParser,
-} from '../terminal-protocol';
-import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
-import { getTerminalTheme, onTerminalThemeChange, themeColorProvider } from '../terminal-theme';
-import { isHostMessage, readHostMessageToken } from '../vscode-message-token';
+import { getTerminalTheme, onTerminalThemeChange } from '../terminal-theme';
+import { HOST_MESSAGE_TOKEN_FIELD, isHostMessage, readHostMessageToken } from '../vscode-message-token';
+import { parseReplay } from './replay-parse';
 import { cancelDorControlRequest, dispatchDorControlRequest } from './dor-control-dispatch';
 import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
 
@@ -34,8 +28,8 @@ import type { VSCodeWorkbenchCommand } from '../vscode-keybindings';
  */
 const DETACHED = Symbol('detached');
 
-/** The outcome a VS Code await handle reports when it can never be answered. */
-const CANCELLED_AWAIT: AwaitOutcome = { kind: 'cancelled', waitedMs: 0 };
+/** The `alert*` platform methods, taken from the shared client in the constructor. */
+export interface VSCodeAdapter extends AlertClientMethods {}
 
 export class VSCodeAdapter implements PlatformAdapter {
   // VS Code owns the theme here: it provides --vscode-* itself and has its own
@@ -44,6 +38,9 @@ export class VSCodeAdapter implements PlatformAdapter {
   // Same for the shell: VS Code's native `dormouse.selectShell` QuickPick owns
   // shell selection there, so the Settings dialog hides its Shell row.
   readonly hostOwnsShells = true;
+  // And updates: the Marketplace installs them, so Settings → Network shows
+  // that instead of an update check.
+  readonly hostOwnsUpdates = true;
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
   // Captured once, at construction, from the global the extension host injects
@@ -55,9 +52,9 @@ export class VSCodeAdapter implements PlatformAdapter {
   private listHandlers = new Set<(detail: { ptys: PtyInfo[] }) => void>();
   private replayHandlers = new Set<(detail: { id: string; data: string }) => void>();
   private flushRequestHandlers = new Set<(detail: { requestId: string }) => void>();
-  private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
-  private watchedCommandHandlers = new Set<(names: string[]) => void>();
-  private alertSettingsHandlers = new Set<(settings: AlertSettings) => void>();
+  // The alerts live in the extension host (`lib/src/host/alert-host.ts`); this
+  // webview is one of their viewers, through the client every host shares.
+  private readonly alerts = createAlertClient((command) => this.vscode.postMessage({ type: 'alert:command', command }));
   // --- Remote host bridge (docs/specs/remote-api.md) ---
   //
   // The Burrow lives in the extension host, next to the PTYs, in whichever VS
@@ -76,60 +73,12 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   readonly burrow: BurrowLink = this.burrowClient.link;
 
-  /**
-   * The mirror this webview booted with, consumed once by `loadVolatile()`.
-   * Captured at construction like every other boot global, so a later
-   * same-document write cannot move the goalposts.
-   */
-  private bootNotepadVolatile: VolatileNotepadSnapshot | null = readInjectedVolatileNotepad();
-
-  /**
-   * The archive lives in the extension host's `globalState` — nothing in the
-   * webview can reach it — so every call is a request/response round trip
-   * (docs/specs/notepad.md). The port is compare-and-swap: this side only ships
-   * bytes and the revision it read them at, and the shared service retries a
-   * `'conflict'`, so a second webview's concurrent append is never lost.
-   */
-  readonly notepadArchive: NotepadArchivePort = {
-    load: () => this.notepadRequest<NotepadArchiveLoadResult | null>('notepad:load', {}),
-    save: (archive: NotepadArchiveV1, baseRevision: string | null) =>
-      this.notepadRequest<'ok' | 'conflict'>('notepad:save', {
-        state: JSON.stringify(archive),
-        baseRevision,
-      }),
-    resetUnreadable: async () => {
-      await this.notepadRequest<void>('notepad:reset', {});
-    },
-    // Fire and forget: nothing waits on the mirror, and the next snapshot
-    // supersedes this one. It is what lets a teardown archive notes from a
-    // webview VS Code has already destroyed.
-    syncVolatile: (snapshot: VolatileNotepadSnapshot) => {
-      this.vscode.postMessage({ type: 'notepad:volatile', snapshot });
-    },
-    // Exactly once: a second read is a cold restore's read, and a cold restore
-    // must never hydrate live notes (docs/specs/notepad.md).
-    loadVolatile: () => {
-      const snapshot = this.bootNotepadVolatile;
-      this.bootNotepadVolatile = null;
-      return snapshot;
-    },
-  };
-
   constructor() {
     this.vscode = acquireVsCodeApi();
+    Object.assign(this, this.alerts.methods);
 
-    // These get called through detached references in the agent-browser panel
-    // (e.g. `getPlatform().agentBrowserScreenshot`), which would otherwise drop
-    // `this` and throw on the internal `requestResponse`. Bind them once so any
-    // call style is safe.
-    this.agentBrowserCommand = this.agentBrowserCommand.bind(this);
-    this.agentBrowserEdit = this.agentBrowserEdit.bind(this);
-    this.agentBrowserScreenshot = this.agentBrowserScreenshot.bind(this);
-    this.agentBrowserStreamStatus = this.agentBrowserStreamStatus.bind(this);
-    this.getAgentBrowserStreamUrl = this.getAgentBrowserStreamUrl.bind(this);
-    this.agentBrowserOpen = this.agentBrowserOpen.bind(this);
-    this.agentBrowserPopOut = this.agentBrowserPopOut.bind(this);
-    this.agentBrowserPopIn = this.agentBrowserPopIn.bind(this);
+    // Called through a detached reference, which would otherwise drop `this`
+    // and throw on the internal `requestResponse`.
     this.createIframeProxyUrl = this.createIframeProxyUrl.bind(this);
 
     // Seed the default shell from the extension-injected global so that
@@ -168,41 +117,25 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ ptys: msg.ptys });
         }
       } else if (msg.type === 'pty:replay') {
-        // Replay arrives as raw buffered output in a single chunk. Live pty:data
-        // is pre-parsed by the extension host, so we only need a one-shot parser
-        // here to reconstruct semantic state from the buffered bytes and strip
-        // OSCs before xterm sees them. See docs/specs/vscode.md. It gets the
-        // theme for the same reason every other parser does: a *declined* query
-        // is not consumed, so it reaches xterm.js, and answering is the owner's
-        // alone. The replay report filter catches the reply that provokes — a
-        // backstop, not the contract.
-        const parser = new TerminalProtocolParser(themeColorProvider);
-        const parsed = parser.process(msg.data);
-        applyTerminalSemanticEvents(msg.id, collectTerminalSemanticEvents(parsed.events));
+        // The replay report filter catches the reply a declined colour query
+        // provokes — a backstop, not the contract.
+        const data = parseReplay(msg.id, msg.data);
         for (const handler of this.replayHandlers) {
-          handler({ id: msg.id, data: parsed.visibleData });
+          handler({ id: msg.id, data });
         }
+      } else if (msg.type === 'terminal:toolEvents') {
+        applyLiveToolEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:semanticEvents') {
         applyTerminalSemanticEvents(msg.id, msg.events ?? []);
+      } else if (msg.type === 'terminal:clipboardOffer') {
+        if (typeof msg.text === 'string') offerProgramCopy(msg.id, msg.text);
       } else if (msg.type === 'dormouse:flushSessionSave') {
         for (const handler of this.flushRequestHandlers) {
           handler({ requestId: msg.requestId });
         }
-      } else if (msg.type === 'alert:state') {
-        // The host posts the whole `AlertState`; forwarding it wholesale is what
-        // keeps a new alert field from needing an edit on this path alone.
-        const { type: _type, ...detail } = msg;
-        for (const handler of this.alertStateHandlers) {
-          handler(detail);
-        }
-      } else if (msg.type === 'alert:watchedCommands') {
-        for (const handler of this.watchedCommandHandlers) {
-          handler(msg.names);
-        }
-      } else if (msg.type === 'alert:settings') {
-        for (const handler of this.alertSettingsHandlers) {
-          handler(msg.settings);
-        }
+      } else if (isAlertEvent(msg.type)) {
+        const { type, [HOST_MESSAGE_TOKEN_FIELD]: _token, ...data } = msg;
+        this.alerts.onEvent(type, data);
       } else if (msg.type === 'dormouse:newTerminal') {
         window.dispatchEvent(new CustomEvent('dormouse:new-terminal', {
           detail: {
@@ -258,27 +191,6 @@ export class VSCodeAdapter implements PlatformAdapter {
   }
 
   /**
-   * One archive round trip. Unlike `requestResponse` this *rejects* rather than
-   * resolving `null`: a `null` load legitimately means "nothing archived yet", so
-   * a timeout that looked like one would let the next save overwrite an archive
-   * nobody managed to read. The shared service turns a rejection into the
-   * unavailable/closure-failure paths (docs/specs/notepad.md → Archive).
-   */
-  private async notepadRequest<T>(
-    type: 'notepad:load' | 'notepad:save' | 'notepad:reset',
-    data: Record<string, unknown>,
-  ): Promise<T> {
-    // The reply object is never `null` on its own, so `requestResponse`'s `null`
-    // here can only be its timeout.
-    const reply = await this.requestResponse<{ ok: boolean; result?: unknown; error?: string }>(
-      type, 'notepad:result', data, (msg) => msg, 5000,
-    );
-    if (!reply) throw new Error(`${type} timed out`);
-    if (!reply.ok) throw new Error(reply.error || `${type} failed`);
-    return reply.result as T;
-  }
-
-  /**
    * One-shot listener for the host reply correlated by `requestId`. `detach`
    * stops listening and settles the promise with `DETACHED` (a caller's own
    * deadline fired). It settles rather than simply going quiet because a
@@ -320,8 +232,9 @@ export class VSCodeAdapter implements PlatformAdapter {
 
   shutdown(): void {
     // The extension host handles PTY cleanup, but nothing there will answer a
-    // command this webview is still holding once it goes away.
+    // command or an await this webview is still holding once it goes away.
     this.burrowClient.dispose();
+    this.alerts.dispose();
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
@@ -339,12 +252,12 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result;
   }
 
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; shell?: string; args?: string[]; helper?: HelperIdentity }): void {
+  spawnPty(id: string, options?: SpawnPtyOptions): void {
     this.vscode.postMessage({ type: 'pty:spawn', id, options });
   }
 
-  writePty(id: string, data: string): void {
-    this.vscode.postMessage({ type: 'pty:input', id, data });
+  writePty(id: string, data: string, options?: WritePtyOptions): void {
+    this.vscode.postMessage({ type: 'pty:input', id, data, paced: options?.paced, userInput: options?.userInput });
   }
 
   resizePty(id: string, cols: number, rows: number): void {
@@ -363,7 +276,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     const result = await this.requestResponse<OpenPort[]>(
       'pty:getOpenPorts', 'pty:openPorts', { id },
       (msg) => msg.ports as OpenPort[],
-      OPEN_PORT_TIMEOUT_MS,
+      openPortRequestTimeoutMs(1, 2),
     );
     return result ?? [];
   }
@@ -392,79 +305,23 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'dormouse:runWorkbenchCommand', command });
   }
 
-  async agentBrowserCommand(session: string, args: string[], binaryPath?: string): Promise<AgentBrowserCommandResult> {
-    const result = await this.requestResponse<AgentBrowserCommandResult>(
-      'agentBrowser:command', 'agentBrowser:commandResult', { session, args, binaryPath },
-      (msg) => ({ exitCode: msg.exitCode, stdout: msg.stdout, stderr: msg.stderr }),
-      10000,
-    );
-    return result ?? { exitCode: 1, stdout: '', stderr: 'agent-browser command timed out' };
+  readonly browserProviders = BROWSER_PROVIDER_IDS;
+
+  async browser(request: BrowserRequest): Promise<BrowserResult> {
+    return await this.requestResponse<BrowserResult>(
+      'browser:request', 'browser:result', { request }, (msg) => msg.result, BROWSER_REQUEST_TIMEOUT_MS,
+    ) ?? { ok: false, error: 'the browser host timed out' };
   }
 
-  async agentBrowserEdit(session: string, op: AgentBrowserEditOp, binaryPath?: string): Promise<AgentBrowserEditResult> {
-    const result = await this.requestResponse<AgentBrowserEditResult>(
-      'agentBrowser:edit', 'agentBrowser:editResult', { session, op, binaryPath },
-      (msg) => ({ ok: msg.ok, text: msg.text, error: msg.error }),
-      10000,
-    );
-    return result ?? { ok: false, error: 'agent-browser edit timed out' };
-  }
-
-  async agentBrowserScreenshot(session: string, opts: { format?: 'jpeg' | 'png'; quality?: number }, binaryPath?: string): Promise<AgentBrowserScreenshotResult> {
-    const result = await this.requestResponse<AgentBrowserScreenshotResult>(
-      'agentBrowser:screenshot', 'agentBrowser:screenshotResult',
-      { session, format: opts.format, quality: opts.quality, binaryPath },
-      (msg) => ({ ok: msg.ok, bytes: msg.bytes, mime: msg.mime, error: msg.error }),
-      10000,
-    );
-    return result ?? { ok: false, error: 'agent-browser screenshot timed out' };
-  }
-
-  async agentBrowserStreamStatus(session: string, binaryPath?: string): Promise<AgentBrowserStreamStatusResult> {
-    const result = await this.requestResponse<AgentBrowserStreamStatusResult>(
-      'agentBrowser:streamStatus', 'agentBrowser:streamStatusResult',
-      { session, binaryPath },
-      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, error: msg.error }),
+  async toolControl(request: ToolHostRequest): Promise<ToolControlResult> {
+    // The extension host owns the filesystem (vscode-ext/src/tool-host.ts). A
+    // timeout reports an error rather than hanging `dor tool`, which blocks on it.
+    const result = await this.requestResponse<ToolControlResult>(
+      'tool:control', 'tool:result', { request },
+      (msg) => msg.result,
       5000,
     );
-    return result ?? { ok: false, error: 'agent-browser stream status timed out' };
-  }
-
-  getAgentBrowserStreamUrl(port: number): Promise<string | null> {
-    // The agent-browser stream server rejects vscode-webview:// origins, so
-    // the extension host relays the stream (see agent-browser-host.ts).
-    return this.requestResponse<string | null>(
-      'agentBrowser:getStreamUrl', 'agentBrowser:streamUrl', { port },
-      (msg) => msg.url,
-      5000,
-    );
-  }
-
-  async agentBrowserOpen(url: string, opts: { headed?: boolean }, binaryPath?: string): Promise<AgentBrowserOpenResult> {
-    const result = await this.requestResponse<AgentBrowserOpenResult>(
-      'agentBrowser:open', 'agentBrowser:openResult', { url, headed: opts.headed, binaryPath },
-      (msg) => ({ ok: msg.ok, session: msg.session, wsPort: msg.wsPort, binaryPath: msg.binaryPath, error: msg.error }),
-      15000,
-    );
-    return result ?? { ok: false, error: 'agent-browser open timed out' };
-  }
-
-  async agentBrowserPopOut(session: string, opts: { rect?: { x: number; y: number; width: number; height: number }; url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult> {
-    const result = await this.requestResponse<AgentBrowserPopResult>(
-      'agentBrowser:popOut', 'agentBrowser:popResult', { session, url: opts.url, rect: opts.rect, binaryPath },
-      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, error: msg.error }),
-      15000,
-    );
-    return result ?? { ok: false, error: 'agent-browser pop-out timed out' };
-  }
-
-  async agentBrowserPopIn(session: string, opts: { url?: string }, binaryPath?: string): Promise<AgentBrowserPopResult> {
-    const result = await this.requestResponse<AgentBrowserPopResult>(
-      'agentBrowser:popIn', 'agentBrowser:popResult', { session, url: opts.url, binaryPath },
-      (msg) => ({ ok: msg.ok, wsPort: msg.wsPort, error: msg.error }),
-      15000,
-    );
-    return result ?? { ok: false, error: 'agent-browser pop-in timed out' };
+    return result ?? { status: 'error', message: 'tool request timed out' };
   }
 
   async createIframeProxyUrl(url: string): Promise<IframeProxyResult> {
@@ -542,87 +399,6 @@ export class VSCodeAdapter implements PlatformAdapter {
     this.vscode.postMessage({ type: 'dormouse:flushSessionSaveDone', requestId });
   }
 
-  // --- Alert management (proxied to extension host) ---
-
-  alertRemove(id: string): void {
-    this.vscode.postMessage({ type: 'alert:remove', id });
-  }
-
-  alertSetWatchedCommands(names: string[]): void {
-    this.vscode.postMessage({ type: 'alert:initializeWatchedCommands', names });
-  }
-
-  alertSetCommandWatched(name: string, watched: boolean): void {
-    this.vscode.postMessage({ type: 'alert:setCommandWatched', name, watched });
-  }
-
-  alertPublishSettings(settings: AlertSettings, opts: { seed: boolean }): void {
-    this.vscode.postMessage({
-      type: opts.seed ? 'alert:initializeSettings' : 'alert:updateSettings',
-      settings,
-    });
-  }
-
-  alertDismiss(id: string): void {
-    this.vscode.postMessage({ type: 'alert:dismiss', id });
-  }
-
-  alertAttend(id: string): void {
-    this.vscode.postMessage({ type: 'alert:attend', id });
-  }
-
-  alertResize(id: string): void {
-    this.vscode.postMessage({ type: 'alert:resize', id });
-  }
-
-  alertClearAttention(id?: string): void {
-    this.vscode.postMessage({ type: 'alert:clearAttention', id });
-  }
-
-  alertToggleTodo(id: string): void {
-    this.vscode.postMessage({ type: 'alert:toggleTodo', id });
-  }
-
-  alertMarkTodo(id: string): void {
-    this.vscode.postMessage({ type: 'alert:markTodo', id });
-  }
-
-  alertClearTodo(id: string): void {
-    this.vscode.postMessage({ type: 'alert:clearTodo', id });
-  }
-
-  /**
-   * The `AlertManager` lives in the extension host, so the wait parks there and
-   * only its outcome crosses back. Unlike `requestResponse` this has no local
-   * deadline — the ceiling is `timeoutMs`, enforced host-side — and `cancel()`
-   * asks rather than answers: the `cancelled` outcome arrives on the same
-   * result message as every other, so a claim is never released twice.
-   */
-  alertAwait(id: string, options: AwaitOptions): AwaitHandle {
-    const requestId = `req-${++this.nextRequestId}`;
-    const { promise } = this.awaitHostReply('alert:awaitResult', requestId, (msg) => msg.outcome as AwaitOutcome);
-    this.vscode.postMessage({ type: 'alert:await', requestId, id, until: options.until, timeoutMs: options.timeoutMs });
-    return {
-      // Nothing detaches this reply — the host answers exactly one
-      // `alert:awaitResult` per request, a cancel included — but the mapping
-      // keeps the handle's `AwaitOutcome` contract without a cast.
-      promise: promise.then((outcome) => (outcome === DETACHED ? CANCELLED_AWAIT : outcome)),
-      cancel: () => this.vscode.postMessage({ type: 'alert:awaitCancel', requestId }),
-    };
-  }
-
-  onAlertState(handler: (detail: AlertStateDetail) => void): void {
-    this.alertStateHandlers.add(handler);
-  }
-
-  onWatchedCommands(handler: (names: string[]) => void): void {
-    this.watchedCommandHandlers.add(handler);
-  }
-
-  onAlertSettings(handler: (settings: AlertSettings) => void): void {
-    this.alertSettingsHandlers.add(handler);
-  }
-
   // --- State persistence ---
 
   saveState(state: unknown): void {
@@ -647,7 +423,7 @@ export class VSCodeAdapter implements PlatformAdapter {
    * than a field on the persisted session precisely so the webview cannot write it
    * back — a `getState`/`saveState` cycle has nothing to carry forward, so no
    * later restore can replay a stale invocation
-   * (docs/specs/transport.md -> "Consuming it").
+   * (docs/compatible-agents.md -> "Cold restore").
    */
   getRecoveryCommands(): Record<string, string> {
     return readInjectedRecoveryCommands();

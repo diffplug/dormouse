@@ -12,26 +12,16 @@
 - **Must inject autorun only after integrated shell readiness**, accepting prompt-start and prompt-end/editing states with no current command. User input before injection cancels it. After eight seconds without readiness, show an unsupported state and never write a timeout fallback.
 - **Must treat typing, paste, accepted drops, and application mouse input as user work**, disarming automatic refresh until Reset or Promote. Selection, copying, resize, and terminal protocol replies do not count. Returning to idle does not rearm autorun.
 - **Must refresh an untouched, completed or autorun-disabled helper on reopening only after a host idle check.** Recheck ownership and the touched flag after that asynchronous check; foreground commands, background descendants, and failed/unknown inspection preserve the helper.
-- **Must hide a retained helper without terminating its PTY**, parking its xterm element in the document. Revealing or promoting reuses the same element; cleanup from an older mount cannot detach a newer mount.
+- **Must hide a retained helper without terminating its PTY**, parking its xterm element in the document. Revealing or promoting reuses the same element; cleanup from an older mount cannot detach a newer mount. Renderer resource lifetime follows `docs/specs/layout.md` → "Renderer".
 - **Must keep a preserved helper's directory independent of its source**, showing both locations prominently when they differ. Unknown directory state is not evidence of a match.
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
 - **Must pause status and process-inspection polling while the context is hidden**, invalidating cached idle results. Reopening publishes current terminal status; source closure inspects work on demand.
 
-| State | Status and action |
-|---|---|
-| Starting | Waiting for shell…; Modify |
-| Autorun executing | Running the captured command; Modify |
-| Untouched completion | Captured command autoran; Modify |
-| User input | Skipping autorun to preserve user keystrokes; Reset |
-| Empty default | Autorun off; Modify |
-| No readiness | Autorun skipped: shell readiness unavailable; Modify |
-| Exited | Helper exited; Reset |
+**Must carry one status line per helper state**, offering Reset in place of Modify only after user input and after exit.
 
 **Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
 
-Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
-
-Notepad sharing and pin restrictions follow `docs/specs/notepad.md` → "Helper terminals".
+Source of truth: `openHelper` / `helperHasWork` / `disposeHelper` / `closeHelperParent` in `lib/src/lib/helper-terminal.ts`; `markSessionTouched` / `parkElement` in `lib/src/lib/terminal-lifecycle.ts`; `HELPER_STATUS` — the state, its status line, and whether it offers Reset — in `lib/src/components/wall/TerminalContextView.tsx`. Tests: `lib/src/lib/helper-terminal.test.ts`.
 
 ## Promotion and source closure
 
@@ -61,7 +51,23 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 **Must share the context presentation between the live menu and its state gallery.**
 
-Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper with the fake shell.
+**Must make diagnostic text drag-selectable**, including detail-dialog errors, without focusing the helper. Copy routing follows `docs/specs/mouse-and-clipboard.md` → "Terminal context input".
+
+**Must suppress xterm's auto-revealed scrollbar in visual snapshots**, while retaining terminal scrolling and layout.
+
+**Must fit every control inside the panel at its minimum width, label included.** Port action overflow follows `docs/specs/layout.md` → "Header context menu". The gallery's play check measures each button against the panel and against its own box.
+
+Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint.
+
+## Tool context
+
+**Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
+
+**Must focus the Tool terminal instance directly**, bypassing its browser Surface focus handle.
+
+**Must mount only one terminal view for the Tool at a time**, moving its retained xterm between the full pane and context without disposing the Session. Context keystrokes, including terminal clipboard chords, belong to that terminal and never reach the browser underneath. Closing context preserves both processes and browser state.
+
+Source of truth: `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`. Tests: `lib/src/components/wall/TerminalContext.test.tsx`, `lib/src/components/Wall.test.tsx`.
 
 ## Future
 

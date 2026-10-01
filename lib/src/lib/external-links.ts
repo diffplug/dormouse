@@ -1,4 +1,8 @@
 const BLOCKED_EXTERNAL_URI_PROTOCOLS = new Set(['javascript:', 'data:', 'blob:', 'about:']);
+/** C0, DEL, and C1 controls. */
+const CONTROL_CHARACTER_RE = /[\x00-\x1f\x7f-\x9f]/;
+/** One DNS label, the source both host-shape patterns below are built from. */
+const DNS_LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
 
 export type DisplayMatchVerdict = 'match' | 'plain' | 'deceptive';
 
@@ -24,7 +28,7 @@ export function inspectExternalUri(input: string): ExternalUriDecision {
     return blocked(input, trimmed, null, 'No URL was provided.');
   }
 
-  if (/[\x00-\x1f\x7f-\x9f]/.test(trimmed)) {
+  if (CONTROL_CHARACTER_RE.test(trimmed)) {
     return blocked(input, trimmed, null, 'The URL contains control characters.');
   }
 
@@ -78,6 +82,42 @@ export function classifyDisplayMatch(uri: string, displayText: string): DisplayM
   return shapedHost === actualHost ? 'plain' : 'deceptive';
 }
 
+// A host the URL parser left as a plain DNS-style name: no IP literal brackets,
+// no port. Whether it names this machine is the host's decision.
+const PLAIN_HOSTNAME_RE = new RegExp(`^${DNS_LABEL}(?:\\.${DNS_LABEL})*$`, 'i');
+// One `ls -F` classifier, which may follow a name inside its link.
+const LS_CLASSIFIER_RE = /[/*@=|>]$/;
+
+/**
+ * The decoded absolute path of a `file:` link whose display text names its
+ * target, or null for every link that must go to the confirmation dialog
+ * (`docs/specs/dor-tool.md` -> Terminal links). The text, trimmed and with at
+ * most one trailing `ls -F` classifier removed, must equal the path or be a
+ * whole-component suffix of it: `x/README.md` names `/x/README.md`,
+ * `EADME.md` does not.
+ */
+export function localFileLinkPreviewPath(uri: string, displayText: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(uri);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'file:' || (url.host !== '' && !PLAIN_HOSTNAME_RE.test(url.host))) return null;
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    return null;
+  }
+  if (CONTROL_CHARACTER_RE.test(path)) return null;
+  // A folder's URI may end in `/`; its name never does.
+  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  const names = (text: string) => text !== '' && (path === text || path.endsWith(`/${text}`));
+  const text = displayText.trim();
+  return names(text) || names(text.replace(LS_CLASSIFIER_RE, '')) ? path : null;
+}
+
 function normalizeForMatch(value: string): string {
   let v = value.trim().toLowerCase();
   // Drop a trailing slash so `https://x.com` and `https://x.com/` match.
@@ -97,7 +137,7 @@ function safeHost(uri: string): string | null {
 // domain (`goog1e.com`, `www.example.org/path`). Bare-domain detection is the
 // classic phishing shape — the attacker shows what looks like a domain in a
 // terminal label that actually links somewhere else.
-const BARE_DOMAIN_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?:[/?#].*)?$/i;
+const BARE_DOMAIN_RE = new RegExp(`^${DNS_LABEL}(?:\\.${DNS_LABEL})+(?:[/?#].*)?$`, 'i');
 
 function extractUrlShapedHost(text: string): string | null {
   const t = text.trim();

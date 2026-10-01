@@ -1,6 +1,9 @@
 /**
  * Environment-free Burrow service shared by both Node burrows; see
- * `docs/specs/relay.md` → "Burrow side". Surface ownership is injected through
+ * `docs/specs/relay.md` → "Burrow side", `docs/specs/one-time.md` → "Service
+ * and hosts" for the one-time connection it also holds, and
+ * `docs/specs/remote-network.md` → "Policy" for the network policy it holds
+ * and enforces. Surface ownership is injected through
  * {@link BurrowSurfaceProvider}.
  */
 
@@ -12,10 +15,11 @@ import {
   formatPairingInvitationUrl,
   isSetupTokenResponse,
   mintNoiseStaticKeyPair,
-  normalizeOrigin,
+  randomBase64Url,
   type EnrollmentOffer,
 } from 'remote-lib-common';
 import {
+  originMismatchMessage,
   performEnrollment,
   type BurrowEnrollCredential,
   type BurrowEnrollment,
@@ -30,6 +34,7 @@ import {
   PUSH_TEST_TITLE,
   type AlertPushDeps,
 } from '../../remote/burrow/push-delivery';
+import type { RemoteApiSessionContext } from '../../remote/burrow/established-session';
 import { RemoteApiSession } from '../../remote/burrow/remote-api';
 import {
   BurrowRuntime,
@@ -37,28 +42,55 @@ import {
   type PairingOutcome,
   type WebSocketLike,
 } from '../../remote/burrow/burrow-runtime';
-import { originAllowedByConnectSrc } from './connect-src';
+import {
+  OneTimeRuntime,
+  type OneTimeApprovalRequest,
+  type OneTimeState,
+} from '../../remote/burrow/one-time-runtime';
+import {
+  MAX_ALLOWED_NETWORKS,
+  levelsFor,
+  networkPolicyResult,
+  nothingPolicy,
+  opensOneTimeLinks,
+  parseNetworkPolicy,
+  runsBurrow,
+  type NetworkInterfaceInfo,
+  type NetworkLevel,
+  type NetworkPolicy,
+  type NetworkPolicyResult,
+} from '../../remote/network-policy';
+import { hostedOrigin, isRelayOrigin, type RelayBuild } from '../relay-origin';
 import { readEnrollmentOffer } from './enroll-offer';
 import type { BurrowStateStore } from './burrow-state-store';
+import { directPeeringFor, samePaths } from './direct-peering';
+import type { BurrowDirectPeerFactory } from './native-direct-peer';
+import { canonicalCidr, listNetworkInterfaces } from './network-interfaces';
 import { createSerialQueue } from './serial-queue';
 import {
   BURROW_EVENT_EVENT,
   BURROW_RESULT_EVENT,
+  approvalKind,
+  idleOneTimeState,
   isBurrowCommand,
   type ApproveParams,
+  type BurrowUiEvent,
   type DenyParams,
   type EnrollOfferParams,
   type EnrollParams,
   type EnrollResult,
   type BurrowStatusEvent,
   type InvitationEvent,
+  type OneTimeEvent,
   type PairingQueueEvent,
   type PairingQueueItem,
   type PushDevicesResult,
-  type PushParams,
   type PushSendSummary,
   type BurrowConsoleStatus,
+  type SetNetworkPolicyParams,
   type SetupQrResult,
+  type TakeBackParams,
+  type TakeBackResult,
 } from './service-protocol';
 
 export interface BurrowServiceOptions {
@@ -72,9 +104,29 @@ export interface BurrowServiceOptions {
   kind: BurrowKind;
   /** Emit one of the `burrow:*` events to the webview. */
   sendToUi: (event: string, data: unknown) => void;
-  /** The CSP-shaped allowlist this build was compiled with (`connect-src.ts`). */
-  connectSrc: string;
+  /**
+   * This build's `bakedRelay()` (`docs/specs/relay.md` → "Relay origin"): the
+   * only Relay this Burrow enrolls with or connects to, and in a Hosted build
+   * the one-time rendezvous too. **Never webview input**: no command carries
+   * an origin.
+   */
+  relay: RelayBuild;
+  /**
+   * Opens the relay socket and the one-time rendezvous alike. **Must send no
+   * `Origin` header** — the rendezvous refuses one, so that no browser page can
+   * mint a room — which Node's global `WebSocket` (the default) and `ws` both
+   * already do. Reached only through the service's transport guard, as is
+   * {@link BurrowServiceOptions.fetch}.
+   */
   createWebSocket?: (url: string) => WebSocketLike;
+  /**
+   * How this host builds a peer connection for the direct path
+   * (`docs/specs/remote-api.md` → Transport → "Direct path"). Threaded rather
+   * than defaulted: the runtimes that have one differ per host, and a Burrow
+   * without it declines every offer and stays relayed. Each runtime takes it
+   * through {@link directPeeringFor}.
+   */
+  createDirectPeer?: BurrowDirectPeerFactory;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   /**
@@ -88,6 +140,8 @@ export interface BurrowServiceOptions {
    * wrong here.
    */
   readOffer?: () => Promise<EnrollmentOffer | null>;
+  /** This machine's interfaces, for `networkPolicy`; injected by the tests. */
+  listInterfaces?: () => NetworkInterfaceInfo[];
 }
 
 /**
@@ -104,28 +158,172 @@ function safeHostname(): string {
 }
 
 /**
- * What a Burrow with no enrollment reports. One builder, because two processes
- * answer this: the service's own `status`, and the VS Code glue for a window
- * that has no service at all (`vscode-ext/src/burrow.ts` → `idleStatus`).
- * The origin-only projection of the offer is the security-relevant half — the
- * one-time token is a bearer credential and never enters a webview
- * (`service-protocol.ts` → `BurrowConsoleStatus.offer`) — so the two must
- * not drift.
+ * Whether this build enrolls at all: only a self-host build, a Hosted one's
+ * Relay being Hosted's, which runs none yet (`docs/specs/relay.md` → "Relay
+ * origin").
+ */
+export function canEnroll(relay: RelayBuild): boolean {
+  return relay.mode === 'self-host';
+}
+
+/** What every command the `nothing` level refuses answers, before any request. */
+const NETWORK_OFF_REFUSAL =
+  'Settings → Network is set to Nothing, so this computer opens no connections on its own.';
+
+/** What `oneTimeOpen` answers under `local` with no network allowed. */
+const NO_NETWORK_ALLOWED_REFUSAL =
+  'No network is allowed under Local networks, so no phone can connect. Allow one in Settings → Network.';
+
+/**
+ * The policy this build reads (`docs/specs/remote-network.md` → "Policy"): the
+ * stored one, or — where none was ever saved, `stored: false` — the default:
+ * `relay` for an enrollment this build may reach and a build that offers it,
+ * else `nothing`. **A stored level this build does not offer reads as
+ * `nothing`** and stays on disk, as an enrollment for another origin does.
+ * Writes nothing: the service saves the default, VS Code's idle answers never do.
+ */
+export async function peekNetworkPolicyFor(
+  store: Pick<BurrowStateStore, 'loadEnrollment' | 'loadNetworkPolicy'>,
+  relay: RelayBuild,
+): Promise<{ policy: NetworkPolicy; stored: boolean }> {
+  const levels = levelsFor(relay.mode);
+  const stored = await store.loadNetworkPolicy();
+  if (stored) {
+    return { policy: levels.includes(stored.level) ? stored : { ...stored, level: 'nothing' }, stored: true };
+  }
+  const enrolled = (await loadEnrollmentFor(store, relay.origin)) !== null;
+  const level = enrolled && levels.includes('relay') ? 'relay' : 'nothing';
+  return { policy: { ...nothingPolicy(), level }, stored: false };
+}
+
+/**
+ * The policy a `setNetworkPolicy` names, taken only exactly: a level this build
+ * offers, and every allowed network a CIDR, saved in its canonical form and
+ * listed once in that form. Throws what the webview shows.
+ */
+function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolicy {
+  const policy = parseNetworkPolicy(value);
+  if (!policy) {
+    throw new Error(
+      `A network policy is { level, allowed (at most ${MAX_ALLOWED_NETWORKS} CIDRs), autoUpdate }, and nothing else.`,
+    );
+  }
+  if (!levelsFor(relay.mode).includes(policy.level)) {
+    throw new Error(`This build does not offer the ${policy.level} level.`);
+  }
+  const allowed: string[] = [];
+  for (const cidr of policy.allowed) {
+    const canonical = canonicalCidr(cidr);
+    if (canonical === null) {
+      throw new Error(`${cidr} is not an address range, such as 192.168.1.0/24.`);
+    }
+    if (allowed.includes(canonical)) {
+      throw new Error(`${canonical} is already allowed.`);
+    }
+    allowed.push(canonical);
+  }
+  return { ...policy, allowed };
+}
+
+/** What `enroll` and `enrollOffer` answer where {@link canEnroll} is false. */
+const HOSTED_ENROLLMENT_REFUSAL =
+  'This build’s Relay is Dormouse Hosted, which is not running one yet. A Relay you run takes ' +
+  'a Dormouse built with its origin (DORMOUSE_RELAY_ORIGIN).';
+
+/**
+ * The installer's offer this build could spend: read only where
+ * {@link canEnroll}, and `null` unless it names the baked origin. One reader
+ * for the service and the VS Code glue, which both answer `status`.
+ */
+export async function readUsableOffer(
+  relay: RelayBuild,
+  read: () => Promise<EnrollmentOffer | null>,
+): Promise<EnrollmentOffer | null> {
+  if (!canEnroll(relay)) return null;
+  const offer = await read();
+  return offer && isRelayOrigin(offer.origin, relay.origin) ? offer : null;
+}
+
+/**
+ * The stored enrollment, or `null` — including for one whose Relay URL or
+ * phone-facing `origin` names another origin, which **reads as none** and stays
+ * on disk (`docs/specs/relay.md` → "Relay origin"). Both are checked because an
+ * enrollment from before the one baked origin could carry an `origin` apart from
+ * its Relay URL. One reader for the service's start and VS Code's contention.
+ */
+export async function loadEnrollmentFor(
+  store: Pick<BurrowStateStore, 'loadEnrollment'>,
+  origin: string,
+): Promise<BurrowEnrollment | null> {
+  const enrollment = await store.loadEnrollment();
+  if (
+    !enrollment ||
+    (isRelayOrigin(enrollment.relayUrl, origin) && isRelayOrigin(enrollment.origin, origin))
+  ) {
+    return enrollment;
+  }
+  console.warn(
+    `[burrow] enrolled Relay ${enrollment.relayUrl} (origin ${enrollment.origin}) is not this ` +
+      `build's relay origin (${origin}); reading it as un-enrolled`,
+  );
+  return null;
+}
+
+/**
+ * What a Burrow with no enrollment reports, given what {@link readUsableOffer}
+ * found. One builder, because two processes answer this: the service's own
+ * `status`, and the VS Code glue for a window that has no service at all
+ * (`vscode-ext/src/burrow.ts` → `idleStatus`). The offer crosses as a boolean
+ * — its one-time token is a bearer credential and never enters a webview
+ * (`service-protocol.ts` → `BurrowConsoleStatus.offer`) — so the two must not
+ * drift.
  */
 export function unenrolledStatus(
   offer: EnrollmentOffer | null,
   kind: BurrowKind,
+  relay: RelayBuild,
+  serving = false,
 ): BurrowConsoleStatus {
   return {
     enrolled: false,
-    relayUrl: null,
+    serving,
+    relayOrigin: relay.origin,
+    relayMode: relay.mode,
     burrowId: null,
     connection: 'stopped',
     pairedClients: 0,
     suggestedLabel: suggestedBurrowLabel(kind),
-    offer: offer ? { origin: offer.origin } : null,
+    offer: offer !== null,
   };
 }
+
+/** The one-time states that hold a socket or a session, which make a Burrow `serving`. */
+const ONE_TIME_SERVING: ReadonlySet<OneTimeState['status']> = new Set<OneTimeState['status']>([
+  'opening',
+  'waiting',
+  'confirming',
+  'connecting',
+  'connected',
+]);
+
+/**
+ * Whether a one-time connection in `state` can reach this machine's terminals,
+ * or is about to: what `serving` adds to `enrolled`
+ * (`service-protocol.ts` → `BurrowStatusEvent.serving`).
+ */
+export function oneTimeServing(state: OneTimeState): boolean {
+  return ONE_TIME_SERVING.has(state.status);
+}
+
+
+/** Bytes of the random ticket a one-time request is answered by, as `pairingId`. */
+const ONE_TIME_TICKET_BYTES = 16;
+
+/** Bytes of the random id a remote session holds a pane's size under. */
+const HOLDER_ID_BYTES = 16;
+
+/** Bytes of the random id that names one service instance to the webviews. */
+const SERVICE_ID_BYTES = 16;
 
 /** Which app a Burrow is. Standalone and VS Code enroll separately. */
 export type BurrowKind = 'standalone' | 'vscode';
@@ -153,15 +351,33 @@ export class BurrowService {
   readonly #store: BurrowStateStore;
   readonly #provider: BurrowSurfaceProvider;
   readonly #sendToUi: (event: string, data: unknown) => void;
-  readonly #connectSrc: string;
+  readonly #relay: RelayBuild;
+  /** `hostedOrigin(#relay)`: where one-time links are made, or `null` for none. */
+  readonly #hostedOrigin: string | null;
   readonly #kind: BurrowKind;
-  readonly #createWebSocket?: (url: string) => WebSocketLike;
-  readonly #fetch?: typeof globalThis.fetch;
+  /** The injected socket factory behind the transport guard (constructor). */
+  readonly #createWebSocket: (url: string) => WebSocketLike;
+  /** The injected peer factory behind the transport guard, bound per runtime by {@link directPeeringFor}. */
+  readonly #createDirectPeer?: BurrowDirectPeerFactory;
+  /** The injected fetch, or the global one, behind the transport guard. */
+  readonly #fetch: typeof globalThis.fetch;
   readonly #now: () => number;
   readonly #readOffer: () => Promise<EnrollmentOffer | null>;
+  readonly #listInterfaces: () => NetworkInterfaceInfo[];
 
   #burrow: BurrowRuntime | null = null;
+  /**
+   * The enrollment this service reports: the running Burrow's, or — under a
+   * level that runs none — the one it holds without running (`#startBurrow`).
+   */
   #enrollment: BurrowEnrollment | null = null;
+  /**
+   * The network policy as last read or set; this service is its only writer.
+   * **`null` until read, and read as `nothing` until then** (`#level`).
+   */
+  #policy: NetworkPolicy | null = null;
+  /** The first read in flight, which every reader joins. */
+  #policyRead: Promise<NetworkPolicy> | null = null;
   /**
    * Lifecycle changes and pairing approvals run one at a time on this chain.
    *
@@ -185,44 +401,114 @@ export class BurrowService {
    */
   readonly #pairings = new Map<string, PendingPairing>();
 
+  /**
+   * The one-time connection, as `oneTimeStatus` answers it and the `one-time`
+   * event carries it. Independent of the enrollment: it needs none, and
+   * enrolling, clearing, and reconnecting leave it alone.
+   */
+  #oneTimeState: OneTimeState;
+  /** The runtime behind that state while it is live; `null` once it ended. */
+  #oneTime: OneTimeRuntime | null = null;
+  /** The open in flight, which a second `oneTimeOpen` joins rather than replaces. */
+  #oneTimeOpening: Promise<OneTimeState> | null = null;
+  /**
+   * The one-time request awaiting the modal, in a slot of its own — never in
+   * `#pairings`, so it is neither capped nor coalesced with a pairing, and its
+   * answer never waits behind an enrollment. Tagged with the runtime that
+   * asked, so only that runtime's dismissal clears it.
+   */
+  #oneTimeApproval: { runtime: OneTimeRuntime; pending: PendingPairing } | null = null;
+  /**
+   * Every live remote-api session of either runtime, by the holder id its
+   * attachments hold panes under, to the `end` that runtime handed it — what
+   * Take back runs. Entered at creation, left at disposal.
+   */
+  readonly #holders = new Map<string, () => void>();
+  /**
+   * This instance, as every `status` event names it and every hold its
+   * sessions take carries it: a webview drops a hold another instance took, which no
+   * release will ever reach (`docs/specs/remote-api.md` → "Size authority").
+   */
+  readonly #serviceId = randomBase64Url(SERVICE_ID_BYTES);
+
   constructor(options: BurrowServiceOptions) {
     this.#store = options.store;
     this.#provider = options.provider;
     this.#sendToUi = options.sendToUi;
-    this.#connectSrc = options.connectSrc;
+    this.#relay = options.relay;
+    this.#hostedOrigin = hostedOrigin(options.relay);
+    this.#oneTimeState = idleOneTimeState(this.#hostedOrigin, this.#level());
     this.#kind = options.kind;
-    this.#createWebSocket = options.createWebSocket;
-    this.#fetch = options.fetch;
+    // The transport guard (`docs/specs/remote-network.md` → "Policy"): every
+    // socket, request, and direct peer this service opens goes through these
+    // three, which refuse at the call while the level is `nothing` — unread and
+    // disposed included (`#level`) — so a path that forgets its own check still
+    // opens nothing. Each feature keeps its own check, for the error a person
+    // reads.
+    const createWebSocket =
+      options.createWebSocket ?? ((url: string) => new WebSocket(url) as unknown as WebSocketLike);
+    this.#createWebSocket = (url) => {
+      this.#refuseNothing();
+      return createWebSocket(url);
+    };
+    const injectedFetch = options.fetch;
+    this.#fetch = async (input, init) => {
+      this.#refuseNothing();
+      // Looked up at the call, like `burrowFetch`'s default.
+      return (injectedFetch ?? globalThis.fetch)(input, init);
+    };
+    // A factory's `null` is a direct path declined, the session kept relayed.
+    const createDirectPeer = options.createDirectPeer;
+    this.#createDirectPeer =
+      createDirectPeer &&
+      ((pathPolicy, stun) => (this.#level() === 'nothing' ? null : createDirectPeer(pathPolicy, stun)));
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
+    this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
   }
 
-  /** Start from a persisted enrollment, if there is one this build may reach. */
+  /**
+   * Start from a persisted enrollment, if there is one this build may reach
+   * and the network policy lets it run — and announce this instance either
+   * way, since a webview that outlived the one before it holds panes under
+   * sessions that are gone, and shows that one's one-time connection: a VS Code
+   * window that takes the broker over from one with a phone connected, or a
+   * restarted sidecar.
+   */
   start(): Promise<void> {
     if (this.#disposed) return Promise.resolve();
-    return this.#serialize(() => this.#start());
+    // Once the policy is read, whose level decides the resting state, and not
+    // behind the enrollment read below: the panel stops offering End on a
+    // connection that is gone. A read that moved the state has said so already.
+    const announced = this.#oneTimeState;
+    void this.#settledLevel().then(() => {
+      if (this.#oneTimeState === announced) this.#emitOneTime();
+    });
+    return this.#serialize(async () => {
+      try {
+        await this.#start();
+      } finally {
+        // A started Burrow has already said so, this instance included.
+        if (!this.#burrow) this.#emitStatus();
+      }
+    });
   }
 
   async #start(): Promise<void> {
-    const enrollment = await this.#store.loadEnrollment();
-    if (!enrollment) return;
-    if (!this.#allowed(enrollment.relayUrl)) {
-      // Enrolled against an origin this build cannot connect to — a binary
-      // downgraded from a custom build, or a moved Relay. Idle rather than
-      // connect: the allowlist is the whole boundary (docs/specs/relay.md).
-      console.warn(
-        `[burrow] enrolled Relay ${enrollment.relayUrl} is outside this build's allowed sources (${this.#connectSrc}); staying idle`,
-      );
-      return;
-    }
-    await this.#startBurrow(enrollment);
+    // The policy before anything: a read that fails leaves the Burrow down.
+    await this.#networkPolicy();
+    const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
+    if (enrollment) await this.#startBurrow(enrollment);
   }
 
-  /** Stop the Burrow and forget the connection-scoped state. */
+  /** Stop the Burrow, end any one-time connection, and forget the connection-scoped state. */
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#stopBurrow();
+    const oneTime = this.#oneTime;
+    this.#oneTime = null;
+    oneTime?.end('user-ended');
   }
 
   async handleCommand(raw: unknown): Promise<void> {
@@ -258,18 +544,36 @@ export class BurrowService {
         return this.#serialize(() => this.#clearEnrollment());
       case 'setupQr':
         return this.#setupQr();
+      // A one-time answer goes straight to its runtime, never behind the chain:
+      // it writes nothing an enrollment's store work could race, and its one
+      // attempt must not wait out an enroll's round trip past the link's expiry.
       case 'approve':
-        return this.#serialize(() => this.#approve(params as ApproveParams));
+        return approvalKind(params as ApproveParams | null) === 'one-time'
+          ? this.#approve(params as ApproveParams)
+          : this.#serialize(() => this.#approve(params as ApproveParams));
       case 'deny':
         return this.#deny(params as DenyParams);
-      case 'push':
-        return this.#push(params as PushParams);
+      case 'oneTimeOpen':
+        return this.#openOneTime();
+      case 'oneTimeEnd':
+        return this.#endOneTime();
+      case 'oneTimeStatus':
+        // After the policy's first read, so a panel seeding from it is not told
+        // `network-off` only to be told otherwise.
+        await this.#settledLevel();
+        return this.#oneTimeState;
+      case 'networkPolicy':
+        return networkPolicyResult(await this.#networkPolicy(), this.#relay.mode, this.#listInterfaces());
+      case 'setNetworkPolicy':
+        return this.#serialize(() => this.#setNetworkPolicy(params as SetNetworkPolicyParams | undefined));
       case 'pushTest':
         return this.#pushTest();
       case 'pushDevices':
         return this.#pushDevices();
       case 'pairingQueue':
         return this.#queueSnapshot();
+      case 'takeBack':
+        return this.#takeBack(params as TakeBackParams | undefined);
       default:
         throw new Error(`unknown burrow command: ${cmd}`);
     }
@@ -277,8 +581,39 @@ export class BurrowService {
 
   // --- Commands ---
 
-  #enroll(params: EnrollParams): Promise<EnrollResult> {
-    return this.#enrollWith(params.relayUrl, { password: params.password }, params.label);
+  async #enroll(params: EnrollParams): Promise<EnrollResult> {
+    if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    await this.#networkPolicy();
+    this.#refuseNothing();
+    this.#refuseOtherOrigin((params as { relayUrl?: unknown }).relayUrl);
+    return this.#enrollWith({ password: params.password }, params.label);
+  }
+
+  /**
+   * The policy as it stands, refused while the level is `nothing` — unread and
+   * disposed included (`#level`) — before any request: by the transport guard
+   * at the call, and by a command **after awaiting `#networkPolicy()` and
+   * before the next await**, so a `setNetworkPolicy` or a `dispose()` that
+   * landed during that await is the one it reads.
+   */
+  #refuseNothing(): NetworkPolicy {
+    const policy = this.#policy;
+    if (!policy || this.#level() === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
+    return policy;
+  }
+
+  /**
+   * An older webview still names the Relay — `enroll`'s `relayUrl`, or
+   * `enrollOffer`'s echoed `origin` — and one naming any but the baked origin
+   * is refused, rather than enrolled with this build's Relay instead.
+   */
+  #refuseOtherOrigin(named: unknown): void {
+    if (named === undefined) return;
+    if (typeof named === 'string' && isRelayOrigin(named, this.#relay.origin)) return;
+    throw new Error(
+      `This Dormouse enrolls only with ${this.#relay.origin}, the Relay it was built for, ` +
+        `not ${String(named)}.`,
+    );
   }
 
   /**
@@ -286,46 +621,39 @@ export class BurrowService {
    * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
-    const offer = await this.#readOffer();
+    if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    await this.#networkPolicy();
+    this.#refuseNothing();
+    this.#refuseOtherOrigin((params as { origin?: unknown }).origin);
+    // Re-read at the click, and refused before the token leaves the machine
+    // unless it names the one Relay this build enrolls with.
+    const offer = await readUsableOffer(this.#relay, this.#readOffer);
     if (!offer) {
       throw new Error(
-        'There is no enrollment offer on this machine — it may have been redeemed already. ' +
-          'Re-run the installer to mint a new one, or enroll with the setup password.',
+        `There is no enrollment offer for ${this.#relay.origin} on this machine — it may have been ` +
+          'redeemed already. Re-run the installer to mint a new one, or enroll with the setup password.',
       );
     }
-    if (offer.origin !== params.origin) {
-      // The webview echoes the origin its card displayed, and this is where that
-      // echo is spent: an installer re-run between the render and the click
-      // rewrites the file, and enrolling against the new origin would spend a
-      // one-time token on a Relay the user never reviewed.
-      throw new Error(
-        `The enrollment offer changed — it now names ${offer.origin}, not ${params.origin}. ` +
-          'Reopen this dialog to review the new one.',
-      );
-    }
-    return await this.#enrollWith(offer.origin, { enrollToken: offer.token }, params.label);
+    return await this.#enrollWith({ enrollToken: offer.token }, params.label);
   }
 
   /**
    * The one enrollment flow, whichever credential proves the right to it: the
-   * allowlist gate, then the exchange, then store-first persistence and the
-   * status edge the webview gate needs.
+   * exchange with the baked origin — the only Relay this build reaches — then
+   * the Relay's own origin checked against it, then store-first persistence and
+   * the status edge the webview gate needs.
    */
-  async #enrollWith(
-    relayUrl: string,
-    credential: BurrowEnrollCredential,
-    label: string,
-  ): Promise<EnrollResult> {
-    if (!this.#allowed(relayUrl)) {
-      // Refused before the credential leaves the machine — including an offer's
-      // token, which is a bearer credential like the password. Self-hosters widen
-      // the list in their own build (docs/specs/relay.md → "Where a Burrow may reach a Relay").
+  async #enrollWith(credential: BurrowEnrollCredential, label: string): Promise<EnrollResult> {
+    const enrollment = await performEnrollment(this.#relay.origin, credential, label, this.#fetch);
+    if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
+      // An older Relay, which ignores the request's `origin` and so enrolled a
+      // Burrow built for another: nothing is persisted here, and the row it
+      // appended is named for the operator (docs/specs/relay.md → "Relay origin").
       throw new Error(
-        `${relayUrl} is outside this build's allowed remote sources (${this.#connectSrc}). ` +
-          'A self-host build bakes its own via DORMOUSE_REMOTE_CONNECT_SRC.',
+        `${originMismatchMessage(enrollment.origin, this.#relay.origin)} The Relay has already ` +
+          `recorded Burrow ${enrollment.burrowId}; remove it from burrows.json.`,
       );
     }
-    const enrollment = await performEnrollment(relayUrl, credential, label);
     // Persist before touching the running Burrow. The credential we just minted
     // exists nowhere else and cannot be minted again from the same exchange — a
     // spent offer's token least of all — so a save that fails after the old Burrow
@@ -346,7 +674,7 @@ export class BurrowService {
       this.#emitStatus();
     }
     await this.#startBurrow(enrollment);
-    return { burrowId: enrollment.burrowId, relayUrl: enrollment.relayUrl };
+    return { burrowId: enrollment.burrowId };
   }
 
   /**
@@ -363,17 +691,19 @@ export class BurrowService {
    * nothing to offer, so the 2 s poll must not stat a file every tick.
    */
   async #status(): Promise<BurrowConsoleStatus> {
-    const offer = this.#enrollment ? null : await this.#readOffer();
+    const offer = this.#enrollment ? null : await readUsableOffer(this.#relay, this.#readOffer);
     const enrollment = this.#enrollment;
-    if (!enrollment) return unenrolledStatus(offer, this.#kind);
+    if (!enrollment) return unenrolledStatus(offer, this.#kind, this.#relay, this.#serving());
     return {
       enrolled: true,
-      relayUrl: enrollment.relayUrl,
+      serving: this.#serving(),
+      relayOrigin: this.#relay.origin,
+      relayMode: this.#relay.mode,
       burrowId: enrollment.burrowId,
       connection: this.#burrow?.status ?? 'stopped',
       pairedClients: this.#burrow?.activeRecords.length ?? 0,
       suggestedLabel: suggestedBurrowLabel(this.#kind),
-      offer: null,
+      offer: false,
     };
   }
 
@@ -424,9 +754,7 @@ export class BurrowService {
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
     const burrow = this.#burrow;
-    if (!enrollment || !burrow) {
-      throw new Error('This machine is not connected to a Dormouse Relay.');
-    }
+    if (!enrollment || !burrow) throw await this.#notConnected();
     const response = await burrowFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
       API_ROUTES.burrowSetupToken,
@@ -455,8 +783,8 @@ export class BurrowService {
     // machine whose screen it photographed.
     const invitation = await burrow.mintInvitation(body.token, body.expiresAt);
     // `enrollment.origin` is the phone-facing WebAuthn origin — where Pocket is
-    // served and where the passkey will be registered — not necessarily the
-    // `relayUrl` this Burrow posts to. The formatter refuses a URL too long to
+    // served and where the passkey will be registered — which enrollment checked
+    // equals this build's relay origin. The formatter refuses a URL too long to
     // scan before any encoder sees it.
     return {
       url: formatPairingInvitationUrl(enrollment.origin, invitation),
@@ -469,57 +797,277 @@ export class BurrowService {
   async #approve(params: ApproveParams): Promise<Record<string, never>> {
     // The code the person typed, straight through. The service never held the
     // expected one — the Burrow compares, once (`service-protocol.ts` →
-    // `PairingQueueItem`).
-    await this.#pendingPairing(params.clientId, params.pairingId).approve(
-      typeof params.code === 'string' ? params.code : '',
-    );
+    // `PairingQueueItem`); a one-time runtime spends its one attempt before it
+    // looks at the digits.
+    await this.#pendingRequest(params).approve(typeof params.code === 'string' ? params.code : '');
     return {};
   }
 
   #deny(params: DenyParams): Record<string, never> {
-    this.#pendingPairing(params.clientId, params.pairingId).deny();
+    this.#pendingRequest(params).deny();
     return {};
   }
 
-  /** Resolve an action only against the exact request its modal displayed. */
-  #pendingPairing(clientId: string, pairingId: string): PendingPairing {
-    const pending = this.#pairings.get(clientId);
-    if (!pending || pending.pairingId !== pairingId) {
+  /**
+   * Resolve an action only against the exact request its modal displayed — a
+   * one-time request by its ticket alone, so a ticket from a link this service
+   * has since replaced names nothing.
+   */
+  #pendingRequest(params: DenyParams): PendingPairing {
+    const pending =
+      approvalKind(params) === 'one-time'
+        ? this.#oneTimeApproval?.pending
+        : this.#pairings.get(params.clientId);
+    if (!pending || pending.pairingId !== params.pairingId) {
       throw new Error('pairing request is no longer pending');
     }
     return pending;
   }
 
-  async #push(params: PushParams): Promise<Record<string, never>> {
-    const deps = this.#pushDeps();
-    // No Burrow means no ACL and no Relay to post to; the ring is simply not
-    // pushed. Nothing to report to the webview, which cannot act on it either.
-    if (deps) {
-      // A push that fails must never break the alert path.
-      await sendPush(deps, params.sessionId, params.title).catch((error: unknown) => {
-        console.warn('[burrow] push notification failed', error);
-      });
+  // --- One-time connection ---
+
+  /**
+   * Open a one-time connection, answering the state the open settled at —
+   * `waiting` with the link, or `ended`. **No parameters**: the origin is this
+   * build's, never the webview's.
+   *
+   * An open in flight is joined, not replaced; a waiting, confirming, or ended
+   * connection is replaced, and its link dies with it. **A connecting or
+   * connected one is refused**: a phone holds it, and only End lets it go.
+   */
+  async #openOneTime(): Promise<OneTimeState> {
+    const hosted = this.#hostedOrigin;
+    if (hosted === null) {
+      throw new Error(
+        'One-time connections are unavailable in a self-host build: their links are made at ' +
+          `Dormouse Hosted, and this build reaches only its own Relay (${this.#relay.origin}).`,
+      );
     }
+    await this.#networkPolicy();
+    // Synchronous from here to the runtime's open: a `setNetworkPolicy` that
+    // landed during the await is read here, since it ends only a live runtime,
+    // and a second click that awaited the same read joins this one rather than
+    // minting a second room.
+    const policy = this.#refuseNothing();
+    if (!opensOneTimeLinks(policy)) throw new Error(NO_NETWORK_ALLOWED_REFUSAL);
+    const state = this.#oneTimeState;
+    if (this.#oneTimeOpening) return this.#oneTimeOpening;
+    if (state.status === 'connecting' || state.status === 'connected') {
+      throw new Error(
+        'A phone is already connected through a one-time link. End it before opening another.',
+      );
+    }
+    const runtime: OneTimeRuntime = new OneTimeRuntime({
+      origin: hosted,
+      createWebSocket: this.#createWebSocket,
+      createSession: (opts) => this.#createApiSession(opts),
+      directPeering: directPeeringFor(policy, this.#createDirectPeer),
+      // The name the phone shows: the one this machine enrolled under, else the
+      // one the enrollment form would have suggested.
+      burrowLabel: this.#enrollment?.label || suggestedBurrowLabel(this.#kind),
+      requestApproval: (request) => this.#requestOneTimeApproval(runtime, request),
+      dismissApproval: () => this.#dismissOneTimeApproval(runtime),
+      onChange: (next) => this.#onOneTimeChanged(runtime, next),
+      now: this.#now,
+    });
+    // Swapped in before either runtime moves: the one being replaced ends
+    // unannounced, and this one's first state is the next the webviews hear.
+    const replaced = this.#oneTime;
+    this.#oneTime = runtime;
+    replaced?.end('user-ended');
+    const opening = runtime.open();
+    this.#oneTimeOpening = opening;
+    try {
+      return await opening;
+    } finally {
+      if (this.#oneTimeOpening === opening) this.#oneTimeOpening = null;
+    }
+  }
+
+  /**
+   * End the live one-time connection (`ended`, `user-ended`) — the panel's End
+   * and Cancel — or put an ended one back to `idle`, its Done. Never reached
+   * under `nothing`, whose change rests an ended one at once (`#restOneTime`).
+   */
+  #endOneTime(): Record<string, never> {
+    if (this.#oneTime) this.#oneTime.end('user-ended');
+    else if (this.#oneTimeState.status === 'ended') this.#setOneTimeState({ status: 'idle' });
     return {};
+  }
+
+  /**
+   * Put a one-time connection that is not live at rest under the policy as it
+   * stands, announcing only a change. A live one is its runtime's to move.
+   */
+  #restOneTime(): void {
+    if (this.#oneTime) return;
+    const resting = idleOneTimeState(this.#hostedOrigin, this.#level());
+    const state = this.#oneTimeState;
+    const reason = (value: OneTimeState) => ('reason' in value ? value.reason : null);
+    if (state.status === resting.status && reason(state) === reason(resting)) return;
+    this.#setOneTimeState(resting);
+  }
+
+  // --- Network policy ---
+
+  /**
+   * The policy, read once and then kept: this service is its only writer
+   * (`#setNetworkPolicy`). **A read that fails rejects**, every caller fails
+   * closed on it, and the next call reads again.
+   */
+  #networkPolicy(): Promise<NetworkPolicy> {
+    if (this.#policy) return Promise.resolve(this.#policy);
+    // Held before any reader resumes; a `setNetworkPolicy` joins this read
+    // for its `previous`, so none can land first.
+    this.#policyRead ??= peekNetworkPolicyFor(this.#store, this.#relay)
+      .then(async ({ policy, stored }) => {
+        // The default is saved at once, so it never flips later.
+        if (!stored) await this.#store.saveNetworkPolicy(policy);
+        this.#policy = policy;
+        this.#restOneTime();
+        return policy;
+      })
+      .finally(() => {
+        this.#policyRead = null;
+      });
+    return this.#policyRead;
+  }
+
+  /** The level as it stands: `nothing` until the policy has been read, and for good once disposed. */
+  #level(): NetworkLevel {
+    return this.#disposed ? 'nothing' : (this.#policy?.level ?? 'nothing');
+  }
+
+  /** The level once the policy has been read — `nothing` for a read that fails. */
+  async #settledLevel(): Promise<NetworkLevel> {
+    await this.#networkPolicy().catch(() => {});
+    return this.#level();
+  }
+
+  /**
+   * Whether the policy lets this process reach Hosted on its own — managed
+   * voice's check (`sidecar-entry.ts`): anything but `nothing`.
+   */
+  async networkAllowed(): Promise<boolean> {
+    return (await this.#settledLevel()) !== 'nothing';
+  }
+
+  /**
+   * Hold `params.policy` from now on (`docs/specs/remote-network.md` →
+   * "Policy"). **Persisted first**: a save that fails changes nothing. A change
+   * to the level, or to the allowed networks under Local networks, ends the
+   * live one-time connection, `user-ended`, so a narrowed policy never leaves
+   * an old path exempt; the allowed networks under any other level, and
+   * `autoUpdate`, touch no connection. Then the relay socket follows the
+   * level: stopped under one that runs no Burrow, the enrollment kept; started
+   * on entering one that does ({@link runsBurrow}).
+   */
+  async #setNetworkPolicy(params: SetNetworkPolicyParams | undefined): Promise<NetworkPolicyResult> {
+    const next = requestedNetworkPolicy(params?.policy, this.#relay);
+    // One that cannot be read is `nothing` here as everywhere, so the user's
+    // choice can still be saved over it.
+    const previous = await this.#networkPolicy().catch(() => nothingPolicy());
+    await this.#store.saveNetworkPolicy(next);
+    this.#policy = next;
+    if (!samePaths(previous, next)) {
+      this.#oneTime?.end('user-ended');
+      this.#restOneTime();
+    }
+    const result = networkPolicyResult(next, this.#relay.mode, this.#listInterfaces());
+    try {
+      if (!runsBurrow(next.level)) {
+        if (this.#burrow) {
+          this.#stopBurrow();
+          this.#emitStatus();
+        }
+      } else if (!runsBurrow(previous.level) && !this.#burrow) {
+        await this.#start();
+      }
+    } finally {
+      // Saved either way, so said either way: a start that failed is its own error.
+      this.#emit({ name: 'network-policy', ...result });
+    }
+    return result;
+  }
+
+  #onOneTimeChanged(runtime: OneTimeRuntime, state: OneTimeState): void {
+    if (this.#oneTime !== runtime) return;
+    // An ended runtime holds nothing more; its last state stays for the panel.
+    if (state.status === 'ended') this.#oneTime = null;
+    this.#setOneTimeState(state);
+  }
+
+  #setOneTimeState(state: OneTimeState): void {
+    const wasServing = this.#serving();
+    this.#oneTimeState = state;
+    this.#emitOneTime();
+    if (this.#serving() !== wasServing) this.#emitStatus();
+  }
+
+  #requestOneTimeApproval(runtime: OneTimeRuntime, request: OneTimeApprovalRequest): void {
+    if (this.#oneTime !== runtime) return;
+    this.#oneTimeApproval = {
+      runtime,
+      pending: {
+        kind: 'one-time',
+        clientId: '',
+        // A fresh ticket per request, for the reason a pairing carries one: a
+        // modal left open over a replaced link must answer nothing.
+        pairingId: randomBase64Url(ONE_TIME_TICKET_BYTES),
+        label: request.label,
+        requestedAt: request.requestedAt,
+        approve: (code) => request.approve(code),
+        deny: () => request.deny(),
+      },
+    };
+    this.#emitQueue();
+  }
+
+  #dismissOneTimeApproval(runtime: OneTimeRuntime): void {
+    if (this.#oneTimeApproval?.runtime !== runtime) return;
+    this.#oneTimeApproval = null;
+    this.#emitQueue();
+  }
+
+  /**
+   * One due alarm push, from the alert host in this same process — the
+   * sidecar's, or VS Code's through `pushAlert` in `vscode-ext/src/burrow.ts`
+   * (`docs/specs/alert.md` -> Push notifications). No Burrow means no ACL and
+   * no Relay to post to, so nothing is sent. Never rejects: a push that fails is
+   * logged, since a dead push must never break the alert path.
+   */
+  async push(sessionId: string, title: string): Promise<void> {
+    const deps = this.#pushDeps();
+    if (!deps) return;
+    await sendPush(deps, sessionId, title).catch((error: unknown) => {
+      console.warn('[burrow] push notification failed', error);
+    });
   }
 
   /**
    * The Settings dialog's "Send test push".
    *
-   * The inverse of {@link #push} in the one way that matters: nothing is
+   * The inverse of {@link push} in the one way that matters: nothing is
    * swallowed. A test whose whole purpose is to report an outcome must let the
    * failure through, so an unenrolled machine, an unreachable Relay, and a
    * fan-out that reached nobody all read differently at the button.
    */
   async #pushTest(): Promise<PushSendSummary> {
     const deps = this.#pushDeps();
-    if (!deps) {
-      throw new Error('This machine is not connected to a Dormouse Relay.');
-    }
+    if (!deps) throw await this.#notConnected();
     // A fixed tag, so pressing the button repeatedly replaces the notification
     // on the phone rather than stacking copies — the same per-Session collapse
     // rule the ring path uses, with the test as its own "Session".
     return await sendPush(deps, PUSH_TEST_TAG, PUSH_TEST_TITLE);
+  }
+
+  /** Why there is no Burrow to ask: the policy, or no enrollment. */
+  async #notConnected(): Promise<Error> {
+    return new Error(
+      (await this.#settledLevel()) === 'nothing'
+        ? NETWORK_OFF_REFUSAL
+        : 'This machine is not connected to a Dormouse Relay.',
+    );
   }
 
   async #pushDevices(): Promise<PushDevicesResult> {
@@ -529,11 +1077,6 @@ export class BurrowService {
   }
 
   // --- Burrow lifecycle ---
-
-  #allowed(relayUrl: string): boolean {
-    const origin = normalizeOrigin(relayUrl);
-    return origin !== null && originAllowedByConnectSrc(origin, this.#connectSrc);
-  }
 
   /**
    * The Noise static gate. **A Burrow without a usable one does not start**, and
@@ -581,6 +1124,8 @@ export class BurrowService {
       noiseStaticPrivateKey: material.privateKeyPkcs8,
       noiseStaticPublicKey: material.publicKey,
     };
+    // A disposed service saves nothing: a successor may already hold its own.
+    if (this.#disposed) return null;
     // Persisted first, for the reason enrollment persists first: a Burrow running
     // on an identity no restart can recover is one every paired Client would
     // have to pair with again after a reboot.
@@ -596,6 +1141,15 @@ export class BurrowService {
     // `#burrow` here would be dropped without its socket being closed, so the
     // replacement is explicit rather than implied by the assignment below.
     this.#stopBurrow();
+    // The one gate on the relay socket, and on everything that needs a running
+    // Burrow — push, the device list, setup codes: under a level that runs
+    // none, or before the policy is read, the enrollment is held and reported,
+    // `stopped`, and nothing is opened. Disposal was checked just above.
+    const policy = this.#policy;
+    if (policy === null || !runsBurrow(policy.level)) {
+      this.#enrollment = enrollment;
+      return;
+    }
     // Seed the synchronous ACL lookup before constructing. Approval awaits the
     // async store before publishing that record or telling the Client it paired.
     const records = await this.#store.loadAcl(enrollment.burrowId);
@@ -607,15 +1161,11 @@ export class BurrowService {
     this.#burrow = new BurrowRuntime({
       enrollment,
       createWebSocket: this.#createWebSocket,
-      createSession: (opts) =>
-        new RemoteApiSession({
-          burrowId: opts.burrowId,
-          send: opts.send,
-          provider: this.#provider,
-        }),
+      directPeering: directPeeringFor(policy, this.#createDirectPeer),
+      createSession: (opts) => this.#createApiSession(opts),
       loadAcl: () => records,
       saveAcl: (burrowId, next) => this.#store.saveAcl(burrowId, next),
-      requestApproval: (pending) => this.#enqueuePairing(pending),
+      requestApproval: (pending) => this.#enqueuePairing({ ...pending, kind: 'pairing' }),
       dismissApproval: (clientId) => this.#resolvePairing(clientId),
       onInvitationChanged: (inviteId, state, outcome) =>
         this.#emitInvitation(inviteId, state, outcome),
@@ -626,18 +1176,55 @@ export class BurrowService {
   }
 
   /**
-   * Tell the webviews whether there is a Burrow at all. Everything they do *for*
-   * one — announcing that the directory may have changed on every pane-state,
-   * activity, and focus change, watching for unattended rings — costs a
-   * crossing per event on a machine that may never enroll, so they arm on this
-   * and idle without it (`lib/src/remote/burrow/enrolled-gate.ts`).
+   * The remote-api handler both runtimes serve an authorized session through,
+   * under a fresh holder id: what a pane it sizes names it by, and what Take
+   * back ends it by.
+   */
+  #createApiSession(context: RemoteApiSessionContext): RemoteApiSession {
+    const holder = randomBase64Url(HOLDER_ID_BYTES);
+    this.#holders.set(holder, context.end);
+    return new RemoteApiSession({
+      burrowId: context.burrowId,
+      send: context.send,
+      provider: this.#provider,
+      holder: { id: holder, label: context.label, serviceId: this.#serviceId },
+      onDispose: () => this.#holders.delete(holder),
+    });
+  }
+
+  /**
+   * A pane strip's Take back: end the session holding that pane's size, as its
+   * runtime ends one — the goodbye, then the dispose, whose release re-fits the
+   * pane (`docs/specs/remote-api.md` → "Size authority"). A one-time session's
+   * end is End itself. Answers whether one was ended: a holder this service
+   * does not know — ended already, or held under a broker that is gone — ends
+   * nothing, and the pane clears its own strip.
+   */
+  #takeBack(params: TakeBackParams | undefined): TakeBackResult {
+    const end = typeof params?.holder === 'string' ? this.#holders.get(params.holder) : undefined;
+    end?.();
+    return { ended: end !== undefined };
+  }
+
+  /** A running Burrow, or a one-time connection holding a socket or a session. */
+  #serving(): boolean {
+    return !!this.#burrow || oneTimeServing(this.#oneTimeState);
+  }
+
+  /**
+   * Tell the webviews whether there is a Burrow at all, and whether anything can
+   * reach this machine's terminals. Everything they do *for* one — announcing
+   * that the directory may have changed on every pane-state, activity, and focus
+   * change — costs a crossing per event on a machine that may never enroll, so
+   * they arm on this and idle without it
+   * (`lib/src/remote/burrow/enrolled-gate.ts`). Sent when either field may
+   * have changed, and once as this instance starts, for its `serviceId`.
    *
-   * `enrolled` means the same thing as the `status` command's field of that
-   * name, which is how a webview seeds before any event arrives.
+   * Both fields mean the same thing as the `status` command's fields of those
+   * names, which is how a webview seeds before any event arrives.
    */
   #emitStatus(): void {
-    if (this.#disposed) return;
-    this.#sendToUi(BURROW_EVENT_EVENT, this.statusEvent());
+    this.#emit(this.statusEvent());
   }
 
   /**
@@ -646,7 +1233,27 @@ export class BurrowService {
    * that joins the broker with it).
    */
   statusEvent(): BurrowStatusEvent {
-    return { name: 'status', enrolled: !!this.#enrollment };
+    return {
+      name: 'status',
+      enrolled: !!this.#enrollment,
+      serving: this.#serving(),
+      serviceId: this.#serviceId,
+    };
+  }
+
+  /** The one-time event as it stands, for the same late arrival as {@link statusEvent}. */
+  oneTimeEvent(): OneTimeEvent {
+    return { name: 'one-time', state: this.#oneTimeState };
+  }
+
+  #emitOneTime(): void {
+    this.#emit(this.oneTimeEvent());
+  }
+
+  /** Every `burrow:event`; nothing is said once disposed. */
+  #emit(event: BurrowUiEvent): void {
+    if (this.#disposed) return;
+    this.#sendToUi(BURROW_EVENT_EVENT, event);
   }
 
   #stopBurrow(): void {
@@ -687,11 +1294,16 @@ export class BurrowService {
   }
 
   #queueSnapshot(): PairingQueueItem[] {
+    const pending = [...this.#pairings.values()];
+    // The one-time request last: the modal shows the head, and pairings that
+    // were already waiting keep their order.
+    if (this.#oneTimeApproval) pending.push(this.#oneTimeApproval.pending);
     // Field by field, never a spread: the pending pairing the Burrow handed us
     // carries the approve/deny closures, and a spread would try to serialize
-    // them across the bridge. Naming the four is what keeps this projection the
+    // them across the bridge. Naming the five is what keeps this projection the
     // whole of what a webview learns.
-    return [...this.#pairings.values()].map(({ clientId, pairingId, label, requestedAt }) => ({
+    return pending.map(({ kind, clientId, pairingId, label, requestedAt }) => ({
+      kind,
       clientId,
       pairingId,
       label,
@@ -704,8 +1316,7 @@ export class BurrowService {
    * state, naming it so a panel showing a *different* code stays live.
    */
   #emitInvitation(inviteId: string, state: InvitationState, outcome?: PairingOutcome): void {
-    if (this.#disposed) return;
-    this.#sendToUi(BURROW_EVENT_EVENT, {
+    this.#emit({
       name: 'invitation',
       inviteId,
       state,
@@ -718,14 +1329,17 @@ export class BurrowService {
   }
 
   #emitQueue(): void {
-    if (this.#disposed) return;
-    this.#sendToUi(BURROW_EVENT_EVENT, {
+    this.#emit({
       name: 'pairing-queue',
       queue: this.#queueSnapshot(),
     } satisfies PairingQueueEvent);
   }
 
-  /** Push delivery needs a live Burrow: the ACL it reads is the running one's. */
+  /**
+   * Push delivery needs a live Burrow: the ACL it reads is the running one's.
+   * **Its fetch asks again at the request**: sealing awaits, and a Burrow
+   * stopped meanwhile — Nothing, a clear, a swap — sends nothing.
+   */
   #pushDeps(): AlertPushDeps | null {
     const burrow = this.#burrow;
     const enrollment = this.#enrollment;
@@ -735,7 +1349,10 @@ export class BurrowService {
       activeRecords: () => burrow.activeRecords,
       seal: (clientStaticPublicKey, plaintext) =>
         burrow.sealPushForClient(clientStaticPublicKey, plaintext),
-      fetch: this.#fetch,
+      fetch: (input, init) =>
+        this.#burrow === burrow
+          ? this.#fetch(input, init)
+          : Promise.reject(new Error('the Burrow stopped before the request was sent')),
     };
   }
 }

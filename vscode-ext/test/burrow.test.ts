@@ -12,7 +12,13 @@ import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import type { EnrollmentOffer } from 'remote-lib-common';
 
+import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
+import { LOCAL_ON } from '../../lib/src/host/remote/test-burrow-link';
+import { levelsFor, nothingPolicy } from '../../lib/src/remote/network-policy';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
+import { FakeSocket } from '../../lib/src/remote/test-fake-socket';
+import { createTestRendezvous, type TestRendezvous } from '../../lib/src/remote/test-rendezvous';
+import { NETWORK_POLICY_KEY, ONE_TIME_SERVING_KEY } from '../src/burrow-store';
 import type { ExtensionMessage } from '../src/message-types';
 import { FrameDecoder, encodeFrame } from '../src/peer-link-protocol';
 import {
@@ -31,6 +37,9 @@ import {
 } from './helpers';
 
 type BurrowModule = typeof import('../src/burrow');
+
+/** The hold a remote session's attach takes; opaque to every window it crosses. */
+const HOLD = { holder: 'session-a', label: 'iPhone', lease: '1' };
 type LinkModule = typeof import('../src/peer-link');
 
 /**
@@ -52,6 +61,55 @@ vi.mock('../../lib/src/host/remote/enroll-offer', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/src/host/remote/enroll-offer')>()),
   readEnrollmentOffer: () => Promise.resolve(offer),
 }));
+
+/**
+ * The direct path's addon. The glue owes the service a factory and the process
+ * a teardown; loading the native library itself is
+ * `lib/src/host/remote/native-direct-peer.test.ts`'s concern.
+ */
+const nativeDirect = vi.hoisted(() => ({ created: 0, disposed: 0 }));
+vi.mock('../../lib/src/host/remote/native-direct-peer', () => ({
+  createNativeDirectPeerFactory: () => {
+    nativeDirect.created += 1;
+    return () => null;
+  },
+  disposeNativeDirectPeers: () => {
+    nativeDirect.disposed += 1;
+  },
+}));
+
+/**
+ * The build's baked relay origin and mode, as the glue reads them. The test
+ * runner has no esbuild define, so the real readers answer the Hosted default;
+ * a case about a self-host build sets these (docs/specs/relay.md → "Relay origin").
+ */
+const relayBuild = vi.hoisted(() => ({
+  origin: 'https://hosted.dormouse.sh',
+  mode: 'hosted' as 'hosted' | 'self-host',
+}));
+vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/src/host/relay-origin')>()),
+  bakedRelay: () => ({ ...relayBuild }),
+}));
+
+/**
+ * A relay socket that never opens, for a case that needs a started Burrow and no
+ * network: the glue's factory prefers the host's global `WebSocket`.
+ */
+function stubSilentRelay(): void {
+  vi.stubGlobal('WebSocket', FakeSocket);
+}
+
+/** A stored enrollment at `origin`, as the keychain holds it. */
+function enrollmentJson(origin: string): string {
+  return JSON.stringify({
+    relayUrl: origin,
+    burrowId: BURROW_ID,
+    burrowToken: 'token',
+    origin,
+    rpId: new URL(origin).hostname,
+  });
+}
 
 const OFFER: EnrollmentOffer = {
   origin: 'https://ned-mac.tail9c2f1.ts.net',
@@ -83,7 +141,7 @@ interface PendingGlobalWrite {
 /** The slice of `ExtensionContext` the store reads, in memory. */
 function fakeContext(options: { deferGlobalWrites?: PendingGlobalWrite[] } = {}) {
   const secrets = new Map<string, string>();
-  const global = new Map<string, string>();
+  const global = new Map<string, unknown>();
   const watchers = new Set<SecretWatcher>();
   /** Every keychain round trip, so a test can see the memo working. */
   const reads: string[] = [];
@@ -119,7 +177,7 @@ function fakeContext(options: { deferGlobalWrites?: PendingGlobalWrite[] } = {})
         update: (key: string, value: unknown) => {
           const apply = () => {
             if (value === undefined) global.delete(key);
-            else global.set(key, value as string);
+            else global.set(key, value);
           };
           if (!options.deferGlobalWrites) {
             apply();
@@ -223,6 +281,7 @@ function bridgeLinkToBurrow(
     resizePty: local.resizePty,
     handleForwardedCommand: mod.handleForwardedCommand,
     dropForwardedCommands: mod.dropForwardedCommands,
+    handleForwardedPush: mod.handleForwardedPush,
     deliverCommandResult: mod.deliverCommandResult,
     deliverUiEvent: mod.deliverUiEvent,
     onClientAuthenticated: mod.greetPeerWindow,
@@ -284,6 +343,35 @@ async function otherWindowHoldsTheBurrow(): Promise<{ frames: Array<{ kind: stri
   return { frames };
 }
 
+/**
+ * Route the service's rendezvous socket to the in-memory room: the glue's
+ * factory prefers the host's global `WebSocket`, so that global is what stands
+ * in for the network.
+ */
+function stubRendezvous(): TestRendezvous {
+  const rendezvous = createTestRendezvous();
+  vi.stubGlobal(
+    'WebSocket',
+    class {
+      constructor(url: string) {
+        return rendezvous.createBurrowSocket(url);
+      }
+    },
+  );
+  return rendezvous;
+}
+
+/**
+ * A context whose `globalState` holds `LOCAL_ON`, as every window's would: a
+ * one-time case needs a network on, and a new install is at Nothing
+ * (`docs/specs/remote-network.md` → "Policy").
+ */
+function localNetworkContext() {
+  const made = fakeContext();
+  made.store.global.set(NETWORK_POLICY_KEY, LOCAL_ON);
+  return made;
+}
+
 function results(posted: ExtensionMessage[]) {
   return posted
     .filter((message) => message.type === 'burrow:result')
@@ -295,6 +383,8 @@ beforeEach(async () => {
   realTmp = process.env.TMPDIR;
   process.env.TMPDIR = dir;
   offer = null;
+  relayBuild.origin = DEFAULT_RELAY_ORIGIN;
+  relayBuild.mode = 'hosted';
 });
 
 afterEach(async () => {
@@ -450,6 +540,26 @@ describe('burrow state store', () => {
     expect(changes).toHaveLength(1);
   });
 
+  it('keeps the one-time serving marker, announcing only a real change', async () => {
+    // Every window hears a write, and every service start clears the marker: a
+    // clear of one that is not there must not wake them all for nothing.
+    const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
+    const { context, store } = fakeContext();
+    const changes: number[] = [];
+    const target = new VsCodeBurrowStateStore(context, () => changes.push(1));
+
+    await target.saveOneTimeServing(false);
+    expect(changes).toHaveLength(0);
+    await target.saveOneTimeServing(true);
+    expect(await target.loadOneTimeServing()).toBe(true);
+    // Not a credential, and never beside the enrollment's.
+    expect(store.secrets.get(ONE_TIME_SERVING_KEY)).toBe('1');
+    expect(changes).toHaveLength(1);
+    await target.saveOneTimeServing(false);
+    expect(await target.loadOneTimeServing()).toBe(false);
+    expect(changes).toHaveLength(2);
+  });
+
   it('drops records that name a different burrow, and unreadable values', async () => {
     const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
     const { context, store } = fakeContext();
@@ -469,6 +579,26 @@ describe('burrow state store', () => {
     expect(await target.loadEnrollment()).toBeNull();
     store.global.set('dormouse.burrow.acl.burrow-9', 'not json');
     expect(await target.loadAcl('burrow-9')).toEqual([]);
+  });
+
+  it('keeps the network policy in globalState, reading a damaged one as Nothing', async () => {
+    const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
+    const { context, store } = fakeContext();
+    const target = new VsCodeBurrowStateStore(context);
+
+    expect(await target.loadNetworkPolicy()).toBeNull();
+    await target.saveNetworkPolicy({ level: 'local', allowed: ['192.168.1.0/24'], autoUpdate: true });
+    // No secret in it, so not the keychain.
+    expect(store.secrets.size).toBe(0);
+    expect(await new VsCodeBurrowStateStore(context).loadNetworkPolicy()).toEqual({
+      level: 'local',
+      allowed: ['192.168.1.0/24'],
+      autoUpdate: true,
+    });
+
+    // Hand-edited, it must not open what the user may have turned off.
+    store.global.set(NETWORK_POLICY_KEY, { level: 'anywhere', allowed: 'all', autoUpdate: true });
+    expect(await target.loadNetworkPolicy()).toEqual(nothingPolicy());
   });
 
   it('serializes ACL snapshots so an older approval cannot land last', async () => {
@@ -507,17 +637,41 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enroll',
-      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
 
     await waitFor(() => results(bound.posted).length > 0);
-    // The service ran it (and refused the origin), rather than the interim
-    // "another window" answer — which is what proves this window took the Burrow.
+    // The service ran it (and refused, this being a Hosted build), rather than
+    // the interim "another window" answer — which is what proves this window
+    // took the Burrow.
     expect(opened!.isPeerBroker()).toBe(true);
     expect(results(bound.posted)[0]).toMatchObject({
       burrowRequestId: 'rh-1',
-      error: expect.stringContaining('allowed remote sources'),
+      error: expect.stringContaining('Dormouse Hosted'),
     });
+  });
+
+  it('gives the service a direct-path factory, and tears the addon down only at deactivation', async () => {
+    nativeDirect.created = 0;
+    nativeDirect.disposed = 0;
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const activation = mod.initBurrow(fakeContext().context);
+
+    mod.handleBurrowCommand({
+      burrowRequestId: 'rh-1',
+      cmd: 'enroll',
+      params: { password: 'p', label: 'Laptop' },
+    });
+    await waitFor(() => results(bound.posted).length > 0);
+    // Built with the service, so a Pocket offering a direct path gets an answer
+    // rather than a decline.
+    expect(nativeDirect.created).toBe(1);
+    expect(nativeDirect.disposed).toBe(0);
+
+    activation.dispose();
+    expect(nativeDirect.disposed).toBe(1);
   });
 
   it('bootstraps the contention on enrollOffer too, or the card cannot be pressed', async () => {
@@ -534,17 +688,171 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enrollOffer',
-      params: { origin: OFFER.origin, label: 'Laptop' },
+      params: { label: 'Laptop' },
     });
 
     await waitFor(() => results(bound.posted).length > 0);
     expect(opened!.isPeerBroker()).toBe(true);
-    // The service ran it and refused the origin this build was not built for —
-    // which is the proof it reached a service at all.
+    // The service ran it and refused, this being a Hosted build — which is the
+    // proof it reached a service at all.
     expect(results(bound.posted)[0]).toMatchObject({
       burrowRequestId: 'rh-1',
-      error: expect.stringContaining('allowed remote sources'),
+      error: expect.stringContaining('Dormouse Hosted'),
     });
+  });
+
+  it('bootstraps the contention on oneTimeOpen, which needs no enrollment', async () => {
+    // The one-time panel is offered on a machine no window has a Burrow for;
+    // refusing its open there would leave the button dead.
+    const rendezvous = stubRendezvous();
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    mod.initBurrow(localNetworkContext().context);
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
+
+    await waitFor(() => results(bound.posted).length > 0);
+    expect(opened!.isPeerBroker()).toBe(true);
+    expect(results(bound.posted)[0]).toMatchObject({
+      burrowRequestId: 'rh-1',
+      result: { status: 'waiting' },
+    });
+    // On the baked origin, through the same factory the relay socket uses.
+    expect(rendezvous.room().burrowUrl).toBe('wss://hosted.dormouse.sh/api/one-time/burrow');
+  });
+
+  it('bootstraps the contention on setNetworkPolicy, so the service is its one writer', async () => {
+    // Written from a window with no service, it would leave a service in
+    // another window holding the policy it replaced.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'setNetworkPolicy', params: { policy: LOCAL_ON } });
+
+    await waitFor(() => results(bound.posted).length > 0);
+    expect(opened!.isPeerBroker()).toBe(true);
+    expect(results(bound.posted)[0]).toMatchObject({ burrowRequestId: 'rh-1', result: { policy: LOCAL_ON } });
+    expect(store.global.get(NETWORK_POLICY_KEY)).toEqual(LOCAL_ON);
+  });
+
+  it('marks the connection serving for every window, and clears the mark when it stops', async () => {
+    stubRendezvous();
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = localNetworkContext();
+    mod.initBurrow(context);
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
+    await waitFor(() => store.secrets.has(ONE_TIME_SERVING_KEY));
+    // A marker, not a credential: nothing about the link is in it.
+    expect(store.secrets.get(ONE_TIME_SERVING_KEY)).toBe('1');
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-2', cmd: 'oneTimeEnd' });
+    await waitFor(() => !store.secrets.has(ONE_TIME_SERVING_KEY));
+  });
+
+  it('clears its own mark when the window goes away while serving, and never another window’s', async () => {
+    // Disposal ends the connection without a final event, so the mark is the
+    // extension's to clear.
+    stubRendezvous();
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = localNetworkContext();
+    const activation = mod.initBurrow(context);
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
+    await waitFor(() => store.secrets.has(ONE_TIME_SERVING_KEY));
+    activation.dispose();
+    await waitFor(() => !store.secrets.has(ONE_TIME_SERVING_KEY));
+
+    // A window that never served leaves the broker's mark alone.
+    const other = await freshBurrow();
+    other.configureBurrow(fakeDeps().deps());
+    const second = fakeContext();
+    const otherActivation = other.initBurrow(second.context);
+    await tick();
+    second.store.secrets.set(ONE_TIME_SERVING_KEY, '1');
+    otherActivation.dispose();
+    await tick();
+    expect(second.store.secrets.get(ONE_TIME_SERVING_KEY)).toBe('1');
+  });
+
+  it('joins the peer net when another window’s one-time connection starts serving', async () => {
+    // Un-enrolled, this window never contended, so the marker is the only thing
+    // that brings its terminals into the directory the phone sees.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
+    await tick();
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    store.secrets.set(ONE_TIME_SERVING_KEY, '1');
+    store.announce(ONE_TIME_SERVING_KEY);
+    await waitFor(() => opened!.isPeerBroker());
+  });
+
+  it('contends at activation on a marker, and the service it starts clears a stale one', async () => {
+    // A broker that closed or crashed while serving leaves its mark behind; the
+    // next service to start names no such connection.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    store.secrets.set(ONE_TIME_SERVING_KEY, '1');
+    mod.initBurrow(context);
+
+    await waitFor(() => opened!.isPeerBroker());
+    await waitFor(() => !store.secrets.has(ONE_TIME_SERVING_KEY));
+  });
+
+  it('tells its own webviews the one-time connection is gone when it takes the broker over', async () => {
+    // The broker window closing takes its phone with it, and this window's
+    // webviews last heard of that connection from it: without the new
+    // service's word they would offer End on nothing until someone clicked it.
+    stubRendezvous();
+    const oneTime = (posted: ExtensionMessage[]) =>
+      posted
+        .filter((message) => message.type === 'burrow:event')
+        .map((message) => (message as { payload: { name?: string; state?: { status: string } } }).payload)
+        .filter((payload) => payload.name === 'one-time')
+        .map((payload) => payload.state!.status);
+
+    const broker = await freshBurrow();
+    const brokerLink = opened!;
+    const brokerSide = fakeDeps();
+    broker.configureBurrow(brokerSide.deps());
+    bridgeLinkToBurrow(broker, brokerLink, brokerSide);
+    const brokerActivation = broker.initBurrow(localNetworkContext().context);
+    broker.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'oneTimeOpen' });
+    await waitFor(() => results(brokerSide.posted).length > 0);
+    expect(brokerLink.isPeerBroker()).toBe(true);
+
+    const mod = await freshBurrow();
+    const link = opened!;
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    bridgeLinkToBurrow(mod, link, bound);
+    // The mark the broker wrote, as `SecretStorage` shares it across windows,
+    // and the policy, as `globalState` does.
+    const { context, store } = localNetworkContext();
+    store.secrets.set(ONE_TIME_SERVING_KEY, '1');
+    mod.initBurrow(context);
+    await waitFor(() => oneTime(bound.posted).at(-1) === 'waiting');
+    expect(link.isPeerBroker()).toBe(false);
+
+    brokerActivation.dispose();
+    await brokerLink.disposePeerLink();
+    await waitFor(() => link.isPeerBroker(), 10_000);
+    await waitFor(() => oneTime(bound.posted).at(-1) === 'idle');
   });
 
   it('forwards a command to the window that holds the Burrow', async () => {
@@ -559,7 +867,10 @@ describe('burrow service glue', () => {
     // than refused: this window sees no enrollment, which is what "not enrolled"
     // *is*, and an error there tells `enrolled-gate.ts` nothing it can act on.
     // The offer is read from the disk of this same process, so the one-click
-    // card renders on exactly the machines it is for — un-enrolled ones.
+    // card renders on exactly the machines it is for — un-enrolled ones, of a
+    // self-host build made for the offer's Relay.
+    relayBuild.origin = OFFER.origin;
+    relayBuild.mode = 'self-host';
     offer = OFFER;
     mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'status' });
     await waitFor(() => results(bound.posted).length > 0);
@@ -568,12 +879,14 @@ describe('burrow service glue', () => {
         burrowRequestId: 'rh-1',
         result: {
           enrolled: false,
-          relayUrl: null,
+          serving: false,
+          relayOrigin: OFFER.origin,
+          relayMode: 'self-host',
           burrowId: null,
           connection: 'stopped',
           pairedClients: 0,
           suggestedLabel: `${hostname()} (VS Code)`,
-          offer: { origin: OFFER.origin },
+          offer: true,
         },
       },
     ]);
@@ -582,7 +895,7 @@ describe('burrow service glue', () => {
 
     // `enroll` bootstraps the contention, which this window loses — so even the
     // bootstrap ends up forwarded rather than starting a second Burrow.
-    const params = { relayUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' };
+    const params = { password: 'p', label: 'Laptop' };
     mod.handleBurrowCommand({ burrowRequestId: 'rh-2', cmd: 'enroll', params });
 
     await waitFor(() => squat.frames.some((frame) => frame.kind === 'command'));
@@ -629,18 +942,9 @@ describe('burrow service glue', () => {
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
     const { context, store } = fakeContext();
-    // Outside this build's allowed sources, so the service starts and idles
-    // rather than opening a real relay socket.
-    store.secrets.set(
-      ENROLLMENT_KEY,
-      JSON.stringify({
-        relayUrl: 'https://relay.example.com',
-        burrowId: BURROW_ID,
-        burrowToken: 'token',
-        origin: 'https://relay.example.com',
-        rpId: 'relay.example.com',
-      }),
-    );
+    // Enrolled at this build's own origin, with a relay socket that never opens.
+    stubSilentRelay();
+    store.secrets.set(ENROLLMENT_KEY, enrollmentJson(relayBuild.origin));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     mod.initBurrow(context);
     // Enough microtasks for the enrollment probe to land and the contention to
@@ -672,7 +976,7 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-1',
       cmd: 'enroll',
-      params: { relayUrl: 'https://relay.dormouse.sh', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
 
     await tick(0);
@@ -689,7 +993,8 @@ describe('burrow service glue', () => {
     const mod = await freshBurrow();
     const bound = fakeDeps();
     mod.configureBurrow(bound.deps());
-    mod.initBurrow(fakeContext().context);
+    const { context, store } = fakeContext();
+    mod.initBurrow(context);
     await tick();
 
     // Including the offer, which both sides read from the same file.
@@ -697,12 +1002,25 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({ burrowRequestId: 'rh-status', cmd: 'status' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-pushDevices', cmd: 'pushDevices' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-pairingQueue', cmd: 'pairingQueue' });
+    // A window with no service has no one-time connection either — none to
+    // open under a new install's Nothing, and nothing to end — and reads the
+    // policy a service would.
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeStatus', cmd: 'oneTimeStatus' });
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-networkPolicy', cmd: 'networkPolicy' });
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeEnd', cmd: 'oneTimeEnd' });
+    // No service holds a pane either, so a Take back ends nothing and the
+    // strip clears itself.
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-takeBack', cmd: 'takeBack', params: { holder: 'nobody' } });
     // Everything else still says there is nothing to reach.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-clear', cmd: 'clearEnrollment' });
+    await waitFor(() => results(bound.posted).length === 8);
     expect(results(bound.posted).find((r) => r.burrowRequestId === 'rh-clear')).toEqual({
       burrowRequestId: 'rh-clear',
       error: 'no Burrow is reachable',
     });
+    // Read, never written: the default is the service's to save, and a save
+    // from here could land over a choice a service in another window just made.
+    expect(store.global.has(NETWORK_POLICY_KEY)).toBe(false);
 
     // And they are exactly what a real service with nothing in its store says,
     // which is the answer the sidecar's webviews get for the same commands.
@@ -717,22 +1035,28 @@ describe('burrow service glue', () => {
         collectDirectory: async () => [],
         watchDirectory: () => () => {},
         resolveSurface: async () => null,
+        releaseSurface: () => {},
         writePty: () => {},
         resizePty: () => {},
         streamPty: () => () => {},
       },
       kind: 'vscode',
       sendToUi: (event, data) => void sent.push({ event, data: data as never }),
-      connectSrc: 'https://*.dormouse.sh wss://*.dormouse.sh',
+      relay: { ...relayBuild },
     });
     await idle.start();
-    for (const cmd of ['status', 'pushDevices', 'pairingQueue']) {
-      await idle.handleCommand({ burrowRequestId: `rh-${cmd}`, cmd });
+    for (const cmd of [
+      'status',
+      'pushDevices',
+      'pairingQueue',
+      'oneTimeStatus',
+      'networkPolicy',
+      'oneTimeEnd',
+      'takeBack',
+    ]) {
+      await idle.handleCommand({ burrowRequestId: `rh-${cmd}`, cmd, params: { holder: 'nobody' } });
     }
     idle.dispose();
-    // The glue's `status` is the one idle answer that reads a file, so it
-    // settles a tick later than the two that do not.
-    await waitFor(() => results(bound.posted).length === 4);
 
     const byId = (entries: Array<{ burrowRequestId: string; result?: unknown }>) =>
       Object.fromEntries(
@@ -741,6 +1065,15 @@ describe('burrow service glue', () => {
     expect(byId(results(bound.posted))).toEqual(
       byId(sent.filter((message) => message.event === 'burrow:result').map((m) => m.data)),
     );
+    expect(byId(results(bound.posted))['rh-oneTimeStatus']).toEqual({
+      status: 'unavailable',
+      reason: 'network-off',
+    });
+    expect(byId(results(bound.posted))['rh-networkPolicy']).toMatchObject({
+      policy: nothingPolicy(),
+      levels: levelsFor('hosted'),
+    });
+    expect(byId(results(bound.posted))['rh-takeBack']).toEqual({ ended: false });
   });
 
   it('contends when another window enrolls, without a reload', async () => {
@@ -755,21 +1088,34 @@ describe('burrow service glue', () => {
     await tick();
     expect(opened!.isPeerBroker()).toBe(false);
 
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    store.secrets.set(
-      ENROLLMENT_KEY,
-      JSON.stringify({
-        relayUrl: 'https://relay.example.com',
-        burrowId: BURROW_ID,
-        burrowToken: 'token',
-        origin: 'https://relay.example.com',
-        rpId: 'relay.example.com',
-      }),
-    );
+    stubSilentRelay();
+    store.secrets.set(ENROLLMENT_KEY, enrollmentJson(relayBuild.origin));
     store.announce(ENROLLMENT_KEY);
 
     await waitFor(() => opened!.isPeerBroker());
+  });
+
+  it('does not contend for an enrollment another build made', async () => {
+    // It reads as none (docs/specs/relay.md → "Relay origin"): the service would
+    // not start it, so it is no reason to bind the peer socket — at activation
+    // or when another window writes it.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    const { context, store } = fakeContext();
+    const elsewhere = enrollmentJson('https://relay.example.com');
+    store.secrets.set(ENROLLMENT_KEY, elsewhere);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    mod.initBurrow(context);
+    await tick();
+    store.announce(ENROLLMENT_KEY);
+    await tick();
+
+    expect(opened!.isPeerBroker()).toBe(false);
+    expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+    // Kept, so switching back to the build that made it restores it.
+    expect(store.secrets.get(ENROLLMENT_KEY)).toBe(elsewhere);
   });
 });
 
@@ -789,7 +1135,7 @@ describe('the relay socket', () => {
 
   it('uses the bundled ws where the extension host has no global WebSocket', async () => {
     // `globalThis.WebSocket` arrived in Node 22, and `engines.vscode` is
-    // `^1.85.0` — VS Code 1.85 shipped Node 18, so the supported range spans
+    // `^1.92.0` — VS Code 1.92 shipped Node 20.14, so the supported range spans
     // the boundary and the fallback is the only implementation on the old side.
     const mod = await freshBurrow();
     const relay = await wsServer();
@@ -816,6 +1162,31 @@ describe('the relay socket', () => {
       expect(closes).toEqual([4001]);
     } finally {
       relay.close();
+    }
+  });
+
+  it('sends no Origin header on either implementation', async () => {
+    // The one-time rendezvous refuses any Origin on its Burrow route, so no
+    // browser page can mint a room; this factory opens that socket too.
+    const { WebSocketServer } = await import('ws');
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((resolve) => server.on('listening', resolve));
+    const origins: Array<string | undefined> = [];
+    server.on('connection', (socket, request) => {
+      origins.push(request.headers.origin);
+      socket.close(1000);
+    });
+    const { port } = server.address() as { port: number };
+    try {
+      const mod = await freshBurrow();
+      const closed = (socket: ReturnType<typeof mod.createRelaySocket>) =>
+        new Promise<void>((resolve) => socket.addEventListener('close', () => resolve()));
+      await closed(mod.createRelaySocket(`ws://127.0.0.1:${port}`));
+      vi.stubGlobal('WebSocket', undefined);
+      await closed(mod.createRelaySocket(`ws://127.0.0.1:${port}`));
+      expect(origins).toEqual([undefined, undefined]);
+    } finally {
+      server.close();
     }
   });
 
@@ -894,6 +1265,25 @@ describe('burrow provider', () => {
     expect(bound.asked.at(-1)).toEqual({
       op: 'surfaceOp',
       params: { surfaceId: 'surface-1', op: 'attach', cols: 100, rows: 30 },
+    });
+  });
+
+  it('carries the hold on the attach and releases it at the owner that took it', async () => {
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    bound.answers.set('surfaceOp', [{ ptyId: 'pty-1', cols: 51, rows: 14 }]);
+    const provider = mod.createBurrowProvider(bound.deps());
+
+    const handle = (await provider.resolveSurface('surface-1', { cols: 51, rows: 14 }, HOLD))!;
+    expect(bound.asked.at(-1)).toEqual({
+      op: 'surfaceOp',
+      params: { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: HOLD },
+    });
+    handle.release();
+    await tick();
+    expect(bound.asked.at(-1)).toEqual({
+      op: 'surfaceOp',
+      params: { surfaceId: 'surface-1', op: 'release', hold: HOLD },
     });
   });
 
@@ -1024,6 +1414,45 @@ describe('serving the other windows', () => {
     expect(sink.data).toEqual(['from the other window']);
   });
 
+  it('releases a hold in the window whose pane took it', async () => {
+    const far = fakeWindow({
+      entries: [{ surfaceId: 'far-1' }],
+      surfaces: { 'far-1': { ptyId: 'pty-far', cols: 51, rows: 14 } },
+    });
+    const { mod, bound } = await brokerWith(far);
+    const provider = mod.createBurrowProvider(bound.deps());
+    let handle: Awaited<ReturnType<typeof provider.resolveSurface>> = null;
+    await waitFor(async () => {
+      handle = await provider.resolveSurface('far-1', { cols: 51, rows: 14 }, HOLD);
+      return handle !== null;
+    });
+    expect(far.requests).toContainEqual({
+      op: 'surfaceOp',
+      params: { surfaceId: 'far-1', op: 'attach', cols: 51, rows: 14, hold: HOLD },
+    });
+
+    handle!.release();
+    await waitFor(() => far.requests.some((r) => (r.params as { op?: string }).op === 'release'));
+    expect(far.requests.at(-1)).toEqual({
+      op: 'surfaceOp',
+      params: { surfaceId: 'far-1', op: 'release', hold: HOLD },
+    });
+  });
+
+  it('releases a hold no handle carries in every window, this one included', async () => {
+    // An attach whose owner answered past the budget: nothing says which
+    // window took the hold, so every one is told and only that one frees it.
+    const far = fakeWindow({ entries: [{ surfaceId: 'far-1' }] });
+    const { mod, bound } = await brokerWith(far);
+    const provider = mod.createBurrowProvider(bound.deps());
+    const release = { op: 'surfaceOp', params: { surfaceId: 'far-1', op: 'release', hold: HOLD } };
+
+    provider.releaseSurface('far-1', HOLD);
+    await waitFor(() => far.requests.some((r) => (r.params as { op?: string }).op === 'release'));
+    expect(far.requests.at(-1)).toEqual(release);
+    expect(bound.asked.at(-1)).toEqual(release);
+  });
+
   it('binds a duplicate restored PTY id to the peer whose surface answer was selected', async () => {
     let firstSurfaceOps = 0;
     let secondSurfaceOps = 0;
@@ -1106,16 +1535,73 @@ describe('serving the other windows', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-0',
       cmd: 'enroll',
-      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
     await waitFor(() => opened!.isPeerBroker());
 
     const far = fakeWindow();
     await openFarWindow(far);
 
-    await waitFor(() => far.uiEvents.length > 0);
-    // Addressed to the window that joined, and nothing else is invented for it.
-    expect(far.uiEvents).toEqual([{ name: 'status', enrolled: false }]);
+    await waitFor(() => far.uiEvents.length > 1);
+    // Addressed to the window that joined, and nothing else is invented for it:
+    // whether anything is served, and the one-time panel's state.
+    expect(far.uiEvents).toEqual([
+      { name: 'status', enrolled: false, serving: false, serviceId: expect.any(String) },
+      { name: 'one-time', state: { status: 'unavailable', reason: 'network-off' } },
+    ]);
+  });
+
+  // A due alarm push is fire and forget: nothing waits on an answer, and a
+  // push late enough to wait for a broker is stale (docs/specs/alert.md).
+  it('sends a push another window forwarded on its own Burrow, answering nothing', async () => {
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    bridgeLinkToBurrow(mod, opened!, bound);
+    mod.initBurrow(fakeContext().context);
+    mod.handleBurrowCommand({
+      burrowRequestId: 'rh-0',
+      cmd: 'enroll',
+      params: { password: 'p', label: 'Laptop' },
+    });
+    await waitFor(() => opened!.isPeerBroker());
+    const { BurrowService } = await import('../../lib/src/host/remote/service');
+    const push = vi.spyOn(BurrowService.prototype, 'push');
+
+    const far = fakeWindow();
+    const link = await openFarWindow(far);
+    link.forwardPush('pty-1', 'pnpm build');
+    await waitFor(() => push.mock.calls.length > 0);
+    expect(push).toHaveBeenCalledExactlyOnceWith('pty-1', 'pnpm build');
+
+    // This window's own alert host reaches the same service directly.
+    mod.pushAlert('pty-2', 'cargo test');
+    expect(push).toHaveBeenLastCalledWith('pty-2', 'cargo test');
+    expect(far.results).toEqual([]);
+    push.mockRestore();
+  });
+
+  it('hands a due push to the window that holds the Burrow, and drops it before there is one', async () => {
+    const squat = await otherWindowHoldsTheBurrow();
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    mod.initBurrow(fakeContext().context);
+    // Not contending yet: no service and no broker, and nothing is held for
+    // a role that may settle later.
+    mod.pushAlert('pty-1', 'stale');
+
+    mod.handleBurrowCommand({
+      burrowRequestId: 'rh-1',
+      cmd: 'enroll',
+      params: { password: 'p', label: 'Laptop' },
+    });
+    await waitFor(() => squat.frames.some((frame) => frame.kind === 'command'));
+    mod.pushAlert('pty-1', 'pnpm build');
+    await waitFor(() => squat.frames.some((frame) => frame.kind === 'push'));
+    expect(squat.frames.filter((frame) => frame.kind === 'push'))
+      .toEqual([{ kind: 'push', sessionId: 'pty-1', title: 'pnpm build' }]);
+    expect(bound.posted).toEqual([]);
   });
 
   it('answers a forwarded command over the link and nowhere else', async () => {
@@ -1129,7 +1615,7 @@ describe('serving the other windows', () => {
     mod.handleBurrowCommand({
       burrowRequestId: 'rh-0',
       cmd: 'enroll',
-      params: { relayUrl: 'https://evil.example', password: 'p', label: 'Laptop' },
+      params: { password: 'p', label: 'Laptop' },
     });
     await waitFor(() => opened!.isPeerBroker());
 

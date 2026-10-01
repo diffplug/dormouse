@@ -3,7 +3,6 @@ import {
   createLathWallStore,
   type LathWallStore,
   LATH_LAYOUT_OPTS,
-  MAX_PARKED_SURFACES,
 } from './lath-wall-store';
 import { leaves, oppositeEdge, type LathNode, type LathTree } from '../../lib/lath/model';
 import { layout } from '../../lib/lath/layout';
@@ -364,6 +363,31 @@ describe('meta writes', () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  // The in-place kind change behind the `dor tool` take-over: one commit, so a
+  // body never renders against the previous kind's params.
+  it('setMeta replaces a leaf\'s whole meta, dropping what it is not handed', () => {
+    const store = seeded();
+    store.updateParams('a', { stale: true });
+    const before = store.getSnapshot();
+    store.setMeta('a', { component: 'tool', tabComponent: 'tool', title: 'storybook', params: { surfaceType: 'tool' } });
+    const after = store.getSnapshot();
+    expect(after.leafMeta.get('a')).toEqual({
+      component: 'tool',
+      tabComponent: 'tool',
+      title: 'storybook',
+      params: { surfaceType: 'tool' },
+    });
+    expect(before.leafMeta.get('a')?.component).toBe('terminal');
+    expect(after.leafMeta).not.toBe(before.leafMeta);
+  });
+
+  it('setMeta is a no-op on an absent id', () => {
+    const store = seeded();
+    const before = store.getSnapshot();
+    store.setMeta('missing', { component: 'tool', tabComponent: 'tool', title: 'x' });
+    expect(store.getSnapshot()).toBe(before);
+  });
+
   it('updateParams merges a patch into params', () => {
     const store = seeded();
     store.updateParams('b', { url: 'https://example.com' });
@@ -474,7 +498,7 @@ describe('doored leaves', () => {
     });
   });
 
-  it('parkedIds exposes the store cap\'s oldest-first park order', () => {
+  it('parkedIds exposes insertion order', () => {
     const store = seeded();
     store.addLeaf('c', leafMeta({ component: 'browser' }), { refId: 'a', edge: 'right' });
     store.doorLeaf('b', { park: true });
@@ -482,20 +506,19 @@ describe('doored leaves', () => {
     expect(store.parkedIds()).toEqual(['b', 'c']);
   });
 
-  it('the cap drops the oldest DOM but never its metadata', () => {
+  it('retains the oldest document and its live metadata until the Door is killed', () => {
     const store = seeded();
     store.doorLeaf('b', { park: true });
     store.updateParams('b', { url: 'https://after-park.example' });
 
-    for (let i = 0; i < MAX_PARKED_SURFACES; i++) {
+    for (let i = 0; i < 32; i++) {
       const id = `browser-${i}`;
       store.addLeaf(id, leafMeta({ component: 'browser' }), { refId: 'a', edge: 'right' });
       store.doorLeaf(id, { park: true });
     }
 
-    // Evicted from the DOM cap...
-    expect(store.getSnapshot().parked.has('b')).toBe(false);
-    // ...but still a Door with live meta, so it reattaches by reloading its latest url.
+    expect(store.getSnapshot().parked.has('b')).toBe(true);
+    expect(store.parkedIds()).toHaveLength(33);
     expect(store.getSnapshot().leafMeta.get('b')?.params).toEqual({ url: 'https://after-park.example' });
 
     store.updateParams('b', { session: 'acquired-late' });
@@ -505,6 +528,7 @@ describe('doored leaves', () => {
     });
 
     store.forgetLeaf('b');
+    expect(store.getSnapshot().parked.has('b')).toBe(false);
     expect(store.getSnapshot().leafMeta.has('b')).toBe(false);
   });
 

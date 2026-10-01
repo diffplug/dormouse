@@ -120,9 +120,15 @@ chain and fails the policy, and a different grant has a different origin.
 someone adds a listener — the same failure mode that once left `.vscode/` owned by
 nobody.
 
-**Why the stream relay needs no `Host` check.** Rebinding exists to make
-same-origin-looking requests to loopback, which buys nothing against a listener
-demanding an unguessable one-shot secret.
+**Why the webview gets one guarded viewer socket, never an upstream.** The
+webview once held a browser-level CDP socket from `get cdp-url` for a popped-out
+window's URL — `Runtime.evaluate` in any target, `file://` navigation — and in
+VS Code dialed a relay that piped raw bytes to any loopback port it named, with
+`Origin` dropped (review of the browser stack, 2026-09). The host now speaks
+each upstream's protocol itself and relays only parsed state, frames and
+rebuilt input, so a webview naming another loopback port gets nothing it could
+not already reach with its own `ws://127.0.0.1:*` `connect-src`. The listener
+checks `Host` as well as the token, like every listener built after the relay.
 
 **Why the browser-dev bridge's content-type gate is a security control.** Without it
 the endpoint is CORS-simple and needs no preflight to survive, and what it dispatches
@@ -130,9 +136,17 @@ is `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env`.
 
 Why proxy cookies are stripped in both directions. [RFC 6265 §8.5](https://www.rfc-editor.org/rfc/rfc6265#section-8.5) scopes cookies by host, not port. An inbound cookie can therefore belong to another local service, including an HttpOnly credential, rather than the fixed upstream. Forwarding it leaks that credential; forwarding an upstream Set-Cookie lets even a remote HTTP target overwrite loopback cookies. The WebSocket handshake is HTTP too, including a refused upgrade. Parsing that handshake before piping bytes closes the same boundary without filtering WebSocket payloads.
 
+The Vite listener serves modules containing the browser-dev bridge token. Vite's
+default CORS policy allows other localhost origins to read those modules
+(measured with Vite 8.3.0, 2026-09). Disabling CORS closes that read; the Host
+check separately blocks DNS rebinding, where the browser sees a same-origin
+request and CORS does not apply.
+
 What header stripping cannot protect. A proxied script runs on `127.0.0.1` and can still read or write non-HttpOnly cookies through `document.cookie`, subject to browser partitioning. The per-grant port isolates origins, not cookie storage. Full isolation needs a separate browser storage context or host namespace; cookie-backed login in the iframe renderer cannot be preserved safely by forwarding ambient cookies.
 
 ## Persisted state
+
+Why the managed-voice token sits beside the Burrow's enrollment. It is the same class of secret — a revocable bearer credential for a Dormouse service — and that directory is the one `burrow_state_dir` already locks on Windows, where `writeJsonAtomic`'s modes are no-ops. A leaked token lets its holder spend the account's daily speak cap until it is revoked on the Hosted account page; it grants no terminal access.
 
 Why session snapshots earn the strongest protection on disk. They are
 `PersistedWindow` blobs, and historically they carried terminal transcripts —
@@ -146,9 +160,9 @@ the rename would leave a window where the transcript is world-readable.
 
 What the current writers actually store. `normalizeSessionV3` in
 `lib/src/lib/session-types.ts` destructures `scrollback` out of every pane on
-read, `saveSession` never emits it, and standalone's `PERSIST_SESSION` is
-`false`, so the shipped app writes no snapshot at all and clears a legacy one at
-boot.
+read and `saveSession` never emits it, so a snapshot standalone writes today
+carries structure only. What a pre-upgrade one carries is retired by the first
+save over it, or — for a `.json.tmp` no save will ever reach — by the boot sweep.
 
 Why the peer-link token is listed here. It is a `randomUUID()` in the VS Code
 extension's global storage, and its own comment says it is the only thing between
@@ -168,3 +182,7 @@ neither sets a mode, and `restrict_to_owner` is never called on it. The socket
 path arrives via the sidecar's stderr, which Rust appends verbatim.
 
 What the snapshot tests cover. `restrict_to_owner_leaves_one_owner_only_ace` is Windows-only and asserts `SE_DACL_PROTECTED`, one ACE, and the SID. `session_write_tightens_directory_and_existing_temp_file` exercises the unix writer against deliberately loose modes. The failure regression injects rejection at each permission stage, verifying the old snapshot survives and no replacement bytes reach disk. The single-ACE property depends on `FILE_ALL_ACCESS` rather than `GENERIC_ALL`, which would split into two ACEs.
+
+## Local-file viewer
+
+The viewer allows inline and granted scripts for interactive local reports. CSP fetch directives constrain resource requests, but do not prevent a script assigning an external URL to its own frame. `form-action` constrains form submissions, not arbitrary navigation. Preserving the policy through the proxy repairs the resource-load boundary; it does not establish that active documents cannot send granted contents outside the machine. [CSP3 navigation checks](https://www.w3.org/TR/CSP3/) and its multiple-policy rules distinguish these mechanisms.

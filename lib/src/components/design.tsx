@@ -2,8 +2,12 @@ import { clsx } from 'clsx';
 import { tv, type VariantProps } from 'tailwind-variants';
 import { XIcon } from '@phosphor-icons/react';
 import { forwardRef, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
+import { isComposingKey } from '../lib/dom';
+import type { CopyOutcome } from '../lib/mouse-selection';
+import { rectsEqual } from '../lib/rect-tween';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -12,6 +16,12 @@ import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 /** Desktop pane-header height. Geometry derived from the header (such as the
  * elevated zoom inset) must use this constant so the chrome stays proportional. */
 export const PANE_HEADER_HEIGHT_PX = 30;
+
+/** Soft app-ground halo separates zoomed panes and context popups from content below. */
+export const ELEVATED_PANE_SHADOW = '0 0 5px 5px var(--color-app-bg)';
+
+/** Theme and shell pickers share a hairline that follows their foreground. */
+export const PICKER_INSET_BORDER = 'inset 0 0 0 1px color-mix(in srgb, currentColor 25%, transparent)';
 
 // Pane headers/doors own the top corners; terminal bodies own the bottom.
 // All terminal-radius constants derive from this single source so the CSS
@@ -25,6 +35,67 @@ export const TERMINAL_TOP_RADIUS_CLASS = 'rounded-t-lg';
 export const TERMINAL_BOTTOM_RADIUS_CLASS = 'rounded-b-lg';
 export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}rem`;
 
+/** Shared shape, size bounds, and type for Baseboard Doors and Workspace tabs. */
+export const DOOR_TAB_CLASS = clsx(
+  'relative flex h-6 max-w-[220px] min-w-[68px] items-center overflow-hidden text-sm font-medium font-mono',
+  TERMINAL_TOP_RADIUS_CLASS,
+);
+
+/** A Workspace name the app derived rather than one a user set
+ *  (`docs/specs/layout.md` → "Workspace names"). */
+export const AUTO_NAME_CLASS = 'italic';
+
+/** What the copy editor's expanded scope adds beyond the drag: its text in the
+ *  preview, and its dashed outline over the terminal (an SVG path). */
+export const COPY_EXPANDED_TEXT_CLASS = 'rounded-[2px] bg-success/15 underline decoration-success decoration-dotted underline-offset-2';
+export const COPY_EXPANDED_PATH_CLASS = 'fill-success/15 stroke-success';
+/** A copied selection's fill while its copy confirms, the copy-confirm accent
+ *  tint (an SVG path; `docs/specs/mouse-and-clipboard.md` §4.5). */
+export const COPY_FLASH_PATH_CLASS = 'fill-header-active-bg/25';
+/** How a Copy button says what its copy did. */
+export const COPY_OUTCOME_LABEL: Record<CopyOutcome, string> = { copied: 'Copied', failed: 'Couldn’t copy' };
+
+/** A preview slot's label in its Pane header and Door, italic as an editor's
+ *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
+export const PREVIEW_LABEL_CLASS = 'italic';
+
+/** The `max-w-` / `h-` bounds of `DOOR_TAB_CLASS`, for the host code that has to
+ *  reason about a tab's size without a rendered element (the cross-window tab
+ *  drag). Tailwind needs the arbitrary values spelled literally above, so these
+ *  two are a mirror — keep them in sync. */
+export const DOOR_TAB_MAX_WIDTH_PX = 220;
+export const DOOR_TAB_HEIGHT_PX = 24;
+
+/** The surface an alarm inset is drawn on, which is what picks its token: each
+ *  `--color-alarm-vs-*` is contrast-picked against one background. */
+export type AlertRingGround = 'door' | 'header-active' | 'header-inactive';
+
+export const ALERT_RING_INSET_CLASS = 'pointer-events-none absolute inset-0';
+
+/** Spelled out per ground, never built from a template — Tailwind's scanner
+ *  reads source text, so a composed arbitrary value would never be emitted. */
+export const ALERT_RING_INSET_BY_GROUND: Record<AlertRingGround, string> = {
+  door: 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-door)]',
+  'header-active': 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-active)]',
+  'header-inactive': 'shadow-[inset_0_0_0_2px_var(--color-alarm-vs-header-inactive)]',
+};
+
+// The Workspace strip's two halves of one idea: the selected tab is seated
+// against the Wall, and the rest recede into the app ground. Keep them
+// together so a palette change can't move one endpoint without the other.
+export const TAB_WALL_JOIN_GRADIENT = 'linear-gradient(to bottom, var(--color-header-active-bg), var(--color-app-bg))';
+
+// The inactive tab's fade, starting at 70% of the 24px tab — just below the
+// label's baseline — and ending at 70% app background, i.e. a 30/70 sRGB mix
+// with the header color under it. Deliberately TRANSLUCENT rather than a
+// gradient between the two tokens: it composites over the `bg-header-*` class,
+// so HEADER_PALETTE_TRANSITION_CLASS still crossfades beneath it. A gradient
+// naming the header token would paint over that crossfade, which
+// `transition-colors` cannot tween.
+export const TAB_INACTIVE_FADE_STYLE = {
+  backgroundImage: 'linear-gradient(to bottom, transparent 70%, color-mix(in srgb, var(--color-app-bg) 70%, transparent))',
+} as const;
+
 // The gutter between panes (and around the wall's top/sides — the baseboard
 // side stays a tight 2px). Deliberately ODD: the passthrough ring is a 1px
 // stroke, and a 1px stroke can only sit dead-center of a gutter on whole
@@ -32,6 +103,12 @@ export const TERMINAL_SELECTION_BORDER_RADIUS = `${TERMINAL_BORDER_RADIUS_REM}re
 // mirrored by the Tailwind inset classes in Wall.tsx / Baseboard.tsx
 // (`*-1.75` = 7px) — keep them in sync.
 export const PANE_GUTTER_PX = 7;
+
+/** Pointer travel before a press becomes a drag; below it the element's own
+ *  click behavior (select / enter passthrough / rename / activate) is untouched.
+ *  Shared by the pane/Door drag and the Workspace strip's reorder, so both feel
+ *  like one gesture vocabulary. */
+export const DRAG_THRESHOLD_PX = 5;
 
 // Concentric-corners rule: when a rounded outline wraps a rounded edge, both
 // arcs must share a corner center — outer radius = inner radius + offset.
@@ -48,14 +125,9 @@ export const PANE_GUTTER_PX = 7;
 export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
 export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
 
-// Focus-ring motion. The selection ring's travel between panes/doors, the pane
-// header's active/inactive palette crossfade, and the ring's unfocus-saturate
-// fade all run on this single duration so they resolve as one gesture. Half the
-// Lath layout motion (LATH_MOTION_MS = 440) — the ring is a light overlay chasing
-// geometry the wall has already committed, so it settles quicker. The ring travel
-// itself is a JS tween on a pointer-events-none overlay (WorkspaceSelectionOverlay
-// + rect-tween.ts), the same per-frame carve-out the Lath animator holds against
-// DESIGN.md's "don't animate layout properties" rule.
+// Focus-ring motion: the one duration of the ring's travel, the pane header's
+// palette crossfade, the ring's unfocus-saturate fade, and the copy editor's
+// travel. DESIGN.md -> "Focus Ring Travel & Header Crossfade" owns why.
 export const FOCUS_MOTION_MS = 220;
 
 // The pane-header palette crossfade, as a complete Tailwind literal so the
@@ -65,20 +137,57 @@ export const FOCUS_MOTION_MS = 220;
 export const HEADER_PALETTE_TRANSITION_CLASS =
   'transition-colors duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none';
 
+/** A Pane header's root: the drag handle in the header palette. The
+ *  active/inactive swap crossfades in step with the focus ring's travel;
+ *  children inherit via `text-inherit`. */
+export const paneHeader = tv({
+  base: `flex h-full min-w-0 flex-1 cursor-grab items-center gap-1.5 ${TERMINAL_TOP_RADIUS_CLASS} pl-2 pr-[5px] text-sm leading-none font-mono select-none active:cursor-grabbing ${HEADER_PALETTE_TRANSITION_CLASS}`,
+  variants: {
+    state: {
+      active: 'bg-header-active-bg text-header-active-fg',
+      inactive: 'bg-header-inactive-bg text-header-inactive-fg',
+    },
+  },
+});
+
 // Letter-spacing for the small semibold TODO pill — wider tracking keeps the
 // tiny label legible. Shared so both pill sites stay in sync.
 export const TODO_PILL_TRACKING_CLASS = 'tracking-[0.08em]';
 
-// Spoken-alarm delivery is intentionally louder than resting chrome.
-// `--color-alarm-vs-terminal` is the dynamic black/white contrast pick for the
-// terminal body behind the overlay. The pulse itself is `alertSpeakingAnimationClass`
-// in `bell-icon-class.ts`, beside the other Chromatic-frozen alert animation.
+// A header's bordered pill button in its own foreground: the TODO pill and the
+// preview slot's mark.
+export const HEADER_PILL_CLASS = `shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`;
+
+// Letter-spacing for the alarm overlay's `SPEAKING` / `SPOKEN` labels — wider
+// tracking keeps the small all-caps label legible over the wash.
 export const ALERT_SPEECH_TRACKING_CLASS = 'tracking-[0.12em]';
 
 // Chrome for small anchored popovers (title candidates, TODO preview, pane
 // context menu, rename warning). Text size and padding vary per popover and
 // stay at the call site; the surface recipe is shared so they can't drift.
 export const POPUP_SURFACE_CLASS = 'z-[1000] rounded border border-border bg-surface-raised font-mono text-foreground shadow-md';
+
+// Message-only panes use the terminal ground because they stand in for a
+// Surface, not chrome. PaneMessage pairs this scrollable root with content that
+// stays centered when it fits and fully reachable when the pane is small.
+const PANE_MESSAGE_CLASS = 'flex h-full min-h-0 w-full min-w-0 flex-col overflow-auto bg-terminal-bg px-6 py-6 text-center text-sm';
+
+export function PaneMessage({
+  children,
+  className,
+  contentClassName,
+  ...props
+}: ComponentProps<'div'> & { contentClassName?: string }) {
+  return (
+    <div {...props} className={clsx(PANE_MESSAGE_CLASS, className)}>
+      {/* Auto margins center only spare space; overflowing content starts at the
+          scroll origin instead of being centered beyond its reachable bounds. */}
+      <div className={clsx('my-auto w-full min-w-0 max-w-[30rem] shrink-0 self-center [overflow-wrap:anywhere]', contentClassName)}>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 // `ComponentProps<'div'>` rather than `HTMLAttributes<HTMLDivElement>` so `ref`
 // is among the props (React 19 ref-as-prop): an anchored menu needs the row
@@ -105,6 +214,10 @@ export const popupButton = tv({
       true: 'animate-copy-flash bg-header-active-bg/25 text-header-active-bg',
       false: 'hover:bg-foreground/10',
     },
+    /** The chosen option of a segmented row (the copy editor's scope and format). */
+    selected: {
+      true: 'bg-header-active-bg text-header-active-fg hover:bg-header-active-bg',
+    },
   },
   defaultVariants: { flashed: false },
 });
@@ -118,8 +231,17 @@ export interface ModalRect {
   height: number;
 }
 
+/** The selection ring's z-index. Under `WorkspaceWindow` it paints from
+ *  `document.body`, where every modal layer must sit above it
+ *  (docs/specs/layout.md → "Selection overlay"). */
+export const SELECTION_RING_Z_INDEX = 50;
+
+/** The copy editor's z-index, also on `document.body`
+ *  (docs/specs/mouse-and-clipboard.md §4.5). */
+export const COPY_EDITOR_Z_INDEX = 55;
+
 export const MODAL_LAYERS = {
-  app: 50,
+  app: 60,
   pane: 100,
   critical: 9999,
 } as const;
@@ -388,6 +510,14 @@ export const UNDER_SWITCH_INDENT = 'ml-18';
 export const SUBTLE_ACTION_REST_COLOR_CLASS = 'text-[color:color-mix(in_srgb,var(--color-link)_35%,var(--color-muted))]';
 export const SUBTLE_ACTION_COLOR_CLASS = `${SUBTLE_ACTION_REST_COLOR_CLASS} enabled:not-aria-disabled:hover:text-link enabled:focus-visible:text-link`;
 export const SUBTLE_ACTION_INTERACTION_CLASS = 'enabled:not-aria-disabled:hover:bg-current/10 focus-visible:outline focus-visible:outline-focus-ring';
+/** Both of the above, hover and focus included, for a wrapper whose focusable control is a
+ *  transparent child (a native `<select>` over a label). The caller drops it while busy. */
+export const SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS = 'hover:bg-current/10 hover:text-link has-[:focus-visible]:text-link has-[:focus-visible]:outline has-[:focus-visible]:outline-focus-ring';
+/** A quiet action inside running text, such as a link to another Settings topic. */
+export const INLINE_ACTION_CLASS = `rounded px-0.5 ${SUBTLE_ACTION_COLOR_CLASS} ${SUBTLE_ACTION_INTERACTION_CLASS}`;
+
+/** A Settings dialog group below another: a rule, and room on both sides of it. */
+export const SETTINGS_SECTION = 'mt-4 border-t border-border pt-3';
 
 /**
  * The app's boolean control: compact track (off left, on right) and one state
@@ -445,11 +575,7 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
     const update = () => {
       const next = element.getBoundingClientRect();
       setRect((previous) =>
-        previous
-        && previous.top === next.top
-        && previous.left === next.left
-        && previous.width === next.width
-        && previous.height === next.height
+        previous && rectsEqual(previous, next)
           ? previous
           : { top: next.top, left: next.left, width: next.width, height: next.height },
       );
@@ -466,6 +592,13 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
   }, [element]);
 
   return rect;
+}
+
+/** `node` rendered into `document.body`, so no Workspace's stacking context,
+ *  presentation transform, or clipping holds it; in place under the server
+ *  renderer, which has no portals. */
+export function portalToBody(node: ReactNode): ReactNode {
+  return typeof document === 'undefined' ? node : createPortal(node, document.body);
 }
 
 export function ModalOverlay({
@@ -496,7 +629,7 @@ export function ModalOverlay({
       }
     : { zIndex: resolvedZIndex, ...style };
 
-  return (
+  const overlay = (
     <div
       className={clsx(modalOverlay({ scope: rect ? 'target' : 'viewport', backdrop }), className)}
       style={overlayStyle}
@@ -505,6 +638,8 @@ export function ModalOverlay({
       {children}
     </div>
   );
+  // Over the selection ring (docs/specs/layout.md -> "Selection overlay").
+  return portalToBody(overlay);
 }
 
 export type ModalSurfaceProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants;
@@ -536,6 +671,8 @@ export type ModalFrameProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVaria
   overlayClassName?: string;
   initialFocusRef?: RefObject<HTMLElement | null>;
   onEscape?: () => void;
+  /** Opt-in dismissal; clicks within the surface (including menus) stay inside. */
+  onOutsideClick?: () => void;
 };
 
 export function ModalFrame({
@@ -547,6 +684,7 @@ export function ModalFrame({
   overlayClassName,
   initialFocusRef,
   onEscape,
+  onOutsideClick,
   padding,
   align,
   elevation,
@@ -554,6 +692,7 @@ export function ModalFrame({
   ...props
 }: ModalFrameProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
+  const startedOnBackdrop = useRef(false);
   useModalFocusTrap(surfaceRef, { initialFocusRef, onEscape });
 
   return (
@@ -562,6 +701,16 @@ export function ModalFrame({
       layer={layer}
       backdrop={backdrop}
       className={overlayClassName}
+      onPointerDownCapture={(event) => {
+        startedOnBackdrop.current = event.target === event.currentTarget;
+      }}
+      onPointerCancel={() => { startedOnBackdrop.current = false; }}
+      onClick={(event) => {
+        // A drag out of the surface also produces a click on the overlay.
+        const outside = startedOnBackdrop.current && event.target === event.currentTarget;
+        startedOnBackdrop.current = false;
+        if (outside) onOutsideClick?.();
+      }}
     >
       <ModalSurface
         ref={surfaceRef}
@@ -580,13 +729,40 @@ export function ModalFrame({
   );
 }
 
+/**
+ * A native modal `<dialog>`, shown on mount. Mount it only while open: closing
+ * unmounts it, which discards everything its owner held, so no reset-on-close
+ * logic is needed and no in-flight work can reach the next open.
+ */
+export function NativeModalDialog({
+  onClose,
+  className,
+  children,
+}: {
+  onClose: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    // StrictMode runs this twice on one element, and a second showModal throws.
+    if (dialog && !dialog.open) dialog.showModal();
+  }, []);
+  return (
+    <dialog ref={dialogRef} onClose={onClose} className={className}>
+      {children}
+    </dialog>
+  );
+}
+
 const MODAL_FOCUSABLE_SELECTOR = [
   'a[href]',
   'button:not([disabled])',
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
+  '[tabindex]',
 ].join(',');
 
 function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElement>(
@@ -608,7 +784,7 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
       const modal = modalRef.current;
       if (!modal) return;
 
-      if (event.key !== 'Escape' && event.key !== 'Tab') return;
+      if ((event.key !== 'Escape' && event.key !== 'Tab') || isComposingKey(event)) return;
 
       // A native modal <dialog> (ThemeStoreDialog, ThemeDebuggerDialog) sits in
       // the browser's top layer and owns the keyboard with its own Tab/Escape
@@ -632,7 +808,10 @@ function useModalFocusTrap<TModal extends HTMLElement, TInitial extends HTMLElem
 
       event.preventDefault();
       stepFocus(
-        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)),
+        // Mounted but hidden controls and negative tab indices are not Tab stops.
+        Array.from(modal.querySelectorAll<HTMLElement>(MODAL_FOCUSABLE_SELECTOR)).filter(
+          (element) => element.tabIndex >= 0 && !element.closest('[hidden], [inert]'),
+        ),
         event.shiftKey ? -1 : 1,
       );
     };

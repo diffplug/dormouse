@@ -22,8 +22,8 @@ vi.mock("react-router", async (importOriginal) => {
 
 const previewLifecycle = vi.hoisted(() => ({ mounted: [] as boolean[], unmounted: [] as boolean[] }));
 vi.mock("../components/SiteHeader", () => ({ default: () => <header />, STATIC_PAGE_HEADER_STYLE: {} }));
+vi.mock("../lib/website-theme", () => ({ WEBSITE_DEFAULT_THEME_ID: "test-theme" }));
 vi.mock("../components/PocketTerminalExperience", () => ({
-  POCKET_THEME_ID: "test-theme",
   PocketTerminalExperience: ({ interactive }: { interactive: boolean }) => {
     useEffect(() => {
       previewLifecycle.mounted.push(interactive);

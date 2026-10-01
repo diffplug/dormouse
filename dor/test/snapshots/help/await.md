@@ -4,7 +4,7 @@ Invocation: `dor await --help`
 
 ```text
 USAGE
-  dor await <surface> --until condition [--json] [--timeout seconds]
+  dor await <surface> --until condition [--json] [--timeout seconds] [--workspace ref]
   dor await --help
 
 Waits until a terminal surface finishes what it is doing, then reports why the wait ended. Lets an agent block on a peer it launched with `dor split` instead of polling `dor list` in a loop.
@@ -42,11 +42,12 @@ Examples:
   CAUSE=$(dor await surface:3 --until quiet)
 
 FLAGS
-     [--json]     Print JSON output.
-     [--timeout]  Seconds to wait before giving up. Default 600; max 86400.
-      --until     What to wait for: quiet or exit.
-  -h  --help      Print help information and exit
-      --          All subsequent inputs should be interpreted as arguments
+     [--json]       Print JSON output.
+     [--timeout]    Seconds to wait before giving up. Default 600; max 86400.
+      --until       What to wait for: quiet or exit.
+     [--workspace]  Workspace to act in, instead of the caller's.
+  -h  --help        Print help information and exit
+      --            All subsequent inputs should be interpreted as arguments
 
 ARGUMENTS
   surface  Surface to wait on.

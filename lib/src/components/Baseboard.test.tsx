@@ -7,16 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/platform', () => ({
   IS_MAC: false,
-  // An archive port present ⇒ this host has a notepad, which is what puts the
-  // button on a Door that has notes.
-  getPlatform: () => ({ alertPublishSettings: vi.fn(), notepadArchive: {} }),
-  getPlatformOrNull: () => ({ alertPublishSettings: vi.fn(), notepadArchive: {} }),
+  getPlatform: () => ({ alertPublishSettings: vi.fn() }),
+  getPlatformOrNull: () => ({ alertPublishSettings: vi.fn() }),
 }));
 
+import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
 import { Baseboard } from './Baseboard';
 import { installLocalStorageStub } from '../lib/test-local-storage';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
-import { DialogKeyboardContext } from './wall/wall-context';
+import { createDialogKeyboardCoordinator, DialogKeyboardContext, SelectedIdContext, WorkspaceIdContext } from './wall/wall-context';
+import { createWorkspace, getWorkspace, resetWorkspaces } from '../lib/workspace-store';
+import type { DoorChip } from './wall/wall-types';
 import {
   addInstalledTheme,
   getActiveThemeId,
@@ -25,8 +26,12 @@ import {
   type DormouseTheme,
 } from '../lib/themes';
 import { resetShellStore, seedShellStore } from '../lib/shell-store';
-import { addPlainNote, clearAllNotepads } from '../lib/notepad/notepad-store';
 import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../lib/push-devices';
+import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
+import { createAlertEpisode } from '../lib/alert-episode';
+import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
+import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
+import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -61,11 +66,35 @@ beforeEach(() => {
   root = createRoot(container);
 });
 
+/** Render `doors`, with `selected` as the selected Door. */
+function renderBaseboard(doors: DoorChip[], selected: string | null = null): void {
+  act(() => root.render(
+    <SelectedIdContext.Provider value={selected}><Baseboard items={doors} onReattach={() => {}} /></SelectedIdContext.Provider>,
+  ));
+}
+
+/** A 244px baseboard whose always-present right cluster is 72px, every other
+ *  element measuring `widthOf` it. */
+function stubBaseboardWidths(widthOf: (element: HTMLElement) => number): void {
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(private callback: ResizeObserverCallback) {}
+    observe(target: HTMLElement) {
+      const width = target.classList.contains('h-7') ? 244 : 72;
+      this.callback([{ target, contentRect: { width } } as ResizeObserverEntry], this as unknown as ResizeObserver);
+    }
+    disconnect() {}
+  });
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+    return widthOf(this);
+  });
+}
+
 afterEach(() => {
   // Module state, so it outlives the component under test.
   setDefaultThemeId(null);
   resetShellStore();
   act(() => root.unmount());
+  resetWorkspaces();
   resetPushDevices();
   container.remove();
   applyAlertSettingsFromHost(DEFAULT_ALERT_SETTINGS);
@@ -75,6 +104,17 @@ afterEach(() => {
 });
 
 describe('Baseboard settings controls', () => {
+  it('reveals a selected overflow Door and keeps it visible after its predecessor is deleted', () => {
+    const items = ['a', 'b', 'c'].map(id => ({ id, title: id, kind: 'terminal' as const }));
+    // The zero-width test viewport fits exactly one Door.
+    renderBaseboard(items, 'a');
+    renderBaseboard(items, 'c');
+    expect(container.querySelector('[data-door-id="c"]')).not.toBeNull();
+    renderBaseboard(items.slice(1), 'c');
+    expect(container.querySelector('[data-door-id="c"]')).not.toBeNull();
+    expect(container.querySelector('[data-door-id="b"]')).toBeNull();
+  });
+
   it('keeps separate speech, push, and general settings buttons', () => {
     act(() => root.render(<Baseboard items={[]} onReattach={() => {}} />));
 
@@ -106,9 +146,41 @@ describe('Baseboard settings controls', () => {
     expect(dialog?.textContent).toContain('Theme:');
   });
 
+  it.each(['speech', 'push'])('opens workspace controls from %s and restores inheritance', (sink) => {
+    createWorkspace({ id: 'alarms', name: 'Builds', alertDelivery: { speakEnabled: true, pushEnabled: true } });
+    const keyboardActive = { current: false };
+    const keyboardOwner = createDialogKeyboardCoordinator(keyboardActive);
+    act(() => root.render(
+      <WorkspaceIdContext.Provider value="alarms">
+        <DialogKeyboardContext.Provider value={keyboardOwner}>
+          <Baseboard items={[]} onReattach={() => {}} />
+        </DialogKeyboardContext.Provider>
+      </WorkspaceIdContext.Provider>,
+    ));
+    const trigger = container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!;
+    act(() => trigger.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })));
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain('This workspace: Builds');
+    expect(dialog.querySelector('[aria-label="Voice for this workspace"]')).not.toBeNull();
+    expect(dialog.textContent).not.toContain('Theme:');
+    expect(keyboardActive.current).toBe(true);
+    const reset = [...dialog.querySelectorAll('button')].find(button => button.textContent === 'Use application defaults')!;
+    act(() => reset.click());
+    expect(getWorkspace('alarms')?.alertDelivery).toBeUndefined();
+    expect(getAlertSettings()).toEqual(DEFAULT_ALERT_SETTINGS);
+    act(() => applyAlertSettingsFromHost({ ...DEFAULT_ALERT_SETTINGS, speakEnabled: true }));
+    expect(container.querySelector('[data-alarm-setting="speech"]')?.getAttribute('aria-pressed')).toBe('true');
+    act(() => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(keyboardActive.current).toBe(false);
+    act(() => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })));
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('This workspace: Builds');
+  });
+
   it.each([
-    ['speech', 'speakEnabled', 'Speak out loud if not attended', 'Delay before speaking:'],
-    ['push', 'pushEnabled', 'Send push notification if not attended', 'Delay before push:'],
+    ['speech', 'speakEnabled', "Speak out loud if not attended", 'Delay before speaking:'],
+    ['push', 'pushEnabled', "Send push notification if not attended", 'Delay before push:'],
   ] as const)('toggles only %s and previews its stored setting without taking the keyboard', (sink, field, label, delay) => {
     vi.useFakeTimers();
     const setDialogKeyboardActive = vi.fn();
@@ -167,6 +239,25 @@ describe('Baseboard settings controls', () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Looking for phones');
     act(() => setPushDevices({ status: 'ready', devices: [{ label: 'Pixel' }] }));
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Push will be sent to Pixel');
+  });
+
+  it.each([
+    ['push', 'Push is off while Settings → Network is set to Nothing.', 'Connect this machine'],
+    ['speech', 'Managed voice is off while Settings → Network is set to Nothing', 'Uses managed voice'],
+  ] as const)('previews %s under Nothing with its off line from the first frame', async (sink, off, on) => {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      burrow: makeStubBurrowLink({ network: networkPolicyResult(nothingPolicy(), 'hosted', []) }),
+      managedVoice: makeStubManagedVoicePort(true),
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+    await act(async () => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+
+    // Synchronous: the preview's first frame, before any read it started could land.
+    act(() => container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!.click());
+    const preview = document.querySelector('[role="status"]')?.textContent;
+    expect(preview).toContain(off);
+    expect(preview).not.toContain(on);
   });
 
   it('restarts feedback on repeat toggles and replaces it when another setting changes', () => {
@@ -314,11 +405,38 @@ describe('Baseboard settings controls', () => {
   });
 });
 
+describe('Baseboard one-time connection', () => {
+  it('shows a connected phone in the measured right cluster, after the notice', async () => {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      burrow: makeStubBurrowLink({ oneTime: { status: 'connected', label: 'Pixel 9', since: 1 } }),
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+
+    await act(async () => root.render(
+      <Baseboard items={[]} onReattach={() => {}} notice={<span data-notice>update</span>} />,
+    ));
+
+    const end = container.querySelector('button[aria-label="End the one-time connection"]');
+    expect(end).not.toBeNull();
+    // Inside the cluster the Door fit subtracts, between the host's notice and
+    // the Settings buttons (docs/specs/layout.md -> Baseboard).
+    const notice = container.querySelector('[data-notice]')!;
+    const cluster = notice.parentElement!;
+    expect(cluster.contains(end)).toBe(true);
+    expect(notice.compareDocumentPosition(end!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      end!.compareDocumentPosition(container.querySelector('[data-alarm-setting="speech"]')!) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
+
 describe('Baseboard browser Doors', () => {
   it('keeps the browser display icon and page label instead of deriving a terminal idle title', () => {
     act(() => root.render(
       <Baseboard
-        items={[{ id: 'browser-1', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'ab-fixed' }]}
+        items={[{ id: 'browser-1', kind: 'browser', title: 'localhost:5173/app', browserDisplay: 'agent-browser-fixed' }]}
         onReattach={() => {}}
       />,
     ));
@@ -326,46 +444,129 @@ describe('Baseboard browser Doors', () => {
     const door = container.querySelector<HTMLButtonElement>('[data-door-id="browser-1"]');
     expect(door?.textContent).toContain('localhost:5173/app');
     expect(door?.textContent).not.toContain('<idle>');
-    expect(door?.querySelector('[data-browser-display-mode="ab-fixed"] svg')).not.toBeNull();
-    expect(door?.querySelectorAll('[data-browser-display-mode="ab-fixed"] svg')).toHaveLength(2);
+    expect(door?.querySelector('[data-browser-display-mode="agent-browser-fixed"] svg')).not.toBeNull();
+    expect(door?.querySelectorAll('[data-browser-display-mode="agent-browser-fixed"] svg')).toHaveLength(2);
     expect(door?.getAttribute('aria-label')).toBe(
       'localhost:5173/app, agent-browser fixed size',
     );
   });
 });
 
-describe('Baseboard Door notepad', () => {
-  afterEach(() => {
-    act(() => clearAllNotepads());
+
+describe('Baseboard overflow alerts', () => {
+  afterEach(() => act(() => clearTerminalActivity()));
+
+  const items = ['a', 'b', 'c', 'd'].map(id => ({ id, title: id, kind: 'terminal' as const }));
+  const arrow = (direction: 'left' | 'right') => container.querySelector<HTMLButtonElement>(`[data-overflow-arrow="${direction}"]`);
+
+  it('marks an overflow arrow for the ringing and TODO Doors it hides', () => {
+    act(() => {
+      setTerminalActivity('b', { status: 'ALERT_RINGING', episode: createAlertEpisode() });
+      setTerminalActivity('c', { todo: true });
+      setTerminalActivity('d', { status: 'ALERT_RINGING', episode: createAlertEpisode(), todo: true });
+    });
+    // The zero-width test viewport fits exactly one Door.
+    renderBaseboard(items, 'a');
+    const right = arrow('right');
+    expect(right?.getAttribute('aria-label')).toBe('3 more, 2 ringing, 2 TODO');
+    expect(right?.querySelector('[data-alert-ring-inset="door"]')).not.toBeNull();
+    expect(right?.textContent).toContain('TODO');
+    // Static: the arrow never replays the arrival burst.
+    expect(right?.querySelector('[data-alert-ring-inset]')?.className).not.toContain('animate');
+    expect(arrow('left')).toBeNull();
+
+    // The same on the other side, for exactly the Doors hidden there.
+    renderBaseboard(items, 'd');
+    expect(arrow('left')?.getAttribute('aria-label')).toBe('3 more, 1 ringing, 1 TODO');
+    expect(arrow('right')).toBeNull();
   });
 
-  it('opens the popover on the Door with notes without reattaching it', () => {
-    addPlainNote('pane-a', 'from the door');
-    const onReattach = vi.fn();
-    act(() => root.render(
-      <Baseboard
-        items={[
-          { id: 'pane-a', kind: 'terminal', title: 'noted' },
-          { id: 'pane-b', kind: 'terminal', title: 'quiet' },
-        ]}
-        onReattach={onReattach}
-      />,
+  it('leaves an arrow plain while the Doors it hides owe nothing', () => {
+    act(() => setTerminalActivity('a', { status: 'ALERT_RINGING', episode: createAlertEpisode(), todo: true }));
+    renderBaseboard(items, 'a');
+    const right = arrow('right');
+    expect(right?.getAttribute('aria-label')).toBe('3 more');
+    expect(right?.querySelector('[data-alert-ring-inset]')).toBeNull();
+    expect(right?.textContent).not.toContain('TODO');
+  });
+
+  it('reserves the TODO arrow\'s width whatever an arrow hides', () => {
+    // Budget 244 - 72 = 172: two 60px Doors fit beside a 20px plain arrow, not
+    // beside the 60px TODO one.
+    stubBaseboardWidths((element) => {
+      if (element.getAttribute('role') === 'group') return 60;
+      if (element.tagName === 'BUTTON') return element.textContent?.includes('TODO') ? 60 : 20;
+      return 16;
+    });
+    const three = items.slice(0, 3);
+    renderBaseboard(three);
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
+    expect(arrow('right')?.getAttribute('aria-label')).toBe('2 more');
+    // A hidden TODO widens the arrow into the room already reserved for it.
+    act(() => setTerminalActivity('c', { todo: true }));
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
+    expect(arrow('right')?.getAttribute('aria-label')).toBe('2 more, 1 TODO');
+  });
+});
+
+describe('Baseboard preview slot', () => {
+  it('marks a preview slot\'s Door with italics alone and names it Preview', () => {
+    const door = (id: string) => container.querySelector<HTMLElement>(`[data-door-id="${id}"]`)!;
+    renderBaseboard([{ id: 'slot', kind: 'tool', title: 'viewer', preview: true }]);
+    // A Tool Door's label is header-derived: `<idle>` with no Session state.
+    expect(door('slot').title).toBe('<idle> — Preview');
+    expect(door('slot').getAttribute('aria-label')).toBe('<idle>, Preview');
+    expect(door('slot').querySelector('.italic')?.textContent).toBe('<idle>');
+    // The italic label is the whole mark.
+    expect(door('slot').textContent).toBe('<idle>');
+    renderBaseboard([{ id: 'kept', kind: 'tool', title: 'viewer' }]);
+    expect(door('kept').title).toBe('<idle>');
+    expect(door('kept').querySelector('.italic')).toBeNull();
+  });
+});
+
+describe('Baseboard Tool unsaved changes', () => {
+  afterEach(() => act(() => resetToolDirty()));
+
+  it('refits Door overflow when a live dirty report changes a measured width', () => {
+    stubBaseboardWidths((element) => {
+      if (element.getAttribute('role') !== 'group') return 16;
+      return element.querySelector('[aria-label="Unsaved changes"]') ? 94 : 80;
+    });
+    const id = 'dirty-door-fit';
+    renderBaseboard([
+      { id, kind: 'tool', title: 'Editor' },
+      { id: 'other-door', kind: 'terminal', title: 'Shell' },
+    ]);
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
+    act(() => recordToolDirty(id, true));
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(1);
+    act(() => recordToolDirty(id, false));
+    expect(container.querySelectorAll('[data-door-id]')).toHaveLength(2);
+  });
+
+  it('updates a terminal-faced Tool Door and suppresses reports for other kinds', () => {
+    const id = 'dirty-door';
+    const renderKind = (kind: 'tool' | 'terminal' | 'browser') => act(() => root.render(
+      <Baseboard items={[{ id, kind, title: 'Editor' }]} onReattach={() => {}} />,
     ));
-
-    // Only the Door holding notes grows the button.
-    expect(container.querySelectorAll('[data-door-notepad-for]')).toHaveLength(1);
-
-    const notepad = container.querySelector<HTMLButtonElement>('[data-door-notepad-for="pane-a"]')!;
-    act(() => { notepad.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
-
-    const popover = document.querySelector('[data-notepad-popover-for="pane-a"]');
-    expect(popover).not.toBeNull();
-    expect(popover?.querySelector('textarea')?.value).toBe('from the door');
-    expect(onReattach).not.toHaveBeenCalled();
-
-    // Escape dismisses it, and still nothing reattached.
-    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-    expect(document.querySelector('[data-notepad-popover-for="pane-a"]')).toBeNull();
-    expect(onReattach).not.toHaveBeenCalled();
+    const visibleDot = () => container.querySelector(`[data-door-id="${id}"] [aria-label="Unsaved changes"]`);
+    renderKind('tool');
+    expect(visibleDot()).toBeNull();
+    act(() => recordToolDirty(id, true));
+    expect(visibleDot()).not.toBeNull();
+    // The hidden measurement pass and the visible Door must grow together.
+    expect(container.querySelectorAll('[role="img"][aria-label="Unsaved changes"]')).toHaveLength(2);
+    expect(container.querySelector(`[data-door-id="${id}"]`)?.getAttribute('aria-label')).toContain('Unsaved changes');
+    renderKind('terminal');
+    expect(visibleDot()).toBeNull();
+    renderKind('browser');
+    expect(visibleDot()).toBeNull();
+    renderKind('tool');
+    expect(visibleDot()).not.toBeNull();
+    act(() => recordToolDirty(id, false));
+    expect(visibleDot()).toBeNull();
+    act(() => recordToolDirty(id, null));
+    expect(visibleDot()).toBeNull();
   });
 });

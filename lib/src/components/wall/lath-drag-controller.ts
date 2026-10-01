@@ -6,10 +6,8 @@ import { type Rect, rectKey } from '../../lib/lath/model';
 import type { DropTarget } from '../../lib/lath/ops';
 import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
 import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
+import { DRAG_THRESHOLD_PX } from '../design';
 
-/** Pointer travel (px) before a header press becomes a pane drag; below it the
- *  header's own click behavior (select / enter passthrough / rename) is untouched. */
-const DRAG_THRESHOLD = 5;
 /** Opacity applied to the dragged leaf while its drop preview floats elsewhere. */
 const DRAG_DIM = '0.6';
 
@@ -206,7 +204,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     d.lastX = e.clientX;
     d.lastY = e.clientY;
     if (!d.active) {
-      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD) return;
+      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < DRAG_THRESHOLD_PX) return;
       d.active = true;
       if (!d.external) {
         deps.latestRef.current.onDragStart?.(d.id); // Wall applies its selection policy

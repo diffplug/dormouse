@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeWorkspaceUnion, EMPTY_WORKSPACE_UNION } from './workspace-union';
+import { computeWorkspaceUnion, nextTodoMember, type WorkspaceUnion } from './workspace-union';
 import type { ActivityState } from './session-activity-store';
 
 function activity(entries: Record<string, Partial<ActivityState>>): Map<string, ActivityState> {
@@ -9,35 +9,38 @@ function activity(entries: Record<string, Partial<ActivityState>>): Map<string, 
     todo: false,
     notification: null,
     awaited: false,
-    ringSeq: 0,
   };
   return new Map(Object.entries(entries).map(([id, partial]) => [id, { ...base, ...partial }]));
 }
 
+const episode = (id: string, startedAt: number) => ({ id, startedAt });
+
+const EMPTY: WorkspaceUnion = { ringing: false, todo: false, count: 0, ringingSince: null };
+
 describe('computeWorkspaceUnion', () => {
   it('is empty when no surface owes attention', () => {
     const union = computeWorkspaceUnion(['a', 'b'], activity({ a: {}, b: { status: 'BUSY' } }));
-    expect(union).toEqual(EMPTY_WORKSPACE_UNION);
+    expect(union).toEqual(EMPTY);
   });
 
   it('reports ringing when any terminal Session is ALERT_RINGING', () => {
     const union = computeWorkspaceUnion(['a', 'b'], activity({ a: {}, b: { status: 'ALERT_RINGING' } }));
-    expect(union).toEqual({ ringing: true, todo: false, count: 1 });
+    expect(union).toEqual({ ringing: true, todo: false, count: 1, ringingSince: null });
   });
 
   it('reports todo for a flagged terminal Session', () => {
     const union = computeWorkspaceUnion(['a'], activity({ a: { todo: true } }));
-    expect(union).toEqual({ ringing: false, todo: true, count: 1 });
+    expect(union).toEqual({ ringing: false, todo: true, count: 1, ringingSince: null });
   });
 
   it('counts a browser Surface TODO (no ring) — status stays WATCHING_DISABLED', () => {
     const union = computeWorkspaceUnion(['web'], activity({ web: { status: 'WATCHING_DISABLED', todo: true } }));
-    expect(union).toEqual({ ringing: false, todo: true, count: 1 });
+    expect(union).toEqual({ ringing: false, todo: true, count: 1, ringingSince: null });
   });
 
   it('counts a surface that is both ringing and todo only once', () => {
     const union = computeWorkspaceUnion(['a'], activity({ a: { status: 'ALERT_RINGING', todo: true } }));
-    expect(union).toEqual({ ringing: true, todo: true, count: 1 });
+    expect(union).toEqual({ ringing: true, todo: true, count: 1, ringingSince: null });
   });
 
   it('sums distinct surfaces owing attention', () => {
@@ -45,15 +48,60 @@ describe('computeWorkspaceUnion', () => {
       ['a', 'b', 'c', 'd'],
       activity({ a: { status: 'ALERT_RINGING' }, b: { todo: true }, c: { status: 'BUSY' }, d: {} }),
     );
-    expect(union).toEqual({ ringing: true, todo: true, count: 2 });
+    expect(union).toEqual({ ringing: true, todo: true, count: 2, ringingSince: null });
   });
 
   it('ignores surface ids with no activity entry', () => {
     const union = computeWorkspaceUnion(['a', 'missing'], activity({ a: { todo: true } }));
-    expect(union).toEqual({ ringing: false, todo: true, count: 1 });
+    expect(union).toEqual({ ringing: false, todo: true, count: 1, ringingSince: null });
+  });
+
+  it('starts ringing at the earliest ringing member, whatever the iteration order', () => {
+    const union = computeWorkspaceUnion(
+      ['a', 'b', 'c'],
+      activity({
+        b: { status: 'ALERT_RINGING', episode: episode('later', 2_000) },
+        a: { status: 'ALERT_RINGING', episode: episode('first', 1_000) },
+        c: { todo: true },
+      }),
+    );
+    expect(union).toEqual({ ringing: true, todo: true, count: 3, ringingSince: 1_000 });
+  });
+
+  it('ignores a quiet member\'s stale episode', () => {
+    const union = computeWorkspaceUnion(
+      ['a', 'b'],
+      activity({
+        a: { status: 'BUSY', episode: episode('stale', 1) },
+        b: { status: 'ALERT_RINGING', episode: episode('live', 9) },
+      }),
+    );
+    expect(union.ringingSince).toBe(9);
   });
 
   it('is empty for an empty surface set', () => {
-    expect(computeWorkspaceUnion([], activity({ a: { todo: true } }))).toEqual(EMPTY_WORKSPACE_UNION);
+    expect(computeWorkspaceUnion([], activity({ a: { todo: true } }))).toEqual(EMPTY);
+  });
+});
+
+describe('nextTodoMember', () => {
+  const order = ['a', 'b', 'c', 'd'];
+  const todos = activity({ a: {}, b: { todo: true }, c: { status: 'ALERT_RINGING' }, d: { todo: true } });
+
+  it('starts from the first member when nothing, or no member, is selected', () => {
+    expect(nextTodoMember(order, null, todos)).toBe('b');
+    expect(nextTodoMember(order, 'gone', todos)).toBe('b');
+  });
+
+  it('moves past the selection to the next TODO, skipping a ring without one, and wraps', () => {
+    expect(nextTodoMember(order, 'a', todos)).toBe('b');
+    expect(nextTodoMember(order, 'b', todos)).toBe('d');
+    expect(nextTodoMember(order, 'd', todos)).toBe('b');
+  });
+
+  it('stays on the only TODO, and finds none when no member has one', () => {
+    expect(nextTodoMember(order, 'b', activity({ b: { todo: true } }))).toBe('b');
+    expect(nextTodoMember(order, 'b', activity({ c: { status: 'ALERT_RINGING' } }))).toBeNull();
+    expect(nextTodoMember([], null, todos)).toBeNull();
   });
 });

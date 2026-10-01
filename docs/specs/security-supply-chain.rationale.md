@@ -6,7 +6,7 @@ Why the test is "puts on a user's machine" rather than "everything a user runs":
 
 Why `dormouse-lib` has to be named a root rather than left as a workspace edge: `vscode-ext` declares only `node-pty` and `ws`, reaching the lib through relative imports into `../lib/src/` from fifteen files, so the extension's dependency walk never arrives at it. Only `dormouse-standalone`'s edge would — which puts the disclosure of lib's entire subtree one refactor away from silently vanishing. Naming it a root is what makes that not matter.
 
-Why external binaries cannot be disclosed: Dormouse is a terminal, so it spawns the user's shell, and `dor ab` forwards to an `agent-browser` CLI the user installs themselves and that is resolved off `PATH`. Those are the user's software, not ours, and disclosing them is neither possible nor meaningful.
+Why external binaries cannot be disclosed: Dormouse is a terminal, so it spawns the user's shell, and `dor agent-browser` forwards to an `agent-browser` CLI the user installs themselves and that is resolved off `PATH`. Those are the user's software, not ours, and disclosing them is neither possible nor meaningful.
 
 Where the snapshots come from: they are generated from the lockfiles and reviewed as part of release work. The `pnpm install --frozen-lockfile` precondition matters because a stale `node_modules` makes the regeneration check pass locally on a tree that would fail in CI.
 
@@ -29,6 +29,8 @@ Why alternate version declarations are excluded: in the pinned [setup-node imple
 ## Cooldown and alerts
 
 What the `minimumReleaseAge` package rules are: the Renovate equivalent of the pnpm dependency cooldown window, applied per manager.
+
+The pgstencil exception has a different gate: its release workflow stages a version only after a passing `security-audit` on the packaged commit, and a human approves the staged package with npm 2FA before it becomes public. The package carries that commit in `dist/provenance.json`; Hosted verifies matching clean commits for core and auth, and its audit checks npm-signed workflow attestations bind those bytes to that commit. The exclusion list is deliberately narrow so other dependencies retain the withdrawal window.
 
 Why the `vulnerabilityAlerts` cooldown is kept rather than dropped for speed: it guards the opposite threat from the alert itself — a compromised release that gets yanked within a day, which a reviewer reading a dependency diff cannot detect the way the ecosystem's own yank process can. Nothing here auto-merges, and the Dependabot alert already makes the vulnerability visible the moment it is published, so what the cooldown costs is a day before the remediation PR appears, not a day before anyone knows.
 

@@ -4,6 +4,9 @@ import {
   __resetMouseSelectionForTests,
   beginDrag,
   endDrag,
+  extendSelectionToToken,
+  COPY_FAILED_MS,
+  failCopy,
   flashCopy,
   getMouseSelectionSnapshot,
   getMouseSelectionState,
@@ -11,14 +14,16 @@ import {
   removeMouseSelectionState,
   setBracketedPaste,
   setHintToken,
+  offerProgramCopy,
+  setCopyEditor,
   setMouseReporting,
   setOverride,
   setSelection,
   subscribeToMouseSelection,
   updateDrag,
   type Selection,
-  type TokenHint,
 } from './mouse-selection';
+import type { BufferToken } from './smart-token';
 
 afterEach(() => {
   __resetMouseSelectionForTests();
@@ -36,8 +41,62 @@ describe('mouse-selection: default state', () => {
       override: 'off',
       selection: null,
       hintToken: null,
-      copyFlash: null,
+      copyEditor: null,
+      programCopy: null,
+      copyOutcome: null,
     });
+  });
+});
+
+describe('mouse-selection: shadowed program drags', () => {
+  it('drops a shadowed drag, with its editor, when the program stops reporting', () => {
+    setMouseReporting('a', 'vt200');
+    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+    setMouseReporting('a', 'none');
+    expect(getMouseSelectionState('a').selection).toBeNull();
+  });
+
+  it('keeps a terminal selection when reporting stops', () => {
+    setMouseReporting('a', 'vt200');
+    setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: true });
+    setMouseReporting('a', 'none');
+    expect(getMouseSelectionState('a').selection).not.toBeNull();
+  });
+});
+
+describe('mouse-selection: program copy offers', () => {
+  const sel = (owner?: 'program') => ({ startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise' as const, dragging: false, startedInScrollback: false, owner });
+
+  it('takes an offer only over a shadowed drag, and drops it with the selection', () => {
+    offerProgramCopy('a', 'nothing armed');
+    expect(getMouseSelectionState('a').programCopy).toBeNull();
+    setSelection('a', sel());
+    offerProgramCopy('a', 'over a terminal selection');
+    expect(getMouseSelectionState('a').programCopy).toBeNull();
+    setSelection('a', sel('program'));
+    offerProgramCopy('a', 'copied');
+    expect(getMouseSelectionState('a').programCopy).toBe('copied');
+    setSelection('a', sel('program'));
+    expect(getMouseSelectionState('a').programCopy).toBeNull();
+  });
+});
+
+describe('mouse-selection: the program format needs its offer', () => {
+  const editor = (format: 'auto' | 'program') => ({ buffer: {} as never, scopes: [], scope: 0, format, overrides: { 0: 'keep' as const } });
+  const sel = { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise' as const, dragging: false, startedInScrollback: false, owner: 'program' as const };
+
+  it('refuses the program format while no offer is held', () => {
+    setSelection('a', sel, editor('auto'));
+    setCopyEditor('a', editor('program'));
+    expect(getMouseSelectionState('a').copyEditor?.format).toBe('auto');
+    offerProgramCopy('a', 'copied');
+    setCopyEditor('a', editor('program'));
+    expect(getMouseSelectionState('a').copyEditor?.format).toBe('program');
+  });
+
+  it('demotes it to Auto when the selection, and so its offer, is replaced', () => {
+    setSelection('a', sel, editor('program'));
+    expect(getMouseSelectionState('a').copyEditor).toMatchObject({ format: 'auto', overrides: {} });
   });
 });
 
@@ -67,7 +126,7 @@ describe('mouse-selection: state setters', () => {
   });
 
   it('setHintToken stores a hint', () => {
-    const hint: TokenHint = { kind: 'url', row: 1, startCol: 0, endCol: 20, text: 'https://example.com' };
+    const hint: BufferToken = { kind: 'url', start: { row: 1, col: 0 }, end: { row: 1, col: 18 }, text: 'https://example.com' };
     setHintToken('a', hint);
     expect(getMouseSelectionState('a').hintToken).toBe(hint);
 
@@ -75,11 +134,46 @@ describe('mouse-selection: state setters', () => {
     expect(getMouseSelectionState('a').hintToken).toBeNull();
   });
 
+  it('setHintToken writes nothing for the token it already holds', () => {
+    const hint: BufferToken = { kind: 'url', start: { row: 1, col: 0 }, end: { row: 1, col: 18 }, text: 'https://example.com' };
+    setHintToken('a', hint);
+    const listener = vi.fn();
+    subscribeToMouseSelection(listener);
+    // Each drag move detects the token afresh: an equal object.
+    setHintToken('a', { ...hint, start: { ...hint.start }, end: { ...hint.end } });
+    expect(listener).not.toHaveBeenCalled();
+    expect(getMouseSelectionState('a').hintToken).toBe(hint);
+    setHintToken('a', { ...hint, end: { row: 1, col: 17 } });
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
   it('removeMouseSelectionState drops all state for an id', () => {
     setMouseReporting('a', 'vt200');
     setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 5, shape: 'linewise', dragging: false, startedInScrollback: false });
     removeMouseSelectionState('a');
     expect(getMouseSelectionState('a')).toEqual(DEFAULT_MOUSE_SELECTION_STATE);
+  });
+});
+
+describe('mouse-selection: smart extension', () => {
+  // A URL a soft wrap carries from row 3 onto row 4.
+  const token: BufferToken = { kind: 'url', start: { row: 3, col: 50 }, end: { row: 4, col: 9 }, text: 'https://example.com/a/b' };
+
+  it('moves the end to the token edge away from the anchor, across rows', () => {
+    beginDrag('a', { row: 3, col: 10, altKey: false, startedInScrollback: false });
+    updateDrag('a', { row: 3, col: 55, altKey: false });
+    extendSelectionToToken('a', token);
+    expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 3, startCol: 10, endRow: 4, endCol: 9 });
+
+    beginDrag('a', { row: 4, col: 30, altKey: false, startedInScrollback: false });
+    updateDrag('a', { row: 4, col: 5, altKey: false });
+    extendSelectionToToken('a', token);
+    expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 4, startCol: 30, endRow: 3, endCol: 50 });
+
+    // An anchor on the token's first cell reads as a forward drag.
+    beginDrag('a', { row: 3, col: 50, altKey: false, startedInScrollback: false });
+    extendSelectionToToken('a', token);
+    expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 3, startCol: 50, endRow: 4, endCol: 9 });
   });
 });
 
@@ -274,37 +368,95 @@ describe('mouse-selection: drag lifecycle', () => {
 });
 
 describe('mouse-selection: flashCopy race', () => {
-  it('beginDrag during a flash clears copyFlash so the timer does not nuke the new selection', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
-    updateDrag('a', { row: 3, col: 5, altKey: false });
-    endDrag('a');
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    // Simulate flashCopy — but we call beginDrag before the timer fires.
-    flashCopy('a', 'raw', 500);
-    expect(getMouseSelectionState('a').copyFlash).toBe('raw');
+  function finalize(row: number): void {
+    beginDrag('a', { row, col: 0, altKey: false, startedInScrollback: false });
+    updateDrag('a', { row: row + 3, col: 5, altKey: false });
+    endDrag('a');
+  }
+
+  it('beginDrag during a flash clears it so the timer does not nuke the new selection', () => {
+    vi.useFakeTimers();
+    finalize(0);
+    flashCopy('a', 500);
+    expect(getMouseSelectionState('a').copyOutcome).toBe('copied');
 
     // New drag starts before the 500ms timer.
     beginDrag('a', { row: 10, col: 2, altKey: false, startedInScrollback: false });
-    expect(getMouseSelectionState('a').copyFlash).toBeNull();
+    expect(getMouseSelectionState('a').copyOutcome).toBeNull();
+    vi.advanceTimersByTime(500);
     expect(getMouseSelectionState('a').selection?.startRow).toBe(10);
   });
 
-  it("a notepad capture's flash clears the selection like a copy's, dismissing the popup", () => {
+  it('times each flash from its own copy', () => {
     vi.useFakeTimers();
-    try {
-      beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
-      endDrag('a');
+    finalize(0);
+    flashCopy('a', 500);
+    vi.advanceTimersByTime(300);
+    finalize(10);
+    flashCopy('a', 500);
 
-      flashCopy('a', 'notepad', 500);
-      expect(getMouseSelectionState('a').copyFlash).toBe('notepad');
-      expect(getMouseSelectionState('a').selection).not.toBeNull();
+    vi.advanceTimersByTime(200);
+    expect(getMouseSelectionState('a')).toMatchObject({ selection: { startRow: 10 }, copyOutcome: 'copied' });
+    vi.advanceTimersByTime(300);
+    expect(getMouseSelectionState('a')).toMatchObject({ selection: null, copyOutcome: null });
+  });
+});
 
-      vi.advanceTimersByTime(500);
-      expect(getMouseSelectionState('a').copyFlash).toBeNull();
-      expect(getMouseSelectionState('a').selection).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
+describe('mouse-selection: failCopy', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const select = () => setSelection('a', { startRow: 0, startCol: 0, endRow: 1, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: false });
+
+  it('says so for COPY_FAILED_MS, then clears only itself, keeping the selection', () => {
+    vi.useFakeTimers();
+    select();
+    failCopy('a');
+    vi.advanceTimersByTime(COPY_FAILED_MS - 1);
+    expect(getMouseSelectionState('a').copyOutcome).toBe('failed');
+    vi.advanceTimersByTime(1);
+    expect(getMouseSelectionState('a')).toMatchObject({ copyOutcome: null, selection: { endRow: 1 } });
+  });
+
+  it('is one outcome with a flash: the newer replaces the older, and its timer', () => {
+    vi.useFakeTimers();
+    select();
+    failCopy('a');
+    vi.advanceTimersByTime(COPY_FAILED_MS - 300);
+    // A retry that lands confirms; the failure's timer no longer clears it.
+    flashCopy('a', 500);
+    vi.advanceTimersByTime(300);
+    expect(getMouseSelectionState('a')).toMatchObject({ copyOutcome: 'copied', selection: { endRow: 1 } });
+    vi.advanceTimersByTime(200);
+    expect(getMouseSelectionState('a')).toMatchObject({ copyOutcome: null, selection: null });
+    // A failure during a flash keeps the selection past the flash's timer.
+    select();
+    flashCopy('a', 500);
+    failCopy('a');
+    vi.advanceTimersByTime(500);
+    expect(getMouseSelectionState('a')).toMatchObject({ copyOutcome: 'failed', selection: { endRow: 1 } });
+  });
+
+  it('times each failure from its own copy, and goes with the selection', () => {
+    vi.useFakeTimers();
+    select();
+    failCopy('a');
+    vi.advanceTimersByTime(COPY_FAILED_MS - 300);
+    failCopy('a');
+    vi.advanceTimersByTime(300);
+    expect(getMouseSelectionState('a').copyOutcome).toBe('failed');
+    setSelection('a', null);
+    expect(getMouseSelectionState('a').copyOutcome).toBeNull();
+  });
+
+  it('is a no-op without a selection', () => {
+    failCopy('a');
+    expect(getMouseSelectionState('a').copyOutcome).toBeNull();
   });
 });
 

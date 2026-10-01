@@ -1,0 +1,124 @@
+# Dormouse Hosted accounts
+
+> See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
+> Owns the Hosted account application and the Worker's deployment. The one-time rendezvous it also serves belongs to `docs/specs/one-time.md` -> "Hosted rendezvous"; remote authorization to `docs/specs/remote-security-model.md`; the multi-tenant Relay remains in `docs/specs/relay.md` -> Future.
+
+## Application boundary
+
+**Must serve the account frontend and its API from `https://hosted.dormouse.sh`.** The Hono Worker serves Vite assets and pgstencil's request-scoped Better Auth adapter. Requests addressed to another origin receive 421. Marketing remains a separate bundle and deployment; no marketing component is imported.
+
+The one-time rendezvous routes and `/connect/` page mount in this app (`docs/specs/one-time.md` -> "Hosted rendezvous", "Phone page"). Both bindings mappers pass its Durable Object and rate-limit bindings; `remote-lib-common` is compiled in from source through `hosted/tsconfig.json` `paths`, which every esbuild bundle and Wrangler honor.
+
+**Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding. The runtime creates and closes its database pool within each request.
+
+**Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`.
+
+**Must declare every peer dependency of the installed packages in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
+
+Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/server/worker-app.ts`; `migrations` in `hosted/server/migrations.ts`; `verifyPackages` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/artifacts.test.ts`.
+
+## Identity and login
+
+**Must retain independent simultaneous browser logins.** Login lifetime is 24 hours without refresh or cookie caching; logout revokes only the current login. These authentication records are not terminal Sessions.
+
+**Must require explicit provider connection from a login less than ten minutes old.** The callback must retain that same live login. Matching email alone never connects an unbound OAuth identity. Different verified provider emails are allowed; an identity already attached to another account cannot be claimed.
+
+**May create provider-only accounts without verified email.** Public email is null; pgstencil's internal placeholder is never a delivery address. Email-code login remains an access path to an account's canonical verified mailbox. No merge, email adoption, unlink, or account-recovery interface exists.
+
+**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exception: "Managed voice".
+
+**Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
+
+**Must discard provider tokens after identity verification and omit login tokens from browser JSON.** Cookies and upstream identity verification follow the packed adapter; `hosted/server/tests/workers.test.ts` pins the consumer's browser contract in workerd with real Postgres and simulated providers.
+
+Source of truth: `hosted/server/providers.js`; `authPolicy` / `providerBindings` in `hosted/server/policy.ts`; `App` in `hosted/src/App.tsx`.
+
+## Interface
+
+**Must link the account footer to the public Hosted privacy policy and terms.**
+
+**Must show configured sign-in methods only.** Email has send, existing-code, verify, resend, and change-address paths. The account screen lists connected methods and explains recent-login requirements and provider-only recovery limits. Failed callbacks display a recoverable error and remove query parameters from browser history.
+
+**Must check the account on return to the page and serialize submitted actions.** Authenticated data remains in memory; login tokens never enter local storage. Only public identity fields are rendered, without provider images or external assets. The Voice tokens section renders only when `GET /api/voice/tokens` succeeds, and its failure never fails the account page; a minted token stays in memory and is shown once.
+
+**Must inherit Dormouse product theme tokens before mounting React.** The OS light/dark preference selects bundled Light Visual Studio or Kimbie Dark. Its type scale and touch sizing are in `hosted/src/style.css`. It loads no marketing styles, fonts, or analytics.
+
+Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/main.tsx`; `hosted/src/style.css`.
+
+## Managed voice
+
+An admin-only test slice: Dormouse desktop exchanges a pasted voice token for ElevenLabs speech.
+
+| Route | Credential | Success |
+|---|---|---|
+| `GET /api/voice/tokens` | login cookie | 200 `{ tokens: [{ id, createdAt, lastUsedAt, revokedAt }] }` |
+| `POST /api/voice/tokens` | login cookie, exact `Origin` | 201 `{ id, token, createdAt }` |
+| `DELETE /api/voice/tokens/:id` | login cookie, exact `Origin` | 204; 404 for another account's or an unknown ID |
+| `POST /api/voice/speak` | `Authorization: Bearer dmv_…`, JSON `{ text, voiceId }` | 200 `audio/mpeg`, `Cache-Control: no-store` |
+
+Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for any account but the admin.
+
+**Must admit only `ADMIN_EMAIL` while it is the account's verified email, rechecked on every request.** This is the only exception to "never email" ("Identity and login"); nothing else may key on an address, and it ends with the entitlement in Future item 3. Cookie routes ask the Better Auth handler's `get-session` for the login; speak reads the token owner's user row.
+
+**Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response. Revocation is permanent; speak stamps `lastUsedAt`.
+
+**Speak must answer in this order:**
+
+1. 401 for a missing, malformed, unknown, or revoked token.
+2. 403 when the owner is not the verified admin.
+3. 400 for malformed JSON, `text` outside 1–200 characters after trim, or `voiceId` outside `^[A-Za-z0-9]{1,64}$`.
+4. 503 when the deployment has no `ELEVENLABS_API_KEY`.
+5. 429 once the owner's UTC-day counter reaches 500. The increment is atomic and precedes the upstream call, so failed upstream attempts count.
+6. 502 when ElevenLabs throws or answers non-2xx.
+
+**Never log the text or forward an upstream body or status.** The upstream URL, model `eleven_flash_v2_5`, and format `mp3_44100_128` are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is a Worker secret that production preflight requires; the preview mapper never passes it. Only the local development entry substitutes silent MP3 when the key is unset. Tests fake ElevenLabs in Miniflare's outbound service, so no entry carries an upstream override.
+
+**Must delete ElevenLabs speech history, which keeps each generation's text, from the production Worker only.** A successful speak schedules one sweep about 10 s later in `waitUntil`; a Cron Trigger every 5 minutes sweeps what that missed. No retention bound is guaranteed (rationale).
+
+- **Must use an ElevenLabs account dedicated to Dormouse voice.** A sweep deletes the whole account's history.
+- **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep, and the preview config drops `triggers`.
+- **Must bound each pass**; a backlog waits for the next pass. At most six deletes are in flight; a 404 counts as deleted; a failed delete never aborts the pass. Only counts and statuses are logged or thrown.
+- **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
+
+Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceRoutes` / `elevenLabs` / `sweepOnCron` / `sweepAfterSpeech` in `hosted/server/voice.ts`; `scheduled` in `hosted/server/worker-app.ts`; `triggers` in `hosted/wrangler.jsonc`; `hosted/server/dormouse-migrations/001_voice_tokens.sql`; `preflight` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/workers.test.ts`, `hosted/scripts/production.test.mjs`, and `hosted/scripts/preview.test.mjs`.
+
+## Development and release
+
+**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; the production entry imports no inbox or test-control handler. `dor tool one-time` runs the rendezvous and phone page on loopback, without a database (`docs/specs/one-time.md` -> "Dev loop").
+
+**Must verify the production Worker bundle and run the consumer's integration suite before release.** Root `pnpm test` runs the `hosted/scripts/*.test.mjs` deploy suites and `test:one-time`, the rendezvous's Miniflare suite, which needs no Docker; the rest of `pnpm test:hosted`'s vitest half needs Docker and is skipped there. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
+
+**Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
+
+Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `hosted/server/tests/workers.test.ts`; `hosted/wrangler.jsonc`.
+
+## PR previews
+
+**Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials. Changed paths include rename sources and all API pages. Deployment runs serialize per PR without cancellation; close/merge cleanup ignores path filtering and tolerates absent resources.
+
+**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark. **Must give each preview its own Durable Object namespace and preview-only rate-limit namespaces**, and delete its Worker with `force` so the namespace goes with it.
+
+**Must run cleanup from the base branch's checkout, never the closed PR's.**
+
+**Must capture preview mail in Postgres and expose escaped text only.** The public inbox shows the newest 100 messages from the last 24 hours, prunes expired rows on capture, and accepts only the preview's configured origin. No test clock is deployed. Preview data is disposable; it is not access-controlled.
+
+Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workflows/hosted-preview.yml`; `previewConfig` / `cleanup` in `hosted/scripts/preview.mjs`; `postgresInbox` in `hosted/server/preview-inbox.ts`; `hosted/server/preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`, `hosted/scripts/changed.test.mjs`, and `hosted/server/tests/workers.test.ts`.
+
+## Production releases
+
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks both installed packages' clean, matching provenance; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and required Worker secret names. Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Production has no public candidate URL.
+
+**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so the deploy that adds a class is a rollback floor. A deploy restarts every room, dropping links still waiting or mid-handshake; a session already on its direct path never touches Hosted. Live verification runs `oneTimeSmoke` after the account smoke.
+
+**Must bound retries.** Health GETs require the selected revision, sharing six five-second retries for transport failures or healthy stale revisions. Retry rate-limited OAuth once; never replay POSTs after transport failures.
+
+**Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification.** Tags identify the deployed commit and verification run/attempt; retries are idempotent and redeployments get new tags. Dating and repeat-deployment suffixes: `recordDeployment`. Code rollback never reverses migrations.
+
+Source of truth: `.github/workflows/hosted-production.yml`; `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `hosted/scripts/production-backup.mjs`; `smokeRequest` in `hosted/scripts/preview-smoke.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs`, `hosted/scripts/smoke-request.test.mjs`, and `hosted/scripts/production-tag.test.mjs`.
+
+## Future
+
+1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
+2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
+3. Managed voice beyond the admin slice: a real entitlement or licence replacing `ADMIN_EMAIL`, credentials scoped for non-admin accounts, per-account quotas, usage accounting, and spending bounds beyond the fixed daily cap, and explicit text/redaction disclosure.
+4. Hosted Relay: **saas-multitenant** in `docs/specs/relay.md` and **remote-network** in `docs/specs/remote-network.md`. Account login never replaces Burrow pairing and authorization. Paid security claims require independent review.

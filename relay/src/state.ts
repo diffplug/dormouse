@@ -458,7 +458,8 @@ export class BurrowStore extends JsonFileStore {
    *
    * **A value of the wrong shape never reaches the file.** This runs
    * unauthenticated, on `requireBurrow` and on every `/ws/burrow` upgrade, and the
-   * lookup costs a `readFile` + `JSON.parse` + two SHA-256 per row — so a probe
+   * lookup costs a `stat` (plus a `readFile` + `JSON.parse` whenever the file
+   * changed) + two SHA-256 per row — so a probe
    * that cannot possibly be a token this Relay minted must not buy any of it.
    * The same reasoning `isDeliveryId` applies at the push routes.
    */
@@ -473,7 +474,7 @@ export class BurrowStore extends JsonFileStore {
   }
 
   /**
-   * Whether `burrowId` is still enrolled, read fresh off disk like
+   * Whether `burrowId` is still enrolled, read through the stat-gated cache like
    * {@link findByToken}: deleting a row from `burrows.json` is the documented
    * revocation mechanism, so anything gating on a Burrow's continued existence —
    * redeeming a setup token it minted, accepting a push subscription for it —
@@ -572,9 +573,9 @@ export interface PushSubscriptionUpsertResult {
  * Burrow is no longer enrolled, so the read boundary that already handles
  * malformed rows handles orphans too, and the next mutation writes the pruned
  * set back. Deleting a Burrow by hand is the documented revocation mechanism, so
- * this is read fresh rather than cached — the same rule `BurrowStore.has`
- * follows. An *absent* `burrows.json` cascades to nothing: it is a file in
- * flight, not a revocation.
+ * this reads through `BurrowStore`'s stat-gated cache, which sees a hand edit on
+ * the next call — the same rule `BurrowStore.has` follows. An *absent*
+ * `burrows.json` cascades to nothing: it is a file in flight, not a revocation.
  */
 export class PushSubscriptionStore extends JsonFileStore {
   /** Which Burrows are still enrolled. Required, so no caller can skip the join. */

@@ -9,16 +9,12 @@ import { useWallKeyboard } from '../use-wall-keyboard';
 import type { WallKeyboardCtx } from './types';
 
 const terminalRegistryMocks = vi.hoisted(() => ({
-  dismissOrToggleAlert: vi.fn(),
-  getActivity: vi.fn(() => ({ status: 'WATCHING_DISABLED' })),
+  acknowledgeSession: vi.fn(),
+  dismissSessionAlert: vi.fn(),
   toggleSessionTodo: vi.fn(),
 }));
 
-vi.mock('../../../lib/terminal-registry', () => ({
-  dismissOrToggleAlert: terminalRegistryMocks.dismissOrToggleAlert,
-  getActivity: terminalRegistryMocks.getActivity,
-  toggleSessionTodo: terminalRegistryMocks.toggleSessionTodo,
-}));
+vi.mock('../../../lib/terminal-registry', () => terminalRegistryMocks);
 
 vi.mock('./handle-mouse-selection-keys', () => ({ handleMouseSelectionKeys: () => false }));
 
@@ -40,6 +36,7 @@ function makeNav(overrides: Partial<WallKeyboardCtx['nav']> = {}): WallKeyboardC
 function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
   return {
     nav: makeNav(),
+    activeRef: { current: true },
     swapWithNeighbor: vi.fn(),
     modeRef: { current: 'command' },
     selectedIdRef: { current: 'pane-a' },
@@ -56,6 +53,7 @@ function makeCtx(overrides: Partial<WallKeyboardCtx> = {}): WallKeyboardCtx {
     handleReattachRef: { current: vi.fn() },
     selectPane: vi.fn(),
     enterTerminalMode: vi.fn(),
+    openTerminalContext: vi.fn(),
     requestKill: vi.fn(),
     setRenamingPaneId: vi.fn(),
     fireEvent: vi.fn(),
@@ -82,6 +80,25 @@ describe('handlePaneShortcuts kill behavior', () => {
 
     expect(ctx.requestKill).toHaveBeenCalledWith('pane-a');
     expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+/** Entering passthrough is a human gesture; `d` only reattaches
+ *  (`docs/specs/alert.md` -> Engagement). */
+describe('handlePaneShortcuts acknowledgement', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it.each(['pane', 'door'] as const)('acknowledges the Session Enter takes a %s into', (selectedType) => {
+    const ctx = makeCtx({ selectedTypeRef: { current: selectedType } });
+    expect(handlePaneShortcuts(keydown('Enter'), ctx, { current: null })).toBe(true);
+    expect(terminalRegistryMocks.acknowledgeSession.mock.calls).toEqual([['pane-a']]);
+  });
+
+  it('acknowledges nothing for `d` bringing a Door back in command mode', () => {
+    const ctx = makeCtx({ selectedTypeRef: { current: 'door' } });
+    expect(handlePaneShortcuts(keydown('d'), ctx, { current: null })).toBe(true);
+    expect(ctx.handleReattachRef.current).toHaveBeenCalledWith(expect.objectContaining({ id: 'pane-a' }), { enterPassthrough: false });
+    expect(terminalRegistryMocks.acknowledgeSession).not.toHaveBeenCalled();
   });
 });
 
@@ -200,22 +217,31 @@ describe('handlePaneShortcuts `>` header context menu', () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(() => { document.body.innerHTML = ''; });
 
-  function makeHeaderEl(id: string): ReturnType<typeof vi.fn> {
+  function makeHeaderEl(id: string): HTMLElement {
     const el = document.createElement('div');
     el.setAttribute('data-pane-header-for', id);
+    el.getBoundingClientRect = () => ({ left: 10, bottom: 30, top: 0, right: 100, width: 90, height: 30, x: 10, y: 0, toJSON: () => ({}) });
     document.body.appendChild(el);
-    const onContextMenu = vi.fn();
-    el.addEventListener('contextmenu', onContextMenu);
-    return onContextMenu;
+    return el;
   }
 
-  it('dispatches contextmenu on the selected pane header element', () => {
-    const onContextMenu = makeHeaderEl('pane-a');
+  it('opens the context from the selected pane header\'s bottom-left corner', () => {
+    makeHeaderEl('pane-a');
+    const ctx = makeCtx();
 
-    expect(handlePaneShortcuts(keydown('>'), makeCtx(), { current: null })).toBe(true);
+    expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(true);
 
-    expect(onContextMenu).toHaveBeenCalledTimes(1);
-    expect(onContextMenu.mock.calls[0][0].type).toBe('contextmenu');
+    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { x: 10, y: 30 });
+  });
+
+  it('`a` dismisses the ring and opens the context', () => {
+    makeHeaderEl('pane-a');
+    const ctx = makeCtx();
+
+    expect(handlePaneShortcuts(keydown('a'), ctx, { current: null })).toBe(true);
+
+    expect(terminalRegistryMocks.dismissSessionAlert).toHaveBeenCalledWith('pane-a');
+    expect(ctx.openTerminalContext).toHaveBeenCalledWith('pane-a', { x: 10, y: 30 });
   });
 
   it('consumes `>` without throwing when no header element matches', () => {
@@ -226,10 +252,10 @@ describe('handlePaneShortcuts `>` header context menu', () => {
   });
 
   it('does nothing when a door is selected', () => {
-    const onContextMenu = makeHeaderEl('pane-a');
+    makeHeaderEl('pane-a');
     const ctx = makeCtx({ selectedTypeRef: { current: 'door' } });
 
     expect(handlePaneShortcuts(keydown('>'), ctx, { current: null })).toBe(false);
-    expect(onContextMenu).not.toHaveBeenCalled();
+    expect(ctx.openTerminalContext).not.toHaveBeenCalled();
   });
 });

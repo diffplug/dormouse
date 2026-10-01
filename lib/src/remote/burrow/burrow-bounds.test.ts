@@ -19,6 +19,7 @@ import {
   E2E_INIT_BURST,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
+  MAX_DIRECT_PENDING_FRAMES,
   MAX_ESTABLISHED_E2E_SESSIONS,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
@@ -34,20 +35,20 @@ import {
   type NoiseKeyPair,
   type PresenceBinding,
 } from 'remote-lib-common';
-import {
-  BurrowRuntime,
-  MAX_QUEUED_RELAY_FRAMES,
-  MAX_QUEUED_RELAY_FRAME_CHARS,
-  type RemoteApiSessionLike,
-} from './burrow-runtime';
+import { BurrowRuntime, MAX_QUEUED_RELAY_FRAMES, MAX_QUEUED_RELAY_FRAME_CHARS } from './burrow-runtime';
+import type { RemoteApiSessionLike } from './established-session';
 import type { BurrowEnrollment } from './enrollment';
 import type { PendingPairing } from './pairing-approval';
 import { FakeSocket } from '../test-fake-socket';
+import { createTestClock } from '../test-timers';
+import { FakeDirectNetwork } from '../direct/test-fake-peer';
+import type { DirectPeerFactory } from '../direct/direct-peer';
 import {
   createTestAuthenticator,
   e2eFramesFor,
   flushUntil,
   openConnectionSession,
+  openDirectPath,
   openPairingSession,
   pairThroughSocket,
   presenceProofFor,
@@ -64,54 +65,6 @@ import {
 const ORIGIN = 'https://burrow-machine.example';
 const RP_ID = 'burrow.example';
 const START = 1_700_000_000_000;
-
-/**
- * A clock and its one timer, both injected. `advance` fires every timer that
- * comes due, in order, so the Burrow's reaper runs exactly where it would in
- * real time — and the suite does not spend five minutes proving a TTL.
- */
-function createTestClock(start: number) {
-  let now = start;
-  let nextId = 1;
-  const timers = new Map<number, { at: number; run: () => void }>();
-  return {
-    now: () => now,
-    setTimer(run: () => void, delayMs: number): () => void {
-      const id = nextId++;
-      timers.set(id, { at: now + delayMs, run });
-      return () => timers.delete(id);
-    },
-    /** How many timers are armed — what `stop()` has to leave at zero. */
-    get armed(): number {
-      return timers.size;
-    },
-    /** Move the clock backwards, as an NTP correction or a sleeping laptop does. */
-    rewind(ms: number): void {
-      now -= ms;
-    },
-    advance(ms: number): void {
-      const target = now + ms;
-      // Bounded: a reaper that armed for an instant it does not clear would
-      // otherwise spin here rather than fail.
-      for (let guard = 0; guard < 10_000; guard += 1) {
-        let dueId: number | null = null;
-        let dueAt = Number.POSITIVE_INFINITY;
-        for (const [id, timer] of timers) {
-          if (timer.at <= target && timer.at < dueAt) {
-            dueAt = timer.at;
-            dueId = id;
-          }
-        }
-        if (dueId === null) break;
-        const timer = timers.get(dueId)!;
-        timers.delete(dueId);
-        now = timer.at;
-        timer.run();
-      }
-      now = target;
-    },
-  };
-}
 
 /**
  * Counting wrappers over the WebCrypto the security primitives reach for, plus
@@ -157,8 +110,13 @@ describe('BurrowRuntime bounds', () => {
   let clock: ReturnType<typeof createTestClock>;
   let crypto: ReturnType<typeof countCrypto>;
   let approvals: PendingPairing[] = [];
-  let sessions: Array<{ handled: unknown[]; disposed: boolean; send: (payload: unknown) => void }> =
-    [];
+  let sessions: Array<{
+    handled: unknown[];
+    disposed: boolean;
+    send: (payload: unknown) => void;
+    label: string;
+    end: () => void;
+  }> = [];
   let authenticator: TestAuthenticator;
   /** What the injected remote-api does with a message; the real one may reply. */
   let onHandle: ((data: unknown, send: (payload: unknown) => void) => void) | null = null;
@@ -192,17 +150,21 @@ describe('BurrowRuntime bounds', () => {
     crypto.restore();
   });
 
-  function makeBurrow(enrollmentOverrides?: Partial<BurrowEnrollment>): BurrowRuntime {
+  function makeBurrow(
+    enrollmentOverrides?: Partial<BurrowEnrollment>,
+    options: { createDirectPeer?: DirectPeerFactory } = {},
+  ): BurrowRuntime {
     const created = new BurrowRuntime({
       enrollment: { ...enrollment, ...enrollmentOverrides },
       reconnect: false,
+      ...(options.createDirectPeer ? { directPeering: { createPeer: options.createDirectPeer } } : {}),
       createWebSocket: () => (socket = new FakeSocket()),
       loadAcl: () => [] as BurrowAclRecord[],
       saveAcl: () => {},
       requestApproval: (pending) => approvals.push(pending),
       dismissApproval: () => {},
-      createSession: ({ send }) => {
-        const entry = { handled: [] as unknown[], disposed: false, send };
+      createSession: ({ send, label, end }) => {
+        const entry = { handled: [] as unknown[], disposed: false, send, label, end };
         sessions.push(entry);
         return {
           handle: (data) => {
@@ -617,6 +579,40 @@ describe('BurrowRuntime bounds', () => {
     expect(sessions[2]!.disposed).toBe(false);
   });
 
+  it('tells a replaced session’s Client it is over', async () => {
+    // Another tab of the same Pocket is still listening on its own socket, and
+    // would otherwise wait on requests nothing answers.
+    const first = await establish('c1');
+    await establish('c1-again', first.clientStatic);
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(await readOutcome(socket, first.session, 'connection', first.connectionId, 1)).toEqual({
+      v: 1,
+      t: 'session-end',
+    });
+  });
+
+  it('ends a session on purpose through its context: the goodbye, then the dispose', async () => {
+    const first = await establish('c1');
+    await establish('c2');
+    // The ACL record's label, as the pane that session holds names it.
+    expect(sessions[0]!.label).toBe('iPhone Safari');
+
+    sessions[0]!.end();
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(sessions[1]!.disposed).toBe(false);
+    expect(burrow.establishedSessionCount).toBe(1);
+    expect(await readOutcome(socket, first.session, 'connection', first.connectionId, 1)).toEqual({
+      v: 1,
+      t: 'session-end',
+    });
+
+    // A stale end names a session that is gone, and ends nothing that replaced it.
+    const again = await establish('c1', first.clientStatic);
+    sessions[0]!.end();
+    expect(sessions[2]!.disposed).toBe(false);
+    expect(e2eFramesFor(socket, 'connection', again.connectionId, 'transport')).toHaveLength(1);
+  });
+
   it('holds one session per relay clientId, and the cap displaces nobody', async () => {
     // Two authorized phones. A relay that stamps one phone's frames with the
     // other's `clientId` takes down the session it reused — the entry holds
@@ -799,12 +795,20 @@ describe('BurrowRuntime bounds', () => {
   });
 
   it('reaps sixteen silent sessions on the idle timeout, without a restart', async () => {
-    for (let i = 0; i < MAX_ESTABLISHED_E2E_SESSIONS; i += 1) await establish(`z${i}`);
+    const established = [];
+    for (let i = 0; i < MAX_ESTABLISHED_E2E_SESSIONS; i += 1) established.push(await establish(`z${i}`));
     expect(burrow.establishedSessionCount).toBe(MAX_ESTABLISHED_E2E_SESSIONS);
 
     // No frame arrives, and no socket event: only the reaper's own timer runs.
     clock.advance(ESTABLISHED_E2E_IDLE_TIMEOUT_MS + 1);
     expect(burrow.establishedSessionCount).toBe(0);
+    // Each is told, in case it was only quiet.
+    for (const { session, connectionId } of established) {
+      expect(await readOutcome(socket, session, 'connection', connectionId, 1)).toEqual({
+        v: 1,
+        t: 'session-end',
+      });
+    }
     expect(burrow.trackedClientCount).toBe(0);
     expect(sessions.every((s) => s.disposed)).toBe(true);
     // And the Burrow is still the same one: nothing restarted it.
@@ -896,7 +900,7 @@ describe('BurrowRuntime bounds', () => {
     const first = await establish('c1');
 
     // Refused before the first `encryptWithAd`, so only a poisoned session is
-    // burrow loss (`BurrowRuntime.#sendApp`).
+    // burrow loss (`EstablishedE2eSession.#sendApp`).
     sessions[0]!.send({ oversize: 'x'.repeat(2 * 1024 * 1024) });
     await settle();
     expect(sessions[0]!.disposed).toBe(false);
@@ -953,5 +957,135 @@ describe('BurrowRuntime bounds', () => {
 
     burrow.stop();
     expect(clock.armed).toBe(0);
+  });
+
+  // --- The direct path, which changes none of the bounds ---------------------
+
+  /** A Burrow that can answer an offer, and the network holding both ends. */
+  function directBurrow(): FakeDirectNetwork {
+    burrow.stop();
+    const network = new FakeDirectNetwork();
+    burrow = makeBurrow(undefined, { createDirectPeer: () => network.createAnswerer() });
+    return network;
+  }
+
+  it('reads a socket factory that throws as a close, and retries on its backoff', () => {
+    // The service's transport guard throws under Nothing
+    // (`lib/src/host/remote/service.ts`); from the reconnect timer, a throw
+    // that escaped would take the host process down.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let refusing = true;
+    let opened = 0;
+    const refused = new BurrowRuntime({
+      enrollment,
+      createWebSocket: () => {
+        if (refusing) throw new Error('set to Nothing');
+        opened += 1;
+        return new FakeSocket();
+      },
+      loadAcl: () => [],
+      saveAcl: () => {},
+      requestApproval: () => {},
+      dismissApproval: () => {},
+      now: clock.now,
+      setTimer: clock.setTimer,
+    });
+
+    refused.start();
+    expect(refused.status).toBe('disconnected');
+    clock.advance(1_000);
+    expect(refused.status).toBe('disconnected');
+
+    refusing = false;
+    clock.advance(2_000);
+    expect(opened).toBe(1);
+    expect(refused.status).toBe('connecting');
+    refused.stop();
+    warn.mockRestore();
+  });
+
+  it('extends the idle deadline on a keepalive that arrived off the channel', async () => {
+    // Every bound is path-agnostic: what refreshes the deadline is a decrypted
+    // Client message, not the transport that carried it
+    // (`docs/specs/remote-api.md` → Transport → "Direct path").
+    const network = directBurrow();
+    const live = await establish('c1');
+    const path = await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c1',
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+      setTimer: clock.setTimer,
+    });
+
+    for (let i = 0; i < 6; i += 1) {
+      clock.advance(E2E_KEEPALIVE_INTERVAL_MS);
+      path.peer.send(live.session.sendKeepalive());
+      await settle();
+    }
+    expect(sessions[0]!.disposed).toBe(false);
+    expect(burrow.establishedSessionCount).toBe(1);
+
+    // And silence on the channel reaps it exactly as silence on the relay does.
+    clock.advance(ESTABLISHED_E2E_IDLE_TIMEOUT_MS);
+    expect(sessions[0]!.disposed).toBe(true);
+  });
+
+  /**
+   * The Burrow's half of the same rule the Client keeps: a refused chunk
+   * disposes the session synchronously, from inside the loop still chunking the
+   * message, and the rest of it must not fall back onto the relay.
+   */
+  it('stops a multi-chunk reply when the channel refuses its first chunk', async () => {
+    const network = directBurrow();
+    const live = await establish('c1');
+    await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c1',
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+      setTimer: clock.setTimer,
+    });
+    const before = e2eFramesFor(socket, 'connection', live.connectionId).length;
+    // Closed under the session, which a radio gap does between two sends.
+    network.answererChannel!.close();
+
+    // Over one Noise message, so the transport chunks it into two ciphertexts.
+    sessions[0]!.send({ requestId: 'r1', ok: true, result: 'x'.repeat(70_000) });
+    await settle();
+
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(e2eFramesFor(socket, 'connection', live.connectionId)).toHaveLength(before);
+  });
+
+  it('disposes a session whose held channel frames outrun the queue', async () => {
+    const network = directBurrow();
+    const live = await establish('c1');
+    // The Client never announces its switch, so every channel frame is held —
+    // which is what makes the cap the only thing bounding this.
+    const path = await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: 'c1',
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+      switchOutbound: false,
+      setTimer: clock.setTimer,
+    });
+
+    for (let i = 0; i <= MAX_DIRECT_PENDING_FRAMES; i += 1) {
+      path.peer.send(live.session.sendKeepalive());
+    }
+    await settle();
+
+    expect(sessions[0]!.disposed).toBe(true);
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(burrow.trackedClientCount).toBe(0);
   });
 });

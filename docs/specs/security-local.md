@@ -1,7 +1,7 @@
 # Local Security
 
 > See `docs/specs/glossary.md` for Pane, Session, and the Surface model; this spec uses them bare.
-> Owns the boundaries a user of the local application has: terminal output, browser panes, `dor`, loopback listeners, and what persists on disk. Defers every mechanism to the spec named at its rule, and the network boundary to `docs/specs/security-remote.md`.
+> Owns the boundaries a user of the local application has: terminal output, browser panes, `dor`, loopback listeners, the network policy's Nothing, and what persists on disk. Defers every mechanism to the spec named at its rule, and the network boundary to `docs/specs/security-remote.md`.
 > Read `docs/specs/security.md` first; `docs/specs/security-audit.md` says how the `FAIL IF` lines here are run.
 
 ## Terminal output
@@ -10,9 +10,11 @@ The attacker is any program writing to a PTY.
 
 **Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC at 16,384 code units, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-escapes.md` -> "Parsing location", "Inline graphics").
 
-**Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 52`, `OSC 50`, and unsupported `OSC 1337`. **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/terminal-escapes.md` -> "Inline graphics").
+**Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 50` and unsupported `OSC 1337`; consume `OSC 52`, which only offers its text to the copy editor over the user's own drag, copied when the user picks it (`docs/specs/mouse-and-clipboard.md` §4.6). **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/terminal-escapes.md` -> "Inline graphics").
 
-**An `OSC 8` hyperlink opens only after a confirmation dialog**; a target whose
+**An `OSC 8` hyperlink opens only after a confirmation dialog**, except a local
+`file:` link whose display text names its target, which previews through the
+user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose
 display text names a different host gets **no open action at all** — close and
 copy only, copy holding initial focus
 (`docs/specs/terminal-escapes.md` -> "OSC 8 hyperlinks"). **Nothing opens without
@@ -31,12 +33,15 @@ before speech or push (`docs/specs/alert.md` -> "Text And Security").
 shell-integration scripts — the parser scans raw bytes and cannot defend it
 (`docs/specs/terminal-escapes.md` -> "Shell-integration injection"; rationale).
 
-**Must confine output to the screen, Session state, and bounded terminal reports** — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8`. **The PTY-boundary parser writes exactly three answer families**: `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports
+**Must confine output to the screen, Session state, and bounded terminal reports** — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8` — except a running designated Tool's OSC 367 `open`, gated below. **The PTY-boundary parser writes exactly three answer families**: `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports
 (`docs/specs/terminal-escapes.md` -> "Report filtering on the input side").
 
-- **FAIL IF** `isKnownUnsupportedIterm2Osc` in `lib/src/lib/terminal-protocol.ts` stops consuming `OSC 52`, or a parse site stops running `TerminalProtocolParser` before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.
+- **FAIL IF** `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts` stops consuming `OSC 52` or `OSC 50`, or a parse site stops running it before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.
+- **FAIL IF** an `OSC 52` payload can reach the clipboard except as the copy editor's program format the user chose and copied, is retained unbounded or with control characters other than newline and tab, or is accepted into a pane with no shadowed drag: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, `copySelection` in `lib/src/lib/copy-selection.ts`. Pinned by `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/mouse-selection.test.ts`, and `lib/src/lib/copy-editor.test.ts`.
 - **FAIL IF** a value the parser retains stops being bounded and control-stripped before storage, or a new one arrives without a limit — `TITLE_LIMIT`, `BODY_LIMIT`, `COMMAND_LINE_LIMIT` and `sanitizeText` in `lib/src/lib/terminal-protocol.ts`, `MAX_CWD_LENGTH` and `boundedCwdValue` in `lib/src/lib/terminal-state.ts`. `COMMAND_LINE_LIMIT` binds *after* the `\xNN` unescape, a 4x bound before it (rationale).
 - **FAIL IF** an `OSC 8` activation reaches an adapter's `openExternal` without the confirmation dialog, or the dialog renders an open action for a **deceptive** verdict: `linkHandler` in `lib/src/lib/terminal-lifecycle.ts`, `classifyDisplayMatch` in `lib/src/lib/external-links.ts`, the render branches in `lib/src/components/ExternalLinkModal.tsx`. Pinned by `lib/src/lib/external-links.test.ts` and `lib/src/components/ExternalLinkModalHost.test.tsx`; the host also rejects a deceptive confirmation (rationale).
+- **FAIL IF** an `OSC 8` activation reaches the preview path when its display text is not a whole-component suffix of its decoded target, or the host opens a `file:` URL whose host is not empty, `localhost`, or this machine: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`, `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`, `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`. Pinned by `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, and `local file URLs` in `lib/src/host/tool-input.test.ts`.
+- **FAIL IF** an OSC 367 `open` reaches `surface.tool` from replay, from a Session that is not a Tool running its designated command, or naming anything but an absolute path free of controls; or if a control-socket request can set its `oscOpen` flag, or its failure reaches the error viewer's argv with a control character. Read `parseToolOpen` in `dor-tools-lib/src/osc.ts`, `dispatchToolOpens` in `lib/src/lib/tool-open-requests.ts` (reached from `applyLiveToolEvents`, never from `parseReplay` in `lib/src/lib/platform/replay-parse.ts`), the `oscOpen` argument of `dispatchDorControlRequest` in `lib/src/lib/platform/dor-control-dispatch.ts`, and the `oscOpen` gate in `lib/src/components/wall/use-dor-control.ts`. Pinned by `an OSC 367 open` in `lib/src/components/wall/preview-slot.test.tsx`.
 
 ## Browser panes
 
@@ -72,8 +77,9 @@ per-panel check in `lib/src/components/wall/IframePanel.tsx`.
 ## The dor control socket
 
 The attacker is another local account. The channel carries the whole Surface API
-— keystrokes into any Pane, its screen and scrollback back out, `dor kill`
-(`docs/specs/dor-cli.md` -> "Control-channel security").
+— keystrokes into any Pane, its screen and scrollback back out, `dor kill` — and
+an app restart behind the running-work confirmation (`docs/specs/dor-cli.md` ->
+"Control-channel security", "dor app").
 
 **A process running as the user is the user.** The socket bounds other local
 accounts, never the user's own: an agent holding `dor` has the power of the
@@ -116,50 +122,85 @@ ancestor chain the webview supplies with each proxy URL request.** `'self'` allo
 same-grant nesting; any foreign ancestor fails. No request header identifies the
 embedder, and the browser checks the whole chain (rationale).
 
-- **FAIL IF** any loopback HTTP or WebSocket listener grants an unrecognized caller a privilege it could not obtain by reaching the upstream directly. Refusing the request is one way; the iframe proxy's *admits all, vouches for none, names its embedder* is another, and is not a violation (rationale). `scripts/loopback-lint.mjs` (`pnpm test`) makes the cheap half deterministic — a new loopback bind that does not reference a guard module fails the build — but only in the bind forms its `BIND_FORMS` lists, each pinned by a fixture in `scripts/loopback-lint-selftest.mjs`, which goes red on a form that has none. **Adding a server dependency means adding its bind spelling there**; a host built at runtime is invisible to a regex in any spelling. The lint sees only a guard reference, not whether every request calls it, so this bullet is still read by hand. Derive the set by searching the shipped trees for `createServer`, `.listen(`, `serve(` and `WebSocket` rather than trusting this list. Today the set is three: the iframe proxy (`lib/src/host/iframe-proxy.ts`), the VS Code agent-browser stream relay (`vscode-ext/src/agent-browser-host.ts`), and the browser-dev bridge (`standalone/scripts/dev-agent-browser.mjs`). A Unix-domain socket or named pipe is not in scope — no browser can reach one — which is why the `dor` control channel is bounded by socket permissions instead.
+- **FAIL IF** any loopback HTTP or WebSocket listener grants an unrecognized caller a privilege it could not obtain by reaching the upstream directly. Refusing the request is one way; the iframe proxy's *admits all, vouches for none, names its embedder* is another, and is not a violation (rationale). `scripts/loopback-lint.mjs` (`pnpm test`) scans all tracked JavaScript and TypeScript and prints every bind it recognizes, with tests and its own fixtures separate from non-test listeners. A new non-test listener without a guard reference fails the build, but the lint cannot tell whether every request calls that guard. **Adding a server dependency means adding its bind spelling to `BIND_FORMS`**, each form pinned by `scripts/loopback-lint-selftest.mjs`. The Relay is separate: no foreign browser origin may drive its API, whatever interface it binds (`docs/specs/security-remote.md` -> "Cross-origin access"). A Unix-domain socket or named pipe is out of scope — no browser can reach one — which is why the `dor` control channel is bounded by socket permissions instead.
 - **FAIL IF** the iframe proxy rewrites `Origin` to the upstream's own origin for a caller whose inbound `Origin` is not the proxy's own — in `handleRequest` **or** `handleUpgrade`. A foreign `Origin` must be forwarded untouched rather than blocked, so the upstream sees the truth and applies its own policy (rationale).
 - **FAIL IF** the iframe proxy forwards `Cookie` upstream or `Set-Cookie` downstream on HTTP or WebSocket handshakes, including refused upgrades. Pinned by `lib/src/host/iframe-proxy.test.ts` (rationale).
 - **FAIL IF** the iframe proxy stops checking that `Host` names its own grant port, on either path. Its per-grant ephemeral port and one-fixed-upstream binding are real mitigations but neither is a secret, so the `Host` check is what makes DNS rebinding fail.
 - **FAIL IF** the iframe proxy drops upstream `X-Frame-Options` / CSP `frame-ancestors` without replacing them with exactly `frame-ancestors 'self' <validated embedder chain>`, admits another source, or targets the shim anywhere but its own proxy origin and that chain's innermost origin. With no usable chain it must preserve the headers and inject nothing (rationale).
 - **FAIL IF** a request bearing a *foreign* `Origin` refreshes a grant's idle timer: a grant holds a live upstream binding, and a stranger polling it keeps a closed pane's binding open. An *absent* `Origin` must keep refreshing it — that is what a live frame's own navigations and sub-resources send.
-- **FAIL IF** the stream relay's grant stops being single-use, TTL-bounded, and pinned to one target port, or if it begins rewriting `Origin` rather than dropping it. It needs no `Host` check while the token holds (rationale).
+- **FAIL IF** the browser viewer listener upgrades without both its own loopback `Host` and a single-use, 60-second grant for that one view, or passes a provider a webview message it has not rebuilt; or the host dials an agent-browser stream or a browser's CDP off loopback: `createViewerServer` and `parseViewerInput` in `lib/src/host/browser-viewer.ts`, `viewStream` and `askCdpEndpoint` in `lib/src/host/agent-browser-host.ts`. The webview holds no CDP and reaches no daemon (rationale). Pinned by `lib/src/host/browser-viewer.test.ts`.
 - **FAIL IF** the browser-dev bridge drops any of its four gates — the per-run token, the loopback `Host` check, the `application/json` content-type required of every non-GET, and the exact-origin `access-control-allow-origin`. The first three live together in the gate that runs before routing, so a route that never reads a body is covered by all of them. It is dev-only and ships in nothing, but it dispatches `pty_spawn` with caller-supplied `shell`, `args`, `cwd` and `env` — arbitrary command execution on a maintainer or CI-agent machine (`docs/specs/security-ci.md` -> "Automated Maintainer (tend)"). The content-type rule is a security control, not tidiness (rationale).
+- **FAIL IF** the browser-dev Vite server permits cross-origin reads of token-bearing modules or disables its DNS-rebinding Host check. Pinned by `standalone/scripts/dev-agent-browser.test.mjs` (rationale).
 
 **Cookie-authenticated iframe pages are unsupported.** Header stripping does not isolate `document.cookie`: proxied scripts still share the loopback hostname's non-HttpOnly cookies across grant ports. This remains a browser-pane isolation gap (rationale).
 
 Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrigin`,
-`isForeignOrigin` — in `lib/src/host/loopback-guard.ts`.
+`isForeignOrigin` — in `lib/src/host/loopback-guard.ts`;
+`startDevVite` in `standalone/scripts/dev-run.mjs`.
+
+### Local-file viewer
+
+**FAIL IF** `dor-tools-builtin/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own case-insensitive loopback `Host`, and an absent or same-listener `Origin`. Methods are GET/HEAD, plus text-editor save/state POSTs requiring its own non-null Origin, JSON, and a bounded body. Compare capability prefixes by SHA-256 then `timingSafeEqual`, including malformed lengths. `allowsFileViewerRequest` in `dor-tools-builtin/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
+
+**FAIL IF** the file viewer exposes directory listings, arbitrary path reads/writes, or a file outside its opened-document grant and fixed shipped-editor assets. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains media/HTML descriptors. Text reads/saves revalidate the exact canonical file and reject symlink substitution; saves compare content revisions and file identity before atomic replacement. Only text viewers accept writes. Viewer resources and editor workers are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; source text is JSON data, never executable markup. The viewer preserves upstream CSP (`docs/specs/dor-browser.md` → Iframe Renderer).
+
+**Must not describe the viewer CSP as confining active documents' navigation.** HTML/SVG scripts can navigate their frame to external URLs, including with granted contents; the resource policy is not a no-egress boundary. (rationale)
+
+**FAIL IF** the folder viewer, `dor-tools-builtin/src/folder-viewer.ts`, serves any request without the capability, `Host`, `Origin`, and response-header rules above, or accepts a POST whose `Origin` is absent, `null`, or not its own. `allowsFileViewerRequest` with `post` gates every route; a POST writes an OSC 367 `open`, which the host runs as `dor open` from that Tool.
+
+**FAIL IF** the folder viewer returns file contents, lists or opens anything outside its canonical root, or renders an entry name as markup. `resolveInside` refuses `.`, `..`, and empty segments, backslashes, and controls, then requires the realpath at or under the root; a symlink whose target leaves it lists as `other`. A listing carries names, kinds, and ignore flags only, and `folderViewerPage` sets names through `textContent`, since script in the page could POST as it.
+
+**FAIL IF** the error viewer, `dor-tools-builtin/src/error-viewer.ts`, serves anything but its one page, breaks the capability, `Host`, `Origin`, and response-header rules above, allows script, or renders its target or message as markup.
+
+**FAIL IF** any built-in viewer's `OSC 2` title keeps a C0, DEL, or C1 character. `viewerTitle` in `dor-tools-builtin/src/file-viewer-format.ts` strips them from the target's basename, which would otherwise write terminal escapes such as a forged `OSC 367 serve`.
+
+**FAIL IF** `gitIgnored` runs git by bare name or lets `core.fsmonitor` run, which the browsed folder's own `.git/config` can name.
+
+Source of truth: `startCapabilityViewer` / `isInsideRoot` / `pathSegments` in `dor-tools-builtin/src/viewer-server.ts`; `viewerTitle` in `dor-tools-builtin/src/file-viewer-format.ts`; `startFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `allowsFileViewerRequest` in `dor-tools-builtin/src/file-viewer-loopback-guard.ts`; `startFolderViewer` / `resolveInside` / `gitIgnored` in `dor-tools-builtin/src/folder-viewer.ts`; `folderViewerPage` in `dor-tools-builtin/src/folder-viewer-page.ts`; `startErrorViewer` / `errorViewerPage` in `dor-tools-builtin/src/error-viewer.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor-tools-builtin/test/folder-viewer.test.mjs`, `dor-tools-builtin/test/error-viewer.test.mjs`, `dor/test/builtin-viewers.test.mjs`, `lib/src/host/file-viewer-proxy.test.ts`.
+
+## Network policy
+
+The exposure is traffic the user never chose, which under Nothing is none. `docs/specs/remote-network.md` -> "Policy" owns the rule these checks audit.
+
+- **FAIL IF** anything opens a connection on its own while the network policy is `nothing` or unread. `BurrowService` in `lib/src/host/remote/service.ts` must route every socket, request, and direct peer through its transport guard, which refuses at the call; start no `BurrowRuntime` under any level but `relay`; and refuse `enroll`, `enrollOffer`, and `oneTimeOpen` before any request. `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts` must ask `networkAllowed` before every speak, and `runUpdateCheck` in `standalone/src/updater.ts` must not call `check()` unless the policy it read is not `nothing` and `autoUpdate` is on, a failed read counting as `nothing`. Search the rest of `lib/src/host/`, `standalone/src/`, and `vscode-ext/src/` for a request outside these three. Pinned by `lib/src/host/remote/service.test.ts`, `lib/src/host/managed-voice-host.test.ts`, and `standalone/src/updater.test.ts`.
+- **FAIL IF** the policy can be written by anything but the user's own choice. `setNetworkPolicy` is the only writer and takes a policy only exactly (`parseNetworkPolicy` in `lib/src/remote/network-policy.ts`, `requestedNetworkPolicy` in `lib/src/host/remote/service.ts`); no Client, Relay, or Hosted answer may reach the store, and a stored record that is not a policy must read as `nothing`.
 
 ## Persisted state
 
 The attacker is another local account reading disk; what the remote stack leaves
 behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
-**Session snapshots are owner-only before any bytes are written.**
-`restrict_to_owner` locks `<app_data_dir>/sessions/` and, *first*, the temp file
-renamed into it, applying a protected single-ACE DACL on Windows where a unix
-mode is a silent no-op (`docs/specs/standalone.md` -> "Persistence"). The same
-helper locks the whole standalone app-data directory before the sidecar spawns.
+**Session snapshots are owner-only before any bytes are written.** Standalone
+persists one window's structure per file as `<state root>/sessions/<label>.json`
+— panes, cwds, titles, doors, layout, TODO flags, never terminal text
+(`docs/specs/standalone.md` -> "Persistence"), plus a
+`<label>.geometry.json` sibling holding that window's box and nothing else, and
+`arrivals.json`, the Workspaces mid-transfer between windows, written the same way
+(`docs/specs/standalone.md` -> "Arrival queue").
+`restrict_to_owner` locks the directory and, *first*, the temp file renamed into
+it, applying a protected single-ACE DACL on Windows where a unix mode is a
+silent no-op. The same helper
+locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is
-persisted"): `normalizeSessionV3` strips it on read, and the standalone store is
-switched off today, clearing any legacy snapshot at boot. Snapshots older
-versions left behind do carry transcripts (rationale).
+persisted"): `normalizeSessionV3` strips it on read, so the first save after an
+upgrade rewrites the snapshot without it, and a boot sweep deletes orphaned
+`*.json.tmp` files no save would ever overwrite. Snapshots older versions left
+behind do carry transcripts (rationale).
 
-**The notepad archive is the one store holding terminal text on purpose** —
-excerpts the user explicitly captured, their colors, the Surface title and kind,
-and the CWD at closure, appended only by a Surface closing
-(`docs/specs/notepad.md` -> "Archive"). Standalone keeps it as
-`<app_data_dir>/notepad-archive-v1.json`, owner-only; VS Code keeps it in
-`<globalStorageUri>/notepad-archive.json`, mode `0600` on Unix and inheriting VS Code's directory ACL on Windows. Migration and Settings Sync follow `docs/specs/notepad.md` -> "VS Code lifecycle". Its live half never reaches disk.
+**Standalone writes `recovery.json` beside its sessions directory**, under the
+state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
+buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
+
+**The managed-voice token is a bearer credential at rest** — `<state dir>/managed-voice.json` beside the Burrow's enrollment, written by `writeJsonAtomic` (`0700`/`0600`; on Windows the owner-only DACL `burrow_state_dir` applies before the sidecar spawns), with the voice id (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. **The token must go only to a Hosted build's baked relay origin**, never following a redirect (`redirect: 'error'`); a self-host build sends it nowhere (`docs/specs/relay.md` -> "Relay origin").
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
-`recovery.json` there, at the umask: one rebuilt agent-resume
-invocation per Surface, no buffer, unlinked as it is read
-(`docs/specs/vscode.md` -> "Capturing agent recovery").
+`recovery.json` under the extension's storage directory, owner-only and
+temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
+unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`
@@ -173,15 +214,36 @@ lands at the umask — readable by another local account wherever `<tmpdir>` is
 shared (rationale). No log call carries PTY bytes; the `dor` control socket path
 does. A gap, not an accepted risk.
 
-- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if either of its two callers, `write_session_to` (the session snapshot) and `write_notepad_archive_to` (the notepad archive), stops going through it. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
-- **FAIL IF** the VS Code notepad archive key — `NOTEPAD_ARCHIVE_KEY` in `vscode-ext/src/notepad-archive-store.ts` — is passed to `context.globalState.setKeysForSync`, directly or as part of any list. It holds captured terminal excerpts, their CWDs, and their Surface titles, and Settings Sync would copy them to every machine the account signs into. Nothing in the extension calls that API today, so the rule is kept by that call not existing; a call added for anything else must exclude this key.
+- **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if **any** of its callers stops going through it. Enumerate them from the file rather than from this line: every writer under the state root is one, the legacy-transcript scrub and `arrivals.json` included. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
 
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in
-`standalone/src-tauri/src/lib.rs`.
+`standalone/src-tauri/src/lib.rs`, `createManagedVoiceHost` in
+`lib/src/host/managed-voice-host.ts`, `hostedOrigin` in
+`lib/src/host/relay-origin.ts`.
 
 ## Terminal context directory actions
 
-**Must validate context directory arguments as existing absolute directories and pass the canonical path as one process argument without shell interpretation.** Keep this capability separate from the external-URL allowlist. VS Code per-terminal context requests and helper ownership updates remain scoped to the owning router.
+**Must validate context directory arguments as existing absolute directories and pass the canonical path as one process argument without shell interpretation.** The same holds for the terminal-reported directories Workspace auto-naming hands the host's git lookup (`docs/specs/layout.md` → "Workspace names"). Keep this capability separate from the external-URL allowlist. VS Code per-terminal context requests and helper ownership updates remain scoped to the owning router.
 
-Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`. Test: `standalone/sidecar/helper-terminal.test.js`.
+Source of truth: `context` in `standalone/sidecar/pty-core.js`; `attachRouter` in `vscode-ext/src/message-router.ts`; `lookupGitDir` in `lib/src/host/git-info.ts`. Tests: `standalone/sidecar/helper-terminal.test.js`, `lib/src/host/git-info.test.ts`.
+
+## Dor Tool configuration
+
+Approval workflow, declaration and resolution belong to `docs/specs/dor-tool.md` → Trust, Declaring tools.
+
+**Must keep repo-local named Tools inert until the user grants trust through Dormouse chrome.** The control socket exposes lookup and launch, never a trust-grant verb. Pending approval spawns neither its terminal nor a helper.
+
+**Must keep named-tool inputs as argv until the renderer quotes them for the target shell.** User configuration is the local user's authority; a project name cannot replace a user Tool during user-only lookup.
+
+**Must escape C0, DEL, and C1 characters in every repo-sourced field `dor tool` prints, its warnings, `--list --json`, and the host errors `dor tool` and `dor open` relay included**, since each is bound for a terminal. Source of truth: `printable` / `renderPrintableJson` in `dor/src/commands/shared.ts`; `dispatchToolSurface` in `dor/src/commands/tool.ts`. Tests: `tool --list escapes control characters in repo text, in every output` and `open, tool, and tool --list escape control characters in a host error` in `dor/test/cli-output.test.mjs`.
+
+**Must reject C0 and DEL characters in Tool argv, substituted argv, and local targets before launch**, including controls exposed by canonicalizing symlinks or by decoding a `file:` URL, which a filesystem error would otherwise echo. Shell quotes do not protect terminal editing keys. String `run` remains explicit shell code. Source of truth: `hasShellInputControls` in `dor/src/commands/shell-quote.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `useDorControl` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-input.test.ts`, `lib/src/components/Wall.test.tsx`.
+
+**Must derive the grant key in the host**, using the canonical upstream URL or project-root folder; a renderer request cannot supply an arbitrary grant URL. **Must bound config reads and refuse repo-config symlinks on every host.** The user config may follow a dotfiles symlink; its opened descriptor must still be a bounded regular file.
+
+**An upstream grant trusts the claimed URL, not authenticated checkout provenance.** A supplied directory containing its own `.git/config` can claim an already-granted upstream; folder-only grants limit this sharing. **Must not describe the chrome gesture as a boundary against other processes running as the user**; the local account model is The dor control socket above.
+
+**Must restrict announced ports to the designated command's Session process tree** (`docs/specs/dor-tool.md` → Serving). Process output may select among that tree's discovered ports; it cannot turn an ordinary terminal into a Tool.
+
+Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `lookupTool` / `FileToolTrustStore` in `lib/src/host/tool-trust.ts`; `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`. Tests: `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/components/wall/use-tool-serving.test.tsx`.

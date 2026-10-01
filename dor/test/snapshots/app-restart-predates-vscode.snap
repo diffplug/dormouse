@@ -1,0 +1,5 @@
+exitCode: 1
+stdout:
+
+stderr:
+Error: unsupported Dormouse control method 'app.restart'

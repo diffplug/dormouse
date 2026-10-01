@@ -18,6 +18,7 @@ import {
   NoiseTransportSession,
   concatBytes,
   createNoiseInitiator,
+  createNoiseResponder,
   e2eConnectionPrologue,
   ecdsaRawToDer,
   fromBase64Url,
@@ -26,14 +27,19 @@ import {
   presenceChallenge,
   randomBase64Url,
   toBase64Url,
+  utf8Decode,
   utf8Encode,
   type NoiseKeyPair,
+  type NoiseSession,
   type PairingInvitation,
   type PasskeyAssertion,
   type PresenceBinding,
   type PresenceProofV1,
 } from 'remote-lib-common';
 import type { FakeSocket } from './test-fake-socket';
+import { DirectPeer } from './direct/direct-peer';
+import type { FakeDirectNetwork } from './direct/test-fake-peer';
+import type { RemoteTimer } from './ws';
 
 const subtle = globalThis.crypto.subtle;
 
@@ -153,7 +159,7 @@ export async function flushUntil<T>(get: () => T | undefined, timeoutMs = 2000):
 }
 
 /** Poll for at most `timeoutMs`, answering `undefined` if it never arrives. */
-async function pollFor<T>(get: () => T | undefined, timeoutMs: number): Promise<T | undefined> {
+export async function pollFor<T>(get: () => T | undefined, timeoutMs: number): Promise<T | undefined> {
   const start = Date.now();
   for (;;) {
     const value = get();
@@ -225,13 +231,21 @@ export async function settleUntilQuiet(read: () => number, stableRounds = 3): Pr
   throw new Error(`settleUntilQuiet: reading never went quiet after 40 settles (last ${last})`);
 }
 
-/** The Burrow's outgoing `e2e` frames for one ceremony, in order. */
+/**
+ * The Burrow's outgoing `e2e` frames for one ceremony, in order, narrowed to one
+ * `step` where a caller wants only the transport half.
+ */
 export function e2eFramesFor(
   socket: FakeSocket,
   kind: string,
   id: string,
+  step?: string,
 ): Array<Record<string, unknown>> {
-  return socket.frames('e2e').filter((frame) => frame.kind === kind && frame.id === id);
+  return socket
+    .frames('e2e')
+    .filter(
+      (frame) => frame.kind === kind && frame.id === id && (step === undefined || frame.step === step),
+    );
 }
 
 /** Deliver one relay-stamped `e2e` frame to the Burrow. */
@@ -250,8 +264,9 @@ export function sendE2eFrame(
 }
 
 /**
- * Decrypt the Burrow's most recent control message on one ceremony, waiting for
- * one to arrive.
+ * Decrypt one of the Burrow's control messages on a ceremony, waiting for it to
+ * arrive: the most recent by default, or the one at `index` where a case is
+ * reading a session's signals in order.
  *
  * The wait is the point: every step of a ceremony awaits several WebCrypto
  * calls, so a test that read the frame log after a fixed number of turns would
@@ -263,13 +278,14 @@ export async function readOutcome(
   session: NoiseTransportSession,
   kind: string,
   id: string,
+  index?: number,
 ): Promise<Record<string, unknown>> {
-  const last = await pollFor(() => {
-    const frames = e2eFramesFor(socket, kind, id).filter((frame) => frame.step === 'transport');
-    return frames[frames.length - 1];
+  const frame = await pollFor(() => {
+    const frames = e2eFramesFor(socket, kind, id, 'transport');
+    return index === undefined ? frames[frames.length - 1] : frames[index];
   }, 2000);
-  if (!last) throw new Error('the Burrow sent no outcome');
-  const receipt = session.receive(fromBase64Url(last.ct as string));
+  if (!frame) throw new Error('the Burrow sent no outcome');
+  const receipt = session.receive(fromBase64Url(frame.ct as string));
   if (receipt.kind !== 'control') {
     throw new Error(`expected a control message, got ${receipt.kind}`);
   }
@@ -391,3 +407,125 @@ export async function openConnectionSession(options: {
     burrowChallenge: toBase64Url(payload),
   };
 }
+
+/**
+ * The Client half of the direct path, as a test drives it against a real
+ * Burrow: offer, read the answer, accept it, and — once the channel opens —
+ * announce this end's own switch (`docs/specs/remote-api.md` → Transport →
+ * "Direct path").
+ *
+ * It decrypts every Burrow→Client transport frame it consumes, so a caller must
+ * not also read the session's relay frames while it is running.
+ */
+export interface TestDirectPath {
+  /** The Client-side wrapper; `send` puts one transport ciphertext on the channel. */
+  readonly peer: DirectPeer;
+  /** Ciphertexts the Burrow put on the channel, in arrival order. */
+  readonly inbound: Uint8Array[];
+  /** The signals decrypted off the relay while opening it, in order. */
+  readonly signals: Array<Record<string, unknown>>;
+}
+
+export async function openDirectPath(options: {
+  socket: FakeSocket;
+  burrowId: string;
+  clientId: string;
+  connectionId: string;
+  session: NoiseTransportSession;
+  network: FakeDirectNetwork;
+  /** This end's own `direct-switch`, once the channel is open (default true). */
+  switchOutbound?: boolean;
+  /** The wrapper's deadlines; a Burrow suite shares its own clock's. */
+  setTimer?: RemoteTimer;
+}): Promise<TestDirectPath> {
+  const { socket, burrowId, clientId, connectionId, session, network } = options;
+  const inbound: Uint8Array[] = [];
+  const signals: Array<Record<string, unknown>> = [];
+  const peer = new DirectPeer({
+    peer: network.createOfferer(),
+    ...(options.setTimer ? { setTimer: options.setTimer } : {}),
+    handlers: {
+      onOpen: () => {},
+      onFrame: (frame) => inbound.push(frame),
+      onClosed: () => {},
+      onViolation: () => {},
+    },
+  });
+  let cursor = e2eFramesFor(socket, 'connection', connectionId, 'transport').length;
+  const nextSignal = async (): Promise<Record<string, unknown>> => {
+    const value = await readOutcome(socket, session, 'connection', connectionId, cursor);
+    cursor += 1;
+    signals.push(value);
+    return value;
+  };
+  const sendControl = (value: Record<string, unknown>): void => {
+    sendE2eFrame(socket, {
+      clientId,
+      burrowId,
+      kind: 'connection',
+      id: connectionId,
+      step: 'transport',
+      ct: toBase64Url(session.sendControl(value)),
+    });
+  };
+
+  const offer = await peer.offer();
+  if (offer === null) throw new Error('the test peer could not describe an offer');
+  sendControl({ v: 1, t: 'direct-offer', sdp: offer });
+  const answer = await nextSignal();
+  // A decline is an answer too: the caller reads it off `signals`.
+  if (answer.t !== 'direct-answer') return { peer, inbound, signals };
+  await peer.acceptAnswer(answer.sdp as string);
+  // The Burrow's own switch is its last message on the relay.
+  await nextSignal();
+  if (options.switchOutbound !== false) sendControl({ v: 1, t: 'direct-switch' });
+  await settle();
+  return { peer, inbound, signals };
+}
+
+// --- One established session, with no socket around it ----------------------
+
+/**
+ * A completed connection IK handshake over the shipped suite: the Client's
+ * transport, and the Burrow's — for a case that drives one established session
+ * on its own, with neither a Relay nor a runtime in the way.
+ */
+export async function noiseSessionPair(): Promise<{
+  client: NoiseTransportSession;
+  /**
+   * The raw `Split` state `client` wraps, so a case can put a frame on the wire
+   * the wrapper would never write. The counters stay shared.
+   */
+  clientNoise: NoiseSession;
+  burrow: NoiseTransportSession;
+}> {
+  const prologue = e2eConnectionPrologue('burrow', 'connection');
+  const burrowStatic = await generateNoiseKeyPair();
+  const initiator = await createNoiseInitiator({
+    prologue,
+    staticKeyPair: await generateNoiseKeyPair(),
+    remoteStaticPublicKey: burrowStatic.publicKey,
+  });
+  const responder = await createNoiseResponder({ prologue, staticKeyPair: burrowStatic });
+  await responder.readMessage(await initiator.writeMessage());
+  await initiator.readMessage(await responder.writeMessage());
+  return {
+    client: new NoiseTransportSession(initiator.session),
+    clientNoise: initiator.session,
+    burrow: new NoiseTransportSession(responder.session),
+  };
+}
+
+/**
+ * What one ciphertext opens to on the receiving `session`: a control message's
+ * value, an application receipt's messages as JSON, or else the receipt's kind.
+ */
+export function openReceipt(session: NoiseTransportSession, ciphertext: Uint8Array): unknown {
+  const receipt = session.receive(ciphertext);
+  if (receipt.kind === 'control') return receipt.value;
+  if (receipt.kind === 'app') return receipt.messages.map((m) => JSON.parse(utf8Decode(m)));
+  return receipt.kind;
+}
+
+/** Bytes that decode as a `ct` and authenticate as nothing. */
+export const FORGED_CT = toBase64Url(new Uint8Array(64));

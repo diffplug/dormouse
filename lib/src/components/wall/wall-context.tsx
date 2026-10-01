@@ -1,9 +1,12 @@
+import type { WorkspaceId } from '../../lib/session-types';
 import type { PortMode } from './TerminalContextView';
 import type { PortUrlEntry } from './port-url';
-import { createContext, useContext, useEffect } from 'react';
-import type { AlertButtonActionResult, SessionStatus, SetTerminalUserTitleResult } from '../../lib/terminal-registry';
+import { createContext, useContext, useEffect, type RefObject } from 'react';
+import type { RingFrame } from '../../lib/rect-tween';
+import type { SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
+import type { LathWallEngine } from './lath-wall-engine';
 
 export interface PaneElementsState {
   elements: Map<string, HTMLElement>;
@@ -13,6 +16,24 @@ export interface PaneElementsState {
 
 export const ModeContext = createContext<WallMode>('command');
 export const SelectedIdContext = createContext<string | null>(null);
+/** The pane whose Surface takes the keyboard in passthrough, else null. */
+export const PassthroughPaneIdContext = createContext<string | null>(null);
+
+/** The last visible ring frame, carried between active Walls in one Window. */
+export const RingHandoffContext = createContext<RefObject<RingFrame | null> | null>(null);
+
+/** The Lath animator's per-frame signal (`LathWallEngine.subscribeFrames`),
+ *  provided by LathHost. Panes moving under Lath send no render tick, so chrome
+ *  portaled out of a pane re-measures it here. Null outside a LathHost: mobile,
+ *  and stories without a Wall. */
+export const LayoutFramesContext = createContext<LathWallEngine['subscribeFrames'] | null>(null);
+
+/** Terminal fitting waits for committed, fully painted geometry. Standalone
+ *  terminal mounts have no layout coordinator and use their resize observer. */
+export const TerminalResizeContext = createContext<{
+  canFit(id: string): boolean;
+  subscribe(listener: () => void): () => void;
+} | null>(null);
 
 export const PaneElementsContext = createContext<PaneElementsState>({
   elements: new Map(),
@@ -29,14 +50,20 @@ export const DoorElementsContext = createContext<PaneElementsState>({
 export interface WallActions {
   onKill: (id: string) => void;
   onMinimize: (id: string) => void;
-  onAlertButton: (id: string, displayedStatus: SessionStatus) => AlertButtonActionResult;
   onToggleTodo: (id: string) => void;
   onSplitH: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onSplitV: (id: string | null, source?: 'keyboard' | 'mouse') => void;
   onZoom: (id: string) => void;
+  /** A click on a pane's body or header: enter passthrough on it, acknowledging
+   *  its Session (`docs/specs/alert.md` -> Engagement). */
   onClickPanel: (id: string) => void;
-  /** Jump to/focus an arbitrary pane by id (visible or minimized). Used by the
-   *  browser header's dev-server chip to surface the terminal serving a port. */
+  /** DOM focus reached a pane with no gesture seen — a raw cross-origin frame:
+   *  enter passthrough on it, acknowledging nothing. */
+  onEnterPanel: (id: string) => void;
+  /** Jump to/focus an arbitrary pane by id (visible or minimized) as a click on
+   *  it would: passthrough, reattaching a Door, acknowledging its Session
+   *  without input. Used by the browser header's dev-server chip to surface the
+   *  terminal serving a port, and by a Workspace tab's TODO pill. */
   onFocusPane: (id: string) => void;
   onStartRename: (id: string) => void;
   onFinishRename: (id: string, value: string) => SetTerminalUserTitleResult;
@@ -45,26 +72,36 @@ export interface WallActions {
    *  (docs/specs/dor-browser.md → "Display Modal And Render Swaps"). agent-browser ↔ iframe is a
    *  surface-type replacement; screencast ↔ popout is handled inside the
    *  agent-browser panel and does not route here. */
-  onSwapRenderMode: (id: string, mode: RenderMode) => void;
-  /** Open a URL as a new iframe browser pane, split next to `id`. The iframe
+  onSwapRenderMode: (id: string, mode: RenderMode, viewport?: import('dor-lib-common/browser-viewports').BrowserViewportSetting) => void;
+  /** Open a URL as a new browser pane, split next to `id` — an iframe, or an
+   *  agent-browser screencast for a page the iframe cannot show. The iframe
    *  renderer is single-frame, so a page's new-tab request (target=_blank /
    *  window.open, surfaced by the proxy shim) becomes a new pane
    *  (docs/specs/dor-browser.md → "Iframe Shim"). */
   onOpenBrowserPane?: (id: string, url: string) => void;
+  /** A browser Surface's first launch failed: apply its `launchFallback`. */
+  onBrowserLaunchFailed?: (id: string, error: string) => void;
   /** The stable `surface:N` ref for a pane/door id (minted lazily, exactly as
    *  `dor list` assigns refs). Used by the pane context menu to show the handle. */
   resolveSurfaceRef: (id: string) => string;
+  /** Resolve a pending tool's approval: grant and start it, or close its pane
+   *  (docs/specs/dor-tool.md -> Trust). */
+  onResolveToolApproval: (id: string, choice: 'upstream' | 'folder' | 'decline' | 'retry') => void;
+  /** Keep a preview slot open: clear its mark (`docs/specs/dor-tool.md` ->
+   *  Preview slot). A double-click on its Pane header, or Keep open in its
+   *  terminal context. */
+  onPinPreview?: (id: string) => void;
 }
 
 export const WallActionsContext = createContext<WallActions>({
   onKill: () => {},
   onMinimize: () => {},
-  onAlertButton: () => 'noop',
   onToggleTodo: () => {},
   onSplitH: () => {},
   onSplitV: () => {},
   onZoom: () => {},
   onClickPanel: () => {},
+  onEnterPanel: () => {},
   onFocusPane: () => {},
   onStartRename: () => {},
   onFinishRename: () => ({ accepted: true }),
@@ -72,6 +109,7 @@ export const WallActionsContext = createContext<WallActions>({
   onSwapRenderMode: () => {},
   onOpenBrowserPane: () => {},
   resolveSurfaceRef: (id: string) => id,
+  onResolveToolApproval: () => {},
 });
 
 /** Engine-directed writes from a pane/header (title + params). The read side is
@@ -88,6 +126,20 @@ export const PaneWriteContext = createContext<PaneWriteActions>({
   setTitle: () => {},
   updateParams: () => {},
 });
+
+/** The Workspace this Wall renders, for Workspace-scoped settings such as
+ *  alarm delivery overrides. Null outside a Wall. */
+export const WorkspaceIdContext = createContext<WorkspaceId | null>(null);
+
+/** Whether this Wall's Workspace is the visible one. A hidden Workspace stays
+ *  mounted and live, so streaming bodies read this to idle
+ *  (`docs/specs/layout.md` → "Workspaces"). Default true: a bare Wall, and any
+ *  component rendered outside one, is always active. */
+export const WorkspaceActiveContext = createContext(true);
+
+/** Presentation can outlive activation while the outgoing Workspace fades.
+ * Null outside WorkspaceMotion: bare Walls follow their active state. */
+export const WorkspaceVisibleContext = createContext<boolean | null>(null);
 
 export const RenamingIdContext = createContext<string | null>(null);
 /** Exact zoom owner for pane-local chrome. Pane chrome compares against its own id

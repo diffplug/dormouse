@@ -22,7 +22,8 @@
  * jsdom with a stub, in SSR-ish prerender passes, and under Storybook, and some
  * of those define a `localStorage` global that is missing methods. Exported for
  * the stores that need the raw handle (`themes/store.ts` keeps its own string
- * cache; `shell-store.ts` removes a key); everything else should go through
+ * cache; `shell-store.ts` removes a key; `watched-commands.ts` tells an absent
+ * key from a saved one); everything else should go through
  * `loadJson`/`saveJson`, which route through this and add the try/catch — the
  * property access itself can throw where storage is blocked by policy.
  */

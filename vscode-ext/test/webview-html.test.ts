@@ -1,8 +1,7 @@
-import { writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { NOTEPAD_VOLATILE_GLOBAL } from '../../lib/src/lib/vscode-notepad-global';
 import { CSP_NONCE_PLACEHOLDER } from '../src/csp-nonce-placeholder';
 import { getWebviewHtml } from '../src/webview-html';
 import { removeDir, tempStorageDir } from './helpers';
@@ -141,6 +140,24 @@ describe('getWebviewHtml', () => {
     }
   });
 
+  it('refuses a document whose splice marker was edited away', async () => {
+    // `<head>` is matched as a literal, so an attribute added to it in
+    // `lib/index.html` would stop the match. Splicing nothing serves a document
+    // with no CSP at all, which the boot smoketest reads as zero violations —
+    // so the throw is the only thing standing between that edit and an
+    // unpoliced webview.
+    const editedPath = await tempStorageDir();
+    try {
+      await writeFile(
+        join(editedPath, 'index.html'),
+        VITE_INDEX_HTML.replace('<head>', '<head class="dormouse">'),
+      );
+      expect(() => getWebviewHtml(webview, editedPath)).toThrow(/carries no `<head>`/);
+    } finally {
+      await removeDir(editedPath);
+    }
+  });
+
   it('rewrites asset paths onto the webview URI', () => {
     const { html } = getWebviewHtml(webview, mediaPath);
     expect(html).not.toContain('"./assets/');
@@ -148,30 +165,38 @@ describe('getWebviewHtml', () => {
     expect(html).toContain(`${CSP_SOURCE}${mediaPath}/assets/rolldown-runtime-BBBBBBBB.js`);
   });
 
-  it('boots with no notepad mirror unless one is handed to it', () => {
-    // Only a live resume gets one; every other document — a cold restore, an
-    // editor panel — must find `null` there (docs/specs/notepad.md).
-    const { html } = getWebviewHtml(webview, mediaPath);
-    expect(html).toContain(`globalThis.${NOTEPAD_VOLATILE_GLOBAL} = null;`);
+  it('treats a `$` in the media path as data while rewriting assets', async () => {
+    // A `$&` in a Windows extension install path expands to the matched asset
+    // attribute with replace's string form, quietly corrupting every asset URI.
+    const dollarMediaPath = `${mediaPath}$&`;
+    await mkdir(dollarMediaPath);
+    try {
+      await writeFile(join(dollarMediaPath, 'index.html'), VITE_INDEX_HTML);
+      const { html } = getWebviewHtml(webview, dollarMediaPath);
+      expect(html).toContain(`${CSP_SOURCE}${dollarMediaPath}/assets/index-AAAAAAAA.js`);
+      expect(html).toContain(`${CSP_SOURCE}${dollarMediaPath}/assets/rolldown-runtime-BBBBBBBB.js`);
+    } finally {
+      await removeDir(dollarMediaPath);
+    }
   });
 
-  it('cannot be broken out of by a captured note', () => {
-    // Notes carry arbitrary terminal output, and this payload is an inline
-    // script. `</script>` inside a note would otherwise end the tag early,
-    // leaving the rest of the archive as markup in the document.
-    const note = { id: 'n1', createdAt: 1, content: { kind: 'plain' as const, text: '</script><img src=x>' } };
-    const { html } = getWebviewHtml(webview, mediaPath, undefined, null, null, {
-      surfaces: [{
-        surfaceId: 'pane-1', surfaceTitle: 'zsh', surfaceKind: 'terminal', cwd: null, notes: [note],
-      }],
-      stagedDeletions: { deleteBatchIds: [], deleteNotes: [] },
-    });
+  it('treats a `$` in serialized state as data, not a substitution pattern', () => {
+    // A pane title is raw terminal output: OSC 0/2/9/99/777 set it, and the
+    // protocol parser strips only control characters, so `$` and a backtick
+    // survive into `workspaceState` and come back as `initialState`. Built with
+    // `replace`'s string form, `` $` `` would expand to the document prefix
+    // already emitted — Vite's own `</script>` included — closing the boot
+    // script so none of its globals are ever set, on every launch until the
+    // workspace state is cleared.
+    const title = '$`$&' + "$'" + '$$PWNED';
+    const { html } = getWebviewHtml(webview, mediaPath, { panes: [{ id: 'p1', title }] });
 
     const inline = /<script nonce="[^"]+">([\s\S]*?)<\/script>/.exec(html);
     expect(inline, 'the boot payload script was cut short').not.toBeNull();
-    expect(inline![1]).toContain(NOTEPAD_VOLATILE_GLOBAL);
-    expect(inline![1]).toContain('\\u003c/script>');
-    expect(html).not.toContain('<img src=x>');
+    // The title reaches the document exactly as written, and nothing else does.
+    expect(inline![1]).toContain(JSON.stringify(title));
+    expect(html.indexOf('<!DOCTYPE html>')).toBe(html.lastIndexOf('<!DOCTYPE html>'));
+    expect(inline![1]).not.toContain('<meta http-equiv="Content-Security-Policy"');
   });
 
   it('mints a fresh nonce and message token per document', () => {

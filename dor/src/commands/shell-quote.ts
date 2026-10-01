@@ -7,6 +7,12 @@
 
 export type ShellCommandKind = 'cmd' | 'posix' | 'powershell';
 
+/** Shell quotes cannot protect bytes that an interactive terminal interprets
+ * as editing keys, escape sequences, or line submission before shell parsing. */
+export function hasShellInputControls(value: string): boolean {
+  return /[\x00-\x1f\x7f]/.test(value);
+}
+
 const POSIX_SAFE_ARG = /^[A-Za-z0-9_@%+=:,./-]+$/;
 // No `,` or `@`, unlike the posix set: PowerShell's argument mode reads a comma
 // as the array operator (`cat a,b.txt` passes two arguments), while an initial

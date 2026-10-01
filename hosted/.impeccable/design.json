@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-11T22:45:00Z",
+  "title": "Design System: Dormouse Hosted",
+  "extensions": {
+    "breakpoints": [{ "name": "compact", "value": "540px" }]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Full-width email form action.",
+      "html": "<button class=\"ds-primary\">Email me a code</button>",
+      "css": ".ds-primary{width:100%;min-height:44px;padding:9px 14px;border:0;border-radius:4px;background:var(--vscode-list-activeSelectionBackground);color:var(--vscode-list-activeSelectionForeground);font:13px/1.6 var(--vscode-editor-font-family);cursor:pointer}.ds-primary:hover:not(:disabled){filter:brightness(1.15)}.ds-primary:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}.ds-primary:disabled{opacity:.55;cursor:default}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Provider and account actions.",
+      "html": "<button class=\"ds-secondary\">Connect GitHub</button>",
+      "css": ".ds-secondary{min-height:44px;padding:9px 14px;border:0;border-radius:4px;background:var(--vscode-list-inactiveSelectionBackground);color:var(--vscode-list-inactiveSelectionForeground);font:13px/1.6 var(--vscode-editor-font-family);cursor:pointer}.ds-secondary:hover:not(:disabled){filter:brightness(1.15)}.ds-secondary:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}.ds-secondary:disabled{opacity:.55;cursor:default}"
+    },
+    {
+      "name": "Text button",
+      "kind": "button",
+      "refersTo": "button-text",
+      "description": "Inline recovery and form options.",
+      "html": "<button class=\"ds-text\">Change email</button>",
+      "css": ".ds-text{min-height:44px;padding:6px 0;border:0;border-radius:4px;background:transparent;color:var(--vscode-textLink-foreground);font:13px/1.6 var(--vscode-editor-font-family);text-decoration:underline;text-underline-offset:3px;cursor:pointer}.ds-text:hover:not(:disabled){filter:brightness(1.15);text-decoration-thickness:2px}.ds-text:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}.ds-text:disabled{opacity:.55;cursor:default}"
+    },
+    {
+      "name": "Email input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labelled email field with full-opacity placeholder.",
+      "html": "<label class=\"ds-label\" for=\"ds-email\">Email address</label><input class=\"ds-input\" id=\"ds-email\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">",
+      "css": ".ds-label{display:block;margin:16px 0 6px;color:var(--vscode-sideBar-foreground);font:13px/1.6 var(--vscode-editor-font-family)}.ds-input{width:100%;min-height:44px;padding:10px 12px;border:0;border-radius:4px;background:var(--vscode-list-inactiveSelectionBackground);color:var(--vscode-list-inactiveSelectionForeground);font:16px/1.6 var(--vscode-editor-font-family)}.ds-input::placeholder{color:inherit;opacity:1}.ds-input[readonly]{opacity:1}.ds-input:focus-visible{outline:2px solid var(--vscode-focusBorder);outline-offset:3px}"
+    },
+    {
+      "name": "Inline notice",
+      "kind": "custom",
+      "refersTo": "notice",
+      "description": "Status feedback within the task column.",
+      "html": "<p class=\"ds-notice\" role=\"status\">Code sent. Check your inbox. It expires in 10 minutes.</p>",
+      "css": ".ds-notice{margin:0 0 16px;padding:12px;background:var(--vscode-list-inactiveSelectionBackground);color:var(--vscode-list-inactiveSelectionForeground);font:13px/1.6 var(--vscode-editor-font-family)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Native Tenant",
+    "overview": "Hosted inherits [Dormouse's product world](../PRODUCT.md) and [parent design system](../DESIGN.md): focused, approachable, capable, with monospace text and quiet, flat controls. This app-boundary record captures the implemented account interface and its browser/mobile sizing exceptions; the parent owns shared product identity.",
+    "keyCharacteristics": [
+      "Runtime theme colors, including matched foreground/background pairs.",
+      "A narrow task column with open spacing between sections.",
+      "Mobile-sized controls with compact monospace labels.",
+      "Inline feedback and explicit account connection states."
+    ],
+    "rules": [
+      { "name": "The Matched Pair Rule", "body": "Keep every control foreground paired with its theme background. Inputs, placeholders, and readonly values retain full foreground opacity.", "section": "colors" },
+      { "name": "The Runtime Palette Rule", "body": "Inherit colors through the existing theme variables; do not introduce fixed colors or synthetic tonal ramps.", "section": "colors" },
+      { "name": "The Browser Form Rule", "body": "Preserve the input role's larger type and a minimum control height of 44px for buttons and inputs, including text buttons. These are Hosted account-form exceptions to the parent's terminal chrome sizing.", "section": "typography" }
+    ],
+    "dos": [
+      "Do inherit the parent theme and monospace identity.",
+      "Do preserve full foreground opacity in editable, placeholder, and readonly input text.",
+      "Do keep connection state and progress visible in action labels."
+    ],
+    "donts": [
+      "Don't import the marketing site's palette, imagery, or typography into account controls.",
+      "Don't add shadows or decorative card wrappers to this flat account surface.",
+      "Don't reduce form controls to the parent's terminal chrome dimensions."
+    ]
+  }
+}

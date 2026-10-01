@@ -6,33 +6,33 @@ import { handleMouseSelectionKeys } from './handle-mouse-selection-keys';
 import type { WallKeyboardCtx } from './types';
 
 vi.mock('../../../lib/clipboard', () => ({
-  copyRaw: vi.fn(),
-  copyRewrapped: vi.fn(),
   doPaste: vi.fn(),
+}));
+vi.mock('../../../lib/copy-selection', () => ({ copySelection: vi.fn() }));
+vi.mock('../../../lib/copy-editor', () => ({
+  cycleCopyFormat: vi.fn(),
+  nudgeCopyEdge: vi.fn(),
+  openCopyEditor: vi.fn(),
+  stepCopyScope: vi.fn(),
 }));
 vi.mock('../../../lib/platform', () => ({ IS_MAC: true }));
 // The real mouse-selection store keeps per-id module state; mock it so each
 // test can drive the drag/selection shape the handler reads.
-vi.mock('../../../lib/mouse-selection', () => ({
+vi.mock('../../../lib/mouse-selection', async (importOriginal) => ({
   getMouseSelectionState: vi.fn(() => ({ selection: null })),
+  isShadowed: (await importOriginal<typeof import('../../../lib/mouse-selection')>()).isShadowed,
   extendSelectionToToken: vi.fn(),
-  flashCopy: vi.fn(),
   setSelection: vi.fn(),
 }));
-// The notepad chord is gated on the host having a notepad and not having ceded
-// the chord to the browser; both are platform reads, so drive them directly.
-vi.mock('../../../lib/notepad/capture', () => ({
-  addSelectionToNotepad: vi.fn(() => true),
-  isNotepadChordBound: vi.fn(() => true),
-}));
-
-function makeCtx(overrides: { surfaceType?: string } = {}): WallKeyboardCtx {
+function makeCtx(params?: Record<string, unknown>, mode: 'passthrough' | 'command' = 'passthrough'): WallKeyboardCtx {
   return {
     selectedIdRef: { current: 'pane-a' },
+    selectedTypeRef: { current: 'pane' },
+    modeRef: { current: mode },
     // Surface-type lookup now flows through the engine-neutral `nav` seam; an
     // absent params reads as a terminal.
     nav: {
-      paneParams: () => (overrides.surfaceType ? { surfaceType: overrides.surfaceType } : undefined),
+      paneParams: () => params,
       findInDirection: () => null,
       hasPane: () => false,
       panes: () => [],
@@ -51,9 +51,6 @@ describe('handleMouseSelectionKeys', () => {
     const { getMouseSelectionState } = await import('../../../lib/mouse-selection');
     // Reset to the no-selection default; individual tests override as needed.
     vi.mocked(getMouseSelectionState).mockReturnValue({ selection: null } as never);
-    const { addSelectionToNotepad, isNotepadChordBound } = await import('../../../lib/notepad/capture');
-    vi.mocked(addSelectionToNotepad).mockClear().mockReturnValue(true);
-    vi.mocked(isNotepadChordBound).mockClear().mockReturnValue(true);
   });
 
   it('does not intercept Cmd+V on a non-xterm textarea', async () => {
@@ -90,11 +87,33 @@ describe('handleMouseSelectionKeys', () => {
     vi.mocked(doPaste).mockClear();
     const e = fakeEvent(document.createElement('div'), { key: 'v', metaKey: true });
 
-    const handled = handleMouseSelectionKeys(e, makeCtx({ surfaceType: 'agent-browser' }));
+    const handled = handleMouseSelectionKeys(e, makeCtx({ surfaceType: 'browser' }));
 
     expect(handled).toBe(false);
     expect(e.defaultPrevented).toBe(false);
     expect(doPaste).not.toHaveBeenCalled();
+  });
+
+  it('routes clipboard keys only when a tool has its terminal forward', async () => {
+    const { doPaste } = await import('../../../lib/clipboard');
+    vi.mocked(doPaste).mockClear();
+    const terminal = { surfaceType: 'tool', command: 'pnpm storybook' };
+    const browser = { ...terminal, url: 'http://localhost:6006/', renderMode: 'iframe' };
+
+    const terminalEvent = fakeEvent(document.createElement('div'), { key: 'v', metaKey: true });
+    expect(handleMouseSelectionKeys(terminalEvent, makeCtx(terminal))).toBe(true);
+    expect(doPaste).toHaveBeenCalledWith('pane-a');
+
+    vi.mocked(doPaste).mockClear();
+    const browserEvent = fakeEvent(document.createElement('div'), { key: 'v', metaKey: true });
+    expect(handleMouseSelectionKeys(browserEvent, makeCtx(browser))).toBe(false);
+    expect(doPaste).not.toHaveBeenCalled();
+
+    const contextTerminal = document.createElement('div');
+    contextTerminal.dataset.contextTerminal = 'pane-a';
+    const pinnedEvent = fakeEvent(contextTerminal, { key: 'v', metaKey: true });
+    expect(handleMouseSelectionKeys(pinnedEvent, makeCtx(browser))).toBe(true);
+    expect(doPaste).toHaveBeenCalledWith('pane-a');
   });
 
   it('extends the selection to the hint token on "e" during a drag', async () => {
@@ -136,105 +155,104 @@ describe('handleMouseSelectionKeys', () => {
     expect(alt.defaultPrevented).toBe(false);
   });
 
-  it('copies raw on Cmd+C and rewrapped on Cmd+Shift+C outside a drag', async () => {
-    const { copyRaw, copyRewrapped } = await import('../../../lib/clipboard');
-    const { getMouseSelectionState, flashCopy } = await import('../../../lib/mouse-selection');
-    vi.mocked(copyRaw).mockClear().mockResolvedValue(true);
-    vi.mocked(copyRewrapped).mockClear().mockResolvedValue(true);
-    vi.mocked(flashCopy).mockClear();
-    vi.mocked(getMouseSelectionState).mockReturnValue({ selection: { dragging: false } } as never);
+  describe('over a shadowed program drag', () => {
+    const shadow = async () => {
+      const { getMouseSelectionState, setSelection } = await import('../../../lib/mouse-selection');
+      const { openCopyEditor } = await import('../../../lib/copy-editor');
+      vi.mocked(setSelection).mockClear();
+      vi.mocked(openCopyEditor).mockClear();
+      vi.mocked(getMouseSelectionState).mockReturnValue({ selection: { dragging: false, owner: 'program' }, copyEditor: null } as never);
+      return { setSelection, openCopyEditor };
+    };
 
-    const rawEvt = fakeEvent(document.createElement('div'), { key: 'c', metaKey: true });
-    expect(handleMouseSelectionKeys(rawEvt, makeCtx())).toBe(true);
-    expect(rawEvt.defaultPrevented).toBe(true);
-    expect(copyRaw).toHaveBeenCalledWith('pane-a');
-    expect(copyRewrapped).not.toHaveBeenCalled();
+    it('opens the editor on the copy chord, in either mode', async () => {
+      const { openCopyEditor } = await shadow();
+      for (const mode of ['passthrough', 'command'] as const) {
+        const e = fakeEvent(document.createElement('div'), { key: 'c', metaKey: true });
+        expect(handleMouseSelectionKeys(e, makeCtx(undefined, mode))).toBe(true);
+        expect(e.defaultPrevented).toBe(true);
+      }
+      expect(openCopyEditor).toHaveBeenCalledTimes(2);
+    });
 
-    const rewrapEvt = fakeEvent(document.createElement('div'), { key: 'c', metaKey: true, shiftKey: true });
-    expect(handleMouseSelectionKeys(rewrapEvt, makeCtx())).toBe(true);
-    expect(copyRewrapped).toHaveBeenCalledWith('pane-a');
-
-    // flashCopy fires from the copy promise's continuation.
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(flashCopy).toHaveBeenCalledWith('pane-a', 'raw');
-    expect(flashCopy).toHaveBeenCalledWith('pane-a', 'rewrapped');
-  });
-});
-
-describe('handleMouseSelectionKeys: notepad chord', () => {
-  const withSelection = async () => {
-    const { getMouseSelectionState } = await import('../../../lib/mouse-selection');
-    vi.mocked(getMouseSelectionState).mockReturnValue({ selection: { dragging: false } } as never);
-  };
-
-  beforeEach(async () => {
-    const { getMouseSelectionState, flashCopy } = await import('../../../lib/mouse-selection');
-    vi.mocked(getMouseSelectionState).mockReturnValue({ selection: null } as never);
-    vi.mocked(flashCopy).mockClear();
-    const { addSelectionToNotepad, isNotepadChordBound } = await import('../../../lib/notepad/capture');
-    vi.mocked(addSelectionToNotepad).mockClear().mockReturnValue(true);
-    vi.mocked(isNotepadChordBound).mockClear().mockReturnValue(true);
+    it('leaves any other key to the program', async () => {
+      const { setSelection, openCopyEditor } = await shadow();
+      const e = fakeEvent(document.createElement('div'), { key: 'Escape' });
+      expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
+      expect(e.defaultPrevented).toBe(false);
+      expect(setSelection).not.toHaveBeenCalled();
+      expect(openCopyEditor).not.toHaveBeenCalled();
+    });
   });
 
-  it('captures and flashes on Cmd+N with a finalized selection', async () => {
-    const { flashCopy } = await import('../../../lib/mouse-selection');
-    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
-    await withSelection();
-    const e = fakeEvent(document.createElement('div'), { key: 'n', metaKey: true });
+  describe('with the copy editor open', () => {
+    const open = async () => {
+      const { getMouseSelectionState, setSelection } = await import('../../../lib/mouse-selection');
+      const { copySelection } = await import('../../../lib/copy-selection');
+      const { cycleCopyFormat, nudgeCopyEdge, stepCopyScope } = await import('../../../lib/copy-editor');
+      for (const fn of [setSelection, copySelection, nudgeCopyEdge, cycleCopyFormat, stepCopyScope]) vi.mocked(fn).mockClear();
+      vi.mocked(getMouseSelectionState).mockReturnValue({ selection: { dragging: false }, copyEditor: {} } as never);
+      return { setSelection, copySelection, nudgeCopyEdge, cycleCopyFormat, stepCopyScope };
+    };
+    const press = (init: Partial<KeyboardEventInit> & { key: string }, mode: 'passthrough' | 'command' = 'passthrough') => {
+      const e = fakeEvent(document.createElement('div'), init);
+      return { e, handled: handleMouseSelectionKeys(e, makeCtx(undefined, mode)) };
+    };
 
-    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(true);
-    expect(e.defaultPrevented).toBe(true);
-    expect(addSelectionToNotepad).toHaveBeenCalledWith('pane-a');
-    expect(flashCopy).toHaveBeenCalledWith('pane-a', 'notepad');
-  });
+    it('copies on the copy chord, with or without Shift, and on Enter', async () => {
+      const { copySelection } = await open();
+      for (const init of [{ key: 'c', metaKey: true }, { key: 'C', metaKey: true, shiftKey: true }, { key: 'Enter' }]) {
+        const { e, handled } = press(init);
+        expect(handled).toBe(true);
+        expect(e.defaultPrevented).toBe(true);
+      }
+      expect(copySelection).toHaveBeenCalledTimes(3);
+      expect(copySelection).toHaveBeenCalledWith('pane-a');
+    });
 
-  it('does not flash when there was nothing to capture', async () => {
-    const { flashCopy } = await import('../../../lib/mouse-selection');
-    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
-    vi.mocked(addSelectionToNotepad).mockReturnValue(false);
-    await withSelection();
+    it('expands and shrinks on e / Shift+E, cycles formats on f / Shift+F', async () => {
+      const { stepCopyScope, cycleCopyFormat } = await open();
+      press({ key: 'e' });
+      press({ key: 'E', shiftKey: true });
+      press({ key: 'f' });
+      press({ key: 'F', shiftKey: true });
+      expect(vi.mocked(stepCopyScope).mock.calls).toEqual([['pane-a', 1], ['pane-a', -1]]);
+      expect(vi.mocked(cycleCopyFormat).mock.calls).toEqual([['pane-a', 1], ['pane-a', -1]]);
+    });
 
-    expect(handleMouseSelectionKeys(fakeEvent(document.createElement('div'), { key: 'n', metaKey: true }), makeCtx())).toBe(true);
-    expect(flashCopy).not.toHaveBeenCalled();
-  });
+    it('nudges the end on arrows and the start on Shift+arrows', async () => {
+      const { nudgeCopyEdge } = await open();
+      press({ key: 'ArrowRight' });
+      press({ key: 'ArrowLeft', shiftKey: true });
+      expect(vi.mocked(nudgeCopyEdge).mock.calls).toEqual([['pane-a', 'end', 1], ['pane-a', 'start', -1]]);
+    });
 
-  it('falls through without a selection, so Ctrl+N stays readline next-history', async () => {
-    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
-    const e = fakeEvent(document.createElement('div'), { key: 'n', metaKey: true });
+    it('closes on Escape, consuming it', async () => {
+      const { setSelection } = await open();
+      const { e, handled } = press({ key: 'Escape' });
+      expect(handled).toBe(true);
+      expect(e.defaultPrevented).toBe(true);
+      expect(setSelection).toHaveBeenCalledWith('pane-a', null);
+    });
 
-    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
-    expect(e.defaultPrevented).toBe(false);
-    expect(addSelectionToNotepad).not.toHaveBeenCalled();
-  });
+    it('lets any other key, and Shift+Enter, reach the terminal untouched', async () => {
+      const { setSelection, copySelection } = await open();
+      for (const init of [{ key: 'g' }, { key: 'Enter', shiftKey: true }, { key: 'e', metaKey: true }]) {
+        const { e, handled } = press(init);
+        expect(handled).toBe(false);
+        expect(e.defaultPrevented).toBe(false);
+      }
+      expect(setSelection).not.toHaveBeenCalled();
+      expect(copySelection).not.toHaveBeenCalled();
+    });
 
-  it('falls through when the host has no notepad or the browser reserves the chord', async () => {
-    const { addSelectionToNotepad, isNotepadChordBound } = await import('../../../lib/notepad/capture');
-    vi.mocked(isNotepadChordBound).mockReturnValue(false);
-    await withSelection();
-    const e = fakeEvent(document.createElement('div'), { key: 'n', metaKey: true });
-
-    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
-    expect(e.defaultPrevented).toBe(false);
-    expect(addSelectionToNotepad).not.toHaveBeenCalled();
-  });
-
-  it('leaves Cmd+Shift+N alone', async () => {
-    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
-    await withSelection();
-    const e = fakeEvent(document.createElement('div'), { key: 'N', metaKey: true, shiftKey: true });
-
-    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
-    expect(e.defaultPrevented).toBe(false);
-    expect(addSelectionToNotepad).not.toHaveBeenCalled();
-  });
-
-  it('leaves a bare "n" alone', async () => {
-    const { addSelectionToNotepad } = await import('../../../lib/notepad/capture');
-    await withSelection();
-    const e = fakeEvent(document.createElement('div'), { key: 'n' });
-
-    expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
-    expect(addSelectionToNotepad).not.toHaveBeenCalled();
+    it('leaves command mode its own keys, but still copies on the chord', async () => {
+      const { stepCopyScope, nudgeCopyEdge, copySelection } = await open();
+      for (const key of ['e', 'ArrowRight', 'Enter', 'Escape']) expect(press({ key }, 'command').handled).toBe(false);
+      expect(press({ key: 'c', metaKey: true }, 'command').handled).toBe(true);
+      expect(stepCopyScope).not.toHaveBeenCalled();
+      expect(nudgeCopyEdge).not.toHaveBeenCalled();
+      expect(copySelection).toHaveBeenCalledTimes(1);
+    });
   });
 });

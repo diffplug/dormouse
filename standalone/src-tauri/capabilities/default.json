@@ -1,9 +1,8 @@
 {
   "identifier": "default",
   "description": "Default capability set for Dormouse",
-  "windows": ["main"],
+  "windows": ["main", "ws-*"],
   "permissions": [
-    "core:app:allow-version",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:window:allow-minimize",
@@ -14,7 +13,6 @@
     "core:window:allow-is-maximized",
     "core:window:allow-is-focused",
     "core:window:allow-start-dragging",
-    "shell:default",
-    "updater:default"
+    "shell:default"
   ]
 }

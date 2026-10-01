@@ -4,6 +4,8 @@
 
 ## Bundling And PATH
 
+The CLI's control client needs Node types, but the renderer imports CLI protocol and shell helpers as values. A browser-platform bundle check rejects Node imports in those helpers and their dependencies without splitting the CLI into separate TypeScript projects.
+
 **What a missing `ELECTRON_RUN_AS_NODE` looks like.** Under VS Code `DORMOUSE_NODE` is the editor's Electron binary — Node only when that variable is set, and terminals routinely strip it from the ambient env. Without it Electron launches its GUI, ignores the script, and exits 0: no error, no output, success exit code, reading as "the command did nothing" rather than as a launcher bug.
 
 **Why the standalone's bundled node is GUI-subsystem.** A console-subsystem node pops a stray terminal window every time Rust spawns the sidecar, so the bundled binary is patched to the GUI subsystem — and that same patch leaves it no console to inherit.
@@ -20,7 +22,43 @@
 
 **The two Windows spawn failures cross-spawn absorbs.** Node's `spawn` does not consult `PATHEXT`, so a bare `agent-browser` ENOENTs instead of resolving the `agent-browser.cmd` shim npm/vfox installs (on POSIX that file is a real executable with a shebang); and Node ≥22 refuses to spawn `.cmd`/`.bat` without a shell (the CVE-2024-27980 hardening), so the resolved absolute `.cmd` EINVALs too. Neither failure has a POSIX counterpart.
 
-**What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser panel's screenshot loop spawns one per stream-frame pulse — a live page flickers focus-stealing windows several times a second.
+**Why the bare name is a code-execution primitive on Windows.** cross-spawn
+delegates resolution to `which`, whose Windows branch prepends `process.cwd()`
+to the search path (`which@2.0.2/which.js:19-21`, comment *"windows always
+checks the cwd first"*), and its `.cmd`-shim path re-emits the **bare** name
+into `cmd.exe` (`cross-spawn@7.0.6/lib/parse.js:36,48-59`), which resolves the
+cwd first as well. `dor` inherits the pane's cwd, so before this rule a cloned
+repository containing `agent-browser.cmd` executed on the next `dor agent-browser` — and
+`dor skill` mandates `dor agent-browser` for every page view. The 2026-09-19 security audit
+([run 35432996343](https://github.com/diffplug/dormouse/actions/runs/35432996343))
+raised it as its one BLOCKER: the hijack needs a *legitimate* install present,
+because `browserBinaryIsMissing` refuses to spawn when the PATH walk finds
+nothing. The same audit named three sidecar sites spawning system binaries by
+bare name (`standalone/sidecar/pty-core.js`, `standalone/sidecar/clipboard-ops.js`)
+whose cwd is the app directory rather than a user's repository;
+`pty-core.js`'s `%SystemRoot%\System32` join is the pattern those should follow.
+
+**What promoting the walk to the spawn target changed.** Before it, the walk
+only proved the install present and travelled to the host as a hint, so its
+divergence from `which` was inert: a fixed `.cmd`/`.exe`/`.bat` order and a bare
+`existsSync`. Once it decides what runs, both diverge observably — a directory
+holding `agent-browser.exe` and `agent-browser.cmd` would switch which one runs,
+and a non-executable file or directory named `agent-browser` earlier on `PATH`
+would fail EACCES/EISDIR where `which` walked past it to the real install (that
+one is not Windows-specific). A second round found that `which@2`'s fallback list
+is npm's `.EXE;.CMD;.BAT;.COM` rather than `cmd.exe`'s `.COM;.EXE;.BAT;.CMD`, so
+copying the shell's order inverts `.com`-vs-`.exe` and `.bat`-vs-`.cmd`; that
+`which` uses `||` rather than `??` for it, so an empty `PATHEXT` falls back
+instead of yielding no candidates; and that it unshifts an empty extension when
+the command contains a `.`, so `agent-browser.exe` is searched as itself. All
+four are `getPathInfo` in `which/which.js`, read at 2.0.2. A third round caught
+the invariant stating the opposite of the fix in the case that motivated it —
+`which`'s Windows branch prepends `process.cwd()`, so an unscoped "select the
+file `which` would" licenses the hijack — and that the X_OK probe was unpinned
+because `statSync().isFile()` already rejected the directory the test shadowed
+with. All three rounds were review findings on the fix, before it merged.
+
+**What a missing `windowsHide` looks like.** cross-spawn routes `.cmd` shims through `cmd.exe`, which owns a real console window, and the browser host's crisp-capture loop spawns one per changed stream frame — a live page flickers focus-stealing windows several times a second.
 
 **Why none of the `exit`-vs-`close` trouble surfaced on macOS.** The `agent-browser` daemon double-forks and detaches from the inherited fds, so `close` fires normally; only on Windows, where the daemon holds the parent's stdout/stderr pipes for its whole life, does a `close`-only wait hang forever.
 
@@ -67,6 +105,10 @@ releases its request; it does not prove itself before receiving the client proof
 
 **Why `dor await` prints no terminal text.** Mirroring `dor read` would drag its whole output-flag surface (`--lines`, mode selection) onto `await` and spend the one thing `await` has that composes cleanly: a stdout that is nothing but the cause, so `CAUSE=$(dor await …)` needs no parsing. `dor await … && dor read …` gets the screen back for one extra command.
 
+## Browser Surface Addressing
+
+**Why the bind waits past the host's browser request timeout.** `surface.browser` answers only once the host has asked the browser where it streams, and that `attach` queues behind any launch, relaunch or close of the same browser, which can take the host's whole budget. At the client's default 5 s deadline, a command run just after a pop-out printed "could not open the Dormouse browser surface … timed out" and the pane bound anyway; agents read stderr, so the warning misled them (review of #777, 2026-09).
+
 ## Browser Open Target Resolution
 
 **Why the port, and not the hostname, picks `http`.** A public HTTPS site lives on 443 and is written without a port, whereas a bare `host:port` is overwhelmingly a dev or infra server — loopback, a LAN container, a Tailnet peer — and those speak `http`. The hostname carries no usable signal: `box.ts.net` is a private Tailnet peer and looks like any other domain, so the CLI does not try to classify it.
@@ -77,4 +119,4 @@ releases its request; it does not prove itself before receiving the client proof
 
 **The pointer-only stub was tried and was too soft.** A stub that only said "run `dor skill`" left agents skipping it and falling back to native subprocesses and their own browser tools — the two behaviors needing redirection *before* an agent would think to read the skill. Hence the same two directives in the stub itself and again at the top of `dor/skill.md`, so an agent that does run `dor skill` meets them up front.
 
-**Why exactly those two directives and no more.** `dor ensure` and `dor ab` are foundational command names, the least likely `dor` facts to drift, so a stub built only from them stays correct without maintenance — the point of committing it to a repo nobody will revisit. Every extra fact is one more thing that can go stale in every clone.
+**Why exactly those two directives and no more.** `dor ensure` and `dor agent-browser` are foundational command names, the least likely `dor` facts to drift, so a stub built only from them stays correct without maintenance — the point of committing it to a repo nobody will revisit. Every extra fact is one more thing that can go stale in every clone.

@@ -120,6 +120,8 @@ export function fakeWindow(
     entries: options.entries ?? [],
     surfaces: options.surfaces ?? {},
     ownPtyIds: new Set(options.ownPtyIds ?? []),
+    /** Every peer request this window answered, in order. */
+    requests: [] as Array<{ op: string; params: unknown }>,
     writes: [] as Array<{ ptyId: string; data: string }>,
     resizes: [] as Array<{ ptyId: string; cols: number; rows: number; repaint?: boolean }>,
     invalidations: 0,
@@ -127,6 +129,8 @@ export function fakeWindow(
     forwarded: [] as Array<{ payload: BurrowCommand; from: PeerLinkClient }>,
     /** Windows whose sockets closed with commands still outstanding. */
     dropped: [] as PeerLinkClient[],
+    /** Due alarm pushes another window forwarded to this one's Burrow. */
+    pushes: [] as Array<{ sessionId: string; title: string }>,
     /** What came back for commands this window forwarded to its broker. */
     results: [] as BurrowResult[],
     uiEvents: [] as unknown[],
@@ -146,6 +150,7 @@ export function fakeWindow(
         // One generic fan-out covers every peer operation; `op` is opaque to
         // the link, so the window answers zero or more results per request.
         brokerRequest: async (op, params) => {
+          this.requests.push({ op, params });
           if (op === 'directory') return this.entries;
           const { surfaceId } = params as { surfaceId: string };
           const surface = this.surfaces[surfaceId];
@@ -162,6 +167,7 @@ export function fakeWindow(
         }),
         handleForwardedCommand: (payload, from) => void this.forwarded.push({ payload, from }),
         dropForwardedCommands: (from) => void this.dropped.push(from),
+        handleForwardedPush: (sessionId, title) => void this.pushes.push({ sessionId, title }),
         deliverCommandResult: (payload) => void this.results.push(payload),
         deliverUiEvent: (payload) => void this.uiEvents.push(payload),
         onClientAuthenticated: (client) => void this.joined.push(client),

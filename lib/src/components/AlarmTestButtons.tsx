@@ -52,12 +52,12 @@ function ResultLine({ result }: { result: { text: string; tone: 'ok' | 'bad' } |
 }
 
 /**
- * Speak a fixed phrase now. Synchronous and local — there is no Relay in this
- * path — so the only failure worth reporting is a webview with no speech
- * backend at all, which would otherwise be indistinguishable from a working one
- * with the volume down.
+ * Speak a fixed phrase now (`docs/specs/alert.md` -> "Settings dialog").
+ * Admission is synchronous, so the only failure worth reporting is a webview
+ * with no speech backend at all, which would otherwise be indistinguishable
+ * from a working one with the volume down.
  */
-export function SpeakTestButton() {
+export function SpeakTestButton({ voice }: { voice?: string | null }) {
   const [result, show] = useTransientResult();
 
   return (
@@ -66,7 +66,7 @@ export function SpeakTestButton() {
         type="button"
         className={modalActionButton()}
         onClick={() => {
-          if (speakTestUtterance()) show('Speaking now.', 'ok');
+          if (speakTestUtterance(voice)) show('Test sound queued.', 'ok');
           else show('This app has no speech engine available.', 'bad');
         }}
       >

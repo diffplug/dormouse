@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang='en'>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <meta name='color-scheme' content='light dark'>
+  <title>Pocket capability checks</title>
+  <link rel='manifest' href='/diagnostics/manifest.webmanifest'>
+  <meta name='apple-mobile-web-app-capable' content='yes'>
+  <meta name='apple-mobile-web-app-title' content='Pocket Key Test'>
+  <link rel='stylesheet' href='/diagnostics/style.css'>
+  <script type='module' src='/diagnostics/page.js'></script>
+  <script type='module' src='/diagnostics/restart-page.js'></script>
+</head>
+<body>
+  <main>
+    <h1>Pocket capability checks</h1>
+    <p>For iOS, Android, and desktop browsers: run checks in the browser or installed app where pairing fails. Browser tabs and installed apps may have different storage and capabilities. No setup code is needed.</p>
+    <p>Test this browser with disposable keys and storage. Your Pocket pairings and passkeys are never opened or changed. Results stay here until you copy or download them.</p>
+    <p>These tests do not request camera, notification, or passkey permission. The encrypted-key experiment is a capability test, not a change to Pocket security.</p>
+    <button id='run'>Run checks</button>
+    <button id='copy' disabled>Copy results</button>
+    <button id='download' disabled>Download results</button>
+    <p id='status' role='status'>Ready. No setup code needed.</p>
+    <ol id='results'></ol>
+    <details><summary>Full report</summary><textarea id='report' readonly aria-label='Diagnostic report'></textarea></details>
+    <h2>Restart persistence test</h2>
+    <p>Harness v3 tests the production encrypted-key format, including its authenticated context. Old checkpoints must be removed and prepared again; earlier restart results tested an experimental format.</p>
+    <p>For the installed-app test, use your browser menu to install or add this page to your Home Screen as Pocket Key Test, then open that new icon. If installation is unavailable, test in the same browser tab instead. Keep your existing Pocket app installed.</p>
+    <ol>
+      <li>Tap Prepare restart test here. It retains one disposable encrypted key, not a pairing.</li>
+      <li>Fully close this app using the app switcher, then reopen the same icon. Do not prepare again.</li>
+      <li>Tap Verify saved key, then Copy restart result. You can repeat after a phone restart.</li>
+      <li>When finished, tap Remove test data in each browser/app where you prepared a test.</li>
+    </ol>
+    <p>A new page instance is checked, but only you can confirm that you force-quit or restarted the phone. Reload alone is not proof of either. If the app resumes the old page, tap Reload test page.</p>
+    <button id='prepare-restart' data-restart-action>Prepare restart test</button>
+    <button id='verify-restart' data-restart-action>Verify saved key</button>
+    <button id='reload-restart' data-restart-action>Reload test page</button>
+    <button id='copy-restart'>Copy restart result</button>
+    <button id='clear-restart' data-restart-action>Remove test data</button>
+    <p id='restart-status' role='status'>No restart operation has run in this page.</p>
+    <textarea id='restart-report' readonly aria-label='Restart diagnostic report'></textarea>
+    <a href='/'>Back to Pocket</a>
+  </main>
+</body>
+</html>

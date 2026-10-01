@@ -225,6 +225,79 @@ export const RULES = [
     },
   },
   {
+    // SELF_HOST.md -> "Definition of done" states this for all three, and only
+    // Linux held it: macOS and Windows compared `previous` to `current` and
+    // stopped, so a pruned rollback target passed `verify` green and
+    // `manage rollback` then failed on a release that was not there.
+    //
+    // Condition and verdict as one span, per platform: the message alone could
+    // survive the test being deleted, and the test alone could survive the
+    // branch reporting a pass.
+    rule: 'Definition of done — manage verify fails a dangling previous-release pointer',
+    patterns: {
+      macOS:
+        /\[ -L "\$ROOT\/previous" \] && \[ ! -d "\$ROOT\/previous" \]; then\n\s*fail "the previous symlink points at a release that no longer exists"/,
+      Linux:
+        /\[ -L "\$ROOT\/previous" \] && \[ ! -d "\$ROOT\/previous" \]; then\n\s*fail "the previous symlink points at a release that no longer exists"/,
+      Windows:
+        /\$prev -and -not \(Test-Path -LiteralPath \(Join-Path \$Root "releases\\\$prev"\) -PathType Container\)\) \{\n\s*Fail "previous\.txt points at a release that no longer exists"/,
+    },
+  },
+  {
+    // SELF_HOST.md -> "Definition of done" says the service definition carries
+    // no credential, and nothing checked it: a plist or unit carrying
+    // `DORMOUSE_SETUP_PASSWORD` passed `verify`. The search is over names the
+    // installer knows from docs/specs/security-remote.md -> "Credentials at
+    // rest"; the enrollment offer is exempted by its `_FILE` suffix, since the
+    // definition legitimately carries that path.
+    //
+    // Anchored on the search expression rather than on the message: the
+    // message is prose and the expression is the control. Unix extracts each
+    // known credential name before filtering the one allowed path variable.
+    rule: 'Credentials at rest — manage verify searches the service definition for a credential name',
+    patterns: {
+      macOS:
+        /grep -hEo 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(_\[\[:alnum:\]_\]\+\)\?'/,
+      Linux:
+        /grep -hEo 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(_\[\[:alnum:\]_\]\+\)\?'/,
+      Windows:
+        /\(\("\$taskXml" \+ "`n" \+ \$wrapperText\) -match 'DORMOUSE_SETUP_PASSWORD\|DORMOUSE_VAPID_PRIVATE_KEY\|DORMOUSE_ENROLL_TOKEN\(\?!_FILE\\b\)'\)/,
+    },
+  },
+  {
+    // The service definition legitimately carries DORMOUSE_ENROLL_TOKEN_FILE,
+    // and no other name in that namespace. Pin the exact Unix filter alongside
+    // the equivalent Windows negative lookahead (word-bounded, so a name that
+    // merely extends _FILE is a finding there too) so the platforms cannot drift.
+    rule: 'Credentials at rest — only the enrollment token file name is exempt',
+    patterns: {
+      macOS: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'/,
+      Linux: /grep -qvx 'DORMOUSE_ENROLL_TOKEN_FILE'/,
+      Windows: /DORMOUSE_ENROLL_TOKEN\(\?!_FILE\\b\)/,
+    },
+  },
+  {
+    // SELF_HOST.md -> "Definition of done": "a definition it cannot read at all
+    // fails rather than passes". Both searches above read the service
+    // definition and the `run-relay` wrapper, and on every platform an
+    // unreadable input reported a pass — `grep -q` exits 2 on a file it cannot
+    // open, and PowerShell's `"$null"` is the empty string, so neither could
+    // match and both took the green branch.
+    //
+    // Condition and verdict as one span, per platform: the message alone could
+    // survive the guard being deleted, and the guard alone could survive it
+    // reporting a pass.
+    rule: 'Definition of done — manage verify fails a definition it could not read',
+    patterns: {
+      macOS:
+        /if \[ "\$definition_read" = 0 \]; then\n\s*fail "the LaunchAgent or bin\/run-relay could not be read/,
+      Linux:
+        /if \[ "\$definition_read" = 0 \]; then\n\s*fail "the unit or bin\/run-relay could not be read/,
+      Windows:
+        /if \(-not \$definitionRead\) \{\n\s*Fail "the task definition or bin\\run-relay\.ps1 could not be read/,
+    },
+  },
+  {
     rule: 'Network posture — the installer refuses to rewrite a mismatched DORMOUSE_ORIGIN',
     patterns: {
       macOS: /refusing to silently rewrite the origin/,

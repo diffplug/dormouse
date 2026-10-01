@@ -10,17 +10,18 @@
  * subscribe to the same service events, and `link.on` supports either arriving
  * first, so the dialog works whether or not the pairing chunk has loaded.
  *
- * The service's `status` event carries only `{ enrolled }`
+ * The service's `status` event carries only `{ enrolled, serving, serviceId }`
  * (`service-protocol.ts` -> `BurrowStatusEvent`), which is enough to know the
  * answer changed but not what it changed to — so every event re-reads the full
  * status rather than patching a field.
  */
 
-import type {
-  InvitationEvent,
-  PushSendSummary,
-  BurrowConsoleStatus,
-  SetupQrResult,
+import {
+  servingOf,
+  type InvitationEvent,
+  type PushSendSummary,
+  type BurrowConsoleStatus,
+  type SetupQrResult,
 } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
@@ -28,7 +29,8 @@ import type { BurrowLink } from '../../lib/platform/types';
 /**
  * `unsupported` is a build with no Burrow service behind it (the website, the
  * lib dev server) — not a failure, and the section renders nothing at all.
- * It is distinct from `error`, which means there is a service and it refused.
+ * It is distinct from `error`, which means there is a service and no read of
+ * it has succeeded since the first subscriber came.
  */
 export type BurrowStatusState =
   | { kind: 'unsupported' }
@@ -47,8 +49,9 @@ let refreshInFlight: Promise<void> | null = null;
 let refreshAgain = false;
 
 /**
- * The service's `status` event fires only when `enrolled` changes, because that
- * is the edge its webview gate arms on. The *connection* moves underneath it
+ * The service's `status` event fires only when `enrolled` or `serving` changes —
+ * the edges its webview gate arms on — and once as the service starts, to name
+ * the instance's `serviceId`. The *connection* moves underneath it
  * with no event at all: `connecting -> connected` on a normal start,
  * `connected -> disconnected` on a dropped relay, `-> displaced` when another
  * instance takes the slot. Without a poll the dialog would show whichever state
@@ -90,10 +93,7 @@ function setState(next: BurrowStatusState): void {
  * others last changed — stale for as long as the dialog stays open, and nothing
  * else would catch it. The mapped type makes the *omission* a compile error;
  * it cannot make a nested field's comparator right, since `Object.is`
- * type-checks for one of those too. `offer` is compared by its origin because
- * the service mints a fresh object per read, and "compares the offer by its
- * origin, not by the object the poll minted" in `burrow-status-store.test.ts` is
- * what pins that.
+ * type-checks for one of those too.
  */
 const STATUS_FIELDS: {
   [K in keyof BurrowConsoleStatus]: (
@@ -102,12 +102,14 @@ const STATUS_FIELDS: {
   ) => boolean;
 } = {
   enrolled: Object.is,
-  relayUrl: Object.is,
+  serving: Object.is,
+  relayOrigin: Object.is,
+  relayMode: Object.is,
   burrowId: Object.is,
   connection: Object.is,
   pairedClients: Object.is,
   suggestedLabel: Object.is,
-  offer: (a, b) => a?.origin === b?.origin,
+  offer: Object.is,
 };
 
 function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
@@ -132,12 +134,19 @@ function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
  * `getPlatform` throws before `initPlatform`, and a host may simply have no
  * service. Both mean the same thing here: nothing to ask.
  */
-function link(): BurrowLink | undefined {
+export function burrowLink(): BurrowLink | undefined {
   try {
     return getPlatform().burrow;
   } catch {
     return undefined;
   }
+}
+
+/** The Burrow link, for a command that has nothing to do without one. */
+export function requireBurrowLink(): BurrowLink {
+  const active = burrowLink();
+  if (!active) throw new Error('This build has no Burrow service.');
+  return active;
 }
 
 export function getBurrowStatusSnapshot(): BurrowStatusState {
@@ -147,7 +156,7 @@ export function getBurrowStatusSnapshot(): BurrowStatusState {
 export function subscribeToBurrowStatus(listener: () => void): () => void {
   listeners.add(listener);
   if (listeners.size === 1) {
-    const active = link();
+    const active = burrowLink();
     if (active) {
       unsubscribeFromLink = active.on('status', () => void refreshBurrowStatus());
       pollTimer = setInterval(() => void refreshBurrowStatus(), POLL_MS);
@@ -232,14 +241,28 @@ function refreshAfterMutation(): Promise<void> {
  * `label.trim()` while the enroll form renders, where an `undefined` throws the
  * whole section away rather than degrading, so it is defaulted here — at the
  * seam where the untrusted shape becomes the typed one — instead of at each of
- * the two forms that read it.
+ * the two forms that read it. `serving` is read through `servingOf`.
+ *
+ * A broker from before the one baked relay origin answers `offer` as
+ * `{ origin } | null` — a fresh object every poll, which the field-wise compare
+ * would republish every 2 s — and names its Relay `relayUrl` with no
+ * `relayOrigin` or `relayMode`. The mode it lacks reads as Hosted, which shows
+ * no enroll form it could not serve.
  */
 function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
-  return { ...status, suggestedLabel: status.suggestedLabel ?? '' };
+  const { relayUrl } = status as { relayUrl?: unknown };
+  return {
+    ...status,
+    serving: servingOf(status),
+    suggestedLabel: status.suggestedLabel ?? '',
+    relayOrigin: status.relayOrigin ?? (typeof relayUrl === 'string' ? relayUrl : ''),
+    relayMode: status.relayMode === 'self-host' ? 'self-host' : 'hosted',
+    offer: Boolean(status.offer),
+  };
 }
 
 async function readBurrowStatus(): Promise<void> {
-  const active = link();
+  const active = burrowLink();
   if (!active) {
     setState(UNSUPPORTED);
     return;
@@ -251,48 +274,39 @@ async function readBurrowStatus(): Promise<void> {
     setState(status ? { kind: 'ready', status: normalizeStatus(status) } : UNSUPPORTED);
   } catch (error) {
     if (mine !== generation) return;
-    setState({ kind: 'error', message: describeError(error) });
+    // A status already read stands, and the next tick retries: publishing one
+    // failed poll as `error` would unmount everything the section holds open
+    // on it — a setup code, a half-typed password, the one-time panel.
+    if (state.kind === 'ready') return;
+    setState({ kind: 'error', message: describeBurrowError(error) });
   }
 }
 
 /**
- * Enroll this machine with a coordinating Relay.
+ * Enroll this machine with its build's Relay.
  *
  * The password is a bearer credential and is passed straight through to the
- * service, which is what talks to the Relay; it is never stored here. The
- * service refuses an origin outside this build's baked relay allowlist *before*
- * the password leaves the machine (`docs/specs/relay.md`, "Where a Burrow may
- * reach a Relay"), so a mistyped origin fails closed rather than leaking
- * it. Rejections propagate verbatim — the caller renders them.
+ * service, which is what talks to the Relay; it is never stored here. There is
+ * no origin to pass: the service posts only to the build's baked relay origin
+ * (`docs/specs/relay.md` → "Relay origin"). Rejections propagate verbatim —
+ * the caller renders them.
  */
-export async function enrollBurrow(
-  relayUrl: string,
-  password: string,
-  label: string,
-): Promise<void> {
-  const active = link();
-  if (!active) throw new Error('This build has no Burrow service.');
-  await active.command('enroll', { relayUrl, password, label });
+export async function enrollBurrow(password: string, label: string): Promise<void> {
+  const active = requireBurrowLink();
+  await active.command('enroll', { password, label });
   await refreshAfterMutation();
 }
 
 /**
  * Enroll against the offer the installer left on this machine — the one-click
  * path, where the only thing the user chooses is what to call the machine
- * (`service-protocol.ts` → `BurrowConsoleStatus.offer`).
- *
- * `origin` is the one the card *displayed*, echoed so the service can refuse a
- * file rewritten since — it is not what gets enrolled against, which comes off
- * the file along with the token this realm never sees.
- *
- * Rejections propagate verbatim, including the same allowlist refusal the typed
- * form gets: a Relay installed on this machine can still be an origin this
- * build was not compiled to reach.
+ * (`service-protocol.ts` → `BurrowConsoleStatus.offer`). The token comes off
+ * the file, which this realm never sees. Rejections propagate verbatim, like
+ * the typed form's.
  */
-export async function enrollOfferBurrow(origin: string, label: string): Promise<void> {
-  const active = link();
-  if (!active) throw new Error('This build has no Burrow service.');
-  await active.command('enrollOffer', { origin, label });
+export async function enrollOfferBurrow(label: string): Promise<void> {
+  const active = requireBurrowLink();
+  await active.command('enrollOffer', { label });
   await refreshAfterMutation();
 }
 
@@ -302,8 +316,7 @@ export async function enrollOfferBurrow(origin: string, label: string): Promise<
  * (`docs/specs/relay.md`, "Relay socket policy").
  */
 export async function reconnectBurrow(): Promise<void> {
-  const active = link();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   await active.command('reconnect');
   await refreshAfterMutation();
 }
@@ -314,8 +327,7 @@ export async function reconnectBurrow(): Promise<void> {
  * claiming otherwise while the credential is still on disk.
  */
 export async function clearBurrowEnrollment(): Promise<void> {
-  const active = link();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   await active.command('clearEnrollment');
   await refreshAfterMutation();
 }
@@ -331,8 +343,7 @@ export async function clearBurrowEnrollment(): Promise<void> {
  * Relay that refuses both have to read as themselves.
  */
 export async function mintSetupQr(): Promise<SetupQrResult> {
-  const active = link();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   return (await active.command('setupQr')) as SetupQrResult;
 }
 
@@ -363,7 +374,7 @@ export function subscribeToInvitation(
   ) => void,
 ): () => void {
   return (
-    link()?.on('invitation', (data) => {
+    burrowLink()?.on('invitation', (data) => {
       const event = data as InvitationEvent | undefined;
       if (typeof event?.inviteId === 'string' && typeof event.state === 'string') {
         const outcome = typeof event.outcome === 'string' ? event.outcome : undefined;
@@ -383,18 +394,17 @@ export function subscribeToInvitation(
  * break an alarm (`docs/specs/relay.md` -> Web Push). A test button is the one
  * caller that needs the failure.
  *
- * Lives here rather than beside the ring watcher in `alert-push.ts`: that
+ * Lives here rather than beside the device refresh in `activation.ts`: that
  * module is deliberately inside the lazily-imported `RemotePairingModalHost`
  * chunk, and importing it from the Settings dialog would pull the whole
  * Burrow stack into the main bundle on every host.
  */
 export async function sendTestPush(): Promise<PushSendSummary> {
-  const active = link();
-  if (!active) throw new Error('This build has no Burrow service.');
+  const active = requireBurrowLink();
   return (await active.command('pushTest')) as PushSendSummary;
 }
 
-function describeError(error: unknown): string {
+export function describeBurrowError(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === 'string' && error) return error;
   // Completes the section's own sentence — "Could not reach this machine's

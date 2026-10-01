@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PlatformAdapter, PtyDataDetail } from "dormouse-lib/lib/platform/types";
+import type { PlatformAdapter } from "dormouse-lib/lib/platform/types";
 
 // Stub the Tauri modules so `./tauri-adapter` imports and constructs outside a
 // Tauri webview — same reason as tauri-adapter.test.ts. Nothing here exercises
@@ -38,97 +38,94 @@ describe("BrowserSidecarAdapter capability surface", () => {
   });
 });
 
-// The harness must not persist Session state that production standalone drops
-// (docs/specs/standalone.md -> "Standalone persists no Session state").
+// The harness mirrors the shipped persistence answer, so a reload there
+// exercises what the app does (docs/specs/transport.md -> "The governing rule").
 describe("BrowserSidecarAdapter session persistence", () => {
   const KEY = "dormouse.browser-sidecar.session";
+  const session = { version: 3 as const, panes: [{ id: "pane-a", title: "A", cwd: "/a", untouched: false }] };
+  const windowBlob = {
+    version: 1 as const,
+    workspaces: [{ id: "ws-1", name: "One", nameIsAuto: false, session }],
+    activeWorkspaceId: "ws-1",
+  };
 
-  it("reports the same persistsSession as TauriAdapter", () => {
-    const harness: PlatformAdapter = new BrowserSidecarAdapter(
-      new BrowserSidecarHost("http://localhost:1234"),
-    );
-    const tauri: PlatformAdapter = new TauriAdapter();
-    expect(harness.persistsSession).toBe(tauri.persistsSession);
-    expect(harness.persistsSession).toBe(false);
-  });
-
-  it("does not write session state to localStorage", () => {
+  it("round-trips a Window through localStorage", () => {
     localStorage.removeItem(KEY);
-    const adapter: PlatformAdapter = new BrowserSidecarAdapter(
-      new BrowserSidecarHost("http://localhost:1234"),
-    );
-    adapter.saveState({ version: 3, panes: [], lathLayout: null });
-    expect(localStorage.getItem(KEY)).toBeNull();
-  });
-
-  it("does not restore a stale blob left by an earlier run", () => {
-    localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
-    const adapter: PlatformAdapter = new BrowserSidecarAdapter(
-      new BrowserSidecarHost("http://localhost:1234"),
-    );
-    expect(adapter.getState()).toBeNull();
+    const adapter = new BrowserSidecarAdapter(new BrowserSidecarHost("http://localhost:1234"));
+    adapter.saveWindowState(windowBlob);
+    expect(adapter.getWindowState()).toEqual(windowBlob);
+    // The shared `getState` readers want a bare Session and the blob is a Window,
+    // so it answers nothing; the boot reads `getWindowState`.
+    expect((adapter as PlatformAdapter).getState()).toBeNull();
     localStorage.removeItem(KEY);
   });
 
-  it("deletes a pre-gate blob on init", async () => {
-    localStorage.setItem(KEY, JSON.stringify({ version: 3, panes: [], lathLayout: null }));
+  it("wraps a pre-Window blob rather than dropping it", () => {
+    localStorage.setItem(KEY, JSON.stringify(session));
+    const adapter = new BrowserSidecarAdapter(new BrowserSidecarHost("http://localhost:1234"));
+    expect(adapter.getWindowState()?.workspaces.map((ws) => ws.session)).toEqual([session]);
+    localStorage.removeItem(KEY);
+  });
+
+  it("claims the recovery commands for its saved panes during init", async () => {
+    localStorage.setItem(KEY, JSON.stringify(windowBlob));
     const host = new BrowserSidecarHost("http://localhost:1234");
     vi.spyOn(host, "init").mockResolvedValue(undefined);
     vi.spyOn(host, "onEvent").mockReturnValue(() => {});
+    const invoke = vi.spyOn(host, "invoke").mockResolvedValue({ "pane-a": "claude --continue" });
     // Claim the console-forwarder flag so init() doesn't patch console.* on the
     // shared jsdom window for every later test in this file.
     (window as typeof window & { __DORMOUSE_BROWSER_CONSOLE_PATCHED__?: boolean })
       .__DORMOUSE_BROWSER_CONSOLE_PATCHED__ = true;
+
     const adapter = new BrowserSidecarAdapter(host);
     await adapter.init();
-    expect(localStorage.getItem(KEY)).toBeNull();
+    await adapter.recoveryReady;
+
+    expect(invoke).toHaveBeenCalledWith("take_recovery_commands", { paneIds: ["pane-a"] });
+    expect(adapter.getRecoveryCommands()).toEqual({ "pane-a": "claude --continue" });
+    localStorage.removeItem(KEY);
   });
 });
 
-// The harness rides the same sidecar, so the parse boundary is the same one
-// TauriAdapter has: forward the pair, apply the events, push the theme.
-describe("BrowserSidecarAdapter terminal stream", () => {
-  async function listening() {
+describe("BrowserSidecarAdapter browser requests", () => {
+  it("forwards every request through one browser_request, and answers a failure as a result", async () => {
     const host = new BrowserSidecarHost("http://localhost:1234");
-    let emit: (event: { event: string; data: unknown }) => void = () => {};
+    const invoke = vi.spyOn(host, "invoke").mockResolvedValueOnce({ ok: true, url: "ws://127.0.0.1:9/view/abc" });
+    const adapter = new BrowserSidecarAdapter(host);
+    const request = { provider: "agent-browser" as const, binding: { session: "sess" }, op: "view" as const, stream: 4321 };
+
+    expect(await adapter.browser(request)).toEqual({ ok: true, url: "ws://127.0.0.1:9/view/abc" });
+    expect(invoke).toHaveBeenCalledWith("browser_request", { request });
+
+    invoke.mockRejectedValueOnce(new Error("bridge down"));
+    expect(await adapter.browser({ provider: "agent-browser", binding: { session: "sess" }, op: "close" })).toEqual({ ok: false, error: "bridge down" });
+  });
+});
+
+// The parse boundary and the alert transport both sidecar adapters share are
+// pinned once, for both, in `sidecar-adapters.test.ts`.
+describe("BrowserSidecarAdapter event stream", () => {
+  // The SSE stream is the only path the alerts' events take here, and whatever
+  // the sidecar sent while it was down is gone: `sync` has the sidecar re-send
+  // this window's state and both stores, ending nothing.
+  it("asks the sidecar to sync when the event stream reconnects", async () => {
+    const host = new BrowserSidecarHost("http://localhost:1234");
+    let reconnect: () => void = () => {};
     vi.spyOn(host, "init").mockResolvedValue(undefined);
-    vi.spyOn(host, "onEvent").mockImplementation((listener) => {
-      emit = listener;
+    vi.spyOn(host, "invoke").mockResolvedValue(undefined);
+    vi.spyOn(host, "onEvent").mockReturnValue(() => {});
+    vi.spyOn(host, "onReconnect").mockImplementation((listener) => {
+      reconnect = listener;
       return () => {};
     });
     const send = vi.spyOn(host, "send").mockImplementation(() => {});
     (window as typeof window & { __DORMOUSE_BROWSER_CONSOLE_PATCHED__?: boolean })
       .__DORMOUSE_BROWSER_CONSOLE_PATCHED__ = true;
-
-    const adapter = new BrowserSidecarAdapter(host);
-    await adapter.init();
+    await new BrowserSidecarAdapter(host).init();
     send.mockClear();
-    return { adapter, send, deliver: (event: string, data: unknown) => emit({ event, data }) };
-  }
 
-  it("forwards the projection pair it was handed, parsing nothing again", async () => {
-    const { adapter, send, deliver } = await listening();
-    const seen: PtyDataDetail[] = [];
-    adapter.onPtyData((detail) => void seen.push(detail));
-
-    deliver("pty:data", { id: "b1", data: "\x1b]11;?\x07tail", textData: "tail" });
-
-    expect(seen).toEqual([{ id: "b1", data: "\x1b]11;?\x07tail", textData: "tail" }]);
-    expect(send.mock.calls.filter(([cmd]) => cmd === "pty_write")).toEqual([]);
-  });
-
-  it("pushes the resolved theme so the sidecar can answer a colour query", async () => {
-    const { adapter, send } = await listening();
-    adapter.requestInit();
-
-    const pushed = send.mock.calls.filter(([cmd]) => cmd === "pty_theme_colors");
-    expect(pushed).toHaveLength(1);
-    expect(pushed[0]![1]).toEqual({
-      colors: {
-        foreground: expect.any(String),
-        background: expect.any(String),
-        cursor: expect.any(String),
-      },
-    });
+    reconnect();
+    expect(send.mock.calls).toEqual([["alert_command", { payload: { op: "sync", ids: [] } }]]);
   });
 });

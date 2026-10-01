@@ -14,8 +14,9 @@
  * that rots.
  *
  * The sources it reads: the canonical product guide, the root README, the
- * bundled agent skill, the self-host runbook, the security spec, the homepage,
- * and the route table, redirects, and head-tag plumbing that publish them.
+ * bundled agent skill, every routed Markdown page (`SITE_ROUTES`), the
+ * homepage, and the route table, redirects, and head-tag plumbing that publish
+ * them.
  *
  * Run by the root `pnpm test`.
  */
@@ -31,7 +32,7 @@ import {
   visit,
   UnsupportedMarkdownError,
 } from '../website/scripts/docs-parser.js';
-import { generateDocs, SITE_ORIGIN, SITE_IMAGE_BASE } from '../website/scripts/generate-docs.js';
+import { generateDocs, SITE_ORIGIN, SITE_IMAGE_BASE, SITE_ROUTES } from '../website/scripts/generate-docs.js';
 // Imported, not scraped: Node strips the types, so the lint reads the same
 // objects the browser bundle does. A regex over the source silently returned
 // fewer pages when a field was reordered or a flag renamed, and every check
@@ -47,6 +48,9 @@ const SKILL = 'dor/skill.md';
 const SELF_HOST = 'SELF_HOST.md';
 const SECURITY_SPEC = 'docs/specs/security.md';
 const HOMEPAGE = 'website/src/pages/Home.tsx';
+/** The authored Markdown published on dormouse.sh: the two READMEs and every
+ *  page the generator routes. */
+const PUBLIC_MARKDOWN = [GUIDE, ROOT_README, ...Object.keys(SITE_ROUTES)];
 /** The `/docs` redirect entrypoint `website/public/_redirects` owns; it names
  *  no page, so `sitePath` has nothing to point it at. */
 const DOCS_ENTRYPOINT_PATH = '/docs';
@@ -98,18 +102,13 @@ function docsSurfaces() {
 }
 
 /** Each source read once and parsed once, then shared by every check. */
-const src = {
-  [GUIDE]: readRepoFile(GUIDE),
-  [ROOT_README]: readRepoFile(ROOT_README),
-  [SKILL]: readRepoFile(SKILL),
-  [SELF_HOST]: readRepoFile(SELF_HOST),
-  [SECURITY_SPEC]: readRepoFile(SECURITY_SPEC),
-  [HOMEPAGE]: readRepoFile(HOMEPAGE),
-};
+const src = Object.fromEntries(
+  [...PUBLIC_MARKDOWN, SKILL, HOMEPAGE].map((rel) => [rel, readRepoFile(rel)]),
+);
 
 /** Parsed form, or null when the source is outside the supported subset. */
 const parsed = {};
-for (const rel of [GUIDE, ROOT_README, SKILL, SELF_HOST, SECURITY_SPEC]) {
+for (const rel of [...PUBLIC_MARKDOWN, SKILL]) {
   try {
     parsed[rel] = parseMarkdown(src[rel]);
   } catch (error) {
@@ -132,8 +131,9 @@ function linksIn(rel) {
 }
 
 function checkNoPlaceholders() {
-  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC]) {
-    if (/\bTODO:/.test(src[rel])) fail(`${rel}: contains a TODO: placeholder`);
+  for (const rel of PUBLIC_MARKDOWN) {
+    // An HTML comment renders nowhere, so a pending image may wait in one.
+    if (/\bTODO:/.test(src[rel].replace(/<!--[\s\S]*?-->/g, ''))) fail(`${rel}: contains a TODO: placeholder`);
   }
 }
 
@@ -226,7 +226,7 @@ function checkImageBaseUrl() {
  * than this check could say.
  */
 function checkLinks() {
-  for (const rel of [GUIDE, ROOT_README, SELF_HOST, SECURITY_SPEC]) {
+  for (const rel of PUBLIC_MARKDOWN) {
     if (!parsed[rel]) continue;
     for (const href of linksIn(rel)) {
       if (href.startsWith('#')) continue;
@@ -250,14 +250,14 @@ function checkLinks() {
  * constrains present code `Reserved:`. This one has no fold: `SECURITY_DELTA`
  * withholds the title and the front matter and nothing else, so anything
  * staged in the file ships to dormouse.sh as a promise
- * (docs/specs/website-docs.md -> `/docs/security` spec).
+ * (docs/specs/website-docs.md -> `/security` spec).
  *
  * Read off the parsed tree, so `## Future` inside a fenced example and a code
  * span reading `Reserved:` are not findings.
  */
 function checkSecurityFold() {
   if (!parsed[SECURITY_SPEC]) return;
-  const where = `${SPEC} -> "/docs/security"`;
+  const where = `${SPEC} -> "/security"`;
   const remedy = 'staged material must be withheld by a delta rule before it can exist there';
   for (const heading of parsed[SECURITY_SPEC].headings) {
     // Any depth, numbered or not: the fold is a fold wherever it is written.
@@ -339,8 +339,8 @@ function checkRoutesToReferences() {
   }
 
   // Which pages the homepage owes a link to is the registry's call, not a
-  // guess from the path: `/hosted` and `/supply-chain` are owed one and do not
-  // sit under `/docs`, while `/changelog` sits in the rail on purpose.
+  // guess from the path: `/hosted` and `/supply-chain` are owed one, while
+  // `/changelog` sits in the rail on purpose.
   const owed = DOCS_PAGES.filter((page) => page.linkedFrom?.includes(HOMEPAGE_SOURCE));
   if (owed.length === 0) {
     fail(`docs-pages.ts: no page names the homepage; ${HOMEPAGE} enforces nothing`);
@@ -359,18 +359,6 @@ function checkRoutesToReferences() {
   for (const page of owed) {
     if (!homeHrefs.some((href) => satisfies(href, page.path))) {
       fail(`${HOMEPAGE}: does not link to ${page.path}`);
-    }
-  }
-
-  // A homepage link *shaped* like a reference must be one. Scoped to `/docs`
-  // because that namespace is only ever references, so a typo there is
-  // detectable; a mistyped top-level path is just a broken link, which no
-  // prefix rule can tell from a real page. Exact paths, because `/docs` is an
-  // entrypoint rather than a page and a prefix test would accept a link to it.
-  const docsPaths = DOCS_PAGES.map((page) => page.path).filter((path) => path.startsWith('/docs/'));
-  for (const href of homeHrefs.filter((href) => href.startsWith('/docs'))) {
-    if (!docsPaths.some((path) => satisfies(href, path))) {
-      fail(`${HOMEPAGE}: links to ${href}, which is not a published reference`);
     }
   }
 }
@@ -506,6 +494,24 @@ function checkPricingRedirect() {
   }
 }
 
+/**
+ * No page is served under `/docs`: the prefix survives only as the entrypoint
+ * and as legacy 301s (docs/specs/website-docs.md -> Reference page chrome), so
+ * a registry path or homepage href there is a page added back under it.
+ */
+function checkNoDocsPrefixPages() {
+  for (const page of DOCS_PAGES) {
+    if (page.path === DOCS_ENTRYPOINT_PATH || page.path.startsWith(`${DOCS_ENTRYPOINT_PATH}/`)) {
+      fail(`docs-pages.ts: ${page.path} is under ${DOCS_ENTRYPOINT_PATH}; reference pages live at the top level`);
+    }
+  }
+  for (const [, href] of (src[HOMEPAGE] ?? '').matchAll(/sitePath\("(\/[^"]*)"\)/g)) {
+    if (href === DOCS_ENTRYPOINT_PATH || href.startsWith(`${DOCS_ENTRYPOINT_PATH}/`)) {
+      fail(`${HOMEPAGE}: links to ${href}, which can only be the entrypoint or a legacy redirect`);
+    }
+  }
+}
+
 /** Generated data must be internally consistent. */
 async function checkGenerated() {
   let data;
@@ -523,24 +529,6 @@ async function checkGenerated() {
   // owns them and the catch above reports any failure.
   for (const file of data.guide.media.unused) {
     fail(`vscode-ext/images/${file} is not referenced by the guide`);
-  }
-}
-
-/**
- * Public copy must not present staged remote transports as shipped.
- *
- * Scoped by the spec that stages them: the ban applies only while WebRTC is
- * still below docs/specs/remote-api.md's `## Future` fold, so promoting it
- * retires this rule in the same commit that ships it.
- */
-function checkNoStagedClaims() {
-  const api = readRepoFile('docs/specs/remote-api.md');
-  const future = api.slice(api.indexOf('\n## Future'));
-  if (!/WebRTC/i.test(future)) return;
-  for (const rel of [GUIDE, ROOT_README, HOMEPAGE]) {
-    if (/WebRTC/i.test(src[rel])) {
-      fail(`${rel}: mentions WebRTC, which is staged under docs/specs/remote-api.md -> ## Future`);
-    }
   }
 }
 
@@ -666,8 +654,8 @@ const checks = [
   checkDocsEntrypoint,
   checkPricingRedirect,
   checkRoutesToReferences,
+  checkNoDocsPrefixPages,
   checkGenerated,
-  checkNoStagedClaims,
   checkNoDimmedDocsText,
   checkInSiteHrefsAreServed,
 ];

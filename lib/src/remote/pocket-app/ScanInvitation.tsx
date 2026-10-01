@@ -18,6 +18,7 @@ import {
 } from 'remote-lib-common';
 
 import { SETUP_CODE_DEAD_MESSAGE } from '../client/pocket-client';
+import { SETUP_PATH } from '../setup-copy';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';
 
 /** A running camera scan; stopping it also stops the media tracks. */
@@ -270,8 +271,7 @@ export function ScanInvitation({
       </header>
       <div className={PK.body}>
         <p className={PK.lead}>
-          On the computer: <strong>Settings → Remote control → Set up a phone</strong>. Point this
-          phone at the code it shows.
+          On the computer: <strong>{SETUP_PATH}</strong>. Point this phone at the code it shows.
         </p>
         {error ? <ErrorRow message={error} /> : null}
         {cameraProblem ? (

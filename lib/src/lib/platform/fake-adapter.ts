@@ -1,16 +1,13 @@
-import { DEFAULT_HELPER_COMMAND, type HelperIdentity, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
-import type { AlertStateDetail, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink } from './types';
-import { AlertManager } from '../alert-manager';
-import type { AwaitHandle, AwaitOptions } from '../alert-manager';
-import type { AlertSettings } from '../alert-settings';
+import { DEFAULT_HELPER_COMMAND, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
+import type { OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
+import type { ManagedVoicePort } from './managed-voice-types';
+import type { AlertManager } from '../alert-manager';
+import { createAlertHost, type AlertHost, type AlertRealm } from '../../host/alert-host';
+import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
 import { normalizeExternalUri } from '../external-links';
 import {
-  createMemoryNotepadArchivePort,
-  type MemoryNotepadArchivePort,
-} from '../notepad/memory-archive-port';
-import {
-  applyTerminalProtocolEvents,
-  collectTerminalSemanticEvents,
+  applyTerminalEvents,
+  collectTerminalClipboardOffers,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
   textProjectionOf,
@@ -19,6 +16,11 @@ import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
+import { applyLiveToolEvents } from '../tool-events';
+import { offerProgramCopy } from '../mouse-selection';
+
+/** This renderer is its host's one realm. */
+const LOCAL_VIEWER = 'local';
 
 export interface FakeScenario {
   name: string;
@@ -41,11 +43,13 @@ export interface FakePtyResizeDetail extends FakePtySize {
 
 const DEFAULT_PTY_SIZE: FakePtySize = { cols: 80, rows: 30 };
 
+/** The `alert*` platform methods, taken from the shared client in the constructor. */
+export interface FakePtyAdapter extends AlertClientMethods {}
+
 export class FakePtyAdapter implements PlatformAdapter {
   private dataHandlers = new Set<(detail: PtyDataDetail) => void>();
   private exitHandlers = new Set<(detail: { id: string; exitCode: number }) => void>();
   private resizeHandlers = new Set<(detail: FakePtyResizeDetail) => void>();
-  private alertStateHandlers = new Set<(detail: AlertStateDetail) => void>();
   private spawnHandlers = new Set<(detail: { id: string }) => void>();
   private terminals = new Set<string>();
   /** The deterministic demo shell behind each helper (docs/specs/terminal-context.md). */
@@ -58,38 +62,71 @@ export class FakePtyAdapter implements PlatformAdapter {
   private inputHandlers = new Map<string, (data: string) => void>();
   private protocolParsers = new Map<string, TerminalProtocolParser>();
   private openPortsMap = new Map<string, OpenPort[]>();
-  private alertManager = new AlertManager();
+  /**
+   * The alerts' host role, in process: the renderer's verbs reach it through
+   * the client every host shares, and its events come straight back, as they
+   * would over a real host's transport (`lib/src/host/alert-host.ts`).
+   */
+  private alertHost!: AlertHost;
+  private stopAlertHost: () => void = () => {};
+  private readonly alerts = createAlertClient((command) => this.alertHost.handle(LOCAL_VIEWER, command, this.alertRealm));
+  private readonly alertRealm: AlertRealm = {
+    answer: (result) => void this.alerts.onEvent('alert:awaitResult', result),
+    resendStates: (ids) => {
+      for (const id of ids) {
+        if (this.alertManager.has(id)) this.alerts.onEvent('alert:state', { id, ...this.alertManager.getState(id) });
+      }
+    },
+    resendWatchedCommands: (names) => void this.alerts.onEvent('alert:watchedCommands', { names }),
+    resendSettings: (settings) => void this.alerts.onEvent('alert:settings', { settings }),
+  };
+
+  /** The PTY side feeds the manager directly, as a host's own PTYs do. */
+  private get alertManager(): AlertManager {
+    return this.alertHost.manager;
+  }
 
   // Host-capability flags: mutable and public because the Storybook preview
   // decorator toggles them per story to simulate a host (VS Code) that owns the
   // theme or shell selection, which is what hides the Settings dialog's rows.
   hostOwnsTheme?: boolean;
   hostOwnsShells?: boolean;
+  hostOwnsUpdates?: boolean;
 
   // Same reason, one layer up: a fake platform has no Burrow service behind it, so
-  // this stays undefined and the Settings dialog's Remote control section renders
-  // nothing (`docs/specs/relay.md`). The preview decorator installs a stub link
-  // for the stories that are *about* that section.
+  // this stays undefined and the Settings dialog's Network topic renders
+  // nothing (`docs/specs/remote-network.md`). The preview decorator installs a
+  // stub link for the stories that are *about* that topic.
   burrow?: BurrowLink;
 
-  /**
-   * The notepad archive as memory — the website demo's real implementation and
-   * what tests and stories archive into. Public and concrete (not the narrower
-   * port type) so a caller can `seed`, `corrupt`, or `clear` it directly.
-   */
-  notepadArchive: MemoryNotepadArchivePort = createMemoryNotepadArchivePort();
+  // The updater's and managed voice's ports, likewise absent unless a story
+  // about Settings → Network or managed voice installs one.
+  updates?: UpdatesPort;
+  managedVoice?: ManagedVoicePort;
 
-  /** Mutable and public for the same reason as the capability flags above: the
-   *  website playground sets it because a browser tab cannot take Cmd/Ctrl+N,
-   *  and the selection-popup stories toggle it per story. */
-  browserReservesNotepadChord?: boolean;
+
+  /** Where a due push goes. There is no Burrow here, so by default it reaches
+   *  no phone; a test sets this to see what would have been sent. */
+  onAlertPush?: (sessionId: string, title: string) => void;
 
   constructor() {
-    this.alertManager.onStateChange((id, state) => {
-      for (const handler of this.alertStateHandlers) {
-        handler({ id, ...state });
-      }
-    });
+    Object.assign(this, this.alerts.methods);
+    this.startAlertHost();
+  }
+
+  private startAlertHost(): void {
+    const host = createAlertHost({ push: (sessionId, title) => this.onAlertPush?.(sessionId, title) });
+    const stops = [
+      host.onSpeak((speak) => void this.alerts.onEvent('alert:speak', speak)),
+      host.manager.onStateChange((id, state) => void this.alerts.onEvent('alert:state', { id, ...state })),
+      host.watched.subscribe((names) => void this.alerts.onEvent('alert:watchedCommands', { names })),
+      host.settings.subscribe((settings) => void this.alerts.onEvent('alert:settings', { settings })),
+    ];
+    this.alertHost = host;
+    this.stopAlertHost = () => {
+      for (const stop of stops) stop();
+      host.dispose();
+    };
   }
 
   async init(): Promise<void> {}
@@ -130,20 +167,20 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.inputHandlers.clear();
     this.protocolParsers.clear();
     this.openPortsMap.clear();
-    this.alertManager.dispose();
-    this.alertManager = new AlertManager();
-    this.alertManager.onStateChange((id, state) => {
-      for (const handler of this.alertStateHandlers) {
-        handler({ id, ...state });
-      }
-    });
+    // What this realm parked settles `cancelled`, as a disposing adapter's does.
+    this.alerts.dispose();
+    this.stopAlertHost();
+    this.startAlertHost();
   }
 
   async getAvailableShells(): Promise<{ name: string; path: string; args?: string[] }[]> {
     return [{ name: 'fake-shell', path: '/bin/fake', args: [] }];
   }
 
-  spawnPty(id: string, options?: { cols?: number; rows?: number; cwd?: string; helper?: HelperIdentity }): void {
+  spawnPty(id: string, options?: SpawnPtyOptions): void {
+    // A new generation starts its alert state over, from what a cold restore
+    // persisted, as every host's spawn does.
+    this.alertHost.respawn(id, options?.alert);
     if (options?.helper) {
       this.helpers.set(id, { cwd: options.cwd ?? '/home/demo/projects/dormouse', busy: false });
       this.alertManager.setHelper(id, true);
@@ -209,7 +246,8 @@ export class FakePtyAdapter implements PlatformAdapter {
     return this.scenarioMap.get(id) ?? this.defaultScenario;
   }
 
-  writePty(id: string, data: string): void {
+  writePty(id: string, data: string, options?: WritePtyOptions): void {
+    if (options?.userInput) this.alertManager.acknowledge(id, { input: true });
     if (!this.terminals.has(id)) return;
     // Only echo if no scenario is actively playing
     if (this.activeTimers.has(id)) return;
@@ -223,6 +261,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   }
 
   resizePty(id: string, cols: number, rows: number): void {
+    this.alertManager.onResize(id);
     if (!this.terminals.has(id)) return;
     const next = { cols, rows };
     const prev = this.terminalSizes.get(id);
@@ -244,7 +283,8 @@ export class FakePtyAdapter implements PlatformAdapter {
     this.inputHandlers.delete(id);
     this.protocolParsers.delete(id);
     this.openPortsMap.delete(id);
-    this.alertManager.onExit(id, 0);
+    // The Session is over, so its alert state goes with it.
+    this.alertManager.remove(id);
     this.helpers.delete(id);
     for (const handler of this.exitHandlers) {
       handler({ id, exitCode: 0 });
@@ -324,25 +364,6 @@ export class FakePtyAdapter implements PlatformAdapter {
   offRequestSessionFlush(_handler: (detail: { requestId: string }) => void): void {}
   notifySessionFlushComplete(_requestId: string): void {}
 
-  // Alert management (local AlertManager, same as TauriAdapter)
-  alertRemove(id: string): void { this.alertManager.remove(id); }
-  alertSetWatchedCommands(names: string[]): void { this.alertManager.setWatchedCommands(names); }
-  alertSetCommandWatched(name: string, watched: boolean): void { this.alertManager.setCommandWatched(name, watched); }
-  alertPublishSettings(settings: AlertSettings): void { this.alertManager.applySettings(settings); }
-  alertDismiss(id: string): void { this.alertManager.dismissAlert(id); }
-  alertAttend(id: string): void { this.alertManager.attend(id); }
-  alertResize(id: string): void { this.alertManager.onResize(id); }
-  alertClearAttention(id?: string): void { this.alertManager.clearAttention(id); }
-  alertToggleTodo(id: string): void { this.alertManager.toggleTodo(id); }
-  alertMarkTodo(id: string): void { this.alertManager.markTodo(id); }
-  alertClearTodo(id: string): void { this.alertManager.clearTodo(id); }
-  alertAwait(id: string, options: AwaitOptions): AwaitHandle { return this.alertManager.awaitCompletion(id, options); }
-  onAlertState(handler: (detail: AlertStateDetail) => void): void { this.alertStateHandlers.add(handler); }
-  // Single renderer owning the AlertManager, so localStorage is the only store
-  // and there is no canonical snapshot to broadcast back.
-  onWatchedCommands(_handler: (names: string[]) => void): void {}
-  onAlertSettings(_handler: (settings: AlertSettings) => void): void {}
-
   private savedState: unknown = null;
   saveState(state: unknown): void { this.savedState = state; }
   getState(): unknown { return this.savedState; }
@@ -362,12 +383,12 @@ export class FakePtyAdapter implements PlatformAdapter {
    * the alert-manager's activity feed the same way real PTY data does in
    * the Tauri/VSCode adapters — without this, browser-side echo (e.g.
    * TutorialShell's per-character echo, AsciiSplashRunner frames) never
-   * reaches the activity monitor and the bell can never tilt or ring.
+   * reaches the activity monitor and a pane can never ring.
    *
    * Pass `{ skipActivity: true }` for writes that are pure UI chrome and
    * shouldn't count as a "task is active" signal — e.g. a tutorial TUI
    * re-rendering its menu on state change. Without the opt-out, every
-   * runner frame would tilt the bell on whichever pane hosts the runner.
+   * runner frame would look like work on whichever pane hosts the runner.
    */
   sendOutput(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     if (!this.terminals.has(id)) return;
@@ -379,7 +400,7 @@ export class FakePtyAdapter implements PlatformAdapter {
    * no data output — useful for animating a fake "task running" state on
    * a pane while the visual feedback lives elsewhere. Calls
    * `alertManager.onData(id)` immediately, then again every `intervalMs`
-   * until `durationMs` elapses, after which silence resumes and the bell
+   * until `durationMs` elapses, after which silence resumes and the Session
    * transitions naturally to MIGHT_NEED_ATTENTION → ALERT_RINGING.
    * Returns a dispose handle that cancels remaining ticks.
    */
@@ -454,14 +475,14 @@ export class FakePtyAdapter implements PlatformAdapter {
 
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
-    applyTerminalProtocolEvents(this.alertManager, id, parsed.events);
-    const semanticEvents = collectTerminalSemanticEvents(parsed.events);
-    this.alertManager.applyTerminalSemanticEvents(id, semanticEvents);
-    applyTerminalSemanticEvents(id, semanticEvents);
+    // The Tool stores are this renderer's own.
+    applyLiveToolEvents(id, parsed.events);
+    applyTerminalSemanticEvents(id, applyTerminalEvents(this.alertManager, id, parsed.events));
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);
     }
+    for (const text of collectTerminalClipboardOffers(parsed.events)) offerProgramCopy(id, text);
 
     if (parsed.visibleData.length === 0) return;
     if (!options.skipActivity) this.alertManager.onData(id);

@@ -12,9 +12,10 @@ import { isRecord } from '../is-record';
  *  "read side", owned live by the wall store's `leafMeta` map and serialized
  *  verbatim inside the persisted Lath layout. */
 export type LeafMeta = {
-  /** Body component key — `'terminal'` | `'browser'`. */
+  /** Body component key — `'terminal'` | `'browser'` | `'tool'`. Resolved through
+   *  LathHost's body registry, which owns the live set. */
   component: string;
-  /** Header component key — `'terminal'` | `'surface'`. */
+  /** Header component key — `'terminal'` | `'surface'` | `'tool'`. */
   tabComponent: string;
   /** Engine-tracked fallback title (live titles come from the terminal-state
    *  stores). Always a string in the snapshot. */

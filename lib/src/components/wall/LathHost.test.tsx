@@ -1,12 +1,12 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useContext } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
 import { createLathWallStore, type LathWallStore, type LeafMeta, LATH_LAYOUT_OPTS } from './lath-wall-store';
-import { createLathWallEngine } from './lath-wall-engine';
+import { type ContextHelper, createLathWallEngine } from './lath-wall-engine';
 import { layout } from '../../lib/lath/layout';
 import { LATH_EASING } from '../../lib/lath/animator';
 import { type DropTarget, move } from '../../lib/lath/ops';
@@ -15,6 +15,7 @@ import { leaf, split, tree as treeOf, movePreview as movePreviewAt } from '../..
 import { leafMeta } from '../../lib/lath/test-fixtures';
 import { PANE_HEADER_HEIGHT_PX } from '../design';
 import type { PaneProps } from './pane-props';
+import { LayoutFramesContext } from './wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -144,6 +145,28 @@ describe('LathHost — node identity (the no-re-parent guarantee)', () => {
 });
 
 describe('LathHost — parked leaves', () => {
+  it('retains the same document after more than eight browsers are minimized', () => {
+    const meta = leafMeta({ component: 'terminal' });
+    const store = seeded(rowOf('a', 'b'), [['a', meta], ['b', meta]]);
+    mount(store);
+    const original = leafDiv('b')!;
+    const input = document.createElement('input');
+    input.value = 'unsaved draft';
+    original.appendChild(input);
+    let token: ReturnType<LathWallStore['doorLeaf']>['token'];
+    act(() => { token = store.doorLeaf('b', { park: true }).token; });
+    for (let i = 0; i < 32; i++) {
+      act(() => store.addLeaf(`browser-${i}`, meta, { refId: 'a', edge: 'right' }));
+      act(() => { store.doorLeaf(`browser-${i}`, { park: true }); });
+    }
+    expect(leafDiv('b')).toBe(original);
+    expect(input.isConnected).toBe(true);
+    act(() => { store.restoreLeaf(meta, token!); });
+    expect(leafDiv('b')).toBe(original);
+    expect(input.value).toBe('unsaved draft');
+    expect(input.isConnected).toBe(true);
+  });
+
   it('keeps a parked leaf as the SAME element, holding its last rect but painting nothing', () => {
     const tree = rowOf('a', 'b');
     const store = seeded(tree, [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
@@ -413,6 +436,43 @@ describe('LathHost — empty tree', () => {
     expect(() => mount(store)).not.toThrow();
     expect(leafOrder()).toEqual([]);
     expect(container.querySelector('[data-lath-sash]')).toBeNull();
+  });
+});
+
+it('gives pane bodies the frame signal, for chrome portaled out of a moving pane', () => {
+  let frames: unknown = null;
+  function FramesBody() {
+    frames = useContext(LayoutFramesContext);
+    return null;
+  }
+  const engine = createLathWallEngine(seeded(rowOf('a'), [['a', leafMeta({ title: 'A' })]]), { durationMs: 0 });
+  act(() => {
+    root.render(
+      <LathHost lath={engine} onCommitResize={vi.fn()} onLeafFocused={vi.fn()} componentsOverride={{ bodies: { terminal: FramesBody }, tabs: { terminal: StubTab } }} />,
+    );
+  });
+  expect(frames).toBe(engine.subscribeFrames);
+});
+
+describe('LathHost — terminal context placement', () => {
+  it('places the context from each painted frame before notifying chrome', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    const { engine } = mount(store);
+    const element = document.createElement('div');
+    const placedWidths: number[] = [];
+    const seen: (ContextHelper | null)[] = [];
+    const unsubscribe = engine.subscribeFrames(() => seen.push(engine.contextHelper()));
+    act(() => engine.setContextPlacer(paint => {
+      placedWidths.push(paint.get('a')!.rect.width);
+      return { sourceId: 'a', element, side: 'right' };
+    }));
+    expect(seen.at(-1)).toEqual({ sourceId: 'a', element, side: 'right' });
+    expect(`${placedWidths.at(-1)}px`).toBe(leafDiv('a')!.style.width);
+    act(() => store.addLeaf('c', leafMeta({ title: 'C' }), { refId: 'b', edge: 'right' }));
+    expect(`${placedWidths.at(-1)}px`).toBe(leafDiv('a')!.style.width);
+    act(() => engine.setContextPlacer(null));
+    expect(seen.at(-1)).toBeNull();
+    unsubscribe();
   });
 });
 
@@ -816,6 +876,31 @@ describe('LathHost — pane / Door drag', () => {
     act(() => up());
     expect(onDragStart).not.toHaveBeenCalled();
     expect(onProposeMove).not.toHaveBeenCalled();
+  });
+
+  it('swallows the click and dblclick a drag\'s release fires, never a sub-threshold press\'s', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
+    mountDrag(store);
+    const seen: string[] = [];
+    const record = (e: Event) => seen.push(`${e.type}:${(e as MouseEvent).detail}`);
+    header('a').addEventListener('click', record);
+    header('a').addEventListener('dblclick', record);
+    // A double-click's second press: the browser fires both on its release.
+    const release = () => {
+      up();
+      header('a').dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }));
+      header('a').dispatchEvent(new MouseEvent('dblclick', { bubbles: true, detail: 2 }));
+    };
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(120, 15));
+    act(release);
+    expect(seen).toEqual([]);
+
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(102, 16));
+    act(release);
+    expect(seen).toEqual(['click:2', 'dblclick:2']);
   });
 
   it('does not start a drag from a header button', () => {

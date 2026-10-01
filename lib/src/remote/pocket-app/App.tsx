@@ -25,27 +25,38 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { BURROW_IS_AN_APP, SCAN_LABEL } from '../setup-copy';
+import { selfHostDirectPeer } from '../client/browser-direct-peer';
+import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore,
   indexedDbPendingDeletionStore,
+  requirePocketKeyStorage,
   type KnownBurrowV1,
+  type KnownBurrowSummary,
 } from '../client/pocket-db';
 import {
   getPushAvailability,
   hasCurrentPushSubscription,
-  isInstalledWebApp,
   needsHomeScreenInstall,
   subscribeToPushInBrowser,
   type PushAvailability,
 } from '../client/push-subscribe';
-import { RemotePtyAdapter } from '../client/remote-adapter';
-import { setPlatform } from '../../lib/platform';
-import { disposeAllSessions, initAlertStateReceiver } from '../../lib/terminal-registry';
+import type { RemotePtyAdapter } from '../client/remote-adapter';
+import { disposeAllSessions } from '../../lib/terminal-registry';
 import { PocketWall } from './PocketWall';
 import { ScanInvitation, type StartScan } from './ScanInvitation';
 import { ErrorRow, PK, pkButton } from './pocket-chrome';
+import { mountRemoteWall } from './remote-wall';
+import {
+  PairingCodeView,
+  RELAYED_TRANSPORT,
+  TransportIndicator,
+  UnsupportedBrowser,
+  Waiting,
+  deviceLabel,
+  type TransportView,
+} from './views';
 
 /**
  * Which screen is up, carrying whatever only that screen has. The two pieces
@@ -82,25 +93,6 @@ type PushConfigState =
 
 export type PushConfigStatus = PushConfigState['status'];
 
-/**
- * The label this Client suggests at pairing.
- *
- * One phone can hold two Client identities — a Safari tab and a Home Screen
- * install have separate storage and therefore separate per-Burrow statics — and
- * they are genuinely separate delivery targets that cannot be merged. Naming
- * the mode is what lets the person approving on the laptop, and the alarm
- * dialog afterwards, tell them apart.
- */
-function deviceLabel(): string {
-  return isInstalledWebApp() ? 'Dormouse Pocket (Home Screen)' : 'Dormouse Pocket (browser)';
-}
-
-/** What a browser that cannot run the protocol is told, and the whole of it. */
-export const UNSUPPORTED_BROWSER_TITLE = 'This browser cannot run Dormouse Pocket';
-export const UNSUPPORTED_BROWSER_BODY =
-  'Dormouse Pocket needs X25519 in the Web Crypto API, which this browser does not have. ' +
-  'Update it, or open Dormouse Pocket in a newer browser.';
-
 /** The copy a run that arrived from the phone's own camera leads with. */
 export const CAMERA_BOOTSTRAP_MESSAGE = 'Scan again from inside Dormouse Pocket';
 
@@ -120,6 +112,7 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
+        createDirectPeer: selfHostDirectPeer,
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),
@@ -340,6 +333,17 @@ export default function App({
     return () => client.setOnBurrowGone(null);
   }, [client, teardownAdapter]);
 
+  /**
+   * Which path carries the live session, and why. Subscribed rather than read on
+   * render: the cutover happens seconds into a session, long after the wall is
+   * up, and an attempt that quietly stays relayed changes only the detail.
+   */
+  const [transport, setTransport] = useState<TransportView>(RELAYED_TRANSPORT);
+  useEffect(() => {
+    client.setOnTransportChanged((path, cause) => setTransport({ path, cause }));
+    return () => client.setOnTransportChanged(null);
+  }, [client]);
+
   /** The connect half, shared so a fresh pairing can continue straight into it. */
   const connectTo = useCallback(
     async (burrow: BurrowView) => {
@@ -351,16 +355,7 @@ export default function App({
         throw new Error(decision.message);
       }
       try {
-        await client.hello();
-
-        // Stand up the remote adapter as the platform, prep a clean registry,
-        // then start watching the directory before the wall renders.
-        const adapter = new RemotePtyAdapter(client);
-        adapterRef.current = adapter;
-        setPlatform(adapter);
-        disposeAllSessions();
-        initAlertStateReceiver();
-        await adapter.init();
+        adapterRef.current = await mountRemoteWall(client);
       } catch (err) {
         // The session is already established, and the throw sends the user back
         // to the Burrows list — where nothing can end it. Leaving it up keeps
@@ -393,6 +388,7 @@ export default function App({
   const onScanned = useCallback(
     (invitation: PairingInvitation) =>
       run('pair', async () => {
+        await requirePocketKeyStorage();
         cancelledPairingRef.current = false;
         const label = deviceLabel();
         let spentOnSetup = false;
@@ -610,7 +606,13 @@ export default function App({
       // The adapter is stood up before the phase moves, so the ref is set
       // whenever this branch is reachable.
       return adapterRef.current ? (
-        <ConnectedView burrow={phase.burrow} adapter={adapterRef.current} onLeave={leaveWall} onError={onWallError} />
+        <ConnectedView
+          burrow={phase.burrow}
+          adapter={adapterRef.current}
+          transport={transport}
+          onLeave={leaveWall}
+          onError={onWallError}
+        />
       ) : (
         <Waiting />
       );
@@ -634,17 +636,8 @@ export default function App({
   }
 }
 
-/** The whole shell with nothing in it yet; the capability probe's screen too. */
-function Waiting(): React.ReactElement {
-  return (
-    <div className={PK.app}>
-      <div className={clsx(PK.body, PK.bodyCenter)}>…</div>
-    </div>
-  );
-}
-
 /** One pinned record as the list renders it. */
-function toBurrowView(record: KnownBurrowV1, online: boolean): BurrowView {
+function toBurrowView(record: KnownBurrowSummary, online: boolean): BurrowView {
   return {
     burrowId: record.burrowId,
     label: record.label || record.burrowId,
@@ -670,77 +663,6 @@ function hasPriorUseNow(client: PocketClient, passkeyAlreadyRegistered: boolean)
   return passkeyAlreadyRegistered || client.hasPriorUse();
 }
 
-// --- The capability gate ----------------------------------------------------
-
-/**
- * The whole of what a runtime without X25519 gets. **No action, and no remote
- * operation behind it**: every ceremony this app has needs the primitive this
- * browser lacks, so an offer here would be one that cannot work
- * (`docs/specs/remote-security-model.md` → Burrow identity).
- */
-export function UnsupportedBrowser(): React.ReactElement {
-  return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <h1 className={PK.headerTitle}>Dormouse Pocket</h1>
-      </header>
-      <div className={clsx(PK.body, PK.bodyCenter)}>
-        <p className={PK.title}>{UNSUPPORTED_BROWSER_TITLE}</p>
-        <p className={PK.lead}>{UNSUPPORTED_BROWSER_BODY}</p>
-      </div>
-    </div>
-  );
-}
-
-// --- The two-digit waiting screen -------------------------------------------
-
-/** The accessible name of the digits; see {@link PairingCodeView}. */
-export const PAIRING_CODE_LABEL = 'Pairing code';
-
-/**
- * The digits the person has to type on the computer, and nothing else.
- *
- * **The code is on screen before the outcome is known, and stays until it
- * lands.** The laptop's modal tells the user to cancel if the phone shows no
- * code, so a screen that waited for anything before painting the digits would
- * teach exactly the reflex the ceremony is built to punish
- * (`docs/specs/remote-security-model.md` → Pairing).
- */
-export function PairingCodeView({
-  code,
-  onCancel,
-}: {
-  /** Null for the moment between the handshake and the sampled code. */
-  code: string | null;
-  onCancel: () => void;
-}): React.ReactElement {
-  return (
-    <div className={PK.app}>
-      <header className={PK.header}>
-        <h1 className={PK.headerTitle}>Pairing</h1>
-      </header>
-      <div className={clsx(PK.body, PK.bodyCenter)}>
-        {/* Named and announced structurally, so what identifies this screen — to
-            a screen reader, to the tests, and to the walkthrough harness — is
-            not a sentence the next copy pass is free to rewrite. */}
-        <p className={PK.code} role="status" aria-label={PAIRING_CODE_LABEL} aria-live="polite">
-          {code ?? '··'}
-        </p>
-        <p className={clsx(PK.lead, 'text-center')}>
-          Type these digits on the computer to approve.
-        </p>
-        <button
-          type="button"
-          className={pkButton({ tone: 'outline', block: true })}
-          onClick={onCancel}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // --- ConnectedView ---------------------------------------------------------
 
 /**
@@ -758,18 +680,21 @@ export const BURROWS_TITLE = 'Burrows';
  * a copy of it.
  */
 export const BURROWS_EMPTY =
-  `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open Settings → `
-  + 'Remote control → Set up a phone, then scan the code.';
+  `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open ${SETUP_PATH}, `
+  + 'then scan the code.';
 
 /** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
   burrow,
   adapter,
+  transport = RELAYED_TRANSPORT,
   onLeave,
   onError,
 }: {
   burrow: BurrowView;
   adapter: RemotePtyAdapter;
+  /** Which path carries the session, and why; see {@link TransportIndicator}. */
+  transport?: TransportView;
   onLeave: () => void;
   onError?: (error: unknown) => void;
 }): React.ReactElement {
@@ -780,6 +705,7 @@ export function ConnectedView({
           ‹ {BURROWS_TITLE}
         </button>
         <h1 className={PK.headerTitle}>{burrow.label || burrow.burrowId}</h1>
+        <TransportIndicator transport={transport} />
       </header>
       <div className={PK.wallHost}>
         <PocketWall adapter={adapter} onError={onError} />
@@ -874,7 +800,7 @@ export function SetupOrSignin({
           <p className={clsx(PK.lead, 'mt-1')}>
             {signinLeads
               ? 'Sign in with your passkey to reach the Burrows this phone is paired with, or scan a code to pair a new one.'
-              : 'On the computer: Settings → Remote control → Set up a phone. Scan the code it shows.'}
+              : `On the computer: ${SETUP_PATH}. Scan the code it shows.`}
           </p>
         </div>
         {/* Above the actions, never below: the passkey this screen mints

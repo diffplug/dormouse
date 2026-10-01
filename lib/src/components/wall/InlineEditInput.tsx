@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { isComposingKey } from '../../lib/dom';
 
 interface InlineEditInputProps {
   /** Seed value, read once at mount. Later changes are ignored — the field
@@ -13,6 +14,11 @@ interface InlineEditInputProps {
   /** What losing focus means: pane titles commit (`'submit'`), the URL editor
    *  discards like a browser omnibox (`'cancel'`). */
   blurAction: 'submit' | 'cancel';
+  /** Whether Enter or a submitting blur still submits when nothing was typed
+   *  (default true). `false` turns that into `onCancel`: only the field knows
+   *  it was untouched, since the seed is read once and the caller's value may
+   *  have moved since. */
+  submitUntouched?: boolean;
   [key: `data-${string}`]: string;
 }
 
@@ -37,6 +43,7 @@ export function InlineEditInput({
   onSubmit,
   onCancel,
   blurAction,
+  submitUntouched = true,
   ...dataAttrs
 }: InlineEditInputProps) {
   const [draft, setDraft] = useState(initialValue);
@@ -45,6 +52,11 @@ export function InlineEditInput({
   // Enter/Escape already decided the outcome; the blur that follows the
   // resulting unmount must not submit a second time (or undo an Escape).
   const settledRef = useRef(false);
+  const touchedRef = useRef(false);
+  const submit = (el: HTMLInputElement) => {
+    if (!submitUntouched && !touchedRef.current) onCancel();
+    else onSubmit(draft, el);
+  };
 
   return (
     <input
@@ -53,21 +65,22 @@ export function InlineEditInput({
       value={draft}
       autoFocus
       ref={selectOnMount}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => { touchedRef.current = true; setDraft(e.target.value); }}
       onKeyDown={(e) => {
+        e.stopPropagation();
+        if (isComposingKey(e.nativeEvent)) return;
         if (e.key === 'Enter') {
           settledRef.current = true;
-          onSubmit(draft, e.currentTarget);
+          submit(e.currentTarget);
         } else if (e.key === 'Escape') {
           settledRef.current = true;
           onCancel();
         }
-        e.stopPropagation();
       }}
       onBlur={(e) => {
         if (settledRef.current) return;
         settledRef.current = true;
-        if (blurAction === 'submit') onSubmit(draft, e.currentTarget);
+        if (blurAction === 'submit') submit(e.currentTarget);
         else onCancel();
       }}
       onMouseDown={(e) => e.stopPropagation()}

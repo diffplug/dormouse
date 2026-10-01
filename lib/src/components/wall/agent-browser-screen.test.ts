@@ -16,7 +16,7 @@ import {
 
 const SNAPSHOT: ScreenSnapshot = {
   state: 'SCALED',
-  renderMode: 'ab-screencast',
+  renderMode: 'agent-browser-screencast',
   viewport: { w: 1280, h: 720, dpr: 1 },
   paneCss: { w: 980, h: 560 },
   displayDpr: 2,
@@ -31,7 +31,7 @@ const CHROME: ChromeSnapshot = {
 };
 
 function stubActions(): ScreenActions {
-  return { engageSync: vi.fn(), applyDevice: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() };
+  return { engageSync: vi.fn(), applyViewport: vi.fn(), openModal: vi.fn() };
 }
 
 function stubChromeActions(): ChromeActions {
@@ -50,11 +50,11 @@ function register(id: string, overrides?: { hostCapable?: boolean }) {
 
 describe('agent-browser screen registry', () => {
   it('derives display identity from agent visibility and presentation intent', () => {
-    expect(browserDisplayMode({ renderMode: 'ab-screencast', syncEngaged: true })).toBe('ab-resize');
+    expect(browserDisplayMode({ renderMode: 'agent-browser-screencast', syncEngaged: true })).toBe('agent-browser-resize');
     // A fixed viewport can happen to match the pane dimensions; intent, not the
     // transient dimension comparison, owns the icon.
-    expect(browserDisplayMode({ renderMode: 'ab-screencast', syncEngaged: false })).toBe('ab-fixed');
-    expect(browserDisplayMode({ renderMode: 'ab-popout', syncEngaged: false })).toBe('ab-popout');
+    expect(browserDisplayMode({ renderMode: 'agent-browser-screencast', syncEngaged: false })).toBe('agent-browser-fixed');
+    expect(browserDisplayMode({ renderMode: 'agent-browser-popout', syncEngaged: false })).toBe('agent-browser-popout');
     expect(browserDisplayMode({ renderMode: 'iframe', syncEngaged: false })).toBe('iframe');
   });
 
@@ -122,6 +122,29 @@ describe('agent-browser screen registry', () => {
 
     unsubScreen();
     unsubChrome();
+    registration.dispose();
+  });
+
+  it('returns the same snapshot objects until their own channel publishes', () => {
+    const registration = register('pane-stable');
+    const controller = getAgentBrowserScreenController('pane-stable')!;
+
+    // useSyncExternalStore loops the render on a fresh object per read.
+    const chrome = controller.chrome();
+    const snapshot = controller.snapshot();
+    expect(controller.chrome()).toBe(chrome);
+    expect(controller.snapshot()).toBe(snapshot);
+
+    const nextSnapshot: ScreenSnapshot = { ...SNAPSHOT, state: 'SYNCED' };
+    registration.update(nextSnapshot);
+    expect(controller.snapshot()).toBe(nextSnapshot);
+    expect(controller.chrome()).toBe(chrome);
+
+    const nextChrome: ChromeSnapshot = { ...CHROME, url: 'http://localhost:5173/app' };
+    registration.updateChrome(nextChrome);
+    expect(controller.chrome()).toBe(nextChrome);
+    expect(controller.snapshot()).toBe(nextSnapshot);
+
     registration.dispose();
   });
 

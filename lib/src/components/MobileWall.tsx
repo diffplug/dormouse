@@ -5,14 +5,13 @@ import {
 } from '@phosphor-icons/react';
 import { HeaderActionButton } from './HeaderActionButton';
 import { TerminalPane } from './TerminalPane';
-import { AlertBell } from './AlertBell';
-import { TODO_PILL_TRACKING_CLASS } from './design';
+import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
+import { HEADER_PILL_CLASS } from './design';
 import { useTodoPillContent } from './TodoPillBody';
 import type { MobileTerminalSessionItem } from './MobileTerminalUi';
 import {
   clearSessionTodo,
   DEFAULT_ACTIVITY_STATE,
-  dismissOrToggleAlert,
   disposeSession,
   getActivitySnapshot,
   getOrCreateTerminal,
@@ -20,7 +19,6 @@ import {
   setTerminalUserTitle,
   subscribeToActivity,
   subscribeToTerminalPaneState,
-  type SessionStatus,
 } from '../lib/terminal-registry';
 import {
   buildAppTitleResolver,
@@ -48,16 +46,6 @@ export interface MobileWallProps {
 
 const DEFAULT_MOBILE_SESSION: MobileWallSession = { id: 'mobile-pane' };
 
-const ALERT_BUTTON_LABELS: Record<SessionStatus, { aria: string; tooltip: string }> = {
-  WATCHING_DISABLED: { aria: 'Enable watching', tooltip: 'Enable watching' },
-  NOTHING_TO_SHOW: { aria: 'Disable watching', tooltip: 'Disable watching' },
-  MIGHT_BE_BUSY: { aria: 'Disable watching', tooltip: 'Disable watching' },
-  BUSY: { aria: 'Disable watching', tooltip: 'Disable watching' },
-  MIGHT_NEED_ATTENTION: { aria: 'Disable watching', tooltip: 'Disable watching' },
-  ALERT_RINGING: { aria: 'Alert ringing', tooltip: 'Alert ringing' },
-  OSC_NOTIF_BUSY: { aria: 'Progress active', tooltip: 'Progress active' },
-  COMMAND_EXIT_ARMED: { aria: 'Command running', tooltip: 'Command running' },
-};
 
 export function useMobileWallSessionItems(
   sessions: MobileWallSession[],
@@ -86,7 +74,7 @@ export function useMobileWallSessionItems(
       secondary: derivedHeader.secondary,
       active: session.id === activeSessionId,
       status: activity.status,
-      ringSeq: activity.ringSeq,
+      episode: activity.episode ?? null,
       todo: activity.todo,
     };
   }), [activeSessionId, activityStates, appTitleForPane, sessions, terminalStates, visiblePaneStates]);
@@ -165,6 +153,8 @@ export function MobileWall({
         onKill={() => killSession(activeItem.id)}
         showKillButton={showKillButton}
       />
+      {/* `MobileTerminalUi` acknowledges a touch or keystroke on this pane —
+          the only way a ring goes out here (`docs/specs/alert.md` -> Pane Header). */}
       <div className="min-h-0 flex-1 overflow-hidden bg-terminal-bg">
         <TerminalPane id={activeItem.id} isFocused />
       </div>
@@ -183,40 +173,24 @@ function MobileWallHeader({
   onKill: () => void;
   showKillButton: boolean;
 }) {
-  const status = session.status ?? 'WATCHING_DISABLED';
   const todoPill = useTodoPillContent(session.todo === true);
-  const alertButtonLabels = ALERT_BUTTON_LABELS[status];
-  const showTodoPill = todoPill.visible;
+  const row = alertRingRow(session.status, null);
+  const burst = useAlertRingBurst(row, session.episode);
 
   return (
-    <div className="flex h-8 shrink-0 items-center gap-1.5 bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg">
+    <div className="relative flex h-8 shrink-0 items-center gap-1.5 overflow-hidden bg-header-active-bg pl-2 pr-[5px] font-mono text-sm leading-none text-header-active-fg">
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="min-w-0 shrink truncate font-medium">{session.title}</span>
-        <HeaderActionButton
-          className={[
-            'flex h-5 min-w-5 items-center justify-center rounded transition-colors shrink-0 hover:bg-current/10',
-            status === 'ALERT_RINGING' ? 'text-alarm-vs-header-active' : '',
-          ].join(' ')}
-          onClick={() => dismissOrToggleAlert(session.id, status)}
-          ariaLabel={alertButtonLabels.aria}
-          tooltip={alertButtonLabels.tooltip}
-          tooltipAlign="left"
-          dataAlertButtonFor={session.id}
-        >
-          <span className="flex items-center justify-center">
-            <AlertBell status={status} ringSeq={session.ringSeq} size={14} />
-          </span>
-        </HeaderActionButton>
         {session.secondary ? (
           <span className="min-w-0 shrink truncate opacity-70">{session.secondary}</span>
         ) : null}
       </div>
-      {showTodoPill ? (
+      {todoPill.visible ? (
         <button
           type="button"
           data-session-todo-for={session.id}
           data-flourishing={todoPill.flourishing ? 'true' : 'false'}
-          className={`todo-pill-shell shrink-0 rounded border border-current px-1.5 py-px text-xs font-semibold ${TODO_PILL_TRACKING_CLASS} transition-colors hover:bg-current/10 focus:outline-none`}
+          className={`todo-pill-shell ${HEADER_PILL_CLASS}`}
           aria-label="Dismiss TODO"
           aria-hidden={todoPill.flourishing ? true : undefined}
           onClick={(event) => {
@@ -247,6 +221,7 @@ function MobileWallHeader({
           </HeaderActionButton>
         ) : null}
       </div>
+      {row && <AlertRingInset ground="header-active" burst={burst} />}
     </div>
   );
 }

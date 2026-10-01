@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { LATH_EASING } from './lath/animator';
 import {
   retargetRingTween,
+  sampleRectTween,
   sampleRingTween,
   sampleRingVelocity,
+  startRectTween,
   startRingTween,
   type RingFrame,
 } from './rect-tween';
@@ -153,5 +155,45 @@ describe('sampleRingVelocity', () => {
     expect(sampleRingVelocity(tween, DUR * 2).left).toBe(0);
     const snap = startRingTween(A, B, 0, 0);
     expect(sampleRingVelocity(snap, 0)).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+  });
+});
+
+it('morphs union components continuously and returns to a plain ring at close', () => {
+  const helper = { ...A.rect, left: 84 };
+  const joined: RingFrame = { rect: { ...A.rect, width: 184 }, shape: A.shape, union: [A.rect, helper] };
+  const open = startRingTween(A, joined, 0, DUR);
+  expect(sampleRingTween(open, 0).rect).toEqual(A.rect);
+  const mid = sampleRingTween(open, 30);
+  expect(mid.rect.width).toBeGreaterThan(A.rect.width);
+  expect(mid.rect.width).toBeLessThan(joined.rect.width);
+  expect(sampleRingTween(open, DUR).union).toEqual(joined.union);
+  const close = startRingTween(mid, A, 30, DUR);
+  expect(sampleRingTween(close, 30).union).toEqual(mid.union);
+  expect(sampleRingTween(close, 60).rect.width).toBeLessThan(mid.rect.width);
+  expect(sampleRingTween(close, 30 + DUR).union).toBeUndefined();
+  expect(sampleRingTween(close, 30 + DUR).rect).toEqual(A.rect);
+});
+
+describe('rect tween', () => {
+  const C = { top: 500, left: 20, width: 90, height: 30 };
+
+  it('eases from one rect to the other on the house curve, exact at both ends', () => {
+    const tween = startRectTween(A.rect, B.rect, 100, DUR);
+    expect(sampleRectTween(tween, 100)).toEqual({ rect: A.rect, done: false });
+    const e = LATH_EASING(0.5);
+    expect(sampleRectTween(tween, 100 + DUR / 2).rect.left).toBeCloseTo(300 * e, 6);
+    expect(sampleRectTween(tween, 100 + DUR)).toEqual({ rect: B.rect, done: true });
+    expect(sampleRectTween(startRectTween(A.rect, B.rect, 0, 0), 0)).toEqual({ rect: B.rect, done: true });
+  });
+
+  it('restarts from the displayed rect with a fresh clock, so a new target never jumps the box', () => {
+    const old = startRectTween(A.rect, B.rect, 0, DUR);
+    const t = 150;
+    const shown = sampleRectTween(old, t).rect;
+    const restarted = startRectTween(shown, C, t, DUR);
+    expect(sampleRectTween(restarted, t).rect).toEqual(sampleRectTween(old, t).rect);
+    // A full duration from the restart, not from the old start.
+    expect(sampleRectTween(restarted, DUR).done).toBe(false);
+    expect(sampleRectTween(restarted, t + DUR)).toEqual({ rect: C, done: true });
   });
 });

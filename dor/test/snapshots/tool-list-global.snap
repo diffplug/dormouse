@@ -1,0 +1,8 @@
+exitCode: 0
+stdout:
+user  /home/me/.config/dormouse/dormouse.yml
+  storybook  "npx storybook"  [iframe]  [port auto]
+  md  ["glow","$TARGET"]  [iframe]  [port announced]  [keyed]
+      Render Markdown.
+
+stderr:

@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 import http from 'node:http';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { readFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-// cross-spawn, not node:child_process: this script spawns `pnpm` and
+import { mkdtempSync } from 'node:fs';
+import { AGENT_BROWSER_SOCKET_DIR_ENV, sessionForKey } from 'dor-lib-common/browser-providers';
+// cross-spawn, not node:child_process: this script spawns `dor` and
 // `agent-browser`, which are `.cmd` shims on Windows that a bare-name spawn
 // can't resolve (ENOENT) and Node >=22 won't run directly (EINVAL). cross-spawn
 // handles both and is a no-op on POSIX. See docs/specs/dor-cli.md.
@@ -15,17 +14,19 @@ import { createInterface } from 'node:readline';
 // The bridge's security boundary, in its own module so it is testable —
 // see standalone/scripts/dev-host-guard.test.mjs.
 import { corsHeaders, isAuthorized } from './dev-host-guard.mjs';
+// Worktree identity and the Vite server this harness shares with the native
+// dev runner (`dev-standalone.mjs`).
+import { repoRoot, standaloneDir, startDevVite, worktreeId } from './dev-run.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const standaloneDir = path.resolve(__dirname, '..');
-const repoRoot = path.resolve(standaloneDir, '..');
 const sidecarDir = path.join(standaloneDir, 'sidecar');
 const sidecarScript = path.join(sidecarDir, 'main.js');
 const dorBinDir = path.join(sidecarDir, 'dor-cli', 'bin');
 const dorEntrypoint = path.join(sidecarDir, 'dor-cli', 'dist', 'dor.js');
-const hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 1422);
-const vitePort = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 1420);
-const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || 'dormouse-dev-standalone';
+// Bind port 0 directly: probing and then releasing a free port races other runs.
+let hostPort = Number(process.env.DORMOUSE_BROWSER_DEV_HOST_PORT || 0);
+const worktreeKey = `innerdogfood-${await worktreeId()}`;
+const browserSession = process.env.DORMOUSE_BROWSER_DEV_AB_SESSION || sessionForKey(worktreeKey);
+const insideDormouse = Boolean(process.env.DORMOUSE_SURFACE_ID);
 // Only the token: the sidecar picks the control socket path itself (hardened
 // per-user directory on POSIX, unguessable pipe name on Windows) and reports it
 // on its own stderr as `[dor-control] listening on …`, which this harness
@@ -44,15 +45,23 @@ const controlToken = randomBytes(24).toString('hex');
 // dev page gets it, via the URL baked into `VITE_DORMOUSE_BROWSER_DEV_HOST`.
 // Overloading one token would hand the bridge to every spawned shell for free.
 const bridgeToken = randomBytes(24).toString('hex');
-const viteOrigin = `http://localhost:${vitePort}`;
+let viteOrigin;
 // The Burrow persists its enrollment + ACL here, under the harness's own
 // temp dir so a dev run never touches the installed app's state.
 const stateDir = path.join(os.tmpdir(), `dormouse-${process.pid}-browser-state`);
+// The inner app's own agent-browser daemons. It names managed sessions
+// `dormouse.<workspace>.<key>` exactly as the installed app does, and every
+// agent-browser shares one socket directory by default, so without this the
+// inner app's workspace-1 `default` browser is the installed app's. Under the
+// short `/tmp`, not macOS's long `os.tmpdir()`: socket paths cap near 104 bytes.
+const agentBrowserDir = mkdtempSync(path.join(process.platform === 'win32' ? os.tmpdir() : '/tmp', 'dab-'));
 
 const pending = new Map();
 const sseClients = new Set();
 let sidecar;
 let vite;
+let hostServer;
+let browser;
 let shuttingDown = false;
 let requestSeq = 0;
 
@@ -97,48 +106,98 @@ function requestSidecar(event, data, responseEvent, pick, timeoutMs = 10000) {
   });
 }
 
+/** The one window this harness simulates: its alert viewer id and registry label. */
+const HARNESS_WINDOW = 'main';
+
 const fireAndForget = {
   pty_spawn: ({ id, options }) => writeSidecar('pty:spawn', { id, options }),
-  pty_write: ({ id, data }) => writeSidecar('pty:input', { id, data }),
+  // `userInput` rides the write, as `pty_write` in src-tauri/src/lib.rs carries it.
+  pty_write: ({ id, data, paced, userInput }) =>
+    writeSidecar('pty:input', { id, data, paced, ...(userInput === true ? { userInput: true } : {}) }),
   pty_resize: ({ id, cols, rows }) => writeSidecar('pty:resize', { id, cols, rows }),
   pty_theme_colors: ({ colors }) => writeSidecar('pty:themeColors', colors),
   pty_kill: ({ id }) => writeSidecar('pty:kill', { id }),
-  pty_request_init: () => writeSidecar('pty:requestInit'),
+  pty_request_init: ({ requestId } = {}) => writeSidecar('pty:requestInit', { requestId }),
   dor_control_response: ({ response }) => writeSidecar('dor:controlResponse', response),
   // The Burrow's whole bridge rides one passthrough, exactly as it does
   // through Rust (`burrow_command` in src-tauri/src/lib.rs).
   burrow_command: ({ payload }) => writeSidecar('burrow:command', payload),
+  // The app's one AlertManager lives in the sidecar; its answers come back over
+  // the event stream like every other sidecar line. Stamped with the one window
+  // label this harness simulates, as Rust stamps the invoking window's
+  // (`alert_command` in src-tauri/src/lib.rs).
+  alert_command: ({ payload }) => writeSidecar('alert:command', { ...payload, window: HARNESS_WINDOW }),
   kill_sidecar_now: () => shutdown(),
 };
 
 const invokeMap = {
+  // BROWSER_REQUEST_TIMEOUT_MS in dor-lib-common/src/browser-providers.ts.
+  browser_request: ({ request }) => requestSidecar('browser:request', { request }, 'browser:result', (data) => data.result, 40000),
   get_available_shells: (_args) => requestSidecar('pty:getShells', {}, 'pty:shells', (data) => data.shells ?? []),
   pty_get_cwd: ({ id }) => requestSidecar('pty:getCwd', { id }, 'pty:cwd', (data) => data.cwd ?? null),
+  pty_get_cwds: ({ ids }) => requestSidecar('pty:getCwds', { ids }, 'pty:cwds', (data) => data.cwds ?? {}),
   pty_context: ({ request }) => requestSidecar('pty:context', request, 'pty:context', data => data),
   pty_get_open_ports: ({ id }) => requestSidecar('pty:getOpenPorts', { id }, 'pty:openPorts', (data) => data.ports ?? []),
+  pty_get_open_ports_many: ({ ids }) => requestSidecar('pty:getOpenPortsMany', { ids }, 'pty:openPortsMany', (data) => data.ports ?? {}),
   read_clipboard_file_paths: () => requestSidecar('clipboard:readFiles', {}, 'clipboard:files', (data) => data.paths ?? null),
   read_clipboard_image_as_file_path: () => requestSidecar('clipboard:readImage', {}, 'clipboard:image', (data) => data.path ?? null),
   read_clipboard_text: () => requestSidecar('clipboard:readText', {}, 'clipboard:text', (data) => data.text ?? null),
   iframe_create_proxy_url: ({ target, embedderOrigins }) => requestSidecar('iframe:createProxyUrl', { target, embedderOrigins }, 'iframe:proxyUrl', (data) => data.result),
-  agent_browser_command: ({ session, args, binaryPath }) => requestSidecar('agentBrowser:command', { session, args, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_edit: ({ session, op, binaryPath }) => requestSidecar('agentBrowser:edit', { session, op, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_screenshot: async ({ session, format, quality, binaryPath }) => {
-    const result = await requestSidecar('agentBrowser:screenshot', { session, format, quality, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000);
-    // The sidecar now returns a temp-file PATH (bytes stay off the stdio pipe).
-    // Production reads that file in Rust; this dev bridge has no Rust, so read it
-    // in Node and re-encode to the base64 the browser-sidecar adapter expects —
-    // the base64 travels in the HTTP invoke response, outside the event stream.
-    if (result && result.ok && typeof result.path === 'string') {
-      const bytes = await readFile(result.path);
-      return { ok: true, mime: result.mime, bytesBase64: bytes.toString('base64') };
-    }
-    return result;
+  // Managed voice, the passthrough `managed_voice` in src-tauri/src/lib.rs;
+  // 20_000 mirrors its MANAGED_VOICE_TIMEOUT.
+  managed_voice: ({ payload }) =>
+    requestSidecar('voice:command', payload, 'voice:result', (data) => data.result, 20_000),
+  tool_control: ({ request }) =>
+    requestSidecar('tool:control', { request }, 'tool:result', (data) => data.result),
+  git_info: ({ paths }) =>
+    requestSidecar('git:info', { paths }, 'git:infoResult', (data) => data.result),
+  // Agent recovery (docs/specs/standalone.md -> "Agent recovery"). The harness
+  // mirrors the persistence answer, so it claims exactly as Rust does, over the
+  // identical sidecar half. There is no `capture_agent_recovery` here: capture
+  // is a quit-only step and the harness has no quit.
+  take_recovery_commands: ({ paneIds }) =>
+    requestSidecar('recovery:take', { paneIds }, 'recovery:commands', (data) => data.commands ?? {}),
+  // The Workspace registry (docs/specs/standalone.md -> "Workspace registry"):
+  // one id counter and one window, since the harness simulates no second one.
+  workspace_reserve_ids: ({ count }) => {
+    const n = Math.max(1, Math.min(64, Number(count) || 1));
+    const first = nextWorkspaceId;
+    nextWorkspaceId += n;
+    return Array.from({ length: n }, (_, i) => `workspace-${first + i}`);
   },
-  agent_browser_stream_status: ({ session, binaryPath }) => requestSidecar('agentBrowser:streamStatus', { session, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_open: ({ url, headed, binaryPath }) => requestSidecar('agentBrowser:open', { url, headed, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_pop_out: ({ session, url, rect, binaryPath }) => requestSidecar('agentBrowser:popOut', { session, url, rect, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
-  agent_browser_pop_in: ({ session, url, binaryPath }) => requestSidecar('agentBrowser:popIn', { session, url, binaryPath }, 'agentBrowser:result', (data) => data.result, 30000),
+  workspace_report: ({ entries }) => {
+    // Restored browser state survives this process; mirror Rust's report seed.
+    for (const entry of entries ?? []) {
+      const minted = refNumber(entry?.id ?? '');
+      if (minted !== undefined) nextWorkspaceId = Math.max(nextWorkspaceId, minted + 1);
+    }
+    const next = JSON.stringify(entries ?? []);
+    if (next === registryEntries) return null;
+    registryEntries = next;
+    registryRevision += 1;
+    broadcast('sidecar', { event: 'dormouse://workspaces', data: registrySnapshot() });
+    return null;
+  },
+  workspace_registry: () => registrySnapshot(),
 };
+
+let nextWorkspaceId = 2;
+let registryEntries = '[]';
+let registryRevision = 0;
+/** A minted id's counter number, else undefined; mirrors `ref_number` in standalone/src-tauri/src/workspaces.rs. */
+function refNumber(id) {
+  const minted = /^workspace-(\d+)$/.exec(id);
+  return minted ? Number(minted[1]) : undefined;
+}
+function registrySnapshot() {
+  const workspaces = JSON.parse(registryEntries).map((entry) => ({
+    id: entry.id,
+    ref: `workspace:${refNumber(entry.id) ?? entry.id}`,
+    name: entry.name,
+    active: Boolean(entry.active),
+  }));
+  return { revision: registryRevision, windows: [{ label: HARNESS_WINDOW, workspaces }] };
+}
 
 async function readJson(req) {
   // The application/json requirement is enforced in the gate below, before
@@ -157,6 +216,10 @@ function cors(req, res) {
 
 function startHostServer() {
   const server = http.createServer(async (req, res) => {
+    if (!viteOrigin) {
+      res.writeHead(404).end('not found');
+      return;
+    }
     cors(req, res);
     if (req.method === 'OPTIONS') {
       res.writeHead(204).end();
@@ -215,6 +278,7 @@ function startHostServer() {
     server.once('error', reject);
     server.listen(hostPort, '127.0.0.1', () => {
       server.off('error', reject);
+      hostPort = server.address().port;
       resolve(server);
     });
   });
@@ -231,10 +295,19 @@ function startSidecar() {
       DORMOUSE_CLI_JS: dorEntrypoint,
       DORMOUSE_CONTROL_TOKEN: controlToken,
       DORMOUSE_STATE_DIR: stateDir,
+      // The harness mirrors the persistence answer, so a reload here claims from
+      // the same agent-recovery record the app's quit writes — under this run's
+      // own temp state, never the installed app's.
+      DORMOUSE_RECOVERY_DIR: stateDir,
+      // Reaches the inner host and, through it, every inner terminal's `dor`;
+      // this harness's own browser keeps the caller's directory.
+      [AGENT_BROWSER_SOCKET_DIR_ENV]: agentBrowserDir,
     },
   });
   log(`sidecar pid=${sidecar.pid}`);
   log(`burrow state dir: ${stateDir}`);
+  log(`recovery state dir: ${stateDir}`);
+  log(`inner agent-browser socket dir: ${agentBrowserDir}`);
 
   createInterface({ input: sidecar.stdout }).on('line', (line) => {
     let msg;
@@ -259,84 +332,123 @@ function startSidecar() {
     broadcast('sidecar', { event, data });
   });
   createInterface({ input: sidecar.stderr }).on('line', (line) => console.error(`[sidecar] ${line}`));
+  sidecar.on('error', (err) => {
+    console.error(err);
+    shutdown(1);
+  });
   sidecar.on('exit', (code, signal) => {
     log(`sidecar exited code=${code} signal=${signal}`);
     for (const request of pending.values()) request.reject(new Error('sidecar exited'));
     pending.clear();
-    shutdown();
+    shutdown(1);
   });
 }
 
-function startVite() {
-  vite = spawn('pnpm', ['--filter', 'dormouse-standalone', 'dev'], {
-    cwd: repoRoot,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      // The token rides in the URL, so the page needs nothing else plumbed to
-      // it and `BrowserSidecarHost` stays the single place that knows about it.
-      VITE_DORMOUSE_BROWSER_DEV_HOST: `http://127.0.0.1:${hostPort}/?t=${bridgeToken}`,
-      DORMOUSE_BROWSER_DEV_VITE_PORT: String(vitePort),
-    },
-  });
-  createInterface({ input: vite.stdout }).on('line', (line) => console.error(`[vite] ${line}`));
-  createInterface({ input: vite.stderr }).on('line', (line) => console.error(`[vite] ${line}`));
-  vite.on('exit', (code, signal) => {
-    log(`vite exited code=${code} signal=${signal}`);
-    shutdown();
-  });
-}
-
-async function waitForVite() {
-  const deadline = Date.now() + 30000;
-  while (Date.now() < deadline) {
-    try {
-      await new Promise((resolve, reject) => {
-        const socket = net.connect(vitePort, 'localhost', resolve);
-        socket.once('error', reject);
-        socket.once('connect', () => socket.end());
-      });
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-  }
-  throw new Error(`vite did not open port ${vitePort}`);
+async function startVite() {
+  // The bridge credential reaches the page only, never process.env: the
+  // sidecar's PTYs must not inherit it.
+  ({ vite, origin: viteOrigin } = await startDevVite({
+    'import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST': JSON.stringify(`http://127.0.0.1:${hostPort}/?t=${bridgeToken}`),
+  }));
+  log(`app URL: ${viteOrigin}`);
 }
 
 async function openAgentBrowser() {
-  const args = ['--session', browserSession];
+  const binary = insideDormouse ? 'dor' : 'agent-browser';
+  const identity = insideDormouse && !process.env.DORMOUSE_BROWSER_DEV_AB_SESSION
+    ? ['--key', worktreeKey]
+    : ['--session', browserSession];
+  const args = insideDormouse ? ['agent-browser', ...identity] : identity;
+  const command = `${binary} ${args.join(' ')}`;
   if (process.env.DORMOUSE_BROWSER_DEV_HEADED === '1') args.push('--headed');
-  args.push('open', `http://localhost:${vitePort}`);
-  const child = spawn('agent-browser', args, { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
-  createInterface({ input: child.stdout }).on('line', (line) => console.error(`[agent-browser] ${line}`));
-  createInterface({ input: child.stderr }).on('line', (line) => console.error(`[agent-browser] ${line}`));
-  await new Promise((resolve) => child.on('exit', resolve));
-  log(`agent-browser session: ${browserSession}`);
-  log(`try: agent-browser --session ${browserSession} snapshot -i`);
+  args.push('open', viteOrigin);
+  browser = spawn(binary, args, { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+  createInterface({ input: browser.stdout }).on('line', (line) => console.error(`[${binary}] ${line}`));
+  createInterface({ input: browser.stderr }).on('line', (line) => console.error(`[${binary}] ${line}`));
+  await new Promise((resolve, reject) => {
+    browser.once('error', reject);
+    browser.once('exit', (code, signal) => code === 0
+      ? resolve()
+      : reject(new Error(`${binary} exited code=${code} signal=${signal}`)));
+  });
+  // Name what was actually passed. `dor agent-browser --key` is namespaced by the Workspace
+  // that will hold the browser, which only the host can resolve
+  // (docs/specs/dor-browser.md -> "Managed identity"), so printing a
+  // `sessionForKey` guess here would name a bare-Wall session nothing created.
+  log(`agent-browser ${identity[0] === '--key' ? 'key' : 'session'}: ${identity[1]}`);
+  log(`try: ${command} snapshot -i`);
 }
 
-async function shutdown() {
+/**
+ * The caller's ref when this harness runs as a Dor Tool, else undefined. The
+ * Tool frames the announced port in its own pane (docs/specs/dor-tool.md ->
+ * Serving), so a keyed browser opened on top would split off a second copy of
+ * the app. `--kind tool` leaves the caller in the list only when it is a Tool.
+ */
+async function callerToolRef() {
+  if (!insideDormouse || process.env.DORMOUSE_BROWSER_DEV_AB_SESSION) return undefined;
+  const list = spawn('dor', ['list', '--kind', 'tool', '--json'], { cwd: repoRoot, stdio: ['ignore', 'pipe', 'ignore'] });
+  let stdout = '';
+  list.stdout.on('data', (chunk) => { stdout += chunk; });
+  const code = await new Promise((resolve) => {
+    list.once('error', () => resolve(-1));
+    list.once('close', resolve);
+  });
+  if (code !== 0) return undefined;
+  try {
+    return JSON.parse(stdout).caller_surface_ref ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   for (const client of sseClients) client.end();
   sseClients.clear();
-  if (vite && !vite.killed) vite.kill('SIGTERM');
-  if (sidecar && !sidecar.killed) sidecar.kill('SIGTERM');
-  setTimeout(() => process.exit(0), 250).unref();
+  hostServer?.close();
+  hostServer?.closeAllConnections();
+  const children = new Set([browser, sidecar].filter(child =>
+    child?.pid && child.exitCode === null && child.signalCode === null));
+  const childrenClosed = [...children].map(child => new Promise(resolve => {
+    child.once('exit', () => {
+      children.delete(child);
+      resolve();
+    });
+    child.kill('SIGTERM');
+  }));
+  // Bound cleanup even when a child or open request stops responding.
+  const timeout = setTimeout(() => {
+    for (const child of children) child.kill('SIGKILL');
+    process.exit(code);
+  }, 3000);
+  await Promise.all([vite?.close(), ...childrenClosed]);
+  clearTimeout(timeout);
+  process.exit(code);
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+process.on('SIGINT', () => shutdown());
+process.on('SIGTERM', () => shutdown());
 
-log(`starting browser dev host on http://127.0.0.1:${hostPort}`);
-// Printed so poking the bridge by hand stays possible. Local stderr only: this
-// harness never runs in CI, and the token dies with the process.
-log(`bridge token: ${bridgeToken}`);
-log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
-await startHostServer();
-startSidecar();
-startVite();
-await waitForVite();
-await openAgentBrowser();
-log('running; Ctrl-C to stop');
+try {
+  hostServer = await startHostServer();
+  log(`starting browser dev host on http://127.0.0.1:${hostPort}`);
+  // Local stderr only; this credential dies with the process.
+  log(`bridge token: ${bridgeToken}`);
+  log(`try: curl -H 'content-type: application/json' -d '{"cmd":"pty_request_init"}' 'http://127.0.0.1:${hostPort}/__dormouse_dev_host/send?t=${bridgeToken}'`);
+  await startVite();
+  startSidecar();
+  // Announce the actual bound port, including an OS-assigned one.
+  const vitePort = Number(new URL(viteOrigin).port);
+  process.stdout.write(
+    `\u001b]367;serve;${JSON.stringify({ port: vitePort, name: 'Dormouse dev', v: 1 })}\u001b\\`,
+  );
+  const toolRef = await callerToolRef();
+  if (toolRef) log(`Tool ${toolRef} shows the app; try: dor agent-browser --surface ${toolRef} snapshot -i`);
+  else await openAgentBrowser();
+  log('running; Ctrl-C to stop');
+} catch (err) {
+  console.error(err);
+  await shutdown(1);
+}

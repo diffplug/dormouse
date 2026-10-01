@@ -7,7 +7,10 @@ import {
   type ApplicationText,
   type StricliProcess,
 } from '@stricli/core';
+import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
+import { VIEW_ERROR_ARGV, VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
+import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
 import { ensureCommand } from './commands/ensure.js';
 import { iframeCommand } from './commands/iframe.js';
@@ -17,7 +20,11 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
+import { toolCommand } from './commands/tool.js';
+import { openCommand } from './commands/open.js';
+import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
+import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail } from './commands/shared.js';
 import type {
   CliEnv,
@@ -29,15 +36,16 @@ import type {
 } from './commands/types.js';
 
 export type {
-  AgentBrowserExec,
-  AgentBrowserExecResult,
-  AgentBrowserSurfaceRequest,
-  AgentBrowserSurfaceResponse,
+  AppRestartResponse,
   AwaitCause,
   AwaitSurfaceOutcome,
   AwaitSurfaceRequest,
   AwaitSurfaceResponse,
   AwaitUntil,
+  BrowserExec,
+  BrowserExecResult,
+  BrowserSurfaceRequest,
+  BrowserSurfaceResponse,
   CliEnv,
   CliOptions,
   CliResult,
@@ -52,8 +60,17 @@ export type {
   KillSurfaceConfirmation,
   KillSurfaceRequest,
   KillSurfaceResponse,
+  ListScope,
   ListSurfacesRequest,
   ListSurfacesResponse,
+  ListWorkspacesRequest,
+  ListWorkspacesResponse,
+  NewWorkspaceRequest,
+  CloseWorkspaceRequest,
+  RenameWorkspaceRequest,
+  SwitchWorkspaceRequest,
+  WorkspaceMutationResponse,
+  WorkspaceRow,
   ReadSurfaceRequest,
   ReadSurfaceResponse,
   ResolvedSplitDirection,
@@ -70,12 +87,16 @@ export type {
   SurfacePort,
   SurfaceRenderMode,
   SurfaceView,
+  ToolSurfaceRequest,
+  ToolSurfaceResponse,
   VersionMetadata,
 } from './commands/types.js';
 
 const COMMANDS = [
   splitCommand,
   ensureCommand,
+  toolCommand,
+  openCommand,
   versionCommand,
   skillCommand,
   sendCommand,
@@ -84,12 +105,17 @@ const COMMANDS = [
   killCommand,
   iframeCommand,
   agentBrowserCommand,
+  playwrightCommand,
   listCommand,
+  workspaceCommand,
+  appCommand,
 ] as const satisfies readonly Command[];
 
 const ROUTES = {
   split: splitCommand.command,
   ensure: ensureCommand.command,
+  tool: toolCommand.command,
+  open: openCommand.command,
   version: versionCommand.command,
   skill: skillCommand.command,
   send: sendCommand.command,
@@ -98,7 +124,10 @@ const ROUTES = {
   kill: killCommand.command,
   iframe: iframeCommand.command,
   'agent-browser': agentBrowserCommand.command,
+  playwright: playwrightCommand.command,
   list: listCommand.command,
+  workspace: workspaceCommand.command,
+  app: appCommand.command,
 };
 
 const DOR_TEXT: ApplicationText = {
@@ -166,13 +195,50 @@ interface CaptureProcess extends StricliProcess {
 }
 
 export async function runCli(rawArgv: string[], options: CliOptions = {}): Promise<CliResult> {
-  const argv = normalizeAgentBrowserAlias(normalizeVersionAlias(rawArgv));
+  const argv = normalizeVersionAlias(rawArgv);
+  // Private host helper: stdout stays on a host-owned pipe, never a terminal
+  // or control-socket response. The marker separates shell startup chatter.
+  if (argv[0] === '__launch-env' && argv.length === 2 && /^[a-f0-9]{32}$/.test(argv[1])) {
+    const env = { ...(options.env ?? process.env) };
+    delete env.ELECTRON_RUN_AS_NODE;
+    // A JSON copy loses process.env's case-insensitive Windows lookup.
+    if (process.platform === 'win32') {
+      for (const key of Object.keys(env)) {
+        const canonical = key.toUpperCase();
+        if ((canonical === 'PATH' || canonical === 'PATHEXT') && key !== canonical) {
+          env[canonical] = env[key];
+          delete env[key];
+        }
+      }
+    }
+    return { stdout: `\n${argv[1]}:${Buffer.from(JSON.stringify(env)).toString('base64')}\n`, stderr: '', exitCode: 0 };
+  }
 
-  // `dor ab <args...>` forwards args verbatim to agent-browser, so they must
-  // never reach stricli's flag parser. Only a bare `--help`/`-h` (or
-  // `dor help agent-browser`, normalized above) falls through to stricli.
-  if (argv[0] === 'agent-browser' && !isAgentBrowserHelpInvocation(argv)) {
-    return runAgentBrowserCli(argv.slice(1), options);
+  // `dor agent-browser <args...>` and `dor playwright <args...>` forward args verbatim to the
+  // provider's CLI, so they must never reach stricli's flag parser. Only a bare
+  // `--help`/`-h` (or `dor help agent-browser`, normalized above) falls through
+  // to stricli.
+  if (isBrowserProvider(argv[0]) && !isPassthroughHelpInvocation(argv)) {
+    return BROWSER_CLIS[argv[0]](argv.slice(1), options);
+  }
+  // `dor __view-file <file>` is the built-in viewer's private entry
+  // (docs/specs/dor-tools-builtin.md -> File viewer). Its server outlives this
+  // call; its title and announcement are the only output.
+  if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
+    const { runFileViewer } = await loadBuiltinViewers();
+    return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
+  }
+  // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
+  // selects and activates files with OSC 367 `open`.
+  if (argv[0] === VIEW_FOLDER_ARGV && argv.length === 2) {
+    const { runFolderViewer } = await loadBuiltinViewers();
+    return { stdout: await runFolderViewer(argv[1]), stderr: '', exitCode: 0 };
+  }
+  // `dor __view-error <target> <message>` is the page a failed OSC 367 `open`
+  // shows in the preview slot.
+  if (argv[0] === VIEW_ERROR_ARGV && argv.length === 3) {
+    const { runErrorViewer } = await loadBuiltinViewers();
+    return { stdout: await runErrorViewer(argv[1], argv[2]), stderr: '', exitCode: 0 };
   }
 
   const helpTarget = getHelpTarget(argv);
@@ -189,18 +255,13 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     if (!check.ok) return fail(check.message);
   }
 
-  // stricli discards the `--` escape sequence during parsing, so capture its
-  // presence here (pre-parse) for commands that must distinguish an empty
-  // command tail from none — e.g. `dor split --` vs bare `dor split`.
-  const hasArgumentEscape = args.includes('--');
-
   const capture = createCaptureProcess(options.env);
   await runStricli(APPLICATION, commandName ? [commandName, ...args] : [], {
     process: capture.process,
     forCommand: (): DorCommandContext => ({
       process: capture.process,
       options,
-      hasArgumentEscape,
+      commandArgs: args,
     }),
   });
 
@@ -209,6 +270,12 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
   };
+}
+
+/** Resolve from the running CLI, never a workspace package or the caller's cwd.
+ * The URL import leaves the builtins outside dor.js and in this same process. */
+function loadBuiltinViewers(): Promise<typeof import('dor-tools-builtin/runtime')> {
+  return import(new URL('./builtin/runtime.js', import.meta.url).href);
 }
 
 /** Map a bare top-level `--version`/`-v` to the `version` command, as most CLIs
@@ -221,14 +288,13 @@ function normalizeVersionAlias(argv: string[]): string[] {
   return argv;
 }
 
-/** `ab` is the documented short alias for `agent-browser`, in any help form. */
-function normalizeAgentBrowserAlias(argv: string[]): string[] {
-  if (argv[0] === 'ab') return ['agent-browser', ...argv.slice(1)];
-  if (argv[0] === 'help' && argv[1] === 'ab') return ['help', 'agent-browser', ...argv.slice(2)];
-  return argv;
-}
+/** Each browser provider's passthrough, run under its id as the command. */
+const BROWSER_CLIS: Record<BrowserAutomationProvider, (args: string[], options: CliOptions) => Promise<CliResult>> = {
+  'agent-browser': runAgentBrowserCli,
+  playwright: runPlaywrightCli,
+};
 
-function isAgentBrowserHelpInvocation(argv: string[]): boolean {
+function isPassthroughHelpInvocation(argv: string[]): boolean {
   return argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h');
 }
 

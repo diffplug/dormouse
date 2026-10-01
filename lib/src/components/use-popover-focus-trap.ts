@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { stepFocus } from './focus-step';
+import { isComposingKey } from '../lib/dom';
 
 /** What Tab reaches inside a popover: real buttons plus explicit tab stops. */
 export const POPOVER_FOCUSABLE_SELECTOR = 'button:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -23,7 +24,7 @@ export function usePopoverFocusTrap(
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only handle keys when focus is inside the popover
-      if (!el.contains(document.activeElement)) return;
+      if (!el.contains(document.activeElement) || isComposingKey(e)) return;
 
       if (e.key === 'Escape') {
         e.preventDefault();

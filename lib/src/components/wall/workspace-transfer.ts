@@ -1,0 +1,177 @@
+import { getToolDirty } from '../../lib/tool-dirty-store';
+import type { TransferredTools } from './tool-transfer';
+import { getToolAnnounce } from '../../lib/tool-announce-store';
+import type { ToolAnnounce } from 'dor-tools-lib/osc';
+import { snapshotTerminalState, type TransferredTerminalState } from '../../lib/terminal-state-store';
+import { dismissWorkspaceUi } from '../../lib/workspace-ui-store';
+import type { TerminalGrid } from '../../lib/terminal-transfer';
+import { forgetHelper, getHelper } from '../../lib/helper-terminal';
+import { releaseSession, serializeTerminal, getTerminalInstance } from '../../lib/terminal-registry';
+import { disposeAgentBrowserSurfaceController } from './agent-browser-surface-controller';
+import type { PersistedSession, PersistedWorkspace, WorkspaceId } from '../../lib/session-types';
+import type { WorkspaceMeta } from '../../lib/workspace-store';
+import type { SaveOptions } from '../../lib/session-save';
+
+/**
+ * Handing a Workspace to another Window (`docs/specs/standalone.md` →
+ * "Transfer"). The half that lives in the shared library: build the record,
+ * and detach every Session **without killing it**. The host
+ * moves the PTY ownership and mounts the Workspace at the other end.
+ *
+ * Nothing here is a closure, so nothing is killed.
+ */
+
+export interface WorkspaceTransferPayload {
+  workspaceId: WorkspaceId;
+  /** What the target restores the Workspace from. */
+  workspace: PersistedWorkspace;
+  /** Member Surfaces holding a PTY, **plus each one's helper Session**: exactly
+   *  what changes ownership. A helper is not a member Surface — it has no pane
+   *  — but it is a live shell owned by this Window, and one left
+   *  behind is a leaked process plus a stray pane on the source's next reload.
+   *  The target re-parents it: `routeUnownedPtys` and `resumeLivePtys` both
+   *  place a helper by its `parentId`, which travels with it. */
+  terminalIds: string[];
+  /** Every member Surface, browser ones included. */
+  allIds: string[];
+}
+
+export interface ReleaseForTransferDeps {
+  workspaceId: WorkspaceId;
+  /** What the Workspace is called, carried as-is to the Window it lands in. */
+  naming: Pick<WorkspaceMeta, 'name' | 'nameIsAuto'>;
+  /** The Workspace's record, built but not published. */
+  serialize: (options?: SaveOptions) => Promise<PersistedSession>;
+  /** Member Surfaces: visible panes ∪ Doors. */
+  surfaceIds: () => string[];
+  /** Whether a member Surface has a PTY behind it. */
+  hasTerminal: (id: string) => boolean;
+  captureTools?: () => TransferredTools;
+}
+
+/**
+ * A Workspace built for the move but still attached to this Window.
+ *
+ * Two-phase because the host may refuse: the target window can close between
+ * the drag's last probe and the drop, and a release that ran first would leave
+ * a gutted Workspace here and a live one nowhere
+ * (`standalone/src/workspace-move.ts`).
+ */
+export interface PreparedWorkspaceTransfer {
+  payload: WorkspaceTransferPayload;
+  /** Kept out of the durable payload; sent with the volatile content. */
+  tools?: TransferredTools;
+  /**
+   * The host took it. Detach every Session — **the point
+   * of no return**, and never reachable from a Wall unmount.
+   */
+  commit(): void;
+}
+
+/**
+ * Build everything the target needs, **touching nothing**.
+ *
+ * Order is load-bearing:
+ *
+ * 1. **Serialize first**, with a live cwd probe. The record reads the registry
+ *    — untouched flags, retained alerts, each pane's cwd — and `commit` empties
+ *    it.
+ * 2. **`commit` releases every Session.** Detached, never killed: the process
+ *    keeps running and the target resumes over it.
+ */
+export async function prepareWorkspaceTransfer(
+  deps: ReleaseForTransferDeps,
+): Promise<PreparedWorkspaceTransfer> {
+  // The cwds are probed here and nowhere else: after the commit the panes this
+  // Window could ask about are gone, and the target restores from this record.
+  const session = await deps.serialize({ probeCwd: true });
+  const allIds = deps.surfaceIds();
+  const panes = allIds.filter(deps.hasTerminal);
+  // A helper rides with its source, in that order: the target's resume needs the
+  // parent in the same slice to re-parent it.
+  const helpers = new Map<string, string>();
+  for (const id of panes) {
+    const helper = getHelper(id);
+    if (helper) helpers.set(id, helper.id);
+  }
+  const terminalIds = panes.flatMap((id) => {
+    const helper = helpers.get(id);
+    return helper ? [id, helper] : [id];
+  });
+
+  const tools = deps.captureTools?.();
+
+  return {
+    ...(tools && Object.keys(tools).length ? { tools } : {}),
+    payload: {
+      workspaceId: deps.workspaceId,
+      workspace: { id: deps.workspaceId, name: deps.naming.name, nameIsAuto: deps.naming.nameIsAuto, session },
+      terminalIds,
+      allIds,
+    },
+    commit() {
+      dismissWorkspaceUi(deps.workspaceId);
+      // Forgotten before its Session goes, so the status poller stops and the
+      // source pane does not re-open the helper it no longer holds.
+      for (const parentId of helpers.keys()) forgetHelper(parentId);
+      // A browser's session lives in the host, and the target attaches to it
+      // from the persisted params; this Window only lets go of its viewer, or
+      // a popped-out one would keep streaming here and both would auto-revert
+      // the same window.
+      for (const id of allIds) disposeAgentBrowserSurfaceController(id);
+      for (const id of terminalIds) releaseSession(id);
+    },
+  };
+}
+
+/** One terminal's half of a transfer's content: what the target writes before
+ *  it attaches, and where the host's replay picks up. */
+export interface TransferredTerminal {
+  /** The buffer as the escape stream that rebuilds it; `''` for a Session this
+   *  Window no longer held. */
+  serialized: string;
+  toolAnnounce?: ToolAnnounce;
+  toolDirty?: boolean;
+  /** Grid at serialization, applied before replay and before destination fitting. */
+  grid?: TerminalGrid;
+  semanticState?: TransferredTerminalState;
+  /** The sidecar's output position the serialization stands at; absent when
+   *  the host never stamped one, and the target then replays the whole buffer
+   *  behind the serialized one. */
+  mark?: number;
+}
+
+/** The second half of a transfer's payload (`docs/specs/transport.md` →
+ *  "Transferring a Workspace"): captured once every terminal's mark has
+ *  passed, and attached to the arrival the host queued at the invoke. */
+export interface WorkspaceTransferContent {
+  terminals: Record<string, TransferredTerminal>;
+  tools?: TransferredTools;
+}
+
+/**
+ * Serialize every terminal at its mark with its source grid.
+ *
+ * **Only after the host's `marked` line for each id**: everything this Window
+ * was sent before that line is in the buffer once the write queue drains, and
+ * everything after it is what the target's since-mark replay carries — the two
+ * tile the stream with nothing lost and nothing twice. An id with no mark (the
+ * host never answered for it) is serialized anyway and replayed whole, which
+ * at worst repeats its tail.
+ */
+export async function captureTransferContent(
+  terminalIds: readonly string[],
+  marks: ReadonlyMap<string, number>,
+): Promise<WorkspaceTransferContent> {
+  const terminals: Record<string, TransferredTerminal> = {};
+  for (const id of terminalIds) {
+    const serialized = (await serializeTerminal(id)) ?? '';
+    const terminal = getTerminalInstance(id);
+    const grid = terminal ? { cols: terminal.cols, rows: terminal.rows } : undefined;
+    const mark = marks.get(id);
+    const toolAnnounce = getToolAnnounce(id);
+    const toolDirty = getToolDirty(id);
+    terminals[id] = { serialized, ...(toolDirty === null ? {} : { toolDirty }), ...(toolAnnounce ? { toolAnnounce } : {}), ...(grid ? { grid, semanticState: snapshotTerminalState(id) } : {}), ...(mark === undefined ? {} : { mark }) };
+  }
+  return { terminals };
+}

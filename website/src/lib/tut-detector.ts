@@ -11,7 +11,7 @@ interface ActivityStoreModule {
   getActivitySnapshot: () => Map<string, ActivityState>;
   subscribeToWatchedCommands: (listener: () => void) => () => void;
   getWatchedCommands: () => string[];
-  getRunningCommandArgv0: (id: string) => string | null;
+  getRunningCommandWatchRule: (id: string) => string | null;
 }
 
 /** Notification sources a program emits for itself, as opposed to the ones
@@ -187,9 +187,10 @@ export class TutDetector {
     if (changed) this.state.markComplete("th-theme");
   }
 
-  /** A rule exists at all — the user turned alerts on for a command name. */
+  /** The user watched the fake `longtask` the item names — never merely any
+   *  rule, since fresh installs start with the coding-agent defaults. */
   private processWatchedCommands(): void {
-    if (this.activityStore.getWatchedCommands().length > 0) {
+    if (this.activityStore.getWatchedCommands().includes("longtask")) {
       this.state.markComplete("al-watch-cmd");
     }
   }
@@ -212,17 +213,11 @@ export class TutDetector {
         this.queueSpreadCheck(id);
       }
 
-      // Gate al-busy / al-ring on a true status transition. Without the
-      // prev.status check, a pane already in BUSY or ALERT_RINGING at the
-      // moment its first activity event fires (e.g. restored state, or a
-      // pane spawned after start() that arrives mid-task) would credit
-      // the user for work they did not do this session.
-      if (
-        prev.status !== current.status &&
-        (current.status === "BUSY" || current.status === "MIGHT_BE_BUSY")
-      ) {
-        this.state.markComplete("al-busy");
-      }
+      // Gate al-ring on a true status transition. Without the prev.status
+      // check, a pane already in ALERT_RINGING at the moment its first
+      // activity event fires (e.g. restored state, or a pane spawned after
+      // start() that arrives mid-task) would credit the user for work they
+      // did not do this session.
       if (prev.status !== "ALERT_RINGING" && current.status === "ALERT_RINGING") {
         this.state.markComplete("al-ring");
       }
@@ -235,14 +230,14 @@ export class TutDetector {
         else if (TERMINAL_REPORT_SOURCES.has(source)) this.state.markComplete("al-notif");
       }
 
-      if (!prev.todo && current.todo) {
-        if (prev.status === "ALERT_RINGING") {
-          this.state.markComplete("al-todo-auto");
-        } else if (!source) {
-          // A protocol or command-exit ring sets TODO itself; only a bare
-          // TODO with no notification behind it was added by hand.
-          this.state.markComplete("al-todo-manual");
-        }
+      // A look without typing turns a ring into a TODO, so the dismissal is
+      // the ring ending with a TODO standing.
+      if (prev.status === "ALERT_RINGING" && current.status !== "ALERT_RINGING" && current.todo) {
+        this.state.markComplete("al-todo-auto");
+      }
+      // Only a bare TODO with no notification behind it was added by hand.
+      if (!prev.todo && current.todo && !source) {
+        this.state.markComplete("al-todo-manual");
       }
       if (prev.todo && !current.todo) {
         this.state.markComplete("al-todo-clear");
@@ -270,16 +265,16 @@ export class TutDetector {
       this.spreadCheckQueued = false;
       if (this.pendingSpreadIds.size === 0) return;
       const snapshot = this.activityStore.getActivitySnapshot();
-      const commandCounts = new Map<string, number>();
+      const ruleCounts = new Map<string, number>();
       for (const [paneId, current] of snapshot) {
         if (!current.watchingEnabled) continue;
-        const command = this.activityStore.getRunningCommandArgv0(paneId);
-        if (command) commandCounts.set(command, (commandCounts.get(command) ?? 0) + 1);
+        const rule = this.activityStore.getRunningCommandWatchRule(paneId);
+        if (rule) ruleCounts.set(rule, (ruleCounts.get(rule) ?? 0) + 1);
       }
       for (const paneId of this.pendingSpreadIds) {
         if (!snapshot.get(paneId)?.watchingEnabled) continue;
-        const command = this.activityStore.getRunningCommandArgv0(paneId);
-        if (command && (commandCounts.get(command) ?? 0) > 1) {
+        const rule = this.activityStore.getRunningCommandWatchRule(paneId);
+        if (rule && (ruleCounts.get(rule) ?? 0) > 1) {
           this.state.markComplete("al-spreads");
           break;
         }
@@ -293,9 +288,11 @@ export class TutDetector {
     for (const [id, current] of snapshot) {
       const prev = this.prevMouse.get(id) ?? DEFAULT_MOUSE_SELECTION_STATE;
 
-      if (current.copyFlash && current.copyFlash !== prev.copyFlash) {
-        if (current.copyFlash === "raw") this.state.markComplete("cp-raw");
-        if (current.copyFlash === "rewrapped") this.state.markComplete("cp-rewrap");
+      // A confirmed copy, in the format its editor shows.
+      if (current.copyOutcome === "copied" && prev.copyOutcome !== "copied") {
+        const format = current.copyEditor?.format;
+        if (format === "exact") this.state.markComplete("cp-raw");
+        if (format === "auto") this.state.markComplete("cp-rewrap");
       }
 
       if (!prev.selection && current.selection) {

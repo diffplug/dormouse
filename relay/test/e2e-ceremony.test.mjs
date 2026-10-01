@@ -1,7 +1,7 @@
 /**
  * Both end-to-end ceremonies driven through the real Relay
- * (`docs/specs/remote-security-model.md` -> `## Future` -> **Scope:
- * e2e-client-burrow**, stage 4): a phone scans a Burrow's QR, registers a passkey
+ * (`docs/specs/remote-security-model.md` -> Pairing and Connection): a phone
+ * scans a Burrow's QR, registers a passkey
  * off the setup token that QR carries, signs in, pairs over IK against the
  * invitation key, and then connects against the Burrow static it pinned.
  *

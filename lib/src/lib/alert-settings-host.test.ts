@@ -28,14 +28,18 @@ describe('AlertSettingsHost', () => {
 
   it('keeps the first startup seed but always applies an explicit update', () => {
     const { host, target } = createHost();
-    host.initialize({ deferAlertsUntilQuiet: true });
+    // The seeded value is the non-default one, so a second seed winning would show.
     host.initialize({ deferAlertsUntilQuiet: false });
+    host.initialize({ deferAlertsUntilQuiet: true });
     expect(target.applySettings).toHaveBeenCalledTimes(1);
+    expect(target.applySettings).toHaveBeenCalledWith(
+      expect.objectContaining({ deferAlertsUntilQuiet: false }),
+    );
 
-    host.update({ deferAlertsUntilQuiet: false });
+    host.update({ deferAlertsUntilQuiet: true });
     expect(target.applySettings).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ deferAlertsUntilQuiet: false }),
+      expect.objectContaining({ deferAlertsUntilQuiet: true }),
     );
   });
 });
