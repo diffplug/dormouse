@@ -1,5 +1,5 @@
-import type { Terminal } from '@xterm/xterm';
-import { readLineCells } from './buffer-cells';
+import type { IBufferLine, Terminal } from '@xterm/xterm';
+import { endsInWrapPadding, readLineCells } from './buffer-cells';
 import type { Selection } from './mouse-selection';
 import { normalizeSelection } from './selection-text';
 import { detectTokenAt } from './smart-token';
@@ -9,8 +9,9 @@ import { detectTokenAt } from './smart-token';
 // overlay, and the tests share one reading of the terminal
 // (docs/specs/mouse-and-clipboard.md §4).
 
-/** One buffer row: a string per cell column (`readLineCells`), trailing blanks
- *  trimmed. */
+/** One buffer row: a string per cell column (`readLineCells`). Trailing blanks
+ *  are trimmed only where the row's logical line ends: before a soft wrap they
+ *  are text, all but a wide character's wrap padding. */
 export interface CopyRow {
   readonly cells: readonly string[];
   /** xterm's `isWrapped`: a true soft wrap continuing the previous row. */
@@ -38,7 +39,8 @@ export function terminalCopyBuffer(terminal: Terminal): CopyBuffer {
       let row = rows.get(index);
       if (!row) {
         const line = index >= 0 && index < buffer.length ? buffer.getLine(index) : undefined;
-        row = line ? { cells: trimTrailingBlanks(readLineCells(line)), wrapped: line.isWrapped } : EMPTY_ROW;
+        const next = index + 1 < buffer.length ? buffer.getLine(index + 1) : undefined;
+        row = line ? { cells: rowCells(line, next), wrapped: line.isWrapped } : EMPTY_ROW;
         rows.set(index, row);
       }
       return row;
@@ -46,7 +48,12 @@ export function terminalCopyBuffer(terminal: Terminal): CopyBuffer {
   };
 }
 
-function trimTrailingBlanks(cells: string[]): string[] {
+function rowCells(line: IBufferLine, next: IBufferLine | undefined): string[] {
+  const cells = readLineCells(line);
+  if (next?.isWrapped) {
+    if (endsInWrapPadding(line, next)) cells.pop();
+    return cells;
+  }
   while (cells.length && /^\s*$/.test(cells[cells.length - 1])) cells.pop();
   return cells;
 }
@@ -139,7 +146,8 @@ function facts(buf: CopyBuffer, r: number): RowFacts {
   const row = buf.row(r);
   let f = rowFacts.get(row);
   if (!f) {
-    const text = row.cells.join('');
+    // Without the blanks a soft wrap keeps, so a trailing box run still trails.
+    const text = row.cells.join('').trimEnd();
     const d = decoration(text);
     const plain = (text.slice(0, d.blankFrom) + ' '.repeat(d.blankTo - d.blankFrom) + text.slice(d.blankTo, d.keepTo)).trimEnd();
     f = { text, plain, boundary: !text.trim() || isFrameOnly(text) || /^[│┃║]/.test(text) };
@@ -223,7 +231,14 @@ const BREAK_TEXT: Record<BreakKind, string> = { keep: '\n', space: ' ', none: ''
 const FIXED_BREAK: Partial<Record<CopyFormat, BreakKind>> = { exact: 'keep', spaces: 'space', joined: 'none' };
 
 interface Cell { ch: string; added: boolean }
-interface Line { cells: Cell[]; row: number; startCol: number }
+interface Line {
+  /** Trailing blanks trimmed. */
+  cells: Cell[];
+  /** The blanks trimmed, which a deleted soft wrap puts back. */
+  trail: Cell[];
+  row: number;
+  startCol: number;
+}
 
 function extract(buf: CopyBuffer, scope: Span, original: Span): Line[] {
   const lines: Line[] = [];
@@ -235,8 +250,9 @@ function extract(buf: CopyBuffer, scope: Span, original: Span): Line[] {
     for (let c = a; c < Math.min(b, cells.length); c++) {
       if (cells[c] !== '') out.push({ ch: cells[c], added: !contains(original, r, c) });
     }
-    while (out.length && /^\s*$/.test(out[out.length - 1].ch)) out.pop();
-    lines.push({ cells: out, row: r, startCol: a });
+    let end = out.length;
+    while (end && /^\s*$/.test(out[end - 1].ch)) end--;
+    lines.push({ cells: out.slice(0, end), trail: out.slice(end), row: r, startCol: a });
   }
   return lines;
 }
@@ -303,14 +319,22 @@ export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, override
   const pieces: Piece[] = [];
   let text = '';
   let joined = false;
+  /** The break before this line deleted a soft wrap, which joins exactly. */
+  let rejoined = false;
   lines.forEach((line, i) => {
+    const next = lines[i + 1];
+    const auto = !next ? 'keep' : FIXED_BREAK[format]
+      ?? (blank(line) || blank(next) || next.row !== line.row + 1 ? 'keep' : autoBreak(scopeLines.buf, line.row));
+    const kind = overrides[i] ?? auto;
+    const rejoins = kind === 'none' && !scopeLines.block && next?.row === line.row + 1 && scopeLines.buf.row(next.row).wrapped;
     const lead = leading(line.cells);
     let strip: number;
-    if (format === 'exact') strip = joined ? lead : 0;
+    if (rejoined) strip = 0;
+    else if (format === 'exact') strip = joined ? lead : 0;
     else if (joined || format !== 'auto') strip = lead;
     else strip = line.startCol > base ? lead : Math.min(lead, base - line.startCol);
-    const cells = line.cells.slice(strip);
-    const leadRun = leading(cells);
+    const cells = rejoins ? [...line.cells.slice(strip), ...line.trail] : line.cells.slice(strip);
+    const leadRun = rejoined ? 0 : leading(cells);
     let run: Extract<Piece, { t: 'text' }> | null = null;
     cells.forEach((cell, k) => {
       const isLead = k < leadRun;
@@ -321,14 +345,11 @@ export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, override
       }
     });
     text += cells.map((c) => c.ch).join('');
-    const next = lines[i + 1];
     if (!next) return;
-    const auto = FIXED_BREAK[format]
-      ?? (blank(line) || blank(next) || next.row !== line.row + 1 ? 'keep' : autoBreak(scopeLines.buf, line.row));
-    const kind = overrides[i] ?? auto;
     pieces.push({ t: 'break', index: i, kind, auto });
     text += BREAK_TEXT[kind];
     joined = kind !== 'keep';
+    rejoined = rejoins;
   });
   return { pieces, text };
 }
@@ -390,7 +411,9 @@ function snapToWords(buf: CopyBuffer, sel: Span): Span {
     const cells = buf.row(sr).cells;
     if (isBlankCell(cells[sc])) break;
     while (sc > 0 && !isBlankCell(cells[sc - 1])) sc--;
-    if (sc <= contentStart(buf, sr) && sr > 0 && !isBlankCell(cells[sc]) && autoBreak(buf, sr - 1) === 'none') {
+    const above = buf.row(sr - 1).cells;
+    // A row a soft wrap continues keeps its trailing blank (`CopyRow`).
+    if (sc <= contentStart(buf, sr) && sr > 0 && !isBlankCell(cells[sc]) && !isBlankCell(above[above.length - 1]) && autoBreak(buf, sr - 1) === 'none') {
       sr--;
       sc = buf.row(sr).cells.length;
       continue;

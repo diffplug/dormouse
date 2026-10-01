@@ -10,7 +10,7 @@ import {
   type CopyFormat,
   type Span,
 } from './copy-text';
-import { bufferLine, CLAUDE_REPLY, fakeXterm, finalizedSelection } from './copy-text-fixtures';
+import { bufferLine, CLAUDE_REPLY, fakeXterm, finalizedSelection, WRAPPING } from './copy-text-fixtures';
 import { extractSelectionText } from './selection-text';
 
 const CLAUDE = CLAUDE_REPLY;
@@ -20,6 +20,8 @@ const claude = lines(CLAUDE, { cols: 80 });
 
 const span = (r0: number, c0: number, r1: number, c1: number, block = false): Span => ({ start: { row: r0, col: c0 }, end: { row: r1, col: c1 }, block });
 const text = (buf: CopyBuffer, s: Span, format: CopyFormat) => render(buf, s, { original: s, format }).text;
+/** {@link WRAPPING} as xterm soft-wraps it at `cols`. */
+const softWrapped = (cols: number) => lines([WRAPPING.slice(0, cols), WRAPPING.slice(cols)], { cols, wrapped: [1] });
 
 describe('copy-text formats', () => {
   const prose = span(2, 2, 5, 27);
@@ -65,6 +67,21 @@ describe('copy-text formats', () => {
     const buf = lines(['abcdefghij', 'klm'], { cols: 10, wrapped: [1] });
     expect(text(buf, span(0, 0, 1, 2), 'auto')).toBe('abcdefghijklm');
     expect(text(buf, span(0, 0, 1, 2), 'spaces')).toBe('abcdefghij klm');
+  });
+
+  it('keeps the space either side of a soft wrap', () => {
+    for (const cols of [20, 19]) {
+      const buf = softWrapped(cols);
+      const all = span(0, 0, 1, WRAPPING.length - cols - 1);
+      expect(text(buf, all, 'auto')).toBe(WRAPPING);
+      expect(text(buf, all, 'joined')).toBe(WRAPPING);
+      expect(text(buf, all, 'spaces')).toBe(WRAPPING);
+      expect(text(buf, all, 'exact')).toBe(`aaaa bbbb cccc dddd\n${cols === 20 ? '' : ' '}eeee ffff`);
+    }
+    // Mid-line, the space the next row starts with is no leading whitespace.
+    expect(render(softWrapped(19), span(0, 0, 1, 9), { original: span(0, 0, 1, 9), format: 'auto' }).pieces).not.toContainEqual(expect.objectContaining({ lead: true }));
+    // A block slab's rows end at its edge, not at the wrap.
+    expect(text(softWrapped(20), span(0, 2, 1, 4, true), 'joined')).toBe('aaee');
   });
 
   it('joins a paragraph wrapped far narrower than the terminal', () => {
@@ -121,6 +138,12 @@ describe('copy-text autoBreak', () => {
     expect([9, 10].map((r) => autoBreak(claude, r))).toEqual(['keep', 'keep']);
     expect(autoBreak(claude, 13)).toBe('none');
   });
+
+  it('judges a row without the blank a soft wrap keeps after it', () => {
+    // The box run still trails the first row, so the paragraph is 15 wide.
+    const buf = lines(['abc def ghi jkl ━━━ ', 'mnopqrstuvwx', 'yzab more'], { cols: 20, wrapped: [1] });
+    expect(autoBreak(buf, 1)).toBe('space');
+  });
 });
 
 describe('copy-text scopes', () => {
@@ -145,6 +168,12 @@ describe('copy-text scopes', () => {
   it('grows nothing from an edge resting on a blank', () => {
     // Row 2 col 22 is the space after "from"; the end grows over "race".
     expect(computeScopes(claude, span(2, 22, 2, 27))[1].span).toMatchObject({ start: { row: 2, col: 22 }, end: { row: 2, col: 28 } });
+  });
+
+  it('grows a word to a soft wrap, never across the space there', () => {
+    const buf = softWrapped(20);
+    expect(computeScopes(buf, span(0, 16, 0, 17))[1].span).toEqual(span(0, 15, 0, 18));
+    expect(computeScopes(buf, span(1, 1, 1, 2))[1].span).toEqual(span(1, 0, 1, 3));
   });
 
   it('names a growth by its grown edge', () => {
@@ -180,5 +209,11 @@ describe('copy-text terminalCopyBuffer', () => {
     expect(buf.row(0).cells).toEqual(['中', '', 'x']);
     expect(text(buf, span(0, 1, 0, 2), 'exact')).toBe('x');
     expect(text(buf, span(0, 0, 0, 2), 'exact')).toBe('中x');
+  });
+
+  it('drops the blank a wide character leaves when it wraps', () => {
+    const rows = [bufferLine([['a', 1], ['', 1]]), { ...bufferLine([['中', 2]]), isWrapped: true }];
+    const terminal = { cols: 2, buffer: { active: { length: 2, getLine: (r: number) => rows[r] } } } as unknown as Terminal;
+    expect(text(terminalCopyBuffer(terminal), span(0, 0, 1, 1), 'auto')).toBe('a中');
   });
 });

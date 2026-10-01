@@ -27,6 +27,10 @@ export const CLAUDE_REPLY: readonly string[] = [
   `╰${'─'.repeat(78)}╯`,
 ];
 
+/** Twenty-nine cells: at 20 columns the line soft-wraps after `dddd `, and at
+ *  19 before ` eeee`. */
+export const WRAPPING = 'aaaa bbbb cccc dddd eeee ffff';
+
 /** Just enough of an xterm `Terminal` over plain strings — one narrow cell
  *  per UTF-16 unit, `wrapped` rows marked as soft wraps — for the copy
  *  editor's and the selection's reads. */

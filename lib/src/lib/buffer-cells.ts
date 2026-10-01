@@ -18,3 +18,12 @@ export function readLineCells(line: IBufferLine): string[] {
   }
   return cells;
 }
+
+/** True when `line` ends in the blank xterm leaves when a wide character
+ *  wraps to `next` rather than split: padding, not text, which reflow adds
+ *  and removes. */
+export function endsInWrapPadding(line: IBufferLine, next: IBufferLine | undefined): boolean {
+  if (!next?.isWrapped) return false;
+  const last = line.getCell(line.length - 1);
+  return last?.getChars() === '' && last.getWidth() === 1 && next.getCell(0, last)?.getWidth() === 2;
+}
