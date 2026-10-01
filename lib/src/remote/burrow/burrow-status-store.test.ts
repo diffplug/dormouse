@@ -361,3 +361,52 @@ describe('an answer from an older broker', () => {
     }
   });
 });
+
+describe('a Hosted enrollment in the status', () => {
+  it('reads one waiting without republishing it, and none from a broker without the field', async () => {
+    vi.useFakeTimers();
+    let hostedEnrollment: unknown = {
+      status: 'waiting',
+      userCode: '23AB-YZ9K',
+      verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
+      expiresAt: 1_800_000_000_000,
+      accountFull: false,
+    };
+    const command = vi.fn(async () => ({
+      enrolled: false,
+      serving: false,
+      relayOrigin: 'https://relay.dormouse.sh',
+      relayMode: 'hosted',
+      burrowId: null,
+      connection: 'stopped',
+      pairedClients: 0,
+      suggestedLabel: 'ned-mac',
+      offer: false,
+      // A fresh object every answer, as the bridge delivers it.
+      ...(hostedEnrollment === undefined ? {} : { hostedEnrollment: structuredClone(hostedEnrollment) }),
+    }));
+    burrowLink = { command, respond: () => {}, notify: () => {}, on: () => () => {} };
+    const listener = vi.fn();
+    const unsubscribe = subscribeToBurrowStatus(listener);
+    const shown = () => (getBurrowStatusSnapshot() as { status: { hostedEnrollment: unknown } }).status.hostedEnrollment;
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shown()).toEqual(hostedEnrollment);
+      await vi.advanceTimersByTimeAsync(3 * 2000);
+      expect(listener).toHaveBeenCalledTimes(1);
+
+      // A reason this build does not know is a failure with no sentence.
+      hostedEnrollment = { status: 'ended', reason: 'toString' };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(shown()).toEqual({ status: 'ended', reason: 'failed' });
+
+      for (const malformed of [undefined, null, { status: 'waiting', userCode: 7 }, { status: 'gone' }]) {
+        hostedEnrollment = malformed;
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(shown(), JSON.stringify(malformed)).toBeNull();
+      }
+    } finally {
+      unsubscribe();
+    }
+  });
+});

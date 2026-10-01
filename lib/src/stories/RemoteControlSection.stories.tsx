@@ -10,6 +10,8 @@ import {
   SELF_HOST_UNENROLLED_STATUS,
   UNENROLLED_STATUS,
 } from '../host/remote/test-burrow-link';
+import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
+import type { HostedEnrollmentState } from '../host/remote/service-protocol';
 import { networkPolicyResult } from '../remote/network-policy';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
@@ -101,19 +103,103 @@ export const Choices: Story = {
 };
 
 /**
- * A stock build, Persistent Relay unfolded: its one Relay is Hosted's, coming
- * soon, so there is nothing to enroll — a Relay you run takes a build made for
- * its origin (`docs/specs/relay.md` → "Relay origin").
+ * A stock build, Persistent Relay unfolded: its one Relay is Hosted's, which
+ * it enrolls with by a code approved at the account (`docs/specs/hosted.md` →
+ * "Burrow enrollment") — the name to keep, and the button that gets one.
  */
 export const HostedPersistentRelay: Story = {
   parameters: {
     primedBurrow: { status: UNENROLLED_STATUS },
-    docs: { story: { height: '420px' } },
+    docs: { story: { height: '470px' } },
   },
   play: async ({ canvasElement }) => {
     await openPersistent(canvasElement);
-    await within(canvasElement).findByRole('button', { name: 'Use hosted.dormouse.sh' });
+    await within(canvasElement).findByRole('button', { name: 'Enroll with hosted.dormouse.sh' });
   },
+};
+
+/** A Hosted enrollment waiting at the account, as `status` reports it. */
+function hostedWaiting(accountFull = false): HostedEnrollmentState {
+  return {
+    status: 'waiting',
+    userCode: '7KQM-X4TD',
+    verificationUrl: 'https://hosted.dormouse.sh/enroll#7KQM-X4TD',
+    expiresAt: STORY_NOW + 10 * 60_000,
+    accountFull,
+  };
+}
+
+/**
+ * The code waiting for approval, in large type: the account page shows the
+ * same one beside Approve. Open opens the page the service composed; the
+ * service polls, so nothing here waits on a click but the person's.
+ */
+export const HostedEnrollWaiting: Story = {
+  parameters: {
+    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: hostedWaiting() } },
+    docs: { story: { height: '500px' } },
+  },
+  play: settled('7KQM-X4TD'),
+};
+
+/**
+ * Approved by an account that already has as many computers as it may enroll:
+ * the Relay keeps the approval, so the service polls on and this computer
+ * enrolls once one is removed.
+ */
+export const HostedEnrollAccountFull: Story = {
+  parameters: {
+    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: hostedWaiting(true) } },
+    docs: { story: { height: '540px' } },
+  },
+  play: settled(/already has as many computers/),
+};
+
+/** Approved by an account not entitled to the Hosted Relay: ended, in fixed copy. */
+export const HostedEnrollNotEntitled: Story = {
+  parameters: {
+    primedBurrow: {
+      status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'ended', reason: 'not-entitled' } },
+    },
+    docs: { story: { height: '520px' } },
+  },
+  play: settled(/can’t use the Hosted Relay/),
+};
+
+/** Nobody approved the code in time. */
+export const HostedEnrollExpired: Story = {
+  parameters: {
+    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'ended', reason: 'expired' } } },
+    docs: { story: { height: '520px' } },
+  },
+  play: settled(/expired before it was approved/),
+};
+
+/** Redeemed, and then refused here — the service's own sentence under the fixed one. */
+export const HostedEnrollFailed: Story = {
+  parameters: {
+    primedBurrow: {
+      status: {
+        ...UNENROLLED_STATUS,
+        hostedEnrollment: { status: 'ended', reason: 'failed', message: 'keychain is locked' },
+      },
+    },
+    docs: { story: { height: '540px' } },
+  },
+  play: settled('keychain is locked'),
+};
+
+/**
+ * Enrolled with Hosted: the self-host view, with the account that manages
+ * this computer a link away. Held without a socket under Local networks.
+ */
+export const HostedEnrolled: Story = {
+  parameters: {
+    primedBurrow: {
+      status: enrolledStatus({ relayOrigin: DEFAULT_RELAY_ORIGIN, relayMode: 'hosted', connection: 'stopped' }),
+    },
+  },
+  play: settled('Manage computers at hosted.dormouse.sh'),
 };
 
 /**

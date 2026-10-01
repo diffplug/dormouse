@@ -52,6 +52,7 @@ export const UNENROLLED_STATUS: BurrowConsoleStatus = {
   pairedClients: 0,
   suggestedLabel: 'ned-mac',
   offer: false,
+  hostedEnrollment: null,
 };
 
 /**

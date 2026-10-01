@@ -154,7 +154,7 @@ Source of truth: `relaySocketRoutes` in `hosted/server/relay-sockets.ts`; `relay
 
 ## Burrow enrollment
 
-A Burrow joins an account by device code, in place of the self-host setup password. The account owns the Burrow; the Burrow's own ACL still authorizes every Client. The relay serves the Burrow's two routes, the account the rest; wire types are `BurrowEnrollBeginResponse` / `BurrowEnrollPollResponse` in `remote-lib-common/src/remote/wire.ts`.
+A Burrow joins an account by device code, in place of the self-host setup password. The account owns the Burrow; the Burrow's own ACL still authorizes every Client. The relay serves the Burrow's two routes, the account the rest; wire types are `BurrowEnrollBeginResponse` / `BurrowEnrollPollResponse` in `remote-lib-common/src/remote/wire.ts`. The desktop's side is `docs/specs/relay.md` -> "Burrow side".
 
 1. The Burrow sends `{ origin }` to `POST /api/burrow/enroll/begin`. Another origin, or none, is the self-host 409 `ORIGIN_MISMATCH_ERROR`. The answer: `deviceCode`, `userCode` (`XXXX-XXXX`), `verificationUrl` (`ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`), `expiresAt` (`ENROLLMENT_TTL_MS`, 10 minutes), and `interval` (5 seconds).
 2. The user opens the link, signs in, compares the code, and approves, writing the approval `{ userCode, userId, expiresAt }`.
@@ -223,4 +223,4 @@ Source of truth: `.github/workflows/hosted-production.yml`; `productionConfig` /
 1. Deploy the configured providers and pass real production acceptance. pgstencil includes the Microsoft fix; personal and work/school callbacks need acceptance.
 2. Add per-browser login listing/revocation, sign-out-everywhere, and account recovery before broad paid use. Revisit the fixed 24-hour login lifetime for daily voice use.
 3. Managed voice beyond the admin slice: a real entitlement or licence replacing `ADMIN_EMAIL`, credentials scoped for non-admin accounts, per-account quotas, usage accounting, and spending bounds beyond the fixed daily cap, and explicit text/redaction disclosure.
-4. Hosted Relay beyond "Relay", "Relay sockets", and "Burrow enrollment": desktop enrollment — **saas-multitenant** in `docs/specs/relay.md` and **remote-network** in `docs/specs/remote-network.md`. Account login never replaces Burrow pairing and authorization. Paid security claims require independent review.
+4. Hosted Relay beyond "Relay", "Relay sockets", and "Burrow enrollment": the path rule for paired phones — **saas-multitenant** in `docs/specs/relay.md` and **remote-network** in `docs/specs/remote-network.md`. Account login never replaces Burrow pairing and authorization. Paid security claims require independent review.

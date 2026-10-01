@@ -380,8 +380,8 @@ Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
    on their own; the section then shows the Relay, the relay connection and the
    paired-device count.
 
-   A stock build shows only a disabled "Use hosted.dormouse.sh" under
-   **Persistent Relay**, with nothing to enroll: the expected symptom of a stock
+   A stock build offers only "Enroll with hosted.dormouse.sh" under
+   **Persistent Relay**, and no setup password: the expected symptom of a stock
    build, not a Relay problem.
 
 3. **The phone, and only then the code.** On the phone, open

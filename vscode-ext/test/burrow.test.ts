@@ -723,6 +723,27 @@ describe('burrow service glue', () => {
     expect(rendezvous.room().burrowUrl).toBe('wss://relay.dormouse.sh/api/one-time/burrow');
   });
 
+  it('bootstraps the contention on beginHostedEnrollment, whose service polls the approval', async () => {
+    // A Hosted build's enroll button on a machine no window has a Burrow for:
+    // refused "no Burrow is reachable", it could never be pressed.
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    mod.initBurrow(fakeContext().context);
+    expect(opened!.isPeerBroker()).toBe(false);
+
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-1', cmd: 'beginHostedEnrollment', params: { label: 'Laptop' } });
+
+    await waitFor(() => results(bound.posted).length > 0);
+    expect(opened!.isPeerBroker()).toBe(true);
+    // The service ran it and refused, a new install's network being Nothing —
+    // which is the proof it reached a service at all.
+    expect(results(bound.posted)[0]).toMatchObject({
+      burrowRequestId: 'rh-1',
+      error: expect.stringContaining('set to Nothing'),
+    });
+  });
+
   it('bootstraps the contention on setNetworkPolicy, so the service is its one writer', async () => {
     // Written from a window with no service, it would leave a service in
     // another window holding the policy it replaced.
@@ -887,6 +908,7 @@ describe('burrow service glue', () => {
           pairedClients: 0,
           suggestedLabel: `${hostname()} (VS Code)`,
           offer: true,
+          hostedEnrollment: null,
         },
       },
     ]);
@@ -1008,12 +1030,13 @@ describe('burrow service glue', () => {
     mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeStatus', cmd: 'oneTimeStatus' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-networkPolicy', cmd: 'networkPolicy' });
     mod.handleBurrowCommand({ burrowRequestId: 'rh-oneTimeEnd', cmd: 'oneTimeEnd' });
+    mod.handleBurrowCommand({ burrowRequestId: 'rh-cancelHostedEnrollment', cmd: 'cancelHostedEnrollment' });
     // No service holds a pane either, so a Take back ends nothing and the
     // strip clears itself.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-takeBack', cmd: 'takeBack', params: { holder: 'nobody' } });
     // Everything else still says there is nothing to reach.
     mod.handleBurrowCommand({ burrowRequestId: 'rh-clear', cmd: 'clearEnrollment' });
-    await waitFor(() => results(bound.posted).length === 8);
+    await waitFor(() => results(bound.posted).length === 9);
     expect(results(bound.posted).find((r) => r.burrowRequestId === 'rh-clear')).toEqual({
       burrowRequestId: 'rh-clear',
       error: 'no Burrow is reachable',
@@ -1052,6 +1075,7 @@ describe('burrow service glue', () => {
       'oneTimeStatus',
       'networkPolicy',
       'oneTimeEnd',
+      'cancelHostedEnrollment',
       'takeBack',
     ]) {
       await idle.handleCommand({ burrowRequestId: `rh-${cmd}`, cmd, params: { holder: 'nobody' } });

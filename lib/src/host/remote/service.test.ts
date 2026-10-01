@@ -43,8 +43,10 @@ vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
 });
 import {
   API_ROUTES,
+  NOT_ENTITLED_ERROR,
   ONE_TIME_WS_ROUTES,
   ORIGIN_MISMATCH_ERROR,
+  RELAY_BEARER_LENGTH,
   mintNoiseStaticKeyPair,
   parseOneTimeLinkUrl,
   parsePairingInvitationUrl,
@@ -87,7 +89,7 @@ import {
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
-import { BurrowService, type BurrowServiceOptions } from './service';
+import { BurrowService, enrollVerificationUrl, type BurrowServiceOptions } from './service';
 import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
@@ -470,6 +472,7 @@ describe('status', () => {
       pairedClients: 0,
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: false,
+      hostedEnrollment: null,
     } satisfies BurrowConsoleStatus);
   });
 
@@ -513,6 +516,7 @@ describe('status', () => {
       pairedClients: 0,
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: true,
+      hostedEnrollment: null,
     } satisfies BurrowConsoleStatus);
     // The one-time token is a bearer credential and this is a service→webview
     // shape (docs/specs/security-remote.md -> "Trust boundary"), so it must not appear anywhere in what was sent.
@@ -545,6 +549,7 @@ describe('status', () => {
       pairedClients: 1,
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: false,
+      hostedEnrollment: null,
     } satisfies BurrowConsoleStatus);
   });
 
@@ -584,7 +589,8 @@ describe('status', () => {
 
 describe('enroll', () => {
   it('refuses in a Hosted build, before the setup password leaves the machine', async () => {
-    // Its one Relay is Hosted's, which enrolls no Burrow yet (docs/specs/relay.md → "Relay origin").
+    // Hosted takes no setup password: its build enrolls by device code
+    // (docs/specs/relay.md → "Relay origin").
     createHostedService();
     const result = await command('enroll', { password: 'setup', label: 'Laptop' });
 
@@ -2403,5 +2409,362 @@ describe('network policy', () => {
       expect(((await command('networkPolicy')).result as { policy: NetworkPolicy }).policy).toEqual(RELAY_ON);
       expect(policyEvents()).toEqual([]);
     });
+  });
+});
+
+describe('Hosted enrollment', () => {
+  const USER_CODE = '23AB-YZ9K';
+  const DEVICE_CODE = 'D'.repeat(RELAY_BEARER_LENGTH);
+  const INTERVAL_S = 5;
+  const TTL_MS = 10 * 60_000;
+
+  /** What the fake Hosted Relay's begin answers, and its queue of poll answers. */
+  let begin: Record<string, unknown>;
+  let polls: Array<{ status: number; body: unknown } | Error>;
+
+  const reply = (status: number, body: unknown) =>
+    ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    }) as Response;
+
+  /** `relay.dormouse.sh` serving begin and poll; an empty poll queue is `pending`. */
+  function hostedFetch(): typeof globalThis.fetch {
+    return (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, init });
+      if (url.endsWith(API_ROUTES.burrowEnrollBegin)) return reply(200, begin);
+      if (url.endsWith(API_ROUTES.burrowEnrollPoll)) {
+        const next = polls.shift() ?? { status: 200, body: { status: 'pending' } };
+        if (next instanceof Error) throw next;
+        return reply(next.status, next.body);
+      }
+      throw new Error(`unexpected request ${url}`);
+    }) as unknown as typeof globalThis.fetch;
+  }
+
+  const enrolledAnswer = () => ({
+    status: 200,
+    body: {
+      status: 'enrolled',
+      enrollment: {
+        burrowId: BURROW_ID,
+        burrowToken: 'hosted-token',
+        origin: HOSTED_ORIGIN,
+        rpId: new URL(HOSTED_ORIGIN).hostname,
+      },
+    },
+  });
+
+  function hosted(seed?: Seed, over: Partial<BurrowServiceOptions> = {}): BurrowService {
+    return createHostedService(seed, { fetch: hostedFetch(), ...over });
+  }
+
+  const pollRequests = () => requests.filter((request) => request.url.endsWith(API_ROUTES.burrowEnrollPoll));
+
+  async function hostedEnrollment(): Promise<unknown> {
+    return ((await command('status')).result as BurrowConsoleStatus).hostedEnrollment;
+  }
+
+  /** Let the work a fired timer started finish: fetches, WebCrypto, the store. */
+  async function drain(until: () => boolean): Promise<void> {
+    for (let turn = 0; turn < 500 && !until(); turn += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+
+  /** Fire the next poll and wait for it to have asked. */
+  async function nextPoll(): Promise<void> {
+    const asked = pollRequests().length;
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 1000);
+    await drain(() => pollRequests().length > asked);
+    // And for what the answer started.
+    for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    begin = {
+      deviceCode: DEVICE_CODE,
+      userCode: USER_CODE,
+      // Followed in no release build: the account page is the Burrow's to compose.
+      verificationUrl: `https://hosted.example/enroll#${USER_CODE}`,
+      expiresAt: Date.now() + TTL_MS,
+      interval: INTERVAL_S,
+    };
+    polls = [];
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('begins at the baked origin and shows a code it composed the account page for, never the device code', async () => {
+    hosted();
+    const { result, error } = await command('beginHostedEnrollment', { label: 'Work laptop' });
+
+    expect(error).toBeUndefined();
+    const waiting = {
+      status: 'waiting',
+      userCode: USER_CODE,
+      verificationUrl: `https://hosted.dormouse.sh/enroll#${USER_CODE}`,
+      expiresAt: Date.now() + TTL_MS,
+      accountFull: false,
+    };
+    expect(result).toEqual(waiting);
+    expect(requests.map((request) => request.url)).toEqual([`${HOSTED_ORIGIN}${API_ROUTES.burrowEnrollBegin}`]);
+    expect(requestBody(0)).toEqual({ origin: HOSTED_ORIGIN });
+    expect(await hostedEnrollment()).toEqual(waiting);
+    expect(statusEvents()).toEqual([false]);
+    // The device code is a bearer, held like `burrowToken`.
+    expect(JSON.stringify(sent)).not.toContain(DEVICE_CODE);
+  });
+
+  it('polls every interval and holds the enrollment it redeems, under Local networks without a socket', async () => {
+    hosted();
+    await service.start();
+    await command('beginHostedEnrollment', { label: 'Work laptop' });
+
+    await nextPoll();
+    expect(pollRequests()).toHaveLength(1);
+    expect(JSON.parse(pollRequests()[0]!.init!.body as string)).toEqual({ deviceCode: DEVICE_CODE });
+    expect(pollRequests()[0]!.init!.redirect).toBe('error');
+
+    polls.push(enrolledAnswer());
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+
+    expect(store.enrollment).toMatchObject({
+      relayUrl: HOSTED_ORIGIN,
+      burrowId: BURROW_ID,
+      burrowToken: 'hosted-token',
+      origin: HOSTED_ORIGIN,
+      label: 'Work laptop',
+    });
+    expect(store.enrollment?.noiseStaticPublicKey).toEqual(expect.any(String));
+    expect((await command('status')).result).toMatchObject({
+      enrolled: true,
+      connection: 'stopped',
+      hostedEnrollment: null,
+    });
+    expect(statusEvents().at(-1)).toBe(true);
+    // Only `relay` runs the persistent Burrow, and polling is over.
+    expect(sockets).toEqual([]);
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(2);
+  });
+
+  it('is refused in a self-host build, and under Nothing, before any request', async () => {
+    createService({ network: RELAY_ON }, { fetch: hostedFetch() });
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('setup password');
+
+    hosted({ network: NOTHING });
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('set to Nothing');
+    expect(requests).toEqual([]);
+  });
+
+  it('refuses a begin answer that is not an enrollment code, waiting on nothing', async () => {
+    begin = { ...begin, interval: 0 };
+    hosted();
+
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('not an enrollment code');
+    expect(await hostedEnrollment()).toBeNull();
+  });
+
+  it('ends on an account not entitled, and polls on through a full one, which the Relay keeps', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 409, body: { error: 'this account already has 32 computers enrolled' } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', accountFull: true });
+
+    // A computer removed at the account, and the kept approval redeems.
+    polls.push(enrolledAnswer());
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+    expect(store.enrollment?.burrowId).toBe(BURROW_ID);
+
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 403, body: { error: NOT_ENTITLED_ERROR } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'not-entitled' });
+    const asked = pollRequests().length;
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(asked);
+  });
+
+  it('keeps polling through an unreachable Relay and a 5xx, and slows down on a 429', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push(new Error('offline'), { status: 503, body: {} }, { status: 429, body: {} });
+    await nextPoll();
+    await nextPoll();
+    await nextPoll();
+    expect(pollRequests()).toHaveLength(3);
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting' });
+
+    // The interval grew by five seconds.
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 1000);
+    await drain(() => false);
+    expect(pollRequests()).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await drain(() => pollRequests().length > 3);
+    expect(pollRequests()).toHaveLength(4);
+  });
+
+  it('ends at the Relay’s expired, and at its own deadline', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 200, body: { status: 'expired' } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+
+    // A Relay whose code would outlive the bound is held to it by this clock.
+    begin = { ...begin, expiresAt: Date.now() + 24 * 60 * 60_000 };
+    const { result } = await command('beginHostedEnrollment', { label: 'x' });
+    expect((result as { expiresAt: number }).expiresAt).toBe(Date.now() + 15 * 60_000);
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    await drain(() => false);
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+    const asked = pollRequests().length;
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(asked);
+  });
+
+  it('stops polling on cancel, on Nothing, and on dispose', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    expect((await command('cancelHostedEnrollment')).result).toEqual({});
+    expect(await hostedEnrollment()).toBeNull();
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toEqual([]);
+
+    await command('beginHostedEnrollment', { label: 'x' });
+    await setPolicy(NOTHING);
+    expect(await hostedEnrollment()).toBeNull();
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toEqual([]);
+
+    await setPolicy(LOCAL_ON);
+    await command('beginHostedEnrollment', { label: 'x' });
+    expect(vi.getTimerCount()).toBe(1);
+    service.dispose();
+    // No timer left to ask, even of a transport that would refuse it.
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toEqual([]);
+  });
+
+  it('keeps nothing a poll in flight redeems after a cancel', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    let answer: (response: Response) => void = () => {};
+    const inFlight = new Promise<Response>((resolve) => {
+      answer = resolve;
+    });
+    const fetch = hostedFetch();
+    service.dispose();
+    hosted(undefined, {
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) =>
+        String(input).endsWith(API_ROUTES.burrowEnrollPoll)
+          ? (requests.push({ url: String(input), init }), inFlight)
+          : fetch(input, init)) as typeof globalThis.fetch,
+    });
+    await command('beginHostedEnrollment', { label: 'x' });
+    await nextPoll();
+    await command('cancelHostedEnrollment');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    answer(reply(200, enrolledAnswer().body));
+    await drain(() => warn.mock.calls.length > 0);
+
+    expect(store.enrollment).toBeNull();
+    expect(await hostedEnrollment()).toBeNull();
+    expect(String(warn.mock.calls[0]![0])).toContain(BURROW_ID);
+    warn.mockRestore();
+  });
+
+  it('refuses a redemption for another origin, saving nothing, and says so', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const answer = enrolledAnswer();
+    (answer.body.enrollment as { origin: string }).origin = 'https://relay.example.com';
+    polls.push(answer);
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+
+    expect(store.enrollment).toBeNull();
+    expect(await hostedEnrollment()).toEqual({
+      status: 'ended',
+      reason: 'failed',
+      message: expect.stringContaining('The Relay says its origin is https://relay.example.com'),
+    });
+  });
+
+  it('ends failed when the redeemed enrollment cannot be saved', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    store.saveEnrollment = async () => {
+      throw new Error('keychain is locked');
+    };
+    polls.push(enrolledAnswer());
+    await nextPoll();
+
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'failed', message: 'keychain is locked' });
+    expect((await command('status')).result).toMatchObject({ enrolled: false });
+  });
+
+  it('replaces one waiting with the next begin', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    await command('beginHostedEnrollment', { label: 'x' });
+    await nextPoll();
+
+    expect(pollRequests()).toHaveLength(1);
+    expect(JSON.parse(pollRequests()[0]!.init!.body as string)).toEqual({ deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH) });
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+  });
+});
+
+describe('enrollVerificationUrl', () => {
+  const code = '23AB-YZ9K';
+  const release = { origin: HOSTED_ORIGIN, mode: 'hosted' } as const;
+  const dev = { origin: 'http://localhost:8787', mode: 'hosted' } as const;
+
+  it('composes the account page in a release build, whatever the Relay names', () => {
+    for (const verificationUrl of [undefined, `https://hosted.example/enroll#${code}`, 'javascript:alert(1)']) {
+      expect(enrollVerificationUrl(release, { userCode: code, verificationUrl })).toBe(
+        `https://hosted.dormouse.sh/enroll#${code}`,
+      );
+    }
+  });
+
+  it('follows the Relay’s account origin in a dev build, held to the link’s checks', () => {
+    expect(enrollVerificationUrl(dev, { userCode: code, verificationUrl: `http://localhost:5173/enroll#${code}` }))
+      .toBe(`http://localhost:5173/enroll#${code}`);
+    expect(enrollVerificationUrl(dev, { userCode: code, verificationUrl: `https://hosted-pr-7.example.dev/enroll#${code}` }))
+      .toBe(`https://hosted-pr-7.example.dev/enroll#${code}`);
+    for (const verificationUrl of [
+      undefined,
+      `http://192.168.1.4:5173/enroll#${code}`,
+      `https://hosted.example/account#${code}`,
+      `https://hosted.example/enroll?x=1#${code}`,
+      `https://user@hosted.example/enroll#${code}`,
+      `https://hosted.example/enroll#9999-ZZZZ`,
+      `https://hosted.example/enroll#${code}x`,
+      `javascript:alert(1)//enroll#${code}`,
+    ]) {
+      expect(() => enrollVerificationUrl(dev, { userCode: code, verificationUrl }), String(verificationUrl)).toThrow(
+        /named no account page/,
+      );
+    }
+  });
+
+  it('composes none in a self-host build', () => {
+    expect(() => enrollVerificationUrl({ origin: ORIGIN, mode: 'self-host' }, { userCode: code })).toThrow(
+      /setup password/,
+    );
   });
 });

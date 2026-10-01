@@ -34,12 +34,18 @@ vi.mock('./QrCode', async (importOriginal) => {
 });
 
 import { ONE_TIME_OUTCOME_LABEL, oneTimeEndedCopy } from './OneTimeConnection';
-import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
+import {
+  HOSTED_ENROLLMENT_CODE_LABEL,
+  HOSTED_ENROLLMENT_ENDED_COPY,
+  PAIRING_OUTCOME_LABEL,
+  RemoteControlSection,
+} from './RemoteControlSection';
 import { hostOf } from './remote-control-shared';
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import {
   isOneTimeState,
   type BurrowConsoleStatus,
+  type HostedEnrollmentState,
   type SetupQrResult,
 } from '../host/remote/service-protocol';
 import {
@@ -86,6 +92,31 @@ function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
     expiresAt: NOW + 300_000,
     ...over,
   };
+}
+
+/** A Hosted enrollment waiting for approval, ten minutes out. */
+function hostedWaiting(over: { accountFull?: boolean } = {}): HostedEnrollmentState {
+  return {
+    status: 'waiting',
+    userCode: '23AB-YZ9K',
+    verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
+    expiresAt: Date.now() + 10 * 60_000,
+    accountFull: over.accountFull ?? false,
+  };
+}
+
+/** The code a waiting Hosted enrollment shows, by its accessible name. */
+function codeShown(): string | null {
+  return container.querySelector(`[aria-label="${HOSTED_ENROLLMENT_CODE_LABEL}"]`)?.textContent ?? null;
+}
+
+/** The name-and-button form a Hosted build begins with, always mounted once unfolded. */
+function hostedForm(): HTMLFormElement {
+  const form = [...container.querySelectorAll('form')].find((candidate) =>
+    candidate.textContent?.includes('Name for this Burrow'),
+  );
+  if (!form) throw new Error('the Hosted enroll form is not mounted');
+  return form;
 }
 
 /** The shared fixture, keeping this file's own Relay/burrow values. */
@@ -286,23 +317,119 @@ describe('RemoteControlSection', () => {
     await openPersistent();
     expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('true');
     expect(persistentPanel().hidden).toBe(false);
-    // Its one Relay is Hosted's (docs/specs/relay.md → "Relay origin"): no form,
-    // no offer card, and the self-host path named as a build.
-    expect(container.querySelector('form')).toBeNull();
+    // Its one Relay is Hosted's (docs/specs/relay.md → "Relay origin"): no
+    // password form, no offer card, and the self-host path named as a build.
+    expect(container.querySelector('input[type="password"]')).toBeNull();
     expect(buttonLabelled('Connect')).toBeUndefined();
     expect(text()).toContain('A self-hosted Relay takes a Dormouse built for its address.');
     await act(async () => buttonLabelled('self-hosted Relay')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/self-host/');
   });
 
-  it('offers hosted.dormouse.sh as coming soon, linking the Hosted preview', async () => {
-    const openExternal = vi.fn();
-    platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
+  it('begins a Hosted enrollment under the name typed for this machine', async () => {
+    let status: BurrowConsoleStatus = NOT_ENROLLED;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'beginHostedEnrollment') {
+        status = { ...NOT_ENROLLED, hostedEnrollment: hostedWaiting() };
+        return status.hostedEnrollment;
+      }
+      return status;
+    });
+    platform = { burrow: link };
     await render();
     await openPersistent();
-    expect(buttonLabelled('Use hosted.dormouse.sh')!.disabled).toBe(true);
-    await act(async () => buttonLabelled('Get updates on Hosted.')!.click());
-    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/#remote-control');
+    expect(hostedForm().hidden).toBe(false);
+    await type('input:not([type])', 'Work laptop');
+
+    await act(async () => buttonLabelled('Enroll with hosted.dormouse.sh')!.click());
+
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'Work laptop' });
+    expect(codeShown()).toBe('23AB-YZ9K');
+    // Hidden while the code waits, never unmounted: what was typed survives.
+    expect(hostedForm().hidden).toBe(true);
+  });
+
+  it('shows the code waiting in large type, opens the account page the service composed, and cancels', async () => {
+    const openExternal = vi.fn();
+    const link = makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: hostedWaiting() }));
+    platform = { burrow: link, openExternal };
+    await render();
+
+    // Unfolded from the start: the dialog reopened on a code waiting.
+    expect(persistentPanel().hidden).toBe(false);
+    expect(codeShown()).toBe('23AB-YZ9K');
+    expect(text()).toContain('Expires in 10 min.');
+    expect(text()).not.toContain('already has as many computers');
+    await act(async () => buttonLabelled('Open hosted.dormouse.sh to approve')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/enroll#23AB-YZ9K');
+
+    await act(async () => buttonLabelled('Cancel')!.click());
+    expect(link.command).toHaveBeenCalledWith('cancelHostedEnrollment');
+  });
+
+  it('says a full account enrolls on its own once a computer is removed there', async () => {
+    const openExternal = vi.fn();
+    platform = {
+      burrow: makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: hostedWaiting({ accountFull: true }) })),
+      openExternal,
+    };
+    await render();
+
+    expect(text()).toContain('That account already has as many computers as it can enroll.');
+    await act(async () => buttonLabelled('Remove one')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
+  });
+
+  it('says in fixed copy why an enrollment ended, and offers a new code or Done', async () => {
+    let ended: HostedEnrollmentState = { status: 'ended', reason: 'not-entitled' };
+    const link = makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: ended }));
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY['not-entitled']);
+
+    ended = { status: 'ended', reason: 'expired' };
+    await act(async () => refreshBurrowStatus());
+    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY.expired);
+
+    ended = { status: 'ended', reason: 'failed', message: 'keychain is locked' };
+    await act(async () => refreshBurrowStatus());
+    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY.failed);
+    expect(text()).toContain('keychain is locked');
+
+    await act(async () => buttonLabelled('Get a new code')!.click());
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: NOT_ENROLLED.suggestedLabel });
+    await act(async () => buttonLabelled('Done')!.click());
+    expect(link.command).toHaveBeenCalledWith('cancelHostedEnrollment');
+  });
+
+  it('shows a refused begin where the button is', async () => {
+    platform = {
+      burrow: makeLink(async (cmd) => {
+        if (cmd === 'beginHostedEnrollment') throw new Error('Settings → Network is set to Nothing');
+        return NOT_ENROLLED;
+      }),
+    };
+    await render();
+    await openPersistent();
+    await act(async () => buttonLabelled('Enroll with hosted.dormouse.sh')!.click());
+    expect(text()).toContain('Settings → Network is set to Nothing');
+  });
+
+  it('links a Hosted enrollment to the account that manages it, and a self-host one to nothing', async () => {
+    const openExternal = vi.fn();
+    platform = {
+      burrow: makeLink(async () => enrolled({ relayOrigin: DEFAULT_RELAY_ORIGIN, relayMode: 'hosted' })),
+      openExternal,
+    };
+    await render();
+    await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
+    await act(async () => root.unmount());
+
+    root = createRoot(container);
+    platform = { burrow: makeLink(async () => enrolled()) };
+    await render();
+    expect(buttonLabelled('Manage computers at hosted.dormouse.sh')).toBeUndefined();
   });
 
   it('offers a self-host build its form under the origin it was built for, and no Hosted button', async () => {
@@ -314,7 +441,7 @@ describe('RemoteControlSection', () => {
     expect(typedForm().textContent).toContain(SELF_HOST_RELAY_ORIGIN);
     // The origin is named, never typed: no field for it.
     expect(container.querySelector('input[type="url"]')).toBeNull();
-    expect(buttonLabelled('Use hosted.dormouse.sh')).toBeUndefined();
+    expect(buttonLabelled('Enroll with hosted.dormouse.sh')).toBeUndefined();
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
 

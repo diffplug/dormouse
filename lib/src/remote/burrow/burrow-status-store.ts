@@ -18,6 +18,7 @@
 
 import {
   servingOf,
+  type HostedEnrollmentState,
   type InvitationEvent,
   type PushSendSummary,
   type BurrowConsoleStatus,
@@ -110,6 +111,9 @@ const STATUS_FIELDS: {
   pairedClients: Object.is,
   suggestedLabel: Object.is,
   offer: Object.is,
+  // A fresh object every poll, so field by field: a reference compare would
+  // republish every 2 s while a code waits.
+  hostedEnrollment: (a, b) => JSON.stringify(a) === JSON.stringify(b),
 };
 
 function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
@@ -258,8 +262,32 @@ function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
     relayOrigin: status.relayOrigin ?? (typeof relayUrl === 'string' ? relayUrl : ''),
     relayMode: status.relayMode === 'self-host' ? 'self-host' : 'hosted',
     offer: Boolean(status.offer),
+    hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment),
   };
 }
+
+/**
+ * A `hostedEnrollment` as this build can draw it, or `null` — absent from a
+ * broker older than the field, or of a shape this build does not know. Built
+ * field by field, in a fixed order, which {@link STATUS_FIELDS} compares on.
+ */
+function hostedEnrollmentOf(value: unknown): HostedEnrollmentState | null {
+  if (!value || typeof value !== 'object') return null;
+  const state = value as Record<string, unknown>;
+  if (state.status === 'waiting') {
+    const { userCode, verificationUrl, expiresAt } = state;
+    return typeof userCode === 'string' && typeof verificationUrl === 'string' && typeof expiresAt === 'number'
+      ? { status: 'waiting', userCode, verificationUrl, expiresAt, accountFull: state.accountFull === true }
+      : null;
+  }
+  if (state.status !== 'ended') return null;
+  const reason = HOSTED_ENROLLMENT_END_REASONS.find((known) => known === state.reason) ?? 'failed';
+  return typeof state.message === 'string'
+    ? { status: 'ended', reason, message: state.message }
+    : { status: 'ended', reason };
+}
+
+const HOSTED_ENROLLMENT_END_REASONS = ['expired', 'not-entitled', 'failed'] as const;
 
 async function readBurrowStatus(): Promise<void> {
   const active = burrowLink();
@@ -307,6 +335,28 @@ export async function enrollBurrow(password: string, label: string): Promise<voi
 export async function enrollOfferBurrow(label: string): Promise<void> {
   const active = requireBurrowLink();
   await active.command('enrollOffer', { label });
+  await refreshAfterMutation();
+}
+
+/**
+ * Begin a Hosted build's device-code enrollment under `label`; the service
+ * polls it and reports through `status` (`HostedEnrollmentState`). Rejections
+ * propagate verbatim — the caller renders them. Re-reads either way, since a
+ * begin replaces whatever enrollment was waiting or ended.
+ */
+export async function beginHostedEnrollment(label: string): Promise<void> {
+  const active = requireBurrowLink();
+  try {
+    await active.command('beginHostedEnrollment', { label });
+  } finally {
+    await refreshAfterMutation();
+  }
+}
+
+/** Stop the Hosted enrollment waiting or ended, and re-read. */
+export async function cancelHostedEnrollment(): Promise<void> {
+  const active = requireBurrowLink();
+  await active.command('cancelHostedEnrollment');
   await refreshAfterMutation();
 }
 

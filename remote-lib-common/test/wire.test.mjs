@@ -22,6 +22,10 @@ import {
   isE2eId,
   isE2eRelayToBurrowFrame,
   isSetupTokenResponse,
+  isBurrowEnrollBeginResponse,
+  MAX_ENROLL_POLL_INTERVAL_S,
+  MIN_ENROLL_POLL_INTERVAL_S,
+  RELAY_BEARER_LENGTH,
   pushSubscriptionDeletePath,
 } from '../dist/index.js';
 
@@ -298,4 +302,43 @@ test('enrollUserCode is the HMAC of the device code, five bits a character, past
     '2Z34-5678',
   );
   await assert.rejects(enrollUserCode(secret, deviceCode, fake(macOf([0, 1, 2, 3, 4, 5, 6]))), /No user code/);
+});
+
+test('isBurrowEnrollBeginResponse holds each field to its shape and bounds', () => {
+  const begin = {
+    deviceCode: 'D'.repeat(RELAY_BEARER_LENGTH),
+    userCode,
+    verificationUrl: `https://hosted.dormouse.sh/enroll#${userCode}`,
+    expiresAt: 1_800_000_000_000,
+    interval: 5,
+  };
+  assert.ok(isBurrowEnrollBeginResponse(begin));
+  // A deployment naming no account origin sends no verificationUrl.
+  const { verificationUrl: _omitted, ...bare } = begin;
+  assert.ok(isBurrowEnrollBeginResponse(bare));
+  assert.ok(isBurrowEnrollBeginResponse({ ...begin, interval: MIN_ENROLL_POLL_INTERVAL_S }));
+  assert.ok(isBurrowEnrollBeginResponse({ ...begin, interval: MAX_ENROLL_POLL_INTERVAL_S }));
+  for (const wrong of [
+    null,
+    'begin',
+    { ...begin, deviceCode: undefined },
+    { ...begin, deviceCode: 'D'.repeat(RELAY_BEARER_LENGTH - 1) },
+    { ...begin, deviceCode: `${'D'.repeat(RELAY_BEARER_LENGTH - 1)}=` },
+    { ...begin, userCode: undefined },
+    { ...begin, userCode: '23ab-yz9k' },
+    { ...begin, userCode: '23ABYZ9K' },
+    { ...begin, verificationUrl: 7 },
+    { ...begin, verificationUrl: `https://hosted.dormouse.sh/enroll#${'x'.repeat(512)}` },
+    { ...begin, expiresAt: undefined },
+    { ...begin, expiresAt: '1800000000000' },
+    { ...begin, expiresAt: Number.POSITIVE_INFINITY },
+    { ...begin, expiresAt: 0 },
+    { ...begin, interval: undefined },
+    { ...begin, interval: '5' },
+    { ...begin, interval: 2.5 },
+    { ...begin, interval: MIN_ENROLL_POLL_INTERVAL_S - 1 },
+    { ...begin, interval: MAX_ENROLL_POLL_INTERVAL_S + 1 },
+  ]) {
+    assert.equal(isBurrowEnrollBeginResponse(wrong), false, JSON.stringify(wrong));
+  }
 });

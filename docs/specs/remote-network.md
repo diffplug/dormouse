@@ -27,7 +27,7 @@
 
 - **The Burrow service's socket factory, fetch, and direct-peer factory refuse at the call while the level is `nothing` or unread, and once the service is disposed** — the socket factory throws (a runtime reads it as a closed socket), fetch rejects, the peer factory answers `null` — so a path that forgets its own check still opens nothing. Everything the service opens, the enrollment exchange included, goes through them; the checks below stay, for the error a person reads.
 - **The Burrow service never opens the relay socket**, the enrollment held as above, so push, the device list, a test push, and setup codes, which need a running Burrow, make no request.
-- **It refuses `enroll` and `enrollOffer` before any request**, the offer file unread.
+- **It refuses `enroll`, `enrollOffer`, and `beginHostedEnrollment` before any request**, the offer file unread, and a change to `nothing` ends a Hosted enrollment awaiting approval.
 - **It offers no one-time link**: the resting state is `unavailable` with reason `network-off`, and `oneTimeOpen` is refused, as under `local` with no network allowed.
 - **Managed voice asks the service before every speak** and answers `network-off` without a request.
 
@@ -101,7 +101,7 @@ Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connecti
 **Scope: remote-network** — build in order:
 
 1. **Anywhere on a phone**: **Must measure iOS Safari's offer size and gathering time, and the Burrow with STUN blocked**, before changing a budget.
-2. **Hosted persistent**: desktop enrollment and the path rule for paired phones, beyond the routes, push, and sockets in `docs/specs/hosted.md` -> "Relay", "Relay sockets", and "Burrow enrollment", with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`, the push row among them with desktop enrollment; Local networks and Anywhere then cover paired phones.
+2. **Hosted persistent**: the path rule for paired phones, beyond the routes, push, sockets, and enrollment in `docs/specs/hosted.md` -> "Relay", "Relay sockets", and "Burrow enrollment", with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`, the push row among them; Local networks and Anywhere then cover paired phones.
 
 ### Allowed networks
 
@@ -112,5 +112,4 @@ Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connecti
 - **Under Local networks a paired phone's session is direct-only**, with the one-time rule: an application message off the Relay ends it unread. **May fall back to Hosted relaying under Anywhere.**
 - **Must choose Pocket's direct-peer factory by deployment** ("Anywhere"), one bundle serving both; `lib/src/remote/pocket-app/App.tsx` hard-codes `selfHostDirectPeer`.
 - **Must start `BurrowRuntime` on the level's `directPeeringFor`, restarting it on any change `samePaths` sees** ("Anywhere").
-- **Must enroll a Hosted build's Burrow by device code from the service** (`docs/specs/hosted.md` -> "Burrow enrollment"): begin and poll every `interval`, validate the begin answer, show the user code, and stop on `NOT_ENTITLED_ERROR`. The Burrow composes the verification URL itself from `ENROLL_PAGE_PATH` and the user code, never trusting the Relay's `verificationUrl`, and opens it only on the user's click and only at `https://hosted.dormouse.sh` in a release Hosted build; a dev Hosted build may follow the `verificationUrl` origin, as `DORMOUSE_RELAY_IS_HOSTED` relaxes the relay origin. `isEnrollment` in `lib/src/remote/burrow/enrollment.ts` stays the one guard of the enrollment shape.
 - **Never enroll Hosted into a customer's tailnet** or mint per-customer hostnames.

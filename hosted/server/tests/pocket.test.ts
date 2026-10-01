@@ -6,6 +6,7 @@ import {
   WS_ROUTES,
   fromBase64Url,
   isEnrollUserCode,
+  isBurrowEnrollBeginResponse,
   isRelayBearer,
   pocketContentSecurityPolicy,
   toBase64Url,
@@ -189,7 +190,10 @@ test("only a Node Burrow begins or polls an enrollment, per-address limited, and
   // a code whose expiry it carries; an expired code is answered the same way.
   const begun = await post(API_ROUTES.burrowEnrollBegin, { origin }, { "cf-connecting-ip": "192.0.2.4" });
   expect(begun.status).toBe(200);
-  const { deviceCode, userCode } = (await begun.json()) as { deviceCode: string; userCode: string };
+  const answer = await begun.json();
+  // What the desktop's Burrow holds an answer to before it polls.
+  expect(isBurrowEnrollBeginResponse(answer)).toBe(true);
+  const { deviceCode, userCode } = answer as { deviceCode: string; userCode: string };
   expect(isRelayBearer(deviceCode) && isEnrollUserCode(userCode)).toBe(true);
   const expired = fromBase64Url(deviceCode);
   expired.set([0, 0, 0, 1]);

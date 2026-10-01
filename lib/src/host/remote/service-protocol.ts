@@ -300,6 +300,16 @@ export interface EnrollOfferParams {
   label: string;
 }
 
+/**
+ * A Hosted build's device-code enrollment (`docs/specs/hosted.md` -> "Burrow
+ * enrollment"): `beginHostedEnrollment` takes the name to keep for this
+ * machine, and the service does the rest, reporting through `status`
+ * ({@link HostedEnrollmentState}). No origin and no URL: both are the build's.
+ */
+export interface HostedEnrollParams {
+  label: string;
+}
+
 /** `kind`, `clientId`, and `pairingId` echo the {@link PairingQueueItem} the modal displayed. */
 export interface ApproveParams {
   /** Read through {@link approvalKind}: absent is a `pairing`. */
@@ -384,6 +394,29 @@ export interface SetupQrResult {
 }
 
 /**
+ * Why a Hosted enrollment stopped short of enrolling, each read as fixed copy
+ * but `failed`, which carries the service's sentence. A reason this build does
+ * not know reads as `failed` with no sentence.
+ */
+export type HostedEnrollmentEndReason = 'expired' | 'not-entitled' | 'failed';
+
+/**
+ * A Hosted build's device-code enrollment as `status` reports it: `waiting`
+ * for the account to approve `userCode`, or `ended` without an enrollment,
+ * until the next begin or a cancel. A success reports none: `enrolled` says it.
+ * `accountFull` is an approval the account cannot redeem until it removes a
+ * computer, which the Relay keeps, so the service polls on.
+ *
+ * **Never the device code**, which is a bearer the service holds as it holds
+ * `burrowToken` (`docs/specs/security-remote.md` -> "Trust boundary").
+ * `verificationUrl` is the account page the service composed, which the panel
+ * opens on a click; `expiresAt` is this machine's clock.
+ */
+export type HostedEnrollmentState =
+  | { status: 'waiting'; userCode: string; verificationUrl: string; expiresAt: number; accountFull: boolean }
+  | { status: 'ended'; reason: HostedEnrollmentEndReason; message?: string };
+
+/**
  * What `window.dormouseBurrow.status()` prints. `docs/specs/relay.md`
  * documents the console hook, so these field names are user-facing surface.
  */
@@ -420,6 +453,11 @@ export interface BurrowConsoleStatus {
    * the no-`burrowToken`-in-a-webview FAIL IF).
    */
   offer: boolean;
+  /**
+   * The device-code enrollment in a Hosted build, or `null` where none was
+   * begun since the last cancel or success, and always in a self-host build.
+   */
+  hostedEnrollment: HostedEnrollmentState | null;
 }
 
 /**

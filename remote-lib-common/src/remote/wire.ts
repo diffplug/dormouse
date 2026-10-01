@@ -12,6 +12,7 @@ import {
   isExactBase64Url,
 } from '../security/bytes.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
+import { isEnrollUserCode } from './enroll-code.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
@@ -382,6 +383,40 @@ export interface BurrowEnrollBeginResponse {
   expiresAt: number;
   /** Seconds the Burrow waits between polls. */
   interval: number;
+}
+
+/** The shortest poll interval a Burrow accepts, in seconds. */
+export const MIN_ENROLL_POLL_INTERVAL_S = 1;
+/** The longest, which also caps a Burrow slowing down after a 429. */
+export const MAX_ENROLL_POLL_INTERVAL_S = 60;
+/** The longest `verificationUrl` a Burrow reads; Hosted's is under fifty characters. */
+const MAX_ENROLL_VERIFICATION_URL_LENGTH = 512;
+
+/**
+ * Structural validation of a {@link BurrowEnrollBeginResponse}, beside the type
+ * so a field added here cannot be silently accepted by the Burrow that reads
+ * one. The device code is a bearer, the user code goes on screen in large
+ * type, and `interval` and `expiresAt` go straight into timers, so each is
+ * held to its shape and bounds: an integer `interval` of
+ * {@link MIN_ENROLL_POLL_INTERVAL_S}–{@link MAX_ENROLL_POLL_INTERVAL_S} seconds,
+ * a finite positive `expiresAt`. `verificationUrl` is only bounded: the Burrow
+ * composes the URL it opens (`docs/specs/hosted.md` -> "Burrow enrollment").
+ */
+export function isBurrowEnrollBeginResponse(value: unknown): value is BurrowEnrollBeginResponse {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  const { interval, expiresAt, verificationUrl } = candidate;
+  return (
+    isRelayBearer(candidate.deviceCode) &&
+    isEnrollUserCode(candidate.userCode) &&
+    (verificationUrl === undefined || isBoundedString(verificationUrl, MAX_ENROLL_VERIFICATION_URL_LENGTH)) &&
+    typeof expiresAt === 'number' &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > 0 &&
+    Number.isInteger(interval) &&
+    (interval as number) >= MIN_ENROLL_POLL_INTERVAL_S &&
+    (interval as number) <= MAX_ENROLL_POLL_INTERVAL_S
+  );
 }
 
 export interface BurrowEnrollPollRequest {
