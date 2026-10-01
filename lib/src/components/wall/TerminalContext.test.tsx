@@ -9,7 +9,7 @@ import { TerminalContext } from './TerminalContext';
 import * as terminalRegistry from '../../lib/terminal-registry';
 import * as helpers from '../../lib/helper-terminal';
 import { TerminalContextContext } from './wall-context';
-import { ensureResizeObserver } from './wall-test-utils';
+import { ensureResizeObserver, PortalAnchoredButton } from './wall-test-utils';
 import { setMouseReporting, removeMouseSelectionState } from '../../lib/mouse-selection';
 import { setPlatform } from '../../lib/platform';
 import { FakePtyAdapter } from '../../lib/platform/fake-adapter';
@@ -274,6 +274,16 @@ it('keeps helper keystrokes out of context dismissal', () => {
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(props.onClose).not.toHaveBeenCalled();
   act(() => button('Close terminal context').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(props.onClose).toHaveBeenCalledOnce();
+});
+it('keeps presses in a helper\'s portaled copy editor out of context dismissal', () => {
+  props.children = <div data-helper-terminal="helper"><PortalAnchoredButton /></div>;
+  render();
+  const editor = document.querySelector<HTMLButtonElement>('[data-portaled]')!;
+  expect(container.contains(editor)).toBe(false);
+  act(() => editor.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
+  expect(props.onClose).not.toHaveBeenCalled();
+  act(() => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })));
   expect(props.onClose).toHaveBeenCalledOnce();
 });
 it('requires explicit confirmation before resetting a preserved helper', async () => {

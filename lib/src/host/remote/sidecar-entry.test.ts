@@ -561,6 +561,12 @@ describe('the webview’s half of the parse', () => {
     await expect(parked.promise).resolves.toMatchObject({ kind: 'resolved', cause: 'exit' });
   });
 
+  it('sends an OSC 52 write to the webview as an offer and writes nothing back', () => {
+    bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]52;c;SGVsbG8=\x07' });
+    expect(sent.map((message) => message.event)).toEqual(['terminal:clipboardOffer']);
+    expect(emitted('terminal:clipboardOffer')).toEqual([{ id: 'pty-1', text: 'Hello' }]);
+  });
+
   it('counts visible output as the Session working, and protocol alone as nothing', () => {
     const onData = vi.spyOn(alerts, 'onData');
     bridge.onPtyEvent('data', { id: 'pty-1', data: '\x1b]7;file:///tmp\x07' });

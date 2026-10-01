@@ -239,10 +239,9 @@ describe("this repo's own dormouse.yml", () => {
     ]);
     expect(file.tools.get('storybook')?.run).toBe('pnpm storybook');
     expect(file.tools.get('innerdogfood')?.run).toBe('pnpm innerdogfood');
-    // storybook only needs framing; the rest are agent-drivable, and the
-    // Relay and Hosted sign-ins need the cookies an iframe drops.
-    expect(file.tools.get('storybook')?.render).toBe('iframe');
-    for (const name of ['innerdogfood', 'website', 'relay', 'hosted', 'one-time']) {
+    // Every Tool is agent-drivable, and the Relay and Hosted sign-ins need the
+    // cookies an iframe drops.
+    for (const name of ['storybook', 'innerdogfood', 'website', 'relay', 'hosted', 'one-time']) {
       expect(file.tools.get(name)?.render).toBe('agent-browser-screencast');
     }
     // innerdogfood announces, because its dev bridge binds before vite, and

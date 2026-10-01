@@ -9,6 +9,10 @@ No project-specific tend preferences yet beyond the notes below. Add guidance he
 
 When asking permission to file an issue upstream (e.g. at `max-sixty/tend`), do **not** include the standing-exception offer ("I can treat this target as file-directly going forward"). nedtwigg wants to keep approving each cross-repo issue individually — keep asking each time, and skip the offer. ([diffplug/dormouse#168](https://github.com/diffplug/dormouse/issues/168#issuecomment-4836133002))
 
+## CI polls skip the `Hosted PR preview` deploy jobs
+
+Append `--skip deploy --skip cleanup` after the PR number and SHA in every `poll_pr_checks.py` call (`poll` and `approval`). Those are the `Hosted PR preview` jobs bound to the `hosted-preview` environment, which requires a maintainer's approval. They sit in `waiting` until someone approves them, and `cleanup` starts on the PR's head when it merges. A poll that waits for either never finishes, and the session runs until the job timeout kills it. Neither job gates a merge. `verify`, which builds and tests Hosted, runs ungated and stays in the poll.
+
 ## A restart starts clean — don't carry a superseded PR's findings forward
 
 Long-running work here is often closed and reopened as a fresh PR ("Supersedes #N"), and that restart is deliberate — nedtwigg: *"When I start over, I usually **want** to start over. The original conversation grew too unfocused and out of hand."* So review the successor on its own terms: don't fetch the predecessor's bot comments and reviews in order to re-raise findings from them, and don't treat a finding dropped that way as a gap in the review machinery. Carrying the closed thread's context forward is the thing the restart was for.

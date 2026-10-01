@@ -108,12 +108,12 @@ const COPY_PASTE_SECTION: Section = {
     },
     {
       id: 'cp-raw',
-      title: 'Copy-paste it somewhere else with "Copy Raw"',
-      hint: 'When you paste, notice how it keeps all the line-breaks. Gross!',
+      title: 'Copy-paste it somewhere else in "Exact"',
+      hint: 'Press `f` to switch format. When you paste, notice how it keeps all the line-breaks. Gross!',
     },
     {
       id: 'cp-rewrap',
-      title: 'Copy-paste it somewhere else with "Copy Rewrapped"',
+      title: 'Copy-paste it somewhere else in "Auto"',
       hint:
         'When you paste, notice how the line-breaks were removed, and the text rewraps neatly wherever you paste it?',
     },
