@@ -1,9 +1,11 @@
-import { act } from 'react';
+import { act, createElement, Fragment, useLayoutEffect, useRef, type ReactElement } from 'react';
+import { createPortal } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { expect, vi } from 'vitest';
 import { BROWSER_PROVIDER_IDS, type BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import { FakePtyAdapter, setPlatform } from '../../lib/platform';
 import { applyTerminalSemanticEvents } from '../../lib/terminal-registry';
+import { setPortalAnchor } from '../../lib/dom';
 import type { BrowserOp, BrowserRequest, BrowserResult } from '../../lib/platform/browser-automation';
 import type { WallActions } from './wall-context';
 import {
@@ -81,6 +83,18 @@ export function doubleClick(target: Element): void {
   };
   act(() => fire(['mousedown', 'mouseup', 'click'], 1));
   act(() => fire(['mousedown', 'mouseup', 'click', 'dblclick'], 2));
+}
+
+/** A stand-in for the copy editor's portal: a hidden anchor where it renders,
+ *  mapped to a root on `document.body` holding one button, so React events
+ *  from the button bubble up the rendering tree as the copy editor's do. */
+export function PortalAnchoredButton(): ReactElement {
+  const anchor = useRef<HTMLSpanElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => setPortalAnchor(root.current!, anchor.current!), []);
+  return createElement(Fragment, null,
+    createElement('span', { hidden: true, ref: anchor }),
+    createPortal(createElement('div', { ref: root }, createElement('button', { type: 'button', 'data-portaled': '' }, 'Portaled')), document.body));
 }
 
 /** jsdom lacks the native modal `<dialog>` API that `NativeModalDialog` calls. */

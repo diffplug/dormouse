@@ -179,9 +179,9 @@ Flat by default. Pane headers, doors, the baseboard, and terminal panes carry ze
 Shadows appear only on **raised surfaces that float above content**: popovers, tooltips, dialogs. They are ambient, not structural; they say "I am temporary and on top," not "I have weight."
 
 ### Shadow Vocabulary
-- **Popover** (`box-shadow: var(--tw-shadow-md)`): tooltips (`PopupButtonRow`), selection popup, illegal-rename warning, terminal-pane header tooltips.
+- **Popover** (`box-shadow: var(--tw-shadow-md)`): tooltips (`PopupButtonRow`), illegal-rename warning, terminal-pane header tooltips.
 - **Dialog** (`box-shadow: var(--tw-shadow-lg)`): kill-confirm sheet, TODO alert dialog.
-- **Modal** (`box-shadow: var(--tw-shadow-2xl)`): theme picker dropdown (when expanded), theme debugger, theme store dialog.
+- **Modal** (`box-shadow: var(--tw-shadow-2xl)`): theme picker dropdown (when expanded), theme debugger, theme store dialog, copy editor.
 - **Inset hairline** (`box-shadow: inset 0 0 0 1px var(--color-focus-ring)` / `var(--color-border)`): mobile UI segmented controls. Used instead of `border` when the surface needs a 1px stroke that does not shift layout on state change.
 
 ### Named Rules
@@ -267,6 +267,9 @@ The selection ring around the focused pane in command mode is an SVG with `strok
 #### Focus Ring Travel & Header Crossfade
 When selection moves between panes/doors, the focus ring **glides** to the new target over 220ms (`FOCUS_MOTION_MS`, half the pane-motion duration) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`, and the source/destination pane headers crossfade their active/inactive palette over the same 220ms (`HEADER_PALETTE_TRANSITION_CLASS` in `design.tsx`), so the two read as one gesture. The ring's rect is a per-frame JS tween (`rect-tween.ts`), not a CSS transition; same-identity re-measures (sash drag, window resize, animator frames) snap 1:1, and a pane↔door move lerps the corner radii so the shape never pops. Reduced motion nulls both: the ring snaps and the header palette swaps instantly.
 
+#### Copy Editor Travel
+The copy editor's moves and resizes ease on the focus ring's duration and curve (`FOCUS_MOTION_MS`, `rect-tween.ts` driven by `rect-motion.ts`); `docs/specs/mouse-and-clipboard.md` §4.5 owns when.
+
 ## 6. Do's and Don'ts
 
 ### Do:
@@ -287,7 +290,7 @@ When selection moves between panes/doors, the focus ring **glides** to the new t
 - **Don't** introduce a `text-muted` color inside an active or inactive pane header. Header-internal text inherits the header foreground; muting inside it breaks the focus signal.
 - **Don't** use rounded SaaS cards, gradient accents, gradient text, or glassmorphism. PRODUCT.md names these directly: "Generic SaaS (rounded cards, gradients, startup illustrations)," "Electron bloat (Slack — heavy, slow-feeling, too much chrome)."
 - **Don't** use hacker-aesthetic green-on-black, terminal-cliché Matrix tints, or any color that signals "this is a programmer tool." The user's theme decides what color this tool is.
-- **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`) **with a CSS transition**. Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation. The one carve-out is a JS tween that writes true per-frame values on a `pointer-events: none` overlay (the Lath animator; the focus ring's `rect-tween`): it moves through real intermediate geometry every frame rather than letting the browser interpolate an opaque box, so measurements stay valid — a CSS `transition: top/left/width/height` does not qualify and stays banned.
+- **Don't** animate layout properties (`width`, `height`, `top`, `left`, `padding`) **with a CSS transition**. Pane transitions use `clip-path` and `opacity` deliberately so layout measurements stay valid mid-animation. The one carve-out is a JS tween that writes true intermediate geometry every frame (the Lath animator on the leaves; the `rect-tween` that carries the focus ring and the copy editor) rather than letting the browser interpolate an opaque box, so measurements stay valid mid-flight — a CSS `transition: top/left/width/height` does not qualify and stays banned.
 - **Don't** add an emoji, mascot, or illustration to chrome. PRODUCT.md is explicit: "Overly playful (too many animations, emojis, mascots)."
 - **Don't** gate app chrome on `window.alert` / `confirm` / `prompt`. Native dialogs are not dependable in the desktop webview: the theme uninstall was gated on `confirm` and silently did nothing there, because the call returned without ever showing a dialog. Whether a given webview suppresses the panel or never implements it, a control gated on one cannot be trusted to run. Use `ModalFrame`, or make the action a single click when it is cheap and reversible. The marketing website is exempt — it only ever runs in a real browser, where `ShareUrlButton`'s `prompt` is a reasonable last-resort clipboard fallback.
 - **Don't** wrap things in containers. Most surfaces don't need one; the host's sidebar already is the container.

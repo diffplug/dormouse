@@ -71,7 +71,7 @@ it('does not rerender pane headers or banners for selection and hover updates', 
   for (let col = 1; col <= 10; col++) {
     act(() => updateDrag('one', { row: 0, col, altKey: false }));
   }
-  act(() => setHintToken('one', { kind: 'url', row: 0, startCol: 0, endCol: 12, text: 'https://a.co' }));
+  act(() => setHintToken('one', { kind: 'url', start: { row: 0, col: 0 }, end: { row: 0, col: 11 }, text: 'https://a.co' }));
 
   expect(commits.mock.calls.length).toBe(0);
   expect(container.querySelectorAll('[role="status"]')).toHaveLength(1);

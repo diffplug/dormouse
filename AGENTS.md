@@ -57,7 +57,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/terminal-escapes.md`** — Registry of every escape sequence parsed, answered, or ignored, each row pointing at its owning spec. Read before touching OSC/CSI parsing.
 - **`docs/compatible-agents.md`** — Public agent guide plus the hidden recovery contract: shutdown capture, detection, single-use records, and cold-restore execution.
 - **`docs/specs/transport.md`** — Adapter-agnostic webview ↔ host protocol: PTY lifecycle and buffering, reconnection, message contracts, persisted-session types, the invariants every adapter honors.
-- **`docs/specs/mouse-and-clipboard.md`** — Terminal-owned selection, copy (Raw / Rewrapped), paste tiers, smart URL/path extension, the mouse-ownership state matrix.
+- **`docs/specs/mouse-and-clipboard.md`** — Terminal-owned selection, the copy editor (Auto / Exact / Spaces / No breaks, expand, per-break marks), paste tiers, smart URL/path extension, the mouse-ownership state matrix.
 - **`docs/specs/theme.md`** — The two-layer CSS variable strategy, consumed-token resolver, terminal color contract, theme debugger.
 - **`docs/specs/dor-cli.md`** — The `dor` CLI on every Dormouse terminal's `PATH`: bundling and env contract, `spawnAndCapture` rules, control-socket plumbing, the Surface handle model, the command set.
 - **`docs/specs/dor-browser.md`** — The browser surface: `BrowserPanel` with swappable `renderMode`, browser chrome, the agent-browser stack, the iframe proxy and CSP boundaries.

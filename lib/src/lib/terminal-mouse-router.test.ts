@@ -4,6 +4,7 @@ import {
   __resetMouseSelectionForTests,
   beginDrag,
   endDrag,
+  extendSelectionToToken,
   getMouseSelectionState,
   setMouseReporting,
   setOverride,
@@ -78,6 +79,8 @@ const dims: TerminalOverlayDims = {
   rows: 24,
   viewportY: 0,
   baseY: 0,
+  elementLeft: 0,
+  elementTop: 0,
   elementWidth: 800,
   elementHeight: 240,
   cellWidth: 10,
@@ -105,7 +108,6 @@ function createHarness(windowHost: ListenerHost) {
     terminal: terminal as never,
     element: element as never,
     getOverlayDims: () => dims,
-    setSelectionBaseline: vi.fn(),
   });
   return { cleanup, element, screen, terminal, windowHost };
 }
@@ -148,6 +150,52 @@ describe('terminal-mouse-router: override suppression', () => {
     expect(ev.preventDefault).not.toHaveBeenCalled();
     expect(ev.stopPropagation).not.toHaveBeenCalled();
     expect(ev.stopImmediatePropagation).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it('shadows a drag the program owns without touching its events (spec §3.8)', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    setMouseReporting('t1', 'vt200');
+
+    const events = [mouseEvent({ clientX: 5, clientY: 5 }), mouseEvent({ clientX: 45, clientY: 25, buttons: 1 }), mouseEvent({ clientX: 45, clientY: 25 })];
+    element.emit('mousedown', events[0]);
+    windowHost.emit('mousemove', events[1]);
+    windowHost.emit('mouseup', events[2]);
+
+    for (const ev of events) expect(ev.preventDefault).not.toHaveBeenCalled();
+    // x=45 sits mid-cell 4: its nearest boundary is the gap before it (§3.1).
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      startRow: 0, startCol: 0, endRow: 2, endCol: 3, dragging: false, owner: 'program',
+    });
+    expect(getMouseSelectionState('t1').copyEditor).toBeNull();
+    cleanup();
+  });
+
+  // Cells are 10px wide: a pointer at x selects up to the gap nearest x.
+  const mouseDrag = (from: [number, number], to: [number, number]) => {
+    const { cleanup, element } = createHarness(windowHost);
+    element.emit('mousedown', mouseEvent({ clientX: from[0], clientY: from[1] }));
+    windowHost.emit('mousemove', mouseEvent({ clientX: to[0], clientY: to[1], buttons: 1 }));
+    windowHost.emit('mouseup', mouseEvent({ clientX: to[0], clientY: to[1] }));
+    const sel = getMouseSelectionState('t1').selection;
+    cleanup();
+    return sel;
+  };
+
+  it('ends a drag released just past a character before the next one, either way (§3.1)', () => {
+    // From the gap before cell 2 to just right of cell 5's right edge.
+    expect(mouseDrag([19, 5], [61, 25])).toMatchObject({ startRow: 0, startCol: 2, endRow: 2, endCol: 5 });
+    // The same span dragged upward: the earlier edge is the head now.
+    expect(mouseDrag([61, 25], [19, 5])).toMatchObject({ startRow: 2, startCol: 5, endRow: 0, endCol: 2 });
+  });
+
+  it('shadows nothing for a program click that never crosses the drag threshold', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    setMouseReporting('t1', 'vt200');
+    element.emit('mousedown', mouseEvent());
+    windowHost.emit('mousemove', mouseEvent({ clientX: 6, buttons: 1 }));
+    windowHost.emit('mouseup', mouseEvent({ clientX: 6 }));
+    expect(getMouseSelectionState('t1').selection).toBeNull();
     cleanup();
   });
 
@@ -247,7 +295,7 @@ describe('terminal-mouse-router: override suppression', () => {
       startRow: 0,
       startCol: 0,
       endRow: 1,
-      endCol: 2,
+      endCol: 1,
       dragging: true,
     });
 
@@ -260,9 +308,11 @@ describe('terminal-mouse-router: override suppression', () => {
       startRow: 0,
       startCol: 0,
       endRow: 1,
-      endCol: 2,
+      endCol: 1,
       dragging: false,
     });
+    // Mouse-up opens the copy editor over what was dragged (spec §4).
+    expect(getMouseSelectionState('t1').copyEditor).toMatchObject({ scope: 0, format: 'auto' });
     cleanup();
   });
 
@@ -285,6 +335,36 @@ describe('terminal-mouse-router: override suppression', () => {
     // A hardware keyboard event must not unlatch the touch gesture's shape.
     windowHost.emit('keydown', mouseEvent({ altKey: false }));
     expect(getMouseSelectionState('t1').selection?.shape).toBe('block');
+    cleanup();
+  });
+
+  it.each([false, true])('keeps token extension through unrelated keys and mouse-up (Alt=%s)', (altKey) => {
+    const { cleanup, element } = createHarness(windowHost);
+    element.emit('mousedown', mouseEvent({ altKey }));
+    windowHost.emit('mousemove', mouseEvent({ clientX: 25, clientY: 15, buttons: 1, altKey }));
+    windowHost.emit('keydown', mouseEvent({ altKey }));
+    extendSelectionToToken('t1', {
+      kind: 'url', text: 'https://a.co', start: { row: 1, col: 0 }, end: { row: 1, col: 10 },
+    });
+    const extended = getMouseSelectionState('t1').selection;
+    // Releasing e, or pressing/releasing another key, keeps the extended edge.
+    windowHost.emit('keyup', mouseEvent({ altKey }));
+    windowHost.emit('keydown', mouseEvent({ altKey }));
+    windowHost.emit('keyup', mouseEvent({ altKey }));
+    expect(getMouseSelectionState('t1').selection).toEqual(extended);
+    windowHost.emit('mouseup', mouseEvent({ clientX: 25, clientY: 15, altKey }));
+    expect(getMouseSelectionState('t1').selection).toEqual({ ...extended, dragging: false });
+    cleanup();
+  });
+
+  it('recomputes pointer boundaries only when Alt changes the drag shape', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    element.emit('mousedown', mouseEvent({ clientX: 19, clientY: 5 }));
+    windowHost.emit('mousemove', mouseEvent({ clientX: 61, clientY: 25, buttons: 1 }));
+    windowHost.emit('keydown', mouseEvent({ altKey: true }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ shape: 'block', startCol: 2, endCol: 5 });
+    windowHost.emit('keyup', mouseEvent({ altKey: false }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ shape: 'linewise', startCol: 2, endCol: 5 });
     cleanup();
   });
 
