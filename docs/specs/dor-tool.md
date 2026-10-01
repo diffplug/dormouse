@@ -205,6 +205,8 @@ Source of truth: `FOLDER_MATCH_SUFFIX` / `builtinFor` in `dor-tools-builtin/src/
 | Select | `dor open --preview <file>` | Show the file in the slot |
 | Activate | `dor open <file>` | Pin the slot when it shows that file; otherwise the ordinary open |
 
+A running Tool may send either as an OSC 367 `open` instead ([OSC 367](#osc-367)).
+
 A preview is answered by the first of:
 
 1. A pinned Tool matching the resolved key is revealed focus-neutrally: `existing`.
@@ -274,17 +276,19 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 
 ## OSC 367
 
-**Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve` and `state` are implemented verbs. The escape registry is `docs/specs/terminal-escapes.md`.
+**Must consume OSC 367 at the PTY owner's parser**, including malformed and unknown verbs, and emit no reply. `serve`, `state`, and `open` are implemented verbs. The escape registry is `docs/specs/terminal-escapes.md`.
 
 - **Must sanitize and bound the payload before retaining it.** `ToolAnnounce` / `parseToolAnnounce` and `ToolState` / `parseToolState` own the field shapes and validation limits.
 - **Must reject a payload naming a version this contract does not speak.** `state` requires `v: 1`; `serve` reads an omitted `v` as 1 and refuses any other value — a future v2's rejection path.
 - **Must treat an optional serve `path` as a path/query on the discovered port, never as another authority.** Accept at most 2,048 characters starting with one `/`, with no backslash, ASCII whitespace/control, or DEL; invalid paths are ignored and the default is `/`. The port still must belong to the designated Session's process tree. Live binding memory includes the path; durable saves omit it.
-- **Must forward parsed announcements, state reports, and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement and unsaved state; later reports in that chunk survive. Both hosts forward each parse's as one `terminal:toolEvents`, which the owning renderer applies with `recordToolEvents`; the fake adapter applies locally.
-- **Must reconstruct announcements, state, and resets from raw replay without emitting replies**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
+- **Must forward parsed announcements, state reports, open requests, and command-start resets in stream order to the owning renderer.** A start clears the previous command's announcement and unsaved state; later reports in that chunk survive. Both hosts forward each parse's as one `terminal:toolEvents`, which the owning renderer applies with `applyLiveToolEvents`; the fake adapter applies locally.
+- **Must reconstruct announcements, state, and resets from raw replay without emitting replies or acting on an `open`**, preserving transferred announcements when since-mark replay has no command start, and clear the renderer record on Session disposal. Ordinary terminal announcements stay inert.
 - Reserved: **Must retain `name`, `dehydrate`, and `persist` as inert parsed fields**, serving the announced-name and D1/D2 items under [Future](#future). Neither `persist: never` nor a `dehydrate` verb changes current persistence.
-- Reserved: **Never assign an OSC 367 verb beyond `serve`, `state`, and `dehydrate`**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
+- **Must act on `open` only from live output of a Tool Session whose designated command is running**, as `dor open` from that Session (`--preview` when `preview` is true), resolved from the Session's local CWD, else the target's directory. The path is absolute, with no control character; the Tool gets no answer.
+- **Must show a failed `open` in the preview slot**: a preview whose lookup fails runs the built-in error viewer there instead (`docs/specs/dor-tools-builtin.md` → Error viewer), and a failed activate is sent again as a preview unless a newer `open` from that Session followed it.
+- Reserved: **Never assign an OSC 367 verb beyond `serve`, `state`, `open`, and `dehydrate`**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
 
-Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` in `dor-tools-lib/src/osc.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`. Tests: `dor-tools-lib/test/osc.test.mjs`, `lib/src/lib/tool-announce.test.ts`, `lib/src/host/remote/sidecar-entry.test.ts`, `vscode-ext/test/message-router.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
+Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/src/lib/terminal-protocol.ts`; `parseToolAnnounce` / `parseToolOpen` in `dor-tools-lib/src/osc.ts`; `applyLiveToolEvents` in `lib/src/lib/tool-events.ts`; `dispatchToolOpens` in `lib/src/lib/tool-open-requests.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`. Tests: `dor-tools-lib/test/osc.test.mjs`, `lib/src/lib/tool-announce.test.ts`, `an OSC 367 open` in `lib/src/components/wall/preview-slot.test.tsx`, `lib/src/host/remote/sidecar-entry.test.ts`, `vscode-ext/test/message-router.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
 
 ## Unsaved changes
 
