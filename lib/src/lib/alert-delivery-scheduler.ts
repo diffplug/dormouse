@@ -1,4 +1,5 @@
 import type { AlertManager, AlertState } from './alert-manager';
+import { isAlertPaused } from './alert-episode';
 import {
   normalizeAlertDeliveryOverrides,
   resolveAlertDeliveryPolicy,
@@ -128,8 +129,8 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
       }
     }
     const { pending } = current;
-    // Paused: disarm without consuming, so quiet re-arms the original deadline.
-    if (state.status !== 'ALERT_RINGING') {
+    // Disarm without consuming, so quiet re-arms the original deadline.
+    if (isAlertPaused(state)) {
       pending.forEach(disarm);
       return;
     }

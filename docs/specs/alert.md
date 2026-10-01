@@ -30,7 +30,7 @@ Only `watching` requires WATCHING. **Every source obeys one engagement rule — 
 
 Public `status` is a projection — first match wins:
 
-1. `ALERT_RINGING` if the ring is active and not paused.
+1. `ALERT_RINGING` if the ring is active and not paused; consumers test a pause with `isAlertPaused` in `lib/src/lib/alert-episode.ts`.
 2. `OSC_NOTIF_BUSY` if a progress cycle is active.
 3. The output/silence detector's own state if WATCHING is on. The detector runs regardless; the rule only makes its state public. **Never reorder 3 and 4** (rationale).
 4. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
@@ -86,19 +86,19 @@ Claimants get first refusal per Session in registration order; the first to retu
 With `deferAlertsUntilQuiet` enabled:
 
 - **Must defer an eligible terminal notification until five seconds after the last accepted output**, including unconfirmed activity and WATCHING off. An idle pane with no recent output rings immediately (rationale).
-- **Must pause the whole unresolved ring on the first accepted output**, preserving sources, detail, episode, and pending alarm deadlines. Quiet restores it even if the redraw never confirms BUSY; an existing TODO stays unchanged.
-- **Never pause or defer a command-finish ring or a ring carrying an `exit` source.** A pending terminal notification joins an eligible command-finish ring immediately.
+- **Must pause the whole unresolved ring while output is recent**, derived, never stored, keeping sources, detail, episode, TODO, and pending alarm deadlines. Quiet restores it without confirmed BUSY; publishing a pause arms the wake that ends it.
+- **Never defer a command-finish ring or pause one carrying an `exit` source**; a pending terminal notification joins it immediately. A held exit leaves the ring paused until it escalates.
 - **Must defer after claimants and ring eligibility, never redispatch the historical `CompletionEvent`** (rationale). A claimed new settle answers a retained `watching` source, never an earlier report.
 - **Keep initial pending intent live-only and bounded** to one notification, chosen by richness (Clearing And TODO). Accepted output moves the quiet deadline; command-boundary detector resets preserve it.
-- **Never impose a maximum deferral time**: continuously printing programs can hold the notification indefinitely (rationale).
-- **Cancel pending delivery on acknowledgement, a dismissal that clears a ring, TODO changes, removal, seeding, or teardown.** A dismiss without a ring leaves initial deferral alone. Disabling the setting releases pending notifications and pauses immediately; enabling pauses eligible unresolved rings with recent output.
+- **Never cap a deferral or pause**, however long output continues (rationale).
+- **Cancel pending delivery on acknowledgement, a dismissal that clears a ring, TODO changes, removal, seeding, or teardown.** A dismiss without a ring leaves initial deferral alone. Disabling the setting releases pending notifications immediately.
 
 Two ordering rules:
 
 - **Clear the progress cycle *before* dispatch**, so a completion or error ends the cycle whether or not the event is claimed and `OSC_NOTIF_BUSY` falls back either way.
 - **Dispatch a command finish for every watch that existed**, including the unseen and engaged ones the ring rule then discards or holds.
 
-Source of truth: `registerCompletionClaimant` / `dispatchCompletion` / `holdOrDeliver` / `pauseRingUntilQuiet` / `deferOrDeliverNotification` / `scheduleDeferredNotification` / `flushDeferredNotification` / `escalateHeld` in `lib/src/lib/alert-manager.ts`; `hasRecentOutput` / `quietAt` in `lib/src/lib/quiesce-detector.ts`. Pinned by `held completions` in `lib/src/lib/alert-engagement.test.ts`.
+Source of truth: `registerCompletionClaimant` / `dispatchCompletion` / `holdOrDeliver` / `isPaused` / `notify` / `deferOrDeliverNotification` / `scheduleDeferredNotification` / `flushDeferredNotification` / `escalateHeld` in `lib/src/lib/alert-manager.ts`; `hasRecentOutput` / `quietAt` in `lib/src/lib/quiesce-detector.ts`. Pinned by `held completions` in `lib/src/lib/alert-engagement.test.ts`.
 
 ## Await
 
@@ -205,7 +205,7 @@ Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`, **a g
 - **Never reset the detector for engagement alone**; settles must reach awaits. **Must reset to `NOTHING_TO_SHOW` when a user verb or an await clears a ring with a `watching` source**, preventing its output tail from settling again; resumed work and rule removal leave it running.
 - **New WATCHING summons must be caused by a fresh settle**, never rerender, theme change, remount, minimize, or reattach; Completion events owns resuming a paused summons.
 
-Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `onSettled` / `pauseRingUntilQuiet` in `lib/src/lib/alert-manager.ts` (pinned by `lib/src/lib/alert-resumed-output.test.ts`); renderer mirror `lib/src/lib/watched-commands.ts`, multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
+Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `onSettled` / `isPaused` in `lib/src/lib/alert-manager.ts` (pinned by `lib/src/lib/alert-resumed-output.test.ts`); renderer mirror `lib/src/lib/watched-commands.ts`, multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
 
 ## Terminal reports
 

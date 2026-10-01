@@ -122,8 +122,6 @@ function noteOutput(set: SourceSet | null): void {
 /** The one ring latch a Session holds (`docs/specs/alert.md` -> Public State). */
 interface Ring extends SourceSet {
   episode: AlertEpisode;
-  /** Output pauses presentation without answering the summons. */
-  paused: boolean;
   /** What it shows, and what the TODO a look turns it into keeps. */
   detail: ActivityNotification;
 }
@@ -346,8 +344,8 @@ export class AlertManager {
     if (enabled === this.deferAlertsUntilQuiet) return;
     this.deferAlertsUntilQuiet = enabled;
     for (const [id, entry] of this.entries) {
-      if (!enabled) this.flushDeferredNotification(id, entry);
-      else if (this.pauseRingUntilQuiet(id, entry)) this.notify(id);
+      if (enabled) this.notify(id);
+      else this.flushDeferredNotification(id, entry);
     }
   }
 
@@ -386,11 +384,13 @@ export class AlertManager {
     if (!entry) return;
     // The echo of the user's own keystroke is not the program working.
     if (this.inEchoWindow(entry)) return;
+    const wasRinging = entry.ring !== null && !this.isPaused(entry);
     if (!entry.detector.onData()) return;
     for (const set of [entry.ring, entry.held]) noteOutput(set);
     entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
-    if (this.pauseRingUntilQuiet(id, entry)) this.notify(id);
+    // Publish only the pause itself, not every chunk of a paused ring.
+    if (wasRinging && this.isPaused(entry)) this.notify(id);
   }
 
   onExit(id: string, exitCode?: number): void {
@@ -466,15 +466,12 @@ export class AlertManager {
   /**
    * A single accepted redraw is enough to delay, never discard, an owed ring.
    * Exit sources remain authoritative, including a report joined to an exit.
-   * Returns whether the ring just paused; the caller publishes.
    */
-  private pauseRingUntilQuiet(id: string, entry: AlertEntry): boolean {
-    const ring = entry.ring;
-    if (!this.deferAlertsUntilQuiet || !entry.detector.hasRecentOutput() || !ring || ring.sources.includes('exit')) return false;
-    this.scheduleDeferredNotification(id, entry);
-    if (ring.paused) return false;
-    ring.paused = true;
-    return true;
+  private isPaused(entry: AlertEntry): boolean {
+    return entry.ring !== null
+      && this.deferAlertsUntilQuiet
+      && entry.detector.hasRecentOutput()
+      && !entry.ring.sources.includes('exit');
   }
 
   /**
@@ -607,15 +604,10 @@ export class AlertManager {
     } else {
       this.raiseRing(entry, source, detail);
     }
-    // A finish releases both a pause and a terminal notification waiting on
-    // animation, which joins the exit's ring (or hold) now rather than publish
-    // stale detail later.
-    if (source === 'exit') {
-      this.flushDeferredNotification(id, entry);
-    } else {
-      this.pauseRingUntilQuiet(id, entry);
-      this.notify(id);
-    }
+    // A terminal notification waiting on animation joins the exit's ring (or
+    // hold) now; keeping its timer would publish stale detail later.
+    if (source === 'exit') this.flushDeferredNotification(id, entry);
+    else this.notify(id);
   }
 
   /** An unengaged report: the acknowledged-state check, then animation deferral. */
@@ -667,7 +659,6 @@ export class AlertManager {
 
     const ringingCause = this.consumeAwaitableRing(entry, options.until);
     if (ringingCause !== null) {
-      this.pauseRingUntilQuiet(id, entry);
       this.notify(id);
       return settledAwait({ kind: 'resolved', cause: ringingCause, waitedMs: 0 });
     }
@@ -979,7 +970,6 @@ export class AlertManager {
       const detail = richer(entry.deferred, notification);
       this.clearDeferredNotification(entry);
       this.raiseRing(entry, 'report', detail);
-      this.pauseRingUntilQuiet(id, entry);
     }
     // The caller may have cleared a publicly visible cycle and delegated the
     // publish to the ring rules; deferring the ring must not swallow it.
@@ -987,7 +977,8 @@ export class AlertManager {
   }
 
   /**
-   * Wake at the detector's quiet deadline, re-arming if output moved it — so
+   * Wake at the detector's quiet deadline to ring a deferred notification or
+   * publish a paused ring's end, re-arming if output moved it — so
    * continuing output costs one timer per quiet window rather than one per PTY
    * chunk. A timer already waiting stays: the due time only moves later, and
    * the wake re-checks it. Mostly the detector's own settle gets there first;
@@ -1008,7 +999,6 @@ export class AlertManager {
   private flushDeferredNotification(id: string, entry: AlertEntry): void {
     const deferred = entry.deferred;
     this.clearDeferredNotification(entry);
-    if (entry.ring) entry.ring.paused = false;
     if (deferred !== null) {
       if (this.isEngaged(id)) this.hold(entry, 'report', deferred);
       else this.raiseRing(entry, 'report', deferred);
@@ -1037,14 +1027,13 @@ export class AlertManager {
   ): void {
     let ring = entry.ring;
     if (ring === null) {
-      ring = { episode: createAlertEpisode(), paused: false, sources: [], watching: null, detail };
+      ring = { episode: createAlertEpisode(), sources: [], watching: null, detail };
       entry.ring = ring;
       entry.ackedQuiet = false;
     } else {
       ring.detail = richer(ring.detail, detail);
     }
     addSource(ring, source);
-    if (source === 'exit') ring.paused = false;
   }
 
   /**
@@ -1384,7 +1373,7 @@ export class AlertManager {
   }
 
   private getProjectedStatus(id: string, entry: AlertEntry): SessionStatus {
-    if (entry.ring !== null && !entry.ring.paused) return 'ALERT_RINGING';
+    if (entry.ring !== null && !this.isPaused(entry)) return 'ALERT_RINGING';
     if (entry.progress !== null) return 'OSC_NOTIF_BUSY';
     // WATCHING outranks the command-exit arm: a watched command is by
     // definition running, so COMMAND_EXIT_ARMED would otherwise mask the
@@ -1419,6 +1408,9 @@ export class AlertManager {
   }
 
   private notify(id: string): void {
+    // Whatever publishes a pause arms the wake that publishes its end.
+    const entry = this.entries.get(id);
+    if (entry && this.isPaused(entry)) this.scheduleDeferredNotification(id, entry);
     const state = this.getState(id);
     const last = this.lastEmitted.get(id);
     // A helper publishes nothing, but takes back what it published before a demotion.

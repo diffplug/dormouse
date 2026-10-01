@@ -2,7 +2,8 @@ import { normalizeAlertDeliveryOverrides, type AlertDeliveryOverrides } from './
 import { isRecord } from './is-record';
 import { isToolKeyScope, isToolRender, type ToolKeyScope, type ToolRender } from './platform/tool-types';
 import { isBrowserViewportSetting, type BrowserViewportSetting } from 'dor-lib-common/browser-viewports';
-import type { AlertState, SessionStatus } from './alert-manager';
+import type { SessionStatus } from './alert-manager';
+import { isAlertPaused, type AlertEpisode } from './alert-episode';
 import { hasShellInputControls } from 'dor/commands/shell-quote';
 import {
   ACTIVITY_NOTIFICATION_SOURCES,
@@ -72,11 +73,11 @@ const STRICT_READER_NOTIFICATION_SOURCES: readonly ActivityNotificationSource[] 
  * stale fields (`docs/specs/alert.md` -> Public State, "Persist only"). A ring
  * no one has looked at is written as the TODO a look would have left.
  */
-export function toPersistedAlertState(state: PersistedAlertState & Partial<Pick<AlertState, 'episode'>>): PersistedAlertState {
+export function toPersistedAlertState(state: PersistedAlertState & { episode?: AlertEpisode | null }): PersistedAlertState {
   const notification = state.notification ?? null;
   return {
     status: state.status,
-    todo: state.todo || state.status === 'ALERT_RINGING' || state.episode != null,
+    todo: state.todo || state.status === 'ALERT_RINGING' || isAlertPaused(state),
     notification: notification !== null && STRICT_READER_NOTIFICATION_SOURCES.includes(notification.source)
       ? notification
       : null,

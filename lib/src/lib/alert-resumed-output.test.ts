@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlertManager } from './alert-manager';
 import { createAlertDeliveryScheduler, type AlertDeliveryScheduler } from './alert-delivery-scheduler';
 import { DEFAULT_ALERT_SETTINGS } from './alert-settings-model';
-import { armCommandExit, driveToBusy, finishCommand, heartbeat, REPORT, runCommand, settle } from './alert-manager-test-utils';
+import { armCommandExit, driveToBusy, engage, finishCommand, goIdle, heartbeat, REPORT, runCommand, settle } from './alert-manager-test-utils';
 import { toPersistedAlertState } from './session-types';
 import { createOwnerPtyStream } from '../host/owner-pty';
 
@@ -114,6 +114,18 @@ describe('owed alerts during resumed output', () => {
     heartbeat(manager, ID, DELAY);
     expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
     expect(spoken).toHaveBeenCalledOnce();
+  });
+  it('leaves a paused ring paused behind an engaged exit until the exit escalates', () => {
+    armCommandExit(manager, ID, WATCHED);
+    ring('report');
+    manager.onData(ID);
+    engage(manager, ID);
+    finishCommand(manager, ID);
+    const paused = manager.getState(ID);
+    expect(paused.episode).not.toBeNull();
+    expect(paused.status).not.toBe('ALERT_RINGING');
+    goIdle(manager, ID);
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', episode: paused.episode });
   });
   it('pauses a report once an await consumes the exit that exempted it', async () => {
     armCommandExit(manager, ID, WATCHED);
