@@ -913,6 +913,8 @@ exists to honor:
   connection is polled every 2 s while something is subscribed**, never as a
   standing timer in every window, comparing field-wise before publishing
   (rationale; same rule as `setPushDevices` in `lib/src/lib/push-devices.ts`).
+  **Never publish a failed read over a status already read**: the next poll
+  retries, and only a subscription that has read none shows the error.
 - **Reads are serialized, and coalescing stops at anything that changes the
   answer** — `enroll`, `reconnect`, `clearEnrollment` and losing the last
   subscriber each drop the read in flight (rationale).

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { clsx } from 'clsx';
 import { SwitchRow } from './AlarmSettingsControls';
 import {
@@ -21,6 +21,7 @@ import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burr
 import {
   changeNetworkPolicy,
   getNetworkPolicySnapshot,
+  refreshNetworkPolicy,
   subscribeToNetworkPolicy,
 } from '../remote/burrow/network-policy-store';
 import {
@@ -61,21 +62,15 @@ type NetworkView =
 function useNetworkView(): NetworkView {
   const network = useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot);
   const burrow = useSyncExternalStore(subscribeToBurrowStatus, getBurrowStatusSnapshot);
-  // The status store re-reads every 2 s and publishes a failed read as
-  // `error`; one failure must not take the choice away, so the last status
-  // answered stands in until the next.
-  const [lastStatus, setLastStatus] = useState<BurrowConsoleStatus | null>(null);
-  if (burrow.kind === 'ready' && burrow.status !== lastStatus) setLastStatus(burrow.status);
-  const status = burrow.kind === 'ready' ? burrow.status : lastStatus;
   if (network.kind === 'unsupported' || burrow.kind === 'unsupported') return { kind: 'unsupported' };
   if (network.kind === 'error') {
     return { kind: 'error', message: `Could not read this computer’s network setting: ${network.message}` };
   }
-  if (burrow.kind === 'error' && !status) {
+  if (burrow.kind === 'error') {
     return { kind: 'error', message: `Could not reach this computer’s remote-control service: ${burrow.message}` };
   }
-  if (network.kind === 'loading' || !status) return { kind: 'loading' };
-  return { kind: 'ready', network: network.network, status };
+  if (network.kind === 'loading' || burrow.kind === 'loading') return { kind: 'loading' };
+  return { kind: 'ready', network: network.network, status: burrow.status };
 }
 
 /** Whether the service holds Nothing; `false` before it answers or without a service. */
@@ -263,6 +258,9 @@ export function NetworkSettings() {
   const view = useNetworkView();
   const { error, save } = useSave();
   const managedVoice = useManagedVoiceConfigured();
+  // The Baseboard keeps the store subscribed for the window's life, so this is
+  // what re-reads the interfaces and recovers a first read that failed.
+  useEffect(() => void refreshNetworkPolicy(), []);
 
   if (view.kind === 'unsupported') return null;
   if (view.kind === 'loading') return <div className={`mt-4 ${HINT}`}>Checking…</div>;

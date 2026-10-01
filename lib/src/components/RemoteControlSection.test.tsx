@@ -52,6 +52,7 @@ import {
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-burrow-link';
 import type { OneTimeEndReason, OneTimeState } from '../remote/burrow/one-time-runtime';
+import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getOneTimeSnapshot, subscribeToOneTime } from '../remote/burrow/one-time-store';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
@@ -154,10 +155,13 @@ function watchReveals(): { drawnAtReveal: boolean[]; restore: () => void } {
 
 /**
  * An enrolled machine with the panel open on a live code, handing back the link
- * so a case can drive invitation events against it.
+ * so a case can drive invitation events against it. `status` answers every
+ * other command, read at each call.
  */
-async function openSetupPanel(): Promise<ReturnType<typeof makeLink>> {
-  const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+async function openSetupPanel(
+  status: () => unknown = () => enrolled(),
+): Promise<ReturnType<typeof makeLink>> {
+  const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : status()));
   platform = { burrow: link };
   await render();
   await act(async () => buttonLabelled('Set up a phone')!.click());
@@ -659,6 +663,25 @@ describe('RemoteControlSection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps an open setup code through a failed poll, and takes the next answer', async () => {
+    let status: BurrowConsoleStatus | Error = enrolled();
+    await openSetupPanel(() => {
+      if (status instanceof Error) throw status;
+      return status;
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    status = new Error('bridge timed out');
+    await act(async () => refreshBurrowStatus());
+    expect(text()).not.toContain('Could not reach');
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    status = enrolled({ pairedClients: 2 });
+    await act(async () => refreshBurrowStatus());
+    expect(text()).toContain('2 paired phones.');
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
   });
 
   it('stops polling once nothing is watching', async () => {

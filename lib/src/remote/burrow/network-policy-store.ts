@@ -16,7 +16,7 @@ import { burrowLink, describeBurrowError, requireBurrowLink } from './burrow-sta
 
 /**
  * `unsupported` is a build with no Burrow service behind it. `error` means
- * there is a service and it would not say.
+ * there is a service and it has not said since the first subscriber came.
  */
 export type NetworkPolicyStoreState =
   | { kind: 'unsupported' }
@@ -83,18 +83,21 @@ export async function refreshNetworkPolicy(): Promise<void> {
     return;
   }
   const mine = ++generation;
+  let next: NetworkPolicyStoreState;
   try {
     const network = await active.command('networkPolicy');
-    if (mine !== generation) return;
-    publish(
-      isNetworkPolicyResult(network)
-        ? { kind: 'ready', network }
-        : { kind: 'error', message: describeBurrowError(undefined) },
-    );
+    next = isNetworkPolicyResult(network)
+      ? { kind: 'ready', network }
+      : { kind: 'error', message: describeBurrowError(undefined) };
   } catch (error) {
-    if (mine !== generation) return;
-    publish({ kind: 'error', message: describeBurrowError(error) });
+    next = { kind: 'error', message: describeBurrowError(error) };
   }
+  if (mine !== generation) return;
+  // A policy already read stands, kept current by the events: the Baseboard
+  // holds this store for the window's life, and one failed re-read must not
+  // turn its Nothing into "not read".
+  if (next.kind === 'error' && snapshot.kind === 'ready') return;
+  publish(next);
 }
 
 /** The tail of {@link changeNetworkPolicy}'s queue, settled either way. */

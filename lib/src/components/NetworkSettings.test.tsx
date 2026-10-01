@@ -9,6 +9,7 @@ import { setNativeFieldValue } from '../lib/dom';
 import { canonicalCidr } from '../host/remote/network-interfaces';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
+import { getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
 import { makeStubUpdatesPort } from '../lib/platform/test-ports';
 import {
   LAN,
@@ -356,7 +357,23 @@ describe('Settings → Network', () => {
     intercept((cmd) => (cmd === 'status' ? Promise.reject(new Error('bridge timed out')) : undefined));
     await act(async () => refreshBurrowStatus());
     expect(container.querySelectorAll('[role="radio"]')).toHaveLength(2);
-    expect(text()).not.toContain('Could not read this computer’s network setting');
+    expect(text()).not.toContain('Could not reach');
+  });
+
+  it('re-reads the policy on open, past a failed read the Baseboard’s subscription holds', async () => {
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
+    let up = false;
+    intercept((cmd) => (cmd === 'networkPolicy' && !up ? Promise.reject(new Error('not up yet')) : undefined));
+    const release = subscribeToNetworkPolicy(() => {});
+    try {
+      await act(async () => {});
+      expect(getNetworkPolicySnapshot().kind).toBe('error');
+      up = true;
+      await render();
+      expect(container.querySelectorAll('[role="radio"]')).toHaveLength(2);
+    } finally {
+      release();
+    }
   });
 
   it('lists the update check in a window without the updater’s port, which the build still runs', async () => {

@@ -115,6 +115,20 @@ describe('network policy store', () => {
     expect(getNetworkPolicySnapshot()).toEqual({ kind: 'ready', network: LOCAL });
   });
 
+  it('keeps a policy already read through a failed re-read', async () => {
+    let answer: () => unknown = () => NOTHING;
+    fakeLink(async () => answer());
+    subscribe();
+    await flush();
+    expect(getNetworkPolicySnapshot()).toEqual({ kind: 'ready', network: NOTHING });
+
+    answer = () => {
+      throw new Error('bridge timed out');
+    };
+    await refreshNetworkPolicy();
+    expect(getNetworkPolicySnapshot()).toEqual({ kind: 'ready', network: NOTHING });
+  });
+
   it('sets the whole policy, taking the answer only when no event did', async () => {
     const link = fakeLink(async (cmd) => (cmd === 'setNetworkPolicy' ? LOCAL : NOTHING));
     subscribe();

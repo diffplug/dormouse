@@ -60,6 +60,35 @@ describe('burrow status polling', () => {
       unsubscribe();
     }
   });
+
+  it('keeps a status already read through a failed poll, and takes the next answer', async () => {
+    vi.useFakeTimers();
+    let answer: () => unknown = () => ({ enrolled: true, connection: 'connecting' });
+    burrowLink = {
+      command: vi.fn(async () => answer()),
+      respond: () => {},
+      notify: () => {},
+      on: () => () => {},
+    };
+
+    const unsubscribe = subscribeToBurrowStatus(() => {});
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ kind: 'ready', status: { connection: 'connecting' } });
+
+      answer = () => {
+        throw new Error('bridge timed out');
+      };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ kind: 'ready', status: { connection: 'connecting' } });
+
+      answer = () => ({ enrolled: true, connection: 'connected' });
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(getBurrowStatusSnapshot()).toMatchObject({ kind: 'ready', status: { connection: 'connected' } });
+    } finally {
+      unsubscribe();
+    }
+  });
 });
 
 describe('re-reading after a mutation', () => {
