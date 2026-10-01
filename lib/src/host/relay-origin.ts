@@ -1,7 +1,8 @@
 /**
  * The one relay origin this build was baked with, and the mode it sets
  * (`docs/specs/relay.md` → "Relay origin"): the Burrow's only Relay, and — in a
- * Hosted build — where the one-time rendezvous and managed voice go too.
+ * Hosted build — where the one-time rendezvous goes too. Managed voice speaks
+ * at {@link HOSTED_VOICE_ORIGIN} instead.
  *
  * Baked by `scripts/relay-origin.mjs` into both host bundles. **Never webview
  * input** — no command carries an origin.
@@ -10,12 +11,19 @@
 import { normalizeOrigin } from 'remote-lib-common';
 
 /**
- * The origin a stock build reaches: Hosted. Kept equal to
+ * The relay origin a stock build reaches: Hosted's. Kept equal to
  * `scripts/relay-origin.mjs` by `relay-origin.test.ts` — the build scripts read
  * the `.mjs`, the service reads this, and a drift would ship a binary whose
  * mode disagrees with its origin.
  */
-export const DEFAULT_RELAY_ORIGIN = 'https://hosted.dormouse.sh';
+export const DEFAULT_RELAY_ORIGIN = 'https://relay.dormouse.sh';
+
+/**
+ * Where a Hosted build's managed voice speaks. A fixed constant, never baked
+ * and never overridden: a dev Hosted build whose relay origin is loopback still
+ * speaks here (`docs/specs/relay.md` → "Relay origin").
+ */
+export const HOSTED_VOICE_ORIGIN = 'https://voice.dormouse.sh';
 
 /**
  * `hosted`: the default origin, or a dev build's `DORMOUSE_RELAY_IS_HOSTED=1`.
@@ -62,13 +70,21 @@ export function bakedRelayMode(): RelayMode {
 }
 
 /**
- * Where this build may reach Hosted: the relay origin in a Hosted build, and
- * `null` in a self-host one, which reaches nothing of Dormouse's in the
- * background. Every Hosted-reaching feature takes this and does nothing on
- * `null`.
+ * Where this build may reach Hosted's one-time rendezvous: the relay origin in
+ * a Hosted build, and `null` in a self-host one, which reaches nothing of
+ * Dormouse's in the background. Every Hosted-reaching feature takes this or
+ * {@link hostedVoiceOrigin} and does nothing on `null`.
  */
 export function hostedOrigin(relay: RelayBuild): string | null {
   return relay.mode === 'hosted' ? relay.origin : null;
+}
+
+/**
+ * Where this build's managed voice may speak: {@link HOSTED_VOICE_ORIGIN} in a
+ * Hosted build, whatever its relay origin, and `null` in a self-host one.
+ */
+export function hostedVoiceOrigin(relay: RelayBuild): string | null {
+  return relay.mode === 'hosted' ? HOSTED_VOICE_ORIGIN : null;
 }
 
 /**

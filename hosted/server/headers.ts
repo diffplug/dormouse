@@ -1,9 +1,16 @@
 import type { Hono } from "hono";
 import { ONE_TIME_PAGE_PATH, ONE_TIME_WS_ROUTES } from "remote-lib-common";
 
-/** The origin-wide policy: the account frontend's own files and nothing else. */
-const ORIGIN_POLICY =
+/** The account origin's policy: the account frontend's own files and nothing else. */
+export const ACCOUNT_POLICY =
   "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; worker-src 'none'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'";
+
+/**
+ * The policy of every response that is no page: the voice origin's, and the
+ * relay origin's outside `/connect/`. It runs nothing at all.
+ */
+export const RUNS_NOTHING_POLICY =
+  "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
 
 /** Whether a path is the one-time page's: `/connect` itself or anything under `/connect/`. */
 function isOneTimePagePath(pathname: string) {
@@ -14,12 +21,11 @@ function isOneTimePagePath(pathname: string) {
 }
 
 /**
- * The one-time page's own policy (`docs/specs/one-time.md` -> "Phone page"),
- * narrower than the origin's where it can be and looser only where the page
- * needs it: scripts from `/connect/assets/` alone (plus WebAssembly for xterm's
- * image decoder), styles from there too plus inline ones for the shell and
- * React, and one socket — the rendezvous client route. Nothing names `'self'`,
- * which would admit the account frontend's files. Sandboxed, so it opens no
+ * The one-time page's own policy (`docs/specs/one-time.md` -> "Phone page"):
+ * scripts from `/connect/assets/` alone (plus WebAssembly for xterm's image
+ * decoder), styles from there too plus inline ones for the shell and React,
+ * and one socket — the rendezvous client route. Nothing names `'self'`, which
+ * would admit whatever else the relay origin serves. Sandboxed, so it opens no
  * popup and submits no form.
  */
 export function oneTimePagePolicy(appOrigin: string) {
@@ -42,37 +48,47 @@ export function oneTimePagePolicy(appOrigin: string) {
 }
 
 /**
- * The policy a response to `pathname` carries. The page's needs `APP_ORIGIN`,
- * and a value that is not exactly an origin could write a directive of its
- * own into the header: the origin-wide policy, which runs none of the page,
- * answers instead.
+ * The policy a relay response to `pathname` carries: the page's under
+ * `/connect`, and one that runs nothing everywhere else. The page's needs
+ * `APP_ORIGIN`, and a value that is not exactly an origin could write a
+ * directive of its own into the header: the runs-nothing policy answers instead.
  */
-export function contentSecurityPolicy(pathname: string, appOrigin: unknown) {
-  if (!isOneTimePagePath(pathname)) return ORIGIN_POLICY;
+export function relayPolicy(pathname: string, appOrigin: unknown) {
+  if (!isOneTimePagePath(pathname)) return RUNS_NOTHING_POLICY;
   return typeof appOrigin === "string" &&
     /^https?:\/\/[a-z0-9.:[\]-]+$/i.test(appOrigin) &&
     URL.canParse(appOrigin) &&
     new URL(appOrigin).origin === appOrigin
     ? oneTimePagePolicy(appOrigin)
-    : ORIGIN_POLICY;
+    : RUNS_NOTHING_POLICY;
 }
 
-/** Vite's content-hashed output: the account frontend's, and the one-time page's. */
-const HASHED_ASSETS = ["/assets/", `${ONE_TIME_PAGE_PATH}assets/`];
+/** What a Worker's `secureHeaders` asks for each response's policy. */
+export type PolicyFor = (pathname: string, appOrigin: unknown) => string;
+
+/** The account frontend's content-hashed Vite output. */
+export const ACCOUNT_HASHED_ASSETS = ["/assets/"];
+
+/** The one-time page's content-hashed Vite output, on the relay. */
+export const RELAY_HASHED_ASSETS = [`${ONE_TIME_PAGE_PATH}assets/`];
 
 // Applied to the HTML shell as well as APIs: auth's own middleware only covers its routes.
-export function secureHeaders(app: Hono<any>) {
+export function secureHeaders(
+  app: Hono<any>,
+  policy: PolicyFor,
+  hashedAssets: readonly string[],
+) {
   app.use("*", async (c, next) => {
     await next();
     // A WebSocket upgrade carries no document, and its headers are the runtime's.
     if (c.res.status === 101) return;
     const { pathname } = new URL(c.req.url);
-    // Vite emits content-hashed files under each `assets/`, so they are safe to cache
-    // forever, but the SPA fallback answers an unknown /assets/ path with the HTML shell:
-    // cache only a 200 whose type is not HTML, and leave everything else uncached.
+    // Vite emits content-hashed files under this Worker's `hashedAssets`, so they are safe
+    // to cache forever, but the SPA fallback answers an unknown /assets/ path with the HTML
+    // shell: cache only a 200 whose type is not HTML, and leave everything else uncached.
     const asset =
       c.res.status === 200 &&
-      HASHED_ASSETS.some((prefix) => pathname.startsWith(prefix)) &&
+      hashedAssets.some((prefix) => pathname.startsWith(prefix)) &&
       !(c.res.headers.get("content-type") ?? "").includes("text/html");
     c.header(
       "Cache-Control",
@@ -85,9 +101,6 @@ export function secureHeaders(app: Hono<any>) {
     c.header("X-Robots-Tag", "noindex, nofollow");
     c.header("Strict-Transport-Security", "max-age=31536000");
     // `c.env` is the mapped bindings once the mapper ran, and the raw ones if it threw.
-    c.header(
-      "Content-Security-Policy",
-      contentSecurityPolicy(pathname, c.env?.APP_ORIGIN),
-    );
+    c.header("Content-Security-Policy", policy(pathname, c.env?.APP_ORIGIN));
   });
 }

@@ -245,8 +245,9 @@ Source of truth: `OneTimeClient` in `lib/src/remote/client/one-time-client.ts`;
 
 ## Hosted rendezvous
 
-Hosted's Worker serves both routes, and one `OneTimeRoom` Durable Object per
-room carries the frames. **Never parse, store, or log a forwarded frame**: the
+The relay Worker (`https://relay.dormouse.sh`; `docs/specs/hosted.md` ->
+"Application boundary") serves both routes, and one `OneTimeRoom` Durable
+Object per room carries the frames. **Never parse, store, or log a forwarded frame**: the
 room bounds a frame by its raw length and its count alone, and forwards the
 string verbatim (rationale).
 
@@ -255,14 +256,14 @@ string verbatim (rationale).
 | `ONE_TIME_WS_ROUTES.burrow` | an upgrade with no `Origin` header | 426 without an upgrade, 403 on any `Origin`, 429 past `ONE_TIME_MINT_LIMIT` |
 | `ONE_TIME_WS_ROUTES.client` | an upgrade whose `Origin` is exactly `APP_ORIGIN`, naming exactly one E2E id as `room` | 426 without an upgrade, 403 on any other or no `Origin`, 400 on a missing, repeated, or malformed room, 429 past `ONE_TIME_JOIN_LIMIT` |
 
-- **Must mount after the bindings mapper and the 421 gate, before the account
-  API**, and never read a cookie, reach Hyperdrive, or call auth. The Worker
+- **Must mount after the bindings mapper and the 421 gate**, and never read a
+  cookie, reach Hyperdrive, or call auth. The Worker
   mints each room id from 16 random bytes and hands the room a fresh request
   carrying only the upgrade and the room id, never the caller's headers.
 - **The `Origin` rules are abuse control, never authorization** (rationale).
 - **Both limits key on `cf-connecting-ip`**: an IPv6 address by its /64, an
   IPv4-mapped one (`::ffff:0:0/96`, however spelled) by its IPv4, and a missing
-  one as `local` (rationale); `hosted/wrangler.jsonc` sets 10 mints and 30 joins
+  one as `local` (rationale); `hosted/wrangler.relay.jsonc` sets 10 mints and 30 joins
   per 60 seconds.
 - **The room's state is the Burrow socket's hibernation attachment** —
   `expiresAt`, `joined`, and a count of every frame received — never memory, so
@@ -293,12 +294,12 @@ holds nothing.
 
 Source of truth: `oneTimeRoutes` / `rateLimitKey` in
 `hosted/server/one-time.ts`; `OneTimeRoom` in `hosted/server/one-time-room.ts`;
-`hosted/wrangler.jsonc`. Pinned by `hosted/server/tests/one-time.test.ts`.
+`hosted/wrangler.relay.jsonc`. Pinned by `hosted/server/tests/one-time.test.ts`.
 
 ## Phone page
 
-Hosted serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`): `OneTimeApp`
-on Pocket's screens, chrome, and mobile wall.
+The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`):
+`OneTimeApp` on Pocket's screens, chrome, and mobile wall.
 
 | Screen | When |
 | --- | --- |
@@ -315,8 +316,8 @@ on Pocket's screens, chrome, and mobile wall.
 - **Never open a socket before the Connect tap**: the tap builds the client and
   runs `connectOnce`, so a link-preview crawler spends nothing.
 - Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
-- **Never persist anything** on an origin Hosted's accounts share: no storage,
-  IndexedDB, worker, push, or cookie. `applyPocketTheme` applies Pocket's
+- **Never persist anything** on the relay origin: no storage, IndexedDB,
+  worker, push, or cookie. `applyPocketTheme` applies Pocket's
   default theme without reading or writing a stored pick, for the page and its
   `PocketWall`. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
 - **Mounts the wall only on `ok`**, through `mountRemoteWall`. End, Cancel, a
@@ -333,14 +334,15 @@ on Pocket's screens, chrome, and mobile wall.
 no module-preload polyfill) into `lib/dist-one-time`, then runs
 `assertPocketShell --one-time`: scripts under `/connect/assets/`, links under
 `/connect/`, nothing inline. Hosted's `build` runs it first, and
-`hosted/scripts/stage-one-time.mjs`, after Hosted's Vite build, copies it to
-`dist/connect/` and checks the copy.
+`hosted/scripts/stage-one-time.mjs` empties the relay's assets directory,
+`hosted/dist/relay/`, copies it to `hosted/dist/relay/connect/`, and checks the copy.
 
-**Serving.** The Worker answers `/connect`, `/connect/`, and
-`/connect/assets/*` from its assets ahead of the SPA fallback; an HTML answer
-under `/connect/assets/` and any other `/connect/*` path is a 404. A hashed
-file there is cached as `/assets/` is. Everything under `/connect` carries this
-policy, from `APP_ORIGIN` (`<o>`; `<ws-o>` with `http` replaced by `ws`):
+**Serving.** The relay Worker answers `/connect`, `/connect/`, and
+`/connect/assets/*` from its assets, which have no SPA fallback; an HTML answer
+under `/connect/assets/` and any other path, under `/connect/` or not, is a 404.
+A hashed file there is cached immutably. Everything under `/connect` carries
+this policy, from the relay's `APP_ORIGIN` (`<o>`; `<ws-o>` with `http`
+replaced by `ws`); every other relay response carries `RUNS_NOTHING_POLICY`:
 
 ```
 default-src 'none'; script-src <o>/connect/assets/ 'wasm-unsafe-eval';
@@ -351,7 +353,7 @@ object-src 'none'; sandbox allow-scripts allow-same-origin
 ```
 
 - **An `APP_ORIGIN` that is not exactly `scheme://host[:port]` of plain host
-  characters gets the origin-wide policy instead**: the URL parser admits `;`,
+  characters gets `RUNS_NOTHING_POLICY` instead**: the URL parser admits `;`,
   `,`, and `'` in a host.
 - **The sandbox keeps `allow-same-origin`**, and Chrome's warning about the pair
   stands (rationale).
@@ -363,7 +365,7 @@ Source of truth: `OneTimeApp` and `oneTimeDeviceLabel` in
 `lib/src/remote/pocket-app/pocket-theme.ts`; `assertPocketShell` in
 `lib/scripts/assert-pocket-worker.mjs`; `stageOneTime` in
 `hosted/scripts/stage-one-time.mjs`; `oneTimePageRoutes` in
-`hosted/server/one-time.ts`; `contentSecurityPolicy` in
+`hosted/server/one-time.ts`; `relayPolicy` in
 `hosted/server/headers.ts`. Pinned by
 `lib/src/remote/one-time-app/OneTimeApp.test.tsx`,
 `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`,
@@ -374,11 +376,11 @@ Source of truth: `OneTimeApp` and `oneTimeDeviceLabel` in
 ## Dev loop
 
 **`dor tool one-time` (root `pnpm dev:one-time`) runs the rendezvous and page
-on loopback, without Postgres**: the production entry under `wrangler dev
+on loopback, without Postgres**: the relay Worker's entry under `wrangler dev
 --local`, bound to `127.0.0.1` on `PORT` or 8787 — fixed, since a Burrow build
 bakes the origin in. `devConfig` sets `APP_ORIGIN` to `http://localhost:<port>`,
-the host a Dor Tool frames, copies the Durable Object, migration, and rate
-limits, and carries no route, Hyperdrive, or secret; `vite build --watch`
+the host a Dor Tool frames, copies the relay config's Durable Object,
+migration, and rate limits, and carries no route or secret; `vite build --watch`
 rebuilds the page into the folder Wrangler serves. Once the page answers, the
 loop prints the origin and the dev Burrow build variables
 (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md`

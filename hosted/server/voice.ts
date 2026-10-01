@@ -40,11 +40,16 @@ export function elevenLabs(
   };
 }
 
-/** What one request's deployment provides. */
-export interface VoiceHost {
+/** What one request's account deployment provides to the token routes. */
+export interface TokenHost {
   databaseUrl: string;
   /** The Better Auth handler, asked for the cookie's login. */
   auth(request: Request): Response | Promise<Response>;
+}
+
+/** What one request's voice deployment provides to speak. */
+export interface SpeakHost {
+  databaseUrl: string;
   /** Undefined when this deployment has no upstream. */
   synthesize: Synthesize | undefined;
 }
@@ -61,10 +66,17 @@ const notAdmin = (c: Context) =>
 const badBody = (c: Context) =>
   fail(c, 400, "Send JSON with text and voiceId.");
 
-/** Registers /api/voice/*; call before any /api/* catch-all. */
-export function voiceRoutes(app: Hono<any>, host: (c: Context) => VoiceHost) {
-  // Cookie routes: same-site pages share the login cookie, so only this origin
-  // may change tokens. Sets `voiceUser` to the admin's user ID.
+/**
+ * Registers the account's /api/voice/tokens routes; call before any /api/*
+ * catch-all.
+ */
+export function voiceTokenRoutes(
+  app: Hono<any>,
+  host: (c: Context) => TokenHost,
+) {
+  // Cookie routes: same-site pages — the relay and voice origins among them —
+  // share the login cookie, so only this origin may change tokens. Sets
+  // `voiceUser` to the admin's user ID.
   const cookieAdmin: MiddlewareHandler<{
     Variables: { voiceUser: string };
   }> = async (c, next) => {
@@ -133,7 +145,13 @@ export function voiceRoutes(app: Hono<any>, host: (c: Context) => VoiceHost) {
       ).length > 0;
     return revoked ? c.body(null, 204) : fail(c, 404, "Token not found.");
   });
+}
 
+/**
+ * Registers the voice origin's bearer-only POST /api/voice/speak; call before
+ * any /api/* catch-all. It reads no cookie and never asks auth.
+ */
+export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
   app.post("/api/voice/speak", async (c) => {
     const bearer = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "");
     if (!bearer || !TOKEN.test(bearer[1])) return tokenRequired(c);

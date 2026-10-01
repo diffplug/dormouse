@@ -73,7 +73,7 @@ describe('connectionsFor', () => {
   it('lists Hosted only while a link is open, and the phone on an allowed network, under Local networks', () => {
     expect(connectionsFor(facts())).toEqual([
       {
-        to: 'hosted.dormouse.sh',
+        to: 'relay.dormouse.sh',
         when: 'Only while a one-time link is open',
         carries: 'Encrypted handshakes. Never terminal traffic.',
       },
@@ -86,7 +86,7 @@ describe('connectionsFor', () => {
   it('lists Hosted while a link is open, Cloudflare’s STUN as a phone connects, and the phone on any network, under Anywhere', () => {
     const rows = [
       {
-        to: 'hosted.dormouse.sh',
+        to: 'relay.dormouse.sh',
         when: 'Only while a one-time link is open',
         carries: 'Encrypted handshakes. Never terminal traffic.',
       },
@@ -130,7 +130,7 @@ describe('connectionsFor', () => {
       connectionsFor(facts({ policy: { ...LOCAL, allowed: [] }, ...over }));
     expect(voice({ managedVoice: true })).toEqual([
       {
-        to: 'hosted.dormouse.sh',
+        to: 'voice.dormouse.sh',
         when: 'When an alert is spoken in the managed voice',
         carries: 'The pane’s name and the voice id, which Hosted passes to ElevenLabs.',
       },

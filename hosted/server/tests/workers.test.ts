@@ -3,7 +3,6 @@ import { digest } from "@pgstencil/auth/security";
 import { fileURLToPath } from "node:url";
 import {
   Miniflare,
-  convertV4MiniflareOptions,
   Request as WorkerRequest,
   Response as WorkerResponse,
 } from "miniflare";
@@ -22,15 +21,18 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
-import { bundleWorker, wrangler } from "./bundle";
+import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, type Name } from "./bundle";
 
-const origin = "https://hosted.dormouse.sh";
+const origin = ORIGINS.account;
+const voiceOrigin = ORIGINS.voice;
+/** The sibling Workers' origins: same-site, so a browser sends them the login cookie. */
+const SAME_SITE = ["https://dormouse.sh", ORIGINS.relay, voiceOrigin];
 const bundle = (production: boolean | "preview") =>
   bundleWorker(
     production === "preview"
       ? "server/preview-worker.ts"
       : production
-        ? "server/worker.ts"
+        ? ENTRIES.account
         : "server/tests/worker-entry.ts",
     production
       ? []
@@ -43,31 +45,35 @@ const bundle = (production: boolean | "preview") =>
 const testBundle = bundle(false);
 const productionBundle = bundle(true);
 const previewBundle = bundle("preview");
+const voiceBundles = {
+  test: bundleWorker("server/tests/voice-entry.ts"),
+  production: bundleWorker(ENTRIES.voice),
+  preview: bundleWorker("server/voice-preview-worker.ts"),
+};
 type Result = Awaited<ReturnType<Miniflare["dispatchFetch"]>>;
 type Handler = (
   request: WorkerRequest,
 ) => WorkerResponse | Promise<WorkerResponse>;
 
-/** One Worker under Miniflare; `database` backs the HYPERDRIVE binding. */
-const workerOptions = ({
-  script,
-  database,
-  assets,
-  ...rest
-}: {
-  script: string;
-  database: string;
-  assets: Handler;
-  bindings: Record<string, string>;
-  outboundService: Handler;
-}) =>
-  convertV4MiniflareOptions({
-    modules: true,
+/** Worker `name` under Miniflare; `database` backs the HYPERDRIVE binding. */
+const workerOptions = (
+  name: Name,
+  {
     script,
-    compatibilityDate: wrangler.compatibility_date,
-    compatibilityFlags: wrangler.compatibility_flags,
+    database,
+    assets,
+    ...rest
+  }: {
+    script: string;
+    database: string;
+    assets?: Handler;
+    bindings: Record<string, string>;
+    outboundService: Handler;
+  },
+) =>
+  miniflareOptions(name, script, {
     hyperdrives: { HYPERDRIVE: database },
-    serviceBindings: { ASSETS: assets },
+    ...(assets ? { serviceBindings: { ASSETS: assets } } : {}),
     ...rest,
   });
 
@@ -107,8 +113,63 @@ async function fixture(
     bindings[`${id.toUpperCase()}_CLIENT_SECRET`] = credentials.clientSecret;
   }
   Object.assign(bindings, overrides);
+  const outboundService: Handler = async (request) => {
+    if (production === "preview")
+      throw new Error(
+        "Preview must never send external mail or OAuth requests",
+      );
+    const url = new URL(request.url);
+    if (url.href === "https://api.postmarkapp.com/email") {
+      expect(request.headers.get("x-postmark-server-token")).toBe(
+        "test-token",
+      );
+      const mail = (await request.json()) as {
+        To: string;
+        From: string;
+        Subject: string;
+        HtmlBody: string;
+        TextBody: string;
+      };
+      await context.email.send({
+        to: [mail.To],
+        from: mail.From,
+        subject: mail.Subject,
+        html: mail.HtmlBody,
+        text: mail.TextBody,
+      });
+      return new WorkerResponse(JSON.stringify({ ErrorCode: 0 }), {
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (url.href.startsWith("https://api.elevenlabs.io/v1/history?")) {
+      elevenLabs.sweeps.push(url.href);
+      return WorkerResponse.json({ history: [] });
+    }
+    if (url.origin === "https://api.elevenlabs.io") {
+      elevenLabs.requests.push({
+        url: url.href,
+        key: request.headers.get("xi-api-key"),
+        body: await request.json(),
+      });
+      return elevenLabs.respond();
+    }
+    const path = endpointPaths[url.origin + url.pathname];
+    if (!path) throw new Error(`Unexpected outbound host: ${url.hostname}`);
+    const response = await fetch(provider.origin + path + url.search, {
+      method: request.method,
+      headers: Object.fromEntries(request.headers),
+      ...(request.method === "POST" ? { body: await request.text() } : {}),
+    });
+    return new WorkerResponse(await response.arrayBuffer(), {
+      status: response.status,
+      headers: {
+        "content-type":
+          response.headers.get("content-type") ?? "application/json",
+      },
+    });
+  };
   const worker = new Miniflare(
-    workerOptions({
+    workerOptions("account", {
       script: (
         await (production === "preview"
           ? previewBundle
@@ -131,63 +192,33 @@ async function fixture(
                   headers: { "content-type": "text/html" },
                 },
               ),
-      async outboundService(request) {
-        if (production === "preview")
-          throw new Error(
-            "Preview must never send external mail or OAuth requests",
-          );
-        const url = new URL(request.url);
-        if (url.href === "https://api.postmarkapp.com/email") {
-          expect(request.headers.get("x-postmark-server-token")).toBe(
-            "test-token",
-          );
-          const mail = (await request.json()) as {
-            To: string;
-            From: string;
-            Subject: string;
-            HtmlBody: string;
-            TextBody: string;
-          };
-          await context.email.send({
-            to: [mail.To],
-            from: mail.From,
-            subject: mail.Subject,
-            html: mail.HtmlBody,
-            text: mail.TextBody,
-          });
-          return new WorkerResponse(JSON.stringify({ ErrorCode: 0 }), {
-            headers: { "content-type": "application/json" },
-          });
-        }
-        if (url.href.startsWith("https://api.elevenlabs.io/v1/history?")) {
-          elevenLabs.sweeps.push(url.href);
-          return WorkerResponse.json({ history: [] });
-        }
-        if (url.origin === "https://api.elevenlabs.io") {
-          elevenLabs.requests.push({
-            url: url.href,
-            key: request.headers.get("xi-api-key"),
-            body: await request.json(),
-          });
-          return elevenLabs.respond();
-        }
-        const path = endpointPaths[url.origin + url.pathname];
-        if (!path) throw new Error(`Unexpected outbound host: ${url.hostname}`);
-        const response = await fetch(provider.origin + path + url.search, {
-          method: request.method,
-          headers: Object.fromEntries(request.headers),
-          ...(request.method === "POST" ? { body: await request.text() } : {}),
-        });
-        return new WorkerResponse(await response.arrayBuffer(), {
-          status: response.status,
-          headers: {
-            "content-type":
-              response.headers.get("content-type") ?? "application/json",
-          },
-        });
-      },
+      outboundService,
     }),
   );
+  // The voice Worker on the same database, with every binding the account
+  // has (its mapper drops what it does not use), started on first use.
+  let voiceWorker: Promise<Miniflare> | undefined;
+  const voice = () =>
+    (voiceWorker ??= (async () => {
+      const started = new Miniflare(
+        workerOptions("voice", {
+          script: (
+            await voiceBundles[
+              production === "preview"
+                ? "preview"
+                : production
+                  ? "production"
+                  : "test"
+            ]
+          ).outputFiles![0].text,
+          bindings: { ...bindings, APP_ORIGIN: voiceOrigin },
+          database: context.database.url,
+          outboundService,
+        }),
+      );
+      await started.ready;
+      return started;
+    })());
   try {
     await worker.ready;
   } catch (error) {
@@ -290,11 +321,12 @@ async function fixture(
       }
       return { path, result: await request(path) };
     }
-    // Token management is same-origin JSON; speak is bearer-only, with no cookie.
-    const voice = (method: string, path = "") =>
+    // Token management is same-origin JSON on the account; speak is
+    // bearer-only on the voice Worker, with no cookie.
+    const tokens = (method: string, path = "") =>
       request("/api/voice/tokens" + path, { method, headers: { origin } });
-    const speak = (token: string | undefined, body: unknown) =>
-      worker.dispatchFetch(origin + "/api/voice/speak", {
+    const speak = async (token: string | undefined, body: unknown) =>
+      (await voice()).dispatchFetch(voiceOrigin + "/api/voice/speak", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -303,8 +335,8 @@ async function fixture(
         body: typeof body === "string" ? body : JSON.stringify(body),
       });
     const mint = async () =>
-      (await (await voice("POST")).json()) as { id: string; token: string };
-    return { request, post, session, email, oauth, voice, speak, mint };
+      (await (await tokens("POST")).json()) as { id: string; token: string };
+    return { request, post, session, email, oauth, tokens, speak, mint };
   }
   return {
     ...context,
@@ -317,15 +349,16 @@ async function fixture(
         method: "POST",
         body: time,
       }),
-    /** Background passes scheduled so far; the test entry only. */
+    /** Background passes the voice Worker scheduled so far; the test entry only. */
     waitUntilCalls: async () =>
       Number(
         await (
-          await worker.dispatchFetch(origin + "/__test/wait-until")
+          await (await voice()).dispatchFetch(voiceOrigin + "/__test/wait-until")
         ).text(),
       ),
     close: async () => {
       await worker.dispose();
+      await (await voiceWorker)?.dispose();
       await provider.close();
       await context.close();
     },
@@ -408,7 +441,7 @@ test.for(providerIds)(
   },
 );
 
-test("same-site marketing requests fail; production excludes dev endpoints and unconfigured providers", async ({
+test("same-site requests fail, the sibling Workers' included; production excludes dev endpoints and unconfigured providers", async ({
   onTestFinished,
 }) => {
   const f = await fixture(true, "github");
@@ -417,15 +450,17 @@ test("same-site marketing requests fail; production excludes dev endpoints and u
   expect(await (await browser.request("/api/providers")).json()).toEqual([
     "github",
   ]);
-  expect(
-    (
-      await browser.post(
-        "email-otp/send-verification-otp",
-        { email: "x@example.test", type: "sign-in" },
-        "https://dormouse.sh",
-      )
-    ).status,
-  ).toBe(403);
+  for (const sameSite of SAME_SITE)
+    expect(
+      (
+        await browser.post(
+          "email-otp/send-verification-otp",
+          { email: "x@example.test", type: "sign-in" },
+          sameSite,
+        )
+      ).status,
+      sameSite,
+    ).toBe(403);
   const shell = await browser.request("/login");
   expect(shell.headers.get("content-security-policy")).toContain(
     "script-src 'self'",
@@ -459,9 +494,11 @@ test("same-site marketing requests fail; production excludes dev endpoints and u
     "/api/auth/revoke-sessions",
   ])
     expect((await browser.request(path)).status).toBe(404);
-  expect(
-    (await f.worker.dispatchFetch("https://dormouse.sh/api/auth/csrf")).status,
-  ).toBe(421);
+  for (const sameSite of SAME_SITE)
+    expect(
+      (await f.worker.dispatchFetch(sameSite + "/api/auth/csrf")).status,
+      sameSite,
+    ).toBe(421);
   await browser.email("real-clock@example.test");
   expect(
     Math.abs(
@@ -569,23 +606,25 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   onTestFinished(f.close);
   const admin = f.browser(),
     other = f.browser();
-  expect((await admin.voice("GET")).status).toBe(401);
+  expect((await admin.tokens("GET")).status).toBe(401);
   await other.email("other@example.test");
-  expect((await other.voice("GET")).status).toBe(403);
-  expect((await other.voice("POST")).status).toBe(403);
+  expect((await other.tokens("GET")).status).toBe(403);
+  expect((await other.tokens("POST")).status).toBe(403);
   await admin.email(ADMIN_EMAIL);
-  expect(await (await admin.voice("GET")).json()).toEqual({ tokens: [] });
-  // A same-site page carries the cookie but not this origin.
-  expect(
-    (
-      await admin.request("/api/voice/tokens", {
-        method: "POST",
-        headers: { origin: "https://dormouse.sh" },
-      })
-    ).status,
-  ).toBe(403);
+  expect(await (await admin.tokens("GET")).json()).toEqual({ tokens: [] });
+  // A same-site page — a sibling Worker's included — carries the cookie but not this origin.
+  for (const sameSite of SAME_SITE)
+    expect(
+      (
+        await admin.request("/api/voice/tokens", {
+          method: "POST",
+          headers: { origin: sameSite },
+        })
+      ).status,
+      sameSite,
+    ).toBe(403);
 
-  const minted = await admin.voice("POST");
+  const minted = await admin.tokens("POST");
   expect(minted.status).toBe(201);
   const { id, token } = (await minted.json()) as { id: string; token: string };
   expect(token).toMatch(/^dmv_[A-Za-z0-9_-]{43}$/);
@@ -620,7 +659,7 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     ]),
   );
   const [listed] = (
-    (await (await admin.voice("GET")).json()) as {
+    (await (await admin.tokens("GET")).json()) as {
       tokens: { id: string; lastUsedAt: string | null; revokedAt: null }[];
     }
   ).tokens;
@@ -689,11 +728,21 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
   // No refused or failed speech (400, 401, 403, 429, 502) scheduled a sweep.
   expect(await f.waitUntilCalls()).toBe(1);
 
-  expect((await admin.voice("DELETE", "/" + id)).status).toBe(204);
+  for (const sameSite of SAME_SITE)
+    expect(
+      (
+        await admin.request("/api/voice/tokens/" + id, {
+          method: "DELETE",
+          headers: { origin: sameSite },
+        })
+      ).status,
+      sameSite,
+    ).toBe(403);
+  expect((await admin.tokens("DELETE", "/" + id)).status).toBe(204);
   expect((await admin.speak(token, hi)).status).toBe(401);
-  expect((await admin.voice("DELETE", "/not-a-token")).status).toBe(404);
+  expect((await admin.tokens("DELETE", "/not-a-token")).status).toBe(404);
   expect(
-    (await admin.voice("DELETE", "/00000000-0000-4000-8000-000000000000"))
+    (await admin.tokens("DELETE", "/00000000-0000-4000-8000-000000000000"))
       .status,
   ).toBe(404);
 
@@ -704,8 +753,8 @@ test("managed voice: only the verified admin mints, speaks, and revokes", async 
     `UPDATE "user" SET "emailVerified" = false WHERE email = $1`,
     [ADMIN_EMAIL],
   );
-  expect((await admin.voice("GET")).status).toBe(403);
-  expect((await admin.voice("POST")).status).toBe(403);
+  expect((await admin.tokens("GET")).status).toBe(403);
+  expect((await admin.tokens("POST")).status).toBe(403);
   expect(
     (await admin.speak(second.token, hi)).status,
   ).toBe(403);
@@ -730,7 +779,7 @@ test("sweep caps fit Workers Free's 50 subrequests per invocation", () => {
   expect(1 + 1 + 1 + SPEECH_SWEEP_CAP).toBeLessThanOrEqual(50);
 });
 
-test("production cron sweeps ElevenLabs history with only its key and no database", async ({
+test("the voice Worker's cron sweeps ElevenLabs history with only its key and no database", async ({
   onTestFinished,
 }) => {
   // Simulated history, newest first.
@@ -746,13 +795,12 @@ test("production cron sweeps ElevenLabs history with only its key and no databas
     maxInFlight = 0;
   const sweeper = async (bindings: Record<string, string>) => {
     const worker = new Miniflare(
-      workerOptions({
-        script: (await productionBundle).outputFiles![0].text,
-        // No AUTH_SECRET, APP_ORIGIN, or mail and OAuth credentials.
+      workerOptions("voice", {
+        script: (await voiceBundles.production).outputFiles![0].text,
+        // No APP_ORIGIN.
         bindings,
         // Nothing listens here, so any database access would fail the run.
         database: "postgres://user:pass@127.0.0.1:9/none",
-        assets: () => new WorkerResponse("", { status: 500 }),
         async outboundService(request) {
           const url = new URL(request.url);
           expect(url.origin).toBe("https://api.elevenlabs.io");

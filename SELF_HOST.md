@@ -110,8 +110,8 @@ installed release, which the installer and `manage status` both print.
   DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:vscode
   ```
 
-  That is a self-host build: it sends nothing to `dormouse.sh` or
-  `hosted.dormouse.sh` on its own, so it has no one-time connection, no managed
+  That is a self-host build: it sends nothing to `dormouse.sh` or any host
+  under it on its own, so it has no one-time connection, no managed
   voice, and no auto-update — update it by rebuilding
   (`docs/specs/relay.md` → "Relay origin").
 

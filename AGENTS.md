@@ -31,7 +31,7 @@ The Tool shows the harness in its own pane and prints the command to drive it
 - **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process; direct-path WebRTC via node-datachannel, every platform's addon in one VSIX)
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
 - **`relay/`** — Selfhost coordinating Relay for remote control (Hono): accounts + passkey auth in local JSON files (no database), WebSocket routing between Clients and Burrows, serves the built Pocket app
-- **`hosted/`** — Separate Hosted account frontend and Hono Worker; packed pgstencil Better Auth, Postgres, and provider configuration.
+- **`hosted/`** — Hosted's three Hono Workers: account and Better Auth (`hosted.dormouse.sh`), one-time rendezvous (`relay.`), voice (`voice.`); Postgres.
 - **`dor/`** — The `dor` CLI (stricli) staged onto the `PATH` of every Dormouse-launched terminal; talks to its host over a private control socket
 - **`remote-lib-common/`** — Security primitives + remote wire contract shared by `relay`, the Burrow module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.

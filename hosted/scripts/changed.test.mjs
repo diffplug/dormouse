@@ -5,6 +5,10 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
   for (const path of [
     "hosted/README.md",
     "hosted/server/worker.ts",
+    "hosted/server/relay-worker.ts",
+    "hosted/server/voice-worker.ts",
+    "hosted/wrangler.relay.jsonc",
+    "hosted/wrangler.voice.jsonc",
     "pnpm-lock.yaml",
     ".github/workflows/hosted-preview.yml",
     "lib/src/theme-colors.css",

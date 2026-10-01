@@ -1605,7 +1605,7 @@ describe('one-time connection', () => {
     const waiting = result as Waiting;
     expect(waiting.status).toBe('waiting');
     expect(rendezvous.rooms).toHaveLength(1);
-    expect(rendezvous.room().burrowUrl).toBe('wss://hosted.dormouse.sh/api/one-time/burrow');
+    expect(rendezvous.room().burrowUrl).toBe('wss://relay.dormouse.sh/api/one-time/burrow');
     expect((await parseOneTimeLinkUrl(waiting.url, HOSTED_ORIGIN))?.roomId).toBe(
       rendezvous.room().roomId,
     );

@@ -7,9 +7,9 @@ import {
   ONE_TIME_WS_ROUTES,
   toBase64Url,
 } from "remote-lib-common";
-import type { Env } from "./worker";
+import type { RelayEnv } from "./bindings";
 
-type OneTimeContext = Context<{ Bindings: Env }>;
+type OneTimeContext = Context<{ Bindings: RelayEnv }>;
 
 /**
  * The one-time rendezvous routes (`docs/specs/one-time.md` -> "Hosted
@@ -17,7 +17,7 @@ type OneTimeContext = Context<{ Bindings: Env }>;
  * room's Durable Object; neither reads a cookie, reaches Hyperdrive, or asks
  * auth anything.
  */
-export function oneTimeRoutes(app: Hono<{ Bindings: Env }>) {
+export function oneTimeRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   app.get(ONE_TIME_WS_ROUTES.burrow, async (c) => {
     if (!upgrade(c)) return upgradeRequired(c);
     // Every browser sends Origin on a WebSocket handshake and the Burrow's
@@ -45,18 +45,17 @@ export function oneTimeRoutes(app: Hono<{ Bindings: Env }>) {
 
 /**
  * The one-time phone page (`docs/specs/one-time.md` -> "Phone page"), staged
- * into the assets under `/connect/`: its shell and its content-hashed assets,
- * and nothing else under the path, so the SPA fallback never answers there.
- * Mounted ahead of that fallback.
+ * into the relay's assets under `/connect/`: its shell and its content-hashed
+ * assets, and nothing else under the path. The relay's assets have no SPA
+ * fallback; an HTML answer to an asset path is refused all the same.
  */
-export function oneTimePageRoutes(app: Hono<{ Bindings: Env }>) {
+export function oneTimePageRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   const assets = (c: OneTimeContext) => c.env.ASSETS.fetch(c.req.raw);
   app.get(ONE_TIME_PAGE_PATH.slice(0, -1), assets);
   app.get(ONE_TIME_PAGE_PATH, assets);
   app.get(`${ONE_TIME_PAGE_PATH}assets/*`, async (c) => {
     const response = await assets(c);
-    // A missing file comes back as the SPA fallback's shell, which is never an
-    // answer to a script or stylesheet request.
+    // An HTML document is never an answer to a script or stylesheet request.
     return (response.headers.get("content-type") ?? "").includes("text/html")
       ? c.notFound()
       : response;

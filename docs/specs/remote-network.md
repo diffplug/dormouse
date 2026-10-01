@@ -80,13 +80,13 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 
 | Row | Listed when |
 |---|---|
-| the Hosted origin: only while a one-time link is open, handshakes and never terminal traffic | `opensOneTimeLinks` (`local`, a network allowed; `anywhere`) |
+| the relay origin: only while a one-time link is open, handshakes and never terminal traffic | `opensOneTimeLinks` (`local`, a network allowed; `anywhere`) |
 | `stun.cloudflare.com`, as a phone connects | `burrowUsesStun` (`anywhere`) |
 | your phone, on any network where `phoneOnAnyNetwork` (`anywhere`), else an allowed one | `opensOneTimeLinks` |
 | the Relay origin: always (unenrolled, "once this computer is enrolled") | `relay` |
 | your phone, directly | `relay` |
 | the Relay origin to the phone's push service, "where push is on" | `relay`, a phone paired (rationale) |
-| the Hosted origin, speaking in the managed voice | a Hosted build, a voice token saved |
+| `voice.dormouse.sh`, speaking in the managed voice | a Hosted build, a voice token saved |
 | `dormouse.sh`, each launch | `autoUpdate` on, in a build that updates itself ("Updates" below), in every window |
 
 - **Allowed networks**, under `local`: one switch per interface, on when all its prefixes are allowed. **Must list every allowed range no switch reading On covers**, with Remove, naming the interface a partly allowed one belongs to; **switching one off keeps a range another switch reading On needs**. A typed range goes to the service, which saves its canonical form; more than 32 is refused in the panel. **With nothing allowed it says no phone can connect.**
@@ -115,5 +115,4 @@ Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connecti
 - **Must choose Pocket's direct-peer factory by deployment** ("Anywhere"), one bundle serving both; `lib/src/remote/pocket-app/App.tsx` hard-codes `selfHostDirectPeer`.
 - **Must start `BurrowRuntime` on the level's `directPeeringFor`, restarting it on any change `samePaths` sees** ("Anywhere").
 - **Must accept sealed push independently of terminal transport**, under `docs/specs/remote-security-model.md` -> "Push sealing".
-- **Must resolve the one-origin pin first** (`docs/specs/relay.md` -> "The one-origin pin"): Pocket and the Relay share `hosted.dormouse.sh`, whose root holds the account app.
 - **Never enroll Hosted into a customer's tailnet** or mint per-customer hostnames.

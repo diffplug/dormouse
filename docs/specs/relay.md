@@ -119,14 +119,15 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 `standalone/scripts/tauri-conf.test.mjs`). The origin sets the build's mode
 (rationale):
 
-| `DORMOUSE_RELAY_ORIGIN` | Mode | Relay | One-time connection, managed voice | Standalone auto-update |
-| --- | --- | --- | --- | --- |
-| unset, or `https://hosted.dormouse.sh` | Hosted | Hosted's, which runs none yet | at this origin | on |
-| any other accepted origin | self-host | exactly this origin | off | off |
+| `DORMOUSE_RELAY_ORIGIN` | Mode | Relay | One-time connection | Managed voice | Standalone auto-update |
+| --- | --- | --- | --- | --- | --- |
+| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, which runs none yet | at this origin | at `https://voice.dormouse.sh` | on |
+| any other accepted origin | self-host | exactly this origin | off | off | off |
 
-- **A self-host build sends nothing to `hosted.dormouse.sh` or `dormouse.sh`
+- **A self-host build sends nothing to `dormouse.sh` or any host under it
   unless the user clicks a link** (rationale). **Every Hosted-reaching host
-  feature takes the nullable `hostedOrigin` and does nothing on `null`**: no
+  feature takes the nullable `hostedOrigin` or `hostedVoiceOrigin` and does
+  nothing on `null`**: no
   rendezvous (`docs/specs/one-time.md` → "Service and hosts"), no managed voice
   (`docs/specs/alert.md` → "Managed voice"). The standalone webview never checks
   for updates (`docs/specs/auto-update.md` → "How it works"), and its binary has
@@ -148,6 +149,14 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 - **A retired variable set non-blank fails the build**:
   `DORMOUSE_REMOTE_CONNECT_SRC`, `DORMOUSE_HOSTED_ORIGIN`,
   `DORMOUSE_ONE_TIME_ORIGIN`.
+- **Managed voice's origin is the constant `HOSTED_VOICE_ORIGIN`, never baked
+  or overridden**, a loopback dev Hosted build included (rationale).
+- **No build bakes `hosted.dormouse.sh`, the account's origin**; the desktop
+  reaches it only by a user's click.
+- Reserved: the Hosted Relay serves `relay.dormouse.sh` over TLS with Pocket at
+  its root, never a tailnet or per-tenant host, passkeys binding to the served
+  origin ("Scope: saas-multitenant"). Hosted's origins: `docs/specs/hosted.md`
+  → "Application boundary".
 
 **The Burrow composes every Relay URL from the baked origin and takes none as
 input**: `enroll` and `enrollOffer` post to it, carrying no Relay URL, and **a
@@ -181,7 +190,8 @@ origin.
 Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in
 `scripts/relay-origin.mjs`; `isAcceptedRelayOrigin` in
 `remote-lib-common/src/security/one-time-link.ts`; `standalone/vite.config.ts`; `bakedRelay`,
-`bakedRelayMode`, and `hostedOrigin` in `lib/src/host/relay-origin.ts`;
+`bakedRelayMode`, `hostedOrigin`, `hostedVoiceOrigin`, and `HOSTED_VOICE_ORIGIN` in
+`lib/src/host/relay-origin.ts`;
 `BurrowService`, `canEnroll`, and `loadEnrollmentFor` in
 `lib/src/host/remote/service.ts`. Pinned by `lib/src/host/relay-origin.test.ts`
 and `lib/src/host/remote/service.test.ts`.
@@ -1109,7 +1119,7 @@ Unstaged but adjacent: origin migration (re-binding the passkey and enrollments
 after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
 
-**Scope: saas-multitenant** — Hosted accounts, Burrow enrollment, and tenant isolation for the managed Relay on `hosted.dormouse.sh`. Hosted identity belongs to [hosted.md](./hosted.md). The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design; Pocket serving remains staged in [pocket-app.md](./pocket-app.md) `## Future`.
+**Scope: saas-multitenant** — Hosted accounts, Burrow enrollment, and tenant isolation for the managed Relay on `relay.dormouse.sh` ("Relay origin"). Hosted identity belongs to [hosted.md](./hosted.md). The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design; Pocket serving remains staged in [pocket-app.md](./pocket-app.md) `## Future`.
 
 ### From single-owner to multi-tenant
 
@@ -1128,13 +1138,3 @@ that lifts each single-tenant simplification, every one chosen to be liftable:
   merely unauthorized. Defense-in-depth: the Burrow still authorizes, but the relay
   must not be the weak point.
 * **Hosted transport.** Follow the **remote-network** scope in [remote-network.md](./remote-network.md) for routing and lifecycle.
-
-### The one-origin pin — the constraint everything obeys
-
-Two things above the fold combine into one hard constraint: the stock Burrow
-reaches exactly `https://hosted.dormouse.sh` ("Relay origin"), and passkeys bind
-to the served origin with Pocket served same-origin at its root
-([pocket-app.md](./pocket-app.md)). The SaaS Relay and its Pocket must therefore
-serve that origin over TLS, whose root Hosted's account app holds today. A raw
-`100.x` tailnet IP, a `*.ts.net` MagicDNS name, or a per-tenant subdomain is a
-different origin, breaking both the pin and the passkey binding.

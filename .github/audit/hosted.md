@@ -6,8 +6,9 @@
 
 **Output file:** `audit-hosted.md`
 
-This is a code-and-specs audit of the Hosted account application and the
-one-time rendezvous it serves. You need no
+This is a code-and-specs audit of Hosted's three Workers — the account
+application (`hosted.dormouse.sh`), the relay that serves the one-time
+rendezvous (`relay.dormouse.sh`), and managed voice (`voice.dormouse.sh`). You need no
 PAT — do not use one. The two pgstencil provenance checks below do read the
 GitHub API, but only a public repository, which the workflow's default
 `GITHUB_TOKEN` and the operator's own `gh` login both reach; if that API is
@@ -15,8 +16,9 @@ unreachable, report those two checks as `UNVERIFIABLE`.
 
 Read `docs/specs/hosted.md`, `docs/specs/one-time.md` (its "Wire contract",
 "Hosted rendezvous", and "Phone page"), `hosted/server/`, `hosted/src/`,
-`hosted/scripts/`, `hosted/wrangler.jsonc`,
-`remote-lib-common/src/remote/one-time-wire.ts`, the phone page Hosted serves —
+`hosted/scripts/`, `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`,
+`hosted/wrangler.voice.jsonc`,
+`remote-lib-common/src/remote/one-time-wire.ts`, the phone page the relay serves —
 `lib/vite.one-time.config.ts`, `lib/one-time/`, `lib/src/remote/one-time-app/`,
 and `lib/scripts/assert-pocket-worker.mjs` — and
 `.github/workflows/hosted-preview.yml` and
@@ -76,13 +78,21 @@ report the same finding twice.
 
 Be adversarial, and go past the `FAIL IF` list. Ask specifically:
 
-- **Is the Hosted origin the only one that can drive Hosted?** Trace a request
-  from `hosted/server/worker.ts` through `workerApp`'s origin gate and
-  `secureHeaders`: a foreign `Host`, a preview hostname, a misconfigured
-  deployment's error path, and the SPA fallback must each answer without
-  credentialed CORS, without a cacheable shell, and without inline script.
-  Check that authentication cookies stay `__Host-`, Secure, HttpOnly, `Path=/`
-  and Domain-less, and that no session token reaches browser JSON or storage.
+- **Is each Worker's origin the only one that can drive it?** Trace a request
+  from `hosted/server/worker.ts`, `hosted/server/relay-worker.ts`, and
+  `hosted/server/voice-worker.ts` through `workerApp`'s origin gate and
+  `secureHeaders`: a foreign `Host`, a sibling Worker's origin, a preview
+  hostname, a misconfigured deployment's error path, and the account's SPA
+  fallback must each answer without credentialed CORS, without a cacheable
+  shell, and without inline script. The siblings are same-site, so the login
+  cookie rides their requests to the account: every account cookie route must
+  refuse their `Origin`. Check that authentication cookies stay `__Host-`,
+  Secure, HttpOnly, `Path=/` and Domain-less, and that no session token
+  reaches browser JSON or storage.
+- **Does a secret reach a Worker that has no use for it?** Read each mapper in
+  `hosted/server/bindings.ts` and each Wrangler config: the relay and voice
+  Workers must hold and pass no auth secret and never import Better Auth, the
+  relay no Hyperdrive, the account no ElevenLabs key.
 - **Can a Hosted login become terminal access, or an account become someone
   else's?** `authPolicy` must keep explicit linking and independent logins; a
   callback whose initiating login was revoked must fail; an unused or unknown
@@ -95,13 +105,15 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   forwarded. Look for a second phone admitted across an await or a hibernation,
   a room that outlives its alarm, a web page that can mint a room, a join from
   another origin, a room id a caller can choose, and a limit a caller can step
-  around. Account cookies ride the phone's upgrade to this same origin: no
-  one-time route or the room may read them or reach auth.
-- **Does anything from the test or preview build reach production?** The
-  production Worker must not export the captured-email inbox, the deterministic
-  clock, or the testing injection module; preview must not copy production
-  routes, bindings, or credentials, must not call real mail or OAuth, and its
-  cleanup must check out the base branch rather than the closed PR's.
+  around. The relay is same-site with the account, so account cookies can
+  ride the phone's upgrade: no one-time route or the room may read them or
+  reach auth.
+- **Does anything from the test or preview build reach production?** No
+  production Worker may export the captured-email inbox, the deterministic
+  clock, or the testing injection module; previews must not copy production
+  routes, bindings, triggers, or credentials, must not call real mail, OAuth,
+  or ElevenLabs, and their cleanup must check out the base branch rather than
+  the closed PR's.
 
 Does the shipped code still match what the spec and this section claim? Spec
 drift is a finding; say which side is wrong.

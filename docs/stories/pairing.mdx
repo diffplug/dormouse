@@ -124,7 +124,7 @@ passkey. `show-password` is the enrollment fallback.
 ## 2. Build a Burrow pointed at it
 
 Shipped Dormouse builds bake in exactly one relay origin,
-`https://hosted.dormouse.sh`, enforced inside the Node process that holds the
+`https://relay.dormouse.sh`, enforced inside the Node process that holds the
 relay socket rather than by any webview CSP. A self-host Relay needs a local
 build baked with its origin, byte for byte:
 
@@ -157,7 +157,7 @@ Relay** leaves nothing to type:
 <Canvas of={RemoteControl.OfferAvailable} />
 
 > The other button, **One-time connection**, is disabled in a self-host build
-> like this one: its links are made at `hosted.dormouse.sh`. In a stock build,
+> like this one: its links are made at `relay.dormouse.sh`. In a stock build,
 > under **Local networks** or **Anywhere**, it needs none of this walkthrough —
 > no Relay, no enrollment, no passkey, no pairing. It shows a link good for one
 > phone, for one session, confirmed with the same two digits and saving nothing;
