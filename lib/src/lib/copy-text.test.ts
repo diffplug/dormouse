@@ -67,6 +67,18 @@ describe('copy-text formats', () => {
     expect(text(buf, span(0, 0, 1, 2), 'spaces')).toBe('abcdefghij klm');
   });
 
+  it('joins a paragraph wrapped far narrower than the terminal', () => {
+    const buf = stringCopyBuffer([
+      'The flake comes from a race between the PTY exit',
+      'event and the final flush of the output buffer.',
+      'When the child exits before xterm has drained its',
+      'write queue, the last chunk is dropped.',
+    ], { cols: 200 });
+    expect(text(buf, span(0, 0, 3, 38), 'auto')).toBe(
+      'The flake comes from a race between the PTY exit event and the final flush of the output buffer. When the child exits before xterm has drained its write queue, the last chunk is dropped.',
+    );
+  });
+
   it('never joins two short lines, however alike', () => {
     const buf = stringCopyBuffer(['Hello', 'World'], { cols: 80 });
     expect(text(buf, span(0, 0, 1, 4), 'auto')).toBe('Hello\nWorld');
@@ -128,6 +140,11 @@ describe('copy-text scopes', () => {
     const buf = stringCopyBuffer(['see ~/projects/dormouse/README.md and src/lib/x.ts too'], { cols: 80 });
     expect(computeScopes(buf, span(0, 8, 0, 20))[1].label).toBe('Full path');
     expect(computeScopes(buf, span(0, 42, 0, 46))[1].label).toBe('Whole words');
+  });
+
+  it('grows nothing from an edge resting on a blank', () => {
+    // Row 2 col 22 is the space after "from"; the end grows over "race".
+    expect(computeScopes(claude, span(2, 22, 2, 27))[1].span).toMatchObject({ start: { row: 2, col: 22 }, end: { row: 2, col: 28 } });
   });
 
   it('names a growth by its grown edge', () => {

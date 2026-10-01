@@ -22,6 +22,7 @@ vi.mock('../../../lib/platform', () => ({ IS_MAC: true }));
 // test can drive the drag/selection shape the handler reads.
 vi.mock('../../../lib/mouse-selection', () => ({
   getMouseSelectionState: vi.fn(() => ({ selection: null })),
+  isShadowed: (s: { selection?: { owner?: string } | null; copyEditor?: unknown }) => s.selection?.owner === 'program' && !s.copyEditor,
   extendSelectionToToken: vi.fn(),
   setSelection: vi.fn(),
 }));

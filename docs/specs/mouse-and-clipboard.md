@@ -143,7 +143,7 @@ Each break between two consecutive rows is, in this order:
 
 1. **Kept** if either row is blank, the next starts a list item, the row ends in `;` `{` `}` or the next starts with `)` `}` `]`, or the next row's indent is not this row's hanging indent.
 2. **Deleted** if the next row is a true soft wrap (xterm's `isWrapped`).
-3. **Kept** if the next row's first word would have fit on this row within the paragraph's wrap width: its longest row, never under half the terminal (rationale).
+3. **Kept** if the paragraph's longest row is under 40 columns (60% of a narrower terminal), or the next row's first word would have fit on this row within that longest row (rationale).
 4. **Deleted** if this row fills that width and its last word is token-shaped (a URL or path character, or 16+ token characters) — a token split at the margin.
 5. Otherwise **one space**.
 
@@ -158,7 +158,7 @@ Narrowest first, each containing the dragged selection, one that adds nothing dr
 | Scope | Covers |
 |---|---|
 | **As selected** | The drag (opens here). |
-| **Whole words** | Each edge grown over the token under it, following a token Auto would rejoin across rows; named **Full URL** or **Full path** when a grown edge token is one. |
+| **Whole words** | Each edge grown over the token under it, following a token Auto would rejoin across rows; an edge resting on a blank grows nothing. Named **Full URL** or **Full path** when the smart-token detector (§5.1) classifies a grown edge token so. |
 | **Paragraph** | The rows between blank rows, frame-only rows, and box sides (`│ ┃ ║`). |
 
 The selection overlay draws a wider scope dashed around the outline; the preview marks every cell outside the drag. Source of truth: `computeScopes` in `lib/src/lib/copy-text.ts`.
@@ -195,10 +195,10 @@ Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by 
 
 An `OSC 52` clipboard write from the inside program is never the clipboard. It becomes an **offer** the editor can show (rationale):
 
-1. The owner's parser decodes the base64 as UTF-8, turns `\r\n` and `\r` into `\n`, and removes every other control character but tab. **Must drop, never truncate, an offer over `CLIPBOARD_OFFER_LIMIT`**; a `?` read is never answered, and an empty or malformed write offers nothing. The sequence is consumed either way.
+1. The owner's parser decodes the base64 as UTF-8, turns `\r\n` and `\r` into `\n`, and removes every other control character but tab. **Must drop, never truncate, a payload over `CLIPBOARD_OFFER_LIMIT` base64 characters**, kept under the incomplete-OSC bound so read splitting never changes the answer; a `?` read is never answered, and an empty or malformed write offers nothing. The sequence is consumed either way.
 2. The host sends it to the owning renderer as `terminal:clipboardOffer` (`docs/specs/transport.md`); replay re-parses output without offers.
 3. **Must accept an offer only into a pane holding a shadowed drag** (§3.8), the latest replacing any earlier; it goes with that selection.
-4. The editor then offers a fifth format, **From <program>** (the running command's name, else `program`), last in `f` order. It ignores scope, its marks still flip, and a nudge returns to Auto. **Never write an offer to the clipboard except as that format, chosen and copied by the user.**
+4. The editor then offers a fifth format, **From <program>** (the running command as WATCHING keys it, `docs/specs/alert.md`, else `program`), last in `f` order. **It has no scope**: choosing it returns to As selected, and `e` does nothing while it shows. Its marks still flip, and a nudge returns to Auto. **Never write an offer to the clipboard except as that format, chosen and copied by the user.**
 
 Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, pinned by `lib/src/lib/terminal-protocol.test.ts`; `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, pinned by `lib/src/lib/mouse-selection.test.ts`; `editorFormats` in `lib/src/lib/copy-editor.ts`.
 

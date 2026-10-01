@@ -7,6 +7,9 @@ export function hasCopyModifier(e: KeyboardEvent): boolean {
   return IS_MAC ? e.metaKey : e.ctrlKey;
 }
 
+/** The copy chord as hints spell it. */
+export const COPY_CHORD_LABEL = IS_MAC ? 'Cmd+C' : 'Ctrl+C';
+
 /** Paste chord: either modifier on every platform, matching VS Code's terminal
  *  and the muscle memory of users coming from Linux/Windows (§8.2). */
 export function hasPasteModifier(e: KeyboardEvent): boolean {

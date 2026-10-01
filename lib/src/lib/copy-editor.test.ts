@@ -92,7 +92,7 @@ describe('copy editor transitions', () => {
 
 describe('the program’s own copy', () => {
   function shadowWithOffer(text: string): void {
-    setSelection(ID, { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+    setSelection(ID, { startRow: 2, startCol: 27, endRow: 3, endCol: 5, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
     offerProgramCopy(ID, text);
     openCopyEditor(ID, terminal);
   }
@@ -104,6 +104,16 @@ describe('the program’s own copy', () => {
     shadowWithOffer('**The flake** comes from a race');
     cycleCopyFormat(ID, -1);
     expect(editor().format).toBe('program');
+  });
+
+  it('sets scope aside: picking it returns to the selection, and e does nothing', () => {
+    shadowWithOffer('anything');
+    stepCopyScope(ID, 1);
+    expect(editor().scope).toBe(1);
+    setCopyFormat(ID, 'program');
+    expect(editor().scope).toBe(0);
+    stepCopyScope(ID, 1);
+    expect(editor().scope).toBe(0);
   });
 
   it('is never a format without an offer', () => {

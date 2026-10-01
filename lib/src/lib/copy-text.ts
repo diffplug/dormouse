@@ -173,8 +173,8 @@ function hangIndent(text: string): number {
   return indent + (list ? list[0].length : 0);
 }
 
-/** The width a program wrapped this row's paragraph at, as best the text says:
- *  its longest row, but never under half the terminal (rationale). */
+/** The width a program wrapped this row's paragraph at, as best the text
+ *  says: its longest row (rationale). */
 function wrapWidth(buf: CopyBuffer, r: number): number {
   let top = r;
   while (top > 0 && top > r - 64 && !facts(buf, top - 1).boundary) top--;
@@ -182,8 +182,12 @@ function wrapWidth(buf: CopyBuffer, r: number): number {
   while (bottom + 1 < buf.length && bottom < r + 64 && !facts(buf, bottom + 1).boundary) bottom++;
   let widest = 0;
   for (let i = top; i <= bottom; i++) widest = Math.max(widest, facts(buf, i).plain.length);
-  return Math.max(widest, Math.floor(buf.cols / 2));
+  return widest;
 }
+
+/** A paragraph whose longest row is narrower than this was never wrapped:
+ *  40 columns, or 60% of a narrower terminal (rationale). */
+const minWrapWidth = (buf: CopyBuffer) => Math.min(40, Math.floor(buf.cols * 0.6));
 
 export type BreakKind = 'keep' | 'space' | 'none';
 
@@ -201,7 +205,7 @@ export function autoBreak(buf: CopyBuffer, r: number): BreakKind {
   const firstWord = nextTrim.split(' ')[0];
   const width = wrapWidth(buf, r);
   // A break the next word would have fit before was typed, not wrapped.
-  if (cur.length + 1 + firstWord.length <= width) return 'keep';
+  if (width < minWrapWidth(buf) || cur.length + 1 + firstWord.length <= width) return 'keep';
   const lastWord = cur.slice(cur.lastIndexOf(' ') + 1);
   const tokenish = /[/\\#?=&]/.test(lastWord) || /^[A-Za-z0-9+_\-.]{16,}$/.test(lastWord);
   // A token wider than the room left is split mid-token at the margin.
@@ -229,6 +233,10 @@ export interface Rendering {
   text: string;
   lines: number;
 }
+
+/** What each break kind puts between two lines. */
+const BREAK_TEXT: Record<BreakKind, string> = { keep: '\n', space: ' ', none: '' };
+const lineCount = (text: string) => (text ? text.split('\n').length : 0);
 
 interface Cell { ch: string; added: boolean }
 interface Line { cells: Cell[]; row: number; startCol: number }
@@ -341,11 +349,11 @@ export function render(buf: CopyBuffer, scope: Span, options: RenderOptions): Re
     if (i + 1 < lines.length) {
       const kind = kinds[i];
       pieces.push({ t: 'break', index: i, kind, auto: autos[i] });
-      text += kind === 'keep' ? '\n' : kind === 'space' ? ' ' : '';
+      text += BREAK_TEXT[kind];
     }
   });
 
-  return { pieces, text, lines: text ? text.split('\n').length : 0 };
+  return { pieces, text, lines: lineCount(text) };
 }
 
 /** Literal text as a rendering — a program's own copy — every line break
@@ -354,19 +362,22 @@ export function renderText(text: string, overrides: Readonly<Record<number, Brea
   const lines = text.split('\n');
   const pieces: Piece[] = [];
   let out = '';
+  let joined = false;
   lines.forEach((raw, i) => {
-    const line = i > 0 && (overrides[i - 1] ?? 'keep') !== 'keep' ? raw.trimStart() : raw;
-    const lead = line.length - line.trimStart().length;
+    // A joined line sheds its indent, as `render` sheds leading spaces.
+    const line = joined ? raw.replace(/^ +/, '') : raw;
+    const lead = line.length - line.replace(/^ +/, '').length;
     if (lead) pieces.push({ t: 'text', text: line.slice(0, lead), added: false, lead: true });
     if (line.length > lead) pieces.push({ t: 'text', text: line.slice(lead), added: false, lead: false });
     out += line;
     if (i + 1 < lines.length) {
       const kind = overrides[i] ?? 'keep';
       pieces.push({ t: 'break', index: i, kind, auto: 'keep' });
-      out += kind === 'keep' ? '\n' : kind === 'space' ? ' ' : '';
+      out += BREAK_TEXT[kind];
+      joined = kind !== 'keep';
     }
   });
-  return { pieces, text: out, lines: out ? out.split('\n').length : 0 };
+  return { pieces, text: out, lines: lineCount(out) };
 }
 
 // ---------------------------------------------------------------------------
@@ -383,8 +394,10 @@ function contentStart(buf: CopyBuffer, r: number): number {
  *  program split across rows. */
 function snapToWords(buf: CopyBuffer, sel: Span): Span {
   let { row: sr, col: sc } = sel.start;
+  // An edge resting on a blank grows nothing: the word beside it was not clipped.
   for (;;) {
     const cells = buf.row(sr).cells;
+    if (isBlankCell(cells[sc])) break;
     while (sc > 0 && !isBlankCell(cells[sc - 1])) sc--;
     if (sc <= contentStart(buf, sr) && sr > 0 && !isBlankCell(cells[sc]) && autoBreak(buf, sr - 1) === 'none') {
       sr--;
@@ -396,6 +409,7 @@ function snapToWords(buf: CopyBuffer, sel: Span): Span {
   let { row: er, col: ec } = sel.end;
   for (;;) {
     const cells = buf.row(er).cells;
+    if (isBlankCell(cells[ec])) break;
     while (ec + 1 < cells.length && !isBlankCell(cells[ec + 1])) ec++;
     if (ec >= cells.length - 1 && !isBlankCell(cells[ec]) && autoBreak(buf, er) === 'none') {
       er++;

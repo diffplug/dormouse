@@ -3,10 +3,12 @@ import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
   getRenderTick,
+  isShadowed,
   subscribeToMouseSelection,
   subscribeToRenderTick,
 } from '../lib/mouse-selection';
 import { selectionOfSpan } from '../lib/copy-text';
+import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
 import { computeRects, rectsToPath } from '../lib/selection-geometry';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { IS_MAC } from '../lib/platform';
@@ -43,7 +45,10 @@ export function SelectionOverlay({ terminalId }: Props) {
   // instead of elementWidth/cols keeps the highlight aligned even when xterm
   // adds a few pixels of padding around the cell grid.
   const { cellWidth, cellHeight, gridLeft, gridTop } = dims;
-  const rects = computeRects(selection, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight);
+  // A shadowed program drag (spec §3.8): the program paints its own highlight,
+  // so Dormouse draws only the hint until the copy chord opens the editor.
+  const shadowed = isShadowed(state);
+  const rects = shadowed ? [] : computeRects(selection, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight);
 
   const style: CSSProperties = {
     position: 'absolute',
@@ -53,14 +58,11 @@ export function SelectionOverlay({ terminalId }: Props) {
   };
 
   const borderColor = focusRingColor || 'rgb(100, 149, 237)';
-  // A shadowed program drag (spec §3.8): the program paints its own highlight,
-  // so Dormouse draws only the hint until the copy chord opens the editor.
-  const shadowed = selection.owner === 'program' && !state.copyEditor;
-  const pathD = shadowed ? '' : rectsToPath(rects);
+  const pathD = rectsToPath(rects);
 
   // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
   const editor = state.copyEditor;
-  const scopeD = editor && editor.scope > 0 && editor.format !== 'program'
+  const scopeD = editor && editor.scope > 0
     ? rectsToPath(computeRects(selectionOfSpan(editor.scopes[editor.scope].span, selection), dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight))
     : '';
 
@@ -134,7 +136,7 @@ export function SelectionOverlay({ terminalId }: Props) {
           <div className="flex flex-col gap-0.5 leading-none text-muted">
             {shadowed ? (
               <div>
-                Press <span className="text-foreground">{IS_MAC ? 'Cmd+C' : 'Ctrl+C'}</span> to copy
+                Press <span className="text-foreground">{COPY_CHORD_LABEL}</span> to copy
               </div>
             ) : (
               <div>

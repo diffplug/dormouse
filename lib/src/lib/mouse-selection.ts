@@ -94,6 +94,21 @@ const states = new Map<string, MouseSelectionState>();
 const listeners = new Set<() => void>();
 let cachedSnapshot: Map<string, MouseSelectionState> | null = null;
 
+/** Everything that belongs to a selection, so a writer that drops or replaces
+ *  one cannot leave another's editor, offer, or flash behind. */
+function clearSelection(s: MouseSelectionState): void {
+  s.selection = null;
+  s.copyEditor = null;
+  s.programCopy = null;
+  s.copyFlash = null;
+  s.hintToken = null;
+}
+
+/** A drag the program owned, shadowed and waiting for the copy chord (§3.8). */
+export function isShadowed(state: MouseSelectionState): boolean {
+  return state.selection?.owner === 'program' && !state.copyEditor;
+}
+
 function notify(): void {
   cachedSnapshot = null;
   listeners.forEach((l) => l());
@@ -134,12 +149,7 @@ export function setMouseReporting(id: string, mode: MouseTrackingMode): void {
     s.override = 'off';
   }
   // A shadowed drag (§3.8) belonged to the program that just stopped reporting.
-  if (mode === 'none' && s.selection?.owner === 'program') {
-    s.selection = null;
-    s.copyEditor = null;
-    s.programCopy = null;
-    s.copyFlash = null;
-  }
+  if (mode === 'none' && s.selection?.owner === 'program') clearSelection(s);
   notify();
 }
 
@@ -168,12 +178,12 @@ export function setOverride(id: string, override: OverrideState): void {
 export function setSelection(id: string, selection: Selection | null, copyEditor: CopyEditorState | null = null): void {
   const s = ensure(id);
   if (s.selection === null && selection === null) return;
-  s.selection = selection;
-  s.copyEditor = selection && !selection.dragging ? copyEditor : null;
-  s.programCopy = null;
-  if (selection === null) {
-    s.copyFlash = null;
-    s.hintToken = null;
+  if (selection === null) clearSelection(s);
+  else {
+    // A replaced selection keeps an in-flight flash and the drag's hint.
+    s.selection = selection;
+    s.copyEditor = selection.dragging ? null : copyEditor;
+    s.programCopy = null;
   }
   notify();
 }
@@ -205,11 +215,9 @@ export function beginDrag(
   args: { row: number; col: number; altKey: boolean; blockLatched?: boolean; startedInScrollback: boolean },
 ): void {
   const s = ensure(id);
-  // Clear any in-flight copy flash so its timer won't null out this new
-  // selection when it fires (the timer checks `copyFlash !== kind`).
-  s.copyFlash = null;
-  s.copyEditor = null;
-  s.programCopy = null;
+  // Clearing the in-flight copy flash too keeps its timer from nulling out this
+  // new selection when it fires (the timer checks `copyFlash !== kind`).
+  clearSelection(s);
   s.selection = {
     startRow: args.row,
     startCol: args.col,
@@ -319,10 +327,7 @@ export function flashCopy(id: string, kind: EditorFormat, durationMs = 700): voi
   setTimeout(() => {
     const current = states.get(id);
     if (current !== s || current.selection !== selection || current.copyFlash !== kind) return;
-    current.copyFlash = null;
-    current.copyEditor = null;
-    current.programCopy = null;
-    current.selection = null;
+    clearSelection(current);
     notify();
   }, durationMs);
 }

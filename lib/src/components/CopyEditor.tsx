@@ -13,9 +13,8 @@ import { spanOfSelection, type BreakKind, type EditorFormat, type Piece, type Re
 import { duplicateFormats, editorFormats, editorRendering, flipCopyBreak, formatRenderings, setCopyFormat, setCopyScope } from '../lib/copy-editor';
 import { copySelection } from '../lib/copy-selection';
 import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
-import { commandProgramName } from '../lib/terminal-state';
-import { getTerminalPaneState } from '../lib/terminal-state-store';
-import { IS_MAC } from '../lib/platform';
+import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
+import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
 import { modalActionButton, modalSurface, popupButton, Shortcut } from './design';
 import { TouchUiContext } from './touch-ui-context';
 import { WorkspaceActiveContext } from './wall/wall-context';
@@ -41,11 +40,9 @@ const FORMAT_BLURBS: Record<EditorFormat, string> = {
   program: 'the text the program itself copied',
 };
 
-/** The running program, by name, for its own copy's label (spec §4.6). */
-function programName(terminalId: string): string {
-  const command = getTerminalPaneState(terminalId).currentCommand?.displayCommand.trim().split(/\s+/)[0];
-  return command ? commandProgramName(command) : 'program';
-}
+/** The running program, wrappers and earlier commands skipped, for its own
+ *  copy's label (spec §4.6). */
+const programName = (terminalId: string) => getRunningCommandWatchKey(terminalId) ?? 'program';
 
 const MARK_GLYPH: Record<BreakKind, string> = { keep: '⏎', space: '␣', none: '⌁' };
 const MARK_TITLE: Record<BreakKind, string> = {
@@ -190,13 +187,13 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
           <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
           <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
           <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
-          {copyEditor.scope > 0 && !fromProgram && <span><span className={clsx(ADDED_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
+          {copyEditor.scope > 0 && <span><span className={clsx(ADDED_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
         </span>
         {selection.shape !== 'block' && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
         <span className="ml-auto shrink-0 whitespace-nowrap">
           {rendering.lines} {rendering.lines === 1 ? 'line' : 'lines'} · {rendering.text.length} ch
         </span>
-        {keys(<Shortcut>{IS_MAC ? 'Cmd+C' : 'Ctrl+C'}</Shortcut>)}
+        {keys(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
         <button
           type="button"
           onClick={() => void copySelection(terminalId)}

@@ -5,6 +5,7 @@ import { isEditableTarget, isTerminalInputProxy } from '../../../lib/dom';
 import {
   extendSelectionToToken,
   getMouseSelectionState,
+  isShadowed,
   setSelection as setMouseSelection,
 } from '../../../lib/mouse-selection';
 import { isWorkspaceSelection } from '../wall-types';
@@ -69,7 +70,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   const keyLower = e.key.toLowerCase();
   if (mouseState.copyEditor) {
     if (handleCopyEditorKey(e, sid, keyLower)) return true;
-  } else if (sel?.owner === 'program') {
+  } else if (isShadowed(mouseState)) {
     // A shadowed program drag (spec §3.8): the copy chord opens the editor
     // over it; any other key belongs to the program, which ends the shadow.
     if (hasCopyModifier(e) && keyLower === 'c') {

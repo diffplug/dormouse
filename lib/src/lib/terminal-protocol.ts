@@ -99,8 +99,10 @@ const BODY_LIMIT = 4096;
 // control characters that the emit-side escaping had removed
 // (`docs/specs/terminal-escapes.md`). See `commandLineEvents`.
 const COMMAND_LINE_LIMIT = 2048;
-/** The longest `OSC 52` text offered, in UTF-16 code units; longer is dropped. */
-export const CLIPBOARD_OFFER_LIMIT = 49_152;
+/** The longest `OSC 52` payload offered, in base64 characters; longer is
+ *  dropped. Under {@link OSC_INCOMPLETE_LIMIT} with room for the introducer, so
+ *  how the PTY splits its reads never changes the answer. */
+export const CLIPBOARD_OFFER_LIMIT = 16_000;
 const OSC99_PENDING_TITLE_LIMIT = 2048;
 const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
@@ -929,19 +931,11 @@ function isKnownUnsupportedIterm2Osc(content: string): boolean {
  */
 function parseOsc52(content: string): TerminalProtocolEvent[] {
   const fields = content.split(';');
-  const data = fields.length >= 3 ? fields.slice(2).join(';').replace(/\s+/g, '') : '';
-  if (!data || data === '?' || !/^[A-Za-z0-9+/]*={0,2}$/.test(data)) return [];
-  // Within the limit is at most three UTF-8 bytes per code unit, and base64
-  // spends four characters on three bytes: anything longer cannot fit.
-  if (data.length > CLIPBOARD_OFFER_LIMIT * 4) return [];
-  let decoded: string;
-  try {
-    const binary = atob(data);
-    decoded = new TextDecoder().decode(Uint8Array.from(binary, (ch) => ch.charCodeAt(0)));
-  } catch {
-    return [];
-  }
-  const text = sanitizeClipboardText(decoded, CLIPBOARD_OFFER_LIMIT);
+  // Base64 never holds a `;`, so a fourth field is malformed; `?` is a read.
+  const data = fields.length === 3 ? fields[2].replace(/\s+/g, '') : '';
+  if (data.length > CLIPBOARD_OFFER_LIMIT) return [];
+  const decoded = decodeBase64(data);
+  const text = decoded === null ? null : sanitizeClipboardText(decoded);
   return text ? [{ kind: 'clipboardOffer', text }] : [];
 }
 

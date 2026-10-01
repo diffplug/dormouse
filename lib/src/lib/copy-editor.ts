@@ -68,7 +68,8 @@ export function editorRendering(
   const unedited = Object.keys(editor.overrides).length === 0;
   const cached = unedited ? renderings?.[editor.format] : undefined;
   if (cached) return cached;
-  if (editor.format === 'program') return renderText(programCopy ?? '', editor.overrides);
+  // Only setCopyFormat picks 'program', and only with an offer in hand.
+  if (editor.format === 'program') return renderText(programCopy!, editor.overrides);
   const scope = editor.scopes[editor.scope].span;
   return render(terminalCopyBuffer(terminal), scope, { original: spanOfSelection(sel), format: editor.format, overrides: editor.overrides });
 }
@@ -86,10 +87,12 @@ export function duplicateFormats(renderings: FormatRenderings): Partial<Record<E
 }
 
 /** Choose a scope; a per-break edit belongs to the scope and format it was
- *  made in, so it is dropped. Out of range stays put. */
+ *  made in, so it is dropped. Out of range stays put, and the program's own
+ *  copy has no scope to choose. */
 export function setCopyScope(id: string, scope: number): void {
   const editor = getMouseSelectionState(id).copyEditor;
-  if (editor && scope !== editor.scope && editor.scopes[scope]) setCopyEditor(id, { ...editor, scope, overrides: {} });
+  if (!editor || editor.format === 'program' || scope === editor.scope || !editor.scopes[scope]) return;
+  setCopyEditor(id, { ...editor, scope, overrides: {} });
 }
 
 /** `e` / `⬆︎e`: the next wider or narrower scope, stopping at either end. */
@@ -99,12 +102,12 @@ export function stepCopyScope(id: string, dir: 1 | -1): void {
 }
 
 /** Choose a format, dropping per-break edits; the program's copy only when
- *  it sent one. */
+ *  it sent one, and at the selection's own scope, since it ignores scope. */
 export function setCopyFormat(id: string, format: EditorFormat): void {
   const { copyEditor: editor, programCopy } = getMouseSelectionState(id);
   if (!editor || !editorFormats(programCopy).includes(format)) return;
   if (format !== editor.format || Object.keys(editor.overrides).length > 0) {
-    setCopyEditor(id, { ...editor, format, overrides: {} });
+    setCopyEditor(id, { ...editor, format, scope: format === 'program' ? 0 : editor.scope, overrides: {} });
   }
 }
 
@@ -113,8 +116,7 @@ export function cycleCopyFormat(id: string, dir: 1 | -1): void {
   const { copyEditor: editor, programCopy } = getMouseSelectionState(id);
   if (!editor) return;
   const formats = editorFormats(programCopy);
-  const at = Math.max(0, formats.indexOf(editor.format));
-  setCopyFormat(id, formats[(at + dir + formats.length) % formats.length]);
+  setCopyFormat(id, formats[(formats.indexOf(editor.format) + dir + formats.length) % formats.length]);
 }
 
 const NEXT_BREAK: Record<BreakKind, BreakKind> = { keep: 'space', space: 'none', none: 'keep' };

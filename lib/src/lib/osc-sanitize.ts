@@ -36,10 +36,9 @@ export function sanitizeCommandLine(input: string, limit: number): string | null
 }
 
 /** Untrusted clipboard text (an `OSC 52` write): line endings normalized to
- *  `\n`, every other control but tab removed, nothing else touched. Null when
- *  nothing survives or the text is over `limit` code units — dropped, never
- *  truncated, since a cut-off copy reads as complete. */
-export function sanitizeClipboardText(input: string, limit: number): string | null {
-  const text = input.replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
-  return text && text.length <= limit ? text : null;
+ *  `\n`, every other control but tab removed, nothing else touched — never
+ *  truncated, since a cut-off copy reads as complete; its caller bounds it.
+ *  Null when nothing survives. */
+export function sanitizeClipboardText(input: string): string | null {
+  return input.replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '') || null;
 }

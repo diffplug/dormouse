@@ -466,9 +466,14 @@ describe('TerminalProtocolParser', () => {
       }
     });
 
-    it('drops an offer over the limit rather than truncating it', () => {
-      expect(offer(`c;${b64('x'.repeat(CLIPBOARD_OFFER_LIMIT))}`).events).toHaveLength(1);
-      expect(offer(`c;${b64('x'.repeat(CLIPBOARD_OFFER_LIMIT + 1))}`).events).toEqual([]);
+    it('drops an offer over the limit rather than truncating it, wherever the reads split', () => {
+      const atLimit = b64('x'.repeat((CLIPBOARD_OFFER_LIMIT / 4) * 3));
+      expect(atLimit).toHaveLength(CLIPBOARD_OFFER_LIMIT);
+      expect(offer(`c;${atLimit}`).events).toHaveLength(1);
+      expect(offer(`c;${atLimit}AAAA`).events).toEqual([]);
+      const parser = new TerminalProtocolParser();
+      parser.process(`\x1b]52;c;${atLimit.slice(0, 9_000)}`);
+      expect(parser.process(`${atLimit.slice(9_000)}\x07`).events).toHaveLength(1);
     });
 
     it('reaches the renderer only through its own collector', () => {
