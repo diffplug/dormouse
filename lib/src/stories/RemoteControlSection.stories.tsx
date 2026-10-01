@@ -59,10 +59,10 @@ export default meta;
 type Story = StoryObj<typeof RemoteControlStory>;
 
 /**
- * The status command is a round trip, so every story opens on "Checking…".
- * Waiting for the settled text keeps Chromatic off that frame — and asserts the
- * story actually reached the state it claims, rather than rendering an empty
- * section because the stub never arrived.
+ * The status command is a round trip, so every story opens empty. Waiting for
+ * the settled text keeps the snapshot off that frame — and asserts the story
+ * actually reached the state it claims, rather than rendering an empty section
+ * because the stub never arrived.
  */
 function settled(text: string | RegExp) {
   return async ({ canvasElement }: { canvasElement: HTMLElement }) => {

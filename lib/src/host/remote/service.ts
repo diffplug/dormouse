@@ -53,6 +53,7 @@ import {
   levelsFor,
   networkPolicyResult,
   nothingPolicy,
+  opensOneTimeLinks,
   parseNetworkPolicy,
   runsBurrow,
   type NetworkInterfaceInfo,
@@ -855,9 +856,7 @@ export class BurrowService {
     // and a second click that awaited the same read joins this one rather than
     // minting a second room.
     const policy = this.#refuseNothing();
-    if (policy.level === 'local' && policy.allowed.length === 0) {
-      throw new Error(NO_NETWORK_ALLOWED_REFUSAL);
-    }
+    if (!opensOneTimeLinks(policy)) throw new Error(NO_NETWORK_ALLOWED_REFUSAL);
     const state = this.#oneTimeState;
     if (this.#oneTimeOpening) return this.#oneTimeOpening;
     if (state.status === 'connecting' || state.status === 'connected') {

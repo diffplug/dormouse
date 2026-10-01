@@ -457,7 +457,8 @@ function BurrowNameField({
  *
  * Renders nothing at all on a build with no Burrow service behind it (the
  * website, the lib dev server): there is no Burrow to enroll, and offering the
- * form would promise something the build cannot do.
+ * form would promise something the build cannot do. Nor before the first
+ * status, which `NetworkPhones` already waited for.
  *
  * This is the same `enroll` / `enrollOffer` / `status` / `reconnect` /
  * `clearEnrollment` surface as the `window.dormouseBurrow` console hook,
@@ -472,8 +473,6 @@ export function RemoteControlSection() {
   // service pushes `status` only when it changes.
   useEffect(() => void refreshBurrowStatus(), []);
 
-  if (state.kind === 'unsupported') return null;
-  if (state.kind === 'loading') return <div className="mt-1.5 text-sm text-muted">Checking…</div>;
   if (state.kind === 'error') {
     return (
       <div className="mt-1.5 text-sm leading-relaxed text-muted">
@@ -481,7 +480,7 @@ export function RemoteControlSection() {
       </div>
     );
   }
-  return <RelayChoices status={state.status} />;
+  return state.kind === 'ready' ? <RelayChoices status={state.status} /> : null;
 }
 
 /**

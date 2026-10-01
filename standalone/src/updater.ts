@@ -4,7 +4,7 @@ import { isRecord } from 'dormouse-lib/lib/is-record';
 import { loadJson, saveJson } from 'dormouse-lib/lib/local-json-store';
 import { getPlatformOrNull, IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
 import type { UpdatesPort, UpdatesSnapshot } from 'dormouse-lib/lib/platform/types';
-import { isNetworkPolicyResult, type NetworkPolicy } from 'dormouse-lib/remote/network-policy';
+import { checksForUpdates, isNetworkPolicyResult, type NetworkPolicy } from 'dormouse-lib/remote/network-policy';
 import type { UpdateBannerState } from './UpdateBanner';
 import type { Update } from '@tauri-apps/plugin-updater';
 
@@ -174,11 +174,6 @@ function remindIfDue(now: number): void {
   if (state.status !== 'idle' && state.status !== 'dismissed') return;
   saveCheckRecord({ ...record, remindedAt: now });
   setState({ status: 'check-due', days: Math.floor(age / DAY_MS) });
-}
-
-/** Whether `policy` has the updater check on its own (`docs/specs/remote-network.md` → "Updates"). */
-function checksAutomatically(policy: NetworkPolicy | null): boolean {
-  return policy !== null && policy.level !== 'nothing' && policy.autoUpdate;
 }
 
 /**
@@ -418,7 +413,8 @@ async function runUpdateCheck(): Promise<void> {
 
   // Read at the check, so a change made meanwhile counts
   // (`docs/specs/remote-network.md` → "Updates").
-  if (checksAutomatically(await readNetworkPolicy())) {
+  const policy = await readNetworkPolicy();
+  if (policy && checksForUpdates(policy)) {
     // An update found is offered by `performCheck`.
     await performCheck().catch((e) => console.error('[updater] Check failed:', e));
   }

@@ -34,6 +34,7 @@ import { DirectPeer, type DirectPeerLike } from '../../remote/direct/direct-peer
 import { STREAMED_CHUNK, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
 import { collect } from '../../remote/direct/test-fake-peer';
 import { localNetworksPath } from './local-networks';
+import { isOfferedAddress } from './network-interfaces';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 
 /** The one call the reliability case needs that `DirectPeerLike` has no reason to. */
@@ -59,13 +60,13 @@ const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill') as Nat
 const buildPeer = (): DirectPeerLike => new RTCPeerConnection({ iceServers: [] });
 
 /**
- * An IPv4 address of this machine's own that is not loopback, which a Local
- * networks policy can allow alone — `undefined` on a machine with none, whose
- * cases below are skipped.
+ * An IPv4 address this machine offers a phone (`isOfferedAddress`, as the bind
+ * reads them), which a Local networks policy can allow alone — `undefined` on
+ * a machine with none, whose cases below are skipped.
  */
 const EXTERNAL_V4 = Object.values(networkInterfaces())
   .flat()
-  .find((entry) => entry && !entry.internal && isIP(entry.address) === 4)?.address;
+  .find((entry) => entry && isOfferedAddress(entry) && isIP(entry.address) === 4)?.address;
 
 /** Whether the last case already tore the addon down through the shipped path. */
 let disposedByFactory = false;

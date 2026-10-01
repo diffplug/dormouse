@@ -25,6 +25,8 @@ import {
 } from '../remote/burrow/network-policy-store';
 import {
   MAX_ALLOWED_NETWORKS,
+  checksForUpdates,
+  opensOneTimeLinks,
   runsBurrow,
   type NetworkInterfaceInfo,
   type NetworkLevel,
@@ -197,7 +199,7 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
   if (policy.level === 'nothing') return [];
   const relay = hostOf(status.relayOrigin);
   const rows: ConnectionRow[] = [];
-  if (policy.level === 'local' && policy.allowed.length > 0) {
+  if (opensOneTimeLinks(policy)) {
     rows.push(
       {
         to: relay,
@@ -242,7 +244,7 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
       carries: 'The pane’s name and the voice id, which Hosted passes to ElevenLabs.',
     });
   }
-  if (policy.autoUpdate && facts.updater) {
+  if (checksForUpdates(policy) && facts.updater) {
     rows.push({
       to: UPDATES_HOST,
       when: 'Each launch',
@@ -563,7 +565,7 @@ export function NetworkUpdates() {
     );
   }
   const off = policy.level === 'nothing';
-  const auto = !off && policy.autoUpdate;
+  const auto = checksForUpdates(policy);
   return (
     <section className={SETTINGS_SECTION}>
       {off ? (

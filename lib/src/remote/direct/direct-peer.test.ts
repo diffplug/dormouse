@@ -26,6 +26,7 @@ import {
 import {
   FAKE_LAN_PAIR,
   FakeDirectNetwork,
+  OFF_LAN_PAIR as OFF_LAN,
   flushMicrotasks,
   lanOnlyPolicy,
   type FakeDirectNetworkOptions,
@@ -438,8 +439,6 @@ describe('DirectPeer', () => {
   });
 
   describe('the path policy', () => {
-    const OFF_LAN = { local: '10.0.0.2', remote: '10.0.0.3' };
-
     it('checks the selected pair before reporting the open', async () => {
       const policy = lanOnlyPolicy();
       const { burrowPeer, burrow } = await connected({}, policy);

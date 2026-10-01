@@ -163,7 +163,7 @@ export class FileBurrowStateStore implements BurrowStateStore {
     const raw = await readIfPresent(this.#policyPath);
     if (raw === null) return null;
     try {
-      return storedNetworkPolicy(JSON.parse(raw)) ?? nothingPolicy();
+      return storedNetworkPolicy(JSON.parse(raw));
     } catch (error) {
       console.warn(`[burrow] could not read ${this.#policyPath}; reading it as Nothing`, error);
       return nothingPolicy();

@@ -87,8 +87,11 @@ function blockListOf(cidrs: readonly string[]): BlockList {
 }
 
 /**
- * {@link addressAllowed} over one list, which is parsed once: for a caller
- * testing many addresses against the same networks.
+ * Whether an address is an IP literal inside one of `cidrs`, which are parsed
+ * once for every address tested. A hostname, an mDNS name, or a zoned address
+ * is in none; a CIDR that does not parse matches nothing. An IPv4-mapped IPv6
+ * address matches its IPv4 range: `BlockList` compares it as IPv4, which
+ * `network-interfaces.test.ts` pins.
  */
 export function allowedAddressTest(cidrs: readonly string[]): (address: string) => boolean {
   const list = blockListOf(cidrs);
@@ -97,16 +100,6 @@ export function allowedAddressTest(cidrs: readonly string[]): (address: string) 
     if (family === 0 || address.includes('%')) return false;
     return list.check(address, family === 4 ? 'ipv4' : 'ipv6');
   };
-}
-
-/**
- * Whether `address` is an IP literal inside one of `cidrs`. A hostname, an mDNS
- * name, or a zoned address is in none; a CIDR that does not parse matches
- * nothing. An IPv4-mapped IPv6 address matches its IPv4 range: `BlockList`
- * compares it as IPv4, which `network-interfaces.test.ts` pins.
- */
-export function addressAllowed(address: string, cidrs: readonly string[]): boolean {
-  return allowedAddressTest(cidrs)(address);
 }
 
 const VPN_NAME = /^(utun|tun|wg|tailscale)/i;

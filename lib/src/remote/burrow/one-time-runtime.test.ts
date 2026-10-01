@@ -41,6 +41,7 @@ import type { RemoteApiSessionLike } from './established-session';
 import { DIRECT_PATH_RECHECK_MS, DirectPeer, type DirectPeerFactory } from '../direct/direct-peer';
 import {
   FakeDirectNetwork,
+  OFF_LAN_PAIR as OFF_LAN,
   collect,
   lanOnlyPolicy,
   type FakeDirectNetworkOptions,
@@ -565,8 +566,6 @@ describe('OneTimeRuntime: the session', () => {
   });
 
   describe('held to a path policy', () => {
-    const OFF_LAN = { local: '10.0.0.2', remote: '10.0.0.3' };
-
     it('connects over a pair the policy allows', async () => {
       makeRuntime({ directPathPolicy: lanOnlyPolicy() });
       await connected();

@@ -69,6 +69,9 @@ export interface FakeDirectNetworkOptions {
 /** The pair a run selects unless it says otherwise: both ends on one LAN. */
 export const FAKE_LAN_PAIR: DirectSelectedPair = { local: '192.168.1.2', remote: '192.168.1.3' };
 
+/** A pair off that LAN at both ends, which {@link lanOnlyPolicy} refuses. */
+export const OFF_LAN_PAIR: DirectSelectedPair = { local: '10.0.0.2', remote: '10.0.0.3' };
+
 /** The one host candidate each end describes itself with: its half of {@link FAKE_LAN_PAIR}. */
 const HOST_CANDIDATE: Record<FakePeerRole, string> = {
   answerer: FAKE_LAN_PAIR.local!,

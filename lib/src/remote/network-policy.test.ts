@@ -7,9 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_ALLOWED_NETWORKS,
-  isNetworkPolicy,
   isNetworkPolicyResult,
   levelsFor,
+  parseNetworkPolicy,
   storedNetworkPolicy,
   type NetworkPolicy,
 } from './network-policy';
@@ -24,13 +24,13 @@ describe('levelsFor', () => {
   });
 });
 
-describe('isNetworkPolicy', () => {
+describe('parseNetworkPolicy', () => {
   it('takes a policy exactly: three keys, a known level, bounded strings, a boolean', () => {
-    expect(isNetworkPolicy(LOCAL)).toBe(true);
-    expect(isNetworkPolicy({ ...LOCAL, level: 'anywhere' })).toBe(true);
-    expect(isNetworkPolicy({ ...LOCAL, allowed: Array.from({ length: MAX_ALLOWED_NETWORKS }, () => 'x') })).toBe(
-      true,
-    );
+    expect(parseNetworkPolicy(LOCAL)).toEqual(LOCAL);
+    expect(parseNetworkPolicy({ ...LOCAL, level: 'anywhere' })).not.toBeNull();
+    expect(
+      parseNetworkPolicy({ ...LOCAL, allowed: Array.from({ length: MAX_ALLOWED_NETWORKS }, () => 'x') }),
+    ).not.toBeNull();
     for (const value of [
       null,
       [],
@@ -43,7 +43,7 @@ describe('isNetworkPolicy', () => {
       { ...LOCAL, allowed: Array.from({ length: MAX_ALLOWED_NETWORKS + 1 }, () => 'x') },
       { ...LOCAL, autoUpdate: 1 },
     ]) {
-      expect(isNetworkPolicy(value), JSON.stringify(value)).toBe(false);
+      expect(parseNetworkPolicy(value), JSON.stringify(value)).toBeNull();
     }
   });
 });
@@ -51,7 +51,7 @@ describe('isNetworkPolicy', () => {
 describe('storedNetworkPolicy', () => {
   it('reads none as none, a policy as a copy, and anything else as Nothing', () => {
     expect(storedNetworkPolicy(undefined)).toBeNull();
-    expect(storedNetworkPolicy(null)).toBeNull();
+    expect(storedNetworkPolicy(null)).toEqual(NOTHING);
 
     const read = storedNetworkPolicy(LOCAL);
     expect(read).toEqual(LOCAL);

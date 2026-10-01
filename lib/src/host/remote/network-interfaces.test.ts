@@ -20,11 +20,14 @@ vi.mock('node:os', async (importOriginal) => {
 });
 
 import {
-  addressAllowed,
+  allowedAddressTest,
   canonicalCidr,
   classifyNetworkInterfaces,
   listNetworkInterfaces,
 } from './network-interfaces';
+
+/** One address against one list, as a caller with a single address asks it. */
+const addressAllowed = (address: string, cidrs: readonly string[]) => allowedAddressTest(cidrs)(address);
 
 afterEach(() => {
   osProbe.fail = false;
@@ -72,7 +75,7 @@ describe('canonicalCidr', () => {
   });
 });
 
-describe('addressAllowed', () => {
+describe('allowedAddressTest', () => {
   const allowed = ['192.168.1.0/24', '2001:db8::/32'];
 
   it('answers whether an IP literal falls in a range, in either family', () => {

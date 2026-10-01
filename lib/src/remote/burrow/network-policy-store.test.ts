@@ -10,9 +10,9 @@ vi.mock('../../lib/platform', () => ({
 }));
 
 import {
+  changeNetworkPolicy,
   getNetworkPolicySnapshot,
   refreshNetworkPolicy,
-  setNetworkPolicy,
   subscribeToNetworkPolicy,
 } from './network-policy-store';
 
@@ -120,7 +120,7 @@ describe('network policy store', () => {
     subscribe();
     await flush();
 
-    await setNetworkPolicy(LOCAL.policy);
+    await changeNetworkPolicy(() => LOCAL.policy);
     expect(link.command).toHaveBeenCalledWith('setNetworkPolicy', { policy: LOCAL.policy });
     expect(getNetworkPolicySnapshot()).toEqual({ kind: 'ready', network: LOCAL });
 
@@ -130,7 +130,7 @@ describe('network policy store', () => {
       emitResult(link, NOTHING);
       return LOCAL;
     });
-    await setNetworkPolicy(NOTHING.policy);
+    await changeNetworkPolicy(() => NOTHING.policy);
     expect(getNetworkPolicySnapshot()).toEqual({ kind: 'ready', network: NOTHING });
   });
 
@@ -141,7 +141,7 @@ describe('network policy store', () => {
     });
     subscribe();
     await flush();
-    await expect(setNetworkPolicy({ level: 'relay', allowed: [], autoUpdate: false })).rejects.toThrow(
+    await expect(changeNetworkPolicy(() => ({ level: 'relay', allowed: [], autoUpdate: false }))).rejects.toThrow(
       'does not offer',
     );
     expect(getNetworkPolicySnapshot()).toEqual({ kind: 'ready', network: LOCAL });

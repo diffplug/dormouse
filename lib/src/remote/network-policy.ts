@@ -77,6 +77,20 @@ export function runsBurrow(level: NetworkLevel): boolean {
   return level === 'relay';
 }
 
+/**
+ * Whether `policy` lets a one-time link open: Local networks with at least one
+ * network allowed, since a phone's direct path must fall within one
+ * (`docs/specs/remote-network.md` → "Local networks").
+ */
+export function opensOneTimeLinks(policy: NetworkPolicy): boolean {
+  return policy.level === 'local' && policy.allowed.length > 0;
+}
+
+/** Whether Standalone checks for updates at launch under `policy` (`docs/specs/remote-network.md` → "Updates"). */
+export function checksForUpdates(policy: NetworkPolicy): boolean {
+  return policy.level !== 'nothing' && policy.autoUpdate;
+}
+
 /** What `networkPolicy` answers, for a build of `mode`. */
 export function networkPolicyResult(
   policy: NetworkPolicy,
@@ -99,17 +113,13 @@ export function parseNetworkPolicy(value: unknown): NetworkPolicy | null {
   return typeof autoUpdate === 'boolean' ? { level, allowed: [...allowed], autoUpdate } : null;
 }
 
-export function isNetworkPolicy(value: unknown): value is NetworkPolicy {
-  return parseNetworkPolicy(value) !== null;
-}
-
 /**
  * A stored record as a store answers it: `null` when there is none, and
- * **Nothing when there is one that is not a policy** — a damaged record must
- * never open a connection the user may have turned off.
+ * **Nothing when there is one that is not a policy**, `null` included — a
+ * damaged record must never open a connection the user may have turned off.
  */
 export function storedNetworkPolicy(value: unknown): NetworkPolicy | null {
-  if (value === undefined || value === null) return null;
+  if (value === undefined) return null;
   return parseNetworkPolicy(value) ?? nothingPolicy();
 }
 
@@ -127,7 +137,7 @@ function isNetworkInterfaceInfo(value: unknown): value is NetworkInterfaceInfo {
 export function isNetworkPolicyResult(value: unknown): value is NetworkPolicyResult {
   return (
     isRecord(value) &&
-    isNetworkPolicy(value.policy) &&
+    parseNetworkPolicy(value.policy) !== null &&
     Array.isArray(value.levels) &&
     value.levels.every(isLevel) &&
     Array.isArray(value.interfaces) &&

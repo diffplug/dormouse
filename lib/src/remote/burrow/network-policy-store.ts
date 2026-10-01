@@ -97,18 +97,6 @@ export async function refreshNetworkPolicy(): Promise<void> {
   }
 }
 
-/**
- * Hold `policy` from now on. The service's event arrives before its answer;
- * the answer is applied only when none has. Rejections propagate verbatim — the
- * service's refusals are written to be read.
- */
-export async function setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
-  const active = requireBurrowLink();
-  const mine = ++generation;
-  const network = await active.command('setNetworkPolicy', { policy });
-  if (mine === generation && isNetworkPolicyResult(network)) publish({ kind: 'ready', network });
-}
-
 /** The tail of {@link changeNetworkPolicy}'s queue, settled either way. */
 let changing: Promise<void> = Promise.resolve();
 
@@ -118,6 +106,10 @@ let changing: Promise<void> = Promise.resolve();
  * answer the one before it left, so a second click before the first lands
  * builds on it rather than on what the panel showed, which the first would
  * otherwise lose.
+ *
+ * The service's event arrives before its answer; the answer is applied only
+ * when none has. Rejections propagate verbatim — the service's refusals are
+ * written to be read.
  */
 export function changeNetworkPolicy(
   change: (network: NetworkPolicyResult) => NetworkPolicy | null,
@@ -127,8 +119,12 @@ export function changeNetworkPolicy(
     if (current.kind !== 'ready') {
       throw new Error(current.kind === 'error' ? current.message : 'The network setting is not loaded yet.');
     }
-    const next = change(current.network);
-    if (next) await setNetworkPolicy(next);
+    const policy = change(current.network);
+    if (!policy) return;
+    const active = requireBurrowLink();
+    const mine = ++generation;
+    const network = await active.command('setNetworkPolicy', { policy });
+    if (mine === generation && isNetworkPolicyResult(network)) publish({ kind: 'ready', network });
   });
   changing = run.catch(() => {});
   return run;

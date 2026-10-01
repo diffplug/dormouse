@@ -165,6 +165,22 @@ function link(primed: PrimedBurrow) {
   platform.burrow = { ...stub, command };
 }
 
+type Command = (cmd: string, params?: unknown) => Promise<unknown>;
+
+/** Wrap the link's `command` so `answer` may answer first; `undefined` falls through to `stub`. */
+function intercept(answer: (cmd: string, params: unknown, stub: Command) => unknown) {
+  const stub = command as Command;
+  command = vi.fn(async (cmd: string, params?: unknown) => {
+    const answered = answer(cmd, params, stub);
+    return answered === undefined ? stub(cmd, params) : answered;
+  });
+  platform.burrow = { ...platform.burrow!, command };
+}
+
+/** Every policy the panel sent, in order. */
+const sentPolicies = () =>
+  command.mock.calls.filter(([cmd]) => cmd === 'setNetworkPolicy').map(([, params]) => (params as { policy: NetworkPolicy }).policy);
+
 async function render() {
   await act(async () =>
     root.render(
@@ -233,12 +249,9 @@ describe('Settings → Network', () => {
 
   it('shows a refused change where it was made', async () => {
     link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
-    const stub = command;
-    command = vi.fn(async (cmd: string, params?: unknown) => {
+    intercept((cmd) => {
       if (cmd === 'setNetworkPolicy') throw new Error('disk full');
-      return stub(cmd, params);
     });
-    platform.burrow = { ...platform.burrow!, command };
     await render();
     const local = container.querySelector<HTMLElement>('[role="radio"][aria-checked="false"]')!;
     await act(async () => local.click());
@@ -249,19 +262,15 @@ describe('Settings → Network', () => {
     /** Hold every `setNetworkPolicy` until `release` answers the oldest one. */
     function holdSets(): () => Promise<void> {
       const held: Array<() => void> = [];
-      const stub = command;
-      command = vi.fn((cmd: string, params?: unknown) =>
+      intercept((cmd, params, stub) =>
         cmd === 'setNetworkPolicy'
           ? new Promise((resolve) => held.push(() => resolve(stub(cmd, params))))
-          : stub(cmd, params));
-      platform.burrow = { ...platform.burrow!, command };
+          : undefined);
       return async () => {
         await act(async () => held.shift()!());
         await act(async () => {});
       };
     }
-    const sent = () =>
-      command.mock.calls.filter(([cmd]) => cmd === 'setNetworkPolicy').map(([, params]) => (params as { policy: NetworkPolicy }).policy);
 
     it('builds on the first, so two switches turned on both stay on', async () => {
       link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
@@ -277,7 +286,7 @@ describe('Settings → Network', () => {
       });
       await release();
       await release();
-      expect(sent()).toEqual([
+      expect(sentPolicies()).toEqual([
         { ...LOCAL, allowed: [LAN, '100.64.0.0/10'] },
         { ...LOCAL, allowed: [LAN, '100.64.0.0/10', '192.168.215.0/24'] },
       ]);
@@ -296,22 +305,10 @@ describe('Settings → Network', () => {
       });
       await release();
       await release();
-      expect(sent().map((policy) => policy.level)).toEqual(['local', 'nothing']);
+      expect(sentPolicies().map((policy) => policy.level)).toEqual(['local', 'nothing']);
       expect(radio('Nothing').getAttribute('aria-checked')).toBe('true');
     });
   });
-
-  /** Wrap the stub's `command` so `intercept` may answer first; `undefined` falls through. */
-  function intercept(answer: (cmd: string, params: unknown) => unknown) {
-    const stub = command;
-    command = vi.fn(async (cmd: string, params?: unknown) => {
-      const answered = answer(cmd, params);
-      return answered === undefined ? stub(cmd, params) : answered;
-    });
-    platform.burrow = { ...platform.burrow!, command };
-  }
-  const sentPolicies = () =>
-    command.mock.calls.filter(([cmd]) => cmd === 'setNetworkPolicy').map(([, params]) => (params as { policy: NetworkPolicy }).policy);
 
   it('offers Disconnect for an enrollment Nothing holds, without leaving Nothing', async () => {
     link({ status: enrolledStatus({ connection: 'stopped' }), network: networkPolicyResult(nothingPolicy(), 'self-host', []) });
@@ -379,13 +376,11 @@ describe('Settings → Network', () => {
   it('lists a typed range as the service saved it, in canonical form', async () => {
     link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
     // The service's canonical save (`requestedNetworkPolicy`), over the stub.
-    const stub = command;
-    command = vi.fn(async (cmd: string, params?: unknown) => {
-      if (cmd !== 'setNetworkPolicy') return stub(cmd, params);
+    intercept((cmd, params, stub) => {
+      if (cmd !== 'setNetworkPolicy') return undefined;
       const { policy } = params as { policy: NetworkPolicy };
       return stub(cmd, { policy: { ...policy, allowed: policy.allowed.map((cidr) => canonicalCidr(cidr)!) } });
     });
-    platform.burrow = { ...platform.burrow!, command };
     await render();
 
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Add an allowed network range"]')!;
