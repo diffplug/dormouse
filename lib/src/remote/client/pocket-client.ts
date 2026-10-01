@@ -36,6 +36,7 @@ import {
   pairingInvitationPrologue,
   pushEndpointFingerprint,
   pushSubscriptionDeletePath,
+  RELAY_PONG,
   randomBase64Url,
   samplePairingCode,
   toBase64Url,
@@ -80,8 +81,13 @@ import {
   type PendingDeletionStore,
 } from './pocket-db';
 import { SCAN_LABEL } from '../setup-copy';
-import type { RemoteWebSocket } from '../ws';
-import { ClientSessionCore, type ClientSessionCoreDeps } from './session-core';
+import { RelayHeartbeat, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import {
+  ClientSessionCore,
+  documentVisibility,
+  type ClientSessionCoreDeps,
+  type PageVisibility,
+} from './session-core';
 import type { TerminalHandlers } from './remote-adapter';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
@@ -117,7 +123,8 @@ export interface PocketStorage {
 
 /**
  * What a `PocketClient` is built from. The session core's own seams —
- * `setTimer`, `visibility`, `createDirectPeer` — pass straight through to it.
+ * `setTimer`, `visibility`, `createDirectPeer` — pass straight through to it;
+ * the relay socket's heartbeat arms on the same `setTimer`.
  */
 export interface PocketClientDeps
   extends Pick<ClientSessionCoreDeps<E2eRoute>, 'setTimer' | 'visibility' | 'createDirectPeer'> {
@@ -306,10 +313,16 @@ export class PocketClient {
   readonly #pendingDeletions: PendingDeletionStore;
   readonly #storage: PocketStorage;
   readonly #now: () => number;
+  readonly #setTimer: RemoteTimer;
+  readonly #visibility: PageVisibility;
   /** Everything a ceremony's frames and an established session do. */
   readonly #core: ClientSessionCore<E2eRoute>;
 
   #ws: PocketSocket | null = null;
+  /** The open relay socket's heartbeat, or null while none is open. */
+  #heartbeat: RelayHeartbeat | null = null;
+  /** Pauses the heartbeat while the page is hidden; null while none runs. */
+  #cancelHeartbeatVisibility: (() => void) | null = null;
   /**
    * The sign-in session: its token, and the account the Relay answered with
    * it — `'owner'` from a self-host Relay, the account's user id from Hosted.
@@ -329,6 +342,8 @@ export class PocketClient {
     this.#pendingDeletions = deps.pendingDeletions;
     this.#storage = deps.storage ?? localStoragePocketStorage();
     this.#now = deps.now ?? (() => Date.now());
+    this.#setTimer = deps.setTimer ?? realTimer;
+    this.#visibility = deps.visibility ?? documentVisibility();
     this.#core = new ClientSessionCore<E2eRoute>({
       sendFrame: (route, step, ciphertext) => this.#sendE2e(route, step, ciphertext),
       messages: {
@@ -654,7 +669,12 @@ export class PocketClient {
     const isCurrent = () => this.#ws === ws;
     ws.addEventListener('message', (ev) => {
       if (!isCurrent()) return;
-      this.#onFrame((ev as { data?: unknown }).data);
+      const data = (ev as { data?: unknown }).data;
+      if (data === RELAY_PONG) {
+        this.#heartbeat?.pong();
+        return;
+      }
+      this.#onFrame(data);
     });
     ws.addEventListener('close', () => this.#onClose(ws));
     return new Promise((resolve, reject) => {
@@ -663,6 +683,7 @@ export class PocketClient {
           reject(new Error('relay socket superseded'));
           return;
         }
+        this.#startHeartbeat(ws);
         resolve();
       });
       ws.addEventListener('error', () => reject(new Error('relay socket error')));
@@ -1073,6 +1094,36 @@ export class PocketClient {
     }
   }
 
+  /**
+   * Ping the relay socket while the page is visible, as keepalives run
+   * (`docs/specs/pocket-app.md`); a socket that stops answering is a drop,
+   * though no close arrived.
+   */
+  #startHeartbeat(ws: PocketSocket): void {
+    this.#stopHeartbeat();
+    const heartbeat = new RelayHeartbeat(ws, this.#setTimer, () => {
+      this.#onClose(ws);
+      try {
+        ws.close();
+      } catch {
+        // already closing
+      }
+    });
+    if (!this.#visibility.isVisible()) heartbeat.pause();
+    this.#heartbeat = heartbeat;
+    this.#cancelHeartbeatVisibility = this.#visibility.subscribe(() => {
+      if (this.#visibility.isVisible()) heartbeat.resume();
+      else heartbeat.pause();
+    });
+  }
+
+  #stopHeartbeat(): void {
+    this.#heartbeat?.stop();
+    this.#heartbeat = null;
+    this.#cancelHeartbeatVisibility?.();
+    this.#cancelHeartbeatVisibility = null;
+  }
+
   #onClose(ws: PocketSocket): void {
     // Generation guard, and the whole test for "was this close intentional?":
     // `close()` tears down and nulls #ws *before* calling `ws.close()`, and a
@@ -1093,6 +1144,7 @@ export class PocketClient {
    */
   #teardown(reason: string, { notifyGone }: { notifyGone: boolean }): void {
     this.#ws = null; // never reuse a closed socket; openSocket() makes a fresh one
+    this.#stopHeartbeat();
     this.#core.endSession(reason, { notifyGone });
   }
 

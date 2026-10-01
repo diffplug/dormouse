@@ -6,6 +6,12 @@
 import { randomBytes } from 'node:crypto';
 
 import {
+  MAX_RELAY_CLIENT_SOCKETS,
+  RELAY_PING,
+  RELAY_PONG,
+  WS_CLOSE_TRY_AGAIN_LATER,
+  WS_CLOSE_UNAUTHORIZED,
+  WS_CLOSE_UNAUTHORIZED_REASON,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REPLACED_REASON,
   WS_CLOSE_BURROW_REVOKED,
@@ -61,26 +67,13 @@ export interface ClientConn {
   burrowId: string | null;
 }
 
-/**
- * How many Client sockets this process will hold at once.
- *
- * `/ws/client` needs a session token, and one account's phones are a handful,
- * so this is far above real use — but without it a token-holder opens sockets
- * until the process runs out, and a half-open TCP connection keeps its entry
- * until the OS gives up. The heartbeat in `app.ts` is the other half of that.
- */
-export const MAX_RELAY_CLIENT_SOCKETS = 64;
-
-/** Refused because the process is already holding {@link MAX_RELAY_CLIENT_SOCKETS}. */
-export const WS_CLOSE_TRY_AGAIN_LATER = 1013;
-
-/**
- * The session behind this socket is gone. The same pair the `/ws/client`
- * upgrade answers with, so a socket closed by the sweep is indistinguishable
- * from one refused at the door and Pocket needs no second recovery.
- */
-export const WS_CLOSE_UNAUTHORIZED = 1008;
-export const WS_CLOSE_UNAUTHORIZED_REASON = 'unauthorized';
+// The Relays' shared socket bounds, re-exported for the self-host tests.
+export {
+  MAX_RELAY_CLIENT_SOCKETS,
+  WS_CLOSE_TRY_AGAIN_LATER,
+  WS_CLOSE_UNAUTHORIZED,
+  WS_CLOSE_UNAUTHORIZED_REASON,
+};
 
 export class RelayHub {
   readonly #burrows = new Map<string, BurrowConn>();
@@ -146,6 +139,7 @@ export class RelayHub {
     // current would carry ciphertext from the dead burrow process into a binding
     // the replacement never made.
     if (this.#burrows.get(burrow.burrowId) !== burrow) return;
+    if (answeredPing(burrow.socket, raw)) return;
     const frame = parseFrame<BurrowFrame>(raw);
     // The shape guard bounds `clientId` before it is used as a map key, and the
     // ciphertext before it is copied onto another socket.
@@ -250,6 +244,7 @@ export class RelayHub {
     // the session the sweep just expired, which is the whole point of expiring
     // it (`docs/specs/relay.md` -> "Routing").
     if (this.#clients.get(client.clientId) !== client) return;
+    if (answeredPing(client.socket, raw)) return;
     const frame = parseFrame<ClientFrame>(raw);
     if (!frame || typeof frame.t !== 'string') {
       this.#toClient(client, { t: 'error', error: 'malformed frame' });
@@ -358,6 +353,21 @@ function parseFrame<T>(raw: string): (T & { t?: unknown }) | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Answer {@link RELAY_PING} with {@link RELAY_PONG}, as the Hosted Relay's
+ * auto-response does: the ping is the whole message, never parsed or
+ * forwarded. True when `raw` was the ping.
+ */
+function answeredPing(socket: RelaySocket, raw: string): boolean {
+  if (raw !== RELAY_PING) return false;
+  try {
+    socket.send(RELAY_PONG);
+  } catch {
+    // mid-close
+  }
+  return true;
 }
 
 /** Serialize and send, swallowing errors from a socket that is mid-close. */

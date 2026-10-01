@@ -605,6 +605,15 @@ Its four resource bounds, enforced under `sweepRelaySockets` or at the socket:
   kinds before starting the idle close handshake**, releasing routing and Client
   capacity immediately, pinned by `relay/test/relay-limits.test.mjs`.
 
+**Must answer the text `RELAY_PING` with `RELAY_PONG`** on either socket kind,
+compared whole before any parse, never forwarded and never an `error`. **The
+Burrow and Pocket each send `RELAY_PING` every `RELAY_PING_INTERVAL_MS` (30 s)
+and enforce a deadline only once a pong has arrived on that socket**: a ping
+still unanswered when the next is due ends it, through that end's ordinary
+close handling, so a Relay that never answers is never held to one. **Pocket
+pauses its pings while the page is hidden** and forgives the outstanding one on
+return, as its keepalives do.
+
 `start.ts` runs the sweep every `RELAY_SWEEP_MS` (30 s), `unref`'d like the
 revocation sweep and far more often, touching no disk. Pinned by
 `relay/test/relay-limits.test.mjs`.
@@ -619,9 +628,15 @@ the evicted Burrow keys its stand-down on the code (see
 socket's own close event is a no-op here, and the new Burrow process has a fresh
 ACL and no memory of them.
 
-Source of truth: `relay/src/relay.ts` (`registerBurrow`), and `isE2eClientFrame` /
-`isE2eBurrowFrame` in `remote-lib-common/src/remote/wire.ts`, written for a Burrow to
-reuse verbatim.
+Source of truth: `relay/src/relay.ts` (`registerBurrow`, `answeredPing`);
+`isE2eClientFrame` / `isE2eBurrowFrame` and `RELAY_PING` in
+`remote-lib-common/src/remote/wire.ts`, written for a Burrow to reuse verbatim;
+`MAX_RELAY_FRAME_BYTES` / `MAX_RELAY_CLIENT_SOCKETS` in
+`remote-lib-common/src/remote/relay-common.ts`; `RelayHeartbeat` in
+`lib/src/remote/ws.ts`. **Every Relay passes the same routing cases**,
+`socketCases` / `e2eCases` in `remote-lib-common/test/harness/relay-parity.mjs`,
+which `relay/test/relay.test.mjs` and `relay/test/e2e-relay.test.mjs` register
+here and `hosted/server/tests/relay-room.test.ts` on Hosted.
 
 ### Pairing (phone ↔ laptop, first time)
 
@@ -972,10 +987,10 @@ is the plaintext stub at `GET /`.
 ## Testing
 
 `pnpm --filter relay test` drives setup → pairing → connect through real HTTP
-and WebSocket boundaries: the `FakeBurrow` in `relay/test/harness/fake-burrow.mjs`
+and WebSocket boundaries: the `FakeBurrow` in `remote-lib-common/test/harness/fake-burrow.mjs`
 speaks only the `e2e` envelope and `client-gone`, mirroring the shipped Burrow's
 ceremony semantics over the same shared primitives; the `FakeClient` in
-`relay/test/harness/fake-client.mjs` runs both ceremonies as a real Noise
+`remote-lib-common/test/harness/fake-client.mjs` runs both ceremonies as a real Noise
 initiator, `SimAuthenticator` producing presence proofs through the real
 `/api/reauth/*` routes; process-level tests spawn the real entrypoint.
 `remote-lib-common/test/security-guarantees.test.mjs` drives the model's
@@ -1130,17 +1145,11 @@ Unstaged but adjacent: origin migration (re-binding the passkey and enrollments
 after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
 
-**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes, Pocket, and the device-code enrollment [hosted.md](./hosted.md) → "Relay" and "Burrow enrollment" serve, in order: tenant-scoped relay sockets, and push. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
+**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes, Pocket, the device-code enrollment, and the per-account relay sockets [hosted.md](./hosted.md) → "Relay", "Relay sockets", and "Burrow enrollment" serve: push. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
 
 ### From single-owner to multi-tenant
 
 Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
 that lifts each single-tenant simplification, every one chosen to be liftable:
 
-* **Relay tenant-scoping (an invariant, not a check).** The relay binds one Burrow
-  per Client socket with no notion of tenant; multi-tenant makes tenancy
-  intrinsic to that binding — a Client may only ever be offered, and bound to,
-  Burrows of its own account, and a cross-tenant binding must be *impossible*, not
-  merely unauthorized. Defense-in-depth: the Burrow still authorizes, but the relay
-  must not be the weak point.
 * **Hosted transport.** Follow the **remote-network** scope in [remote-network.md](./remote-network.md) for routing and lifecycle.

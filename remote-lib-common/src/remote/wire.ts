@@ -138,6 +138,25 @@ export const WS_ROUTES = {
 /** WS auth rides a query parameter (browsers cannot set WS headers). */
 export const WS_TOKEN_PARAM = 'token';
 
+/** The 401 `GET /ws/burrow` answers a token that names no enrolled Burrow, on either Relay. */
+export const UNKNOWN_BURROW_TOKEN_ERROR = 'unknown burrow token';
+
+/**
+ * The keepalive a Burrow or a Client sends its relay socket, and the Relay's
+ * answer (`docs/specs/relay.md` -> "Routing"). Neither is JSON, so each is
+ * compared as a whole string before any parse; neither is forwarded. The
+ * Hosted Relay answers without waking its Durable Object.
+ */
+export const RELAY_PING = 'ping';
+export const RELAY_PONG = 'pong';
+
+/**
+ * How often either end pings its relay socket. Once a pong has arrived on a
+ * socket, a ping unanswered by the next one ends it; a Relay that never
+ * answers is never held to a deadline.
+ */
+export const RELAY_PING_INTERVAL_MS = 30_000;
+
 /**
  * Close code the relay sends to a Burrow socket it displaces when a newer socket
  * claims the same `burrowId` (only one socket may own a burrowId — see relay.md

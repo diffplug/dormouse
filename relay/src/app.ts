@@ -16,11 +16,12 @@ import type { NodeWebSocket } from '@hono/node-ws';
 import { serveStatic } from '@hono/node-server/serve-static';
 import {
   API_ROUTES,
+  MAX_RELAY_FRAME_BYTES,
+  UNKNOWN_BURROW_TOKEN_ERROR,
+  WS_CLOSE_IDLE,
+  WS_CLOSE_IDLE_REASON,
   DELIVERY_ID_LENGTH,
-  E2E_ID_LENGTH,
   ChallengeIssuer,
-  MAX_CLIENT_ID_LENGTH,
-  MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_SEALED_PUSH_LENGTH,
   SELFHOST_ACCOUNT_ID,
@@ -89,6 +90,9 @@ import type {
   SigninFinishRequest,
   SigninFinishResponse,
 } from 'remote-lib-common';
+
+// Shared with the Hosted Relay; re-exported for the self-host tests.
+export { MAX_RELAY_FRAME_BYTES };
 
 import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
 import {
@@ -226,17 +230,6 @@ export const RELAY_SWEEP_MS = 30_000;
  * dozed, which reconnects anyway.
  */
 export const RELAY_IDLE_TIMEOUT_MS = 3 * RELAY_SWEEP_MS;
-/** A socket closed for silence, not for anything it did. */
-const WS_CLOSE_IDLE = 1001;
-const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
-/**
- * The largest frame `ws` may buffer for us. Derived from the wire bounds the
- * relay's own guards enforce — a maximal `ct` plus the envelope around it —
- * because without it `ws` buffers up to 100 MiB before any guard has run.
- * `MAX_CLIENT_ID_LENGTH` is in here because a Burrow frame carries one.
- */
-export const MAX_RELAY_FRAME_BYTES =
-  MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 2 * E2E_ID_LENGTH + 1024;
 /** A small fixed delay on a rejected credential. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 
@@ -1200,7 +1193,7 @@ export function createApp(config: AppConfig): CreatedApp {
     async (c, next) => {
       const token = c.req.query(WS_TOKEN_PARAM);
       const burrow = token ? await burrowStore.findByToken(token) : undefined;
-      if (!burrow) return c.json({ error: 'unknown burrow token' }, 401);
+      if (!burrow) return c.json({ error: UNKNOWN_BURROW_TOKEN_ERROR }, 401);
       c.set('burrow', burrow);
       return next();
     },

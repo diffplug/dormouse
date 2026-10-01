@@ -35,14 +35,25 @@
       {
         "name": "ONE_TIME_ROOM",
         "class_name": "OneTimeRoom"
+      },
+      {
+        "name": "RELAY_ROOM",
+        "class_name": "RelayRoom"
       }
     ]
   },
+  // Append-only: a deployed tag is never edited.
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": [
         "OneTimeRoom"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "RelayRoom"
       ]
     }
   ],

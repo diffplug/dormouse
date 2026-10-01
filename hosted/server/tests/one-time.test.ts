@@ -332,7 +332,7 @@ test("either end leaving closes the other and ends the room", async () => {
 test("a hibernated room keeps its join and its count", async () => {
   const { burrow, frame } = await mint();
   const hibernate = () =>
-    production.mf.unsafeEvictDurableObject("", "OneTimeRoom", {
+    production.mf.unsafeEvictDurableObject(wrangler.relay.name, "OneTimeRoom", {
       name: frame.roomId,
       webSockets: "hibernate",
     });

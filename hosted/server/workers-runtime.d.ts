@@ -27,7 +27,13 @@ interface DurableObjectState {
   getWebSockets(tag?: string): WorkerWebSocket[];
   getTags(ws: WorkerWebSocket): string[];
   setWebSocketAutoResponse(pair?: WebSocketRequestResponsePair): void;
+  /** When the runtime last answered `ws` through the auto-response pair, or null if never. */
+  getWebSocketAutoResponseTimestamp(ws: WorkerWebSocket): Date | null;
   readonly storage: {
+    get<T = unknown>(key: string): Promise<T | undefined>;
+    put(key: string, value: unknown): Promise<void>;
+    list(): Promise<Map<string, unknown>>;
+    getAlarm(): Promise<number | null>;
     setAlarm(scheduledTime: number): Promise<void>;
     deleteAlarm(): Promise<void>;
     deleteAll(): Promise<void>;
@@ -38,9 +44,23 @@ interface DurableObjectId {
   readonly name?: string;
 }
 
-interface DurableObjectNamespace {
+/** A Durable Object's stub: `fetch`, plus the RPC methods of the class `Stub` names. */
+type DurableObjectStub<Stub = unknown> = {
+  fetch(request: Request): Promise<Response>;
+} & Stub;
+
+interface DurableObjectNamespace<Stub = unknown> {
   idFromName(name: string): DurableObjectId;
-  get(id: DurableObjectId): { fetch(request: Request): Promise<Response> };
+  get(id: DurableObjectId): DurableObjectStub<Stub>;
+}
+
+/** The base class whose public methods a stub calls as RPC. */
+declare module "cloudflare:workers" {
+  export abstract class DurableObject<Env = unknown> {
+    protected readonly ctx: DurableObjectState;
+    protected readonly env: Env;
+    constructor(ctx: DurableObjectState, env: Env);
+  }
 }
 
 /** A `ratelimits` binding. */

@@ -34,6 +34,7 @@ import {
   ICE_SERVER_MODULE,
   NATIVE_PEER_FACTORY,
   PEER_FACTORIES,
+  RELAY_ROOM,
   RULES,
   SECURITY_SPEC,
 } from './e2e-lint.mjs';
@@ -269,6 +270,24 @@ for (const violation of [
     'hosted/server/one-time-room.ts',
     violation,
     `a forbidden read in hosted/server/one-time-room.ts stays green: ${violation.trim()}`,
+  );
+}
+
+// The same for the per-account relay object, whose allowances are exact: its
+// account-id write, its fixed log line, and `ct` copied as a field. A second
+// write, a log carrying anything, or `ct` read rather than copied must redden.
+for (const violation of [
+  '\nconst __selftest = (ct: string) => atob(ct);\n',
+  '\nconst __selftest = (frame: string) => console.log(frame);\n',
+  '\nconst __selftest = (frame: string) => console.error("RelayRoom refused a request for another account", frame);\n',
+  "\nconst __selftest = (frame: string) => this.ctx.storage.put('frame', frame);\n",
+  "\nconst __selftest = (frame: string) => this.ctx.storage.sql.exec('SELECT ?', frame);\n",
+  '\nconst __selftest = (frame: { ct: string }) => frame.ct.length;\n',
+]) {
+  selftest.withAppended(
+    RELAY_ROOM,
+    violation,
+    `a forbidden read or write in ${RELAY_ROOM} stays green: ${violation.trim()}`,
   );
 }
 

@@ -677,6 +677,9 @@ until then known only to the Relay — and one
 counter, so a Relay that kept an envelope can re-deliver it
 ([Push sealing](#push-sealing)).
 
+**Hosted's Relay observes what the self-host Relay does**, each account's in
+its own `RelayRoom` ([hosted.md](./hosted.md) -> "Relay sockets").
+
 **Hosted's one-time rendezvous observes each room's timing, both ends' IP
 addresses, the room id, and the size and count of the handshake frames it
 forwards** — never plaintext, and nothing once the session is direct

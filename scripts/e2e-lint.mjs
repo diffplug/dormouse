@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Mechanical check for the structural half of the end-to-end boundary in
- * `docs/specs/security-remote.md` ("Remote Control"), and of the Hosted room
- * that forwards a one-time handshake in `docs/specs/security-hosted.md`
- * ("Rendezvous boundary"). Runs from the repo
+ * `docs/specs/security-remote.md` ("Remote Control"), and of the Hosted rooms
+ * that forward a one-time handshake and an account's relay frames in
+ * `docs/specs/security-hosted.md` ("Rendezvous boundary", "Relay boundary"). Runs from the repo
  * root via `pnpm test` (see the root package.json). Exits non-zero with a
  * per-violation report naming the rule that was broken and the spec line it
  * enforces.
@@ -64,7 +64,7 @@ const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
 /** The spec whose "Remote Control" lines the rules below pin, unless a rule names its own. */
 export const SECURITY_SPEC = 'docs/specs/security-remote.md';
 
-/** The spec whose "Rendezvous boundary" lines the Hosted room's rule pins. */
+/** The spec whose "Rendezvous boundary" and "Relay boundary" lines the Hosted rooms' rules pin. */
 export const HOSTED_SECURITY_SPEC = 'docs/specs/security-hosted.md';
 
 /**
@@ -177,6 +177,19 @@ const GRANT_NAME =
  * one-time token among it.
  */
 const ONE_TIME_NAME = /[Oo]neTime|ONE_TIME_|['"`]one-time/g;
+
+/** Hosted's per-account relay object (`docs/specs/hosted.md` -> "Relay sockets"). */
+export const RELAY_ROOM = 'hosted/server/relay-room.ts';
+
+/**
+ * Everything {@link RELAY_ROOM} may spell of the pattern its rule forbids: the
+ * one storage write, of the account id; the one log, a fixed string; and the
+ * `ct` it copies from one envelope into the next, a field never read.
+ */
+const RELAY_ROOM_ALLOWED = [
+  'storage.put(ACCOUNT_KEY, account)',
+  'console.error("RelayRoom refused a request for another account")',
+];
 
 /** The three shipped source trees, scanned whole for the dependency rules. */
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
@@ -427,6 +440,22 @@ export const RULES = [
     pattern: /\bJSON\.parse\b|\bfromBase64Url\b|\batob\b|\bconsole\.|\bstorage\.(?:put|sql|kv)\b/g,
     violationFile: 'hosted/server/one-time-room.ts',
     violation: '\nconst __selftest = (frame: string) => JSON.parse(frame);\n',
+  },
+  {
+    rule: "Hosted's RelayRoom never decodes, logs, or stores a frame",
+    spec: HOSTED_SECURITY_SPEC,
+    security: 'stores, logs, or decodes a frame or its `ct`',
+    kind: 'forbid',
+    files: [RELAY_ROOM],
+    // It parses the routing envelope and copies `ct` across field by field, so
+    // it has no reason to decode one; its one log line is a fixed string, and
+    // its one storage write is the account id. Matched whole, call and all, so
+    // an argument added to either is a match the allowance no longer covers.
+    pattern:
+      /\bfromBase64Url\b|\batob\b|\bconsole\.\w+\([^)]*\)|\bstorage\.(?:put|sql|kv|transaction)\b(?:\([^)]*\))?|\.ct\b(?!,)/g,
+    allow: (match) => RELAY_ROOM_ALLOWED.includes(match),
+    violationFile: RELAY_ROOM,
+    violation: '\nconst __selftest = (ct: string) => fromBase64Url(ct);\n',
   },
   {
     rule: 'The Relay never names the one-time family',

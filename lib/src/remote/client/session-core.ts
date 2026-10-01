@@ -705,7 +705,7 @@ function uuid(): string {
  * alternative is a client that silently never keepalives, and the only place
  * this default runs is the app, which always has one.
  */
-function documentVisibility(): PageVisibility {
+export function documentVisibility(): PageVisibility {
   const doc: Document | undefined = globalThis.document;
   return {
     isVisible: () => doc === undefined || doc.visibilityState === 'visible',

@@ -24,7 +24,7 @@ import {
 
 import { AccountStore } from '../dist/state.js';
 import { SetupTokenIssuer } from '../dist/setup-token.js';
-import { FakeBurrow } from './harness/fake-burrow.mjs';
+import { FakeBurrow } from '../../remote-lib-common/test/harness/fake-burrow.mjs';
 import {
   ORIGIN,
   PASSWORD,

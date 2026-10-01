@@ -58,6 +58,7 @@ import type {
 import type { RelayEnv } from "./bindings";
 import { allowed } from "./one-time";
 import { ENROLLMENT_TTL_MS } from "./policy-constants";
+import { relayRoom } from "./relay-sockets";
 import {
   OWNER_COLUMNS,
   database,
@@ -412,9 +413,10 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       WHERE "userId" = $1 ORDER BY "enrolledAt", "burrowId"`,
       [c.var.session.userId],
     );
-    // No relay socket reaches this Worker yet, so none is connected.
+    const { userId } = c.var.session;
+    const online = new Set(await relayRoom(c.env.RELAY_ROOM, userId).onlineBurrows(userId));
     const res: BurrowsResponse = {
-      burrows: rows.map(({ burrowId }) => ({ burrowId, online: false })),
+      burrows: rows.map(({ burrowId }) => ({ burrowId, online: online.has(burrowId) })),
     };
     return c.json(res);
   });

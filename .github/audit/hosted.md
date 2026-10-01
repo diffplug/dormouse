@@ -17,8 +17,8 @@ unreachable, report those two checks as `UNVERIFIABLE`.
 
 Read `docs/specs/hosted.md`, `docs/specs/one-time.md` (its "Wire contract",
 "Hosted rendezvous", and "Phone page"), `docs/specs/relay.md` (its "HTTP API",
-"Setup tokens and the pairing QR", and "WebAuthn without a WebAuthn library",
-whose semantics the Hosted Relay keeps), `hosted/server/`, `hosted/src/`,
+"Setup tokens and the pairing QR", "WebAuthn without a WebAuthn library", and
+"Routing", whose semantics the Hosted Relay keeps), `hosted/server/`, `hosted/src/`,
 `hosted/scripts/`, `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`,
 `hosted/wrangler.voice.jsonc`,
 `remote-lib-common/src/remote/one-time-wire.ts`,
@@ -130,6 +130,17 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   Relay must read no cookie, and the rendezvous authorizes nothing. Pocket and
   `/connect/` share the relay origin; check what each page's policy lets it
   reach of the other.
+- **Can one account's relay socket reach another's?** Trace an upgrade
+  through `relaySocketRoutes` (`hosted/server/relay-sockets.ts`) into
+  `RelayRoom` (`hosted/server/relay-room.ts`): the object must be named only
+  from the account a token resolved to, refuse any request or RPC naming
+  another, and receive no header or token of the caller's; a web page must not
+  open a Burrow socket, nor another origin a Client socket. Look for routing
+  state kept in memory that a hibernated object would lose, a socket torn down
+  twice or routed after its close began, a frame parsed before its length is
+  bounded, a `ct` decoded, logged, or stored, a Client cap one socket can
+  evict past, a session that outlives its alarm, a ping that wakes the object,
+  and a removed Burrow whose socket stays open.
 - **Can the rendezvous become more than a handshake pipe?** Trace a frame
   through `OneTimeRoom`: nothing may read, keep, or log it, and the length,
   type, and count bounds must close both ends before a byte past them is

@@ -24,6 +24,9 @@ import {
 import { boundedPushText } from '../security/push.js';
 import { getWebCrypto } from '../security/webcrypto.js';
 import {
+  E2E_ID_LENGTH,
+  MAX_CLIENT_ID_LENGTH,
+  MAX_E2E_CIPHERTEXT_LENGTH,
   CLIENT_DATA_TYPE_ERROR,
   MALFORMED_ASSERTION_ERROR,
   MALFORMED_CLIENT_DATA_ERROR,
@@ -37,6 +40,43 @@ import {
 
 /** The bearer shape lives in the wire contract; re-exported for the Relays. */
 export { RELAY_BEARER_BYTE_LENGTH, RELAY_BEARER_LENGTH, isRelayBearer } from './wire.js';
+
+/**
+ * The largest relay frame either Relay will read, from either socket kind.
+ * Derived from the wire bounds the frame guards enforce — a maximal `ct` plus
+ * the envelope around it — so the raw text is bounded before any parse: the
+ * self-host Relay hands it to `ws` as `maxPayload` (which otherwise buffers up
+ * to 100 MiB), the Hosted Relay measures each message against it.
+ * `MAX_CLIENT_ID_LENGTH` is in here because a Burrow frame carries one.
+ */
+export const MAX_RELAY_FRAME_BYTES =
+  MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 2 * E2E_ID_LENGTH + 1024;
+
+/** A frame over {@link MAX_RELAY_FRAME_BYTES} closes its socket with this. */
+export const WS_CLOSE_FRAME_TOO_LARGE = 1009;
+
+/**
+ * How many Client sockets one Relay holds at once: the self-host process, or
+ * one account's Durable Object on Hosted. One account's phones are a handful,
+ * so this is far above real use; without it a token-holder opens sockets until
+ * the Relay runs out.
+ */
+export const MAX_RELAY_CLIENT_SOCKETS = 64;
+
+/** Refused because the Relay is already holding {@link MAX_RELAY_CLIENT_SOCKETS}. */
+export const WS_CLOSE_TRY_AGAIN_LATER = 1013;
+
+/**
+ * The session behind this socket is gone. The same pair the `/ws/client`
+ * upgrade answers with, so a socket closed after the fact is indistinguishable
+ * from one refused at the door and Pocket needs no second recovery.
+ */
+export const WS_CLOSE_UNAUTHORIZED = 1008;
+export const WS_CLOSE_UNAUTHORIZED_REASON = 'unauthorized';
+
+/** A socket closed for silence, not for anything it did. */
+export const WS_CLOSE_IDLE = 1001;
+export const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
 
 /** Sessions live 12 hours (relay.md: "hours-scale TTL"). */
 export const RELAY_SESSION_TTL_MS = 12 * 60 * 60 * 1000;

@@ -17,6 +17,7 @@ import {
   MAX_TOKENS_PER_BURROW,
   NoiseError,
   NoiseTransportSession,
+  RELAY_PONG,
   TokenBucket,
   WS_CLOSE_BURROW_REPLACED,
   WS_ROUTES,
@@ -59,7 +60,13 @@ import {
 import type { BurrowEnrollment } from './enrollment';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import type { DirectPeering } from '../direct/direct-peer';
-import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
+import {
+  RelayHeartbeat,
+  closeCode,
+  realTimer,
+  type RemoteTimer,
+  type RemoteWebSocket,
+} from '../ws';
 import { loadBurrowAcl } from './acl';
 import {
   EstablishedE2eSession,
@@ -394,6 +401,8 @@ export class BurrowRuntime {
   #backoffMs = INITIAL_BACKOFF_MS;
   /** Cancels the armed reconnect, or null when none is armed. */
   #cancelReconnect: (() => void) | null = null;
+  /** The open socket's heartbeat, or null while none is open. */
+  #heartbeat: RelayHeartbeat | null = null;
 
   constructor(options: BurrowOptions) {
     this.#enrollment = options.enrollment;
@@ -740,6 +749,7 @@ export class BurrowRuntime {
     this.#stopped = true;
     this.#status = 'stopped';
     this.#clearReconnectTimer();
+    this.#stopHeartbeat();
     this.#dropTransientState();
     // A stopped Burrow leaves no timer behind to wake the process it runs in.
     this.#clearReaper();
@@ -772,11 +782,17 @@ export class BurrowRuntime {
       if (this.#ws !== ws) return;
       this.#status = 'connected';
       this.#backoffMs = INITIAL_BACKOFF_MS;
+      this.#heartbeat = new RelayHeartbeat(ws, this.#setTimer, () => this.#abandonSocket());
       this.#reap();
     });
     ws.addEventListener('message', (ev) => {
       if (this.#ws !== ws) return;
-      this.#onFrame((ev as { data?: unknown }).data);
+      const data = (ev as { data?: unknown }).data;
+      if (data === RELAY_PONG) {
+        this.#heartbeat?.pong();
+        return;
+      }
+      this.#onFrame(data);
     });
     ws.addEventListener('error', () => {
       // A `close` always follows; reconnection is handled there.
@@ -793,6 +809,7 @@ export class BurrowRuntime {
   }
 
   #onClose(code: number | undefined): void {
+    this.#stopHeartbeat();
     this.#dropTransientState();
     if (this.#stopped) {
       this.#status = 'stopped';
@@ -823,6 +840,27 @@ export class BurrowRuntime {
   #clearReconnectTimer(): void {
     this.#cancelReconnect?.();
     this.#cancelReconnect = null;
+  }
+
+  #stopHeartbeat(): void {
+    this.#heartbeat?.stop();
+    this.#heartbeat = null;
+  }
+
+  /**
+   * End the socket here and now, through the ordinary close policy: its
+   * handlers are detached by the generation guard first, so nothing it still
+   * delivers is read.
+   */
+  #abandonSocket(): void {
+    const ws = this.#ws;
+    this.#ws = null;
+    this.#onClose(undefined);
+    try {
+      ws?.close();
+    } catch {
+      // Already closing.
+    }
   }
 
   /**
@@ -933,14 +971,7 @@ export class BurrowRuntime {
       this.#frames.length >= MAX_QUEUED_RELAY_FRAMES ||
       this.#frameChars + chars > MAX_QUEUED_RELAY_FRAME_CHARS
     ) {
-      const ws = this.#ws;
-      this.#ws = null;
-      this.#onClose(undefined);
-      try {
-        ws?.close();
-      } catch {
-        // Already closing; its handlers are detached by the generation guard.
-      }
+      this.#abandonSocket();
       return;
     }
     this.#frames.push({ frame, chars });

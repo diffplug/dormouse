@@ -24,6 +24,9 @@ import {
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
   MAX_RELAY_TO_BURROW_FRAME_LENGTH,
+  RELAY_PING,
+  RELAY_PING_INTERVAL_MS,
+  RELAY_PONG,
   NoiseTransportSession,
   fromBase64Url,
   utf8Encode,
@@ -102,6 +105,9 @@ function countCrypto() {
     },
   };
 }
+
+/** The one timer an open relay socket always holds: its heartbeat. */
+const HEARTBEAT = 1;
 
 describe('BurrowRuntime bounds', () => {
   let enrollment: BurrowEnrollment;
@@ -747,8 +753,9 @@ describe('BurrowRuntime bounds', () => {
     });
     expect(burrow.trackedClientCount).toBe(0);
     expect(burrow.outstandingInvitationCount).toBe(0);
-    // Every deadline it held is gone, so nothing is left to wake the process.
-    expect(clock.armed).toBe(0);
+    // Every deadline it held is gone: what is left to wake the process is
+    // the relay socket's heartbeat alone.
+    expect(clock.armed).toBe(HEARTBEAT);
     // The abandoned challenge went with the record that named it, rather than
     // waiting on the issuer's own sweep.
     expect(burrow.pendingChallengeCount).toBe(0);
@@ -779,7 +786,7 @@ describe('BurrowRuntime bounds', () => {
     expect(burrow.trackedClientCount).toBe(0);
     expect(burrow.pendingChallengeCount).toBe(0);
     expect(sessions.every((s) => s.disposed)).toBe(true);
-    expect(clock.armed).toBe(0);
+    expect(clock.armed).toBe(HEARTBEAT);
   });
 
   it('expires a deadline that falls exactly on now', async () => {
@@ -791,7 +798,7 @@ describe('BurrowRuntime bounds', () => {
     // reaper that arms for an instant it will not reap spins on that instant.
     clock.advance(1);
     expect(burrow.outstandingInvitationCount).toBe(0);
-    expect(clock.armed).toBe(0);
+    expect(clock.armed).toBe(HEARTBEAT);
   });
 
   it('reaps sixteen silent sessions on the idle timeout, without a restart', async () => {
@@ -948,6 +955,29 @@ describe('BurrowRuntime bounds', () => {
 
     expect(sessions[0]!.handled).toEqual([{ n: 1 }]);
     expect(burrow.establishedSessionCount).toBe(0);
+  });
+
+  it('pings its relay socket every interval, holding a Relay that never answers to nothing', () => {
+    clock.advance(5 * RELAY_PING_INTERVAL_MS);
+    expect(socket.texts).toEqual(Array(5).fill(RELAY_PING));
+    // An older Relay never pongs: the socket is as open as it was.
+    expect(burrow.status).toBe('connected');
+  });
+
+  it('once a pong has arrived, a ping unanswered by the next one ends the socket', () => {
+    clock.advance(RELAY_PING_INTERVAL_MS);
+    socket.receiveRaw(RELAY_PONG);
+    // Answered on time, twice: still connected, and the pong reached no frame handler.
+    clock.advance(RELAY_PING_INTERVAL_MS);
+    socket.receiveRaw(RELAY_PONG);
+    clock.advance(RELAY_PING_INTERVAL_MS);
+    expect(burrow.status).toBe('connected');
+    // Not answered before the next one is due: closed, through the ordinary
+    // close policy (this Burrow does not reconnect).
+    clock.advance(RELAY_PING_INTERVAL_MS);
+    expect(socket.readyState).toBe(3);
+    expect(burrow.status).toBe('stopped');
+    expect(socket.texts).toHaveLength(3);
   });
 
   it('leaves no timer armed once the Burrow stops', async () => {

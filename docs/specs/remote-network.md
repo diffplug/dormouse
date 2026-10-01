@@ -101,7 +101,7 @@ Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connecti
 **Scope: remote-network** — build in order:
 
 1. **Anywhere on a phone**: **Must measure iOS Safari's offer size and gathering time, and the Burrow with STUN blocked**, before changing a budget.
-2. **Hosted persistent**: desktop enrollment, the Hosted Relay's sockets, and push, beyond its routes in `docs/specs/hosted.md` -> "Relay" and "Burrow enrollment", with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`; Local networks and Anywhere then cover paired phones.
+2. **Hosted persistent**: desktop enrollment, the path rule for paired phones, and push, beyond the routes and sockets in `docs/specs/hosted.md` -> "Relay", "Relay sockets", and "Burrow enrollment", with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`; Local networks and Anywhere then cover paired phones.
 
 ### Allowed networks
 
@@ -109,8 +109,6 @@ Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connecti
 
 ### Hosted persistent
 
-- **Must route account-scoped Relay sockets through Durable Objects**, keyed per Burrow, preserving bounded opaque frames and tenant isolation; Hosted login never authorizes a terminal.
-- **Must use WebSocket hibernation**, rebuilding routing from attachments and durable metadata, and never store terminal ciphertext.
 - **Under Local networks a paired phone's session is direct-only**, with the one-time rule: an application message off the Relay ends it unread. **May fall back to Hosted relaying under Anywhere.**
 - **Must choose Pocket's direct-peer factory by deployment** ("Anywhere"), one bundle serving both; `lib/src/remote/pocket-app/App.tsx` hard-codes `selfHostDirectPeer`.
 - **Must start `BurrowRuntime` on the level's `directPeeringFor`, restarting it on any change `samePaths` sees** ("Anywhere").

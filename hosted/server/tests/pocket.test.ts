@@ -149,7 +149,9 @@ test("the API and socket routes are never Pocket's: no shell, no page policy, no
   // The self-host installers' probe is not Hosted's.
   expect((await get("/api/hello")).status).toBe(404);
   expect(await (await get(API_ROUTES.pushConfig)).json()).toEqual({ applicationServerKey: null });
-  expect((await get(WS_ROUTES.client)).status).toBe(404);
+  // A socket route answers only an upgrade, and only after its Origin check.
+  expect((await get(WS_ROUTES.client)).status).toBe(403);
+  expect((await get(WS_ROUTES.burrow)).status).toBe(426);
 });
 
 test("a percent-encoded /connect path is the page's route, under its policy and without the camera", async () => {

@@ -17,6 +17,9 @@ import {
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
+  RELAY_PING,
+  RELAY_PING_INTERVAL_MS,
+  RELAY_PONG,
   SETUP_TOKEN_INVALID_ERROR,
   formatPairingInvitationUrl,
   fromBase64Url,
@@ -665,8 +668,11 @@ describe('keepalives on an established session', () => {
     // The kind byte, 32 zero bytes, and the Poly1305 tag: every keepalive is
     // this size, so the interval tells a timing observer nothing else.
     expect(fromBase64Url(sent[0]!.ct as string).length).toBe(1 + KEEPALIVE_BODY_SIZE + 16);
-    expect(timers.live).toHaveLength(1);
-    expect(timers.live[0]!.delayMs).toBe(E2E_KEEPALIVE_INTERVAL_MS);
+    // Re-armed, beside the relay socket's own heartbeat.
+    expect(timers.live.map(({ delayMs }) => delayMs)).toEqual([
+      RELAY_PING_INTERVAL_MS,
+      E2E_KEEPALIVE_INTERVAL_MS,
+    ]);
   });
 
   it('pauses while the page is hidden and sends one the moment it returns', async () => {
@@ -679,10 +685,11 @@ describe('keepalives on an established session', () => {
     expect(timers.live).toHaveLength(0);
     expect(sentSince(harness, before)).toHaveLength(0);
 
-    // Back in front of the user: one immediately, then the interval again.
+    // Back in front of the user: one immediately, then the interval again,
+    // and the relay heartbeat with it.
     visibility.set(true);
     expect(sentSince(harness, before)).toHaveLength(1);
-    expect(timers.live).toHaveLength(1);
+    expect(timers.live).toHaveLength(2);
   });
 
   it('stops when the session does', async () => {
@@ -717,7 +724,8 @@ describe('keepalives on an established session', () => {
     // No keepalive into a session that no longer exists, and the app is told.
     expect(sentSince(harness, before)).toHaveLength(0);
     expect(gone).toHaveBeenCalledOnce();
-    expect(timers.live).toHaveLength(0);
+    // Only the relay socket's heartbeat: the socket outlives the session.
+    expect(timers.live.map(({ delayMs }) => delayMs)).toEqual([RELAY_PING_INTERVAL_MS]);
 
     // And a request on the dead session fails rather than hanging.
     await expect(harness.client.write('s1', 'ls')).rejects.toThrow();
@@ -760,8 +768,67 @@ describe('keepalives on an established session', () => {
     expect(send).toHaveBeenCalledTimes(1);
     // And the next interval is still armed, so a socket that comes back is
     // keepalived again rather than silently reaped.
-    expect(timers.live).toHaveLength(1);
+    expect(timers.live).toHaveLength(2);
     send.mockRestore();
+  });
+});
+
+describe('the relay socket heartbeat', () => {
+  /** A signed-in phone with its relay socket open, on a timer and visibility the test owns. */
+  async function opened() {
+    const timers = fakeTimers();
+    const visibility = fakeVisibility();
+    const harness = await signedIn(
+      {},
+      { setTimer: timers.setTimer, visibility: visibility.visibility },
+    );
+    const opening = harness.client.openSocket();
+    harness.socket.open();
+    await opening;
+    return { harness, timers, visibility };
+  }
+
+  it('pings every interval and holds a Relay that never answers to nothing', async () => {
+    const { harness, timers } = await opened();
+    for (let i = 1; i <= 5; i += 1) {
+      timers.fireAt(RELAY_PING_INTERVAL_MS);
+      expect(harness.socket.texts).toHaveLength(i);
+    }
+    expect(harness.socket.texts.every((text) => text === RELAY_PING)).toBe(true);
+    // An older Relay never pongs: the socket is as open as it was.
+    expect(harness.client.socketOpen).toBe(true);
+    // A pong is the heartbeat's, never a frame the Client reads.
+    harness.socket.receiveRaw(RELAY_PONG);
+    expect(harness.client.socketOpen).toBe(true);
+  });
+
+  it('once a pong has arrived, a ping unanswered by the next one drops the socket', async () => {
+    const { harness, timers } = await opened();
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    harness.socket.receiveRaw(RELAY_PONG);
+    // Answered on time: still open.
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    harness.socket.receiveRaw(RELAY_PONG);
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    expect(harness.client.socketOpen).toBe(true);
+    // Not answered before the next one is due.
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    expect(harness.client.socketOpen).toBe(false);
+    expect(harness.socket.readyState).toBe(3);
+    expect(timers.live).toHaveLength(0);
+  });
+
+  it('pauses while the page is hidden, and forgives the ping it was waiting on', async () => {
+    const { harness, timers, visibility } = await opened();
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    harness.socket.receiveRaw(RELAY_PONG);
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    // Hidden with a ping outstanding: a throttled page cannot judge it.
+    visibility.set(false);
+    expect(timers.live).toHaveLength(0);
+    visibility.set(true);
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    expect(harness.client.socketOpen).toBe(true);
   });
 });
 
@@ -870,7 +937,7 @@ describe('the direct path, end to end', () => {
     const clientBefore = run.clientFrames().length;
     const sentBefore = run.network.offererChannel!.sent.length;
 
-    run.timers.fireAt(E2E_KEEPALIVE_INTERVAL_MS);
+    run.timers.fireLatestAt(E2E_KEEPALIVE_INTERVAL_MS);
 
     expect(run.clientFrames()).toHaveLength(clientBefore);
     const sent = run.network.offererChannel!.sent.slice(sentBefore);

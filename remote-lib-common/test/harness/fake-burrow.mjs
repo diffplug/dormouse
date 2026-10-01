@@ -10,10 +10,10 @@
  * the same token) models a Burrow restart: its ACL starts empty again.
  *
  * Constructor: `{ relayUrl, burrowToken, burrowId, origin, rpId, label,
- * autoApprove, requireUserVerification, noiseStaticKeyPair }`. `relayUrl` may
- * be `http(s)://…` or `ws(s)://…`. With `autoApprove` the Burrow types back
- * whatever code the request displayed; otherwise call
- * `confirmPairing(clientId, code)` / `denyPairing(clientId)`.
+ * autoApprove, requireUserVerification, noiseStaticKeyPair, socket,
+ * socketInit }`. `relayUrl` may be `http(s)://…` or `ws(s)://…`. With
+ * `autoApprove` the Burrow types back whatever code the request displayed;
+ * otherwise call `confirmPairing(clientId, code)` / `denyPairing(clientId)`.
  *
  * Events, for logs and assertions: `open`, `close`, `frame`, `invitation`,
  * `e2e-open`, `e2e-receive`, `e2e-error`, `pairing-request`, `paired`,
@@ -49,7 +49,7 @@ import {
   utf8Decode,
   utf8Encode,
   verifyPresenceProof,
-} from 'remote-lib-common';
+} from '../../dist/index.js';
 
 import { attachFrameSocket, closeSocket, receiveFrame, sendFrame } from './frame-socket.mjs';
 
@@ -73,6 +73,7 @@ export class FakeBurrow extends EventEmitter {
     requireUserVerification,
     noiseStaticKeyPair,
     socket,
+    socketInit,
   }) {
     super();
     this.burrowId = burrowId;
@@ -107,6 +108,7 @@ export class FakeBurrow extends EventEmitter {
       this,
       `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrowToken}`,
       socket,
+      socketInit,
     );
     ws.addEventListener('message', (ev) => {
       // Serialized through a promise chain for the reason the relay serializes

@@ -34,8 +34,8 @@ import {
   signin,
   startRelay,
 } from './helpers.mjs';
-import { FakeClient } from './harness/fake-client.mjs';
-import { FakeBurrow } from './harness/fake-burrow.mjs';
+import { FakeClient } from '../../remote-lib-common/test/harness/fake-client.mjs';
+import { FakeBurrow } from '../../remote-lib-common/test/harness/fake-burrow.mjs';
 import { randomSecret } from '../../remote-lib-common/test/harness/actors.mjs';
 
 const BURROW_LABEL = 'Ned Laptop';

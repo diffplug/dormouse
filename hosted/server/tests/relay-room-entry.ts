@@ -1,0 +1,93 @@
+import type { ExecutionContext } from "hono";
+import worker, { OneTimeRoom, RelayRoom as ProductionRoom } from "../relay-worker";
+
+// Module state outlives an evicted object, so it counts what woke one.
+let constructed = 0;
+let handled = 0;
+let skewMs = 0;
+/** What each upgrade handed the object: its header names and search parameters. */
+const upgrades: { headers: string[]; params: string[] }[] = [];
+
+/**
+ * The production `RelayRoom`, counting its wake-ups and handler calls, keeping
+ * what each upgrade carried, and on a clock a test can move.
+ */
+export class RelayRoom extends ProductionRoom {
+  constructor(ctx: DurableObjectState, env: unknown) {
+    super(ctx, env);
+    constructed += 1;
+  }
+
+  protected override now() {
+    return Date.now() + skewMs;
+  }
+
+  override async fetch(request: Request) {
+    upgrades.push({
+      headers: [...request.headers.keys()],
+      params: [...new URL(request.url).searchParams.keys()],
+    });
+    return super.fetch(request);
+  }
+
+  override async webSocketMessage(ws: WorkerWebSocket, message: string | ArrayBuffer) {
+    handled += 1;
+    return super.webSocketMessage(ws, message);
+  }
+
+  override async webSocketClose(ws: WorkerWebSocket, code: number) {
+    handled += 1;
+    return super.webSocketClose(ws, code);
+  }
+
+  override async alarm() {
+    handled += 1;
+    return super.alarm();
+  }
+
+  /** The counters, the upgrades so far, every socket's attachment, what storage holds, and the alarm. */
+  async probe() {
+    return {
+      constructed,
+      handled,
+      upgrades,
+      attachments: this.ctx.getWebSockets().map((ws) => ws.deserializeAttachment()),
+      storage: Object.fromEntries(await this.ctx.storage.list()),
+      alarm: await this.ctx.storage.getAlarm(),
+    };
+  }
+
+  /** Move this object's clock by `ms` from real time. */
+  async skew(ms: number) {
+    skewMs = ms;
+  }
+}
+
+export { OneTimeRoom };
+
+type TestEnv = { RELAY_ROOM: DurableObjectNamespace<Record<string, (...args: unknown[]) => unknown>> };
+
+/**
+ * The relay Worker, plus `POST /__test/room/<method>?account=<id>`: that
+ * RPC on the account's object with the JSON body as its arguments, from
+ * inside workerd so no stub outlives the request. `forge` instead hands the
+ * object an upgrade naming the account in the body, and answers its status.
+ */
+export default {
+  async fetch(request: Request, env: TestEnv, ctx: ExecutionContext) {
+    const url = new URL(request.url);
+    const method = /^\/__test\/room\/(\w+)$/.exec(url.pathname)?.[1];
+    if (!method) return worker.fetch(request, env as never, ctx);
+    const account = url.searchParams.get("account")!;
+    const room = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(account));
+    const args = (await request.json()) as unknown[];
+    if (method === "forge") {
+      const target = new URL(`${url.origin}/ws/burrow`);
+      target.searchParams.set("account", String(args[0]));
+      target.searchParams.set("burrow", String(args[1]));
+      const response = await room.fetch(new Request(target, { headers: { upgrade: "websocket" } }));
+      return Response.json(response.status);
+    }
+    return Response.json((await room[method](...args)) ?? null);
+  },
+};

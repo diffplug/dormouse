@@ -43,7 +43,7 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 
 ## Relay boundary
 
-**The Hosted Relay** on the relay Worker, and its account routes on the account Worker: `docs/specs/hosted.md` -> "Relay" and "Burrow enrollment" own them; these are the checks on them. Inspect `relayApiRoutes` in `hosted/server/relay-api.ts`, `hosted/server/relay-auth.ts`, `relayAccountRoutes` in `hosted/server/relay-account.ts`, `cookieAdmin` in `hosted/server/account-gate.ts`, and `hosted/server/dormouse-migrations/002_relay.sql`.
+**The Hosted Relay** on the relay Worker, and its account routes on the account Worker: `docs/specs/hosted.md` -> "Relay", "Relay sockets", and "Burrow enrollment" own them; these are the checks on them. Inspect `relayApiRoutes` in `hosted/server/relay-api.ts`, `hosted/server/relay-auth.ts`, `relaySocketRoutes` in `hosted/server/relay-sockets.ts`, `RelayRoom` in `hosted/server/relay-room.ts`, `relayAccountRoutes` in `hosted/server/relay-account.ts`, `cookieAdmin` in `hosted/server/account-gate.ts`, and `hosted/server/dormouse-migrations/002_relay.sql`.
 
 - **FAIL IF** a session, Burrow, or setup token is stored other than as its SHA-256, an enrollment device code is stored at all, or an account's Relay rows outlive its user row.
 - **FAIL IF** a query reading a Burrow, passkey, presence nonce, or setup token is not scoped to the caller's account (the session's user, or the Burrow token's owner), a passkey registers to any account but the minting Burrow's owner, or a setup challenge redeems with another Burrow's token.
@@ -55,9 +55,13 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 - **FAIL IF** an approval admits a request without a login, with an `Origin` other than the account's own exactly, from a login older than `LOGIN_FRESH_AGE_MS` or one whose creation time it cannot read, for an account but the entitled admin, or past the per-account attempt limit (`RELAY_APPROVE_LIMIT`, counted before the body is read).
 - **FAIL IF** a table a caller can grow has no cap keyed by whoever grows it (approvals: the per-account attempt limit), or a capped write deletes another key's rows; `signin/*` or `setup/begin`/`finish` reaches the database before its per-address limit; or a production `namespace_id` reaches `PREVIEW_RATELIMIT_OFFSET`.
 - **FAIL IF** the relay Worker reads a cookie, asks auth, or reads a user column but the entitlement's; inspect the relay bundle's imports.
+- **FAIL IF** `RelayRoom` stores, logs, or decodes a frame or its `ct`, parses anything but the routing envelope through the shared guards (`isE2eClientFrame`, `isE2eBurrowFrame`), parses a frame before bounding its raw length by the shared `MAX_RELAY_FRAME_BYTES`, or stores anything but its account id; `scripts/e2e-lint.mjs` holds the storage, decode, and absence half textually.
+- **FAIL IF** a `RelayRoom` is named from anything but the account an authenticated token resolved to, or serves a request or RPC naming an account other than the one it stored.
+- **FAIL IF** the client socket upgrade admits an `Origin` other than exactly the relay's `APP_ORIGIN`, the Burrow upgrade admits any `Origin`, either reaches the object before its token resolves to a live session or Burrow of an entitled account, or the Worker hands the object any header, token, or parameter of the caller's.
+- **FAIL IF** a removed Burrow's live socket stays open, or a route reaches `closeBurrow`, `onlineBurrows`, or any other `RelayRoom` method but the two upgrades.
 - **FAIL IF** a Pocket path's response lacks Pocket's policy (`pocketContentSecurityPolicy` in `remote-lib-common/src/remote/relay-common.ts`, taken only from an `APP_ORIGIN` that is exactly an origin), any response but a Pocket path's allows the camera, `/connect/` included, or a response is classified on any path but the decoded one Hono routes on, so `/%63onnect/` would take Pocket's; inspect `relayRules` / `relayPathKind` and `secureHeaders` in `hosted/server/headers.ts`.
 
-Pinned by `hosted/server/tests/relay.test.ts`, `hosted/server/tests/pocket.test.ts`, and `hosted/server/tests/boundary.test.ts`.
+Pinned by `hosted/server/tests/relay.test.ts`, `hosted/server/tests/relay-room.test.ts`, `hosted/server/tests/workers.test.ts`, `hosted/server/tests/pocket.test.ts`, and `hosted/server/tests/boundary.test.ts`.
 
 ## Deployment boundary
 

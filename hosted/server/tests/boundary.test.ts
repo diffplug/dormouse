@@ -7,6 +7,7 @@ import {
   API_ROUTES,
   ONE_TIME_PAGE_PATH,
   ONE_TIME_WS_ROUTES,
+  WS_ROUTES,
 } from "remote-lib-common";
 import {
   accountBindings,
@@ -25,12 +26,14 @@ import {
 import { ADMIN_EMAIL } from "../admin";
 import { cookieAdmin } from "../account-gate";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
+import type { RelayRoomRpc } from "../relay-sockets";
 import { voiceApp } from "../voice-app";
 import { workerApp } from "../worker-app";
 import {
   ENTRIES,
   NAMES,
   ORIGINS,
+  alone,
   bundleWorker,
   miniflareOptions,
   type Name,
@@ -69,7 +72,7 @@ beforeAll(async () => {
     NAMES.map(async (name) => {
       bundles[name] = await bundleWorker(ENTRIES[name]);
       workers[name] = new Miniflare(
-        miniflareOptions(name, bundles[name].outputFiles[0].text, {
+        alone(name, miniflareOptions(name, bundles[name].outputFiles[0].text, {
           bindings: { ...everything, APP_ORIGIN: ORIGINS[name] },
           // Nothing listens here, so any database access would fail the request.
           hyperdrives: { HYPERDRIVE: "postgres://user:pass@127.0.0.1:9/none" },
@@ -92,7 +95,7 @@ beforeAll(async () => {
               return WorkerResponse.json({ history: [] });
             return new WorkerResponse("{}", { status: 500 });
           },
-        }),
+        })),
       );
       await workers[name].ready;
     }),
@@ -126,6 +129,8 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", ONE_TIME_WS_ROUTES.burrow],
     ["GET", ONE_TIME_WS_ROUTES.client],
     ["GET", ONE_TIME_PAGE_PATH],
+    ["GET", WS_ROUTES.burrow],
+    ["GET", WS_ROUTES.client],
     ["POST", API_ROUTES.setupBegin],
     ["POST", API_ROUTES.signinBegin],
     ["GET", API_ROUTES.burrows],
@@ -194,8 +199,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/push/devices"],
     // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
     ["GET", "/api/hello"],
-    // No relay socket is served yet, and the non-page prefixes 404 whole.
-    ["GET", "/ws/client"],
+    // The non-page prefixes 404 whole.
     ["GET", "/ws/other"],
     ["GET", "/api"],
     ["GET", "/ws"],
@@ -214,6 +218,8 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/login"],
     ...RELAY_API,
     ...ACCOUNT_RELAY,
+    ["GET", WS_ROUTES.burrow],
+    ["GET", WS_ROUTES.client],
   ],
 };
 
@@ -343,6 +349,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
     HYPERDRIVE: { connectionString: "postgres://example.test/none" },
     ASSETS: { fetch: async () => new Response() },
     ONE_TIME_ROOM: {} as DurableObjectNamespace,
+    RELAY_ROOM: {} as DurableObjectNamespace<RelayRoomRpc>,
     ONE_TIME_MINT_LIMIT: {} as RateLimit,
     ONE_TIME_JOIN_LIMIT: {} as RateLimit,
     RELAY_SIGNIN_LIMIT: {} as RateLimit,
@@ -365,12 +372,14 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "HYPERDRIVE",
       "POSTMARK_SERVER_TOKEN",
       "RELAY_APPROVE_LIMIT",
+      "RELAY_ROOM",
     ].sort(),
   );
   expect(accountPreviewBindings(env)).toEqual({
     APP_ORIGIN: env.APP_ORIGIN,
     ASSETS: env.ASSETS,
     RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
+    RELAY_ROOM: env.RELAY_ROOM,
     AUTH_SECRET: env.AUTH_SECRET,
     BUILD_SHA: sha,
     HYPERDRIVE: env.HYPERDRIVE,
@@ -391,6 +400,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "RELAY_ENROLL_BEGIN_LIMIT",
       "RELAY_ENROLL_POLL_LIMIT",
       "RELAY_ENROLL_SECRET",
+      "RELAY_ROOM",
       "RELAY_SETUP_LIMIT",
       "RELAY_SIGNIN_LIMIT",
     ].sort(),
@@ -463,6 +473,9 @@ test("the cookie gate needs no login creation time; approval reads it and fails 
         throw new Error("The limit is past the recent-login check");
       },
     } as RateLimit,
+    closeBurrow: async () => {
+      throw new Error("No approval removes a Burrow");
+    },
   });
   const origin = "https://account.example.test";
   // The voice-token routes' gate admits the admin whatever `createdAt` says.

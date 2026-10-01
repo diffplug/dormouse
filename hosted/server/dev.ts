@@ -65,6 +65,8 @@ const host: RelayAccountHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
+  // No relay runs here, so no Burrow holds a socket to close.
+  closeBurrow: async () => {},
 };
 voiceTokenRoutes(app, () => host);
 relayAccountRoutes(app, () => host);

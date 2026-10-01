@@ -28,6 +28,8 @@ export interface Owner {
 /** A live sign-in session, by its token's hash. */
 export interface RelaySession extends Owner {
   tokenHash: string;
+  /** When it expires, epoch milliseconds: a relay socket it opens closes then. */
+  expiresAt: number;
 }
 
 /** An enrolled Burrow. */
@@ -57,13 +59,14 @@ export async function sessionByToken(db: Client, token: string): Promise<RelaySe
   const tokenHash = digest(token);
   const {
     rows: [row],
-  } = await db.query<OwnerRow>(
-    `SELECT s."userId", ${OWNER_COLUMNS}
+  } = await db.query<OwnerRow & { expiresAt: number }>(
+    `SELECT s."userId", ${OWNER_COLUMNS},
+      floor(extract(epoch from s."expiresAt") * 1000)::float8 AS "expiresAt"
     FROM dormouse_relay_sessions s JOIN "user" u ON u.id = s."userId"
     WHERE s."tokenHash" = $1 AND s."expiresAt" > now()`,
     [tokenHash],
   );
-  return row ? { ...ownerOf(row), tokenHash } : null;
+  return row ? { ...ownerOf(row), tokenHash, expiresAt: row.expiresAt } : null;
 }
 
 /** The Burrow `token` names, its owner joined in the same query, or null. */
