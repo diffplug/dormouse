@@ -26,6 +26,7 @@ import { cfg } from '../../cfg';
 import { ringPerimeter } from '../../lib/ring-geometry';
 import type { RingFrame } from '../../lib/rect-tween';
 import { resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
+import { installFakeFrames } from '../motion-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -51,13 +52,7 @@ function makeStore() {
   } satisfies LathOverlayStore & { commit(): void };
 }
 
-// Fake clock + rAF: performance.now reads `clock`; frames run only when we flush.
-let clock = 0;
-let rafSeq = 0;
-let rafCbs: Map<number, FrameRequestCallback>;
-let realNow: () => number;
-let realRaf: typeof requestAnimationFrame;
-let realCaf: typeof cancelAnimationFrame;
+const frames = installFakeFrames();
 
 let container: HTMLDivElement;
 let root: Root;
@@ -114,18 +109,7 @@ function ringRect() {
 /** Advance the clock and run the rAF callbacks queued as of now (ticks scheduled
  *  by those callbacks wait for the next flush). */
 async function frame(ms: number): Promise<void> {
-  clock += ms;
-  const cbs = [...rafCbs.values()];
-  rafCbs.clear();
-  await act(async () => { for (const cb of cbs) cb(clock); });
-}
-
-function noReducedMotion() {
-  globalThis.matchMedia = ((query: string) => ({
-    matches: false, media: query, onchange: null,
-    addEventListener() {}, removeEventListener() {},
-    addListener() {}, removeListener() {}, dispatchEvent() { return false; },
-  })) as unknown as typeof matchMedia;
+  await act(async () => frames.advance(ms));
 }
 
 const A: Rectish = { top: 0, left: 0, width: 100, height: 40 };
@@ -134,23 +118,9 @@ const INFLATE = 4; // SELECTION_RING_INFLATE_PX for panes
 
 beforeEach(() => {
   resetWorkspaceUi();
-  clock = 0;
-  rafSeq = 0;
-  rafCbs = new Map();
-  realNow = performance.now.bind(performance);
-  realRaf = globalThis.requestAnimationFrame;
-  realCaf = globalThis.cancelAnimationFrame;
-  performance.now = () => clock;
-  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-    const id = ++rafSeq;
-    rafCbs.set(id, cb);
-    return id;
-  }) as typeof requestAnimationFrame;
-  globalThis.cancelAnimationFrame = ((id: number) => { rafCbs.delete(id); }) as typeof cancelAnimationFrame;
   globalThis.ResizeObserver ??= class {
     observe() {} unobserve() {} disconnect() {}
   } as unknown as typeof ResizeObserver;
-  noReducedMotion();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -160,9 +130,6 @@ afterEach(() => {
   // Some tests unmount explicitly (rAF-cancel coverage); a second unmount is a no-op.
   try { act(() => root.unmount()); } catch { /* already unmounted */ }
   container.remove();
-  performance.now = realNow;
-  globalThis.requestAnimationFrame = realRaf;
-  globalThis.cancelAnimationFrame = realCaf;
 });
 
 /** Two panes, `a` and `b`, both connected to the document. */
@@ -273,12 +240,12 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
 
     // First appearance snaps: no tween, ring already on A (inflated by 4px).
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
     expect(ringRect()).toEqual({ top: A.top - INFLATE, left: A.left - INFLATE, width: A.width + INFLATE * 2, height: A.height + INFLATE * 2 });
 
     // Selecting b starts a tween and schedules the loop.
     await act(async () => root.render(<Harness selectedId="b" mode="passthrough" store={store} panes={panes} />));
-    expect(rafCbs.size).toBe(1);
+    expect(frames.pending).toBe(1);
 
     await frame(110); // ~halfway through the 220ms travel
     const mid = ringRect()!;
@@ -293,14 +260,11 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
     await frame(200); // now past 220ms total
     expect(ringRect()).toEqual({ top: B.top - INFLATE, left: B.left - INFLATE, width: B.width + INFLATE * 2, height: B.height + INFLATE * 2 });
     // Tween cleared: the loop stops scheduling.
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
   });
 
   it('snaps instantly under reduced motion (no tween, no rAF)', async () => {
-    globalThis.matchMedia = ((query: string) => ({
-      matches: query.includes('prefers-reduced-motion'), media: query, onchange: null,
-      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent() { return false; },
-    })) as unknown as typeof matchMedia;
+    frames.reduceMotion();
 
     const store = makeStore();
     const panes = twoPanes();
@@ -308,7 +272,7 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
     await act(async () => root.render(<Harness selectedId="b" mode="passthrough" store={store} panes={panes} />));
 
     // Landed on B immediately, no frame stepping.
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
     expect(ringRect()).toEqual({ top: B.top - INFLATE, left: B.left - INFLATE, width: B.width + INFLATE * 2, height: B.height + INFLATE * 2 });
   });
 
@@ -323,7 +287,7 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
     stubRect(panes.get('a')!, moved);
     await act(async () => store.commit());
 
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
     expect(ringRect()).toEqual({ top: moved.top - INFLATE, left: moved.left - INFLATE, width: moved.width + INFLATE * 2, height: moved.height + INFLATE * 2 });
   });
 
@@ -333,12 +297,12 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
     await act(async () => root.render(<Harness selectedId="b" mode="passthrough" store={store} panes={panes} />));
     await frame(110); // mid-tween, a rAF is pending
-    expect(rafCbs.size).toBe(1);
+    expect(frames.pending).toBe(1);
 
     await act(async () => root.render(<Harness selectedId={null} mode="passthrough" store={store} panes={panes} />));
     expect(ring()).toBeNull();
     // The in-flight loop is cancelled.
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
   });
 
   it('cancels the rAF loop on unmount', async () => {
@@ -346,10 +310,10 @@ describe('WorkspaceSelectionOverlay ring travel', () => {
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
     await act(async () => root.render(<Harness selectedId="b" mode="passthrough" store={store} panes={panes} />));
-    expect(rafCbs.size).toBe(1);
+    expect(frames.pending).toBe(1);
 
     await act(async () => root.unmount());
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
   });
 });
 
@@ -362,7 +326,7 @@ describe('SelectionRing settled render', () => {
     const panes = twoPanes();
     await act(async () => root.render(<Harness selectedId="a" mode="passthrough" store={store} panes={panes} />));
 
-    expect(rafCbs.size).toBe(0); // settled: no tween running
+    expect(frames.pending).toBe(0); // settled: no tween running
     const path = container.querySelector('[data-ring="outline"]');
     expect(path).not.toBeNull();
     expect(path!.getAttribute('stroke-width')).toBe('1');

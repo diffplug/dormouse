@@ -1,14 +1,14 @@
-import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TerminalPane } from '../components/TerminalPane';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
 import { getMouseSelectionState, setSelection, type Selection } from '../lib/mouse-selection';
-import { getTerminalOverlayDims } from '../lib/terminal-registry';
+import { openCopyEditor } from '../lib/copy-editor';
 import { settleTerminals, waitForCondition } from './settle-terminals';
+import { useStorySelection } from './story-selection';
 
 /**
  * Wires a programmatic selection state onto a live TerminalPane so we can
- * visualize the overlay, the Alt hint, and the copy popup in their various
+ * visualize the overlay, the Alt hint, and the copy editor in their various
  * positions without scripting a real mouse drag.
  */
 function TextSelectionStory({
@@ -18,30 +18,11 @@ function TextSelectionStory({
   id: string;
   selection: Omit<Selection, 'startedInScrollback'>;
 }) {
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-
-    const tryApply = () => {
-      if (cancelled) return;
-      // Wait until xterm has actually rendered — getTerminalOverlayDims
-      // reads `.xterm-screen`, which doesn't exist until after the first
-      // paint. Without this the overlay would compute garbage positions.
-      const dims = getTerminalOverlayDims(id);
-      if (!dims || dims.cellHeight === 0) {
-        timer = setTimeout(tryApply, 50);
-        return;
-      }
-      setSelection(id, { ...selection, startedInScrollback: false });
-    };
-
-    timer = setTimeout(tryApply, 100);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      setSelection(id, null);
-    };
-  }, [id, selection]);
+  useStorySelection(id, (terminal) => {
+    setSelection(id, { ...selection, startedInScrollback: false });
+    // A finalized drag opens the copy editor, as mouse-up does.
+    if (!selection.dragging) openCopyEditor(id, terminal);
+  }, [selection]);
 
   return (
     <div style={{ width: 600, height: 340 }} className="bg-terminal-bg">
@@ -105,11 +86,11 @@ export const HintWhenDraggingUp: Story = {
   },
 };
 
-// --- Copy popup positioning ---------------------------------------------
+// --- Copy editor positioning --------------------------------------------
 
-export const PopupAfterDragDown: Story = {
+export const EditorAfterDragDown: Story = {
   args: {
-    id: 'text-sel-popup-down',
+    id: 'text-sel-editor-down',
     selection: {
       startRow: 2, startCol: 5,
       endRow: 6, endCol: 24,
@@ -119,9 +100,9 @@ export const PopupAfterDragDown: Story = {
   },
 };
 
-export const PopupAfterDragUp: Story = {
+export const EditorAfterDragUp: Story = {
   args: {
-    id: 'text-sel-popup-up',
+    id: 'text-sel-editor-up',
     selection: {
       startRow: 8, startCol: 22,
       endRow: 4, endCol: 6,

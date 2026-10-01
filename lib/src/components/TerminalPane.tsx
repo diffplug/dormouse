@@ -8,7 +8,7 @@ import {
   focusSession,
 } from '../lib/terminal-registry';
 import { SelectionOverlay } from './SelectionOverlay';
-import { SelectionPopup } from './SelectionPopup';
+import { CopyEditor } from './CopyEditor';
 import { MouseOverrideBanner } from './wall/MouseOverrideBanner';
 import { SizeHoldStrip } from './wall/SizeHoldStrip';
 import { getSizeHolds, subscribeToSizeHolds } from '../lib/size-hold-store';
@@ -94,7 +94,7 @@ export function TerminalPane({ id, isFocused = true }: TerminalPaneProps) {
   return (
     <div ref={containerRef} className={`relative h-full w-full overflow-hidden bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`}>
       <SelectionOverlay terminalId={id} />
-      <SelectionPopup terminalId={id} />
+      <CopyEditor terminalId={id} />
       <MouseOverrideBanner terminalId={id} />
       <SizeHoldStrip terminalId={id} />
     </div>

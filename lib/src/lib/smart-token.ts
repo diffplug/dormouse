@@ -3,7 +3,9 @@
  * Used by the smart-extension feature to offer "Press e to select the full
  * URL/path" during a mid-drag (spec §5).
  */
-import type { IBufferCell, IBufferLine } from '@xterm/xterm';
+import type { IBuffer, IBufferCell } from '@xterm/xterm';
+import { lineAt, textCells, wrapRun } from './buffer-cells';
+import type { GridPos } from './copy-text';
 
 export interface DetectedToken {
   kind: 'url' | 'path';
@@ -100,31 +102,89 @@ export function detectTokenAt(line: string, col: number): DetectedToken | null {
   return null;
 }
 
-/** Convert the string detector's UTF-16 offsets to xterm cell columns. Wide
- * characters have a zero-width continuation cell; combining marks and emoji
- * can occupy several code units within one cell. */
-export function detectTokenInBufferLine(line: IBufferLine, col: number): DetectedToken | null {
-  let text = '';
-  let probe = -1;
-  const starts: number[] = [];
-  const ends: number[] = [];
-  // Reuse the first cell for the rest of the line — `getCell` allocates a fresh
-  // CellData per call otherwise, and this runs on every pointermove of a drag.
-  let scratch: IBufferCell | undefined;
-  for (let c = 0; c < line.length; c++) {
-    const cell = line.getCell(c, scratch);
-    if (!cell) continue;
-    scratch ??= cell;
-    const width = cell.getWidth();
-    if (width === 0) continue;
-    if (c <= col && col < c + width) probe = text.length;
-    const chars = cell.getChars() || ' ';
-    for (let i = 0; i < chars.length; i++) {
-      starts.push(c);
-      ends.push(c + width);
+/** A token in the terminal buffer, by its first and last cells. */
+export type BufferToken = Omit<DetectedToken, 'start' | 'end'> & { start: GridPos; end: GridPos };
+
+/** How many rows a token is read across either side of the pointer's, which
+ * bounds the work of each drag update. */
+const WRAP_REACH = 16;
+
+let scratch: IBufferCell | undefined;
+
+/** The token at `col` of buffer row `row`, read across the soft wraps either
+ * side of it: a soft wrap is not whitespace. Blank cells read nothing more.
+ * Must re-read surrounding cells even at an unchanged pointer: terminal output
+ * can change the token or its wrap boundaries without changing that cell. */
+export function detectTokenInBuffer(buffer: IBuffer, row: number, col: number): BufferToken | null {
+  const cell = lineAt(buffer, row)?.getCell(col, scratch);
+  if (!cell) return null;
+  scratch ??= cell;
+  const chars = cell.getChars();
+  // An empty cell, or the padding a wide character leaves when it wraps.
+  if (cell.getWidth() !== 0 && (chars === '' || isWhitespace(chars[0]))) return null;
+  return readToken(buffer, row, col);
+}
+
+/** One row as the detector reads it: its cells, their text, and the cell
+ * each UTF-16 unit of the text sits in. */
+interface RowText { row: number; cells: string[]; text: string; units: number[] }
+
+const WHITESPACE = /[ \t\n\r]/;
+
+/** {@link detectTokenInBuffer} past its early returns. Reads the pointer's
+ * row, and the rows a soft wrap joins to it only while the run of
+ * non-whitespace from the pointer reaches that edge. Converts the string
+ * detector's UTF-16 offsets to xterm cells: wide characters have a zero-width
+ * continuation cell, and combining marks and emoji can occupy several code
+ * units within one cell. */
+function readToken(buffer: IBuffer, row: number, col: number): BufferToken | null {
+  const { top, lines } = wrapRun(buffer, row, WRAP_REACH);
+  const read = (r: number): RowText => {
+    const cells = textCells(lines[r - top], lines[r - top + 1]);
+    let text = '';
+    const units: number[] = [];
+    cells.forEach((chars, c) => {
+      text += chars;
+      for (let i = 0; i < chars.length; i++) units.push(c);
+    });
+    return { row: r, cells, text, units };
+  };
+  const here = read(row);
+  let start = col;
+  while (start > 0 && here.cells[start] === '') start--;
+  const probe = here.units.indexOf(start);
+  if (probe < 0) return null;
+  const rows = [here];
+  /** The text read above the pointer's row. */
+  let above = 0;
+  // A soft wrap is not whitespace: a run reaching a row's edge goes on.
+  if (!WHITESPACE.test(here.text.slice(0, probe))) {
+    for (let r = row - 1; r >= top; r--) {
+      rows.unshift(read(r));
+      above += rows[0].text.length;
+      if (WHITESPACE.test(rows[0].text)) break;
     }
-    text += chars;
   }
-  const token = detectTokenAt(text, probe);
-  return token ? { ...token, start: starts[token.start], end: ends[token.end - 1] } : null;
+  if (!WHITESPACE.test(here.text.slice(probe))) {
+    for (let r = row + 1; r < top + lines.length; r++) {
+      rows.push(read(r));
+      if (WHITESPACE.test(rows[rows.length - 1].text)) break;
+    }
+  }
+  const token = detectTokenAt(rows.map((r) => r.text).join(''), above + probe);
+  if (!token) return null;
+  /** The row and cell UTF-16 unit `unit` of the joined text sits in. */
+  const locate = (unit: number): { at: RowText; col: number } => {
+    let at = rows[0];
+    for (let k = 1; unit >= at.text.length; k++) {
+      unit -= at.text.length;
+      at = rows[k];
+    }
+    return { at, col: at.units[unit] };
+  };
+  const first = locate(token.start);
+  const last = locate(token.end - 1);
+  let end = last.col;
+  while (last.at.cells[end + 1] === '') end++;
+  return { ...token, start: { row: first.at.row, col: first.col }, end: { row: last.at.row, col: end } };
 }
