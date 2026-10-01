@@ -24,8 +24,8 @@ import {
 
 // The copy editor after the first round (Prototypes/Copy editor): only the
 // editor concept, at full pane width, driven by letters instead of digits.
-//   e / ⬆︎e   grow / shrink the scope
-//   f         next format (Auto → Exact → Spaces → No breaks)
+//   e / ⬆︎e   expand / shrink the scope
+//   f / ⬆︎f   next / previous format (Auto → Exact → Spaces → No breaks)
 //   ◀ ▶       move the end a word; ⬆︎◀ ⬆︎▶ move the start
 //   ↵ or the copy chord copies; Esc closes.
 
@@ -205,7 +205,7 @@ function CopyEditor({ screen, sel, scopeIndex, format, overrides, flashed, onSco
       <div className="flex flex-col gap-1 border-b border-border px-2 py-1.5">
         <div className="flex items-center gap-2">
           <Segment value={scope.id} onPick={(id) => onScope(scopes.findIndex((s) => s.id === id))} items={scopes.map((s) => ({ id: s.id, label: s.label }))} />
-          <span className="text-xs whitespace-nowrap text-muted"><Shortcut>e</Shortcut> grow <Shortcut>{SHIFT}e</Shortcut> shrink</span>
+          <span className="text-xs whitespace-nowrap text-muted"><Shortcut>e</Shortcut> expand <Shortcut>{SHIFT}e</Shortcut> shrink</span>
         </div>
         <div className="flex items-center gap-2">
           <Segment
@@ -221,7 +221,7 @@ function CopyEditor({ screen, sel, scopeIndex, format, overrides, flashed, onSco
               };
             })}
           />
-          <span className="text-xs whitespace-nowrap text-muted"><Shortcut>f</Shortcut> format</span>
+          <span className="text-xs whitespace-nowrap text-muted"><Shortcut>f</Shortcut> <Shortcut>{SHIFT}f</Shortcut></span>
         </div>
       </div>
       <div className="min-h-[40px] flex-1 overflow-auto bg-app-bg">
@@ -410,7 +410,7 @@ function CopyEditorPrototype({ host: initialHost, preset }: Props) {
     if (phase === 'idle') return mouseMode ? `Drag across the text (Claude Code paints its own highlight), then press ${COPY_CHORD}.` : 'Drag across the text.';
     if (phase === 'dragging') return 'Release to finish the selection.';
     if (phase === 'armed') return `Press ${COPY_CHORD}: Dormouse saw the drag and captured the same cells.`;
-    return `e / ${SHIFT}e scope · f format · ${LEFT}${RIGHT} end · ${SHIFT}${LEFT}${RIGHT} start · click a mark to flip one break · ↵ or ${COPY_CHORD} copies · Esc closes`;
+    return `e / ${SHIFT}e expand / shrink · f / ${SHIFT}f format · ${LEFT}${RIGHT} end · ${SHIFT}${LEFT}${RIGHT} start · click a mark to flip one break · ↵ or ${COPY_CHORD} copies · Esc closes`;
   })();
 
   return (
