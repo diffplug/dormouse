@@ -1,27 +1,51 @@
 import { describe, expect, it } from 'vitest';
-import { bufferLine } from './copy-text-fixtures';
-import { detectTokenAt, detectTokenInBufferLine } from './smart-token';
+import type { IBuffer, IBufferLine } from '@xterm/xterm';
+import { bufferLine, fakeXterm } from './copy-text-fixtures';
+import { detectTokenAt, detectTokenInBuffer } from './smart-token';
+
+/** A buffer of `lines`, each row in `wrapped` a soft wrap continuing the one before. */
+const bufferOf = (lines: readonly IBufferLine[], wrapped: readonly number[] = []) =>
+  ({ length: lines.length, getLine: (r: number) => lines[r] && { ...lines[r], isWrapped: wrapped.includes(r) } }) as unknown as IBuffer;
+const cellsOf = (text: string) => [...text].map((c): [string, number] => [c, 1]);
 
 function at(line: string, anchor: string) {
   const col = line.indexOf(anchor);
   return detectTokenAt(line, col);
 }
 
-describe('detectTokenInBufferLine', () => {
+describe('detectTokenInBuffer', () => {
   it.each([['界', 2], ['e\u0301', 1], ['👩‍💻', 2]] as const)(
     'maps token boundaries after %s using cell widths', (prefix, width) => {
       const url = 'https://a.co';
-      const line = bufferLine([[prefix, width], [' ', 1], ...[...url].map((c): [string, number] => [c, 1])]);
-      expect(detectTokenInBufferLine(line, width + 1)).toEqual({
-        kind: 'url', text: url, start: width + 1, end: width + 1 + url.length,
+      const line = bufferLine([[prefix, width], [' ', 1], ...cellsOf(url)]);
+      expect(detectTokenInBuffer(bufferOf([line]), 0, width + 1)).toEqual({
+        kind: 'url', text: url, start: { row: 0, col: width + 1 }, end: { row: 0, col: width + url.length },
       });
     },
   );
 
   it('includes both cells of a wide character at the end of a path', () => {
-    const line = bufferLine([['/', 1], ['界', 2], [' ', 1]]);
-    expect(detectTokenInBufferLine(line, 2)).toEqual({ kind: 'path', text: '/界', start: 0, end: 3 });
-    expect(detectTokenInBufferLine(line, 3)).toBeNull();
+    const buffer = bufferOf([bufferLine([['/', 1], ['界', 2], [' ', 1]])]);
+    expect(detectTokenInBuffer(buffer, 0, 2)).toEqual({ kind: 'path', text: '/界', start: { row: 0, col: 0 }, end: { row: 0, col: 2 } });
+    expect(detectTokenInBuffer(buffer, 0, 3)).toBeNull();
+    expect(detectTokenInBuffer(buffer, 1, 0)).toBeNull();
+  });
+
+  it('reads a token across the soft wraps either side of the pointer', () => {
+    const line = 'see https://github.com/diffplug/dormouse/pull/853 ok';
+    const rows = [line.slice(0, 20), line.slice(20, 40), line.slice(40)];
+    const buffer = fakeXterm(rows, { cols: 20, wrapped: [1, 2] }).buffer.active;
+    const token = { kind: 'url', text: 'https://github.com/diffplug/dormouse/pull/853', start: { row: 0, col: 4 }, end: { row: 2, col: 8 } };
+    for (const [row, col] of [[0, 8], [1, 2], [2, 2]]) expect(detectTokenInBuffer(buffer, row, col)).toEqual(token);
+    // Trimmed scrollback can leave the buffer's first row a continuation.
+    expect(detectTokenInBuffer(fakeXterm(rows, { cols: 20, wrapped: [0, 1, 2] }).buffer.active, 0, 8)).toEqual(token);
+    // A row the program ended is whitespace.
+    expect(detectTokenInBuffer(fakeXterm(rows, { cols: 20 }).buffer.active, 1, 2)).toBeNull();
+  });
+
+  it('skips the blank a wide character leaves when it wraps', () => {
+    const buffer = bufferOf([bufferLine([...cellsOf('/a/'), ['', 1]]), bufferLine([['界', 2], ['b', 1]])], [1]);
+    expect(detectTokenInBuffer(buffer, 1, 2)).toEqual({ kind: 'path', text: '/a/界b', start: { row: 0, col: 0 }, end: { row: 1, col: 2 } });
   });
 });
 

@@ -3,8 +3,8 @@
  * Used by the smart-extension feature to offer "Press e to select the full
  * URL/path" during a mid-drag (spec §5).
  */
-import type { IBufferLine } from '@xterm/xterm';
-import { readLineCells } from './buffer-cells';
+import type { IBuffer } from '@xterm/xterm';
+import { endsInWrapPadding, lineAt, readLineCells } from './buffer-cells';
 
 export interface DetectedToken {
   kind: 'url' | 'path';
@@ -101,27 +101,52 @@ export function detectTokenAt(line: string, col: number): DetectedToken | null {
   return null;
 }
 
-/** Convert the string detector's UTF-16 offsets to xterm cell columns. Wide
- * characters have a zero-width continuation cell; combining marks and emoji
- * can occupy several code units within one cell. */
-export function detectTokenInBufferLine(line: IBufferLine, col: number): DetectedToken | null {
-  const cells = readLineCells(line);
+export interface BufferCell { row: number; col: number }
+
+/** A token in the terminal buffer, by its first and last cells. */
+export interface BufferToken {
+  kind: 'url' | 'path';
+  start: BufferCell;
+  end: BufferCell;
+  text: string;
+}
+
+/** How many rows a token is read across either side of the pointer's, which
+ * bounds the work of each drag update. */
+const WRAP_REACH = 16;
+
+/** The token at `col` of buffer row `row`, read across the soft wraps either
+ * side of it: a soft wrap is not whitespace. Convert the string detector's
+ * UTF-16 offsets to xterm cells. Wide characters have a zero-width
+ * continuation cell; combining marks and emoji can occupy several code units
+ * within one cell. */
+export function detectTokenInBuffer(buffer: IBuffer, row: number, col: number): BufferToken | null {
+  let top = row;
+  while (top > 0 && top > row - WRAP_REACH && lineAt(buffer, top)?.isWrapped) top--;
+  let bottom = row;
+  while (bottom < row + WRAP_REACH && lineAt(buffer, bottom + 1)?.isWrapped) bottom++;
   let text = '';
   let probe = -1;
-  const starts: number[] = [];
-  const ends: number[] = [];
-  for (let c = 0; c < cells.length; c++) {
-    const chars = cells[c];
-    if (chars === '') continue;
-    let width = 1;
-    while (cells[c + width] === '') width++;
-    if (c <= col && col < c + width) probe = text.length;
-    for (let i = 0; i < chars.length; i++) {
-      starts.push(c);
-      ends.push(c + width);
+  const starts: BufferCell[] = [];
+  const ends: BufferCell[] = [];
+  for (let r = top; r <= bottom; r++) {
+    const line = lineAt(buffer, r);
+    if (!line) break;
+    const cells = readLineCells(line);
+    if (endsInWrapPadding(line, lineAt(buffer, r + 1))) cells.pop();
+    for (let c = 0; c < cells.length; c++) {
+      const chars = cells[c];
+      if (chars === '') continue;
+      let width = 1;
+      while (cells[c + width] === '') width++;
+      if (r === row && c <= col && col < c + width) probe = text.length;
+      for (let i = 0; i < chars.length; i++) {
+        starts.push({ row: r, col: c });
+        ends.push({ row: r, col: c + width - 1 });
+      }
+      text += chars;
     }
-    text += chars;
   }
   const token = detectTokenAt(text, probe);
-  return token ? { ...token, start: starts[token.start], end: ends[token.end - 1] } : null;
+  return token ? { kind: token.kind, start: starts[token.start], end: ends[token.end - 1], text: token.text } : null;
 }

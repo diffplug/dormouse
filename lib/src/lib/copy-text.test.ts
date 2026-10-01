@@ -22,6 +22,27 @@ const span = (r0: number, c0: number, r1: number, c1: number, block = false): Sp
 const text = (buf: CopyBuffer, s: Span, format: CopyFormat) => render(buf, s, { original: s, format }).text;
 /** {@link WRAPPING} as xterm soft-wraps it at `cols`. */
 const softWrapped = (cols: number) => lines([WRAPPING.slice(0, cols), WRAPPING.slice(cols)], { cols, wrapped: [1] });
+/** `rows` as xterm reflows them into a narrower terminal: a row's text wider
+ *  than `cols` continues onto soft-wrapped rows. */
+function reflowed(rows: readonly string[], cols: number): CopyBuffer {
+  const out: string[] = [];
+  const wrapped: number[] = [];
+  for (const row of rows) {
+    const rowText = row.trimEnd();
+    out.push(rowText.slice(0, cols));
+    for (let c = cols; c < rowText.length; c += cols) {
+      wrapped.push(out.length);
+      out.push(rowText.slice(c, c + cols));
+    }
+  }
+  return lines(out, { cols, wrapped });
+}
+/** {@link CLAUDE} in a pane narrowed to 60 columns: each reply row past the
+ *  60th column wraps, so rows 2–8 are the first paragraph, 10–16 the code,
+ *  and 18–20 the URL. */
+const narrowed = reflowed(CLAUDE, 60);
+/** A line whose wrap leaves a row of only blanks between its text. */
+const blankWrap = lines(['intro', '', 'aaaa bbbb cccc dddd ', ' '.repeat(20), 'eeee ffff', '', 'outro'], { cols: 20, wrapped: [3, 4] });
 
 describe('copy-text formats', () => {
   const prose = span(2, 2, 5, 27);
@@ -84,6 +105,37 @@ describe('copy-text formats', () => {
     expect(text(softWrapped(20), span(0, 2, 1, 4, true), 'joined')).toBe('aaee');
   });
 
+  it('reads a reply the terminal narrowed as it reads the original', () => {
+    expect(text(narrowed, span(2, 2, 8, 27), 'auto')).toBe(text(claude, prose, 'auto'));
+    expect(text(narrowed, span(10, 2, 16, 44), 'auto')).toBe(text(claude, span(7, 2, 11, 44), 'auto'));
+    expect(text(narrowed, span(18, 36, 20, 58), 'auto')).toBe(text(claude, span(13, 36, 14, 58), 'auto'));
+    expect(text(narrowed, span(2, 2, 4, 10), 'exact')).toBe('The flake comes from a race between the PTY exit event and\n the final flush\n  of the ou');
+  });
+
+  it('reads a blank row a soft wrap continues as part of its line', () => {
+    const all = span(2, 0, 4, 8);
+    const line = `aaaa bbbb cccc dddd ${' '.repeat(20)}eeee ffff`;
+    expect(text(blankWrap, all, 'auto')).toBe(line);
+    expect(text(blankWrap, all, 'joined')).toBe(line);
+    expect(text(blankWrap, all, 'exact')).toBe('aaaa bbbb cccc dddd\n\neeee ffff');
+  });
+
+  it('trims a line’s trailing blanks, however many rows they wrap onto', () => {
+    const buf = lines(['aaaa bbbb cccc dddd ', ' '.repeat(20), 'eeee'], { cols: 20, wrapped: [1] });
+    expect(text(buf, span(0, 0, 2, 3), 'joined')).toBe('aaaa bbbb cccc ddddeeee');
+    expect(text(buf, span(0, 0, 2, 3), 'exact')).toBe('aaaa bbbb cccc dddd\n\neeee');
+  });
+
+  it('finds the shared indent without the rows a soft wrap continues', () => {
+    const code = reflowed(['    const a = 1;', '    const message = "a long string that wraps";', '    const b = 2;'], 30);
+    expect(text(code, span(0, 0, 3, 15), 'auto')).toBe('const a = 1;\nconst message = "a long string that wraps";\nconst b = 2;');
+    expect(text(code, span(0, 0, 3, 15), 'exact')).toBe('    const a = 1;\n    const message = "a long st\nring that wraps";\n    const b = 2;');
+    // Nor does a scope starting where a soft wrap fell keep the blank there.
+    const buf = lines([WRAPPING.slice(0, 19), WRAPPING.slice(19), '', 'next'], { cols: 19, wrapped: [1] });
+    expect(text(buf, span(1, 0, 3, 3), 'auto')).toBe('eeee ffff\n\nnext');
+    expect(text(buf, span(1, 0, 3, 3), 'exact')).toBe(' eeee ffff\n\nnext');
+  });
+
   it('joins a paragraph wrapped far narrower than the terminal', () => {
     const buf = lines([
       'The flake comes from a race between the PTY exit',
@@ -139,10 +191,16 @@ describe('copy-text autoBreak', () => {
     expect(autoBreak(claude, 13)).toBe('none');
   });
 
-  it('judges a row without the blank a soft wrap keeps after it', () => {
-    // The box run still trails the first row, so the paragraph is 15 wide.
-    const buf = lines(['abc def ghi jkl ━━━ ', 'mnopqrstuvwx', 'yzab more'], { cols: 20, wrapped: [1] });
-    expect(autoBreak(buf, 1)).toBe('space');
+  it('judges the lines a soft wrap joins, not its rows', () => {
+    // Each wrapped reply row ends on a short continuation row; the next starts at the hanging indent.
+    expect([2, 3, 4, 5, 6, 7, 8].map((r) => autoBreak(narrowed, r))).toEqual(['none', 'space', 'none', 'space', 'none', 'space', 'keep']);
+    // The second line, wider than the pane, still ends where the next word would have fit.
+    const typed = reflowed([
+      'The flake comes from a race between the PTY exit event and the final flush of',
+      'the output buffer, and this line ends early, as typed by hand.',
+      'Then the next.',
+    ], 60);
+    expect([1, 3].map((r) => autoBreak(typed, r))).toEqual(['space', 'keep']);
   });
 });
 
@@ -152,6 +210,25 @@ describe('copy-text scopes', () => {
     expect(scopes.map((s) => s.label)).toEqual(['As selected', 'Full URL', 'Paragraph']);
     expect(scopes[1].span).toEqual(span(13, 36, 14, 58));
     expect(scopes[2].span).toEqual(span(13, 2, 14, 58));
+  });
+
+  it('grows a split URL from either side to its real end and start', () => {
+    for (const sel of [span(13, 50, 13, 60), span(14, 10, 14, 20)]) {
+      expect(computeScopes(claude, sel)[1]).toEqual({ label: 'Full URL', span: span(13, 36, 14, 58) });
+    }
+    const url = 'see https://github.com/diffplug/dormouse/pull/853/files ok';
+    const soft = lines([url.slice(0, 30), url.slice(30)], { cols: 30, wrapped: [1] });
+    for (const sel of [span(0, 10, 0, 12), span(1, 5, 1, 8)]) {
+      expect(computeScopes(soft, sel)[1]).toEqual({ label: 'Full URL', span: span(0, 4, 1, 24) });
+    }
+    // Across a soft wrap and then the program's own split.
+    expect(computeScopes(narrowed, span(18, 50, 18, 55))[1]).toEqual({ label: 'Full URL', span: span(18, 36, 20, 58) });
+  });
+
+  it('bounds a paragraph by lines, not by a blank row a soft wrap continues', () => {
+    const scopes = computeScopes(blankWrap, span(4, 0, 4, 1));
+    expect(scopes.map((s) => s.label)).toEqual(['As selected', 'Whole words', 'Paragraph']);
+    expect(scopes[2].span).toEqual(span(2, 0, 4, 8));
   });
 
   it('skips a scope that adds nothing', () => {
@@ -174,6 +251,10 @@ describe('copy-text scopes', () => {
     const buf = softWrapped(20);
     expect(computeScopes(buf, span(0, 16, 0, 17))[1].span).toEqual(span(0, 15, 0, 18));
     expect(computeScopes(buf, span(1, 1, 1, 2))[1].span).toEqual(span(1, 0, 1, 3));
+    // The space is the continuation's first cell, inside the indent of its line.
+    const indented = reflowed([`  ${WRAPPING}`], 21);
+    expect(computeScopes(indented, span(0, 18, 0, 19))[1].span).toEqual(span(0, 17, 0, 20));
+    expect(computeScopes(indented, span(1, 2, 1, 3))[1].span).toEqual(span(1, 1, 1, 4));
   });
 
   it('names a growth by its grown edge', () => {

@@ -12,7 +12,7 @@ import {
 } from './mouse-selection';
 import { openCopyEditor } from './copy-editor';
 import { boundaryAt, dragCells, type PointerBoundary } from './drag-cells';
-import { detectTokenInBufferLine } from './smart-token';
+import { detectTokenInBuffer } from './smart-token';
 import type { TerminalOverlayDims } from './terminal-store';
 
 /**
@@ -210,15 +210,7 @@ export function attachTerminalMouseRouter({
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     if (!consumed) consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
 
-    const line = terminal.buffer.active.getLine(cell.row);
-    const token = line ? detectTokenInBufferLine(line, cell.col) : null;
-    setHintToken(id, token ? {
-      kind: token.kind,
-      row: cell.row,
-      startCol: token.start,
-      endCol: token.end,
-      text: token.text,
-    } : null);
+    setHintToken(id, detectTokenInBuffer(terminal.buffer.active, cell.row, cell.col));
   };
 
   const finishPendingOrActiveDrag = (ev: MouseEvent | PointerEvent) => {

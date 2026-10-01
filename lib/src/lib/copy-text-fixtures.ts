@@ -55,7 +55,11 @@ export function bufferLine(parts: ReadonlyArray<readonly [string, number]>): IBu
     { getChars: () => chars, getWidth: () => width },
     ...Array.from({ length: width - 1 }, () => ({ getChars: () => '', getWidth: () => 0 })),
   ]);
-  return { length: cells.length, isWrapped: false, getCell: (col: number) => cells[col] } as unknown as IBufferLine;
+  const translateToString = (trim = false, start = 0, end = cells.length) => {
+    const text = cells.slice(start, end).map((cell) => cell.getChars() || (cell.getWidth() ? ' ' : '')).join('');
+    return trim ? text.trimEnd() : text;
+  };
+  return { length: cells.length, isWrapped: false, getCell: (col: number) => cells[col], translateToString } as unknown as IBufferLine;
 }
 
 /** A finalized linewise selection, as mouse-up leaves one. */

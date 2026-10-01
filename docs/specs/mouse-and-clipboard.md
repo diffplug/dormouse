@@ -138,18 +138,18 @@ Mouse-up over a terminal-handled drag opens the **copy editor**, as does the cop
 | **Spaces** | Decoration stripped, blank lines dropped, every break one space, continuation indents removed. |
 | **No breaks** | As Spaces, every break deleted. |
 
-**Decoration** is a frame-only line (dropped), a leading or trailing run of box drawing (`U+2500–U+259F`, Box Drawing and Block Elements), and a TUI's leading bullet (`⏺`, `⎿`, `●`). **Must read cells through xterm's wide-character continuation cells.** **A deleted soft wrap joins its rows exactly**, keeping a blank on either side of it. **Never rewrap a block-shape selection**: it is a rectangular slab, so Auto reads it as Exact, and it has no wider scope (§4.2) and no edge keys (§4.3).
+**Decoration** is a frame-only line (dropped), a leading or trailing run of box drawing (`U+2500–U+259F`, Box Drawing and Block Elements), and a TUI's leading bullet (`⏺`, `⎿`, `●`). **Must read cells through xterm's wide-character continuation cells.** **A deleted soft wrap joins its rows exactly**, keeping a blank on either side of it. **Every judgement reads a soft wrap's rows as one line**, indented as its first row (rationale). **Never rewrap a block-shape selection**: it is a rectangular slab, so Auto reads it as Exact, and it has no wider scope (§4.2) and no edge keys (§4.3).
 
 Source of truth: `render` in `lib/src/lib/copy-text.ts`, pinned by `lib/src/lib/copy-text.test.ts`.
 
 #### 4.1.1 Auto
 
-Each break between two consecutive rows is, in this order:
+Each break between consecutive rows is, in this order:
 
 1. **Deleted** if the next row is a true soft wrap (xterm's `isWrapped`).
-2. **Kept** if either row is blank, the next starts a list item, the row ends in `;` `{` `}` or the next starts with `)` `}` `]`, or the next row's indent is not this row's hanging indent.
-3. **Kept** if the paragraph's longest row is under 40 columns (60% of a narrower terminal), or the next row's first word would have fit on this row within that longest row (rationale).
-4. **Deleted** if this row fills that width and its last word is token-shaped (a URL or path character, or 16+ token characters) — a token split at the margin.
+2. **Kept** if either line is blank, the next starts a list item, this one ends in `;` `{` `}` or the next starts with `)` `}` `]`, or the next line's indent is not this line's hanging indent.
+3. **Kept** if the paragraph's longest line is under 40 columns (60% of a narrower terminal), or the next line's first word would have fit on this line within that longest line (rationale).
+4. **Deleted** if this line fills that width and its last word is token-shaped (a URL or path character, or 16+ token characters) — a token split at the margin.
 5. Otherwise **one space**.
 
 Leading and trailing blank lines are trimmed, a run of blank lines collapses to one, and the indent every line shares is removed, keeping relative indent.
@@ -163,8 +163,8 @@ Narrowest first, each containing the dragged selection, one that adds nothing dr
 | Scope | Covers |
 |---|---|
 | **As selected** | The drag (opens here). |
-| **Whole words** | Each edge grown over the token under it, following a token Auto would rejoin across rows; an edge resting on a blank grows nothing. Named **Full URL** or **Full path** when the smart-token detector (§5.1) classifies a grown edge token so. |
-| **Paragraph** | The rows between blank rows, frame-only rows, and box sides (`│ ┃ ║`). |
+| **Whole words** | Each edge grown over its token, across any row break Auto deletes; an edge on a blank grows nothing. Named **Full URL** or **Full path** when the §5.1 detector classifies a grown edge token so. |
+| **Paragraph** | The lines between blank lines, frame-only lines, and box sides (`│ ┃ ║`). |
 
 The selection overlay draws a wider scope dashed around the outline; the preview marks every cell outside the drag. Source of truth: `computeScopes` in `lib/src/lib/copy-text.ts`.
 
@@ -231,9 +231,9 @@ Offered **mid-drag**, alongside the Alt block modifier (§3.2–§3.3): each dra
 
 ### 5.1 Detection
 
-A token is whitespace-delimited. Trailing characters unlikely to be part of it — `.`, `,`, `;`, `:`, `!`, `?`, single quotes, double quotes — are stripped from its end, along with unmatched closing brackets (`)`, `]`, `}`, `>`); matched pairs are preserved. **Strip before pattern matching, never after** (rationale).
+A token is whitespace-delimited and **runs on across soft wraps**. Trailing characters unlikely to be part of it — `.`, `,`, `;`, `:`, `!`, `?`, single quotes, double quotes — are stripped from its end, along with unmatched closing brackets (`)`, `]`, `}`, `>`); matched pairs are preserved. **Strip before pattern matching, never after** (rationale).
 
-**Must map detection offsets through xterm cells**, preserving wide characters, combining marks, and multi-codepoint emoji. Source of truth: `detectTokenInBufferLine` in `lib/src/lib/smart-token.ts`, pinned by `lib/src/lib/smart-token.test.ts`.
+**Must map detection offsets through xterm cells**, preserving wide characters, combining marks, and multi-codepoint emoji, skipping wrap padding. Source of truth: `detectTokenInBuffer` in `lib/src/lib/smart-token.ts`, pinned by `lib/src/lib/smart-token.test.ts`.
 
 Source of truth: `PATTERNS` in `lib/src/lib/smart-token.ts` — the detected shapes in priority order, error locations (`<path>:line[:col]`) ahead of the generic path patterns. The generic patterns require an anchor (`~/`, `/`, `./`, `../`, or a drive letter), so a bare relative path like `src/foo.ts` qualifies only in its error-location form.
 

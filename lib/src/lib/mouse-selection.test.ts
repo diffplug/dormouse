@@ -4,6 +4,7 @@ import {
   __resetMouseSelectionForTests,
   beginDrag,
   endDrag,
+  extendSelectionToToken,
   flashCopy,
   getMouseSelectionSnapshot,
   getMouseSelectionState,
@@ -123,7 +124,7 @@ describe('mouse-selection: state setters', () => {
   });
 
   it('setHintToken stores a hint', () => {
-    const hint: TokenHint = { kind: 'url', row: 1, startCol: 0, endCol: 20, text: 'https://example.com' };
+    const hint: TokenHint = { kind: 'url', start: { row: 1, col: 0 }, end: { row: 1, col: 18 }, text: 'https://example.com' };
     setHintToken('a', hint);
     expect(getMouseSelectionState('a').hintToken).toBe(hint);
 
@@ -136,6 +137,23 @@ describe('mouse-selection: state setters', () => {
     setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 5, shape: 'linewise', dragging: false, startedInScrollback: false });
     removeMouseSelectionState('a');
     expect(getMouseSelectionState('a')).toEqual(DEFAULT_MOUSE_SELECTION_STATE);
+  });
+});
+
+describe('mouse-selection: smart extension', () => {
+  // A URL a soft wrap carries from row 3 onto row 4.
+  const token: TokenHint = { kind: 'url', start: { row: 3, col: 50 }, end: { row: 4, col: 9 }, text: 'https://example.com/a/b' };
+
+  it('moves the end to the token edge away from the anchor, across rows', () => {
+    beginDrag('a', { row: 3, col: 10, altKey: false, startedInScrollback: false });
+    updateDrag('a', { row: 3, col: 55, altKey: false });
+    extendSelectionToToken('a', token);
+    expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 3, startCol: 10, endRow: 4, endCol: 9 });
+
+    beginDrag('a', { row: 4, col: 30, altKey: false, startedInScrollback: false });
+    updateDrag('a', { row: 4, col: 5, altKey: false });
+    extendSelectionToToken('a', token);
+    expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 4, startCol: 30, endRow: 3, endCol: 50 });
   });
 });
 

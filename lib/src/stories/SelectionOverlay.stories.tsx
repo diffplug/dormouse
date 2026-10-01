@@ -150,9 +150,8 @@ export const SmartPathHint: Story = {
     },
     hintToken: {
       kind: 'path',
-      row: 8,
-      startCol: 35,
-      endCol: 38,
+      start: { row: 8, col: 35 },
+      end: { row: 8, col: 37 },
       text: 'src',
     },
   },

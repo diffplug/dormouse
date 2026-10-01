@@ -2,6 +2,7 @@
  * `useSyncExternalStore`-compatible subscription API. */
 
 import type { BreakKind, CopyBuffer, EditorFormat, Scope } from './copy-text';
+import type { BufferToken } from './smart-token';
 
 export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
 export type OverrideState = 'off' | 'temporary' | 'permanent';
@@ -38,15 +39,8 @@ export interface Selection {
   startedInScrollback: boolean;
 }
 
-export interface TokenHint {
-  kind: 'url' | 'path';
-  /** Absolute buffer row the token occupies. */
-  row: number;
-  startCol: number;
-  /** Exclusive. */
-  endCol: number;
-  text: string;
-}
+/** The token under a drag's head, in absolute buffer rows. */
+export type TokenHint = BufferToken;
 
 /** The copy editor over a finalized selection (spec §4). */
 export interface CopyEditorState {
@@ -297,15 +291,9 @@ export function extendSelectionToToken(id: string, token: TokenHint): void {
   const s = states.get(id);
   if (!s?.selection?.dragging) return;
   const sel = s.selection;
-  const anchorOnTokenRow = sel.startRow === token.row;
-  const forward = anchorOnTokenRow
-    ? sel.startCol <= token.startCol
-    : sel.startRow < token.row;
-  s.selection = {
-    ...sel,
-    endRow: token.row,
-    endCol: forward ? token.endCol - 1 : token.startCol,
-  };
+  const forward = sel.startRow < token.start.row || (sel.startRow === token.start.row && sel.startCol <= token.start.col);
+  const edge = forward ? token.end : token.start;
+  s.selection = { ...sel, endRow: edge.row, endCol: edge.col };
   notify();
 }
 
