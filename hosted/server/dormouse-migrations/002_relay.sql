@@ -67,17 +67,11 @@ CREATE INDEX dormouse_relay_setup_tokens_expiry ON dormouse_relay_setup_tokens (
 
 -- Device-code enrollment approvals: the account approved this user code, and
 -- the first poll whose device code derives it enrolls a Burrow owned by
--- "userId" and marks the row redeemed, which it stays until it expires, so a
--- poll whose answer was lost learns it was spent. Begin writes nothing.
--- "redeemedBurrowId" names no foreign key: removing that Burrow must never
--- make the approval redeemable again.
+-- "userId" and deletes the row. Begin writes nothing.
 CREATE TABLE dormouse_relay_enrollment_approvals (
     "userCode" text PRIMARY KEY CHECK ("userCode" ~ '^[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$'),
     "userId" text NOT NULL REFERENCES "user" (id) ON DELETE CASCADE,
-    "expiresAt" timestamptz NOT NULL,
-    "redeemedBurrowId" text,
-    "redeemedAt" timestamptz,
-    CHECK (("redeemedBurrowId" IS NULL) = ("redeemedAt" IS NULL))
+    "expiresAt" timestamptz NOT NULL
 );
 CREATE INDEX dormouse_relay_enrollment_approvals_user ON dormouse_relay_enrollment_approvals ("userId");
 CREATE INDEX dormouse_relay_enrollment_approvals_expiry ON dormouse_relay_enrollment_approvals ("expiresAt");

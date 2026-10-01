@@ -19,7 +19,7 @@ Marketing is a separate bundle and deployment. `remote-lib-common` is compiled i
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding. The runtime creates and closes its database pool within each request.
 
-**Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`.
+**Must install released core/auth packages from npm and commit their lockfile integrity hashes.** The installed packages' `dist/provenance.json` must name the same clean pgstencil commit; no runtime import depends on a sibling checkout. The auth migrations remain owned by the package; Dormouse's own tables migrate from `hosted/server/dormouse-migrations/`. **Never edit a merged migration**: a migrated database never reruns one, so append the next number (pinned by `hosted/server/tests/migrations.test.ts`).
 
 **Must declare every peer dependency of the installed packages in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
 
@@ -161,7 +161,7 @@ A Burrow joins an account by device code, in place of the self-host setup passwo
 3. The Burrow polls `POST /api/burrow/enroll/poll` with `{ deviceCode }` every `interval`: `expired` for a malformed or expired code; `pending` while no live approval holds its user code; `enrolled` with the self-host `BurrowEnrollResponse`, `origin` the relay's `APP_ORIGIN` and `rpId` its hostname, without `requireUserVerification`; or `redeemed` with the `burrowId` an earlier poll enrolled, until the approval expires, so the Burrow can name what the account must remove. 403 `NOT_ENTITLED_ERROR` when the approver is no longer entitled; 409 naming `ACCOUNT_ORIGIN/account` at `MAX_ENROLLED_BURROWS` Burrows. Both refusals keep the approval, so a later poll can enroll.
 
 - **Never write from begin.** The device code is 32 bytes, the bearer shape: a 4-byte big-endian expiry in epoch seconds, then 28 random bytes. The user code is `enrollUserCode`: `HMAC-SHA-256(RELAY_ENROLL_SECRET, deviceCode)` read five bits at a time into `ENROLL_USER_CODE_ALPHABET`, values past it skipped (rationale).
-- **Must store the approval alone** (`dormouse_relay_enrollment_approvals`): it cannot tell an issued code from any well-formed one, so it approves any; one no Burrow redeems expires (rationale).
+- **Must store the approval alone** (`dormouse_relay_enrollment_approvals`; its redeemed columns in `004_relay_enrollment_redeemed.sql`): it cannot tell an issued code from any well-formed one, so it approves any; one no Burrow redeems expires (rationale).
 - **Never admit a begin or poll request carrying `Origin`** (403): only a Node Burrow calls them. Then 429 with `Retry-After` past `RELAY_ENROLL_BEGIN_LIMIT` (10 a minute per address) or `RELAY_ENROLL_POLL_LIMIT` (60), before the body limit and any database read.
 - **Must answer an expired device code from the code alone**, reading no database.
 - **Must redeem in one statement**: the poll recomputes the user code, marks its live unredeemed approval with `redeemedBurrowId` and `redeemedAt`, and inserts the Burrow owned by the approval's `userId`, under the account's lock with the cap check, so two polls mint one Burrow. The entitlement is rechecked first.
