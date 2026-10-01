@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { within } from 'storybook/test';
 // Importing from App.tsx runs `pocket-chrome`'s `index.css` side-effect import,
 // so Tailwind's utilities load for these stories. Storybook manages the theme
 // tokens (`--vscode-*`) itself.
@@ -73,6 +74,23 @@ export const MixedList: Story = {};
 // Canonical Pocket default theme, pinned so Chromatic captures the dark rows.
 export const MixedListKimbieDark: Story = {
   globals: { theme: 'Kimbie Dark' },
+};
+
+// A computer removed from the account: the Relay's list no longer names it, so
+// its row says so and offers Forget alone, beside one merely offline.
+export const RemovedFromAccount: Story = {
+  args: {
+    deployment: 'hosted',
+    burrows: [
+      { burrowId: 'burrow-studio', label: 'Studio iMac', online: false, needsPairing: false, removed: true },
+      { burrowId: 'burrow-nas', label: 'Basement NAS', online: false, needsPairing: false },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('Removed from your account');
+    await canvas.findByRole('button', { name: 'Forget' });
+  },
 };
 
 // Small-phone stress case: paired+offline, burrow-id fallback, and long labels.

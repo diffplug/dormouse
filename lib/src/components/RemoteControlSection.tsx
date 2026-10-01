@@ -41,12 +41,28 @@ import {
   subscribeToInvitation,
 } from '../remote/burrow/burrow-status-store';
 
+/** What `not-entitled` reads, in a Hosted build, the only kind that can latch it. */
+export const NOT_ENTITLED_COPY = 'Your Hosted plan doesn’t include remote control right now.';
+
+/** What `removed` reads: the account it was removed from, or the self-host Relay. */
+export function removedCopy(
+  status: Pick<BurrowConsoleStatus, 'relayMode' | 'relayOrigin' | 'accountOrigin'>,
+): string {
+  return status.relayMode === 'hosted'
+    ? `This computer was removed from your account at ${hostOf(status.accountOrigin ?? HOSTED_ACCOUNT_ORIGIN)}.`
+    : `This computer was removed from ${hostOf(status.relayOrigin)}. Disconnect to enroll it again.`;
+}
+
 /**
  * How each relay-socket state reads to someone who is not holding the spec.
- * `displaced` is the only one that needs the user to act, so it is the only one
- * that gets a button (`docs/specs/relay.md`, "Relay socket policy").
+ * The latched ones are the ones that need the user to act, so only they get a
+ * button of their own (`docs/specs/relay.md`, "Remote control, in the Settings
+ * dialog").
  */
-function describeConnection(connection: BurrowStatus): { text: string; tone: 'ok' | 'warn' | 'muted' } {
+function describeConnection(
+  connection: BurrowStatus,
+  status: Pick<BurrowConsoleStatus, 'relayMode' | 'relayOrigin' | 'accountOrigin'>,
+): { text: string; tone: 'ok' | 'warn' | 'muted' } {
   switch (connection) {
     case 'connected':
       return { text: 'Connected', tone: 'ok' };
@@ -59,6 +75,10 @@ function describeConnection(connection: BurrowStatus): { text: string; tone: 'ok
         text: 'Another Dormouse instance took this Relay’s slot. This machine stood down and will not retry on its own.',
         tone: 'warn',
       };
+    case 'removed':
+      return { text: removedCopy(status), tone: 'warn' };
+    case 'not-entitled':
+      return { text: NOT_ENTITLED_COPY, tone: 'warn' };
     case 'stopped':
       return { text: 'Stopped', tone: 'muted' };
     case 'idle':
@@ -507,6 +527,15 @@ export function RemoteControlSection() {
  * {@link UnenrolledRelay}.
  */
 function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
+  // Enroll again spans the flip from enrolled to un-enrolled, so its busy and
+  // error live here, above both views: a begin refused after the clear still
+  // has somewhere to say so.
+  const enrollAgain = useBusyAction();
+  const onEnrollAgain = () =>
+    void enrollAgain.run(async () => {
+      await clearBurrowEnrollment();
+      await beginHostedEnrollment(status.suggestedLabel);
+    });
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">Control this Dormouse from your phone.</div>
@@ -522,15 +551,18 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
                 setup code, or an error, belonging to the one we just left. */}
             <EnrolledView
               key={status.burrowId ?? 'enrolled'}
-              relayOrigin={status.relayOrigin}
-              accountOrigin={status.accountOrigin}
-              hostedEnrollment={status.hostedEnrollment}
-              connection={status.connection}
-              pairedClients={status.pairedClients}
+              status={status}
+              enrollingAgain={enrollAgain.busy}
+              enrollAgainError={enrollAgain.error}
+              onEnrollAgain={onEnrollAgain}
             />
           </>
         ) : (
-          <UnenrolledRelay status={status} />
+          <UnenrolledRelay
+            status={status}
+            enrollingAgain={enrollAgain.busy}
+            enrollAgainError={enrollAgain.error}
+          />
         )}
       </div>
     </div>
@@ -544,10 +576,22 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
  * dialog"). **Folding hides the enroll view, never unmounts it**, for the same
  * reason {@link EnrollView} folds its own.
  */
-function UnenrolledRelay({ status }: { status: BurrowConsoleStatus }) {
+function UnenrolledRelay({
+  status,
+  enrollingAgain,
+  enrollAgainError,
+}: {
+  status: BurrowConsoleStatus;
+  /** An Enroll again under way, whose begin this view will render. */
+  enrollingAgain: boolean;
+  enrollAgainError: string | null;
+}) {
   // Unfolded from the start only over an enrollment already begun — the
-  // dialog reopened on a code waiting for approval, which folded would hide.
-  const [unfolded, setUnfolded] = useState(() => status.hostedEnrollment !== null);
+  // dialog reopened on a code waiting for approval, which folded would hide —
+  // or being begun by Enroll again.
+  const [unfolded, setUnfolded] = useState(
+    () => status.hostedEnrollment !== null || enrollingAgain || enrollAgainError !== null,
+  );
   const [hint, choices] =
     status.relayMode === 'self-host'
       ? [
@@ -566,6 +610,9 @@ function UnenrolledRelay({ status }: { status: BurrowConsoleStatus }) {
               accountOrigin={status.accountOrigin}
               suggestedLabel={status.suggestedLabel}
             />
+            {enrollAgainError ? (
+              <div className="mt-2 text-sm leading-relaxed text-error">{enrollAgainError}</div>
+            ) : null}
             <div className={`${FIELD_HINT} mt-3`}>
               A <ExternalTextLink href={SELF_HOST_URL}>self-hosted Relay</ExternalTextLink> takes a
               Dormouse built for its address.
@@ -997,26 +1044,29 @@ export function HeldEnrollment({ relayOrigin }: { relayOrigin: string }) {
 }
 
 function EnrolledView({
-  relayOrigin,
-  accountOrigin,
-  hostedEnrollment,
-  connection,
-  pairedClients,
+  status,
+  enrollingAgain,
+  enrollAgainError,
+  onEnrollAgain,
 }: {
-  relayOrigin: string;
-  accountOrigin: string | null;
-  hostedEnrollment: HostedEnrollmentState | null;
-  connection: BurrowStatus;
-  pairedClients: number;
+  status: BurrowConsoleStatus;
+  enrollingAgain: boolean;
+  enrollAgainError: string | null;
+  onEnrollAgain: () => void;
 }) {
-  const { busy, error, run } = useBusyAction();
+  const { relayOrigin, accountOrigin, hostedEnrollment, connection, pairedClients } = status;
+  const { busy: ownBusy, error: ownError, run } = useBusyAction();
+  const busy = ownBusy || enrollingAgain;
+  const error = ownError ?? enrollAgainError;
+  // A Relay that no longer takes this Burrow mints no setup code.
+  const refused = connection === 'removed' || connection === 'not-entitled';
   // Disconnecting drops every paired phone until they pair again, so it asks
   // once rather than acting on the first click.
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   // Its own busy and error, unlike every other action here: the mint also fires
   // on a timer, and this view's one error slot belongs to what the user clicked.
   const setup = useSetupQr();
-  const described = describeConnection(connection);
+  const described = describeConnection(connection, status);
   /**
    * Where the one pairing report goes, decided here rather than half in each
    * place that can draw it: **the panel owns it only where it has a sentence to
@@ -1064,7 +1114,7 @@ function EnrolledView({
       {error ? <div className="mt-1.5 text-error">{error}</div> : null}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        {connection === 'displaced' ? (
+        {connection === 'displaced' || connection === 'not-entitled' ? (
           <button
             type="button"
             disabled={busy}
@@ -1074,19 +1124,31 @@ function EnrolledView({
             Reconnect
           </button>
         ) : null}
+        {connection === 'removed' && status.relayMode === 'hosted' ? (
+          <button
+            type="button"
+            disabled={busy}
+            className={modalActionButton({ tone: 'primary' })}
+            onClick={onEnrollAgain}
+          >
+            {enrollingAgain ? 'Getting a code…' : 'Enroll again'}
+          </button>
+        ) : null}
         {confirmingDisconnect ? (
           <DisconnectConfirm busy={busy} run={run} onDone={() => setConfirmingDisconnect(false)} />
         ) : (
           <>
-            <button
-              type="button"
-              disabled={busy}
-              aria-expanded={setup.state !== null}
-              className={modalActionButton({ tone: setup.state ? 'secondary' : 'primary' })}
-              onClick={() => (setup.state ? setup.close() : setup.newCode())}
-            >
-              {SETUP_BUTTON}
-            </button>
+            {refused ? null : (
+              <button
+                type="button"
+                disabled={busy}
+                aria-expanded={setup.state !== null}
+                className={modalActionButton({ tone: setup.state ? 'secondary' : 'primary' })}
+                onClick={() => (setup.state ? setup.close() : setup.newCode())}
+              >
+                {SETUP_BUTTON}
+              </button>
+            )}
             <button
               type="button"
               disabled={busy}
@@ -1099,7 +1161,7 @@ function EnrolledView({
         )}
       </div>
 
-      {setup.state ? (
+      {setup.state && !refused ? (
         <SetupPhonePanel
           state={setup.state}
           report={reportInPanel ? setup.report : undefined}

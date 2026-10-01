@@ -32,7 +32,7 @@ import {
   type EnrollmentStatic,
 } from '../../remote/burrow/enrollment';
 import type { BurrowSurfaceProvider } from '../../remote/burrow/burrow-surface-provider';
-import { burrowFetch, describingFetchFailures } from '../../remote/burrow/burrow-fetch';
+import { burrowFetch, describingFetchFailures, probeBurrowStanding } from '../../remote/burrow/burrow-fetch';
 import type { PendingPairing } from '../../remote/burrow/pairing-approval';
 import {
   loadPushDevices,
@@ -390,6 +390,14 @@ const ONE_TIME_SERVING: ReadonlySet<OneTimeState['status']> = new Set<OneTimeSta
   'connecting',
   'connected',
 ]);
+
+/**
+ * A Burrow its Relay no longer takes (`BurrowLatch`), which asks that Relay
+ * for nothing more: its token would only be refused.
+ */
+function refusedByRelay(burrow: BurrowRuntime): boolean {
+  return burrow.status === 'removed' || burrow.status === 'not-entitled';
+}
 
 /**
  * Whether a one-time connection in `state` can reach this machine's terminals,
@@ -1114,9 +1122,10 @@ export class BurrowService {
   }
 
   /**
-   * Re-open the relay socket now. The only way back from `displaced`: an evicted
-   * Burrow stands down for good rather than fighting the Burrow that replaced it, so
-   * returning has to be asked for.
+   * Re-open the relay socket now. The only way back from a latched state
+   * (`BurrowLatch`): a latched Burrow stands down for good — rather than
+   * fighting the Burrow that replaced it, or retrying a token its Relay
+   * refuses — so returning has to be asked for.
    *
    * Only the restart takes the lifecycle lease. The status snapshot after it is
    * a plain read — one that may touch the disk for the offer file — and holding
@@ -1160,7 +1169,7 @@ export class BurrowService {
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
     const burrow = this.#burrow;
-    if (!enrollment || !burrow) throw await this.#notConnected();
+    if (!enrollment || !burrow || refusedByRelay(burrow)) throw await this.#notConnected();
     const response = await burrowFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
       API_ROUTES.burrowSetupToken,
@@ -1602,6 +1611,7 @@ export class BurrowService {
       onInvitationChanged: (inviteId, state, outcome) =>
         this.#emitInvitation(inviteId, state, outcome),
       onPathRefused: (refusal) => this.#recordPathRefusal(refusal),
+      probeStanding: () => probeBurrowStanding({ enrollment, fetch: this.#fetch }),
       now: this.#now,
     });
     this.#burrow.start();
@@ -1769,14 +1779,15 @@ export class BurrowService {
   }
 
   /**
-   * Push delivery needs a live Burrow: the ACL it reads is the running one's.
+   * Push delivery needs a live Burrow its Relay still takes: the ACL it reads
+   * is the running one's.
    * **Its fetch asks again at the request**: sealing awaits, and a Burrow
    * stopped meanwhile — Nothing, a clear, a swap — sends nothing.
    */
   #pushDeps(): AlertPushDeps | null {
     const burrow = this.#burrow;
     const enrollment = this.#enrollment;
-    if (!burrow || !enrollment) return null;
+    if (!burrow || !enrollment || refusedByRelay(burrow)) return null;
     return {
       enrollment,
       activeRecords: () => burrow.activeRecords,

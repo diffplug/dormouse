@@ -149,8 +149,8 @@ interface ConnectionRow {
 /** What {@link connectionsFor} reads. */
 export interface NetworkFacts {
   policy: NetworkPolicy;
-  /** The build's relay origin and mode, the enrollment, and its paired phones. */
-  status: Pick<BurrowConsoleStatus, 'relayOrigin' | 'relayMode' | 'enrolled' | 'pairedClients'>;
+  /** The build's relay origin and mode, the enrollment, its relay socket, and its paired phones. */
+  status: Pick<BurrowConsoleStatus, 'relayOrigin' | 'relayMode' | 'enrolled' | 'connection' | 'pairedClients'>;
   /** A managed-voice token is saved. */
   managedVoice: boolean;
   /** This build checks for its own updates ({@link updatesItself}). */
@@ -204,7 +204,10 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
   const oneTime = opensOneTimeLinks(policy);
   // The relay socket: a self-host build's, enrolled or about to be; a Hosted
   // build's once it is enrolled, the one-time links riding the same origin.
-  const persistent = runsBurrow(policy.level) && (status.relayMode === 'self-host' || status.enrolled);
+  // None while the Relay no longer takes this Burrow, which asks it nothing.
+  const refused = status.enrolled && (status.connection === 'removed' || status.connection === 'not-entitled');
+  const persistent =
+    runsBurrow(policy.level) && (status.relayMode === 'self-host' || status.enrolled) && !refused;
   if (persistent) {
     rows.push({
       to: relay,
@@ -227,8 +230,9 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
     });
   }
   // A phone reaches this computer directly wherever one can connect at all —
-  // not under Local networks with nothing allowed.
-  if (oneTime || policy.level === 'relay') {
+  // not under Local networks with nothing allowed, nor under My Relay only
+  // once that Relay refuses this Burrow.
+  if (oneTime || (policy.level === 'relay' && !refused)) {
     rows.push({
       to: phoneRowFor(policy, persistent),
       when: 'While connected',

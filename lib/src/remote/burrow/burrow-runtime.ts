@@ -18,7 +18,9 @@ import {
   NoiseError,
   NoiseTransportSession,
   TokenBucket,
+  WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
+  WS_CLOSE_BURROW_REVOKED,
   WS_ROUTES,
   WS_TOKEN_PARAM,
   boundedBurrowLabel,
@@ -57,6 +59,7 @@ import {
   type RelayToBurrowFrame,
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
+import type { BurrowStanding } from './burrow-fetch';
 import { createSerialQueue } from '../../host/remote/serial-queue';
 import type { DirectPeering } from '../direct/direct-peer';
 import type { PathRefusal } from '../direct/path-refusal';
@@ -240,16 +243,30 @@ interface ClientState {
 
 /**
  * `disconnected` is a socket we expect to get back (a reconnect is armed);
- * `displaced` is a socket another Burrow took from us and no timer will restore
- * (see {@link BurrowRuntime.start}); `stopped` is a socket we closed ourselves.
+ * `stopped` is a socket we closed ourselves. The rest are {@link BurrowLatch}es.
  */
 export type BurrowStatus =
   | 'idle'
   | 'connecting'
   | 'connected'
   | 'disconnected'
-  | 'displaced'
+  | BurrowLatch
   | 'stopped';
+
+/**
+ * A relay socket no timer will restore (see {@link BurrowRuntime.start}):
+ * `displaced` is one another Burrow took from us; `removed` and `not-entitled`
+ * are a Relay that no longer takes this Burrow's token
+ * ({@link BurrowStanding}).
+ */
+export type BurrowLatch = 'displaced' | BurrowStanding;
+
+/** The close code each {@link BurrowLatch} arrives on. */
+const LATCH_FOR_CLOSE: ReadonlyMap<number, BurrowLatch> = new Map([
+  [WS_CLOSE_BURROW_REPLACED, 'displaced'],
+  [WS_CLOSE_BURROW_REVOKED, 'removed'],
+  [WS_CLOSE_BURROW_NOT_ENTITLED, 'not-entitled'],
+]);
 
 export interface BurrowOptions {
   enrollment: BurrowEnrollment;
@@ -294,6 +311,12 @@ export interface BurrowOptions {
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
   /**
+   * Asked after a socket that never opened, before the next backoff, whether
+   * the Relay still takes this Burrow's token ({@link probeBurrowStanding});
+   * rejects when no answer came. Absent, a refused upgrade is only retried.
+   */
+  probeStanding?: () => Promise<BurrowStanding | null>;
+  /**
    * How this host takes the direct path (`docs/specs/remote-api.md` →
    * Transport → "Direct path"). Absent, or with no factory, every
    * `direct-offer` is declined and every session stays relayed; a path
@@ -327,6 +350,7 @@ export class BurrowRuntime {
   readonly #now: () => number;
   readonly #setTimer: RemoteTimer;
   readonly #reconnect: boolean;
+  readonly #probeStanding: BurrowOptions['probeStanding'];
   readonly #directPeering: DirectPeering;
   readonly #onPathRefused: (refusal: PathRefusal) => void;
 
@@ -411,8 +435,15 @@ export class BurrowRuntime {
   #ws: WebSocketLike | null = null;
   #status: BurrowStatus = 'idle';
   #stopped = false;
-  /** Latched by a {@link WS_CLOSE_BURROW_REPLACED} close; only `start()` clears it. */
-  #displaced = false;
+  /** Latched by a close or a probe; only `start()` clears it. */
+  #latched: BurrowLatch | null = null;
+  /**
+   * Whether this failure streak has had its answered probe: set by one, and
+   * cleared by an open or a `start()`.
+   */
+  #probed = false;
+  /** Bumped by `start()` and `stop()`, so a probe answering across either is dropped. */
+  #run = 0;
   #backoffMs = INITIAL_BACKOFF_MS;
   /** Cancels the armed reconnect, or null when none is armed. */
   #cancelReconnect: (() => void) | null = null;
@@ -447,6 +478,7 @@ export class BurrowRuntime {
     this.#onInvitationChanged = options.onInvitationChanged ?? (() => {});
     this.#setTimer = options.setTimer ?? realTimer;
     this.#reconnect = options.reconnect ?? true;
+    this.#probeStanding = options.probeStanding;
     this.#directPeering = options.directPeering ?? { createPeer: null };
     this.#onPathRefused = options.onPathRefused ?? (() => {});
   }
@@ -726,14 +758,16 @@ export class BurrowRuntime {
   // --- Socket lifecycle ----------------------------------------------------
 
   /**
-   * Open the relay socket. Also the one way back from `displaced`: an evicted
-   * Burrow never reconnects on a timer, so returning is a deliberate act that
-   * evicts whichever Burrow currently holds the burrowId. Idempotent while a socket
-   * is live.
+   * Open the relay socket. Also the one way back from a {@link BurrowLatch}: a
+   * latched Burrow never reconnects on a timer, so returning is a deliberate
+   * act — one that evicts whichever Burrow currently holds the burrowId.
+   * Idempotent while a socket is live.
    */
   start(): void {
     this.#stopped = false;
-    this.#displaced = false;
+    this.#latched = null;
+    this.#probed = false;
+    this.#run += 1;
     this.#clearReconnectTimer();
     this.#backoffMs = INITIAL_BACKOFF_MS;
     // Kicked off here so the import is normally settled before the first frame;
@@ -780,6 +814,7 @@ export class BurrowRuntime {
     }
     this.#stopped = true;
     this.#status = 'stopped';
+    this.#run += 1;
     this.#clearReconnectTimer();
     this.#stopHeartbeat();
     this.#dropTransientState();
@@ -794,7 +829,7 @@ export class BurrowRuntime {
   }
 
   #connect(): void {
-    if (this.#ws || this.#stopped || this.#displaced) return;
+    if (this.#ws || this.#stopped || this.#latched) return;
     this.#status = 'connecting';
     const wsBase = this.#enrollment.relayUrl.replace(/^http/, 'ws');
     const url = `${wsBase}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${encodeURIComponent(this.#enrollment.burrowToken)}`;
@@ -806,14 +841,17 @@ export class BurrowRuntime {
       // (`lib/src/host/remote/service.ts`) — is a socket that closed at once:
       // thrown from the reconnect timer, it would take the host process down.
       console.warn('[burrow] could not open the relay socket', error);
-      this.#onClose(undefined);
+      this.#onClose(undefined, false);
       return;
     }
     this.#ws = ws;
+    let opened = false;
     ws.addEventListener('open', () => {
       if (this.#ws !== ws) return;
+      opened = true;
       this.#status = 'connected';
       this.#backoffMs = INITIAL_BACKOFF_MS;
+      this.#probed = false;
       this.#heartbeat = new RelayHeartbeat(ws, this.#setTimer, () => this.#abandonSocket());
       this.#reap();
     });
@@ -833,24 +871,26 @@ export class BurrowRuntime {
       // open a second one, and make this Burrow displace *itself*.
       if (this.#ws !== ws) return;
       this.#ws = null;
-      this.#onClose(closeCode(ev));
+      this.#onClose(closeCode(ev), opened);
     });
   }
 
-  #onClose(code: number | undefined): void {
+  /**
+   * The relay socket policy (`docs/specs/relay.md` -> "Burrow side"): a
+   * latching close ({@link LATCH_FOR_CLOSE}) is terminal; a socket that never
+   * opened — a refused upgrade reads only as an error event — is probed first,
+   * once per failure streak; anything else backs off and reconnects.
+   */
+  #onClose(code: number | undefined, opened: boolean): void {
     this.#stopHeartbeat();
     this.#dropTransientState();
     if (this.#stopped) {
       this.#status = 'stopped';
       return;
     }
-    if (code === WS_CLOSE_BURROW_REPLACED) {
-      // Another Burrow claimed this burrowId and the relay evicted us on purpose
-      // (relay/src/relay.ts `registerBurrow`). Reconnecting would evict that one,
-      // which would reconnect and evict us, forever — so this close is terminal
-      // and coming back requires an explicit `start()`.
-      this.#displaced = true;
-      this.#status = 'displaced';
+    const latch = code === undefined ? undefined : LATCH_FOR_CLOSE.get(code);
+    if (latch) {
+      this.#latch(latch);
       return;
     }
     if (!this.#reconnect) {
@@ -858,6 +898,42 @@ export class BurrowRuntime {
       return;
     }
     this.#status = 'disconnected';
+    if (!opened && !this.#probed && this.#probeStanding) {
+      this.#probe(this.#probeStanding);
+      return;
+    }
+    this.#scheduleReconnect();
+  }
+
+  /** Stand down until `start()`, as `latch` says why. */
+  #latch(latch: BurrowLatch): void {
+    this.#latched = latch;
+    this.#status = latch;
+  }
+
+  /**
+   * Ask the Relay about this Burrow's token, then latch or back off. Nothing
+   * reconnects meanwhile, and an answer that lands after a `start()` or
+   * `stop()` is dropped. **Only an answer spends the streak's probe**: one that
+   * never arrived — asleep, offline, Nothing — proves nothing, and the next
+   * refused upgrade asks again.
+   */
+  #probe(probe: () => Promise<BurrowStanding | null>): void {
+    const run = this.#run;
+    void probe().then(
+      (standing) => {
+        if (run !== this.#run) return;
+        this.#probed = true;
+        if (standing) this.#latch(standing);
+        else this.#scheduleReconnect();
+      },
+      () => {
+        if (run === this.#run) this.#scheduleReconnect();
+      },
+    );
+  }
+
+  #scheduleReconnect(): void {
     const delay = this.#backoffMs;
     this.#backoffMs = Math.min(this.#backoffMs * 2, MAX_BACKOFF_MS);
     this.#cancelReconnect = this.#setTimer(() => {
@@ -884,7 +960,7 @@ export class BurrowRuntime {
   #abandonSocket(): void {
     const ws = this.#ws;
     this.#ws = null;
-    this.#onClose(undefined);
+    this.#onClose(undefined, true);
     try {
       ws?.close();
     } catch {

@@ -27,7 +27,8 @@ primitive lives in `remote-lib-common`, the terminal UI in `lib`/`standalone`.
   (`BURROW_REVOCATION_SWEEP_MS`, one minute), since the upgrade check runs once and
   a Burrow may stay connected indefinitely. The sweep closes it with
   `WS_CLOSE_BURROW_REVOKED` (4001) and its Clients get `burrow-gone`, the teardown a
-  disconnect performs; the Burrow may reconnect, and the upgrade then answers 401.
+  disconnect performs; the Burrow stands down ("Burrow side", relay socket
+  policy), and an upgrade it still tries answers 401.
   Revoking a *Client* is the Burrow's own ACL and still needs a Burrow restart
   ([remote-security-model.md](./remote-security-model.md)).
 * A dropped WebSocket is handled by reloading the page / reconnecting the burrow;
@@ -853,14 +854,33 @@ memo invalidation — live in that burrow's spec.
     `failed`, the message naming the Burrow and `<accountOrigin>/account` to
     remove it at (a console warning once disposed).
 * **Relay socket policy**: one socket at a time, reconnected with exponential
-  backoff (1 s, doubling to 30 s) after any close — **except a close carrying
-  `WS_CLOSE_BURROW_REPLACED`, which is terminal** (rationale): another Dormouse
-  instance enrolled with the same `burrowId` took the relay slot, so this one
-  disposes its sessions, reports `displaced`, and arms no timer. Coming back is
-  an explicit act — `reconnect()` — which takes the slot back and displaces the
-  other Burrow in turn, so `displaced` is the one connection state the user has to
-  act on. **Ignore open, message, and close events from sockets the controller
-  no longer owns** (rationale).
+  backoff (1 s, doubling to 30 s) after any close — **except three closes, which
+  are terminal** (rationale): the Burrow disposes its sessions, reports a latched state, and
+  arms no timer.
+
+  | Close | State | Meaning |
+  |---|---|---|
+  | `WS_CLOSE_BURROW_REPLACED` (4000; rationale) | `displaced` | another Dormouse instance enrolled with the same `burrowId` took the relay slot |
+  | `WS_CLOSE_BURROW_REVOKED` (4001) | `removed` | the Burrow's row is gone |
+  | `WS_CLOSE_BURROW_NOT_ENTITLED` (4002, Hosted only) | `not-entitled` | its owner is no longer entitled |
+
+  Coming back is an explicit act — `reconnect()` or a fresh start — which after
+  `displaced` takes the slot back and displaces the other Burrow in turn.
+  **A socket that never opened is probed before its next backoff**, since a
+  refused upgrade reaches the Burrow only as an error event: one
+  `GET /api/push/devices` as the Burrow, through the service's guarded fetch,
+  bounded at `BURROW_REQUEST_TIMEOUT_MS`. A 401 `UNAUTHORIZED_ERROR` (or
+  `UNKNOWN_BURROW_TOKEN_ERROR`) latches `removed`, a 403 `NOT_ENTITLED_ERROR`
+  `not-entitled`, and any other answer backs off. **At most one answered probe
+  per failure streak**; an open ends the streak, and a probe that got no answer
+  spends nothing (rationale). **A latched `removed` or `not-entitled` Burrow asks its Relay
+  nothing more**: no push, device list, or setup code. **Ignore open, message,
+  and close events, and probe answers, from sockets the controller no longer
+  owns** (rationale).
+  Source of truth: `BurrowRuntime.#onClose` in
+  `lib/src/remote/burrow/burrow-runtime.ts`; `probeBurrowStanding` in
+  `lib/src/remote/burrow/burrow-fetch.ts`; pinned by
+  `lib/src/remote/burrow/burrow-relay-socket.test.ts`.
   `lib/src/remote/burrow/burrow-runtime.test.ts` pins late delivery after stop and
   restart. **Never construct a socket after service disposal**, including
   from an enrollment or ACL read already in flight.
@@ -953,8 +973,19 @@ The enroll view names `relayOrigin` over a two-field form (setup password,
 Burrow name — prefilled with the `suggestedLabel` `status` carries) calling the
 service's `enroll`;
 enrolled, it shows unclicked the Relay origin, relay connection state, and paired-device
-count, with `Disconnect` and — only on `displaced` — `Reconnect`. Rules the UI
-exists to honor:
+count, with `Disconnect`, and per latched state:
+
+| State | Reads | Offers |
+|---|---|---|
+| `displaced` | another instance took the slot | Reconnect |
+| `removed`, Hosted | `removedCopy`: removed from your account at the account host | **Enroll again**: clears the enrollment, then begins a device-code enrollment |
+| `removed`, self-host | `removedCopy`: removed from the Relay's host, Disconnect to enroll again | nothing more |
+| `not-entitled` | `NOT_ENTITLED_COPY` | Reconnect |
+
+**`removed` and `not-entitled` offer no "Set up a phone".** Enroll again's busy
+and error live above both views, so a begin refused after the clear still
+shows, and Persistent Relay starts unfolded over it. Rules the UI exists to
+honor:
 
 - **The offer leads, but only where it can be pressed.** The card shows when an
   unexpired local offer file names the baked origin and this self-host Burrow is

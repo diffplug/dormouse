@@ -87,14 +87,14 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 - **Choosing Local networks with nothing allowed must first allow every prefix of this machine's `lan` interfaces**, never a `vpn` or `virtual` one; the panel fills them, not the service (rationale). **Any other choice must keep `allowed`.**
 - **The connection list states only what is built** (rationale): `connectionsFor` answers these rows and no others. Under `nothing` it answers none, and the list reads "Nothing. Terminals and browser panes still reach whatever you open in them, including panes restored at launch."
 
-The relay socket runs ("persistent" below) where `runsBurrow` holds, in a self-host build or with an enrollment.
+The relay socket runs ("persistent" below) where `runsBurrow` holds, in a self-host build or with an enrollment, unless the Burrow latched `removed` or `not-entitled` (`docs/specs/relay.md` -> "Burrow side").
 
 | Row | Listed when |
 |---|---|
 | the relay origin: only while a one-time link is open, handshakes and never terminal traffic | `opensOneTimeLinks` (`local`, a network allowed; `anywhere`), not persistent |
 | the relay origin: always (unenrolled, "once this computer is enrolled"); terminal traffic when a phone can't connect directly, never under `local` | persistent |
 | `stun.cloudflare.com`, as a phone connects | `opensOneTimeLinks` and `burrowUsesStun` (`anywhere`) |
-| your phone: on any network where `phoneOnAnyNetwork` (`anywhere`), else an allowed one; "directly" where persistent (`relay`: only that) | `opensOneTimeLinks`, or `relay` |
+| your phone: on any network where `phoneOnAnyNetwork` (`anywhere`), else an allowed one; "directly" where persistent (`relay`: only that) | `opensOneTimeLinks`, or `relay` and not so latched |
 | the relay origin to the phone's push service, "where push is on" | persistent, a phone paired (rationale) |
 | `voice.dormouse.sh`, speaking in the managed voice | a Hosted build, a voice token saved |
 | `dormouse.sh`, each launch | `autoUpdate` on, in a build that updates itself ("Updates" below), in every window |

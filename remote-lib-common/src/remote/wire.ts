@@ -74,7 +74,9 @@ export function pushSubscriptionDeletePath(deliveryId: string): string {
  * unknown or expired. Shared because Pocket keys recovery on it: a 401 alone is
  * ambiguous (a spent setup token answers 401 too), and only this one means
  * "sign in again". Changing the string on one side without the other would
- * silently strand users on a dead session.
+ * silently strand users on a dead session. A Burrow-gated route answers it
+ * too, for a burrow token that names no Burrow, and a Burrow's standing probe
+ * reads it as removal (`docs/specs/relay.md` -> "Burrow side").
  */
 export const UNAUTHORIZED_ERROR = 'unauthorized';
 
@@ -176,17 +178,26 @@ export const WS_CLOSE_BURROW_REPLACED = 4000;
 export const WS_CLOSE_BURROW_REPLACED_REASON = 'replaced by a newer burrow connection';
 
 /**
- * The Burrow's `burrows.json` row is gone, so its bearer token names nothing.
- *
- * A distinct code from {@link WS_CLOSE_BURROW_REPLACED} because the two mean
- * opposite things to a reconnect: a replaced Burrow must stand down, while a
- * revoked one may retry as often as it likes — the upgrade will simply 401,
- * which is the whole of what revocation is.
+ * The Burrow's row is gone — removed from the account, or deleted from
+ * `burrows.json` — so its bearer token names nothing. Terminal at the Burrow,
+ * which reports `removed` rather than retrying an upgrade that can only 401
+ * (`docs/specs/relay.md` -> "Burrow side").
  */
 export const WS_CLOSE_BURROW_REVOKED = 4001;
 
 /** Human-readable reason paired with {@link WS_CLOSE_BURROW_REVOKED}. */
 export const WS_CLOSE_BURROW_REVOKED_REASON = 'this burrow is no longer enrolled';
+
+/**
+ * The Burrow is still enrolled, but its owner is no longer entitled to the
+ * Hosted Relay. Only Hosted sends it; terminal at the Burrow, which reports
+ * `not-entitled`. Distinct from {@link WS_CLOSE_BURROW_REVOKED} because the
+ * fix differs: a plan, not a re-enrollment.
+ */
+export const WS_CLOSE_BURROW_NOT_ENTITLED = 4002;
+
+/** Human-readable reason paired with {@link WS_CLOSE_BURROW_NOT_ENTITLED}. */
+export const WS_CLOSE_BURROW_NOT_ENTITLED_REASON = 'this account is not entitled to the Hosted Relay';
 
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';

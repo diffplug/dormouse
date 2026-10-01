@@ -1,11 +1,19 @@
 /**
  * The Burrow's authenticated HTTP calls to its own Relay — push delivery
- * (`push-delivery.ts`) and setup-token minting (`lib/src/host/remote/service.ts`
- * → `#setupQr`) — under one transport policy, so neither can drift from it.
+ * (`push-delivery.ts`), setup-token minting (`lib/src/host/remote/service.ts`
+ * → `#setupQr`), and the standing probe ({@link probeBurrowStanding}) — under
+ * one transport policy, so none can drift from it.
  *
  * Not the enrollment exchange: that one proves a different credential and has no
  * `burrowToken` yet (`enrollment.ts`). It shares only {@link BURROW_REQUEST_TIMEOUT_MS}.
  */
+
+import {
+  API_ROUTES,
+  NOT_ENTITLED_ERROR,
+  UNAUTHORIZED_ERROR,
+  UNKNOWN_BURROW_TOKEN_ERROR,
+} from 'remote-lib-common';
 
 import type { BurrowEnrollment } from './enrollment';
 
@@ -105,20 +113,12 @@ export interface BurrowFetchOptions {
 
 /**
  * `GET route`, or — the moment a `body` is passed — `POST route` with that body
- * as JSON, authenticated as this Burrow. An endpoint whose only input is the
- * bearer still posts, with `{}`.
- *
- * Throws on any non-2xx so no caller can swallow one: a send that ignored a 401
- * from a revoked burrow token would leave the feature permanently broken and
- * silent, which is the failure mode this path is most prone to.
+ * as JSON, authenticated as this Burrow, answered whatever its status. An
+ * endpoint whose only input is the bearer still posts, with `{}`.
  */
-export async function burrowFetch(
-  options: BurrowFetchOptions,
-  route: string,
-  body?: unknown,
-): Promise<Response> {
+function burrowRequest(options: BurrowFetchOptions, route: string, body?: unknown): Promise<Response> {
   const doFetch = options.fetch ?? globalThis.fetch;
-  const response = await doFetch(`${options.enrollment.relayUrl}${route}`, {
+  return doFetch(`${options.enrollment.relayUrl}${route}`, {
     ...(body === undefined ? {} : { method: 'POST', body: JSON.stringify(body) }),
     // The service replaced a webview whose CSP checked every redirect target,
     // and a Node process re-checks nothing. Do not let the Relay's open redirect
@@ -131,8 +131,47 @@ export async function burrowFetch(
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
   });
+}
+
+/**
+ * {@link burrowRequest}, throwing on any non-2xx so no caller can swallow one: a
+ * send that ignored a 401 from a revoked burrow token would leave the feature
+ * permanently broken and silent, which is the failure mode this path is most
+ * prone to.
+ */
+export async function burrowFetch(
+  options: BurrowFetchOptions,
+  route: string,
+  body?: unknown,
+): Promise<Response> {
+  const response = await burrowRequest(options, route, body);
   if (!response.ok) {
     throw new Error(`${options.errorPrefix ?? `${route} failed`} (${response.status})`);
   }
   return response;
+}
+
+/** What a Relay said of this Burrow's token, when it said it stands no more. */
+export type BurrowStanding = 'removed' | 'not-entitled';
+
+/**
+ * Ask the Relay whether this Burrow's token still stands, through the one
+ * Burrow-gated read both Relays serve, `GET /api/push/devices`
+ * (`docs/specs/relay.md` -> "Burrow side", relay socket policy): a 401
+ * naming the token unknown is `removed`, a 403 `NOT_ENTITLED_ERROR` is
+ * `not-entitled`, and any other answer `null`. **Rejects when no answer
+ * came**, which proves nothing either way.
+ */
+export async function probeBurrowStanding(
+  options: Omit<BurrowFetchOptions, 'errorPrefix'>,
+): Promise<BurrowStanding | null> {
+  const response = await burrowRequest(options, API_ROUTES.pushDevices);
+  if (response.ok) return null;
+  const body: unknown = await response.json().catch(() => null);
+  const error = body && typeof body === 'object' ? (body as { error?: unknown }).error : undefined;
+  if (response.status === 401 && (error === UNAUTHORIZED_ERROR || error === UNKNOWN_BURROW_TOKEN_ERROR)) {
+    return 'removed';
+  }
+  if (response.status === 403 && error === NOT_ENTITLED_ERROR) return 'not-entitled';
+  return null;
 }

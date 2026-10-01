@@ -18,7 +18,7 @@
  *   await window.dormouseBurrow.beginHostedEnrollment('My Laptop')       // a Hosted build: the code to approve
  *   await window.dormouseBurrow.cancelHostedEnrollment()
  *   window.dormouseBurrow.status()
- *   window.dormouseBurrow.reconnect()      // needed after `displaced`
+ *   window.dormouseBurrow.reconnect()      // needed after `displaced`, `removed`, or `not-entitled`
  *   window.dormouseBurrow.clearEnrollment()
  */
 

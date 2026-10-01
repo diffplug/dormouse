@@ -165,6 +165,20 @@ describe('connectionsFor', () => {
     expect(connectionsFor(unenrolled)[0]!.when).toBe('Always, once this computer is enrolled');
   });
 
+  it('lists no relay socket while the Relay refuses this Burrow, which opens nothing', () => {
+    for (const connection of ['removed', 'not-entitled'] as const) {
+      // Hosted: only the one-time links that still ride its origin.
+      expect(
+        connectionsFor(facts({ status: { ...UNENROLLED_STATUS, enrolled: true, pairedClients: 1, connection } })),
+        connection,
+      ).toEqual(connectionsFor(facts()));
+      // Self-host under My Relay only: nothing reaches this computer at all.
+      expect(connectionsFor(facts({ ...relayFacts(1), status: enrolledStatus({ pairedClients: 1, connection }) }))).toEqual([]);
+    }
+    // A socket merely down is still the standing connection.
+    expect(connectionsFor(facts({ ...relayFacts(1), status: enrolledStatus({ pairedClients: 1, connection: 'disconnected' }) }))[0]!.when).toBe('Always');
+  });
+
   it('lists push through the Relay once a phone is paired, naming the push setting as its condition', () => {
     // Push may be on in a Workspace, some in other windows, with the default
     // off, so the list cannot read it and states the condition instead.

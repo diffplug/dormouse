@@ -14,6 +14,7 @@ import {
   RELAY_PONG,
   UNAUTHORIZED_ERROR,
   UNKNOWN_BURROW_TOKEN_ERROR,
+  WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
   WS_CLOSE_IDLE,
@@ -483,7 +484,7 @@ test("the alarm is the earliest Client expiry or Burrow sweep; a close leaves it
   expect((await room.probe()).alarm).toBe(null);
 });
 
-test("the sweep closes a Burrow removed or de-entitled behind its socket's back, and keeps the rest", async ({
+test("the sweep closes a Burrow removed (4001) or de-entitled (4002) behind its socket's back, and keeps the rest", async ({
   onTestFinished,
 }) => {
   onTestFinished(closeAll);
@@ -503,10 +504,11 @@ test("the sweep closes a Burrow removed or de-entitled behind its socket's back,
   expect(await room.onlineBurrows(owner.userId)).toEqual([kept.burrowId]);
   expect(await kept.socket.quiet(150)).toBe(true);
 
-  // The owner loses the entitlement: every Burrow socket it holds goes.
+  // The owner loses the entitlement: every Burrow socket it holds goes, on
+  // the code that says why.
   await entitled();
   await room.fire();
-  expect((await kept.socket.closed).code).toBe(WS_CLOSE_BURROW_REVOKED);
+  expect((await kept.socket.closed).code).toBe(WS_CLOSE_BURROW_NOT_ENTITLED);
   expect(await room.onlineBurrows(owner.userId)).toEqual([]);
 });
 

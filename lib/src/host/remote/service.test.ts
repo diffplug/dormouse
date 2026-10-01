@@ -47,6 +47,8 @@ import {
   ONE_TIME_WS_ROUTES,
   ORIGIN_MISMATCH_ERROR,
   RELAY_BEARER_LENGTH,
+  UNAUTHORIZED_ERROR,
+  WS_CLOSE_BURROW_REVOKED,
   mintNoiseStaticKeyPair,
   parseOneTimeLinkUrl,
   parsePairingInvitationUrl,
@@ -839,6 +841,34 @@ describe('start', () => {
     expect(sockets).toHaveLength(1);
   });
 
+  it('asks the Relay about a refused upgrade through its guarded fetch, and reports what it said', async () => {
+    for (const [status, error, connection] of [
+      [401, UNAUTHORIZED_ERROR, 'removed'],
+      [403, NOT_ENTITLED_ERROR, 'not-entitled'],
+    ] as const) {
+      requests.length = 0;
+      sockets.length = 0;
+      createService(
+        { enrollment: ENROLLMENT },
+        {
+          fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+            requests.push({ url: String(input), init });
+            return new Response(JSON.stringify({ error }), { status });
+          }) as unknown as typeof globalThis.fetch,
+        },
+      );
+      await service.start();
+      sockets[0]!.emitError();
+      sockets[0]!.closeWith(1006);
+      await vi.waitFor(async () =>
+        expect(((await command('status')).result as BurrowConsoleStatus).connection).toBe(connection),
+      );
+      expect(requests.map((request) => request.url)).toEqual([`${ORIGIN}${API_ROUTES.pushDevices}`]);
+      expect(sockets).toHaveLength(1);
+      service.dispose();
+    }
+  });
+
   it('reconnect is the way back, and start()s a Burrow that never ran', async () => {
     createService({ enrollment: ENROLLMENT });
     const status = (await command('reconnect')).result as BurrowConsoleStatus;
@@ -1431,6 +1461,17 @@ describe('push', () => {
   it('sends nothing with no Burrow running', async () => {
     createService();
     await service.push('pty-1', 'x');
+    expect(requests).toEqual([]);
+  });
+
+  it('sends nothing, and mints no setup code, once the Relay removed this Burrow', async () => {
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    await service.start();
+    sockets[0]!.open();
+    sockets[0]!.closeWith(WS_CLOSE_BURROW_REVOKED);
+
+    await service.push('pty-1', 'x');
+    expect(await command('setupQr')).toMatchObject({ error: expect.stringContaining('not connected') });
     expect(requests).toEqual([]);
   });
 

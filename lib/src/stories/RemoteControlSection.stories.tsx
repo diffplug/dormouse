@@ -322,7 +322,7 @@ export const ConnectedManyDevices: Story = {
 };
 
 /**
- * The only connection state with a button. `displaced` is terminal by design —
+ * A latched state, so it gets a button. `displaced` is terminal by design —
  * another instance took the relay slot and this one stood down — so nothing
  * brings it back on its own.
  */
@@ -332,6 +332,52 @@ export const Displaced: Story = {
     docs: { story: { height: '410px' } },
   },
   play: settled(/Another Dormouse instance took/),
+};
+
+/** The Hosted status a removed or de-entitled Burrow reports. */
+const HOSTED_ENROLLED = {
+  relayOrigin: DEFAULT_RELAY_ORIGIN,
+  relayMode: 'hosted',
+  accountOrigin: 'https://hosted.dormouse.sh',
+  pairedClients: 1,
+} as const;
+
+/**
+ * Removed from the account page: the Relay closed the socket 4001, and this
+ * machine stood down. Enroll again clears the dead enrollment and begins a
+ * new code.
+ */
+export const RemovedHosted: Story = {
+  parameters: {
+    primedBurrow: { status: enrolledStatus({ ...HOSTED_ENROLLED, connection: 'removed' }) },
+    docs: { story: { height: '450px' } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('This computer was removed from your account at hosted.dormouse.sh.');
+    await canvas.findByRole('button', { name: 'Enroll again' });
+  },
+};
+
+/** A self-host Burrow its operator removed: Disconnect, then enroll again from the form. */
+export const RemovedSelfHost: Story = {
+  parameters: {
+    primedBurrow: { status: enrolledStatus({ connection: 'removed', pairedClients: 1 }) },
+  },
+  play: settled(/This computer was removed from .* Disconnect to enroll it again\./),
+};
+
+/** The account lost its plan: the Relay closed the socket 4002. Reconnect tries again. */
+export const NotEntitled: Story = {
+  parameters: {
+    primedBurrow: { status: enrolledStatus({ ...HOSTED_ENROLLED, connection: 'not-entitled' }) },
+    docs: { story: { height: '450px' } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('Your Hosted plan doesn’t include remote control right now.');
+    await canvas.findByRole('button', { name: 'Reconnect' });
+  },
 };
 
 /** Disconnect asks first: it drops every paired phone until each pairs again. */

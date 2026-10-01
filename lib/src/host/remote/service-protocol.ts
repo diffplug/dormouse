@@ -453,10 +453,12 @@ export interface BurrowConsoleStatus {
   relayMode: RelayMode;
   burrowId: string | null;
   /**
-   * The relay socket's state. `displaced` is the one that needs acting on:
-   * another Dormouse instance enrolled with the same `burrowId` took the relay
-   * slot, so this one stood down and no timer will bring it back — `reconnect()`
-   * takes the slot back (and displaces the other one in turn).
+   * The relay socket's state. The latched ones need acting on, since no timer
+   * brings them back (`docs/specs/relay.md` -> "Burrow side", relay socket
+   * policy): `displaced` — another Dormouse instance enrolled with the same
+   * `burrowId` took the relay slot, and `reconnect()` takes it back;
+   * `removed` — the Relay no longer knows this Burrow; `not-entitled` — its
+   * Hosted account no longer includes the Relay.
    */
   connection: BurrowStatus;
   pairedClients: number;

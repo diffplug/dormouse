@@ -473,13 +473,22 @@ lands hours late, or on another paired phone, cannot masquerade as a real
 alarm. (The spoken alarm has a sibling **Play test sound**; both live in
 `docs/specs/alert.md` → Alarm settings.)
 
-**Displaced** is the one connection state that needs a person. Another Dormouse
+**Displaced** is one of three connection states that need a person. Another Dormouse
 instance enrolled with the same `burrowId` took the relay slot, and this one stood
 down — terminally, on purpose, because two instances fighting over a slot is
 worse than one stopping. Reconnect takes it back, and displaces the other in
 turn.
 
 <Canvas of={RemoteControl.Displaced} />
+
+**Removed** is the second: the computer was removed from the account (or from
+`burrows.json`), so the Relay closed its socket and this machine stood down
+rather than retrying a token nothing will accept. On Hosted, Enroll again begins
+a fresh code; a self-host machine is disconnected and enrolled again from the
+form. The third, **not entitled**, is a Hosted plan that no longer includes
+remote control, and offers Reconnect.
+
+<Canvas of={RemoteControl.RemovedHosted} />
 
 **Disconnect** asks first, because forgetting the enrollment drops every paired
 phone until each pairs again.

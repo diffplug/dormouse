@@ -38,8 +38,10 @@ import {
   HOSTED_ENROLLMENT_CODE_LABEL,
   HOSTED_ENROLLMENT_ENDED_COPY,
   HOSTED_ENROLLMENT_REDEEMING_COPY,
+  NOT_ENTITLED_COPY,
   PAIRING_OUTCOME_LABEL,
   RemoteControlSection,
+  removedCopy,
 } from './RemoteControlSection';
 import { hostOf, pathRefusalSentence } from './remote-control-shared';
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
@@ -67,6 +69,7 @@ import { networkPolicyResult, type NetworkPolicy } from '../remote/network-polic
 import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getOneTimeSnapshot, subscribeToOneTime } from '../remote/burrow/one-time-store';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
+import { SETUP_BUTTON } from '../remote/setup-copy';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -831,6 +834,80 @@ describe('RemoteControlSection', () => {
     await render();
 
     expect(text()).toContain('took this Relay’s slot');
+    await act(async () => buttonLabelled('Reconnect')!.click());
+    expect(link.command).toHaveBeenCalledWith('reconnect');
+  });
+
+  it('says a self-host Burrow was removed from its Relay, with Disconnect alone', async () => {
+    platform = { burrow: makeLink(async () => enrolled({ connection: 'removed' })) };
+    await render();
+    expect(text()).toContain(removedCopy(enrolled()));
+    expect(text()).toContain('removed from laptop.tailnet.ts.net');
+    expect(buttonLabelled('Disconnect')).toBeTruthy();
+    for (const absent of ['Reconnect', 'Enroll again', SETUP_BUTTON]) {
+      expect(buttonLabelled(absent), absent).toBeUndefined();
+    }
+  });
+
+  it('enrolls a removed Hosted Burrow again: the dead enrollment cleared, then a code begun', async () => {
+    let enrolledNow = true;
+    const hosted = {
+      relayOrigin: DEFAULT_RELAY_ORIGIN,
+      relayMode: 'hosted' as const,
+      accountOrigin: 'https://hosted.dormouse.sh',
+    };
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'clearEnrollment') {
+        enrolledNow = false;
+        return {};
+      }
+      if (cmd === 'beginHostedEnrollment') return hostedWaiting();
+      return enrolledNow
+        ? enrolled({ ...hosted, connection: 'removed' })
+        : { ...NOT_ENROLLED, hostedEnrollment: hostedWaiting() };
+    });
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain('This computer was removed from your account at hosted.dormouse.sh.');
+    expect(buttonLabelled(SETUP_BUTTON)).toBeUndefined();
+    expect(buttonLabelled('Reconnect')).toBeUndefined();
+    expect(buttonLabelled('Disconnect')).toBeTruthy();
+
+    await act(async () => buttonLabelled('Enroll again')!.click());
+    const order = link.command.mock.calls
+      .map(([cmd]) => cmd)
+      .filter((cmd) => cmd === 'clearEnrollment' || cmd === 'beginHostedEnrollment');
+    expect(order).toEqual(['clearEnrollment', 'beginHostedEnrollment']);
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'ned-mac' });
+    // The code is in view, not folded behind Persistent Relay.
+    expect(codeShown()).toBe('23AB-YZ9K');
+  });
+
+  it('shows a begin refused after Enroll again cleared the enrollment', async () => {
+    let enrolledNow = true;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'clearEnrollment') {
+        enrolledNow = false;
+        return {};
+      }
+      if (cmd === 'beginHostedEnrollment') throw new Error('Couldn’t reach relay.dormouse.sh: the name doesn’t resolve.');
+      return enrolledNow ? enrolled({ relayMode: 'hosted', connection: 'removed' }) : NOT_ENROLLED;
+    });
+    platform = { burrow: link };
+    await render();
+    await act(async () => buttonLabelled('Enroll again')!.click());
+    expect(text()).toContain('Couldn’t reach relay.dormouse.sh: the name doesn’t resolve.');
+    expect(hostedForm().hidden).toBe(false);
+  });
+
+  it('says a Hosted plan no longer includes remote control, with Reconnect and Disconnect', async () => {
+    const link = makeLink(async () => enrolled({ relayMode: 'hosted', connection: 'not-entitled' }));
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain(NOT_ENTITLED_COPY);
+    expect(buttonLabelled(SETUP_BUTTON)).toBeUndefined();
+    expect(buttonLabelled('Enroll again')).toBeUndefined();
+    expect(buttonLabelled('Disconnect')).toBeTruthy();
     await act(async () => buttonLabelled('Reconnect')!.click());
     expect(link.command).toHaveBeenCalledWith('reconnect');
   });

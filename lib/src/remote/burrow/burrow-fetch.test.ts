@@ -5,7 +5,14 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { describeFetchFailure, describingFetchFailures } from './burrow-fetch';
+import {
+  API_ROUTES,
+  NOT_ENTITLED_ERROR,
+  UNAUTHORIZED_ERROR,
+  UNKNOWN_BURROW_TOKEN_ERROR,
+} from 'remote-lib-common';
+
+import { describeFetchFailure, describingFetchFailures, probeBurrowStanding } from './burrow-fetch';
 
 const URL_WITH_PATH = 'https://relay.dormouse.sh/api/burrow/enroll/begin?x=1';
 
@@ -54,5 +61,52 @@ describe('describingFetchFailures', () => {
 
     const answer = new Response('', { status: 503 });
     expect(await describingFetchFailures(() => Promise.resolve(answer))(URL_WITH_PATH)).toBe(answer);
+  });
+});
+
+describe('probeBurrowStanding', () => {
+  const enrollment = { relayUrl: 'https://relay.example', burrowToken: 'tok' };
+  const answering = (status: number, body: unknown) => {
+    const asked: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const fetch = (async (url: string, init?: RequestInit) => {
+      asked.push({ url, init });
+      return new Response(body === undefined ? null : JSON.stringify(body), { status });
+    }) as unknown as typeof globalThis.fetch;
+    return { asked, probe: () => probeBurrowStanding({ enrollment, fetch }) };
+  };
+
+  it('asks the push-devices read as this Burrow, bounded and refusing redirects', async () => {
+    const { asked, probe } = answering(200, { devices: [] });
+    expect(await probe()).toBeNull();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.url).toBe(`https://relay.example${API_ROUTES.pushDevices}`);
+    expect(asked[0]!.init?.redirect).toBe('error');
+    expect(asked[0]!.init?.signal).toBeInstanceOf(AbortSignal);
+    expect((asked[0]!.init?.headers as Record<string, string>).authorization).toBe('Bearer tok');
+  });
+
+  it('reads a Burrow gate’s 401 as removed and a 403 not-entitled as not-entitled, and nothing else', async () => {
+    for (const [status, body, standing] of [
+      [401, { error: UNAUTHORIZED_ERROR }, 'removed'],
+      [401, { error: UNKNOWN_BURROW_TOKEN_ERROR }, 'removed'],
+      [403, { error: NOT_ENTITLED_ERROR }, 'not-entitled'],
+      // A 401 or 403 that is not the Relay's own — a proxy's — proves nothing.
+      [401, { error: 'proxy auth required' }, null],
+      [401, undefined, null],
+      [403, { error: 'forbidden' }, null],
+      [403, { error: UNAUTHORIZED_ERROR }, null],
+      [401, { error: NOT_ENTITLED_ERROR }, null],
+      [500, { error: UNAUTHORIZED_ERROR }, null],
+      [502, undefined, null],
+    ] as const) {
+      expect(await answering(status, body).probe(), `${status} ${JSON.stringify(body)}`).toBe(standing);
+    }
+  });
+
+  it('rejects when no answer came', async () => {
+    const fetch = (async () => {
+      throw new TypeError('fetch failed');
+    }) as unknown as typeof globalThis.fetch;
+    await expect(probeBurrowStanding({ enrollment, fetch })).rejects.toThrow('fetch failed');
   });
 });

@@ -152,6 +152,14 @@ discarding the pin (rationale). Each row carries **Remove**, which tombstones th
 delivery id before deleting the record; the list carries **Scan a setup code**.
 Pairing continues into connecting.
 
+**A record the Relay's list no longer names is removed**, marked only off a
+`GET /api/burrows` that succeeded; a listed offline Burrow stays offline. Its
+row reads `BURROW_REMOVED_COPY` for the deployment Pocket read
+(`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone,
+which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the
+list**, showing that copy instead where the Burrow is gone; a failed re-read
+keeps the original.
+
 Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`;
 `SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
 gate in `lib/src/remote/pocket-app/App.tsx`; `PairingCodeView` in

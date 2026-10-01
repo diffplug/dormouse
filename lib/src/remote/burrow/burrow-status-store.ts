@@ -56,7 +56,7 @@ let refreshAgain = false;
  * the instance's `serviceId`. The *connection* moves underneath it
  * with no event at all: `connecting -> connected` on a normal start,
  * `connected -> disconnected` on a dropped relay, `-> displaced` when another
- * instance takes the slot. Without a poll the dialog would show whichever state
+ * instance takes the slot, `-> removed` when the Relay drops this Burrow. Without a poll the dialog would show whichever state
  * happened to be true the instant it opened — a machine that connected a second
  * later reads as permanently "Connecting…".
  *
@@ -367,9 +367,9 @@ export async function cancelHostedEnrollment(): Promise<void> {
 }
 
 /**
- * Take the relay slot back after `displaced` — which is terminal by design, so
- * nothing reconnects on its own. This displaces the other instance in turn
- * (`docs/specs/relay.md`, "Relay socket policy").
+ * Re-open the relay socket after a latched state — terminal by design, so
+ * nothing reconnects on its own. After `displaced` this displaces the other
+ * instance in turn (`docs/specs/relay.md`, "Burrow side", relay socket policy).
  */
 export async function reconnectBurrow(): Promise<void> {
   const active = requireBurrowLink();
