@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
+import { stateSequence } from 'dor-tools-lib/osc';
 import { fileViewerFormat } from './file-viewer-format.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 import { editorPage } from './editor-page.js';
@@ -179,8 +180,6 @@ export async function startFileViewer(input: string, { onDirty = () => {} }: { o
 /** The `dor __view-file <file>` entry: starts the viewer, which outlives the
  * call, and returns its title and OSC 367 announcement for the caller to print. */
 export async function runFileViewer(file: string): Promise<string> {
-  const viewer = await startFileViewer(file, { onDirty: dirty => {
-    process.stdout.write(`\x1b]367;state;${JSON.stringify({ v: 1, dirty })}\x07`);
-  } });
+  const viewer = await startFileViewer(file, { onDirty: dirty => { process.stdout.write(stateSequence({ dirty })); } });
   return announceViewer(viewer, viewer.target);
 }

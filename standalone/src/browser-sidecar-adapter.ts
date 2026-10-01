@@ -1,6 +1,6 @@
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
-import { recordToolEvents } from '../../lib/src/lib/tool-events';
+import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
@@ -329,7 +329,7 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
       for (const handler of this.dataHandlers) handler(payload);
     } else if (event === "terminal:toolEvents") {
       const payload = data as { id: string; events: TerminalProtocolEvent[] };
-      recordToolEvents(payload.id, payload.events);
+      applyLiveToolEvents(payload.id, payload.events);
     } else if (event === "terminal:semanticEvents") {
       const { id, events } = data as { id: string; events: TerminalSemanticEvent[] };
       applyTerminalSemanticEvents(id, events);

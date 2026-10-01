@@ -16,6 +16,7 @@ import 'monaco-editor/esm/vs/basic-languages/css/css.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution.js';
+import { connectToolFrame } from 'dor-tools-lib/frame';
 import './editor.css';
 
 monaco.languages.register({ id: 'json', extensions: ['.json', '.jsonl'] });
@@ -35,8 +36,6 @@ let model: monaco.editor.ITextModel;
 let savedRevision = 0;
 let version = '';
 let saving: Promise<void> | null = null;
-let parentOrigin: string | null = null;
-let connection = '';
 let lastDirty: boolean | undefined;
 let stateQueue = Promise.resolve();
 let appliedTheme = '';
@@ -56,17 +55,19 @@ function fail(reason: unknown) {
   error.textContent = reason instanceof Error ? reason.message : String(reason);
   error.hidden = false;
 }
-function post(data: Record<string, unknown>) {
-  if (parentOrigin) window.parent.postMessage({ __dormouse: 'editor', connection, ...data }, parentOrigin);
-}
 function dirty() { return !!model && model.getAlternativeVersionId() !== savedRevision; }
+// The host's close prompt saves through this channel (docs/specs/dor-tool.md -> Closing unsaved Tools).
+const host = connectToolFrame({
+  dirty: () => model ? dirty() : undefined,
+  save: () => save().catch(reason => { fail(reason); throw reason; }),
+});
 function report() {
   const changed = dirty();
   saveButton.disabled = !model || !changed || saving !== null;
   state.textContent = saving ? 'Saving…' : changed ? 'Unsaved' : 'Saved';
   // Post immediately so the preview is pinned before a second selection can
   // replace it. The ordered OSC reports also cover automated browser renders.
-  post({ kind: 'state', dirty: changed });
+  host.report();
   if (changed !== lastDirty) {
     lastDirty = changed;
     stateQueue = stateQueue.then(() => request('state', { dirty: changed })).then(() => {}, fail);
@@ -131,7 +132,6 @@ async function load() {
   savedRevision = model.getAlternativeVersionId();
   applyTheme();
   report();
-  post({ kind: 'ready', dirty: dirty() });
 }
 saveButton.addEventListener('click', () => { void save().catch(fail); });
 // Capture phase: runs before Monaco, and outside it too.
@@ -158,22 +158,6 @@ el('wrap').addEventListener('click', () => {
   editor?.updateOptions({ wordWrap: on ? 'on' : 'off' });
 });
 window.addEventListener('dormouse:theme', applyTheme);
-window.addEventListener('message', event => {
-  const data = event.data;
-  if (event.source !== window.parent || !data || data.__dormouse !== 'editor-command') return;
-  if (data.kind === 'connect' && typeof data.connection === 'string') {
-    parentOrigin = event.origin;
-    connection = data.connection;
-    if (model) post({ kind: 'ready', dirty: dirty() });
-    return;
-  }
-  if (event.origin !== parentOrigin || data.connection !== connection || !model) return;
-  if (data.kind === 'save' && typeof data.request === 'string') {
-    void save().then(() => post({ kind: 'saved', request: data.request, dirty: dirty() }), reason => {
-      fail(reason); post({ kind: 'saved', request: data.request, error: String(reason), dirty: dirty() });
-    });
-  }
-});
 window.addEventListener('beforeunload', event => {
   if (window.parent === window && dirty()) { event.preventDefault(); event.returnValue = ''; }
 });

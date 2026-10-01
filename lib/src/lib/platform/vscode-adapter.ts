@@ -1,6 +1,6 @@
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import { BROWSER_REQUEST_TIMEOUT_MS, type BrowserRequest, type BrowserResult } from './browser-automation';
-import { recordToolEvents } from '../tool-events';
+import { applyLiveToolEvents } from '../tool-events';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
 import { openPortRequestTimeoutMs } from './types';
@@ -123,7 +123,7 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ id: msg.id, data });
         }
       } else if (msg.type === 'terminal:toolEvents') {
-        recordToolEvents(msg.id, msg.events ?? []);
+        applyLiveToolEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:semanticEvents') {
         applyTerminalSemanticEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'dormouse:flushSessionSave') {

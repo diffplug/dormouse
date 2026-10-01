@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { parseToolState } from './tool-state';
+import { parseToolState } from 'dor-tools-lib/osc';
 import { clearToolDirty, getToolDirty, recordToolDirty, resetToolDirty, subscribeToToolDirty } from './tool-dirty-store';
 import { getToolAnnounce, resetToolAnnounces } from './tool-announce-store';
 import { recordToolEvents } from './tool-events';

@@ -2,8 +2,7 @@ import type { Dirent } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
-import { errorMessage } from './commands/shared.js';
-import type { ControlClient } from './commands/types.js';
+import { openSequence } from 'dor-tools-lib/osc';
 import { folderViewerPage } from './folder-viewer-page.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 
@@ -157,19 +156,15 @@ export async function startFolderViewer(input: string, { open }: { open: FolderO
 }
 
 /** The `dor __view-folder <dir>` entry: starts the viewer, which outlives the
- * call, and returns its title and OSC 367 announcement for the caller to print. Select
- * and activate run `dor open` through the control client, or report why none is available. */
-export async function runFolderViewer(dir: string, client: ControlClient | Error): Promise<string> {
+ * call, and returns its title and OSC 367 announcement for the caller to print.
+ * Select and activate write OSC 367 `open` to this Tool's terminal, in the
+ * order the page sends them; the host answers nothing, showing a failure in
+ * the preview slot. */
+export async function runFolderViewer(dir: string): Promise<string> {
   const viewer = await startFolderViewer(dir, {
-    // Requests are served only after `viewer` is assigned.
-    open: async (file, preview) => {
-      if (client instanceof Error) return { ok: false, error: client.message };
-      try {
-        const response = await client.toolSurface({ file, preview, cwd: viewer.root, fresh: false, minimized: false });
-        return { ok: true, status: response.status };
-      } catch (error) {
-        return { ok: false, error: errorMessage(error) };
-      }
+    open: async (path, preview) => {
+      process.stdout.write(openSequence({ path, preview }));
+      return { ok: true, status: 'sent' };
     },
   });
   return announceViewer(viewer, viewer.root);

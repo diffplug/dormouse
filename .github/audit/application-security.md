@@ -68,15 +68,23 @@ The lint scans all tracked JavaScript and TypeScript. Search the same files for
 `createServer`, `.listen(`, `serve(` and `WebSocket` too, because a new API or a
 host built at runtime can escape its patterns.
 The Local-file viewer subsection adds a tokenized file grant: read
-`dor/src/file-viewer.ts`, `dor/src/viewer-server.ts`, and
-`dor/src/file-viewer-loopback-guard.ts`, including its static asset discovery,
-descriptor lifetime, and every request gate. Also read `dor/src/editable-file.ts`,
-`dor/src/viewer-assets.ts`, and `dor/viewer/editor.ts`: writes must target only
-the opened text file, compare disk revisions, reject substituted symlinks,
-and never expose arbitrary assets or execute the source document. The folder viewer shares that
-listener and guard: read `dor/src/folder-viewer.ts` and
-`dor/src/folder-viewer-page.ts` for path containment, the POST gate, how names
-reach the page, and the git invocation.
+`dor-tools-builtin/src/file-viewer.ts`,
+`dor-tools-builtin/src/viewer-server.ts`, and
+`dor-tools-builtin/src/file-viewer-loopback-guard.ts`, including its static
+asset discovery, descriptor lifetime, and every request gate. Also read
+`dor-tools-builtin/src/editable-file.ts`,
+`dor-tools-builtin/src/viewer-assets.ts`, and
+`dor-tools-builtin/viewer/editor.ts`: writes must target only the opened text
+file, compare disk revisions, reject substituted symlinks, and never expose
+arbitrary assets or execute the source document. The folder viewer shares that
+listener and guard: read `dor-tools-builtin/src/folder-viewer.ts` and
+`dor-tools-builtin/src/folder-viewer-page.ts` for path containment, the POST
+gate, how names reach the page, and the git invocation; its POSTs become OSC
+367 `open`. The error viewer, `dor-tools-builtin/src/error-viewer.ts`, shares
+them too. For the OSC 367 `open` rule under `## Terminal output`, read
+`lib/src/lib/tool-open-requests.ts`, the `oscOpen` argument in
+`lib/src/lib/platform/dor-control-dispatch.ts`, and the `oscOpen` gate in
+`lib/src/components/wall/use-dor-control.ts`.
 
 For `## Network policy`, read `docs/specs/remote-network.md` -> "Policy", then
 `lib/src/remote/network-policy.ts`, the policy half of
@@ -207,8 +215,8 @@ as a subtraction rather than as two named subdirectories, which is the shape
 to prefer when you find the next one.
 
 Today the remainder is `lib/`, `relay/`, `remote-lib-common/`, `standalone/`,
-`vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`, `docs/`,
-`.impeccable/`, and the root files — but treat that as a description of the
+`vscode-ext/`, `dor/`, `dor-lib-common/`, `dor-tools-builtin/`, `dor-tools-lib/`, `canopy/`,
+`deploy/`, `docs/`, `.impeccable/`, and the root files — but treat that as a description of the
 current tree, not as your scope. Your scope is the remainder.
 
 Remote control is where the depth goes; the rest is a sweep for anything that

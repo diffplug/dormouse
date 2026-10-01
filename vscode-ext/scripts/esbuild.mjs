@@ -41,6 +41,10 @@ const common = {
     // not follow an import out into `lib/`, and `dor` has no package exports to
     // fall back on. Same alias `lib/vite.config.ts` and standalone carry.
     dor: fileURLToPath(new URL('../../dor/src', import.meta.url)),
+    // The built-in viewers' format registry, reached the same way.
+    'dor-tools-builtin': fileURLToPath(new URL('../../dor-tools-builtin/src', import.meta.url)),
+    // And the Tool protocol, which the host's OSC parser reads.
+    'dor-tools-lib': fileURLToPath(new URL('../../dor-tools-lib/src', import.meta.url)),
   },
 };
 

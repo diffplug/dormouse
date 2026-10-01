@@ -1,6 +1,6 @@
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
-import { recordToolEvents } from '../../lib/src/lib/tool-events';
+import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
@@ -154,7 +154,7 @@ export class TauriAdapter implements PlatformAdapter {
       // The Tool half of the sidecar's parse; its reports stayed with the
       // sidecar's AlertManager.
       listenToWindow<{ id: string; events: TerminalProtocolEvent[] }>("terminal:toolEvents", (event) => {
-        recordToolEvents(event.payload.id, event.payload.events);
+        applyLiveToolEvents(event.payload.id, event.payload.events);
       }),
 
       listenToWindow<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {

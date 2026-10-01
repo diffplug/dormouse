@@ -746,9 +746,9 @@ export function Wall({
   /**
    * A permanent Surface closure checks helper work before teardown
    * (`docs/specs/terminal-context.md` → "Promotion and source closure"), then a
-   * dirty Tool's consent (`docs/specs/dor-tool.md` → Editing files): a gesture
-   * passes `ask`, a Workspace close the ids it already asked about, and a
-   * command is refused.
+   * dirty Tool's consent (`docs/specs/dor-tool.md` → Closing unsaved Tools): a
+   * gesture passes `ask`, a Workspace close the ids it already asked about, and
+   * a command is refused.
    */
   const closeSurface = useCallback(async (id: string, editors: 'ask' | readonly string[] = []): Promise<string | null> => {
     if (pendingSurfaceCloses.current.has(id)) return 'This terminal is already closing';

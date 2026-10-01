@@ -487,14 +487,17 @@ sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
 - **The store seeds from `oneTimeStatus` and replaces its state with every
   `one-time` event that passes `isOneTimeState`**; an answer an event overtook
   is dropped. The indicator holds it for the window's life, so the panel
-  re-reads on mount.
+  re-reads on mount. **Never publish a failed read over a state already read,
+  unless an End has returned since**: a window that missed the End's event
+  must not show the phone connected.
 
 Source of truth: `OneTimeConnection` and `oneTimeEndedCopy` in
 `lib/src/components/OneTimeConnection.tsx`; `phoneOnAnyNetwork` in
 `lib/src/remote/network-policy.ts`; `QrCode` in
 `lib/src/components/QrCode.tsx`; `OneTimeIndicator` in
-`lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime` and
-`openOneTime` in `lib/src/remote/burrow/one-time-store.ts`. Pinned by
+`lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime`,
+`refreshOneTime`, `openOneTime`, and `endOneTime` in
+`lib/src/remote/burrow/one-time-store.ts`. Pinned by
 `lib/src/components/RemoteControlSection.test.tsx`,
 `lib/src/components/OneTimeIndicator.test.tsx`, and
 `lib/src/remote/burrow/one-time-store.test.ts`.

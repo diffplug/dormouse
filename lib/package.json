@@ -32,6 +32,7 @@
     "@zxing/library": "0.23.0",
     "clsx": "^2.1.1",
     "dor-lib-common": "workspace:*",
+    "dor-tools-lib": "workspace:*",
     "fflate": "0.8.3",
     "jsonc-parser": "3.3.1",
     "picomatch": "^4.0.7",

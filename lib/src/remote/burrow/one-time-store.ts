@@ -21,7 +21,7 @@ import type { OneTimeState } from './one-time-runtime';
 /**
  * `unsupported` is a build with no Burrow service behind it — the section above
  * the panel renders nothing there, and the indicator never shows. `error` means
- * there is a service and it would not say.
+ * there is a service and a read failed with no state the store may keep.
  */
 export type OneTimeStoreState =
   | { kind: 'unsupported' }
@@ -44,8 +44,17 @@ let unsubscribeFromLink: (() => void) | null = null;
  */
 let generation = 0;
 
+/**
+ * Set when an End returns, answered or refused, and cleared by the next
+ * publish. The service emits the End's event before it answers, but the store
+ * cannot tell that event's state from an earlier one whose successor it
+ * missed, so after an End a failed read keeps nothing.
+ */
+let endedSinceShown = false;
+
 function publish(next: OneTimeStoreState): void {
   snapshot = next;
+  endedSinceShown = false;
   for (const listener of listeners) listener();
 }
 
@@ -97,18 +106,21 @@ export async function refreshOneTime(): Promise<void> {
     return;
   }
   const mine = ++generation;
+  let next: OneTimeStoreState;
   try {
     const state = await active.command('oneTimeStatus');
-    if (mine !== generation) return;
-    publish(
-      isOneTimeState(state)
-        ? { kind: 'ready', state }
-        : { kind: 'error', message: describeBurrowError(undefined) },
-    );
+    next = isOneTimeState(state)
+      ? { kind: 'ready', state }
+      : { kind: 'error', message: describeBurrowError(undefined) };
   } catch (error) {
-    if (mine !== generation) return;
-    publish({ kind: 'error', message: describeBurrowError(error) });
+    next = { kind: 'error', message: describeBurrowError(error) };
   }
+  if (mine !== generation) return;
+  // A state already read stands, kept current by the events: the Baseboard
+  // holds this store for the window's life, and one failed re-read must not
+  // hide a connected phone.
+  if (next.kind === 'error' && snapshot.kind === 'ready' && !endedSinceShown) return;
+  publish(next);
 }
 
 /**
@@ -134,6 +146,10 @@ export async function openOneTime(): Promise<void> {
  */
 export async function endOneTime(): Promise<void> {
   const active = requireBurrowLink();
-  await active.command('oneTimeEnd');
+  try {
+    await active.command('oneTimeEnd');
+  } finally {
+    endedSinceShown = true;
+  }
   await refreshOneTime();
 }

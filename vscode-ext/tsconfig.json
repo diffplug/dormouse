@@ -25,7 +25,9 @@
     // dependency, so its protocol types resolve by path — same mapping the lib
     // app project uses.
     "paths": {
-      "dor/*": ["../dor/src/*"]
+      "dor/*": ["../dor/src/*"],
+      "dor-tools-builtin/*": ["../dor-tools-builtin/src/*"],
+      "dor-tools-lib/*": ["../dor-tools-lib/src/*"]
     }
   },
   // `../lib/src/globals.d.ts` declares the webview's `acquireVsCodeApi`, which

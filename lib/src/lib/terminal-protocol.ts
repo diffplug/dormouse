@@ -1,9 +1,8 @@
-import { parseToolState, type ToolState } from './tool-state';
+import { parseToolAnnounce, parseToolOpen, parseToolState, type ToolAnnounce, type ToolOpen, type ToolState } from 'dor-tools-lib/osc';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
 import { sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
 import { isProtocolCommandStart } from './tool-events';
-import { parseToolAnnounce, type ToolAnnounce } from './tool-announce';
 import {
   STRING_CONTROL_INTRODUCER,
   STRING_CONTROL_INTRODUCER_SCAN,
@@ -26,6 +25,8 @@ export type TerminalProtocolEvent =
   | { kind: 'notification'; notification: ActivityNotification }
   | { kind: 'toolAnnounce'; announce: ToolAnnounce }
   | { kind: 'toolState'; state: ToolState }
+  /** A request, not a report: acted on live, never reconstructed from replay. */
+  | { kind: 'toolOpen'; open: ToolOpen }
   | { kind: 'progress'; progress: ProtocolProgressUpdate }
   | { kind: 'response'; data: string }
   | { kind: 'semantic'; event: TerminalSemanticEvent };
@@ -309,7 +310,9 @@ export class TerminalProtocolParser {
       const announce = parseToolAnnounce(payload);
       if (announce) return [{ kind: 'toolAnnounce', announce }];
       const state = parseToolState(payload);
-      return state ? [{ kind: 'toolState', state }] : [];
+      if (state) return [{ kind: 'toolState', state }];
+      const open = parseToolOpen(payload);
+      return open ? [{ kind: 'toolOpen', open }] : [];
     }
     const colorResponse = this.parseColorQuery(content);
     if (colorResponse) return colorResponse;
@@ -516,15 +519,16 @@ function applyTerminalReport(sink: TerminalProtocolAlertSink, id: string, event:
 }
 
 /**
- * The Tool announcement, Tool state and command-start events `recordToolEvents`
+ * The Tool announcement, state, open and command-start events the renderer
  * acts on, in stream order: what a parse site forwards to the renderer that
- * holds the Tool stores. Reports stay with the owner's `AlertManager`, and a
- * response is the owner's alone to write.
+ * holds the Tool stores (`applyLiveToolEvents`). Reports stay with the owner's
+ * `AlertManager`, and a response is the owner's alone to write.
  */
 export function collectTerminalToolEvents(
   events: readonly TerminalProtocolEvent[],
 ): TerminalProtocolEvent[] {
-  return events.filter((event) => event.kind === 'toolAnnounce' || event.kind === 'toolState' || isProtocolCommandStart(event));
+  return events.filter((event) => event.kind === 'toolAnnounce' || event.kind === 'toolState' || event.kind === 'toolOpen'
+    || isProtocolCommandStart(event));
 }
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {
