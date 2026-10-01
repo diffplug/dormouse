@@ -23,6 +23,7 @@ import {
   isE2eRelayToBurrowFrame,
   isSetupTokenResponse,
   isBurrowEnrollBeginResponse,
+  isBurrowEnrollPollResponse,
   MAX_ENROLL_POLL_INTERVAL_S,
   MIN_ENROLL_POLL_INTERVAL_S,
   RELAY_BEARER_LENGTH,
@@ -340,5 +341,25 @@ test('isBurrowEnrollBeginResponse holds each field to its shape and bounds', () 
     { ...begin, interval: MAX_ENROLL_POLL_INTERVAL_S + 1 },
   ]) {
     assert.equal(isBurrowEnrollBeginResponse(wrong), false, JSON.stringify(wrong));
+  }
+});
+
+test('isBurrowEnrollPollResponse knows four answers, a redeemed one naming its Burrow', () => {
+  const burrowId = 'A'.repeat(22);
+  assert.ok(isBurrowEnrollPollResponse({ status: 'pending' }));
+  assert.ok(isBurrowEnrollPollResponse({ status: 'expired' }));
+  assert.ok(isBurrowEnrollPollResponse({ status: 'redeemed', burrowId }));
+  assert.ok(isBurrowEnrollPollResponse({ status: 'enrolled', enrollment: {} }));
+  for (const wrong of [
+    null,
+    'pending',
+    { status: 'redeemed' },
+    { status: 'redeemed', burrowId: 'short' },
+    { status: 'redeemed', burrowId: 7 },
+    { status: 'enrolled' },
+    { status: 'enrolled', enrollment: 'x' },
+    { status: 'approved' },
+  ]) {
+    assert.equal(isBurrowEnrollPollResponse(wrong), false, JSON.stringify(wrong));
   }
 });

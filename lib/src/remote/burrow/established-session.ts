@@ -13,6 +13,7 @@
  */
 
 import {
+  DIRECT_ONLY_DEADLINE_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   SESSION_END_V1,
   type DirectPath,
@@ -49,6 +50,15 @@ export function sealControl(session: NoiseTransportSession, value: object): Uint
     return null;
   }
 }
+
+/**
+ * Why a direct-only session can no longer be carried
+ * ({@link EstablishedE2eSessionDeps.onDirectOnlyBroken}): an application
+ * message arrived over the relay, the direct attempt was given up, or — read by
+ * the owner's reaper off {@link EstablishedE2eSession.directDeadlineAt} — the
+ * deadline passed with the session not yet direct.
+ */
+export type DirectOnlyBreak = 'relayed-app' | 'given-up' | 'deadline';
 
 /** The remote-api handler an established session drives. */
 export interface RemoteApiSessionLike {
@@ -114,13 +124,23 @@ export interface EstablishedE2eSessionDeps {
    */
   onTransportChanged?(path: DirectPath, cause: DirectRelayCause | null): void;
   /**
-   * Present only where the owner requires application data to arrive on the
-   * direct path alone: an application message decrypted off the relay is then
-   * **never handed to the remote-api handler**, and this is called instead, for
-   * the owner to end the session. Like {@link onFatal}, never called once this
-   * session is disposed. Absent, the relay carries protocol-v1 like the channel.
+   * **The direct path or nothing**: the one-time runtime always, and a paired
+   * Burrow exactly where its path policy is held
+   * (`docs/specs/remote-network.md` -> "Local networks"). Such a session has
+   * {@link EstablishedE2eSession.directDeadlineAt} to switch; an application
+   * message decrypted off the relay is **never handed to the remote-api
+   * handler**; and a given-up attempt leaves it nothing to stay on. Each is
+   * reported through {@link onDirectOnlyBroken}. Absent, the relay carries
+   * protocol-v1 like the channel.
    */
-  onRelayedApp?(): void;
+  readonly directOnly?: boolean;
+  /**
+   * A direct-only session can no longer be carried: the owner ends it, which
+   * is what makes this the last report. Like {@link onFatal}, never called once
+   * this session is disposed. A given-up attempt is reported a microtask later, so the decline
+   * the endpoint sends right after giving up goes out first.
+   */
+  onDirectOnlyBroken?(reason: DirectOnlyBreak): void;
   /** The owner's clock, which the idle deadline is read against. */
   readonly now: () => number;
   /** Every deadline the direct path arms; see {@link RemoteTimer}. */
@@ -139,7 +159,9 @@ export class EstablishedE2eSession {
   readonly #direct: DirectEndpoint;
   readonly #sendRelay: (ciphertext: Uint8Array) => void;
   readonly #onFatal: EstablishedE2eSessionDeps['onFatal'];
-  readonly #onRelayedApp: (() => void) | null;
+  readonly #onDirectOnlyBroken: ((reason: DirectOnlyBreak) => void) | null;
+  /** When a direct-only session must be direct by; `null` for one the relay may carry. */
+  readonly #directOnlyBy: number | null;
   readonly #now: () => number;
   #lastClientActivityAt: number;
   #disposed = false;
@@ -148,8 +170,10 @@ export class EstablishedE2eSession {
     this.#session = deps.session;
     this.#sendRelay = deps.sendRelay;
     this.#onFatal = deps.onFatal;
-    this.#onRelayedApp = deps.onRelayedApp ?? null;
     this.#now = deps.now;
+    const directOnly = deps.directOnly === true;
+    this.#onDirectOnlyBroken = directOnly ? (deps.onDirectOnlyBroken ?? null) : null;
+    this.#directOnlyBy = directOnly ? this.#now() + DIRECT_ONLY_DEADLINE_MS : null;
     this.#api = deps.createApi((payload) => this.#sendApp(payload));
     this.#direct = new DirectEndpoint('answerer', {
       peering: deps.directPeering,
@@ -164,7 +188,15 @@ export class EstablishedE2eSession {
       // disposes it on every route that replaces or tears one down, so a
       // session that is not disposed is the live one.
       isCurrent: () => !this.#disposed,
-      onTransportChanged: deps.onTransportChanged,
+      onTransportChanged: (path, cause) => {
+        deps.onTransportChanged?.(path, cause);
+        // A given-up attempt leaves only the relay, which may not carry a
+        // direct-only session. Deferred, so the decline the endpoint sends
+        // right after giving up reaches the Client before the owner's ending.
+        if (directOnly && path === 'relay' && cause !== null) {
+          queueMicrotask(() => this.#breakDirectOnly('given-up'));
+        }
+      },
       setTimer: deps.setTimer,
     });
     this.#lastClientActivityAt = this.#now();
@@ -179,9 +211,14 @@ export class EstablishedE2eSession {
     return this.#lastClientActivityAt + ESTABLISHED_E2E_IDLE_TIMEOUT_MS;
   }
 
-  /** What carries this session: `direct` once **both** directions have switched. */
-  get path(): DirectPath {
-    return this.#direct.path;
+  /**
+   * When a direct-only session must carry both directions on the direct path
+   * by — `DIRECT_ONLY_DEADLINE_MS` from its promotion — for the owner's reaper
+   * to end it with `'deadline'`. `null` for a session the relay may carry, and
+   * once both directions have switched: the deadline is met for good.
+   */
+  get directDeadlineAt(): number | null {
+    return this.#direct.path === 'direct' ? null : this.#directOnlyBy;
   }
 
   /**
@@ -207,8 +244,11 @@ export class EstablishedE2eSession {
    * so the direct path closes only once the goodbye has left it, bounded by
    * {@link SESSION_END_FLUSH_MS}. The relay send is synchronous onto the
    * owner's socket, which the dispose leaves open.
+   *
+   * `flush: false` is for an owner that is stopping and must leave no timer
+   * behind: the goodbye is sent best-effort and the channel closes at once.
    */
-  end(): void {
+  end({ flush = true }: { flush?: boolean } = {}): void {
     if (this.#disposed) return;
     const goodbye = sealControl(this.#session, SESSION_END_V1);
     // Before the send: a channel that refuses the goodbye reports its close,
@@ -216,7 +256,7 @@ export class EstablishedE2eSession {
     this.#disposed = true;
     if (goodbye) this.#direct.send(goodbye);
     this.#api.dispose();
-    if (goodbye) this.#direct.disposeAfterFlush(SESSION_END_FLUSH_MS);
+    if (goodbye && flush) this.#direct.disposeAfterFlush(SESSION_END_FLUSH_MS);
     else this.#direct.dispose();
   }
 
@@ -231,6 +271,11 @@ export class EstablishedE2eSession {
   #fatal(reason: string, cause?: DirectViolationCause): void {
     if (this.#disposed) return;
     this.#onFatal(reason, cause);
+  }
+
+  #breakDirectOnly(reason: DirectOnlyBreak): void {
+    if (this.#disposed) return;
+    this.#onDirectOnlyBroken?.(reason);
   }
 
   /**
@@ -248,10 +293,10 @@ export class EstablishedE2eSession {
       this.#fatal('a transport message failed to decrypt');
       return null;
     }
-    // Any stream chunk counts, a partial one included: an owner that requires
-    // the direct path wants no application byte on the relay at all.
-    if (receipt.kind === 'app' && carrier === 'relay' && this.#onRelayedApp) {
-      this.#onRelayedApp();
+    // Any stream chunk counts, a partial one included: a direct-only session
+    // takes no application byte off the relay at all.
+    if (receipt.kind === 'app' && carrier === 'relay' && this.#directOnlyBy !== null) {
+      this.#breakDirectOnly('relayed-app');
       return null;
     }
     // The one thing that refreshes the idle deadline, keepalive or application

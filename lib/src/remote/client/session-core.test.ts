@@ -175,27 +175,39 @@ describe('awaitDirect', () => {
     return { ...made, reply };
   }
 
-  it('answers false at once with no session, and when the attempt is given up', async () => {
-    expect(await makeCore().core.awaitDirect(LATER)).toBe(false);
+  it('answers at once with no session, and with the cause when the attempt is given up', async () => {
+    expect(await makeCore().core.awaitDirect(LATER)).toBe('lost');
 
     const { core, reply } = await offered();
     const waiting = core.awaitDirect(LATER);
     reply({ v: 1, t: 'direct-decline' });
-    expect(await waiting).toBe(false);
+    expect(await waiting).toBe('declined');
     // The session itself is still up: what to do about it is the owner's.
     expect(core.establishedRoute).toBe(ROUTE);
+    // Asked again, the cause is already known.
+    expect(await core.awaitDirect(LATER)).toBe('declined');
   });
 
-  it('answers false when the session ends or the time passes', async () => {
+  it('answers with how the session ended, or that the time passed', async () => {
     const ending = await offered();
     const ended = ending.core.awaitDirect(LATER);
     ending.reply(SESSION_END_V1);
-    expect(await ended).toBe(false);
+    expect(await ended).toBe('ended-by-burrow');
+
+    const lost = await offered();
+    const lostWait = lost.core.awaitDirect(LATER);
+    lost.core.loseBurrow('the channel closed');
+    expect(await lostWait).toBe('lost');
+
+    const retired = await offered();
+    const retiredWait = retired.core.awaitDirect(LATER);
+    retired.core.endSession('connection replaced', { notifyGone: false });
+    expect(await retiredWait).toBe('retired');
 
     const slow = await offered();
     const timedOut = slow.core.awaitDirect(LATER);
     slow.timers.fireAt(LATER);
-    expect(await timedOut).toBe(false);
+    expect(await timedOut).toBe('timeout');
   });
 });
 

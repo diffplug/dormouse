@@ -2,27 +2,26 @@
  * Who serves this Pocket, which decides the ICE servers its direct path gathers
  * through (`docs/specs/remote-network.md` -> "Anywhere"): one bundle, served by
  * Hosted and by every self-host Relay. **Hosted's relay staging writes
- * {@link POCKET_DEPLOYMENT_PATH}**, and nothing else does — a self-host Relay
+ * `POCKET_DEPLOYMENT_FILE`** (`remote-lib-common`), and nothing else does — a self-host Relay
  * answers that path with its shell or a 404 — so no policy crosses the wire and
  * anything but Hosted's exact answer reads as self-host, which gathers through
  * no ICE server.
  */
 
+import { HOSTED_POCKET_DEPLOYMENT, POCKET_DEPLOYMENT_FILE } from 'remote-lib-common';
+
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { hostedDirectPeer, selfHostDirectPeer } from '../client/browser-direct-peer';
 import { isRecord } from '../../lib/is-record';
 
-/** The file Hosted stages beside Pocket (`hosted/scripts/stage-relay.mjs`). */
-export const POCKET_DEPLOYMENT_PATH = '/deployment.json';
-
-/** What {@link POCKET_DEPLOYMENT_PATH} holds where Hosted serves Pocket. */
-export const HOSTED_DEPLOYMENT = { deployment: 'hosted' } as const;
+/** Where this page reads the file Hosted stages beside Pocket: its own origin's root. */
+export const POCKET_DEPLOYMENT_PATH = `/${POCKET_DEPLOYMENT_FILE}`;
 
 export type PocketDeployment = 'hosted' | 'self-host';
 
-/** `hosted` for exactly {@link HOSTED_DEPLOYMENT}'s shape, else `self-host`. */
+/** `hosted` for exactly `HOSTED_POCKET_DEPLOYMENT`'s shape, else `self-host`. */
 export function parsePocketDeployment(body: unknown): PocketDeployment {
-  return isRecord(body) && body.deployment === HOSTED_DEPLOYMENT.deployment ? 'hosted' : 'self-host';
+  return isRecord(body) && body.deployment === HOSTED_POCKET_DEPLOYMENT.deployment ? 'hosted' : 'self-host';
 }
 
 /** Who serves this page, read off its own origin; **never rejects** — a failure is `self-host`. */

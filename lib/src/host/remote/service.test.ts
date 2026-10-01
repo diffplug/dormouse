@@ -2750,13 +2750,14 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toHaveLength(1);
   });
 
-  it('holds one a replaced code’s poll redeems, and drops the code that replaced it', async () => {
+  it('holds one a cancelled code’s poll redeems, and drops the code begun after it', async () => {
     hosted();
     await command('beginHostedEnrollment', { label: 'x' });
     const answer = heldPoll();
     await nextPoll();
+    await command('cancelHostedEnrollment');
     begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
-    await command('beginHostedEnrollment', { label: 'x', replace: true });
+    await command('beginHostedEnrollment', { label: 'x' });
     expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
     answer(enrolledAnswer());
     await drain(() => store.enrollment !== null);
@@ -2829,7 +2830,7 @@ describe('Hosted enrollment', () => {
     });
     // Nor does a Cancel or a begin void it.
     await command('cancelHostedEnrollment');
-    expect((await command('beginHostedEnrollment', { label: 'x', replace: true })).result).toEqual({
+    expect((await command('beginHostedEnrollment', { label: 'x' })).result).toEqual({
       status: 'redeeming',
     });
     expect(beginRequests()).toHaveLength(1);
@@ -2866,10 +2867,12 @@ describe('Hosted enrollment', () => {
   it('ends answer-lost when the Relay says an earlier poll redeemed the code', async () => {
     hosted();
     await command('beginHostedEnrollment', { label: 'x' });
-    polls.push({ status: 200, body: { status: 'redeemed' } });
+    const lost = 'A'.repeat(22);
+    polls.push({ status: 200, body: { status: 'redeemed', burrowId: lost } });
     await nextPoll();
 
-    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'answer-lost' });
+    // Naming the Burrow the account must remove.
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'answer-lost', burrowId: lost });
     expect(store.enrollment).toBeNull();
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
     expect(pollRequests()).toHaveLength(1);
@@ -2911,7 +2914,7 @@ describe('Hosted enrollment', () => {
     expect((await command('status')).result).toMatchObject({ enrolled: false });
   });
 
-  it('answers the code already waiting to a begin that does not ask to replace it', async () => {
+  it('answers the code already waiting to a second begin', async () => {
     // Another VS Code window's Enroll lands on this service: voiding the code
     // the first window shows would leave it approving nothing.
     hosted();
@@ -2937,38 +2940,28 @@ describe('Hosted enrollment', () => {
     expect(beginRequests()).toHaveLength(1);
   });
 
-  it('keeps what was waiting or ended until a replacing begin has a code', async () => {
+  it('keeps one that ended until a new begin has a code, then replaces it, saying so', async () => {
     hosted();
-    const waiting = (await command('beginHostedEnrollment', { label: 'x' })).result;
-    const events = statusEvents().length;
-    begin = { ...begin, interval: 0 };
-    expect((await command('beginHostedEnrollment', { label: 'x', replace: true })).error).toContain(
-      'not an enrollment code',
-    );
-    expect(await hostedEnrollment()).toEqual(waiting);
-    expect(statusEvents()).toHaveLength(events);
-    // Still polled.
-    await nextPoll();
-    expect(pollRequests()).toHaveLength(1);
-
+    await command('beginHostedEnrollment', { label: 'x' });
     polls.push({ status: 200, body: { status: 'expired' } });
     await nextPoll();
     expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
-    expect((await command('beginHostedEnrollment', { label: 'x', replace: true })).error).toBeDefined();
-    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
-  });
 
-  it('replaces one waiting with a begin that asks to, saying so', async () => {
-    hosted();
-    await command('beginHostedEnrollment', { label: 'x' });
+    // "Get a new code" is a begin: one that fails keeps the ending on screen.
     const events = statusEvents().length;
-    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
-    await command('beginHostedEnrollment', { label: 'x', replace: true });
+    const good = begin;
+    begin = { ...begin, interval: 0 };
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain('not an enrollment code');
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+    expect(statusEvents()).toHaveLength(events);
+
+    begin = { ...good, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    await command('beginHostedEnrollment', { label: 'x' });
     expect(statusEvents()).toHaveLength(events + 1);
     await nextPoll();
-
-    expect(pollRequests()).toHaveLength(1);
-    expect(JSON.parse(pollRequests()[0]!.init!.body as string)).toEqual({ deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH) });
+    expect(JSON.parse(pollRequests().at(-1)!.init!.body as string)).toEqual({
+      deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH),
+    });
     expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
   });
 });

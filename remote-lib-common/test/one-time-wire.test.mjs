@@ -10,11 +10,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  DIRECT_ONLY_DEADLINE_MS,
   DEFAULT_PAIRING_TTL_MS,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_ONE_TIME_FORWARDED,
   MAX_ONE_TIME_FRAME_LENGTH,
-  ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
   RELAY_PING,
@@ -172,11 +172,10 @@ test('the room forwards a handshake, never a session', () => {
 test('the timings: a pairing-length link, a short grace, and a direct deadline inside it', () => {
   assert.equal(ONE_TIME_LINK_TTL_MS, DEFAULT_PAIRING_TTL_MS);
   assert.equal(ONE_TIME_LINK_TTL_MS, 5 * 60 * 1000);
-  assert.equal(ONE_TIME_EXPIRY_GRACE_MS, 30_000);
-  assert.equal(ONE_TIME_DIRECT_DEADLINE_MS, 15_000);
+  assert.equal(ONE_TIME_EXPIRY_GRACE_MS, 45_000);
   // A confirmation at the last second of the link still has its whole direct
   // deadline before the room's hard deadline closes the rendezvous.
-  assert.ok(ONE_TIME_DIRECT_DEADLINE_MS < ONE_TIME_EXPIRY_GRACE_MS);
+  assert.ok(DIRECT_ONLY_DEADLINE_MS < ONE_TIME_EXPIRY_GRACE_MS);
 });
 
 test('the rendezvous keepalive is the relay socket\'s: two fixed strings no frame can be', () => {

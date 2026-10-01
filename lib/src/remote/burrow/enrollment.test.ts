@@ -518,8 +518,15 @@ describe('Hosted device-code enrollment', () => {
     it('reads pending, expired, and redeemed as they are', async () => {
       expect(await poll(json(200, { status: 'pending' }))).toEqual({ status: 'pending' });
       expect(await poll(json(200, { status: 'expired' }))).toEqual({ status: 'expired' });
-      // An earlier poll's redemption whose answer never arrived.
-      expect(await poll(json(200, { status: 'redeemed' }))).toEqual({ status: 'redeemed' });
+      // An earlier poll's redemption whose answer never arrived, naming the
+      // Burrow it enrolled.
+      const burrowId = 'A'.repeat(22);
+      expect(await poll(json(200, { status: 'redeemed', burrowId, extra: 1 }))).toEqual({ status: 'redeemed', burrowId });
+      // One that names no Burrow is no answer this build reads.
+      expect(await poll(json(200, { status: 'redeemed' }))).toEqual({
+        status: 'failed',
+        message: expect.stringContaining('not an enrollment poll'),
+      });
     });
 
     it('retries what told it nothing, slowing down on a 429', async () => {

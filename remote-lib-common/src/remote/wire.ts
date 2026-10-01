@@ -426,14 +426,35 @@ export interface BurrowEnrollPollRequest {
 /**
  * `expired` also answers an unknown device code. `enrolled` answers once: the
  * redemption is single-use. `redeemed` answers every later poll of that code
- * until the approval expires: an earlier poll enrolled a Burrow whose answer
- * never reached this one, which the account must remove.
+ * until the approval expires: an earlier poll enrolled `burrowId`, whose answer
+ * never reached this one, and which the account must remove.
  */
 export type BurrowEnrollPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
-  | { status: 'redeemed' }
+  | { status: 'redeemed'; burrowId: string }
   | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
+
+/**
+ * A poll answer of a known status, `redeemed` naming a routing-id-shaped
+ * Burrow. `enrolled`'s enrollment is only an object here: the Burrow holds it
+ * to its own enrollment guard.
+ */
+export function isBurrowEnrollPollResponse(value: unknown): value is BurrowEnrollPollResponse {
+  if (!value || typeof value !== 'object') return false;
+  const answer = value as Record<string, unknown>;
+  switch (answer.status) {
+    case 'pending':
+    case 'expired':
+      return true;
+    case 'redeemed':
+      return isE2eId(answer.burrowId);
+    case 'enrolled':
+      return !!answer.enrollment && typeof answer.enrollment === 'object';
+    default:
+      return false;
+  }
+}
 
 /**
  * Burrow-token auth. The single-use setup credential an enrolled Burrow mints for

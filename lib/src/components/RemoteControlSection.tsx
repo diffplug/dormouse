@@ -13,7 +13,7 @@ import {
   useMinutesLeft,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
-import { ACCOUNT_PAGE_PATH } from '../host/relay-origin';
+import { ACCOUNT_PAGE_PATH, HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
 import type {
   BurrowConsoleStatus,
   HostedEnrollmentEndReason,
@@ -559,7 +559,7 @@ function UnenrolledRelay({ status }: { status: BurrowConsoleStatus }) {
           />,
         ]
       : [
-          'Enroll this Dormouse with your hosted.dormouse.sh account, so paired phones can reconnect any time.',
+          `Enroll this Dormouse with your ${hostOf(status.accountOrigin ?? HOSTED_ACCOUNT_ORIGIN)} account, so paired phones can reconnect any time.`,
           <>
             <HostedEnrollView
               enrollment={status.hostedEnrollment}
@@ -608,26 +608,23 @@ export const HOSTED_ENROLLMENT_ENDED_COPY: Record<HostedEnrollmentEndReason, str
   'not-entitled':
     'The account that approved that code can’t use the Hosted Relay, so this computer was not enrolled.',
   'answer-lost':
-    'That code was approved and used, but the answer never reached this computer, so it was not enrolled. ' +
-    'Remove the computer it added from your account, then enroll again.',
+    'That code was approved and used, but the answer never reached this computer, so it was not enrolled.',
   failed: 'This computer could not finish enrolling.',
 };
 
 /** The copy a status's `redeeming` shows: approved, and the enrollment being saved. */
 export const HOSTED_ENROLLMENT_REDEEMING_COPY = 'Approved. Enrolling this computer…';
 
-/**
- * The account page the service names in `status.accountOrigin`, or failing
- * that — a broker older than the field — the origin of the URL it composed.
- */
-function accountPage(accountOrigin: string | null, verificationUrl?: string): string | null {
-  if (accountOrigin !== null) return `${accountOrigin}${ACCOUNT_PAGE_PATH}`;
-  if (verificationUrl === undefined) return null;
-  try {
-    return `${new URL(verificationUrl).origin}${ACCOUNT_PAGE_PATH}`;
-  } catch {
-    return null;
-  }
+/** The account page the service names in `status.accountOrigin`, where computers are removed. */
+function accountPage(accountOrigin: string | null): string | null {
+  return accountOrigin === null ? null : `${accountOrigin}${ACCOUNT_PAGE_PATH}`;
+}
+
+/** What a lost answer asks of the person: the Burrow it enrolled, named where the service knows it. */
+export function answerLostRemoval(burrowId: string | undefined): string {
+  return burrowId
+    ? `Remove Burrow ${burrowId} from your account, then enroll again.`
+    : 'Remove the computer it added from your account, then enroll again.';
 }
 
 /** Why the last Hosted enrollment ended, with the account page where it says to go there. */
@@ -638,12 +635,12 @@ function HostedEnrollmentEnded({
   ended: Extract<HostedEnrollmentState, { status: 'ended' }>;
   accountOrigin: string | null;
 }) {
-  const page = ended.reason === 'answer-lost' ? accountPage(accountOrigin) : null;
+  const lost = ended.reason === 'answer-lost';
+  const page = lost ? accountPage(accountOrigin) : null;
   return (
     <div className="mt-1.5 text-sm leading-relaxed" role="status">
-      <div className="text-foreground">
-        {own(HOSTED_ENROLLMENT_ENDED_COPY, ended.reason) ?? HOSTED_ENROLLMENT_ENDED_COPY.failed}
-      </div>
+      <div className="text-foreground">{HOSTED_ENROLLMENT_ENDED_COPY[ended.reason]}</div>
+      {lost ? <div className="mt-1 text-foreground">{answerLostRemoval(ended.burrowId)}</div> : null}
       {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
       {page ? (
         <div className="mt-1">
@@ -685,9 +682,8 @@ function HostedEnrollView({
     void run(async () => {
       setBeginning(true);
       try {
-        // "Get a new code" replaces whatever code is waiting by now; the
-        // first Enroll joins one another window already has.
-        await beginHostedEnrollment(label.trim(), { replace: ended !== null });
+        // A code another window has waiting is answered; one that ended is replaced.
+        await beginHostedEnrollment(label.trim());
       } finally {
         setBeginning(false);
       }
@@ -724,7 +720,7 @@ function HostedEnrollView({
             disabled={busy || label.trim() === ''}
             className={modalActionButton({ tone: 'primary' })}
           >
-            {beginning ? 'Getting a code…' : ended ? 'Get a new code' : 'Enroll with hosted.dormouse.sh'}
+            {beginning ? 'Getting a code…' : ended ? 'Get a new code' : `Enroll with ${hostOf(accountOrigin ?? HOSTED_ACCOUNT_ORIGIN)}`}
           </button>
           {ended ? (
             <button
@@ -757,7 +753,7 @@ function HostedEnrollmentCode({
 }) {
   const minutesLeft = useMinutesLeft(waiting.expiresAt) ?? 0;
   const account = hostOf(waiting.verificationUrl);
-  const page = accountPage(accountOrigin, waiting.verificationUrl);
+  const page = accountPage(accountOrigin);
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">Approve this computer at your account. Check that it shows this code:</div>

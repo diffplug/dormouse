@@ -10,6 +10,7 @@ import {
   ORIGIN_MISMATCH_ERROR,
   UNAUTHORIZED_ERROR,
   isBurrowEnrollBeginResponse,
+  isBurrowEnrollPollResponse,
   isE2eId,
   isNoiseStaticMaterial,
   mintNoiseStaticKeyPair,
@@ -350,15 +351,15 @@ export async function beginHostedEnrollment(
 /**
  * What one poll says. `retry` is a poll that told nothing — the Relay
  * unreachable, a 5xx, or a 429, which asks the Burrow to `slowDown` — and the
- * next poll asks again; `redeemed` is an approval an earlier poll spent, whose
- * answer never arrived; `refused` keeps the copy for its fixed reasons to the
+ * next poll asks again; `redeemed` is an approval an earlier poll spent on
+ * `burrowId`, whose answer never arrived; `refused` keeps the copy for its fixed reasons to the
  * panel; `failed` names what went wrong.
  */
 export type HostedEnrollmentPoll =
   | { status: 'pending' }
   | { status: 'retry'; slowDown: boolean }
   | { status: 'expired' }
-  | { status: 'redeemed' }
+  | { status: 'redeemed'; burrowId: string }
   | { status: 'enrolled'; enrollment: BurrowEnrollment }
   | { status: 'refused'; reason: 'not-entitled' | 'account-full' }
   | { status: 'failed'; message: string };
@@ -401,14 +402,14 @@ export async function pollHostedEnrollment(
     return { status: 'failed', message: refusalMessage(response.status, detail, relayOrigin) };
   }
   const body: unknown = await response.json().catch(() => null);
-  const status = (body as { status?: unknown } | null)?.status;
-  if (status === 'pending' || status === 'expired' || status === 'redeemed') return { status };
-  if (status !== 'enrolled') {
+  if (!isBurrowEnrollPollResponse(body)) {
     return { status: 'failed', message: 'Could not enroll: the Relay’s answer was not an enrollment poll.' };
   }
+  // Rebuilt, so nothing but the guarded fields reaches `status`.
+  if (body.status === 'redeemed') return { status: 'redeemed', burrowId: body.burrowId };
+  if (body.status !== 'enrolled') return { status: body.status };
   try {
-    const enrolled = (body as { enrollment?: unknown }).enrollment;
-    return { status: 'enrolled', enrollment: enrollmentFrom(relayOrigin, enrolled, label, noiseStatic) };
+    return { status: 'enrolled', enrollment: enrollmentFrom(relayOrigin, body.enrollment, label, noiseStatic) };
   } catch (error) {
     return { status: 'failed', message: errorMessage(error) };
   }

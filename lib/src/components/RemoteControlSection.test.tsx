@@ -397,12 +397,9 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY.failed);
     expect(text()).toContain('keychain is locked');
 
-    // A new code replaces whatever code is waiting by now; the first Enroll does not.
+    // A new code is just a begin, which the service answers with a fresh one.
     await act(async () => buttonLabelled('Get a new code')!.click());
-    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', {
-      label: NOT_ENROLLED.suggestedLabel,
-      replace: true,
-    });
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: NOT_ENROLLED.suggestedLabel });
     await act(async () => buttonLabelled('Done')!.click());
     expect(link.command).toHaveBeenCalledWith('cancelHostedEnrollment');
   });
@@ -430,14 +427,18 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Cancel')).toBeUndefined();
   });
 
-  it('sends a lost answer to the account page to remove what it added', async () => {
+  it('sends a lost answer to the account page to remove the Burrow it added, by name', async () => {
     const openExternal = vi.fn();
     platform = {
-      burrow: makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: { status: 'ended', reason: 'answer-lost' } })),
+      burrow: makeLink(async () => ({
+        ...NOT_ENROLLED,
+        hostedEnrollment: { status: 'ended', reason: 'answer-lost', burrowId: 'T7lzkkrPT8nx4m9zf90V4h' },
+      })),
       openExternal,
     };
     await render();
     expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY['answer-lost']);
+    expect(text()).toContain('Remove Burrow T7lzkkrPT8nx4m9zf90V4h from your account');
     await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
   });

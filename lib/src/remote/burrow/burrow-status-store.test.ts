@@ -408,6 +408,10 @@ describe('a Hosted enrollment in the status', () => {
         await vi.advanceTimersByTimeAsync(2000);
         expect(shown()).toEqual({ status: 'ended', reason });
       }
+      // A lost answer keeps the Burrow it names, and nothing it does not know.
+      hostedEnrollment = { status: 'ended', reason: 'answer-lost', burrowId: 'B1', extra: true };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(shown()).toEqual({ status: 'ended', reason: 'answer-lost', burrowId: 'B1' });
       hostedEnrollment = { status: 'redeeming' };
       await vi.advanceTimersByTimeAsync(2000);
       expect(shown()).toEqual({ status: 'redeeming' });

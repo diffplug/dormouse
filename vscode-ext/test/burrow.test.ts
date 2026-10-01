@@ -1629,7 +1629,7 @@ describe('serving the other windows', () => {
     expect(bound.posted).toEqual([]);
   });
 
-  it('answers another window’s Enroll with the code this one is showing, replacing it only when asked', async () => {
+  it('answers another window’s Enroll with the code this one is showing', async () => {
     // A window that never contended answers `status` idle and sees no code;
     // its Enroll lands on this service, and replacing the code would leave the
     // first window showing one the account can no longer approve.
@@ -1642,12 +1642,11 @@ describe('serving the other windows', () => {
           return new Response(JSON.stringify({ status: 'pending' }), { status: 200 });
         }
         begun += 1;
-        const userCode = begun === 1 ? '23AB-YZ9K' : '9999-ZZZZ';
         return new Response(
           JSON.stringify({
             // The bearer shape: 32 bytes, base64url.
             deviceCode: String(begun).repeat(43),
-            userCode,
+            userCode: '23AB-YZ9K',
             expiresAt: Date.now() + 10 * 60_000,
             interval: 5,
           }),
@@ -1671,15 +1670,6 @@ describe('serving the other windows', () => {
       await waitFor(() => far.results.length > 0);
       expect(far.results[0]).toMatchObject({ result: { status: 'waiting', userCode: '23AB-YZ9K' } });
       expect(begun).toBe(1);
-
-      link.forwardCommand({
-        burrowRequestId: 'rh-2',
-        cmd: 'beginHostedEnrollment',
-        params: { label: 'Other', replace: true },
-      });
-      await waitFor(() => far.results.length > 1);
-      expect(far.results[1]).toMatchObject({ result: { status: 'waiting', userCode: '9999-ZZZZ' } });
-      expect(begun).toBe(2);
     } finally {
       window.dispose();
     }

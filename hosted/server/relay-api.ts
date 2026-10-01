@@ -489,8 +489,8 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     return database(c, async (db) => {
       const {
         rows: [approval],
-      } = await db.query<OwnerRow & { redeemed: boolean }>(
-        `SELECT a."userId", a."redeemedAt" IS NOT NULL AS redeemed, ${OWNER_COLUMNS}
+      } = await db.query<OwnerRow & { redeemedBurrowId: string | null }>(
+        `SELECT a."userId", a."redeemedBurrowId", ${OWNER_COLUMNS}
         FROM dormouse_relay_enrollment_approvals a JOIN "user" u ON u.id = a."userId"
         WHERE a."userCode" = $1 AND a."expiresAt" > now()`,
         [userCode],
@@ -498,7 +498,9 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       if (!approval) return answer({ status: "pending" });
       // Spent by an earlier poll whose answer this Burrow never read: the
       // Burrow it minted is the account's to remove, and nothing redeems twice.
-      if (approval.redeemed) return answer({ status: "redeemed" });
+      if (approval.redeemedBurrowId !== null) {
+        return answer({ status: "redeemed", burrowId: approval.redeemedBurrowId });
+      }
       const owner = ownerOf(approval);
       // Rechecked here: an approval does not outlive its approver's entitlement.
       if (!owner.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
@@ -531,12 +533,14 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         if (rowCount) return "enrolled";
         // Lost to a poll that redeemed it while this one waited on the lock,
         // or expired since the read above.
-        const { rowCount: redeemed } = await db.query(
-          `SELECT 1 FROM dormouse_relay_enrollment_approvals
-          WHERE "userCode" = $1 AND "expiresAt" > now() AND "redeemedAt" IS NOT NULL`,
+        const {
+          rows: [spent],
+        } = await db.query<{ redeemedBurrowId: string }>(
+          `SELECT "redeemedBurrowId" FROM dormouse_relay_enrollment_approvals
+          WHERE "userCode" = $1 AND "expiresAt" > now() AND "redeemedBurrowId" IS NOT NULL`,
           [userCode],
         );
-        return redeemed ? "redeemed" : "expired";
+        return spent ? { redeemed: spent.redeemedBurrowId } : "expired";
       });
       if (outcome === "full") {
         const where = c.env.ACCOUNT_ORIGIN;
@@ -549,7 +553,8 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
           409,
         );
       }
-      if (outcome !== "enrolled") return answer({ status: outcome });
+      if (outcome === "expired") return answer({ status: "expired" });
+      if (outcome !== "enrolled") return answer({ status: "redeemed", burrowId: outcome.redeemed });
       return answer({
         status: "enrolled",
         // The Burrow enforces `origin`/`rpId` as its ConnectionPolicy; Hosted

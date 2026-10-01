@@ -17,7 +17,7 @@ import {
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   MAX_ONE_TIME_FORWARDED,
   MAX_ONE_TIME_FRAME_LENGTH,
-  ONE_TIME_DIRECT_DEADLINE_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   ONE_TIME_LINK_TTL_MS,
   RELAY_PING,
   RELAY_PING_INTERVAL_MS,
@@ -545,7 +545,7 @@ describe('OneTimeRuntime: the session', () => {
   it('ends direct-failed when no switch lands by the direct deadline', async () => {
     makeRuntime();
     await connecting();
-    clock.advance(ONE_TIME_DIRECT_DEADLINE_MS - 1);
+    clock.advance(DIRECT_ONLY_DEADLINE_MS - 1);
     expect(runtime.state.status).toBe('connecting');
     clock.advance(1);
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');

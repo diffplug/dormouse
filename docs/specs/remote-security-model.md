@@ -330,7 +330,7 @@ runtime that carries these rules out ("Burrow runtime").
   outcome promotes the same session; the phone refuses protocol-v1 until both
   directions are direct, and an application message the Burrow decrypts off
   the rendezvous ends the session unread. A session with no direct path by
-  `ONE_TIME_DIRECT_DEADLINE_MS` ends at both ends, with no relayed fallback.
+  `DIRECT_ONLY_DEADLINE_MS` ends at both ends; no relayed fallback.
 - **After the switch the direct channel, not the rendezvous, is the lifecycle
   authority** — for this ceremony alone, the carve-out from
   [remote-api.md](./remote-api.md) -> "Direct path"'s rule that the Relay stays
@@ -418,12 +418,13 @@ runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
 | `E2E_INIT_BURST` / `E2E_INIT_REFILL_INTERVAL_MS` | 8 / 1 000 | same |
 | `DIRECT_SETUP_TIMEOUT_MS` / `DIRECT_ANSWER_TIMEOUT_MS` / `DIRECT_GATHER_TIMEOUT_MS` / `DIRECT_SRFLX_GRACE_MS` | 15 000 / 10 000 / 3 000 / 500 | `remote-lib-common/src/security/direct-path.ts` |
 | `DIRECT_HANDOFF_TIMEOUT_MS` / `DIRECT_DISCONNECTED_GRACE_MS` | `= DIRECT_SETUP_TIMEOUT_MS` (15 000) / 5 000 | same |
+| `DIRECT_ONLY_DEADLINE_MS` | `= DIRECT_SETUP_TIMEOUT_MS + DIRECT_HANDOFF_TIMEOUT_MS` (30 000; rationale) | same |
 | `MAX_DIRECT_SDP_LENGTH` | 2 000 characters | same |
 | `MAX_DIRECT_PENDING_FRAMES` / `MAX_DIRECT_PENDING_BYTES` | 8 192 frames / 4 MiB, bytes binding first; one pair for a receiver's hold and a sender's queue alike (rationale) | same |
 | `DIRECT_BUFFER_HIGH` / `DIRECT_BUFFER_LOW` | 256 KiB / 64 KiB | same |
 | `MAX_ONE_TIME_FRAME_LENGTH` | one maximal `ct` + 512 | `remote-lib-common/src/remote/one-time-wire.ts` |
 | `MAX_ONE_TIME_FORWARDED` | 32 messages, both directions together | same |
-| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` / `ONE_TIME_DIRECT_DEADLINE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 30 000 / 15 000 | same |
+| `ONE_TIME_LINK_TTL_MS` / `ONE_TIME_EXPIRY_GRACE_MS` | `= DEFAULT_PAIRING_TTL_MS` / 45 000 (> `DIRECT_ONLY_DEADLINE_MS`) | same |
 | `ONE_TIME_OPEN_TIMEOUT_MS` | 8 000 | `lib/src/remote/burrow/one-time-runtime.ts` |
 
 - **Must bound waiting relay frames before enqueueing**, by count and cumulative

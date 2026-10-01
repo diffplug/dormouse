@@ -8,7 +8,6 @@
 
 import {
   DEFAULT_PAIRING_TTL_MS,
-  DIRECT_ONLY_DEADLINE_MS,
   E2E_INIT_BURST,
   E2E_INIT_REFILL_INTERVAL_MS,
   BurrowAcl,
@@ -46,8 +45,6 @@ import {
   DELIVERY_ID_BYTE_LENGTH,
   type ConnectionOutcomeV1,
   type ConnectionPolicy,
-  type DirectPath,
-  type DirectRelayCause,
   type E2eRelayToBurrowFrame,
   type BurrowAclRecord,
   type BurrowFrame,
@@ -73,6 +70,7 @@ import { loadBurrowAcl } from './acl';
 import {
   EstablishedE2eSession,
   sealControl,
+  type DirectOnlyBreak,
   type RemoteApiSessionContext,
   type RemoteApiSessionLike,
 } from './established-session';
@@ -223,13 +221,14 @@ interface EstablishedSession {
   /** The IK-authenticated Client static — what the session cap is keyed on. */
   readonly clientStaticPublicKey: string;
   readonly e2e: EstablishedE2eSession;
-  /**
-   * Where the direct path is required — the path policy is held — the instant
-   * this session must be direct by ({@link DIRECT_ONLY_DEADLINE_MS} from its
-   * outcome); `null` where the relay may carry it.
-   */
-  readonly directBy: number | null;
 }
+
+/**
+ * Whether an ending tells the Client: `true` with the goodbye, flushed off the
+ * direct path as {@link EstablishedE2eSession.end} bounds it; `'unflushed'`
+ * with it sent best-effort, for a `stop()` that leaves no timer behind.
+ */
+type Goodbye = boolean | 'unflushed';
 
 /** Per-client lifecycle state tracked by the Burrow, keyed by clientId. */
 interface ClientState {
@@ -619,13 +618,11 @@ export class BurrowRuntime {
           },
         });
       }
-      // Only until the switch: once direct, the deadline is met for good.
-      if (established && established.directBy !== null && established.e2e.path !== 'direct') {
+      // A direct-only session's, until the switch meets it for good.
+      const directBy = established?.e2e.directDeadlineAt ?? null;
+      if (established && directBy !== null) {
         const { e2e } = established;
-        out.push({
-          at: established.directBy,
-          expire: () => this.#endDirectOnly(clientId, e2e, 'the direct path did not carry it in time'),
-        });
+        out.push({ at: directBy, expire: () => this.#endDirectOnly(clientId, e2e, 'deadline') });
       }
       if (established) {
         out.push({
@@ -765,10 +762,12 @@ export class BurrowRuntime {
    * Close the relay socket and everything on it. **Every established session
    * hears the goodbye first**, while the socket can still carry it: a stop is
    * an ending this Burrow chose — a network policy change, a clear, a swap.
+   * Sent best-effort and unflushed, since a stopped Burrow leaves no timer
+   * behind ({@link EstablishedE2eSession.end}).
    */
   stop(): void {
     for (const clientId of [...this.#clients.keys()]) {
-      this.#disposeEstablished(clientId, { goodbye: true });
+      this.#disposeEstablished(clientId, { goodbye: 'unflushed' });
     }
     this.#stopped = true;
     this.#status = 'stopped';
@@ -1527,31 +1526,12 @@ export class BurrowRuntime {
       // A refused path ends it with no goodbye, which could only ride the
       // refused channel; the phone reads the channel's close.
       onFatal: () => this.#disposeEstablished(clientId),
-      ...(directOnly
-        ? {
-            // An application message off the relay ends the session unread.
-            onRelayedApp: () =>
-              this.#endDirectOnly(clientId, e2e, 'an application message arrived over the relay'),
-            // A given-up attempt leaves only the relay, which may not carry it.
-            // Deferred, so a decline the endpoint sends right after giving up
-            // reaches the phone before the goodbye.
-            onTransportChanged: (path: DirectPath, cause: DirectRelayCause | null) => {
-              if (path !== 'relay' || cause === null) return;
-              queueMicrotask(() =>
-                this.#endDirectOnly(clientId, e2e, 'the direct path was given up'),
-              );
-            },
-          }
-        : {}),
+      directOnly,
+      onDirectOnlyBroken: (reason) => this.#endDirectOnly(clientId, e2e, reason),
       now: this.#now,
       setTimer: this.#setTimer,
     });
-    state.established = {
-      connectionId,
-      clientStaticPublicKey,
-      e2e,
-      directBy: directOnly ? this.#now() + DIRECT_ONLY_DEADLINE_MS : null,
-    };
+    state.established = { connectionId, clientStaticPublicKey, e2e };
     this.#armReaper();
   }
 
@@ -1561,7 +1541,7 @@ export class BurrowRuntime {
    * silence (`docs/specs/remote-network.md` -> "Local networks"). `e2e` names
    * the session meant, so a late call cannot end its replacement.
    */
-  #endDirectOnly(clientId: string, e2e: EstablishedE2eSession, reason: string): void {
+  #endDirectOnly(clientId: string, e2e: EstablishedE2eSession, reason: DirectOnlyBreak): void {
     if (this.#clients.get(clientId)?.established?.e2e !== e2e) return;
     console.warn(`[burrow] ended a direct-only session: ${reason}`);
     this.#disposeEstablished(clientId, { goodbye: true, only: e2e });
@@ -1666,12 +1646,12 @@ export class BurrowRuntime {
    */
   #disposeEstablished(
     clientId: string,
-    options: { goodbye?: boolean; only?: EstablishedE2eSession } = {},
+    options: { goodbye?: Goodbye; only?: EstablishedE2eSession } = {},
   ): void {
     const state = this.#clients.get(clientId);
     if (!state?.established) return;
     if (options.only && state.established.e2e !== options.only) return;
-    this.#clearEstablished(state, options.goodbye === true);
+    this.#clearEstablished(state, options.goodbye ?? false);
     this.#pruneClient(clientId);
   }
 
@@ -1679,13 +1659,13 @@ export class BurrowRuntime {
    * Tear one established session down and clear the slot, leaving the entry
    * itself to the caller — a promotion is about to fill it, a disposal prunes.
    */
-  #clearEstablished(state: ClientState, goodbye = false): void {
+  #clearEstablished(state: ClientState, goodbye: Goodbye = false): void {
     if (!state.established) return;
     const { e2e } = state.established;
     // Cleared first, so nothing the teardown sets off can reach this session
     // through the slot again — `end` itself reports nothing once it begins.
     state.established = undefined;
-    if (goodbye) e2e.end();
+    if (goodbye) e2e.end({ flush: goodbye !== 'unflushed' });
     else e2e.dispose();
   }
 

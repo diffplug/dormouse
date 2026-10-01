@@ -4,17 +4,19 @@ import { fileURLToPath } from "node:url";
 import {
   assertPocketShell,
   assertPocketWorker,
-  DEPLOYMENT_FILE,
-  HOSTED_DEPLOYMENT_BODY,
   ONE_TIME_SHELL,
 } from "../../lib/scripts/assert-pocket-worker.mjs";
+import {
+  HOSTED_POCKET_DEPLOYMENT,
+  POCKET_DEPLOYMENT_FILE,
+} from "../../remote-lib-common/src/remote/pocket-deployment.ts";
 
 /**
  * Stage the relay Worker's assets: Pocket from `lib`'s `build:pocket` at the
  * root (`docs/specs/pocket-app.md` -> "Deployment: same-origin, always"), and
  * the one-time phone page from `build:one-time` at its page path
  * (`docs/specs/one-time.md` -> "Phone page"), and beside Pocket the
- * `DEPLOYMENT_FILE` that tells it Hosted serves it
+ * `POCKET_DEPLOYMENT_FILE` that tells it Hosted serves it
  * (`docs/specs/remote-network.md` -> "Anywhere"). The directory is emptied
  * first so these are all it holds, and each copy's shell is checked against
  * its own policy — what the relay serves, not only what `lib` built. Returns
@@ -33,15 +35,15 @@ export function stageRelay({ pocket, oneTime }, assets) {
   if (existsSync(join(pocket, ONE_TIME_SHELL.base)))
     throw new Error(`the Pocket build has a ${ONE_TIME_SHELL.base} the one-time page owns`);
   // A self-host Relay serves that same build, which must read as self-host.
-  if (existsSync(join(pocket, DEPLOYMENT_FILE)))
-    throw new Error(`the Pocket build has a ${DEPLOYMENT_FILE} only Hosted's staging writes`);
+  if (existsSync(join(pocket, POCKET_DEPLOYMENT_FILE)))
+    throw new Error(`the Pocket build has a ${POCKET_DEPLOYMENT_FILE} only Hosted's staging writes`);
   rmSync(assets, { recursive: true, force: true });
   mkdirSync(assets, { recursive: true });
   cpSync(pocket, assets, { recursive: true });
   assertPocketWorker(assets);
   const pocketScripts = assertPocketShell(assets);
   if (pocketScripts === 0) throw new Error("the staged Pocket shell has no script");
-  writeFileSync(join(assets, DEPLOYMENT_FILE), HOSTED_DEPLOYMENT_BODY);
+  writeFileSync(join(assets, POCKET_DEPLOYMENT_FILE), `${JSON.stringify(HOSTED_POCKET_DEPLOYMENT)}\n`);
   cpSync(oneTime, pagePath, { recursive: true });
   const oneTimeScripts = assertPocketShell(pagePath, ONE_TIME_SHELL);
   if (oneTimeScripts === 0) throw new Error("the staged one-time shell has no script");

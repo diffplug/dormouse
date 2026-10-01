@@ -19,6 +19,7 @@ import {
   DIRECT_DISCONNECTED_GRACE_MS,
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_HANDOFF_TIMEOUT_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   DIRECT_SETUP_TIMEOUT_MS,
   DIRECT_SRFLX_GRACE_MS,
   DirectCutover,
@@ -125,6 +126,11 @@ test('the timings the spec names are the values that ship', () => {
   // its own. Asserted as the alias it is: `>=` would be a tautology through it,
   // and a literal would fail a legitimate re-tuning of the budget.
   assert.equal(DIRECT_HANDOFF_TIMEOUT_MS, DIRECT_SETUP_TIMEOUT_MS);
+  // A direct-only session's deadline runs from the Burrow's outcome; the phone
+  // arms its own setup bound only once that outcome reaches it, and its switch
+  // then crosses the relay. A deadline any shorter beats a phone that is
+  // within both of its own bounds.
+  assert.equal(DIRECT_ONLY_DEADLINE_MS, DIRECT_SETUP_TIMEOUT_MS + DIRECT_HANDOFF_TIMEOUT_MS);
   // Long enough that a gap ICE recovers from is waited out rather than charged
   // a fresh handshake and a WebAuthn prompt.
   assert.equal(DIRECT_DISCONNECTED_GRACE_MS, 5_000);

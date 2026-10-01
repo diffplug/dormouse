@@ -100,8 +100,8 @@ no deadline.
   together.
 - **Timings.** An unused link lives `ONE_TIME_LINK_TTL_MS` (the pairing TTL,
   5 minutes). The join and the confirmation finish by its expiry, and the
-  direct path's `ONE_TIME_DIRECT_DEADLINE_MS` (15 s) after the outcome ends
-  inside the room's hard deadline, `expiresAt + ONE_TIME_EXPIRY_GRACE_MS` (30 s).
+  direct path's `DIRECT_ONLY_DEADLINE_MS` (30 s) after the outcome ends
+  inside the room's hard deadline, `expiresAt + ONE_TIME_EXPIRY_GRACE_MS` (45 s).
 - **The ceremony's messages are padded `control` messages** on the Noise session
   (`docs/specs/relay.md` -> "E2E framing"): `OneTimeRequestV1 {code, label}`
   phone → Burrow, `label` one of `ONE_TIME_DEVICE_LABELS`, then one
@@ -138,7 +138,7 @@ resumes.
 | `opening` | minting the keypair, then waiting up to `ONE_TIME_OPEN_TIMEOUT_MS` (8 s) for the room frame |
 | `waiting {url, expiresAt}` | the link is live; `expiresAt` is its last live millisecond |
 | `confirming {label, expiresAt}` | a phone's request awaits the approval modal |
-| `connecting {label}` | confirmed; the direct path has `ONE_TIME_DIRECT_DEADLINE_MS` |
+| `connecting {label}` | confirmed; the direct path has `DIRECT_ONLY_DEADLINE_MS` |
 | `connected {label, since}` | both directions are direct and the rendezvous is closed |
 | `ended {reason}` | terminal |
 
@@ -193,8 +193,9 @@ decides them; a runtime never enters either.
 | `burrow-error` | room close `4015`, a protocol violation, an application message over the rendezvous, a room past the message cap, or a local failure |
 
 Source of truth: `OneTimeRuntime` in
-`lib/src/remote/burrow/one-time-runtime.ts`; `onRelayedApp` and
-`onTransportChanged` in `lib/src/remote/burrow/established-session.ts`.
+`lib/src/remote/burrow/one-time-runtime.ts`; `directOnly`,
+`onDirectOnlyBroken`, and `directDeadlineAt` in
+`lib/src/remote/burrow/established-session.ts`.
 Pinned by `lib/src/remote/burrow/one-time-runtime.test.ts`, which drives a real
 Noise initiator through the in-memory room `lib/src/remote/test-rendezvous.ts`.
 
@@ -209,8 +210,8 @@ at most one session**, on `ClientSessionCore`, direct or not at all.
 2. Hands the two digits to `onCode`, sends `OneTimeRequestV1 {code, label}`,
    and reads one outcome.
 3. On `ok`, calls `onConfirmed`, establishes the session, and offers the
-   direct path, which has `ONE_TIME_DIRECT_DEADLINE_MS` to carry both
-   directions.
+   direct path, which has `DIRECT_ONLY_DEADLINE_MS` to carry both
+   directions (`ClientSessionCore.awaitDirect`).
 4. At the switch, closes the rendezvous normally and resolves
    `{ok: true, burrowLabel}`.
 

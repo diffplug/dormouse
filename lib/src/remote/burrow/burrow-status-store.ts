@@ -287,9 +287,12 @@ function hostedEnrollmentOf(value: unknown): HostedEnrollmentState | null {
   if (state.status === 'redeeming') return { status: 'redeeming' };
   if (state.status !== 'ended') return null;
   const reason = HOSTED_ENROLLMENT_END_REASONS.find((known) => known === state.reason) ?? 'failed';
-  return typeof state.message === 'string'
-    ? { status: 'ended', reason, message: state.message }
-    : { status: 'ended', reason };
+  return {
+    status: 'ended',
+    reason,
+    ...(typeof state.message === 'string' ? { message: state.message } : {}),
+    ...(typeof state.burrowId === 'string' ? { burrowId: state.burrowId } : {}),
+  };
 }
 
 async function readBurrowStatus(): Promise<void> {
@@ -344,13 +347,13 @@ export async function enrollOfferBurrow(label: string): Promise<void> {
 /**
  * Begin a Hosted build's device-code enrollment under `label`; the service
  * polls it and reports through `status` (`HostedEnrollmentState`). A code
- * already waiting is answered unless `replace` asks for a new one. Rejections
+ * already waiting is answered, and one that ended is replaced. Rejections
  * propagate verbatim — the caller renders them. Re-reads either way.
  */
-export async function beginHostedEnrollment(label: string, options: { replace?: boolean } = {}): Promise<void> {
+export async function beginHostedEnrollment(label: string): Promise<void> {
   const active = requireBurrowLink();
   try {
-    await active.command('beginHostedEnrollment', { label, ...(options.replace ? { replace: true } : {}) });
+    await active.command('beginHostedEnrollment', { label });
   } finally {
     await refreshAfterMutation();
   }

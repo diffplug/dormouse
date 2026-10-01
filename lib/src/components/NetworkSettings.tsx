@@ -168,19 +168,17 @@ function updatesItself(status: Pick<BurrowConsoleStatus, 'relayMode'>): boolean 
 }
 
 /**
- * What the relay socket carries under `policy`: under Local networks never
- * terminal traffic, which a paired phone's session may not take through the
- * relay (`docs/specs/remote-network.md` -> "Local networks").
+ * What the relay socket carries under `policy`: one-time links only where one
+ * opens, and under Local networks never terminal traffic, which a paired
+ * phone's session may not take through the relay
+ * (`docs/specs/remote-network.md` -> "Local networks").
  */
 function persistentRelayCarries(policy: NetworkPolicy): string {
-  switch (policy.level) {
-    case 'local':
-      return 'Encrypted handshakes and one-time links, requests for setup codes and the push device list. Never terminal traffic.';
-    case 'anywhere':
-      return 'Encrypted handshakes and one-time links, requests for setup codes and the push device list, and terminal traffic when a phone can’t connect directly.';
-    default:
-      return 'Encrypted handshakes, requests for setup codes and the push device list, and terminal traffic when a phone can’t connect directly.';
-  }
+  const handshakes = opensOneTimeLinks(policy) ? 'Encrypted handshakes and one-time links' : 'Encrypted handshakes';
+  const requests = `${handshakes}, requests for setup codes and the push device list`;
+  return holdsToAllowedNetworks(policy.level)
+    ? `${requests}. Never terminal traffic.`
+    : `${requests}, and terminal traffic when a phone can’t connect directly.`;
 }
 
 /** Where the phone row says the phone is: on any network, an allowed one, or simply directly. */

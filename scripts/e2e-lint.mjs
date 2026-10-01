@@ -536,23 +536,23 @@ export const RULES = [
     pattern: /^    const directOnly = this\.#directPeering\.pathPolicy !== undefined;$/m,
   },
   {
-    rule: '`BurrowRuntime` hands `onRelayedApp` only to a direct-only session',
+    rule: '`BurrowRuntime` hands its session that derivation and no other',
     security: 'must derive `directOnly` from the path policy alone',
     kind: 'require',
     file: BURROW_RUNTIME,
-    // The one handler, inside the spread `directOnly` gates; the count rule
-    // below keeps a second, ungated one out.
-    pattern: /\.\.\.\(directOnly\n\s*\? \{\n(?:\s*\/\/[^\n]*\n)*\s*onRelayedApp: /,
+    // `EstablishedE2eSession` owns every direct-only rule — the deadline, the
+    // given-up attempt, the relayed application message — so what this
+    // runtime decides is the one flag, as derived above.
+    pattern: /^      directOnly,$/m,
   },
   {
-    rule: 'Exactly one `onRelayedApp` in `BurrowRuntime`',
-    security: 'must derive `directOnly` from the path policy alone',
-    kind: 'exactly',
-    files: [BURROW_RUNTIME],
-    pattern: /\bonRelayedApp\b/g,
-    count: 1,
-    violationFile: BURROW_RUNTIME,
-    violation: '\nconst __selftest = { onRelayedApp: () => {} };\n',
+    rule: '`OneTimeRuntime` makes its one session direct-only',
+    security: 'must make its one session `directOnly`',
+    kind: 'require',
+    file: ONE_TIME_RUNTIME,
+    // A one-time connection has no relayed fallback at all: the rendezvous
+    // carries a handshake, never a session.
+    pattern: /^        directOnly: true,$/m,
   },
   {
     rule: '`OneTimeRuntime` names nothing that grants or persists',

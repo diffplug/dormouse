@@ -11,6 +11,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import {
   DEFAULT_PAIRING_TTL_MS,
+  DIRECT_BUFFER_HIGH,
   DIRECT_ONLY_DEADLINE_MS,
   SESSION_END_V1,
   mintNoiseStaticKeyPair,
@@ -301,5 +302,27 @@ describe('BurrowRuntime direct-only sessions', () => {
     expect(await lastControl(second, 1)).toEqual(SESSION_END_V1);
     expect(sessions.every((entry) => entry.disposed)).toBe(true);
     expect(socket.readyState).toBe(3);
+  });
+
+  it('stops with no flush timer behind it, a direct session busy with output included', async () => {
+    const network = new FakeDirectNetwork();
+    makeBurrow({ createPeer: () => network.createAnswerer() });
+    const live = await connect();
+    // The test's own end on real timers, so the clock counts the Burrow's alone.
+    await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: live.clientId,
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+    });
+    // A goodbye that cannot leave at once: an ended session would hold the
+    // channel open behind a flush timer.
+    network.answererChannel!.bufferedAmount = DIRECT_BUFFER_HIGH;
+
+    burrow.stop();
+    expect(clock.armed).toBe(0);
+    expect(sessions[0]!.disposed).toBe(true);
   });
 });

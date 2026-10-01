@@ -69,6 +69,7 @@ import {
 } from '../../remote/network-policy';
 import {
   ACCOUNT_PAGE_PATH,
+  HOSTED_ACCOUNT_ORIGIN,
   hostedAccountOrigin,
   hostedOrigin,
   isDevHostedBuild,
@@ -94,7 +95,7 @@ import {
   type EnrollParams,
   type EnrollResult,
   type HostedEnrollParams,
-  type HostedEnrollmentEndReason,
+  type HostedEnrollmentEnded,
   type HostedEnrollmentState,
   type BurrowStatusEvent,
   type InvitationEvent,
@@ -174,18 +175,6 @@ function safeHostname(): string {
   }
 }
 
-/**
- * How this build enrolls (`docs/specs/relay.md` → "Relay origin"): a
- * self-host build with its Relay's setup password or the installer's offer
- * (`enroll`, `enrollOffer`), a Hosted build by device code
- * (`beginHostedEnrollment`). Each command refuses in the other build.
- */
-export type EnrollmentMethod = 'password' | 'device-code';
-
-export function enrollmentMethod(relay: RelayBuild): EnrollmentMethod {
-  return relay.mode === 'self-host' ? 'password' : 'device-code';
-}
-
 /** What every command the `nothing` level refuses answers, before any request. */
 const NETWORK_OFF_REFUSAL =
   'Settings → Network is set to Nothing, so this computer opens no connections on its own.';
@@ -245,10 +234,13 @@ function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolic
   return { ...policy, allowed };
 }
 
-/** What `enroll` and `enrollOffer` answer in a Hosted build. */
-const HOSTED_ENROLLMENT_REFUSAL =
-  'This Dormouse enrolls with Dormouse Hosted by approving a code at hosted.dormouse.sh, not with ' +
-  'a setup password. A Relay you run takes a Dormouse built with its origin (DORMOUSE_RELAY_ORIGIN).';
+/** What `enroll` and `enrollOffer` answer in a Hosted build, naming where its codes are approved. */
+function hostedEnrollmentRefusal(accountOrigin: string): string {
+  return (
+    `This Dormouse enrolls with Dormouse Hosted by approving a code at ${new URL(accountOrigin).host}, not with ` +
+    'a setup password. A Relay you run takes a Dormouse built with its origin (DORMOUSE_RELAY_ORIGIN).'
+  );
+}
 
 /** What `beginHostedEnrollment` answers in a self-host build. */
 const SELF_HOST_DEVICE_CODE_REFUSAL =
@@ -327,7 +319,7 @@ export async function readUsableOffer(
   relay: RelayBuild,
   read: () => Promise<EnrollmentOffer | null>,
 ): Promise<EnrollmentOffer | null> {
-  if (enrollmentMethod(relay) !== 'password') return null;
+  if (relay.mode !== 'self-host') return null;
   const offer = await read();
   return offer && isRelayOrigin(offer.origin, relay.origin) ? offer : null;
 }
@@ -450,8 +442,6 @@ interface HostedEnrollmentRun {
   readonly label: string;
   readonly userCode: string;
   readonly verificationUrl: string;
-  /** `verificationUrl`'s origin: the account a Burrow left behind is removed at. */
-  readonly accountOrigin: string;
   /** This machine's deadline (`HOSTED_ENROLLMENT_MAX_WAIT_MS`). */
   readonly expiresAt: number;
   intervalMs: number;
@@ -519,10 +509,10 @@ export class BurrowService {
   /** The Hosted enrollment awaiting approval, polled by its own timer. */
   #enrollRun: HostedEnrollmentRun | null = null;
   /** How the last one ended short of enrolling, until the next begin or a cancel. */
-  #enrollEnded: { reason: HostedEnrollmentEndReason; message?: string } | null = null;
+  #enrollEnded: HostedEnrollmentEnded | null = null;
   /** Bumped by every begin and cancel, so a begin still in flight that was superseded keeps nothing. */
   #enrollSeq = 0;
-  /** The begin in flight, which a begin that does not replace joins. */
+  /** The begin in flight, which every other begin joins. */
   #enrollBegin: Promise<HostedEnrollmentState> | null = null;
   /** The account origin the last begin resolved: what a dev Hosted build's `status` names. */
   #accountOrigin: string | null = null;
@@ -715,7 +705,7 @@ export class BurrowService {
   // --- Commands ---
 
   async #enroll(params: EnrollParams): Promise<EnrollResult> {
-    if (enrollmentMethod(this.#relay) !== 'password') throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
     await this.#networkPolicy();
     this.#refuseNothing();
     this.#refuseOtherOrigin((params as { relayUrl?: unknown }).relayUrl);
@@ -754,7 +744,7 @@ export class BurrowService {
    * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
-    if (enrollmentMethod(this.#relay) !== 'password') throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
     await this.#networkPolicy();
     this.#refuseNothing();
     this.#refuseOtherOrigin((params as { origin?: unknown }).origin);
@@ -829,24 +819,21 @@ export class BurrowService {
 
   /**
    * Begin a device-code enrollment and poll it from here, answering the
-   * `waiting` state the panel draws. **A code already waiting is answered, not
-   * voided**, unless `replace` asks for a new one — another VS Code window's
-   * Enroll lands on the same service — and one redeeming always is. Nothing
-   * already waiting or ended changes until a new code is in hand. Refused in a
-   * self-host build, on an enrolled machine, and under `nothing` before any
-   * request.
+   * `waiting` state the panel draws. **A code already waiting or redeeming is
+   * answered, not voided** — another VS Code window's Enroll lands on the same
+   * service — and a begin in flight is joined; one that ended is replaced once
+   * a new code is in hand. Refused in a self-host build, on an enrolled
+   * machine, and under `nothing` before any request.
    */
   async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
-    if (enrollmentMethod(this.#relay) !== 'device-code') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
+    if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
     const named = typeof params?.label === 'string' ? params.label.trim() : '';
     const label = named || suggestedBurrowLabel(this.#kind);
-    const replace = params?.replace === true;
     await this.#networkPolicy();
     this.#refuseNothing();
     this.#refuseEnrolled();
-    const run = this.#enrollRun;
-    if (run && (run.redeeming || !replace)) return this.#hostedEnrollmentState()!;
-    if (this.#enrollBegin && !replace) return await this.#enrollBegin;
+    if (this.#enrollRun) return this.#hostedEnrollmentState()!;
+    if (this.#enrollBegin) return await this.#enrollBegin;
     const begun = this.#beginRun(label, ++this.#enrollSeq);
     this.#enrollBegin = begun;
     try {
@@ -877,7 +864,6 @@ export class BurrowService {
       label,
       userCode: begin.userCode,
       verificationUrl,
-      accountOrigin: new URL(verificationUrl).origin,
       expiresAt: now + wait,
       intervalMs: begin.interval * 1000,
       accountFull: false,
@@ -887,10 +873,15 @@ export class BurrowService {
     this.#clearEnrollRun();
     this.#enrollEnded = null;
     this.#enrollRun = run;
-    this.#accountOrigin = run.accountOrigin;
+    this.#accountOrigin = new URL(verificationUrl).origin;
     this.#schedulePoll(run);
     this.#emitStatus();
     return this.#hostedEnrollmentState()!;
+  }
+
+  /** What `enroll` and `enrollOffer` answer in a Hosted build: the account this build approves codes at. */
+  #hostedEnrollmentRefusal(): string {
+    return hostedEnrollmentRefusal(accountOriginFor(this.#relay, this.#accountOrigin) ?? HOSTED_ACCOUNT_ORIGIN);
   }
 
   /** What a begin on an enrolled machine answers: a second enrollment would replace the first. */
@@ -975,7 +966,7 @@ export class BurrowService {
         return;
       // An earlier poll redeemed it and its answer was lost on the way.
       case 'redeemed':
-        this.#endHostedEnrollment(run, { reason: 'answer-lost' });
+        this.#endHostedEnrollment(run, { reason: 'answer-lost', burrowId: answer.burrowId });
         return;
       // The Relay keeps an approval it refused, so a full account polls on
       // and enrolls once a computer is removed; an entitlement ends it.
@@ -1012,7 +1003,7 @@ export class BurrowService {
     }
     const stranded =
       `Your account holds Burrow ${enrollment.burrowId}, which this computer could not keep; ` +
-      `remove it at ${run.accountOrigin}${ACCOUNT_PAGE_PATH}.`;
+      `remove it at ${new URL(run.verificationUrl).origin}${ACCOUNT_PAGE_PATH}.`;
     try {
       await this.#serialize(async () => {
         if (this.#disposed) throw new Error('Dormouse closed before it could save the enrollment.');
@@ -1051,10 +1042,7 @@ export class BurrowService {
   }
 
   /** End `run` short of enrolling, if it is still the one waiting. */
-  #endHostedEnrollment(
-    run: HostedEnrollmentRun,
-    ended: { reason: HostedEnrollmentEndReason; message?: string },
-  ): void {
+  #endHostedEnrollment(run: HostedEnrollmentRun, ended: HostedEnrollmentEnded): void {
     if (this.#enrollRun !== run) return;
     this.#clearEnrollRun();
     this.#enrollEnded = ended;

@@ -1020,7 +1020,7 @@ test("enrollment: only a recent admin login from this origin approves, and the B
   expect((await admin.remove(burrowId)).status).toBe(404);
 
   // A redeemed approval is approved again only once it has expired, and then unredeemed.
-  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed" });
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed", burrowId });
   expect((await admin.approve(begun.userCode)).status).toBe(409);
   await queryDatabase(
     f.database.url,

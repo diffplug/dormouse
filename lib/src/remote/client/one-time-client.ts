@@ -16,8 +16,8 @@
  */
 
 import {
+  DIRECT_ONLY_DEADLINE_MS,
   NoiseTransportSession,
-  ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_EXPIRY_GRACE_MS,
   RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
@@ -36,7 +36,6 @@ import {
   samplePairingCode,
   toBase64Url,
   type DirectPath,
-  type DirectRelayCause,
   type DirectoryEntry,
   type E2eClientStep,
   type HelloResult,
@@ -126,7 +125,7 @@ type Phase =
   | 'idle'
   /** The rendezvous is open: the handshake, then the person at the computer. */
   | 'confirming'
-  /** Confirmed; the direct path has `ONE_TIME_DIRECT_DEADLINE_MS` to carry both directions. */
+  /** Confirmed; the direct path has `DIRECT_ONLY_DEADLINE_MS` to carry both directions. */
   | 'connecting'
   /** Direct both ways and the rendezvous closed: protocol-v1 may run. */
   | 'connected'
@@ -149,7 +148,6 @@ export class OneTimeClient implements RemoteAdapterClient {
   readonly #rendezvous: RendezvousHold;
   /** Whether the socket ever opened: a close before that means the room was never reached. */
   #opened = false;
-  #cancelDirectDeadline: (() => void) | null = null;
 
   /**
    * The first failure's fixed copy: **set once by {@link #fail}**, so what the
@@ -160,8 +158,6 @@ export class OneTimeClient implements RemoteAdapterClient {
   /** Rejects when {@link #failure} is set; see {@link #race}. */
   #interrupted: Promise<never> = new Promise(() => {});
   #interrupt: ((error: Error) => void) | null = null;
-  /** Resolves the wait for the switch. */
-  #onSwitched: (() => void) | null = null;
   /** Whether `connectOnce` resolved `ok`: from then on an ending is {@link setOnEnded}'s to report. */
   #announced = false;
   #onEnded: ((message: string) => void) | null = null;
@@ -185,7 +181,7 @@ export class OneTimeClient implements RemoteAdapterClient {
       visibility: deps.visibility,
       createDirectPeer: deps.createDirectPeer,
     });
-    this.#core.setOnTransportChanged((path, cause) => this.#onTransportChanged(path, cause));
+    this.#core.setOnTransportChanged((path) => this.#onTransportChanged(path));
     this.#core.setOnBurrowGone((endedByBurrow) => this.#onSessionGone(endedByBurrow));
   }
 
@@ -252,13 +248,20 @@ export class OneTimeClient implements RemoteAdapterClient {
       if (this.#failure !== null) throw new Error(this.#failure);
       // The digits have done their job: the screen moves on to the direct path.
       onConfirmed?.();
-      // Armed before `establish`, whose offer can give up synchronously.
-      const switched = this.#awaitSwitch();
+      this.#phase = 'connecting';
       // After the outcome and never before: `establish` builds the direct
       // path, and a peer connection that existed ahead of authorization would
       // be one an unauthorized party had steered.
       this.#core.establish(route, session);
-      await this.#race(switched);
+      // The core's wait reads an offer that gave up synchronously inside
+      // `establish`, so asking after it misses nothing.
+      const failure = await this.#race(this.#core.awaitDirect(DIRECT_ONLY_DEADLINE_MS));
+      if (failure !== null) {
+        // A computer that said it ended the connection is the end; anything
+        // else before the switch is no direct path.
+        this.#fail(failure === 'ended-by-burrow' ? ONE_TIME_ENDED_MESSAGE : ONE_TIME_DIRECT_FAILED_MESSAGE);
+        throw new Error(this.#failure ?? ONE_TIME_DIRECT_FAILED_MESSAGE);
+      }
       this.#announced = true;
       return { ok: true, burrowLabel: outcome.burrowLabel };
     } catch {
@@ -331,34 +334,15 @@ export class OneTimeClient implements RemoteAdapterClient {
 
   // --- The direct path -------------------------------------------------------
 
-  /** Arm the direct deadline, and answer the wait for the switch. */
-  #awaitSwitch(): Promise<void> {
-    this.#phase = 'connecting';
-    this.#cancelDirectDeadline = this.#setTimer(() => {
-      this.#cancelDirectDeadline = null;
-      this.#fail(ONE_TIME_DIRECT_FAILED_MESSAGE);
-    }, ONE_TIME_DIRECT_DEADLINE_MS);
-    return new Promise((resolve) => {
-      this.#onSwitched = resolve;
-    });
-  }
-
   /**
-   * Both directions are direct, or the attempt was given up. **The switch
-   * hands the lifecycle to the channel**: the rendezvous is closed normally and
-   * its loss is no longer an ending. A given-up attempt has no relay to stay on.
+   * Both directions are direct. **The switch hands the lifecycle to the
+   * channel**: the rendezvous is closed normally and its loss is no longer an
+   * ending. A given-up attempt is `connectOnce`'s, through the core's wait.
    */
-  #onTransportChanged(path: DirectPath, cause: DirectRelayCause | null): void {
-    if (this.#phase !== 'connecting') return;
-    if (path === 'direct') {
-      this.#phase = 'connected';
-      this.#clearDirectDeadline();
-      this.#rendezvous.close();
-      this.#onSwitched?.();
-      this.#onSwitched = null;
-      return;
-    }
-    if (cause !== null) this.#fail(ONE_TIME_DIRECT_FAILED_MESSAGE);
+  #onTransportChanged(path: DirectPath): void {
+    if (this.#phase !== 'connecting' || path !== 'direct') return;
+    this.#phase = 'connected';
+    this.#rendezvous.close();
   }
 
   /**
@@ -379,11 +363,6 @@ export class OneTimeClient implements RemoteAdapterClient {
     }
     this.#teardown();
     this.#onEnded?.(ONE_TIME_ENDED_MESSAGE);
-  }
-
-  #clearDirectDeadline(): void {
-    this.#cancelDirectDeadline?.();
-    this.#cancelDirectDeadline = null;
   }
 
   // --- The rendezvous socket -------------------------------------------------
@@ -522,8 +501,6 @@ export class OneTimeClient implements RemoteAdapterClient {
   #teardown(): void {
     if (this.#phase === 'ended') return;
     this.#phase = 'ended';
-    this.#clearDirectDeadline();
-    this.#onSwitched = null;
     this.#rendezvous.close();
     this.#core.endSession(this.#failure ?? ONE_TIME_ENDED_MESSAGE, { notifyGone: false });
   }

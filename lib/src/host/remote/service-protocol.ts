@@ -308,11 +308,6 @@ export interface EnrollOfferParams {
  */
 export interface HostedEnrollParams {
   label: string;
-  /**
-   * Replace a code already waiting with a new one. Without it a begin answers
-   * the code waiting — another VS Code window's, say — rather than voiding it.
-   */
-  replace?: boolean;
 }
 
 /** `kind`, `clientId`, and `pairingId` echo the {@link PairingQueueItem} the modal displayed. */
@@ -424,7 +419,18 @@ export type HostedEnrollmentEndReason = (typeof HOSTED_ENROLLMENT_END_REASONS)[n
 export type HostedEnrollmentState =
   | { status: 'waiting'; userCode: string; verificationUrl: string; expiresAt: number; accountFull: boolean }
   | { status: 'redeeming' }
-  | { status: 'ended'; reason: HostedEnrollmentEndReason; message?: string };
+  | ({ status: 'ended' } & HostedEnrollmentEnded);
+
+/**
+ * How a Hosted enrollment ended short of enrolling: `message` is `failed`'s
+ * sentence, and `burrowId` the Burrow an `answer-lost` approval enrolled, which
+ * the account must remove.
+ */
+export interface HostedEnrollmentEnded {
+  reason: HostedEnrollmentEndReason;
+  message?: string;
+  burrowId?: string;
+}
 
 /**
  * What `window.dormouseBurrow.status()` prints. `docs/specs/relay.md`

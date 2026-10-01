@@ -21,15 +21,6 @@ import { isBoundedString } from './bytes.js';
 export const DIRECT_SETUP_TIMEOUT_MS = 15_000;
 
 /**
- * How long a direct-only session has, from its connection outcome, for the
- * direct path to carry both directions before the Burrow ends it
- * (`ConnectionOutcomeV1.directOnly`). The offerer's own setup bound: an
- * attempt not switched by then has been given up at that end, and the session
- * has no relay to stay on.
- */
-export const DIRECT_ONLY_DEADLINE_MS = DIRECT_SETUP_TIMEOUT_MS;
-
-/**
  * The label of the one data channel a session opens.
  *
  * A two-end agreement rather than one end's naming choice: the answerer checks
@@ -121,6 +112,17 @@ export const MAX_DIRECT_PENDING_FRAMES = 8192;
  * `remote-lib-common/test/direct-path.test.mjs`.
  */
 export const DIRECT_HANDOFF_TIMEOUT_MS = DIRECT_SETUP_TIMEOUT_MS;
+
+/**
+ * How long a direct-only session has, from its promotion, for the direct path
+ * to carry both directions before the Burrow ends it — a one-time connection,
+ * and a paired phone's under Local networks (`ConnectionOutcomeV1.directOnly`).
+ * **Never shorter than the phone can need**: it arms its own
+ * {@link DIRECT_SETUP_TIMEOUT_MS} only once the outcome reaches it, and its
+ * switch then crosses the relay, which {@link DIRECT_HANDOFF_TIMEOUT_MS}
+ * bounds. Both ends wait this long.
+ */
+export const DIRECT_ONLY_DEADLINE_MS = DIRECT_SETUP_TIMEOUT_MS + DIRECT_HANDOFF_TIMEOUT_MS;
 
 /**
  * How long a connection may sit `disconnected` before the attempt is written

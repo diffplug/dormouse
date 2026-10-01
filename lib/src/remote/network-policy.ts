@@ -77,7 +77,7 @@ export function levelsFor(mode: RelayMode): NetworkLevel[] {
  * Anywhere may relay it, Local networks holds it to the direct path.
  */
 export function runsBurrow(level: NetworkLevel): boolean {
-  return level === 'relay' || level === 'local' || level === 'anywhere';
+  return level !== 'nothing';
 }
 
 /**

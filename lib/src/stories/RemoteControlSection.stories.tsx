@@ -155,26 +155,6 @@ export const HostedEnrollAccountFull: Story = {
   play: settled(/already has as many computers/),
 };
 
-/** Approved by an account not entitled to the Hosted Relay: ended, in fixed copy. */
-export const HostedEnrollNotEntitled: Story = {
-  parameters: {
-    primedBurrow: {
-      status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'ended', reason: 'not-entitled' } },
-    },
-    docs: { story: { height: '520px' } },
-  },
-  play: settled(/can’t use the Hosted Relay/),
-};
-
-/** Nobody approved the code in time. */
-export const HostedEnrollExpired: Story = {
-  parameters: {
-    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'ended', reason: 'expired' } } },
-    docs: { story: { height: '520px' } },
-  },
-  play: settled(/expired before it was approved/),
-};
-
 /** Redeemed, and then refused here — the service's own sentence under the fixed one. */
 export const HostedEnrollFailed: Story = {
   parameters: {
@@ -206,12 +186,15 @@ export const HostedEnrollRedeeming: Story = {
 
 /**
  * The Relay says an earlier poll redeemed the code, whose answer never
- * arrived: the computer it added is the account's to remove.
+ * arrived: the Burrow it names is the account's to remove.
  */
 export const HostedEnrollAnswerLost: Story = {
   parameters: {
     primedBurrow: {
-      status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'ended', reason: 'answer-lost' } },
+      status: {
+        ...UNENROLLED_STATUS,
+        hostedEnrollment: { status: 'ended', reason: 'answer-lost', burrowId: 'T7lzkkrPT8nx4m9zf90V4h' },
+      },
     },
     docs: { story: { height: '560px' } },
   },

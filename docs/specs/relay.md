@@ -195,7 +195,7 @@ Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in
 `bakedRelayMode`, `hostedOrigin`, `hostedVoiceOrigin`, `hostedAccountOrigin`,
 `isDevHostedBuild`, `HOSTED_VOICE_ORIGIN`, and `HOSTED_ACCOUNT_ORIGIN` in
 `lib/src/host/relay-origin.ts`;
-`BurrowService`, `enrollmentMethod`, and `loadEnrollmentFor` in
+`BurrowService` and `loadEnrollmentFor` in
 `lib/src/host/remote/service.ts`. Pinned by `lib/src/host/relay-origin.test.ts`
 and `lib/src/host/remote/service.test.ts`.
 
@@ -808,22 +808,22 @@ memo invalidation — live in that burrow's spec.
   unless it succeeded, or a failed delete would leave the credential on disk for
   the next launch to read back.
 * **Hosted enrollment** (a Hosted build, from the Settings dialog):
-  `beginHostedEnrollment` `{ label, replace? }` mints the Noise static, posts `{ origin }`
+  `beginHostedEnrollment` `{ label }` mints the Noise static, posts `{ origin }`
   to `API_ROUTES.burrowEnrollBegin` at the baked origin, and holds an answer only
   if `isBurrowEnrollBeginResponse` passes; the service then polls
   `burrowEnrollPoll` itself every `interval`
   ([hosted.md](./hosted.md) -> "Burrow enrollment"), off the lifecycle chain
   until it redeems. Both requests carry the 10 s timeout and `redirect: 'error'`.
   Refused on an enrolled machine.
-  - **Must answer a code already waiting, or redeeming, rather than replace it**,
-    unless `replace` is set ("Get a new code"): another VS Code window's Enroll
-    reaches the same service. A begin in flight is joined.
-  - **Never change what is waiting or ended until a replacing begin has its
-    code.**
+  - **Must answer a code already waiting, or redeeming, rather than replace it**:
+    another VS Code window's Enroll reaches the same service. A begin in flight
+    is joined; one after an ending ("Get a new code") begins anew.
+  - **Never change what ended until the new begin has its code.**
   - **The device code never leaves the service**, as `burrowToken` does not:
     `status` carries `hostedEnrollment` — `waiting` with `userCode`,
     `verificationUrl`, `expiresAt`, and `accountFull`; `redeeming`; or `ended`
-    with a reason from `HOSTED_ENROLLMENT_END_REASONS` — and `accountOrigin`
+    with a reason from `HOSTED_ENROLLMENT_END_REASONS`, `answer-lost` naming its
+    `burrowId` — and `accountOrigin`
     (`accountOriginFor`: `HOSTED_ACCOUNT_ORIGIN` in a release build, the last
     begin's account origin in a dev one). Each change is a `status` event.
   - **Must compose the verification URL, never take it from the Relay in a
@@ -835,17 +835,19 @@ memo invalidation — live in that burrow's spec.
     without one.
   - **Must stop polling** on the Relay's `expired`, at this machine's deadline
     (the Relay's `expiresAt` held to 1–15 minutes, the clocks being separate), on
-    Cancel, on a begin replacing it, on disposal, and on a change to `nothing`.
+    Cancel, on disposal, and on a change to `nothing`.
     A 403 `NOT_ENTITLED_ERROR` ends it `not-entitled`; any other refusal ends it
     `failed` with the service's sentence. **A transport failure, a 5xx, or a 429
     polls again**, a 429 adding 5 s to the interval, up to 60 s; **a full
     account's 409 polls on with `accountFull`**, the Relay keeping the approval.
-    The Relay's `redeemed` (an earlier poll's answer lost) ends it `answer-lost`.
+    The Relay's `redeemed` (an earlier poll's answer lost) ends it `answer-lost`
+    with the `burrowId` it names; `isBurrowEnrollPollResponse` guards every
+    answer.
   - **An `enrolled` answer takes the Enrollment path above**: `isEnrollment`
     with the label and the static minted before the begin, the origin checked,
     then store first on the lifecycle chain, **reporting `redeeming` until the
     save and start finish**, which neither Cancel nor a begin interrupts.
-  - **Must hold a redemption that lands after Cancel or a replacing begin**:
+  - **Must hold a redemption that lands after Cancel and a new begin**:
     it is spent and recorded by the Relay. Only a disposed service or an
     enrolled machine cannot; that, the origin check, or a failed save ends it
     `failed`, the message naming the Burrow and `<accountOrigin>/account` to
@@ -1001,14 +1003,14 @@ exists to honor:
   until each pairs again.
 - **The Hosted enroll view renders `status.hostedEnrollment` and holds no state
   of its own** ("Burrow side" -> Hosted enrollment). Un-begun, the name field
-  prefilled with `suggestedLabel` and "Enroll with hosted.dormouse.sh"; waiting,
+  prefilled with `suggestedLabel` and "Enroll with <account host>"; waiting,
   the code in large type under `HOSTED_ENROLLMENT_CODE_LABEL`, the minutes left,
   "Open <account host> to approve", which opens `verificationUrl` with
   `openExternal` only on the click, and Cancel — with `accountFull`, a link to
   remove a computer at the account; ended, why, in fixed copy per reason
   (`HOSTED_ENROLLMENT_ENDED_COPY`, `failed` adding the service's sentence), with
-  "Get a new code" (`replace`) and Done, which cancels; `answer-lost` links the
-  account page. Redeeming, `HOSTED_ENROLLMENT_REDEEMING_COPY` alone. **Open is
+  "Get a new code", a plain begin, and Done, which cancels; `answer-lost` names
+  the Burrow to remove and links the account page. Redeeming, `HOSTED_ENROLLMENT_REDEEMING_COPY` alone. **Open is
   disabled once the minutes left reach 0.** **The name field is hidden while a
   code waits, never unmounted**, and **Persistent Relay starts unfolded over an
   enrollment already begun**. Enrolled, the view adds "Manage computers at
@@ -1221,12 +1223,3 @@ session requires fresh WebAuthn presence, by design
 Unstaged but adjacent: origin migration (re-binding the passkey and enrollments
 after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
-
-**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes, push, Pocket, the device-code enrollment, and the per-account relay sockets [hosted.md](./hosted.md) → "Relay", "Relay sockets", and "Burrow enrollment" serve: the Hosted transport below. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
-
-### From single-owner to multi-tenant
-
-Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
-that lifts each single-tenant simplification, every one chosen to be liftable:
-
-* **Hosted transport.** Follow the **remote-network** scope in [remote-network.md](./remote-network.md) for routing and lifecycle.

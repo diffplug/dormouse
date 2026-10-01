@@ -53,6 +53,14 @@ export interface CeremonyRoute {
 }
 
 /**
+ * Why {@link ClientSessionCore.awaitDirect} answered without a direct path:
+ * the attempt's own {@link DirectRelayCause}; `timeout`; the session lost
+ * (`lost`) or ended by the Burrow's goodbye (`ended-by-burrow`); or `retired`
+ * by its owner — a replacing Connect, a teardown — which reports nothing.
+ */
+export type DirectWaitFailure = DirectRelayCause | 'timeout' | 'lost' | 'ended-by-burrow' | 'retired';
+
+/**
  * Whether this page is in front of the user, and a way to be told when that
  * changes. Injectable because keepalives are the one thing a Client does on a
  * timer, and a test must not wait thirty real seconds to see one.
@@ -151,7 +159,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   /** Cancels the one visibility subscription, held while a session or a heartbeat runs. */
   #cancelVisibility: (() => void) | null = null;
   /** The one {@link awaitDirect} in flight, answered by the switch or by its end. */
-  #directWaiter: ((direct: boolean) => void) | null = null;
+  #directWaiter: ((failure: DirectWaitFailure | null) => void) | null = null;
 
   /**
    * In-flight ceremony waiters, keyed by `${kind}:${id}:${step}`.
@@ -419,8 +427,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
       fatal: (reason) => this.loseBurrow(reason),
       isCurrent: () => this.#established === current(),
       onTransportChanged: (path, cause) => {
-        if (path === 'direct') this.#settleDirect(true);
-        else if (cause !== null) this.#settleDirect(false);
+        if (path === 'direct') this.#settleDirect(null);
+        else if (cause !== null) this.#settleDirect(cause);
         this.#onTransportChanged?.(path, cause);
       },
       setTimer: this.#setTimer,
@@ -428,31 +436,35 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   }
 
   /**
-   * Whether the established session's direct path carries both directions
-   * within `timeoutMs`: `false` once the attempt is given up, the session
-   * ends, or the time passes — and at once with no session. For a session the
-   * Burrow holds to the direct path (`ConnectionOutcomeV1.directOnly`), whose
-   * owner sends no protocol-v1 until this answers `true`.
+   * Wait for the established session's direct path to carry both directions
+   * within `timeoutMs`: `null` once it does, else why not
+   * ({@link DirectWaitFailure}) — at once with no session, or with an attempt
+   * already given up. For a session that runs direct or not at all — a
+   * one-time connection, or one whose outcome says `directOnly` — whose owner
+   * sends no protocol-v1 until this answers `null`. A session that ends
+   * meanwhile answers it with how it ended; burrow loss is still reported
+   * ({@link setOnBurrowGone}), and an owner with no wall up yet ignores it.
    */
-  awaitDirect(timeoutMs: number): Promise<boolean> {
+  awaitDirect(timeoutMs: number): Promise<DirectWaitFailure | null> {
     const established = this.#established;
-    if (!established) return Promise.resolve(false);
-    if (established.direct.path === 'direct') return Promise.resolve(true);
-    if (established.direct.relayCause !== null) return Promise.resolve(false);
-    this.#settleDirect(false);
+    if (!established) return Promise.resolve('lost');
+    if (established.direct.path === 'direct') return Promise.resolve(null);
+    const cause = established.direct.relayCause;
+    if (cause !== null) return Promise.resolve(cause);
+    this.#settleDirect('retired');
     return new Promise((resolve) => {
-      const cancel = this.#setTimer(() => this.#settleDirect(false), timeoutMs);
-      this.#directWaiter = (direct) => {
+      const cancel = this.#setTimer(() => this.#settleDirect('timeout'), timeoutMs);
+      this.#directWaiter = (failure) => {
         cancel();
-        resolve(direct);
+        resolve(failure);
       };
     });
   }
 
-  #settleDirect(direct: boolean): void {
+  #settleDirect(failure: DirectWaitFailure | null): void {
     const waiter = this.#directWaiter;
     this.#directWaiter = null;
-    waiter?.(direct);
+    waiter?.(failure);
   }
 
   /**
@@ -712,6 +724,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     reason: string,
     { notifyGone, endedByBurrow = false }: { notifyGone: boolean; endedByBurrow?: boolean },
   ): void {
+    // An {@link awaitDirect} in flight hears how the session ended.
+    this.#settleDirect(!notifyGone ? 'retired' : endedByBurrow ? 'ended-by-burrow' : 'lost');
     this.disposeSession();
     this.rejectAll(new Error(reason));
     if (notifyGone) this.#onBurrowGone?.(endedByBurrow);
@@ -730,7 +744,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // stayed relayed would sit in the indicator through the whole of the next.
     if (direct?.relayCause) this.#onTransportChanged?.('relay', null);
     this.#established = null;
-    this.#settleDirect(false);
+    this.#settleDirect('retired');
     this.#watchVisibility();
   }
 

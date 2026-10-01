@@ -140,10 +140,15 @@ describe('connectionsFor', () => {
       },
       push,
     ]);
-    // With nothing allowed no phone connects, but the socket still runs.
-    expect(destinations({ policy: { ...LOCAL, allowed: [] }, status: enrolled })).toEqual([
-      'relay.dormouse.sh',
-      push.to,
+    // With nothing allowed no phone connects and no link opens, but the
+    // socket still runs.
+    expect(connectionsFor(facts({ policy: { ...LOCAL, allowed: [] }, status: enrolled }))).toEqual([
+      {
+        to: 'relay.dormouse.sh',
+        when: 'Always',
+        carries: 'Encrypted handshakes, requests for setup codes and the push device list. Never terminal traffic.',
+      },
+      push,
     ]);
     expect(destinations({ policy: ANYWHERE, status: { ...enrolled, pairedClients: 0 } })).not.toContain(push.to);
   });

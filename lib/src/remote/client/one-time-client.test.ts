@@ -14,7 +14,8 @@ import {
   MAX_ONE_TIME_FRAME_LENGTH,
   NoiseTransportSession,
   ONE_TIME_DENIAL_CODES,
-  ONE_TIME_DIRECT_DEADLINE_MS,
+  DIRECT_ONLY_DEADLINE_MS,
+  DIRECT_SETUP_TIMEOUT_MS,
   ONE_TIME_LINK_TTL_MS,
   RELAY_PING,
   RELAY_PING_INTERVAL_MS,
@@ -583,11 +584,12 @@ describe('OneTimeClient: the direct path', () => {
     const { result } = await connecting(client, burrow);
     const settled = vi.fn();
     void result.then(settled);
-    // The phone's own channel opens late and it switches, so neither its setup
-    // deadline nor its handoff deadline is the one that fires first.
-    clock.advance(5_000);
+    // The phone's own channel opens at the last moment its setup bound allows
+    // and it switches; the computer never does. The deadline is the sum of the
+    // two bounds, so the phone's own handoff wait spends exactly what is left.
+    clock.advance(DIRECT_SETUP_TIMEOUT_MS - 1);
     network.openChannels();
-    clock.advance(ONE_TIME_DIRECT_DEADLINE_MS - 5_000 - 1);
+    clock.advance(DIRECT_ONLY_DEADLINE_MS - DIRECT_SETUP_TIMEOUT_MS - 1);
     await settle();
     expect(settled).not.toHaveBeenCalled();
     clock.advance(1);

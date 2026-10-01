@@ -20,7 +20,6 @@ import {
   MAX_ONE_TIME_FORWARDED,
   NoiseError,
   NoiseTransportSession,
-  ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_LINK_TTL_MS,
   RELAY_PONG,
   ONE_TIME_WS_ROUTES,
@@ -44,7 +43,6 @@ import {
   toBase64Url,
   utf8Encode,
   type DirectPath,
-  type DirectRelayCause,
   type NoiseKeyPair,
   type OneTimeBurrowFrame,
   type OneTimeClientFrame,
@@ -62,6 +60,7 @@ import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '..
 import {
   EstablishedE2eSession,
   sealControl,
+  type DirectOnlyBreak,
   type RemoteApiSessionContext,
   type RemoteApiSessionLike,
 } from './established-session';
@@ -85,7 +84,7 @@ export type OneTimeEndReason =
   | 'expired'
   /** The phone's socket closed before the switch, or the channel after it. */
   | 'phone-left'
-  /** No direct path: declined, abandoned, or not switched by `ONE_TIME_DIRECT_DEADLINE_MS`. */
+  /** No direct path: declined, abandoned, or not switched by `DIRECT_ONLY_DEADLINE_MS`. */
   | 'direct-failed'
   /** The direct path's policy refused it: no allowed network carried it, before the switch or after. */
   | 'network-not-allowed'
@@ -268,7 +267,6 @@ export class OneTimeRuntime {
   #received = 0;
 
   #openDeadlineAt = 0;
-  #directDeadlineAt = 0;
   /** Cancels the armed deadline timer, or null when none is armed. */
   #cancelDeadline: (() => void) | null = null;
   /** The instant the armed timer is for, so a later deadline is not re-armed. */
@@ -575,9 +573,9 @@ export class OneTimeRuntime {
   }
 
   /**
-   * Success: answer, then promote **the same** Noise session. From here the
-   * direct path has `ONE_TIME_DIRECT_DEADLINE_MS` to carry both directions, and
-   * no application message may arrive any other way.
+   * Success: answer, then promote **the same** Noise session, direct-only:
+   * from here the direct path has `DIRECT_ONLY_DEADLINE_MS` to carry both
+   * directions, and no application message may arrive any other way.
    */
   #promote(reserved: ReservedPhone, label: string): void {
     const link = this.#link!;
@@ -607,8 +605,9 @@ export class OneTimeRuntime {
         directPeering: this.#directPeering,
         sendRelay: (relayed) => this.#sendFrame('transport', relayed),
         onFatal: (reason, cause) => this.#onSessionFatal(e2e, reason, cause),
-        onRelayedApp: () => this.#onRelayedApp(e2e),
-        onTransportChanged: (path, cause) => this.#onTransportChanged(e2e, path, cause),
+        directOnly: true,
+        onDirectOnlyBroken: (reason) => this.#onDirectOnlyBroken(e2e, reason),
+        onTransportChanged: (path) => this.#onTransportChanged(e2e, path),
         now: this.#now,
         setTimer: this.#setTimer,
       });
@@ -620,7 +619,6 @@ export class OneTimeRuntime {
       return;
     }
     this.#sendFrame('transport', ciphertext);
-    this.#directDeadlineAt = this.#now() + ONE_TIME_DIRECT_DEADLINE_MS;
     this.#setState({ status: 'connecting', label });
     this.#armDeadline();
   }
@@ -628,42 +626,34 @@ export class OneTimeRuntime {
   // --- The session -----------------------------------------------------------
 
   /**
-   * Both directions are direct, or the attempt was given up. **The switch hands
-   * the lifecycle to the channel**: the rendezvous is closed normally and its
-   * loss is no longer an ending. A given-up attempt has no relay to stay on.
+   * Both directions are direct. **The switch hands the lifecycle to the
+   * channel**: the rendezvous is closed normally and its loss is no longer an
+   * ending.
    */
-  #onTransportChanged(
-    e2e: EstablishedE2eSession,
-    path: DirectPath,
-    cause: DirectRelayCause | null,
-  ): void {
+  #onTransportChanged(e2e: EstablishedE2eSession, path: DirectPath): void {
     const state = this.#state;
-    if (this.#established !== e2e || state.status !== 'connecting') return;
-    if (path === 'direct') {
-      this.#rendezvous.close();
-      // Nothing queued is read any more: the room is not a path from here.
-      this.#work.length = 0;
-      this.#setState({ status: 'connected', label: state.label, since: this.#now() });
-      this.#armDeadline();
-      return;
-    }
-    if (cause === null) return;
-    // Deferred one microtask, so a decline the endpoint sends right after
-    // giving up reaches the phone before the rendezvous closes under it.
-    queueMicrotask(() => {
-      if (this.#established === e2e) this.#end('direct-failed');
-    });
+    if (this.#established !== e2e || state.status !== 'connecting' || path !== 'direct') return;
+    this.#rendezvous.close();
+    // Nothing queued is read any more: the room is not a path from here.
+    this.#work.length = 0;
+    this.#setState({ status: 'connected', label: state.label, since: this.#now() });
+    this.#armDeadline();
   }
 
   /**
-   * An application message arrived over the rendezvous. **Application data
-   * never crosses the rendezvous**, so a phone that sends it is not one this
-   * Burrow serves.
+   * The session cannot be direct, which is the only way it runs. **Application
+   * data never crosses the rendezvous**, so a phone that sends it there is not
+   * one this Burrow serves; a given-up attempt or a missed deadline has no
+   * relay to fall back to (`EstablishedE2eSession`'s `directOnly`).
    */
-  #onRelayedApp(e2e: EstablishedE2eSession): void {
+  #onDirectOnlyBroken(e2e: EstablishedE2eSession, reason: DirectOnlyBreak): void {
     if (this.#established !== e2e) return;
-    console.warn('[one-time] an application message arrived over the rendezvous');
-    this.#end('burrow-error');
+    if (reason === 'relayed-app') {
+      console.warn('[one-time] an application message arrived over the rendezvous');
+      this.#end('burrow-error');
+      return;
+    }
+    this.#end('direct-failed');
   }
 
   /**
@@ -707,11 +697,16 @@ export class OneTimeRuntime {
           : () => this.#end('expired');
         return [{ at: link.expiry * 1000 + 1, expire }];
       }
-      case 'connecting':
+      case 'connecting': {
+        const e2e = this.#established;
+        const directBy = e2e?.directDeadlineAt ?? null;
         return [
-          { at: this.#directDeadlineAt, expire: () => this.#end('direct-failed') },
+          ...(e2e && directBy !== null
+            ? [{ at: directBy, expire: () => this.#onDirectOnlyBroken(e2e, 'deadline') }]
+            : []),
           ...this.#idleDeadline(),
         ];
+      }
       case 'connected':
         return this.#idleDeadline();
       default:

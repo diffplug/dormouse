@@ -7,9 +7,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// @ts-expect-error -- a plain build script, deliberately not part of the app's
-// TypeScript program; Hosted's staging writes exactly these.
-import { DEPLOYMENT_FILE, HOSTED_DEPLOYMENT_BODY } from '../../../scripts/assert-pocket-worker.mjs';
+import { HOSTED_POCKET_DEPLOYMENT, POCKET_DEPLOYMENT_FILE } from 'remote-lib-common';
+
 import { CLOUDFLARE_STUN_URL } from '../direct/ice-servers';
 import {
   POCKET_DEPLOYMENT_PATH,
@@ -32,8 +31,11 @@ afterEach(() => {
 
 describe('Pocket’s deployment', () => {
   it('reads Hosted from exactly what Hosted’s staging writes, at the path it writes it', async () => {
-    expect(POCKET_DEPLOYMENT_PATH).toBe(`/${DEPLOYMENT_FILE}`);
-    expect(await readPocketDeployment(serving(() => new Response(HOSTED_DEPLOYMENT_BODY)))).toBe('hosted');
+    expect(POCKET_DEPLOYMENT_PATH).toBe(`/${POCKET_DEPLOYMENT_FILE}`);
+    // As `hosted/scripts/stage-relay.mjs` writes it.
+    expect(
+      await readPocketDeployment(serving(() => new Response(`${JSON.stringify(HOSTED_POCKET_DEPLOYMENT)}\n`))),
+    ).toBe('hosted');
   });
 
   it('reads self-host from a self-host Relay’s shell, a 404, a failure, and any other body', async () => {
@@ -41,7 +43,7 @@ describe('Pocket’s deployment', () => {
       // The SPA fallback a self-host Relay answers every unknown path with.
       () => new Response('<!doctype html><title>Pocket</title>', { headers: { 'content-type': 'text/html' } }),
       () => new Response('Not Found', { status: 404 }),
-      () => new Response(HOSTED_DEPLOYMENT_BODY, { status: 500 }),
+      () => new Response(JSON.stringify(HOSTED_POCKET_DEPLOYMENT), { status: 500 }),
       () => Promise.reject(new TypeError('offline')),
       () => new Response('{"deployment":"Hosted"}'),
       () => new Response('{"deployment":["hosted"]}'),

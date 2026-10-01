@@ -82,7 +82,7 @@ import {
 } from './pocket-db';
 import { SCAN_LABEL } from '../setup-copy';
 import { RelayHeartbeat, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
-import { ClientSessionCore, type ClientSessionCoreDeps } from './session-core';
+import { ClientSessionCore, type ClientSessionCoreDeps, type DirectWaitFailure } from './session-core';
 import type { TerminalHandlers } from './remote-adapter';
 
 /** The slice of a WebSocket the client uses; a browser `WebSocket` satisfies it. */
@@ -174,12 +174,32 @@ export const BURROW_SESSION_REAPED_MESSAGE =
 
 /**
  * What a connection the computer holds to the direct path reports when no
- * direct path formed in time — the phone off its allowed networks, most often
- * (`docs/specs/remote-network.md` -> "Local networks").
+ * direct path formed in time, or the computer ended it for that — the phone
+ * off its allowed networks, most often (`docs/specs/remote-network.md` ->
+ * "Local networks").
  */
 export const DIRECT_ONLY_FAILED_MESSAGE =
   'This computer accepts phones only over a direct connection on a network it allows, and one couldn’t be made. ' +
   'Join one of those networks, then Connect again.';
+
+/**
+ * What the same connection reports when a direct connection was never
+ * possible: this browser brings no WebRTC, or the computer declined the offer.
+ * Joining another network would not help, so this never says to.
+ */
+export const DIRECT_ONLY_UNSUPPORTED_MESSAGE =
+  'This computer accepts phones only over a direct connection, and this browser or the computer can’t make one. ' +
+  'Try another browser on this phone, or check the computer’s Settings → Network.';
+
+/**
+ * The fixed copy for a direct-only connect that never went direct: no direct
+ * connection was possible at all, or one was and did not form.
+ */
+function directOnlyFailureMessage(failure: Exclude<DirectWaitFailure, 'retired'>): string {
+  return failure === 'unsupported' || failure === 'declined'
+    ? DIRECT_ONLY_UNSUPPORTED_MESSAGE
+    : DIRECT_ONLY_FAILED_MESSAGE;
+}
 
 /** What a request in flight fails with when the computer ends the session on purpose. */
 export const BURROW_SESSION_ENDED_MESSAGE = 'The computer ended this session. Connect again to resume.';
@@ -321,6 +341,8 @@ export class PocketClient {
   readonly #setTimer: RemoteTimer;
   /** Everything a ceremony's frames and an established session do. */
   readonly #core: ClientSessionCore<E2eRoute>;
+  /** Whether a direct-only connect is waiting for its switch, reporting its endings itself. */
+  #awaitingDirect = false;
 
   #ws: PocketSocket | null = null;
   /** The open relay socket's heartbeat, or null while none is open. */
@@ -410,9 +432,18 @@ export class PocketClient {
    * Notified when the Burrow drops: a `burrow-gone` frame, a closed socket, a
    * session the Burrow's idle reaper took while this page was hidden, or the
    * Burrow's goodbye — the person at the computer took a pane back.
+   *
+   * **Never while a direct-only {@link connect} waits for its switch**: no wall
+   * has mounted to leave, and that connect resolves the failure itself — one
+   * report per ending.
    */
-  setOnBurrowGone(callback: (() => void) | null): void {
-    this.#core.setOnBurrowGone(callback);
+  setOnBurrowGone(callback: ((endedByBurrow: boolean) => void) | null): void {
+    this.#core.setOnBurrowGone(
+      callback &&
+        ((endedByBurrow) => {
+          if (!this.#awaitingDirect) callback(endedByBurrow);
+        }),
+    );
   }
 
   // --- Account: first-time setup + sign-in ---------------------------------
@@ -894,11 +925,24 @@ export class PocketClient {
       // **A direct-only session sends no protocol-v1 before the switch**: the
       // Burrow ends one whose application message crosses the relay, so the
       // wall mounts only once the direct path carries both directions.
-      if (outcome.directOnly === true && !(await this.#core.awaitDirect(DIRECT_ONLY_DEADLINE_MS))) {
-        if (this.#core.establishedRoute === route) {
-          this.#core.endSession(DIRECT_ONLY_FAILED_MESSAGE, { notifyGone: false });
+      let failure: DirectWaitFailure | null = null;
+      if (outcome.directOnly === true) {
+        // A replacing Connect retires this wait before its own request goes
+        // out, so this one is over long before that one's outcome arrives.
+        this.#awaitingDirect = true;
+        try {
+          failure = await this.#core.awaitDirect(DIRECT_ONLY_DEADLINE_MS);
+        } finally {
+          this.#awaitingDirect = false;
         }
-        return { ok: false, message: DIRECT_ONLY_FAILED_MESSAGE, pairingRequired: false };
+      }
+      if (failure !== null) {
+        // A replacing Connect retired this one, and its session is the live
+        // one now: answered without touching it.
+        if (failure === 'retired') return { ok: false, message: BURROW_UNAVAILABLE_MESSAGE, pairingRequired: false };
+        const message = directOnlyFailureMessage(failure);
+        if (this.#core.establishedRoute === route) this.#core.endSession(message, { notifyGone: false });
+        return { ok: false, message, pairingRequired: false };
       }
       return { ok: true, burrowLabel: outcome.burrowLabel };
     }

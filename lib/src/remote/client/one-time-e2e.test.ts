@@ -14,7 +14,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  ONE_TIME_DIRECT_DEADLINE_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   fromBase64Url,
   parseOneTimeLinkUrl,
   toBase64Url,
@@ -371,7 +371,7 @@ describe('one-time connection, end to end', () => {
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
     approval.approve(shown);
     await settleUntil(() => network.offererChannel !== null);
-    clock.advance(ONE_TIME_DIRECT_DEADLINE_MS);
+    clock.advance(DIRECT_ONLY_DEADLINE_MS);
     expect(await result).toEqual({ ok: false, message: ONE_TIME_DIRECT_FAILED_MESSAGE });
     await settleUntil(() => runtime.state.status === 'ended');
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');
