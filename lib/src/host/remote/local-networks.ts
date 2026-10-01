@@ -37,21 +37,22 @@ export function bindAddressFor(
 /**
  * `sdp` with every candidate outside `inAllowed`, or with no address to read,
  * removed and a default address outside it written as `0.0.0.0`, and how many
- * candidates are left. Lines end at any of CRLF, LF, or CR and fields at any
- * whitespace, so no line the native parser reads as a candidate escapes this
- * one; lines rejoin with the first ending found.
+ * candidates are left. Lines end at any of CRLF, LF, or CR and fields at the
+ * C-locale whitespace libdatachannel splits on, never JavaScript's wider `\s`,
+ * so no line the native parser reads as a candidate escapes this one; lines
+ * rejoin with the first ending found.
  */
 function keepAllowed(sdp: string, inAllowed: (address: string) => boolean): { sdp: string; candidates: number } {
   const eol = /\r\n|\r|\n/.exec(sdp)?.[0] ?? '\n';
   let candidates = 0;
   const lines: string[] = [];
   for (const line of sdp.split(/\r\n|\r|\n/)) {
-    const fields = line.trim().split(/\s+/);
-    if (/^a=candidate:/i.test(fields[0]!)) {
+    const fields = line.split(/[ \t\v\f]+/).filter((field) => field !== '');
+    if (/^a=candidate:/i.test(fields[0] ?? '')) {
       const address = fields[4];
       if (!address || !inAllowed(address)) continue;
       candidates += 1;
-    } else if (/^c=/i.test(fields[0]!)) {
+    } else if (/^c=/i.test(fields[0] ?? '')) {
       const address = fields[2];
       if (!address || !inAllowed(address)) {
         lines.push('c=IN IP4 0.0.0.0');

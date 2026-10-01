@@ -185,6 +185,8 @@ describe('localNetworksPath', () => {
       'a=candidate:4 1 udp 2113937151 192.168.86.23 51238 typ host\na=candidate:5 1 udp 2113937151 203.0.113.7 51239 typ host',
       'a=candidate:6 1 udp 2113937151 192.168.86.23 51240 typ host\ra=candidate:7 1 udp 2113937151 203.0.113.7 51241 typ host',
       'a=candidate:8 1 udp',
+      // U+00A0 is not whitespace to the native parser, which reads 203.0.113.7 as this address.
+      'a=candidate:9\u00a0x\u00a0y\u00a0z\u00a0192.168.86.23 1 udp 2113937151 203.0.113.7 51242 typ host',
       '',
     ].join('\r\n');
 
