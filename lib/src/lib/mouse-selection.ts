@@ -240,18 +240,21 @@ export function beginDrag(
 /**
  * Update an in-progress drag. No-op if no drag is active or the drag has
  * already been released. The shape can flip live as Alt is pressed / released
- * (spec §3.2).
+ * (spec §3.2). `anchor` moves the drag's origin cell too: which cell a pointer
+ * boundary selects depends on which side of it the drag ends (§3.1).
  */
 export function updateDrag(
   id: string,
-  args: { row: number; col: number; altKey: boolean },
+  args: { row: number; col: number; altKey: boolean; anchor?: { row: number; col: number } },
 ): void {
   const s = ensure(id);
   const sel = s.selection;
   if (!sel || !sel.dragging) return;
   const shape: SelectionShape = args.altKey || sel.blockLatched ? 'block' : 'linewise';
-  if (sel.endRow === args.row && sel.endCol === args.col && sel.shape === shape) return;
-  s.selection = { ...sel, endRow: args.row, endCol: args.col, shape };
+  const startRow = args.anchor?.row ?? sel.startRow;
+  const startCol = args.anchor?.col ?? sel.startCol;
+  if (sel.endRow === args.row && sel.endCol === args.col && sel.shape === shape && sel.startRow === startRow && sel.startCol === startCol) return;
+  s.selection = { ...sel, startRow, startCol, endRow: args.row, endCol: args.col, shape };
   notify();
 }
 
@@ -303,20 +306,6 @@ export function extendSelectionToToken(id: string, token: TokenHint): void {
     endRow: token.row,
     endCol: forward ? token.endCol - 1 : token.startCol,
   };
-  notify();
-}
-
-/**
- * Flip the in-progress drag's shape based on the current Alt-key state.
- * No-op when no drag is active. Used to react to Alt press/release while
- * the mouse is stationary (spec §3.2).
- */
-export function setDragAlt(id: string, altKey: boolean): void {
-  const s = states.get(id);
-  if (!s?.selection?.dragging) return;
-  const shape: SelectionShape = altKey || s.selection.blockLatched ? 'block' : 'linewise';
-  if (s.selection.shape === shape) return;
-  s.selection = { ...s.selection, shape };
   notify();
 }
 

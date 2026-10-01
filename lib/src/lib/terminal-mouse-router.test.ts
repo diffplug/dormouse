@@ -160,11 +160,30 @@ describe('terminal-mouse-router: override suppression', () => {
     windowHost.emit('mouseup', events[2]);
 
     for (const ev of events) expect(ev.preventDefault).not.toHaveBeenCalled();
+    // x=45 sits mid-cell 4: its nearest boundary is the gap before it (§3.1).
     expect(getMouseSelectionState('t1').selection).toMatchObject({
-      startRow: 0, startCol: 0, endRow: 2, endCol: 4, dragging: false, owner: 'program',
+      startRow: 0, startCol: 0, endRow: 2, endCol: 3, dragging: false, owner: 'program',
     });
     expect(getMouseSelectionState('t1').copyEditor).toBeNull();
     cleanup();
+  });
+
+  // Cells are 10px wide: a pointer at x selects up to the gap nearest x.
+  const mouseDrag = (from: [number, number], to: [number, number]) => {
+    const { cleanup, element } = createHarness(windowHost);
+    element.emit('mousedown', mouseEvent({ clientX: from[0], clientY: from[1] }));
+    windowHost.emit('mousemove', mouseEvent({ clientX: to[0], clientY: to[1], buttons: 1 }));
+    windowHost.emit('mouseup', mouseEvent({ clientX: to[0], clientY: to[1] }));
+    const sel = getMouseSelectionState('t1').selection;
+    cleanup();
+    return sel;
+  };
+
+  it('ends a drag released just past a character before the next one, either way (§3.1)', () => {
+    // From the gap before cell 2 to just right of cell 5's right edge.
+    expect(mouseDrag([19, 5], [61, 25])).toMatchObject({ startRow: 0, startCol: 2, endRow: 2, endCol: 5 });
+    // The same span dragged upward: the earlier edge is the head now.
+    expect(mouseDrag([61, 25], [19, 5])).toMatchObject({ startRow: 2, startCol: 5, endRow: 0, endCol: 2 });
   });
 
   it('shadows nothing for a program click that never crosses the drag threshold', () => {
@@ -273,7 +292,7 @@ describe('terminal-mouse-router: override suppression', () => {
       startRow: 0,
       startCol: 0,
       endRow: 1,
-      endCol: 2,
+      endCol: 1,
       dragging: true,
     });
 
@@ -286,7 +305,7 @@ describe('terminal-mouse-router: override suppression', () => {
       startRow: 0,
       startCol: 0,
       endRow: 1,
-      endCol: 2,
+      endCol: 1,
       dragging: false,
     });
     // Mouse-up opens the copy editor over what was dragged (spec §4).

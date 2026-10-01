@@ -64,6 +64,7 @@ Selection is available whenever the terminal handles the mouse (§3.5, §6.1).
 
 ### 3.1 Initiating a Selection
 
+- **A selection edge is the cell boundary nearest the pointer**, as xterm.js's own selection reads it: the earlier edge (reading order, or column order for a block) takes the cell after its boundary, the later edge the cell before (rationale). Source of truth: `dragCells` in `lib/src/lib/drag-cells.ts`, pinned by its test.
 - **Must begin selection after a click-and-drag crosses ~4px**; plain clicks shift pane focus or activate hyperlinks. **Must capture mouse presses on xterm’s screen immediately** (rationale); that capture, and the plain click it must not break, are pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
 - On touch or pen, a primary pointer tap-and-drag takes the same path; non-primary touch pointers are ignored.
 - The selection draws as a single perimeter outline tracing the union of selected cells (§7 owns rendering). Color is `--color-focus-ring` (`docs/specs/theme.md`), with a hardcoded cornflower-blue final fallback in `SelectionOverlay.tsx`.

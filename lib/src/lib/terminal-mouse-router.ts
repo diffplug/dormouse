@@ -4,7 +4,6 @@ import {
   endDrag,
   getMouseSelectionState,
   isDragging,
-  setDragAlt,
   setHintToken,
   setOverride,
   setSelection,
@@ -12,6 +11,7 @@ import {
   updateDrag,
 } from './mouse-selection';
 import { openCopyEditor } from './copy-editor';
+import { boundaryAt, dragCells, type PointerBoundary } from './drag-cells';
 import { detectTokenInBufferLine } from './smart-token';
 import type { TerminalOverlayDims } from './terminal-store';
 
@@ -61,10 +61,12 @@ export function attachTerminalMouseRouter({
   element: HTMLDivElement;
   getOverlayDims: (id: string) => TerminalOverlayDims | null;
 }): () => void {
-  const computeCell = (ev: { clientX: number; clientY: number }): { row: number; col: number; startedInScrollback: boolean } => {
+  /** The cell under the pointer, and (`b`) the cell boundary nearest it,
+   *  which is what a selection edge takes (spec §3.1). */
+  const computeCell = (ev: { clientX: number; clientY: number }): { row: number; col: number; b: number; startedInScrollback: boolean } => {
     const dims = getOverlayDims(id);
     if (!dims) {
-      return { row: 0, col: 0, startedInScrollback: false };
+      return { row: 0, col: 0, b: 0, startedInScrollback: false };
     }
     const elementRect = element.getBoundingClientRect();
     const offsetX = ev.clientX - elementRect.left - dims.gridLeft;
@@ -73,7 +75,7 @@ export function attachTerminalMouseRouter({
     const viewportRow = Math.min(dims.rows - 1, Math.max(0, Math.floor(offsetY / dims.cellHeight)));
     const absRow = dims.viewportY + viewportRow;
     const startedInScrollback = absRow < dims.baseY;
-    return { row: absRow, col, startedInScrollback };
+    return { row: absRow, col, b: boundaryAt(offsetX, dims.cellWidth, dims.cols), startedInScrollback };
   };
 
   // xterm's linkifier listens on its screen, not our outer wrapper. Capture
@@ -86,6 +88,16 @@ export function attachTerminalMouseRouter({
     const dy = ev.clientY - from.clientY;
     return dx * dx + dy * dy >= DRAG_THRESHOLD_PX_SQ;
   };
+  // The active drag's edges as pointer boundaries; the store holds the cells
+  // they resolve to, which depend on the shape and on which edge is earlier.
+  let dragAnchor: PointerBoundary | null = null;
+  let dragHead: PointerBoundary | null = null;
+  const applyDrag = (altKey: boolean) => {
+    const sel = getMouseSelectionState(id).selection;
+    if (!dragAnchor || !dragHead || !sel?.dragging) return;
+    const { anchor, head } = dragCells(dragAnchor, dragHead, altKey || !!sel.blockLatched, terminal.cols);
+    updateDrag(id, { row: head.row, col: head.col, altKey, anchor });
+  };
   // Touch has no Alt key, so a double-tap-then-drag is how a block selection is
   // started on touch. A second touch within this window and distance of the
   // previous one (which ended as a tap) arms block mode for the drag it begins.
@@ -94,6 +106,7 @@ export function attachTerminalMouseRouter({
   let pendingDrag: {
     row: number;
     col: number;
+    b: number;
     altKey: boolean;
     block: boolean;
     startedInScrollback: boolean;
@@ -116,7 +129,7 @@ export function attachTerminalMouseRouter({
   // A mouse drag the inside program owns (spec §3.8). Its events reach the
   // program untouched; this only remembers where it went, so a copy chord can
   // open the editor over what the program is highlighting.
-  let programDrag: { row: number; col: number; clientX: number; clientY: number; last: { clientX: number; clientY: number } | null } | null = null;
+  let programDrag: { row: number; b: number; clientX: number; clientY: number; last: { clientX: number; clientY: number } | null } | null = null;
 
   const terminalOwnsEvent = (ev: MouseEvent | PointerEvent) => {
     const state = getMouseSelectionState(id);
@@ -139,7 +152,7 @@ export function attachTerminalMouseRouter({
     setHintToken(id, null);
     if (!terminalOwns) {
       programDrag = ev.button === 0 && !opts.touchLike
-        ? { row: cell.row, col: cell.col, clientX: ev.clientX, clientY: ev.clientY, last: null }
+        ? { row: cell.row, b: cell.b, clientX: ev.clientX, clientY: ev.clientY, last: null }
         : null;
       return false;
     }
@@ -155,6 +168,7 @@ export function attachTerminalMouseRouter({
     pendingDrag = {
       row: cell.row,
       col: cell.col,
+      b: cell.b,
       altKey: ev.altKey,
       block: opts.block ?? false,
       startedInScrollback: cell.startedInScrollback,
@@ -185,12 +199,14 @@ export function attachTerminalMouseRouter({
         blockLatched: pendingDrag.block,
         startedInScrollback: pendingDrag.startedInScrollback,
       });
+      dragAnchor = { row: pendingDrag.row, b: pendingDrag.b };
       terminal.clearSelection();
       pendingDrag = null;
     }
     if (!isDragging(id)) return;
     const cell = computeCell(ev);
-    updateDrag(id, { row: cell.row, col: cell.col, altKey: ev.altKey });
+    dragHead = { row: cell.row, b: cell.b };
+    applyDrag(ev.altKey);
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     if (!consumed) consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
 
@@ -253,11 +269,12 @@ export function attachTerminalMouseRouter({
     programDrag = null;
     if (!drag?.last || getMouseSelectionState(id).mouseReporting === 'none') return;
     const end = computeCell(drag.last);
+    const { anchor, head } = dragCells(drag, end, false, terminal.cols);
     setSelection(id, {
-      startRow: drag.row,
-      startCol: drag.col,
-      endRow: end.row,
-      endCol: end.col,
+      startRow: anchor.row,
+      startCol: anchor.col,
+      endRow: head.row,
+      endCol: head.col,
       shape: 'linewise',
       dragging: false,
       startedInScrollback: false,
@@ -407,8 +424,7 @@ export function attachTerminalMouseRouter({
   };
 
   const onAltChange = (ev: KeyboardEvent) => {
-    if (!isDragging(id)) return;
-    setDragAlt(id, ev.altKey);
+    if (isDragging(id)) applyDrag(ev.altKey);
   };
 
   element.addEventListener('mousedown', onMouseDown, true);
