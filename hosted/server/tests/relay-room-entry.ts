@@ -1,12 +1,18 @@
 import type { ExecutionContext } from "hono";
 import { WS_ROUTES } from "remote-lib-common";
 import { RELAY_ROOM_PARAMS } from "../relay-room-contract";
-import worker, { OneTimeRoom, RelayRoom as ProductionRoom, RelayRows } from "../relay-worker";
+import worker, {
+  OneTimeRoom,
+  RelayRoom as ProductionRoom,
+  RelayRows as ProductionRows,
+} from "../relay-worker";
 
 // Module state outlives an evicted object, so it counts what woke one.
 let constructed = 0;
 let handled = 0;
 let skewMs = 0;
+/** Whether a row read stalls, as a slow database would. */
+let rowsStalled = false;
 /** What each upgrade handed the object: its header names and search parameters. */
 const upgrades: { headers: string[]; params: string[] }[] = [];
 
@@ -68,9 +74,26 @@ export class RelayRoom extends ProductionRoom {
   async fire() {
     await this.alarm();
   }
+
+  /** Stall every row read from now, or stop stalling new ones. */
+  async stallRows(on: boolean) {
+    rowsStalled = on;
+  }
 }
 
-export { OneTimeRoom, RelayRows };
+/**
+ * The production `RelayRows`, whose read, while stalled, waits past the 30 s
+ * the runtime gives a `blockConcurrencyWhile` callback; a pending timer keeps
+ * workerd from cancelling it as a hung request.
+ */
+export class RelayRows extends ProductionRows {
+  override async burrows(burrowIds: string[]) {
+    if (rowsStalled) await new Promise((resolve) => setTimeout(resolve, 60_000));
+    return super.burrows(burrowIds);
+  }
+}
+
+export { OneTimeRoom };
 
 type TestEnv = { RELAY_ROOM: DurableObjectNamespace<Record<string, (...args: unknown[]) => unknown>> };
 

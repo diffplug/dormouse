@@ -33,7 +33,12 @@ import {
   type RelayToClientFrame,
 } from "remote-lib-common";
 import type { RelayBurrow } from "./relay-auth";
-import { RELAY_ROOM_PARAMS, RELAY_ROOM_SWEEP_MS, type RelayRoomRpc } from "./relay-room-contract";
+import {
+  RELAY_ROOM_PARAMS,
+  RELAY_ROOM_SWEEP_MS,
+  RELAY_ROW_READ_TIMEOUT_MS,
+  type RelayRoomRpc,
+} from "./relay-room-contract";
 import type { RelayRows } from "./relay-rows";
 import { OPEN, refuseSocket } from "./socket-room";
 
@@ -269,8 +274,8 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
   /**
    * The backstop to `closeBurrow`: every held Burrow whose row is gone, is
    * another account's, or whose owner is no longer entitled closes 4001, its
-   * Clients told `burrow-gone`. One query for them all; a failed read leaves
-   * them to the next sweep.
+   * Clients told `burrow-gone`. One query for them all; a failed or timed-out
+   * read leaves them to the next sweep.
    */
   async #sweep() {
     const account = await this.ctx.storage.get<string>(ACCOUNT_KEY);
@@ -301,11 +306,25 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
   /**
    * Those of `burrowIds` still enrolled, with their owners, read by the
    * Worker's own `RelayRows` in an invocation of its own: an object that has
-   * held a database connection is never evicted (rationale).
+   * held a database connection is never evicted (rationale). Rejects past
+   * `RELAY_ROW_READ_TIMEOUT_MS`, so a stalled read under
+   * `blockConcurrencyWhile` fails as a failed read does, never resetting the
+   * object and every socket it holds.
    */
-  #rows(burrowIds: string[]): Promise<RelayBurrow[]> {
+  async #rows(burrowIds: string[]): Promise<RelayBurrow[]> {
     const { RelayRows } = this.ctx.exports as { RelayRows: Pick<RelayRows, "burrows"> };
-    return RelayRows.burrows(burrowIds);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error("RelayRows read timed out")),
+        RELAY_ROW_READ_TIMEOUT_MS,
+      );
+    });
+    try {
+      return await Promise.race([RelayRows.burrows(burrowIds), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**

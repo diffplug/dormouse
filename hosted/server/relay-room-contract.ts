@@ -21,6 +21,13 @@ export const RELAY_ROOM_PARAMS = {
  */
 export const RELAY_ROOM_SWEEP_MS = 60 * 60 * 1000;
 
+/**
+ * The longest a `RelayRoom` waits on a read of its Burrows' rows before
+ * treating it as failed: well under the 30 s after which the runtime resets
+ * an object whose `blockConcurrencyWhile` callback has not settled.
+ */
+export const RELAY_ROW_READ_TIMEOUT_MS = 5_000;
+
 /** The RPC a `RelayRoom` serves. Each names the account, which the object checks against its own. */
 export interface RelayRoomRpc {
   /** Close `burrowId`'s socket as revoked (4001), its Clients told `burrow-gone`; whether one was held. */

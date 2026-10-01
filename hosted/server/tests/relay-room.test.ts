@@ -38,7 +38,7 @@ import { e2eCases, socketCases } from "../../../remote-lib-common/test/harness/r
 import { ADMIN_EMAIL } from "../admin";
 import { migrations } from "../migrations";
 import { relayAccountRoutes } from "../relay-account";
-import { RELAY_ROOM_SWEEP_MS } from "../relay-room-contract";
+import { RELAY_ROOM_SWEEP_MS, RELAY_ROW_READ_TIMEOUT_MS } from "../relay-room-contract";
 import { ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions, wrangler } from "./bundle";
 
 // The Hosted Relay's sockets and its per-account `RelayRoom`
@@ -92,6 +92,8 @@ const roomOf = (account: string) => ({
   skew: (ms: number) => rpc<null>(account, "skew", ms),
   /** Run the alarm now. */
   fire: () => rpc<null>(account, "fire"),
+  /** Stall every row read the object makes, or stop. */
+  stallRows: (on: boolean) => rpc<null>(account, "stallRows", on),
   /** The status of an upgrade naming `claimed` and `burrowId`. */
   forge: (claimed: string, burrowId: string) => rpc<number>(account, "forge", claimed, burrowId),
 });
@@ -523,6 +525,36 @@ test("a Burrow removed between the Worker's token check and the object's accept 
   const other = await account();
   expect(await room.forge(owner.userId, (await burrowRow(other.userId)).burrowId)).toBe(401);
   expect(await room.forge(owner.userId, (await burrowRow(owner.userId)).burrowId)).toBe(403);
+});
+
+test("a stalled row read answers the upgrade 503 within its bound and leaves the sweep for later, the object's sockets open", async ({
+  onTestFinished,
+}) => {
+  const owner = await account();
+  const room = await owner.room();
+  onTestFinished(async () => {
+    closeAll();
+    await room.stallRows(false);
+  });
+  const held = await owner.driver.connectBurrow();
+  const client = await owner.driver.connectClient();
+  const enrolled = await burrowRow(owner.userId);
+  await room.stallRows(true);
+
+  // Unbounded, the read would hold `blockConcurrencyWhile` past the runtime's
+  // 30 s and reset the object, every socket with it.
+  const started = Date.now();
+  expect(await room.forge(owner.userId, enrolled.burrowId)).toBe(503);
+  expect(Date.now() - started).toBeLessThan(RELAY_ROW_READ_TIMEOUT_MS + 5_000);
+  // The sweep's read fails the same way and closes nothing.
+  await room.fire();
+  expect(await held.socket.quiet(150)).toBe(true);
+
+  client.send(e2eClientFrame(held.burrowId));
+  expect(await held.socket.take()).toMatchObject({ step: "init" });
+  expect(await room.onlineBurrows(owner.userId)).toEqual([held.burrowId]);
+  await room.stallRows(false);
+  expect(await room.forge(owner.userId, enrolled.burrowId)).toBe(101);
 });
 
 test("a removal answers 204 once the row is gone, even when closing its socket fails", async () => {
