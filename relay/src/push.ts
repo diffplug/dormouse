@@ -22,7 +22,12 @@ import { createECDH, timingSafeEqual } from 'node:crypto';
 
 import webpush from 'web-push';
 
-import { normalizeOrigin } from 'remote-lib-common';
+import {
+  PUSH_TTL_SECONDS,
+  defaultVapidSubject,
+  isLoopbackVapidSubject,
+  normalizeOrigin,
+} from 'remote-lib-common';
 
 import type { StoredPushSubscription } from './state.js';
 import {
@@ -53,58 +58,11 @@ export interface VapidKeys {
 }
 
 /**
- * Hosts a push service will not accept in a VAPID subject. Apple answers
- * `403 {"reason":"BadJwtToken"}` for a loopback subject — verified against
- * `web.push.apple.com` for both `mailto:admin@localhost` and
- * `https://localhost:3000`, while `mailto:admin@example.com` and an ordinary
- * https origin were accepted. Apple does not check that the contact is
- * *reachable*, only that it is not loopback.
+ * The VAPID subject this Relay signs with when `DORMOUSE_VAPID_SUBJECT` is
+ * unset: its https origin, or `null` when there is none push can use. Shared
+ * with the Hosted Relay (`remote-lib-common/src/remote/web-push.ts`).
  */
-const LOOPBACK_SUBJECT_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-
-/** The host a subject names: the domain half for `mailto:`, the hostname otherwise. */
-function subjectHost(subject: URL): string {
-  if (subject.protocol === 'mailto:') {
-    const at = subject.pathname.lastIndexOf('@');
-    return at === -1 ? '' : subject.pathname.slice(at + 1).toLowerCase();
-  }
-  return subject.hostname.toLowerCase();
-}
-
-function isLoopbackSubjectHost(host: string): boolean {
-  if (!host) return false;
-  if (LOOPBACK_SUBJECT_HOSTS.has(host)) return true;
-  // RFC 6761 reserves the whole `.localhost` TLD for loopback.
-  if (host.endsWith('.localhost')) return true;
-  return /^127\./.test(host);
-}
-
-/**
- * The `mailto:`/`https:` operator contact to sign VAPID JWTs with (RFC 8292)
- * when `DORMOUSE_VAPID_SUBJECT` is unset, or `null` when this deployment has no
- * usable one and push must stay off.
- *
- * The Relay's own origin is the right zero-config answer: it is a real contact
- * for whoever runs this Relay, and every deployment that can serve Pocket at
- * all already has a valid https origin, because WebAuthn requires one. A
- * loopback dev server has no such contact — and could not reach a phone anyway,
- * since the phone cannot route to it. Returning `null` there disables push
- * rather than inventing a placeholder contact that a push service may reject,
- * which is the failure this default exists to prevent: the previous default
- * (`mailto:admin@localhost`) let the Relay boot clean, answer 200 on send, and
- * silently deliver nothing to any iPhone.
- */
-export function defaultVapidSubject(origin: string): string | null {
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    return null;
-  }
-  if (parsed.protocol !== 'https:') return null;
-  if (isLoopbackSubjectHost(parsed.hostname.toLowerCase())) return null;
-  return parsed.origin;
-}
+export { defaultVapidSubject };
 
 /** Generate a VAPID keypair in the exact encoding the sender expects. */
 export function generateVapidKeys(): VapidKeys {
@@ -158,7 +116,7 @@ export function assertVapidSubject(subject: string): void {
   if (parsed.protocol !== 'mailto:' && parsed.protocol !== 'https:') {
     throw new Error('VAPID subject must be a valid mailto: or https: URL.');
   }
-  if (isLoopbackSubjectHost(subjectHost(parsed))) {
+  if (isLoopbackVapidSubject(subject)) {
     throw new Error(
       'VAPID subject must not name a loopback host — Apple rejects such a JWT with ' +
         'BadJwtToken, so every push to an iPhone would fail. Use a routable contact, ' +
@@ -179,13 +137,11 @@ function decodeVapidKey(value: string, name: 'public' | 'private', length: numbe
 }
 
 /**
- * Real delivery through `web-push`. TTL is deliberately short: an alarm that
- * arrives an hour late is noise, not information, so a push service holding one
- * for an offline phone should drop it rather than deliver it stale. The
+ * Real delivery through `web-push`, at the shared `PUSH_TTL_SECONDS`. The
  * request timeout is a separate bound on socket inactivity while talking to
  * the push service.
  */
-export const PUSH_TTL_SECONDS = 300;
+export { PUSH_TTL_SECONDS };
 export const PUSH_REQUEST_TIMEOUT_MS = 10_000;
 
 // The third bound of the trio, `PUSH_SEND_DEADLINE_MS`, lives in

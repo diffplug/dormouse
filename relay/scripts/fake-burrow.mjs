@@ -19,7 +19,7 @@
 import { API_ROUTES, formatPairingInvitationUrl, generateNoiseKeyPair } from 'remote-lib-common';
 
 import { SetupPasswordStore } from '../dist/state.js';
-import { FakeBurrow } from '../test/harness/fake-burrow.mjs';
+import { FakeBurrow } from '../../remote-lib-common/test/harness/fake-burrow.mjs';
 import { devStateDir } from './dev-paths.mjs';
 
 const relayUrl = (process.argv[2] ?? 'http://localhost:3000').replace(/\/$/, '');

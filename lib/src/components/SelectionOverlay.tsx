@@ -1,16 +1,21 @@
-import { useContext, useSyncExternalStore, type CSSProperties } from 'react';
+import { clsx } from 'clsx';
+import { useContext, useMemo, useSyncExternalStore, type CSSProperties } from 'react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
   getRenderTick,
+  isShadowed,
   subscribeToMouseSelection,
   subscribeToRenderTick,
 } from '../lib/mouse-selection';
+import { selectionOfSpan } from '../lib/copy-text';
+import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
 import { computeRects, rectsToPath } from '../lib/selection-geometry';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { IS_MAC } from '../lib/platform';
+import { motionIsInstant } from '../lib/ui-geometry';
 import { useFocusRingColor } from '../lib/themes/use-focus-ring-color';
-import { PopupButtonRow } from './design';
+import { COPY_EXPANDED_PATH_CLASS, COPY_FLASH_PATH_CLASS, PopupButtonRow } from './design';
 import { TouchUiContext } from './touch-ui-context';
 
 interface Props {
@@ -31,6 +36,9 @@ export function SelectionOverlay({ terminalId }: Props) {
   const focusRingColor = useFocusRingColor();
 
   const state = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
+  const copied = state.copyOutcome === 'copied';
+  // Read once per flash, not per render tick.
+  const pulse = useMemo(() => copied && !motionIsInstant(), [copied]);
   const selection = state.selection;
   if (!selection) return null;
 
@@ -42,7 +50,10 @@ export function SelectionOverlay({ terminalId }: Props) {
   // instead of elementWidth/cols keeps the highlight aligned even when xterm
   // adds a few pixels of padding around the cell grid.
   const { cellWidth, cellHeight, gridLeft, gridTop } = dims;
-  const rects = computeRects(selection, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight);
+  // A shadowed program drag (spec §3.8): the program paints its own highlight,
+  // so Dormouse draws only the hint until the copy chord opens the editor.
+  const shadowed = isShadowed(state);
+  const pathOf = (sel: typeof selection) => rectsToPath(computeRects(sel, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight));
 
   const style: CSSProperties = {
     position: 'absolute',
@@ -52,17 +63,20 @@ export function SelectionOverlay({ terminalId }: Props) {
   };
 
   const borderColor = focusRingColor || 'rgb(100, 149, 237)';
-  const pathD = rectsToPath(rects);
+  const pathD = shadowed ? '' : pathOf(selection);
+
+  // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
+  const editor = state.copyEditor;
+  const scopeD = editor && editor.scope > 0 ? pathOf(selectionOfSpan(editor.scopes[editor.scope].span, selection)) : '';
 
   // Mid-drag hint. Placed outside the selection on the side opposite the
   // drag direction: below when the user drags down, above when they drag up.
   // Drag-down anchors by `top` (top edge aligned with where we want the
   // near-selection edge); drag-up anchors by `bottom` so the near-selection
-  // edge lines up regardless of element height — this keeps the hint and
-  // the copy popup visually coincident, since the popup uses the same
-  // anchoring rules. Shown only while the user is dragging (spec §3.3).
+  // edge lines up regardless of element height. Shown only while the user is
+  // dragging (spec §3.3), or over a shadowed drag.
   let hint: { left: number; top?: number; bottom?: number } | null = null;
-  if (selection.dragging) {
+  if (selection.dragging || shadowed) {
     const endViewportRow = selection.endRow - dims.viewportY;
     if (endViewportRow >= 0 && endViewportRow < dims.rows) {
       const draggedDown = selection.endRow >= selection.startRow;
@@ -99,6 +113,22 @@ export function SelectionOverlay({ terminalId }: Props) {
           style={{ position: 'absolute', top: 0, left: 0, overflow: 'visible' }}
         >
           <g transform={`translate(${gridLeft} ${gridTop})`}>
+            {scopeD && (
+              <path
+                d={scopeD}
+                className={COPY_EXPANDED_PATH_CLASS}
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+              />
+            )}
+            {/* Spec §4.5: the copied selection fills. */}
+            {copied && (
+              <path
+                d={pathD}
+                data-copy-flash=""
+                className={clsx(COPY_FLASH_PATH_CLASS, pulse && 'animate-copy-flash-fill')}
+              />
+            )}
             <path
               d={pathD}
               fill="none"
@@ -115,11 +145,17 @@ export function SelectionOverlay({ terminalId }: Props) {
           style={{ left: hint.left, top: hint.top, bottom: hint.bottom }}
         >
           <div className="flex flex-col gap-0.5 leading-none text-muted">
-            <div>
-              {touchUi
-                ? 'Start drag with double-tap for block selection'
-                : `Hold ${IS_MAC ? 'Opt' : 'Alt'} for block selection`}
-            </div>
+            {shadowed ? (
+              <div>
+                Press <span className="text-foreground">{COPY_CHORD_LABEL}</span> to copy
+              </div>
+            ) : (
+              <div>
+                {touchUi
+                  ? 'Start drag with double-tap for block selection'
+                  : `Hold ${IS_MAC ? 'Opt' : 'Alt'} for block selection`}
+              </div>
+            )}
             {state.hintToken && (
               <div>
                 Press <span className="text-foreground">e</span> to select the full{' '}

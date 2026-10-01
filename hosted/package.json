@@ -5,15 +5,14 @@
   "scripts": {
     "dev": "tsx server/dev.ts",
     "typecheck": "tsc --noEmit",
-    "build": "pnpm --filter dormouse-lib build:one-time && pnpm typecheck && vite build && node scripts/stage-one-time.mjs && wrangler deploy --dry-run --outdir dist-worker",
+    "build": "pnpm --filter dormouse-lib build:pocket && pnpm --filter dormouse-lib build:one-time && pnpm typecheck && vite build && node scripts/stage-relay.mjs && wrangler deploy --dry-run --outdir dist-worker/account && wrangler deploy --dry-run --config wrangler.relay.jsonc --outdir dist-worker/relay && wrangler deploy --dry-run --config wrangler.voice.jsonc --outdir dist-worker/voice",
     "test": "pnpm test:deploy && vitest run",
     "db:migrate": "tsx server/db.ts migrate",
     "db:validate": "tsx server/db.ts validate",
     "db:status": "tsx server/db.ts status",
-    "deploy": "pnpm build && wrangler deploy",
     "preview:worker": "wrangler dev --local --local-protocol https",
     "test:deploy": "node --test scripts/*.test.mjs",
-    "test:one-time": "vitest run server/tests/one-time.test.ts",
+    "test:miniflare": "vitest run server/tests/one-time.test.ts server/tests/boundary.test.ts server/tests/pocket.test.ts server/tests/relay-push.test.ts",
     "preview:deploy": "node scripts/preview.mjs deploy",
     "preview:cleanup": "node scripts/preview.mjs cleanup",
     "preview:smoke": "node scripts/preview-smoke.mjs"

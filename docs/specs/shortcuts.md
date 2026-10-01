@@ -56,10 +56,10 @@ Both modes, ahead of the passthrough gate, and only on a terminal **selected** S
 |-----|--------|-------------|
 | `e` | Extend to token | Mid-drag only: extend the selection to the full URL/path token at the cursor; consumed but inert with no token. |
 | `Alt` (hold) | Block / linewise | Block (rectangular) rather than linewise, live through the drag; touch latches it with a double-tap-then-drag. |
-| `Esc` | Cancel selection | Cancel the in-progress drag, or clear a finalized selection while its popup is up. |
-| *(any other key)* | — | Swallowed during a terminal-handled drag, never reaching the inside program (`docs/specs/mouse-and-clipboard.md` §3.6). |
-| `⌘C` (macOS) / `Ctrl+C` (others) | Copy raw | Copy the selection as-is; requires a finalized selection. |
-| `⌘⇧C` (macOS) / `Ctrl+Shift+C` (others) | Copy rewrapped | Copy the selection rewrapped for single-line display. |
+| `Esc` | Cancel selection | Cancel the in-progress drag, or in passthrough close the copy editor and clear its selection. |
+| *(any other key)* | — | Swallowed during a terminal-handled drag, never reaching the inside program (`docs/specs/mouse-and-clipboard.md` §3.6); with the copy editor open, closes it and reaches the terminal. |
+| `⌘C` (macOS) / `Ctrl+C` (others) | Copy | Copy editor: copy what it shows (`⇧` optional); over a program-owned drag, open it. |
+| `e` / `⇧E`, `f` / `⇧F`, `←` `→` / `⇧←` `⇧→`, `↵` | Copy editor | Passthrough only: scope, format, edges, copy (`docs/specs/mouse-and-clipboard.md` §4.3). |
 | `⌘V` / `⌘⇧V` / `Ctrl+V` / `Ctrl+Shift+V` | Paste | Paste into the terminal; the `Ctrl` variants are intercepted on every platform, macOS included. |
 
 On macOS `Ctrl+C` still reaches the running program; a literal `0x16` needs the shell's `quoted-insert` (`Ctrl+Q`) (`docs/specs/mouse-and-clipboard.md` §8.3).
@@ -103,5 +103,5 @@ The standalone host contributes no chords; `docs/specs/standalone.md` owns its n
 - `lib/src/components/wall/chrome-keyboard-lease.ts`, `lib/src/lib/workspace-ui-store.ts` — the strip's keyboard suppression and rename/confirmation state
 - `lib/src/lib/vscode-keybindings.ts` — the workbench mirror allowlist
 - `lib/src/lib/terminal-mouse-router.ts` — live Alt tracking during a drag
-- `lib/src/components/SelectionPopup.tsx`, `lib/src/components/wall/TerminalContextView.tsx`, `lib/src/components/wall/InlineEditInput.tsx` — the popover/dialog handlers
+- `lib/src/components/wall/TerminalContextView.tsx`, `lib/src/components/wall/InlineEditInput.tsx` — the popover/dialog handlers
 - `lib/src/components/wall/agent-browser-surface-controller.ts` — browser key forwarding and the edit-chord bridge

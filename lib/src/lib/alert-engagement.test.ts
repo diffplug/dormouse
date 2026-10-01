@@ -385,6 +385,7 @@ describe('a Claude Code turn', () => {
       onToolEvents() {},
       onSemanticEvents() {},
       writeResponse() {},
+      onClipboardOffer() {},
       onChunk() {},
     });
     const pty = alertedPty(manager, { write() {}, resize() {} });

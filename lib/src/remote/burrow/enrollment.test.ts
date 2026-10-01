@@ -1,14 +1,22 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   BAD_PASSWORD_ERROR,
+  NOT_ENTITLED_ERROR,
   ORIGIN_MISMATCH_ERROR,
+  RELAY_BEARER_LENGTH,
   UNAUTHORIZED_ERROR,
   fromBase64Url,
   mintNoiseStaticKeyPair,
   toBase64Url,
 } from 'remote-lib-common';
 import { TEST_SETUP_PASSWORD } from '../test-setup-password';
-import { isEnrollment, performEnrollment } from './enrollment';
+import {
+  beginHostedEnrollment,
+  isEnrollment,
+  performEnrollment,
+  pollHostedEnrollment,
+  type EnrollmentStatic,
+} from './enrollment';
 
 // A real `burrowId`: base64url of 16 bytes, the one shape `isEnrollment`
 // accepts, because it is also the routing id every `e2e` envelope carries.
@@ -430,4 +438,127 @@ describe('burrow enrollment', () => {
     expect(isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey: 42 })).toBe(false);
   });
 
+});
+
+describe('Hosted device-code enrollment', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const RELAY = 'https://relay.dormouse.sh';
+  const BEGIN = {
+    deviceCode: 'D'.repeat(RELAY_BEARER_LENGTH),
+    userCode: '23AB-YZ9K',
+    verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
+    expiresAt: 1_800_000_000_000,
+    interval: 5,
+  };
+  const json = (status: number, body: unknown) =>
+    vi.fn(async () => new Response(JSON.stringify(body), { status }));
+
+  it('begins with the baked origin alone, minting the Noise static first', async () => {
+    const fetchMock = json(200, BEGIN);
+    const { begin, noiseStatic } = await beginHostedEnrollment(RELAY, fetchMock as unknown as typeof fetch);
+
+    expect(begin).toEqual(BEGIN);
+    expect(fetchMock.mock.calls[0]![0]).toBe(`${RELAY}/api/burrow/enroll/begin`);
+    const init = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(init.redirect).toBe('error');
+    expect(JSON.parse(init.body as string)).toEqual({ origin: RELAY });
+    expect(JSON.stringify(init.body)).not.toContain(noiseStatic.noiseStaticPublicKey);
+
+    // A runtime that cannot mint fails before the Relay is asked anything.
+    vi.mocked(mintNoiseStaticKeyPair).mockRejectedValueOnce(new Error('no X25519 here'));
+    const unasked = json(200, BEGIN);
+    await expect(beginHostedEnrollment(RELAY, unasked as unknown as typeof fetch)).rejects.toThrow(
+      /cannot generate the X25519 key/,
+    );
+    expect(unasked).not.toHaveBeenCalled();
+  });
+
+  it('refuses a begin answer that is not an enrollment code, and names a refused origin', async () => {
+    await expect(
+      beginHostedEnrollment(RELAY, json(200, { ...BEGIN, interval: 0 }) as unknown as typeof fetch),
+    ).rejects.toThrow(/not an enrollment code/);
+    await expect(
+      beginHostedEnrollment(
+        RELAY,
+        json(409, { error: ORIGIN_MISMATCH_ERROR, origin: 'https://relay.example.com' }) as unknown as typeof fetch,
+      ),
+    ).rejects.toThrow(/The Relay says its origin is https:\/\/relay.example.com/);
+  });
+
+  describe('a poll', () => {
+    let noiseStatic: EnrollmentStatic;
+    beforeAll(async () => {
+      const material = await mintNoiseStaticKeyPair();
+      noiseStatic = { noiseStaticPrivateKey: material.privateKeyPkcs8, noiseStaticPublicKey: material.publicKey };
+    });
+    const poll = (fetchMock: unknown) =>
+      pollHostedEnrollment(RELAY, BEGIN.deviceCode, 'My Laptop', noiseStatic, fetchMock as typeof fetch);
+
+    it('posts the device code alone, and maps an enrolled answer through the enrollment guard', async () => {
+      const enrollment = { burrowId: BURROW_ID, burrowToken: 'tok', origin: RELAY, rpId: 'relay.dormouse.sh' };
+      const fetchMock = json(200, { status: 'enrolled', enrollment });
+
+      const answer = await poll(fetchMock);
+
+      expect(fetchMock.mock.calls[0]![0]).toBe(`${RELAY}/api/burrow/enroll/poll`);
+      const init = fetchMock.mock.calls[0]![1] as RequestInit;
+      expect(init.redirect).toBe('error');
+      expect(JSON.parse(init.body as string)).toEqual({ deviceCode: BEGIN.deviceCode });
+      expect(answer).toEqual({
+        status: 'enrolled',
+        enrollment: { relayUrl: RELAY, ...enrollment, label: 'My Laptop', ...noiseStatic },
+      });
+      expect(isEnrollment((answer as { enrollment: unknown }).enrollment)).toBe(true);
+      // A redemption the guard refuses fails, naming the field.
+      expect(await poll(json(200, { status: 'enrolled', enrollment: { ...enrollment, burrowId: 'short' } })))
+        .toEqual({ status: 'failed', message: expect.stringContaining('burrowId') });
+    });
+
+    it('reads pending, expired, and redeemed as they are', async () => {
+      expect(await poll(json(200, { status: 'pending' }))).toEqual({ status: 'pending' });
+      expect(await poll(json(200, { status: 'expired' }))).toEqual({ status: 'expired' });
+      // An earlier poll's redemption whose answer never arrived, naming the
+      // Burrow it enrolled.
+      const burrowId = 'A'.repeat(22);
+      expect(await poll(json(200, { status: 'redeemed', burrowId, extra: 1 }))).toEqual({ status: 'redeemed', burrowId });
+      // One that names no Burrow is no answer this build reads.
+      expect(await poll(json(200, { status: 'redeemed' }))).toEqual({
+        status: 'failed',
+        message: expect.stringContaining('not an enrollment poll'),
+      });
+    });
+
+    it('retries what told it nothing, slowing down on a 429', async () => {
+      expect(await poll(vi.fn(async () => Promise.reject(new Error('offline'))))).toEqual({
+        status: 'retry',
+        slowDown: false,
+      });
+      expect(await poll(json(503, { error: 'unavailable' }))).toEqual({ status: 'retry', slowDown: false });
+      expect(await poll(json(429, { error: 'too many enrollment attempts' }))).toEqual({
+        status: 'retry',
+        slowDown: true,
+      });
+    });
+
+    it('refuses for the two reasons the panel words, and fails on anything else', async () => {
+      expect(await poll(json(403, { error: NOT_ENTITLED_ERROR }))).toEqual({
+        status: 'refused',
+        reason: 'not-entitled',
+      });
+      expect(await poll(json(409, { error: 'this account already has 32 computers enrolled' }))).toEqual({
+        status: 'refused',
+        reason: 'account-full',
+      });
+      // A 403 the Relay did not raise for the entitlement is not one.
+      expect(await poll(json(403, { error: 'forbidden' }))).toEqual({
+        status: 'failed',
+        message: 'The Relay refused the enrollment (HTTP 403): {"error":"forbidden"}',
+      });
+      expect(await poll(json(200, { status: 'approved' }))).toEqual({
+        status: 'failed',
+        message: expect.stringContaining('not an enrollment poll'),
+      });
+    });
+  });
 });

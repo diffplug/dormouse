@@ -6,17 +6,27 @@
 
 **Output file:** `audit-hosted.md`
 
-This is a code-and-specs audit of the Hosted account application and the
-one-time rendezvous it serves. You need no
+This is a code-and-specs audit of Hosted's three Workers — the account
+application (`hosted.dormouse.sh`), the relay that serves the Hosted Relay's
+account-scoped routes, Pocket, and the one-time rendezvous
+(`relay.dormouse.sh`), and managed voice (`voice.dormouse.sh`). You need no
 PAT — do not use one. The two pgstencil provenance checks below do read the
 GitHub API, but only a public repository, which the workflow's default
 `GITHUB_TOKEN` and the operator's own `gh` login both reach; if that API is
 unreachable, report those two checks as `UNVERIFIABLE`.
 
 Read `docs/specs/hosted.md`, `docs/specs/one-time.md` (its "Wire contract",
-"Hosted rendezvous", and "Phone page"), `hosted/server/`, `hosted/src/`,
-`hosted/scripts/`, `hosted/wrangler.jsonc`,
-`remote-lib-common/src/remote/one-time-wire.ts`, the phone page Hosted serves —
+"Hosted rendezvous", and "Phone page"), `docs/specs/relay.md` (its "HTTP API",
+"Setup tokens and the pairing QR", "WebAuthn without a WebAuthn library",
+"Routing", "Web Push", and "State files", whose semantics the Hosted Relay
+keeps), `hosted/server/`, `hosted/src/`,
+`hosted/scripts/`, `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`,
+`hosted/wrangler.voice.jsonc`,
+`remote-lib-common/src/remote/one-time-wire.ts`,
+`remote-lib-common/src/remote/relay-common.ts`,
+`remote-lib-common/src/remote/web-push.ts` and its test
+`remote-lib-common/test/web-push.test.mjs`, the Pocket build the relay
+serves (`lib/vite.pocket.config.ts`, `lib/pocket/`), the phone page it serves —
 `lib/vite.one-time.config.ts`, `lib/one-time/`, `lib/src/remote/one-time-app/`,
 and `lib/scripts/assert-pocket-worker.mjs` — and
 `.github/workflows/hosted-preview.yml` and
@@ -76,32 +86,97 @@ report the same finding twice.
 
 Be adversarial, and go past the `FAIL IF` list. Ask specifically:
 
-- **Is the Hosted origin the only one that can drive Hosted?** Trace a request
-  from `hosted/server/worker.ts` through `workerApp`'s origin gate and
-  `secureHeaders`: a foreign `Host`, a preview hostname, a misconfigured
-  deployment's error path, and the SPA fallback must each answer without
-  credentialed CORS, without a cacheable shell, and without inline script.
-  Check that authentication cookies stay `__Host-`, Secure, HttpOnly, `Path=/`
-  and Domain-less, and that no session token reaches browser JSON or storage.
+- **Is each Worker's origin the only one that can drive it?** Trace a request
+  from `hosted/server/worker.ts`, `hosted/server/relay-worker.ts`, and
+  `hosted/server/voice-worker.ts` through `workerApp`'s origin gate and
+  `secureHeaders`: a foreign `Host`, a sibling Worker's origin, a preview
+  hostname, a misconfigured deployment's error path, and the account's SPA
+  fallback must each answer without credentialed CORS, without a cacheable
+  shell, and without inline script. The siblings are same-site, so the login
+  cookie rides their requests to the account: every account cookie route must
+  refuse their `Origin`. Check that authentication cookies stay `__Host-`,
+  Secure, HttpOnly, `Path=/` and Domain-less, and that no session token
+  reaches browser JSON or storage.
+- **Does a secret reach a Worker that has no use for it?** Read each mapper in
+  `hosted/server/bindings.ts` and each Wrangler config: the relay and voice
+  Workers must hold and pass no auth secret and never import Better Auth, and
+  the account and relay no ElevenLabs key, and the account and voice no
+  `RELAY_ENROLL_SECRET` or VAPID private key, which must be a relay Worker
+  secret and never a `vars` entry. The relay's Hyperdrive reaches only
+  its own tables and the entitlement's user row.
+- **Can one account reach another's Relay rows?** Trace every query in
+  `hosted/server/relay-api.ts`: a session or Burrow token of account B must not
+  list, prove with, spend, or mint against account A's Burrows, passkeys,
+  nonces, setup tokens, or setup challenges; a single-use row must be spent in
+  the statement that reads it; a bearer secret must be at rest only as its
+  hash; a de-entitled account or removed Burrow must act on nothing, the
+  account's sessions and sign-in included; every unauthenticated route that
+  reaches Postgres must spend its per-address limit first; and every table a
+  caller grows must stay bounded against that caller, a capped write never
+  touching another key's rows. Classify a percent-encoded path (`/%63onnect/`,
+  `/%61ssets/`) the way `secureHeaders` and the routes do.
+- **Can an enrollment become someone else's Burrow, or a second one?** Trace
+  a device code from `begin` through the account's approval
+  (`hosted/server/relay-account.ts`) to the poll that redeems it: begin must
+  write nothing; a web page must not begin or poll; the device code must carry
+  its own expiry and its user code must be the relay secret's HMAC of it, so
+  no one can forge a device code that redeems another's approval; an approval
+  must need a recent admin login from the account's own origin and never
+  replace a live one; the redemption must be one statement whose owner is that
+  approver, and a redeemed approval must never redeem again, even once its
+  Burrow is removed; and a removed Burrow's row must be gone, its token opening nothing
+  on any relay route. Look for a user code predictable without the secret, an
+  unlimited approval loop, and a table an unauthenticated caller can grow.
+- **Can push leak text, cross an account, or reach somewhere it should not?**
+  Trace a send through `relayPushRoutes` in `hosted/server/relay-push.ts`: the
+  Relay must forward exactly the sealed envelope's three fields plus the
+  token's `burrowId`, read and log no notification text, and reach only the
+  calling Burrow's rows. A session must not register against, read back, or
+  delete another account's rows, even holding its `deliveryId`, and an
+  upsert's endpoint rotation, its caps, and the 404/410 prune must stay inside
+  the account. Every fetch must go to an endpoint `knownPushEndpoint` admits,
+  follow no redirect, and keep at most 1 KiB of a refusal's body. Check the sender against
+  RFC 8291 and RFC 8292 yourself: the test's expected bytes must come from the
+  RFC, not the code, and a JWT's `aud` must be the endpoint's origin. Look for
+  an endpoint string that parses to an allowlisted host in one place and
+  another host in another.
 - **Can a Hosted login become terminal access, or an account become someone
   else's?** `authPolicy` must keep explicit linking and independent logins; a
   callback whose initiating login was revoked must fail; an unused or unknown
   provider credential must enable nothing. No Hosted endpoint may mint a Burrow
-  ACL grant or stand in for the encrypted pairing and presence proof, and the
-  rendezvous authorizes nothing.
+  ACL grant or stand in for the encrypted pairing and presence proof, the
+  Relay must read no cookie, and the rendezvous authorizes nothing. Pocket and
+  `/connect/` share the relay origin; check what each page's policy lets it
+  reach of the other.
+- **Can one account's relay socket reach another's?** Trace an upgrade
+  through `relaySocketRoutes` (`hosted/server/relay-sockets.ts`) into
+  `RelayRoom` (`hosted/server/relay-room.ts`): the object must be named only
+  from the account a token resolved to, refuse any request or RPC naming
+  another, and receive no header or token of the caller's; a web page must not
+  open a Burrow socket, nor another origin a Client socket. Look for routing
+  state kept in memory that a hibernated object would lose, a socket torn down
+  twice or routed after its close began, a frame parsed before its length is
+  bounded or bounded in characters rather than bytes, a `ct` read, decoded,
+  logged, or stored outside the shared frame layer's field copy, a Client cap
+  one socket can evict past, a session that outlives its alarm, a ping that
+  wakes the object, a Burrow socket accepted on a row removed after the token
+  check, and a removed or de-entitled Burrow whose socket outlives the hourly
+  sweep.
 - **Can the rendezvous become more than a handshake pipe?** Trace a frame
   through `OneTimeRoom`: nothing may read, keep, or log it, and the length,
   type, and count bounds must close both ends before a byte past them is
   forwarded. Look for a second phone admitted across an await or a hibernation,
   a room that outlives its alarm, a web page that can mint a room, a join from
   another origin, a room id a caller can choose, and a limit a caller can step
-  around. Account cookies ride the phone's upgrade to this same origin: no
-  one-time route or the room may read them or reach auth.
-- **Does anything from the test or preview build reach production?** The
-  production Worker must not export the captured-email inbox, the deterministic
-  clock, or the testing injection module; preview must not copy production
-  routes, bindings, or credentials, must not call real mail or OAuth, and its
-  cleanup must check out the base branch rather than the closed PR's.
+  around. The relay is same-site with the account, so account cookies can
+  ride the phone's upgrade: no one-time route or the room may read them or
+  reach auth.
+- **Does anything from the test or preview build reach production?** No
+  production Worker may export the captured-email inbox, the deterministic
+  clock, or the testing injection module; previews must not copy production
+  routes, bindings, triggers, or credentials, must not call real mail, OAuth,
+  or ElevenLabs, and their cleanup must check out the base branch rather than
+  the closed PR's.
 
 Does the shipped code still match what the spec and this section claim? Spec
 drift is a finding; say which side is wrong.

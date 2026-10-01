@@ -1,47 +1,33 @@
 import { createBetterAuthWorker } from "@pgstencil/auth/better-auth-workers";
+import { accountApp } from "./account-app";
+import { accountPreviewBindings, type AccountEnv } from "./bindings";
 import { authPolicy } from "./policy";
-import { workerApp } from "./worker-app";
 import { postgresInbox, inboxPage, messagePage } from "./preview-inbox";
-import type { Env } from "./worker";
 
-const auth = createBetterAuthWorker<Env>({
+/** The account Worker's PR preview: mail lands in the preview database's inbox. */
+const auth = createBetterAuthWorker<AccountEnv>({
   ...authPolicy,
   email: (env) => postgresInbox(env.HYPERDRIVE.connectionString),
 });
-export default workerApp(
-  (request, env, ctx) => auth.fetch(request, env, ctx),
-  // Ignore stale production/OAuth/ElevenLabs bindings on an existing preview Worker.
-  (env) => ({
-    HYPERDRIVE: env.HYPERDRIVE,
-    ASSETS: env.ASSETS,
-    APP_ORIGIN: env.APP_ORIGIN,
-    AUTH_SECRET: env.AUTH_SECRET,
-    BUILD_SHA: env.BUILD_SHA,
-    ONE_TIME_ROOM: env.ONE_TIME_ROOM,
-    ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
-    ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
-    EMAIL_FROM: "",
-    POSTMARK_SERVER_TOKEN: "",
-  }),
-  {
-    configure: (app) => {
-      app.get("/api/dev/emails", async (c) =>
-        c.json(await postgresInbox(c.env.HYPERDRIVE.connectionString).all()),
+export default accountApp(
+  auth.fetch,
+  accountPreviewBindings,
+  (app) => {
+    app.get("/api/dev/emails", async (c) =>
+      c.json(await postgresInbox(c.env.HYPERDRIVE.connectionString).all()),
+    );
+    app.get("/dev/emails", async (c) =>
+      c.html(
+        inboxPage(await postgresInbox(c.env.HYPERDRIVE.connectionString).all()),
+      ),
+    );
+    app.get("/dev/emails/:id", async (c) => {
+      const id = c.req.param("id");
+      if (!/^[1-9]\d{0,17}$/.test(id)) return c.notFound();
+      const mail = await postgresInbox(c.env.HYPERDRIVE.connectionString).get(
+        id,
       );
-      app.get("/dev/emails", async (c) =>
-        c.html(
-          inboxPage(await postgresInbox(c.env.HYPERDRIVE.connectionString).all()),
-        ),
-      );
-      app.get("/dev/emails/:id", async (c) => {
-        const id = c.req.param("id");
-        if (!/^[1-9]\d{0,17}$/.test(id)) return c.notFound();
-        const mail = await postgresInbox(c.env.HYPERDRIVE.connectionString).get(
-          id,
-        );
-        return mail ? c.html(messagePage(mail)) : c.notFound();
-      });
-    },
+      return mail ? c.html(messagePage(mail)) : c.notFound();
+    });
   },
 );
-export { OneTimeRoom } from "./one-time-room";

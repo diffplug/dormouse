@@ -22,7 +22,6 @@ import {
   DEFAULT_PAIRING_TTL_MS,
   REMOTE_EVENTS,
   REMOTE_METHODS,
-  SELFHOST_ACCOUNT_ID,
   generateNoiseKeyPair,
   mintNoiseStaticKeyPair,
   presenceChallenge,
@@ -47,7 +46,7 @@ import type { WebAuthnClient } from './webauthn';
 import { BurrowRuntime } from '../burrow/burrow-runtime';
 import type { BurrowEnrollment } from '../burrow/enrollment';
 import type { PendingPairing } from '../burrow/pairing-approval';
-import type { DirectPeerLike } from '../direct/direct-peer';
+import type { DirectPathPolicy, DirectPeerLike } from '../direct/direct-peer';
 import { FakeSocket } from '../test-fake-socket';
 import { createTestAuthenticator, pollFor, type TestAuthenticator } from '../test-e2e-client';
 import { createTestRelay, type TestRelay } from '../test-relay';
@@ -58,6 +57,12 @@ export const ORIGIN = 'https://pocket.example';
 export const RP_ID = 'pocket.example';
 export const BURROW_LABEL = 'Ned’s laptop';
 export const SESSION_TOKEN = 'tok-abc';
+/**
+ * The account the fake Relay answers at setup and sign-in. Not the self-host
+ * `'owner'`: Pocket must carry whatever its Relay answered, as Hosted answers
+ * the account's user id.
+ */
+export const ACCOUNT_ID = 'hosted-account-7f3a';
 /** What the stub Burrow streams on attach: a chunk whose two projections differ. */
 export const STREAMED_CHUNK: TerminalDataEvent = {
   bytes: toBase64Url(utf8Encode('pre\x1b]1337;File=inline=1:AAAA\x07post')),
@@ -179,19 +184,19 @@ export const AUTH_ROUTES: Record<string, RouteHandler> = {
     json: {
       challenge: secret(),
       rpId: RP_ID,
-      accountId: SELFHOST_ACCOUNT_ID,
+      accountId: ACCOUNT_ID,
       existingCredentialIds: [],
     },
   }),
   '/api/setup/finish': () => ({
-    json: { accountId: SELFHOST_ACCOUNT_ID, credentialId: CREDENTIAL_ID },
+    json: { accountId: ACCOUNT_ID, credentialId: CREDENTIAL_ID },
   }),
   '/api/setup/retire': () => ({ status: 204 }),
   '/api/signin/begin': () => ({ json: { challenge: secret(), rpId: RP_ID } }),
   '/api/signin/finish': () => ({
     json: {
       sessionToken: SESSION_TOKEN,
-      accountId: SELFHOST_ACCOUNT_ID,
+      accountId: ACCOUNT_ID,
       expiresAt: 1,
       passkeyPublicKey: PASSKEY_PUBLIC_KEY,
     },
@@ -233,6 +238,8 @@ export interface E2eHarness {
   mintInvitation(): Promise<PairingInvitation>;
   /** Pair, approve, and connect — the whole ceremony every session case starts with. */
   connectPaired(): Promise<void>;
+  /** Make the next sign-in answer `accountId`, as a sign-in to another account would. */
+  answerSigninAs(accountId: string): void;
   /** Run a pairing and confirm it on the Burrow with the digits the phone showed. */
   pairAndApprove(
     invitation: PairingInvitation,
@@ -269,6 +276,8 @@ export async function makeE2eHarness(
     deps?: Partial<PocketClientDeps>;
     /** How this Burrow builds a peer for the direct path; absent, it declines. */
     burrowDirect?: () => DirectPeerLike | null;
+    /** The path policy the Burrow holds each attempt to — Local networks', which makes it direct-only. */
+    burrowPathPolicy?: DirectPathPolicy;
   } = {},
 ): Promise<E2eHarness> {
   const burrowId = options.burrowId ?? randomBase64Url(16);
@@ -296,7 +305,9 @@ export async function makeE2eHarness(
     enrollment,
     reconnect: false,
     createWebSocket: () => burrowSocket,
-    ...(options.burrowDirect ? { directPeering: { createPeer: options.burrowDirect } } : {}),
+    ...(options.burrowDirect || options.burrowPathPolicy
+      ? { directPeering: { createPeer: options.burrowDirect ?? null, pathPolicy: options.burrowPathPolicy } }
+      : {}),
     loadAcl: options.loadAcl ?? (() => []),
     saveAcl: (_burrowId, records) => {
       savedAcl = [...records];
@@ -336,6 +347,7 @@ export async function makeE2eHarness(
 
   // The presence routes, derived exactly as the Relay derives them.
   const nonces = new Map<string, PresenceBinding>();
+  let signinAccountId = ACCOUNT_ID;
   const routes: Record<string, RouteHandler> = {
     ...AUTH_ROUTES,
     // The account's real passkey, so the key the proof presents is the one the
@@ -343,7 +355,7 @@ export async function makeE2eHarness(
     '/api/signin/finish': () => ({
       json: {
         sessionToken: SESSION_TOKEN,
-        accountId: SELFHOST_ACCOUNT_ID,
+        accountId: signinAccountId,
         expiresAt: 1,
         passkeyPublicKey: authenticator.publicKey,
       },
@@ -442,6 +454,9 @@ export async function makeE2eHarness(
     clientTransportFrames: () => transportFrames(requireClientSocket().frames('e2e')),
     burrowTransportFrames: () => transportFrames(relay.burrowSocket.frames('e2e')),
     mintInvitation,
+    answerSigninAs(accountId) {
+      signinAccountId = accountId;
+    },
     pairAndApprove,
     async connectPaired() {
       await pairAndApprove(await mintInvitation());

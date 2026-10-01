@@ -19,7 +19,7 @@ import {
   type E2eClientStep,
 } from 'remote-lib-common';
 
-import { ClientSessionCore, type CeremonyRoute } from './session-core';
+import { ClientSessionCore, networkNotAllowedMessage, type CeremonyRoute } from './session-core';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { FakeDirectNetwork, flushMicrotasks, type FakePeer } from '../direct/test-fake-peer';
 import { FORGED_CT, noiseSessionPair, openReceipt } from '../test-e2e-client';
@@ -163,6 +163,54 @@ describe('establish', () => {
   });
 });
 
+describe('awaitDirect', () => {
+  /** An established session whose offer has gone out, and the Burrow's half to answer it on. */
+  async function offered() {
+    const made = makeCore({ createDirectPeer: () => new FakeDirectNetwork({ opening: 'never' }).createOfferer() });
+    const { client, burrow } = await noiseSessionPair();
+    made.core.establish(ROUTE, client);
+    await flushMicrotasks();
+    openReceipt(burrow, made.sent.at(-1)!.ciphertext);
+    const reply = (value: object) => made.core.onFrame(ROUTE, 'transport', toBase64Url(burrow.sendControl({ ...value })));
+    return { ...made, reply };
+  }
+
+  it('answers at once with no session, and with the cause when the attempt is given up', async () => {
+    expect(await makeCore().core.awaitDirect(LATER)).toBe('lost');
+
+    const { core, reply } = await offered();
+    const waiting = core.awaitDirect(LATER);
+    reply({ v: 1, t: 'direct-decline' });
+    expect(await waiting).toBe('declined');
+    // The session itself is still up: what to do about it is the owner's.
+    expect(core.establishedRoute).toBe(ROUTE);
+    // Asked again, the cause is already known.
+    expect(await core.awaitDirect(LATER)).toBe('declined');
+  });
+
+  it('answers with how the session ended, or that the time passed', async () => {
+    const ending = await offered();
+    const ended = ending.core.awaitDirect(LATER);
+    ending.reply(SESSION_END_V1);
+    expect(await ended).toBe('ended-by-burrow');
+
+    const lost = await offered();
+    const lostWait = lost.core.awaitDirect(LATER);
+    lost.core.loseBurrow('the channel closed');
+    expect(await lostWait).toBe('lost');
+
+    const retired = await offered();
+    const retiredWait = retired.core.awaitDirect(LATER);
+    retired.core.endSession('connection replaced', { notifyGone: false });
+    expect(await retiredWait).toBe('retired');
+
+    const slow = await offered();
+    const timedOut = slow.core.awaitDirect(LATER);
+    slow.timers.fireAt(LATER);
+    expect(await timedOut).toBe('timeout');
+  });
+});
+
 describe('an established session', () => {
   it('carries protocol-v1 as application messages, both ways', async () => {
     const { core, sent } = makeCore();
@@ -256,6 +304,37 @@ describe('an established session', () => {
     expect(endedByBurrow).toEqual([true]);
     expect(core.establishedRoute).toBeNull();
     await expect(inFlight).rejects.toThrow(MESSAGES.ended);
+  });
+
+  it('keeps the goodbye that ended the session, for its owner’s copy, until the next is established', async () => {
+    const { core } = makeCore();
+    const first = await noiseSessionPair();
+    core.establish(ROUTE, first.client);
+    expect(core.goodbye).toBeNull();
+    const refused = { ...SESSION_END_V1, reason: 'network-not-allowed', address: '172.58.12.9', addressSource: 'observed' };
+    core.onFrame(ROUTE, 'transport', toBase64Url(first.burrow.sendControl(refused)));
+    expect(core.goodbye).toEqual(refused);
+
+    core.establish(ROUTE, (await noiseSessionPair()).client);
+    expect(core.goodbye).toBeNull();
+  });
+
+  it('words a goodbye the path ended by the address it names, and nothing for one that names none', () => {
+    const refused = { ...SESSION_END_V1, reason: 'network-not-allowed' } as const;
+    expect(networkNotAllowedMessage({ ...refused, address: '172.58.12.9', addressSource: 'observed' })).toBe(
+      'This computer only accepts phones on its allowed networks. Yours connected from 172.58.12.9 — ' +
+        'join the same Wi-Fi or VPN as the computer and try again.',
+    );
+    // The phone's own claim is never worded as where it connected from, nor as off the networks.
+    expect(networkNotAllowedMessage({ ...refused, address: '172.58.12.9', addressSource: 'reported' })).toBe(
+      'This phone couldn’t reach the computer directly over one of its allowed networks (it reported 172.58.12.9). ' +
+        'If it’s on another network, join the same Wi-Fi or VPN as the computer and try again.',
+    );
+    // No address — the computer's own end refused, or nothing to name — is
+    // never a reason to send the phone to another network: the generic copy.
+    expect(networkNotAllowedMessage(refused)).toBeNull();
+    expect(networkNotAllowedMessage(SESSION_END_V1)).toBeNull();
+    expect(networkNotAllowedMessage(null)).toBeNull();
   });
 
   it('ignores a control shape it does not know, and stays connected', async () => {

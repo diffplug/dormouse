@@ -1,9 +1,10 @@
-// Policy values the Worker and the frontend bundle both need. This module
-// imports nothing, for the reason `./providers.js` does not either: `./policy`
-// reaches the OAuth client secrets through `providerBindings`, and
-// docs/specs/security-hosted.md -> "Origin boundary" has an auditor inspect the
-// frontend import graph. The account screen takes its constants from here so
-// that graph never walks back to the module holding the secrets.
+// Policy values more than one bundle needs: the account Worker and its
+// frontend, or the account and relay Workers. This module imports nothing, for
+// the reason `./providers.js` does not either: `./policy` reaches the OAuth
+// client secrets through `providerBindings`, and docs/specs/security-hosted.md
+// -> "Origin boundary" has an auditor inspect the frontend import graph. The
+// account screen takes its constants from here so that graph never walks back
+// to the module holding the secrets.
 
 // How long after signing in a login still counts as recent enough to connect a
 // provider. The packed adapter enforces it as Better Auth's `session.freshAge`
@@ -12,3 +13,10 @@
 // the server has already stopped accepting 302s to /login?error=. One value,
 // and `hosted/server/tests/policy.test.ts` pins it to what the adapter builds.
 export const LOGIN_FRESH_AGE_MS = 10 * 60 * 1000;
+
+// The recent-login window as the account screen and its errors spell it.
+export const RECENT_LOGIN_WINDOW = `${LOGIN_FRESH_AGE_MS / 60_000} minutes`;
+
+// How long an enrollment's device code lives (the relay mints it) and how long
+// an approval waits for its poll (the account writes it).
+export const ENROLLMENT_TTL_MS = 10 * 60 * 1000;

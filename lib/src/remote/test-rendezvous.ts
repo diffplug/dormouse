@@ -19,7 +19,7 @@
  * - **Strings forwarded verbatim, never parsed**, each counted toward
  *   `MAX_ONE_TIME_FORWARDED` across both directions; a message with nobody on
  *   the other end yet is counted, then dropped.
- * - **`ONE_TIME_PING` answered with `ONE_TIME_PONG`**, never forwarded or
+ * - **`RELAY_PING` answered with `RELAY_PONG`**, never forwarded or
  *   counted.
  * - **A non-string, an oversize string, or one past the cap closes both
  *   `4015`.**
@@ -44,8 +44,8 @@ import {
   NoiseTransportSession,
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
-  ONE_TIME_PING,
-  ONE_TIME_PONG,
+  RELAY_PING,
+  RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
   WS_CLOSE_ONE_TIME_DEADLINE,
@@ -247,8 +247,8 @@ export function createTestRendezvous(options: TestRendezvousOptions = {}): TestR
 
   const forward = (room: Room, from: RendezvousSocket, data: unknown): void => {
     if (room.deleted) return;
-    if (data === ONE_TIME_PING) {
-      from.deliver(ONE_TIME_PONG);
+    if (data === RELAY_PING) {
+      from.deliver(RELAY_PONG);
       return;
     }
     if (typeof data !== 'string' || data.length > MAX_ONE_TIME_FRAME_LENGTH) {

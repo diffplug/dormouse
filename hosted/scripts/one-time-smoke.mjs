@@ -75,7 +75,7 @@ export async function oneTimeSmoke(origin, connect = open, fetchPage = fetch) {
  */
 async function pageSmoke(origin, fetchPage) {
   const page = await fetchPage(origin + ONE_TIME_PAGE_PATH);
-  assert.equal(page.status, 200, "Hosted serves the one-time page");
+  assert.equal(page.status, 200, "The relay serves the one-time page");
   assert.match(page.headers.get("content-type") ?? "", /text\/html/);
   const policy = page.headers.get("content-security-policy") ?? "";
   for (const directive of [

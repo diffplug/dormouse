@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Mechanical check for the structural half of the end-to-end boundary in
- * `docs/specs/security-remote.md` ("Remote Control"), and of the Hosted room
- * that forwards a one-time handshake in `docs/specs/security-hosted.md`
- * ("Rendezvous boundary"). Runs from the repo
+ * `docs/specs/security-remote.md` ("Remote Control"), and of the Hosted rooms
+ * that forward a one-time handshake and an account's relay frames in
+ * `docs/specs/security-hosted.md` ("Rendezvous boundary", "Relay boundary"). Runs from the repo
  * root via `pnpm test` (see the root package.json). Exits non-zero with a
  * per-violation report naming the rule that was broken and the spec line it
  * enforces.
@@ -16,7 +16,8 @@
  * checked-in service worker shadowing the built one, no one-time frame the
  * Relay or `BurrowRuntime` could read, no parse in
  * the Hosted room that forwards one, no grant a one-time connection could
- * leave behind, and no store a one-time phone could keep anything in. An
+ * leave behind, no store a one-time phone could keep anything in, and no
+ * relayed application message a Local-networks session would read. An
  * absence is exactly what a
  * reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
@@ -64,7 +65,7 @@ const NOISE_PROTOCOL_NAME = 'Noise_IK_25519_ChaChaPoly_SHA256';
 /** The spec whose "Remote Control" lines the rules below pin, unless a rule names its own. */
 export const SECURITY_SPEC = 'docs/specs/security-remote.md';
 
-/** The spec whose "Rendezvous boundary" lines the Hosted room's rule pins. */
+/** The spec whose "Rendezvous boundary" and "Relay boundary" lines the Hosted rooms' rules pin. */
 export const HOSTED_SECURITY_SPEC = 'docs/specs/security-hosted.md';
 
 /**
@@ -127,6 +128,9 @@ const FRAME_MODULES = [
   'lib/src/remote/one-time-rendezvous.ts',
 ];
 
+/** The paired Burrow's runtime, which holds a session to the direct path under Local networks. */
+const BURROW_RUNTIME = 'lib/src/remote/burrow/burrow-runtime.ts';
+
 /** The laptop's one-time runtime, which authorizes one session and writes nothing. */
 const ONE_TIME_RUNTIME = 'lib/src/remote/burrow/one-time-runtime.ts';
 
@@ -178,6 +182,36 @@ const GRANT_NAME =
  */
 const ONE_TIME_NAME = /[Oo]neTime|ONE_TIME_|['"`]one-time/g;
 
+/** Hosted's per-account relay object (`docs/specs/hosted.md` -> "Relay sockets"). */
+export const RELAY_ROOM = 'hosted/server/relay-room.ts';
+
+/** The frame layer both Relays route through (`docs/specs/relay.md` -> "Routing"). */
+export const RELAY_ROUTING = 'remote-lib-common/src/remote/relay-routing.ts';
+
+/**
+ * Everything {@link RELAY_ROOM} could keep, log, or read a frame through,
+ * spelled out because it reaches frames only through {@link RELAY_ROUTING}:
+ *
+ * - the ciphertext's field name at all, a parse, or a decode — it never
+ *   names `ct`, so a destructure or a computed key is a match too;
+ * - `console` other than one method called with one plain string;
+ * - `storage` other than the reads, the alarm, and the one write of the
+ *   account id — an alias of it included;
+ * - an attachment other than a connection (`conn`, `x.conn`) or a connection
+ *   literal checked `satisfies` its type without a spread, and a connection
+ *   field written other than the two routing writes.
+ */
+const RELAY_ROOM_LEAKS = new RegExp(
+  [
+    String.raw`\bct\b|\bJSON\.parse\b|\batob\b|\bBuffer\b|\bTextDecoder\b|[Bb]ase64`,
+    String.raw`\bconsole\b(?!\.\w+\(\s*"[^"\\]*"\s*\))`,
+    String.raw`\bstorage\b(?!\.(?:get|getAlarm|setAlarm|deleteAlarm)\b|\.put\(ACCOUNT_KEY, account\))`,
+    String.raw`\bserializeAttachment\((?!(?:\w+\.)?conn\)|\{(?:(?!\.\.\.)[^{}()])*\}\s*satisfies\s+(?:BurrowConn|ClientConn)\))`,
+    String.raw`\bconn\.(?!retired\b|burrowId\b)\w+\s*=(?!=)`,
+  ].join('|'),
+  'g',
+);
+
 /** The three shipped source trees, scanned whole for the dependency rules. */
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
 
@@ -203,11 +237,20 @@ export const NATIVE_PEER_FACTORY = 'lib/src/host/remote/native-direct-peer.ts';
 export const PEER_FACTORIES = [NATIVE_PEER_FACTORY, 'lib/src/remote/client/browser-direct-peer.ts'];
 
 /**
- * The one file the AES-GCM ban excuses, as `docs/specs/security-remote.md` ->
- * "Credentials at rest" names it. Excused by path rather than dropped from the
- * scan, so a rename that leaves the cipher behind turns the rule red.
+ * The two files the AES-GCM ban excuses, as `docs/specs/security-remote.md` ->
+ * "Credentials at rest" names them, each by exact path rather than dropped
+ * from the scan, so a rename that leaves the cipher behind turns the rule red.
+ * This one wraps Pocket's private key at rest.
  */
 const AT_REST_KEY_WRAPPER = 'lib/src/remote/client/pocket-private-key.ts';
+
+/**
+ * And this one is the Hosted Relay's Web Push sender, whose
+ * `aes128gcm` record RFC 8291 fixes as AES-128-GCM. It encrypts to a push
+ * service's subscription key, outside the Noise channel, around an envelope
+ * already sealed inside it.
+ */
+export const WEB_PUSH_SENDER = 'remote-lib-common/src/remote/web-push.ts';
 
 /**
  * One entry per structural property. Every rule states the line it enforces in
@@ -262,8 +305,9 @@ export const RULES = [
     security: 'AES-GCM appears in production source under `remote-lib-common/src/`',
     kind: 'forbid',
     trees: SOURCE_TREES,
-    allow: (match, file) => file === AT_REST_KEY_WRAPPER,
-    // The one exception encrypts local private-key storage, never wire data.
+    allow: (match, file) => file === AT_REST_KEY_WRAPPER || file === WEB_PUSH_SENDER,
+    // The exceptions encrypt local private-key storage and a Web Push record,
+    // never a Noise frame.
     // `AES-GCM` is the substitution the Noise suite exists to refuse: it *is* in
     // shipping WebCrypto, which is exactly what makes it the tempting one, and
     // the protocol name is part of the transcript so swapping it is a different
@@ -429,6 +473,33 @@ export const RULES = [
     violation: '\nconst __selftest = (frame: string) => JSON.parse(frame);\n',
   },
   {
+    rule: "Hosted's RelayRoom never names, parses, decodes, logs, or stores a frame",
+    spec: HOSTED_SECURITY_SPEC,
+    security: 'stores, logs, or decodes a frame or its `ct`',
+    kind: 'forbid',
+    files: [RELAY_ROOM],
+    // It reads a frame only through the shared frame layer, which hands back
+    // the routing envelope and rebuilds it; everything that could keep, log,
+    // or read one is in `RELAY_ROOM_LEAKS`.
+    pattern: RELAY_ROOM_LEAKS,
+    violationFile: RELAY_ROOM,
+    violation: '\nconst __selftest = (frame: { ct: string }) => Buffer.from(frame.ct, "base64");\n',
+  },
+  {
+    rule: 'The shared frame layer copies `ct` field by field and reads it nowhere',
+    spec: HOSTED_SECURITY_SPEC,
+    security: 'copies `ct` field by field and reads it nowhere else',
+    kind: 'forbid',
+    files: [RELAY_ROUTING],
+    // Its one parse is of the raw frame, after which the guards bound every
+    // field; `ct` appears only as the copy `ct: frame.ct,` into an envelope.
+    pattern:
+      /\bct: frame\.ct,|\bct\b|\bJSON\.parse\b(?!\(raw\))|\batob\b|\bBuffer\b|\bTextDecoder\b|\bfromBase64Url\b|\bconsole\b/g,
+    allow: (match) => match === 'ct: frame.ct,',
+    violationFile: RELAY_ROUTING,
+    violation: '\nconst __selftest = (frame: { ct: string }) => atob(frame.ct);\n',
+  },
+  {
     rule: 'The Relay never names the one-time family',
     security: 'no one-time name may appear under `relay/src/`',
     kind: 'forbid',
@@ -453,6 +524,35 @@ export const RULES = [
     pattern: ONE_TIME_NAME,
     violationFile: 'lib/src/remote/burrow/burrow-runtime.ts',
     violation: "\nimport { isOneTimeClientFrame } from 'remote-lib-common';\n",
+  },
+  {
+    rule: '`BurrowRuntime` makes a session direct-only exactly where the path policy is held',
+    security: 'must derive `directOnly` from the path policy alone',
+    kind: 'require',
+    file: BURROW_RUNTIME,
+    // Local networks' path policy checks the direct path; the relay is a path
+    // it does not check, so a held policy is what makes a paired session
+    // direct-only — never the level, a Client, or the Relay.
+    pattern: /^    const directOnly = this\.#directPeering\.pathPolicy !== undefined;$/m,
+  },
+  {
+    rule: '`BurrowRuntime` hands its session that derivation and no other',
+    security: 'must derive `directOnly` from the path policy alone',
+    kind: 'require',
+    file: BURROW_RUNTIME,
+    // `EstablishedE2eSession` owns every direct-only rule — the deadline, the
+    // given-up attempt, the relayed application message — so what this
+    // runtime decides is the one flag, as derived above.
+    pattern: /^      directOnly,$/m,
+  },
+  {
+    rule: '`OneTimeRuntime` makes its one session direct-only',
+    security: 'must make its one session `directOnly`',
+    kind: 'require',
+    file: ONE_TIME_RUNTIME,
+    // A one-time connection has no relayed fallback at all: the rendezvous
+    // carries a handshake, never a session.
+    pattern: /^        directOnly: true,$/m,
   },
   {
     rule: '`OneTimeRuntime` names nothing that grants or persists',
@@ -685,7 +785,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     for (const failure of failures) console.error(`  ${failure}\n`);
     console.error(
       `Each line above maps to the "Remote Control" section of ${SECURITY_SPEC}, or to the\n` +
-        `"Rendezvous boundary" section of ${HOSTED_SECURITY_SPEC}. If a\n` +
+        `"Rendezvous boundary" or "Relay boundary" section of ${HOSTED_SECURITY_SPEC}. If a\n` +
         'control moved rather than disappeared, update the rule in scripts/e2e-lint.mjs\n' +
         'in the same commit — and add the self-test case that proves it load-bearing.',
     );

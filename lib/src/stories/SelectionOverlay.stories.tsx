@@ -5,7 +5,6 @@ import { SelectionOverlay } from '../components/SelectionOverlay';
 import {
   focusSession,
   getOrCreateTerminal,
-  getTerminalOverlayDims,
   mountElement,
   refitSession,
   unmountElement,
@@ -16,11 +15,12 @@ import {
   setHintToken,
   setSelection,
   type Selection,
-  type TokenHint,
 } from '../lib/mouse-selection';
+import type { BufferToken } from '../lib/smart-token';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../components/design';
 import { TouchUiContext } from '../components/touch-ui-context';
 import { settleTerminals, waitForCondition } from './settle-terminals';
+import { useStorySelection } from './story-selection';
 
 function SelectionOverlayStory({
   id,
@@ -30,7 +30,7 @@ function SelectionOverlayStory({
 }: {
   id: string;
   selection: Omit<Selection, 'startedInScrollback'>;
-  hintToken?: TokenHint | null;
+  hintToken?: BufferToken | null;
   touch?: boolean;
 }) {
   const terminalHostRef = useRef<HTMLDivElement>(null);
@@ -55,30 +55,10 @@ function SelectionOverlayStory({
     focusSession(id, true);
   }, [id]);
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-
-    const applySelection = () => {
-      if (cancelled) return;
-      const dims = getTerminalOverlayDims(id);
-      if (!dims || dims.cellHeight === 0) {
-        timer = setTimeout(applySelection, 50);
-        return;
-      }
-
-      setSelection(id, { ...selection, startedInScrollback: false });
-      setHintToken(id, hintToken);
-    };
-
-    timer = setTimeout(applySelection, 100);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      setSelection(id, null);
-      setHintToken(id, null);
-    };
-  }, [id, selection, hintToken]);
+  useStorySelection(id, () => {
+    setSelection(id, { ...selection, startedInScrollback: false });
+    setHintToken(id, hintToken);
+  }, [selection, hintToken]);
 
   return (
     <TouchUiContext.Provider value={touch}>
@@ -170,9 +150,8 @@ export const SmartPathHint: Story = {
     },
     hintToken: {
       kind: 'path',
-      row: 8,
-      startCol: 35,
-      endCol: 38,
+      start: { row: 8, col: 35 },
+      end: { row: 8, col: 37 },
       text: 'src',
     },
   },

@@ -4,6 +4,7 @@ import {
   clampOverlayPosition,
   overlayViewportBounds,
   OVERLAY_VIEWPORT_MARGIN_PX,
+  subscribeOverlayViewport,
 } from '../lib/ui-geometry';
 
 /** Gap between the trigger's near edge and the menu. */
@@ -66,21 +67,11 @@ export function useAnchoredMenu(
   // leaves the element fixed in place. The geometry below still depends on the
   // viewport, so subscribe independently instead of relying on a coincidental
   // rect allocation. `visualViewport` covers mobile browser chrome and the
-  // on-screen keyboard on engines that report those separately; its scroll
-  // event carries origin changes that do not resize either viewport.
+  // on-screen keyboard on engines that report those separately.
   const [, setViewportRevision] = useState(0);
   useEffect(() => {
     if (!open) return;
-    const update = () => setViewportRevision((revision) => revision + 1);
-    const visualViewport = window.visualViewport;
-    window.addEventListener('resize', update);
-    visualViewport?.addEventListener('resize', update);
-    visualViewport?.addEventListener('scroll', update);
-    return () => {
-      window.removeEventListener('resize', update);
-      visualViewport?.removeEventListener('resize', update);
-      visualViewport?.removeEventListener('scroll', update);
-    };
+    return subscribeOverlayViewport(() => setViewportRevision((revision) => revision + 1));
   }, [open]);
 
   const viewport = triggerRect ? overlayViewportBounds() : null;

@@ -34,7 +34,7 @@ Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boun
 
 ### `pty:data` strip semantics
 
-**Supported semantic sequences are consumed and never re-emitted** — empty or unparseable payloads, unrecognized `OSC 1337` subcommands and `OSC 50` / `OSC 52` included. **`OSC 8` and the recognized ImageAddon `OSC 1337` forms are the exceptions**: they stay in `pty:data` so xterm.js owns hyperlink regions and inline graphics. Dormouse supplies only the hyperlink activation handler. Every other OSC family passes through unchanged, so xterm.js handles standard behavior Dormouse does not model.
+**Supported semantic sequences are consumed and never re-emitted** — empty or unparseable payloads, unrecognized `OSC 1337` subcommands, `OSC 50`, and `OSC 52` included. **`OSC 8` and the recognized ImageAddon `OSC 1337` forms are the exceptions**: they stay in `pty:data` so xterm.js owns hyperlink regions and inline graphics. Dormouse supplies only the hyperlink activation handler. Every other OSC family passes through unchanged, so xterm.js handles standard behavior Dormouse does not model.
 
 **`textData` is the same chunk with every string-control payload removed**, for consumers reading output as text; every other control is left for `stripTerminalControls`. The webview receives them apart: `pty:data` (the stripped output; feeds xterm.js), `terminal:semanticEvents` (normalized CWD / prompt-command / title events; feeds `TerminalPaneState`), and `terminal:toolEvents` (OSC 367, [dor-tool.md](dor-tool.md#osc-367)). **Notification-derived state never travels as `pty:data`**: the parse site feeds its own process's `AlertManager`.
 
@@ -71,7 +71,7 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `OSC 1337 ; ReportCellSize ST` | iTerm2 cell-size query; passed through and answered by the owner's ImageAddon. | [Inline graphics](#inline-graphics) |
 | `OSC 1337 ; <anything else> ST` | Unsupported iTerm2 extension; consumed and ignored. | This spec |
 | `OSC 50 ; <font> ST` | Unsupported dynamic font change; consumed and ignored. | This spec |
-| `OSC 52 ; <selection> ; <data> ST` | Unsupported clipboard write; consumed and ignored — untrusted PTY output cannot write the user's clipboard. | This spec |
+| `OSC 52 ; <selection> ; <data> ST` | Clipboard write: consumed, and only offered to the copy editor over a shadowed drag; a `?` read is never answered. | [mouse-and-clipboard.md](mouse-and-clipboard.md) §4.6 |
 
 **A `BEL` that terminates an OSC is part of that sequence, never a bell**; the `BEL` row covers a standalone one, parsed and stripped at the same boundary.
 
@@ -123,7 +123,7 @@ Every renderer over one PTY parses these queries; only the owner's answer reache
 
 **Every host's CSP must grant `'wasm-unsafe-eval'`, never `'unsafe-eval'`** — the addon compiles a vendored WebAssembly SIXEL decoder from `activate()`, making this a Session-creation requirement rather than a first-image one (rationale).
 
-Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.security.csp` in `standalone/src-tauri/tauri.conf.json`, `pocketContentSecurityPolicy` in `relay/src/app.ts`; `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `processForwarded` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
+Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.security.csp` in `standalone/src-tauri/tauri.conf.json`, `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/relay-common.ts`; `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` and `processForwarded` in `lib/src/lib/terminal-protocol.ts`; `TerminalControlStreamFilter` in `lib/src/lib/terminal-controls.ts`.
 
 ### Report filtering on the input side
 

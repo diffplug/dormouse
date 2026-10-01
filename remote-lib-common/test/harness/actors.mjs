@@ -59,6 +59,14 @@ export function randomSecret() {
   return toBase64Url(randomBytes(32));
 }
 
+/**
+ * Registration `clientDataJSON` exactly as a browser builds it for
+ * `navigator.credentials.create()`, base64url, for `POST /api/setup/finish`.
+ */
+export function registrationClientData({ challenge, origin, type = 'webauthn.create' }) {
+  return toBase64Url(utf8Encode(JSON.stringify({ type, challenge, origin, crossOrigin: false })));
+}
+
 /** A SimBurrow, or a bare hostId string; both name one Burrow to these actors. */
 function burrowIdOf(burrow) {
   return typeof burrow === 'string' ? burrow : burrow.burrowId;

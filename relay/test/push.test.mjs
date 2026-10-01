@@ -12,6 +12,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createECDH, randomBytes } from 'node:crypto';
 import { readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -125,8 +126,27 @@ test('default VAPID subject is the https origin, and absent for one push cannot 
   }
 });
 
+/** Keys a browser could hold: an uncompressed P-256 point and a 16-byte secret. */
+function browserKeys() {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  return { p256dh: ecdh.getPublicKey(), auth: randomBytes(16) };
+}
+
+const KEYS = browserKeys();
+
+/** `point` with the low bit of `y` flipped: the shape of a P-256 point, off the curve. */
+function offCurve(point) {
+  const bad = Buffer.from(point);
+  bad[64] ^= 1;
+  return bad;
+}
+
 function subscription(endpoint = 'https://push.example.com/sub/abc') {
-  return { endpoint, keys: { p256dh: 'BFakeP256dhKey', auth: 'FakeAuthSecret' } };
+  return {
+    endpoint,
+    keys: { p256dh: KEYS.p256dh.toString('base64url'), auth: KEYS.auth.toString('base64url') },
+  };
 }
 
 /** A delivery id in the shape a Burrow mints: base64url of 32 random bytes. */
@@ -328,16 +348,21 @@ test('an over-long endpoint is refused before it becomes a durable row', async (
   await assert.rejects(storedRows(stateDir), 'nothing was written');
 });
 
-test('over-long encryption keys are refused; RFC 8291 fixes both lengths', async () => {
+test('encryption keys RFC 8291 could not have produced are refused', async () => {
   const { app, stateDir, burrow, sessionToken } = await pushApp();
   const long = 'A'.repeat(4096);
+  const { p256dh, auth } = subscription().keys;
 
   for (const keys of [
-    { p256dh: long, auth: 'FakeAuthSecret' },
-    { p256dh: 'BFakeP256dhKey', auth: long },
-    // Empty is not a key `web-push` could ever encrypt to.
-    { p256dh: '', auth: 'FakeAuthSecret' },
-    { p256dh: 'BFakeP256dhKey', auth: '' },
+    { p256dh: long, auth },
+    { p256dh, auth: long },
+    // Empty, or the wrong length, is not a key `web-push` could ever encrypt to.
+    { p256dh: '', auth },
+    { p256dh, auth: '' },
+    { p256dh: 'BFakeP256dhKey', auth },
+    { p256dh, auth: 'FakeAuthSecret' },
+    // 65 bytes led by 0x04 but off P-256: every send to it would fail, holding the row forever.
+    { p256dh: offCurve(KEYS.p256dh).toString('base64url'), auth },
   ]) {
     const res = await subscribe(app, {
       sessionToken,
@@ -359,7 +384,7 @@ test('a padded base64 p256dh still registers — browsers serialize both ways', 
     // 65 and 16 raw bytes as PADDED base64: the longest either can really be.
     sub: {
       endpoint: 'https://push.example.com/sub/abc',
-      keys: { p256dh: `${'B'.repeat(87)}=`, auth: `${'C'.repeat(23)}=` },
+      keys: { p256dh: KEYS.p256dh.toString('base64'), auth: KEYS.auth.toString('base64') },
     },
   });
   assert.equal(res.status, 200);

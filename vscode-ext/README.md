@@ -51,9 +51,9 @@ Dormouse drives the agent-browser or Playwright CLI you already have rather than
 
 ## Select and copy-paste like you meant
 
-<!-- TODO: GIF of overriding a TUI's mouse capture and choosing Copy Rewrapped (the homepage's copy-paste video would do) -->
+<!-- TODO: GIF of overriding a TUI's mouse capture and copying in Auto from the copy editor -->
 
-When a TUI grabs the mouse, one click in the pane header takes it back. **Copy Raw** keeps the hard wraps; **Copy Rewrapped** joins them back into the line the program printed. Press `e` mid-drag to grab a whole URL or path, and paste a screenshot to hand your agent its path.
+When a TUI grabs the mouse, one click in the pane header takes it back. Every selection opens a copy editor showing exactly what lands on the clipboard: **Auto** joins the hard wraps back into the line the program printed, **Exact** keeps them, and `e` expands a clipped selection to the whole URL, path, or paragraph. Paste a screenshot to hand your agent its path.
 
 ## Getting started
 

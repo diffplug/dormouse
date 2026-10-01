@@ -7,8 +7,8 @@ exports[`TutRunner snapshots > renders Copy paste with all items incomplete 1`] 
 
    [33m●[0m  [1mDrag-select some text[0m
         [3mThe paragraph below is a good example — "Some terminal programs..."[0m
-   [2m·[0m  Copy-paste it somewhere else with "Copy Raw"
-   [2m·[0m  Copy-paste it somewhere else with "Copy Rewrapped"
+   [2m·[0m  Copy-paste it somewhere else in "Exact"
+   [2m·[0m  Copy-paste it somewhere else in "Auto"
    [2m·[0m  Click the cursor icon in [36mchangelog[39m
 
   [2mPress [36mp[39m to toggle the Place To Paste.[0m

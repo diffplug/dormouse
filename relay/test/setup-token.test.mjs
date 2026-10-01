@@ -14,15 +14,17 @@ import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { API_ROUTES, SETUP_TOKEN_INVALID_ERROR, UNAUTHORIZED_ERROR } from 'remote-lib-common';
+import {
+  API_ROUTES,
+  MAX_TOKENS_PER_BURROW,
+  SETUP_TOKEN_INVALID_ERROR,
+  SETUP_TOKEN_TTL_MS,
+  UNAUTHORIZED_ERROR,
+} from 'remote-lib-common';
 
 import { AccountStore } from '../dist/state.js';
-import {
-  MAX_TOKENS_PER_BURROW,
-  SetupTokenIssuer,
-  SETUP_TOKEN_TTL_MS,
-} from '../dist/setup-token.js';
-import { FakeBurrow } from './harness/fake-burrow.mjs';
+import { SetupTokenIssuer } from '../dist/setup-token.js';
+import { FakeBurrow } from '../../remote-lib-common/test/harness/fake-burrow.mjs';
 import {
   ORIGIN,
   PASSWORD,
