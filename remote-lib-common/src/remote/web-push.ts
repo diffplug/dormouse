@@ -358,11 +358,24 @@ export function defaultVapidSubject(origin: string): string | null {
 
 /**
  * True if `keys` are subscription keys {@link encryptWebPush} can encrypt to:
- * `p256dh` an uncompressed P-256 point, `auth` the 16-byte secret. Both Relays
- * refuse any other at registration (`isPushSubscriptionPayload`).
+ * `p256dh` an uncompressed point on P-256, `auth` the 16-byte secret. Both
+ * Relays refuse any other at registration (`admissiblePushSubscription`). The
+ * shape checks run first; only a 65-byte `0x04`-led point reaches WebCrypto,
+ * whose import refuses one off the curve — a key that would otherwise register
+ * and then fail every send with `DataError`, holding its row forever.
  */
-export function isWebPushKeys(keys: { readonly p256dh: unknown; readonly auth: unknown }): boolean {
-  return decodeP256dh(keys.p256dh) !== null && decodeAuthSecret(keys.auth) !== null;
+export async function importableWebPushKeys(keys: {
+  readonly p256dh: unknown;
+  readonly auth: unknown;
+}): Promise<boolean> {
+  const point = decodeP256dh(keys.p256dh);
+  if (!point || !decodeAuthSecret(keys.auth)) return false;
+  try {
+    await subtleOf(getWebCrypto()).importKey('raw', point, ECDH, false, []);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** A `p256dh` as its 65-byte uncompressed point (leading `0x04`), or null. */

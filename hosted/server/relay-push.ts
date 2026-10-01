@@ -8,10 +8,10 @@ import {
   MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
   PUSH_SEND_DEADLINE_MS,
   PUSH_TTL_SECONDS,
+  admissiblePushSubscription,
   concatBytes,
   defaultVapidSubject,
   isPushDeliveryId,
-  isPushSubscriptionPayload,
   isSealedPushRecipient,
   readJson,
   utf8Encode,
@@ -262,7 +262,7 @@ export function relayPushRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       !body ||
       typeof body.burrowId !== "string" ||
       !isPushDeliveryId(body.deliveryId) ||
-      !isPushSubscriptionPayload(body.subscription)
+      !(await admissiblePushSubscription(body.subscription))
     )
       return c.json({ error: "malformed request" }, 400);
     if (!knownPushEndpoint(body.subscription.endpoint))

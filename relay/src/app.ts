@@ -41,7 +41,7 @@ import {
   presenceChallenge,
   toBase64Url,
   isPushDeliveryId,
-  isPushSubscriptionPayload,
+  admissiblePushSubscription,
   isSealedPushRecipient,
   verifyPasskeyAssertion,
   TokenBucket,
@@ -968,7 +968,7 @@ export function createApp(config: AppConfig): CreatedApp {
       !body ||
       typeof body.burrowId !== 'string' ||
       !isPushDeliveryId(body.deliveryId) ||
-      !isPushSubscriptionPayload(body.subscription)
+      !(await admissiblePushSubscription(body.subscription))
     ) {
       return c.json({ error: 'malformed request' }, 400);
     }

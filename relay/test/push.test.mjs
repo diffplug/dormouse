@@ -135,6 +135,13 @@ function browserKeys() {
 
 const KEYS = browserKeys();
 
+/** `point` with the low bit of `y` flipped: the shape of a P-256 point, off the curve. */
+function offCurve(point) {
+  const bad = Buffer.from(point);
+  bad[64] ^= 1;
+  return bad;
+}
+
 function subscription(endpoint = 'https://push.example.com/sub/abc') {
   return {
     endpoint,
@@ -354,6 +361,8 @@ test('encryption keys RFC 8291 could not have produced are refused', async () =>
     { p256dh, auth: '' },
     { p256dh: 'BFakeP256dhKey', auth },
     { p256dh, auth: 'FakeAuthSecret' },
+    // 65 bytes led by 0x04 but off P-256: every send to it would fail, holding the row forever.
+    { p256dh: offCurve(KEYS.p256dh).toString('base64url'), auth },
   ]) {
     const res = await subscribe(app, {
       sessionToken,

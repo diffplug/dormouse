@@ -1603,3 +1603,19 @@ test("send requires and bounds its recipients, and the push routes refuse an id 
   expect((await f.devices(f.sessionToken)).status).toBe(401);
   expect((await f.query([randomSecret()], f.laptop.token)).status).toBe(401);
 });
+
+test("subscribe refuses a p256dh of the right shape off P-256, writing nothing", async ({ onTestFinished }) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const { subscription } = browserSubscription();
+  // 65 bytes led by 0x04 with the low bit of y flipped: every send to it would fail.
+  const offCurve = Buffer.from(subscription.keys.p256dh, "base64url");
+  offCurve[64] ^= 1;
+  expect(
+    await f.subscribe(randomSecret(), {
+      ...subscription,
+      keys: { ...subscription.keys, p256dh: offCurve.toString("base64url") },
+    }),
+  ).toMatchObject({ status: 400, json: { error: "malformed request" } });
+  expect(await f.rows()).toEqual([]);
+});
