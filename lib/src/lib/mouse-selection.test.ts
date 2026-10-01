@@ -12,6 +12,7 @@ import {
   setBracketedPaste,
   setHintToken,
   offerProgramCopy,
+  setCopyEditor,
   setMouseReporting,
   setOverride,
   setSelection,
@@ -74,6 +75,25 @@ describe('mouse-selection: program copy offers', () => {
     expect(getMouseSelectionState('a').programCopy).toBe('copied');
     setSelection('a', sel('program'));
     expect(getMouseSelectionState('a').programCopy).toBeNull();
+  });
+});
+
+describe('mouse-selection: the program format needs its offer', () => {
+  const editor = (format: 'auto' | 'program') => ({ buffer: {} as never, scopes: [], scope: 0, format, overrides: { 0: 'keep' as const } });
+  const sel = { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise' as const, dragging: false, startedInScrollback: false, owner: 'program' as const };
+
+  it('refuses the program format while no offer is held', () => {
+    setSelection('a', sel, editor('auto'));
+    setCopyEditor('a', editor('program'));
+    expect(getMouseSelectionState('a').copyEditor?.format).toBe('auto');
+    offerProgramCopy('a', 'copied');
+    setCopyEditor('a', editor('program'));
+    expect(getMouseSelectionState('a').copyEditor?.format).toBe('program');
+  });
+
+  it('demotes it to Auto when the selection, and so its offer, is replaced', () => {
+    setSelection('a', sel, editor('program'));
+    expect(getMouseSelectionState('a').copyEditor).toMatchObject({ format: 'auto', overrides: {} });
   });
 });
 

@@ -26,39 +26,23 @@ export interface CopyBuffer {
 
 const EMPTY_ROW: CopyRow = Object.freeze({ cells: Object.freeze([]) as readonly string[], wrapped: false });
 
-function memoRows(length: number, read: (index: number) => CopyRow | null): (index: number) => CopyRow {
-  const rows = new Map<number, CopyRow>();
-  return (index) => {
-    let row = rows.get(index);
-    if (!row) {
-      row = (index >= 0 && index < length ? read(index) : null) ?? EMPTY_ROW;
-      rows.set(index, row);
-    }
-    return row;
-  };
-}
-
-/** A lazily read, memoized view of a terminal's active buffer. Build one per
- *  read: it does not notice later output. */
+/** A lazily read, memoized view of a terminal's active buffer: the copy
+ *  editor keeps one per open, so its preview and its copy read the same rows. */
 export function terminalCopyBuffer(terminal: Terminal): CopyBuffer {
   const buffer = terminal.buffer.active;
+  const rows = new Map<number, CopyRow>();
   return {
     cols: terminal.cols,
     length: buffer.length,
-    row: memoRows(buffer.length, (index) => {
-      const line = buffer.getLine(index);
-      return line ? { cells: trimTrailingBlanks(readLineCells(line)), wrapped: line.isWrapped } : null;
-    }),
-  };
-}
-
-/** A buffer over plain strings, one cell per code point; for tests and stories. */
-export function stringCopyBuffer(lines: readonly string[], options: { cols: number; wrapped?: readonly number[] }): CopyBuffer {
-  const wrapped = new Set(options.wrapped ?? []);
-  return {
-    cols: options.cols,
-    length: lines.length,
-    row: memoRows(lines.length, (index) => ({ cells: trimTrailingBlanks([...lines[index]]), wrapped: wrapped.has(index) })),
+    row(index) {
+      let row = rows.get(index);
+      if (!row) {
+        const line = index >= 0 && index < buffer.length ? buffer.getLine(index) : undefined;
+        row = line ? { cells: trimTrailingBlanks(readLineCells(line)), wrapped: line.isWrapped } : EMPTY_ROW;
+        rows.set(index, row);
+      }
+      return row;
+    },
   };
 }
 
@@ -231,12 +215,12 @@ export type Piece =
 export interface Rendering {
   pieces: Piece[];
   text: string;
-  lines: number;
 }
 
 /** What each break kind puts between two lines. */
 const BREAK_TEXT: Record<BreakKind, string> = { keep: '\n', space: ' ', none: '' };
-const lineCount = (text: string) => (text ? text.split('\n').length : 0);
+/** The formats whose every break is the same decision. */
+const FIXED_BREAK: Partial<Record<CopyFormat, BreakKind>> = { exact: 'keep', spaces: 'space', joined: 'none' };
 
 interface Cell { ch: string; added: boolean }
 interface Line { cells: Cell[]; row: number; startCol: number }
@@ -283,23 +267,28 @@ function stripDecoration(line: Line): Line | null {
   return { ...line, cells };
 }
 
-export interface RenderOptions {
-  /** Cells inside the dragged selection; the rest of the scope is marked added. */
-  original: Span;
-  format: CopyFormat;
-  /** Break index → kind, replacing the format's own decision. */
-  overrides?: Readonly<Record<number, BreakKind>>;
+/** A scope's rows, read once for every format: as displayed, and with
+ *  decoration stripped. */
+export interface ScopeLines {
+  buf: CopyBuffer;
+  block: boolean;
+  raw: readonly Line[];
+  stripped: readonly Line[];
 }
 
-export function render(buf: CopyBuffer, scope: Span, options: RenderOptions): Rendering {
-  const { original, overrides = {} } = options;
-  // Never rewrap a block slab (spec §4.1).
-  const format = scope.block && options.format === 'auto' ? 'exact' : options.format;
-  let lines = extract(buf, scope, original);
-  const blank = (l: Line) => l.cells.length === 0;
+/** Read `scope`, marking every cell outside `original` (the dragged
+ *  selection) as added. */
+export function readScope(buf: CopyBuffer, scope: Span, original: Span): ScopeLines {
+  const raw = extract(buf, scope, original);
+  return { buf, block: scope.block, raw, stripped: raw.map(stripDecoration).filter((l): l is Line => l !== null) };
+}
 
+export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, overrides: Readonly<Record<number, BreakKind>> = {}): Rendering {
+  // Never rewrap a block slab (spec §4.1).
+  const format = scopeLines.block && chosen === 'auto' ? 'exact' : chosen;
+  const blank = (l: Line) => l.cells.length === 0;
+  let lines = [...(format === 'exact' ? scopeLines.raw : scopeLines.stripped)];
   if (format !== 'exact') {
-    lines = lines.map(stripDecoration).filter((l): l is Line => l !== null);
     while (lines.length && blank(lines[0])) lines.shift();
     while (lines.length && blank(lines[lines.length - 1])) lines.pop();
     if (format === 'spaces' || format === 'joined') lines = lines.filter((l) => !blank(l));
@@ -311,24 +300,10 @@ export function render(buf: CopyBuffer, scope: Span, options: RenderOptions): Re
   const indents = lines.filter((l) => !blank(l)).map((l) => l.startCol + leading(l.cells));
   const base = indents.length ? Math.min(...indents) : 0;
 
-  const autos: BreakKind[] = [];
-  const kinds: BreakKind[] = [];
-  for (let i = 0; i + 1 < lines.length; i++) {
-    const a = lines[i];
-    const b = lines[i + 1];
-    let auto: BreakKind;
-    if (format === 'exact') auto = 'keep';
-    else if (format === 'spaces') auto = 'space';
-    else if (format === 'joined') auto = 'none';
-    else auto = blank(a) || blank(b) || b.row !== a.row + 1 ? 'keep' : autoBreak(buf, a.row);
-    autos.push(auto);
-    kinds.push(overrides[i] ?? auto);
-  }
-
   const pieces: Piece[] = [];
   let text = '';
+  let joined = false;
   lines.forEach((line, i) => {
-    const joined = i > 0 && kinds[i - 1] !== 'keep';
     const lead = leading(line.cells);
     let strip: number;
     if (format === 'exact') strip = joined ? lead : 0;
@@ -346,14 +321,30 @@ export function render(buf: CopyBuffer, scope: Span, options: RenderOptions): Re
       }
     });
     text += cells.map((c) => c.ch).join('');
-    if (i + 1 < lines.length) {
-      const kind = kinds[i];
-      pieces.push({ t: 'break', index: i, kind, auto: autos[i] });
-      text += BREAK_TEXT[kind];
-    }
+    const next = lines[i + 1];
+    if (!next) return;
+    const auto = FIXED_BREAK[format]
+      ?? (blank(line) || blank(next) || next.row !== line.row + 1 ? 'keep' : autoBreak(scopeLines.buf, line.row));
+    const kind = overrides[i] ?? auto;
+    pieces.push({ t: 'break', index: i, kind, auto });
+    text += BREAK_TEXT[kind];
+    joined = kind !== 'keep';
   });
+  return { pieces, text };
+}
 
-  return { pieces, text, lines: lineCount(text) };
+export interface RenderOptions {
+  /** Cells inside the dragged selection; the rest of the scope is marked added. */
+  original: Span;
+  format: CopyFormat;
+  /** Break index → kind, replacing the format's own decision. */
+  overrides?: Readonly<Record<number, BreakKind>>;
+}
+
+/** One format over one scope; `readScope` + `renderLines` when several
+ *  formats share the scope. */
+export function render(buf: CopyBuffer, scope: Span, options: RenderOptions): Rendering {
+  return renderLines(readScope(buf, scope, options.original), options.format, options.overrides);
 }
 
 /** Literal text as a rendering — a program's own copy — every line break
@@ -377,7 +368,7 @@ export function renderText(text: string, overrides: Readonly<Record<number, Brea
       joined = kind !== 'keep';
     }
   });
-  return { pieces, text: out, lines: lineCount(out) };
+  return { pieces, text: out };
 }
 
 // ---------------------------------------------------------------------------
@@ -435,10 +426,8 @@ function toParagraph(buf: CopyBuffer, sel: Span): Span {
 
 /** Names a growth by the edge tokens that grew, as the smart-token detector
  *  classifies them (spec §5.1). */
-function wordsLabel(text: string, grewStart: boolean, grewEnd: boolean): string {
-  const tokens = text.split(/\s+/).filter(Boolean);
-  const kinds = [grewStart ? tokens[0] : undefined, grewEnd ? tokens[tokens.length - 1] : undefined]
-    .map((token) => (token ? detectTokenAt(token, 0)?.kind : undefined));
+function wordsLabel(edgeTokens: readonly string[]): string {
+  const kinds = edgeTokens.map((token) => detectTokenAt(token.trim(), 0)?.kind);
   if (kinds.includes('url')) return 'Full URL';
   if (kinds.includes('path')) return 'Full path';
   return 'Whole words';
@@ -458,9 +447,16 @@ export function computeScopes(buf: CopyBuffer, sel: Span): Scope[] {
     if (!out.some((s) => spanEquals(s.span, union))) out.push({ label, span: union });
   };
   const words = snapToWords(buf, sel);
-  const grewStart = comparePos(words.start, sel.start) < 0;
-  const grewEnd = comparePos(words.end, sel.end) > 0;
-  push(wordsLabel(render(buf, words, { original: words, format: 'auto' }).text, grewStart, grewEnd), words);
+  // The token under a grown edge, rejoined as Auto would, names the growth.
+  const tokenAt = (pos: GridPos) => {
+    const token = snapToWords(buf, { start: pos, end: pos, block: false });
+    return render(buf, token, { original: token, format: 'auto' }).text;
+  };
+  const edges = [
+    ...(comparePos(words.start, sel.start) < 0 ? [tokenAt(words.start)] : []),
+    ...(comparePos(words.end, sel.end) > 0 ? [tokenAt(words.end)] : []),
+  ];
+  if (edges.length) push(wordsLabel(edges), words);
   push('Paragraph', toParagraph(buf, sel));
   return out;
 }

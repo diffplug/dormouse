@@ -43,6 +43,11 @@ export const DOOR_TAB_CLASS = clsx(
  *  (`docs/specs/layout.md` → "Workspace names"). */
 export const AUTO_NAME_CLASS = 'italic';
 
+/** What the copy editor's expanded scope adds beyond the drag: its text in the
+ *  preview, and its dashed outline over the terminal (an SVG path). */
+export const COPY_EXPANDED_TEXT_CLASS = 'rounded-[2px] bg-success/15 underline decoration-success decoration-dotted underline-offset-2';
+export const COPY_EXPANDED_PATH_CLASS = 'fill-success/15 stroke-success';
+
 /** A preview slot's label in its Pane header and Door, italic as an editor's
  *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
 export const PREVIEW_LABEL_CLASS = 'italic';

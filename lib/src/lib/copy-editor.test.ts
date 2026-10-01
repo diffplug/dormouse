@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./clipboard', () => ({ writeTextToClipboard: vi.fn() }));
-vi.mock('./terminal-registry', () => ({ getTerminalInstance: vi.fn() }));
 import { writeTextToClipboard } from './clipboard';
-import { cycleCopyFormat, flipCopyBreak, openCopyEditor, setCopyFormat, stepCopyScope } from './copy-editor';
-import { copySelection, nudgeSelection } from './copy-selection';
+import { cycleCopyFormat, flipCopyBreak, nudgeCopyEdge, openCopyEditor, setCopyFormat, stepCopyScope } from './copy-editor';
+import { copySelection } from './copy-selection';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
@@ -14,7 +13,6 @@ import {
   subscribeToMouseSelection,
   type Selection,
 } from './mouse-selection';
-import { getTerminalInstance } from './terminal-registry';
 import { CLAUDE_REPLY, fakeXterm } from './copy-text-fixtures';
 
 const terminal = fakeXterm(CLAUDE_REPLY);
@@ -29,7 +27,6 @@ const editor = () => getMouseSelectionState(ID).copyEditor!;
 
 beforeEach(() => {
   __resetMouseSelectionForTests();
-  vi.mocked(getTerminalInstance).mockReturnValue(terminal);
   vi.mocked(writeTextToClipboard).mockReset();
 });
 
@@ -76,7 +73,7 @@ describe('copy editor transitions', () => {
     cycleCopyFormat(ID, 1);
     const seen: unknown[] = [];
     const unsubscribe = subscribeToMouseSelection(() => seen.push(getMouseSelectionState(ID).copyEditor?.format));
-    nudgeSelection(ID, 'end', 1);
+    nudgeCopyEdge(ID, 'end', 1);
     unsubscribe();
     expect(getMouseSelectionState(ID).selection).toMatchObject({ endRow: 2, endCol: 16 });
     expect(editor()).toMatchObject({ format: 'exact', scope: 0 });
@@ -85,7 +82,7 @@ describe('copy editor transitions', () => {
 
   it('never nudges a block slab', () => {
     select({ shape: 'block', endRow: 4, endCol: 11 });
-    nudgeSelection(ID, 'end', 1);
+    nudgeCopyEdge(ID, 'end', 1);
     expect(getMouseSelectionState(ID).selection?.endCol).toBe(11);
   });
 });
@@ -134,7 +131,7 @@ describe('the program’s own copy', () => {
   it('falls back to Auto when a nudge moves off what the program copied', () => {
     shadowWithOffer('anything');
     setCopyFormat(ID, 'program');
-    nudgeSelection(ID, 'end', -1);
+    nudgeCopyEdge(ID, 'end', -1);
     expect(editor().format).toBe('auto');
     expect(getMouseSelectionState(ID).programCopy).toBeNull();
   });

@@ -1,4 +1,5 @@
-import type { Terminal } from '@xterm/xterm';
+import type { IBufferLine, Terminal } from '@xterm/xterm';
+import type { Selection } from './mouse-selection';
 
 // The screen the copy editor's tests and stories share.
 
@@ -27,17 +28,33 @@ export const CLAUDE_REPLY: readonly string[] = [
 ];
 
 /** Just enough of an xterm `Terminal` over plain strings — one narrow cell
- *  per UTF-16 unit — for the copy editor's and the selection's reads. */
-export function fakeXterm(lines: readonly string[], cols = 80): Terminal {
+ *  per UTF-16 unit, `wrapped` rows marked as soft wraps — for the copy
+ *  editor's and the selection's reads. */
+export function fakeXterm(lines: readonly string[], { cols = 80, wrapped = [] }: { cols?: number; wrapped?: readonly number[] } = {}): Terminal {
   const getLine = (r: number) => {
     const text = lines[r];
     if (text === undefined) return undefined;
     return {
       length: cols,
-      isWrapped: false,
+      isWrapped: wrapped.includes(r),
       getCell: (c: number) => ({ getChars: () => text[c] ?? '', getWidth: () => 1 }),
       translateToString: (_trim?: boolean, start = 0, end = cols) => text.slice(start, end),
     };
   };
   return { cols, rows: 24, buffer: { active: { length: lines.length, getLine } } } as unknown as Terminal;
+}
+
+/** A buffer line of `[chars, width]` cells, a width-2 cell followed by its
+ *  zero-width continuation, as xterm lays out wide characters. */
+export function bufferLine(parts: ReadonlyArray<readonly [string, number]>): IBufferLine {
+  const cells = parts.flatMap(([chars, width]) => [
+    { getChars: () => chars, getWidth: () => width },
+    ...Array.from({ length: width - 1 }, () => ({ getChars: () => '', getWidth: () => 0 })),
+  ]);
+  return { length: cells.length, isWrapped: false, getCell: (col: number) => cells[col] } as unknown as IBufferLine;
+}
+
+/** A finalized linewise selection, as mouse-up leaves one. */
+export function finalizedSelection(over: Partial<Selection> = {}): Selection {
+  return { startRow: 0, startCol: 0, endRow: 0, endCol: 0, shape: 'linewise', dragging: false, startedInScrollback: false, ...over };
 }

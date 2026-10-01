@@ -107,7 +107,7 @@ body {
   .kill-letter-flash { animation-duration: 1ms; }
 }
 
-/* --- Copy-confirmation flash for the selection popup button --- */
+/* --- Confirmation flash for a popup button (the mouse override banner's) --- */
 
 @keyframes copy-flash {
   0%   { transform: scale(1);    }

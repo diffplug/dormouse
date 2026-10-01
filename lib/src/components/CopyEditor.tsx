@@ -10,12 +10,12 @@ import {
   subscribeToRenderTick,
 } from '../lib/mouse-selection';
 import { spanOfSelection, type BreakKind, type EditorFormat, type Piece, type Rendering } from '../lib/copy-text';
-import { duplicateFormats, editorFormats, editorRendering, flipCopyBreak, formatRenderings, setCopyFormat, setCopyScope } from '../lib/copy-editor';
+import { duplicateFormats, editorFormats, editorRendering, flipCopyBreak, formatRenderings, isEdited, setCopyFormat, setCopyScope } from '../lib/copy-editor';
 import { copySelection } from '../lib/copy-selection';
-import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
+import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
 import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
-import { modalActionButton, modalSurface, popupButton, Shortcut } from './design';
+import { COPY_EXPANDED_TEXT_CLASS, modalActionButton, modalSurface, popupButton, Shortcut } from './design';
 import { TouchUiContext } from './touch-ui-context';
 import { WorkspaceActiveContext } from './wall/wall-context';
 
@@ -78,19 +78,13 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
   const state = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const { selection, copyEditor, copyFlash, programCopy } = state;
   const open = workspaceActive && !!copyEditor;
-  const terminal = open ? getTerminalInstance(terminalId) : null;
-  // Every format at the scope is rendered once per scope, so `f` and the
-  // duplicate check reuse it; only a per-break edit renders again.
-  const scope = copyEditor?.scopes[copyEditor.scope].span;
-  const renderings = useMemo(
-    () => (terminal && selection && scope ? formatRenderings(terminal, selection, scope, programCopy) : null),
-    [terminal, selection, scope, programCopy],
+  // Each scope's formats are rendered once and cached on it (`copy-editor.ts`),
+  // so `f`, the duplicate check, and the copy all reuse them.
+  const rendering = useMemo(() => (open && copyEditor ? editorRendering(copyEditor, programCopy) : null), [open, copyEditor, programCopy]);
+  const sameAs = useMemo(
+    () => (open && copyEditor ? duplicateFormats(formatRenderings(copyEditor, programCopy)) : {}),
+    [open, copyEditor, programCopy],
   );
-  const rendering = useMemo(
-    () => (terminal && selection && copyEditor && renderings ? editorRendering(terminal, selection, copyEditor, programCopy, renderings) : null),
-    [terminal, selection, copyEditor, programCopy, renderings],
-  );
-  const sameAs = useMemo(() => (renderings ? duplicateFormats(renderings) : {}), [renderings]);
   const onFlip = useCallback((index: number, kind: BreakKind) => flipCopyBreak(terminalId, index, kind), [terminalId]);
 
   const [placement, setPlacement] = useState<Placement | null>(null);
@@ -134,7 +128,8 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
 
   if (!rendering || !placement || !copyEditor || !selection) return null;
 
-  const edited = Object.keys(copyEditor.overrides).length > 0;
+  const edited = isEdited(copyEditor);
+  const lines = rendering.text ? rendering.text.split('\n').length : 0;
   const fromProgram = copyEditor.format === 'program';
   const formatName = (f: EditorFormat) => (f === 'program' ? `From ${programName(terminalId)}` : FORMAT_NAMES[f]);
   const keys = (node: ReactNode) => (touchUi ? null : <span className="whitespace-nowrap text-xs text-muted">{node}</span>);
@@ -152,7 +147,7 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
     <div
       data-copy-editor-for={terminalId}
       style={style}
-      className={clsx(modalSurface({ padding: 'none', elevation: 'modal' }), 'flex flex-col overflow-hidden border-foreground/20 text-sm')}
+      className={modalSurface({ padding: 'none', elevation: 'modal', class: 'flex flex-col overflow-hidden border-foreground/20 text-sm' })}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="flex shrink-0 flex-col gap-1 border-b border-border px-2 py-1.5">
@@ -187,11 +182,11 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
           <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
           <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
           <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
-          {copyEditor.scope > 0 && <span><span className={clsx(ADDED_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
+          {copyEditor.scope > 0 && <span><span className={clsx(COPY_EXPANDED_TEXT_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
         </span>
         {selection.shape !== 'block' && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
         <span className="ml-auto shrink-0 whitespace-nowrap">
-          {rendering.lines} {rendering.lines === 1 ? 'line' : 'lines'} · {rendering.text.length} ch
+          {lines} {lines === 1 ? 'line' : 'lines'} · {rendering.text.length} ch
         </span>
         {keys(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
         <button
@@ -206,8 +201,6 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
     </div>
   );
 }
-
-const ADDED_CLASS = 'rounded-[2px] bg-success/15 underline decoration-success decoration-dotted underline-offset-2';
 
 function Segment<T extends string | number>({ value, items, onPick }: {
   value: T;
@@ -265,7 +258,7 @@ const LinedPreview = memo(function LinedPreview({ rendering, onFlip }: {
     const line = lines[lines.length - 1];
     if (p.t === 'text') {
       const text = p.lead ? p.text.replace(/ /g, '·').replace(/\t/g, '→') : p.text;
-      line.push(<span key={i} className={clsx(p.lead && 'text-muted/60', p.added && ADDED_CLASS)}>{text}</span>);
+      line.push(<span key={i} className={clsx(p.lead && 'text-muted/60', p.added && COPY_EXPANDED_TEXT_CLASS)}>{text}</span>);
       return;
     }
     line.push(<Mark key={i} index={p.index} kind={p.kind} auto={p.auto} onFlip={onFlip} />);

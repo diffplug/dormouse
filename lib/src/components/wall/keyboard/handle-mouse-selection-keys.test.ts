@@ -8,28 +8,27 @@ import type { WallKeyboardCtx } from './types';
 vi.mock('../../../lib/clipboard', () => ({
   doPaste: vi.fn(),
 }));
-vi.mock('../../../lib/copy-selection', () => ({
-  copySelection: vi.fn(),
-  nudgeSelection: vi.fn(),
-  openProgramSelection: vi.fn(),
-}));
+vi.mock('../../../lib/copy-selection', () => ({ copySelection: vi.fn() }));
 vi.mock('../../../lib/copy-editor', () => ({
   cycleCopyFormat: vi.fn(),
+  nudgeCopyEdge: vi.fn(),
+  openCopyEditor: vi.fn(),
   stepCopyScope: vi.fn(),
 }));
 vi.mock('../../../lib/platform', () => ({ IS_MAC: true }));
 // The real mouse-selection store keeps per-id module state; mock it so each
 // test can drive the drag/selection shape the handler reads.
-vi.mock('../../../lib/mouse-selection', () => ({
+vi.mock('../../../lib/mouse-selection', async (importOriginal) => ({
   getMouseSelectionState: vi.fn(() => ({ selection: null })),
-  isShadowed: (s: { selection?: { owner?: string } | null; copyEditor?: unknown }) => s.selection?.owner === 'program' && !s.copyEditor,
+  isShadowed: (await importOriginal<typeof import('../../../lib/mouse-selection')>()).isShadowed,
   extendSelectionToToken: vi.fn(),
   setSelection: vi.fn(),
 }));
-function makeCtx(params?: Record<string, unknown>): WallKeyboardCtx {
+function makeCtx(params?: Record<string, unknown>, mode: 'passthrough' | 'command' = 'passthrough'): WallKeyboardCtx {
   return {
     selectedIdRef: { current: 'pane-a' },
     selectedTypeRef: { current: 'pane' },
+    modeRef: { current: mode },
     // Surface-type lookup now flows through the engine-neutral `nav` seam; an
     // absent params reads as a terminal.
     nav: {
@@ -159,49 +158,45 @@ describe('handleMouseSelectionKeys', () => {
   describe('over a shadowed program drag', () => {
     const shadow = async () => {
       const { getMouseSelectionState, setSelection } = await import('../../../lib/mouse-selection');
-      const { openProgramSelection } = await import('../../../lib/copy-selection');
+      const { openCopyEditor } = await import('../../../lib/copy-editor');
       vi.mocked(setSelection).mockClear();
-      vi.mocked(openProgramSelection).mockClear();
+      vi.mocked(openCopyEditor).mockClear();
       vi.mocked(getMouseSelectionState).mockReturnValue({ selection: { dragging: false, owner: 'program' }, copyEditor: null } as never);
-      return { setSelection, openProgramSelection };
+      return { setSelection, openCopyEditor };
     };
 
-    it('opens the editor on the copy chord', async () => {
-      const { openProgramSelection } = await shadow();
-      const e = fakeEvent(document.createElement('div'), { key: 'c', metaKey: true });
-      expect(handleMouseSelectionKeys(e, makeCtx())).toBe(true);
-      expect(e.defaultPrevented).toBe(true);
-      expect(openProgramSelection).toHaveBeenCalledWith('pane-a');
+    it('opens the editor on the copy chord, in either mode', async () => {
+      const { openCopyEditor } = await shadow();
+      for (const mode of ['passthrough', 'command'] as const) {
+        const e = fakeEvent(document.createElement('div'), { key: 'c', metaKey: true });
+        expect(handleMouseSelectionKeys(e, makeCtx(undefined, mode))).toBe(true);
+        expect(e.defaultPrevented).toBe(true);
+      }
+      expect(openCopyEditor).toHaveBeenCalledTimes(2);
     });
 
-    it('lets any other key reach the program and drops the shadow', async () => {
-      const { setSelection, openProgramSelection } = await shadow();
+    it('leaves any other key to the program', async () => {
+      const { setSelection, openCopyEditor } = await shadow();
       const e = fakeEvent(document.createElement('div'), { key: 'Escape' });
       expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
       expect(e.defaultPrevented).toBe(false);
-      expect(setSelection).toHaveBeenCalledWith('pane-a', null);
-      expect(openProgramSelection).not.toHaveBeenCalled();
-    });
-
-    it('keeps the shadow across a bare modifier', async () => {
-      const { setSelection } = await shadow();
-      handleMouseSelectionKeys(fakeEvent(document.createElement('div'), { key: 'Meta', metaKey: true }), makeCtx());
       expect(setSelection).not.toHaveBeenCalled();
+      expect(openCopyEditor).not.toHaveBeenCalled();
     });
   });
 
   describe('with the copy editor open', () => {
     const open = async () => {
       const { getMouseSelectionState, setSelection } = await import('../../../lib/mouse-selection');
-      const { copySelection, nudgeSelection } = await import('../../../lib/copy-selection');
-      const { cycleCopyFormat, stepCopyScope } = await import('../../../lib/copy-editor');
-      for (const fn of [setSelection, copySelection, nudgeSelection, cycleCopyFormat, stepCopyScope]) vi.mocked(fn).mockClear();
+      const { copySelection } = await import('../../../lib/copy-selection');
+      const { cycleCopyFormat, nudgeCopyEdge, stepCopyScope } = await import('../../../lib/copy-editor');
+      for (const fn of [setSelection, copySelection, nudgeCopyEdge, cycleCopyFormat, stepCopyScope]) vi.mocked(fn).mockClear();
       vi.mocked(getMouseSelectionState).mockReturnValue({ selection: { dragging: false }, copyEditor: {} } as never);
-      return { setSelection, copySelection, nudgeSelection, cycleCopyFormat, stepCopyScope };
+      return { setSelection, copySelection, nudgeCopyEdge, cycleCopyFormat, stepCopyScope };
     };
-    const press = (init: Partial<KeyboardEventInit> & { key: string }) => {
+    const press = (init: Partial<KeyboardEventInit> & { key: string }, mode: 'passthrough' | 'command' = 'passthrough') => {
       const e = fakeEvent(document.createElement('div'), init);
-      return { e, handled: handleMouseSelectionKeys(e, makeCtx()) };
+      return { e, handled: handleMouseSelectionKeys(e, makeCtx(undefined, mode)) };
     };
 
     it('copies on the copy chord, with or without Shift, and on Enter', async () => {
@@ -226,10 +221,10 @@ describe('handleMouseSelectionKeys', () => {
     });
 
     it('nudges the end on arrows and the start on Shift+arrows', async () => {
-      const { nudgeSelection } = await open();
+      const { nudgeCopyEdge } = await open();
       press({ key: 'ArrowRight' });
       press({ key: 'ArrowLeft', shiftKey: true });
-      expect(vi.mocked(nudgeSelection).mock.calls).toEqual([['pane-a', 'end', 1], ['pane-a', 'start', -1]]);
+      expect(vi.mocked(nudgeCopyEdge).mock.calls).toEqual([['pane-a', 'end', 1], ['pane-a', 'start', -1]]);
     });
 
     it('closes on Escape, consuming it', async () => {
@@ -240,21 +235,24 @@ describe('handleMouseSelectionKeys', () => {
       expect(setSelection).toHaveBeenCalledWith('pane-a', null);
     });
 
-    it('closes on any other key and lets it reach the terminal', async () => {
+    it('lets any other key, and Shift+Enter, reach the terminal untouched', async () => {
       const { setSelection, copySelection } = await open();
-      const { e, handled } = press({ key: 'g' });
-      expect(handled).toBe(false);
-      expect(e.defaultPrevented).toBe(false);
-      expect(setSelection).toHaveBeenCalledWith('pane-a', null);
+      for (const init of [{ key: 'g' }, { key: 'Enter', shiftKey: true }, { key: 'e', metaKey: true }]) {
+        const { e, handled } = press(init);
+        expect(handled).toBe(false);
+        expect(e.defaultPrevented).toBe(false);
+      }
+      expect(setSelection).not.toHaveBeenCalled();
       expect(copySelection).not.toHaveBeenCalled();
     });
 
-    it('stays open for a bare modifier; a modified e is no editor key', async () => {
-      const { setSelection, stepCopyScope } = await open();
-      expect(press({ key: 'Shift', shiftKey: true }).handled).toBe(false);
-      expect(press({ key: 'e', metaKey: true }).handled).toBe(false);
+    it('leaves command mode its own keys, but still copies on the chord', async () => {
+      const { stepCopyScope, nudgeCopyEdge, copySelection } = await open();
+      for (const key of ['e', 'ArrowRight', 'Enter', 'Escape']) expect(press({ key }, 'command').handled).toBe(false);
+      expect(press({ key: 'c', metaKey: true }, 'command').handled).toBe(true);
       expect(stepCopyScope).not.toHaveBeenCalled();
-      expect(vi.mocked(setSelection).mock.calls).toEqual([['pane-a', null]]);
+      expect(nudgeCopyEdge).not.toHaveBeenCalled();
+      expect(copySelection).toHaveBeenCalledTimes(1);
     });
   });
 });

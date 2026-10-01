@@ -1,7 +1,5 @@
-import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TerminalPane } from '../components/TerminalPane';
-import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
 import { CLAUDE_REPLY } from '../lib/copy-text-fixtures';
 import type { FakeScenario } from '../lib/platform';
 import { openCopyEditor, setCopyFormat, setCopyScope } from '../lib/copy-editor';
@@ -9,6 +7,7 @@ import { getMouseSelectionState, setCopyEditor, setSelection, type Selection } f
 import type { BreakKind, CopyFormat } from '../lib/copy-text';
 import { TouchUiContext } from '../components/touch-ui-context';
 import { settleTerminals, waitForCondition } from './settle-terminals';
+import { useStorySelection } from './story-selection';
 
 const SCENARIO_CLAUDE_REPLY: FakeScenario = {
   name: 'claude-reply',
@@ -32,32 +31,15 @@ function CopyEditorStory({
   editor?: EditorPreset;
   touch?: boolean;
 }) {
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const apply = () => {
-      if (cancelled) return;
-      const dims = getTerminalOverlayDims(id);
-      const terminal = getTerminalInstance(id);
-      if (!dims || dims.cellHeight === 0 || !terminal) {
-        timer = setTimeout(apply, 50);
-        return;
-      }
-      // What a mouse-up does: finalize, then open the editor over it.
-      setSelection(id, { ...selection, dragging: false, startedInScrollback: false });
-      openCopyEditor(id, terminal);
-      if (editor.scope) setCopyScope(id, editor.scope);
-      if (editor.format) setCopyFormat(id, editor.format);
-      const opened = getMouseSelectionState(id).copyEditor;
-      if (opened && editor.overrides) setCopyEditor(id, { ...opened, overrides: editor.overrides });
-    };
-    timer = setTimeout(apply, 100);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      setSelection(id, null);
-    };
-  }, [id, selection, editor]);
+  useStorySelection(id, (terminal) => {
+    // What a mouse-up does: finalize, then open the editor over it.
+    setSelection(id, { ...selection, dragging: false, startedInScrollback: false });
+    openCopyEditor(id, terminal);
+    if (editor.scope) setCopyScope(id, editor.scope);
+    if (editor.format) setCopyFormat(id, editor.format);
+    const opened = getMouseSelectionState(id).copyEditor;
+    if (opened && editor.overrides) setCopyEditor(id, { ...opened, overrides: editor.overrides });
+  }, [selection, editor]);
 
   return (
     <TouchUiContext.Provider value={touch}>

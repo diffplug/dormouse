@@ -133,7 +133,7 @@ export function attachTerminalMouseRouter({
     opts: { touchLike: boolean; block?: boolean },
   ) => {
     const { state, cell, terminalOwns } = terminalOwnsEvent(ev);
-    // Touch suppresses compatibility mousedown, so popup's mouse listener
+    // Touch suppresses compatibility mousedown, so the editor's mouse listener
     // cannot clear a previous selection for us.
     setSelection(id, null);
     setHintToken(id, null);

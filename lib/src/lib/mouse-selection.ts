@@ -1,7 +1,7 @@
 /** DOM-free per-terminal mouse/selection store with a
  * `useSyncExternalStore`-compatible subscription API. */
 
-import type { BreakKind, EditorFormat, Scope } from './copy-text';
+import type { BreakKind, CopyBuffer, EditorFormat, Scope } from './copy-text';
 
 export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
 export type OverrideState = 'off' | 'temporary' | 'permanent';
@@ -50,6 +50,9 @@ export interface TokenHint {
 
 /** The copy editor over a finalized selection (spec §4). */
 export interface CopyEditorState {
+  /** The buffer read when the editor opened, so what it shows is what it
+   *  copies. */
+  buffer: CopyBuffer;
   /** Narrowest first; `[0]` is the selection itself. */
   scopes: readonly Scope[];
   /** Index into {@link scopes}. */
@@ -180,10 +183,12 @@ export function setSelection(id: string, selection: Selection | null, copyEditor
   if (s.selection === null && selection === null) return;
   if (selection === null) clearSelection(s);
   else {
-    // A replaced selection keeps an in-flight flash and the drag's hint.
+    // A replaced selection keeps an in-flight flash and the drag's hint, but
+    // not the program's offer, so its editor cannot show that offer either.
     s.selection = selection;
-    s.copyEditor = selection.dragging ? null : copyEditor;
     s.programCopy = null;
+    s.copyEditor = selection.dragging || !copyEditor ? null
+      : copyEditor.format === 'program' ? { ...copyEditor, format: 'auto', overrides: {} } : copyEditor;
   }
   notify();
 }
@@ -198,10 +203,11 @@ export function offerProgramCopy(id: string, text: string): void {
 }
 
 /** Open or update the editor over the current finalized selection; a no-op
- *  without one. */
+ *  without one, or for the program's format without its offer. */
 export function setCopyEditor(id: string, editor: CopyEditorState): void {
   const s = ensure(id);
   if (!s.selection || s.selection.dragging || s.copyEditor === editor) return;
+  if (editor.format === 'program' && s.programCopy === null) return;
   s.copyEditor = editor;
   notify();
 }

@@ -5,18 +5,18 @@ import {
   computeScopes,
   nudge,
   render,
-  stringCopyBuffer,
   terminalCopyBuffer,
   type CopyBuffer,
   type CopyFormat,
   type Span,
 } from './copy-text';
-import { CLAUDE_REPLY, fakeXterm } from './copy-text-fixtures';
+import { bufferLine, CLAUDE_REPLY, fakeXterm, finalizedSelection } from './copy-text-fixtures';
 import { extractSelectionText } from './selection-text';
-import type { Selection } from './mouse-selection';
 
 const CLAUDE = CLAUDE_REPLY;
-const claude = stringCopyBuffer(CLAUDE, { cols: 80 });
+/** A copy buffer over plain lines, through the real xterm cell reader. */
+const lines = (rows: readonly string[], options: { cols: number; wrapped?: number[] }) => terminalCopyBuffer(fakeXterm(rows, options));
+const claude = lines(CLAUDE, { cols: 80 });
 
 const span = (r0: number, c0: number, r1: number, c1: number, block = false): Span => ({ start: { row: r0, col: c0 }, end: { row: r1, col: c1 }, block });
 const text = (buf: CopyBuffer, s: Span, format: CopyFormat) => render(buf, s, { original: s, format }).text;
@@ -31,7 +31,7 @@ describe('copy-text formats', () => {
   });
 
   it('Exact is the old Copy Raw: rows trimmed, indents kept', () => {
-    const sel: Selection = { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false };
+    const sel = finalizedSelection({ startRow: 2, startCol: 2, endRow: 5, endCol: 27 });
     expect(text(claude, prose, 'exact')).toBe(extractSelectionText(fakeXterm(CLAUDE), sel));
     expect(text(claude, prose, 'exact').split('\n')[1]).toBe('  of the output buffer. When the child exits before xterm has drained its');
   });
@@ -62,13 +62,13 @@ describe('copy-text formats', () => {
   });
 
   it('joins a true soft wrap exactly, whatever the text', () => {
-    const buf = stringCopyBuffer(['abcdefghij', 'klm'], { cols: 10, wrapped: [1] });
+    const buf = lines(['abcdefghij', 'klm'], { cols: 10, wrapped: [1] });
     expect(text(buf, span(0, 0, 1, 2), 'auto')).toBe('abcdefghijklm');
     expect(text(buf, span(0, 0, 1, 2), 'spaces')).toBe('abcdefghij klm');
   });
 
   it('joins a paragraph wrapped far narrower than the terminal', () => {
-    const buf = stringCopyBuffer([
+    const buf = lines([
       'The flake comes from a race between the PTY exit',
       'event and the final flush of the output buffer.',
       'When the child exits before xterm has drained its',
@@ -80,12 +80,12 @@ describe('copy-text formats', () => {
   });
 
   it('never joins two short lines, however alike', () => {
-    const buf = stringCopyBuffer(['Hello', 'World'], { cols: 80 });
+    const buf = lines(['Hello', 'World'], { cols: 80 });
     expect(text(buf, span(0, 0, 1, 4), 'auto')).toBe('Hello\nWorld');
   });
 
   it('keeps list items on their own lines', () => {
-    const buf = stringCopyBuffer([
+    const buf = lines([
       '- the first item wraps because it is long enough to reach past the margin',
       '  of the pane',
       '- the second item',
@@ -103,7 +103,7 @@ describe('copy-text formats', () => {
     const r = render(claude, prose, { original: prose, format: 'auto', overrides: { 1: 'keep' } });
     const breaks = r.pieces.flatMap((p) => (p.t === 'break' ? [[p.auto, p.kind]] : []));
     expect(breaks).toEqual([['space', 'space'], ['space', 'keep'], ['space', 'space']]);
-    expect(r.lines).toBe(2);
+    expect(r.text.split('\n')).toHaveLength(2);
     expect(r.text.split('\n')[1]).toBe('write queue, the last chunk is dropped and the assertion on the prompt text fails intermittently.');
   });
 
@@ -137,7 +137,7 @@ describe('copy-text scopes', () => {
   });
 
   it('names a path or a plain word the way the smart-token detector does', () => {
-    const buf = stringCopyBuffer(['see ~/projects/dormouse/README.md and src/lib/x.ts too'], { cols: 80 });
+    const buf = lines(['see ~/projects/dormouse/README.md and src/lib/x.ts too'], { cols: 80 });
     expect(computeScopes(buf, span(0, 8, 0, 20))[1].label).toBe('Full path');
     expect(computeScopes(buf, span(0, 42, 0, 46))[1].label).toBe('Whole words');
   });
@@ -175,16 +175,7 @@ describe('copy-text nudge', () => {
 
 describe('copy-text terminalCopyBuffer', () => {
   it('maps wide characters through their continuation cells', () => {
-    const cells = [
-      { chars: '中', width: 2 }, { chars: '', width: 0 },
-      { chars: 'x', width: 1 }, { chars: '', width: 1 }, { chars: '', width: 1 },
-    ];
-    const line = {
-      length: cells.length,
-      isWrapped: false,
-      getCell: (c: number) => (cells[c] ? { getChars: () => cells[c].chars, getWidth: () => cells[c].width } : undefined),
-    };
-    const terminal = { cols: 5, buffer: { active: { length: 1, getLine: () => line } } } as unknown as Terminal;
+    const terminal = { cols: 5, buffer: { active: { length: 1, getLine: () => bufferLine([['中', 2], ['x', 1]]) } } } as unknown as Terminal;
     const buf = terminalCopyBuffer(terminal);
     expect(buf.row(0).cells).toEqual(['中', '', 'x']);
     expect(text(buf, span(0, 1, 0, 2), 'exact')).toBe('x');

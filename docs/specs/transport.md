@@ -200,7 +200,7 @@ Transport constraints:
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. **Carries an optional `textData`** (string-control payloads removed, for the prompt heuristic), **omitted when it would equal `data`**. |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
 | Host → webview | `terminal:toolEvents` | Ordered Tool announcements, state, and command-start resets (`docs/specs/dor-tool.md` → OSC 367). |
-| Host → webview | `terminal:clipboardOffer` | `text`: one decoded `OSC 52` write, for the copy editor to offer; the webview drops it unless that pane holds a shadowed drag (`docs/specs/mouse-and-clipboard.md` §4.6). |
+| Host → webview | `terminal:clipboardOffer` | `text`: one decoded `OSC 52` write, an offer the copy editor may show (`docs/specs/mouse-and-clipboard.md` §4.6). |
 | Webview → host | `pty:spawn` | `options.alert`: a cold-restored pane's persisted alert state (`docs/specs/alert.md` → Public State). |
 | Webview → host | `dormouse:themeColors` (VS Code) / `pty_theme_colors` (standalone) | Resolved foreground / background / cursor, so the owner's parser can answer OSC 10/11/12. |
 | Host → webview | `pty:replay` | Buffered raw output since spawn; the webview runs a one-shot parser over it, the only re-parse there is. |

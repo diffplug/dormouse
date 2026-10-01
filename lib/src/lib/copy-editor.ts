@@ -4,7 +4,8 @@ import {
   comparePos,
   computeScopes,
   nudge,
-  render,
+  readScope,
+  renderLines,
   renderText,
   selectionOfSpan,
   spanEquals,
@@ -12,30 +13,45 @@ import {
   terminalCopyBuffer,
   type BreakKind,
   type CopyBuffer,
+  type CopyFormat,
   type EditorFormat,
   type Rendering,
+  type ScopeLines,
   type Span,
 } from './copy-text';
-import {
-  getMouseSelectionState,
-  setCopyEditor,
-  setSelection,
-  type CopyEditorState,
-  type Selection,
-} from './mouse-selection';
+import { getMouseSelectionState, setCopyEditor, setSelection, type CopyEditorState } from './mouse-selection';
+import { registry } from './terminal-store';
 
-// The copy editor's state transitions over the selection store, given the
-// terminal whose buffer it reads (docs/specs/mouse-and-clipboard.md §4). The
-// registry-aware wrappers that write the clipboard live in `copy-selection.ts`.
+// The copy editor's state transitions over the selection store
+// (docs/specs/mouse-and-clipboard.md §4). Every reading goes through the buffer
+// the editor opened with; only opening reads the terminal.
 
-function editorFor(buf: CopyBuffer, span: Span, format: EditorFormat): CopyEditorState {
-  return { scopes: computeScopes(buf, span), scope: 0, format, overrides: {} };
+function editorFor(buffer: CopyBuffer, span: Span, format: EditorFormat): CopyEditorState {
+  return { buffer, scopes: computeScopes(buffer, span), scope: 0, format, overrides: {} };
 }
 
 /** Open the editor over the finalized selection, at its own scope in Auto. */
-export function openCopyEditor(id: string, terminal: Terminal): void {
+export function openCopyEditor(id: string, terminal: Terminal | undefined = registry.get(id)?.terminal): void {
   const sel = getMouseSelectionState(id).selection;
-  if (sel && !sel.dragging) setCopyEditor(id, editorFor(terminalCopyBuffer(terminal), spanOfSelection(sel), 'auto'));
+  if (terminal && sel && !sel.dragging) setCopyEditor(id, editorFor(terminalCopyBuffer(terminal), spanOfSelection(sel), 'auto'));
+}
+
+export type FormatRenderings = Partial<Record<EditorFormat, Rendering>>;
+
+interface ScopeCache { lines: ScopeLines; renderings: Record<CopyFormat, Rendering> }
+/** Per scope span, which lives as long as the editor that holds it. */
+const scopeCache = new WeakMap<Span, ScopeCache>();
+
+function scopeOf(editor: CopyEditorState): ScopeCache {
+  const span = editor.scopes[editor.scope].span;
+  let cached = scopeCache.get(span);
+  if (!cached) {
+    const lines = readScope(editor.buffer, span, editor.scopes[0].span);
+    const renderings = Object.fromEntries(COPY_FORMATS.map((f) => [f, renderLines(lines, f)])) as Record<CopyFormat, Rendering>;
+    cached = { lines, renderings };
+    scopeCache.set(span, cached);
+  }
+  return cached;
 }
 
 /** The formats the editor offers, in `f` order: the program's own copy last,
@@ -44,34 +60,21 @@ export function editorFormats(programCopy: string | null): readonly EditorFormat
   return programCopy === null ? COPY_FORMATS : [...COPY_FORMATS, 'program'];
 }
 
-export type FormatRenderings = Partial<Record<EditorFormat, Rendering>>;
-
-/** Every format over `scope`, before any per-break edit: what the format row
- *  compares, and the preview whenever nothing was edited. */
-export function formatRenderings(terminal: Terminal, sel: Selection, scope: Span, programCopy: string | null): FormatRenderings {
-  const buf = terminalCopyBuffer(terminal);
-  const original = spanOfSelection(sel);
-  const out: FormatRenderings = {};
-  for (const format of COPY_FORMATS) out[format] = render(buf, scope, { original, format });
-  if (programCopy !== null) out.program = renderText(programCopy);
-  return out;
+/** Every format at the editor's scope, before any per-break edit: what the
+ *  format row compares. */
+export function formatRenderings(editor: CopyEditorState, programCopy: string | null): FormatRenderings {
+  const { renderings } = scopeOf(editor);
+  return programCopy === null ? renderings : { ...renderings, program: renderText(programCopy) };
 }
 
+export const isEdited = (editor: CopyEditorState) => Object.keys(editor.overrides).length > 0;
+
 /** What the editor shows and copies. */
-export function editorRendering(
-  terminal: Terminal,
-  sel: Selection,
-  editor: CopyEditorState,
-  programCopy: string | null,
-  renderings?: FormatRenderings,
-): Rendering {
-  const unedited = Object.keys(editor.overrides).length === 0;
-  const cached = unedited ? renderings?.[editor.format] : undefined;
-  if (cached) return cached;
-  // Only setCopyFormat picks 'program', and only with an offer in hand.
+export function editorRendering(editor: CopyEditorState, programCopy: string | null): Rendering {
+  // The store never holds the program format without its offer.
   if (editor.format === 'program') return renderText(programCopy!, editor.overrides);
-  const scope = editor.scopes[editor.scope].span;
-  return render(terminalCopyBuffer(terminal), scope, { original: spanOfSelection(sel), format: editor.format, overrides: editor.overrides });
+  const cached = scopeOf(editor);
+  return isEdited(editor) ? renderLines(cached.lines, editor.format, editor.overrides) : cached.renderings[editor.format];
 }
 
 /** Each format whose text an earlier one, in `f` order, already gives. */
@@ -101,12 +104,11 @@ export function stepCopyScope(id: string, dir: 1 | -1): void {
   if (editor) setCopyScope(id, editor.scope + dir);
 }
 
-/** Choose a format, dropping per-break edits; the program's copy only when
- *  it sent one, and at the selection's own scope, since it ignores scope. */
+/** Choose a format, dropping per-break edits; the program's own copy returns
+ *  to the selection's scope, since it ignores scope. */
 export function setCopyFormat(id: string, format: EditorFormat): void {
-  const { copyEditor: editor, programCopy } = getMouseSelectionState(id);
-  if (!editor || !editorFormats(programCopy).includes(format)) return;
-  if (format !== editor.format || Object.keys(editor.overrides).length > 0) {
+  const editor = getMouseSelectionState(id).copyEditor;
+  if (editor && (format !== editor.format || isEdited(editor))) {
     setCopyEditor(id, { ...editor, format, scope: format === 'program' ? 0 : editor.scope, overrides: {} });
   }
 }
@@ -129,18 +131,17 @@ export function flipCopyBreak(id: string, index: number, kind: BreakKind): void 
 
 /**
  * `◀ ▶` move the end a word, `⬆︎◀ ⬆︎▶` the start. The selection is rewritten in
- * reading order with a fresh editor at its own scope, keeping the format.
+ * reading order with a fresh editor at its own scope, keeping the format (the
+ * store demotes the program's, whose offer goes with the old selection).
  */
-export function nudgeCopyEdge(id: string, terminal: Terminal, edge: 'start' | 'end', dir: 1 | -1): void {
+export function nudgeCopyEdge(id: string, edge: 'start' | 'end', dir: 1 | -1): void {
   const { selection: sel, copyEditor } = getMouseSelectionState(id);
   if (!sel || !copyEditor || sel.shape === 'block') return;
-  // A moved selection is no longer what the program copied.
-  const format = copyEditor.format === 'program' ? 'auto' : copyEditor.format;
-  const buf = terminalCopyBuffer(terminal);
+  const buf = copyEditor.buffer;
   const span = spanOfSelection(sel);
   const moved: Span = edge === 'start'
     ? { ...span, start: nudge(buf, span.start, dir, 'start') }
     : { ...span, end: nudge(buf, span.end, dir, 'end') };
   if (spanEquals(moved, span) || comparePos(moved.start, moved.end) > 0) return;
-  setSelection(id, selectionOfSpan(moved, sel), editorFor(buf, moved, format));
+  setSelection(id, selectionOfSpan(moved, sel), editorFor(buf, moved, copyEditor.format));
 }

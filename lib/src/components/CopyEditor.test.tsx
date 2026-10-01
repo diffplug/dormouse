@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../lib/copy-selection', () => ({ copySelection: vi.fn() }));
 vi.mock('../lib/platform', () => ({ IS_MAC: true }));
-// The registry barrel boots xterm; the editor only reads the grid and buffer.
-vi.mock('../lib/terminal-registry', () => ({ getTerminalOverlayDims: vi.fn(), getTerminalInstance: vi.fn() }));
+// The registry barrel boots xterm; the editor only reads the measured grid.
+vi.mock('../lib/terminal-registry', () => ({ getTerminalOverlayDims: vi.fn() }));
 import { copySelection } from '../lib/copy-selection';
 import { openCopyEditor } from '../lib/copy-editor';
 import { CLAUDE_REPLY, fakeXterm } from '../lib/copy-text-fixtures';
@@ -22,7 +22,7 @@ import {
   offerProgramCopy,
   setSelection,
 } from '../lib/mouse-selection';
-import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
+import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { CopyEditor } from './CopyEditor';
 import { TouchUiContext } from './touch-ui-context';
 import { WorkspaceActiveContext } from './wall/wall-context';
@@ -70,7 +70,6 @@ beforeEach(() => {
   __resetMouseSelectionForTests();
   dims = { ...DIMS };
   vi.mocked(getTerminalOverlayDims).mockImplementation(() => dims);
-  vi.mocked(getTerminalInstance).mockReturnValue(terminal);
   vi.mocked(copySelection).mockReset();
   container = document.createElement('div');
   document.body.appendChild(container);

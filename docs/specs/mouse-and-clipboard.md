@@ -104,8 +104,8 @@ Source of truth: `lib/src/components/wall/keyboard/handle-mouse-selection-keys.t
 ### 3.7 Ending a Selection
 
 - Releasing the button ends the drag and fixes the selection; the copy editor (§4) opens.
-- It persists until something ends it: a completed copy, a content change (§3.4), **Esc**, or a click outside (§4.3).
-- **A new mouse-down in the terminal content area replaces any existing selection immediately** and dismisses its editor.
+- It persists until the editor is dismissed (§4.5).
+- **A new mouse-down in the terminal content area replaces any existing selection immediately**, its editor with it.
 
 ### 3.8 Drags the Inside Program Owns
 
@@ -113,7 +113,7 @@ A primary mouse drag that reaches the inside program (§6.1) is **shadowed**: it
 
 - **Must never consume, delay, or reorder a shadowed drag's events**; only a press that crosses the drag threshold counts, so a program click shadows nothing.
 - It draws no outline, only a `Press Cmd+C to copy` hint (Ctrl+C on non-macOS): the program paints its own highlight.
-- **The copy chord opens the copy editor over it** (§4), outline included. Any other key goes to the program and drops the shadow, as do a new mouse-down, a content change (§3.4), and the program ending mouse reporting.
+- **The copy chord opens the copy editor over it** (§4), outline included. Any input the program receives drops the shadow (§4.5), as does the program ending mouse reporting.
 - Touch never shadows; a touch drag over a reporting program takes §6.1's rows.
 
 Source of truth: `finishProgramDrag` in `lib/src/lib/terminal-mouse-router.ts`, pinned by `lib/src/lib/terminal-mouse-router.test.ts`; the chord in `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts`.
@@ -122,7 +122,7 @@ Source of truth: `finishProgramDrag` in `lib/src/lib/terminal-mouse-router.ts`, 
 
 ## 4. Copy Editor
 
-Mouse-up over a terminal-handled drag opens the **copy editor**, as does the copy chord over a shadowed one (§3.8): the text a copy would produce, at full pane width, every line break the selection crossed marked (rationale).
+Mouse-up over a terminal-handled drag opens the **copy editor**, as does the copy chord over a shadowed one (§3.8): the text a copy would produce, every line break the selection crossed marked (rationale).
 
 ### 4.1 Formats
 
@@ -141,8 +141,8 @@ Source of truth: `render` in `lib/src/lib/copy-text.ts`, pinned by `lib/src/lib/
 
 Each break between two consecutive rows is, in this order:
 
-1. **Kept** if either row is blank, the next starts a list item, the row ends in `;` `{` `}` or the next starts with `)` `}` `]`, or the next row's indent is not this row's hanging indent.
-2. **Deleted** if the next row is a true soft wrap (xterm's `isWrapped`).
+1. **Deleted** if the next row is a true soft wrap (xterm's `isWrapped`).
+2. **Kept** if either row is blank, the next starts a list item, the row ends in `;` `{` `}` or the next starts with `)` `}` `]`, or the next row's indent is not this row's hanging indent.
 3. **Kept** if the paragraph's longest row is under 40 columns (60% of a narrower terminal), or the next row's first word would have fit on this row within that longest row (rationale).
 4. **Deleted** if this row fills that width and its last word is token-shaped (a URL or path character, or 16+ token characters) — a token split at the margin.
 5. Otherwise **one space**.
@@ -167,15 +167,16 @@ The selection overlay draws a wider scope dashed around the outline; the preview
 
 | Key | Effect |
 |---|---|
+| `Cmd+C` (Ctrl+C on non-macOS), with or without Shift | Copy what the editor shows, in either mode. |
 | `e` / `Shift+E` | Next wider / narrower scope, stopping at either end. |
 | `f` / `Shift+F` | Next / previous format, wrapping, in table order (§4.1), then the program's own copy (§4.6). |
 | `←` `→` / `Shift+←` `→` | Move the end / start one word; a row boundary ends a word. Returns to As selected, keeping the format. |
-| `Enter`, `Cmd+C` (Ctrl+C on non-macOS), either with Shift | Copy what the editor shows. |
+| `Enter` | Copy, as the chord does. |
 | `Esc` | Close and cancel the selection. |
 
-**Any other key closes the editor and reaches the terminal**, so typing after a selection still types; a bare modifier and the paste chord leave it open. **Intercept Ctrl+C only while the editor is open or a shadowed drag waits for it** (§3.8); otherwise it reaches the inside program (SIGINT for shells, app-defined for TUIs). A selection a TUI makes from the keyboard (vim visual mode, less search highlight) is neither, and does not change that routing. The editor's hints write Shift and the arrows as the mobile compass rose does (`⬆︎` `◀` `▶`), and touch shows none.
+**Every key but the copy chord is the editor's in passthrough only**; command mode keeps its own. Any other key goes to the terminal, which closes the editor (§4.5). **Intercept Ctrl+C only while the editor is open or a shadowed drag waits for it** (§3.8); otherwise it reaches the inside program (SIGINT for shells, app-defined for TUIs). A selection a TUI makes from the keyboard (vim visual mode, less search highlight) is neither, and does not change that routing. The editor's hints write Shift and the arrows as the mobile compass rose does (`⬆︎` `◀` `▶`), and touch shows none.
 
-Source of truth: `handleCopyEditorKey` in `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts`, pinned by its test; the transitions in `lib/src/lib/copy-editor.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
+Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts`, pinned by its test; the transitions in `lib/src/lib/copy-editor.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
 
 ### 4.4 Preview and Marks
 
@@ -186,7 +187,7 @@ Source of truth: `handleCopyEditorKey` in `lib/src/components/wall/keyboard/hand
 ### 4.5 Placement and Dismissal
 
 - Full pane width, on the side of the selection with more room; touch prefers above, clear of the thumb that ended the drag. **When neither side has 120px it docks at the bottom over the selection.** Remeasured on every render tick (§7).
-- **Esc**, a click outside the editor, or a content change (§3.4) dismisses it and cancels the selection; a new mouse-down replaces both (§3.7).
+- **Esc**, a click outside the editor, a content change (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
 - **Must flash only after a successful clipboard write, and only for the selection copied**: the Copy button shows a checkmark for ~700 ms, then the selection clears. Failed writes retain it for retry; canceling clears the flash immediately.
 
 Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `lib/src/components/CopyEditor.test.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
@@ -195,9 +196,9 @@ Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by 
 
 An `OSC 52` clipboard write from the inside program is never the clipboard. It becomes an **offer** the editor can show (rationale):
 
-1. The owner's parser decodes the base64 as UTF-8, turns `\r\n` and `\r` into `\n`, and removes every other control character but tab. **Must drop, never truncate, a payload over `CLIPBOARD_OFFER_LIMIT` base64 characters**, kept under the incomplete-OSC bound so read splitting never changes the answer; a `?` read is never answered, and an empty or malformed write offers nothing. The sequence is consumed either way.
+1. The owner's parser decodes the base64 as UTF-8, turns `\r\n` and `\r` into `\n`, and removes every other control character but tab. **Must drop, never truncate, a payload over `CLIPBOARD_OFFER_LIMIT` base64 characters** (rationale); a `?` read is never answered, and an empty or malformed write offers nothing. The sequence is consumed either way.
 2. The host sends it to the owning renderer as `terminal:clipboardOffer` (`docs/specs/transport.md`); replay re-parses output without offers.
-3. **Must accept an offer only into a pane holding a shadowed drag** (§3.8), the latest replacing any earlier; it goes with that selection.
+3. **Must accept an offer only into a pane whose selection the program owns** (§3.8), shadowed or open in the editor, the latest replacing any earlier; it goes with that selection.
 4. The editor then offers a fifth format, **From <program>** (the running command as WATCHING keys it, `docs/specs/alert.md`, else `program`), last in `f` order. **It has no scope**: choosing it returns to As selected, and `e` does nothing while it shows. Its marks still flip, and a nudge returns to Auto. **Never write an offer to the clipboard except as that format, chosen and copied by the user.**
 
 Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, pinned by `lib/src/lib/terminal-protocol.test.ts`; `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, pinned by `lib/src/lib/mouse-selection.test.ts`; `editorFormats` in `lib/src/lib/copy-editor.ts`.
@@ -262,7 +263,7 @@ Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`, 
 
 - **Must render outlines, hints, and the copy editor above the cell grid**, isolated from inside-program output and redraws; header icons and banners remain persistent chrome.
 - **Geometry comes from the *measured* xterm cell grid** (`cellWidth`/`cellHeight`/`gridLeft`/`gridTop`), never element-width ÷ cols, so the outline stays aligned across xterm's internal padding.
-- **Must remeasure both overlay and editor on every shared render tick** (scroll, resize, output), even when the selection is unchanged; the editor dismisses if the selection is canceled. Pinned for the editor by `lib/src/components/CopyEditor.test.tsx`.
+- **Must remeasure both overlay and editor on every shared render tick** (scroll, resize, output), even when the selection is unchanged. Pinned for the editor by `lib/src/components/CopyEditor.test.tsx`.
 
 Source of truth: `lib/src/lib/selection-text.ts` (extraction and normalization), `lib/src/lib/selection-geometry.ts` (perimeter construction), `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx` — tested in `lib/src/components/wall/mouse-chrome.test.tsx`.
 

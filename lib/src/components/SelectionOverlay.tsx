@@ -13,7 +13,7 @@ import { computeRects, rectsToPath } from '../lib/selection-geometry';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { IS_MAC } from '../lib/platform';
 import { useFocusRingColor } from '../lib/themes/use-focus-ring-color';
-import { PopupButtonRow } from './design';
+import { COPY_EXPANDED_PATH_CLASS, PopupButtonRow } from './design';
 import { TouchUiContext } from './touch-ui-context';
 
 interface Props {
@@ -48,7 +48,7 @@ export function SelectionOverlay({ terminalId }: Props) {
   // A shadowed program drag (spec §3.8): the program paints its own highlight,
   // so Dormouse draws only the hint until the copy chord opens the editor.
   const shadowed = isShadowed(state);
-  const rects = shadowed ? [] : computeRects(selection, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight);
+  const pathOf = (sel: typeof selection) => rectsToPath(computeRects(sel, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight));
 
   const style: CSSProperties = {
     position: 'absolute',
@@ -58,13 +58,11 @@ export function SelectionOverlay({ terminalId }: Props) {
   };
 
   const borderColor = focusRingColor || 'rgb(100, 149, 237)';
-  const pathD = rectsToPath(rects);
+  const pathD = shadowed ? '' : pathOf(selection);
 
   // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
   const editor = state.copyEditor;
-  const scopeD = editor && editor.scope > 0
-    ? rectsToPath(computeRects(selectionOfSpan(editor.scopes[editor.scope].span, selection), dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight))
-    : '';
+  const scopeD = editor && editor.scope > 0 ? pathOf(selectionOfSpan(editor.scopes[editor.scope].span, selection)) : '';
 
   // Mid-drag hint. Placed outside the selection on the side opposite the
   // drag direction: below when the user drags down, above when they drag up.
@@ -113,7 +111,7 @@ export function SelectionOverlay({ terminalId }: Props) {
             {scopeD && (
               <path
                 d={scopeD}
-                style={{ fill: 'color-mix(in srgb, var(--color-success) 15%, transparent)', stroke: 'var(--color-success)' }}
+                className={COPY_EXPANDED_PATH_CLASS}
                 strokeWidth={1.5}
                 strokeDasharray="4 3"
               />

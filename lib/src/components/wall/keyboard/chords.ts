@@ -7,6 +7,11 @@ export function hasCopyModifier(e: KeyboardEvent): boolean {
   return IS_MAC ? e.metaKey : e.ctrlKey;
 }
 
+/** The copy chord: `c` with the copy modifier, Shift or not. */
+export function isCopyChord(e: KeyboardEvent): boolean {
+  return hasCopyModifier(e) && e.key.toLowerCase() === 'c';
+}
+
 /** The copy chord as hints spell it. */
 export const COPY_CHORD_LABEL = IS_MAC ? 'Cmd+C' : 'Ctrl+C';
 

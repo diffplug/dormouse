@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { IBufferLine } from '@xterm/xterm';
+import { bufferLine } from './copy-text-fixtures';
 import { detectTokenAt, detectTokenInBufferLine } from './smart-token';
 
 function at(line: string, anchor: string) {
@@ -8,14 +8,6 @@ function at(line: string, anchor: string) {
 }
 
 describe('detectTokenInBufferLine', () => {
-  function bufferLine(parts: Array<[string, number]>): IBufferLine {
-    const cells = parts.flatMap(([chars, width]) => [
-      { getChars: () => chars, getWidth: () => width },
-      ...Array.from({ length: width - 1 }, () => ({ getChars: () => '', getWidth: () => 0 })),
-    ]);
-    return { length: cells.length, getCell: (col: number) => cells[col] } as IBufferLine;
-  }
-
   it.each([['界', 2], ['e\u0301', 1], ['👩‍💻', 2]] as const)(
     'maps token boundaries after %s using cell widths', (prefix, width) => {
       const url = 'https://a.co';

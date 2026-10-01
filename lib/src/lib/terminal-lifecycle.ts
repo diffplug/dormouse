@@ -731,6 +731,10 @@ export function getSessionInputVersion(id: string): number {
  * Engagement): the host acknowledges it with input as it writes it.
  */
 export function writeUserInput(id: string, data: string): void {
+  // Typing, a paste, or Pocket's input bar ends a finalized selection — the
+  // copy editor over it, or a shadowed drag — on every path alike
+  // (docs/specs/mouse-and-clipboard.md §4.3, §3.8).
+  if (getMouseSelectionState(id).selection?.dragging === false) setMouseSelection(id, null);
   markSessionTouched(id);
   getPlatform().writePty(id, data, { userInput: true });
 }

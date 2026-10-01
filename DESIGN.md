@@ -179,9 +179,9 @@ Flat by default. Pane headers, doors, the baseboard, and terminal panes carry ze
 Shadows appear only on **raised surfaces that float above content**: popovers, tooltips, dialogs. They are ambient, not structural; they say "I am temporary and on top," not "I have weight."
 
 ### Shadow Vocabulary
-- **Popover** (`box-shadow: var(--tw-shadow-md)`): tooltips (`PopupButtonRow`), selection popup, illegal-rename warning, terminal-pane header tooltips.
+- **Popover** (`box-shadow: var(--tw-shadow-md)`): tooltips (`PopupButtonRow`), illegal-rename warning, terminal-pane header tooltips.
 - **Dialog** (`box-shadow: var(--tw-shadow-lg)`): kill-confirm sheet, TODO alert dialog.
-- **Modal** (`box-shadow: var(--tw-shadow-2xl)`): theme picker dropdown (when expanded), theme debugger, theme store dialog.
+- **Modal** (`box-shadow: var(--tw-shadow-2xl)`): theme picker dropdown (when expanded), theme debugger, theme store dialog, copy editor.
 - **Inset hairline** (`box-shadow: inset 0 0 0 1px var(--color-focus-ring)` / `var(--color-border)`): mobile UI segmented controls. Used instead of `border` when the surface needs a 1px stroke that does not shift layout on state change.
 
 ### Named Rules

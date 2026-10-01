@@ -1,11 +1,10 @@
-import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { TerminalPane } from '../components/TerminalPane';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
 import { getMouseSelectionState, setSelection, type Selection } from '../lib/mouse-selection';
-import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
 import { openCopyEditor } from '../lib/copy-editor';
 import { settleTerminals, waitForCondition } from './settle-terminals';
+import { useStorySelection } from './story-selection';
 
 /**
  * Wires a programmatic selection state onto a live TerminalPane so we can
@@ -19,33 +18,11 @@ function TextSelectionStory({
   id: string;
   selection: Omit<Selection, 'startedInScrollback'>;
 }) {
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>;
-
-    const tryApply = () => {
-      if (cancelled) return;
-      // Wait until xterm has actually rendered — getTerminalOverlayDims
-      // reads `.xterm-screen`, which doesn't exist until after the first
-      // paint. Without this the overlay would compute garbage positions.
-      const dims = getTerminalOverlayDims(id);
-      if (!dims || dims.cellHeight === 0) {
-        timer = setTimeout(tryApply, 50);
-        return;
-      }
-      setSelection(id, { ...selection, startedInScrollback: false });
-      // A finalized drag opens the copy editor, as mouse-up does.
-      const terminal = getTerminalInstance(id);
-      if (!selection.dragging && terminal) openCopyEditor(id, terminal);
-    };
-
-    timer = setTimeout(tryApply, 100);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-      setSelection(id, null);
-    };
-  }, [id, selection]);
+  useStorySelection(id, (terminal) => {
+    setSelection(id, { ...selection, startedInScrollback: false });
+    // A finalized drag opens the copy editor, as mouse-up does.
+    if (!selection.dragging) openCopyEditor(id, terminal);
+  }, [selection]);
 
   return (
     <div style={{ width: 600, height: 340 }} className="bg-terminal-bg">
