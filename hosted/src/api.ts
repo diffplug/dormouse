@@ -106,3 +106,47 @@ export async function revokeVoiceToken(id: string) {
   if (!(await voice("DELETE", `/${encodeURIComponent(id)}`)).ok)
     throw voiceFailed();
 }
+
+export interface Computer {
+  burrowId: string;
+  enrolledAt: string;
+}
+async function relay(path: string, init: RequestInit = {}): Promise<Response> {
+  return request(
+    `/api/relay${path}`,
+    init,
+    "Computers are temporarily unavailable. Try again.",
+  );
+}
+/** The server's message for a refused request: each is written for this page. */
+async function refused(response: Response): Promise<Error> {
+  const body = (await response.json().catch(() => null)) as {
+    message?: unknown;
+  } | null;
+  return new Error(
+    typeof body?.message === "string"
+      ? body.message
+      : "That did not work. Reload the page and try again.",
+  );
+}
+/** Null when the server says this account may not use the Hosted Relay. */
+export async function getComputers(): Promise<Computer[] | null> {
+  const response = await relay("/burrows");
+  if (response.status === 401 || response.status === 403) return null;
+  if (!response.ok) throw await refused(response);
+  return ((await response.json()) as { burrows: Computer[] }).burrows;
+}
+export async function removeComputer(burrowId: string) {
+  const response = await relay(`/burrows/${encodeURIComponent(burrowId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw await refused(response);
+}
+export async function approveEnrollment(userCode: string) {
+  const response = await relay("/enrollments/approve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ userCode }),
+  });
+  if (!response.ok) throw await refused(response);
+}

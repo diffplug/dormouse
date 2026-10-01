@@ -101,6 +101,13 @@ afterAll(async () => {
 const send = (name: Name, url: string, method = "GET") =>
   workers[name].dispatchFetch(url, { method, redirect: "manual" });
 
+/** The Relay's routes the account serves: approval, and its Burrows. */
+const ACCOUNT_RELAY: [string, string][] = [
+  ["POST", "/api/relay/enrollments/approve"],
+  ["GET", "/api/relay/burrows"],
+  ["DELETE", "/api/relay/burrows/AAAAAAAAAAAAAAAAAAAAAA"],
+];
+
 /** A route each Worker serves, as method and path. */
 const SERVED: Record<Name, [string, string][]> = {
   account: [
@@ -108,6 +115,7 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", "/api/providers"],
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
+    ...ACCOUNT_RELAY,
     ["GET", "/login"],
   ],
   relay: [
@@ -118,6 +126,8 @@ const SERVED: Record<Name, [string, string][]> = {
     ["POST", API_ROUTES.signinBegin],
     ["GET", API_ROUTES.burrows],
     ["POST", API_ROUTES.burrowSetupToken],
+    ["POST", API_ROUTES.burrowEnrollBegin],
+    ["POST", API_ROUTES.burrowEnrollPoll],
     ["GET", "/"],
   ],
   voice: [["POST", "/api/voice/speak"]],
@@ -173,6 +183,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
+    ...ACCOUNT_RELAY,
     ["POST", "/api/voice/speak"],
     ["POST", "/api/push/subscribe"],
     ["POST", "/api/push/send"],
@@ -198,6 +209,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/"],
     ["GET", "/login"],
     ...RELAY_API,
+    ...ACCOUNT_RELAY,
   ],
 };
 
@@ -331,6 +343,10 @@ test("each bindings mapper passes only what its Worker uses", () => {
     ONE_TIME_JOIN_LIMIT: {} as RateLimit,
     RELAY_SIGNIN_LIMIT: {} as RateLimit,
     RELAY_SETUP_LIMIT: {} as RateLimit,
+    RELAY_ENROLL_BEGIN_LIMIT: {} as RateLimit,
+    RELAY_ENROLL_POLL_LIMIT: {} as RateLimit,
+    RELAY_APPROVE_LIMIT: {} as RateLimit,
+    ACCOUNT_ORIGIN: "https://account.example.test",
   };
   const keys = (bindings: object) => Object.keys(bindings).sort();
   expect(keys(accountBindings(env))).toEqual(
@@ -344,11 +360,13 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "GITHUB_CLIENT_SECRET",
       "HYPERDRIVE",
       "POSTMARK_SERVER_TOKEN",
+      "RELAY_APPROVE_LIMIT",
     ].sort(),
   );
   expect(accountPreviewBindings(env)).toEqual({
     APP_ORIGIN: env.APP_ORIGIN,
     ASSETS: env.ASSETS,
+    RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
     AUTH_SECRET: env.AUTH_SECRET,
     BUILD_SHA: sha,
     HYPERDRIVE: env.HYPERDRIVE,
@@ -358,6 +376,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
   // No auth secret: the Relay reads its own tables and a user row, never a login.
   expect(keys(relayBindings(env))).toEqual(
     [
+      "ACCOUNT_ORIGIN",
       "APP_ORIGIN",
       "ASSETS",
       "BUILD_SHA",
@@ -365,6 +384,8 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "ONE_TIME_JOIN_LIMIT",
       "ONE_TIME_MINT_LIMIT",
       "ONE_TIME_ROOM",
+      "RELAY_ENROLL_BEGIN_LIMIT",
+      "RELAY_ENROLL_POLL_LIMIT",
       "RELAY_SETUP_LIMIT",
       "RELAY_SIGNIN_LIMIT",
     ].sort(),
@@ -409,5 +430,5 @@ test("the relay bundle reads no cookie and never asks auth", () => {
     expect(code, input).not.toMatch(/["'`]cookie["'`]|getCookie|\.cookie\b|\/api\/auth\//i);
   }
   // The pattern finds it where it is.
-  expect(readFileSync("server/voice.ts", "utf8")).toMatch(/["'`]cookie["'`]/);
+  expect(readFileSync("server/account-gate.ts", "utf8")).toMatch(/["'`]cookie["'`]/);
 });

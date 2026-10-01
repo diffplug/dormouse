@@ -4,6 +4,13 @@ import assert from 'node:assert/strict';
 import {
   API_ROUTES,
   E2E_ID_LENGTH,
+  ENROLL_USER_CODE_ALPHABET,
+  MAX_ENROLL_EXPIRY_SKEW_MS,
+  MAX_VERIFICATION_URL_LENGTH,
+  isBurrowEnrollBeginResponse,
+  isBurrowEnrollPollResponse,
+  isEnrollUserCode,
+  normalizeEnrollUserCode,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
@@ -237,5 +244,109 @@ test('isE2eRelayToClientFrame takes the burrow steps with a stamped burrowId', (
     { ...stamped, ct: 'a'.repeat(MAX_E2E_CIPHERTEXT_LENGTH + 1) },
   ]) {
     assert.equal(isE2eRelayToClientFrame(frame), false, JSON.stringify(frame));
+  }
+});
+
+// --- Hosted's device-code enrollment ---------------------------------------
+
+const deviceCode = 'A'.repeat(43);
+const userCode = '23AB-YZ9K';
+const begun = (overrides = {}) => ({
+  deviceCode,
+  userCode,
+  verificationUrl: `https://hosted.dormouse.sh/enroll#${userCode}`,
+  expiresAt: 1_000_000 + 600_000,
+  interval: 5,
+  ...overrides,
+});
+
+test('the user code alphabet is thirty characters no one misreads, and only those', () => {
+  assert.equal(ENROLL_USER_CODE_ALPHABET.length, 30);
+  assert.equal(new Set(ENROLL_USER_CODE_ALPHABET).size, 30);
+  for (const misread of '01OILU') assert.ok(!ENROLL_USER_CODE_ALPHABET.includes(misread), misread);
+  for (let code = 0; code < 128; code += 1) {
+    const char = String.fromCharCode(code);
+    assert.equal(isEnrollUserCode(`${char}AAA-AAAA`), ENROLL_USER_CODE_ALPHABET.includes(char), char);
+  }
+});
+
+test('normalizeEnrollUserCode forgives case, spaces, and dashes, and nothing else', () => {
+  for (const typed of ['23ab-yz9k', ' 23AB YZ9K ', '23ABYZ9K', '23-AB-YZ-9K']) {
+    assert.equal(normalizeEnrollUserCode(typed), userCode, typed);
+  }
+  for (const bad of ['23AB-YZ9', '23AB-YZ9KK', '23AB-YZ0K', 'O3AB-YZ9K', 7, null, `${userCode}${' '.repeat(40)}`]) {
+    assert.equal(normalizeEnrollUserCode(bad), null, String(bad));
+  }
+});
+
+test('isBurrowEnrollBeginResponse accepts a real begin, with or without a link', () => {
+  assert.ok(isBurrowEnrollBeginResponse(begun(), 1_000_000));
+  const { verificationUrl: _, ...unlinked } = begun();
+  assert.ok(isBurrowEnrollBeginResponse(unlinked, 1_000_000));
+  // The dev loop's loopback account origin.
+  assert.ok(
+    isBurrowEnrollBeginResponse(begun({ verificationUrl: `http://localhost:5173/enroll#${userCode}` }), 1_000_000),
+  );
+});
+
+test('isBurrowEnrollBeginResponse bounds every field a Burrow shows, opens, or schedules by', () => {
+  const now = 1_000_000;
+  for (const [field, value] of [
+    ['deviceCode', 'A'.repeat(42)],
+    ['deviceCode', `${'A'.repeat(42)}=`],
+    ['userCode', '23AB-YZ0K'],
+    ['userCode', '23ABYZ9K'],
+    ['verificationUrl', `http://hosted.dormouse.sh/enroll#${userCode}`],
+    ['verificationUrl', `javascript:alert(1)//enroll#${userCode}`],
+    ['verificationUrl', `https://hosted.dormouse.sh/enroll#ZZZZ-ZZZZ`],
+    ['verificationUrl', `https://hosted.dormouse.sh/other#${userCode}`],
+    ['verificationUrl', `https://hosted.dormouse.sh/enroll?x=1#${userCode}`],
+    ['verificationUrl', `https://user@hosted.dormouse.sh/enroll#${userCode}`],
+    ['verificationUrl', `https://${'a'.repeat(MAX_VERIFICATION_URL_LENGTH)}.sh/enroll#${userCode}`],
+    ['verificationUrl', null],
+    ['expiresAt', now + MAX_ENROLL_EXPIRY_SKEW_MS + 1],
+    ['expiresAt', now - MAX_ENROLL_EXPIRY_SKEW_MS - 1],
+    ['expiresAt', 1.5],
+    ['interval', 0],
+    ['interval', 61],
+    ['interval', 2.5],
+    ['interval', '5'],
+  ]) {
+    assert.equal(isBurrowEnrollBeginResponse(begun({ [field]: value }), now), false, `${field} ${value}`);
+  }
+  assert.equal(isBurrowEnrollBeginResponse(null), false);
+});
+
+test('isBurrowEnrollPollResponse takes the three answers, an enrollment field by field', () => {
+  const enrollment = {
+    burrowId: 'A'.repeat(E2E_ID_LENGTH),
+    burrowToken: deviceCode,
+    origin: 'https://relay.dormouse.sh',
+    rpId: 'relay.dormouse.sh',
+  };
+  for (const answer of [
+    { status: 'pending' },
+    { status: 'expired' },
+    { status: 'enrolled', enrollment },
+    { status: 'enrolled', enrollment: { ...enrollment, requireUserVerification: true } },
+  ]) {
+    assert.ok(isBurrowEnrollPollResponse(answer), JSON.stringify(answer));
+  }
+  for (const [field, value] of [
+    ['burrowId', 'A'.repeat(E2E_ID_LENGTH + 1)],
+    ['burrowToken', 'short'],
+    ['origin', 'https://relay.dormouse.sh/'],
+    ['rpId', ''],
+    ['rpId', 'a'.repeat(254)],
+    ['requireUserVerification', 'false'],
+  ]) {
+    assert.equal(
+      isBurrowEnrollPollResponse({ status: 'enrolled', enrollment: { ...enrollment, [field]: value } }),
+      false,
+      field,
+    );
+  }
+  for (const answer of [{ status: 'enrolled' }, { status: 'approved' }, {}, null]) {
+    assert.equal(isBurrowEnrollPollResponse(answer), false, JSON.stringify(answer));
   }
 });

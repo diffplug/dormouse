@@ -110,6 +110,15 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   caller grows must stay bounded against that caller, a capped write never
   touching another key's rows. Classify a percent-encoded path (`/%63onnect/`,
   `/%61ssets/`) the way `secureHeaders` and the routes do.
+- **Can an enrollment become someone else's Burrow, or a second one?** Trace
+  a device code from `begin` through the account's approval
+  (`hosted/server/relay-account.ts`) to the poll that redeems it: a web page
+  must not begin or poll, an approval must need a recent admin login from the
+  account's own origin and stamp its approver once, the code must expire, the
+  redemption must be one statement whose owner is that approver, and a removed
+  Burrow's token must open nothing on any relay route. Look for a guessable
+  code, an unlimited approval loop, and an approval answer that tells an
+  unknown code from an expired or already approved one.
 - **Can a Hosted login become terminal access, or an account become someone
   else's?** `authPolicy` must keep explicit linking and independent logins; a
   callback whose initiating login was revoked must fail; an unused or unknown

@@ -164,8 +164,49 @@ test("the self-host password enrollment answers the 401 a wrong credential does"
   expect(await response.json()).toEqual({ error: "unauthorized" });
 });
 
+test("only a Node Burrow begins or polls an enrollment, per-address limited before the database", async () => {
+  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+    relay.dispatchFetch(origin + path, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+  // A browser always sends Origin on a POST; the relay's own is refused too.
+  for (const path of [API_ROUTES.burrowEnrollBegin, API_ROUTES.burrowEnrollPoll])
+    for (const sent of [origin, "https://evil.example.test", "null"]) {
+      const response = await post(path, { origin }, { origin: sent, "cf-connecting-ip": "192.0.2.1" });
+      expect(response.status, `${path} ${sent}`).toBe(403);
+      expect(await response.json()).toEqual({ error: "forbidden" });
+    }
+  // Neither answer below reads the database, which refuses every connection.
+  for (let i = 0; i < 10; i++) {
+    const mismatch = await post(API_ROUTES.burrowEnrollBegin, { origin: "https://other.example.test" }, {
+      "cf-connecting-ip": "192.0.2.2",
+    });
+    expect(mismatch.status).toBe(409);
+    expect(await mismatch.json()).toEqual({ error: "origin mismatch", origin });
+  }
+  const limited = await post(API_ROUTES.burrowEnrollBegin, { origin }, { "cf-connecting-ip": "192.0.2.2" });
+  expect(limited.status).toBe(429);
+  expect(limited.headers.get("retry-after")).toBe("60");
+  expect(await limited.json()).toEqual({ error: "too many enrollment attempts" });
+  for (let i = 0; i < 60; i++) {
+    const unknown = await post(API_ROUTES.burrowEnrollPoll, { deviceCode: "short" }, { "cf-connecting-ip": "192.0.2.3" });
+    expect(await unknown.json()).toEqual({ status: "expired" });
+  }
+  expect(
+    (await post(API_ROUTES.burrowEnrollPoll, { deviceCode: "short" }, { "cf-connecting-ip": "192.0.2.3" })).status,
+  ).toBe(429);
+});
+
 test("every body is bounded before any route, a credential gate included", async () => {
-  for (const path of [API_ROUTES.setupFinish, API_ROUTES.signinFinish, API_ROUTES.burrowEnroll]) {
+  for (const path of [
+    API_ROUTES.setupFinish,
+    API_ROUTES.signinFinish,
+    API_ROUTES.burrowEnroll,
+    API_ROUTES.burrowEnrollBegin,
+    API_ROUTES.burrowEnrollPoll,
+  ]) {
     const response = await relay.dispatchFetch(origin + path, {
       method: "POST",
       headers: { "content-type": "application/json" },

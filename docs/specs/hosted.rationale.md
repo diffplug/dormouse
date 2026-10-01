@@ -39,3 +39,8 @@ Caps (2026-09-30):
 Sweep interval (2026-09-30): hourly, not the voice sweep's five minutes. Each pass opens a Postgres connection, which wakes a suspended Neon compute; expired rows are refused on read whatever their age, so the sweep only bounds storage, and an hour of sign-in challenges is the per-address limit times an hour per address.
 
 Rate limits (2026-09-30): `signin/*` and `setup/begin`/`finish` are the unauthenticated routes that reach Postgres. A ceremony's two routes share one budget, so 30 a minute per address is 15 ceremonies, far above one person's retries and enough that a burst costs Postgres little. Like the one-time limits, they are keyed per address (an IPv6 /64), so they bound one caller, not a botnet.
+
+## Burrow enrollment
+
+- Live-request cap (2026-10-01): `begin` is unauthenticated, so its cap cannot be keyed by a caller and is global. A full table refuses rather than evicting: eviction would let a flood from many addresses expire a request a person is approving at that moment, silently, while refusal costs a legitimate Burrow one retry with a visible error. `MAX_LIVE_ENROLLMENTS` (1,000) is ten addresses' worth of the per-address begin limit (10 a minute) over one 10-minute lifetime: enough for every real enrollment at once, small enough to scan.
+- User codes: 30⁸ ≈ 6.6 × 10¹¹ codes against at most 1,000 live ones gives a guessing approver about 1.5 × 10⁻⁹ per attempt, which the per-account limit holds to 10 attempts a minute; only the entitled admin reaches the lookup.

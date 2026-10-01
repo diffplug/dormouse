@@ -59,6 +59,10 @@ test("each preview configuration isolates its origin and excludes production bin
       {
         APP_ORIGIN: `https://${name}.hosted-tests.workers.dev`,
         BUILD_SHA: env.BUILD_SHA,
+        // The relay's enrollment links name this PR's account preview.
+        ...(worker === "relay" && {
+          ACCOUNT_ORIGIN: "https://dormouse-hosted-pr-42.hosted-tests.workers.dev",
+        }),
       },
       worker,
     );
@@ -83,16 +87,17 @@ test("each preview configuration isolates its origin and excludes production bin
   assert.ok(bases.account.migrations?.length);
   assert.equal(configs.account.migrations, undefined);
   assert.equal(configs.account.durable_objects, undefined);
-  assert.equal(configs.account.ratelimits, undefined);
   assert.deepEqual(configs.relay.durable_objects, bases.relay.durable_objects);
   assert.deepEqual(configs.relay.migrations, bases.relay.migrations);
-  assert.deepEqual(
-    configs.relay.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
-    bases.relay.ratelimits.map(({ name, namespace_id }) => [
-      name,
-      String(Number(namespace_id) + 1000),
-    ]),
-  );
+  for (const worker of ["relay", "account"])
+    assert.deepEqual(
+      configs[worker].ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+      bases[worker].ratelimits.map(({ name, namespace_id }) => [
+        name,
+        String(Number(namespace_id) + 1000),
+      ]),
+      worker,
+    );
   for (const bad of ["0", "-1", "42/../../production", "main", "42\n"])
     assert.throws(() => previewName(bad, "dormouse-hosted"));
   assert.throws(() =>

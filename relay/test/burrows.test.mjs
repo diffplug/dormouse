@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import {
   API_ROUTES,
   E2E_ID_LENGTH,
+  MAX_ENROLLED_BURROWS,
   RELAY_BEARER_LENGTH,
   WS_ROUTES,
   WS_TOKEN_PARAM,
@@ -19,7 +20,7 @@ import {
 } from 'remote-lib-common';
 
 import { BURROW_ENROLL_ATTEMPT_REFILL_MS } from '../dist/app.js';
-import { BurrowStore, MAX_ENROLLED_BURROWS } from '../dist/state.js';
+import { BurrowStore } from '../dist/state.js';
 
 import {
   RP_ID,

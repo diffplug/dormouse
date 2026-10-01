@@ -2,7 +2,12 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { digest } from "@pgstencil/auth/security";
 import { withClient } from "pgstencil/postgres";
-import { UNAUTHORIZED_ERROR, isRelayBearer, parseBearer } from "remote-lib-common";
+import {
+  NOT_ENTITLED_ERROR,
+  UNAUTHORIZED_ERROR,
+  isRelayBearer,
+  parseBearer,
+} from "remote-lib-common";
 import { isAdmin } from "./admin";
 import type { RelayEnv } from "./bindings";
 
@@ -31,7 +36,7 @@ export interface RelayBurrow extends Owner {
 }
 
 /** The 403 a Burrow-authenticated request gets once its owner is not entitled. */
-export const NOT_ENTITLED_ERROR = "this account is not entitled to the Hosted Relay";
+export { NOT_ENTITLED_ERROR };
 
 /**
  * The owner columns every lookup selects from `"user" u`, and the one

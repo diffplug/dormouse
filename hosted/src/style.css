@@ -225,6 +225,20 @@ dd {
 .mint {
   margin-top: 8px;
 }
+.enroll {
+  margin-top: 0;
+}
+.user-code {
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  margin-bottom: 16px;
+}
+.enroll .text-button {
+  display: block;
+  margin-top: 8px;
+}
 footer {
   display: flex;
   justify-content: space-between;

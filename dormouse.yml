@@ -54,8 +54,8 @@ tools:
     port: auto
     prespawn_dedupe: [relay, $PROJECT_ROOT]
 
-  # The Hosted accounts frontend with email sign-in, plus speak beside its
-  # voice-token routes; read the codes at /api/dev/emails on the printed
+  # The Hosted accounts frontend with email sign-in, voice tokens, and Burrow
+  # approval at /enroll; read the codes at /api/dev/emails on the printed
   # origin. Needs Docker running.
   hosted:
     run: pnpm dev:hosted

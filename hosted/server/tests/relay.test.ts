@@ -6,10 +6,14 @@ import { createTestContext } from "pgstencil/testing";
 import { queryDatabase, withClient } from "pgstencil/postgres";
 import {
   API_ROUTES,
+  ENROLL_USER_CODE_ALPHABET,
+  MAX_ENROLLED_BURROWS,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
   MAX_TOKENS_PER_BURROW,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
+  isBurrowEnrollBeginResponse,
+  isBurrowEnrollPollResponse,
   verifyPresenceProof,
   type PresenceBinding,
 } from "remote-lib-common";
@@ -22,9 +26,13 @@ import {
 import { ADMIN_EMAIL } from "../admin";
 import { migrations } from "../migrations";
 import {
+  ENROLLMENT_POLL_INTERVAL_S,
+  ENROLLMENT_TTL_MS,
+  MAX_LIVE_ENROLLMENTS,
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
   MAX_SETUP_CHALLENGES_PER_BURROW,
+  mintUserCode,
   restoreSetupToken,
 } from "../relay-api";
 import { NOT_ENTITLED_ERROR } from "../relay-auth";
@@ -45,7 +53,7 @@ async function fixture() {
   const context = await createTestContext({ migrations });
   const relay = new Miniflare(
     miniflareOptions("relay", (await script).outputFiles[0].text, {
-      bindings: { APP_ORIGIN: origin },
+      bindings: { APP_ORIGIN: origin, ACCOUNT_ORIGIN: ORIGINS.account },
       hyperdrives: { HYPERDRIVE: context.database.url },
       serviceBindings: {
         ASSETS: () =>
@@ -113,7 +121,7 @@ async function fixture() {
     ]);
   }
 
-  /** An enrolled Burrow, as phase B's device-code flow will write one. */
+  /** An enrolled Burrow, as the device-code poll writes one. */
   async function burrow(userId: string) {
     const burrowId = randomRoutingId();
     const token = randomSecret();
@@ -212,6 +220,24 @@ async function fixture() {
     };
   }
 
+  /** A device-code enrollment begun as the Burrow begins one. */
+  async function begin() {
+    const begun = await call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin } });
+    expect(begun.status).toBe(200);
+    expect(isBurrowEnrollBeginResponse(begun.json)).toBe(true);
+    return begun.json as { deviceCode: string; userCode: string; verificationUrl: string; expiresAt: number };
+  }
+
+  const poll = (deviceCode: unknown) =>
+    call("POST", API_ROUTES.burrowEnrollPoll, { body: { deviceCode } });
+
+  /** What the account Worker's approval writes (`hosted/server/relay-account.ts`). */
+  const approve = (userCode: string, userId: string) =>
+    sql(
+      `UPDATE dormouse_relay_enrollments SET "approvedBy" = $2, "approvedAt" = now() WHERE "userCode" = $1`,
+      [userCode, userId],
+    );
+
   /** The relay's Cron Trigger, as Cloudflare fires it. */
   async function cron() {
     // Without @cloudflare/workers-types, the Fetcher's scheduled() is untyped.
@@ -229,6 +255,9 @@ async function fixture() {
     call,
     account,
     burrow,
+    begin,
+    poll,
+    approve,
     mint,
     setupToken,
     register,
@@ -730,4 +759,136 @@ test("every unauthenticated route that reaches Postgres is rate limited per addr
     // Another address is another caller.
     expect((await f.call("POST", routes[0], { ip: "203.0.113.8", body: {} })).status).not.toBe(429);
   }
+});
+
+test("a device-code enrollment: pending until approved, then one Burrow owned by its approver, once", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const begun = await f.begin();
+  expect(begun.userCode).toMatch(/^[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$/);
+  expect(begun.verificationUrl).toBe(`${ORIGINS.account}/enroll#${begun.userCode}`);
+  expect(Math.abs(begun.expiresAt - (Date.now() + ENROLLMENT_TTL_MS))).toBeLessThan(60_000);
+  expect((begun as unknown as { interval: number }).interval).toBe(ENROLLMENT_POLL_INTERVAL_S);
+  // The device code is at rest only as its hash.
+  expect(await f.sql(`SELECT "deviceCodeHash", "userCode", "approvedBy" FROM dormouse_relay_enrollments`)).toEqual([
+    { deviceCodeHash: digest(begun.deviceCode), userCode: begun.userCode, approvedBy: null },
+  ]);
+
+  expect(await f.poll(begun.deviceCode)).toMatchObject({ status: 200, json: { status: "pending" } });
+  for (const unknown of [randomSecret(), "short", undefined])
+    expect(await f.poll(unknown)).toMatchObject({ status: 200, json: { status: "expired" } });
+
+  await f.approve(begun.userCode, owner);
+  const enrolled = await f.poll(begun.deviceCode);
+  expect(enrolled.status).toBe(200);
+  expect(isBurrowEnrollPollResponse(enrolled.json)).toBe(true);
+  const { enrollment } = enrolled.json as { enrollment: Record<string, string> };
+  expect(enrolled.json).toEqual({
+    status: "enrolled",
+    enrollment: { burrowId: enrollment.burrowId, burrowToken: enrollment.burrowToken, origin, rpId },
+  });
+  expect(await f.sql(`SELECT "burrowId", "userId", "tokenHash" FROM dormouse_relay_burrows`)).toEqual([
+    { burrowId: enrollment.burrowId, userId: owner, tokenHash: digest(enrollment.burrowToken) },
+  ]);
+  // Spent: the code answers as unknown, and the Burrow's token acts.
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "expired" });
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollments`)).toEqual([{ n: 0 }]);
+  expect((await f.mint(enrollment.burrowToken)).status).toBe(200);
+});
+
+test("two polls racing one approval mint one Burrow", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  for (let round = 0; round < 5; round++) {
+    const begun = await f.begin();
+    await f.approve(begun.userCode, owner);
+    const answers = await Promise.all(Array.from({ length: 4 }, () => f.poll(begun.deviceCode)));
+    expect(answers.map(({ json }) => json!.status).sort()).toEqual(["enrolled", "expired", "expired", "expired"]);
+  }
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 5 }]);
+});
+
+test("an enrollment expires, is refused past its approver's entitlement, and waits on a full account", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const expire = (deviceCode: string) =>
+    f.sql(
+      `UPDATE dormouse_relay_enrollments SET "expiresAt" = now() - interval '1 second' WHERE "deviceCodeHash" = $1`,
+      [digest(deviceCode)],
+    );
+
+  // Expired, approved or not, it enrolls nothing.
+  const late = await f.begin();
+  await f.approve(late.userCode, owner);
+  await expire(late.deviceCode);
+  expect((await f.poll(late.deviceCode)).json).toEqual({ status: "expired" });
+
+  // The entitlement is rechecked at redemption; the request survives the refusal.
+  const begun = await f.begin();
+  await f.approve(begun.userCode, owner);
+  await f.sql(`UPDATE "user" SET "emailVerified" = false WHERE id = $1`, [owner]);
+  expect(await f.poll(begun.deviceCode)).toMatchObject({ status: 403, json: { error: NOT_ENTITLED_ERROR } });
+  await f.sql(`UPDATE "user" SET "emailVerified" = true WHERE id = $1`, [owner]);
+
+  // A full account names the page that removes one, and keeps the request.
+  const enrolled = [];
+  for (let i = 0; i < MAX_ENROLLED_BURROWS; i++) enrolled.push(await f.burrow(owner));
+  expect(await f.poll(begun.deviceCode)).toMatchObject({
+    status: 409,
+    json: {
+      error: `this account already has ${MAX_ENROLLED_BURROWS} computers enrolled; remove one at ${ORIGINS.account}/account first`,
+    },
+  });
+  // Revoked Burrows make room.
+  await f.sql(`UPDATE dormouse_relay_burrows SET "revokedAt" = now() WHERE "burrowId" = $1`, [enrolled[0].burrowId]);
+  expect((await f.poll(begun.deviceCode)).json).toMatchObject({ status: "enrolled" });
+});
+
+test("begin refuses another origin and a full table, and prunes expired requests", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  for (const claimed of [undefined, "https://relay.example.test", `${origin}.evil.test`])
+    expect(await f.call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin: claimed } })).toMatchObject({
+      status: 409,
+      json: { error: "origin mismatch", origin },
+    });
+  // A trailing slash is the same origin.
+  expect((await f.call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin: `${origin}/` } })).status).toBe(200);
+
+  const fill = (expiry: string) =>
+    f.sql(
+      `INSERT INTO dormouse_relay_enrollments ("deviceCodeHash", "userCode", "expiresAt")
+      SELECT md5(random()::text || n), 'ZZZZ-' || substr($3, n / 27000 % 30 + 1, 1)
+        || substr($3, n / 900 % 30 + 1, 1) || substr($3, n / 30 % 30 + 1, 1) || substr($3, n % 30 + 1, 1),
+        now() + $1::interval
+      FROM generate_series(1, $2::int - 1) n`,
+      [expiry, MAX_LIVE_ENROLLMENTS, ENROLL_USER_CODE_ALPHABET],
+    );
+  await fill("10 minutes");
+  const full = await f.call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin } });
+  expect(full).toMatchObject({ status: 429, json: { error: "too many pending enrollments" } });
+  expect(full.headers.get("retry-after")).toBe("60");
+  // Expired requests are pruned on the next begin, which then has room.
+  await f.sql(`UPDATE dormouse_relay_enrollments SET "expiresAt" = now() - interval '1 second'`);
+  expect((await f.call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin } })).status).toBe(200);
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollments`)).toEqual([{ n: 1 }]);
+  // The Cron Trigger sweeps what no begin pruned.
+  await f.sql(`UPDATE dormouse_relay_enrollments SET "expiresAt" = now() - interval '1 second'`);
+  await f.cron();
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollments`)).toEqual([{ n: 0 }]);
+});
+
+test("a user code draws each character uniformly, redrawing a byte past the alphabet's last multiple", () => {
+  // 240 = 8 × 30: bytes 240–255 would favour the first sixteen characters.
+  const bytes = [240, 255, 0, 29, 30, 59, 239, 100, 7, 248, 1];
+  const random = (n: number) => new Uint8Array(bytes.splice(0, n));
+  expect(mintUserCode(random)).toBe("2Z2Z-ZC93");
+  expect(mintUserCode()).toMatch(/^[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$/);
 });

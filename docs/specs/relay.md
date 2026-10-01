@@ -356,6 +356,8 @@ The Relay owns the fixed `/api/hello` health response, pinned by
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 | `GET /*`                         | —              | The built Pocket app, registered last so every route above wins. Cache policy and SPA fallback: [pocket-app.md](./pocket-app.md) |
 
+The Hosted Relay's device-code enrollment routes, `API_ROUTES.burrowEnrollBegin` and `burrowEnrollPoll`, are not served here: each is the Relay's usual 404 ([hosted.md](./hosted.md) -> "Burrow enrollment").
+
 The Relay emits no cross-origin grant
 ([security-remote.md](./security-remote.md#cross-origin-access)). **WS auth rides
 the `token` query param**, since browsers cannot set WebSocket headers.
@@ -1128,15 +1130,13 @@ Unstaged but adjacent: origin migration (re-binding the passkey and enrollments
 after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
 
-**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes and Pocket [hosted.md](./hosted.md) → "Relay" serves, in order: Burrow enrollment by the authenticated account, tenant-scoped relay sockets, and push. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
+**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes, Pocket, and the device-code enrollment [hosted.md](./hosted.md) → "Relay" and "Burrow enrollment" serve, in order: tenant-scoped relay sockets, and push. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
 
 ### From single-owner to multi-tenant
 
 Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
 that lifts each single-tenant simplification, every one chosen to be liftable:
 
-* **Enrollment.** Burrow enrollment moves from the global setup password to the
-  authenticated account, with per-tenant revocation.
 * **Relay tenant-scoping (an invariant, not a check).** The relay binds one Burrow
   per Client socket with no notion of tenant; multi-tenant makes tenancy
   intrinsic to that binding — a Client may only ever be offered, and bound to,

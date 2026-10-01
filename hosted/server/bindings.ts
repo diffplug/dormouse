@@ -19,6 +19,8 @@ interface Assets {
 /** `hosted.dormouse.sh`: the account frontend, auth, and voice-token minting. */
 export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv {
   ASSETS: Assets;
+  /** Enrollment approvals, per account. */
+  RELAY_APPROVE_LIMIT: RateLimit;
   EMAIL_FROM: string;
   POSTMARK_SERVER_TOKEN: string;
   OAUTH_PROVIDERS?: string;
@@ -33,6 +35,10 @@ export interface RelayEnv extends WorkerEnv {
   ONE_TIME_JOIN_LIMIT: RateLimit;
   RELAY_SIGNIN_LIMIT: RateLimit;
   RELAY_SETUP_LIMIT: RateLimit;
+  RELAY_ENROLL_BEGIN_LIMIT: RateLimit;
+  RELAY_ENROLL_POLL_LIMIT: RateLimit;
+  /** The account Worker's origin, which a begin answer's `verificationUrl` names; absent, it names none. */
+  ACCOUNT_ORIGIN?: string;
 }
 
 /** `voice.dormouse.sh`: managed-voice speech and its history sweep. */
@@ -45,6 +51,7 @@ export interface VoiceEnv extends WorkerEnv {
 export const accountBindings = (env: AccountEnv): AccountEnv => ({
   HYPERDRIVE: env.HYPERDRIVE,
   ASSETS: env.ASSETS,
+  RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
   APP_ORIGIN: env.APP_ORIGIN,
   AUTH_SECRET: env.AUTH_SECRET,
   EMAIL_FROM: env.EMAIL_FROM,
@@ -57,6 +64,7 @@ export const accountBindings = (env: AccountEnv): AccountEnv => ({
 export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
   HYPERDRIVE: env.HYPERDRIVE,
   ASSETS: env.ASSETS,
+  RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
   APP_ORIGIN: env.APP_ORIGIN,
   AUTH_SECRET: env.AUTH_SECRET,
   BUILD_SHA: env.BUILD_SHA,
@@ -78,6 +86,9 @@ export const relayBindings = (env: RelayEnv): RelayEnv => ({
   ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
   RELAY_SIGNIN_LIMIT: env.RELAY_SIGNIN_LIMIT,
   RELAY_SETUP_LIMIT: env.RELAY_SETUP_LIMIT,
+  RELAY_ENROLL_BEGIN_LIMIT: env.RELAY_ENROLL_BEGIN_LIMIT,
+  RELAY_ENROLL_POLL_LIMIT: env.RELAY_ENROLL_POLL_LIMIT,
+  ACCOUNT_ORIGIN: env.ACCOUNT_ORIGIN,
 });
 
 /** Hyperdrive for the token lookup and the ElevenLabs key; no auth secret. */

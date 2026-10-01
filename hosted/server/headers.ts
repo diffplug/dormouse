@@ -97,7 +97,8 @@ export const relayRules: RulesFor = (path, appOrigin) => {
       };
 };
 
-function exactOrigin(value: unknown): string | null {
+/** `value` when it is exactly an http(s) origin, else null. */
+export function exactOrigin(value: unknown): string | null {
   return typeof value === "string" &&
     /^https?:\/\/[a-z0-9.:[\]-]+$/i.test(value) &&
     URL.canParse(value) &&

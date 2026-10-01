@@ -21,7 +21,8 @@
     "run_worker_first": true
   },
   "vars": {
-    "APP_ORIGIN": "https://relay.dormouse.sh"
+    "APP_ORIGIN": "https://relay.dormouse.sh",
+    "ACCOUNT_ORIGIN": "https://hosted.dormouse.sh"
   },
   "hyperdrive": [
     {
@@ -75,6 +76,22 @@
       "namespace_id": "4",
       "simple": {
         "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_ENROLL_BEGIN_LIMIT",
+      "namespace_id": "5",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_ENROLL_POLL_LIMIT",
+      "namespace_id": "6",
+      "simple": {
+        "limit": 60,
         "period": 60
       }
     }

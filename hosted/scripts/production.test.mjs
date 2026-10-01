@@ -48,6 +48,16 @@ test("each production config keeps its canonical domain and production entry, an
       worker,
     );
   }
+  // The relay's enrollment links name production's account, and no other.
+  assert.equal(configs.relay.vars.ACCOUNT_ORIGIN, "https://hosted.dormouse.sh");
+  for (const elsewhere of [undefined, "https://evil.example.test"])
+    assert.throws(() =>
+      productionConfig(
+        { ...bases.relay, vars: { ...bases.relay.vars, ACCOUNT_ORIGIN: elsewhere } },
+        env,
+        "relay",
+      ),
+    );
   // Each config is its own Worker's: none stands in for a sibling.
   assert.throws(() => productionConfig(bases.relay, env, "account"));
   assert.throws(() => productionConfig(bases.account, env, "voice"));
@@ -196,7 +206,7 @@ test("the history sweep's cron is the voice Worker's, the relay's sweeps its exp
   // An absent `triggers` would leave a deployed schedule in place.
   assert.deepEqual(configs.account.triggers, { crons: [] });
 });
-test("the rendezvous Durable Object and its rate limits are the relay's, and Durable Object migrations are append-only", () => {
+test("the rendezvous Durable Object is the relay's, each rate limit its Worker's, and Durable Object migrations are append-only", () => {
   assert.deepEqual(configs.relay.durable_objects, {
     bindings: [{ name: "ONE_TIME_ROOM", class_name: "OneTimeRoom" }],
   });
@@ -210,7 +220,14 @@ test("the rendezvous Durable Object and its rate limits are the relay's, and Dur
       ["ONE_TIME_JOIN_LIMIT", "2"],
       ["RELAY_SIGNIN_LIMIT", "3"],
       ["RELAY_SETUP_LIMIT", "4"],
+      ["RELAY_ENROLL_BEGIN_LIMIT", "5"],
+      ["RELAY_ENROLL_POLL_LIMIT", "6"],
     ],
+  );
+  // Approvals are limited per account, on the account.
+  assert.deepEqual(
+    configs.account.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+    [["RELAY_APPROVE_LIMIT", "7"]],
   );
   // The account deployed `v1` with the room, so it keeps that tag unedited and
   // appends the deletion.
@@ -218,10 +235,9 @@ test("the rendezvous Durable Object and its rate limits are the relay's, and Dur
     { tag: "v1", new_sqlite_classes: ["OneTimeRoom"] },
     { tag: "v2", deleted_classes: ["OneTimeRoom"] },
   ]);
-  for (const worker of ["account", "voice"]) {
+  for (const worker of ["account", "voice"])
     assert.equal(configs[worker].durable_objects, undefined, worker);
-    assert.equal(configs[worker].ratelimits, undefined, worker);
-  }
+  assert.equal(configs.voice.ratelimits, undefined);
   assert.equal(configs.voice.migrations, undefined);
 });
 const accountSecrets = [

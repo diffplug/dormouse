@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import {
   E2E_ID_BYTE_LENGTH,
+  MAX_ENROLLED_BURROWS,
   RELAY_BEARER_BYTE_LENGTH,
   SELFHOST_ACCOUNT_ID,
   isE2eId,
@@ -360,17 +361,6 @@ export interface StoredBurrow {
   readonly enrolledAt: number;
 }
 
-
-/**
- * How many Burrows one account may have enrolled.
- *
- * Enrollment is credential-gated, so this is not a flood defense — it is the
- * bound on a file that is otherwise append-only and is re-read, re-parsed and
- * compared row by row on every burrow-gated request and every `/ws/burrow`
- * upgrade. Far above the machines a person owns; revocation (deleting a row by
- * hand) is what makes room.
- */
-export const MAX_ENROLLED_BURROWS = 32;
 
 /** Thrown by {@link BurrowStore.enroll} when {@link MAX_ENROLLED_BURROWS} is reached. */
 export class BurrowLimitReachedError extends Error {

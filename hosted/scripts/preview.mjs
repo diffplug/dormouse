@@ -70,14 +70,20 @@ export function previewConfig(base, env, worker, hyperdriveId) {
   return config;
 }
 
-/** Every Worker's preview config, keyed as `WORKERS` is; all three share one Hyperdrive, as production does. */
+/**
+ * Every Worker's preview config, keyed as `WORKERS` is; all three share one
+ * Hyperdrive, as production does. The relay's enrollment links name the
+ * account preview, never production's account.
+ */
 export function previewConfigs(bases, env, hyperdriveId) {
-  return Object.fromEntries(
+  const configs = Object.fromEntries(
     Object.keys(WORKERS).map((worker) => [
       worker,
       previewConfig(bases[worker], env, worker, hyperdriveId),
     ]),
   );
+  configs.relay.vars.ACCOUNT_ORIGIN = configs.account.vars.APP_ORIGIN;
+  return configs;
 }
 
 /** Production rate-limit namespace ids stay below this; previews use id + offset. */

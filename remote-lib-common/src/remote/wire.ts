@@ -11,10 +11,13 @@ import {
   isBoundedString,
   isExactBase64Url,
 } from '../security/bytes.js';
+import { isLinkScheme } from '../security/link-url.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
+import { isEnrollUserCode } from './enroll-code.js';
+import { isOrigin } from './origin.js';
 
 // ---------------------------------------------------------------------------
 // HTTP API (see relay.md "HTTP API")
@@ -28,6 +31,9 @@ export const API_ROUTES = {
   reauthBegin: '/api/reauth/begin',
   reauthFinish: '/api/reauth/finish',
   burrowEnroll: '/api/burrow/enroll',
+  /** Hosted only: the device-code enrollment ({@link BurrowEnrollBeginResponse}). */
+  burrowEnrollBegin: '/api/burrow/enroll/begin',
+  burrowEnrollPoll: '/api/burrow/enroll/poll',
   burrowSetupToken: '/api/burrow/setup-token',
   burrows: '/api/burrows',
   pushConfig: '/api/push/config',
@@ -87,6 +93,13 @@ export const BAD_PASSWORD_ERROR = 'invalid setup password';
  * ({@link BurrowEnrollOriginMismatch}).
  */
 export const ORIGIN_MISMATCH_ERROR = 'origin mismatch';
+
+/**
+ * The `error` the Hosted Relay answers when the account behind a credential is
+ * not entitled to it: 403 to a Burrow token, a setup redemption, or an
+ * enrollment poll, and 401 to a sign-in. A Burrow keys on it to stop retrying.
+ */
+export const NOT_ENTITLED_ERROR = 'this account is not entitled to the Hosted Relay';
 
 // The rest of the `error` strings both Relays answer, verbatim, so the
 // self-host and Hosted Relays cannot drift on what a Client reads. Only the
@@ -303,6 +316,131 @@ export interface BurrowEnrollResponse {
    * the weaker verifier, and the Burrow is the one that decides access.
    */
   requireUserVerification?: boolean;
+}
+
+/**
+ * Hosted's device-code enrollment (`docs/specs/hosted.md` -> "Burrow
+ * enrollment"), in place of the setup password the self-host Relay takes: the
+ * Burrow begins, the account approves the user code on the account origin,
+ * and the Burrow polls until it is enrolled. Only a Node Burrow calls either
+ * route; a request carrying `Origin` is refused. The self-host Relay serves
+ * neither.
+ */
+export interface BurrowEnrollBeginRequest {
+  /** The relay origin the Burrow was built for; any other is a 409 {@link BurrowEnrollOriginMismatch}. */
+  origin: string;
+}
+
+/** Longest `verificationUrl` a Burrow will open. */
+export const MAX_VERIFICATION_URL_LENGTH = 512;
+/** The account page a `verificationUrl` names. */
+export const ENROLL_PAGE_PATH = '/enroll';
+/** The bounds a Burrow holds `interval` (seconds) to. */
+export const MIN_ENROLL_POLL_INTERVAL_S = 1;
+export const MAX_ENROLL_POLL_INTERVAL_S = 60;
+/** How far `expiresAt` may sit from the Burrow's clock, either way, skew included. */
+export const MAX_ENROLL_EXPIRY_SKEW_MS = 24 * 60 * 60 * 1000;
+
+const DEVICE_CODE_LENGTH = base64UrlLength(32);
+
+export interface BurrowEnrollBeginResponse {
+  /** The Burrow's secret for polling: 32 random bytes, base64url. */
+  deviceCode: string;
+  /** What Dormouse shows and the account approves, `XXXX-XXXX`. */
+  userCode: string;
+  /**
+   * The account page that approves `userCode`, the code in its fragment;
+   * absent where the deployment names no account origin.
+   */
+  verificationUrl?: string;
+  /** Epoch ms after which neither code redeems. */
+  expiresAt: number;
+  /** Seconds the Burrow waits between polls. */
+  interval: number;
+}
+
+export interface BurrowEnrollPollRequest {
+  deviceCode: string;
+}
+
+/**
+ * `expired` also answers an unknown device code. `enrolled` answers once: the
+ * redemption is single-use.
+ */
+export type BurrowEnrollPollResponse =
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
+
+/**
+ * A `verificationUrl` a Burrow may open: HTTPS (or loopback HTTP), no
+ * credentials or query, the enroll page, and `#userCode` as its fragment, so the
+ * page cannot approve a code other than the one Dormouse shows.
+ */
+function isVerificationUrl(value: unknown, userCode: string): boolean {
+  if (typeof value !== 'string' || value.length > MAX_VERIFICATION_URL_LENGTH) return false;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    isLinkScheme(url) &&
+    url.username === '' &&
+    url.password === '' &&
+    url.pathname === ENROLL_PAGE_PATH &&
+    url.search === '' &&
+    url.hash === `#${userCode}`
+  );
+}
+
+/**
+ * Structural validation of a begin answer, which a Burrow shows (`userCode`),
+ * opens (`verificationUrl`), and schedules by (`expiresAt`, `interval`).
+ * `now` is the Burrow's clock.
+ */
+export function isBurrowEnrollBeginResponse(
+  value: unknown,
+  now: number = Date.now(),
+): value is BurrowEnrollBeginResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    isExactBase64Url(v.deviceCode, DEVICE_CODE_LENGTH) &&
+    isEnrollUserCode(v.userCode) &&
+    (v.verificationUrl === undefined || isVerificationUrl(v.verificationUrl, v.userCode)) &&
+    Number.isSafeInteger(v.expiresAt) &&
+    Math.abs((v.expiresAt as number) - now) <= MAX_ENROLL_EXPIRY_SKEW_MS &&
+    Number.isInteger(v.interval) &&
+    (v.interval as number) >= MIN_ENROLL_POLL_INTERVAL_S &&
+    (v.interval as number) <= MAX_ENROLL_POLL_INTERVAL_S
+  );
+}
+
+/** Longest `rpId` (a DNS name) an enrollment may carry. */
+const MAX_RP_ID_LENGTH = 253;
+
+/** The {@link BurrowEnrollResponse} a Relay hands an enrolled Burrow, field by field. */
+function isBurrowEnrollResponse(value: unknown): value is BurrowEnrollResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    isE2eId(v.burrowId) &&
+    isExactBase64Url(v.burrowToken, DEVICE_CODE_LENGTH) &&
+    isOrigin(v.origin) &&
+    isBoundedString(v.rpId, MAX_RP_ID_LENGTH) &&
+    v.rpId !== '' &&
+    (v.requireUserVerification === undefined || typeof v.requireUserVerification === 'boolean')
+  );
+}
+
+/** Structural validation of a poll answer. */
+export function isBurrowEnrollPollResponse(value: unknown): value is BurrowEnrollPollResponse {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  if (v.status === 'pending' || v.status === 'expired') return true;
+  return v.status === 'enrolled' && isBurrowEnrollResponse(v.enrollment);
 }
 
 /**

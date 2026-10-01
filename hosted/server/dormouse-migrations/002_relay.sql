@@ -66,10 +66,11 @@ CREATE INDEX dormouse_relay_setup_tokens_burrow ON dormouse_relay_setup_tokens (
 CREATE INDEX dormouse_relay_setup_tokens_expiry ON dormouse_relay_setup_tokens ("expiresAt");
 
 -- Device-code enrollment requests: a Burrow polls with its device code while
--- the account approves the user code on the account origin.
+-- the account approves the user code on the account origin. Approval stamps
+-- "approvedBy" once; the poll that enrolls the Burrow deletes the row.
 CREATE TABLE dormouse_relay_enrollments (
     "deviceCodeHash" text PRIMARY KEY,
-    "userCode" text NOT NULL UNIQUE,
+    "userCode" text NOT NULL UNIQUE CHECK ("userCode" ~ '^[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$'),
     "expiresAt" timestamptz NOT NULL,
     "approvedBy" text REFERENCES "user" (id) ON DELETE CASCADE,
     "approvedAt" timestamptz
