@@ -36,7 +36,7 @@ import { SurfacePaneHeader } from './SurfacePaneHeader';
 import { AlertRingIndicator } from './AlertRingIndicator';
 import { TerminalContextOverlay } from './TerminalContextOverlay';
 import type { ContextSide } from './terminal-context-placement';
-import { TerminalContextContext, TerminalResizeContext } from './wall-context';
+import { LayoutFramesContext, TerminalContextContext, TerminalResizeContext } from './wall-context';
 
 /** Widened pointer target over each (thin) sash band, in px. */
 const SASH_HIT = 8;
@@ -766,5 +766,9 @@ export function LathHost({
       )}
     </div>
   );
-  return <TerminalResizeContext.Provider value={terminalResize}>{content}</TerminalResizeContext.Provider>;
+  return (
+    <LayoutFramesContext.Provider value={lath.subscribeFrames}>
+      <TerminalResizeContext.Provider value={terminalResize}>{content}</TerminalResizeContext.Provider>
+    </LayoutFramesContext.Provider>
+  );
 }

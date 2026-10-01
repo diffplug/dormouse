@@ -6,6 +6,7 @@ import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-re
 // translateToString honors start/end columns.
 function makeBuffer(rows: { text: string; wrapped?: boolean }[], width = 40): BufferLike {
   return {
+    length: rows.length,
     getLine(index: number) {
       const row = rows[index];
       if (row === undefined) return undefined;

@@ -1,6 +1,7 @@
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
 import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
+import { offerProgramCopy } from '../../lib/src/lib/mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
@@ -159,6 +160,11 @@ export class TauriAdapter implements PlatformAdapter {
 
       listenToWindow<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
         applyTerminalSemanticEvents(event.payload.id, event.payload.events);
+      }),
+
+      // An OSC 52 write, offered to the copy editor; never the clipboard.
+      listenToWindow<{ id: string; text: string }>("terminal:clipboardOffer", (event) => {
+        offerProgramCopy(event.payload.id, event.payload.text);
       }),
 
       listenToWindow<{ id: string; exitCode: number }>("pty:exit", (event) => {

@@ -222,6 +222,7 @@ const processedExitListeners = new Set<ProcessedExitListener>();
 type SemanticEventsListener = (id: string, events: TerminalSemanticEvent[]) => void;
 const semanticEventsListeners = new Set<SemanticEventsListener>();
 const toolEventsListeners = new Set<(id: string, events: TerminalProtocolEvent[]) => void>();
+const clipboardOfferListeners = new Set<(id: string, text: string) => void>();
 
 export function onProcessedPtyData(listener: ProcessedDataListener): () => void {
   processedDataListeners.add(listener);
@@ -299,6 +300,7 @@ function getOwnerPtyStream(id: string): ProcessedPtyStream {
       colorProvider: themeColorProvider,
       onToolEvents: (events) => { for (const listener of toolEventsListeners) listener(id, events); },
       onSemanticEvents: (events) => { for (const listener of semanticEventsListeners) listener(id, events); },
+      onClipboardOffer: (text) => { for (const listener of clipboardOfferListeners) listener(id, text); },
       writeResponse: (response) => ptyManager.write(id, response),
       onChunk: (chunk) => { for (const listener of processedDataListeners) listener(id, chunk.data, chunk.textData); },
     });
@@ -490,6 +492,10 @@ export function attachRouter(
       if (ownedPtyIds.has(id)) post({ type: 'terminal:toolEvents', id, events } satisfies ExtensionMessage);
     };
     toolEventsListeners.add(onToolEvents);
+    const onClipboardOffer = (id: string, text: string) => {
+      if (ownedPtyIds.has(id)) post({ type: 'terminal:clipboardOffer', id, text } satisfies ExtensionMessage);
+    };
+    clipboardOfferListeners.add(onClipboardOffer);
     const removeSemanticListener = onTerminalSemanticEvents((id, events) => {
       if (!ownedPtyIds.has(id)) return;
       post({ type: 'terminal:semanticEvents', id, events } satisfies ExtensionMessage);
@@ -514,6 +520,7 @@ export function attachRouter(
       removeProcessedListener();
       removeSemanticListener();
       toolEventsListeners.delete(onToolEvents);
+      clipboardOfferListeners.delete(onClipboardOffer);
       removeExitListener();
       removeAlertListener();
       removeSpeakListener();

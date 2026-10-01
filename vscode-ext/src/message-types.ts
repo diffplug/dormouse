@@ -63,6 +63,8 @@ export type ExtensionMessage =
   // A parse's Tool announcements, state and command-start resets, in stream order.
   | { type: 'terminal:toolEvents'; id: string; events: TerminalProtocolEvent[] }
   | { type: 'terminal:semanticEvents'; id: string; events: TerminalSemanticEvent[] }
+  // An OSC 52 write the copy editor may offer; never the clipboard itself.
+  | { type: 'terminal:clipboardOffer'; id: string; text: string }
   | { type: 'pty:list'; ptys: PtyInfo[] }
   | { type: 'pty:replay'; id: string; data: string }
   | { type: 'pty:cwd'; id: string; cwd: string | null; requestId?: string }
