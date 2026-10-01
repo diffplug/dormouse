@@ -25,7 +25,7 @@ import {
   removeMouseSelectionState,
   setSelection as setMouseSelection,
 } from './mouse-selection';
-import { extractSelectionText } from './selection-text';
+import { watchSelection, type SelectionWatch } from './selection-watch';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
@@ -61,7 +61,7 @@ import {
   setTerminalUserTitle,
   type PromptLineReader,
 } from './terminal-state-store';
-import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
+import { readLogicalLineFromBuffer } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
 
@@ -95,19 +95,7 @@ function makePromptLineReader(terminal: Terminal): PromptLineReader {
     readLine() {
       const buffer = terminal.buffer?.active;
       if (!buffer) return null;
-      const cursorAbsRow = buffer.baseY + buffer.cursorY;
-      const bufferLike: BufferLike = {
-        getLine(index) {
-          const line = buffer.getLine(index);
-          if (!line) return undefined;
-          return {
-            isWrapped: line.isWrapped,
-            translateToString: (trimRight, startColumn, endColumn) =>
-              line.translateToString(trimRight, startColumn, endColumn),
-          };
-        },
-      };
-      return readLogicalLineFromBuffer(bufferLike, cursorAbsRow, buffer.cursorX);
+      return readLogicalLineFromBuffer(buffer, buffer.baseY + buffer.cursorY, buffer.cursorX);
     },
   };
 }
@@ -223,13 +211,11 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
   };
 }
 
-/** xterm input/resize/render handlers. Returns a dispose. The render
- *  handler watches selectionBaseline (mutated by the mouse router) so the
- *  baseline is read by reference rather than captured. */
+/** xterm input/resize/render handlers. Returns a dispose. */
 function wireXtermHandlers(
   id: string,
   terminal: Terminal,
-  selectionBaselineRef: { current: string | null },
+  selection: SelectionWatch,
 ): () => void {
   const inputDisposable = terminal.onData((data) => {
     // One strip, two readers. While an override is active the reports must not
@@ -268,23 +254,12 @@ function wireXtermHandlers(
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
     getPlatform().resizePty(id, cols, rows);
     bumpRenderTick();
-    if (getMouseSelectionState(id).selection) setMouseSelection(id, null);
-    selectionBaselineRef.current = null;
+    selection.onResize();
   });
 
   const renderDisposable = terminal.onRender(() => {
     bumpRenderTick();
-    if (selectionBaselineRef.current === null) return;
-    const sel = getMouseSelectionState(id).selection;
-    if (!sel || sel.dragging) {
-      selectionBaselineRef.current = null;
-      return;
-    }
-    const current = extractSelectionText(terminal, sel);
-    if (current !== selectionBaselineRef.current) {
-      setMouseSelection(id, null);
-      selectionBaselineRef.current = null;
-    }
+    selection.onRender();
   });
 
   return () => {
@@ -298,15 +273,9 @@ interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: H
 
 function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
   const { terminal, fit, serialize, element } = createXtermHost(id, options.grid);
-  const selectionBaselineRef = { current: null as string | null };
-  // Every module that finalizes a selection arms the render handler through
-  // this one setter at drag end.
-  const setSelectionBaseline = (baseline: string | null) => {
-    selectionBaselineRef.current = baseline;
-  };
-
+  const selectionWatch = watchSelection(id, terminal);
   const disposePty = wirePtyEvents(id, terminal);
-  const disposeXterm = wireXtermHandlers(id, terminal, selectionBaselineRef);
+  const disposeXterm = wireXtermHandlers(id, terminal, selectionWatch);
   const mouseModeObserver = attachMouseModeObserver(id, terminal);
   // Windows-only: keep win32-input-mode from clobbering kitty-protocol TUIs.
   // Off-Windows win32-input-mode is never advertised, so kitty already wins.
@@ -316,10 +285,10 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
     terminal,
     element,
     getOverlayDims: getTerminalOverlayDims,
-    setSelectionBaseline,
   });
 
   const cleanup = () => {
+    selectionWatch.dispose();
     disposePty();
     disposeXterm();
     mouseModeObserver.dispose();
@@ -335,7 +304,6 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
     serialize,
     element,
     cleanup,
-    setSelectionBaseline,
     isReplaying: false,
     untouched: options.untouched ?? false,
   };
@@ -701,6 +669,8 @@ export function getTerminalOverlayDims(id: string): TerminalOverlayDims | null {
     rows: entry.terminal.rows,
     viewportY: entry.terminal.buffer.active.viewportY,
     baseY: entry.terminal.buffer.active.baseY,
+    elementLeft: elementRect.left,
+    elementTop: elementRect.top,
     elementWidth: elementRect.width,
     elementHeight: elementRect.height,
     cellWidth,
@@ -726,6 +696,10 @@ export function getSessionInputVersion(id: string): number {
  * Engagement): the host acknowledges it with input as it writes it.
  */
 export function writeUserInput(id: string, data: string): void {
+  // Typing, a paste, or Pocket's input bar ends a finalized selection — the
+  // copy editor over it, or a shadowed drag — on every path alike
+  // (docs/specs/mouse-and-clipboard.md §4.3, §3.8).
+  if (getMouseSelectionState(id).selection?.dragging === false) setMouseSelection(id, null);
   markSessionTouched(id);
   getPlatform().writePty(id, data, { userInput: true });
 }

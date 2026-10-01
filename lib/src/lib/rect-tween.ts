@@ -1,6 +1,7 @@
-// Focus-ring tween core — the selection ring's travel between panes/doors as a
-// pure function of time (animator style: `now` is always passed in; no DOM,
-// React, timers, or Date/performance). The overlay drives it from a rAF loop and
+// Focus-ring tween core — the selection ring's travel between panes/doors, and
+// the copy editor's rect-only travel (`RectTween`), as a pure function of time
+// (animator style: `now` is always passed in; no DOM, React, timers, or
+// Date/performance). The overlay drives it from a rAF loop and
 // tests assert real interpolated values against a fake clock, exactly like the
 // Lath animator (lib/src/lib/lath/animator.ts). It reuses that module's house
 // easing rather than re-deriving the curve.
@@ -15,6 +16,9 @@ export interface RingRect {
   width: number;
   height: number;
 }
+
+export const rectsEqual = (a: RingRect, b: RingRect): boolean =>
+  a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
 
 /** The ring's corner radii + stroke inset. Carried alongside the rect so a
  *  pane↔door selection morphs its shape (radii lerp) instead of popping. */
@@ -97,7 +101,7 @@ export function retargetRingTween(tween: RingTween, to: RingFrame): RingTween {
  *  is evaluated at. Position and velocity MUST read the clock the same way or the
  *  smear desynchronizes from the ring it describes, so both go through here. A
  *  zero-duration tween reads as already complete. */
-function progressAt(tween: RingTween, now: number): { raw: number; clamped: number } {
+function progressAt(tween: Pick<RingTween, 'start' | 'durationMs'>, now: number): { raw: number; clamped: number } {
   const raw = tween.durationMs <= 0 ? 1 : (now - tween.start) / tween.durationMs;
   return { raw, clamped: raw < 0 ? 0 : raw > 1 ? 1 : raw };
 }
@@ -155,4 +159,26 @@ export function sampleRingVelocity(tween: RingTween, now: number): RingEdgeSpeed
     left: edge(from.left, to.left),
     right: edge(from.left + from.width, to.left + to.width),
   };
+}
+
+/** A rect-only motion segment, for chrome that moves and resizes but carries no
+ *  ring shape (the copy editor). It has no retarget. */
+export interface RectTween {
+  from: RingRect;
+  to: RingRect;
+  start: number;
+  durationMs: number;
+}
+
+/** Begin a tween from the displayed rect `from` toward `to`, clock starting at
+ *  `now`. A zero (or negative) duration samples as already complete at `to`. */
+export function startRectTween(from: RingRect, to: RingRect, now: number, durationMs: number): RectTween {
+  return { from, to, start: now, durationMs };
+}
+
+/** Sample the tween at `now` on the house curve, exact at both endpoints, the
+ *  same clock reading as `sampleRingTween`. */
+export function sampleRectTween(tween: RectTween, now: number): { rect: RingRect; done: boolean } {
+  const { clamped } = progressAt(tween, now);
+  return { rect: lerpRect(tween.from, tween.to, LATH_EASING(clamped)), done: clamped >= 1 };
 }

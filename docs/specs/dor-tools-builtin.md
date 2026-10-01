@@ -58,10 +58,10 @@ Source of truth: `readEditableFile` / `saveEditableFile` in `dor-tools-builtin/s
 - **Must list dotfiles.** Git-ignored entries are dimmed and shown by default, with a show/hide toggle.
 - **Must compact a directory containing exactly one child directory and nothing else into a slash-separated row**, continuing up to 32 levels per listing; hidden/ignored entries still count as siblings. Never compact through a symlink child. Refresh and Collapse all preserve the ordinary select/activate contract.
 - **Must cut a listing to its first 5,000 entries in display order**, directories first, from at most 100,000 names read.
-- **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which writes it to the Tool's terminal as an OSC 367 `open` (`docs/specs/dor-tool.md` → OSC 367), `preview` for a select, in arrival order. The page learns only that it was sent.
+- **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which writes it to the Tool's terminal as an OSC 367 `open` (`docs/specs/dor-tool.md` → OSC 367), `preview` for a select, in arrival order. The page learns only that it was sent, or, for a path `validToolOpenPath` refuses, an error instead of a write.
 - **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)
 
-Source of truth: `startFolderViewer` / `runFolderViewer` in `dor-tools-builtin/src/folder-viewer.ts`; `folderViewerPage` in `dor-tools-builtin/src/folder-viewer-page.ts`. Tests: `dor-tools-builtin/test/folder-viewer.test.mjs`, `the folder entry selects and activates with OSC 367 open, in the order the page sends them` in `dor/test/builtin-viewers.test.mjs`.
+Source of truth: `startFolderViewer` / `runFolderViewer` / `oscOpen` in `dor-tools-builtin/src/folder-viewer.ts`; `folderViewerPage` in `dor-tools-builtin/src/folder-viewer-page.ts`. Tests: `dor-tools-builtin/test/folder-viewer.test.mjs`, `the folder entry selects and activates with OSC 367 open, in the order the page sends them` in `dor/test/builtin-viewers.test.mjs`.
 
 ## Error viewer
 

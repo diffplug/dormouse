@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createWorkspaceMotion, collapseWorkspace, restoreWorkspaceMotion, workspaceIsCollapsed } from './workspace-motion';
+import { createWorkspaceMotion, collapseWorkspace, restoreWorkspaceMotion, workspaceInTravel, workspaceIsCollapsed } from './workspace-motion';
 import { LATH_EASING, LATH_MOTION_MS } from '../lib/lath/animator';
 import { cfg } from '../cfg';
 
@@ -52,6 +52,21 @@ afterEach(() => {
 });
 
 describe('workspace motion', () => {
+  it('is in travel exactly while its Wall is presented away from its grid box', () => {
+    expect(workspaceInTravel('ws-a')).toBe(false);
+    motion.expand();
+    expect(workspaceInTravel('ws-a')).toBe(true);
+    frame(LATH_MOTION_MS / 2);
+    expect(workspaceInTravel('ws-a')).toBe(true);
+    frame(LATH_MOTION_MS / 2);
+    expect(workspaceInTravel('ws-a')).toBe(false);
+    void motion.collapse();
+    frame(LATH_MOTION_MS);
+    expect(workspaceIsCollapsed('ws-a')).toBe(true);
+    expect(workspaceInTravel('ws-a')).toBe(true);
+    expect(workspaceInTravel('ws-other')).toBe(false);
+  });
+
   it('expands from its tab with pane timing/easing, without changing layout dimensions', () => {
     motion.expand();
     expect(wall.style.transform).toBe('translate(100px, -32px) scale(0.1, 0.04)');

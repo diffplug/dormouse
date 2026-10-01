@@ -396,6 +396,7 @@ function drainQueuedCommands(): void {
 const CONTENTION_STARTERS: ReadonlySet<string> = new Set([
   'enroll',
   'enrollOffer',
+  'beginHostedEnrollment',
   'oneTimeOpen',
   'setNetworkPolicy',
 ]);
@@ -414,10 +415,12 @@ const CONTENTION_STARTERS: ReadonlySet<string> = new Set([
  * an enrolled machine's webview it has no Burrow moments before it gets one,
  * leaving the gates that arm on that answer down.
  *
- * `enroll`, `enrollOffer`, `oneTimeOpen`, and `setNetworkPolicy` are the
- * commands that may start the contention: they are how an installation with no
- * Burrow at all bootstraps — `enrollOffer` from the one-click card an idle
- * `status` advertises ({@link idleStatus}), `oneTimeOpen` from the idle
+ * `enroll`, `enrollOffer`, `beginHostedEnrollment`, `oneTimeOpen`, and
+ * `setNetworkPolicy` are the commands that may start the contention: they are
+ * how an installation with no Burrow at all bootstraps — `enrollOffer` from the
+ * one-click card an idle `status` advertises ({@link idleStatus}),
+ * `beginHostedEnrollment` from a Hosted build's enroll button, whose service
+ * then polls the approval, `oneTimeOpen` from the idle
  * one-time panel, which needs no enrollment, and `setNetworkPolicy` because the
  * service is the policy's only writer: a window writing it with a service
  * elsewhere would leave that service holding the old one. Everything else
@@ -543,7 +546,9 @@ function refuse(burrowRequestId: string): void {
  * what one with no enrollment returns (`lib/src/host/remote/service.ts`). The
  * one-time pair is the same: no service means no connection, so its status is
  * the idle one this build's origin and policy allow, and ending it is already
- * done; and with no service there is no session to take a pane back from.
+ * done; a Hosted enrollment is polled by a service, so with none there is
+ * nothing to cancel; and with no service there is no session to take a pane
+ * back from.
  */
 async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
   switch (cmd) {
@@ -562,11 +567,15 @@ async function idleAnswer(cmd: string): Promise<{ result: unknown } | null> {
       );
       return { result: idleOneTimeState(hostedOrigin(bakedRelay()), level) };
     }
+    // With no service there is no session for the path to have ended.
     case 'networkPolicy':
+    case 'dismissPathRefusal':
       return {
         result: networkPolicyResult(await idleNetworkPolicy(), bakedRelay().mode, listNetworkInterfaces()),
       };
     case 'oneTimeEnd':
+    // Nor an enrollment awaiting approval: the service that began one holds it.
+    case 'cancelHostedEnrollment':
       return { result: {} };
     // No service holds any session, so none holds a pane: the strip clears itself.
     case 'takeBack':

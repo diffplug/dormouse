@@ -86,23 +86,64 @@ async function voice(method: string, path = ""): Promise<Response> {
     "Voice tokens are temporarily unavailable. Try again.",
   );
 }
-const voiceFailed = () =>
+/** A voice or relay call's error when the server gave none written for this page. */
+const failed = () =>
   new Error("That did not work. Reload the page and try again.");
 /** Null when the server says this account may not use managed voice. */
 export async function getVoiceTokens(): Promise<VoiceToken[] | null> {
   const response = await voice("GET");
   if (response.status === 401 || response.status === 403) return null;
-  if (!response.ok) throw voiceFailed();
+  if (!response.ok) throw failed();
   return ((await response.json()) as { tokens: VoiceToken[] }).tokens;
 }
 export async function createVoiceToken() {
   const response = await voice("POST");
-  if (!response.ok) throw voiceFailed();
+  if (!response.ok) throw failed();
   return (await response.json()) as Pick<VoiceToken, "id" | "createdAt"> & {
     token: string;
   };
 }
 export async function revokeVoiceToken(id: string) {
   if (!(await voice("DELETE", `/${encodeURIComponent(id)}`)).ok)
-    throw voiceFailed();
+    throw failed();
+}
+
+export interface Computer {
+  burrowId: string;
+  enrolledAt: string;
+}
+async function relay(path: string, init: RequestInit = {}): Promise<Response> {
+  return request(
+    `/api/relay${path}`,
+    init,
+    "Computers are temporarily unavailable. Try again.",
+  );
+}
+/** The server's message for a refused request: each is written for this page. */
+async function refused(response: Response): Promise<Error> {
+  const body = (await response.json().catch(() => null)) as {
+    message?: unknown;
+  } | null;
+  return typeof body?.message === "string" ? new Error(body.message) : failed();
+}
+/** Null when the server says this account may not use the Hosted Relay. */
+export async function getComputers(): Promise<Computer[] | null> {
+  const response = await relay("/burrows");
+  if (response.status === 401 || response.status === 403) return null;
+  if (!response.ok) throw await refused(response);
+  return ((await response.json()) as { burrows: Computer[] }).burrows;
+}
+export async function removeComputer(burrowId: string) {
+  const response = await relay(`/burrows/${encodeURIComponent(burrowId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) throw await refused(response);
+}
+export async function approveEnrollment(userCode: string) {
+  const response = await relay("/enrollments/approve", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ userCode }),
+  });
+  if (!response.ok) throw await refused(response);
 }

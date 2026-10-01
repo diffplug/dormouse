@@ -7,9 +7,10 @@ import {
   ONE_TIME_WS_ROUTES,
   toBase64Url,
 } from "remote-lib-common";
-import type { Env } from "./worker";
+import type { RelayEnv } from "./bindings";
+import { forwardUpgrade, isUpgrade, upgradeRequired } from "./socket-room";
 
-type OneTimeContext = Context<{ Bindings: Env }>;
+type OneTimeContext = Context<{ Bindings: RelayEnv }>;
 
 /**
  * The one-time rendezvous routes (`docs/specs/one-time.md` -> "Hosted
@@ -17,9 +18,9 @@ type OneTimeContext = Context<{ Bindings: Env }>;
  * room's Durable Object; neither reads a cookie, reaches Hyperdrive, or asks
  * auth anything.
  */
-export function oneTimeRoutes(app: Hono<{ Bindings: Env }>) {
+export function oneTimeRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   app.get(ONE_TIME_WS_ROUTES.burrow, async (c) => {
-    if (!upgrade(c)) return upgradeRequired(c);
+    if (!isUpgrade(c)) return upgradeRequired(c, "message");
     // Every browser sends Origin on a WebSocket handshake and the Burrow's
     // native socket sends none, so refusing any Origin keeps web pages from
     // minting rooms.
@@ -32,7 +33,7 @@ export function oneTimeRoutes(app: Hono<{ Bindings: Env }>) {
     return forward(c, ONE_TIME_WS_ROUTES.burrow, room);
   });
   app.get(ONE_TIME_WS_ROUTES.client, async (c) => {
-    if (!upgrade(c)) return upgradeRequired(c);
+    if (!isUpgrade(c)) return upgradeRequired(c, "message");
     if (c.req.raw.headers.get("origin") !== c.env.APP_ORIGIN)
       return c.json({ message: "Forbidden." }, 403);
     const rooms = new URL(c.req.url).searchParams.getAll(ONE_TIME_ROOM_PARAM);
@@ -45,38 +46,35 @@ export function oneTimeRoutes(app: Hono<{ Bindings: Env }>) {
 
 /**
  * The one-time phone page (`docs/specs/one-time.md` -> "Phone page"), staged
- * into the assets under `/connect/`: its shell and its content-hashed assets,
- * and nothing else under the path, so the SPA fallback never answers there.
- * Mounted ahead of that fallback.
+ * into the relay's assets under `/connect/`: its shell and its content-hashed
+ * assets, and nothing else under the path. The relay's assets have no SPA
+ * fallback; an HTML answer to an asset path is refused all the same.
  */
-export function oneTimePageRoutes(app: Hono<{ Bindings: Env }>) {
+export function oneTimePageRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   const assets = (c: OneTimeContext) => c.env.ASSETS.fetch(c.req.raw);
   app.get(ONE_TIME_PAGE_PATH.slice(0, -1), assets);
   app.get(ONE_TIME_PAGE_PATH, assets);
-  app.get(`${ONE_TIME_PAGE_PATH}assets/*`, async (c) => {
-    const response = await assets(c);
-    // A missing file comes back as the SPA fallback's shell, which is never an
-    // answer to a script or stylesheet request.
-    return (response.headers.get("content-type") ?? "").includes("text/html")
-      ? c.notFound()
-      : response;
-  });
+  app.get(`${ONE_TIME_PAGE_PATH}assets/*`, async (c) => assetOrNotFound(c, await assets(c)));
   app.get(`${ONE_TIME_PAGE_PATH}*`, (c) => c.notFound());
 }
 
-function upgrade(c: OneTimeContext) {
-  return c.req.raw.headers.get("upgrade")?.toLowerCase() === "websocket";
-}
-
-function upgradeRequired(c: OneTimeContext) {
-  return c.json({ message: "WebSocket upgrade required." }, 426);
+/**
+ * A content-hashed asset's answer: the file itself, or a 404 — never HTML,
+ * which would be cached as immutable under the hashed name.
+ */
+export function assetOrNotFound(c: OneTimeContext, response: Response) {
+  return response.ok &&
+    !(response.headers.get("content-type") ?? "").includes("text/html")
+    ? response
+    : c.notFound();
 }
 
 function tooMany(c: OneTimeContext) {
   return c.json({ message: "Too many requests." }, 429);
 }
 
-async function allowed(c: OneTimeContext, limit: RateLimit) {
+/** Whether `limit` admits this caller, keyed by {@link rateLimitKey}. */
+export async function allowed(c: OneTimeContext, limit: RateLimit) {
   return (
     await limit.limit({
       key: rateLimitKey(c.req.raw.headers.get("cf-connecting-ip")),
@@ -137,13 +135,8 @@ function ipv6Groups(ip: string): string[] {
   ];
 }
 
-/**
- * A fresh request carrying only the upgrade and the room, so no cookie,
- * address, or Origin reaches the room.
- */
+/** The room's object, handed a bare upgrade naming the room and nothing else of the caller's. */
 function forward(c: OneTimeContext, route: string, room: string) {
-  const url = new URL(route, c.req.url);
-  url.searchParams.set(ONE_TIME_ROOM_PARAM, room);
   const stub = c.env.ONE_TIME_ROOM.get(c.env.ONE_TIME_ROOM.idFromName(room));
-  return stub.fetch(new Request(url, { headers: { upgrade: "websocket" } }));
+  return forwardUpgrade(stub, new URL(route, c.req.url), { [ONE_TIME_ROOM_PARAM]: room });
 }

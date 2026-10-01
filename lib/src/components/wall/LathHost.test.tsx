@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act, StrictMode } from 'react';
+import { act, StrictMode, useContext } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LathHost, LATH_ZOOM_MARGIN, LATH_ZOOM_SHADOW } from './LathHost';
@@ -15,6 +15,7 @@ import { leaf, split, tree as treeOf, movePreview as movePreviewAt } from '../..
 import { leafMeta } from '../../lib/lath/test-fixtures';
 import { PANE_HEADER_HEIGHT_PX } from '../design';
 import type { PaneProps } from './pane-props';
+import { LayoutFramesContext } from './wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -436,6 +437,21 @@ describe('LathHost — empty tree', () => {
     expect(leafOrder()).toEqual([]);
     expect(container.querySelector('[data-lath-sash]')).toBeNull();
   });
+});
+
+it('gives pane bodies the frame signal, for chrome portaled out of a moving pane', () => {
+  let frames: unknown = null;
+  function FramesBody() {
+    frames = useContext(LayoutFramesContext);
+    return null;
+  }
+  const engine = createLathWallEngine(seeded(rowOf('a'), [['a', leafMeta({ title: 'A' })]]), { durationMs: 0 });
+  act(() => {
+    root.render(
+      <LathHost lath={engine} onCommitResize={vi.fn()} onLeafFocused={vi.fn()} componentsOverride={{ bodies: { terminal: FramesBody }, tabs: { terminal: StubTab } }} />,
+    );
+  });
+  expect(frames).toBe(engine.subscribeFrames);
 });
 
 describe('LathHost — terminal context placement', () => {

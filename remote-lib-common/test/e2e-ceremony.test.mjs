@@ -411,6 +411,7 @@ test('isConnectionRequestV1 is the presence proof and nothing else', async () =>
 
 test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denials', () => {
   assert.equal(isConnectionOutcomeV1({ ok: true, burrowLabel: 'Laptop' }), true);
+  assert.equal(isConnectionOutcomeV1({ ok: true, burrowLabel: 'Laptop', directOnly: true }), true);
   for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'burrow-busy', 'burrow-error']) {
     assert.equal(isConnectionOutcomeV1({ ok: false, code }), true, code);
   }
@@ -421,6 +422,9 @@ test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denial
     // failed is owner-local, so there is no wire spelling for it.
     ['an ACL miss as a denial code', { ok: false, code: 'client-not-paired' }],
     ['a denial code from the other ceremony', { ok: false, code: 'user-denied' }],
+    // Present only as `true`: a Client must never read a falsy spelling as one.
+    ['a directOnly that is not true', { ok: true, burrowLabel: 'Laptop', directOnly: false }],
+    ['a directOnly that is a string', { ok: true, burrowLabel: 'Laptop', directOnly: 'yes' }],
   ]) {
     assert.equal(isConnectionOutcomeV1(value), false, why);
   }
@@ -490,20 +494,43 @@ test('isOneTimeOutcomeV1 takes a labelled success or one of four fixed denials',
   }
 });
 
-test('isSessionEndV1 is the exact two-key goodbye and nothing else', () => {
+test('isSessionEndV1 is the goodbye in its three exact shapes and nothing else', () => {
   assert.equal(isSessionEndV1(SESSION_END_V1), true);
   assert.equal(isSessionEndV1({ v: 1, t: 'session-end' }), true);
+  assert.equal(isSessionEndV1({ v: 1, t: 'session-end', reason: 'network-not-allowed' }), true);
+  for (const [address, addressSource] of [
+    ['172.58.12.9', 'observed'],
+    ['2607:fb90:1:2::9', 'reported'],
+    ['::ffff:192.168.1.20', 'observed'],
+    ['ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255', 'reported'],
+  ]) {
+    assert.equal(
+      isSessionEndV1({ v: 1, t: 'session-end', reason: 'network-not-allowed', address, addressSource }),
+      true,
+      address,
+    );
+  }
   // Frozen, so no sender can grow the shared value into a shape the guard refuses.
   assert.equal(Object.isFrozen(SESSION_END_V1), true);
+  const refused = { v: 1, t: 'session-end', reason: 'network-not-allowed' };
   for (const [why, value] of [
     ['not an object', 'session-end'],
     ['null', null],
     ['an array', [{ v: 1, t: 'session-end' }]],
     ['a future version', { v: 2, t: 'session-end' }],
     ['no version', { t: 'session-end' }],
-    // It carries nothing, so a field on it is one no reader has — the shape a
-    // smuggler would pick.
-    ['an extra key', { v: 1, t: 'session-end', reason: 'take-back' }],
+    // A reason no reader has is the shape a smuggler would pick.
+    ['another reason', { v: 1, t: 'session-end', reason: 'take-back' }],
+    ['an extra key', { ...refused, note: 'hi' }],
+    ['an address with no source', { ...refused, address: '172.58.12.9' }],
+    ['a source with no address', { ...refused, addressSource: 'observed' }],
+    ['an address with no reason', { v: 1, t: 'session-end', address: '1.2.3.4', addressSource: 'observed', x: 1 }],
+    ['an unknown source', { ...refused, address: '172.58.12.9', addressSource: 'guessed' }],
+    ['a hostname', { ...refused, address: 'phone.local', addressSource: 'observed' }],
+    ['an mDNS name', { ...refused, address: '0b1c5f3a-1d2e-4c1b-9a1e-1234567890ab.local', addressSource: 'observed' }],
+    ['a zoned address', { ...refused, address: 'fe80::1%en0', addressSource: 'observed' }],
+    ['an address with a port', { ...refused, address: '172.58.12.9:443', addressSource: 'observed' }],
+    ['markup', { ...refused, address: '<b>1.2.3.4</b>', addressSource: 'observed' }],
     ['a direct-path signal', { v: 1, t: 'direct-switch' }],
     ['a ceremony outcome', { ok: true, burrowLabel: 'Laptop' }],
   ]) {
@@ -579,4 +606,7 @@ test('the goodbye is the same size on the wire as every other control message', 
   const burrow = await established();
   const outcome = burrow.sendControl({ ok: true, burrowLabel: "Ned's MacBook Pro (16-inch, 2025)" });
   assert.equal(burrow.sendControl({ ...SESSION_END_V1 }).length, outcome.length);
+  const longest = 'ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255';
+  const refused = { ...SESSION_END_V1, reason: 'network-not-allowed', address: longest, addressSource: 'reported' };
+  assert.equal(burrow.sendControl(refused).length, outcome.length);
 });

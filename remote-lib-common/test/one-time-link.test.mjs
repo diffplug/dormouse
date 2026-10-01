@@ -201,8 +201,8 @@ test('one character more is refused at mint time and by the parser', async () =>
 
 test('a build bakes only a bare link-scheme origin that fits a link', () => {
   for (const origin of [
-    'https://hosted.dormouse.sh',
-    'https://hosted.dormouse.sh:8443',
+    'https://relay.dormouse.sh',
+    'https://relay.dormouse.sh:8443',
     'http://localhost:3000',
     'http://127.0.0.1:8787',
     'http://[::1]:8787',
@@ -211,15 +211,15 @@ test('a build bakes only a bare link-scheme origin that fits a link', () => {
     assert.equal(isAcceptedRelayOrigin(origin), true, origin);
   }
   for (const origin of [
-    'https://hosted.dormouse.sh/',
-    'https://hosted.dormouse.sh/connect',
-    'https://user@hosted.dormouse.sh',
-    'https://hosted.dormouse.sh?x=1',
-    'HTTPS://hosted.dormouse.sh',
-    'http://hosted.dormouse.sh',
+    'https://relay.dormouse.sh/',
+    'https://relay.dormouse.sh/connect',
+    'https://user@relay.dormouse.sh',
+    'https://relay.dormouse.sh?x=1',
+    'HTTPS://relay.dormouse.sh',
+    'http://relay.dormouse.sh',
     'http://127.0.0.2:8787',
-    'wss://hosted.dormouse.sh',
-    'hosted.dormouse.sh',
+    'wss://relay.dormouse.sh',
+    'relay.dormouse.sh',
     '',
     undefined,
     originOfLength(MAX_RELAY_ORIGIN_LENGTH + 1),

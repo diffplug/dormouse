@@ -6,6 +6,7 @@ import {
 } from '../lib/processed-pty-stream';
 import {
   applyTerminalEvents,
+  collectTerminalClipboardOffers,
   collectTerminalProtocolResponses,
   collectTerminalToolEvents,
   type TerminalColorProvider,
@@ -33,6 +34,9 @@ export interface OwnerPtyStreamOptions {
   /** A reply to a query. Written by the owner alone, never a viewer: it is the
    *  sole reply authority (`docs/specs/remote-api.md` → Terminal surfaces). */
   writeResponse(data: string): void;
+  /** An `OSC 52` write, for the renderer's copy editor to offer — never the
+   *  clipboard (`docs/specs/mouse-and-clipboard.md` §4.6). */
+  onClipboardOffer(text: string): void;
   /** One chunk of visible output, for the owner's renderer. */
   onChunk(chunk: ProcessedPtyChunk): void;
 }
@@ -53,6 +57,7 @@ export function createOwnerPtyStream(id: string, options: OwnerPtyStreamOptions)
       if (toolEvents.length > 0) options.onToolEvents(toolEvents);
       if (semanticEvents.length > 0) options.onSemanticEvents(semanticEvents);
       for (const response of collectTerminalProtocolResponses(events)) options.writeResponse(response);
+      for (const text of collectTerminalClipboardOffers(events)) options.onClipboardOffer(text);
     },
     onChunk(chunk) {
       options.alerts.onData(id);

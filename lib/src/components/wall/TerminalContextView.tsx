@@ -13,7 +13,7 @@ import { WindowFocusedContext } from './wall-context';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import type { ContextPlacement, ContextSide } from './terminal-context-placement';
 import { messageOf } from '../../lib/errors';
-import { isComposingKey } from '../../lib/dom';
+import { anchoredTarget, isComposingKey } from '../../lib/dom';
 
 export type PortMode = 'system' | RenderMode;
 export type ContextScan = { status: 'scanning' | 'failed' } | { status: 'loaded'; entries: PortUrlEntry[] };
@@ -363,7 +363,8 @@ export function TerminalContextView(p: TerminalContextViewProps) {
   const close = useCallback(() => { if (surface.current) snapshotExit(surface.current, content.current); p.onClose(); }, [p.onClose]);
   useEffect(() => {
     if (p.closing) return;
-    const outside = (e: PointerEvent) => { if (!surface.current?.contains(e.target as Node)) close(); };
+    // A portaled copy editor counts as where its anchor sits.
+    const outside = (e: PointerEvent) => { if (!surface.current?.contains(anchoredTarget(e.target))) close(); };
     document.addEventListener('pointerdown', outside, true);
     return () => document.removeEventListener('pointerdown', outside, true);
   }, [p.closing, close]);

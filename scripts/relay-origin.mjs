@@ -19,8 +19,8 @@ import {
 export const RELAY_ORIGIN_PLACEHOLDER = '__DORMOUSE_RELAY_ORIGIN__';
 export const RELAY_MODE_PLACEHOLDER = '__DORMOUSE_RELAY_MODE__';
 
-/** The origin a stock build reaches: Hosted. */
-export const DEFAULT_RELAY_ORIGIN = 'https://hosted.dormouse.sh';
+/** The relay origin a stock build reaches: Hosted's. */
+export const DEFAULT_RELAY_ORIGIN = 'https://relay.dormouse.sh';
 
 /**
  * Variables that once chose an origin `DORMOUSE_RELAY_ORIGIN` now chooses.

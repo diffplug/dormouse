@@ -20,8 +20,8 @@ function browserDirectPeer(stun: boolean): DirectPeerFactory {
       : new RTCPeerConnection({ iceServers: stunServers(stun) });
 }
 
-/** The one-time page's, which Hosted serves. */
+/** Hosted-served Pocket and the one-time page. */
 export const hostedDirectPeer: DirectPeerFactory = browserDirectPeer(true);
 
-/** Pocket's, which a self-host Relay serves. */
+/** Pocket served by a self-host Relay. */
 export const selfHostDirectPeer: DirectPeerFactory = browserDirectPeer(false);

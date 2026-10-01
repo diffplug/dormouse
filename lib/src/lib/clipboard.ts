@@ -1,41 +1,75 @@
 import { shellCommandKind } from 'dor/commands/shell-quote';
 import { getMouseSelectionState } from './mouse-selection';
-import { rewrap } from './rewrap';
-import { extractSelectionText } from './selection-text';
 import { getPlatform, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
-import { getDefaultShellOpts, getTerminalInstance, getTerminalShellKind, writeUserInput } from './terminal-registry';
+import { getDefaultShellOpts, getTerminalShellKind, writeUserInput } from './terminal-registry';
 
-/** Report failure without throwing so callers retain the selection for retry. */
+/** Report failure without throwing so callers retain the selection for retry.
+ *  Without the Clipboard API (an insecure origin, such as Pocket over plain
+ *  http) or when it refuses, falls back to `document.execCommand('copy')`. */
 export async function writeTextToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+  // Before any await, so the fallback runs inside the click or key that asked.
+  if (!clipboard?.writeText) return copyWithExecCommand(text);
   try {
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
+    await clipboard.writeText(text);
+    return true;
   } catch {
-    // Clipboard access can be denied or the webview can lose focus.
+    // Denied, or the webview lost focus; the activation may have lapsed too.
+    return copyWithExecCommand(text);
   }
-  return false;
 }
 
-/** Copy the current selection as-is; no-op without one. */
-export async function copyRaw(terminalId: string): Promise<boolean> {
-  const terminal = getTerminalInstance(terminalId);
-  const sel = getMouseSelectionState(terminalId).selection;
-  if (!terminal || !sel) return false;
-  return writeTextToClipboard(extractSelectionText(terminal, sel));
+/** Copy `text` through a one-shot `copy` listener, leaving focus where it is:
+ *  moving it would blur xterm, which reports the focus change, and commit an
+ *  inline rename. WebKit may fire no `copy` without a selection; then a hidden
+ *  textarea holds one. */
+function copyWithExecCommand(text: string): boolean {
+  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') return false;
+  let wrote = false;
+  const onCopy = (event: ClipboardEvent) => {
+    if (!event.clipboardData) return;
+    event.clipboardData.setData('text/plain', text);
+    event.preventDefault();
+    // Ours alone: no other copy handler writes over it.
+    event.stopImmediatePropagation();
+    wrote = true;
+  };
+  document.addEventListener('copy', onCopy, { capture: true });
+  try {
+    const copied = document.execCommand('copy');
+    if (wrote) return copied;
+  } catch {
+    // Fall through to the textarea, which fails the same way if it must.
+  } finally {
+    document.removeEventListener('copy', onCopy, { capture: true });
+  }
+  return copyFromTextarea(text);
 }
 
-/** Copy with rewrap, except for rectangular block selections. */
-export async function copyRewrapped(terminalId: string): Promise<boolean> {
-  const terminal = getTerminalInstance(terminalId);
-  const sel = getMouseSelectionState(terminalId).selection;
-  if (!terminal || !sel) return false;
-  const raw = extractSelectionText(terminal, sel);
-  const out = sel.shape === 'block' ? raw : rewrap(raw);
-  return writeTextToClipboard(out);
+/** Copy `text` from a hidden textarea, putting focus back after; a field
+ *  keeps its own selection through the blur. */
+function copyFromTextarea(text: string): boolean {
+  const previous = document.activeElement;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.setAttribute('aria-hidden', 'true');
+  // Off-screen rather than hidden, which cannot be selected; 16px type keeps
+  // iOS from zooming to it.
+  Object.assign(textarea.style, { position: 'fixed', top: '0', left: '-9999px', opacity: '0', fontSize: '16px' });
+  document.body.appendChild(textarea);
+  try {
+    textarea.focus({ preventScroll: true });
+    textarea.setSelectionRange(0, text.length);
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+    if (previous instanceof HTMLElement) previous.focus({ preventScroll: true });
+  }
 }
 
 /** Replace ESC with visible U+241B so clipboard text cannot close a bracketed

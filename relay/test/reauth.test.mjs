@@ -14,7 +14,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { API_ROUTES, presenceChallenge, toBase64Url } from 'remote-lib-common';
+import { API_ROUTES, presenceChallenge } from 'remote-lib-common';
+
+import { randomSecret } from '../../remote-lib-common/test/harness/actors.mjs';
 
 import {
   ORIGIN,
@@ -26,17 +28,12 @@ import {
   register,
 } from './helpers.mjs';
 
-/** A well-formed base64url 32-byte value; the routing fields are opaque here. */
-function random32() {
-  return toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
-}
-
 /** A pairing binding for `authenticator`, the cheapest well-formed one. */
 function pairingBinding(authenticator, overrides = {}) {
   return {
     kind: 'pairing',
     burrowId: 'burrow-1',
-    handshakeHash: random32(),
+    handshakeHash: randomSecret(),
     passkeyCredentialId: authenticator.credentialId,
     ...overrides,
   };
@@ -108,12 +105,12 @@ test('begin refuses a malformed binding rather than deriving something from it',
     // Not a kind at all, and a connection binding missing its Burrow challenge:
     // the closed shape is what keeps unauthenticated data out of a structure
     // the Burrow has just verified.
-    { kind: 'nonsense', burrowId: 'h', handshakeHash: random32(), passkeyCredentialId: 'c' },
+    { kind: 'nonsense', burrowId: 'h', handshakeHash: randomSecret(), passkeyCredentialId: 'c' },
     {
       kind: 'connection',
       burrowId: 'h',
-      connectionId: random32(),
-      handshakeHash: random32(),
+      connectionId: randomSecret(),
+      handshakeHash: randomSecret(),
       passkeyCredentialId: authenticator.credentialId,
     },
     { ...pairingBinding(authenticator), extra: 'field' },
@@ -175,7 +172,7 @@ test('finish refuses a nonce past its TTL, and one that was never minted', async
   assert.equal(late.status, 400);
 
   const unknown = await finish(app, sessionToken, {
-    relayNonce: random32(),
+    relayNonce: randomSecret(),
     assertion: proof.assertion,
   });
   assert.equal(unknown.status, 400);
@@ -204,7 +201,7 @@ test('finish refuses a signature that does not verify against the stored key', a
   // The right credential id over the right challenge, signed by a foreign key.
   const forged = {
     ...proof.assertion,
-    signature: (await authenticator.assert({ challenge: random32(), origin: ORIGIN, rpId: RP_ID }))
+    signature: (await authenticator.assert({ challenge: randomSecret(), origin: ORIGIN, rpId: RP_ID }))
       .signature,
   };
   const res = await finish(app, sessionToken, {
@@ -220,7 +217,7 @@ test('both routes require a session', async () => {
   const authenticator = await newAuthenticator();
   await register(app, authenticator);
   assert.equal((await begin(app, undefined, { binding: pairingBinding(authenticator) })).status, 401);
-  assert.equal((await finish(app, undefined, { relayNonce: random32() })).status, 401);
+  assert.equal((await finish(app, undefined, { relayNonce: randomSecret() })).status, 401);
 });
 
 test('a request with no binding is refused, not answered with a random challenge', async () => {

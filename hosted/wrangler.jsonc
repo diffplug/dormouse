@@ -15,7 +15,7 @@
     }
   ],
   "assets": {
-    "directory": "./dist",
+    "directory": "./dist/account",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": true
@@ -31,11 +31,14 @@
       "id": "5bfbeba081b4456f9c3cf36edbb20c1d"
     }
   ],
+  // The relay Worker's, so removing a Burrow closes its live socket. It is
+  // implemented there; this Worker creates no class of it.
   "durable_objects": {
     "bindings": [
       {
-        "name": "ONE_TIME_ROOM",
-        "class_name": "OneTimeRoom"
+        "name": "RELAY_ROOM",
+        "class_name": "RelayRoom",
+        "script_name": "dormouse-relay"
       }
     ]
   },
@@ -45,30 +48,29 @@
       "new_sqlite_classes": [
         "OneTimeRoom"
       ]
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": [
+        "OneTimeRoom"
+      ]
     }
   ],
   "ratelimits": [
     {
-      "name": "ONE_TIME_MINT_LIMIT",
-      "namespace_id": "1",
+      // Enrollment approvals, keyed by account rather than address.
+      "name": "RELAY_APPROVE_LIMIT",
+      "namespace_id": "7",
       "simple": {
         "limit": 10,
-        "period": 60
-      }
-    },
-    {
-      "name": "ONE_TIME_JOIN_LIMIT",
-      "namespace_id": "2",
-      "simple": {
-        "limit": 30,
         "period": 60
       }
     }
   ],
   "triggers": {
-    "crons": [
-      "*/5 * * * *"
-    ]
+    // Empty, never absent: an absent `triggers` leaves a deployed schedule in
+    // place, and the history sweep's moved to the voice Worker.
+    "crons": []
   },
   "observability": {
     "enabled": false

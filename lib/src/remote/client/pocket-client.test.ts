@@ -14,10 +14,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CONTROL_PAYLOAD_SIZE,
   DEFAULT_PAIRING_TTL_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
-  SELFHOST_ACCOUNT_ID,
+  RELAY_PING,
+  RELAY_PING_INTERVAL_MS,
+  RELAY_PONG,
   SETUP_TOKEN_INVALID_ERROR,
   formatPairingInvitationUrl,
   fromBase64Url,
@@ -33,6 +36,8 @@ import {
 import {
   CONNECTION_DENIAL_MESSAGES,
   BURROW_UNAVAILABLE_MESSAGE,
+  DIRECT_ONLY_FAILED_MESSAGE,
+  DIRECT_ONLY_UNSUPPORTED_MESSAGE,
   BurrowIdentityMismatchError,
   PAIRING_DENIAL_MESSAGES,
   PASSKEY_UNAVAILABLE_MESSAGE,
@@ -49,7 +54,9 @@ import { FakeSocket } from '../test-fake-socket';
 import { fakeTimers } from '../test-timers';
 import {
   FakeDirectNetwork,
+  OFF_LAN_PAIR,
   collect,
+  lanOnlyPolicy,
   type FakeDirectNetworkOptions,
   type FakePeer,
 } from '../direct/test-fake-peer';
@@ -58,6 +65,7 @@ import type { RemoteTimer } from '../ws';
 import { createTestAuthenticator, settle, type TestAuthenticator } from '../test-e2e-client';
 import { PasskeyAlreadyRegisteredError, type WebAuthnClient } from './webauthn';
 import {
+  ACCOUNT_ID,
   AUTH_ROUTES,
   BURROW_LABEL,
   CREDENTIAL_ID,
@@ -180,7 +188,7 @@ async function seedRecord(
   const clientStatic = await generateNoiseKeyPair();
   const record: KnownBurrowV1 = {
     burrowId,
-    accountId: SELFHOST_ACCOUNT_ID,
+    accountId: ACCOUNT_ID,
     label: 'Laptop',
     burrowStaticPublicKey: toBase64Url((await generateNoiseKeyPair()).publicKey),
     clientStaticKeyPair: {
@@ -236,6 +244,29 @@ describe('pairing, end to end', () => {
     // The Burrow authorized the static this handshake authenticated, not one the
     // payload claimed.
     expect(harness.savedAcl[0]!.clientStaticPublicKey).toBe(record.clientStaticKeyPair.publicKeyRaw);
+    // Both ends name the account the Relay answered at sign-in, never a constant.
+    expect(record.accountId).toBe(ACCOUNT_ID);
+    expect(harness.savedAcl[0]!.accountId).toBe(ACCOUNT_ID);
+  });
+
+  it("refuses an outcome naming another account than the session's, and stores nothing", async () => {
+    const harness = await makeE2eHarness();
+    const invitation = await harness.mintInvitation();
+    let shown: string | null = null;
+    const pairing = harness.client.pair(invitation, 'iPhone Safari', (code) => {
+      shown = code;
+    });
+    // The proof named the first account; the phone then signs in to another.
+    await waitFor(() => harness.approvals.length > 0, 'the approval modal');
+    harness.answerSigninAs('another-account');
+    await harness.client.signin();
+    harness.approvals[0]!.approve(shown!);
+
+    expect(await pairing).toEqual({
+      ok: false,
+      message: PAIRING_DENIAL_MESSAGES['burrow-error'],
+    });
+    expect(harness.knownBurrows.records.size).toBe(0);
   });
 
   it('takes the invitation straight off the URL the Burrow renders', async () => {
@@ -608,6 +639,10 @@ function fakeVisibility() {
       visible = next;
       for (const listener of listeners) listener();
     },
+    /** How many subscriptions are held. */
+    get subscribers(): number {
+      return listeners.size;
+    },
   };
 }
 
@@ -642,8 +677,11 @@ describe('keepalives on an established session', () => {
     // The kind byte, 32 zero bytes, and the Poly1305 tag: every keepalive is
     // this size, so the interval tells a timing observer nothing else.
     expect(fromBase64Url(sent[0]!.ct as string).length).toBe(1 + KEEPALIVE_BODY_SIZE + 16);
-    expect(timers.live).toHaveLength(1);
-    expect(timers.live[0]!.delayMs).toBe(E2E_KEEPALIVE_INTERVAL_MS);
+    // Re-armed, beside the relay socket's own heartbeat.
+    expect(timers.live.map(({ delayMs }) => delayMs)).toEqual([
+      RELAY_PING_INTERVAL_MS,
+      E2E_KEEPALIVE_INTERVAL_MS,
+    ]);
   });
 
   it('pauses while the page is hidden and sends one the moment it returns', async () => {
@@ -656,10 +694,18 @@ describe('keepalives on an established session', () => {
     expect(timers.live).toHaveLength(0);
     expect(sentSince(harness, before)).toHaveLength(0);
 
-    // Back in front of the user: one immediately, then the interval again.
+    // Back in front of the user: one immediately, then the interval again,
+    // and the relay heartbeat with it.
     visibility.set(true);
     expect(sentSince(harness, before)).toHaveLength(1);
-    expect(timers.live).toHaveLength(1);
+    expect(timers.live).toHaveLength(2);
+  });
+
+  it('shares its one visibility subscription with the relay socket heartbeat', async () => {
+    const { harness, visibility } = await connected();
+    expect(visibility.subscribers).toBe(1);
+    harness.client.close();
+    expect(visibility.subscribers).toBe(0);
   });
 
   it('stops when the session does', async () => {
@@ -694,7 +740,8 @@ describe('keepalives on an established session', () => {
     // No keepalive into a session that no longer exists, and the app is told.
     expect(sentSince(harness, before)).toHaveLength(0);
     expect(gone).toHaveBeenCalledOnce();
-    expect(timers.live).toHaveLength(0);
+    // Only the relay socket's heartbeat: the socket outlives the session.
+    expect(timers.live.map(({ delayMs }) => delayMs)).toEqual([RELAY_PING_INTERVAL_MS]);
 
     // And a request on the dead session fails rather than hanging.
     await expect(harness.client.write('s1', 'ls')).rejects.toThrow();
@@ -737,8 +784,74 @@ describe('keepalives on an established session', () => {
     expect(send).toHaveBeenCalledTimes(1);
     // And the next interval is still armed, so a socket that comes back is
     // keepalived again rather than silently reaped.
-    expect(timers.live).toHaveLength(1);
+    expect(timers.live).toHaveLength(2);
     send.mockRestore();
+  });
+});
+
+describe('the relay socket heartbeat', () => {
+  /** A signed-in phone with its relay socket open, on a timer and visibility the test owns. */
+  async function opened() {
+    const timers = fakeTimers();
+    const visibility = fakeVisibility();
+    const harness = await signedIn(
+      {},
+      { setTimer: timers.setTimer, visibility: visibility.visibility },
+    );
+    const opening = harness.client.openSocket();
+    harness.socket.open();
+    await opening;
+    return { harness, timers, visibility };
+  }
+
+  it('pings every interval and holds a Relay that never answers to nothing', async () => {
+    const { harness, timers } = await opened();
+    for (let i = 1; i <= 5; i += 1) {
+      timers.fireAt(RELAY_PING_INTERVAL_MS);
+      expect(harness.socket.texts).toHaveLength(i);
+    }
+    expect(harness.socket.texts.every((text) => text === RELAY_PING)).toBe(true);
+    // An older Relay never pongs: the socket is as open as it was.
+    expect(harness.client.socketOpen).toBe(true);
+    // A pong is the heartbeat's, never a frame the Client reads.
+    harness.socket.receiveRaw(RELAY_PONG);
+    expect(harness.client.socketOpen).toBe(true);
+  });
+
+  it('once a pong has arrived, a ping unanswered by the next one drops the socket', async () => {
+    const { harness, timers } = await opened();
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    harness.socket.receiveRaw(RELAY_PONG);
+    // Answered on time: still open.
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    harness.socket.receiveRaw(RELAY_PONG);
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    expect(harness.client.socketOpen).toBe(true);
+    // Not answered before the next one is due.
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    expect(harness.client.socketOpen).toBe(false);
+    expect(harness.socket.readyState).toBe(3);
+    expect(timers.live).toHaveLength(0);
+  });
+
+  it('holds one visibility subscription while the socket is open, and none after', async () => {
+    const { harness, visibility } = await opened();
+    expect(visibility.subscribers).toBe(1);
+    harness.client.close();
+    expect(visibility.subscribers).toBe(0);
+  });
+
+  it('pauses while the page is hidden, and forgives the ping it was waiting on', async () => {
+    const { harness, timers, visibility } = await opened();
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    harness.socket.receiveRaw(RELAY_PONG);
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    // Hidden with a ping outstanding: a throttled page cannot judge it.
+    visibility.set(false);
+    expect(timers.live).toHaveLength(0);
+    visibility.set(true);
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    expect(harness.client.socketOpen).toBe(true);
   });
 });
 
@@ -847,7 +960,7 @@ describe('the direct path, end to end', () => {
     const clientBefore = run.clientFrames().length;
     const sentBefore = run.network.offererChannel!.sent.length;
 
-    run.timers.fireAt(E2E_KEEPALIVE_INTERVAL_MS);
+    run.timers.fireLatestAt(E2E_KEEPALIVE_INTERVAL_MS);
 
     expect(run.clientFrames()).toHaveLength(clientBefore);
     const sent = run.network.offererChannel!.sent.slice(sentBefore);
@@ -1167,6 +1280,130 @@ describe('the direct path, end to end', () => {
 });
 
 // --- Setup, sign-in, and the token a scan carries ---------------------------
+
+describe('a direct-only session, end to end', () => {
+  /**
+   * A paired phone against a real Burrow holding Local networks' path policy
+   * (`docs/specs/remote-network.md` -> "Local networks"), whose outcome says the
+   * session is direct-only: the connect answers only once the direct path
+   * carries it, and nothing protocol-v1 crosses the relay before then.
+   */
+  async function directOnly(
+    options: { network?: FakeDirectNetworkOptions; clientHasPeer?: boolean; burrowHasPeer?: boolean } = {},
+  ) {
+    const network = new FakeDirectNetwork(options.network);
+    const timers = fakeTimers();
+    const harness = await makeE2eHarness({
+      deps: {
+        setTimer: timers.setTimer,
+        ...(options.clientHasPeer === false ? {} : { createDirectPeer: () => network.createOfferer() }),
+      },
+      burrowDirect: options.burrowHasPeer === false ? undefined : () => network.createAnswerer(),
+      burrowPathPolicy: lanOnlyPolicy(),
+    });
+    await harness.pairAndApprove(await harness.mintInvitation());
+    return { harness, network, timers };
+  }
+
+  /** Every Client→relay transport frame on the connection that is not a fixed-size control. */
+  const relayedApp = (harness: E2eHarness) =>
+    harness
+      .clientTransportFrames()
+      .filter((frame) => fromBase64Url(frame.ct as string).length !== 1 + CONTROL_PAYLOAD_SIZE + 16);
+
+  it('answers ok only once the direct path carries the session, and protocol-v1 rides the channel', async () => {
+    const { harness, network } = await directOnly();
+    const outcome = await harness.client.connect(harness.burrowId);
+    expect(outcome).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+    expect(harness.client.transportPath).toBe('direct');
+
+    expect(await harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+    expect(relayedApp(harness)).toEqual([]);
+    expect(network.offererChannel!.sent.length).toBeGreaterThan(0);
+  });
+
+  it('fails with fixed copy, sending nothing relayed, when no direct path forms', async () => {
+    // A browser without WebRTC gives the attempt up at once, and no network
+    // the phone joins would help.
+    const unsupported = await directOnly({ clientHasPeer: false });
+    expect(await unsupported.harness.client.connect(unsupported.harness.burrowId)).toEqual({
+      ok: false,
+      message: DIRECT_ONLY_UNSUPPORTED_MESSAGE,
+      pairingRequired: false,
+    });
+    expect(unsupported.harness.client.connectedBurrowId).toBeNull();
+    expect(relayedApp(unsupported.harness)).toEqual([]);
+
+    // A path off the allowed networks, which the Burrow refuses — and says so
+    // in its goodbye, naming the address its ICE agent saw.
+    const refused = await directOnly({ network: { selectedPair: OFF_LAN_PAIR } });
+    expect(await refused.harness.client.connect(refused.harness.burrowId)).toMatchObject({
+      ok: false,
+      message:
+        'This computer only accepts phones on its allowed networks. Yours connected from 10.0.0.3 — ' +
+        'join the same Wi-Fi or VPN as the computer and try again.',
+    });
+    expect(refused.harness.burrow.establishedSessionCount).toBe(0);
+    expect(relayedApp(refused.harness)).toEqual([]);
+
+    // The computer's own end off them: the generic copy, never the phone's network.
+    const ownEnd = await directOnly({ network: { selectedPair: { local: '10.0.0.2', remote: '192.168.1.3' } } });
+    expect(await ownEnd.harness.client.connect(ownEnd.harness.burrowId)).toMatchObject({
+      ok: false,
+      message: DIRECT_ONLY_FAILED_MESSAGE,
+    });
+  });
+
+  it('gives up at the deadline on a channel that never opens', async () => {
+    const { harness, timers } = await directOnly({ network: { opening: 'never' } });
+    const connecting = harness.client.connect(harness.burrowId);
+    await waitFor(() => harness.client.connectedBurrowId !== null, 'the connect to wait for the switch');
+    // The latest of the timers on this interval: the socket's heartbeat and the
+    // session's keepalive share it, and the wait is armed after both.
+    timers.fireLatestAt(DIRECT_ONLY_DEADLINE_MS);
+    expect(await connecting).toMatchObject({ ok: false, message: DIRECT_ONLY_FAILED_MESSAGE });
+    expect(harness.client.connectedBurrowId).toBeNull();
+  });
+
+  it('names the computer, not a network, when it declines the direct path', async () => {
+    // A Burrow that builds no peer declines the offer.
+    const declined = await directOnly({ burrowHasPeer: false });
+    expect(await declined.harness.client.connect(declined.harness.burrowId)).toMatchObject({
+      ok: false,
+      message: DIRECT_ONLY_UNSUPPORTED_MESSAGE,
+    });
+  });
+
+  it('retires a waiting connect silently when another replaces it, and the replacement still owns its endings', async () => {
+    const { harness } = await directOnly({ network: { opening: 'never' } });
+    const gone = vi.fn();
+    harness.client.setOnBurrowGone(gone);
+    const first = harness.client.connect(harness.burrowId);
+    await waitFor(() => harness.client.connectedBurrowId !== null, 'the first connect to wait for the switch');
+    const second = harness.client.connect(harness.burrowId);
+    expect(await first).toMatchObject({ ok: false, message: BURROW_UNAVAILABLE_MESSAGE });
+    await waitFor(() => harness.burrow.establishedSessionCount === 1 && harness.client.connectedBurrowId !== null, 'the replacement to wait for its switch');
+
+    // The first's retirement left the replacement's wait in charge of its
+    // own ending.
+    harness.burrow.stop();
+    expect(await second).toMatchObject({ ok: false, message: DIRECT_ONLY_FAILED_MESSAGE });
+    expect(gone).not.toHaveBeenCalled();
+  });
+
+  it('reports a Burrow ending during the wait as the connect’s failure only, never burrow loss', async () => {
+    const { harness } = await directOnly({ network: { opening: 'never' } });
+    const gone = vi.fn();
+    harness.client.setOnBurrowGone(gone);
+    const connecting = harness.client.connect(harness.burrowId);
+    await waitFor(() => harness.burrow.establishedSessionCount === 1, 'the Burrow to promote the session');
+    // The Burrow's own ending — its goodbye, as at the direct deadline.
+    harness.burrow.stop();
+    expect(await connecting).toMatchObject({ ok: false, message: DIRECT_ONLY_FAILED_MESSAGE });
+    expect(gone).not.toHaveBeenCalled();
+    expect(harness.client.connectedBurrowId).toBeNull();
+  });
+});
 
 describe('setup + signin', () => {
   it('registers with the scanned token, signs in, and sends the session as a bearer', async () => {

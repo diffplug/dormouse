@@ -8,6 +8,7 @@ import {
   type VscodeThemeVarTraceOrigin,
 } from '../lib/themes';
 import { NativeModalDialog } from './design';
+import { writeTextToClipboard } from '../lib/clipboard';
 
 export const OPEN_THEME_DEBUGGER_EVENT = 'dormouse:openThemeDebugger';
 
@@ -179,22 +180,6 @@ function DynamicPicks({ snapshot }: { snapshot: ThemeDiagnosticSnapshot }) {
   );
 }
 
-function copyWithFallback(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text);
-  }
-
-  const textArea = document.createElement('textarea');
-  textArea.value = text;
-  textArea.style.position = 'fixed';
-  textArea.style.opacity = '0';
-  document.body.append(textArea);
-  textArea.select();
-  document.execCommand('copy');
-  textArea.remove();
-  return Promise.resolve();
-}
-
 /** Mount only while open (`NativeModalDialog`); each open captures a fresh snapshot. */
 export function ThemeDebuggerDialog({ onClose }: { onClose: () => void }) {
   const [snapshot, setSnapshot] = useState(captureThemeDiagnostics);
@@ -215,8 +200,7 @@ export function ThemeDebuggerDialog({ onClose }: { onClose: () => void }) {
   }, [copied]);
 
   const copyReport = async () => {
-    await copyWithFallback(snapshot.report);
-    setCopied(true);
+    if (await writeTextToClipboard(snapshot.report)) setCopied(true);
   };
 
   return (

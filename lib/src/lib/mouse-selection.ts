@@ -1,9 +1,16 @@
 /** DOM-free per-terminal mouse/selection store with a
  * `useSyncExternalStore`-compatible subscription API. */
 
+import { comparePos, type BreakKind, type CopyBuffer, type EditorFormat, type Scope } from './copy-text';
+import type { BufferToken } from './smart-token';
+
 export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
 export type OverrideState = 'off' | 'temporary' | 'permanent';
 export type SelectionShape = 'linewise' | 'block';
+
+/** A drag's shape: Alt held, or a latched block, makes it a block (spec §3.2). */
+export const dragShape = (altKey: boolean, blockLatched: boolean | undefined): SelectionShape =>
+  altKey || blockLatched ? 'block' : 'linewise';
 
 export interface Selection {
   /** Absolute buffer row (scrollback + viewport), 0-indexed. */
@@ -24,6 +31,11 @@ export interface Selection {
   /** True while the user is still dragging; false once the mouse is released. */
   dragging: boolean;
   /**
+   * `'program'` for a drag the inside program owned, which Dormouse only
+   * shadowed: no outline and no editor until the copy chord (spec §3.8).
+   */
+  owner?: 'program';
+  /**
    * True when the drag originated in scrollback. Scrollback-origin drags are
    * always handled by the terminal regardless of the inside program's mouse
    * reporting (spec §3.5).
@@ -31,30 +43,41 @@ export interface Selection {
   startedInScrollback: boolean;
 }
 
-export interface TokenHint {
-  kind: 'url' | 'path';
-  /** Absolute buffer row the token occupies. */
-  row: number;
-  startCol: number;
-  /** Exclusive. */
-  endCol: number;
-  text: string;
+/** The copy editor over a finalized selection (spec §4). */
+export interface CopyEditorState {
+  /** The buffer read when the editor opened, so what it shows is what it
+   *  copies. */
+  buffer: CopyBuffer;
+  /** Narrowest first; `[0]` is the selection itself. */
+  scopes: readonly Scope[];
+  /** Index into {@link scopes}. */
+  scope: number;
+  format: EditorFormat;
+  /** Break index → kind, for the current scope and format only. */
+  overrides: Readonly<Record<number, BreakKind>>;
 }
 
-export type CopyFlashKind = 'raw' | 'rewrapped';
 
 export interface MouseSelectionState {
   mouseReporting: MouseTrackingMode;
   bracketedPaste: boolean;
   override: OverrideState;
   selection: Selection | null;
-  hintToken: TokenHint | null;
-  /**
-   * Set briefly after Cmd+C / Cmd+Shift+C / Cmd+N or a popup-button click, so
-   * the popup can flash a confirmation before everything clears.
-   */
-  copyFlash: CopyFlashKind | null;
+  /** The token under a drag's head, in absolute buffer rows. */
+  hintToken: BufferToken | null;
+  /** Open while non-null: always the editor written with this exact
+   *  `selection`, which is finalized. */
+  copyEditor: CopyEditorState | null;
+  /** The program's own `OSC 52` text, offered while it holds a shadowed drag
+   *  (spec §4.6); it goes with the selection. */
+  programCopy: string | null;
+  /** What the latest copy did, set briefly: a confirmed copy, after which
+   *  the selection clears, or a failed write, which keeps it for a retry. */
+  copyOutcome: CopyOutcome | null;
 }
+
+/** What a copy did, as its Copy button says (spec §4.5). */
+export type CopyOutcome = 'copied' | 'failed';
 
 export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze({
   mouseReporting: 'none',
@@ -62,12 +85,29 @@ export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze(
   override: 'off',
   selection: null,
   hintToken: null,
-  copyFlash: null,
+  copyEditor: null,
+  programCopy: null,
+  copyOutcome: null,
 }) as MouseSelectionState;
 
 const states = new Map<string, MouseSelectionState>();
 const listeners = new Set<() => void>();
 let cachedSnapshot: Map<string, MouseSelectionState> | null = null;
+
+/** Everything that belongs to a selection, so a writer that drops or replaces
+ *  one cannot leave another's editor, offer, or flash behind. */
+function clearSelection(s: MouseSelectionState): void {
+  s.selection = null;
+  s.copyEditor = null;
+  s.programCopy = null;
+  s.copyOutcome = null;
+  s.hintToken = null;
+}
+
+/** A drag the program owned, shadowed and waiting for the copy chord (§3.8). */
+export function isShadowed(state: MouseSelectionState): boolean {
+  return state.selection?.owner === 'program' && !state.copyEditor;
+}
 
 function notify(): void {
   cachedSnapshot = null;
@@ -108,6 +148,8 @@ export function setMouseReporting(id: string, mode: MouseTrackingMode): void {
   if (mode === 'none' && s.override !== 'off') {
     s.override = 'off';
   }
+  // A shadowed drag (§3.8) belonged to the program that just stopped reporting.
+  if (mode === 'none' && s.selection?.owner === 'program') clearSelection(s);
   notify();
 }
 
@@ -128,14 +170,42 @@ export function setOverride(id: string, override: OverrideState): void {
   notify();
 }
 
-export function setSelection(id: string, selection: Selection | null): void {
+/**
+ * Replace the selection and, in the same write, the copy editor over it: none
+ * unless one is given for a finalized selection, so an editor never outlives
+ * the selection it was opened for.
+ */
+export function setSelection(id: string, selection: Selection | null, copyEditor: CopyEditorState | null = null): void {
   const s = ensure(id);
   if (s.selection === null && selection === null) return;
-  s.selection = selection;
-  if (selection === null) {
-    s.copyFlash = null;
-    s.hintToken = null;
+  if (selection === null) clearSelection(s);
+  else {
+    // A replaced selection keeps an in-flight flash and the drag's hint, but
+    // not the program's offer, so its editor cannot show that offer either.
+    s.selection = selection;
+    s.programCopy = null;
+    s.copyEditor = selection.dragging || !copyEditor ? null
+      : copyEditor.format === 'program' ? { ...copyEditor, format: 'auto', overrides: {} } : copyEditor;
   }
+  notify();
+}
+
+/** Take a program's `OSC 52` text as an offer, but only into a pane holding a
+ *  shadowed drag (spec §4.6); dropped anywhere else. */
+export function offerProgramCopy(id: string, text: string): void {
+  const s = states.get(id);
+  if (s?.selection?.owner !== 'program' || s.programCopy === text) return;
+  s.programCopy = text;
+  notify();
+}
+
+/** Open or update the editor over the current finalized selection; a no-op
+ *  without one, or for the program's format without its offer. */
+export function setCopyEditor(id: string, editor: CopyEditorState): void {
+  const s = ensure(id);
+  if (!s.selection || s.selection.dragging || s.copyEditor === editor) return;
+  if (editor.format === 'program' && s.programCopy === null) return;
+  s.copyEditor = editor;
   notify();
 }
 
@@ -148,15 +218,15 @@ export function beginDrag(
   args: { row: number; col: number; altKey: boolean; blockLatched?: boolean; startedInScrollback: boolean },
 ): void {
   const s = ensure(id);
-  // Clear any in-flight copy flash so its timer won't null out this new
-  // selection when it fires (the timer checks `copyFlash !== kind`).
-  s.copyFlash = null;
+  // Clearing the in-flight copy flash too keeps its timer from clearing this
+  // new selection when it fires.
+  clearSelection(s);
   s.selection = {
     startRow: args.row,
     startCol: args.col,
     endRow: args.row,
     endCol: args.col,
-    shape: args.altKey || args.blockLatched ? 'block' : 'linewise',
+    shape: dragShape(args.altKey, args.blockLatched),
     ...(args.blockLatched ? { blockLatched: true } : {}),
     dragging: true,
     startedInScrollback: args.startedInScrollback,
@@ -167,18 +237,21 @@ export function beginDrag(
 /**
  * Update an in-progress drag. No-op if no drag is active or the drag has
  * already been released. The shape can flip live as Alt is pressed / released
- * (spec §3.2).
+ * (spec §3.2). `anchor` moves the drag's origin cell too: which cell a pointer
+ * boundary selects depends on which side of it the drag ends (§3.1).
  */
 export function updateDrag(
   id: string,
-  args: { row: number; col: number; altKey: boolean },
+  args: { row: number; col: number; altKey: boolean; anchor?: { row: number; col: number } },
 ): void {
   const s = ensure(id);
   const sel = s.selection;
   if (!sel || !sel.dragging) return;
-  const shape: SelectionShape = args.altKey || sel.blockLatched ? 'block' : 'linewise';
-  if (sel.endRow === args.row && sel.endCol === args.col && sel.shape === shape) return;
-  s.selection = { ...sel, endRow: args.row, endCol: args.col, shape };
+  const shape = dragShape(args.altKey, sel.blockLatched);
+  const startRow = args.anchor?.row ?? sel.startRow;
+  const startCol = args.anchor?.col ?? sel.startCol;
+  if (sel.endRow === args.row && sel.endCol === args.col && sel.shape === shape && sel.startRow === startRow && sel.startCol === startCol) return;
+  s.selection = { ...sel, startRow, startCol, endRow: args.row, endCol: args.col, shape };
   notify();
 }
 
@@ -217,58 +290,62 @@ export function stateRequiresNativeMouseSuppression(state: MouseSelectionState):
  * toward whichever token boundary is farther from the anchor so the drag
  * direction is respected.
  */
-export function extendSelectionToToken(id: string, token: TokenHint): void {
+export function extendSelectionToToken(id: string, token: BufferToken): void {
   const s = states.get(id);
   if (!s?.selection?.dragging) return;
   const sel = s.selection;
-  const anchorOnTokenRow = sel.startRow === token.row;
-  const forward = anchorOnTokenRow
-    ? sel.startCol <= token.startCol
-    : sel.startRow < token.row;
-  s.selection = {
-    ...sel,
-    endRow: token.row,
-    endCol: forward ? token.endCol - 1 : token.startCol,
-  };
+  const forward = comparePos({ row: sel.startRow, col: sel.startCol }, token.start) <= 0;
+  const edge = forward ? token.end : token.start;
+  s.selection = { ...sel, endRow: edge.row, endCol: edge.col };
   notify();
 }
 
-/**
- * Flip the in-progress drag's shape based on the current Alt-key state.
- * No-op when no drag is active. Used to react to Alt press/release while
- * the mouse is stationary (spec §3.2).
- */
-export function setDragAlt(id: string, altKey: boolean): void {
-  const s = states.get(id);
-  if (!s?.selection?.dragging) return;
-  const shape: SelectionShape = altKey || s.selection.blockLatched ? 'block' : 'linewise';
-  if (s.selection.shape === shape) return;
-  s.selection = { ...s.selection, shape };
-  notify();
-}
+/** How long a confirmed copy shows before the selection clears (spec §4.5):
+ *  longer on touch, where the finger covers the button and the eye arrives late. */
+export const COPY_FLASH_MS = 700;
+export const TOUCH_COPY_FLASH_MS = 1200;
+/** How long a failed copy says so, the selection kept. */
+export const COPY_FAILED_MS = 1500;
 
-/**
- * Trigger the copy confirmation flash ("Copied!").
- * The popup reads `copyFlash` and renders a confirmation state; after
- * `durationMs` the flash clears along with the selection, dismissing the popup.
- */
-export function flashCopy(id: string, kind: CopyFlashKind, durationMs = 700): void {
-  const s = ensure(id);
-  const selection = s.selection;
-  s.copyFlash = kind;
+/** Each state's latest copy outcome, so a timer acts only for its own. */
+const outcomes = new WeakMap<MouseSelectionState, object>();
+
+/** Show `outcome` for `durationMs`, unless the selection or a newer outcome
+ *  replaces it: then a confirmed copy clears the selection, dismissing the
+ *  editor whatever moved the selection meanwhile, and a failure clears only
+ *  itself. */
+function showCopyOutcome(id: string, s: MouseSelectionState, outcome: CopyOutcome, durationMs: number): void {
+  const token = {};
+  outcomes.set(s, token);
+  s.copyOutcome = outcome;
   notify();
   setTimeout(() => {
-    const current = states.get(id);
-    if (current !== s || current.selection !== selection || current.copyFlash !== kind) return;
-    current.copyFlash = null;
-    current.selection = null;
+    if (states.get(id) !== s || outcomes.get(s) !== token || s.copyOutcome === null) return;
+    if (outcome === 'copied') clearSelection(s);
+    else s.copyOutcome = null;
     notify();
   }, durationMs);
 }
 
-export function setHintToken(id: string, hint: TokenHint | null): void {
+/** Confirm a copy, the selection clearing after `durationMs`. */
+export function flashCopy(id: string, durationMs = COPY_FLASH_MS): void {
+  showCopyOutcome(id, ensure(id), 'copied', durationMs);
+}
+
+/** Say a copy failed, keeping the selection for a retry; a no-op without one. */
+export function failCopy(id: string): void {
+  const s = states.get(id);
+  if (s?.selection) showCopyOutcome(id, s, 'failed', COPY_FAILED_MS);
+}
+
+const sameToken = (a: BufferToken | null, b: BufferToken | null) => a === b || (!!a && !!b
+  && a.kind === b.kind && a.text === b.text && comparePos(a.start, b.start) === 0 && comparePos(a.end, b.end) === 0);
+
+/** Set the drag's token hint. Every drag move sets it, and a write rebuilds
+ *  every pane's snapshot, so the same token writes nothing. */
+export function setHintToken(id: string, hint: BufferToken | null): void {
   const s = ensure(id);
-  if (s.hintToken === null && hint === null) return;
+  if (sameToken(s.hintToken, hint)) return;
   s.hintToken = hint;
   notify();
 }

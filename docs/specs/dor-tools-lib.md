@@ -5,7 +5,7 @@
 
 ## Files
 
-- `dor-tools-lib/src/osc.ts` — OSC 367: the Tool's `serve` / `state` encoders and the host's parsers.
+- `dor-tools-lib/src/osc.ts` — OSC 367: the Tool's `serve` / `state` / `open` encoders and the host's parsers.
 - `dor-tools-lib/src/protocol.ts` — the iframe save channel's messages in both directions, versioned by `dorTool`.
 - `dor-tools-lib/src/frame.ts` — the Tool side of the save channel for a framed page.
 - `dor-tools-lib/src/sanitize.ts` — the package's own guards for untrusted input.
