@@ -5,8 +5,11 @@ import type { RelayEnv } from "../bindings";
 import {
   deliverPush,
   deliverWithinDeadline,
+  MAX_REASON_BYTES,
   knownPushEndpoint,
   pushConfigOf,
+  reasonOf,
+  vapidAuthorizations,
   type PushConfig,
 } from "../relay-push";
 import { NAMES, ORIGINS, testVapidKeys, wrangler } from "./bundle";
@@ -87,7 +90,7 @@ test("one delivery: 2xx delivered, 404 and 410 expired, a redirect or refusal or
       return response();
     }) as unknown as typeof fetch;
   const outcome = (response: () => Response) =>
-    deliverPush(target(), '{"v":1}', config, { fetch: answering(response) });
+    deliverPush(target(), '{"v":1}', vapidAuthorizations(config), { fetch: answering(response) });
   expect(await outcome(() => new Response(null, { status: 201 }))).toBe("delivered");
   expect(await outcome(() => new Response(null, { status: 404 }))).toBe("expired");
   expect(await outcome(() => new Response(null, { status: 410 }))).toBe("expired");
@@ -105,7 +108,7 @@ test("one delivery: 2xx delivered, 404 and 410 expired, a redirect or refusal or
     expect(logged.length).toBeLessThan(400);
     expect(logged).not.toContain("/fcm/send/abc");
     expect(
-      await deliverPush(target(), "{}", config, {
+      await deliverPush(target(), "{}", vapidAuthorizations(config), {
         fetch: (async () => {
           throw new Error("connection reset");
         }) as unknown as typeof fetch,
@@ -130,7 +133,7 @@ test("an endpoint outside the allowlist is never fetched, whatever the row says"
   const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
   try {
     expect(
-      await deliverPush(target("https://push.example.com/sub/abc"), "{}", await push(), {
+      await deliverPush(target("https://push.example.com/sub/abc"), "{}", vapidAuthorizations(await push()), {
         fetch: fetched as unknown as typeof fetch,
       }),
     ).toBe("failed");
@@ -166,9 +169,53 @@ test("a delivery past its deadline is failed and aborted; a throw is failed", as
   }
 });
 
+test("a refusal's reason keeps at most its bound of the body, however large a chunk, and cancels the rest", async () => {
+  let pulls = 0;
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    // One chunk far past the bound: blank up to it, a marker after.
+    pull(controller) {
+      pulls++;
+      controller.enqueue(new TextEncoder().encode(`${" ".repeat(MAX_REASON_BYTES)}beyond${"x".repeat(64 * 1024)}`));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  expect(await reasonOf(new Response(body, { status: 500 }))).toBe("");
+  expect(pulls).toBe(1);
+  expect(cancelled).toBe(true);
+  // Small chunks are kept up to the bound across reads.
+  const chunks = ['{"reason":', '"Overloaded"}'];
+  const small = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const next = chunks.shift();
+      if (next) controller.enqueue(new TextEncoder().encode(next));
+      else controller.close();
+    },
+  });
+  expect(await reasonOf(new Response(small, { status: 500 }))).toBe('{"reason":"Overloaded"}');
+});
+
+test("a send's VAPID JWT is signed once per push-service origin", async () => {
+  const config = await push();
+  const sign = vi.spyOn(config.signer, "authorization");
+  const authorize = vapidAuthorizations(config);
+  const fcm = await authorize(new URL("https://fcm.googleapis.com/fcm/send/a"));
+  expect(await authorize(new URL("https://fcm.googleapis.com/fcm/send/b"))).toBe(fcm);
+  const apple = await authorize(new URL("https://web.push.apple.com/c"));
+  expect(apple).not.toBe(fcm);
+  expect(sign).toHaveBeenCalledTimes(2);
+  // The JWT's `aud` is the origin, so one serves every endpoint there.
+  const audience = (authorization: string) =>
+    JSON.parse(Buffer.from(/t=[^.]+\.([^.]+)\./.exec(authorization)![1], "base64url").toString()).aud;
+  expect([audience(fcm), audience(apple)]).toEqual(["https://fcm.googleapis.com", "https://web.push.apple.com"]);
+});
+
 test("a send fits Workers Free's 50 subrequests, and no Wrangler config carries a VAPID key", () => {
-  // One fetch per distinct subscription of the sending Burrow, and its database connection.
-  expect(MAX_PUSH_SUBSCRIPTIONS_PER_BURROW + 1).toBeLessThanOrEqual(50);
+  // One fetch per distinct subscription of the sending Burrow, and its two
+  // database connections: the read, and the prune.
+  expect(MAX_PUSH_SUBSCRIPTIONS_PER_BURROW + 2).toBeLessThanOrEqual(50);
   for (const name of NAMES)
     expect(Object.keys((wrangler[name] as { vars: object }).vars).filter((key) => /VAPID/.test(key)), name).toEqual([]);
 });

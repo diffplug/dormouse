@@ -134,7 +134,7 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   delete another account's rows, even holding its `deliveryId`, and an
   upsert's endpoint rotation, its caps, and the 404/410 prune must stay inside
   the account. Every fetch must go to an endpoint `knownPushEndpoint` admits,
-  follow no redirect, and read only a bounded reason. Check the sender against
+  follow no redirect, and keep at most 1 KiB of a refusal's body. Check the sender against
   RFC 8291 and RFC 8292 yourself: the test's expected bytes must come from the
   RFC, not the code, and a JWT's `aud` must be the endpoint's origin. Look for
   an endpoint string that parses to an allowlisted host in one place and

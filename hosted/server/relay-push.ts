@@ -8,6 +8,7 @@ import {
   MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
   PUSH_SEND_DEADLINE_MS,
   PUSH_TTL_SECONDS,
+  concatBytes,
   defaultVapidSubject,
   isPushDeliveryId,
   isPushSubscriptionPayload,
@@ -31,7 +32,7 @@ import type {
   WebPushKeys,
 } from "remote-lib-common";
 import type { RelayEnv } from "./bindings";
-import { locked, requireBurrow, requireSession, type Client } from "./relay-auth";
+import { database, locked, readAsBurrow, requireBurrow, requireSession, type Client } from "./relay-auth";
 
 /**
  * The Web Push services a subscription may name, by exact host or by a
@@ -48,8 +49,8 @@ export const PUSH_SERVICE_HOST_SUFFIXES: readonly string[] = [
   ".notify.windows.com",
 ];
 
-/** Bytes of a refusal's body read for the log, and the characters kept of it. */
-const MAX_REASON_BYTES = 1024;
+/** Bytes of a refusal's body kept for the log, and the characters logged of them. */
+export const MAX_REASON_BYTES = 1024;
 const MAX_LOGGED_REASON = 200;
 
 /**
@@ -106,6 +107,26 @@ export async function pushConfigOf(env: RelayEnv): Promise<PushConfig | null> {
 
 export type PushDeliveryResult = "delivered" | "expired" | "failed";
 
+/** A delivery's VAPID `Authorization` for a push service's endpoint. */
+export type Authorize = (endpoint: URL) => Promise<string>;
+
+/**
+ * One send's VAPID authorizations: a JWT's `aud` is the push service's
+ * origin, so each origin's is signed once, on first use, and serves every
+ * endpoint there.
+ */
+export function vapidAuthorizations(push: PushConfig, nowMs = Date.now()): Authorize {
+  const byOrigin = new Map<string, Promise<string>>();
+  return (endpoint) => {
+    let authorization = byOrigin.get(endpoint.origin);
+    if (!authorization) {
+      authorization = push.signer.authorization(endpoint.href, push.subject, nowMs);
+      byOrigin.set(endpoint.origin, authorization);
+    }
+    return authorization;
+  };
+}
+
 /** One stored subscription, as delivery needs it. */
 export interface PushTarget {
   endpoint: string;
@@ -121,7 +142,7 @@ export interface PushTarget {
 export async function deliverPush(
   target: PushTarget,
   payload: string,
-  push: PushConfig,
+  authorize: Authorize,
   { fetch: send = fetch, signal }: { fetch?: typeof fetch; signal?: AbortSignal } = {},
 ): Promise<PushDeliveryResult> {
   const url = knownPushEndpoint(target.endpoint);
@@ -130,11 +151,10 @@ export async function deliverPush(
     return "failed";
   }
   try {
-    const request = await webPushRequest(
-      { endpoint: url.href, keys: target.keys },
-      utf8Encode(payload),
-      { signer: push.signer, subject: push.subject, ttlSeconds: PUSH_TTL_SECONDS, nowMs: Date.now() },
-    );
+    const request = await webPushRequest(target.keys, utf8Encode(payload), {
+      authorization: await authorize(url),
+      ttlSeconds: PUSH_TTL_SECONDS,
+    });
     const response = await send(url.href, {
       method: "POST",
       headers: request.headers,
@@ -188,30 +208,28 @@ export async function deliverWithinDeadline(
   }
 }
 
-/** The push service's own explanation, read to {@link MAX_REASON_BYTES}, collapsed and clamped. */
-async function reasonOf(response: Response): Promise<string> {
+/**
+ * The push service's own explanation, collapsed and clamped: at most
+ * {@link MAX_REASON_BYTES} of its body kept, each chunk copied down to what
+ * still fits so a large one is never retained, and the rest cancelled.
+ */
+export async function reasonOf(response: Response): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
-  const chunks: Uint8Array[] = [];
-  let read = 0;
+  const kept: Uint8Array[] = [];
+  let room = MAX_REASON_BYTES;
   try {
-    while (read < MAX_REASON_BYTES) {
+    while (room > 0) {
       const { done, value } = await reader.read();
       if (done) break;
-      chunks.push(value);
-      read += value.length;
+      const take = value.slice(0, room);
+      kept.push(take);
+      room -= take.length;
     }
   } finally {
     await reader.cancel().catch(() => {});
   }
-  const bytes = new Uint8Array(Math.min(read, MAX_REASON_BYTES));
-  let offset = 0;
-  for (const chunk of chunks) {
-    const take = Math.min(chunk.length, bytes.length - offset);
-    bytes.set(chunk.subarray(0, take), offset);
-    offset += take;
-  }
-  return clamp(new TextDecoder().decode(bytes));
+  return clamp(new TextDecoder().decode(concatBytes(...kept)));
 }
 
 function clamp(text: string): string {
@@ -316,33 +334,41 @@ export function relayPushRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     return c.json(res);
   });
 
-  app.post(API_ROUTES.pushSend, requireBurrow, async (c) => {
-    const push = await pushConfigOf(c.env);
-    if (!push) return c.json({ error: "push is not configured" }, 503);
-    const recipients: unknown = (await readJson<PushSendRequest>(c))?.recipients;
-    if (
-      !Array.isArray(recipients) ||
-      recipients.length === 0 ||
-      recipients.length > MAX_PUSH_QUERY_DELIVERY_IDS ||
-      !recipients.every(isSealedPushRecipient)
-    )
-      return c.json(
-        {
-          error:
-            `recipients must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} ` +
-            "{ deliveryId, sealed } pairs",
-        },
-        400,
+  // Never holds a Postgres connection across a push service's fetch: the
+  // targets are read on the gate's connection, released before the fan-out,
+  // and one is reopened only to prune.
+  app.post(API_ROUTES.pushSend, async (c) => {
+    const read = await readAsBurrow(c, async (db, burrow) => {
+      const push = await pushConfigOf(c.env);
+      if (!push) return c.json({ error: "push is not configured" }, 503);
+      const recipients: unknown = (await readJson<PushSendRequest>(c))?.recipients;
+      if (
+        !Array.isArray(recipients) ||
+        recipients.length === 0 ||
+        recipients.length > MAX_PUSH_QUERY_DELIVERY_IDS ||
+        !recipients.every(isSealedPushRecipient)
+      )
+        return c.json(
+          {
+            error:
+              `recipients must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} ` +
+              "{ deliveryId, sealed } pairs",
+          },
+          400,
+        );
+      const { rows } = await db.query<{ deliveryId: string; endpoint: string; p256dh: string; auth: string }>(
+        `SELECT s."deliveryId", s.endpoint, s.p256dh, s.auth
+        FROM dormouse_relay_push_subscriptions s
+        WHERE s."burrowId" = $1 AND s."vapidPublicKey" = $2 AND s."deliveryId" = ANY($3::text[])`,
+        [burrow.burrowId, push.signer.publicKey, recipients.map((recipient) => recipient.deliveryId)],
       );
+      return { burrow, push, recipients, rows };
+    });
+    if (read instanceof Response) return read;
+    const { burrow, push, recipients, rows } = read;
     // The Burrow is its token's, never the body's.
-    const { burrowId } = c.var.burrow;
-    const { db } = c.var;
-    const { rows } = await db.query<{ deliveryId: string; endpoint: string; p256dh: string; auth: string }>(
-      `SELECT s."deliveryId", s.endpoint, s.p256dh, s.auth
-      FROM dormouse_relay_push_subscriptions s
-      WHERE s."burrowId" = $1 AND s."vapidPublicKey" = $2 AND s."deliveryId" = ANY($3::text[])`,
-      [burrowId, push.signer.publicKey, recipients.map((recipient) => recipient.deliveryId)],
-    );
+    const { burrowId } = burrow;
+    const authorize = vapidAuthorizations(push);
     const byDelivery = new Map(rows.map((row) => [row.deliveryId, row]));
     // One fetch per subscription, so a send stays within the per-Burrow cap
     // of subrequests: a repeated recipient is not sent twice (rationale).
@@ -367,7 +393,7 @@ export function relayPushRoutes(app: Hono<{ Bindings: RelayEnv }>) {
                 salt: sealed.salt,
                 ct: sealed.ct,
               } satisfies SealedPushPayload),
-              push,
+              authorize,
               { signal },
             ),
           PUSH_SEND_DEADLINE_MS,
@@ -378,10 +404,12 @@ export function relayPushRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     // sending Burrow's account.
     const expired = results.filter((r) => r.result === "expired").map((r) => r.endpoint);
     if (expired.length > 0)
-      await db.query(
-        `DELETE FROM dormouse_relay_push_subscriptions s USING dormouse_relay_burrows b
-        WHERE b."burrowId" = s."burrowId" AND b."userId" = $1 AND s.endpoint = ANY($2::text[])`,
-        [c.var.burrow.userId, expired],
+      await database(c, (db) =>
+        db.query(
+          `DELETE FROM dormouse_relay_push_subscriptions s USING dormouse_relay_burrows b
+          WHERE b."burrowId" = s."burrowId" AND b."userId" = $1 AND s.endpoint = ANY($2::text[])`,
+          [burrow.userId, expired],
+        ),
       );
     const res: PushSendResponse = {
       delivered: results.filter((r) => r.result === "delivered").length,
@@ -404,7 +432,10 @@ interface Subscription {
 
 /**
  * Stores `record` for `userId`'s Burrow, or answers null when the Burrow is
- * not that account's. One transaction under the account's advisory lock:
+ * not that account's — or is being removed: the Burrow row is share-locked,
+ * so a concurrent removal either waits for this write and cascades it, or
+ * commits first and the Burrow is unknown. One transaction under the
+ * account's advisory lock:
  *
  * 1. Every address this delivery is moving off — read from the account's rows
  *    carrying its `deliveryId`, whichever Burrow — has its rows dropped,
@@ -423,10 +454,13 @@ export function upsertSubscription(
 ): Promise<PushSubscribeResponse | null> {
   return locked(db, `push:${userId}`, async () => {
     const { rowCount } = await db.query(
-      `SELECT 1 FROM dormouse_relay_burrows WHERE "burrowId" = $1 AND "userId" = $2`,
+      `SELECT 1 FROM dormouse_relay_burrows WHERE "burrowId" = $1 AND "userId" = $2 FOR KEY SHARE`,
       [record.burrowId, userId],
     );
     if (!rowCount) return null;
+    // `clock_timestamp()`, not `now()`: `now()` is the transaction's start,
+    // before the lock, so a write that waited would sort older than the one it
+    // followed, and the caps would evict it first.
     const {
       rows: [{ subscribedAt }],
     } = await db.query<{ subscribedAt: number }>(
@@ -443,11 +477,11 @@ export function upsertSubscription(
           AND NOT (s."burrowId" = $2 AND s."deliveryId" = $3)
       )
       INSERT INTO dormouse_relay_push_subscriptions AS s
-        ("burrowId", "deliveryId", endpoint, p256dh, auth, "vapidPublicKey")
-      VALUES ($2, $3, $4, $5, $6, $7)
+        ("burrowId", "deliveryId", endpoint, p256dh, auth, "vapidPublicKey", "subscribedAt")
+      VALUES ($2, $3, $4, $5, $6, $7, clock_timestamp())
       ON CONFLICT ("burrowId", "deliveryId") DO UPDATE SET
         endpoint = EXCLUDED.endpoint, p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth,
-        "vapidPublicKey" = EXCLUDED."vapidPublicKey", "subscribedAt" = now()
+        "vapidPublicKey" = EXCLUDED."vapidPublicKey", "subscribedAt" = EXCLUDED."subscribedAt"
       RETURNING ${SUBSCRIBED_AT_MS} AS "subscribedAt"`,
       [
         userId,

@@ -1,7 +1,8 @@
-import { createECDH, createHmac } from "node:crypto";
+import { createHmac } from "node:crypto";
 import { writeFile, mkdir, appendFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { vapidKeysFrom } from "./vapid.mjs";
 import { WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
 
 export function required(env, name) {
@@ -210,26 +211,14 @@ export function previewSecrets(configs, env) {
 /**
  * A preview's VAPID pair: the P-256 scalar is the HMAC of the preview secret
  * with `<name>/vapid`, so it is stable across a PR's redeploys and its
- * subscriptions survive them. A digest that is not a valid scalar (about one
- * in 2^32) takes the next counter.
+ * subscriptions survive them.
  */
-export function previewVapidKeys(secret, name) {
-  for (let counter = 0; ; counter++) {
-    const scalar = createHmac("sha256", secret)
+export const previewVapidKeys = (secret, name) =>
+  vapidKeysFrom((counter) =>
+    createHmac("sha256", secret)
       .update(`${name}/vapid${counter ? `/${counter}` : ""}`)
-      .digest();
-    const ecdh = createECDH("prime256v1");
-    try {
-      ecdh.setPrivateKey(scalar);
-    } catch {
-      continue;
-    }
-    return {
-      RELAY_VAPID_PUBLIC_KEY: ecdh.getPublicKey().toString("base64url"),
-      RELAY_VAPID_PRIVATE_KEY: scalar.toString("base64url"),
-    };
-  }
-}
+      .digest(),
+  );
 
 /** Each Worker's origin in `configs`, keyed as `WORKERS` is. */
 export const originsOf = (configs) =>

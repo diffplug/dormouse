@@ -273,17 +273,19 @@ stale row rather than leave one per rotation:
   or Client delete.
 * **Every stored field is bounded and the row count is capped** — the one
   *durable* store a session token can grow (rationale). `endpoint` at
-  `MAX_PUSH_ENDPOINT_LENGTH` (1024) on admission; both `keys` at the base64
-  lengths RFC 8291 fixes — `p256dh` an uncompressed P-256 point, `auth` the
-  16-byte secret — each at its *padded* encoding, so a browser that pads still
-  registers. An upsert then caps the committed set at
+  `MAX_PUSH_ENDPOINT_LENGTH` (1024) on admission; both `keys` bounded at the
+  base64 lengths RFC 8291 fixes, each at its *padded* encoding so a browser
+  that pads still registers, and refused unless they decode to them —
+  `p256dh` an uncompressed P-256 point (`0x04`-led), `auth` the 16-byte
+  secret (`isWebPushKeys`). An upsert then caps the committed set at
   `MAX_PUSH_SUBSCRIPTIONS_PER_BURROW` (32) and `MAX_PUSH_SUBSCRIPTIONS_TOTAL`
   (256), **evicting the oldest `subscribedAt` first and never the row it just
   wrote**. Eviction covers every Burrow, so a hand-edited file over the cap
   converges on the next write.
 
 Source of truth: `relay/src/state.ts`; the caps and field bounds in
-`remote-lib-common/src/remote/relay-common.ts`.
+`remote-lib-common/src/remote/relay-common.ts`; `isWebPushKeys` in
+`remote-lib-common/src/remote/web-push.ts`.
 
 ## WebAuthn without a WebAuthn library
 

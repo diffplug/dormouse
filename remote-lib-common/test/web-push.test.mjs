@@ -205,11 +205,11 @@ test('a push request carries the encrypted body, the VAPID authorization, TTL, a
   const signer = await vapidSigner(nodeVapidKeys());
   const subscription = browserSubscription();
   const endpoint = 'https://web.push.apple.com/QGuQyavXutnMH-5';
-  const { headers, body } = await webPushRequest(
-    { endpoint, keys: subscription.keys },
-    utf8Encode('{"v":1}'),
-    { signer, subject: 'https://relay.example.test', ttlSeconds: 300, nowMs: Date.now() },
-  );
+  const authorization = await signer.authorization(endpoint, 'https://relay.example.test', Date.now());
+  const { headers, body } = await webPushRequest(subscription.keys, utf8Encode('{"v":1}'), {
+    authorization,
+    ttlSeconds: 300,
+  });
   assert.deepEqual(Object.keys(headers).sort(), [
     'authorization',
     'content-encoding',
@@ -217,7 +217,7 @@ test('a push request carries the encrypted body, the VAPID authorization, TTL, a
     'ttl',
     'urgency',
   ]);
-  assert.match(headers.authorization, /^vapid t=[^,]+, k=/);
+  assert.equal(headers.authorization, authorization);
   assert.equal(headers['content-encoding'], 'aes128gcm');
   assert.equal(headers.ttl, '300');
   assert.equal(headers.urgency, 'high');

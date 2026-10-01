@@ -148,9 +148,10 @@ export async function encryptWebPush(
 ): Promise<Uint8Array> {
   const crypto = options.crypto ?? getWebCrypto();
   const subtle = subtleOf(crypto);
-  const uaPublic = decodePushKey(keys.p256dh, P256_POINT_LENGTH, 'p256dh');
-  if (uaPublic[0] !== 4) throw new Error('p256dh is not an uncompressed P-256 point');
-  const authSecret = decodePushKey(keys.auth, AUTH_SECRET_LENGTH, 'auth');
+  const uaPublic = decodeP256dh(keys.p256dh);
+  if (!uaPublic) throw new Error('p256dh is not an uncompressed P-256 point');
+  const authSecret = decodeAuthSecret(keys.auth);
+  if (!authSecret) throw new Error(`auth must decode to ${AUTH_SECRET_LENGTH} bytes`);
   if (plaintext.length > MAX_WEB_PUSH_PLAINTEXT_LENGTH) {
     throw new Error(`push payload exceeds ${MAX_WEB_PUSH_PLAINTEXT_LENGTH} bytes`);
   }
@@ -267,28 +268,26 @@ export interface WebPushRequest {
 
 /**
  * One push's headers and encrypted body: `aes128gcm`, the VAPID
- * authorization, `TTL`, and high urgency, an alarm being worth waking for.
+ * `authorization` ({@link VapidSigner.authorization} for the endpoint's
+ * origin, which one JWT serves for every endpoint there), `TTL`, and high
+ * urgency, an alarm being worth waking for.
  */
 export async function webPushRequest(
-  target: { readonly endpoint: string; readonly keys: WebPushKeys },
+  keys: WebPushKeys,
   payload: Uint8Array,
   {
-    signer,
-    subject,
+    authorization,
     ttlSeconds,
-    nowMs,
     ...encrypt
   }: WebPushEncryptOptions & {
-    readonly signer: VapidSigner;
-    readonly subject: string;
+    readonly authorization: string;
     readonly ttlSeconds: number;
-    readonly nowMs: number;
   },
 ): Promise<WebPushRequest> {
-  const body = await encryptWebPush(payload, target.keys, encrypt);
+  const body = await encryptWebPush(payload, keys, encrypt);
   return {
     headers: {
-      authorization: await signer.authorization(target.endpoint, subject, nowMs),
+      authorization,
       'content-encoding': 'aes128gcm',
       'content-type': 'application/octet-stream',
       ttl: String(ttlSeconds),
@@ -358,18 +357,37 @@ export function defaultVapidSubject(origin: string): string | null {
 }
 
 /**
- * A subscription key as browsers serialize it: base64url, or base64 with
- * padding, decoding to exactly `length` bytes.
+ * True if `keys` are subscription keys {@link encryptWebPush} can encrypt to:
+ * `p256dh` an uncompressed P-256 point, `auth` the 16-byte secret. Both Relays
+ * refuse any other at registration (`isPushSubscriptionPayload`).
  */
-function decodePushKey(value: string, length: number, name: string): Uint8Array {
-  let decoded: Uint8Array;
+export function isWebPushKeys(keys: { readonly p256dh: unknown; readonly auth: unknown }): boolean {
+  return decodeP256dh(keys.p256dh) !== null && decodeAuthSecret(keys.auth) !== null;
+}
+
+/** A `p256dh` as its 65-byte uncompressed point (leading `0x04`), or null. */
+function decodeP256dh(value: unknown): Uint8Array | null {
+  const point = decodePushKey(value, P256_POINT_LENGTH);
+  return point && point[0] === 4 ? point : null;
+}
+
+/** An `auth` as its 16 bytes, or null. */
+function decodeAuthSecret(value: unknown): Uint8Array | null {
+  return decodePushKey(value, AUTH_SECRET_LENGTH);
+}
+
+/**
+ * A subscription key as browsers serialize it — base64url or base64, padded
+ * or not — decoding to exactly `length` bytes, or null.
+ */
+function decodePushKey(value: unknown, length: number): Uint8Array | null {
+  if (typeof value !== 'string') return null;
   try {
-    decoded = fromBase64Url(value.replace(/\+/g, '-').replace(/\//g, '_'));
+    const decoded = fromBase64Url(value.replace(/\+/g, '-').replace(/\//g, '_'));
+    return decoded.length === length ? decoded : null;
   } catch {
-    throw new Error(`${name} is not base64url`);
+    return null;
   }
-  if (decoded.length !== length) throw new Error(`${name} must decode to ${length} bytes`);
-  return decoded;
 }
 
 /** A P-256 scalar and its point as a WebCrypto private key for `algorithm`. */

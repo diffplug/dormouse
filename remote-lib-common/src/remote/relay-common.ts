@@ -26,6 +26,7 @@ import {
 import { boundedPushText } from '../security/push.js';
 import { MAX_SEALED_PUSH_LENGTH, isSealedPushV1 } from '../security/push-seal.js';
 import { getWebCrypto } from '../security/webcrypto.js';
+import { isWebPushKeys } from './web-push.js';
 import {
   E2E_ID_LENGTH,
   MAX_CLIENT_ID_LENGTH,
@@ -227,10 +228,11 @@ export function isPushDeliveryId(value: unknown): value is string {
 }
 
 /**
- * True if `value` is a `PushSubscriptionPayload` with both encryption keys,
- * each of a length RFC 8291 could actually have produced. Non-empty, because a
- * blank key is a row no sender can ever encrypt to. **Every stored field is
- * bounded**: these three are the whole row.
+ * True if `value` is a `PushSubscriptionPayload` whose keys a sender can
+ * encrypt to: each within its bound, `p256dh` decoding to an uncompressed
+ * P-256 point and `auth` to 16 bytes, padded or not (`isWebPushKeys`), so a
+ * row no push could ever reach is refused at registration. **Every stored
+ * field is bounded**: these three are the whole row.
  */
 export function isPushSubscriptionPayload(value: unknown): value is PushSubscriptionPayload {
   if (!value || typeof value !== 'object') return false;
@@ -240,7 +242,8 @@ export function isPushSubscriptionPayload(value: unknown): value is PushSubscrip
     !!v.keys &&
     typeof v.keys === 'object' &&
     isBoundedNonEmptyString(v.keys.p256dh, MAX_PUSH_KEY_P256DH_LENGTH) &&
-    isBoundedNonEmptyString(v.keys.auth, MAX_PUSH_KEY_AUTH_LENGTH)
+    isBoundedNonEmptyString(v.keys.auth, MAX_PUSH_KEY_AUTH_LENGTH) &&
+    isWebPushKeys(v.keys)
   );
 }
 

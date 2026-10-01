@@ -88,7 +88,7 @@ export const ENROLLMENT_POLL_INTERVAL_S = 5;
 const DEVICE_CODE_EXPIRY_BYTES = 4;
 
 /** A table a caller grows, capped per `owner` value. */
-interface Capped {
+export interface Capped {
   table: string;
   pk: string;
   owner: string;
@@ -107,7 +107,7 @@ const SETUP_CHALLENGES: Capped = {
   owner: '"burrowId"',
   cap: MAX_SETUP_CHALLENGES_PER_BURROW,
 };
-const SESSIONS: Capped = {
+export const SESSIONS: Capped = {
   table: "dormouse_relay_sessions",
   pk: '"tokenHash"',
   owner: '"userId"',
@@ -134,8 +134,13 @@ const EXPIRING_TABLES = [
 const epochMs = (column: string) =>
   `floor(extract(epoch from ${column}) * 1000)::float8`;
 
-/** `now()` plus `$n` milliseconds. */
-const after = (param: string) => `now() + (${param}::float8 * interval '1 millisecond')`;
+/**
+ * `clock_timestamp()` plus `$n` milliseconds. Not `now()`, the transaction's
+ * start: a capped insert takes its lock inside the transaction, so a write
+ * that waited would expire before the one it followed and be trimmed first.
+ */
+const after = (param: string) =>
+  `clock_timestamp() + (${param}::float8 * interval '1 millisecond')`;
 
 /** 429 past `limit` per address, before anything reaches the database. */
 const perAddress =
@@ -621,7 +626,7 @@ async function consumeChallenge(db: Client, challenge: string, burrowId: string 
  * row already expired is not inserted. Answers its expiry in epoch
  * milliseconds, or undefined when nothing was inserted.
  */
-async function admit(
+export async function admit(
   db: Client,
   { table, pk, owner, cap }: Capped,
   ownerValue: string,

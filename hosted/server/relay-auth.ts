@@ -102,11 +102,11 @@ export type RelayHonoEnv<Var extends object = object> = {
   Variables: { db: Client } & Var;
 };
 
-/** One connection per request, released before the response. */
-export function database(
+/** One connection, released once `action` settles. */
+export function database<T>(
   c: { env: Pick<RelayEnv, "HYPERDRIVE"> },
-  action: (db: Client) => Promise<Response>,
-): Promise<Response> {
+  action: (db: Client) => Promise<T>,
+): Promise<T> {
   return withClient(c.env.HYPERDRIVE.connectionString, action);
 }
 
@@ -128,42 +128,69 @@ export async function locked<T>(db: Client, key: string, action: () => Promise<T
 
 export const unauthorized = (c: Context) => c.json({ error: UNAUTHORIZED_ERROR }, 401);
 
+/** How a credential gate finds its bearer's row and decides whether to admit it. */
+interface Gate<Found> {
+  lookup(db: Client, token: string): Promise<Found | null>;
+  admit(c: Context, found: Found): Response | null;
+}
+
 /**
- * A credential gate as Hono middleware: a bearer of the minted shape (refused
- * before any database read), resolved by `lookup` on the request's
- * connection, and admitted by `admit` or answered with its response.
+ * Runs `action` on a connection once `gate` admits the request's bearer: a
+ * bearer of the minted shape (refused before any database read), resolved on
+ * that connection, and admitted or answered with the gate's response.
  */
+async function gated<Found, T>(
+  c: Context,
+  { lookup, admit }: Gate<Found>,
+  action: (db: Client, found: Found) => Promise<T>,
+): Promise<T | Response> {
+  const token = parseBearer(c.req.header("authorization"));
+  if (!isRelayBearer(token)) return unauthorized(c);
+  return database(c, async (db) => {
+    const found = await lookup(db, token);
+    if (!found) return unauthorized(c);
+    return admit(c, found) ?? action(db, found);
+  });
+}
+
+/** A credential gate as Hono middleware, the request's connection held through the route. */
 function bearerGate<Name extends string, Found>(
   name: Name,
-  lookup: (db: Client, token: string) => Promise<Found | null>,
-  admit: (c: Context, found: Found) => Response | null,
+  gate: Gate<Found>,
 ): MiddlewareHandler<RelayHonoEnv<Record<Name, Found>>> {
-  return async (c, next) => {
-    const token = parseBearer(c.req.header("authorization"));
-    if (!isRelayBearer(token)) return unauthorized(c);
-    return database(c, async (db) => {
-      const found = await lookup(db, token);
-      if (!found) return unauthorized(c);
-      const refused = admit(c, found);
-      if (refused) return refused;
+  return (c, next) =>
+    gated(c, gate, async (db, found) => {
       const vars = c as unknown as Context<{ Variables: Record<string, unknown> }>;
       vars.set("db", db);
       vars.set(name, found);
       await next();
       return c.res;
     });
-  };
 }
 
 /**
  * Session-gated routes: a de-entitled account's session is the same 401 as an
  * expired one, so Pocket returns to sign-in.
  */
-export const requireSession = bearerGate("session", sessionByToken, (c, session) =>
-  session.entitled ? null : unauthorized(c),
-);
+export const requireSession = bearerGate("session", {
+  lookup: sessionByToken,
+  admit: (c, session) => (session.entitled ? null : unauthorized(c)),
+});
 
 /** Burrow-gated routes: an owner not entitled is a 403, rechecked per request. */
-export const requireBurrow = bearerGate("burrow", burrowByToken, (c, burrow) =>
-  burrow.entitled ? null : c.json({ error: NOT_ENTITLED_ERROR }, 403),
-);
+const BURROW_GATE: Gate<RelayBurrow> = {
+  lookup: burrowByToken,
+  admit: (c, burrow) => (burrow.entitled ? null : c.json({ error: NOT_ENTITLED_ERROR }, 403)),
+};
+export const requireBurrow = bearerGate("burrow", BURROW_GATE);
+
+/**
+ * The Burrow gate for a route whose work outlasts its reads: `read` runs on
+ * the gate's connection, which is released before this answers, so what the
+ * route does next never holds it. Answers what `read` does, or the gate's
+ * refusal.
+ */
+export const readAsBurrow = <T>(
+  c: Context<{ Bindings: RelayEnv }>,
+  read: (db: Client, burrow: RelayBurrow) => Promise<T>,
+): Promise<T | Response> => gated(c, BURROW_GATE, read);

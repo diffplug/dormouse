@@ -356,8 +356,11 @@ rm vapid.json
 ```
 
 The public half is public (`GET /api/push/config` serves it); the private half
-signs every push. Push stays off, not half-working, until both are set and
-match. Rotating the pair makes every phone's subscription stale until Pocket
+signs every push. Both are required for a production deploy: preflight refuses
+a relay Worker missing either. Cloudflare exposes a secret's name, never its
+value, so preflight cannot tell whether the two match; the relay answers push
+off for a pair that does not, and the release's live verification fails
+unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket
 re-registers it, so rotate only on compromise. Previews derive their own pair
 and never need this one.
 

@@ -386,13 +386,15 @@ test("deployment smoke rejects malformed health before making any auth requests"
   assert.equal(requests, 1);
 });
 
-test("the smoke runs its parts concurrently, retries each alone, and checks the rendezvous after the relay's revision alone", async () => {
+test("the smoke runs its parts concurrently, retries each alone, and checks the push config and rendezvous after the relay's revision alone", async () => {
   const origins = {
     account: "https://account.example.test",
     relay: "https://relay.example.test",
     voice: "https://voice.example.test",
   };
   const events = [];
+  // The relay's VAPID key, or null while push is off.
+  let pushKey = `B${"A".repeat(86)}`;
   // How many more health checks each origin fails before it is healthy.
   const unhealthy = {};
   // Every request the production smoke makes, answered as a healthy account would.
@@ -405,6 +407,11 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
         return Response.json({ ok: false }, { status: 503 });
       }
       return Response.json({ ok: true, revision: env.BUILD_SHA });
+    }
+    if (pathname === "/api/push/config") {
+      assert.equal(origin, origins.relay);
+      events.push("push");
+      return Response.json({ applicationServerKey: pushKey });
     }
     assert.equal(origin, origins.account);
     if (pathname === "/api/ready") return new Response(null, { status: 200 });
@@ -444,7 +451,18 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
   assert.equal(count(`${origins.voice} health`), 1);
   assert.equal(count(`${origins.relay} health`), 2);
   assert.equal(count("one-time"), 1);
+  assert.equal(count("push"), 1);
+  assert.ok(events.indexOf("push") > events.lastIndexOf(`${origins.relay} health`));
   assert.equal(events.at(-1), "one-time");
+
+  // A relay with push off — a VAPID secret missing, or a pair that does not
+  // match — fails the smoke: preflight can read only the secrets' names.
+  events.length = 0;
+  pushKey = null;
+  await assert.rejects(smokeAll(origins, env.BUILD_SHA, { fetcher, oneTime }), {
+    message: `${origins.relay} must answer a VAPID key: both relay secrets set, as one pair`,
+  });
+  pushKey = `B${"A".repeat(86)}`;
 
   // Per-part attempts: the account runs once while the relay and voice retry.
   events.length = 0;

@@ -42,8 +42,12 @@ import {
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
   MAX_SETUP_CHALLENGES_PER_BURROW,
+  SESSIONS,
+  admit,
   restoreSetupToken,
 } from "../relay-api";
+import type { Client } from "../relay-auth";
+import { upsertSubscription } from "../relay-push";
 import {
   ENTRIES,
   ORIGINS,
@@ -1388,6 +1392,137 @@ test("send outcomes: 404 and 410 prune, a refusal, a redirect, or a throw is fai
   expect((await f.rows()).map((row) => row.endpoint).sort()).toEqual(
     ["ok", "refused", "redirect", "throw"].map((name) => FCM + name).sort(),
   );
+});
+
+/** Polls `ready` every 25 ms until it holds, for at most `ms`; answers whether it did. */
+async function eventually(ready: () => Promise<boolean>, ms = 5_000) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    if (await ready()) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/**
+ * Backends on the fixture's database that have run a query, other than the
+ * one counting them (Miniflare's Hyperdrive keeps one open that never has),
+ * optionally only those waiting on a lock.
+ */
+async function backends(f: Awaited<ReturnType<typeof fixture>>, waitingOnLock = false) {
+  const [{ n }] = await f.sql<{ n: number }>(
+    `SELECT count(*)::int AS n FROM pg_stat_activity
+    WHERE datname = current_database() AND pid <> pg_backend_pid() AND query <> ''
+      AND (NOT $1 OR wait_event_type = 'Lock')`,
+    [waitingOnLock],
+  );
+  return n;
+}
+
+test("a send holds no Postgres connection while a push service answers, and reopens one only to prune", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const gone = randomSecret();
+  await f.subscribe(gone, browserSubscription(FCM + "gone").subscription);
+  let released = false;
+  f.answerPushes(async () => {
+    // A closed connection's backend can outlive the close by a moment.
+    released = await eventually(async () => (await backends(f)) === 0, 2_000);
+    return new WorkerResponse(null, { status: 410 });
+  });
+  expect((await f.send(to(gone))).json).toEqual({ delivered: 0, expired: 1, unknown: 0, failed: 0 });
+  expect(released).toBe(true);
+  expect(await f.rows()).toEqual([]);
+});
+
+test("a send signs one VAPID JWT per push-service origin", async ({ onTestFinished }) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  const mozilla = "https://updates.push.services.mozilla.com/wpush/v2/";
+  const ids = [randomSecret(), randomSecret(), randomSecret()];
+  for (const [i, endpoint] of [FCM + "a", FCM + "b", mozilla + "c"].entries())
+    await f.subscribe(ids[i], browserSubscription(endpoint).subscription);
+  expect((await f.send(to(...ids))).json).toMatchObject({ delivered: 3 });
+  const byOrigin = new Map<string, Set<string>>();
+  for (const { url, headers } of f.pushed) {
+    const origin = new URL(url).origin;
+    byOrigin.set(origin, (byOrigin.get(origin) ?? new Set()).add(headers.authorization));
+  }
+  // ECDSA signatures are randomized, so a second signing would differ.
+  expect([...byOrigin].map(([origin, tokens]) => [origin, tokens.size])).toEqual([
+    ["https://fcm.googleapis.com", 1],
+    ["https://updates.push.services.mozilla.com", 1],
+  ].sort());
+});
+
+test("a subscribe racing its Burrow's removal answers unknown burrow, never a database error", async ({
+  onTestFinished,
+}) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  await withClient(f.url, async (remover) => {
+    // The removal has deleted the row and not yet committed.
+    await remover.query("BEGIN");
+    await remover.query(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [f.laptop.burrowId]);
+    const subscribed = f.subscribe(randomSecret());
+    expect(await eventually(async () => (await backends(f, true)) === 1)).toBe(true);
+    await remover.query("COMMIT");
+    expect(await subscribed).toMatchObject({ status: 404, json: { error: "unknown burrow" } });
+  });
+  expect(await f.rows()).toEqual([]);
+});
+
+test("a capped write that waited on its lock is stamped after the write it followed", async ({ onTestFinished }) => {
+  const f = await pushFixture();
+  onTestFinished(f.close);
+  /**
+   * Runs `write` on a connection that pauses just after `BEGIN` while `other`
+   * runs to completion: a transaction that began first and takes the lock
+   * second. Answers both results.
+   */
+  async function interleaved<T>(write: (db: Client) => Promise<T>) {
+    return withClient(f.url, async (db) => {
+      let began!: () => void;
+      let go!: () => void;
+      const begun = new Promise<void>((resolve) => (began = resolve));
+      const gate = new Promise<void>((resolve) => (go = resolve));
+      const paused: Client = {
+        async query<Row>(text: string, values?: unknown[]) {
+          const result = await (db as Client).query<Row>(text, values);
+          if (text === "BEGIN") {
+            began();
+            await gate;
+          }
+          return result;
+        },
+      };
+      const waited = write(paused);
+      await begun;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const first = await withClient(f.url, write);
+      go();
+      return { first, waited: await waited };
+    });
+  }
+  const vapidPublicKey = testVapidKeys().RELAY_VAPID_PUBLIC_KEY;
+  const subscriptions = await interleaved((db) => {
+    const deliveryId = randomSecret();
+    const { keys } = browserSubscription().subscription;
+    return upsertSubscription(db, f.owner, {
+      burrowId: f.laptop.burrowId,
+      deliveryId,
+      endpoint: FCM + deliveryId,
+      keys,
+      vapidPublicKey,
+    });
+  });
+  expect(subscriptions.waited!.subscribedAt).toBeGreaterThan(subscriptions.first!.subscribedAt);
+  const sessions = await interleaved((db) =>
+    admit(db, SESSIONS, f.owner, { tokenHash: digest(randomSecret()), userId: f.owner }, 60_000),
+  );
+  expect(sessions.waited!).toBeGreaterThan(sessions.first!);
 });
 
 test("a send waits at most its deadline for a hung push service, keeping the row", async ({ onTestFinished }) => {

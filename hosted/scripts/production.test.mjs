@@ -128,6 +128,10 @@ test("production smokes the relay before anything after it deploys, and a relay 
   // The relay's health fails this many times before it passes.
   let unhealthy = 5;
   const fetcher = async (url) => {
+    if (url === "https://relay.dormouse.sh/api/push/config") {
+      events.push("relay push");
+      return Response.json({ applicationServerKey: "B" + "A".repeat(86) });
+    }
     assert.equal(url, "https://relay.dormouse.sh/api/health");
     events.push("relay health");
     return unhealthy-- > 0
@@ -150,6 +154,7 @@ test("production smokes the relay before anything after it deploys, and a relay 
   assert.deepEqual(events, [
     "deploy dormouse-relay",
     ...Array(6).fill("relay health"),
+    "relay push",
     "relay one-time",
     "deploy dormouse-voice",
     "deploy dormouse-hosted",
@@ -165,7 +170,7 @@ test("production smokes the relay before anything after it deploys, and a relay 
   );
   // Six attempts, then nothing else deploys: the account's `v2` never runs.
   assert.equal(rendezvous, 6);
-  assert.deepEqual(events, ["deploy dormouse-relay", "relay health"]);
+  assert.deepEqual(events, ["deploy dormouse-relay", "relay health", "relay push"]);
 });
 test("live verification retries the relay and voice while their domains come up, and runs the account's POSTs once", async () => {
   const health = {};
@@ -177,6 +182,10 @@ test("live verification retries the relay and voice while their domains come up,
   };
   const fetcher = async (url) => {
     const { origin, pathname } = new URL(url);
+    if (pathname === "/api/push/config") {
+      assert.equal(origin, "https://relay.dormouse.sh");
+      return Response.json({ applicationServerKey: `B${"A".repeat(86)}` });
+    }
     assert.equal(pathname, "/api/health");
     health[origin] = (health[origin] ?? 0) + 1;
     return health[origin] > failing[origin]
