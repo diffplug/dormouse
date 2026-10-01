@@ -1,7 +1,7 @@
 import { doPaste } from '../../../lib/clipboard';
 import { cycleCopyFormat, nudgeCopyEdge, openCopyEditor, stepCopyScope } from '../../../lib/copy-editor';
 import { copySelection } from '../../../lib/copy-selection';
-import { isEditableTarget, isTerminalInputProxy } from '../../../lib/dom';
+import { anchoredTarget, isEditableTarget, isTerminalInputProxy } from '../../../lib/dom';
 import {
   extendSelectionToToken,
   getMouseSelectionState,
@@ -35,8 +35,9 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
 
   // These chords copy/paste against a terminal's pty and mouse selection.
   // Non-terminal surfaces (agent-browser, iframe) own their clipboard keys —
-  // e.g. AgentBrowserPanel forwards cmd-V to the embedded page — so yield.
-  const contextTerminal = tgt?.closest?.<HTMLElement>('[data-context-terminal]');
+  // e.g. AgentBrowserPanel forwards cmd-V to the embedded page — so yield. A
+  // portaled copy editor counts as where its anchor sits.
+  const contextTerminal = (anchoredTarget(tgt) as HTMLElement | null)?.closest?.<HTMLElement>('[data-context-terminal]');
   if (contextTerminal?.dataset.contextTerminal !== sid && !hasActiveTerminal(ctx, sid)) return false;
 
   const mouseState = getMouseSelectionState(sid);

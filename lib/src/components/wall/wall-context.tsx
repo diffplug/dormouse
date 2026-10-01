@@ -21,6 +21,12 @@ export const PassthroughPaneIdContext = createContext<string | null>(null);
 /** The last visible ring frame, carried between active Walls in one Window. */
 export const RingHandoffContext = createContext<RefObject<RingFrame | null> | null>(null);
 
+/** The Lath animator's per-frame signal (`LathWallEngine.subscribeFrames`),
+ *  provided by LathHost. Panes moving under Lath send no render tick, so chrome
+ *  portaled out of a pane re-measures it here. Null outside a LathHost: mobile,
+ *  and stories without a Wall. */
+export const LayoutFramesContext = createContext<((cb: (settled: boolean) => void) => () => void) | null>(null);
+
 /** Terminal fitting waits for committed, fully painted geometry. Standalone
  *  terminal mounts have no layout coordinator and use their resize observer. */
 export const TerminalResizeContext = createContext<{

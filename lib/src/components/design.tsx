@@ -234,6 +234,11 @@ export interface ModalRect {
  *  (docs/specs/layout.md → "Selection overlay"). */
 export const SELECTION_RING_Z_INDEX = 50;
 
+/** The copy editor's z-index, also on `document.body`: above the ring and any
+ *  in-Wall chrome, below every `MODAL_LAYERS` value. Never `app`: a tie with
+ *  `SettingsDialog` would fall back to insertion order. */
+export const COPY_EDITOR_Z_INDEX = 55;
+
 export const MODAL_LAYERS = {
   app: 60,
   pane: 100,

@@ -101,6 +101,9 @@ Event routing, by mode:
   alone so it still reaches the terminal, and real mouse pointers fall through
   untouched. (rationale)
 
+**Never treat a portaled descendant as pane content**: a press outside the
+host's DOM starts no touch mode, tap, or keyboard dismissal.
+
 **Must release a tracked Mouse-mode press on pointerup or cancel even after
 leaving Mouse mode.** Cancellation releases on the last target.
 
@@ -110,7 +113,7 @@ the pointer, and **must never reach xterm or the pane** for focus, selection,
 or pane interaction. **Non-primary mouse buttons
 are ignored**, so their browser or host behavior continues.
 
-Source of truth: `TOUCH_MODES` and `paneMouseOverride` in
+Source of truth: `TOUCH_MODES`, `paneMouseOverride`, and `isPortaledTarget` in
 `lib/src/components/MobileTerminalUi.tsx`; per-pane wiring in
 `lib/src/remote/pocket-app/PocketWall.tsx` and
 `website/src/components/PocketTerminalExperience.tsx`.

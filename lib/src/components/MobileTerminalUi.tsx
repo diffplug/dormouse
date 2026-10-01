@@ -8,6 +8,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
   type ReactNode,
+  type SyntheticEvent,
 } from 'react';
 import {
   ArticleNyTimesIcon,
@@ -424,6 +425,14 @@ function withinTapSlop(tap: PendingTap, event: PointerEvent<HTMLElement>): boole
   return Math.hypot(event.clientX - tap.clientX, event.clientY - tap.clientY) <= RADIUS_FADE_START;
 }
 
+/** A press inside a portaled descendant (the copy editor) reaches the host's
+ *  capture handlers only through React. It is not pane content, so it begins no
+ *  touch mode, tap, or keyboard dismissal. Only the press is checked: the later
+ *  events of a press the host took are keyed by its pointer id. */
+function isPortaledTarget(event: SyntheticEvent<HTMLElement>): boolean {
+  return !event.currentTarget.contains(event.target as Node);
+}
+
 function isGestureDialogTarget(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest('[data-mobile-gesture-dialog]') !== null;
 }
@@ -757,7 +766,7 @@ export function MobileTerminalUi({
   }, []);
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (isGestureDialogTarget(event.target)) return;
+    if (isPortaledTarget(event) || isGestureDialogTarget(event.target)) return;
     // A tap acknowledges the active Session, a drag or swipe never
     // (`docs/specs/alert.md` -> Engagement): judged on release, and tracked in
     // capture on the host, before any mode below consumes the press.
@@ -895,7 +904,8 @@ export function MobileTerminalUi({
     if (completionState) scheduleGestureCompletionClear();
   }, [commitGestureState, endEdgeScroll, executeGestureAction, scheduleGestureCompletionClear]);
 
-  const handlePaneFocusStartCapture = useCallback(() => {
+  const handlePaneFocusStartCapture = useCallback((event: SyntheticEvent<HTMLDivElement>) => {
+    if (isPortaledTarget(event)) return;
     blurPaneTextInputs();
   }, [blurPaneTextInputs]);
 

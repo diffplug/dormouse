@@ -6,8 +6,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MobileTerminalUi, paneMouseOverride, type MobileTerminalSessionItem, type MobileTerminalTouchMode, type MobileTerminalUiProps } from './MobileTerminalUi';
 import { setNativeFieldValue } from '../lib/dom';
-import { pointerEvent } from './wall/wall-test-utils';
+import { pointerEvent, PortalAnchoredButton } from './wall/wall-test-utils';
 import * as registry from '../lib/terminal-registry';
+import * as activity from '../lib/session-activity-store';
 import type { Terminal } from '@xterm/xterm';
 
 const EPISODE = { id: 'episode-1', startedAt: Date.now() };
@@ -331,6 +332,32 @@ describe('MobileTerminalUi touch modes', () => {
     terminal.dispatchEvent(pointerEvent('pointerup'));
 
     expect(received).toEqual([]);
+  });
+});
+
+describe('MobileTerminalUi portaled descendants', () => {
+  // The copy editor portals to document.body: its presses reach the host's
+  // capture handlers only through React, and are not pane content.
+  it.each<MobileTerminalTouchMode>(['gestures', 'cursor', 'selection'])('leaves a press in one alone in %s mode', (mode) => {
+    const acknowledge = vi.spyOn(activity, 'acknowledgeSession');
+    const { input } = renderUi({
+      activeTouchMode: mode,
+      cursorTouchAvailable: true,
+      sessions: [{ id: 'pane-a', title: 'shell', active: true, episode: null }],
+      terminal: <div data-testid="terminal"><PortalAnchoredButton /></div>,
+    });
+    act(() => input.focus());
+    const editor = document.querySelector<HTMLButtonElement>('[data-portaled]')!;
+    const down = pointerEvent('pointerdown');
+    act(() => {
+      editor.dispatchEvent(down);
+      editor.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      editor.dispatchEvent(pointerEvent('pointerup'));
+    });
+    expect(down.defaultPrevented).toBe(false);
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
   });
 });
 
