@@ -31,10 +31,9 @@ URL it prints. Request a code for a test address and read it at
 the worktree path; `docs/specs/hosted.md` -> "Development and release" owns what
 the local entry serves and what production omits. The port is OS-assigned
 unless you set `PORT`. Do not share this local inbox publicly. The local
-origin serves speak beside the token routes, which production splits across
-the account and voice Workers; set `ELEVENLABS_API_KEY` in the environment of
-`pnpm dev:hosted` to hear real speech (`docs/specs/hosted.md` -> "Managed
-voice").
+origin serves the voice token routes but not speak: a Hosted build speaks only
+at `https://voice.dormouse.sh` (`docs/specs/hosted.md` -> "Development and
+release").
 
 ```sh
 pnpm test:hosted
@@ -350,13 +349,15 @@ credential pair do and do not enable. Facebook is outside this milestone.
    Default `promote=false` verifies and builds only. `promote=true` enters the
    protected production environment and runs the preflight, backup and
    restore-test, migration, deployment, and live-verification sequence in
-   `docs/specs/hosted.md` -> "Production releases", deploying the account,
-   relay, and voice Workers in that order. No real mail is sent by its smoke
+   `docs/specs/hosted.md` -> "Production releases", deploying the relay,
+   voice, and account Workers in that order. No real mail is sent by its smoke
    checks, and passing them is not acceptance.
 
-   The first release after the split deletes the account Worker's
-   `OneTimeRoom` (its append-only migration `v2`) and creates the relay's
-   (`v1`): links open at that moment drop, and both become rollback floors.
+   The first release after the split creates the relay's `OneTimeRoom` (`v1`),
+   then deletes the account Worker's (its append-only migration `v2`): links
+   open at that moment drop, and both become rollback floors. Its smoke repeats
+   the relay and voice checks up to six times, 10 s apart, while their new
+   custom domains' certificates issue.
 3. Tagging runs only after live verification, on the terms in
    `docs/specs/hosted.md` -> "Production releases". If only tagging fails, rerun
    failed jobs: it records the original deployment without deploying again.

@@ -10,12 +10,7 @@ import { EmailDev, SystemTime } from "pgstencil";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
-import {
-  elevenLabs,
-  speakRoute,
-  voiceTokenRoutes,
-  type Synthesize,
-} from "./voice";
+import { voiceTokenRoutes } from "./voice";
 
 // Bind first, then derive the origin from the port actually bound, so an unset
 // PORT runs beside another checkout's server. `localhost`, not `127.0.0.1`: it
@@ -63,27 +58,13 @@ const auth = createAuthApp({
 auth.app.get("/api/dev/emails", (c) =>
   c.json(email.all().map(({ to, text }) => ({ to, text }))),
 );
-// A quarter second of silent MP3 (MPEG-1 Layer III, 128 kbps, 44.1 kHz; zeroed
-// side info decodes as silence).
-const silence: Synthesize = async () => {
-  const frame = 417;
-  const audio = new Uint8Array(frame * 10);
-  for (let i = 0; i < audio.length; i += frame)
-    audio.set([0xff, 0xfb, 0x90, 0x64], i);
-  return new Response(audio, { headers: { "content-type": "audio/mpeg" } });
-};
-const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
 const app = new Hono();
 voiceTokenRoutes(app, () => ({
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
 }));
-// Deployed, speak is the voice Worker's alone; locally it sits beside the
-// token routes on this one origin, so a minted token can be tried with curl.
-speakRoute(app, () => ({
-  databaseUrl,
-  synthesize: elevenLabsKey ? elevenLabs(elevenLabsKey) : silence,
-}));
+// No speak: a Hosted build speaks only at the fixed voice origin, so no
+// Dormouse build could reach one here.
 app.all("*", (c) => auth.app.fetch(c.req.raw));
 const vite = await createViteServer({
   server: {
@@ -100,7 +81,7 @@ ready = {
   vite,
 };
 console.log(
-  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.\nManaged voice: ${elevenLabsKey ? "real ElevenLabs key" : "silent fake audio (ELEVENLABS_API_KEY unset)"}.`,
+  `Dormouse Hosted: ${origin}\nLocal email inbox: ${origin}/api/dev/emails\nEmail stays local; OAuth is disabled in this development entry.`,
 );
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, async () => {

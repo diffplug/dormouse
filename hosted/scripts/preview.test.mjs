@@ -78,8 +78,10 @@ test("each preview configuration isolates its origin and excludes production bin
   assert.equal(configs.voice.assets, undefined);
   for (const worker of ["account", "relay"])
     assert.equal(configs[worker].assets.run_worker_first, true, worker);
-  // The account's migrations, append-only, delete the class its Worker no longer implements.
-  assert.deepEqual(configs.account.migrations, bases.account.migrations);
+  // Production's account keeps the migrations that deleted its old room; its
+  // preview, implementing no Durable Object, carries none.
+  assert.ok(bases.account.migrations?.length);
+  assert.equal(configs.account.migrations, undefined);
   assert.equal(configs.account.durable_objects, undefined);
   assert.equal(configs.account.ratelimits, undefined);
   assert.deepEqual(configs.relay.durable_objects, bases.relay.durable_objects);
@@ -267,7 +269,7 @@ test("cleanup only deletes this PR's resources and can run twice", async (t) => 
   await cleanup(env);
   existing = false;
   await cleanup(env);
-  const workers = ["dormouse-hosted-pr-42", "dormouse-relay-pr-42", "dormouse-voice-pr-42"];
+  const workers = ["dormouse-relay-pr-42", "dormouse-voice-pr-42", "dormouse-hosted-pr-42"];
   assert.deepEqual(
     removed.map((path) => path.split("/").pop()),
     [...workers, "ours", "br-ours", ...workers],
@@ -353,21 +355,22 @@ test("deployment smoke rejects malformed health before making any auth requests"
   assert.equal(requests, 1);
 });
 
-test("the smoke runs its parts concurrently, retries each alone, and checks the rendezvous after the account and relay", async () => {
+test("the smoke runs its parts concurrently, retries each alone, and checks the rendezvous after the relay's revision alone", async () => {
   const origins = {
     account: "https://account.example.test",
     relay: "https://relay.example.test",
     voice: "https://voice.example.test",
   };
   const events = [];
-  let relayHealthy = false;
+  // How many more health checks each origin fails before it is healthy.
+  const unhealthy = {};
   // Every request the production smoke makes, answered as a healthy account would.
   const fetcher = async (url, init = {}) => {
     const { origin, pathname } = new URL(url);
     if (pathname === "/api/health") {
       events.push(`${origin} health`);
-      if (origin === origins.relay && !relayHealthy) {
-        relayHealthy = true;
+      if (unhealthy[origin] > 0) {
+        unhealthy[origin]--;
         return Response.json({ ok: false }, { status: 503 });
       }
       return Response.json({ ok: true, revision: env.BUILD_SHA });
@@ -391,36 +394,62 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
       return new Response("<html></html>", { headers: { "content-type": "text/html" } });
     return new Response(null, { status: 404 });
   };
+  const count = (event) => events.filter((e) => e === event).length;
+  const oneTime = async (origin) => {
+    assert.equal(origin, origins.relay);
+    events.push("one-time");
+  };
   const waits = [];
+  unhealthy[origins.relay] = 1;
   await smokeAll(origins, env.BUILD_SHA, {
     fetcher,
     attempts: 2,
     wait: async (ms) => waits.push(ms),
-    oneTime: async (origin) => {
-      assert.equal(origin, origins.relay);
-      events.push("one-time");
-    },
+    oneTime,
   });
-  // The relay alone retried; the rendezvous ran once, after both passed.
+  // The relay alone retried; the rendezvous ran once, after it passed.
   assert.deepEqual(waits, [10_000]);
-  const count = (event) => events.filter((e) => e === event).length;
   assert.equal(count(`${origins.account} health`), 1);
   assert.equal(count(`${origins.voice} health`), 1);
   assert.equal(count(`${origins.relay} health`), 2);
   assert.equal(count("one-time"), 1);
   assert.equal(events.at(-1), "one-time");
 
-  // A part out of attempts fails the smoke, and the rendezvous never runs on a relay that did not pass.
-  relayHealthy = false;
+  // Per-part attempts: the account runs once while the relay and voice retry.
   events.length = 0;
+  waits.length = 0;
+  Object.assign(unhealthy, { [origins.account]: 1, [origins.relay]: 2, [origins.voice]: 1 });
   await assert.rejects(
     smokeAll(origins, env.BUILD_SHA, {
       fetcher,
-      oneTime: async () => events.push("one-time"),
+      attempts: { account: 1, relay: 3, voice: 2 },
+      wait: async (ms) => waits.push(ms),
+      oneTime,
     }),
-    /must be healthy/,
+    { message: new RegExp(`^${origins.account} must be healthy`) },
   );
-  assert.ok(!events.includes("one-time"));
+  assert.equal(count(`${origins.account} health`), 1);
+  assert.equal(count(`${origins.relay} health`), 3);
+  assert.equal(count(`${origins.voice} health`), 2);
+  // An account failure does not hold back the rendezvous.
+  assert.equal(count("one-time"), 1);
+
+  // A part out of attempts fails the smoke, the rendezvous never runs on a
+  // relay that did not pass, and every failed part is reported.
+  events.length = 0;
+  Object.assign(unhealthy, { [origins.account]: 1, [origins.relay]: 1 });
+  await assert.rejects(
+    smokeAll(origins, env.BUILD_SHA, { fetcher, oneTime }),
+    (error) => {
+      assert.ok(error instanceof AggregateError);
+      assert.deepEqual(
+        error.errors.map(({ message }) => message.split("\n")[0]),
+        [`${origins.account} must be healthy`, `${origins.relay} must be healthy`],
+      );
+      return true;
+    },
+  );
+  assert.equal(count("one-time"), 0);
 });
 
 test("a relay or voice health check requires the deployed revision, and nothing else", async () => {

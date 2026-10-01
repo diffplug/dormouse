@@ -262,9 +262,12 @@ async function emailLoginSmoke(request, origin) {
 
 /**
  * Every Worker's smoke: the account's auth boundary, each other Worker's
- * revision, and the relay's rendezvous once both the account and the relay
- * passed. Independent parts run concurrently, and each retries on its own up
- * to `attempts` times, `retryMs` apart, so a passed part never runs again.
+ * revision, and the relay's rendezvous once the relay's revision passed — never
+ * waiting on the account, so an account failure hides no relay one. Independent
+ * parts run concurrently, and each retries on its own up to its `attempts`
+ * (one count for all, or `{ account, relay, voice }`; the rendezvous takes the
+ * relay's), `retryMs` apart, so a passed part never runs again. Every part
+ * settles before the smoke fails, and the failure names each part that failed.
  */
 export async function smokeAll(
   { account, relay, voice },
@@ -279,28 +282,34 @@ export async function smokeAll(
     wait = delay,
   } = {},
 ) {
-  const retried = async (what, check) => {
+  const retried = async (part, what, check) => {
+    const limit = typeof attempts === "number" ? attempts : (attempts[part] ?? 1);
     for (let attempt = 1; ; attempt++) {
       try {
         return await check();
       } catch (error) {
-        if (attempt >= attempts) throw error;
+        if (attempt >= limit) throw error;
         console.log(
-          `${what} not ready (attempt ${attempt}/${attempts}); retrying in ${retryMs / 1000} seconds`,
+          `${what} not ready (attempt ${attempt}/${limit}); retrying in ${retryMs / 1000} seconds`,
         );
         await wait(retryMs);
       }
     }
   };
-  const accountSmoke = retried(account, () =>
-    smoke(account, sha, fetcher, preview, providers),
-  );
-  const relayHealth = retried(relay, () => healthSmoke(relay, sha, fetcher));
-  const voiceHealth = retried(voice, () => healthSmoke(voice, sha, fetcher));
-  const rendezvous = Promise.all([accountSmoke, relayHealth]).then(() =>
-    retried(`${relay} one-time`, () => oneTime(relay)),
-  );
-  await Promise.all([accountSmoke, relayHealth, voiceHealth, rendezvous]);
+  const relayHealth = retried("relay", relay, () => healthSmoke(relay, sha, fetcher));
+  const results = await Promise.allSettled([
+    retried("account", account, () => smoke(account, sha, fetcher, preview, providers)),
+    relayHealth,
+    retried("voice", voice, () => healthSmoke(voice, sha, fetcher)),
+    relayHealth.then(() => retried("relay", `${relay} one-time`, () => oneTime(relay))),
+  ]);
+  // A relay that failed its revision fails the rendezvous with the same error.
+  const failures = [
+    ...new Set(results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))),
+  ];
+  if (failures.length === 1) throw failures[0];
+  if (failures.length)
+    throw new AggregateError(failures, failures.map((error) => error.message).join("\n"));
 }
 
 if (

@@ -11,8 +11,20 @@ const hosted = new URL("../", import.meta.url);
  * Hosted's three Workers, in deploy order, with the facts their Wrangler
  * configs do not carry. Everything else — script name, `main`, `APP_ORIGIN`,
  * assets, Hyperdrive, Durable Objects, rate limits — is read from `config`.
+ * The account deploys last, so its `v2` deleting `OneTimeRoom` lands only once
+ * the relay serving the replacement is live.
  */
 export const WORKERS = {
+  relay: {
+    config: "wrangler.relay.jsonc",
+    // The production entry: its mapper passes nothing a preview lacks.
+    previewMain: "server/relay-worker.ts",
+  },
+  voice: {
+    config: "wrangler.voice.jsonc",
+    previewMain: "server/voice-preview-worker.ts",
+    secrets: () => ["ELEVENLABS_API_KEY"],
+  },
   account: {
     config: "wrangler.jsonc",
     previewMain: "server/preview-worker.ts",
@@ -30,16 +42,6 @@ export const WORKERS = {
     ],
     /** Its preview is deployed with the derived `AUTH_SECRET`. */
     previewSecrets: true,
-  },
-  relay: {
-    config: "wrangler.relay.jsonc",
-    // The production entry: its mapper passes nothing a preview lacks.
-    previewMain: "server/relay-worker.ts",
-  },
-  voice: {
-    config: "wrangler.voice.jsonc",
-    previewMain: "server/voice-preview-worker.ts",
-    secrets: () => ["ELEVENLABS_API_KEY"],
   },
 };
 

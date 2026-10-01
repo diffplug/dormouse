@@ -1,5 +1,6 @@
 import { test, expect, beforeAll, afterAll, vi } from "vitest";
 import type { ExecutionContext } from "hono";
+import { build } from "esbuild";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { ONE_TIME_PAGE_PATH, ONE_TIME_WS_ROUTES } from "remote-lib-common";
 import {
@@ -215,6 +216,24 @@ test("speak is the voice Worker's, bearer-only", async () => {
   expect(response.headers.get("content-security-policy")).toBe(
     RUNS_NOTHING_POLICY,
   );
+});
+
+test("the local development entry serves no speak", async () => {
+  // A Hosted build speaks only at the fixed voice origin, so a local speak
+  // would be unreachable; the bundle keeps only what the entry mounts.
+  const {
+    outputFiles: [dev],
+  } = await build({
+    entryPoints: ["server/dev.ts"],
+    bundle: true,
+    write: false,
+    format: "esm",
+    platform: "node",
+    packages: "external",
+  });
+  expect(dev.text).toContain("/api/voice/tokens");
+  expect(dev.text).not.toContain("/api/voice/speak");
+  expect(dev.text).not.toContain("api.elevenlabs.io");
 });
 
 test("the ElevenLabs history sweep runs on the voice Worker alone", async () => {

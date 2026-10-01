@@ -5,6 +5,7 @@ import { readFile, rm } from "node:fs/promises";
 import {
   productionConfig,
   productionConfigs,
+  productionSmoke,
   preflight,
 } from "./production.mjs";
 import { deployWorkers, oauthProviders, readConfigs } from "./workers.mjs";
@@ -67,7 +68,7 @@ test("each production config keeps its canonical domain and production entry, an
   );
   assert.throws(() => productionConfig(bases.account, env));
 });
-test("Workers deploy in registry order from one config path each, and a failure stops the rest", async (t) => {
+test("Workers deploy relay, voice, then account from one config path each, and a failure stops the rest", async (t) => {
   t.after(() =>
     rm(new URL("../.wrangler/deploy-test/", import.meta.url), { recursive: true, force: true }),
   );
@@ -82,21 +83,55 @@ test("Workers deploy in registry order from one config path each, and a failure 
   await deployWorkers("deploy-test", configs, { spawn: spawn() });
   assert.deepEqual(
     deployed.map(([name, path]) => [name, path.split("/").slice(-3).join("/")]),
+    // The account last: its `v2` deletes the `OneTimeRoom` the relay replaces.
     [
-      ["dormouse-hosted", ".wrangler/deploy-test/wrangler.account.json"],
       ["dormouse-relay", ".wrangler/deploy-test/wrangler.relay.json"],
       ["dormouse-voice", ".wrangler/deploy-test/wrangler.voice.json"],
+      ["dormouse-hosted", ".wrangler/deploy-test/wrangler.account.json"],
     ],
   );
   deployed.length = 0;
   await assert.rejects(
-    deployWorkers("deploy-test", configs, { spawn: spawn("dormouse-relay") }),
-    { message: "dormouse-relay deploy failed" },
+    deployWorkers("deploy-test", configs, { spawn: spawn("dormouse-voice") }),
+    { message: "dormouse-voice deploy failed" },
   );
-  assert.deepEqual(deployed.map(([name]) => name), ["dormouse-hosted", "dormouse-relay"]);
+  assert.deepEqual(deployed.map(([name]) => name), ["dormouse-relay", "dormouse-voice"]);
   // Each config is removed once deployed, failed or not.
   for (const [, path] of deployed)
     await assert.rejects(readFile(path), { code: "ENOENT" });
+});
+test("live verification retries the relay and voice while their domains come up, and runs the account's POSTs once", async () => {
+  const health = {};
+  // Each origin's health fails this many times before it passes.
+  const failing = {
+    "https://hosted.dormouse.sh": 1,
+    "https://relay.dormouse.sh": 5,
+    "https://voice.dormouse.sh": 5,
+  };
+  const fetcher = async (url) => {
+    const { origin, pathname } = new URL(url);
+    assert.equal(pathname, "/api/health");
+    health[origin] = (health[origin] ?? 0) + 1;
+    return health[origin] > failing[origin]
+      ? Response.json({ ok: true, revision: env.BUILD_SHA })
+      : Response.json({ ok: false }, { status: 503 });
+  };
+  let rendezvous = 0;
+  await assert.rejects(
+    productionSmoke(configs, env.BUILD_SHA, {
+      fetcher,
+      wait: async () => {},
+      oneTime: async () => rendezvous++,
+    }),
+    // The account's failure alone: the relay and voice passed on their sixth try.
+    { message: /^https:\/\/hosted\.dormouse\.sh must be healthy/ },
+  );
+  assert.deepEqual(health, {
+    "https://hosted.dormouse.sh": 1,
+    "https://relay.dormouse.sh": 6,
+    "https://voice.dormouse.sh": 6,
+  });
+  assert.equal(rendezvous, 1);
 });
 test("the history sweep's cron is the voice Worker's alone, and the account's removes its old one", () => {
   assert.deepEqual(configs.voice.triggers, { crons: ["*/5 * * * *"] });
@@ -164,7 +199,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
   const read = [];
   await preflight(env, configs, provider({ read }));
   // The relay holds no secret, so nothing is asked of it.
-  assert.deepEqual(read, ["dormouse-hosted", "dormouse-voice"]);
+  assert.deepEqual(read.sort(), ["dormouse-hosted", "dormouse-voice"]);
   for (const missing of accountSecrets)
     await assert.rejects(
       preflight(

@@ -79,6 +79,19 @@ export function requiredSecrets(configs) {
       ]),
   );
 }
+/**
+ * The release's live verification. The relay and voice retry as a preview's
+ * parts do, since a first release attaches their custom domains and a new
+ * certificate can outlast the health retry; the account's smoke sends POSTs,
+ * so it runs once. `options` stands in for the network in tests.
+ */
+export function productionSmoke(configs, sha, options = {}) {
+  return smokeAll(originsOf(configs), sha, {
+    providers: oauthProviders(configs.account),
+    attempts: { account: 1, relay: 6, voice: 6 },
+    ...options,
+  });
+}
 export async function verifyPackages() {
   const commits = [];
   for (const name of ["pgstencil", "@pgstencil/auth/better-auth"]) {
@@ -143,18 +156,14 @@ if (
     const configs = productionConfigs(await readConfigs(), process.env);
     const action = process.argv[2];
     if (action === "smoke") {
-      await smokeAll(
-        originsOf(configs),
-        process.env.BUILD_SHA,
-        { providers: oauthProviders(configs.account) },
-      );
+      await productionSmoke(configs, process.env.BUILD_SHA);
       console.log(
         "Hosted production revisions, auth boundary, and one-time rendezvous verified.",
       );
     } else if (action === "preflight" || action === "deploy") {
       await verifyPackages();
       await preflight(process.env, configs);
-      // Account, relay, voice; a failure stops the rest.
+      // Relay, voice, then account; a failure stops the rest.
       if (action === "deploy") await deployWorkers("production", configs);
     } else throw new Error("Use preflight, deploy or smoke");
   } catch (error) {

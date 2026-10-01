@@ -79,7 +79,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 5. 429 once the owner's UTC-day counter reaches 500. The increment is atomic and precedes the upstream call, so failed upstream attempts count.
 6. 502 when ElevenLabs throws or answers non-2xx.
 
-**Never log the text or forward an upstream body or status.** The upstream URL, model `eleven_flash_v2_5`, and format `mp3_44100_128` are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is the voice Worker's secret, which production preflight requires there; the voice preview mapper never passes it. Only the local development entry substitutes silent MP3 when the key is unset. Tests fake ElevenLabs in Miniflare's outbound service, so no entry carries an upstream override.
+**Never log the text or forward an upstream body or status.** The upstream URL, model `eleven_flash_v2_5`, and format `mp3_44100_128` are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is the voice Worker's secret, which production preflight requires there; the voice preview mapper never passes it. Tests fake ElevenLabs in Miniflare's outbound service, so no entry carries an upstream override.
 
 **Must delete ElevenLabs speech history, which keeps each generation's text, from the production voice Worker only.** A successful speak schedules one sweep about 10 s later in `waitUntil`; a Cron Trigger every 5 minutes sweeps what that missed. No retention bound is guaranteed (rationale).
 
@@ -92,13 +92,13 @@ Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceTokenRoutes` / `sp
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database, and mounts speak beside the token routes. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. `dor tool one-time` runs the relay Worker on loopback, without a database (`docs/specs/one-time.md` -> "Dev loop").
+**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database, and the voice token routes but never speak, which every Hosted build reaches only at `https://voice.dormouse.sh`. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. `dor tool one-time` runs the relay Worker on loopback, without a database (`docs/specs/one-time.md` -> "Dev loop").
 
 **Must verify the three production Worker bundles and run the consumer's integration suite before release.** Root `pnpm test` runs the `hosted/scripts/*.test.mjs` deploy suites and `test:miniflare`, the Docker-free Miniflare suites (the rendezvous, and the three Workers' boundary); the rest of `pnpm test:hosted`'s vitest half runs only there, `workers.test.ts` needing Docker. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
-Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `hosted/server/tests/workers.test.ts`; `build` in `hosted/package.json`.
+Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `hosted/server/tests/workers.test.ts`; `build` in `hosted/package.json`. Pinned by `the local development entry serves no speak` in `hosted/server/tests/boundary.test.ts`.
 
 ## PR previews
 
@@ -114,15 +114,15 @@ Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workf
 
 ## Production releases
 
-**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks both installed packages' clean, matching provenance; `productionConfig` holds each config to its Worker's pinned name and origin and lone custom domain; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and each Worker's own secret names (the voice's is `ELEVENLABS_API_KEY`; the relay has none). Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Deploy account, relay, then voice, stopping at a failure. Production has no public candidate URL.
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks both installed packages' clean, matching provenance; `productionConfig` holds each config to its Worker's pinned name and origin and lone custom domain; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and each Worker's own secret names (the voice's is `ELEVENLABS_API_KEY`; the relay has none). Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Deploy relay, voice, then account, stopping at a failure (rationale). Production has no public candidate URL.
 
-**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. The account keeps the `v1` that created `OneTimeRoom` and appends `v2` deleting it; the relay starts its own `v1`. A deploy restarts every room, dropping links still waiting or mid-handshake; a session already on its direct path never touches Hosted. Live verification checks each Worker's revision and runs `oneTimeSmoke` on the relay after the account smoke and the relay's revision check.
+**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. The account keeps the `v1` that created `OneTimeRoom` and appends `v2` deleting it; the relay starts its own `v1`. A deploy restarts every room, dropping links still waiting or mid-handshake; a session already on its direct path never touches Hosted. Live verification checks each Worker's revision and runs `oneTimeSmoke` on the relay once the relay's revision check passes, whatever the account's outcome; a failed smoke reports every failed part.
 
-**Must bound retries.** Health GETs require the selected revision, sharing six five-second retries for transport failures or healthy stale revisions. Retry rate-limited OAuth once; never replay POSTs after transport failures.
+**Must bound retries.** Health GETs require the selected revision, sharing six five-second retries for transport failures or healthy stale revisions. Retry rate-limited OAuth once; never replay POSTs after transport failures. Production repeats only the relay and voice smokes, up to six times 10 s apart (rationale).
 
 **Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification.** Tags identify the deployed commit and verification run/attempt; retries are idempotent and redeployments get new tags. Dating and repeat-deployment suffixes: `recordDeployment`. Code rollback never reverses migrations.
 
-Source of truth: `.github/workflows/hosted-production.yml`; `productionConfig` / `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `deployWorkers` in `hosted/scripts/workers.mjs`; `hosted/scripts/production-backup.mjs`; `smokeRequest` / `healthSmoke` / `smokeAll` in `hosted/scripts/preview-smoke.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs`, `hosted/scripts/smoke-request.test.mjs`, and `hosted/scripts/production-tag.test.mjs`.
+Source of truth: `.github/workflows/hosted-production.yml`; `productionConfig` / `verifyPackages` / `preflight` / `productionSmoke` in `hosted/scripts/production.mjs`; `WORKERS` / `deployWorkers` in `hosted/scripts/workers.mjs`; `hosted/scripts/production-backup.mjs`; `smokeRequest` / `healthSmoke` / `smokeAll` in `hosted/scripts/preview-smoke.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs`, `hosted/scripts/smoke-request.test.mjs`, and `hosted/scripts/production-tag.test.mjs`.
 
 ## Future
 

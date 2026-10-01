@@ -19,3 +19,8 @@ Three origins (decided 2026-09-30):
 - Pocket (staged for the relay origin's root) and the `/connect/` page render untrusted terminal output. Script running on the account's origin could make any request the login cookie authorizes and read the answer, so `/connect/` moved to `relay.dormouse.sh` and the account kept its origin.
 - Sibling origins under `dormouse.sh` are same-site, not same-origin: `SameSite=Lax` does not stop a browser from attaching the account's cookie to a request a `relay.` or `voice.` page makes to `hosted.`. The exact-`Origin` check on every cookie route is what refuses those requests.
 - No released desktop build bakes `hosted.dormouse.sh` (v1.1.0, the last release, predates one-time and managed voice), so the routes moved off it with no compatibility shim.
+
+## Production releases
+
+- Deploy order (2026-09-30): the account's `v2` deletes the `OneTimeRoom` namespace the relay's `v1` replaces, and a deployed migration is a rollback floor. Deploying the account first would make the deletion permanent before the replacement is known to deploy; with the relay first, a failed relay deploy stops the release before the account changes.
+- Smoke attempts (2026-09-30): the first release after the split attaches `relay.dormouse.sh` and `voice.dormouse.sh` as new custom domains, and a new certificate can take longer to issue than the health GET's six five-second retries. Repeating a relay or voice smoke sends only GETs and WebSockets on a fresh room, so it replays no POST; the account smoke's POSTs keep it at one attempt.

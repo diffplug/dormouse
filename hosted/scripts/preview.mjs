@@ -20,7 +20,7 @@ export function previewName(pr, name) {
 /**
  * A Worker's preview config, allowlisted from its production `base`: its own
  * workers.dev origin, its registry preview entry, assets rebased, its Durable
- * Objects and migrations (a namespace belongs to the Worker implementing it),
+ * Objects with their migrations (a namespace belongs to the Worker implementing it),
  * rate limits in preview-only namespaces (counters are account-wide), and the
  * PR's Hyperdrive wherever the base binds one. Never routes, triggers, other
  * bindings, or production vars.
@@ -56,8 +56,12 @@ export function previewConfig(base, env, worker, hyperdriveId) {
       id: hyperdriveId,
     }));
   }
-  if (base.durable_objects) config.durable_objects = base.durable_objects;
-  if (base.migrations) config.migrations = base.migrations;
+  // Migrations travel only with the Durable Objects they create: a preview
+  // Worker that implements none starts with none to delete.
+  if (base.durable_objects) {
+    config.durable_objects = base.durable_objects;
+    if (base.migrations) config.migrations = base.migrations;
+  }
   if (base.ratelimits)
     config.ratelimits = base.ratelimits.map((limit) => ({
       ...limit,
