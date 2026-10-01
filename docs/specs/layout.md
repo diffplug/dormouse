@@ -88,7 +88,7 @@ Popups share the zoomed pane’s app-background halo.
 
 | Row | Content |
 |---|---|
-| Title | Derived display title, labeled Explain action, copyable source Surface ref and close at right |
+| Title | Derived display title, icon-only Explain bug immediately beside the title, copyable source Surface ref and close at right |
 | Dir | Home-abbreviated directory, its unlabeled absolute-path copy, native explorer action |
 | Ports | One scan per opening; scanning/empty/failure states; one port inline, multiple ports in a dropdown with count beside it; labeled launch actions |
 | Alerts | Source Watch and TODO controls; notification details directly below |
@@ -98,7 +98,7 @@ Popups share the zoomed pane’s app-background halo.
 
 **Must write visible action text in the Title, Dir, and Ports rows in lowercase**, since `iframe` and `agent-browser` cannot be capitalized; proper nouns such as Finder, tooltips, and accessible names keep their case.
 
-**Must keep the Title and Dir rows on one line.** Title: explain drops its label, the title truncates to 8 characters, the Surface ref drops to its copy icon (the tooltip keeps it), then the title truncates further. Dir: the explorer action drops its label before the directory truncates from its start, keeping its end.
+**Must keep the Title and Dir rows on one line.** Title: the title truncates to 8 characters, the Surface ref drops to its copy icon (the tooltip keeps it), then the title truncates further. Dir: the explorer action drops its label before the directory truncates from its start, keeping its end.
 
 **Must focus context controls on opening.** Explicit entry into helper xterm gives it terminal keys; Escape there belongs to its program. Escape from controls closes the innermost disclosure, then context. Terminal clipboard routing uses the focused helper rather than the selected source. Actions use subdued link color and shared compact `OnOffSwitch` controls.
 

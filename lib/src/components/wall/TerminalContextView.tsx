@@ -189,24 +189,23 @@ function TitleRow({ title, surfaceRef, onExplain, onCopyRef, actions }: {
   const row = useRef<HTMLDivElement>(null);
   const measures = useRef<HTMLDivElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
-  const [explainCompact, setExplainCompact] = useState(false);
   const [refCompact, setRefCompact] = useState(false);
-  // Explain drops its label, the title truncates to 8ch, the ref drops to its icon, then the title truncates on.
-  useRowFit(row, measures, (width, gap, [text, least, explainFull, explainIcon, refFull]) => {
+  // The title truncates to 8ch, the ref drops to its icon, then the title truncates on.
+  useRowFit(row, measures, (width, gap, [text, least, explainIcon, refFull]) => {
     const rest = (actionsRef.current?.offsetWidth ?? 0) + 3 * gap;
-    setExplainCompact(text + explainFull + refFull + rest > width);
     setRefCompact(Math.min(text, least) + explainIcon + refFull + rest > width);
   }, [title, surfaceRef], [actionsRef]);
   return <div ref={row} data-context-title className="relative flex min-h-6 min-w-0 items-center gap-1.5">
     <div ref={measures} aria-hidden="true" inert className={MEASURER_CLASS}>
       <span className="whitespace-nowrap">{title}</span>
       <span className="w-[8ch] shrink-0" />
-      <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}explain</span>
       <span className={ACTION_BOX_CLASS}>{EXPLAIN_ICON}</span>
       <span className={ACTION_BOX_CLASS}>{surfaceRef}{COPY_ICON}</span>
     </div>
-    <span className="min-w-0 flex-1 truncate" title={title}>{title}</span>
-    <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}{!explainCompact && 'explain'}</ContextAction>
+    <span className="flex min-w-0 flex-1 items-center gap-1.5">
+      <span className="min-w-0 truncate" title={title}>{title}</span>
+      <ContextAction label="Explain this title" onClick={onExplain}>{EXPLAIN_ICON}</ContextAction>
+    </span>
     <ContextCopyAction label={`Copy ${surfaceRef}`} confirmation={refCompact ? COPY_CHECK : undefined} onCopy={onCopyRef}>{!refCompact && <span>{surfaceRef}</span>}{COPY_ICON}</ContextCopyAction>
     <div ref={actionsRef} data-context-header-actions className="flex shrink-0 items-center gap-0.5">{actions}</div>
   </div>;
