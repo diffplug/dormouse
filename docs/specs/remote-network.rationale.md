@@ -176,6 +176,8 @@ whose phone gathers a srflx it cannot use: with the grace its attempt opened at
 "Direct path"), and on a network that drops UDP 3478 its offer waits the whole
 3 s `DIRECT_GATHER_TIMEOUT_MS`.
 
+**On a real phone** *(2026-10-01, iPhone 15 Pro, iOS Safari, against PR #865's Hosted preview; laptop on home Wi-Fi, macOS 27, innerdogfood)*. Under Anywhere, the phone on Verizon cellular with Wi-Fi and Tailscale off connected directly and felt instant from the confirmation, as did the phone on the same home Wi-Fi; typed and pasted input arrived intact. Under Local networks with only the home Wi-Fi allowed, the phone on cellular never reached a terminal: the attempt ended `direct-failed` about 5 s after the confirmation (Burrow log: the direct channel did not open in time), because both ends' candidates outside the allowed network were stripped and no pair formed, so the page's STUN did not widen the level. Not yet measured on the phone: its offer size and gathering time, and a Burrow whose STUN is blocked.
+
 **The endpoint.** Cloudflare documents `stun:stun.cloudflare.com:3478` as free
 and unlimited in its Realtime FAQ; ordinary Workers expose no UDP listener, so
 Hosted cannot run its own. Checked 2026-09-30.

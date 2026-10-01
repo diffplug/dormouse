@@ -100,7 +100,7 @@ Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connecti
 
 **Scope: remote-network** — build in order:
 
-1. **Anywhere on a phone**: **Must validate iOS Safari on cellular and Wi-Fi** — SDP size, gathering against `DIRECT_SRFLX_GRACE_MS`, NAT traversal, Burrow STUN blocked — before changing a budget.
+1. **Anywhere on a phone**: **Must measure iOS Safari's offer size and gathering time, and the Burrow with STUN blocked**, before changing a budget.
 2. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`; Local networks and Anywhere then cover paired phones.
 
 ### Allowed networks
