@@ -347,9 +347,9 @@ export default function App({
    * exist. Answers the rows it painted.
    */
   const loadBurrows = useCallback(async (): Promise<BurrowView[]> => {
+    const account = client.accountId;
     const [records, enrolled] = await Promise.all([client.listKnownBurrows(), client.listBurrows()]);
     const online = new Map(enrolled.map((burrow) => [burrow.burrowId, burrow.online]));
-    const account = client.accountId;
     const views = records.map((record) =>
       toBurrowView(
         record,

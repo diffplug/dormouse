@@ -154,7 +154,8 @@ Pairing continues into connecting.
 
 **A record of the signed-in account the Relay's list no longer names is
 removed**, marked only off a `GET /api/burrows` that succeeded; a listed
-offline Burrow, and another account's record, keep the offline row. Its
+offline Burrow, and another account's record, keep the offline row.
+**Must bind removal checks to the account that started the list read.** Its
 row reads `BURROW_REMOVED_COPY` for the deployment Pocket read
 (`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone,
 which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the

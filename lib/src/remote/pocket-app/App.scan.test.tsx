@@ -878,6 +878,24 @@ describe('a Burrow the Relay no longer lists', () => {
     expect(actionsIn(rowFor(container, 'Work laptop'))).toEqual(['Connect', 'Remove']);
   });
 
+  it('uses the account that requested the list when the signed-in account changes during its read', async () => {
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([
+      await knownBurrow('burrow-1', 'First laptop'),
+      await knownBurrow('burrow-9', 'Work laptop', 'other-account'),
+    ]);
+    fake.listBurrows.mockImplementation(async () => {
+      // The request used owner's session; another sign-in finishes before its response.
+      fake.accountId = 'other-account';
+      return [{ burrowId: 'burrow-1', label: 'First laptop', online: true }];
+    });
+    await boot();
+    await click(container, 'Sign in with passkey');
+
+    expect(rowFor(container, 'Work laptop').textContent).not.toContain(REMOVED);
+    expect(actionsIn(rowFor(container, 'Work laptop'))).toEqual(['Connect', 'Remove']);
+  });
+
   it('marks nothing removed off a list that failed', async () => {
     fake.hasPriorUse = true;
     fake.listKnownBurrows.mockResolvedValue([await knownBurrow('burrow-1', 'First laptop')]);
