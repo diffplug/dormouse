@@ -250,21 +250,51 @@ const AT_10_42 = new Date(2026, 9, 1, 10, 42).getTime();
 const CLOCK_10_42 = new Date(AT_10_42).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
 describe('pathRefusalSentence', () => {
-  const observed: PathRefusal = { at: AT_10_42, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' };
+  const observed: PathRefusal = {
+    at: AT_10_42,
+    kind: 'path-refused',
+    end: 'remote',
+    address: '172.58.12.9',
+    addressSource: 'observed',
+  };
   const reported: PathRefusal = { ...observed, kind: 'given-up', addressSource: 'reported' };
+  const remote: PathRefusal = { at: AT_10_42, kind: 'path-refused', end: 'remote' };
+  const local: PathRefusal = { at: AT_10_42, kind: 'path-refused', end: 'local', localAddress: '10.0.0.2' };
+  const localUnnamed: PathRefusal = { at: AT_10_42, kind: 'path-refused', end: 'local' };
   const none: PathRefusal = { at: AT_10_42, kind: 'deadline' };
+  const SAME_DAY = AT_10_42 + 60 * 60 * 1000;
 
-  it('says when, and where the phone connected from, above the allowed networks', () => {
-    expect(pathRefusalSentence(observed, 'network-panel')).toBe(
+  it('says when, and which end was off the networks allowed below', () => {
+    expect(pathRefusalSentence(observed, 'network-panel', SAME_DAY)).toBe(
       `At ${CLOCK_10_42} a phone tried to connect from 172.58.12.9, which isn’t on a network allowed below.`,
     );
-    // The phone's own claim is named as its claim.
-    expect(pathRefusalSentence(reported, 'network-panel')).toBe(
-      `At ${CLOCK_10_42} a phone reported 172.58.12.9, which isn’t on a network allowed below.`,
+    // The phone's own claim is named as its claim, never as off the networks.
+    expect(pathRefusalSentence(reported, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone couldn’t connect directly over an allowed network (it reported 172.58.12.9).`,
     );
-    expect(pathRefusalSentence(none, 'network-panel')).toBe(
+    expect(pathRefusalSentence(remote, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone tried to connect from outside the networks allowed below.`,
+    );
+    // This computer's own end: never the phone's network.
+    expect(pathRefusalSentence(local, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone couldn’t connect: this computer wasn’t on a network allowed below (its address was 10.0.0.2).`,
+    );
+    expect(pathRefusalSentence(localUnnamed, 'network-panel', SAME_DAY)).toBe(
+      `At ${CLOCK_10_42} a phone couldn’t connect: this computer wasn’t on a network allowed below.`,
+    );
+    expect(pathRefusalSentence(none, 'network-panel', SAME_DAY)).toBe(
       `At ${CLOCK_10_42} a phone couldn’t reach this computer over an allowed network.`,
     );
+  });
+
+  it('names the date of a refusal from another day', () => {
+    const day = new Date(AT_10_42).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    const nextDay = new Date(2026, 9, 2, 9, 0).getTime();
+    expect(pathRefusalSentence(none, 'network-panel', nextDay)).toBe(
+      `On ${day} at ${CLOCK_10_42} a phone couldn’t reach this computer over an allowed network.`,
+    );
+    const withYear = new Date(AT_10_42).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    expect(pathRefusalSentence(none, 'network-panel', new Date(2027, 0, 2).getTime())).toContain(`On ${withYear} at`);
   });
 
   it('words a one-time ending the same way, as the ending', () => {
@@ -272,7 +302,10 @@ describe('pathRefusalSentence', () => {
       'The phone tried to connect from 172.58.12.9, which isn’t on one of your allowed networks, so the connection ended.',
     );
     expect(pathRefusalSentence(reported, 'one-time')).toBe(
-      'The phone reported 172.58.12.9, which isn’t on one of your allowed networks, so the connection ended.',
+      'The phone couldn’t connect directly over one of your allowed networks (it reported 172.58.12.9), so the connection ended.',
+    );
+    expect(pathRefusalSentence(local, 'one-time')).toBe(
+      'This computer wasn’t on one of your allowed networks (its address was 10.0.0.2), so the connection ended.',
     );
     expect(pathRefusalSentence(none, 'one-time')).toBe(
       'The phone couldn’t reach this computer over one of your allowed networks, so the connection ended.',
@@ -478,7 +511,7 @@ describe('Settings → Network', () => {
   });
 
   it('shows the last refused phone above the allowed networks until it is dismissed', async () => {
-    const refusal: PathRefusal = { at: AT_10_42, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' };
+    const refusal: PathRefusal = { at: AT_10_42, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' };
     link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES, refusal) });
     await render();
     const notice = () => container.querySelector(`[role="status"][aria-label="${PATH_REFUSAL_LABEL}"]`);

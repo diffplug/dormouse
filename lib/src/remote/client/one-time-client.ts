@@ -365,9 +365,16 @@ export class OneTimeClient implements RemoteAdapterClient {
     this.#onEnded?.(ONE_TIME_ENDED_MESSAGE);
   }
 
-  /** What the laptop's goodbye before the switch reads as: why the path ended it, where it said. */
+  /**
+   * What the laptop's goodbye before the switch reads as: why the path ended
+   * it, where it named this phone's address; the generic direct failure where
+   * the path was why and it named none; else an ending.
+   */
   #endedByBurrowMessage(): string {
-    return networkNotAllowedMessage(this.#core.goodbye) ?? ONE_TIME_ENDED_MESSAGE;
+    const goodbye = this.#core.goodbye;
+    const named = networkNotAllowedMessage(goodbye);
+    if (named !== null) return named;
+    return goodbye && 'reason' in goodbye ? ONE_TIME_DIRECT_FAILED_MESSAGE : ONE_TIME_ENDED_MESSAGE;
   }
 
   // --- The rendezvous socket -------------------------------------------------

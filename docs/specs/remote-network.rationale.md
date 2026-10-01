@@ -119,6 +119,16 @@ and read by nothing that decides. Only a pair the policy refused is named as
 where the phone connected from: an allowed pair that never carried a channel
 is no evidence of the network the phone was on.
 
+**Why a refusal says which end (review, 2026-10-01).** A laptop that left its
+allowed networks — off the home Wi-Fi, a VPN down — gets its pair's local end
+refused while the phone sits on the right network; naming the phone's address
+then told the person at the laptop the phone was at fault, and told the phone
+to join a network it was already on. The local end is checked first, since a
+phone's address says nothing while the laptop is itself off the networks. A
+reported address is read outside the allowed networks only, since one inside
+them is no reason for a refusal, and its copy never asserts it is off them: the
+phone's offer is a claim, and an allowed range can be public.
+
 **Why a timer as well as the state events.** libjuice, the ICE agent under
 `node-datachannel`, makes the first nominated pair in its priority order the
 selected one on every bookkeeping pass, and changes state only through a

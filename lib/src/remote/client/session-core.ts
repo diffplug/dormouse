@@ -63,21 +63,25 @@ export type DirectWaitFailure = DirectRelayCause | 'timeout' | 'lost' | 'ended-b
 
 /**
  * What a phone reads when the computer's goodbye says the path ended a
- * direct-only session (`docs/specs/remote-network.md` -> "Local networks"), or
- * `null` for a goodbye that says nothing of why. One sentence for Pocket and
- * the one-time page, naming the address the computer named and never the
- * computer's allowed networks, which the phone is not told.
+ * direct-only session (`docs/specs/remote-network.md` -> "Local networks") and
+ * names this phone's address, or `null` — a goodbye that says nothing of why,
+ * or names no address, which leaves the Client's generic direct-failure copy.
+ * One sentence for Pocket and the one-time page, never naming the computer's
+ * allowed networks, which the phone is not told; an address the phone
+ * `reported` is not asserted to be off them.
  */
 export function networkNotAllowedMessage(goodbye: SessionEndV1 | null): string | null {
-  if (!goodbye || !('reason' in goodbye)) return null;
-  const lead = 'This computer only accepts phones on its allowed networks.';
-  const fix = 'join the same Wi-Fi or VPN as the computer and try again.';
-  if (!('address' in goodbye)) return `${lead} Yours wasn’t on one — ${fix}`;
-  const yours =
-    goodbye.addressSource === 'observed'
-      ? `Yours connected from ${goodbye.address}`
-      : `Yours reported the address ${goodbye.address}`;
-  return `${lead} ${yours} — ${fix}`;
+  if (!goodbye || !('address' in goodbye)) return null;
+  if (goodbye.addressSource === 'reported') {
+    return (
+      `This phone couldn’t reach the computer directly over one of its allowed networks (it reported ${goodbye.address}). ` +
+      'If it’s on another network, join the same Wi-Fi or VPN as the computer and try again.'
+    );
+  }
+  return (
+    `This computer only accepts phones on its allowed networks. Yours connected from ${goodbye.address} — ` +
+    'join the same Wi-Fi or VPN as the computer and try again.'
+  );
 }
 
 /**

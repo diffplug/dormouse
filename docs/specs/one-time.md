@@ -235,7 +235,7 @@ Every failure resolves `{ok: false, message}` with fixed copy:
 | room close `4011` or `4012` | `ONE_TIME_LINK_USED_MESSAGE` |
 | an expired link, room close `4010` or `4014`, any other close before an outcome past the link's expiry, or no answer by the room's deadline | `ONE_TIME_LINK_EXPIRED_MESSAGE` |
 | between an `ok` outcome and the switch: a decline, a lost session, the deadline, or any other close | `ONE_TIME_DIRECT_FAILED_MESSAGE` |
-| between an `ok` outcome and the switch: the laptop's goodbye | `networkNotAllowedMessage` where it names the path, else `ONE_TIME_ENDED_MESSAGE` |
+| between an `ok` outcome and the switch: the laptop's goodbye | `networkNotAllowedMessage` where it names the phone's address, `ONE_TIME_DIRECT_FAILED_MESSAGE` where it names the path and no address, else `ONE_TIME_ENDED_MESSAGE` |
 | a socket that never opened | `ONE_TIME_UNREACHABLE_MESSAGE` |
 | any other close, `close()`, or a session lost between the switch and the resolve | `ONE_TIME_ENDED_MESSAGE` |
 | a payload on message 2, or an outcome its guard refuses | `ONE_TIME_DENIAL_MESSAGES['burrow-error']` |

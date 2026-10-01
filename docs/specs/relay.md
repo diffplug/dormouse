@@ -871,19 +871,15 @@ memo invalidation — live in that burrow's spec.
   `GET /api/push/devices` as the Burrow, through the service's guarded fetch,
   bounded at `BURROW_REQUEST_TIMEOUT_MS`. A 401 `UNAUTHORIZED_ERROR` (or
   `UNKNOWN_BURROW_TOKEN_ERROR`) latches `removed`, a 403 `NOT_ENTITLED_ERROR`
-  `not-entitled`, and any other answer backs off. **At most one answered probe
-  per failure streak**; an open ends the streak, and a probe that got no answer
-  spends nothing (rationale). **A latched `removed` or `not-entitled` Burrow asks its Relay
-  nothing more**: no push, device list, or setup code. **Ignore open, message,
-  and close events, and probe answers, from sockets the controller no longer
-  owns** (rationale).
-  Source of truth: `BurrowRuntime.#onClose` in
-  `lib/src/remote/burrow/burrow-runtime.ts`; `probeBurrowStanding` in
-  `lib/src/remote/burrow/burrow-fetch.ts`; pinned by
-  `lib/src/remote/burrow/burrow-relay-socket.test.ts`.
-  `lib/src/remote/burrow/burrow-runtime.test.ts` pins late delivery after stop and
-  restart. **Never construct a socket after service disposal**, including
-  from an enrollment or ACL read already in flight.
+  `not-entitled`, and any other 2xx, 401, or 403 backs off. **At most one
+  answered probe per failure streak**; an open ends the streak, and **only a
+  2xx, 401, or 403 spends it**: no answer, a 5xx, or any other status counts
+  as none (rationale). **A latched `removed` or `not-entitled` Burrow
+  (`relayRefuses`) asks its Relay nothing more**: no push, device list, or
+  setup code. **Ignore open, message, and close events, and probe answers,
+  from sockets the controller no longer owns** (rationale). **Never construct
+  a socket after service disposal**, including from an enrollment or ACL read
+  already in flight.
 * **Security**: `BurrowAcl` (persisted through the `BurrowStateStore`, **keyed per
   `burrowId`**, so an enrollment onto a fresh one starts with an empty ACL while a
   re-enrollment onto the same one keeps its paired devices),
@@ -942,7 +938,11 @@ Source of truth: `lib/src/host/remote/service.ts` (`BurrowService`,
 in `remote-lib-common/src/remote/wire.ts`, `BurrowRuntime.mintInvitation` in
 `lib/src/remote/burrow/burrow-runtime.ts`, `lib/src/remote/burrow/burrow-fetch.ts`,
 `lib/src/remote/burrow/enrolled-gate.ts`, `lib/src/remote/burrow/activation.ts` (the
-webview's client half).
+webview's client half); the relay socket policy in `BurrowRuntime.#onClose` in
+`lib/src/remote/burrow/burrow-runtime.ts`, `probeBurrowStanding` in `lib/src/remote/burrow/burrow-fetch.ts`, and
+`relayRefuses` in `lib/src/host/remote/service-protocol.ts`. Pinned by
+`lib/src/remote/burrow/burrow-relay-socket.test.ts` and, for late delivery after
+stop and restart, `lib/src/remote/burrow/burrow-runtime.test.ts`.
 
 ### Remote control, in the Settings dialog
 

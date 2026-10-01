@@ -190,8 +190,8 @@ describe('localNetworksPath', () => {
       '',
     ].join('\r\n');
     expect(localNetworksPath(LAN).reportedAddress(offer)).toBe('172.58.12.9');
-    // The same whatever is allowed: it is never read against the allowed networks.
-    expect(localNetworksPath(['172.58.0.0/16']).reportedAddress(offer)).toBe('172.58.12.9');
+    // One inside the allowed networks is no reason the phone was refused.
+    expect(localNetworksPath(['172.58.0.0/16']).reportedAddress(offer)).toBe('2607:fb90:1:2::9');
     expect(localNetworksPath(LAN).reportedAddress(offer.replace(/^a=candidate:6 .*$/m, ''))).toBe('2607:fb90:1:2::9');
     // Private addresses only, or none at all: nothing to report.
     expect(localNetworksPath(LAN).reportedAddress(LAN_OFFER_PRIVATE)).toBeNull();
@@ -208,23 +208,26 @@ describe('localNetworksPath', () => {
     expect(path.refusal({ local: '::ffff:192.168.86.160', remote: '::ffff:c0a8:5617' })).toBeNull();
   });
 
-  it('refuses a pair with either end off the allowed networks', () => {
+  it('refuses a pair with either end off the allowed networks, naming that end, this one first', () => {
     const path = localNetworksPath(LAN);
-    expect(path.refusal({ local: '100.97.229.25', remote: '192.168.86.23' })).toBe(
-      'the selected pair’s local end is not on an allowed network',
-    );
-    expect(path.refusal({ local: '192.168.86.160', remote: '100.101.7.8' })).toBe(
-      'the selected pair’s remote end is not on an allowed network',
-    );
+    expect(path.refusal({ local: '100.97.229.25', remote: '192.168.86.23' })).toEqual({
+      reason: 'the selected pair’s local end is not on an allowed network',
+      end: 'local',
+    });
+    expect(path.refusal({ local: '192.168.86.160', remote: '100.101.7.8' })).toEqual({
+      reason: 'the selected pair’s remote end is not on an allowed network',
+      end: 'remote',
+    });
+    expect(path.refusal({ local: '100.97.229.25', remote: '100.101.7.8' })?.end).toBe('local');
   });
 
   it('refuses a name, an mDNS name, a missing end, or no pair at all', () => {
     const path = localNetworksPath(LAN);
     for (const remote of ['phone.local', '0f1e2d3c-aaaa-bbbb-cccc-000000000000.local', null]) {
-      expect(path.refusal({ local: '192.168.86.160', remote }), String(remote)).not.toBeNull();
+      expect(path.refusal({ local: '192.168.86.160', remote })?.end, String(remote)).toBe('remote');
     }
-    expect(path.refusal({ local: null, remote: '192.168.86.23' })).not.toBeNull();
-    expect(path.refusal(null)).toBe('the connection reports no selected candidate pair');
+    expect(path.refusal({ local: null, remote: '192.168.86.23' })?.end).toBe('local');
+    expect(path.refusal(null)).toEqual({ reason: 'the connection reports no selected candidate pair', end: null });
   });
 });
 

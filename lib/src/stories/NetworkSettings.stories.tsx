@@ -177,7 +177,7 @@ export const LocalNetworksRefusedObserved: Story = {
     primedBurrow: hosted(
       { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
       UNENROLLED_STATUS,
-      { at: AT_10_42, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' },
+      { at: AT_10_42, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' },
     ),
   },
   play: async ({ canvasElement }) => {
@@ -189,20 +189,39 @@ export const LocalNetworksRefusedObserved: Story = {
   },
 };
 
-/** No pair formed, so the address is the one the phone's offer reported, named as its claim. */
+/** No pair formed, so the address is the one the phone's offer reported, named as its claim and never as off the networks. */
 export const LocalNetworksRefusedReported: Story = {
   parameters: {
     primedBurrow: hosted(
       { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
       UNENROLLED_STATUS,
-      { at: AT_10_42, kind: 'given-up', address: '2607:fb90:1:2::9', addressSource: 'reported' },
+      { at: AT_10_42, kind: 'given-up', end: 'remote', address: '2607:fb90:1:2::9', addressSource: 'reported' },
     ),
   },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
     await expect(await canvas.findByRole('status', { name: 'Last refused phone' })).toHaveTextContent(
-      /a phone reported 2607:fb90:1:2::9, which isn’t on a network allowed below\./,
+      /a phone couldn’t connect directly over an allowed network \(it reported 2607:fb90:1:2::9\)\./,
     );
+  },
+};
+
+/** This computer's own end was off the allowed networks: the panel says so, and blames no phone's network. */
+export const LocalNetworksRefusedThisComputer: Story = {
+  parameters: {
+    primedBurrow: hosted(
+      { level: 'local', allowed: WIFI.prefixes, autoUpdate: false },
+      UNENROLLED_STATUS,
+      { at: AT_10_42, kind: 'path-refused', end: 'local', localAddress: '10.0.0.2' },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    const notice = await canvas.findByRole('status', { name: 'Last refused phone' });
+    await expect(notice).toHaveTextContent(
+      /a phone couldn’t connect: this computer wasn’t on a network allowed below \(its address was 10\.0\.0\.2\)\./,
+    );
+    await expect(notice).not.toHaveTextContent(/tried to connect from/);
   },
 };
 

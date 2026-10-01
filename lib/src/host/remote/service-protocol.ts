@@ -174,6 +174,15 @@ export function servingOf(
 }
 
 /**
+ * Whether `connection` is a Relay that no longer takes this Burrow (a
+ * `BurrowStanding` latched, `docs/specs/relay.md` -> "Burrow side"), which the
+ * Burrow asks for nothing more: no push, device list, setup code, or relay row.
+ */
+export function relayRefuses(connection: BurrowStatus): boolean {
+  return connection === 'removed' || connection === 'not-entitled';
+}
+
+/**
  * The service instance a `status` event names, or `null` where it names none —
  * a broker older than the field — which drops no hold.
  */

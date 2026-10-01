@@ -59,24 +59,56 @@ export function useBusyAction() {
  * What the person at this machine reads when the path ended a phone's session
  * (`docs/specs/remote-network.md` -> "Local networks"): one wording for
  * Settings → Network, which says when, above its allowed networks, and for a
- * one-time connection's ending. An address the phone `reported` is named as
- * its claim, never as where it connected from.
+ * one-time connection's ending. Only a refusal of the phone's end blames the
+ * phone's network; one of this machine's end says this computer was off them.
+ * An address the phone `reported` is named as its claim, never as where it
+ * connected from, nor as off the allowed networks.
  */
-export function pathRefusalSentence(refusal: PathRefusal, place: 'network-panel' | 'one-time'): string {
+export function pathRefusalSentence(
+  refusal: PathRefusal,
+  place: 'network-panel' | 'one-time',
+  now: number = Date.now(),
+): string {
   const panel = place === 'network-panel';
-  const phone = panel ? `At ${clockTime(refusal.at)} a phone` : 'The phone';
+  const when = panel ? `${refusalTime(refusal.at, now)} ` : '';
+  const phone = panel ? `${when}a phone` : 'The phone';
   const end = panel ? '.' : ', so the connection ended.';
-  if (refusal.address === undefined) {
+  const allowed = panel ? 'a network allowed below' : 'one of your allowed networks';
+  if (!('end' in refusal)) {
     return `${phone} couldn’t reach this computer over ${panel ? 'an allowed network' : 'one of your allowed networks'}${end}`;
   }
-  const said = refusal.addressSource === 'observed' ? 'tried to connect from' : 'reported';
-  const networks = panel ? 'a network allowed below' : 'one of your allowed networks';
-  return `${phone} ${said} ${refusal.address}, which isn’t on ${networks}${end}`;
+  if (refusal.end === 'local') {
+    const own = refusal.localAddress === undefined ? '' : ` (its address was ${refusal.localAddress})`;
+    return panel
+      ? `${when}a phone couldn’t connect: this computer wasn’t on ${allowed}${own}.`
+      : `This computer wasn’t on ${allowed}${own}${end}`;
+  }
+  if (refusal.address === undefined) {
+    return `${phone} tried to connect from outside ${panel ? 'the networks allowed below' : 'your allowed networks'}${end}`;
+  }
+  if (refusal.addressSource === 'reported') {
+    const over = panel ? 'an allowed network' : 'one of your allowed networks';
+    return `${phone} couldn’t connect directly over ${over} (it reported ${refusal.address})${end}`;
+  }
+  return `${phone} tried to connect from ${refusal.address}, which isn’t on ${allowed}${end}`;
 }
 
-/** `at` as this machine's clock shows it, hours and minutes. */
-function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+/**
+ * When `at` was, as this machine's clock shows it, leading a sentence: `At`
+ * hours and minutes today, `On` a date before them otherwise — a refusal stays
+ * until dismissed, so it can be days old.
+ */
+function refusalTime(at: number, now: number): string {
+  const date = new Date(at);
+  const today = new Date(now);
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (date.toDateString() === today.toDateString()) return `At ${time}`;
+  const day = date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(date.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' }),
+  });
+  return `On ${day} at ${time}`;
 }
 
 /** What a connected one-time phone can do, as the panel and the indicator's tooltip say it. */

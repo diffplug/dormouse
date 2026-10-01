@@ -334,17 +334,24 @@ export default function App({
 
   /**
    * The Burrows list: the pinned records, with online state stamped on from the
-   * Relay, and a record the Relay's list no longer names marked removed — only
-   * ever off a list that was read, since a failed read throws. **A Burrow with
-   * no record is not shown** — the Relay's list is discovery, and a row for a
+   * Relay, and a record of the signed-in account the Relay's list no longer
+   * names marked removed — only ever off a list that was read, since a failed
+   * read throws. **Another account's record is never marked removed**: this
+   * session's list names only its own account's Burrows. **A Burrow with no
+   * record is not shown** — the Relay's list is discovery, and a row for a
    * computer this phone holds no key for would offer an action that cannot
    * exist. Answers the rows it painted.
    */
   const loadBurrows = useCallback(async (): Promise<BurrowView[]> => {
     const [records, enrolled] = await Promise.all([client.listKnownBurrows(), client.listBurrows()]);
     const online = new Map(enrolled.map((burrow) => [burrow.burrowId, burrow.online]));
+    const account = client.accountId;
     const views = records.map((record) =>
-      toBurrowView(record, online.get(record.burrowId) ?? false, !online.has(record.burrowId)),
+      toBurrowView(
+        record,
+        online.get(record.burrowId) ?? false,
+        account !== null && record.accountId === account && !online.has(record.burrowId),
+      ),
     );
     setBurrows(views);
     setPhase({ at: 'burrows' });

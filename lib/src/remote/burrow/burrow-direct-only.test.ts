@@ -317,8 +317,31 @@ describe('BurrowRuntime direct-only sessions', () => {
       addressSource: 'observed',
     });
     expect(refusals).toEqual([
-      { at: clock.now(), kind: 'path-refused', address: OFF_LAN_PAIR.remote, addressSource: 'observed' },
+      { at: clock.now(), kind: 'path-refused', end: 'remote', address: OFF_LAN_PAIR.remote, addressSource: 'observed' },
     ]);
+  });
+
+  it('ends a session whose own end the policy refuses with a goodbye naming no address, and records this end', async () => {
+    const network = localNetworks(
+      new FakeDirectNetwork({ selectedPair: { local: '10.0.0.2', remote: '10.0.0.3' } }),
+      // The phone offered one, and is not the end refused: nothing names it.
+      lanOnlyPolicy({ reportedAddress: () => '203.0.113.7' }),
+    );
+    const live = await connect();
+    const { signals } = await openDirectPath({
+      socket,
+      burrowId: enrollment.burrowId,
+      clientId: live.clientId,
+      connectionId: live.connectionId,
+      session: live.session,
+      network,
+      setTimer: clock.setTimer,
+    });
+    await settle();
+
+    expect(burrow.establishedSessionCount).toBe(0);
+    expect(signals.at(-1)).toEqual({ ...SESSION_END_V1, reason: 'network-not-allowed' });
+    expect(refusals).toEqual([{ at: clock.now(), kind: 'path-refused', end: 'local', localAddress: '10.0.0.2' }]);
   });
 
   it('names the address the phone’s offer reported where no pair formed, as a refusal', async () => {
@@ -348,7 +371,7 @@ describe('BurrowRuntime direct-only sessions', () => {
       addressSource: 'reported',
     });
     expect(refusals).toEqual([
-      { at: clock.now(), kind: 'given-up', address: '203.0.113.7', addressSource: 'reported' },
+      { at: clock.now(), kind: 'given-up', end: 'remote', address: '203.0.113.7', addressSource: 'reported' },
     ]);
   });
 

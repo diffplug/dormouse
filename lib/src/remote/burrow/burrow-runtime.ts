@@ -313,7 +313,8 @@ export interface BurrowOptions {
   /**
    * Asked after a socket that never opened, before the next backoff, whether
    * the Relay still takes this Burrow's token ({@link probeBurrowStanding});
-   * rejects when no answer came. Absent, a refused upgrade is only retried.
+   * rejects when no answer about the token came. Absent, a refused upgrade is
+   * only retried.
    */
   probeStanding?: () => Promise<BurrowStanding | null>;
   /**
@@ -914,9 +915,10 @@ export class BurrowRuntime {
   /**
    * Ask the Relay about this Burrow's token, then latch or back off. Nothing
    * reconnects meanwhile, and an answer that lands after a `start()` or
-   * `stop()` is dropped. **Only an answer spends the streak's probe**: one that
-   * never arrived — asleep, offline, Nothing — proves nothing, and the next
-   * refused upgrade asks again.
+   * `stop()` is dropped. **Only an answer about the token spends the streak's
+   * probe**: a rejection — no answer (asleep, offline, Nothing), or a status
+   * other than 2xx, 401, or 403 — proves nothing, and the next refused upgrade
+   * asks again.
    */
   #probe(probe: () => Promise<BurrowStanding | null>): void {
     const run = this.#run;

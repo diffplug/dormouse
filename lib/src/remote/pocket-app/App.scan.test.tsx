@@ -57,6 +57,7 @@ const fake = vi.hoisted(() => ({
     | null,
   hasPriorUse: false,
   sessionToken: null as string | null,
+  accountId: 'owner' as string | null,
   setup: vi.fn<(credential: { setupToken: string }, label: string) => Promise<unknown>>(),
   signin: vi.fn<() => Promise<unknown>>(),
   retireSetupToken: vi.fn<(token: string) => Promise<void>>(),
@@ -108,6 +109,9 @@ vi.mock('../client/pocket-client', async (importOriginal) => ({
     socketOpen = true;
     get sessionToken() {
       return fake.sessionToken;
+    }
+    get accountId() {
+      return fake.accountId;
     }
     hasPriorUse = () => fake.hasPriorUse;
     registeredPushEndpoint = () => null;
@@ -171,11 +175,11 @@ let container: HTMLDivElement;
 let root: Root;
 
 /** A record as a successful pairing writes one. */
-async function knownBurrow(burrowId: string, label = 'First laptop'): Promise<KnownBurrowV1> {
+async function knownBurrow(burrowId: string, label = 'First laptop', accountId = 'owner'): Promise<KnownBurrowV1> {
   const clientStatic = await generateNoiseKeyPair();
   return {
     burrowId,
-    accountId: 'owner',
+    accountId,
     label,
     burrowStaticPublicKey: toBase64Url((await generateNoiseKeyPair()).publicKey),
     clientStaticKeyPair: {
@@ -196,6 +200,7 @@ beforeEach(() => {
   fake.noiseSupported = true;
   fake.hasPriorUse = false;
   fake.sessionToken = null;
+  fake.accountId = 'owner';
   fake.setup.mockReset().mockImplementation(async () => {
     fake.hasPriorUse = true;
     return {};
@@ -801,6 +806,21 @@ describe('a Burrow the Relay no longer lists', () => {
 
     await click(container, 'Forget');
     expect(fake.forgetBurrow).toHaveBeenCalledWith('burrow-2');
+  });
+
+  it('marks another account’s record unlisted by this session as the normal offline row', async () => {
+    fake.hasPriorUse = true;
+    fake.listKnownBurrows.mockResolvedValue([
+      await knownBurrow('burrow-1', 'First laptop'),
+      await knownBurrow('burrow-9', 'Work laptop', 'other-account'),
+    ]);
+    fake.listBurrows.mockResolvedValue([{ burrowId: 'burrow-1', label: 'First laptop', online: true }]);
+    await boot();
+    await click(container, 'Sign in with passkey');
+
+    expect(rowFor(container, 'Work laptop').textContent).not.toContain(REMOVED);
+    expect(rowFor(container, 'Work laptop').textContent).toContain('Offline');
+    expect(actionsIn(rowFor(container, 'Work laptop'))).toEqual(['Connect', 'Remove']);
   });
 
   it('marks nothing removed off a list that failed', async () => {

@@ -89,6 +89,7 @@ import {
   approvalKind,
   idleOneTimeState,
   isBurrowCommand,
+  relayRefuses,
   type ApproveParams,
   type BurrowUiEvent,
   type DenyParams,
@@ -390,14 +391,6 @@ const ONE_TIME_SERVING: ReadonlySet<OneTimeState['status']> = new Set<OneTimeSta
   'connecting',
   'connected',
 ]);
-
-/**
- * A Burrow its Relay no longer takes (`BurrowLatch`), which asks that Relay
- * for nothing more: its token would only be refused.
- */
-function refusedByRelay(burrow: BurrowRuntime): boolean {
-  return burrow.status === 'removed' || burrow.status === 'not-entitled';
-}
 
 /**
  * Whether a one-time connection in `state` can reach this machine's terminals,
@@ -1169,7 +1162,7 @@ export class BurrowService {
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
     const burrow = this.#burrow;
-    if (!enrollment || !burrow || refusedByRelay(burrow)) throw await this.#notConnected();
+    if (!enrollment || !burrow || relayRefuses(burrow.status)) throw await this.#notConnected();
     const response = await burrowFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
       API_ROUTES.burrowSetupToken,
@@ -1421,13 +1414,18 @@ export class BurrowService {
     if (this.#policy) this.#emit({ name: 'network-policy', ...this.#networkPolicyResult(this.#policy) });
   }
 
-  /** Forget the refusal held — the panel's Dismiss — and say so to every window. */
+  /**
+   * Forget the refusal held when Dismiss arrived — the panel's Dismiss — and
+   * say so to every window. Captured before the policy read: one recorded
+   * meanwhile is news the panel has not shown, and stays.
+   */
   async #dismissPathRefusal(): Promise<NetworkPolicyResult> {
+    const dismissing = this.#pathRefusal;
     const policy = await this.#networkPolicy();
-    const had = this.#pathRefusal !== null;
-    this.#pathRefusal = null;
+    const cleared = dismissing !== null && this.#pathRefusal === dismissing;
+    if (cleared) this.#pathRefusal = null;
     const result = this.#networkPolicyResult(policy);
-    if (had) this.#emit({ name: 'network-policy', ...result });
+    if (cleared) this.#emit({ name: 'network-policy', ...result });
     return result;
   }
 
@@ -1787,7 +1785,7 @@ export class BurrowService {
   #pushDeps(): AlertPushDeps | null {
     const burrow = this.#burrow;
     const enrollment = this.#enrollment;
-    if (!burrow || !enrollment || refusedByRelay(burrow)) return null;
+    if (!burrow || !enrollment || relayRefuses(burrow.status)) return null;
     return {
       enrollment,
       activeRecords: () => burrow.activeRecords,

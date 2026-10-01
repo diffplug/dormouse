@@ -1888,7 +1888,13 @@ describe('one-time connection', () => {
 
       await offerOneTimeDirect(phone, network);
       await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
-      const refusal = { at: expect.any(Number), kind: 'path-refused', address: '10.0.0.3', addressSource: 'observed' };
+      const refusal = {
+        at: expect.any(Number),
+        kind: 'path-refused',
+        end: 'remote',
+        address: '10.0.0.3',
+        addressSource: 'observed',
+      };
       expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed', refusal });
       expect(servingEvents().at(-1)).toBe(false);
 
@@ -1901,6 +1907,38 @@ describe('one-time connection', () => {
       expect(dismissed).not.toHaveProperty('refusal');
       expect(events().at(-1)).not.toHaveProperty('refusal');
       expect((await command('networkPolicy')).result).not.toHaveProperty('refusal');
+    });
+
+    it('dismisses only the refusal held when Dismiss arrived, keeping one recorded meanwhile', async () => {
+      const answerers: Array<ReturnType<FakeDirectNetwork['createAnswerer']>> = [];
+      const remotes = ['10.0.0.3', '192.168.1.3'];
+      createHostedService(undefined, {
+        createDirectPeer: () => {
+          const answerer = network.createAnswerer();
+          answerer.selectedPair = { local: '192.168.1.2', remote: remotes[answerers.length]! };
+          answerers.push(answerer);
+          return answerer;
+        },
+      });
+      await offerOneTimeDirect(await approvedPhone(), network);
+      await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
+      expect((await command('networkPolicy')).result).toMatchObject({ refusal: { address: '10.0.0.3' } });
+
+      // A second phone, on the allowed network, then moved off it in the same
+      // tick as a Dismiss of the first refusal: the second is news, and stays.
+      network = new FakeDirectNetwork();
+      const second = await join((await open()).url);
+      const queued = queueEvents().length;
+      second.sendControl({ code: '42', label: 'iPhone' });
+      const event = await flushUntil(() => queueEvents().slice(queued).find((e) => e.queue.length > 0));
+      await approve(event.queue[0]!);
+      expect(await second.next()).toMatchObject({ ok: true });
+      await switchDirect(second);
+      answerers[1]!.setConnectionState('connected');
+      const dismissing = service.handleCommand({ burrowRequestId: 'dismiss', cmd: 'dismissPathRefusal' });
+      answerers[1]!.reselect({ local: '192.168.1.2', remote: '10.0.0.9' });
+      await dismissing;
+      expect((await command('networkPolicy')).result).toMatchObject({ refusal: { address: '10.0.0.9' } });
     });
 
     it('rests that ending, its runtime gone, on a change of path, so no other level reports it', async () => {

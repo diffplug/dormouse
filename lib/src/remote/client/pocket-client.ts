@@ -179,13 +179,15 @@ export const BURROW_SESSION_REAPED_MESSAGE =
 
 /**
  * What a connection the computer holds to the direct path reports when no
- * direct path formed in time, or the computer ended it without saying why; a
- * goodbye that says the path was why reads {@link networkNotAllowedMessage}
- * instead (`docs/specs/remote-network.md` -> "Local networks").
+ * direct path formed in time, or the computer ended it without naming this
+ * phone's address; a goodbye that names it reads
+ * {@link networkNotAllowedMessage} instead (`docs/specs/remote-network.md` ->
+ * "Local networks"). **Never tells the phone to join a network**: the computer
+ * may be the end that was off them.
  */
 export const DIRECT_ONLY_FAILED_MESSAGE =
   'This computer accepts phones only over a direct connection on a network it allows, and one couldn’t be made. ' +
-  'Join one of those networks, then Connect again.';
+  'Check that this phone and the computer are both on one of those networks, then Connect again.';
 
 /**
  * What the same connection reports when a direct connection was never
@@ -388,6 +390,11 @@ export class PocketClient {
 
   get sessionToken(): string | null {
     return this.#session?.token ?? null;
+  }
+
+  /** The signed-in session's account, or `null` signed out. */
+  get accountId(): string | null {
+    return this.#session?.accountId ?? null;
   }
 
   get connectedBurrowId(): string | null {

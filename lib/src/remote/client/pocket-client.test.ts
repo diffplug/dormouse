@@ -1345,6 +1345,13 @@ describe('a direct-only session, end to end', () => {
     });
     expect(refused.harness.burrow.establishedSessionCount).toBe(0);
     expect(relayedApp(refused.harness)).toEqual([]);
+
+    // The computer's own end off them: the generic copy, never the phone's network.
+    const ownEnd = await directOnly({ network: { selectedPair: { local: '10.0.0.2', remote: '192.168.1.3' } } });
+    expect(await ownEnd.harness.client.connect(ownEnd.harness.burrowId)).toMatchObject({
+      ok: false,
+      message: DIRECT_ONLY_FAILED_MESSAGE,
+    });
   });
 
   it('gives up at the deadline on a channel that never opens', async () => {

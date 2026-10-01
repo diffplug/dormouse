@@ -155,6 +155,30 @@ export interface PathAddress {
 }
 
 /**
+ * Which end of the selected pair a path policy refused: `local` this
+ * machine's, `remote` the peer's.
+ */
+export type PathEnd = 'local' | 'remote';
+
+/**
+ * Why a path policy refused a selected pair, and which end it refused — `null`
+ * where the stack reported no pair, which blames neither.
+ */
+export interface PathPolicyRefusal {
+  readonly reason: string;
+  readonly end: PathEnd | null;
+}
+
+/**
+ * Which end of this attempt's path a refusal names, and the one address it
+ * may name there (`docs/specs/remote-network.md` -> "Local networks"): the
+ * peer's ({@link PathAddress}), or this machine's own on the refused pair.
+ */
+export type RefusedEnd =
+  | { readonly end: 'remote'; readonly address: PathAddress | null }
+  | { readonly end: 'local'; readonly address: string | null };
+
+/**
  * `address` as a refusal names it — an IPv4-mapped IPv6 address as its IPv4
  * half — or `null` for anything that is not an IP literal.
  */
@@ -188,17 +212,19 @@ export interface DirectPathPolicy {
    */
   acceptRemote(sdp: string): string;
   /**
-   * The first public IP literal among the candidates of the peer's description
-   * as it arrived, before {@link acceptRemote} — a phone's server-reflexive
-   * candidate, most often — or `null`. **A diagnostic for the person reading a
-   * refusal, never path evidence**: nothing decides on it.
+   * The first public IP literal outside the allowed networks among the
+   * candidates of the peer's description as it arrived, before
+   * {@link acceptRemote} — a phone's server-reflexive candidate, most often —
+   * or `null`. **A diagnostic for the person reading a refusal, never path
+   * evidence**: nothing decides on it.
    */
   reportedAddress(sdp: string): string | null;
   /**
    * Why the connection's selected candidate pair may not carry the session,
-   * or `null` when it may. `pair` is `null` where the peer reports none.
+   * and which end it refuses, or `null` when it may. `pair` is `null` where the
+   * peer reports none.
    */
-  refusal(pair: DirectSelectedPair | null): string | null;
+  refusal(pair: DirectSelectedPair | null): PathPolicyRefusal | null;
 }
 
 export interface DirectPeerHandlers {
@@ -286,9 +312,11 @@ export class DirectPeer {
   readonly #flushWaiters: Array<() => void> = [];
   #open = false;
   #closed = false;
-  /** The remote address of the selected pair the path policy refused; see {@link pathAddress}. */
-  #observed: string | null = null;
-  /** {@link DirectPathPolicy.reportedAddress} of the offer this end answered; see {@link pathAddress}. */
+  /** The end of the path the policy refused, where it named one; see {@link refusedEnd}. */
+  #refused: PathEnd | null = null;
+  /** The refused end's address on the selected pair, an IP literal; see {@link refusedEnd}. */
+  #refusedAddress: string | null = null;
+  /** {@link DirectPathPolicy.reportedAddress} of the offer this end answered; see {@link refusedEnd}. */
   #reported: string | null = null;
 
   constructor(deps: DirectPeerDeps) {
@@ -311,15 +339,24 @@ export class DirectPeer {
   }
 
   /**
-   * The address a refusal of this attempt names, under a path policy: the
-   * remote end of the selected pair it refused, as this end's ICE agent
-   * reported it (`observed`), the only path evidence; else the first public
-   * address the peer's offer carried (`reported`), a diagnostic alone; else
-   * `null`.
+   * The end a refusal of this attempt names, under a path policy. **`local`
+   * where the policy refused this machine's end** — the pair's local end off
+   * the allowed networks, or no candidate of this end on one — with that local
+   * address where the pair had one, and never the peer's. **Otherwise
+   * `remote`**, naming the refused pair's remote end as this end's ICE agent
+   * reported it (`observed`), the only path evidence, else the first public
+   * address outside the allowed networks the peer's offer carried
+   * (`reported`), a diagnostic alone — for a refused remote end, or any
+   * attempt whose offer carried one. `null` where neither applies.
    */
-  get pathAddress(): PathAddress | null {
-    if (this.#observed !== null) return { address: this.#observed, source: 'observed' };
-    if (this.#reported !== null) return { address: this.#reported, source: 'reported' };
+  get refusedEnd(): RefusedEnd | null {
+    if (this.#refused === 'local') return { end: 'local', address: this.#refusedAddress };
+    if (this.#refused === 'remote' && this.#refusedAddress !== null) {
+      return { end: 'remote', address: { address: this.#refusedAddress, source: 'observed' } };
+    }
+    const reported: PathAddress | null =
+      this.#reported === null ? null : { address: this.#reported, source: 'reported' };
+    if (this.#refused === 'remote' || reported) return { end: 'remote', address: reported };
     return null;
   }
 
@@ -663,6 +700,7 @@ export class DirectPeer {
     if (this.#pathPolicy && typeof sdp === 'string') {
       const described = this.#pathPolicy.describe(sdp);
       if (described === null) {
+        this.#refused = 'local';
         this.#refuse('no candidate of this end is on an allowed network');
         return null;
       }
@@ -763,9 +801,11 @@ export class DirectPeer {
     if (!policy) return false;
     const refusal = policy.refusal(pair);
     if (refusal === null) return false;
-    // The one address a refusal may name as where the phone connected from.
-    this.#observed = shownAddress(pair?.remote ?? null);
-    this.#refuse(refusal);
+    // The end refused, and its own address on the pair: the remote one is the
+    // one address a refusal may name as where the phone connected from.
+    this.#refused = refusal.end;
+    this.#refusedAddress = shownAddress(refusal.end === null ? null : (pair?.[refusal.end] ?? null));
+    this.#refuse(refusal.reason);
     return true;
   }
 

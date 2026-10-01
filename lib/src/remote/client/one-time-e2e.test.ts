@@ -382,9 +382,19 @@ describe('one-time connection, end to end', () => {
         'join the same Wi-Fi or VPN as the computer and try again.',
     });
     await settleUntil(() => runtime.state.status === 'ended');
-    const refusal = { at: expect.any(Number), kind: 'path-refused', address: '10.0.0.3', addressSource: 'observed' };
+    const refusal = { at: expect.any(Number), kind: 'path-refused', end: 'remote', address: '10.0.0.3', addressSource: 'observed' };
     expect(runtime.state).toEqual({ status: 'ended', reason: 'network-not-allowed', refusal });
     expect(refusals).toEqual([refusal]);
+  });
+
+  it('gives the direct-failed copy, naming no network, when the laptop’s own end was off the allowed networks', async () => {
+    makeRuntime({ network: { selectedPair: { local: '10.0.0.2', remote: '192.168.1.3' } }, pathPolicy: lanOnlyPolicy() });
+    const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
+    approval.approve(shown);
+    expect(await result).toEqual({ ok: false, message: ONE_TIME_DIRECT_FAILED_MESSAGE });
+    await settleUntil(() => runtime.state.status === 'ended');
+    const refusal = { at: expect.any(Number), kind: 'path-refused', end: 'local', localAddress: '10.0.0.2' };
+    expect(runtime.state).toEqual({ status: 'ended', reason: 'network-not-allowed', refusal });
   });
 
   it('gives the direct-failed copy when the laptop builds no peer', async () => {

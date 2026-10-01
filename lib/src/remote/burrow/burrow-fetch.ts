@@ -96,7 +96,8 @@ export function describingFetchFailures(fetch: typeof globalThis.fetch): typeof 
       return await fetch(input, init);
     } catch (error) {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      throw new Error(describeFetchFailure(url, error));
+      // `cause` by assignment: this build's lib is ES2020, which types no `ErrorOptions`.
+      throw Object.assign(new Error(describeFetchFailure(url, error)), { cause: error });
     }
   };
 }
@@ -159,14 +160,18 @@ export type BurrowStanding = 'removed' | 'not-entitled';
  * Burrow-gated read both Relays serve, `GET /api/push/devices`
  * (`docs/specs/relay.md` -> "Burrow side", relay socket policy): a 401
  * naming the token unknown is `removed`, a 403 `NOT_ENTITLED_ERROR` is
- * `not-entitled`, and any other answer `null`. **Rejects when no answer
- * came**, which proves nothing either way.
+ * `not-entitled`, and any other 2xx, 401, or 403 `null`. **Rejects when no
+ * answer came, or any other status did** — a 5xx, a 404 — which proves
+ * nothing either way.
  */
 export async function probeBurrowStanding(
   options: Omit<BurrowFetchOptions, 'errorPrefix'>,
 ): Promise<BurrowStanding | null> {
   const response = await burrowRequest(options, API_ROUTES.pushDevices);
   if (response.ok) return null;
+  if (response.status !== 401 && response.status !== 403) {
+    throw new Error(`${API_ROUTES.pushDevices} answered ${response.status}`);
+  }
   const body: unknown = await response.json().catch(() => null);
   const error = body && typeof body === 'object' ? (body as { error?: unknown }).error : undefined;
   if (response.status === 401 && (error === UNAUTHORIZED_ERROR || error === UNKNOWN_BURROW_TOKEN_ERROR)) {

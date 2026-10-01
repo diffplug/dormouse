@@ -14,7 +14,7 @@ import {
 import { useManagedVoiceConfigured } from './ManagedVoiceSection';
 import { hostOf, pathRefusalSentence, useBusyAction } from './remote-control-shared';
 import { HeldEnrollment, RemoteControlSection } from './RemoteControlSection';
-import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
+import { relayRefuses, type BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { HOSTED_VOICE_ORIGIN } from '../host/relay-origin';
 import { getPlatform } from '../lib/platform';
 import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
@@ -205,7 +205,7 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
   // The relay socket: a self-host build's, enrolled or about to be; a Hosted
   // build's once it is enrolled, the one-time links riding the same origin.
   // None while the Relay no longer takes this Burrow, which asks it nothing.
-  const refused = status.enrolled && (status.connection === 'removed' || status.connection === 'not-entitled');
+  const refused = status.enrolled && relayRefuses(status.connection);
   const persistent =
     runsBurrow(policy.level) && (status.relayMode === 'self-host' || status.enrolled) && !refused;
   if (persistent) {

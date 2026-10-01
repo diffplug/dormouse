@@ -657,7 +657,34 @@ describe('DirectPeer', () => {
       );
       expect(offered).toHaveLength(1);
       expect(offered[0]).toContain(`a=candidate:1 1 udp 2130706431 ${FAKE_LAN_PAIR.remote}`);
-      expect(run.burrowPeer.pathAddress).toEqual({ address: OFF_LAN.remote, source: 'observed' });
+      expect(run.burrowPeer.refusedEnd).toEqual({ end: 'remote', address: { address: OFF_LAN.remote, source: 'observed' } });
+    });
+
+    it('names this end, and never the phone, where the policy refused this machine’s end of the pair', async () => {
+      const run = await connected(
+        { selectedPair: { local: '::ffff:10.0.0.2', remote: '10.0.0.3' } },
+        lanOnlyPolicy({ reportedAddress: () => '203.0.113.7' }),
+      );
+      expect(run.burrow.refusals).toEqual(['off the LAN']);
+      expect(run.burrowPeer.refusedEnd).toEqual({ end: 'local', address: '10.0.0.2' });
+    });
+
+    it('names this end with no address where none of its candidates is on an allowed network', async () => {
+      const run = pair({}, lanOnlyPolicy({ describe: () => null, reportedAddress: () => '203.0.113.7' }));
+      expect(await run.burrowPeer.answer((await run.clientPeer.offer())!)).toBeNull();
+      expect(run.burrowPeer.refusedEnd).toEqual({ end: 'local', address: null });
+    });
+
+    it('names what the offer reported where no pair was reported, and neither end without it', async () => {
+      const reported = await connected({ selectedPair: null }, lanOnlyPolicy({ reportedAddress: () => '203.0.113.7' }));
+      expect(reported.burrow.refusals).toEqual(['off the LAN']);
+      expect(reported.burrowPeer.refusedEnd).toEqual({
+        end: 'remote',
+        address: { address: '203.0.113.7', source: 'reported' },
+      });
+
+      const unnamed = await connected({ selectedPair: null }, lanOnlyPolicy());
+      expect(unnamed.burrowPeer.refusedEnd).toBeNull();
     });
 
     it('names what the offer reported where no pair was refused, and nothing without a policy', async () => {
@@ -667,25 +694,31 @@ describe('DirectPeer', () => {
       const allowed = await connected({}, policy);
       expect(allowed.burrow.opens).toBe(1);
       expect(allowed.burrow.refusals).toEqual([]);
-      expect(allowed.burrowPeer.pathAddress).toEqual({ address: '203.0.113.7', source: 'reported' });
+      expect(allowed.burrowPeer.refusedEnd).toEqual({
+        end: 'remote',
+        address: { address: '203.0.113.7', source: 'reported' },
+      });
 
       const unheld = await connected({ selectedPair: OFF_LAN });
-      expect(unheld.burrowPeer.pathAddress).toBeNull();
+      expect(unheld.burrowPeer.refusedEnd).toBeNull();
     });
 
     it('names only an IP literal, an IPv4-mapped one as its IPv4 half', async () => {
       const mapped = await connected(
-        { selectedPair: { local: '10.0.0.2', remote: '::ffff:172.58.12.9' } },
+        { selectedPair: { local: '192.168.1.2', remote: '::ffff:172.58.12.9' } },
         lanOnlyPolicy({ reportedAddress: () => '203.0.113.7' }),
       );
-      expect(mapped.burrowPeer.pathAddress).toEqual({ address: '172.58.12.9', source: 'observed' });
+      expect(mapped.burrowPeer.refusedEnd).toEqual({
+        end: 'remote',
+        address: { address: '172.58.12.9', source: 'observed' },
+      });
 
       const named = await connected(
-        { selectedPair: { local: '10.0.0.2', remote: '0b1c5f3a-1d2e.local' } },
+        { selectedPair: { local: '192.168.1.2', remote: '0b1c5f3a-1d2e.local' } },
         lanOnlyPolicy({ reportedAddress: () => 'phone.local' }),
       );
       expect(named.burrow.refusals).toEqual(['off the LAN']);
-      expect(named.burrowPeer.pathAddress).toBeNull();
+      expect(named.burrowPeer.refusedEnd).toEqual({ end: 'remote', address: null });
     });
 
     it('applies the peer’s description as the policy accepts it', async () => {

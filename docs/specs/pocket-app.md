@@ -152,8 +152,9 @@ discarding the pin (rationale). Each row carries **Remove**, which tombstones th
 delivery id before deleting the record; the list carries **Scan a setup code**.
 Pairing continues into connecting.
 
-**A record the Relay's list no longer names is removed**, marked only off a
-`GET /api/burrows` that succeeded; a listed offline Burrow stays offline. Its
+**A record of the signed-in account the Relay's list no longer names is
+removed**, marked only off a `GET /api/burrows` that succeeded; a listed
+offline Burrow, and another account's record, keep the offline row. Its
 row reads `BURROW_REMOVED_COPY` for the deployment Pocket read
 (`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone,
 which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the

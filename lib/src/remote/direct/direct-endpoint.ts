@@ -25,7 +25,7 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import { DirectPeer, type DirectPeering, type DirectViolationCause, type PathAddress } from './direct-peer';
+import { DirectPeer, type DirectPeering, type DirectViolationCause, type RefusedEnd } from './direct-peer';
 import { realTimer, type RemoteTimer } from '../ws';
 
 /**
@@ -98,8 +98,8 @@ export class DirectEndpoint {
   #peer: DirectPeer | null = null;
   /** Whether this end built a peer for an attempt; see {@link attempted}. */
   #attempted = false;
-  /** The given-up attempt's {@link DirectPeer.pathAddress}, kept past its peer. */
-  #givenUpAddress: PathAddress | null = null;
+  /** The given-up attempt's {@link DirectPeer.refusedEnd}, kept past its peer. */
+  #givenUpEnd: RefusedEnd | null = null;
   #disposed = false;
   #cause: DirectRelayCause | null = null;
   /** Whether an offer has been taken up and not yet answered or declined. */
@@ -149,11 +149,11 @@ export class DirectEndpoint {
   }
 
   /**
-   * The address a refusal of this session's attempt names
-   * ({@link DirectPeer.pathAddress}), live or given up; `null` with none.
+   * The end a refusal of this session's attempt names
+   * ({@link DirectPeer.refusedEnd}), live or given up; `null` with none.
    */
-  get pathAddress(): PathAddress | null {
-    return this.#peer?.pathAddress ?? this.#givenUpAddress;
+  get refusedEnd(): RefusedEnd | null {
+    return this.#peer?.refusedEnd ?? this.#givenUpEnd;
   }
 
   /**
@@ -467,7 +467,7 @@ export class DirectEndpoint {
     // actually was, and staying relayed is the outcome an operator most often
     // has to explain. Once per session at most: the attempt is not retried.
     console.warn(`[direct] staying on the relay: ${reason}`);
-    this.#givenUpAddress = this.#peer?.pathAddress ?? this.#givenUpAddress;
+    this.#givenUpEnd = this.#peer?.refusedEnd ?? this.#givenUpEnd;
     this.#peer?.close();
     this.#peer = null;
     this.#cutover.abandon();

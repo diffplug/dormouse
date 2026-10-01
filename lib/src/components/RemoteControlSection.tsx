@@ -14,11 +14,12 @@ import {
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import { ACCOUNT_PAGE_PATH, HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
-import type {
-  BurrowConsoleStatus,
-  HostedEnrollmentEndReason,
-  HostedEnrollmentState,
-  SetupQrResult,
+import {
+  relayRefuses,
+  type BurrowConsoleStatus,
+  type HostedEnrollmentEndReason,
+  type HostedEnrollmentState,
+  type SetupQrResult,
 } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
 import type {
@@ -1059,7 +1060,7 @@ function EnrolledView({
   const busy = ownBusy || enrollingAgain;
   const error = ownError ?? enrollAgainError;
   // A Relay that no longer takes this Burrow mints no setup code.
-  const refused = connection === 'removed' || connection === 'not-entitled';
+  const refused = relayRefuses(connection);
   // Disconnecting drops every paired phone until they pair again, so it asks
   // once rather than acting on the first click.
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);

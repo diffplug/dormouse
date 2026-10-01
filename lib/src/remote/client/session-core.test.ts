@@ -319,18 +319,20 @@ describe('an established session', () => {
     expect(core.goodbye).toBeNull();
   });
 
-  it('words a goodbye the path ended by what it names, and nothing for one that names no reason', () => {
+  it('words a goodbye the path ended by the address it names, and nothing for one that names none', () => {
     const refused = { ...SESSION_END_V1, reason: 'network-not-allowed' } as const;
-    const lead = 'This computer only accepts phones on its allowed networks.';
-    const fix = 'join the same Wi-Fi or VPN as the computer and try again.';
     expect(networkNotAllowedMessage({ ...refused, address: '172.58.12.9', addressSource: 'observed' })).toBe(
-      `${lead} Yours connected from 172.58.12.9 — ${fix}`,
+      'This computer only accepts phones on its allowed networks. Yours connected from 172.58.12.9 — ' +
+        'join the same Wi-Fi or VPN as the computer and try again.',
     );
-    // The phone's own claim is never worded as where it connected from.
+    // The phone's own claim is never worded as where it connected from, nor as off the networks.
     expect(networkNotAllowedMessage({ ...refused, address: '172.58.12.9', addressSource: 'reported' })).toBe(
-      `${lead} Yours reported the address 172.58.12.9 — ${fix}`,
+      'This phone couldn’t reach the computer directly over one of its allowed networks (it reported 172.58.12.9). ' +
+        'If it’s on another network, join the same Wi-Fi or VPN as the computer and try again.',
     );
-    expect(networkNotAllowedMessage(refused)).toBe(`${lead} Yours wasn’t on one — ${fix}`);
+    // No address — the computer's own end refused, or nothing to name — is
+    // never a reason to send the phone to another network: the generic copy.
+    expect(networkNotAllowedMessage(refused)).toBeNull();
     expect(networkNotAllowedMessage(SESSION_END_V1)).toBeNull();
     expect(networkNotAllowedMessage(null)).toBeNull();
   });

@@ -58,6 +58,10 @@ describe('describingFetchFailures', () => {
     const failing = describingFetchFailures(() => Promise.reject(undiciFailure('ENOTFOUND')));
     await expect(failing(URL_WITH_PATH)).rejects.toThrow('Couldn’t reach relay.dormouse.sh: the name doesn’t resolve.');
     await expect(failing(new URL(URL_WITH_PATH))).rejects.toThrow('relay.dormouse.sh');
+    const underlying = undiciFailure('ECONNREFUSED');
+    await expect(describingFetchFailures(() => Promise.reject(underlying))(URL_WITH_PATH)).rejects.toMatchObject({
+      cause: underlying,
+    });
 
     const answer = new Response('', { status: 503 });
     expect(await describingFetchFailures(() => Promise.resolve(answer))(URL_WITH_PATH)).toBe(answer);
@@ -96,10 +100,19 @@ describe('probeBurrowStanding', () => {
       [403, { error: 'forbidden' }, null],
       [403, { error: UNAUTHORIZED_ERROR }, null],
       [401, { error: NOT_ENTITLED_ERROR }, null],
-      [500, { error: UNAUTHORIZED_ERROR }, null],
-      [502, undefined, null],
     ] as const) {
       expect(await answering(status, body).probe(), `${status} ${JSON.stringify(body)}`).toBe(standing);
+    }
+  });
+
+  it('rejects any other status, which is no answer about the token', async () => {
+    for (const [status, body] of [
+      [500, { error: UNAUTHORIZED_ERROR }],
+      [502, undefined],
+      [404, undefined],
+      [429, undefined],
+    ] as const) {
+      await expect(answering(status, body).probe(), `${status}`).rejects.toThrow(`answered ${status}`);
     }
   });
 

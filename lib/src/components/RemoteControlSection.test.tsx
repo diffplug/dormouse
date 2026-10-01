@@ -2025,7 +2025,7 @@ describe('One-time connection', () => {
   });
 
   it('names where the phone connected from when the path ended it, in the Network panel’s words', async () => {
-    const refusal = { at: NOW, kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' } as const;
+    const refusal = { at: NOW, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' } as const;
     await renderOneTime(oneTimeService({ status: 'ended', reason: 'network-not-allowed', refusal }));
     expect(oneTimeOutcome()?.textContent).toBe(pathRefusalSentence(refusal, 'one-time'));
     expect(oneTimeOutcome()?.textContent).toContain('172.58.12.9');

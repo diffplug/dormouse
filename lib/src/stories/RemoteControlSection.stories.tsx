@@ -660,7 +660,7 @@ export const OneTimeEndedNetworkNotAllowed: Story = {
       oneTime: {
         status: 'ended',
         reason: 'network-not-allowed',
-        refusal: { at: Date.now(), kind: 'path-refused', address: '172.58.12.9', addressSource: 'observed' },
+        refusal: { at: Date.now(), kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' },
       },
     },
     docs: { story: { height: '360px' } },

@@ -234,9 +234,8 @@ export class EstablishedE2eSession {
    * (`docs/specs/remote-network.md` -> "Local networks"), else `null`: set by a
    * break of a direct-only session a path policy holds — a refused path, or a
    * given-up attempt or a missed deadline once the phone offered one — before
-   * the owner hears of it. Its address is the remote end of the selected pair
-   * the policy refused, else the first public address the phone's offer
-   * carried, which is a diagnostic and decides nothing.
+   * the owner hears of it. It names the end refused, and that end's address
+   * where there is one ({@link DirectEndpoint.refusedEnd}).
    */
   get pathRefusal(): PathRefusal | null {
     return this.#pathRefusal;
@@ -314,7 +313,7 @@ export class EstablishedE2eSession {
     if (this.#disposed) return;
     const forPath = reason === 'path-refused' || (reason !== 'relayed-app' && this.#direct.attempted);
     if (this.#pathHeld && forPath) {
-      this.#pathRefusal = pathRefusal(this.#now(), reason as PathRefusal['kind'], this.#direct.pathAddress);
+      this.#pathRefusal = pathRefusal(this.#now(), reason as PathRefusal['kind'], this.#direct.refusedEnd);
     }
     this.#onDirectOnlyBroken?.(reason);
   }
