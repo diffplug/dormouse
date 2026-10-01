@@ -201,6 +201,18 @@ test('a malformed or mismatched VAPID pair yields no signer', async () => {
   assert.ok(await vapidSigner(keys));
 });
 
+test('noncanonical trailing bits in either VAPID key yield no signer', async () => {
+  const keys = nodeVapidKeys();
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+  for (const field of ['publicKey', 'privateKey']) {
+    const value = keys[field];
+    const noncanonical = value.slice(0, -1) + alphabet[alphabet.indexOf(value.at(-1)) | 1];
+    assert.notEqual(noncanonical, value);
+    assert.deepEqual(Buffer.from(noncanonical, 'base64url'), Buffer.from(value, 'base64url'));
+    assert.equal(await vapidSigner({ ...keys, [field]: noncanonical }), null);
+  }
+});
+
 test('a push request carries the encrypted body, the VAPID authorization, TTL, and urgency', async () => {
   const signer = await vapidSigner(nodeVapidKeys());
   const subscription = browserSubscription();

@@ -222,10 +222,9 @@ export async function vapidSigner(
   ) {
     return null;
   }
-  const publicKey = fromBase64Url(keys.publicKey);
-  const privateScalar = fromBase64Url(keys.privateKey);
-  if (publicKey.length !== P256_POINT_LENGTH || publicKey[0] !== 4) return null;
-  if (privateScalar.length !== P256_SCALAR_LENGTH) return null;
+  const publicKey = decodeP256dh(keys.publicKey);
+  const privateScalar = decodePushKey(keys.privateKey, P256_SCALAR_LENGTH);
+  if (!publicKey || !privateScalar) return null;
   const subtle = subtleOf(crypto);
   let signingKey: CryptoKeyLike;
   try {

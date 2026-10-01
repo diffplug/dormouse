@@ -66,6 +66,20 @@ test("push is configured only by a matching pair and an https, non-loopback orig
     expect(await pushConfigOf(env(extra)), name).toBeNull();
 });
 
+test("noncanonical VAPID secrets disable push across repeated cached config reads", async () => {
+  const keys = testVapidKeys();
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  for (const field of ["RELAY_VAPID_PUBLIC_KEY", "RELAY_VAPID_PRIVATE_KEY"] as const) {
+    const value = keys[field];
+    const noncanonical = value.slice(0, -1) + alphabet[alphabet.indexOf(value.at(-1)!) | 1];
+    expect(noncanonical).not.toBe(value);
+    const invalid = env({ [field]: noncanonical });
+    expect(await pushConfigOf(invalid), field).toBeNull();
+    expect(await pushConfigOf(invalid), `${field} cached`).toBeNull();
+  }
+  expect(await pushConfigOf(env())).not.toBeNull();
+});
+
 /** A subscription a browser could hold. */
 function target(endpoint = "https://fcm.googleapis.com/fcm/send/abc") {
   const ecdh = createECDH("prime256v1");
