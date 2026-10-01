@@ -338,6 +338,20 @@ export const RULES = [
     },
   },
   {
+    // A `head -1` or `grep -q` that exits before the CLI finishes writing gets
+    // it killed by SIGPIPE, so the decision rides on a race; capture first,
+    // then search the captured text. `ts ip -4 | head -1` sat in both
+    // `manage verify`s while every rule above stayed green.
+    rule: 'Network posture — no Tailscale CLI output is piped into `head` or `grep -q`',
+    forbidden: true,
+    violation: 'tsip="$(ts ip -4 2>/dev/null | head -1 || true)"',
+    patterns: {
+      macOS: /(?:\btailscale|\bts)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
+      Linux: /(?:\btailscale|\bts)\b[^\n|]*\|\s*(?:head\b|grep\s+-\w*q)/,
+    },
+    skip: { Windows: 'every Tailscale decision is a `-match` over a string already captured from `Invoke-Tailscale`, so there is no pipeline to take SIGPIPE' },
+  },
+  {
     // Anchored on the three paths that matter. A bare `chmod 0700` also matches
     // `run-relay`, `manage` and the probe state dir, and `Protect-Path` has
     // six hits, so relaxing config/+state/ to 0755 passed.
