@@ -353,7 +353,7 @@ Source of truth: `toSpokenText` / `startAlertSpeech` in `lib/src/lib/alert-speec
 Every rule above holds for both engines.
 
 - **Must try managed voice first while the adapter's `managedVoice` status says a token is saved** (`docs/specs/transport.md` → "Managed voice"); otherwise the utterance goes straight to Web Speech.
-- **A self-host build's host has no Hosted origin** and makes no request (`docs/specs/relay.md` → "Relay origin").
+- **A self-host build's host has no Hosted origin** and makes no request (`docs/specs/relay.md` → "Relay origin"), **nor does any host under the network policy's `nothing`** (`docs/specs/remote-network.md` → "Policy").
 - **Must fall back to Web Speech for the same utterance, inside the same attempt, on any failure before managed audio starts** — `unconfigured`, offline, non-2xx, host timeout, undecodable or refused playback. **Never play both**: audio that started and then failed ends the attempt instead (rationale). Nothing is retried.
 - `speaking` / `spoken` follow the audio element's `playing` / `ended`. **Cut-off and teardown must stop the audio**; a request still in flight runs out in the host and its answer is ignored.
 - **Never let the voice token reach a renderer**; the host adds it to the request (rationale). Where it may go: `docs/specs/security-local.md` → "Persisted state".
@@ -378,7 +378,7 @@ Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vsc
 
 Reached from the baseboard sliders; `docs/specs/layout.md` owns placement.
 
-- **Must show Settings as a continuous page beside left-side contents**, omitting unavailable topics: General without an editable theme or shell, Relay without a Burrow service. **Must place Remote control in Relay below Notifications**, preserving push's "below" copy.
+- **Must show Settings as a continuous page beside left-side contents**, omitting unavailable topics: General without an editable theme or shell, Network without a Burrow service. **Must place Network below Notifications**, preserving push's "below" copy; `docs/specs/remote-network.md` -> "Settings → Network" owns its content.
 - **Must scroll to topics and search results over 700 ms**, using eased animation; new navigation replaces it, user scrolling cancels it. Contents click, mouse hover, or Up/Down/Home/End navigates. Highlight the mouse-hovered contents entry or settings section, otherwise the section at the scroll area's top, or last at the bottom. **Hovering settings never scrolls.** Contents remain visible.
 - **Must search available settings' labels, descriptions, rendered options, and live command/device names**, case-insensitively, each whitespace-separated term found in one group or its topic's label. Matching groups and contents entries show, or an empty state; each search change scrolls to the top. **Never unmount a filtered group**, so drafts and in-flight actions survive search and navigation.
 - **Must close on a backdrop click, the close button, or Escape**, Escape closing an open picker first. **Never dismiss a drag starting inside the dialog.** Title-bar search takes initial focus, and Tab skips hidden controls. Pinned by `lib/src/components/SettingsDialog.test.tsx` and `lib/src/stories/SettingsDialog.stories.tsx`.
@@ -387,7 +387,7 @@ Reached from the baseboard sliders; `docs/specs/layout.md` owns placement.
 - Lists every watched command with a remove control, and **cannot add one** — WATCHING is keyed on a running command's watch key, so creating a rule stays the terminal context of a Pane running it, and the empty state says so. **It is the only place a rule set on a since-closed Pane can be removed**, the terminal context reaching only the command its own Pane is running.
 - The watcher group carries the **Defer alerts until animation stops** switch and explains that a fully armed watcher delays terminal notifications and withdraws a ring once watched work resumes.
 - **Delays are committed on blur or `Enter`, never per keystroke** — typing `3` on the way to `30` must not briefly install a 3-second timer. They are shown in seconds; an out-of-range or empty entry snaps back to whatever the store clamped it to.
-- **The push group's device line names every device a push would reach**, and otherwise says why there is none — no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
+- **The push group's device line names every device a push would reach**, and otherwise says why there is none — Network set to Nothing, no Burrow enrolled, nothing subscribed yet, or the server could not be asked (rationale).
 - **Must show only application-wide settings**, excluding Workspace overrides.
 - **Must open a separate Workspace alert dialog from either baseboard alarm button's right-click or focused `Shift+F10`/`ContextMenu`**, only with a Workspace scope. Preserve per-field inheritance, reset-all, and local voice selection/testing; close on Escape, backdrop click, or close button and return focus to the invoking alarm button. Pinned by `lib/src/components/Baseboard.test.tsx` and `lib/src/components/WorkspaceAlarmSettings.test.tsx`.
 - **Must use the elevated-pane halo and theme-dropdown fades toward overflow.** **Must match Shell and Theme trigger sizing and inset borders**, without a Shell swatch.

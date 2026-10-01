@@ -53,15 +53,16 @@ export const ONE_TIME_INVALID_MESSAGE =
 export const ONE_TIME_NOT_CONNECTED_TITLE = 'Not connected';
 
 export const ONE_TIME_READY_TITLE = 'Connect to your computer';
-const ONE_TIME_SAME_WIFI =
-  'Your phone and computer must be on the same Wi-Fi. Nothing is saved on this phone.';
+const ONE_TIME_ALLOWED_NETWORK =
+  'Your phone must be on a network your computer allows in Settings → Network. Nothing is saved ' +
+  'on this phone.';
 export const ONE_TIME_CONNECT_LABEL = 'Connect';
 
 const ONE_TIME_CODE_INSTRUCTION = 'Type these two digits on your computer.';
 
 export const ONE_TIME_CONNECTING_TITLE = 'Connecting directly…';
 const ONE_TIME_CONNECTING_BODY =
-  'Keep this page open. Your phone and computer must be on the same Wi-Fi.';
+  'Keep this page open. Your phone must be on a network your computer allows.';
 
 export const ONE_TIME_END_LABEL = 'End';
 
@@ -347,7 +348,7 @@ export function OneTimeReady({
   return (
     <PocketScreen heading={ONE_TIME_HEADING}>
       <p className={PK.title}>{ONE_TIME_READY_TITLE}</p>
-      <p className={PK.lead}>{ONE_TIME_SAME_WIFI}</p>
+      <p className={PK.lead}>{ONE_TIME_ALLOWED_NETWORK}</p>
       <button type="button" className={pkButton({ block: true })} onClick={onConnect}>
         {ONE_TIME_CONNECT_LABEL}
       </button>

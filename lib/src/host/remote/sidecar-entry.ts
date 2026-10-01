@@ -503,6 +503,9 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
     onStatus: (status) => send('voice:status', status),
     log: (message) => console.error(message),
     relay,
+    // The service holds the network policy; managed voice is its second choke
+    // point (`docs/specs/remote-network.md` → "Policy").
+    networkAllowed: () => service.networkAllowed(),
   });
 
   function handleBurrowCommand(data: unknown): void {

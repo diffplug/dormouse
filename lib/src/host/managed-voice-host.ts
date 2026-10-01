@@ -53,6 +53,12 @@ export function createManagedVoiceHost(options: {
   log?: (message: string) => void;
   /** This build's `bakedRelay()`; see `speakUrl`. */
   relay: RelayBuild;
+  /**
+   * Whether the network policy lets this process reach Hosted
+   * (`docs/specs/remote-network.md` → "Policy"), asked at every speak.
+   * `false` refuses before any request.
+   */
+  networkAllowed: () => Promise<boolean>;
 }): { handle(command: unknown): Promise<unknown> } {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? MANAGED_VOICE_REQUEST_TIMEOUT_MS;
@@ -168,6 +174,8 @@ export function createManagedVoiceHost(options: {
   }
 
   async function speak(speakUrl: string, text: string): Promise<ManagedVoiceHostSpeakResult> {
+    // Expected, like `unconfigured`, so not logged: the renderer falls back.
+    if (!(await options.networkAllowed())) return { ok: false, reason: 'network-off' };
     const result = await request(speakUrl, text);
     if (!result.ok && result.reason !== 'unconfigured') log(`[managed-voice] speak failed: ${result.reason}`);
     return result;

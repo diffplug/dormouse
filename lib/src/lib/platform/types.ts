@@ -225,6 +225,16 @@ export interface PlatformAdapter {
   hostOwnsShells?: boolean;
 
   /**
+   * Whether the host updates Dormouse itself, so Settings → Network offers no
+   * update check of its own. Absent reads as `false`.
+   *
+   * `VSCodeAdapter` sets it `true`: the Marketplace installs the extension's
+   * updates, following VS Code's own setting (`docs/specs/remote-network.md`
+   * -> "Settings → Network").
+   */
+  hostOwnsUpdates?: boolean;
+
+  /**
    * Agent resume invocations the host captured when it last tore down, keyed by
    * surface id — consumed once by a cold restore (`session-restore.ts`).
    *
@@ -417,4 +427,31 @@ export interface PlatformAdapter {
   /** Managed voice (`docs/specs/transport.md` -> "Managed voice"); absent
    *  means every utterance goes to Web Speech. */
   managedVoice?: ManagedVoicePort;
+
+  /**
+   * The host's update checks, for Settings → Network's "Last checked" and
+   * "Check now" (`docs/specs/remote-network.md` -> "Updates"). Absent where
+   * this window never checks: VS Code, a self-host build, the browser-dev
+   * harness, and every Standalone window but `main`.
+   */
+  updates?: UpdatesPort;
+}
+
+/**
+ * An external store over the host's updater, which lib knows nothing more of
+ * (`docs/specs/auto-update.md` -> "Threading").
+ */
+export interface UpdatesPort {
+  /** Stable until the next change, as `useSyncExternalStore` needs. */
+  getSnapshot(): UpdatesSnapshot;
+  subscribe(listener: () => void): () => void;
+  /** Check now, whatever the network policy says; the outcome shows in the Baseboard. */
+  checkNow(): void;
+}
+
+export interface UpdatesSnapshot {
+  /** When the last successful check finished (epoch ms), or `null` for none on this machine. */
+  checkedAt: number | null;
+  /** Whether a check, automatic or asked for, is in flight. */
+  checking: boolean;
 }

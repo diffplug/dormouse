@@ -136,15 +136,16 @@ side"): the same
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
 as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStore`
-keeps enrollment and ACL there as **one** `burrow.json`, 0600 in a 0700
-directory via temp-then-rename — one file, so a write is one atomic rename
-(rationale). `burrowToken` is a bearer credential and **never enters a webview
-realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
+keeps enrollment and ACL there as **one** `burrow.json`, so a write is one atomic
+rename (rationale), and the network policy beside it (`docs/specs/remote-network.md`
+→ "Policy"), both 0600 in a 0700 directory via temp-then-rename. `burrowToken` is
+a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
 
 - **Reads fail closed.** Only `ENOENT` and a read-but-unparseable file answer
-  empty; the parse failure warns. Any other read error is neither answered nor
-  memoized — the load rejects and takes the save behind it with it (rationale). A
-  later read recovers.
+  empty — but the network policy's unparseable file reads as Nothing, never
+  empty (`docs/specs/remote-network.md` → "Policy"); the parse failure warns.
+  Any other read error is neither answered nor memoized — the load rejects and
+  takes the save behind it with it (rationale). A later read recovers.
 - **The in-memory view advances only after the rename succeeds.** Re-tightening a
   directory Rust already created is best-effort; failing the save over it would
   lose the Burrow instead.

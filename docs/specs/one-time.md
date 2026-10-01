@@ -184,6 +184,7 @@ decides them; a runtime never enters either.
 | `expired` | a link past its expiry, claimed or not; a late request or confirmation; room close `4010` or `4014` |
 | `phone-left` | room close `4013` before the switch; any session failure after it |
 | `direct-failed` | a decline, an abandoned attempt, a session failure before the switch, or the direct deadline |
+| `network-not-allowed` | the path check refused the direct path (`docs/specs/remote-network.md` -> "Local networks") |
 | `idle` | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` without a decrypted phone message |
 | `unreachable` | no room frame by the open deadline, a first message that is not one, or a socket lost before it |
 | `rendezvous-lost` | any other close before the switch |
@@ -391,7 +392,8 @@ Source of truth: `devConfig` in `hosted/scripts/dev-one-time.mjs`. Pinned by
 enrollment**: it works un-enrolled, survives `clearEnrollment` and
 `reconnect`, and `dispose()` ends it. Its label is the enrollment's, else
 `suggestedBurrowLabel(kind)`; its provider and direct-peer factory are the
-enrolled runtime's.
+enrolled runtime's, held under Local networks to the allowed networks
+(`docs/specs/remote-network.md` -> "Local networks").
 
 | Command | Answers |
 | --- | --- |
@@ -404,8 +406,10 @@ enrolled runtime's.
   connection (ending it unannounced), and is **refused while `connecting` or
   `connected`**, and while `unavailable`.
 - **Every state change is a `{ name: 'one-time', state }` event, and so is a
-  service's start**, ahead of its enrollment read (rationale).
-- **`status` and its event carry `serving`**: `enrolled`, or a one-time status
+  service's start**, after its policy read, ahead of its enrollment read
+  (rationale).
+- **`status` and its event carry `serving`**: a running Burrow (none under
+  Nothing), or a one-time status
   of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip
   emits `status`. **A reader missing `serving` takes `enrolled`** (an older VS
   Code broker). What arms on each: `docs/specs/vscode.md` -> "Burrow: a
@@ -424,7 +428,9 @@ enrolled runtime's.
 **The origin is the build's Hosted origin, which only a Hosted build has**
 (`docs/specs/relay.md` -> "Relay origin", whose "Accepted origins" bounds it). **Availability is decided before any socket exists**:
 without a Hosted origin the state is `unavailable` with reason `self-host`, and
-the service builds no runtime.
+the service builds no runtime; the network policy's `nothing` makes it
+`unavailable` with reason `network-off`, and a policy change ends a live
+connection (`docs/specs/remote-network.md` -> "Policy").
 
 **Standalone** passes the baked pair from the sidecar entry; Rust broadcasts
 every `burrow:event` unchanged. VS Code's bootstrap, idle answers, and serving
@@ -440,20 +446,21 @@ Source of truth: `BurrowService` and `oneTimeServing` in
 
 ## Laptop UI
 
-**`OneTimeConnection` sits in Settings' Remote control choices, above
-Persistent Relay, enrolled or not**; `OneTimeIndicator` sits in the Baseboard's
-right cluster (`docs/specs/layout.md` -> "Baseboard").
+**`OneTimeConnection` sits in the Remote control choices of Settings →
+Network's Phones section, above Persistent Relay, enrolled or not**
+(`docs/specs/remote-network.md` -> "Settings → Network"); `OneTimeIndicator`
+sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
 
 | State | The panel shows | Actions |
 | --- | --- | --- |
-| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Phone and computer must be on the same Wi-Fi. No account needed." | the button opens |
+| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Your phone must be on an allowed network. No account needed." | the button opens |
 | `unavailable` | the button disabled, the reason's copy for the hint | — |
 | `opening` | "Getting a link…" | Cancel |
 | `waiting` | the link as a QR code and as selectable text; "Good for one phone. Expires in N min." | Copy link, New link, Cancel |
 | `confirming` | "Type the two digits your phone shows into the dialog." | Cancel |
 | `connecting` | "Connecting directly…" | Cancel |
 | `connected` | the phone's label, then "has full control of your terminals." | End |
-| `ended` | one fixed sentence per reason, `direct-failed`'s naming the same Wi-Fi | New link, Done |
+| `ended` | one fixed sentence per reason, `direct-failed`'s and `network-not-allowed`'s naming the allowed networks | New link, Done |
 
 - **The panel renders the service's state and owns only its busy and error**; a
   refused `oneTimeOpen` renders inline. **Closing Settings changes nothing**:
@@ -488,8 +495,4 @@ Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
 
 ## Future
 
-**Scope: one-time-anywhere** — reach past one network, for paid users: STUN and
-TURN servers for those users alone (the Relay-supplied ICE servers of
-`docs/specs/remote-api.md` -> "8. Direct path"), a budgeted relayed fallback
-when no direct path forms, and a per-IP cap on concurrent rooms beside the mint
-limit.
+**Scope: one-time-anywhere** — Anywhere's STUN follows the **remote-network** scope in [remote-network.md](./remote-network.md). A per-IP cap on concurrent rooms remains beside the mint limit.

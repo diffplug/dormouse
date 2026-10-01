@@ -37,6 +37,7 @@ import {
   makeStubBurrowLink,
   type PrimedBurrow,
 } from '../src/host/remote/test-burrow-link';
+import { makeStubManagedVoicePort, makeStubUpdatesPort } from '../src/lib/platform/test-ports';
 import { cfg } from '../src/cfg';
 import type { DormouseTheme } from '../src/lib/themes';
 import { clearPersistedShellSelection, seedShellStore } from '../src/lib/shell-store';
@@ -338,6 +339,27 @@ const preview: Preview = {
       // Likewise for shell selection: VS Code's native QuickPick owns it, which
       // is how the Settings dialog decides to hide its Shell row.
       platform.hostOwnsShells = context.parameters?.hostOwnsShells === true || undefined;
+
+      // And updates, which VS Code's Marketplace owns: Settings → Network then
+      // names it instead of an update check.
+      platform.hostOwnsUpdates = context.parameters?.hostOwnsUpdates === true || undefined;
+
+      // The updater's port, which only Standalone's main window has: a story
+      // about Settings → Network's update checks names the last successful
+      // check (`null` for none), and every other story has no updater.
+      const primedUpdates = context.parameters?.primedUpdates as
+        | { checkedAt: number | null }
+        | undefined;
+      platform.updates = primedUpdates ? makeStubUpdatesPort(primedUpdates.checkedAt) : undefined;
+
+      // Managed voice's port, with a token saved or not; absent is a build
+      // that offers none.
+      const primedManagedVoice = context.parameters?.primedManagedVoice as
+        | { configured: boolean }
+        | undefined;
+      platform.managedVoice = primedManagedVoice
+        ? makeStubManagedVoicePort(primedManagedVoice.configured)
+        : undefined;
 
       // And the same seam again for the Settings dialog's Remote control
       // section, which renders nothing without a Host service behind the

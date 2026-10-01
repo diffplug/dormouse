@@ -19,8 +19,10 @@
 import { DIRECT_CHANNEL_LABEL, NOISE_MAX_MESSAGE_LENGTH } from 'remote-lib-common';
 import {
   type DirectChannelLike,
+  type DirectPathPolicy,
   type DirectPeerLike,
   type DirectSctpLike,
+  type DirectSelectedPair,
   type DirectSessionDescription,
 } from './direct-peer';
 import { FakeEventTarget } from '../test-fake-socket';
@@ -57,6 +59,47 @@ export interface FakeDirectNetworkOptions {
    * *peer* created, while the offerer only re-reads its own request.
    */
   readonly channelSide?: FakePeerRole;
+  /**
+   * What each end's transport first reports as its selected pair, as the
+   * answerer sees it: {@link FAKE_LAN_PAIR} by default, `null` for none.
+   */
+  readonly selectedPair?: DirectSelectedPair | null;
+}
+
+/** The pair a run selects unless it says otherwise: both ends on one LAN. */
+export const FAKE_LAN_PAIR: DirectSelectedPair = { local: '192.168.1.2', remote: '192.168.1.3' };
+
+/** A pair off that LAN at both ends, which {@link lanOnlyPolicy} refuses. */
+export const OFF_LAN_PAIR: DirectSelectedPair = { local: '10.0.0.2', remote: '10.0.0.3' };
+
+/** The one host candidate each end describes itself with: its half of {@link FAKE_LAN_PAIR}. */
+const HOST_CANDIDATE: Record<FakePeerRole, string> = {
+  answerer: FAKE_LAN_PAIR.local!,
+  offerer: FAKE_LAN_PAIR.remote!,
+};
+
+/**
+ * A path policy allowing only {@link FAKE_LAN_PAIR}'s LAN, by string prefix —
+ * the address math is the host's, and `lib/src/host/remote/local-networks.test.ts`
+ * pins it — recording every pair it is asked about. It binds nothing, and
+ * passes both descriptions through as given unless `over` says otherwise.
+ */
+export function lanOnlyPolicy(
+  over: Partial<Pick<DirectPathPolicy, 'describe' | 'acceptRemote'>> = {},
+): DirectPathPolicy & { readonly asked: Array<DirectSelectedPair | null> } {
+  const asked: Array<DirectSelectedPair | null> = [];
+  const onLan = (address: string | null) => address?.startsWith('192.168.1.') ?? false;
+  return {
+    asked,
+    bindAddress: () => null,
+    describe: (sdp) => sdp,
+    acceptRemote: (sdp) => sdp,
+    ...over,
+    refusal: (pair) => {
+      asked.push(pair);
+      return pair && onLan(pair.local) && onLan(pair.remote) ? null : 'off the LAN';
+    },
+  };
 }
 
 /** One end of the linked pair; the offerer creates the channel. */
@@ -165,9 +208,16 @@ export class FakePeer implements DirectPeerLike {
   readonly #network: FakeDirectNetwork;
   readonly #events = new FakeEventTarget();
   #local: DirectSessionDescription | null = null;
+  /** The peer's description as this end was handed it. */
+  remoteDescription: DirectSessionDescription | null = null;
   #gathering: string;
   #connectionState = 'connecting';
   closed = false;
+  /**
+   * What the transport's `getSelectedCandidatePair()` reports, as addresses;
+   * `null` for none. See {@link FakeDirectNetworkOptions.selectedPair}.
+   */
+  selectedPair: DirectSelectedPair | null;
 
   constructor(
     role: FakePeerRole,
@@ -178,6 +228,7 @@ export class FakePeer implements DirectPeerLike {
     this.#options = options;
     this.#network = network;
     this.#gathering = options.gathering === 'pending' ? 'gathering' : 'complete';
+    this.selectedPair = options.selectedPair === undefined ? FAKE_LAN_PAIR : options.selectedPair;
   }
 
   get iceGatheringState(): string {
@@ -191,7 +242,17 @@ export class FakePeer implements DirectPeerLike {
   get sctp(): DirectSctpLike | null {
     const limit = this.#options.maxMessageSize;
     if (limit === null) return null;
-    return { maxMessageSize: limit ?? NOISE_MAX_MESSAGE_LENGTH };
+    const pair = this.selectedPair;
+    const candidate = (address: string | null) => ({ address });
+    return {
+      maxMessageSize: limit ?? NOISE_MAX_MESSAGE_LENGTH,
+      transport: {
+        iceTransport: {
+          getSelectedCandidatePair: () =>
+            pair && { local: candidate(pair.local), remote: candidate(pair.remote) },
+        },
+      },
+    };
   }
 
   get connectionState(): string {
@@ -202,6 +263,15 @@ export class FakePeer implements DirectPeerLike {
   setConnectionState(state: string): void {
     this.#connectionState = state;
     this.#emit('connectionstatechange', {});
+  }
+
+  /**
+   * ICE moves the connection onto another pair and says so with an ICE state
+   * change; a move it reports to no one is a plain {@link selectedPair} write.
+   */
+  reselect(pair: DirectSelectedPair | null): void {
+    this.selectedPair = pair;
+    this.#emit('iceconnectionstatechange', {});
   }
 
   /** This end's channel defect, if the run put one on this side. */
@@ -229,6 +299,7 @@ export class FakePeer implements DirectPeerLike {
   }
 
   async setRemoteDescription(description: DirectSessionDescription): Promise<void> {
+    this.remoteDescription = description;
     if (description.type === 'offer') {
       // The answerer learns of the channel here, exactly as a real one does.
       const channel = new FakeChannel(DIRECT_CHANNEL_LABEL, this.#defect);
@@ -255,10 +326,14 @@ export class FakePeer implements DirectPeerLike {
   }
 
   #describe(kind: 'offer' | 'answer'): string {
+    // One host candidate, whatever pair ICE goes on to select: a description
+    // is a claim, never the path.
+    const host = HOST_CANDIDATE[this.#role];
     const body =
       'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' +
       'm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\n' +
-      `a=setup:${kind === 'offer' ? 'actpass' : 'active'}\r\na=mid:0\r\na=sctp-port:5000\r\n`;
+      `a=setup:${kind === 'offer' ? 'actpass' : 'active'}\r\na=mid:0\r\na=sctp-port:5000\r\n` +
+      `a=candidate:1 1 udp 2130706431 ${host} 9 typ host\r\n`;
     // A machine with many interfaces describes itself in more candidates than a
     // signal can carry; the attempt is skipped or declined rather than sent.
     return this.#options.oversize === kind ? `${body}a=x:${'c'.repeat(4000)}\r\n` : body;

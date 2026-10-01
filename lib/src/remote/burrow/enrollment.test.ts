@@ -68,6 +68,7 @@ describe('burrow enrollment', () => {
       'https://dormouse.example',
       { password: TEST_SETUP_PASSWORD },
       'My Laptop',
+      fetch,
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -117,6 +118,7 @@ describe('burrow enrollment', () => {
       'https://dormouse.example',
       { password: TEST_SETUP_PASSWORD },
       'My Laptop',
+      fetch,
     );
 
     expect(enrollment.noiseStaticPublicKey).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -144,7 +146,7 @@ describe('burrow enrollment', () => {
     // A runtime with no X25519 at all.
     vi.mocked(mintNoiseStaticKeyPair).mockRejectedValueOnce(new Error('unsupported curve'));
     await expect(
-      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'My Laptop'),
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'My Laptop', fetch),
     ).rejects.toThrow(/cannot generate the X25519 key/);
 
     // And one whose PKCS#8 falls outside what `isEnrollment` accepts: caught
@@ -154,7 +156,7 @@ describe('burrow enrollment', () => {
       publicKey: toBase64Url(new Uint8Array(32)),
     });
     await expect(
-      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'My Laptop'),
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'My Laptop', fetch),
     ).rejects.toThrow(/not a shape this build persists/);
 
     expect(store.size).toBe(0);
@@ -177,7 +179,7 @@ describe('burrow enrollment', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await performEnrollment('https://dormouse.example', { enrollToken: 'f'.repeat(64) }, 'My Laptop');
+    await performEnrollment('https://dormouse.example', { enrollToken: 'f'.repeat(64) }, 'My Laptop', fetch);
 
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body).toEqual({ enrollToken: 'f'.repeat(64), origin: 'https://dormouse.example' });
@@ -191,7 +193,7 @@ describe('burrow enrollment', () => {
     vi.mocked(mintNoiseStaticKeyPair).mockRejectedValueOnce(new Error('no X25519 here'));
 
     await expect(
-      performEnrollment('https://dormouse.example', { enrollToken: 'one-time' }, 'My Laptop'),
+      performEnrollment('https://dormouse.example', { enrollToken: 'one-time' }, 'My Laptop', fetch),
     ).rejects.toThrow(/cannot generate the X25519 key/);
     // A successful POST appends a `burrows.json` row and spends the installer's
     // single-use token, neither of which this side can undo — so a runtime that
@@ -217,7 +219,7 @@ describe('burrow enrollment', () => {
       }),
     );
 
-    const pending = performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x');
+    const pending = performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch);
     // Awaited rather than asserted synchronously: the X25519 mint runs before
     // the exchange (see "mints the Noise static before the exchange"), so the
     // request is one WebCrypto round trip away rather than in this tick.
@@ -240,12 +242,12 @@ describe('burrow enrollment', () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', refused(BAD_PASSWORD_ERROR));
     await expect(
-      performEnrollment('https://dormouse.example', { password: 'wrong' }, 'x'),
+      performEnrollment('https://dormouse.example', { password: 'wrong' }, 'x', fetch),
     ).rejects.toThrow('The Relay did not accept that setup password.');
 
     vi.stubGlobal('fetch', refused(UNAUTHORIZED_ERROR));
     await expect(
-      performEnrollment('https://dormouse.example', { enrollToken: 'spent' }, 'x'),
+      performEnrollment('https://dormouse.example', { enrollToken: 'spent' }, 'x', fetch),
     ).rejects.toThrow(/enrollment offer is no longer valid/);
   });
 
@@ -260,7 +262,7 @@ describe('burrow enrollment', () => {
       ),
     );
     await expect(
-      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch),
     ).rejects.toThrow(
       'The Relay says its origin is https://relay.example, but this build was made for ' +
         "https://dormouse.example. Rebuild Dormouse with DORMOUSE_RELAY_ORIGIN=https://relay.example, or set the Relay's " +
@@ -274,7 +276,7 @@ describe('burrow enrollment', () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('Unauthorized', { status: 401 })));
     await expect(
-      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch),
     ).rejects.toThrow('The Relay refused the enrollment (HTTP 401): Unauthorized');
   });
 
@@ -284,7 +286,7 @@ describe('burrow enrollment', () => {
     stubLocalStorage();
     vi.stubGlobal('fetch', vi.fn(async () => new Response('gateway is asleep', { status: 502 })));
     await expect(
-      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch),
     ).rejects.toThrow('The Relay refused the enrollment (HTTP 502): gateway is asleep');
   });
 
@@ -295,7 +297,7 @@ describe('burrow enrollment', () => {
     const page = `<html>\n<head><title>502 Bad Gateway</title></head>\n${'<hr>'.repeat(200)}`;
     vi.stubGlobal('fetch', vi.fn(async () => new Response(page, { status: 502 })));
     await expect(
-      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch),
     ).rejects.toThrow('The Relay refused the enrollment (HTTP 502): <html>');
   });
 
@@ -316,7 +318,7 @@ describe('burrow enrollment', () => {
       ),
     );
 
-    await expect(performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch)).rejects.toThrow(
       /missing or invalid: origin, rpId/,
     );
   });
@@ -336,7 +338,7 @@ describe('burrow enrollment', () => {
       ),
     );
 
-    await expect(performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch)).rejects.toThrow(
       /missing or invalid: burrowId/,
     );
   });
@@ -374,7 +376,7 @@ describe('burrow enrollment', () => {
       ),
     );
     await expect(
-      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x'),
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch),
     ).rejects.toThrow(/missing or invalid: burrowId/);
   });
 
@@ -386,7 +388,7 @@ describe('burrow enrollment', () => {
       vi.fn(async () => new Response('<html>not your Relay</html>', { status: 200 })),
     );
 
-    await expect(performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x')).rejects.toThrow(
+    await expect(performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, 'x', fetch)).rejects.toThrow(
       /did not answer JSON/,
     );
   });

@@ -1,3 +1,4 @@
+import { isStringArray } from './is-record';
 import { getStorage, loadJson, saveJson } from './local-json-store';
 import { DEFAULT_WATCHED_COMMANDS } from './coding-agents';
 import { getPlatform } from './platform';
@@ -16,10 +17,6 @@ import { getRunningCommandWatchKey } from './terminal-state-store';
  * and the host broadcasts its canonical snapshot to every webview.
  */
 const STORAGE_KEY = 'dormouse:watched-commands';
-
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
-}
 
 function readStored(): string[] {
   try {

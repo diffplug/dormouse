@@ -142,6 +142,35 @@ describe('FileBurrowStateStore', () => {
     expect(await new FileBurrowStateStore(dir).loadAcl('burrow-1')).toEqual([]);
   });
 
+  it('keeps the network policy in a file of its own, which an older build’s rewrite cannot drop', async () => {
+    const policy = { level: 'relay', allowed: ['192.168.1.0/24'], autoUpdate: true } as const;
+    const store = new FileBurrowStateStore(dir);
+    expect(await store.loadNetworkPolicy()).toBeNull();
+    await store.saveNetworkPolicy({ ...policy, allowed: [...policy.allowed] });
+    await store.saveEnrollment(ENROLLMENT);
+    expect(await store.loadNetworkPolicy()).toEqual(policy);
+
+    // A build from before the policy rewrites `burrow.json` with the fields it
+    // knows; a policy kept there would be gone, and its default recomputed.
+    await writeFile(file(), JSON.stringify({ version: 1, enrollment: ENROLLMENT, acl: {} }));
+    expect(await new FileBurrowStateStore(dir).loadNetworkPolicy()).toEqual(policy);
+  });
+
+  it('reads a policy file that is there but not a policy as Nothing, never as none', async () => {
+    // Hand-edited or truncated, it must not open what the user may have turned
+    // off — and `null` would let the service save the default over it.
+    const policyFile = join(dir, 'network-policy.json');
+    const nothing = { level: 'nothing', allowed: [], autoUpdate: false };
+    await writeFile(policyFile, JSON.stringify({ level: 'everything', allowed: [], autoUpdate: true }));
+    expect(await new FileBurrowStateStore(dir).loadNetworkPolicy()).toEqual(nothing);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await writeFile(policyFile, '{ "level": "relay"');
+    expect(await new FileBurrowStateStore(dir).loadNetworkPolicy()).toEqual(nothing);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it('clearing the enrollment leaves the records alone', async () => {
     const store = new FileBurrowStateStore(dir);
     await store.saveEnrollment(ENROLLMENT);
@@ -169,8 +198,11 @@ describe('FileBurrowStateStore', () => {
       const nested = join(dir, 'nested');
       const store = new FileBurrowStateStore(nested);
       await store.saveEnrollment(ENROLLMENT);
+      // The policy holds no secret, and is kept like its neighbour anyway.
+      await store.saveNetworkPolicy({ level: 'nothing', allowed: [], autoUpdate: false });
 
       expect((await stat(join(nested, 'burrow.json'))).mode & 0o777).toBe(0o600);
+      expect((await stat(join(nested, 'network-policy.json'))).mode & 0o777).toBe(0o600);
       expect((await stat(nested)).mode & 0o777).toBe(0o700);
     },
   );
@@ -264,12 +296,15 @@ describe('FileBurrowStateStore', () => {
     const seeded = new FileBurrowStateStore(dir);
     await seeded.saveEnrollment(ENROLLMENT);
     await seeded.saveAcl('burrow-1', [aclRecord('burrow-1', 'client-1')]);
+    await seeded.saveNetworkPolicy({ level: 'relay', allowed: [], autoUpdate: false });
     const before = await readFile(file(), 'utf8');
 
     const store = new FileBurrowStateStore(dir);
     fsProbe.readFileError = Object.assign(new Error('EACCES'), { code: 'EACCES' });
     await expect(store.loadEnrollment()).rejects.toMatchObject({ code: 'EACCES' });
     await expect(store.loadAcl('burrow-1')).rejects.toMatchObject({ code: 'EACCES' });
+    // Neither `null`, which would save the default over the choice, nor Nothing.
+    await expect(store.loadNetworkPolicy()).rejects.toMatchObject({ code: 'EACCES' });
     await expect(store.saveEnrollment({ ...ENROLLMENT, burrowId: 'LnExjA-KKeADf221aLlYyw' })).rejects.toMatchObject({
       code: 'EACCES',
     });
@@ -281,6 +316,7 @@ describe('FileBurrowStateStore', () => {
     // And the failure was not memoized: the same store recovers on the next read.
     expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
     expect(await store.loadAcl('burrow-1')).toHaveLength(1);
+    expect(await store.loadNetworkPolicy()).toEqual({ level: 'relay', allowed: [], autoUpdate: false });
   });
 
   it('starts empty and warns on a malformed file', async () => {
@@ -316,8 +352,11 @@ describe('createEphemeralBurrowStateStore', () => {
 
     await store.saveEnrollment(ENROLLMENT);
     await store.saveAcl('burrow-1', [aclRecord('burrow-1', 'client-1')]);
+    expect(await store.loadNetworkPolicy()).toBeNull();
+    await store.saveNetworkPolicy({ level: 'relay', allowed: [], autoUpdate: false });
     expect(await store.loadEnrollment()).toEqual(ENROLLMENT);
     expect(await store.loadAcl('burrow-1')).toHaveLength(1);
+    expect(await store.loadNetworkPolicy()).toEqual({ level: 'relay', allowed: [], autoUpdate: false });
     expect(warnings).toHaveLength(1);
 
     await store.clearEnrollment();

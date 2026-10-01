@@ -52,6 +52,7 @@ import {
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-burrow-link';
 import type { OneTimeEndReason, OneTimeState } from '../remote/burrow/one-time-runtime';
+import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getOneTimeSnapshot, subscribeToOneTime } from '../remote/burrow/one-time-store';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
@@ -154,10 +155,13 @@ function watchReveals(): { drawnAtReveal: boolean[]; restore: () => void } {
 
 /**
  * An enrolled machine with the panel open on a live code, handing back the link
- * so a case can drive invitation events against it.
+ * so a case can drive invitation events against it. `status` answers every
+ * other command, read at each call.
  */
-async function openSetupPanel(): Promise<ReturnType<typeof makeLink>> {
-  const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+async function openSetupPanel(
+  status: () => unknown = () => enrolled(),
+): Promise<ReturnType<typeof makeLink>> {
+  const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : status()));
   platform = { burrow: link };
   await render();
   await act(async () => buttonLabelled('Set up a phone')!.click());
@@ -268,8 +272,8 @@ describe('RemoteControlSection', () => {
     await render();
     expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
     expect(text()).toContain(
-      'Open a link on your phone for a one-off connection. Phone and computer must be on the ' +
-        'same Wi-Fi. No account needed.',
+      'Open a link on your phone for a one-off connection. Your phone must be on an allowed ' +
+        'network. No account needed.',
     );
     expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('false');
     expect(persistentPanel().hidden).toBe(true);
@@ -659,6 +663,25 @@ describe('RemoteControlSection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps an open setup code through a failed poll, and takes the next answer', async () => {
+    let status: BurrowConsoleStatus | Error = enrolled();
+    await openSetupPanel(() => {
+      if (status instanceof Error) throw status;
+      return status;
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    status = new Error('bridge timed out');
+    await act(async () => refreshBurrowStatus());
+    expect(text()).not.toContain('Could not reach');
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    status = enrolled({ pairedClients: 2 });
+    await act(async () => refreshBurrowStatus());
+    expect(text()).toContain('2 paired phones.');
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
   });
 
   it('stops polling once nothing is watching', async () => {
@@ -1597,7 +1620,7 @@ describe('One-time connection', () => {
   });
 
   it('scrolls each new link into view once its code has drawn, and leaves the dialog alone otherwise', async () => {
-    // Settings' Remote control section sits at the bottom of a scrolling
+    // Settings' Remote control choices sit at the bottom of a scrolling
     // dialog, so the QR arrives below the fold (seen in QC, 2026-09-29).
     const reveals = watchReveals();
     try {
@@ -1708,7 +1731,7 @@ describe('One-time connection', () => {
       root = createRoot(container);
     }
     // The failure this whole feature is most likely to hit names its fix.
-    expect(ONE_TIME_ENDED_COPY['direct-failed']).toContain('same Wi-Fi');
+    expect(ONE_TIME_ENDED_COPY['direct-failed']).toContain('allowed network');
   });
 
   it('falls back for a reason this build has no sentence for, prototype names included', async () => {

@@ -6,6 +6,7 @@ import { OVERLAY_MAX_HEIGHT_VAR } from '../components/design';
 import { SettingsDialog, SETTINGS_SCROLL_MS, TOPIC_GAP_PX } from '../components/SettingsDialog';
 import { WorkspaceIdContext } from '../components/wall/wall-context';
 import { enrolledStatus, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 /** The dialog renders into `document.body`, outside `canvasElement`
  *  (docs/specs/layout.md → "Selection overlay"), so play queries scope to the
@@ -155,7 +156,7 @@ export const PushNoBurrow: Story = {
 
 /**
  * The other `no-burrow`: a build that *does* have a Burrow service, which simply has
- * not enrolled. Same push status as `PushNoBurrow`, but here the Remote control
+ * not enrolled. Same push status as `PushNoBurrow`, but here the Network
  * section renders beneath — so this is the one whose copy may say "below", and
  * the pair is what keeps that word honest.
  */
@@ -337,12 +338,13 @@ export const HostOwnsShells: Story = {
 };
 
 /**
- * The Relay topic contains Remote control below the push
- * settings whose `no-burrow` copy points at it. Stories without
- * `primedBurrow` represent a build with no Burrow service behind the
- * webview: the section renders nothing at all rather than offering a form the
- * build cannot honor (`docs/specs/relay.md`). `RemoteControlSection.stories`
- * covers its own states.
+ * The Network topic sits below the push settings whose `no-burrow` copy points
+ * at it, its Phones section holding the Remote control choices under any level
+ * but Nothing. Stories without `primedBurrow` represent a build with no Burrow
+ * service behind the webview: the topic renders nothing at all rather than
+ * offering a choice the build cannot honor (`docs/specs/remote-network.md` ->
+ * "Settings → Network"). `NetworkSettings.stories` and
+ * `RemoteControlSection.stories` cover their own states.
  */
 export const WithRemoteControl: Story = {
   parameters: {
@@ -351,23 +353,54 @@ export const WithRemoteControl: Story = {
     primedAlertSettings: { pushEnabled: true },
   },
   play: async ({ canvasElement }) => {
-    await selectTopic('Relay')({ canvasElement });
-    await dialog(canvasElement).findByText('1 paired phone.');
+    await selectTopic('Network')({ canvasElement });
+    const body = dialog(canvasElement);
+    await body.findByText('1 paired phone.');
+    await expect(body.getByRole('radio', { name: /^My Relay only/ })).toHaveAttribute('aria-checked', 'true');
   },
 };
 
-export const RelaySetup: Story = {
+export const NetworkSetup: Story = {
   ...PushNotEnrolled,
-  play: selectTopic('Relay'),
+  play: selectTopic('Network'),
 };
 
-export const SearchRelay: Story = {
+export const SearchNetwork: Story = {
   ...WithRemoteControl,
   play: async ({ canvasElement }) => {
     const body = dialog(canvasElement);
     fireEvent.change(body.getByRole('searchbox'), { target: { value: 'relay' } });
-    await expect(body.getByRole('region', { name: 'Relay' })).toHaveTextContent('Remote control');
-    await expect(contentsButton(body, 'Relay')).toBeVisible();
+    await expect(body.getByRole('region', { name: 'Network' })).toHaveTextContent('Persistent Relay');
+    await expect(contentsButton(body, 'Network')).toBeVisible();
+    // Updates is its own group: a search for it leaves the rest of the topic out.
+    fireEvent.change(body.getByRole('searchbox'), { target: { value: 'never updates itself' } });
+    await waitFor(() => expect(body.getByText(/This build never updates itself/)).toBeVisible());
+    await expect(body.getByText('1 paired phone.')).not.toBeVisible();
+  },
+};
+
+/**
+ * Network set to Nothing: push and managed voice say they are off, and why,
+ * each pointing at the Network topic, which the link scrolls to.
+ */
+export const NotificationsUnderNothing: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      network: networkPolicyResult(nothingPolicy(), 'hosted', []),
+    },
+    primedManagedVoice: { configured: true },
+    primedWatchedCommands: ['claude'],
+    primedAlertSettings: { pushEnabled: true, speakEnabled: true },
+  },
+  play: async ({ canvasElement }) => {
+    await selectTopic('Notifications')({ canvasElement });
+    const body = dialog(canvasElement);
+    await body.findByText(/Push is off while/);
+    await body.findByText(/Managed voice is off while/);
+    const [link] = within(body.getByRole('region', { name: 'Notifications' })).getAllByRole('button', { name: 'Network' });
+    await userEvent.click(link!);
+    await waitForTopicScroll(body.getByRole('region', { name: 'Network' }));
   },
 };
 

@@ -39,13 +39,14 @@ let fetchMock: ReturnType<typeof vi.fn>;
 let broadcasts: unknown[];
 let host: ReturnType<typeof make>;
 
-function make(options: { timeoutMs?: number; stateDir?: string } = {}) {
+function make(options: { timeoutMs?: number; stateDir?: string; networkAllowed?: () => Promise<boolean> } = {}) {
   return createManagedVoiceHost({
     stateDir: 'stateDir' in options ? options.stateDir : dir,
     onStatus: (status) => void broadcasts.push(status),
     fetch: fetchMock as unknown as typeof fetch,
     timeoutMs: options.timeoutMs,
     relay: { origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' },
+    networkAllowed: options.networkAllowed ?? (async () => true),
   });
 }
 
@@ -199,6 +200,7 @@ describe('the build it runs in', () => {
       onStatus: () => {},
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: 'http://localhost:8787', mode: 'hosted' },
+      networkAllowed: async () => true,
     });
     await local.handle({ op: 'configure', update: { token: TOKEN } });
     fetchMock.mockResolvedValue(audioResponse());
@@ -217,6 +219,7 @@ describe('the build it runs in', () => {
       onStatus: (status) => void broadcasts.push(status),
       fetch: fetchMock as unknown as typeof fetch,
       relay: { origin: 'https://relay.example.ts.net', mode: 'self-host' },
+      networkAllowed: async () => true,
     });
     broadcasts = [];
 
@@ -235,5 +238,26 @@ describe('the build it runs in', () => {
       token: TOKEN,
       voiceId: DEFAULT_MANAGED_VOICE_ID,
     });
+  });
+});
+
+describe('the network policy', () => {
+  it('sends nothing under Nothing, asking again at every speak', async () => {
+    // docs/specs/remote-network.md → "Policy": managed voice is a choke point
+    // of its own. Saving a token is local, so it still works.
+    let allowed = false;
+    const gated = make({ networkAllowed: async () => allowed });
+    expect(await gated.handle({ op: 'configure', update: { token: TOKEN } })).toMatchObject({ ok: true });
+    fetchMock.mockResolvedValue(audioResponse());
+
+    expect(await gated.handle({ op: 'speak', text: 'build finished' })).toEqual({
+      ok: false,
+      reason: 'network-off',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    allowed = true;
+    expect(await gated.handle({ op: 'speak', text: 'build finished' })).toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

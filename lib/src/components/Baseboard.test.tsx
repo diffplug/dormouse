@@ -30,6 +30,8 @@ import { resetPushDevices, setPushDevices, setPushDevicesRefresher } from '../li
 import { clearTerminalActivity, setTerminalActivity } from '../lib/session-activity-store';
 import { createAlertEpisode } from '../lib/alert-episode';
 import { makeStubBurrowLink } from '../host/remote/test-burrow-link';
+import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
+import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -237,6 +239,25 @@ describe('Baseboard settings controls', () => {
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Looking for phones');
     act(() => setPushDevices({ status: 'ready', devices: [{ label: 'Pixel' }] }));
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Push will be sent to Pixel');
+  });
+
+  it.each([
+    ['push', 'Push is off while Settings → Network is set to Nothing.', 'Connect this machine'],
+    ['speech', 'Managed voice is off while Settings → Network is set to Nothing', 'Uses managed voice'],
+  ] as const)('previews %s under Nothing with its off line from the first frame', async (sink, off, on) => {
+    const platform = await import('../lib/platform');
+    vi.spyOn(platform, 'getPlatform').mockReturnValue({
+      alertPublishSettings: vi.fn(),
+      burrow: makeStubBurrowLink({ network: networkPolicyResult(nothingPolicy(), 'hosted', []) }),
+      managedVoice: makeStubManagedVoicePort(true),
+    } as unknown as ReturnType<typeof platform.getPlatform>);
+    await act(async () => root.render(<Baseboard items={[]} onReattach={() => {}} />));
+
+    // Synchronous: the preview's first frame, before any read it started could land.
+    act(() => container.querySelector<HTMLButtonElement>(`[data-alarm-setting="${sink}"]`)!.click());
+    const preview = document.querySelector('[role="status"]')?.textContent;
+    expect(preview).toContain(off);
+    expect(preview).not.toContain(on);
   });
 
   it('restarts feedback on repeat toggles and replaces it when another setting changes', () => {

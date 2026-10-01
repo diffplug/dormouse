@@ -132,9 +132,12 @@ const FOREIGN_ORIGIN = 'https://someone-elses-dormouse.example';
  */
 const SETUP_QR = 'svg[aria-label="Setup code for this machine"]';
 
-/** The Settings dialog's Remote control section, which every Burrow step reads. */
-const REMOTE_SECTION = `[...document.querySelectorAll('[role="dialog"] section')]
-  .find((el) => el.innerText.startsWith('Remote control'))`;
+/**
+ * Settings → Network's Phones section, which holds the Remote control choices
+ * every Burrow step reads — by the id its label carries
+ * (`lib/src/components/NetworkSettings.tsx`), rather than by copy.
+ */
+const REMOTE_SECTION = `document.querySelector('[role="dialog"] section[aria-labelledby="network-phones-label"]')`;
 
 /**
  * What a person types to prove the terminal is real, and where its answer lands.
@@ -152,8 +155,13 @@ const RECONNECT_PROOF = 'reconnect-proof.txt';
  * A terminal notification, as WezTerm's OSC 777 spells it
  * (`docs/specs/terminal-escapes.md`). Typed at the laptop's shell from the
  * phone, so what rings is the Burrow's own alert manager.
+ *
+ * `$(sleep 1)` holds it a second, past the echo window the phone's Enter
+ * opens: a notification inside it answers the keystroke and never rings
+ * (`docs/specs/alert.md` -> "Engagement"). Inside `printf`'s own arguments so
+ * the pane title the Burrow derives still starts with it.
  */
-const NOTIFY_SEQUENCE = String.raw`printf '\033]777;notify;Walkthrough;the Burrow is ringing\033\\'`;
+const NOTIFY_SEQUENCE = String.raw`printf "$(sleep 1)"'\033]777;notify;Walkthrough;the Burrow is ringing\033\\'`;
 
 /**
  * The workspace's built `remote-lib-common`, or `null` when it is not built.
@@ -343,18 +351,32 @@ async function stepBurrow(ctx) {
   await ctx.shot('01-burrow-booted.png');
 }
 
-/** Open Settings from the baseboard and scroll to Remote control. */
+/**
+ * Open Settings from the baseboard, choose Network → My Relay only, and scroll
+ * to the Phones section it opens. A fresh Burrow's network policy is Nothing
+ * (`docs/specs/remote-network.md` -> "Policy"), which refuses enrollment before
+ * any request, so this click is what lets the next step reach the Relay.
+ */
 async function stepSettings(ctx) {
   const ab = ctx.state.burrowBrowser;
   await ab.run(['click', 'button[aria-label="Settings"]']);
+  await ab.waitUntil(
+    `const radio = [...document.querySelectorAll('[role="dialog"] [role="radio"]')]
+       .find((el) => el.innerText.startsWith('My Relay only'));
+     if (!radio) return null;
+     if (radio.getAttribute('aria-checked') !== 'true') radio.click();
+     return true;`,
+    { what: 'Settings → Network to offer My Relay only' },
+  );
   // The section is below the fold in a short window, and a screenshot is
-  // viewport-only — so the wait scrolls it into view as it finds it.
+  // viewport-only — so the wait scrolls it into view as it finds it, at once
+  // rather than at the dialog's smooth pace, which the shot would catch mid-way.
   await ab.waitUntil(
     `const section = ${REMOTE_SECTION};
-     if (!section) return null;
-     section.scrollIntoView({ block: 'center' });
+     if (!section || !/Persistent Relay/.test(section.innerText)) return null;
+     section.scrollIntoView({ block: 'center', behavior: 'instant' });
      return true;`,
-    { what: 'the Settings dialog to show Remote control' },
+    { what: 'the Phones section to show the Remote control choices' },
   );
   await ctx.shot('02-settings-open.png');
 }
@@ -435,10 +457,12 @@ async function captureQr(ctx) {
 
   // One round trip for "it is there" and "here is where": a second read could
   // land after a rotation and measure a different code than the one captured.
+  // `instant`, because the Settings dialog scrolls smoothly (`scroll-smooth`),
+  // and a rect read mid-glide is where the code was, not where it lands.
   const measured = await ab.waitUntil(
     `const svg = document.querySelector(${JSON.stringify(SETUP_QR)});
      if (!svg) return null;
-     svg.scrollIntoView({ block: 'center' });
+     svg.scrollIntoView({ block: 'center', behavior: 'instant' });
      const r = svg.getBoundingClientRect();
      return { x: r.x, y: r.y, width: r.width, height: r.height, innerWidth: innerWidth,
        url: ${invitationUrlExpr('svg')} };`,
@@ -1087,10 +1111,10 @@ async function runFromPocket(ctx) {
  *
  * The escape is typed from Pocket only because that is where the caret already
  * is; what turns it into a ring is the Burrow's own alert manager, and the phone
- * learns of it the one way it can — `ringing`/`hasTODO` on the directory
- * snapshot (`docs/specs/alert.md`,
- * `lib/src/remote/burrow/directory-collect.ts`). Push is off on a loopback
- * origin, so this is the in-session path and the whole of it.
+ * learns of it the one way it can — `ringing` on the directory snapshot
+ * (`docs/specs/alert.md`, `lib/src/remote/burrow/directory-collect.ts`). Push
+ * is off on a loopback origin, so this is the in-session path and the whole of
+ * it.
  */
 async function ringFromBurrow(ctx) {
   const pocket = ctx.state.pocketBrowser;
@@ -1100,14 +1124,15 @@ async function ringFromBurrow(ctx) {
   const startedAt = Date.now();
   const sent = await proveCommand(ctx, NOTIFY_PROOF, { prefix: `${NOTIFY_SEQUENCE}; ` });
   await pocket.run(['click', 'button[aria-label="Sessions input mode"]']);
-  // **The row has to be *this* notification's.** Waiting for any row with a
-  // TODO would be satisfied instantly by one left over from an earlier command
-  // — the assertion would pass having proved nothing — so the row must also be
-  // ringing and carry the escape in the title the Burrow derived from the command
-  // line, which is the one thing only this command could have produced.
+  // **The row has to be *this* notification's.** Waiting for any ringing row
+  // could be satisfied by one left over from an earlier command — the assertion
+  // would pass having proved nothing — so the row must also carry the escape in
+  // the title the Burrow derived from the command line, which is the one thing
+  // only this command could have produced. Ringing, not TODO: a ring never sets
+  // TODO, a look does (`docs/specs/alert.md`), and nobody has looked.
   const row = await pocket.waitUntil(
     `${sessionRowsExpr()}
-     return rows && rows.find((r) => r.todo && r.ringing && r.text.includes('777;notify')) || null;`,
+     return rows && rows.find((r) => r.ringing && r.text.includes('777;notify')) || null;`,
     { what: "the Burrow's notification to reach the phone's session list", timeoutMs: 60_000 },
   );
   ctx.record({
@@ -1342,7 +1367,7 @@ async function fillField(ctx, selector, value, ab = ctx.state.burrowBrowser) {
 const SETUP = [
   { name: 'relay', title: 'Start the coordinating Relay', run: stepRelay },
   { name: 'burrow', title: 'Start the Burrow in the agent-browser harness', run: stepBurrow },
-  { name: 'settings', title: 'Open Settings → Remote control', run: stepSettings },
+  { name: 'settings', title: 'Open Settings → Network and choose My Relay only', run: stepSettings },
   { name: 'enroll', title: 'Enroll this machine through the form', run: stepEnroll },
   { name: 'qr', title: 'Open the phone-setup panel and capture its QR', run: stepQr },
   {

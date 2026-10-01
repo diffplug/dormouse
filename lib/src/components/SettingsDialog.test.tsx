@@ -8,6 +8,8 @@ import { setPlatform } from '../lib/platform';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { SettingsDialog, SETTINGS_SCROLL_MS } from './SettingsDialog';
 import { makeStubBurrowLink, UNENROLLED_STATUS } from '../host/remote/test-burrow-link';
+import { makeStubManagedVoicePort } from '../lib/platform/test-ports';
+import { networkPolicyResult, nothingPolicy } from '../remote/network-policy';
 import { stubResizeObserver } from './wall/wall-test-utils';
 import { setNativeFieldValue } from '../lib/dom';
 import { applyAlertSettingsFromHost, DEFAULT_ALERT_SETTINGS, getAlertSettings } from '../lib/alert-settings';
@@ -91,7 +93,7 @@ beforeEach(() => {
     return nextFrame;
   });
   vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
-  sectionOffsets = { general: 16, activity: 116, notifications: 516, relay: 916 };
+  sectionOffsets = { general: 16, activity: 116, notifications: 516, network: 916 };
   stubResizeObserver(400);
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
     const top = this.dataset.settingsTopic
@@ -214,5 +216,44 @@ describe('SettingsDialog navigation and search', () => {
       backdrop.click();
     });
     expect(close).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('SettingsDialog under Network → Nothing', () => {
+  it('says push and managed voice are off, each linking to the Network topic', async () => {
+    platform.burrow = makeStubBurrowLink({
+      status: UNENROLLED_STATUS,
+      network: networkPolicyResult(nothingPolicy(), 'hosted', []),
+    });
+    platform.managedVoice = makeStubManagedVoicePort(true);
+    await render();
+    expect(text()).toContain('Push is off while Network is set to Nothing.');
+    expect(text()).toContain(
+      'Managed voice is off while Network is set to Nothing, so alerts use your browser or system voice.',
+    );
+    expect(text()).not.toContain('Connect this machine to a Dormouse Relay');
+
+    scrollTo.mockClear();
+    const link = [...document.querySelectorAll<HTMLButtonElement>('[data-setting="push"] button')]
+      .find((button) => button.textContent === 'Network')!;
+    await act(async () => link.click());
+    await advanceScroll();
+    expect(scrollTo).toHaveBeenLastCalledWith({ top: 900, behavior: 'instant' });
+  });
+
+  it('clears a search that hides the Network topic before following the link to it', async () => {
+    platform.burrow = makeStubBurrowLink({
+      status: UNENROLLED_STATUS,
+      network: networkPolicyResult(nothingPolicy(), 'hosted', []),
+    });
+    await render();
+    await search('push is off');
+    const network = document.querySelector<HTMLElement>('[data-settings-topic="network"]')!;
+    expect(network.hidden).toBe(true);
+
+    const link = visible('[data-setting="push"] button').find((button) => button.textContent === 'Network')!;
+    await act(async () => link.click());
+    expect(document.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('');
+    expect(network.hidden).toBe(false);
   });
 });

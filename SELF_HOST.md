@@ -368,9 +368,11 @@ Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
    print it into the conversation.
 
 2. **The Burrow.** On this same machine, launch the standalone or VS Code build
-   made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites) and open
-   **Settings → Remote control** — the sliders icon at the far right of the
-   baseboard. While the offer is unspent, its card enrolls in one click with no
+   made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings →
+   Network** — the sliders icon at the far right of the baseboard — and choose
+   **My Relay only**: a new install starts at Nothing, which refuses enrollment
+   (`docs/specs/remote-network.md` → "Policy"). Its Phones section then holds
+   the remote-control choices. While the offer is unspent, its card enrolls in one click with no
    setup password; the typed form behind "Enroll with the setup password…"
    covers a spent offer or a Burrow on another machine (`docs/specs/relay.md`,
    "Remote control, in the Settings dialog"). Enrollment persists in the Burrow service's
@@ -389,7 +391,7 @@ Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
    owns why, and covers the phone's camera). **A setup code is
    live for five minutes**, so that first load — bundle, service worker, Home
    Screen install — must not happen inside the window. With the phone waiting on
-   that screen, press **Set up a phone** in **Settings → Remote control**;
+   that screen, press **Set up a phone** in **Settings → Network**;
    scanning or pasting the code creates the passkey and signs them in, bound to
    this exact origin, with no password typed on the phone.
 

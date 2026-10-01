@@ -152,7 +152,8 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 **The Burrow composes every Relay URL from the baked origin and takes none as
 input**: `enroll` and `enrollOffer` post to it, carrying no Relay URL, and **a
 Hosted build refuses both**, Hosted running no Relay
-(`docs/specs/hosted.md` → Future); **a command still naming a Relay** (an older
+(`docs/specs/hosted.md` → Future), as does any build under the network
+policy's `nothing` (`docs/specs/remote-network.md` → "Policy"); **a command still naming a Relay** (an older
 webview's) **is refused unless it names the baked origin**. **An enrollment
 whose Relay URL or `origin` names another origin reads as none** wherever one is
 read — `start`, `status`, VS Code's activation — and stays on disk untouched, so
@@ -726,7 +727,9 @@ memo invalidation — live in that burrow's spec.
   `noiseStaticPublicKey` this Burrow mints locally **before** the request and
   never sends in it —
   [remote-security-model.md](./remote-security-model.md)) through its
-  `BurrowStateStore`, then opens and maintains `GET /ws/burrow`. **Must persist the operator's
+  `BurrowStateStore`, then opens and maintains `GET /ws/burrow` — only under the
+  network policy's `relay`; any other level holds the enrollment without a socket
+  ([remote-network.md](./remote-network.md) -> Policy). **Must persist the operator's
   `label` locally and disclose it only inside encrypted outcomes** — the request body
   carries the credential and the baked `origin`, nothing else
   ([remote-security-model.md](./remote-security-model.md) -> Burrow identity) — and
@@ -825,8 +828,10 @@ webview's client half).
 ### Remote control, in the Settings dialog
 
 Enrolling is the one step a self-hoster cannot skip, so it is UI, not a console
-incantation: a **Remote control** section in the Relay topic of the app-global
-Settings dialog ([alert.md](./alert.md) -> Settings dialog).
+incantation: the **Remote control** choices in the Phones section of Settings →
+Network, shown under any level but Nothing
+([remote-network.md](./remote-network.md) -> "Settings → Network"). A self-host
+build enrolls only under **My Relay only**, which the user chooses first.
 Its managed-Relay link follows [website-docs.md](./website-docs.md) ->
 `/hosted` preview.
 
@@ -837,7 +842,7 @@ the build cannot do.
 **The push-devices line above it must key on that same seam, not on its own
 `no-burrow`**, a superset covering both a Burrow service that has not enrolled *and*
 a build with no Burrow service at all ([alert.md](./alert.md) -> Push
-notifications). Only the first has a section beneath it, so only the first says
+notifications). Only the first has a Network topic beneath it, so only the first says
 "below"; the `PushNoBurrow` / `PushNotEnrolled` story pair holds the two apart.
 
 **Two choices: One-time connection (`docs/specs/one-time.md` -> "Laptop UI")
@@ -908,6 +913,8 @@ exists to honor:
   connection is polled every 2 s while something is subscribed**, never as a
   standing timer in every window, comparing field-wise before publishing
   (rationale; same rule as `setPushDevices` in `lib/src/lib/push-devices.ts`).
+  **Never publish a failed read over a status already read**: the next poll
+  retries, and only a subscription that has read none shows the error.
 - **Reads are serialized, and coalescing stops at anything that changes the
   answer** — `enroll`, `reconnect`, `clearEnrollment` and losing the last
   subscriber each drop the read in flight (rationale).
@@ -1014,10 +1021,11 @@ Hosted (Relay origin), so a local Relay needs a dev build baked with its origin 
 DORMOUSE_RELAY_ORIGIN=http://localhost:3000 pnpm dev:standalone
 ```
 
-Then enroll once, in **Settings → Remote control** (the sliders icon at the far
-right of the baseboard): the setup password and a name for this machine. Read
-`password` from the generated `setup-password.json` state record. The same from
-the webview's devtools console, the scripting seam:
+Then enroll once, in **Settings → Network** (the sliders icon at the far
+right of the baseboard): choose **My Relay only**, then the setup password and a
+name for this machine. Read `password` from the generated `setup-password.json`
+state record. Once My Relay only is chosen, the same from the webview's devtools
+console, the scripting seam:
 
 ```js
 await window.dormouseBurrow.enroll('<64 hex characters>', 'My Laptop')
@@ -1029,7 +1037,7 @@ themselves. For a headless stand-in burrow instead:
 — it reads the same state, prints a pairing URL, auto-approves, and logs.
 
 **3. Phone** (or any other browser profile): open the Relay origin there first,
-then show a code on the laptop (**Settings → Remote control → Set up a phone**).
+then show a code on the laptop (**Settings → Network → Set up a phone**).
 A browser that has never been here leads with **Scan a setup code**; scanning or
 pasting it creates the passkey and signs you in. Read the two digits off the
 phone into the laptop's modal; the phone then answers its own biometric prompt
@@ -1101,25 +1109,7 @@ Unstaged but adjacent: origin migration (re-binding the passkey and enrollments
 after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
 
-**Scope: saas-multitenant** — the Relay-side hurdles between today's
-single-owner selfhost Relay and a multi-tenant SaaS at the Hosted origin,
-including the Bring-Your-Own-Tailnet (BYOT) posture, parked below, that puts the
-relay inside a customer's own tailnet without a custom client build. The wire API and security
-model are unchanged from selfhost ([remote-api.md](./remote-api.md), Transport);
-everything here is deployment and relay plumbing beneath them. Hosted account
-identity lives in [hosted.md](./hosted.md); this scope adds Relay tenant ownership
-and passkey enrollment — **Accounts** below. Front-door work staged elsewhere
-and not restated: CloudFlare routing +
-Pocket static serving in [pocket-app.md](./pocket-app.md) `## Future`.
-
-Framing invariant: Tailscale is network-layer defense-in-depth *under* the
-existing authorization model, never a substitute for it — the Burrow stays the
-final authority and the relay never decides access
-([remote-security-model.md](./remote-security-model.md)). BYOT controls
-**reachability** and nothing more: the relay endpoint leaves the public internet
-and is addressable only from the customer's tailnet. Confidentiality of relayed
-bytes from the SaaS operator is the end-to-end protocol's job, and holds without
-BYOT.
+**Scope: saas-multitenant** — Hosted accounts, Burrow enrollment, and tenant isolation for the managed Relay on `hosted.dormouse.sh`. Hosted identity belongs to [hosted.md](./hosted.md). The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design; Pocket serving remains staged in [pocket-app.md](./pocket-app.md) `## Future`.
 
 ### From single-owner to multi-tenant
 
@@ -1137,11 +1127,7 @@ that lifts each single-tenant simplification, every one chosen to be liftable:
   Burrows of its own account, and a cross-tenant binding must be *impossible*, not
   merely unauthorized. Defense-in-depth: the Burrow still authorizes, but the relay
   must not be the weak point.
-* **Statefulness → horizontal scale.** All transient state (challenges,
-  sessions, relay bindings) is in memory, so the relay is one process. At scale
-  a Client and its Burrow must land on the same instance (sticky routing) or share
-  a bus; the CloudFlare front door ([pocket-app.md](./pocket-app.md) `## Future`)
-  is where that routing lands.
+* **Hosted transport.** Follow the **remote-network** scope in [remote-network.md](./remote-network.md) for routing and lifecycle.
 
 ### The one-origin pin — the constraint everything obeys
 
@@ -1152,38 +1138,3 @@ to the served origin with Pocket served same-origin at its root
 serve that origin over TLS, whose root Hosted's account app holds today. A raw
 `100.x` tailnet IP, a `*.ts.net` MagicDNS name, or a per-tenant subdomain is a
 different origin, breaking both the pin and the passkey binding.
-
-### BYOT — a per-tenant tailnet node
-
-**Parked: its per-tenant hostnames contradict the one-origin pin, so BYOT must
-be redesigned around one origin before it is built, and no wildcard allowlist
-returns for it.** The design below was written against the retired
-`*.dormouse.sh` wildcard.
-
-The SaaS process embeds one Tailscale node per tenant via `tsnet` (one
-`tsnet.Server` per tenant, each with its own state dir), joining the customer's
-own tailnet. Tenant A's Burrow and Pocket reach the relay as a node inside A's
-tailnet; A cannot address B's node, which is not in A's tailnet — network
-isolation layered on the relay tenant-scoping above. The load-bearing hurdle is
-reconciling that node with the pin:
-
-* **Name + cert.** A per-tenant hostname under the wildcard — e.g.
-  `tenant-xyz.dormouse.sh` — must resolve, *for tailnet members only*
-  (split-horizon DNS coordinated with the customer's MagicDNS), to that tenant's
-  node, which serves a real TLS cert for the subdomain (we control `dormouse.sh`,
-  so ACME DNS-01 issues it). Origin stays `*.dormouse.sh`, so the existing CSP
-  wildcard, passkeys, and autoupdate all keep working while the bytes ride the
-  tailnet and the relay never touches the public internet. A selfhoster cannot
-  reproduce this (no `*.dormouse.sh` cert, no stock client), which is what makes
-  BYOT a distinct product rather than dressed-up selfhost.
-* **Enrollment.** The customer supplies a Tailscale OAuth client or ephemeral
-  auth key scoped to a tag (e.g. `tag:dormouse-relay`); the Relay brings the
-  tenant's node up as an ephemeral, tagged device, and the customer's own ACLs
-  pin which of their devices may reach it.
-* **Operational hurdles.** N userspace WireGuard nodes (each a gVisor netstack,
-  a DERP connection, and key material) in one process: lazy activation (node up
-  only while a tenant has a live device, ephemeral teardown when idle), sharding
-  across processes at scale, per-tenant cert provisioning + split-DNS,
-  server-side custody of per-tenant Tailscale auth material, per-node health (a
-  dropped node means that tenant is offline). The node also consumes a device
-  slot on the *customer's* tailnet — kept ephemeral to minimize it.

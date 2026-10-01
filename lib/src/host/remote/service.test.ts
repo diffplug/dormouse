@@ -7,6 +7,40 @@
 
 import { hostname } from 'node:os';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * The socket factory and fetch the service handed on, kept so a case can play a
+ * path that forgot its own policy check. The runtime and the exchange are the
+ * real ones.
+ */
+const handedTransport = vi.hoisted(() => ({
+  createWebSocket: null as ((url: string) => unknown) | null,
+  createDirectPeer: null as (() => unknown) | null,
+  fetch: null as typeof globalThis.fetch | null,
+}));
+
+vi.mock('../../remote/burrow/burrow-runtime', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../remote/burrow/burrow-runtime')>();
+  class BurrowRuntime extends real.BurrowRuntime {
+    constructor(options: ConstructorParameters<typeof real.BurrowRuntime>[0]) {
+      super(options);
+      handedTransport.createWebSocket = options.createWebSocket ?? null;
+      handedTransport.createDirectPeer = options.createDirectPeer ?? null;
+    }
+  }
+  return { ...real, BurrowRuntime };
+});
+
+vi.mock('../../remote/burrow/enrollment', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../../remote/burrow/enrollment')>();
+  return {
+    ...real,
+    performEnrollment: (...args: Parameters<typeof real.performEnrollment>) => {
+      handedTransport.fetch = args[3] ?? null;
+      return real.performEnrollment(...args);
+    },
+  };
+});
 import {
   API_ROUTES,
   ONE_TIME_WS_ROUTES,
@@ -26,6 +60,8 @@ import type {
   SurfaceHold,
 } from '../../remote/burrow/burrow-surface-provider';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import { nothingPolicy, type NetworkInterfaceInfo, type NetworkPolicy } from '../../remote/network-policy';
+import type { DirectPathPolicy, DirectPeerFactory } from '../../remote/direct/direct-peer';
 import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
@@ -44,16 +80,20 @@ import {
   createTestRendezvous,
   joinOneTimeRoom,
   negotiateOneTimeDirect,
+  offerOneTimeDirect,
   type TestOneTimePhone,
   type TestRendezvous,
 } from '../../remote/test-rendezvous';
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import { BurrowService, type BurrowServiceOptions } from './service';
+import { LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
   BurrowStatusEvent,
+  BurrowUiEvent,
   InvitationEvent,
+  NetworkPolicyEvent,
   OneTimeEvent,
   PairingQueueEvent,
   PairingQueueItem,
@@ -111,18 +151,34 @@ function aclRecord(seed: string, label = 'iPhone Safari'): BurrowAclRecord {
 interface MemoryStore extends BurrowStateStore {
   enrollment: BurrowEnrollment | null;
   acl: Record<string, BurrowAclRecord[]>;
+  network: NetworkPolicy | null;
 }
+
+type Seed = Partial<Pick<MemoryStore, 'enrollment' | 'acl' | 'network'>>;
+
+/**
+ * The builds' own cases run under `RELAY_ON` / `LOCAL_ON`, their network on, so
+ * a case about a Relay or a one-time link is not also a case about the policy.
+ * The `network policy` cases seed their own, `null` included.
+ */
+const NOTHING = nothingPolicy();
+
+/** What the injected interface list answers. */
+const INTERFACES: NetworkInterfaceInfo[] = [
+  { id: 'en0', label: 'Local network', kind: 'lan', prefixes: [LAN] },
+];
 
 /**
  * A durable store whose contents a test can seed and read back — not
  * `createEphemeralBurrowStateStore`, whose whole point is `persistent: false`,
  * which is what the adopt cases turn on.
  */
-function memoryStore(seed: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>> = {}): MemoryStore {
+function memoryStore(seed: Seed = {}): MemoryStore {
   const store: MemoryStore = {
     persistent: true,
     enrollment: seed.enrollment ?? null,
     acl: seed.acl ?? {},
+    network: seed.network ?? null,
     loadEnrollment: async () => store.enrollment,
     saveEnrollment: async (enrollment) => {
       store.enrollment = enrollment;
@@ -133,6 +189,10 @@ function memoryStore(seed: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>> = {}
     loadAcl: async (burrowId) => store.acl[burrowId] ?? [],
     saveAcl: async (burrowId, records) => {
       store.acl[burrowId] = [...records];
+    },
+    loadNetworkPolicy: async () => store.network,
+    saveNetworkPolicy: async (policy) => {
+      store.network = policy;
     },
   };
   return store;
@@ -249,11 +309,8 @@ const OFFER: EnrollmentOffer = {
   mintedAt: '2026-08-31T00:00:00.000Z',
 };
 
-function createService(
-  seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>,
-  over: Partial<BurrowServiceOptions> = {},
-): BurrowService {
-  store = memoryStore(seed);
+function createService(seed?: Seed, over: Partial<BurrowServiceOptions> = {}): BurrowService {
+  store = memoryStore({ network: RELAY_ON, ...seed });
   service = new BurrowService({
     store,
     provider: fakeProvider(),
@@ -278,6 +335,7 @@ function createService(
       if (offerGate) await offerGate;
       return offer;
     },
+    listInterfaces: () => INTERFACES,
     ...over,
   });
   return service;
@@ -288,10 +346,7 @@ function createService(
  * `../relay-origin.ts`). A seeded enrollment is moved to the Hosted origin,
  * since one naming any other reads as none.
  */
-function createHostedService(
-  seed?: Partial<Pick<MemoryStore, 'enrollment' | 'acl'>>,
-  over: Partial<BurrowServiceOptions> = {},
-): BurrowService {
+function createHostedService(seed?: Seed, over: Partial<BurrowServiceOptions> = {}): BurrowService {
   const enrollment = seed?.enrollment
     ? {
         ...seed.enrollment,
@@ -301,7 +356,7 @@ function createHostedService(
       }
     : seed?.enrollment;
   return createService(
-    seed ? { ...seed, enrollment } : seed,
+    { network: LOCAL_ON, ...seed, enrollment },
     { relay: { origin: HOSTED_ORIGIN, mode: 'hosted' }, ...over },
   );
 }
@@ -326,17 +381,10 @@ function queueEvents(): PairingQueueEvent[] {
   return uiEvents().filter((event): event is PairingQueueEvent => event.name === 'pairing-queue');
 }
 
-function uiEvents(): Array<PairingQueueEvent | BurrowStatusEvent | InvitationEvent | OneTimeEvent> {
+function uiEvents(): BurrowUiEvent[] {
   return sent
     .filter((message) => message.event === 'burrow:event')
-    .map(
-      (message) =>
-        message.data as unknown as
-          | PairingQueueEvent
-          | BurrowStatusEvent
-          | InvitationEvent
-          | OneTimeEvent,
-    );
+    .map((message) => message.data as unknown as BurrowUiEvent);
 }
 
 function invitationEvents(): InvitationEvent[] {
@@ -896,6 +944,8 @@ describe('status events', () => {
     };
 
     const starting = service.start();
+    // Once the policy is read, the enrollment read still held.
+    await flushUntil(() => (uiEvents().length > 0 ? true : undefined));
     expect(uiEvents()).toEqual([{ name: 'one-time', state: { status: 'unavailable', reason: 'self-host' } }]);
     release();
     await starting;
@@ -1330,6 +1380,19 @@ describe('push', () => {
     expect(body).not.toContain('pty-1');
   });
 
+  it('sends nothing once the Burrow stops mid-seal', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createService({ enrollment: ENROLLMENT, acl: { [BURROW_ID]: [aclRecord('device-1')] } });
+    await service.start();
+
+    // Sealing awaits WebCrypto; the change to Nothing lands first.
+    const pushing = service.push('pty-1', 'x');
+    await command('setNetworkPolicy', { policy: nothingPolicy() });
+    await pushing;
+    expect(requests.some((request) => request.url.endsWith('/api/push/send'))).toBe(false);
+    warn.mockRestore();
+  });
+
   it('sends nothing with no Burrow running', async () => {
     createService();
     await service.push('pty-1', 'x');
@@ -1515,7 +1578,7 @@ describe('one-time connection', () => {
     expect(sockets).toEqual([]);
     expect(requests).toEqual([]);
 
-    // The start's announcement, then the open.
+    // The start's announcement, once the policy is read, then the open.
     expect(oneTimeStates().map((state) => state.status)).toEqual(['idle', 'opening', 'waiting']);
     expect((await command('oneTimeStatus')).result).toEqual(waiting);
     expect(service.oneTimeEvent().state).toEqual(waiting);
@@ -1582,7 +1645,9 @@ describe('one-time connection', () => {
     expect(firstRoom.burrow.closeCode).toBe(1000);
     // The replaced runtime's ending is not announced as this service's: the
     // replacement's `opening` is, and `serving` never dropped between them.
+    // (The first `idle` is the policy's first read.)
     expect(oneTimeStates().map((state) => state.status)).toEqual([
+      'idle',
       'opening',
       'waiting',
       'opening',
@@ -1717,6 +1782,46 @@ describe('one-time connection', () => {
     expect((await command('takeBack', {})).result).toEqual({ ended: false });
   });
 
+  describe('under Local networks', () => {
+    /**
+     * A factory whose answerer selects `remote` from this end on the allowed
+     * LAN, recording the path policy each attempt hands it.
+     */
+    function answererTo(remote: string, handed: Array<DirectPathPolicy | undefined>): DirectPeerFactory {
+      return (pathPolicy) => {
+        handed.push(pathPolicy);
+        const answerer = network.createAnswerer();
+        answerer.selectedPair = { local: '192.168.1.2', remote };
+        return answerer;
+      };
+    }
+
+    it('hands the attempt a policy over the allowed networks, and connects over them', async () => {
+      const handed: Array<DirectPathPolicy | undefined> = [];
+      createHostedService(undefined, { createDirectPeer: answererTo('192.168.1.3', handed) });
+      const phone = await join((await open()).url);
+      await approve(await request(phone));
+      expect(await phone.next()).toMatchObject({ ok: true });
+
+      await switchDirect(phone);
+      expect(handed).toHaveLength(1);
+      expect(handed[0]!.refusal({ local: '192.168.1.2', remote: '192.168.1.3' })).toBeNull();
+      expect(handed[0]!.refusal({ local: '192.168.1.2', remote: '10.0.0.3' })).not.toBeNull();
+    });
+
+    it('ends network-not-allowed when the phone’s end of the pair is off them', async () => {
+      createHostedService(undefined, { createDirectPeer: answererTo('10.0.0.3', []) });
+      const phone = await join((await open()).url);
+      await approve(await request(phone));
+      expect(await phone.next()).toMatchObject({ ok: true });
+
+      await offerOneTimeDirect(phone, network);
+      await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
+      expect(servingEvents().at(-1)).toBe(false);
+    });
+  });
+
   it('refuses a new link while a phone holds this one, connecting or connected', async () => {
     createHostedService();
     const phone = await join((await open()).url);
@@ -1737,7 +1842,7 @@ describe('one-time connection', () => {
 
     // Every state it announced is one a panel — or the VS Code marker — can read.
     expect(new Set(oneTimeStates().map((state) => state.status))).toEqual(
-      new Set(['opening', 'waiting', 'confirming', 'connecting', 'connected', 'ended']),
+      new Set(['idle', 'opening', 'waiting', 'confirming', 'connecting', 'connected', 'ended']),
     );
     expect(oneTimeStates().every(isOneTimeState)).toBe(true);
     for (const malformed of [
@@ -1752,18 +1857,18 @@ describe('one-time connection', () => {
   });
 
   it('survives the enrollment going, and a reconnect', async () => {
+    // Held, not run: Local networks runs no Burrow (`network policy` below).
     createHostedService({ enrollment: ENROLLMENT });
     await service.start();
-    sockets[0]!.open();
     const waiting = await open();
 
     await command('clearEnrollment');
     await command('reconnect');
     expect((await command('oneTimeStatus')).result).toEqual(waiting);
     expect(rendezvous.room().burrow.readyState).toBe(1);
-    // The enrollment gate cycled; the serving one never dropped.
-    expect(statusEvents()).toEqual([true, false]);
-    expect(servingEvents()).toEqual([true, true]);
+    // The enrollment gate cycled; the serving one never dropped once up.
+    expect(statusEvents()).toEqual([true, true, false]);
+    expect(servingEvents()).toEqual([false, true, true]);
 
     // And the link still works end to end, the phone told the enrolled name
     // the connection opened under.
@@ -1772,36 +1877,12 @@ describe('one-time connection', () => {
     expect(await phone.next()).toEqual({ ok: true, burrowLabel: ENROLLMENT.label });
   });
 
-  it('keeps its request beside the pairings, and through a clearEnrollment', async () => {
-    const authenticator = await createTestAuthenticator({
-      rpId: new URL(HOSTED_ORIGIN).hostname,
-      origin: HOSTED_ORIGIN,
-    });
+  it('keeps its request through a clearEnrollment', async () => {
     createHostedService({ enrollment: ENROLLMENT });
     await service.start();
-    const socket = sockets[0]!;
-    socket.open();
-    const qr = (await command('setupQr')).result as SetupQrResult;
-    const invitation = await parsePairingInvitationUrl(qr.url, HOSTED_ORIGIN);
-    await pairThroughSocket({
-      socket,
-      burrowId: ENROLLMENT.burrowId,
-      clientId: 'c1',
-      invitation: invitation!,
-      authenticator,
-      until: () => queueEvents().length > 0,
-    });
-
     const phone = await join((await open()).url);
     await request(phone);
-    // Pairings first, the one-time request after them.
-    expect(queueEvents().at(-1)!.queue.map((item) => [item.kind, item.clientId])).toEqual([
-      ['pairing', 'c1'],
-      ['one-time', ''],
-    ]);
 
-    // Clearing the enrollment drops the pairing, whose Relay is gone, and
-    // nothing else.
     await command('clearEnrollment');
     expect(queueEvents().at(-1)!.queue.map((item) => item.kind)).toEqual(['one-time']);
     expect(oneTimeStates().at(-1)).toMatchObject({ status: 'confirming' });
@@ -1841,5 +1922,417 @@ describe('one-time connection', () => {
       service.dispose();
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+/**
+ * The network policy (`docs/specs/remote-network.md` → "Policy"): its default,
+ * its setter, and what `nothing` keeps the Burrow service from opening.
+ */
+describe('network policy', () => {
+  function policyEvents(): NetworkPolicyEvent[] {
+    return uiEvents().filter((event): event is NetworkPolicyEvent => event.name === 'network-policy');
+  }
+
+  function setPolicy(policy: unknown) {
+    return command('setNetworkPolicy', { policy });
+  }
+
+  describe('its first read', () => {
+    it('saves Nothing for a machine that never enrolled', async () => {
+      createService({ network: null });
+      await service.start();
+
+      expect(store.network).toEqual(NOTHING);
+      expect((await command('networkPolicy')).result).toEqual({
+        policy: NOTHING,
+        levels: ['nothing', 'relay'],
+        interfaces: INTERFACES,
+      });
+    });
+
+    it('saves My Relay only for an enrollment this build reaches, which keeps running', async () => {
+      // An upgraded self-host install: dropping its phones would read as breakage.
+      createService({ enrollment: ENROLLMENT, network: null });
+      await service.start();
+
+      expect(store.network).toEqual(RELAY_ON);
+      expect(sockets).toHaveLength(1);
+    });
+
+    it('saves Nothing for an enrollment for another origin, which reads as none', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      createService({
+        enrollment: { ...ENROLLMENT, relayUrl: 'https://other.example', origin: 'https://other.example' },
+        network: null,
+      });
+      await service.start();
+      expect(store.network).toEqual(NOTHING);
+      warn.mockRestore();
+    });
+
+    it('offers a Hosted build Nothing and Local networks, starting at Nothing', async () => {
+      createHostedService({ network: null });
+      expect((await command('networkPolicy')).result).toEqual({
+        policy: NOTHING,
+        levels: ['nothing', 'local'],
+        interfaces: INTERFACES,
+      });
+    });
+
+    it('reads a level this build does not offer as Nothing, and leaves it on disk', async () => {
+      // A Hosted build's choice, read by a self-host build on the same machine.
+      createService({ enrollment: ENROLLMENT, network: LOCAL_ON });
+      await service.start();
+
+      expect(((await command('networkPolicy')).result as { policy: NetworkPolicy }).policy).toEqual({
+        ...LOCAL_ON,
+        level: 'nothing',
+      });
+      expect(store.network).toEqual(LOCAL_ON);
+      expect(sockets).toEqual([]);
+    });
+
+    it('leaves the Burrow down when the policy cannot be read', async () => {
+      createService({ enrollment: ENROLLMENT });
+      store.loadNetworkPolicy = async () => {
+        throw new Error('EACCES');
+      };
+      await expect(service.start()).rejects.toThrow('EACCES');
+      expect(sockets).toEqual([]);
+      expect(await service.networkAllowed()).toBe(false);
+    });
+
+    it('saves a choice over a policy it cannot read, and acts on it', async () => {
+      createService({ enrollment: ENROLLMENT });
+      store.loadNetworkPolicy = async () => {
+        throw new Error('EACCES');
+      };
+      await expect(service.start()).rejects.toThrow('EACCES');
+
+      expect((await setPolicy(RELAY_ON)).error).toBeUndefined();
+      expect(store.network).toEqual(RELAY_ON);
+      expect(sockets).toHaveLength(1);
+    });
+  });
+
+  describe('Nothing', () => {
+    function enrolledUnderNothing() {
+      createService({
+        enrollment: ENROLLMENT,
+        acl: { [BURROW_ID]: [aclRecord('device-1')] },
+        network: NOTHING,
+      });
+    }
+
+    it('keeps an enrolled Burrow stopped, reporting its enrollment', async () => {
+      enrolledUnderNothing();
+      await service.start();
+
+      expect(sockets).toEqual([]);
+      expect((await command('status')).result).toMatchObject({
+        enrolled: true,
+        serving: false,
+        burrowId: BURROW_ID,
+        connection: 'stopped',
+      });
+      expect(service.statusEvent()).toMatchObject({ enrolled: true, serving: false });
+      // And a reconnect does not reopen it.
+      await command('reconnect');
+      expect(sockets).toEqual([]);
+    });
+
+    it('makes no request for push, the device list, a test push, or a setup code', async () => {
+      enrolledUnderNothing();
+      await service.start();
+
+      await service.push('pty-1', 'build finished');
+      expect((await command('pushDevices')).result).toBeNull();
+      expect((await command('pushTest')).error).toContain('set to Nothing');
+      expect((await command('setupQr')).error).toContain('set to Nothing');
+      expect(requests).toEqual([]);
+    });
+
+    it('refuses to enroll before any request, the offer file unread', async () => {
+      offer = OFFER;
+      createService({ network: NOTHING });
+
+      expect((await command('enroll', { password: 'setup', label: 'Laptop' })).error).toContain(
+        'set to Nothing',
+      );
+      expect((await command('enrollOffer', { label: 'Laptop' })).error).toContain('set to Nothing');
+      expect(requests).toEqual([]);
+      expect(offerReads).toBe(0);
+      expect(store.enrollment).toBeNull();
+    });
+
+    it('offers no one-time link, and opens none', async () => {
+      createHostedService({ network: NOTHING });
+      await service.start();
+
+      expect((await command('oneTimeStatus')).result).toEqual({
+        status: 'unavailable',
+        reason: 'network-off',
+      });
+      expect((await command('oneTimeOpen')).error).toContain('set to Nothing');
+      expect(rendezvous.rooms).toEqual([]);
+    });
+
+    it('refuses a socket, a request, or a direct peer at the transport, for a path that forgot its check', async () => {
+      createService({ network: RELAY_ON });
+      expect((await command('enroll', { password: 'setup', label: 'Laptop' })).error).toBeUndefined();
+      const { createWebSocket, createDirectPeer, fetch } = handedTransport;
+      expect(sockets).toHaveLength(1);
+      const made = requests.length;
+      const answerers = vi.spyOn(network, 'createAnswerer');
+
+      await setPolicy(NOTHING);
+      expect(() => createWebSocket!(`${ORIGIN.replace(/^http/, 'ws')}/ws/burrow`)).toThrow('set to Nothing');
+      await expect(fetch!(`${ORIGIN}${API_ROUTES.pushDevices}`)).rejects.toThrow('set to Nothing');
+      // Its `null` declines the direct path, as a host without one does.
+      expect(createDirectPeer!()).toBeNull();
+      expect(sockets).toHaveLength(1);
+      expect(requests).toHaveLength(made);
+      expect(answerers).not.toHaveBeenCalled();
+    });
+
+    it('refuses managed voice', async () => {
+      createHostedService({ network: NOTHING });
+      expect(await service.networkAllowed()).toBe(false);
+
+      createHostedService({ network: LOCAL_ON });
+      expect(await service.networkAllowed()).toBe(true);
+    });
+  });
+
+  it('holds an enrollment without running it under Local networks, which has no persistent path', async () => {
+    createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON });
+    await service.start();
+    expect(sockets).toEqual([]);
+    expect((await command('status')).result).toMatchObject({ enrolled: true, connection: 'stopped' });
+    await command('reconnect');
+
+    // Nor on entering Local networks from Nothing.
+    await setPolicy(NOTHING);
+    await setPolicy(LOCAL_ON);
+    expect(sockets).toEqual([]);
+    expect(servingEvents()).not.toContain(true);
+  });
+
+  it('opens no one-time link under Local networks with no network allowed', async () => {
+    createHostedService({ network: { ...LOCAL_ON, allowed: [] } });
+    expect((await command('oneTimeStatus')).result).toEqual({ status: 'idle' });
+    expect((await command('oneTimeOpen')).error).toContain('No network is allowed');
+    expect(rendezvous.rooms).toEqual([]);
+  });
+
+  describe('setNetworkPolicy', () => {
+    it('starts the enrolled Burrow out of Nothing, and stops it again, keeping the enrollment', async () => {
+      createService({ enrollment: ENROLLMENT, network: NOTHING });
+      await service.start();
+      expect(sockets).toEqual([]);
+
+      const { result } = await setPolicy(RELAY_ON);
+      expect(result).toEqual({ policy: RELAY_ON, levels: ['nothing', 'relay'], interfaces: INTERFACES });
+      expect(store.network).toEqual(RELAY_ON);
+      expect(sockets).toHaveLength(1);
+      expect(servingEvents().at(-1)).toBe(true);
+
+      await setPolicy(NOTHING);
+      expect(sockets[0]!.readyState).toBe(3);
+      expect(sockets).toHaveLength(1);
+      expect(servingEvents().at(-1)).toBe(false);
+      expect(store.enrollment).toEqual(ENROLLMENT);
+      expect((await command('status')).result).toMatchObject({ enrolled: true, connection: 'stopped' });
+      expect(policyEvents().map((event) => event.policy)).toEqual([RELAY_ON, NOTHING]);
+    });
+
+    it('lets an enroll through once the level allows a Relay', async () => {
+      createService({ network: NOTHING });
+      await setPolicy(RELAY_ON);
+      expect((await command('enroll', { password: 'setup', label: 'Laptop' })).error).toBeUndefined();
+      expect(sockets).toHaveLength(1);
+    });
+
+    it('ends a live one-time link on a change of level or networks, never on autoUpdate alone', async () => {
+      createHostedService();
+      await service.start();
+      expect((await command('oneTimeOpen')).result).toMatchObject({ status: 'waiting' });
+
+      await setPolicy({ ...LOCAL_ON, autoUpdate: true });
+      expect(oneTimeStates().at(-1)).toMatchObject({ status: 'waiting' });
+      expect(rendezvous.room().burrow.closeCode).toBeNull();
+
+      await setPolicy({ ...LOCAL_ON, allowed: ['10.0.0.0/8'] });
+      expect(rendezvous.room().burrow.closeCode).toBe(1000);
+      expect(oneTimeStates().slice(-2)).toEqual([{ status: 'ended', reason: 'user-ended' }, { status: 'idle' }]);
+
+      await command('oneTimeOpen');
+      await setPolicy(NOTHING);
+      expect(rendezvous.rooms).toHaveLength(2);
+      expect(rendezvous.room().burrow.closeCode).toBe(1000);
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'unavailable', reason: 'network-off' });
+      expect(servingEvents().at(-1)).toBe(false);
+
+      await setPolicy(LOCAL_ON);
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'idle' });
+    });
+
+    it('opens no one-time link for a click that lands while a change to Nothing saves', async () => {
+      createHostedService();
+      await service.start();
+      let saved!: () => void;
+      const saving = new Promise<void>((resolve) => {
+        saved = resolve;
+      });
+      store.saveNetworkPolicy = (policy) => {
+        store.network = policy;
+        return saving;
+      };
+      const set = setPolicy(NOTHING);
+      await flushUntil(() => (store.network?.level === 'nothing' ? true : undefined));
+
+      // The save lands first, then the click reads the policy it resumed on.
+      saved();
+      const open = command('oneTimeOpen');
+      await set;
+      expect((await open).error).toContain('set to Nothing');
+      expect(rendezvous.rooms).toEqual([]);
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'unavailable', reason: 'network-off' });
+    });
+
+    describe('a dispose() that lands during the first policy read', () => {
+      /** Holds every policy read until the returned release runs. */
+      function holdPolicyRead(): () => void {
+        const read = Promise.withResolvers<void>();
+        store.loadNetworkPolicy = async () => {
+          await read.promise;
+          return store.network;
+        };
+        return read.resolve;
+      }
+
+      it('opens no one-time link', async () => {
+        createHostedService();
+        const release = holdPolicyRead();
+        const open = service.handleCommand({ burrowRequestId: 'open', cmd: 'oneTimeOpen' });
+        service.dispose();
+        release();
+        await open;
+        expect(rendezvous.rooms).toEqual([]);
+      });
+
+      it('tells managed voice the network is off', async () => {
+        createHostedService();
+        const release = holdPolicyRead();
+        const allowed = service.networkAllowed();
+        service.dispose();
+        release();
+        expect(await allowed).toBe(false);
+      });
+
+      it('sends no enrollment', async () => {
+        createService();
+        const release = holdPolicyRead();
+        const enroll = service.handleCommand({
+          burrowRequestId: 'enroll',
+          cmd: 'enroll',
+          params: { password: 'setup', label: 'Laptop' },
+        });
+        service.dispose();
+        release();
+        await enroll;
+        expect(requests).toEqual([]);
+        expect(sockets).toEqual([]);
+      });
+    });
+
+    it('saves no backfilled Noise static for a dispose() that lands during its mint', async () => {
+      const { noiseStaticPrivateKey: _private, noiseStaticPublicKey: _public, ...legacy } = ENROLLMENT;
+      createService({ enrollment: legacy });
+      const subtle = globalThis.crypto.subtle;
+      const generateKey = subtle.generateKey.bind(subtle) as (...args: unknown[]) => Promise<unknown>;
+      const mint = vi.spyOn(subtle, 'generateKey').mockImplementation(((...args: unknown[]) => {
+        service.dispose();
+        return generateKey(...args);
+      }) as typeof subtle.generateKey);
+      try {
+        await service.start();
+        expect(mint).toHaveBeenCalled();
+      } finally {
+        mint.mockRestore();
+      }
+      expect(store.enrollment).toEqual(legacy);
+      expect(sockets).toEqual([]);
+    });
+
+    it('rejects anything but an exact policy this build offers, changing nothing', async () => {
+      createService({ enrollment: ENROLLMENT });
+      await service.start();
+      const bad: unknown[] = [
+        undefined,
+        { ...RELAY_ON, level: 'local' },
+        { ...RELAY_ON, level: 'anywhere' },
+        { ...RELAY_ON, extra: true },
+        { level: 'relay', allowed: [] },
+        { ...RELAY_ON, autoUpdate: 'yes' },
+        { ...RELAY_ON, allowed: ['example.com/24'] },
+        { ...RELAY_ON, allowed: ['192.168.1.0/33'] },
+        { ...RELAY_ON, allowed: ['fe80::1%en0/64'] },
+        { ...RELAY_ON, allowed: [LAN, LAN] },
+        // The same range twice, once as its canonical form spells it.
+        { ...RELAY_ON, allowed: [LAN, '192.168.1.7/24'] },
+        { ...RELAY_ON, allowed: Array.from({ length: 33 }, (_, i) => `10.${i}.0.0/16`) },
+      ];
+      for (const policy of bad) {
+        expect((await setPolicy(policy)).error, JSON.stringify(policy)).toBeTruthy();
+      }
+      expect((await command('setNetworkPolicy')).error).toBeTruthy();
+      expect(store.network).toEqual(RELAY_ON);
+      expect(policyEvents()).toEqual([]);
+      expect(sockets).toHaveLength(1);
+
+      // The bound itself is allowed, in either family.
+      const allowed = [...Array.from({ length: 31 }, (_, i) => `10.${i}.0.0/16`), '2001:db8::/32'];
+      expect((await setPolicy({ ...RELAY_ON, allowed })).error).toBeUndefined();
+    });
+
+    it('saves each allowed network in its canonical form, and answers that', async () => {
+      createHostedService();
+      await service.start();
+      const typed = { ...LOCAL_ON, allowed: ['192.168.1.7/24', '2001:DB8:0:0::1/32', '10.8.0.0/24'] };
+      const canonical = { ...LOCAL_ON, allowed: [LAN, '2001:db8::/32', '10.8.0.0/24'] };
+
+      const { result, error } = await setPolicy(typed);
+      expect(error).toBeUndefined();
+      expect((result as { policy: NetworkPolicy }).policy).toEqual(canonical);
+      expect(store.network).toEqual(canonical);
+      expect(policyEvents().at(-1)!.policy).toEqual(canonical);
+    });
+
+    it('announces a saved policy even when the Burrow it allows cannot start', async () => {
+      createService({ enrollment: ENROLLMENT, network: NOTHING });
+      await service.start();
+      store.loadAcl = async () => {
+        throw new Error('EIO');
+      };
+
+      expect((await setPolicy(RELAY_ON)).error).toBe('EIO');
+      expect(store.network).toEqual(RELAY_ON);
+      expect(policyEvents().map((event) => event.policy)).toEqual([RELAY_ON]);
+    });
+
+    it('changes nothing when the save fails', async () => {
+      createService({ enrollment: ENROLLMENT });
+      await service.start();
+      store.saveNetworkPolicy = async () => {
+        throw new Error('disk full');
+      };
+
+      expect((await setPolicy(NOTHING)).error).toBe('disk full');
+      expect(sockets[0]!.readyState).not.toBe(3);
+      expect(((await command('networkPolicy')).result as { policy: NetworkPolicy }).policy).toEqual(RELAY_ON);
+      expect(policyEvents()).toEqual([]);
+    });
   });
 });

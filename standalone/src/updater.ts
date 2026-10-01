@@ -1,6 +1,10 @@
 import { useSyncExternalStore } from 'react';
 import { bakedRelayMode } from 'dormouse-lib/host/relay-origin';
+import { isRecord } from 'dormouse-lib/lib/is-record';
+import { loadJson, saveJson } from 'dormouse-lib/lib/local-json-store';
 import { getPlatformOrNull, IS_WINDOWS, PLATFORM_STRING } from 'dormouse-lib/lib/platform';
+import type { UpdatesPort, UpdatesSnapshot } from 'dormouse-lib/lib/platform/types';
+import { checksForUpdates, isNetworkPolicyResult, type NetworkPolicy } from 'dormouse-lib/remote/network-policy';
 import type { UpdateBannerState } from './UpdateBanner';
 import type { Update } from '@tauri-apps/plugin-updater';
 
@@ -38,11 +42,28 @@ async function invokeTauri<T>(cmd: string): Promise<T> {
 
 const STORAGE_KEY = 'dormouse:update-result';
 
+/** The check clock (`docs/specs/auto-update.md` → "localStorage"). */
+const CHECK_KEY = 'dormouse:update-check';
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+/** How old the last successful check is before the reminder, and how often it may show. */
+const REMINDER_INTERVAL_MS = 7 * DAY_MS;
+/**
+ * No earlier clock reading is right — this code did not exist — so one is a
+ * clock not yet set, which reads 1970 or 2000 until the network sets it.
+ */
+const EARLIEST_PLAUSIBLE_TIME = Date.UTC(2026, 8, 1);
+
 let state: UpdateBannerState = { status: 'idle' };
 let availableUpdate: Update | null = null;
 let pendingUpdate: Update | null = null;
 let downloadPromise: Promise<void> | null = null;
 let currentVersion = '';
+/** The check in flight, which a second asker joins. */
+let checkPromise: Promise<Update | null> | null = null;
+/** The hourly reminder tick, from launch on: a terminal stays open for weeks. */
+let reminderTimer: ReturnType<typeof setInterval> | null = null;
 
 const listeners = new Set<() => void>();
 
@@ -52,9 +73,22 @@ function shouldSkipInstallInDev(): boolean {
 
 function setState(next: UpdateBannerState) {
   state = next;
+  emit();
+}
+
+/** Tells every subscriber — the Baseboard's and the `updates` port's — to read again. */
+function emit(): void {
   for (const listener of listeners) {
     listener();
   }
+}
+
+/** Show `next`, then `idle` after 10 s unless the notice has moved on — to another like it included. */
+function showBriefly(next: UpdateBannerState): void {
+  setState(next);
+  setTimeout(() => {
+    if (state === next) setState({ status: 'idle' });
+  }, 10_000);
 }
 
 function subscribe(listener: () => void) {
@@ -70,6 +104,137 @@ export function useUpdateState(): UpdateBannerState {
   return useSyncExternalStore(subscribe, getSnapshot);
 }
 
+// --- The check clock ---
+
+/**
+ * `checkedAt`: the last successful check. `since`: when this machine started
+ * counting, the baseline before any check. `remindedAt`: the last reminder.
+ */
+interface CheckRecord {
+  checkedAt: number | null;
+  since: number;
+  remindedAt: number | null;
+}
+
+const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+/** The stored record, or `null` for none, a corrupt one included. Writes nothing. */
+function peekCheckRecord(): CheckRecord | null {
+  const record = loadJson(CHECK_KEY, null, (value): value is CheckRecord =>
+    isRecord(value)
+    && isTime(value.since)
+    && (value.checkedAt === null || isTime(value.checkedAt))
+    && (value.remindedAt === null || isTime(value.remindedAt)));
+  // Its three fields alone, so a save built from it writes nothing else back.
+  return record && { checkedAt: record.checkedAt, since: record.since, remindedAt: record.remindedAt };
+}
+
+/**
+ * The stored record, else a fresh one counting from `now`, saved. **A time
+ * ahead of `now` — a clock set back since — is saved as `now`**, delaying the
+ * reminder a week at most rather than until the clock catches up.
+ */
+function loadCheckRecord(now: number): CheckRecord {
+  const stored = peekCheckRecord();
+  const upToNow = (time: number | null) => (time === null ? null : Math.min(time, now));
+  const record: CheckRecord = {
+    checkedAt: upToNow(stored?.checkedAt ?? null),
+    since: Math.min(stored?.since ?? now, now),
+    remindedAt: upToNow(stored?.remindedAt ?? null),
+  };
+  if (
+    !stored
+    || record.checkedAt !== stored.checkedAt
+    || record.since !== stored.since
+    || record.remindedAt !== stored.remindedAt
+  ) {
+    saveCheckRecord(record);
+  }
+  return record;
+}
+
+function saveCheckRecord(record: CheckRecord): void {
+  saveJson(CHECK_KEY, record);
+  publishChecks();
+}
+
+/**
+ * The Baseboard's reminder, once the last successful check — or, before one,
+ * the baseline — is a week old, and at most once a week. Reads local
+ * timestamps and contacts nothing. **Never over a notice still showing**, which
+ * a later tick waits out, **nor on a clock not yet set**, which would pull
+ * every time back to its own.
+ */
+function remindIfDue(now: number): void {
+  if (now < EARLIEST_PLAUSIBLE_TIME) return;
+  const record = loadCheckRecord(now);
+  const age = now - (record.checkedAt ?? record.since);
+  if (age < REMINDER_INTERVAL_MS) return;
+  if (record.remindedAt !== null && now - record.remindedAt < REMINDER_INTERVAL_MS) return;
+  if (state.status !== 'idle' && state.status !== 'dismissed') return;
+  saveCheckRecord({ ...record, remindedAt: now });
+  setState({ status: 'check-due', days: Math.floor(age / DAY_MS) });
+}
+
+/**
+ * One check, automatic or asked for; a second asker joins it. A success is
+ * recorded, and an update it finds is offered for approval.
+ */
+function performCheck(): Promise<Update | null> {
+  if (checkPromise) return checkPromise;
+  checkPromise = (async () => {
+    try {
+      const update = await checkForUpdate();
+      const now = Date.now();
+      saveCheckRecord({ since: now, remindedAt: null, ...peekCheckRecord(), checkedAt: now });
+      if (update) {
+        // One still unapproved is replaced, and its handle let go.
+        const replaced = availableUpdate;
+        availableUpdate = update;
+        if (replaced && replaced !== update) void replaced.close().catch(() => {});
+        setState({ status: 'available', version: update.version });
+      }
+      return update;
+    } finally {
+      checkPromise = null;
+      publishChecks();
+    }
+  })();
+  publishChecks();
+  return checkPromise;
+}
+
+// --- The `updates` port (dormouse-lib/lib/platform/types.ts) ---
+
+let checksSnapshot: UpdatesSnapshot | null = null;
+
+function getChecksSnapshot(): UpdatesSnapshot {
+  checksSnapshot ??= { checkedAt: peekCheckRecord()?.checkedAt ?? null, checking: checkPromise !== null };
+  return checksSnapshot;
+}
+
+function publishChecks(): void {
+  checksSnapshot = null;
+  emit();
+}
+
+/**
+ * Whether this build checks at all: never a self-host build
+ * (`docs/specs/relay.md` → "Relay origin") or the browser-dev harness.
+ */
+function buildChecks(): boolean {
+  return !BROWSER_DEV_HOST && bakedRelayMode() === 'hosted';
+}
+
+/**
+ * What Settings → Network reads: the last successful check and whether one is
+ * running, and Check now. `undefined` in a build that never checks, for
+ * `main.tsx` to give only the window that checks.
+ */
+export function updatesPortForBuild(): UpdatesPort | undefined {
+  return buildChecks() ? { getSnapshot: getChecksSnapshot, subscribe, checkNow } : undefined;
+}
+
 // --- Actions ---
 
 export function dismissBanner(): void {
@@ -78,6 +243,42 @@ export function dismissBanner(): void {
 
 export function approveUpdate(): void {
   void downloadApprovedUpdate();
+}
+
+/**
+ * Check now — the Baseboard's Check now and Try again, and Settings → Network's.
+ * A click, so it checks whatever the network policy says
+ * (`docs/specs/remote-network.md` → "Updates"). **An update already approved
+ * is shown again rather than checked for**: a second `check()` would offer it
+ * for approval twice.
+ */
+export function checkNow(): void {
+  if (!buildChecks()) return;
+  if (pendingUpdate) {
+    setState({ status: 'downloaded', version: pendingUpdate.version });
+    return;
+  }
+  if (downloadPromise && availableUpdate) {
+    setState({ status: 'downloading', version: availableUpdate.version });
+    return;
+  }
+  void runManualCheck();
+}
+
+async function runManualCheck(): Promise<void> {
+  setState({ status: 'checking' });
+  let update: Update | null;
+  try {
+    update = await performCheck();
+  } catch (e) {
+    console.error('[updater] Check failed:', e);
+    setState({ status: 'check-failed' });
+    return;
+  }
+  // An update found is already offered (`performCheck`).
+  if (update) return;
+  currentVersion ||= await getAppVersion().catch(() => '');
+  showBriefly({ status: 'up-to-date', version: currentVersion });
 }
 
 /** Quit now and relaunch; the quit installs the pending update on its way out
@@ -149,6 +350,9 @@ export function startUpdateCheck(): void {
     console.info('[updater] a self-host build: no update check');
     return;
   }
+  // The reminder again, hourly, whatever the policy: it contacts nothing, and
+  // never checks.
+  reminderTimer ??= setInterval(() => remindIfDue(Date.now()), HOUR_MS);
   void runUpdateCheck().catch((e) => console.error('[updater] Startup failed:', e));
 }
 
@@ -191,12 +395,7 @@ async function runUpdateCheck(): Promise<void> {
           });
           hadFailureMarker = true;
         } else {
-          setState({ status: 'post-update-success', from: marker.from, to: marker.to });
-          setTimeout(() => {
-            if (state.status === 'post-update-success') {
-              setState({ status: 'idle' });
-            }
-          }, 10_000);
+          showBriefly({ status: 'post-update-success', from: marker.from, to: marker.to });
         }
       }
     }
@@ -212,17 +411,30 @@ async function runUpdateCheck(): Promise<void> {
 
   await new Promise((resolve) => setTimeout(resolve, 5_000));
 
-  try {
-    const update = await checkForUpdate();
-    if (!update) {
-      return;
-    }
-
-    availableUpdate = update;
-    setState({ status: 'available', version: update.version });
-  } catch (e) {
-    console.error('[updater] Check failed:', e);
+  // Read at the check, so a change made meanwhile counts
+  // (`docs/specs/remote-network.md` → "Updates").
+  const policy = await readNetworkPolicy();
+  if (policy && checksForUpdates(policy)) {
+    // An update found is offered by `performCheck`.
+    await performCheck().catch((e) => console.error('[updater] Check failed:', e));
   }
+  // Due only where no check has succeeded for a week: automatic checks off, or failing.
+  remindIfDue(Date.now());
+}
+
+/**
+ * The network policy, from the Burrow service that holds it. **`null` — read as
+ * Nothing — for a read that fails**, or a platform with no service.
+ */
+async function readNetworkPolicy(): Promise<NetworkPolicy | null> {
+  try {
+    const result = await getPlatformOrNull()?.burrow?.command('networkPolicy');
+    if (isNetworkPolicyResult(result)) return result.policy;
+    console.warn('[updater] No network policy to read; not checking.');
+  } catch (e) {
+    console.warn('[updater] Could not read the network policy; not checking:', e);
+  }
+  return null;
 }
 
 async function downloadApprovedUpdate(): Promise<void> {
@@ -268,6 +480,10 @@ export function _resetForTesting(): void {
   pendingUpdate = null;
   downloadPromise = null;
   currentVersion = '';
+  checkPromise = null;
+  checksSnapshot = null;
+  if (reminderTimer) clearInterval(reminderTimer);
+  reminderTimer = null;
   listeners.clear();
 }
 

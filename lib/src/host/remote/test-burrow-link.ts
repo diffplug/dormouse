@@ -23,7 +23,7 @@ import {
   fromBase64Url,
 } from 'remote-lib-common';
 
-import { DEFAULT_RELAY_ORIGIN, hostedOrigin } from '../relay-origin';
+import { DEFAULT_RELAY_ORIGIN, hostedOrigin, type RelayMode } from '../relay-origin';
 import {
   idleOneTimeState,
   type InvitationEvent,
@@ -32,6 +32,7 @@ import {
 } from './service-protocol';
 import type { PairingOutcome, TerminalInvitationState } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import { networkPolicyResult, type NetworkPolicy, type NetworkPolicyResult } from '../../remote/network-policy';
 import type { BurrowLink } from '../../lib/platform/types';
 
 /** The self-host Relay the fixtures' build was baked for (`docs/specs/relay.md` → "Relay origin"). */
@@ -142,6 +143,23 @@ export function oneTimeWaiting(
   };
 }
 
+/** The one Wi-Fi the fixtures' Local networks allows. */
+export const LAN = '192.168.1.0/24';
+/** A self-host build's network on: My Relay only. */
+export const RELAY_ON: NetworkPolicy = { level: 'relay', allowed: [], autoUpdate: false };
+/** A Hosted build's network on: Local networks over {@link LAN}. */
+export const LOCAL_ON: NetworkPolicy = { level: 'local', allowed: [LAN], autoUpdate: false };
+
+/**
+ * What `networkPolicy` answers for a build with its network on, which the
+ * Remote control choices' fixtures assume.
+ */
+export function networkOn(relayMode: RelayMode): NetworkPolicyResult {
+  return networkPolicyResult(relayMode === 'self-host' ? RELAY_ON : LOCAL_ON, relayMode, [
+    { id: 'en0', label: 'Local network', kind: 'lan', prefixes: [LAN] },
+  ]);
+}
+
 /** A link that answers through its `command` and relays {@link emit} to its subscribers. */
 export interface EventedBurrowLink<C extends BurrowLink['command']> extends BurrowLink {
   /** Exactly the `command` it was made with, so a caller's spy reads its calls here. */
@@ -214,6 +232,8 @@ export interface PrimedBurrow {
   oneTimeOpen?: OneTimeState;
   /** Make `oneTimeOpen` reject — a build that cannot open one, or a phone already connected. */
   oneTimeOpenError?: string;
+  /** What `networkPolicy` answers; {@link networkOn} for the status's build by default. */
+  network?: NetworkPolicyResult;
 }
 
 /**
@@ -223,11 +243,15 @@ export interface PrimedBurrow {
  * `enrollOffer`, `reconnect`, `clearEnrollment` and `oneTimeEnd` resolve without
  * changing the answer. The exception is `enrollError`, because a refused enrollment is a state the
  * form must render (`docs/specs/relay.md`, "Remote control, in the Settings
- * dialog") and a rejected enroll is the only way to reach it.
+ * dialog") and a rejected enroll is the only way to reach it. And
+ * `setNetworkPolicy` holds what it was sent and answers it, as the service
+ * does, so a story can walk Settings → Network's choices.
  */
 export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
+  const { relayOrigin, relayMode } = primed.status ?? UNENROLLED_STATUS;
+  let network = primed.network ?? networkOn(relayMode);
   return {
-    command: async (cmd) => {
+    command: async (cmd, params) => {
       if (cmd === 'status') {
         if (primed.statusError) throw new Error(primed.statusError);
         return primed.status ?? UNENROLLED_STATUS;
@@ -239,9 +263,17 @@ export function makeStubBurrowLink(primed: PrimedBurrow): BurrowLink {
         if (primed.setupQrError) throw new Error(primed.setupQrError);
         return primed.setupQr ?? setupQrResult();
       }
+      if (cmd === 'networkPolicy') return network;
+      if (cmd === 'setNetworkPolicy') {
+        const { policy } = params as { policy: NetworkPolicy };
+        network = networkPolicyResult(policy, relayMode, network.interfaces);
+        return network;
+      }
       if (cmd === 'oneTimeStatus') {
-        const { relayOrigin, relayMode } = primed.status ?? UNENROLLED_STATUS;
-        return primed.oneTime ?? idleOneTimeState(hostedOrigin({ origin: relayOrigin, mode: relayMode }));
+        return (
+          primed.oneTime ??
+          idleOneTimeState(hostedOrigin({ origin: relayOrigin, mode: relayMode }), network.policy.level)
+        );
       }
       if (cmd === 'oneTimeOpen') {
         if (primed.oneTimeOpenError) throw new Error(primed.oneTimeOpenError);

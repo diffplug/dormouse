@@ -28,6 +28,8 @@ export interface BrowserReport {
   readonly maxDirectSdpLength: number;
   /** Candidate lines in that offer — what makes a multi-homed machine large. */
   readonly candidates?: number;
+  /** The address each names: an IP literal, or the mDNS name a browser hides one behind. */
+  readonly candidateAddresses?: string[];
   /** The association's own per-message limit, as this browser reports it. */
   readonly maxMessageSize?: number | null;
   /** The size of every frame echoed back, in the order this end saw them. */
@@ -78,6 +80,9 @@ async function run(): Promise<BrowserReport> {
     maxDirectSdpLength: MAX_DIRECT_SDP_LENGTH,
     offerSdpLength: sdp?.length,
     candidates: sdp ? (sdp.match(/^a=candidate/gm) ?? []).length : undefined,
+    candidateAddresses: sdp
+      ? [...sdp.matchAll(/^a=candidate:\S+ \S+ \S+ \S+ (\S+)/gm)].map((match) => match[1]!)
+      : undefined,
   };
   // `offer()` answers null for a description this end would not send, which on
   // a machine with many interfaces is the interesting outcome rather than a

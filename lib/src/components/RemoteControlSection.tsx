@@ -3,7 +3,7 @@ import { DEFAULT_PAIRING_TTL_MS } from 'remote-lib-common';
 import { ModalReviewBlock, TextInput, modalActionButton } from './design';
 import { ExternalTextLink } from './ExternalTextLink';
 import { OneTimeConnection } from './OneTimeConnection';
-import { FIELD_HINT, FIELD_LABEL, own, revealPanel } from './remote-control-shared';
+import { FIELD_HINT, FIELD_LABEL, own, revealPanel, useBusyAction } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import type { BurrowConsoleStatus, SetupQrResult } from '../host/remote/service-protocol';
 import type {
@@ -11,7 +11,7 @@ import type {
   BurrowStatus,
   TerminalInvitationState,
 } from '../remote/burrow/burrow-runtime';
-import { BURROW_IS_AN_APP, SCAN_LABEL } from '../remote/setup-copy';
+import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_BUTTON } from '../remote/setup-copy';
 import {
   clearBurrowEnrollment,
   enrollOfferBurrow,
@@ -90,29 +90,6 @@ function refreshDelay(expiresAt: number, now: number): number {
     Math.max(expiresAt - now - SETUP_QR_REFRESH_LEAD_MS, SETUP_QR_MIN_REFRESH_MS),
     SETUP_QR_MAX_REFRESH_MS,
   );
-}
-
-/**
- * A busy/error pair for an action surface with one error location. Enrollment
- * uses the cross-form gate below instead.
- */
-function useBusyAction() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = useCallback(async (action: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-
-  return { busy, error, run };
 }
 
 /**
@@ -474,11 +451,14 @@ function BurrowNameField({
 /**
  * The two ways a phone can reach this machine — a one-time connection, or a
  * persistent Relay this machine enrolls with so a phone running Dormouse Pocket
- * can pair with it.
+ * can pair with it — as Settings → Network's Phones section shows them under
+ * any level but Nothing (`NetworkPhones` in `NetworkSettings.tsx`), which
+ * labels them.
  *
  * Renders nothing at all on a build with no Burrow service behind it (the
  * website, the lib dev server): there is no Burrow to enroll, and offering the
- * form would promise something the build cannot do.
+ * form would promise something the build cannot do. Nor before the first
+ * status, which `NetworkPhones` already waited for.
  *
  * This is the same `enroll` / `enrollOffer` / `status` / `reconnect` /
  * `clearEnrollment` surface as the `window.dormouseBurrow` console hook,
@@ -493,22 +473,14 @@ export function RemoteControlSection() {
   // service pushes `status` only when it changes.
   useEffect(() => void refreshBurrowStatus(), []);
 
-  if (state.kind === 'unsupported') return null;
-
-  return (
-    <section className="mt-4 border-t border-border pt-3">
-      <div className="text-sm text-foreground">Remote control</div>
-      {state.kind === 'loading' ? (
-        <div className="mt-1.5 text-sm text-muted">Checking…</div>
-      ) : state.kind === 'error' ? (
-        <div className="mt-1.5 text-sm leading-relaxed text-muted">
-          Could not reach this machine’s remote-control service: {state.message}
-        </div>
-      ) : (
-        <RelayChoices status={state.status} />
-      )}
-    </section>
-  );
+  if (state.kind === 'error') {
+    return (
+      <div className="mt-1.5 text-sm leading-relaxed text-muted">
+        Could not reach this machine’s remote-control service: {state.message}
+      </div>
+    );
+  }
+  return state.kind === 'ready' ? <RelayChoices status={state.status} /> : null;
 }
 
 /**
@@ -745,6 +717,69 @@ function OfferCard({
   );
 }
 
+/**
+ * Disconnecting's second step, which the first click asks for: it drops every
+ * paired phone until they pair again. Local only — the enrollment is forgotten
+ * here and the Relay is not asked — so it is offered under Nothing too
+ * ({@link HeldEnrollment}).
+ */
+function DisconnectConfirm({ busy, run, onDone }: {
+  busy: boolean;
+  run: (action: () => Promise<void>) => Promise<boolean>;
+  onDone: () => void;
+}) {
+  return (
+    <>
+      <span className="text-xs text-muted">Paired phones will need to pair again.</span>
+      <button
+        type="button"
+        disabled={busy}
+        className={modalActionButton({ tone: 'primary' })}
+        onClick={() =>
+          void run(async () => {
+            await clearBurrowEnrollment();
+            onDone();
+          })
+        }
+      >
+        Disconnect
+      </button>
+      <button type="button" disabled={busy} className={modalActionButton()} onClick={onDone}>
+        Cancel
+      </button>
+    </>
+  );
+}
+
+/**
+ * An enrollment the network policy holds without running — under Nothing,
+ * Settings → Network's Phones section shows no Remote control choices — so
+ * the one thing left to do with it, Disconnect, stays in reach without
+ * choosing a level that opens the relay socket.
+ */
+export function HeldEnrollment({ relayOrigin }: { relayOrigin: string }) {
+  const { busy, error, run } = useBusyAction();
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className="mt-1.5 text-sm leading-relaxed">
+      <div className="text-muted">
+        Enrolled with <span className="font-mono break-all text-foreground">{relayOrigin}</span>, which
+        nothing reaches while Network is set to Nothing. Paired phones stay paired.
+      </div>
+      {error ? <div className="mt-1.5 text-error">{error}</div> : null}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {confirming ? (
+          <DisconnectConfirm busy={busy} run={run} onDone={() => setConfirming(false)} />
+        ) : (
+          <button type="button" disabled={busy} className={modalActionButton()} onClick={() => setConfirming(true)}>
+            Disconnect
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EnrolledView({
   relayOrigin,
   connection,
@@ -798,30 +833,7 @@ function EnrolledView({
           </button>
         ) : null}
         {confirmingDisconnect ? (
-          <>
-            <span className="text-xs text-muted">Paired phones will need to pair again.</span>
-            <button
-              type="button"
-              disabled={busy}
-              className={modalActionButton({ tone: 'primary' })}
-              onClick={() =>
-                void run(async () => {
-                  await clearBurrowEnrollment();
-                  setConfirmingDisconnect(false);
-                })
-              }
-            >
-              Disconnect
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              className={modalActionButton()}
-              onClick={() => setConfirmingDisconnect(false)}
-            >
-              Cancel
-            </button>
-          </>
+          <DisconnectConfirm busy={busy} run={run} onDone={() => setConfirmingDisconnect(false)} />
         ) : (
           <>
             <button
@@ -831,7 +843,7 @@ function EnrolledView({
               className={modalActionButton({ tone: setup.state ? 'secondary' : 'primary' })}
               onClick={() => (setup.state ? setup.close() : setup.newCode())}
             >
-              Set up a phone
+              {SETUP_BUTTON}
             </button>
             <button
               type="button"

@@ -12,16 +12,15 @@ import {
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 /**
- * The Settings dialog's Remote control section — the one step a self-hoster
- * cannot skip (`docs/specs/relay.md`, "Remote control, in the Settings
- * dialog"). Rendered on its own rather than through `SettingsDialog` so these
- * stories are about the enrollment states themselves; `SettingsDialog`'s
- * `WithRemoteControl` covers it in place.
+ * The Remote control choices in Settings → Network's Phones section — the one
+ * step a self-hoster cannot skip (`docs/specs/relay.md`, "Remote control, in
+ * the Settings dialog"). Rendered on its own rather than through
+ * `SettingsDialog` so these stories are about the enrollment states
+ * themselves; `SettingsDialog`'s `WithRemoteControl` covers it in place.
  *
  * Every state comes from the `primedBurrow` parameter, because the section
  * reads its whole world from `getPlatform().burrow` and renders nothing
- * without one. The leading rule is the section's own `border-t` — it normally
- * separates it from the push settings above.
+ * without one.
  */
 function RemoteControlStory() {
   return (
@@ -60,10 +59,10 @@ export default meta;
 type Story = StoryObj<typeof RemoteControlStory>;
 
 /**
- * The status command is a round trip, so every story opens on "Checking…".
- * Waiting for the settled text keeps Chromatic off that frame — and asserts the
- * story actually reached the state it claims, rather than rendering an empty
- * section because the stub never arrived.
+ * The status command is a round trip, so every story opens empty. Waiting for
+ * the settled text keeps the snapshot off that frame — and asserts the story
+ * actually reached the state it claims, rather than rendering an empty section
+ * because the stub never arrived.
  */
 function settled(text: string | RegExp) {
   return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
@@ -443,7 +442,7 @@ export const OneTimeConfirming: Story = {
   play: settled('Type the two digits your phone shows into the dialog.'),
 };
 
-/** Confirmed; the phone is setting up the direct path on the same Wi-Fi. */
+/** Confirmed; the phone is setting up the direct path over an allowed network. */
 export const OneTimeConnecting: Story = {
   parameters: {
     primedBurrow: {

@@ -29,7 +29,8 @@ import type { BurrowLink } from '../../lib/platform/types';
 /**
  * `unsupported` is a build with no Burrow service behind it (the website, the
  * lib dev server) — not a failure, and the section renders nothing at all.
- * It is distinct from `error`, which means there is a service and it refused.
+ * It is distinct from `error`, which means there is a service and no read of
+ * it has succeeded since the first subscriber came.
  */
 export type BurrowStatusState =
   | { kind: 'unsupported' }
@@ -273,6 +274,10 @@ async function readBurrowStatus(): Promise<void> {
     setState(status ? { kind: 'ready', status: normalizeStatus(status) } : UNSUPPORTED);
   } catch (error) {
     if (mine !== generation) return;
+    // A status already read stands, and the next tick retries: publishing one
+    // failed poll as `error` would unmount everything the section holds open
+    // on it — a setup code, a half-typed password, the one-time panel.
+    if (state.kind === 'ready') return;
     setState({ kind: 'error', message: describeBurrowError(error) });
   }
 }

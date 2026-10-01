@@ -21,6 +21,8 @@
  */
 
 import { createRequire } from 'node:module';
+import { isIP } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -31,6 +33,8 @@ import {
 import { DirectPeer, type DirectPeerLike } from '../../remote/direct/direct-peer';
 import { STREAMED_CHUNK, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
 import { collect } from '../../remote/direct/test-fake-peer';
+import { localNetworksPath } from './local-networks';
+import { isOfferedAddress } from './network-interfaces';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
 
 /** The one call the reliability case needs that `DirectPeerLike` has no reason to. */
@@ -54,6 +58,15 @@ const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill') as Nat
  * never a public STUN or TURN default.
  */
 const buildPeer = (): DirectPeerLike => new RTCPeerConnection({ iceServers: [] });
+
+/**
+ * An IPv4 address this machine offers a phone (`isOfferedAddress`, as the bind
+ * reads them), which a Local networks policy can allow alone — `undefined` on
+ * a machine with none, whose cases below are skipped.
+ */
+const EXTERNAL_V4 = Object.values(networkInterfaces())
+  .flat()
+  .find((entry) => entry && isOfferedAddress(entry) && isIP(entry.address) === 4)?.address;
 
 /** Whether the last case already tore the addon down through the shipped path. */
 let disposedByFactory = false;
@@ -374,6 +387,101 @@ describe('the direct path over the native addon', () => {
         ATTEMPT_BUDGET_MS,
       );
       expect(gone).toHaveBeenCalledOnce();
+    },
+    CASE_BUDGET_MS,
+  );
+
+  /**
+   * Local networks on the real stack (`docs/specs/remote-network.md` -> "Local
+   * networks"): the shipped factory binds the one allowed address, and the
+   * path policy reads the pair the addon's own ICE agent selected — the half a
+   * fake pair can only assert. Before the teardown case, which ends the addon.
+   */
+  it.skipIf(!EXTERNAL_V4)('binds the one allowed address, and advertises it alone', async () => {
+    const peer = createNativeDirectPeerFactory()(localNetworksPath([`${EXTERNAL_V4}/32`]))!;
+    try {
+      peer.createDataChannel(DIRECT_CHANNEL_LABEL, { ordered: true });
+      await peer.setLocalDescription(await peer.createOffer());
+      await waitFor(() => peer.iceGatheringState === 'complete', 'gathering to complete', ATTEMPT_BUDGET_MS);
+      const candidates = peer
+        .localDescription!.sdp!.split(/\r?\n/)
+        .filter((line) => line.startsWith('a=candidate'));
+      expect(candidates.map((line) => line.split(' ')[4])).toEqual([EXTERNAL_V4]);
+    } finally {
+      peer.close();
+    }
+  });
+
+  /**
+   * A bound answerer under the path policy, opened against an unbound offerer
+   * whose offer `rewrite` edits in transit.
+   */
+  const openBound = (rewrite: (offer: string) => string = (offer) => offer) => {
+    const pathPolicy = localNetworksPath([`${EXTERNAL_V4}/32`]);
+    return untilOpen(async (attempt) => {
+      let opened = 0;
+      const lost: string[] = [];
+      const handlers = {
+        onOpen: () => (opened += 1),
+        onFrame: () => {},
+        onClosed: (reason: string) => lost.push(reason),
+        onViolation: (reason: string) => lost.push(reason),
+      };
+      const bound = attempt.keep(createNativeDirectPeerFactory()(pathPolicy)!);
+      const offerer = attempt.keep(new DirectPeer({ peer: buildPeer(), handlers }));
+      const answerer = attempt.keep(new DirectPeer({ peer: bound, handlers, pathPolicy }));
+      const offer = await offerer.offer();
+      expect(offer).not.toBeNull();
+      const answer = await answerer.answer(rewrite(offer!));
+      expect(answer).not.toBeNull();
+      await offerer.acceptAnswer(answer!);
+      return {
+        bound,
+        lost,
+        open: () => opened === 2,
+        abandon: () => {
+          offerer.close();
+          answerer.close();
+        },
+      };
+    }, 'both ends of the bound channel to open');
+  };
+
+  it.skipIf(!EXTERNAL_V4)(
+    'opens a bound channel whose selected pair the path policy reads as IP addresses',
+    async () => {
+      const run = await openBound();
+      try {
+        // Both ends on this machine, so both are the one allowed address: the
+        // addon reports the pair as literals, never a name.
+        const pair = run.bound.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+        expect(pair?.local?.address).toBe(EXTERNAL_V4);
+        expect(pair?.remote?.address).toBe(EXTERNAL_V4);
+        expect(run.lost).toEqual([]);
+      } finally {
+        run.abandon();
+      }
+    },
+    CASE_BUDGET_MS,
+  );
+
+  it.skipIf(!EXTERNAL_V4)(
+    'opens from an offer naming only mDNS hosts, which the policy strips, on the offerer’s own checks',
+    async () => {
+      // A browser's offer: every host candidate a name, which the Burrow drops.
+      const run = await openBound((offer) =>
+        offer.replace(
+          /^(a=candidate:\S+ \S+ \S+ \S+ )\S+/gm,
+          (_, head: string) => `${head}${crypto.randomUUID()}.local`,
+        ),
+      );
+      try {
+        const pair = run.bound.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+        expect(pair?.remote?.address).toBe(EXTERNAL_V4);
+        expect(run.lost).toEqual([]);
+      } finally {
+        run.abandon();
+      }
     },
     CASE_BUDGET_MS,
   );

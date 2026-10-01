@@ -37,6 +37,9 @@ export class VSCodeAdapter implements PlatformAdapter {
   // Same for the shell: VS Code's native `dormouse.selectShell` QuickPick owns
   // shell selection there, so the Settings dialog hides its Shell row.
   readonly hostOwnsShells = true;
+  // And updates: the Marketplace installs them, so Settings → Network shows
+  // that instead of an update check.
+  readonly hostOwnsUpdates = true;
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
   // Captured once, at construction, from the global the extension host injects

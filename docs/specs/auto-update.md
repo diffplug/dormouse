@@ -2,17 +2,19 @@
 
 > See `docs/specs/glossary.md` for Baseboard / Door vocabulary. Owns the standalone updater's lifecycle; the release pipeline that publishes the update manifest it fetches is `docs/specs/deploy.md`, and the quit orchestrator that drives the install is `docs/specs/standalone.md` §Quit flow.
 
-The standalone app checks for updates on launch and prompts in the Baseboard. **Nothing is downloaded or installed until the user approves that prompt**; the download then runs in the background, the install at quit.
+The standalone app checks for updates on launch, where the network policy allows it, and prompts in the Baseboard. **Nothing is downloaded or installed until the user approves that prompt**; the download then runs in the background, the install at quit.
 
 ## How it works
 
-**Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then `check()`: no update is silent, an update raises the approval prompt. Version-lookup and check failures are logged. **Only approval starts the background `download()`**; a failed one is logged and the prompt returns.
+**Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then read the network policy with `networkPolicy` over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), `check()` — no update is silent, an update raises the approval prompt; then the reminder, if due: `check-due`, recording `remindedAt`. **The reminder is re-evaluated hourly while the app runs**, reading no policy and never checking; **never over an undismissed notice, nor while the clock reads before 2026-09**, not yet set. Version-lookup and check failures are logged. **Only approval starts the background `download()`**; a failed one is logged and the prompt returns.
 
-**A self-host build never checks** (`docs/specs/relay.md` → "Relay origin"): `startUpdateCheck()` returns at once unless the webview's own baked mode, `bakedRelayMode()`, is `hosted`.
+**Check now** — the `check-due` and `check-failed` links, and the `updates` port — shows `checking`, then `available`, `up-to-date`, or `check-failed`. **A second ask joins the check in flight. An update already approved is shown again, `downloading` or `downloaded`, instead of checked for**, which would offer it for approval twice. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage).
+
+**A self-host build never checks** (`docs/specs/relay.md` → "Relay origin"): `startUpdateCheck()` returns at once and `checkNow()` does nothing unless the webview's own baked mode, `bakedRelayMode()`, is `hosted`.
 
 **A failed download leaves the *available* update in place** so a second approval retries rather than no-ops; only a successful `download()` promotes `check()`'s in-memory *available* `Update` to *pending*.
 
-**`startUpdateCheck()` is a no-op under the browser-dev harness** (`VITE_DORMOUSE_BROWSER_DEV_HOST`), which has no Tauri updater behind it.
+**`startUpdateCheck()` and `checkNow()` are no-ops under the browser-dev harness** (`VITE_DORMOUSE_BROWSER_DEV_HOST`), which has no Tauri updater behind it.
 
 ### Quit-time install
 
@@ -38,6 +40,10 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 | `restart-refused` | "Update downloaded (v0.5.0) — will install when you quit (couldn't restart: `<reason>`)" | "Changelog" | No |
 | `post-update-success` | "Updated to v0.5.0 — from v0.4.0" | "Changelog" | 10 seconds |
 | `post-update-failure` | "Update failed" | "Click here to debug" | No |
+| `check-due` | "No update check in 9 days" | "Check now" | No |
+| `checking` | "Checking for updates…" | — | No |
+| `up-to-date` | "Dormouse is up to date (v0.5.0)" | — | 10 seconds |
+| `check-failed` | "Couldn’t check for updates" | "Try again" | No |
 
 "Install when I quit" is the approval; "Changelog" opens `https://dormouse.sh/changelog/after/<getVersion()>`. **"Restart now" calls `quit_restart`** (`docs/specs/standalone.md` → "Restart"): the quit installs on its way out, then relaunches. **A refusal turns a still-shown `downloaded` into `restart-refused`, carrying the host's reason and never "Restart now"**, since the refusal holds until relaunch; the update stays pending. ` · ` separates the message from the action labels.
 
@@ -51,7 +57,7 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 ### Threading
 
-**No updater knowledge in `lib/`** — the Baseboard lives there and every updater module is standalone-only, so the notice threads through as an opaque `ReactNode` slot: `App` → `Wall` (`baseboardNotice`) → `Baseboard` (`notice`).
+**No updater knowledge in `lib/`** — the Baseboard lives there and every updater module is standalone-only, so the notice threads through as an opaque `ReactNode` slot: `App` → `Wall` (`baseboardNotice`) → `Baseboard` (`notice`). Settings reads the checks through the platform's optional `updates` port (`UpdatesPort`: `{ checkedAt, checking }` and `checkNow()`), which `main.tsx` gives `main` alone, and only in a build that checks.
 
 ## Platform behavior at quit
 
@@ -69,7 +75,7 @@ Update status is a text notice in the Baseboard, the always-visible bottom strip
 
 ## localStorage
 
-Single key: `dormouse:update-result`
+`dormouse:update-result`, the post-install marker:
 
 | Scenario | Value written | When cleared |
 |----------|--------------|--------------|
@@ -78,11 +84,13 @@ Single key: `dormouse:update-result`
 
 **Must write the success marker *before* `install()`** — on Windows `install()` never returns. **Must confirm its target against the running app version on next launch**; a mismatch becomes a failure notice and suppresses the update check. **A throwing `install()` overwrites it with a failure entry.** An unapproved update writes nothing. **Must ignore corrupt markers**, including invalid field types. `standalone/src/updater.test.ts` pins marker validation and confirmation.
 
+`dormouse:update-check`, the check clock: `{ "checkedAt": number | null, "since": number, "remindedAt": number | null }`, epoch ms — the last successful check, when this machine started counting, and the last reminder. Written by the first launch, tick, or check that finds none, with `since` then; never cleared. **A value of the wrong shape counts as none**, restarting the clock. **A time ahead of the clock is saved as now**, the others kept, so a clock set back delays the reminder a week at most.
+
 ## Files
 
 | File | Role |
 |------|------|
-| [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, check, approved download, quit-time install (`hasPendingUpdate` / `installPendingUpdate`), markers, debug report |
+| [`standalone/src/updater.ts`](../../standalone/src/updater.ts) | State machine, policy-gated check, reminder, Check now and the `updates` port, approved download, quit-time install (`hasPendingUpdate` / `installPendingUpdate`), markers, debug report |
 | [`standalone/src/updater.test.ts`](../../standalone/src/updater.test.ts) | Pins the updater lifecycle and ordering |
 | [`standalone/src/UpdateBanner.tsx`](../../standalone/src/UpdateBanner.tsx) | Presentational notice content for the Baseboard |
 | [`standalone/src/UpdateDebugModal.tsx`](../../standalone/src/UpdateDebugModal.tsx) | Failure modal: issue search + copyable report |

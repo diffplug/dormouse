@@ -356,7 +356,7 @@ describe('one-time connection, end to end', () => {
     expect(await result).toEqual({ ok: false, message: ONE_TIME_ENDED_MESSAGE });
   });
 
-  it('gives the same-Wi-Fi copy when the laptop builds no peer', async () => {
+  it('gives the allowed-network copy when the laptop builds no peer', async () => {
     makeRuntime({ createDirectPeer: null });
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
     approval.approve(shown);
@@ -365,7 +365,7 @@ describe('one-time connection, end to end', () => {
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');
   });
 
-  it('gives the same-Wi-Fi copy when no channel opens by the direct deadline', async () => {
+  it('gives the allowed-network copy when no channel opens by the direct deadline', async () => {
     makeRuntime({ network: { opening: 'never' } });
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
     approval.approve(shown);
@@ -439,7 +439,7 @@ describe('size authority across a one-time connection, end to end', () => {
       .at(-1);
   }
 
-  beforeEach(() => {
+  beforeEach(async () => {
     toUi = [];
     responders = new Map();
     listeners = new Map();
@@ -467,8 +467,12 @@ describe('size authority across a one-time connection, end to end', () => {
         },
       },
     );
+    // Local networks: a new install is at Nothing, which opens no link
+    // (`docs/specs/remote-network.md` → "Policy").
+    const store = createEphemeralBurrowStateStore(() => {});
+    await store.saveNetworkPolicy({ level: 'local', allowed: ['192.168.1.0/24'], autoUpdate: false });
     service = new BurrowService({
-      store: createEphemeralBurrowStateStore(() => {}),
+      store,
       provider,
       kind: 'standalone',
       sendToUi: toWebview,

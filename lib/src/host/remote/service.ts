@@ -1,8 +1,10 @@
 /**
  * Environment-free Burrow service shared by both Node burrows; see
- * `docs/specs/relay.md` → "Burrow side", and `docs/specs/one-time.md` →
- * "Service and hosts" for the one-time connection it also holds. Surface
- * ownership is injected through {@link BurrowSurfaceProvider}.
+ * `docs/specs/relay.md` → "Burrow side", `docs/specs/one-time.md` → "Service
+ * and hosts" for the one-time connection it also holds, and
+ * `docs/specs/remote-network.md` → "Policy" for the network policy it holds
+ * and enforces. Surface ownership is injected through
+ * {@link BurrowSurfaceProvider}.
  */
 
 import { hostname } from 'node:os';
@@ -46,9 +48,24 @@ import {
   type OneTimeState,
 } from '../../remote/burrow/one-time-runtime';
 import type { DirectPeerFactory } from '../../remote/direct/direct-peer';
+import {
+  MAX_ALLOWED_NETWORKS,
+  levelsFor,
+  networkPolicyResult,
+  nothingPolicy,
+  opensOneTimeLinks,
+  parseNetworkPolicy,
+  runsBurrow,
+  type NetworkInterfaceInfo,
+  type NetworkLevel,
+  type NetworkPolicy,
+  type NetworkPolicyResult,
+} from '../../remote/network-policy';
 import { hostedOrigin, isRelayOrigin, type RelayBuild } from '../relay-origin';
 import { readEnrollmentOffer } from './enroll-offer';
 import type { BurrowStateStore } from './burrow-state-store';
+import { localNetworksPath } from './local-networks';
+import { canonicalCidr, listNetworkInterfaces } from './network-interfaces';
 import { createSerialQueue } from './serial-queue';
 import {
   BURROW_EVENT_EVENT,
@@ -70,6 +87,7 @@ import {
   type PushDevicesResult,
   type PushSendSummary,
   type BurrowConsoleStatus,
+  type SetNetworkPolicyParams,
   type SetupQrResult,
   type TakeBackParams,
   type TakeBackResult,
@@ -97,14 +115,17 @@ export interface BurrowServiceOptions {
    * Opens the relay socket and the one-time rendezvous alike. **Must send no
    * `Origin` header** — the rendezvous refuses one, so that no browser page can
    * mint a room — which Node's global `WebSocket` (the default) and `ws` both
-   * already do.
+   * already do. Reached only through the service's transport guard, as is
+   * {@link BurrowServiceOptions.fetch}.
    */
   createWebSocket?: (url: string) => WebSocketLike;
   /**
    * How this host builds a peer connection for the direct path
    * (`docs/specs/remote-api.md` → Transport → "Direct path"). Threaded rather
    * than defaulted: the runtimes that have one differ per host, and a Burrow
-   * without it declines every offer and stays relayed.
+   * without it declines every offer and stays relayed. Under Local networks a
+   * one-time attempt hands it its path policy
+   * (`docs/specs/remote-network.md` → "Local networks").
    */
   createDirectPeer?: DirectPeerFactory;
   fetch?: typeof globalThis.fetch;
@@ -120,6 +141,8 @@ export interface BurrowServiceOptions {
    * wrong here.
    */
   readOffer?: () => Promise<EnrollmentOffer | null>;
+  /** This machine's interfaces, for `networkPolicy`; injected by the tests. */
+  listInterfaces?: () => NetworkInterfaceInfo[];
 }
 
 /**
@@ -142,6 +165,74 @@ function safeHostname(): string {
  */
 export function canEnroll(relay: RelayBuild): boolean {
   return relay.mode === 'self-host';
+}
+
+/** What every command the `nothing` level refuses answers, before any request. */
+const NETWORK_OFF_REFUSAL =
+  'Settings → Network is set to Nothing, so this computer opens no connections on its own.';
+
+/** What `oneTimeOpen` answers under `local` with no network allowed. */
+const NO_NETWORK_ALLOWED_REFUSAL =
+  'No network is allowed under Local networks, so no phone can connect. Allow one in Settings → Network.';
+
+/**
+ * The policy this build reads (`docs/specs/remote-network.md` → "Policy"): the
+ * stored one, or — where none was ever saved, `stored: false` — the default:
+ * `relay` for an enrollment this build may reach and a build that offers it,
+ * else `nothing`. **A stored level this build does not offer reads as
+ * `nothing`** and stays on disk, as an enrollment for another origin does.
+ * Writes nothing: the service saves the default, VS Code's idle answers never do.
+ */
+export async function peekNetworkPolicyFor(
+  store: Pick<BurrowStateStore, 'loadEnrollment' | 'loadNetworkPolicy'>,
+  relay: RelayBuild,
+): Promise<{ policy: NetworkPolicy; stored: boolean }> {
+  const levels = levelsFor(relay.mode);
+  const stored = await store.loadNetworkPolicy();
+  if (stored) {
+    return { policy: levels.includes(stored.level) ? stored : { ...stored, level: 'nothing' }, stored: true };
+  }
+  const enrolled = (await loadEnrollmentFor(store, relay.origin)) !== null;
+  const level = enrolled && levels.includes('relay') ? 'relay' : 'nothing';
+  return { policy: { ...nothingPolicy(), level }, stored: false };
+}
+
+/**
+ * The policy a `setNetworkPolicy` names, taken only exactly: a level this build
+ * offers, and every allowed network a CIDR, saved in its canonical form and
+ * listed once in that form. Throws what the webview shows.
+ */
+function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolicy {
+  const policy = parseNetworkPolicy(value);
+  if (!policy) {
+    throw new Error(
+      `A network policy is { level, allowed (at most ${MAX_ALLOWED_NETWORKS} CIDRs), autoUpdate }, and nothing else.`,
+    );
+  }
+  if (!levelsFor(relay.mode).includes(policy.level)) {
+    throw new Error(`This build does not offer the ${policy.level} level.`);
+  }
+  const allowed: string[] = [];
+  for (const cidr of policy.allowed) {
+    const canonical = canonicalCidr(cidr);
+    if (canonical === null) {
+      throw new Error(`${cidr} is not an address range, such as 192.168.1.0/24.`);
+    }
+    if (allowed.includes(canonical)) {
+      throw new Error(`${canonical} is already allowed.`);
+    }
+    allowed.push(canonical);
+  }
+  return { ...policy, allowed };
+}
+
+/** Whether two policies allow the same paths: the level, and the networks as a set. */
+function samePaths(a: NetworkPolicy, b: NetworkPolicy): boolean {
+  return (
+    a.level === b.level &&
+    a.allowed.length === b.allowed.length &&
+    a.allowed.every((cidr) => b.allowed.includes(cidr))
+  );
 }
 
 /** What `enroll` and `enrollOffer` answer where {@link canEnroll} is false. */
@@ -274,14 +365,28 @@ export class BurrowService {
   /** `hostedOrigin(#relay)`: where one-time links are made, or `null` for none. */
   readonly #hostedOrigin: string | null;
   readonly #kind: BurrowKind;
+  /** The injected socket factory behind the transport guard (constructor). */
   readonly #createWebSocket: (url: string) => WebSocketLike;
   readonly #createDirectPeer?: DirectPeerFactory;
-  readonly #fetch?: typeof globalThis.fetch;
+  /** The injected fetch, or the global one, behind the transport guard. */
+  readonly #fetch: typeof globalThis.fetch;
   readonly #now: () => number;
   readonly #readOffer: () => Promise<EnrollmentOffer | null>;
+  readonly #listInterfaces: () => NetworkInterfaceInfo[];
 
   #burrow: BurrowRuntime | null = null;
+  /**
+   * The enrollment this service reports: the running Burrow's, or — under a
+   * level that runs none — the one it holds without running (`#startBurrow`).
+   */
   #enrollment: BurrowEnrollment | null = null;
+  /**
+   * The network policy as last read or set; this service is its only writer.
+   * **`null` until read, and read as `nothing` until then** (`#level`).
+   */
+  #policy: NetworkPolicy | null = null;
+  /** The first read in flight, which every reader joins. */
+  #policyRead: Promise<NetworkPolicy> | null = null;
   /**
    * Lifecycle changes and pairing approvals run one at a time on this chain.
    *
@@ -341,28 +446,53 @@ export class BurrowService {
     this.#sendToUi = options.sendToUi;
     this.#relay = options.relay;
     this.#hostedOrigin = hostedOrigin(options.relay);
-    this.#oneTimeState = idleOneTimeState(this.#hostedOrigin);
+    this.#oneTimeState = idleOneTimeState(this.#hostedOrigin, this.#level());
     this.#kind = options.kind;
-    this.#createWebSocket =
-      options.createWebSocket ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
-    this.#createDirectPeer = options.createDirectPeer;
-    this.#fetch = options.fetch;
+    // The transport guard (`docs/specs/remote-network.md` → "Policy"): every
+    // socket, request, and direct peer this service opens goes through these
+    // three, which refuse at the call while the level is `nothing` — unread and
+    // disposed included (`#level`) — so a path that forgets its own check still
+    // opens nothing. Each feature keeps its own check, for the error a person
+    // reads.
+    const createWebSocket =
+      options.createWebSocket ?? ((url: string) => new WebSocket(url) as unknown as WebSocketLike);
+    this.#createWebSocket = (url) => {
+      this.#refuseNothing();
+      return createWebSocket(url);
+    };
+    const injectedFetch = options.fetch;
+    this.#fetch = async (input, init) => {
+      this.#refuseNothing();
+      // Looked up at the call, like `burrowFetch`'s default.
+      return (injectedFetch ?? globalThis.fetch)(input, init);
+    };
+    // A factory's `null` is a direct path declined, the session kept relayed.
+    const createDirectPeer = options.createDirectPeer;
+    this.#createDirectPeer =
+      createDirectPeer &&
+      ((pathPolicy) => (this.#level() === 'nothing' ? null : createDirectPeer(pathPolicy)));
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
+    this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
   }
 
   /**
-   * Start from a persisted enrollment, if there is one this build may reach —
-   * and announce this instance either way, since a webview that outlived the
-   * one before it holds panes under sessions that are gone, and shows that
-   * one's one-time connection: a VS Code window that takes the broker over from
-   * one with a phone connected, or a restarted sidecar.
+   * Start from a persisted enrollment, if there is one this build may reach
+   * and the network policy lets it run — and announce this instance either
+   * way, since a webview that outlived the one before it holds panes under
+   * sessions that are gone, and shows that one's one-time connection: a VS Code
+   * window that takes the broker over from one with a phone connected, or a
+   * restarted sidecar.
    */
   start(): Promise<void> {
     if (this.#disposed) return Promise.resolve();
-    // At once, since it needs no enrollment: the panel stops offering End on a
-    // connection that is gone before the keychain read below answers.
-    this.#emitOneTime();
+    // Once the policy is read, whose level decides the resting state, and not
+    // behind the enrollment read below: the panel stops offering End on a
+    // connection that is gone. A read that moved the state has said so already.
+    const announced = this.#oneTimeState;
+    void this.#settledLevel().then(() => {
+      if (this.#oneTimeState === announced) this.#emitOneTime();
+    });
     return this.#serialize(async () => {
       try {
         await this.#start();
@@ -374,6 +504,8 @@ export class BurrowService {
   }
 
   async #start(): Promise<void> {
+    // The policy before anything: a read that fails leaves the Burrow down.
+    await this.#networkPolicy();
     const enrollment = await loadEnrollmentFor(this.#store, this.#relay.origin);
     if (enrollment) await this.#startBurrow(enrollment);
   }
@@ -435,7 +567,14 @@ export class BurrowService {
       case 'oneTimeEnd':
         return this.#endOneTime();
       case 'oneTimeStatus':
+        // After the policy's first read, so a panel seeding from it is not told
+        // `network-off` only to be told otherwise.
+        await this.#settledLevel();
         return this.#oneTimeState;
+      case 'networkPolicy':
+        return networkPolicyResult(await this.#networkPolicy(), this.#relay.mode, this.#listInterfaces());
+      case 'setNetworkPolicy':
+        return this.#serialize(() => this.#setNetworkPolicy(params as SetNetworkPolicyParams | undefined));
       case 'pushTest':
         return this.#pushTest();
       case 'pushDevices':
@@ -451,10 +590,25 @@ export class BurrowService {
 
   // --- Commands ---
 
-  #enroll(params: EnrollParams): Promise<EnrollResult> {
+  async #enroll(params: EnrollParams): Promise<EnrollResult> {
     if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    await this.#networkPolicy();
+    this.#refuseNothing();
     this.#refuseOtherOrigin((params as { relayUrl?: unknown }).relayUrl);
     return this.#enrollWith({ password: params.password }, params.label);
+  }
+
+  /**
+   * The policy as it stands, refused while the level is `nothing` — unread and
+   * disposed included (`#level`) — before any request: by the transport guard
+   * at the call, and by a command **after awaiting `#networkPolicy()` and
+   * before the next await**, so a `setNetworkPolicy` or a `dispose()` that
+   * landed during that await is the one it reads.
+   */
+  #refuseNothing(): NetworkPolicy {
+    const policy = this.#policy;
+    if (!policy || this.#level() === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
+    return policy;
   }
 
   /**
@@ -477,6 +631,8 @@ export class BurrowService {
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     if (!canEnroll(this.#relay)) throw new Error(HOSTED_ENROLLMENT_REFUSAL);
+    await this.#networkPolicy();
+    this.#refuseNothing();
     this.#refuseOtherOrigin((params as { origin?: unknown }).origin);
     // Re-read at the click, and refused before the token leaves the machine
     // unless it names the one Relay this build enrolls with.
@@ -497,7 +653,7 @@ export class BurrowService {
    * the status edge the webview gate needs.
    */
   async #enrollWith(credential: BurrowEnrollCredential, label: string): Promise<EnrollResult> {
-    const enrollment = await performEnrollment(this.#relay.origin, credential, label);
+    const enrollment = await performEnrollment(this.#relay.origin, credential, label, this.#fetch);
     if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
       // An older Relay, which ignores the request's `origin` and so enrolled a
       // Burrow built for another: nothing is persisted here, and the row it
@@ -549,7 +705,7 @@ export class BurrowService {
     if (!enrollment) return unenrolledStatus(offer, this.#kind, this.#relay, this.#serving());
     return {
       enrolled: true,
-      serving: true,
+      serving: this.#serving(),
       relayOrigin: this.#relay.origin,
       relayMode: this.#relay.mode,
       burrowId: enrollment.burrowId,
@@ -607,9 +763,7 @@ export class BurrowService {
   async #setupQr(): Promise<SetupQrResult> {
     const enrollment = this.#enrollment;
     const burrow = this.#burrow;
-    if (!enrollment || !burrow) {
-      throw new Error('This machine is not connected to a Dormouse Relay.');
-    }
+    if (!enrollment || !burrow) throw await this.#notConnected();
     const response = await burrowFetch(
       { enrollment, fetch: this.#fetch, errorPrefix: 'could not mint a setup code' },
       API_ROUTES.burrowSetupToken,
@@ -698,6 +852,13 @@ export class BurrowService {
           `Dormouse Hosted, and this build reaches only its own Relay (${this.#relay.origin}).`,
       );
     }
+    await this.#networkPolicy();
+    // Synchronous from here to the runtime's open: a `setNetworkPolicy` that
+    // landed during the await is read here, since it ends only a live runtime,
+    // and a second click that awaited the same read joins this one rather than
+    // minting a second room.
+    const policy = this.#refuseNothing();
+    if (!opensOneTimeLinks(policy)) throw new Error(NO_NETWORK_ALLOWED_REFUSAL);
     const state = this.#oneTimeState;
     if (this.#oneTimeOpening) return this.#oneTimeOpening;
     if (state.status === 'connecting' || state.status === 'connected') {
@@ -710,6 +871,9 @@ export class BurrowService {
       createWebSocket: this.#createWebSocket,
       createSession: (opts) => this.#createApiSession(opts),
       createDirectPeer: this.#createDirectPeer ?? null,
+      // Local networks holds the attempt to the networks allowed at the open: a
+      // change to them ends this runtime before any later attempt could run.
+      directPathPolicy: policy.level === 'local' ? localNetworksPath(policy.allowed) : undefined,
       // The name the phone shows: the one this machine enrolled under, else the
       // one the enrollment form would have suggested.
       burrowLabel: this.#enrollment?.label || suggestedBurrowLabel(this.#kind),
@@ -734,12 +898,107 @@ export class BurrowService {
 
   /**
    * End the live one-time connection (`ended`, `user-ended`) — the panel's End
-   * and Cancel — or put an ended one back to `idle`, its Done.
+   * and Cancel — or put an ended one back to `idle`, its Done. Never reached
+   * under `nothing`, whose change rests an ended one at once (`#restOneTime`).
    */
   #endOneTime(): Record<string, never> {
     if (this.#oneTime) this.#oneTime.end('user-ended');
     else if (this.#oneTimeState.status === 'ended') this.#setOneTimeState({ status: 'idle' });
     return {};
+  }
+
+  /**
+   * Put a one-time connection that is not live at rest under the policy as it
+   * stands, announcing only a change. A live one is its runtime's to move.
+   */
+  #restOneTime(): void {
+    if (this.#oneTime) return;
+    const resting = idleOneTimeState(this.#hostedOrigin, this.#level());
+    const state = this.#oneTimeState;
+    const reason = (value: OneTimeState) => ('reason' in value ? value.reason : null);
+    if (state.status === resting.status && reason(state) === reason(resting)) return;
+    this.#setOneTimeState(resting);
+  }
+
+  // --- Network policy ---
+
+  /**
+   * The policy, read once and then kept: this service is its only writer
+   * (`#setNetworkPolicy`). **A read that fails rejects**, every caller fails
+   * closed on it, and the next call reads again.
+   */
+  #networkPolicy(): Promise<NetworkPolicy> {
+    if (this.#policy) return Promise.resolve(this.#policy);
+    // Held before any reader resumes; a `setNetworkPolicy` joins this read
+    // for its `previous`, so none can land first.
+    this.#policyRead ??= peekNetworkPolicyFor(this.#store, this.#relay)
+      .then(async ({ policy, stored }) => {
+        // The default is saved at once, so it never flips later.
+        if (!stored) await this.#store.saveNetworkPolicy(policy);
+        this.#policy = policy;
+        this.#restOneTime();
+        return policy;
+      })
+      .finally(() => {
+        this.#policyRead = null;
+      });
+    return this.#policyRead;
+  }
+
+  /** The level as it stands: `nothing` until the policy has been read, and for good once disposed. */
+  #level(): NetworkLevel {
+    return this.#disposed ? 'nothing' : (this.#policy?.level ?? 'nothing');
+  }
+
+  /** The level once the policy has been read — `nothing` for a read that fails. */
+  async #settledLevel(): Promise<NetworkLevel> {
+    await this.#networkPolicy().catch(() => {});
+    return this.#level();
+  }
+
+  /**
+   * Whether the policy lets this process reach Hosted on its own — managed
+   * voice's check (`sidecar-entry.ts`): anything but `nothing`.
+   */
+  async networkAllowed(): Promise<boolean> {
+    return (await this.#settledLevel()) !== 'nothing';
+  }
+
+  /**
+   * Hold `params.policy` from now on (`docs/specs/remote-network.md` →
+   * "Policy"). **Persisted first**: a save that fails changes nothing. A change
+   * to the level or the allowed networks ends the live one-time connection,
+   * `user-ended`, so a narrowed policy never leaves an old path exempt;
+   * `autoUpdate` alone touches no connection. Then the relay socket follows the
+   * level: stopped under one that runs no Burrow, the enrollment kept; started
+   * on entering one that does ({@link runsBurrow}).
+   */
+  async #setNetworkPolicy(params: SetNetworkPolicyParams | undefined): Promise<NetworkPolicyResult> {
+    const next = requestedNetworkPolicy(params?.policy, this.#relay);
+    // One that cannot be read is `nothing` here as everywhere, so the user's
+    // choice can still be saved over it.
+    const previous = await this.#networkPolicy().catch(() => nothingPolicy());
+    await this.#store.saveNetworkPolicy(next);
+    this.#policy = next;
+    if (!samePaths(previous, next)) {
+      this.#oneTime?.end('user-ended');
+      this.#restOneTime();
+    }
+    const result = networkPolicyResult(next, this.#relay.mode, this.#listInterfaces());
+    try {
+      if (!runsBurrow(next.level)) {
+        if (this.#burrow) {
+          this.#stopBurrow();
+          this.#emitStatus();
+        }
+      } else if (!runsBurrow(previous.level) && !this.#burrow) {
+        await this.#start();
+      }
+    } finally {
+      // Saved either way, so said either way: a start that failed is its own error.
+      this.#emit({ name: 'network-policy', ...result });
+    }
+    return result;
   }
 
   #onOneTimeChanged(runtime: OneTimeRuntime, state: OneTimeState): void {
@@ -806,13 +1065,20 @@ export class BurrowService {
    */
   async #pushTest(): Promise<PushSendSummary> {
     const deps = this.#pushDeps();
-    if (!deps) {
-      throw new Error('This machine is not connected to a Dormouse Relay.');
-    }
+    if (!deps) throw await this.#notConnected();
     // A fixed tag, so pressing the button repeatedly replaces the notification
     // on the phone rather than stacking copies — the same per-Session collapse
     // rule the ring path uses, with the test as its own "Session".
     return await sendPush(deps, PUSH_TEST_TAG, PUSH_TEST_TITLE);
+  }
+
+  /** Why there is no Burrow to ask: the policy, or no enrollment. */
+  async #notConnected(): Promise<Error> {
+    return new Error(
+      (await this.#settledLevel()) === 'nothing'
+        ? NETWORK_OFF_REFUSAL
+        : 'This machine is not connected to a Dormouse Relay.',
+    );
   }
 
   async #pushDevices(): Promise<PushDevicesResult> {
@@ -869,6 +1135,8 @@ export class BurrowService {
       noiseStaticPrivateKey: material.privateKeyPkcs8,
       noiseStaticPublicKey: material.publicKey,
     };
+    // A disposed service saves nothing: a successor may already hold its own.
+    if (this.#disposed) return null;
     // Persisted first, for the reason enrollment persists first: a Burrow running
     // on an identity no restart can recover is one every paired Client would
     // have to pair with again after a reboot.
@@ -884,6 +1152,13 @@ export class BurrowService {
     // `#burrow` here would be dropped without its socket being closed, so the
     // replacement is explicit rather than implied by the assignment below.
     this.#stopBurrow();
+    // The one gate on the relay socket, and on everything that needs a running
+    // Burrow — push, the device list, setup codes: under a level that runs
+    // none the enrollment is held and reported, `stopped`, and nothing is opened.
+    if (!runsBurrow(this.#level())) {
+      this.#enrollment = enrollment;
+      return;
+    }
     // Seed the synchronous ACL lookup before constructing. Approval awaits the
     // async store before publishing that record or telling the Client it paired.
     const records = await this.#store.loadAcl(enrollment.burrowId);
@@ -940,9 +1215,9 @@ export class BurrowService {
     return { ended: end !== undefined };
   }
 
-  /** Enrolled, or a one-time connection holding a socket or a session. */
+  /** A running Burrow, or a one-time connection holding a socket or a session. */
   #serving(): boolean {
-    return !!this.#enrollment || oneTimeServing(this.#oneTimeState);
+    return !!this.#burrow || oneTimeServing(this.#oneTimeState);
   }
 
   /**
@@ -1069,7 +1344,11 @@ export class BurrowService {
     } satisfies PairingQueueEvent);
   }
 
-  /** Push delivery needs a live Burrow: the ACL it reads is the running one's. */
+  /**
+   * Push delivery needs a live Burrow: the ACL it reads is the running one's.
+   * **Its fetch asks again at the request**: sealing awaits, and a Burrow
+   * stopped meanwhile — Nothing, a clear, a swap — sends nothing.
+   */
   #pushDeps(): AlertPushDeps | null {
     const burrow = this.#burrow;
     const enrollment = this.#enrollment;
@@ -1079,7 +1358,10 @@ export class BurrowService {
       activeRecords: () => burrow.activeRecords,
       seal: (clientStaticPublicKey, plaintext) =>
         burrow.sealPushForClient(clientStaticPublicKey, plaintext),
-      fetch: this.#fetch,
+      fetch: (input, init) =>
+        this.#burrow === burrow
+          ? this.#fetch(input, init)
+          : Promise.reject(new Error('the Burrow stopped before the request was sent')),
     };
   }
 }

@@ -18,9 +18,18 @@
 
 import type { DirectPeerFactory, DirectPeerLike } from '../../remote/direct/direct-peer';
 
+/**
+ * The polyfill's configuration, which it spreads into the native
+ * `PeerConnection`: `bindAddress` reaches the addon unchanged.
+ */
+interface DirectPeerConfig {
+  readonly iceServers: [];
+  readonly bindAddress?: string;
+}
+
 /** The one polyfill export a direct path needs. */
 interface DirectPolyfill {
-  readonly RTCPeerConnection: new (config: { iceServers: [] }) => DirectPeerLike;
+  readonly RTCPeerConnection: new (config: DirectPeerConfig) => DirectPeerLike;
 }
 
 /** The addon's own module, for the teardown the polyfill does not expose. */
@@ -70,9 +79,12 @@ function requireNative(): NativeDirect {
  * offer, so retrying it per session would warn on every connection and cost a
  * native load attempt each time — and the Burrow's answer is the same either
  * way: `direct-decline`, and the session stays on the relay.
+ *
+ * Handed a path policy, the attempt's socket binds the address it names, if
+ * any (`docs/specs/remote-network.md` -> "Local networks").
  */
 export function createNativeDirectPeerFactory(): DirectPeerFactory {
-  return () => {
+  return (pathPolicy) => {
     if (!native && !declined) {
       try {
         native = requireNative();
@@ -81,9 +93,14 @@ export function createNativeDirectPeerFactory(): DirectPeerFactory {
         console.warn(`[burrow] no direct path: the WebRTC addon did not load: ${String(error)}`);
       }
     }
+    if (!native) return null;
+    const bindAddress = pathPolicy?.bindAddress() ?? null;
     // `iceServers: []` here and nowhere else: host candidates only, never a
     // public STUN or TURN default (`docs/specs/remote-api.md` → "Direct path").
-    return native ? new native.polyfill.RTCPeerConnection({ iceServers: [] }) : null;
+    return new native.polyfill.RTCPeerConnection({
+      iceServers: [],
+      ...(bindAddress === null ? {} : { bindAddress }),
+    });
   };
 }
 

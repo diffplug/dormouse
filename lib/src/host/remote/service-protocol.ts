@@ -27,6 +27,7 @@ import type {
   BurrowStatus,
 } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import type { NetworkLevel, NetworkPolicy, NetworkPolicyResult } from '../../remote/network-policy';
 import type { RelayMode } from '../relay-origin';
 
 /** Transport event names for what the service sends back. */
@@ -195,19 +196,34 @@ export interface OneTimeEvent {
   state: OneTimeState;
 }
 
+/**
+ * service → webview: the network policy changed (`docs/specs/remote-network.md`
+ * -> "Policy"). Complete every time, so a reader replaces rather than merges;
+ * `networkPolicy` answers the same shape, for a reader that arrives after it.
+ */
+export interface NetworkPolicyEvent extends NetworkPolicyResult {
+  name: 'network-policy';
+}
+
 /** Every `burrow:event` the service sends, by `name`. */
-export type BurrowUiEvent = BurrowStatusEvent | PairingQueueEvent | InvitationEvent | OneTimeEvent;
+export type BurrowUiEvent =
+  | BurrowStatusEvent
+  | PairingQueueEvent
+  | InvitationEvent
+  | OneTimeEvent
+  | NetworkPolicyEvent;
 
 /**
  * The one-time state of a Burrow with no connection, from this build's
- * `hostedOrigin` (`../relay-origin.ts`): `unavailable` without one — a
- * self-host build, which opens no rendezvous — else `idle`. One builder for
- * every process that answers it: the service, the VS Code glue for a window
- * with no service at all (`vscode-ext/src/burrow.ts` → `refuseCommand`), and
- * the Storybook stub.
+ * `hostedOrigin` (`../relay-origin.ts`) and the network policy's level:
+ * `unavailable` without a Hosted origin — a self-host build, which opens no
+ * rendezvous — or under `nothing`, else `idle`. One builder for every process
+ * that answers it: the service, the VS Code glue for a window with no service
+ * at all (`vscode-ext/src/burrow.ts` → `refuseCommand`), and the Storybook stub.
  */
-export function idleOneTimeState(hosted: string | null): OneTimeState {
-  return hosted === null ? { status: 'unavailable', reason: 'self-host' } : { status: 'idle' };
+export function idleOneTimeState(hosted: string | null, level: NetworkLevel): OneTimeState {
+  if (hosted === null) return { status: 'unavailable', reason: 'self-host' };
+  return level === 'nothing' ? { status: 'unavailable', reason: 'network-off' } : { status: 'idle' };
 }
 
 /**
@@ -314,6 +330,16 @@ export interface TakeBackParams {
 /** Whether a session was ended. `false` when none holds under that id any more. */
 export interface TakeBackResult {
   ended: boolean;
+}
+
+/**
+ * The whole policy to hold from now on (`docs/specs/remote-network.md` ->
+ * "Policy"). The service takes it only exactly: a level this build offers, at
+ * most `MAX_ALLOWED_NETWORKS` CIDRs, a boolean `autoUpdate` — and saves, and
+ * answers, each CIDR in its canonical form.
+ */
+export interface SetNetworkPolicyParams {
+  policy: NetworkPolicy;
 }
 
 /** Answers an outstanding {@link BurrowAsk}; `burrowRequestId` is the ask's, not a new one. */

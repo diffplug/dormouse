@@ -31,6 +31,14 @@ import {
 } from 'remote-lib-common';
 import { realTimer, type RemoteTimer } from '../ws';
 
+/**
+ * How often a path policy re-reads an open channel's selected pair
+ * (`docs/specs/remote-network.md` -> "Local networks"): `node-datachannel`'s
+ * ICE agent moves a completed connection onto a newly nominated pair without
+ * any event, so a state change alone would never see it.
+ */
+export const DIRECT_PATH_RECHECK_MS = 1_000;
+
 /** The four `RTCSdpType` values, so a real description assigns to ours. */
 export type DirectSdpType = 'offer' | 'answer' | 'pranswer' | 'rollback';
 
@@ -56,15 +64,33 @@ export interface DirectChannelLike {
   addEventListener(type: string, handler: (ev: unknown) => void): void;
 }
 
+/** One end of a candidate pair: as much of `RTCIceCandidate` as the path check reads. */
+export interface DirectCandidateLike {
+  readonly address: string | null;
+}
+
 /**
- * As much of `RTCSctpTransport` as the size check needs. The association's own
- * limit, negotiated from both ends' `a=max-message-size`, so it is knowable only
- * once the channel is open — `node-datachannel`'s polyfill exposes the transport
- * from construction and leaves this null until then, which is why it is nullable
- * here even though the W3C type is not.
+ * As much of `RTCSctpTransport` as the size and path checks need. The size is
+ * the association's own limit, negotiated from both ends' `a=max-message-size`,
+ * so it is knowable only once the channel is open — `node-datachannel`'s
+ * polyfill exposes the transport from construction and leaves this null until
+ * then, which is why it is nullable here even though the W3C type is not.
  */
 export interface DirectSctpLike {
   readonly maxMessageSize: number | null;
+  /**
+   * `RTCDtlsTransport` → `RTCIceTransport`, whose selected pair a
+   * {@link DirectPathPolicy} checks. Optional all the way down: only a
+   * restricted Burrow reads it, and a peer that cannot say is refused there.
+   */
+  readonly transport?: {
+    readonly iceTransport?: {
+      getSelectedCandidatePair?(): {
+        readonly local?: DirectCandidateLike;
+        readonly remote?: DirectCandidateLike;
+      } | null;
+    };
+  };
 }
 
 /** The subset of `RTCPeerConnection` one negotiation needs. */
@@ -83,8 +109,49 @@ export interface DirectPeerLike {
   close(): void;
 }
 
-/** How one endpoint constructs a peer, or answers that it has none. */
-export type DirectPeerFactory = () => DirectPeerLike | null;
+/**
+ * How one endpoint constructs a peer, or answers that it has none. A Burrow's
+ * endpoint hands it the attempt's {@link DirectPathPolicy}, if it has one, for
+ * the socket it binds.
+ */
+export type DirectPeerFactory = (pathPolicy?: DirectPathPolicy) => DirectPeerLike | null;
+
+/** The selected candidate pair's two addresses, each `null` where unreported. */
+export interface DirectSelectedPair {
+  readonly local: string | null;
+  readonly remote: string | null;
+}
+
+/**
+ * What a Burrow whose network policy restricts the direct path holds one
+ * attempt to (`docs/specs/remote-network.md` -> "Local networks"). Built
+ * host-side, where the address math is; a peer without one is unrestricted.
+ */
+export interface DirectPathPolicy {
+  /**
+   * The one address this attempt's socket binds on this machine now, or `null`
+   * to bind every interface. Read by the peer factory, once per attempt.
+   */
+  bindAddress(): string | null;
+  /**
+   * This end's description as it may be sent, every candidate outside the
+   * allowed networks removed — or `null` where none is left, which refuses the
+   * attempt.
+   */
+  describe(sdp: string): string | null;
+  /**
+   * The peer's description as this end applies it: every candidate that is not
+   * an IP address inside the allowed networks removed, a name included, so the
+   * ICE agent sends no check and makes no lookup toward one. None left is not a
+   * refusal: the peer's own checks still reach this end's allowed candidates.
+   */
+  acceptRemote(sdp: string): string;
+  /**
+   * Why the connection's selected candidate pair may not carry the session,
+   * or `null` when it may. `pair` is `null` where the peer reports none.
+   */
+  refusal(pair: DirectSelectedPair | null): string | null;
+}
 
 export interface DirectPeerHandlers {
   /** The channel is open: this end may switch its sends onto it. */
@@ -101,10 +168,14 @@ export interface DirectPeerHandlers {
    * non-binary message, or one too large to be a Noise transport message. The
    * session dies whichever direction has switched, because a peer speaking a
    * different protocol on the channel is not one the counters can be kept
-   * synchronized with.
+   * synchronized with. `cause` is `path-refused` where the path policy refused
+   * the path instead, which ends the session the same way.
    */
-  onViolation(reason: string): void;
+  onViolation(reason: string, cause?: DirectViolationCause): void;
 }
+
+/** A violation that was not the peer's protocol: see {@link DirectPeerHandlers.onViolation}. */
+export type DirectViolationCause = 'path-refused';
 
 /** What a closed peer reports to: nothing, so it retains nothing either. */
 const SILENT_HANDLERS: DirectPeerHandlers = {
@@ -117,6 +188,8 @@ const SILENT_HANDLERS: DirectPeerHandlers = {
 export interface DirectPeerDeps {
   readonly peer: DirectPeerLike;
   readonly handlers: DirectPeerHandlers;
+  /** The network policy's hold on this attempt, if it has one; see {@link DirectPathPolicy}. */
+  readonly pathPolicy?: DirectPathPolicy;
   /** Every deadline below; see {@link RemoteTimer}. */
   readonly setTimer?: RemoteTimer;
 }
@@ -136,10 +209,15 @@ export interface DirectPeerDeps {
  * own low-water event, so a burst of terminal output waits in a queue with a
  * stated bound rather than in a runtime buffer whose refusal would kill the
  * session.
+ *
+ * **A path policy is consulted before the open is reported and again while
+ * connected**, and its refusal is a violation: the session ends whichever
+ * direction has switched, since a restricted session has no relay to stay on.
  */
 export class DirectPeer {
   readonly #peer: DirectPeerLike;
   #handlers: DirectPeerHandlers;
+  readonly #pathPolicy: DirectPathPolicy | null;
   readonly #setTimer: RemoteTimer;
   #channel: DirectChannelLike | null = null;
   /** Ciphertext waiting on the channel to drain; see {@link send}. */
@@ -147,6 +225,8 @@ export class DirectPeer {
   #cancelSetup: (() => void) | null = null;
   /** Cancels the grace a `disconnected` connection is given, if one is running. */
   #cancelDisconnected: (() => void) | null = null;
+  /** Cancels the next {@link DIRECT_PATH_RECHECK_MS} check, while one is armed. */
+  #cancelPathRecheck: (() => void) | null = null;
   /**
    * Settles the gathering wait — cancelling its deadline with it — or null when
    * none is outstanding. Held on the instance because {@link close} has to
@@ -162,10 +242,15 @@ export class DirectPeer {
   constructor(deps: DirectPeerDeps) {
     this.#peer = deps.peer;
     this.#handlers = deps.handlers;
+    this.#pathPolicy = deps.pathPolicy ?? null;
     this.#setTimer = deps.setTimer ?? realTimer;
     // Registered before either half of the negotiation runs: a connection that
     // fails while a description is still being built has nothing else watching.
     this.#peer.addEventListener('connectionstatechange', () => this.#onConnectionState());
+    // ICE can move the session onto another pair without the connection's own
+    // state changing, sometimes with an ICE state change and sometimes with
+    // none, which is what {@link DIRECT_PATH_RECHECK_MS} is for.
+    this.#peer.addEventListener('iceconnectionstatechange', () => this.#recheckPath());
   }
 
   /** Whether the channel has opened and not since gone. */
@@ -210,7 +295,10 @@ export class DirectPeer {
         const channel = (ev as { channel?: DirectChannelLike } | null)?.channel;
         if (channel) this.#adopt(channel);
       });
-      await this.#peer.setRemoteDescription({ type: 'offer', sdp: offerSdp });
+      await this.#peer.setRemoteDescription({
+        type: 'offer',
+        sdp: this.#pathPolicy ? this.#pathPolicy.acceptRemote(offerSdp) : offerSdp,
+      });
       const answer = await this.#peer.createAnswer();
       await this.#peer.setLocalDescription(answer);
       return await this.#gatheredSdp();
@@ -282,6 +370,8 @@ export class DirectPeer {
     this.#closed = true;
     this.#clearSetupTimeout();
     this.#clearDisconnectedGrace();
+    this.#cancelPathRecheck?.();
+    this.#cancelPathRecheck = null;
     this.#outbound.clear();
     // The suspended `offer()`/`answer()` finishes here rather than in three
     // seconds' time: it sees `#closed`, answers `null`, and releases the
@@ -387,8 +477,10 @@ export class DirectPeer {
       this.#fail(`the direct channel carries only ${limit} bytes per message`);
       return;
     }
+    if (this.#pathRefused()) return;
     this.#open = true;
     this.#clearSetupTimeout();
+    this.#armPathRecheck();
     this.#handlers.onOpen();
   }
 
@@ -449,6 +541,7 @@ export class DirectPeer {
     }
     if (state !== 'disconnected') {
       this.#clearDisconnectedGrace();
+      this.#recheckPath();
       return;
     }
     if (this.#cancelDisconnected) return;
@@ -461,6 +554,9 @@ export class DirectPeer {
 
   #onMessage(ev: unknown): void {
     if (this.#closed) return;
+    // A frame no stack should deliver before its channel's open is one whose
+    // path has not been checked yet, so it is checked here instead.
+    if (!this.#open && this.#pathRefused()) return;
     const data = (ev as { data?: unknown } | null)?.data;
     let frame: Uint8Array;
     // A view either way, never a copy: everything downstream reads the frame
@@ -493,7 +589,16 @@ export class DirectPeer {
   async #gatheredSdp(): Promise<string | null> {
     await this.#awaitGathering();
     if (this.#closed) return null;
-    const sdp = this.#peer.localDescription?.sdp;
+    let sdp = this.#peer.localDescription?.sdp;
+    // Before the bound: what is sent is the described SDP, not the stack's.
+    if (this.#pathPolicy && typeof sdp === 'string') {
+      const described = this.#pathPolicy.describe(sdp);
+      if (described === null) {
+        this.#refuse('no candidate of this end is on an allowed network');
+        return null;
+      }
+      sdp = described;
+    }
     return isDirectSdp(sdp) ? sdp : null;
   }
 
@@ -537,6 +642,63 @@ export class DirectPeer {
   #clearDisconnectedGrace(): void {
     this.#cancelDisconnected?.();
     this.#cancelDisconnected = null;
+  }
+
+  /**
+   * Check the path again while the channel is open and the connection reports
+   * `connected` — on a state change, and every {@link DIRECT_PATH_RECHECK_MS}.
+   * A connection on its way down is `#onConnectionState`'s, never a refused
+   * path — and so, once open, is a reading with no pair: a stack with no
+   * selected pair has nowhere to send, and loses the connection by its state.
+   */
+  #recheckPath(): void {
+    if (!this.#pathPolicy || this.#closed || !this.#open || this.#peer.connectionState !== 'connected') {
+      return;
+    }
+    const pair = this.#selectedPair();
+    if (pair) this.#pathRefused(pair);
+  }
+
+  /** Re-read the path every {@link DIRECT_PATH_RECHECK_MS} until the peer closes, where a policy holds it. */
+  #armPathRecheck(): void {
+    if (!this.#pathPolicy || this.#closed) return;
+    this.#cancelPathRecheck = this.#setTimer(() => {
+      this.#cancelPathRecheck = null;
+      this.#recheckPath();
+      this.#armPathRecheck();
+    }, DIRECT_PATH_RECHECK_MS);
+  }
+
+  /** Run the path policy, if there is one, refusing on its behalf; whether it refused. */
+  #pathRefused(pair = this.#selectedPair()): boolean {
+    const policy = this.#pathPolicy;
+    if (!policy) return false;
+    const refusal = policy.refusal(pair);
+    if (refusal === null) return false;
+    this.#refuse(refusal);
+    return true;
+  }
+
+  /**
+   * The selected pair's addresses, or `null` where the stack reports none — or
+   * throws reporting it, as `node-datachannel`'s polyfill can for a candidate
+   * it cannot describe.
+   */
+  #selectedPair(): DirectSelectedPair | null {
+    try {
+      const pair = this.#peer.sctp?.transport?.iceTransport?.getSelectedCandidatePair?.();
+      return pair ? { local: pair.local?.address ?? null, remote: pair.remote?.address ?? null } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The path is not one the policy allows: dispose like a violation, once. */
+  #refuse(reason: string): void {
+    if (this.#closed) return;
+    const handlers = this.#handlers;
+    this.close();
+    handlers.onViolation(reason, 'path-refused');
   }
 
   /** Report the channel gone, once, and take the connection down with it. */

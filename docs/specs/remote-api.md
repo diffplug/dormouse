@@ -95,7 +95,9 @@ Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
 signal always fits one control body.
 
 **No ICE servers**, and **never a public STUN or TURN default**: `iceServers:
-[]` at both ends, host candidates only. (rationale)
+[]` at both ends, host candidates only. (rationale) Local networks restricts a
+one-time attempt further
+([remote-network.md](./remote-network.md) -> "Local networks").
 
 **The two shipped stacks are proven against each other by hand**, by
 `scripts/direct-interop/run.mjs` over the shipped `DirectPeer`, which also
@@ -433,7 +435,7 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 **Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and both Burrows speak today. What remains is to **dogfood** it across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
 
-Relay-supplied ICE servers are unstaged (SaaS), as is a session surviving relay loss.
+STUN discovery and a paired phone's network restrictions follow the **remote-network** scope in [remote-network.md](./remote-network.md). A session surviving relay loss remains unstaged.
 
 ### 9. Audio
 
