@@ -38,6 +38,7 @@ import {
   RELAY_ROUTING,
   RULES,
   SECURITY_SPEC,
+  WEB_PUSH_SENDER,
 } from './e2e-lint.mjs';
 
 const selftest = makeSelftest('e2e-lint.mjs', '.e2e-selftest.bak');
@@ -327,6 +328,11 @@ selftest.withAppended(
   'lib/src/remote/client/pocket-db.ts',
   "\nconst __selftest = { name: 'AES-GCM' };\n",
   'AES-GCM in the module beside the at-rest wrapper stays green',
+);
+selftest.withAppended(
+  'remote-lib-common/src/remote/relay-common.ts',
+  "\nconst __selftest = { name: 'AES-GCM' };\n",
+  `AES-GCM in the module beside ${WEB_PUSH_SENDER} stays green`,
 );
 
 const cited = new Map();

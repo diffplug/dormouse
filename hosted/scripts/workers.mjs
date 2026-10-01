@@ -19,8 +19,10 @@ export const WORKERS = {
     config: "wrangler.relay.jsonc",
     // The production entry: its mapper passes nothing a preview lacks.
     previewMain: "server/relay-worker.ts",
-    secrets: () => ["RELAY_ENROLL_SECRET"],
+    secrets: () => ["RELAY_ENROLL_SECRET", "RELAY_VAPID_PUBLIC_KEY", "RELAY_VAPID_PRIVATE_KEY"],
     previewSecret: "RELAY_ENROLL_SECRET",
+    /** Its preview also gets a VAPID pair, so push works with no production credential. */
+    previewVapid: true,
   },
   voice: {
     config: "wrangler.voice.jsonc",

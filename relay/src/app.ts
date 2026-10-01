@@ -24,10 +24,9 @@ import {
   WS_CLOSE_UNAUTHORIZED_REASON,
   WS_CLOSE_IDLE,
   WS_CLOSE_IDLE_REASON,
-  DELIVERY_ID_LENGTH,
   ChallengeIssuer,
   MAX_PUSH_QUERY_DELIVERY_IDS,
-  MAX_SEALED_PUSH_LENGTH,
+  MAX_PUSH_SEND_BODY_BYTES,
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   BAD_PASSWORD_ERROR,
@@ -36,13 +35,14 @@ import {
   WS_ROUTES,
   PUSH_SEND_DEADLINE_MS,
   WS_TOKEN_PARAM,
-  isExactBase64Url,
   isOrigin,
   isPresenceBinding,
   normalizeOrigin,
   presenceChallenge,
   toBase64Url,
-  isSealedPushV1,
+  isPushDeliveryId,
+  admissiblePushSubscription,
+  isSealedPushRecipient,
   verifyPasskeyAssertion,
   TokenBucket,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
@@ -75,7 +75,6 @@ import type {
   PushSendResponse,
   PushSubscribeRequest,
   PushSubscribeResponse,
-  PushSubscriptionPayload,
   PushSubscriptionsQueryRequest,
   PushSubscriptionsQueryResponse,
   ReauthBeginRequest,
@@ -83,7 +82,6 @@ import type {
   ReauthFinishRequest,
   ReauthFinishResponse,
   SealedPushPayload,
-  SealedPushRecipient,
   SetupBeginRequest,
   SetupBeginResponse,
   SetupFinishRequest,
@@ -111,7 +109,7 @@ import {
 import type { StoredBurrow, StoredPushSubscription } from './state.js';
 import { sendWithinDeadline } from './push.js';
 import type { PushSender } from './push.js';
-import { MAX_PUSH_ENDPOINT_LENGTH, isPublicHttpsPushEndpoint } from './push-endpoint.js';
+import { isPublicHttpsPushEndpoint } from './push-endpoint.js';
 import { isSetupPassword } from './setup-password.js';
 
 /** Runtime configuration; see `index.ts` for how env maps onto this. */
@@ -228,18 +226,8 @@ export const BURROW_ENROLL_ATTEMPT_BURST = 8;
 /** Sustained Burrow-enrollment admission: one attempt per second. */
 export const BURROW_ENROLL_ATTEMPT_REFILL_MS = 1_000;
 
-/**
- * The one route whose legitimate body outgrows {@link MAX_REQUEST_BODY_BYTES}:
- * a fan-out of `MAX_PUSH_QUERY_DELIVERY_IDS` sealed envelopes, each already
- * bounded by `MAX_SEALED_PUSH_LENGTH`. Derived from those two rather than
- * written out, so tightening either tightens this with it; the per-recipient
- * allowance covers the delivery id, the salt, and the JSON around them.
- */
-const PUSH_SEND_RECIPIENT_OVERHEAD_BYTES = 256;
-export const MAX_PUSH_SEND_BODY_BYTES =
-  MAX_PUSH_QUERY_DELIVERY_IDS *
-    (DELIVERY_ID_LENGTH + MAX_SEALED_PUSH_LENGTH + PUSH_SEND_RECIPIENT_OVERHEAD_BYTES) +
-  PUSH_SEND_RECIPIENT_OVERHEAD_BYTES;
+// Shared with the Hosted Relay, which derives its send-body bound the same way.
+export { MAX_PUSH_SEND_BODY_BYTES };
 
 /** The one answer to an over-long body: 413, before any route has run. */
 function tooLarge(c: Context<AppEnv>): Response {
@@ -979,8 +967,8 @@ export function createApp(config: AppConfig): CreatedApp {
     if (
       !body ||
       typeof body.burrowId !== 'string' ||
-      !isDeliveryId(body.deliveryId) ||
-      !isSubscriptionPayload(body.subscription)
+      !isPushDeliveryId(body.deliveryId) ||
+      !(await admissiblePushSubscription(body.subscription))
     ) {
       return c.json({ error: 'malformed request' }, 400);
     }
@@ -1027,7 +1015,7 @@ export function createApp(config: AppConfig): CreatedApp {
       deliveryIds.length > MAX_PUSH_QUERY_DELIVERY_IDS ||
       // Every id is bounded here, as it is at subscribe: `readJson` caps
       // nothing, and a value no Burrow ever minted cannot match a row anyway.
-      deliveryIds.some((id) => !isDeliveryId(id))
+      deliveryIds.some((id) => !isPushDeliveryId(id))
     ) {
       return c.json(
         { error: `deliveryIds must be 1..${MAX_PUSH_QUERY_DELIVERY_IDS} delivery ids` },
@@ -1059,7 +1047,7 @@ export function createApp(config: AppConfig): CreatedApp {
     // have minted names no row, so refusing it early only avoids reading the
     // file for a value that cannot match.
     const deliveryId = c.req.param('deliveryId');
-    if (isDeliveryId(deliveryId)) await pushStore.removeDelivery(deliveryId);
+    if (isPushDeliveryId(deliveryId)) await pushStore.removeDelivery(deliveryId);
     return c.body(null, 204);
   });
 
@@ -1394,60 +1382,4 @@ function pocketCacheControl(requestPath: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Base64url of exactly {@link DELIVERY_ID_LENGTH} characters — the Burrow mints
- * 32 random bytes, so anything else is not an id any Burrow ever issued and must
- * be refused before it becomes a row key.
- */
-function isDeliveryId(value: unknown): value is string {
-  return isExactBase64Url(value, DELIVERY_ID_LENGTH);
-}
-
-/**
- * One `{ deliveryId, sealed }` pair on a send. Shape and bounds are the whole
- * of what the Relay can check — it holds no key — and the envelope's bound is
- * its only defense against forwarding megabytes at a phone.
- */
-function isSealedPushRecipient(value: unknown): value is SealedPushRecipient {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as SealedPushRecipient;
-  return isDeliveryId(v.deliveryId) && isSealedPushV1(v.sealed);
-}
-
-/**
- * Longest `keys.p256dh` / `keys.auth` this Relay will store. RFC 8291 fixes
- * both: `p256dh` is an uncompressed P-256 point (65 bytes) and `auth` is the
- * 16-byte auth secret, so the caps are their base64 encodings *with* padding —
- * browsers emit unpadded base64url, and a padded serialization must not be the
- * thing that breaks a real subscription.
- *
- * **Every stored field is bounded.** These two plus
- * {@link MAX_PUSH_ENDPOINT_LENGTH} are the whole row, and a durable row of
- * unknown size is re-read and re-parsed by every push route
- * (`docs/specs/relay.md` -> State files).
- */
-const MAX_PUSH_KEY_P256DH_LENGTH = 88;
-const MAX_PUSH_KEY_AUTH_LENGTH = 24;
-
-/**
- * True if `value` is a `PushSubscriptionPayload` with both encryption keys,
- * each of a length RFC 8291 could actually have produced. Non-empty, because a
- * blank key is a row `web-push` can never encrypt to.
- */
-function isSubscriptionPayload(value: unknown): value is PushSubscriptionPayload {
-  if (!value || typeof value !== 'object') return false;
-  const v = value as PushSubscriptionPayload;
-  return (
-    isBoundedNonEmptyString(v.endpoint, MAX_PUSH_ENDPOINT_LENGTH) &&
-    !!v.keys &&
-    typeof v.keys === 'object' &&
-    isBoundedNonEmptyString(v.keys.p256dh, MAX_PUSH_KEY_P256DH_LENGTH) &&
-    isBoundedNonEmptyString(v.keys.auth, MAX_PUSH_KEY_AUTH_LENGTH)
-  );
-}
-
-function isBoundedNonEmptyString(value: unknown, max: number): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= max;
 }

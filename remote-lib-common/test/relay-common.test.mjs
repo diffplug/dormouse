@@ -4,6 +4,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createECDH, randomBytes } from 'node:crypto';
 
 import {
   MAX_PASSKEY_LABEL_LENGTH,
@@ -15,6 +16,7 @@ import {
   readJson,
   verifySigninAssertion,
   importableSpkiP256,
+  admissiblePushSubscription,
   normalizeChallenge,
   pocketContentSecurityPolicy,
   reducePasskeyLabel,
@@ -26,6 +28,43 @@ import { SimAuthenticator, randomSecret, registrationClientData } from './harnes
 const ORIGIN = 'https://relay.example';
 const RP_ID = 'relay.example';
 const encode = (value) => toBase64Url(utf8Encode(JSON.stringify(value)));
+/** `point` with the low bit of `y` flipped: 65 bytes, `0x04`-led, and not on P-256. */
+const offCurve = (point) => {
+  const bad = Buffer.from(point);
+  bad[64] ^= 1;
+  return bad;
+};
+
+test('admissiblePushSubscription admits only keys a sender can encrypt to, padded or not', async () => {
+  const ecdh = createECDH('prime256v1');
+  ecdh.generateKeys();
+  const point = ecdh.getPublicKey();
+  const auth = randomBytes(16);
+  const padded = (bytes) => bytes.toString('base64');
+  const payload = (keys) => ({ endpoint: 'https://fcm.googleapis.com/fcm/send/abc', keys });
+  for (const keys of [
+    { p256dh: point.toString('base64url'), auth: auth.toString('base64url') },
+    { p256dh: padded(point), auth: padded(auth) },
+  ])
+    assert.equal(await admissiblePushSubscription(payload(keys)), true, JSON.stringify(keys));
+  const ok = { p256dh: point.toString('base64url'), auth: auth.toString('base64url') };
+  for (const keys of [
+    // A compressed point, a point without its prefix, and 65 bytes not led by 0x04.
+    { ...ok, p256dh: ecdh.getPublicKey(undefined, 'compressed').toString('base64url') },
+    { ...ok, p256dh: point.subarray(1).toString('base64url') },
+    { ...ok, p256dh: Buffer.concat([Buffer.from([2]), point.subarray(1)]).toString('base64url') },
+    // The right shape, off the curve: every send to it would fail with DataError.
+    { ...ok, p256dh: offCurve(point).toString('base64url') },
+    { ...ok, p256dh: 'BFakeP256dhKey' },
+    { ...ok, auth: randomBytes(15).toString('base64url') },
+    { ...ok, auth: randomBytes(17).toString('base64url') },
+    { ...ok, auth: 'FakeAuthSecret' },
+    { ...ok, auth: `${auth.toString('base64url').slice(0, -1)}!` },
+    { ...ok, p256dh: '' },
+    { ...ok, auth: undefined },
+  ])
+    assert.equal(await admissiblePushSubscription(payload(keys)), false, JSON.stringify(keys));
+});
 
 test('decodeClientData answers an object or null', () => {
   assert.deepEqual(decodeClientData(encode({ type: 'webauthn.create' })), { type: 'webauthn.create' });

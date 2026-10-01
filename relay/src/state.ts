@@ -7,6 +7,8 @@ import { join } from 'node:path';
 import {
   E2E_ID_BYTE_LENGTH,
   MAX_ENROLLED_BURROWS,
+  MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT,
+  MAX_PUSH_SUBSCRIPTIONS_PER_BURROW,
   RELAY_BEARER_BYTE_LENGTH,
   SELFHOST_ACCOUNT_ID,
   isE2eId,
@@ -438,7 +440,7 @@ export class BurrowStore extends JsonFileStore {
    * lookup costs a `stat` (plus a `readFile` + `JSON.parse` whenever the file
    * changed) + two SHA-256 per row — so a probe
    * that cannot possibly be a token this Relay minted must not buy any of it.
-   * The same reasoning `isDeliveryId` applies at the push routes.
+   * The same reasoning `isPushDeliveryId` applies at the push routes.
    */
   async findByToken(burrowToken: string): Promise<StoredBurrow | undefined> {
     // The one shape a `burrowToken` has, required at every lookup the way
@@ -670,9 +672,9 @@ export class PushSubscriptionStore extends JsonFileStore {
    *
    * **Not scoped to an account**, and correct only because selfhost has exactly
    * one (`SELFHOST_ACCOUNT_ID`, which `docs/specs/security-remote.md` -> "Trust boundary" pins). A delivery id is
-   * unguessable, so possession is the authorization — but multi-tenant would
-   * still have to key the delete on the calling account, since a leaked id
-   * would otherwise reach across tenants (`docs/specs/relay.md` `## Future`).
+   * unguessable, so possession is the authorization — but the multi-tenant
+   * Hosted Relay keys the delete on the calling account, since a leaked id
+   * would otherwise reach across tenants (`docs/specs/hosted.md` -> "Relay").
    */
   removeDelivery(deliveryId: string): Promise<number> {
     return this.mutate(async () => {
@@ -705,20 +707,12 @@ export class PushSubscriptionStore extends JsonFileStore {
 }
 
 /**
- * How many subscription rows one Burrow, and the whole file, may hold.
- *
- * `POST /api/push/subscribe` needs a session token and a `deliveryId` the
- * caller picks for itself — the Relay cannot check one against a Burrow's ACL,
- * by design — so without a cap one signed-in caller appends a durable row per
- * request, and every push route thereafter re-reads and re-parses the file.
- * Every sibling transient store is capped (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`,
- * `MAX_TOKENS_PER_BURROW`); this is the durable one, so it matters more.
- *
- * Far above any real use: the per-Burrow cap is phones paired with one laptop,
- * the total is that across every laptop an account enrolled.
+ * The subscription caps (`MAX_PUSH_SUBSCRIPTIONS_PER_BURROW` and
+ * `MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT` in `remote-lib-common`). This Relay has
+ * one account, so the per-account cap bounds the whole file.
  */
-export const MAX_PUSH_SUBSCRIPTIONS_PER_BURROW = 32;
-export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = 256;
+export { MAX_PUSH_SUBSCRIPTIONS_PER_BURROW };
+export const MAX_PUSH_SUBSCRIPTIONS_TOTAL = MAX_PUSH_SUBSCRIPTIONS_PER_ACCOUNT;
 
 /**
  * Drop the oldest rows until both caps hold, never `keep` — the row this

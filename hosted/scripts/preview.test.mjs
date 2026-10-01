@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createHmac } from "node:crypto";
+import { createHmac, createPrivateKey, createPublicKey, sign, verify } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   previewName,
@@ -386,13 +386,15 @@ test("deployment smoke rejects malformed health before making any auth requests"
   assert.equal(requests, 1);
 });
 
-test("the smoke runs its parts concurrently, retries each alone, and checks the rendezvous after the relay's revision alone", async () => {
+test("the smoke runs its parts concurrently, retries each alone, and checks the push config and rendezvous after the relay's revision alone", async () => {
   const origins = {
     account: "https://account.example.test",
     relay: "https://relay.example.test",
     voice: "https://voice.example.test",
   };
   const events = [];
+  // The relay's VAPID key, or null while push is off.
+  let pushKey = `B${"A".repeat(86)}`;
   // How many more health checks each origin fails before it is healthy.
   const unhealthy = {};
   // Every request the production smoke makes, answered as a healthy account would.
@@ -405,6 +407,11 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
         return Response.json({ ok: false }, { status: 503 });
       }
       return Response.json({ ok: true, revision: env.BUILD_SHA });
+    }
+    if (pathname === "/api/push/config") {
+      assert.equal(origin, origins.relay);
+      events.push("push");
+      return Response.json({ applicationServerKey: pushKey });
     }
     assert.equal(origin, origins.account);
     if (pathname === "/api/ready") return new Response(null, { status: 200 });
@@ -444,7 +451,18 @@ test("the smoke runs its parts concurrently, retries each alone, and checks the 
   assert.equal(count(`${origins.voice} health`), 1);
   assert.equal(count(`${origins.relay} health`), 2);
   assert.equal(count("one-time"), 1);
+  assert.equal(count("push"), 1);
+  assert.ok(events.indexOf("push") > events.lastIndexOf(`${origins.relay} health`));
   assert.equal(events.at(-1), "one-time");
+
+  // A relay with push off — a VAPID secret missing, or a pair that does not
+  // match — fails the smoke: preflight can read only the secrets' names.
+  events.length = 0;
+  pushKey = null;
+  await assert.rejects(smokeAll(origins, env.BUILD_SHA, { fetcher, oneTime }), {
+    message: `${origins.relay} must answer a VAPID key: both relay secrets set, as one pair`,
+  });
+  pushKey = `B${"A".repeat(86)}`;
 
   // Per-part attempts: the account runs once while the relay and voice retry.
   events.length = 0;
@@ -504,10 +522,32 @@ test("each preview Worker with a secret gets its own, derived from the preview s
   const configs = previewConfigs(await readConfigs(), env, "c".repeat(32));
   const secret = "p".repeat(32);
   const derived = (name) => createHmac("sha256", secret).update(name).digest("hex");
-  assert.deepEqual(previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: secret }), {
-    account: { AUTH_SECRET: derived("dormouse-hosted-pr-42") },
-    relay: { RELAY_ENROLL_SECRET: derived("dormouse-relay-pr-42") },
-  });
+  const secrets = previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: secret });
+  const { RELAY_VAPID_PUBLIC_KEY, RELAY_VAPID_PRIVATE_KEY, ...relay } = secrets.relay;
+  assert.deepEqual(
+    { ...secrets, relay },
+    {
+      account: { AUTH_SECRET: derived("dormouse-hosted-pr-42") },
+      relay: { RELAY_ENROLL_SECRET: derived("dormouse-relay-pr-42") },
+    },
+  );
+  // The relay's VAPID scalar is the HMAC of its name, and its point signs as one pair.
+  assert.equal(
+    RELAY_VAPID_PRIVATE_KEY,
+    createHmac("sha256", secret).update("dormouse-relay-pr-42/vapid").digest("base64url"),
+  );
+  const point = Buffer.from(RELAY_VAPID_PUBLIC_KEY, "base64url");
+  assert.equal(point.length, 65);
+  const jwk = { kty: "EC", crv: "P-256", x: point.subarray(1, 33).toString("base64url"), y: point.subarray(33).toString("base64url") };
+  const signature = sign("sha256", Buffer.from("probe"), createPrivateKey({ key: { ...jwk, d: RELAY_VAPID_PRIVATE_KEY }, format: "jwk" }));
+  assert.ok(verify("sha256", Buffer.from("probe"), createPublicKey({ key: jwk, format: "jwk" }), signature));
+  // Stable across redeploys of one PR, distinct across PRs and secrets.
+  assert.deepEqual(previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: secret }), secrets);
+  const otherPr = previewConfigs(await readConfigs(), { ...env, PR_NUMBER: "43" }, "c".repeat(32));
+  assert.notEqual(
+    previewSecrets(otherPr, { ...env, PREVIEW_AUTH_SECRET: secret }).relay.RELAY_VAPID_PRIVATE_KEY,
+    RELAY_VAPID_PRIVATE_KEY,
+  );
   assert.throws(() => previewSecrets(configs, env), /Missing PREVIEW_AUTH_SECRET/);
   assert.throws(
     () => previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: "short" }),

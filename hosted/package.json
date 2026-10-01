@@ -12,7 +12,7 @@
     "db:status": "tsx server/db.ts status",
     "preview:worker": "wrangler dev --local --local-protocol https",
     "test:deploy": "node --test scripts/*.test.mjs",
-    "test:miniflare": "vitest run server/tests/one-time.test.ts server/tests/boundary.test.ts server/tests/pocket.test.ts",
+    "test:miniflare": "vitest run server/tests/one-time.test.ts server/tests/boundary.test.ts server/tests/pocket.test.ts server/tests/relay-push.test.ts",
     "preview:deploy": "node scripts/preview.mjs deploy",
     "preview:cleanup": "node scripts/preview.mjs cleanup",
     "preview:smoke": "node scripts/preview-smoke.mjs"

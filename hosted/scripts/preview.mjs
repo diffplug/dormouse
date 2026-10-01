@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { writeFile, mkdir, appendFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { vapidKeysFrom } from "./vapid.mjs";
 import { WORKERS, deployWorkers, fromStage, readConfigs } from "./workers.mjs";
 
 export function required(env, name) {
@@ -184,7 +185,8 @@ const secretsFile = (worker) =>
 /**
  * Each preview Worker's secrets, keyed as `WORKERS` is: its `previewSecret`,
  * the HMAC of `PREVIEW_AUTH_SECRET` with its preview Worker's name, so no two
- * Workers or PRs share one and none is stored.
+ * Workers or PRs share one and none is stored; and, with `previewVapid`, a
+ * VAPID pair derived the same way (`previewVapidKeys`).
  */
 export function previewSecrets(configs, env) {
   const secret = required(env, "PREVIEW_AUTH_SECRET");
@@ -193,16 +195,30 @@ export function previewSecrets(configs, env) {
   return Object.fromEntries(
     Object.entries(WORKERS)
       .filter(([, { previewSecret }]) => previewSecret)
-      .map(([worker, { previewSecret }]) => [
-        worker,
-        {
-          [previewSecret]: createHmac("sha256", secret)
-            .update(configs[worker].name)
-            .digest("hex"),
-        },
-      ]),
+      .map(([worker, { previewSecret, previewVapid }]) => {
+        const name = configs[worker].name;
+        return [
+          worker,
+          {
+            [previewSecret]: createHmac("sha256", secret).update(name).digest("hex"),
+            ...(previewVapid && previewVapidKeys(secret, name)),
+          },
+        ];
+      }),
   );
 }
+
+/**
+ * A preview's VAPID pair: the P-256 scalar is the HMAC of the preview secret
+ * with `<name>/vapid`, so it is stable across a PR's redeploys and its
+ * subscriptions survive them.
+ */
+export const previewVapidKeys = (secret, name) =>
+  vapidKeysFrom((counter) =>
+    createHmac("sha256", secret)
+      .update(`${name}/vapid${counter ? `/${counter}` : ""}`)
+      .digest(),
+  );
 
 /** Each Worker's origin in `configs`, keyed as `WORKERS` is. */
 export const originsOf = (configs) =>

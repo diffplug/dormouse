@@ -1,7 +1,9 @@
 import { build } from "esbuild";
 import { convertV4MiniflareOptions } from "miniflare";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { builtinModules } from "node:module";
+import { vapidKeysFrom } from "../../scripts/vapid.mjs";
 import { WORKERS, parseConfig } from "../../scripts/workers.mjs";
 
 interface WranglerConfig {
@@ -37,6 +39,11 @@ const each = <T>(pick: (config: WranglerConfig) => T) =>
 export const ORIGINS = each((config) => config.vars.APP_ORIGIN);
 /** The relay's `RELAY_ENROLL_SECRET` in every test; production's is a Worker secret. */
 export const TEST_ENROLL_SECRET = "dormouse-hosted-test-enroll-secret";
+/** A VAPID pair for tests, as the relay's two secrets hold one; `seed` names another. */
+export const testVapidKeys = (seed = "dormouse-hosted-test-vapid") =>
+  vapidKeysFrom((counter: number) =>
+    createHash("sha256").update(counter ? `${seed}/${counter}` : seed).digest(),
+  );
 /** Each Worker's production entry, from its config. */
 export const ENTRIES = each((config) => config.main);
 

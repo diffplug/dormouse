@@ -300,8 +300,8 @@ expiry; do not grant tag bypass to the bot or Actions generally.
 ### Runtime secrets in the Workers
 
 Auth, mail, and OAuth secrets live in the account Worker, the enrollment
-secret in the relay Worker, and the ElevenLabs key in the voice Worker, never
-GitHub. In your
+secret and the Web Push (VAPID) pair in the relay Worker, and the ElevenLabs
+key in the voice Worker, never GitHub. In your
 own terminal, from `hosted/`, authenticate Wrangler to the production account
 and use its hidden prompt, never a command-line value:
 
@@ -335,6 +335,34 @@ through the same prompts as `GITHUB_CLIENT_ID`, `GOOGLE_CLIENT_ID`,
 `MICROSOFT_CLIENT_ID`, and `APPLE_CLIENT_ID`. The first secret can create the
 initial Worker stub; it does not activate account service. Set all required
 secrets before release; deployment preserves the ones already there.
+
+Generate the relay's VAPID pair once, in a private directory, and load both
+halves as relay secrets without printing them; keep a copy of the JSON in your
+secret manager, then delete it:
+
+```sh
+umask 077
+node --input-type=module -e '
+import { generateKeyPairSync } from "node:crypto";
+const { d, x, y } = generateKeyPairSync("ec", { namedCurve: "P-256" })
+  .privateKey.export({ format: "jwk" });
+const point = Buffer.concat([Buffer.from([4]), Buffer.from(x, "base64url"), Buffer.from(y, "base64url")]);
+console.log(JSON.stringify({
+  RELAY_VAPID_PUBLIC_KEY: point.toString("base64url"),
+  RELAY_VAPID_PRIVATE_KEY: d,
+}));' > vapid.json
+pnpm exec wrangler secret bulk vapid.json --config wrangler.relay.jsonc
+rm vapid.json
+```
+
+The public half is public (`GET /api/push/config` serves it); the private half
+signs every push. Both are required for a production deploy: preflight refuses
+a relay Worker missing either. Cloudflare exposes a secret's name, never its
+value, so preflight cannot tell whether the two match; the relay answers push
+off for a pair that does not, and the release's live verification fails
+unless `/api/push/config` answers the key. Rotating the pair makes every phone's subscription stale until Pocket
+re-registers it, so rotate only on compromise. Previews derive their own pair
+and never need this one.
 
 Configure the sender and enable each ready provider in `OAUTH_PROVIDERS` in
 `wrangler.jsonc`, comma separated, reviewed in a PR. The checked-in file enables

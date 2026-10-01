@@ -128,6 +128,10 @@ test("production smokes the relay before anything after it deploys, and a relay 
   // The relay's health fails this many times before it passes.
   let unhealthy = 5;
   const fetcher = async (url) => {
+    if (url === "https://relay.dormouse.sh/api/push/config") {
+      events.push("relay push");
+      return Response.json({ applicationServerKey: "B" + "A".repeat(86) });
+    }
     assert.equal(url, "https://relay.dormouse.sh/api/health");
     events.push("relay health");
     return unhealthy-- > 0
@@ -150,6 +154,7 @@ test("production smokes the relay before anything after it deploys, and a relay 
   assert.deepEqual(events, [
     "deploy dormouse-relay",
     ...Array(6).fill("relay health"),
+    "relay push",
     "relay one-time",
     "deploy dormouse-voice",
     "deploy dormouse-hosted",
@@ -165,7 +170,7 @@ test("production smokes the relay before anything after it deploys, and a relay 
   );
   // Six attempts, then nothing else deploys: the account's `v2` never runs.
   assert.equal(rendezvous, 6);
-  assert.deepEqual(events, ["deploy dormouse-relay", "relay health"]);
+  assert.deepEqual(events, ["deploy dormouse-relay", "relay health", "relay push"]);
 });
 test("live verification retries the relay and voice while their domains come up, and runs the account's POSTs once", async () => {
   const health = {};
@@ -177,6 +182,10 @@ test("live verification retries the relay and voice while their domains come up,
   };
   const fetcher = async (url) => {
     const { origin, pathname } = new URL(url);
+    if (pathname === "/api/push/config") {
+      assert.equal(origin, "https://relay.dormouse.sh");
+      return Response.json({ applicationServerKey: `B${"A".repeat(86)}` });
+    }
     assert.equal(pathname, "/api/health");
     health[origin] = (health[origin] ?? 0) + 1;
     return health[origin] > failing[origin]
@@ -247,6 +256,7 @@ test("the Durable Objects are the relay's, each rate limit its Worker's, and Dur
   assert.equal(configs.voice.ratelimits, undefined);
   assert.equal(configs.voice.migrations, undefined);
 });
+const relaySecrets = ["RELAY_ENROLL_SECRET", "RELAY_VAPID_PUBLIC_KEY", "RELAY_VAPID_PRIVATE_KEY"];
 const accountSecrets = [
   "AUTH_SECRET",
   "POSTMARK_SERVER_TOKEN",
@@ -262,7 +272,7 @@ function provider({
   disabled = true,
   secrets = {
     "dormouse-hosted": accountSecrets,
-    "dormouse-relay": ["RELAY_ENROLL_SECRET"],
+    "dormouse-relay": relaySecrets,
     "dormouse-voice": ["ELEVENLABS_API_KEY"],
   },
   read = [],
@@ -290,7 +300,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
         provider({
           secrets: {
             "dormouse-hosted": accountSecrets.filter((name) => name !== missing),
-            "dormouse-relay": ["RELAY_ENROLL_SECRET"],
+            "dormouse-relay": relaySecrets,
             "dormouse-voice": ["ELEVENLABS_API_KEY"],
           },
         }),
@@ -305,28 +315,29 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
       provider({
         secrets: {
           "dormouse-hosted": [...accountSecrets, "ELEVENLABS_API_KEY"],
-          "dormouse-relay": ["RELAY_ENROLL_SECRET"],
+          "dormouse-relay": relaySecrets,
           "dormouse-voice": [],
         },
       }),
     ),
     { message: "Missing dormouse-voice secret: ELEVENLABS_API_KEY" },
   );
-  // The relay's enrollment secret, on the account Worker, does not count either.
-  await assert.rejects(
-    preflight(
-      env,
-      configs,
-      provider({
-        secrets: {
-          "dormouse-hosted": [...accountSecrets, "RELAY_ENROLL_SECRET"],
-          "dormouse-relay": [],
-          "dormouse-voice": ["ELEVENLABS_API_KEY"],
-        },
-      }),
-    ),
-    { message: "Missing dormouse-relay secret: RELAY_ENROLL_SECRET" },
-  );
+  // The relay's secrets, on the account Worker, do not count either.
+  for (const missing of relaySecrets)
+    await assert.rejects(
+      preflight(
+        env,
+        configs,
+        provider({
+          secrets: {
+            "dormouse-hosted": [...accountSecrets, missing],
+            "dormouse-relay": relaySecrets.filter((name) => name !== missing),
+            "dormouse-voice": ["ELEVENLABS_API_KEY"],
+          },
+        }),
+      ),
+      { message: `Missing dormouse-relay secret: ${missing}` },
+    );
   // Each case supplies every configured secret, so it fails on its own check.
   for (const [override, message] of [
     [{ host: "ep-preview.neon.tech" }, "Migration and runtime databases must use the same host"],
@@ -348,7 +359,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
     provider({
       secrets: {
         "dormouse-hosted": ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN", ...extra],
-        "dormouse-relay": ["RELAY_ENROLL_SECRET"],
+        "dormouse-relay": relaySecrets,
         "dormouse-voice": ["ELEVENLABS_API_KEY"],
       },
     });

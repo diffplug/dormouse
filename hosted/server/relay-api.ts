@@ -13,6 +13,7 @@ import {
   MALFORMED_BINDING_ERROR,
   MAX_ENROLLED_BURROWS,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
+  MAX_PUSH_SEND_BODY_BYTES,
   MAX_REQUEST_BODY_BYTES,
   MAX_TOKENS_PER_BURROW,
   NOT_ENTITLED_ERROR,
@@ -46,7 +47,6 @@ import type {
   BurrowsResponse,
   PasskeyAssertion,
   PresenceBinding,
-  PushConfigResponse,
   ReauthBeginResponse,
   ReauthFinishResponse,
   SetupBeginResponse,
@@ -59,9 +59,11 @@ import type { RelayEnv } from "./bindings";
 import { allowed } from "./one-time";
 import { ENROLLMENT_TTL_MS } from "./policy-constants";
 import { relayRoom } from "./relay-room-contract";
+import { relayPushRoutes } from "./relay-push";
 import {
   OWNER_COLUMNS,
   database,
+  locked,
   ownerOf,
   requireBurrow,
   requireSession,
@@ -86,7 +88,7 @@ export const ENROLLMENT_POLL_INTERVAL_S = 5;
 const DEVICE_CODE_EXPIRY_BYTES = 4;
 
 /** A table a caller grows, capped per `owner` value. */
-interface Capped {
+export interface Capped {
   table: string;
   pk: string;
   owner: string;
@@ -105,7 +107,7 @@ const SETUP_CHALLENGES: Capped = {
   owner: '"burrowId"',
   cap: MAX_SETUP_CHALLENGES_PER_BURROW,
 };
-const SESSIONS: Capped = {
+export const SESSIONS: Capped = {
   table: "dormouse_relay_sessions",
   pk: '"tokenHash"',
   owner: '"userId"',
@@ -132,8 +134,13 @@ const EXPIRING_TABLES = [
 const epochMs = (column: string) =>
   `floor(extract(epoch from ${column}) * 1000)::float8`;
 
-/** `now()` plus `$n` milliseconds. */
-const after = (param: string) => `now() + (${param}::float8 * interval '1 millisecond')`;
+/**
+ * `clock_timestamp()` plus `$n` milliseconds. Not `now()`, the transaction's
+ * start: a capped insert takes its lock inside the transaction, so a write
+ * that waited would expire before the one it followed and be trimmed first.
+ */
+const after = (param: string) =>
+  `clock_timestamp() + (${param}::float8 * interval '1 millisecond')`;
 
 /** 429 past `limit` per address, before anything reaches the database. */
 const perAddress =
@@ -172,12 +179,12 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     app.use(route, perAddress(limit, "too many enrollment attempts"));
   }
 
-  app.use(
-    "/api/*",
-    bodyLimit({
-      maxSize: MAX_REQUEST_BODY_BYTES,
-      onError: (c) => c.json({ error: BODY_TOO_LARGE_ERROR }, 413),
-    }),
+  // One route is exempt, its legitimate body being larger: the push send.
+  const tooLarge = (c: Context) => c.json({ error: BODY_TOO_LARGE_ERROR }, 413);
+  const smallBodies = bodyLimit({ maxSize: MAX_REQUEST_BODY_BYTES, onError: tooLarge });
+  const sendBodies = bodyLimit({ maxSize: MAX_PUSH_SEND_BODY_BYTES, onError: tooLarge });
+  app.use("/api/*", (c, next) =>
+    (c.req.path === API_ROUTES.pushSend ? sendBodies : smallBodies)(c, next),
   );
 
   // --- Setup: a passkey joins the account that owns the minting Burrow ------
@@ -538,11 +545,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     });
   });
 
-  // Push is off until the Durable Object Relay delivers it.
-  app.get(API_ROUTES.pushConfig, (c) => {
-    const res: PushConfigResponse = { applicationServerKey: null };
-    return c.json(res);
-  });
+  relayPushRoutes(app);
 }
 
 /** The relay Cron Trigger: every table's expired rows, whoever grew them. */
@@ -615,22 +618,6 @@ async function consumeChallenge(db: Client, challenge: string, burrowId: string 
   return row?.live === true;
 }
 
-/** Runs `action` in a transaction holding `key`'s advisory lock, so a cap check and its insert cannot interleave. */
-async function locked<T>(db: Client, key: string, action: () => Promise<T>) {
-  await db.query("BEGIN");
-  try {
-    await db.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-      `dormouse-relay:${key}`,
-    ]);
-    const result = await action();
-    await db.query("COMMIT");
-    return result;
-  } catch (error) {
-    await db.query("ROLLBACK").catch(() => {});
-    throw error;
-  }
-}
-
 /**
  * Inserts `row` into `spec`'s table for `owner`, under that owner's lock and
  * in one statement: its own expired rows pruned, its live rows trimmed to
@@ -639,7 +626,7 @@ async function locked<T>(db: Client, key: string, action: () => Promise<T>) {
  * row already expired is not inserted. Answers its expiry in epoch
  * milliseconds, or undefined when nothing was inserted.
  */
-async function admit(
+export async function admit(
   db: Client,
   { table, pk, owner, cap }: Capped,
   ownerValue: string,

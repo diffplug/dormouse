@@ -50,6 +50,9 @@ export interface RelayEnv extends WorkerEnv {
   ACCOUNT_ORIGIN?: string;
   /** The HMAC key a device code's user code is derived under. */
   RELAY_ENROLL_SECRET: string;
+  /** The Web Push signing pair; push is off without a matching pair. */
+  RELAY_VAPID_PUBLIC_KEY?: string;
+  RELAY_VAPID_PRIVATE_KEY?: string;
 }
 
 /** `voice.dormouse.sh`: managed-voice speech and its history sweep. */
@@ -87,9 +90,9 @@ export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
 
 /**
  * Hyperdrive for the Relay's own tables and no auth secret: the Relay reads a
- * user row only for its entitlement, never a login. Its one secret,
- * `RELAY_ENROLL_SECRET`, derives enrollment user codes. Production and preview
- * alike.
+ * user row only for its entitlement, never a login. Its secrets are
+ * `RELAY_ENROLL_SECRET`, which derives enrollment user codes, and the VAPID
+ * pair push is signed with. Production and preview alike.
  */
 export const relayBindings = (env: RelayEnv): RelayEnv => ({
   ASSETS: env.ASSETS,
@@ -106,6 +109,8 @@ export const relayBindings = (env: RelayEnv): RelayEnv => ({
   RELAY_ENROLL_POLL_LIMIT: env.RELAY_ENROLL_POLL_LIMIT,
   ACCOUNT_ORIGIN: exactOrigin(env.ACCOUNT_ORIGIN) ?? undefined,
   RELAY_ENROLL_SECRET: env.RELAY_ENROLL_SECRET,
+  RELAY_VAPID_PUBLIC_KEY: env.RELAY_VAPID_PUBLIC_KEY,
+  RELAY_VAPID_PRIVATE_KEY: env.RELAY_VAPID_PRIVATE_KEY,
 });
 
 /** Hyperdrive for the token lookup and the ElevenLabs key; no auth secret. */

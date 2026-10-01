@@ -73,6 +73,22 @@ export async function healthSmoke(origin, sha, fetcher = fetch) {
   assert.deepEqual(await health.json(), { ok: true, revision: sha });
 }
 
+/**
+ * The relay answers a VAPID key from `/api/push/config`. Cloudflare exposes a
+ * Worker secret's name and never its value, so preflight sees only that both
+ * halves exist; a pair that does not match turns push off, and fails here.
+ */
+export async function pushConfigSmoke(origin, fetcher = fetch) {
+  const response = await smokeRequest(fetcher, origin + "/api/push/config", {});
+  assert.equal(response.status, 200, `${origin} must answer its push config`);
+  const { applicationServerKey } = await response.json();
+  assert.match(
+    applicationServerKey ?? "",
+    /^B[A-Za-z0-9_-]{86}$/,
+    `${origin} must answer a VAPID key: both relay secrets set, as one pair`,
+  );
+}
+
 export async function smoke(
   origin,
   sha,
@@ -276,9 +292,10 @@ async function retrying(limit, what, check, { retryMs, wait }) {
 }
 
 /**
- * The relay's smoke: its revision, then its one-time rendezvous, each retried
- * on its own up to `attempts`, `retryMs` apart, so a passed revision never
- * runs again and the rendezvous never runs on a relay that did not pass.
+ * The relay's smoke: its revision, then its push config and its one-time
+ * rendezvous, each retried on its own up to `attempts`, `retryMs` apart, so a
+ * passed revision never runs again and neither later check runs on a relay that
+ * did not pass.
  */
 export async function relaySmoke(
   origin,
@@ -293,6 +310,7 @@ export async function relaySmoke(
 ) {
   const retry = { retryMs, wait };
   await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
+  await retrying(attempts, `${origin} push`, () => pushConfigSmoke(origin, fetcher), retry);
   await retrying(attempts, `${origin} one-time`, () => oneTime(origin), retry);
 }
 

@@ -102,9 +102,10 @@ per-Burrow browser storage follows `docs/specs/remote-security-model.md` ->
   `lib/src/remote/client/pocket-encrypted-storage.test.ts`.
 - **FAIL IF** AES-GCM appears in production source under `remote-lib-common/src/`,
   `lib/src/`, or `relay/src/` outside the local at-rest
-  wrapper `lib/src/remote/client/pocket-private-key.ts`. The wire cipher is
-  unchanged; `scripts/e2e-lint.mjs` and `scripts/e2e-lint-selftest.mjs` pin
-  this exception.
+  wrapper `lib/src/remote/client/pocket-private-key.ts` and the Web Push sender
+  `remote-lib-common/src/remote/web-push.ts`, whose `aes128gcm` record RFC 8291
+  fixes. The wire cipher is unchanged; `scripts/e2e-lint.mjs` and
+  `scripts/e2e-lint-selftest.mjs` pin these exceptions.
 
 - **FAIL IF** `relay/src/state.ts` stops creating `$DORMOUSE_STATE_DIR` mode `0o700`, or stops writing every file through `writeAtomic` at mode `0o600`. The "every file" clause is a negative search over `relay/src/`: no `writeFile`, `appendFile`, or `createWriteStream` may target the state directory outside `writeAtomic`. A cheap default, not a cross-platform guarantee; the installer's directory permissions below protect the installed Relay's state (rationale).
 - **FAIL IF** `FileBurrowStateStore` (`lib/src/host/remote/burrow-state-store.ts`) stops creating its directory `0o700` and writing `0o600` on non-Windows platforms, or if `VsCodeBurrowStateStore` stops keeping the **enrollment** in `SecretStorage`. The ACL's home in `globalState` is deliberate and is not a finding; the enrollment's is what carries `burrowToken`.
@@ -216,6 +217,8 @@ CGNAT, link-local, documentation, benchmark, multicast, reserved, IPv4-mapped,
 unique-local, and site-local ranges — rejecting a hostname wholesale if *any* answer is
 blocked, and handing the socket the exact address it checked so rebinding cannot create
 a second unchecked resolution.
+The Hosted Relay, which cannot pin a resolution, admits only known push services' hosts
+instead (`docs/specs/security-hosted.md` -> "Relay boundary").
 
 - **FAIL IF** `relay/src/push-endpoint.ts` stops rejecting non-public push endpoints at registration, stops applying `createPublicLookup` / `createPublicPushAgent` to delivery, or stops rejecting a hostname whose DNS answers are mixed public and blocked.
 - **FAIL IF** `/api/push/send` stops taking the `burrowId` from the Burrow's own token, begins selecting recipients when `recipients` is absent or empty, stops clamping them at `MAX_PUSH_QUERY_DELIVERY_IDS`, or if any read endpoint begins reporting on a delivery id the caller did not present. Possession of the 256-bit `deliveryId` is the whole authorization for the Client-facing push routes, so the Relay must never *list* one to a session.

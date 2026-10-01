@@ -5,9 +5,12 @@ import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { readFileSync } from "node:fs";
 import {
   API_ROUTES,
+  MAX_PUSH_SEND_BODY_BYTES,
+  MAX_REQUEST_BODY_BYTES,
   ONE_TIME_PAGE_PATH,
   ONE_TIME_WS_ROUTES,
   WS_ROUTES,
+  pushSubscriptionDeletePath,
 } from "remote-lib-common";
 import {
   accountBindings,
@@ -36,6 +39,7 @@ import {
   alone,
   bundleWorker,
   miniflareOptions,
+  testVapidKeys,
   type Name,
 } from "./bundle";
 
@@ -57,6 +61,7 @@ const everything = {
   GITHUB_CLIENT_ID: "test-github-id",
   GITHUB_CLIENT_SECRET: "test-github-secret",
   RELAY_ENROLL_SECRET: "test-relay-enroll-secret",
+  ...testVapidKeys(),
 };
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
@@ -137,6 +142,8 @@ const SERVED: Record<Name, [string, string][]> = {
     ["POST", API_ROUTES.burrowSetupToken],
     ["POST", API_ROUTES.burrowEnrollBegin],
     ["POST", API_ROUTES.burrowEnrollPoll],
+    ["GET", API_ROUTES.pushConfig],
+    ["POST", API_ROUTES.pushSend],
     ["GET", "/"],
   ],
   voice: [["POST", "/api/voice/speak"]],
@@ -155,6 +162,11 @@ const RELAY_API: [string, string][] = [
   ["POST", API_ROUTES.burrowSetupToken],
   ["POST", API_ROUTES.burrowEnroll],
   ["GET", API_ROUTES.pushConfig],
+  ["POST", API_ROUTES.pushSubscribe],
+  ["POST", API_ROUTES.pushSubscriptionsQuery],
+  ["DELETE", pushSubscriptionDeletePath("A".repeat(43))],
+  ["GET", API_ROUTES.pushDevices],
+  ["POST", API_ROUTES.pushSend],
 ];
 
 test.for(NAMES)(
@@ -194,9 +206,6 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
     ...ACCOUNT_RELAY,
     ["POST", "/api/voice/speak"],
-    ["POST", "/api/push/subscribe"],
-    ["POST", "/api/push/send"],
-    ["GET", "/api/push/devices"],
     // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
     ["GET", "/api/hello"],
     // The non-page prefixes 404 whole.
@@ -403,6 +412,8 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "RELAY_ROOM",
       "RELAY_SETUP_LIMIT",
       "RELAY_SIGNIN_LIMIT",
+      "RELAY_VAPID_PRIVATE_KEY",
+      "RELAY_VAPID_PUBLIC_KEY",
     ].sort(),
   );
   // `ACCOUNT_ORIGIN` reaches the routes exactly an origin, or not at all.
@@ -423,6 +434,32 @@ test("each bindings mapper passes only what its Worker uses", () => {
   expect(keys(voicePreviewBindings(env))).toEqual(
     ["APP_ORIGIN", "BUILD_SHA", "HYPERDRIVE"].sort(),
   );
+});
+
+test("the relay answers its VAPID key, and push routes gate on a bearer before the database", async () => {
+  const relay = ORIGINS.relay;
+  const config = await send("relay", relay + API_ROUTES.pushConfig);
+  expect(await config.json()).toEqual({
+    applicationServerKey: everything.RELAY_VAPID_PUBLIC_KEY,
+  });
+  for (const [method, path] of RELAY_API.filter(([, path]) => path.startsWith("/api/push/")))
+    if (path !== API_ROUTES.pushConfig)
+      expect((await send("relay", relay + path, method)).status, `${method} ${path}`).toBe(401);
+  expect(outbound).toEqual([]);
+});
+
+test("only the push send outgrows the request body bound, and only to its derived bound", async () => {
+  const post = (path: string, bytes: number) =>
+    workers.relay.dispatchFetch(ORIGINS.relay + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "x".repeat(bytes),
+    });
+  // Past the general bound, a send reaches its Burrow-token gate; anything else is 413.
+  expect((await post(API_ROUTES.pushSend, MAX_REQUEST_BODY_BYTES + 1)).status).toBe(401);
+  expect((await post(API_ROUTES.pushSubscribe, MAX_REQUEST_BODY_BYTES + 1)).status).toBe(413);
+  expect((await post(API_ROUTES.pushSend, MAX_PUSH_SEND_BODY_BYTES + 1)).status).toBe(413);
+  expect(MAX_PUSH_SEND_BODY_BYTES).toBeGreaterThan(MAX_REQUEST_BODY_BYTES);
 });
 
 test("neither the relay nor the voice bundle carries Better Auth", async () => {

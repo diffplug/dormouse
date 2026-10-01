@@ -233,11 +233,20 @@ export const NATIVE_PEER_FACTORY = 'lib/src/host/remote/native-direct-peer.ts';
 export const PEER_FACTORIES = [NATIVE_PEER_FACTORY, 'lib/src/remote/client/browser-direct-peer.ts'];
 
 /**
- * The one file the AES-GCM ban excuses, as `docs/specs/security-remote.md` ->
- * "Credentials at rest" names it. Excused by path rather than dropped from the
- * scan, so a rename that leaves the cipher behind turns the rule red.
+ * The two files the AES-GCM ban excuses, as `docs/specs/security-remote.md` ->
+ * "Credentials at rest" names them, each by exact path rather than dropped
+ * from the scan, so a rename that leaves the cipher behind turns the rule red.
+ * This one wraps Pocket's private key at rest.
  */
 const AT_REST_KEY_WRAPPER = 'lib/src/remote/client/pocket-private-key.ts';
+
+/**
+ * And this one is the Hosted Relay's Web Push sender, whose
+ * `aes128gcm` record RFC 8291 fixes as AES-128-GCM. It encrypts to a push
+ * service's subscription key, outside the Noise channel, around an envelope
+ * already sealed inside it.
+ */
+export const WEB_PUSH_SENDER = 'remote-lib-common/src/remote/web-push.ts';
 
 /**
  * One entry per structural property. Every rule states the line it enforces in
@@ -292,8 +301,9 @@ export const RULES = [
     security: 'AES-GCM appears in production source under `remote-lib-common/src/`',
     kind: 'forbid',
     trees: SOURCE_TREES,
-    allow: (match, file) => file === AT_REST_KEY_WRAPPER,
-    // The one exception encrypts local private-key storage, never wire data.
+    allow: (match, file) => file === AT_REST_KEY_WRAPPER || file === WEB_PUSH_SENDER,
+    // The exceptions encrypt local private-key storage and a Web Push record,
+    // never a Noise frame.
     // `AES-GCM` is the substitution the Noise suite exists to refuse: it *is* in
     // shipping WebCrypto, which is exactly what makes it the tempting one, and
     // the protocol name is part of the transcript so swapping it is a different
