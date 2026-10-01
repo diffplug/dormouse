@@ -14,7 +14,7 @@ import type { EnrollmentOffer } from 'remote-lib-common';
 
 import { DEFAULT_RELAY_ORIGIN } from '../../lib/src/host/relay-origin';
 import { LOCAL_ON } from '../../lib/src/host/remote/test-burrow-link';
-import { nothingPolicy } from '../../lib/src/remote/network-policy';
+import { levelsFor, nothingPolicy } from '../../lib/src/remote/network-policy';
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
 import { FakeSocket } from '../../lib/src/remote/test-fake-socket';
 import { createTestRendezvous, type TestRendezvous } from '../../lib/src/remote/test-rendezvous';
@@ -1071,7 +1071,7 @@ describe('burrow service glue', () => {
     });
     expect(byId(results(bound.posted))['rh-networkPolicy']).toMatchObject({
       policy: nothingPolicy(),
-      levels: ['nothing', 'local'],
+      levels: levelsFor('hosted'),
     });
     expect(byId(results(bound.posted))['rh-takeBack']).toEqual({ ended: false });
   });

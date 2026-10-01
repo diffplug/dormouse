@@ -94,9 +94,9 @@ over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client skips the offer, the
 Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
 signal always fits one control body.
 
-**No ICE servers**, and **never a public STUN or TURN default**: `iceServers:
-[]` at both ends, host candidates only. (rationale) Local networks restricts a
-one-time attempt further
+Which ICE servers each end gathers through:
+[remote-network.md](./remote-network.md) -> "Anywhere" (rationale); Local
+networks restricts a one-time attempt further
 ([remote-network.md](./remote-network.md) -> "Local networks").
 
 **The two shipped stacks are proven against each other by hand**, by
@@ -435,7 +435,7 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 **Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and both Burrows speak today. What remains is to **dogfood** it across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
 
-STUN discovery and a paired phone's network restrictions follow the **remote-network** scope in [remote-network.md](./remote-network.md). A session surviving relay loss remains unstaged.
+A paired phone's network levels follow the **remote-network** scope in [remote-network.md](./remote-network.md). A session surviving relay loss remains unstaged.
 
 ### 9. Audio
 

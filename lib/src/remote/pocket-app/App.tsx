@@ -25,7 +25,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { browserDirectPeer } from '../client/browser-direct-peer';
+import { selfHostDirectPeer } from '../client/browser-direct-peer';
 import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
@@ -112,7 +112,7 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
-        createDirectPeer: browserDirectPeer,
+        createDirectPeer: selfHostDirectPeer,
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),

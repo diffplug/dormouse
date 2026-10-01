@@ -149,6 +149,8 @@ export const LAN = '192.168.1.0/24';
 export const RELAY_ON: NetworkPolicy = { level: 'relay', allowed: [], autoUpdate: false };
 /** A Hosted build's network on: Local networks over {@link LAN}. */
 export const LOCAL_ON: NetworkPolicy = { level: 'local', allowed: [LAN], autoUpdate: false };
+/** A Hosted build's network on everywhere: Anywhere, no network allowed. */
+export const ANYWHERE_ON: NetworkPolicy = { level: 'anywhere', allowed: [], autoUpdate: false };
 
 /**
  * What `networkPolicy` answers for a build with its network on, which the

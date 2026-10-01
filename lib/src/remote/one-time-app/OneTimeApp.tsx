@@ -20,7 +20,7 @@ import {
   type OneTimeLink,
 } from 'remote-lib-common';
 
-import { browserDirectPeer } from '../client/browser-direct-peer';
+import { hostedDirectPeer } from '../client/browser-direct-peer';
 import {
   ONE_TIME_ENDED_MESSAGE,
   ONE_TIME_LINK_EXPIRED_MESSAGE,
@@ -113,13 +113,13 @@ export type OneTimePageClient = RemoteWallClient &
 /**
  * The page's client: the rendezvous on this page's own origin — `wss:` on
  * Hosted, `ws:` on the loopback dev loop — the browser's own WebSocket, and
- * the phone's one direct-peer factory. Building it opens nothing.
+ * the direct-peer factory for a page Hosted serves. Building it opens nothing.
  */
 function createOneTimePageClient(): OneTimePageClient {
   return new OneTimeClient({
     wsOrigin: location.origin.replace(/^http/, 'ws'),
     createWebSocket: (url) => new WebSocket(url) as unknown as RemoteWebSocket,
-    createDirectPeer: browserDirectPeer,
+    createDirectPeer: hostedDirectPeer,
   });
 }
 

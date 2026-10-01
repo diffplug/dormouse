@@ -494,7 +494,8 @@ the Relay as the carrier of an already-authorized session; every rule above
 holds unchanged, because nothing about *what* is carried changes.
 [remote-api.md](./remote-api.md) -> "Direct path" owns the design — the session
 promoted at [Connection](#connection) and its `CipherState`s, the signals that
-ride inside it, the empty ICE-server list, and the bound on either end's queue.
+ride inside it, and the bound on either end's queue;
+[remote-network.md](./remote-network.md) -> "Anywhere" owns its ICE server.
 What this model adds is what is *underneath* them.
 
 - **DTLS beneath is transport hygiene this model does not rely on.** It protects
@@ -507,7 +508,8 @@ attempt.** The standalone Burrow's addon binds one socket on the unspecified
 address and advertises each routable interface at that port; a browser binds per
 interface. Either way the host answers UDP from anyone who can route to it on
 any of those networks. (rationale) Local networks may bind one address instead
-([remote-network.md](./remote-network.md) -> "Local networks").
+([remote-network.md](./remote-network.md) -> "Local networks"); under Anywhere
+the NAT mapping STUN opens may admit senders beyond them.
 **Two parsers sit behind it and both are attack surface**: before DTLS, ICE's
 own STUN parser, which answers a binding request only under this attempt's
 ufrag and password (RFC 8445 requires 24 and 128 bits of randomness), both

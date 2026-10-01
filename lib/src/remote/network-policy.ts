@@ -10,16 +10,18 @@
 import type { RelayMode } from '../host/relay-origin';
 import { isRecord, isStringArray } from '../lib/is-record';
 
-const LEVELS = ['nothing', 'local', 'anywhere', 'relay'] as const;
+/** Every level a policy may name, whichever build offers it. */
+export const NETWORK_LEVELS = ['nothing', 'local', 'anywhere', 'relay'] as const;
 
 /**
- * `relay` is the UI's "My Relay only". `anywhere` is reserved for Cloudflare
- * STUN (`docs/specs/remote-network.md` -> "Anywhere"): no build offers it yet.
+ * `relay` is the UI's "My Relay only". `anywhere` lets a one-time link reach
+ * any network, through Cloudflare STUN (`docs/specs/remote-network.md` ->
+ * "Anywhere").
  */
-export type NetworkLevel = (typeof LEVELS)[number];
+export type NetworkLevel = (typeof NETWORK_LEVELS)[number];
 
 const isLevel = (value: unknown): value is NetworkLevel =>
-  (LEVELS as readonly unknown[]).includes(value);
+  (NETWORK_LEVELS as readonly unknown[]).includes(value);
 
 export interface NetworkPolicy {
   level: NetworkLevel;
@@ -60,11 +62,11 @@ export function nothingPolicy(): NetworkPolicy {
 }
 
 /**
- * The levels a build offers: a Hosted build's `local` (and later `anywhere`),
- * or a self-host build's `relay`. The service refuses any other.
+ * The levels a build offers: a Hosted build's `local` and `anywhere`, or a
+ * self-host build's `relay`. The service refuses any other.
  */
 export function levelsFor(mode: RelayMode): NetworkLevel[] {
-  return mode === 'self-host' ? ['nothing', 'relay'] : ['nothing', 'local'];
+  return mode === 'self-host' ? ['nothing', 'relay'] : ['nothing', 'local', 'anywhere'];
 }
 
 /**
@@ -78,12 +80,21 @@ export function runsBurrow(level: NetworkLevel): boolean {
 }
 
 /**
- * Whether `policy` lets a one-time link open: Local networks with at least one
- * network allowed, since a phone's direct path must fall within one
- * (`docs/specs/remote-network.md` → "Local networks").
+ * Whether `policy` lets a one-time link open: Anywhere, or Local networks with
+ * at least one network allowed, since a phone's direct path must fall within
+ * one there (`docs/specs/remote-network.md` → "Local networks").
  */
 export function opensOneTimeLinks(policy: NetworkPolicy): boolean {
-  return policy.level === 'local' && policy.allowed.length > 0;
+  return policy.level === 'anywhere' || (policy.level === 'local' && policy.allowed.length > 0);
+}
+
+/**
+ * Whether the Burrow's direct peers gather through Cloudflare STUN under
+ * `level`, which shows Cloudflare this computer's public address: Anywhere
+ * alone (`docs/specs/remote-network.md` → "Anywhere").
+ */
+export function burrowUsesStun(level: NetworkLevel): boolean {
+  return level === 'anywhere';
 }
 
 /** Whether Standalone checks for updates at launch under `policy` (`docs/specs/remote-network.md` → "Updates"). */

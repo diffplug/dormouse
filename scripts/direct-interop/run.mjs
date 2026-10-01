@@ -107,7 +107,8 @@ const { DirectPeer } = requireBundle(join(temp, 'direct-peer.cjs'));
 const { localNetworksPath } = requireBundle(join(temp, 'local-networks.cjs'));
 const javascript = browserBundle.outputFiles[0].text;
 
-// `iceServers: []` as both shipped factories pass it: host candidates only.
+// `iceServers: []` as Pocket's factory passes it, and the Burrow's at every level but
+// Anywhere: host candidates only (`docs/specs/remote-network.md` -> "Anywhere").
 const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill');
 const addon = sidecarRequire('node-datachannel');
 

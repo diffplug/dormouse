@@ -223,10 +223,10 @@ describe('Settings → Network', () => {
   });
 
   it('offers only the levels the service offers and has copy for', async () => {
-    link({
-      status: UNENROLLED_STATUS,
-      network: { ...networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES), levels: ['nothing', 'local', 'anywhere'] },
-    });
+    // A Hosted build offers Anywhere too, which this panel has no copy for yet.
+    const network = networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES);
+    expect(network.levels).toContain('anywhere');
+    link({ status: UNENROLLED_STATUS, network });
     await render();
     const radios = [...container.querySelectorAll('[role="radio"]')].map((radio) => radio.textContent);
     expect(radios.map((label) => label?.split('.')[0])).toEqual([

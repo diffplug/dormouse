@@ -7,8 +7,8 @@
  * sidecar's native polyfill, and the in-memory fake all satisfy the same shape
  * and neither endpoint reaches for a global. Constructing one is the injected
  * factory's job (`PocketClientDeps.createDirectPeer`,
- * `BurrowOptions.createDirectPeer`), which is also where `iceServers: []` is
- * set — nothing here knows what an ICE server is.
+ * `BurrowOptions.createDirectPeer`), which is also where the ICE servers are
+ * chosen (`ice-servers.ts`) — nothing here knows what an ICE server is.
  *
  * The wrapper owns the two halves of one negotiation and the channel's four
  * events. It owns no policy: what a closed channel *means* depends on whether

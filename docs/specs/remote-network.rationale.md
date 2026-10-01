@@ -32,10 +32,18 @@ address, which only Tailscale draws from, or Tailscale's name. Once allowed, the
 range is still an address range: an address inside it on another interface,
 WARP's included, passes the path check as the level's proximity caveat says.
 
-**Why `autoUpdate` alone ends nothing.** The rule that a change ends the live
-one-time session exists so a narrowed policy cannot leave an old path exempt.
-`autoUpdate` governs no path a phone uses, so ending a phone's session because
-the person toggled update checks would cost them the connection and protect
+**Three personas set the levels (2026-09-30).** One wants no network requests at
+all; one will try Pocket but only over their LAN or VPN; one wants it to work
+anywhere. One choice per persona, with the connections it implies listed beside
+it, replaced a transport matrix (persistent vs one-time × restricted vs not)
+whose rows the UI never needed to distinguish.
+
+**Why `autoUpdate`, and the allowed networks outside Local networks, end
+nothing.** The rule that a change ends the live one-time session exists so a
+narrowed policy cannot leave an old path exempt. `autoUpdate` governs no path a
+phone uses, and the allowed networks govern one only under Local networks, so
+ending a phone's session because the person toggled update checks, or edited a
+list that Anywhere never reads, would cost them the connection and protect
 nothing.
 
 ## Updates
@@ -50,7 +58,7 @@ needs no policy to run.
 
 **Why the list states only what is built (2026-09-30).** The list is what a
 person reads to decide which level to trust, so a row for a connection no code
-makes — Anywhere's STUN, the Hosted Relay — would promise traffic that never
+makes — the Hosted Relay — would promise traffic that never
 happens, and a missing row would hide one that does. The prototype listed the
 whole design; the real list drops each row until its stage ships.
 
@@ -64,14 +72,6 @@ omitted a push the code sends. Listed whenever a phone is paired, the row's
 only exactly and answers what it saved; filling in networks there would save
 something the request did not say. The panel already holds the interfaces the
 person is looking at, and the switches show at once what was allowed.
-
-## Levels
-
-**Three personas set the levels (2026-09-30).** One wants no network requests at
-all; one will try Pocket but only over their LAN or VPN; one wants it to work
-anywhere. One choice per persona, with the connections it implies listed beside
-it, replaced a transport matrix (persistent vs one-time × restricted vs not)
-whose rows the UI never needed to distinguish.
 
 ## Local networks
 
@@ -162,6 +162,11 @@ hence the Burrow alone depends on the level.
 **The endpoint.** Cloudflare documents `stun:stun.cloudflare.com:3478` as free
 and unlimited in its Realtime FAQ; ordinary Workers expose no UDP listener, so
 Hosted cannot run its own. Checked 2026-09-30.
+
+**What STUN adds on the addon** *(2026-09-30, `node-datachannel` 0.33.4 on
+macOS 27)*. Gathering through Cloudflare's STUN completed in 84 ms, against
+21 ms with none, and added one `srflx` candidate to the four host ones, the
+offer growing from 760 to 844 characters.
 
 ## Allowed networks
 

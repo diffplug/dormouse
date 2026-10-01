@@ -5,7 +5,8 @@
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
-phone shows, and the session runs over a direct WebRTC path on the same network.
+phone shows, and the session runs over a direct WebRTC path on a network the
+policy allows.
 Hosted's rendezvous carries the handshake and nothing after it.
 
 ## Flow
@@ -313,6 +314,7 @@ on Pocket's screens, chrome, and mobile wall.
   first render**, parsed or not, and reload on `hashchange` (rationale).
 - **Never open a socket before the Connect tap**: the tap builds the client and
   runs `connectOnce`, so a link-preview crawler spends nothing.
+- Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
 - **Never persist anything** on an origin Hosted's accounts share: no storage,
   IndexedDB, worker, push, or cookie. `applyPocketTheme` applies Pocket's
   default theme without reading or writing a stored pick, for the page and its
@@ -393,7 +395,8 @@ enrollment**: it works un-enrolled, survives `clearEnrollment` and
 `reconnect`, and `dispose()` ends it. Its label is the enrollment's, else
 `suggestedBurrowLabel(kind)`; its provider and direct-peer factory are the
 enrolled runtime's, held under Local networks to the allowed networks
-(`docs/specs/remote-network.md` -> "Local networks").
+(`docs/specs/remote-network.md` -> "Local networks") and given STUN under
+Anywhere (`docs/specs/remote-network.md` -> "Anywhere").
 
 | Command | Answers |
 | --- | --- |
@@ -495,4 +498,4 @@ Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
 
 ## Future
 
-**Scope: one-time-anywhere** — Anywhere's STUN follows the **remote-network** scope in [remote-network.md](./remote-network.md). A per-IP cap on concurrent rooms remains beside the mint limit.
+**Scope: one-time-anywhere** — Anywhere's choice in the panel follows the **remote-network** scope in [remote-network.md](./remote-network.md). A per-IP cap on concurrent rooms remains beside the mint limit.
