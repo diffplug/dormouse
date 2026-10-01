@@ -2,45 +2,44 @@ browser:
   default_viewport: desktop
 
 tools:
+  # HMR dev server for our storybook
   storybook:
     run: pnpm storybook
     render: agent-browser-screencast
     port: auto
     prespawn_dedupe: [storybook, $PROJECT_ROOT]
 
+  # spawns a standalone Dormouse with the UI backed by agent-browser (frontend HMR, static backend)
   innerdogfood:
     run: pnpm innerdogfood
     render: agent-browser-screencast
     port: announced
     prespawn_dedupe: [innerdogfood, $PROJECT_ROOT]
 
+  # HMR for playground / marketing / docs at dormouse.sh
   website:
     run: pnpm dev:website
     render: agent-browser-screencast
     port: auto
     prespawn_dedupe: [website, $PROJECT_ROOT]
 
+  # Selfhost Relay serving Pocket, for testing remote control locally (static build of both, restart to see changes)
   relay:
     run: pnpm dev:relay
     render: agent-browser-screencast
     port: auto
     prespawn_dedupe: [relay, $PROJECT_ROOT]
 
+  # HMR for the frontend of hosted.dormouse.sh (backend needs a restart; needs Docker for Postgres)
   hosted:
     run: pnpm dev:hosted
     render: agent-browser-screencast
     port: auto
     prespawn_dedupe: [hosted, $PROJECT_ROOT]
 
-  # The one-time rendezvous and phone page on loopback, for trying a one-time
-  # connection end to end: build a Burrow with the variables it prints, then
-  # open a link from its Settings. Port 8787 (or PORT), fixed because that
-  # Burrow build bakes the origin in, so one checkout at a time.
+  # One-time connection rendezvous + phone page on localhost:8787 (Worker reloads on save, page rebuilds on save, no HMR); fixed port, so one checkout at a time
   one-time:
     run: pnpm dev:one-time
-    # A real browser, so an agent can drive the phone page at a phone viewport.
     render: agent-browser-screencast
-    # Wrangler's inspector binds a second port in the same tree, so the loop
-    # announces the page's port and path via OSC 367 once the Worker answers.
     port: announced
     prespawn_dedupe: [one-time, $PROJECT_ROOT]
