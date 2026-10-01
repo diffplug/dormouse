@@ -54,6 +54,12 @@ makes — Anywhere's STUN, the Hosted Relay — would promise traffic that never
 happens, and a missing row would hide one that does. The prototype listed the
 whole design; the real list drops each row until its stage ships.
 
+**Why the push row names its condition (2026-09-30).** Push is on by the
+application default or by any Workspace's own override, and Workspaces in other
+windows are out of the panel's reach, so a row keyed on the default alone
+omitted a push the code sends. Listed whenever a phone is paired, the row's
+"where push is on" is true however push was turned on.
+
 **Why the panel fills the LAN prefixes.** `setNetworkPolicy` takes a policy
 only exactly and answers what it saved; filling in networks there would save
 something the request did not say. The panel already holds the interfaces the

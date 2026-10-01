@@ -67,6 +67,16 @@ export function levelsFor(mode: RelayMode): NetworkLevel[] {
   return mode === 'self-host' ? ['nothing', 'relay'] : ['nothing', 'local'];
 }
 
+/**
+ * Whether `level` runs the persistent Burrow — the relay socket and everything
+ * that needs it: `relay` alone today. **Every other level holds an enrollment
+ * without running it**, since only My Relay only has a path rule for a
+ * persistent session (`docs/specs/remote-network.md` → "Policy").
+ */
+export function runsBurrow(level: NetworkLevel): boolean {
+  return level === 'relay';
+}
+
 /** What `networkPolicy` answers, for a build of `mode`. */
 export function networkPolicyResult(
   policy: NetworkPolicy,

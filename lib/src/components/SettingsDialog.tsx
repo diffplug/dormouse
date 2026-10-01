@@ -9,9 +9,9 @@ import {
   MODAL_OVERLAY_INSET,
   ModalCloseButton,
   ModalFrame,
+  INLINE_ACTION_CLASS,
   OVERLAY_MAX_HEIGHT,
-  SUBTLE_ACTION_COLOR_CLASS,
-  SUBTLE_ACTION_INTERACTION_CLASS,
+  SETTINGS_SECTION,
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
@@ -19,7 +19,7 @@ import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
-import { NetworkPhones, NetworkSettings, NetworkUpdates, useNetworkLevel } from './NetworkSettings';
+import { NetworkPhones, NetworkSettings, NetworkUpdates, useNetworkOff } from './NetworkSettings';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
@@ -39,9 +39,6 @@ import {
 const TITLE_ID = 'settings-dialog-title';
 const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
-/** The divider above a settings group. */
-const SECTION = 'mt-4 border-t border-border pt-3';
-
 /** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
 const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
 
@@ -52,11 +49,7 @@ const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:mi
 function NetworkTopicLink({ onShow }: { onShow?: () => void }) {
   if (!onShow) return <>Settings → Network</>;
   return (
-    <button
-      type="button"
-      className={`rounded px-0.5 ${SUBTLE_ACTION_COLOR_CLASS} ${SUBTLE_ACTION_INTERACTION_CLASS}`}
-      onClick={onShow}
-    >
+    <button type="button" className={INLINE_ACTION_CLASS} onClick={onShow}>
       Network
     </button>
   );
@@ -260,7 +253,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setOpenMenu(null);
     scrollToTopic(id);
   };
-  const showNetwork = () => chooseTopic('network');
+  // A search can hide the topic its link names, so the link clears it first.
+  const showNetwork = () => {
+    setQuery('');
+    chooseTopic('network');
+  };
 
   useLayoutEffect(() => {
     followScroll();
@@ -427,7 +424,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   </div>
                 </div>
               </section>
-              <section data-setting="inactivity" hidden={!matches('inactivity')} className={SECTION}>
+              <section data-setting="inactivity" hidden={!matches('inactivity')} className={SETTINGS_SECTION}>
                 <SecondsField
                   label="Inactivity timeout:"
                   valueMs={settings.inactivityTimeoutMs}
@@ -484,7 +481,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
   const managedVoiceOffered = useManagedVoiceOffered();
   // Under Nothing the service sends no push and managed voice asks nothing
   // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
-  const networkOff = useNetworkLevel() === 'nothing';
+  const networkOff = useNetworkOff();
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -495,7 +492,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
   return sink === 'speech' ? (
     <>
       <AlarmSinkSection
-        className={preview ? '' : SECTION}
+        className={preview ? '' : SETTINGS_SECTION}
         switchLabel="Speak out loud if not attended"
         delayLabel="Delay before speaking:"
         enabled={settings.speakEnabled}
@@ -504,20 +501,20 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
         onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
         action={preview ? null : <SpeakTestButton />}
       >
-        {managedVoiceOffered && networkOff ? (
-          <>
-            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
-            so alerts use your browser or system voice.
-          </>
-        ) : managedVoiceOffered ? (
-          'Uses managed voice while a voice token is saved, otherwise your browser or system voice.'
-        ) : (
+        {!managedVoiceOffered ? (
           <>
             Uses your browser or system voice.{' '}
             <ExternalTextLink href={HOSTED_VOICE_URL}>
               Managed ElevenLabs voice is coming soon.
             </ExternalTextLink>
           </>
+        ) : networkOff ? (
+          <>
+            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
+            so alerts use your browser or system voice.
+          </>
+        ) : (
+          'Uses managed voice while a voice token is saved, otherwise your browser or system voice.'
         )}
       </AlarmSinkSection>
       {preview ? null : (
@@ -528,7 +525,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
     </>
   ) : (
     <AlarmSinkSection
-      className={preview ? '' : SECTION}
+      className={preview ? '' : SETTINGS_SECTION}
       switchLabel="Send push notification if not attended"
       delayLabel="Delay before push:"
       enabled={settings.pushEnabled}

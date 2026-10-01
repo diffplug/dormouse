@@ -545,18 +545,18 @@ describe('DirectPeer', () => {
     });
 
     it('applies the peer’s description as the policy accepts it', async () => {
-      const run = pair({}, lanOnlyPolicy(undefined, (sdp) => `${sdp}a=accepted\r\n`));
+      const run = pair({}, lanOnlyPolicy({ acceptRemote: (sdp) => `${sdp}a=accepted\r\n` }));
       const offer = await run.clientPeer.offer();
       await run.burrowPeer.answer(offer!);
       expect(run.answerer.remoteDescription).toEqual({ type: 'offer', sdp: `${offer}a=accepted\r\n` });
     });
 
     it('sends its description as the policy describes it, and refuses when nothing is left', async () => {
-      const stripped = pair({}, lanOnlyPolicy((sdp) => `${sdp}a=described\r\n`));
+      const stripped = pair({}, lanOnlyPolicy({ describe: (sdp) => `${sdp}a=described\r\n` }));
       const offer = await stripped.clientPeer.offer();
       expect(await stripped.burrowPeer.answer(offer!)).toMatch(/a=described\r\n$/);
 
-      const empty = pair({}, lanOnlyPolicy(() => null));
+      const empty = pair({}, lanOnlyPolicy({ describe: () => null }));
       expect(await empty.burrowPeer.answer((await empty.clientPeer.offer())!)).toBeNull();
       expect(empty.burrow.refusals).toEqual(['no candidate of this end is on an allowed network']);
       expect(empty.answerer.closed).toBe(true);

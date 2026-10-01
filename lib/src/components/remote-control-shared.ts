@@ -1,14 +1,41 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 /**
  * What the Remote control choices' two QR panels share: the Relay's "Set up a
  * phone" (`RemoteControlSection.tsx`) and the one-time connection
  * (`OneTimeConnection.tsx`), whose Baseboard indicator (`OneTimeIndicator.tsx`)
- * repeats its connected sentence.
+ * repeats its connected sentence — and the action hook Settings → Network's
+ * panels share with them.
  */
 
 export const FIELD_LABEL = 'text-xs text-muted';
 export const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
+
+/**
+ * A busy/error pair for an action surface with one error location; `run`
+ * answers whether the action succeeded. Enrollment uses its cross-form gate
+ * instead (`RemoteControlSection.tsx`).
+ */
+export function useBusyAction() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(async (action: () => Promise<void>): Promise<boolean> => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+      return true;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  return { busy, error, run };
+}
 
 /** What a connected one-time phone can do, as the panel and the indicator's tooltip say it. */
 export function oneTimeControlSentence(label: string): string {

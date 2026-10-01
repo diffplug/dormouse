@@ -9,21 +9,16 @@ import { DEFAULT_MANAGED_VOICE_ID, type ManagedVoicePort } from './managed-voice
 import type { UpdatesPort, UpdatesSnapshot } from './types';
 
 /** An updater whose last successful check was `checkedAt`; Check now succeeds at once. */
-export function makeStubUpdatesPort(checkedAt: number | null): UpdatesPort & { readonly checks: number } {
+export function makeStubUpdatesPort(checkedAt: number | null): UpdatesPort {
   let snapshot: UpdatesSnapshot = { checkedAt, checking: false };
-  let checks = 0;
   const listeners = new Set<() => void>();
   return {
-    get checks() {
-      return checks;
-    },
     getSnapshot: () => snapshot,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => void listeners.delete(listener);
     },
     checkNow: () => {
-      checks += 1;
       snapshot = { checkedAt: Date.now(), checking: false };
       for (const listener of listeners) listener();
     },

@@ -108,3 +108,28 @@ export async function setNetworkPolicy(policy: NetworkPolicy): Promise<void> {
   const network = await active.command('setNetworkPolicy', { policy });
   if (mine === generation && isNetworkPolicyResult(network)) publish({ kind: 'ready', network });
 }
+
+/** The tail of {@link changeNetworkPolicy}'s queue, settled either way. */
+let changing: Promise<void> = Promise.resolve();
+
+/**
+ * Hold the policy `change` makes of the service's latest answer, or nothing
+ * when it answers `null`. **Changes run one at a time**, each reading the
+ * answer the one before it left, so a second click before the first lands
+ * builds on it rather than on what the panel showed, which the first would
+ * otherwise lose.
+ */
+export function changeNetworkPolicy(
+  change: (network: NetworkPolicyResult) => NetworkPolicy | null,
+): Promise<void> {
+  const run = changing.then(async () => {
+    const current = snapshot;
+    if (current.kind !== 'ready') {
+      throw new Error(current.kind === 'error' ? current.message : 'The network setting is not loaded yet.');
+    }
+    const next = change(current.network);
+    if (next) await setNetworkPolicy(next);
+  });
+  changing = run.catch(() => {});
+  return run;
+}

@@ -2211,10 +2211,12 @@ describe('network policy', () => {
         { ...RELAY_ON, extra: true },
         { level: 'relay', allowed: [] },
         { ...RELAY_ON, autoUpdate: 'yes' },
-        { ...RELAY_ON, allowed: ['192.168.1.7/24'] },
-        { ...RELAY_ON, allowed: ['2001:DB8::/32'] },
         { ...RELAY_ON, allowed: ['example.com/24'] },
+        { ...RELAY_ON, allowed: ['192.168.1.0/33'] },
+        { ...RELAY_ON, allowed: ['fe80::1%en0/64'] },
         { ...RELAY_ON, allowed: [LAN, LAN] },
+        // The same range twice, once as its canonical form spells it.
+        { ...RELAY_ON, allowed: [LAN, '192.168.1.7/24'] },
         { ...RELAY_ON, allowed: Array.from({ length: 33 }, (_, i) => `10.${i}.0.0/16`) },
       ];
       for (const policy of bad) {
@@ -2228,6 +2230,19 @@ describe('network policy', () => {
       // The bound itself is allowed, in either family.
       const allowed = [...Array.from({ length: 31 }, (_, i) => `10.${i}.0.0/16`), '2001:db8::/32'];
       expect((await setPolicy({ ...RELAY_ON, allowed })).error).toBeUndefined();
+    });
+
+    it('saves each allowed network in its canonical form, and answers that', async () => {
+      createHostedService();
+      await service.start();
+      const typed = { ...LOCAL_ON, allowed: ['192.168.1.7/24', '2001:DB8:0:0::1/32', '10.8.0.0/24'] };
+      const canonical = { ...LOCAL_ON, allowed: [LAN, '2001:db8::/32', '10.8.0.0/24'] };
+
+      const { result, error } = await setPolicy(typed);
+      expect(error).toBeUndefined();
+      expect((result as { policy: NetworkPolicy }).policy).toEqual(canonical);
+      expect(store.network).toEqual(canonical);
+      expect(policyEvents().at(-1)!.policy).toEqual(canonical);
     });
 
     it('announces a saved policy even when the Burrow it allows cannot start', async () => {

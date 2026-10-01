@@ -240,4 +240,20 @@ describe('SettingsDialog under Network → Nothing', () => {
     await advanceScroll();
     expect(scrollTo).toHaveBeenLastCalledWith({ top: 900, behavior: 'instant' });
   });
+
+  it('clears a search that hides the Network topic before following the link to it', async () => {
+    platform.burrow = makeStubBurrowLink({
+      status: UNENROLLED_STATUS,
+      network: networkPolicyResult(nothingPolicy(), 'hosted', []),
+    });
+    await render();
+    await search('push is off');
+    const network = document.querySelector<HTMLElement>('[data-settings-topic="network"]')!;
+    expect(network.hidden).toBe(true);
+
+    const link = visible('[data-setting="push"] button').find((button) => button.textContent === 'Network')!;
+    await act(async () => link.click());
+    expect(document.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('');
+    expect(network.hidden).toBe(false);
+  });
 });

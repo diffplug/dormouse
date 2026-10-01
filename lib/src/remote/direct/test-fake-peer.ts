@@ -78,21 +78,20 @@ const HOST_CANDIDATE: Record<FakePeerRole, string> = {
 /**
  * A path policy allowing only {@link FAKE_LAN_PAIR}'s LAN, by string prefix —
  * the address math is the host's, and `lib/src/host/remote/local-networks.test.ts`
- * pins it — recording every pair it is asked about. It binds nothing,
- * describes as `describe` does, and accepts the peer's description as
- * `acceptRemote` does: both as given, by default.
+ * pins it — recording every pair it is asked about. It binds nothing, and
+ * passes both descriptions through as given unless `over` says otherwise.
  */
 export function lanOnlyPolicy(
-  describe: DirectPathPolicy['describe'] = (sdp) => sdp,
-  acceptRemote: DirectPathPolicy['acceptRemote'] = (sdp) => sdp,
+  over: Partial<Pick<DirectPathPolicy, 'describe' | 'acceptRemote'>> = {},
 ): DirectPathPolicy & { readonly asked: Array<DirectSelectedPair | null> } {
   const asked: Array<DirectSelectedPair | null> = [];
   const onLan = (address: string | null) => address?.startsWith('192.168.1.') ?? false;
   return {
     asked,
     bindAddress: () => null,
-    describe,
-    acceptRemote,
+    describe: (sdp) => sdp,
+    acceptRemote: (sdp) => sdp,
+    ...over,
     refusal: (pair) => {
       asked.push(pair);
       return pair && onLan(pair.local) && onLan(pair.remote) ? null : 'off the LAN';

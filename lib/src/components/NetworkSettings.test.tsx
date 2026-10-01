@@ -5,10 +5,14 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setPlatform } from '../lib/platform';
+import { setNativeFieldValue } from '../lib/dom';
+import { canonicalCidr } from '../host/remote/network-interfaces';
 import { FakePtyAdapter } from '../lib/platform/fake-adapter';
+import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { makeStubUpdatesPort } from '../lib/platform/test-ports';
 import {
   LAN,
+  LOCAL_ON as LOCAL,
   RELAY_ON,
   SELF_HOST_UNENROLLED_STATUS,
   UNENROLLED_STATUS,
@@ -17,10 +21,10 @@ import {
   type PrimedBurrow,
 } from '../host/remote/test-burrow-link';
 import {
+  MAX_ALLOWED_NETWORKS,
   networkPolicyResult,
   nothingPolicy,
   type NetworkInterfaceInfo,
-  type NetworkLevel,
   type NetworkPolicy,
 } from '../remote/network-policy';
 import {
@@ -40,23 +44,14 @@ const TAILSCALE: NetworkInterfaceInfo = { id: 'utun4', label: 'Tailscale', kind:
 const DOCKER: NetworkInterfaceInfo = { id: 'bridge100', label: 'Virtual network', kind: 'virtual', prefixes: ['192.168.215.0/24'] };
 const INTERFACES = [WIFI, ETHERNET, TAILSCALE, DOCKER];
 
-const HOSTED_ORIGIN = UNENROLLED_STATUS.relayOrigin;
-const LOCAL: NetworkPolicy = { level: 'local', allowed: [LAN], autoUpdate: false };
-
 /** A Hosted build, un-enrolled, network on and nothing else. */
 function facts(over: Partial<NetworkFacts> = {}): NetworkFacts {
-  return {
-    policy: LOCAL,
-    relayOrigin: HOSTED_ORIGIN,
-    relayMode: 'hosted',
-    enrolled: false,
-    pairedClients: 0,
-    pushEnabled: false,
-    managedVoice: false,
-    updater: false,
-    ...over,
-  };
+  return { policy: LOCAL, status: UNENROLLED_STATUS, managedVoice: false, updater: false, ...over };
 }
+
+/** A self-host build under My Relay only, enrolled with `pairedClients` phones. */
+const relayFacts = (pairedClients = 0) =>
+  ({ policy: RELAY_ON, status: enrolledStatus({ pairedClients }) }) satisfies Partial<NetworkFacts>;
 
 const destinations = (over: Partial<NetworkFacts>) => connectionsFor(facts(over)).map((row) => row.to);
 
@@ -65,10 +60,9 @@ describe('connectionsFor', () => {
     expect(
       connectionsFor(facts({
         policy: { ...nothingPolicy(), autoUpdate: true },
+        status: enrolledStatus({ pairedClients: 1 }),
         managedVoice: true,
         updater: true,
-        pushEnabled: true,
-        pairedClients: 1,
       })),
     ).toEqual([]);
   });
@@ -87,21 +81,24 @@ describe('connectionsFor', () => {
   });
 
   it('lists the Relay always, once enrolled, and the phone directly, under My Relay only', () => {
-    const relay = { policy: RELAY_ON, relayOrigin: SELF_HOST_UNENROLLED_STATUS.relayOrigin, relayMode: 'self-host' } as const;
-    const enrolled = connectionsFor(facts({ ...relay, enrolled: true }));
-    expect(enrolled.map((row) => [row.to, row.when])).toEqual([
+    expect(connectionsFor(facts(relayFacts())).map((row) => [row.to, row.when])).toEqual([
       ['ned-mac.tail9c2f1.ts.net', 'Always'],
       ['Your phone, directly', 'While connected'],
     ]);
-    expect(connectionsFor(facts(relay))[0]!.when).toBe('Always, once this computer is enrolled');
+    const unenrolled = facts({ policy: RELAY_ON, status: SELF_HOST_UNENROLLED_STATUS });
+    expect(connectionsFor(unenrolled)[0]!.when).toBe('Always, once this computer is enrolled');
   });
 
-  it('lists push through the Relay only with push on and a phone paired', () => {
-    const relay = { policy: RELAY_ON, relayOrigin: SELF_HOST_UNENROLLED_STATUS.relayOrigin, relayMode: 'self-host', enrolled: true } as const;
-    const push = 'ned-mac.tail9c2f1.ts.net → your phone’s push service';
-    expect(destinations({ ...relay, pushEnabled: true, pairedClients: 1 })).toContain(push);
-    expect(destinations({ ...relay, pushEnabled: true })).not.toContain(push);
-    expect(destinations({ ...relay, pairedClients: 1 })).not.toContain(push);
+  it('lists push through the Relay once a phone is paired, naming the push setting as its condition', () => {
+    // Push may be on in a Workspace, some in other windows, with the default
+    // off, so the list cannot read it and states the condition instead.
+    const push = connectionsFor(facts(relayFacts(1))).find((row) => row.to.endsWith('your phone’s push service'));
+    expect(push).toEqual({
+      to: 'ned-mac.tail9c2f1.ts.net → your phone’s push service',
+      when: 'When an alert goes unattended, where push is on',
+      carries: 'An end-to-end encrypted notification.',
+    });
+    expect(destinations(relayFacts(0))).not.toContain(push!.to);
   });
 
   it('lists Hosted for managed voice only with a token saved, in a Hosted build', () => {
@@ -115,7 +112,7 @@ describe('connectionsFor', () => {
       },
     ]);
     expect(voice({})).toEqual([]);
-    expect(voice({ managedVoice: true, relayMode: 'self-host', policy: RELAY_ON }).map((row) => row.when))
+    expect(voice({ ...relayFacts(), managedVoice: true }).map((row) => row.when))
       .not.toContain('When an alert is spoken in the managed voice');
   });
 
@@ -147,7 +144,7 @@ describe('policyForLevel', () => {
   it('keeps the networks already allowed, and fills nothing for another level', () => {
     const typed = { ...nothingPolicy(), allowed: ['10.8.0.0/24'] };
     expect(policyForLevel(network(typed), 'local').allowed).toEqual(['10.8.0.0/24']);
-    expect(policyForLevel(network(nothingPolicy()), 'relay' as NetworkLevel).allowed).toEqual([]);
+    expect(policyForLevel(network(nothingPolicy()), 'relay').allowed).toEqual([]);
     expect(policyForLevel(network({ ...LOCAL, autoUpdate: true }), 'nothing')).toEqual({
       level: 'nothing',
       allowed: [LAN],
@@ -216,7 +213,7 @@ describe('Settings → Network', () => {
     await render();
     const radios = [...container.querySelectorAll('[role="radio"]')].map((radio) => radio.textContent);
     expect(radios.map((label) => label?.split('.')[0])).toEqual([
-      'NothingDormouse opens no connections on its own',
+      'NothingDormouse opens no connections on its own, and phones can’t reach it',
       'Local networksPhones connect only over networks you choose',
     ]);
   });
@@ -248,6 +245,160 @@ describe('Settings → Network', () => {
     expect(text()).toContain('disk full');
   });
 
+  describe('a second change before the first lands', () => {
+    /** Hold every `setNetworkPolicy` until `release` answers the oldest one. */
+    function holdSets(): () => Promise<void> {
+      const held: Array<() => void> = [];
+      const stub = command;
+      command = vi.fn((cmd: string, params?: unknown) =>
+        cmd === 'setNetworkPolicy'
+          ? new Promise((resolve) => held.push(() => resolve(stub(cmd, params))))
+          : stub(cmd, params));
+      platform.burrow = { ...platform.burrow!, command };
+      return async () => {
+        await act(async () => held.shift()!());
+        await act(async () => {});
+      };
+    }
+    const sent = () =>
+      command.mock.calls.filter(([cmd]) => cmd === 'setNetworkPolicy').map(([, params]) => (params as { policy: NetworkPolicy }).policy);
+
+    it('builds on the first, so two switches turned on both stay on', async () => {
+      link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
+      const release = holdSets();
+      await render();
+      const allow = (label: string) =>
+        container.querySelector<HTMLElement>(`[role="switch"][aria-label="Allow ${label} off"]`)!;
+      const tailscale = allow('Tailscale utun4');
+      const docker = allow('Virtual network bridge100');
+      await act(async () => {
+        tailscale.click();
+        docker.click();
+      });
+      await release();
+      await release();
+      expect(sent()).toEqual([
+        { ...LOCAL, allowed: [LAN, '100.64.0.0/10'] },
+        { ...LOCAL, allowed: [LAN, '100.64.0.0/10', '192.168.215.0/24'] },
+      ]);
+    });
+
+    it('lands on the level chosen last', async () => {
+      link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
+      const release = holdSets();
+      await render();
+      const radio = (name: string) =>
+        [...container.querySelectorAll<HTMLElement>('[role="radio"]')].find((el) => el.textContent?.startsWith(name))!;
+      const [local, nothing] = [radio('Local networks'), radio('Nothing')];
+      await act(async () => {
+        local.click();
+        nothing.click();
+      });
+      await release();
+      await release();
+      expect(sent().map((policy) => policy.level)).toEqual(['local', 'nothing']);
+      expect(radio('Nothing').getAttribute('aria-checked')).toBe('true');
+    });
+  });
+
+  /** Wrap the stub's `command` so `intercept` may answer first; `undefined` falls through. */
+  function intercept(answer: (cmd: string, params: unknown) => unknown) {
+    const stub = command;
+    command = vi.fn(async (cmd: string, params?: unknown) => {
+      const answered = answer(cmd, params);
+      return answered === undefined ? stub(cmd, params) : answered;
+    });
+    platform.burrow = { ...platform.burrow!, command };
+  }
+  const sentPolicies = () =>
+    command.mock.calls.filter(([cmd]) => cmd === 'setNetworkPolicy').map(([, params]) => (params as { policy: NetworkPolicy }).policy);
+
+  it('offers Disconnect for an enrollment Nothing holds, without leaving Nothing', async () => {
+    link({ status: enrolledStatus({ connection: 'stopped' }), network: networkPolicyResult(nothingPolicy(), 'self-host', []) });
+    await render();
+    expect(text()).toContain('Enrolled with https://ned-mac.tail9c2f1.ts.net');
+    await act(async () => button('Disconnect').click());
+    await act(async () => button('Disconnect').click());
+    expect(command.mock.calls.map(([cmd]) => cmd)).toContain('clearEnrollment');
+    expect(sentPolicies()).toEqual([]);
+  });
+
+  it('shows every allowed range, a partly allowed interface’s included', async () => {
+    // Wi-Fi and Ethernet share the LAN; each also has a range of its own.
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
+    await render();
+    expect(container.querySelector('[role="switch"][aria-label="Allow Local network en0 off"]')).not.toBeNull();
+    expect(text()).toContain(`Part of Local network · en0${LAN}`);
+    await act(async () => container.querySelector<HTMLElement>(`button[aria-label="Remove ${LAN}"]`)!.click());
+    expect(sentPolicies()).toEqual([{ ...LOCAL, allowed: [] }]);
+  });
+
+  it('keeps a range another switch reading On still needs when one is turned off', async () => {
+    const both = { ...LOCAL, allowed: [LAN, 'fd00:1::/64', '10.1.0.0/16'] };
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(both, 'hosted', INTERFACES) });
+    await render();
+    await act(async () =>
+      container.querySelector<HTMLElement>('[role="switch"][aria-label="Allow Local network en5 on"]')!.click());
+    expect(sentPolicies()).toEqual([{ ...both, allowed: [LAN, 'fd00:1::/64'] }]);
+  });
+
+  it('says how many ranges may be allowed rather than sending one too many', async () => {
+    const full = Array.from({ length: MAX_ALLOWED_NETWORKS }, (_, i) => `10.${i}.0.0/16`);
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult({ ...LOCAL, allowed: full }, 'hosted', INTERFACES) });
+    await render();
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Add an allowed network range"]')!;
+    await act(async () => setNativeFieldValue(input, '10.99.0.0/16'));
+    await act(async () => button('Add').click());
+    expect(text()).toContain(`At most ${MAX_ALLOWED_NETWORKS} ranges can be allowed. Remove one first.`);
+    expect(sentPolicies()).toEqual([]);
+  });
+
+  it('keeps the choice up through a failed status read', async () => {
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
+    await render();
+    intercept((cmd) => (cmd === 'status' ? Promise.reject(new Error('bridge timed out')) : undefined));
+    await act(async () => refreshBurrowStatus());
+    expect(container.querySelectorAll('[role="radio"]')).toHaveLength(2);
+    expect(text()).not.toContain('Could not read this computer’s network setting');
+  });
+
+  it('lists the update check in a window without the updater’s port, which the build still runs', async () => {
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult({ ...LOCAL, autoUpdate: true }, 'hosted', INTERFACES) });
+    await render();
+    const listed = () => [...container.querySelectorAll('dt')].map((dt) => dt.textContent);
+    expect(listed()).toContain('dormouse.sh');
+
+    // VS Code's Marketplace updates the extension, so nothing of Dormouse's checks.
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    platform.hostOwnsUpdates = true;
+    await render();
+    expect(listed()).not.toContain('dormouse.sh');
+  });
+
+  it('lists a typed range as the service saved it, in canonical form', async () => {
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
+    // The service's canonical save (`requestedNetworkPolicy`), over the stub.
+    const stub = command;
+    command = vi.fn(async (cmd: string, params?: unknown) => {
+      if (cmd !== 'setNetworkPolicy') return stub(cmd, params);
+      const { policy } = params as { policy: NetworkPolicy };
+      return stub(cmd, { policy: { ...policy, allowed: policy.allowed.map((cidr) => canonicalCidr(cidr)!) } });
+    });
+    platform.burrow = { ...platform.burrow!, command };
+    await render();
+
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Add an allowed network range"]')!;
+    await act(async () => setNativeFieldValue(input, ' 10.8.0.7/24 '));
+    await act(async () => button('Add').click());
+    expect(command).toHaveBeenCalledWith('setNetworkPolicy', {
+      policy: { ...LOCAL, allowed: [LAN, '10.8.0.7/24'] },
+    });
+    expect(text()).toContain('Added range · not connected now10.8.0.0/24');
+    expect(text()).not.toContain('10.8.0.7');
+    expect(input.value).toBe('');
+  });
+
   describe('updates', () => {
     const hosted = (policy: NetworkPolicy) => ({
       status: UNENROLLED_STATUS,
@@ -256,13 +407,12 @@ describe('Settings → Network', () => {
 
     it('says when the last check was, and checks now, where this window has the updater', async () => {
       link(hosted({ ...LOCAL, autoUpdate: true }));
-      const port = makeStubUpdatesPort(null);
-      platform.updates = port;
+      platform.updates = makeStubUpdatesPort(null);
       await render();
       expect(text()).toContain('Checked at each launch. Never checked on this computer.');
       expect(text()).toContain('The bottom bar reminds you after a week without a successful check.');
+      // Only the stub's `checkNow` records a check.
       await act(async () => button('Check now').click());
-      expect(port.checks).toBe(1);
       expect(text()).toContain('Last checked today.');
     });
 

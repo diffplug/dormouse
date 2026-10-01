@@ -54,6 +54,7 @@ import {
   networkPolicyResult,
   nothingPolicy,
   parseNetworkPolicy,
+  runsBurrow,
   type NetworkInterfaceInfo,
   type NetworkLevel,
   type NetworkPolicy,
@@ -169,16 +170,6 @@ export function canEnroll(relay: RelayBuild): boolean {
 const NETWORK_OFF_REFUSAL =
   'Settings → Network is set to Nothing, so this computer opens no connections on its own.';
 
-/**
- * Whether `level` runs the persistent Burrow — the relay socket and everything
- * that needs it: `relay` alone today. **Every other level holds an enrollment
- * without running it**, since only My Relay only has a path rule for a
- * persistent session (`docs/specs/remote-network.md` → "Policy").
- */
-function runsBurrow(level: NetworkLevel): boolean {
-  return level === 'relay';
-}
-
 /** What `oneTimeOpen` answers under `local` with no network allowed. */
 const NO_NETWORK_ALLOWED_REFUSAL =
   'No network is allowed under Local networks, so no phone can connect. Allow one in Settings → Network.';
@@ -207,8 +198,8 @@ export async function peekNetworkPolicyFor(
 
 /**
  * The policy a `setNetworkPolicy` names, taken only exactly: a level this build
- * offers, and every allowed network a canonical CIDR, listed once. Throws what
- * the webview shows.
+ * offers, and every allowed network a CIDR, saved in its canonical form and
+ * listed once in that form. Throws what the webview shows.
  */
 function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolicy {
   const policy = parseNetworkPolicy(value);
@@ -220,13 +211,18 @@ function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolic
   if (!levelsFor(relay.mode).includes(policy.level)) {
     throw new Error(`This build does not offer the ${policy.level} level.`);
   }
-  if (policy.allowed.some((cidr) => canonicalCidr(cidr) !== cidr)) {
-    throw new Error('Each allowed network must be a range in canonical form, such as 192.168.1.0/24.');
+  const allowed: string[] = [];
+  for (const cidr of policy.allowed) {
+    const canonical = canonicalCidr(cidr);
+    if (canonical === null) {
+      throw new Error(`${cidr} is not an address range, such as 192.168.1.0/24.`);
+    }
+    if (allowed.includes(canonical)) {
+      throw new Error(`${canonical} is already allowed.`);
+    }
+    allowed.push(canonical);
   }
-  if (new Set(policy.allowed).size !== policy.allowed.length) {
-    throw new Error('An allowed network is listed twice.');
-  }
-  return policy;
+  return { ...policy, allowed };
 }
 
 /** Whether two policies allow the same paths: the level, and the networks as a set. */

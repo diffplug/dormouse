@@ -605,7 +605,7 @@ describe('OneTimeRuntime: the session', () => {
     });
 
     it('ends network-not-allowed when no candidate of its own is on an allowed network', async () => {
-      makeRuntime({ directPathPolicy: lanOnlyPolicy(() => null) });
+      makeRuntime({ directPathPolicy: lanOnlyPolicy({ describe: () => null }) });
       const { phone } = await connecting();
       phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await network.createOfferer().createOffer()).sdp! });
       await settleUntil(() => runtime.state.status === 'ended');

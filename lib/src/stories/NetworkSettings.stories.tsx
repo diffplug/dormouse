@@ -118,9 +118,9 @@ export const NothingChooseFromPhones: Story = {
     await userEvent.click(canvas.getByRole('button', { name: 'Local networks' }));
     await waitFor(() =>
       expect(canvas.getByRole('radio', { name: /^Local networks/ })).toHaveAttribute('aria-checked', 'true'));
-    await expect(canvas.getByRole('switch', { name: 'Allow Local network on' })).toBeVisible();
-    await expect(canvas.getByRole('switch', { name: 'Allow Tailscale off' })).toBeVisible();
-    await expect(canvas.getByRole('switch', { name: 'Allow Virtual network off' })).toBeVisible();
+    await expect(canvas.getByRole('switch', { name: 'Allow Local network en0 on' })).toBeVisible();
+    await expect(canvas.getByRole('switch', { name: 'Allow Tailscale utun4 off' })).toBeVisible();
+    await expect(canvas.getByRole('switch', { name: 'Allow Virtual network bridge100 off' })).toBeVisible();
     await canvas.findByRole('button', { name: 'One-time connection' });
   },
 };
@@ -201,10 +201,7 @@ export const ManagedVoice: Story = {
 
 /** A self-host build: its own Relay or nothing, push through it, and no updater. */
 export const SelfHost: Story = {
-  parameters: {
-    primedBurrow: selfHost(RELAY_ON, enrolledStatus({ pairedClients: 1 })),
-    primedAlertSettings: { pushEnabled: true },
-  },
+  parameters: { primedBurrow: selfHost(RELAY_ON, enrolledStatus({ pairedClients: 1 })) },
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
     await expect(canvas.getByRole('radio', { name: /^My Relay only/ })).toHaveAttribute('aria-checked', 'true');
@@ -220,6 +217,17 @@ export const SelfHostNothing: Story = {
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
     await canvas.findByRole('button', { name: 'My Relay only' });
+  },
+};
+
+/** Nothing, with an enrollment held: Disconnect, which is local, stays in reach. */
+export const SelfHostNothingEnrolled: Story = {
+  parameters: { primedBurrow: selfHost(nothingPolicy(), enrolledStatus({ connection: 'stopped', serving: false })) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/which nothing reaches while Network is set to Nothing/);
+    await userEvent.click(canvas.getByRole('button', { name: 'Disconnect' }));
+    await canvas.findByText('Paired phones will need to pair again.');
   },
 };
 

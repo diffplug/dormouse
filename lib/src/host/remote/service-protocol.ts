@@ -335,7 +335,8 @@ export interface TakeBackResult {
 /**
  * The whole policy to hold from now on (`docs/specs/remote-network.md` ->
  * "Policy"). The service takes it only exactly: a level this build offers, at
- * most `MAX_ALLOWED_NETWORKS` canonical CIDRs, a boolean `autoUpdate`.
+ * most `MAX_ALLOWED_NETWORKS` CIDRs, a boolean `autoUpdate` — and saves, and
+ * answers, each CIDR in its canonical form.
  */
 export interface SetNetworkPolicyParams {
   policy: NetworkPolicy;
