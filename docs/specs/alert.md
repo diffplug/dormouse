@@ -265,7 +265,6 @@ Source of truth: `dispatchCompletion` / `setViewer` / `formatCommandExitBody` in
 | dismiss (`a`, Pane Header) | clears the ring, leaving `todo` on with its detail. **With nothing ringing: no change, no notify, a deferred notification kept** |
 | toggle TODO (`t`) | clears the ring; `todo` flips, on keeping the ring's detail, off dropping the notification |
 | an await consumes a source (Await) | withdraws that source |
-| watched work resumes (WATCHING Track) | withdraws `watching` |
 | a rule stops covering the `watching` key | withdraws `watching` |
 
 - **The user verbs acknowledge; a withdrawal never does.** Each also drops whatever was held or deferred, except a dismiss with nothing ringing, and **a dropped hold or deferral leaves no TODO**. A ring a withdrawal empties goes with its detail, leaving `todo` and its notification as they stood.

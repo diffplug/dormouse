@@ -346,8 +346,8 @@ export class AlertManager {
     if (enabled === this.deferAlertsUntilQuiet) return;
     this.deferAlertsUntilQuiet = enabled;
     for (const [id, entry] of this.entries) {
-      if (enabled) this.pauseRingUntilQuiet(id, entry);
-      else this.flushDeferredNotification(id, entry);
+      if (!enabled) this.flushDeferredNotification(id, entry);
+      else if (this.pauseRingUntilQuiet(id, entry)) this.notify(id);
     }
   }
 
@@ -390,7 +390,7 @@ export class AlertManager {
     for (const set of [entry.ring, entry.held]) noteOutput(set);
     entry.ackedQuiet = false;
     this.eachWaiter(id, (waiter) => waiter.onOutput());
-    this.pauseRingUntilQuiet(id, entry);
+    if (this.pauseRingUntilQuiet(id, entry)) this.notify(id);
   }
 
   onExit(id: string, exitCode?: number): void {
@@ -466,13 +466,15 @@ export class AlertManager {
   /**
    * A single accepted redraw is enough to delay, never discard, an owed ring.
    * Exit sources remain authoritative, including a report joined to an exit.
+   * Returns whether the ring just paused; the caller publishes.
    */
-  private pauseRingUntilQuiet(id: string, entry: AlertEntry): void {
+  private pauseRingUntilQuiet(id: string, entry: AlertEntry): boolean {
     const ring = entry.ring;
-    if (!this.deferAlertsUntilQuiet || !entry.detector.hasRecentOutput() || !ring || ring.sources.includes('exit')) return;
-    ring.paused = true;
+    if (!this.deferAlertsUntilQuiet || !entry.detector.hasRecentOutput() || !ring || ring.sources.includes('exit')) return false;
     this.scheduleDeferredNotification(id, entry);
-    this.notify(id);
+    if (ring.paused) return false;
+    ring.paused = true;
+    return true;
   }
 
   /**
@@ -507,9 +509,10 @@ export class AlertManager {
     }
     // The settle completion gets first refusal before delivery held from an
     // earlier event. Never re-offer that historical event to current claimants.
-    // Unconditional: a claimant taking *this* settle says nothing about the
-    // earlier completion it never saw, which is now quiet and due.
-    this.flushDeferredNotification(id, entry);
+    // Regardless of a claimant: taking *this* settle says nothing about the
+    // earlier completion it never saw, which is now quiet and due — unless
+    // output accepted during dispatch renewed the quiet deadline.
+    if (!this.deferAlertsUntilQuiet || !entry.detector.hasRecentOutput()) this.flushDeferredNotification(id, entry);
   }
 
   // --- Completion events ---
@@ -584,8 +587,8 @@ export class AlertManager {
   }
 
   /**
-   * The one path from a completion that may ring to the ring: a live one, a
-   * deferred report coming due and an escalated hold alike. Engaged, it is held for engagement to end;
+   * The path from a completion that may ring to the ring: a live one and an
+   * escalated hold alike. Engaged, it is held for engagement to end;
    * otherwise a report goes through the acknowledged-state check and animation
    * deferral, and anything else rings. Publishes, including a progress cycle
    * the caller cleared before dispatch.
@@ -604,11 +607,11 @@ export class AlertManager {
     } else {
       this.raiseRing(entry, source, detail);
     }
-    // A terminal notification already waiting on animation joins the exit's
-    // ring (or hold) now; keeping its timer would publish stale detail later.
+    // A finish releases both a pause and a terminal notification waiting on
+    // animation, which joins the exit's ring (or hold) now rather than publish
+    // stale detail later.
     if (source === 'exit') {
-      // A finish releases both initial deferral and an already-visible pause.
-      this.flushDeferredNotification(id, entry, true);
+      this.flushDeferredNotification(id, entry);
     } else {
       this.pauseRingUntilQuiet(id, entry);
       this.notify(id);
@@ -1001,8 +1004,8 @@ export class AlertManager {
     }, Math.max(0, entry.detector.quietAt() - Date.now()));
   }
 
-  private flushDeferredNotification(id: string, entry: AlertEntry, commandFinished = false): void {
-    if (!commandFinished && this.deferAlertsUntilQuiet && entry.detector.hasRecentOutput()) return;
+  /** Callers decide quiet: a settle, the wake timer, a finish, or disabling the gate. */
+  private flushDeferredNotification(id: string, entry: AlertEntry): void {
     const deferred = entry.deferred;
     this.clearDeferredNotification(entry);
     if (entry.ring) entry.ring.paused = false;

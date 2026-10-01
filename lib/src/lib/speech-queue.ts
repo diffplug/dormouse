@@ -32,7 +32,8 @@ interface Attempt {
  * ineligible job can still be dropped while it is only pending here.
  *
  * Bounded in both directions, because a wedged or callback-less engine must not
- * retain later alerts: at most {@link MAX_PENDING} pending jobs, and at most
+ * retain later alerts: at most {@link MAX_PENDING} pending jobs admitted (one
+ * more while a paused, unstarted attempt returns to the queue), and at most
  * {@link SPEECH_ENGINE_TIMEOUT_MS} per engine attempt, after which the attempt
  * is cancelled and the queue advances. Callback identity is revoked before any
  * cancel, so a detached late callback cannot settle the attempt that replaced
@@ -50,8 +51,7 @@ export class SpeechQueue {
   enqueue(job: SpeechJob): boolean {
     if (!this.engine.available()) return false;
     if (this.active?.job.key === job.key || this.pending.some(pending => pending.key === job.key)) return true;
-    // Reserve a slot for an unstarted attempt that a pause may return here.
-    if (this.pending.length + (this.active && !this.active.started ? 1 : 0) >= MAX_PENDING) return false;
+    if (this.pending.length >= MAX_PENDING) return false;
     this.pending.push(job);
     this.pump();
     return true;
@@ -85,20 +85,31 @@ export class SpeechQueue {
 
   private pause(attempt: Attempt): void {
     // Preparation is not delivery. Retain a job that never actually started,
-    // and revoke the old engine attempt before cancellation can call back.
+    // past the bound if the queue filled meanwhile, and revoke the old engine
+    // attempt before cancellation can call back.
     if (!attempt.started) this.pending.unshift(attempt.job);
     this.finish(attempt, true);
+  }
+
+  /** Drop resolved jobs on the way to the first that is not paused. */
+  private takeNext(): SpeechJob | undefined {
+    for (let i = 0; i < this.pending.length;) {
+      const job = this.pending[i];
+      if (!job.eligible()) { this.pending.splice(i, 1); continue; }
+      if (job.paused?.()) { i++; continue; }
+      this.pending.splice(i, 1);
+      return job;
+    }
+    return undefined;
   }
 
   private pump(): void {
     if (this.pumping) return;
     this.pumping = true;
     try {
-      while (!this.active && this.pending.length) {
-        this.pending = this.pending.filter(job => job.eligible());
-        const index = this.pending.findIndex(job => !job.paused?.());
-        if (index === -1) break;
-        const [job] = this.pending.splice(index, 1);
+      while (!this.active) {
+        const job = this.takeNext();
+        if (!job) break;
         const attempt: Attempt = {
           job, handle: null, started: false,
           timer: setTimeout(() => this.finish(attempt, true), SPEECH_ENGINE_TIMEOUT_MS),

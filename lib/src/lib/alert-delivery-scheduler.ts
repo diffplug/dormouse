@@ -49,14 +49,22 @@ interface Published {
   overrides: AlertDeliveryOverrides;
 }
 
+/** A sink's fixed deadline, armed only while the Session is visibly ringing. */
+interface Delivery {
+  dueAt: number;
+  timer: ReturnType<typeof setTimeout> | undefined;
+}
+
+function disarm(delivery: Delivery): void {
+  clearTimeout(delivery.timer);
+  delivery.timer = undefined;
+}
+
 export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOptions): AlertDeliveryScheduler {
   const { manager } = options;
   let defaults = DEFAULT_ALERT_SETTINGS;
   /** Deadlines survive pauses; a sink missing from `pending` is consumed. */
-  const episodes = new Map<string, {
-    episodeId: string;
-    pending: Map<AlertSink, { dueAt: number; timer: ReturnType<typeof setTimeout> | null }>;
-  }>();
+  const episodes = new Map<string, { episodeId: string; pending: Map<AlertSink, Delivery> }>();
   /** Each Session's last publication, and the realm that made it. */
   const published = new Map<string, Published>();
 
@@ -93,7 +101,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     const effective = policy(id);
     for (const [sink, delivery] of pending) {
       if (sinks[sink].enabled(effective)) continue;
-      if (delivery.timer !== null) clearTimeout(delivery.timer);
+      disarm(delivery);
       pending.delete(sink);
     }
   }
@@ -102,9 +110,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
     const episode = state.episode ?? null;
     let current = episodes.get(id);
     if (current && current.episodeId !== episode?.id) {
-      for (const delivery of current.pending.values()) {
-        if (delivery.timer !== null) clearTimeout(delivery.timer);
-      }
+      current.pending.forEach(disarm);
       episodes.delete(id);
       current = undefined;
     }
@@ -117,18 +123,18 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
         const rule = sinks[sink];
         // Fixed at episode start; disabled sinks and delay edits never replay it.
         if (rule.enabled(effective)) current.pending.set(sink, {
-          dueAt: episode.startedAt + rule.delayMs(effective), timer: null,
+          dueAt: episode.startedAt + rule.delayMs(effective), timer: undefined,
         });
       }
     }
     const { pending } = current;
+    // Paused: disarm without consuming, so quiet re-arms the original deadline.
+    if (state.status !== 'ALERT_RINGING') {
+      pending.forEach(disarm);
+      return;
+    }
     for (const [sink, delivery] of pending) {
-      if (state.status !== 'ALERT_RINGING') {
-        if (delivery.timer !== null) clearTimeout(delivery.timer);
-        delivery.timer = null;
-        continue;
-      }
-      if (delivery.timer !== null) continue;
+      if (delivery.timer !== undefined) continue;
       const rule = sinks[sink];
       delivery.timer = setTimeout(() => {
         pending.delete(sink);
@@ -174,11 +180,7 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
 
     dispose() {
       for (const stop of stops) stop();
-      for (const { pending } of episodes.values()) {
-        for (const delivery of pending.values()) {
-          if (delivery.timer !== null) clearTimeout(delivery.timer);
-        }
-      }
+      for (const { pending } of episodes.values()) pending.forEach(disarm);
       episodes.clear();
       published.clear();
     },

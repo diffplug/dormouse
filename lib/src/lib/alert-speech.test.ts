@@ -468,8 +468,30 @@ describe('spoken alarms', () => {
     for (let i = 0; i < 100; i++) ring(`pty-${i}`);
     for (let i = 0; i < 100; i++) due(`pty-${i}`);
     expect(engine.spoken).toHaveLength(1);
-    for (let i = 0; i < 64; i++) engine.utterances[i].onend?.();
-    expect(engine.spoken).toHaveLength(64);
+    for (let i = 0; i < 65; i++) engine.utterances[i].onend?.();
+    expect(engine.spoken).toHaveLength(65);
     expect(engine.utterances.every(utterance => utterance.onend === null)).toBe(true);
+  });
+
+  it('returns paused preparation to a full queue and speaks it after quiet', () => {
+    start();
+    for (let i = 0; i < 66; i++) ring(`pty-${i}`);
+    const first = getActivity('pty-0');
+    for (let i = 0; i < 66; i++) due(`pty-${i}`);
+    setTerminalActivity('pty-0', { ...first, status: 'BUSY' });
+    expect(engine.cancels).toBe(1);
+    engine.utterances[1].onstart?.();
+    expect(getAlertSpeechState('pty-1')).toBe('speaking');
+    setTerminalActivity('pty-0', first);
+    engine.utterances[1].onend?.();
+    engine.utterances[2].onstart?.();
+    expect(getAlertSpeechState('pty-0')).toBe('speaking');
+    for (let i = 2; i < 66; i++) {
+      engine.utterances[i].onstart?.();
+      engine.utterances[i].onend?.();
+    }
+    expect(engine.spoken).toHaveLength(66);
+    expect(getAlertSpeechState('pty-64')).toBe('spoken');
+    expect(getAlertSpeechState('pty-65')).toBeNull();
   });
 });

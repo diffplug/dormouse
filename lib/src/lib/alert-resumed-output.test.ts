@@ -35,6 +35,21 @@ function ring(source: 'watching' | 'report'): void {
 }
 
 describe('owed alerts during resumed output', () => {
+  it('keeps a deferred report when output arrives while a claimant takes the settle', () => {
+    driveToBusy(manager, ID);
+    manager.notifyFromProtocol(ID, REPORT);
+    vi.advanceTimersByTime(1_000);
+    manager.onData(ID);
+    manager.registerCompletionClaimant(ID, (event) => {
+      if (event.kind !== 'settled') return false;
+      manager.onData(ID);
+      return true;
+    });
+    settle();
+    expect(manager.getState(ID).status).not.toBe('ALERT_RINGING');
+    vi.advanceTimersByTime(5_000);
+    expect(manager.getState(ID)).toMatchObject({ status: 'ALERT_RINGING', notification: REPORT });
+  });
   it.each(['watching', 'report'] as const)('pauses a %s on the first redraw and keeps its original alarm deadlines', (source) => {
     ring(source);
     const episode = manager.getState(ID).episode;
