@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isAbsolute, relative, sep } from 'node:path';
 import { serveSequence } from 'dor-tools-lib/osc';
 import { CONTROLS, viewerTitle } from './file-viewer-format.js';
@@ -70,8 +70,6 @@ export async function startCapabilityViewer({ csp, post = false, chunked = false
   release?: () => Promise<void>;
   route(req: IncomingMessage, res: ServerResponse, prefix: string): Promise<void>;
 }): Promise<CapabilityViewer> {
-  // Loaded on demand: this module is bundled into every `dor` invocation.
-  const { createServer } = await import('node:http');
   const prefix = `/${randomBytes(32).toString('hex')}/`;
   const answer = (res: ServerResponse, status: number, message = '') => {
     if (!chunked) { reply(res, status, message); return; }

@@ -18,7 +18,8 @@
 **`dor` must work without `npm i -g`.** Both hosts stage `dor`
 (`scripts/stage-dor-cli.mjs`) before build and prepend its `bin`
 directory to every spawned PTY's `PATH`. Staged: `bin/dor` + `bin/dor.cmd`,
-`dist/dor.js` (esbuild), and a generated `package.json` declaring
+`dist/dor.js` (esbuild), the builtin runtime tree
+(`docs/specs/dor-tools-builtin.md` → Packaging), and a generated `package.json` declaring
 `"type": "module"` so Node runs ESM independently of parent package metadata.
 
 **Both launchers must set `ELECTRON_RUN_AS_NODE=1` themselves** before

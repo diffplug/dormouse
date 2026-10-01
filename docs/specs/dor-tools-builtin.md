@@ -1,13 +1,13 @@
 # Built-in Tools
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> Owns the built-in Tools — `builtin:file` (the local-file viewer and its text editor) and `builtin:folder` — and the package that ships them inside `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
+> Owns the built-in Tools — `builtin:file` (the local-file viewer and its text editor) and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
 
 ## Files
 
 - `dor-tools-builtin/src/file-viewer.ts` — `builtin:file`: grant construction and the listener's routes.
 - `dor-tools-builtin/src/editable-file.ts` — text reads and revision-checked saves.
-- `dor-tools-builtin/viewer/editor.ts` — the Monaco page, bundled by `dor-tools-builtin/scripts/build-viewer.mjs`.
+- `dor-tools-builtin/viewer/editor.ts` — the Monaco page, bundled by `dor-tools-builtin/scripts/build.mjs`.
 - `dor-tools-builtin/src/folder-viewer.ts` — `builtin:folder`: listings, select, and activate.
 - `dor-tools-builtin/src/error-viewer.ts` — the page a failed OSC 367 `open` shows in the preview slot.
 - `dor-tools-builtin/src/viewer-server.ts` — the capability listener and announcement both viewers share.
@@ -16,15 +16,15 @@
 
 ## Packaging
 
-`dor-tools-builtin` is a private workspace package `dor` depends on; the built-in Tools run inside `dor`'s bundle.
+`dor-tools-builtin` is a private workspace package with a separate Node runtime bundle.
 
-- **`dor`'s prebuild must build `dor-tools-builtin` first**: `dor` imports it through the package's `exports`, which point at its built `dist`, and esbuild inlines it into `dist/dor.js`.
-- **Must stage the editor assets beside the bundle**, since `viewerAsset` reads them relative to the running module: `dor-tools-builtin/scripts/build-viewer.mjs` bundles Monaco into the package's `dist/viewer`, and `dor/scripts/stage-builtin-viewer.mjs` copies it to `dor/dist/viewer`.
+- **Must bundle the viewers and their runtime dependencies into `dor-tools-builtin/dist/runtime.js`**, without workspace or installed-package resolution at runtime. `dor`'s prebuild builds this package first.
+- **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` resolves assets relative to the runtime module.
 - **Must keep `file-viewer-format` free of Node runtime dependencies**: lib's renderer and host modules import it, and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles it for a browser.
-- `dor/src/cli.ts` dispatches the private argv verbs (`VIEW_FILE_ARGV` / `VIEW_FOLDER_ARGV` / `VIEW_ERROR_ARGV`).
+- **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
 
-Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `runCli` in `dor/src/cli.ts`. Tests: `dor/test/builtin-viewers.test.mjs`, `dor-tools-builtin/test/browser-shared.test.mjs`.
+Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tools-builtin/scripts/build.mjs`; `dor/scripts/stage-builtins.mjs`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `runCli` / `loadBuiltinViewers` in `dor/src/cli.ts`. Tests: `dor/test/builtin-viewers.test.mjs`, `dor-tools-builtin/test/browser-shared.test.mjs`.
 
 ## File viewer
 

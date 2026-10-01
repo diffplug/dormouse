@@ -2,6 +2,10 @@
 
 > Informative evidence for `docs/specs/dor-tools-builtin.md`, keyed by its headings.
 
+## Packaging
+
+A separate runtime bundle keeps viewer code out of ordinary CLI invocations while reusing the existing POSIX and Windows launchers, Node configuration, and Tool process lifecycle. Keeping the editor assets beside their runtime avoids depending on the build workspace after staging.
+
 ## File viewer
 
 Innerdogfood QC in Chromium (2026-09) showed the native PDF plugin failing inside the normal iframe sandbox. PDFs use configured user Tools; the built-in viewer carries no PDF renderer dependency.

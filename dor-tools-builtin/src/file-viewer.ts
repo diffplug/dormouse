@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import type { FileHandle } from 'node:fs/promises';
+import { open, realpath, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { stateSequence } from 'dor-tools-lib/osc';
 import { fileViewerFormat } from './file-viewer-format.js';
@@ -48,9 +48,6 @@ function references(text: string, html: boolean): string[] {
 /** One Tool process owns one file grant and its file descriptors. Restarting
  * creates a fresh capability; only the file argument is persisted by Dormouse. */
 export async function startFileViewer(input: string, { onDirty = () => {} }: { onDirty?: (dirty: boolean) => void } = {}): Promise<{ port: number; path: string; target: string; close(): Promise<void> }> {
-  // Loaded on demand: this module is bundled into every `dor` invocation, and this
-  // builtin and `node:http` (see `startCapabilityViewer`) cost more to load than everything else the CLI touches.
-  const { open, realpath } = await import('node:fs/promises');
   const target = await realpath(input);
   const format = fileViewerFormat(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
