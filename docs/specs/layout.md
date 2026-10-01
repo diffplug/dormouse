@@ -578,7 +578,7 @@ Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `Termi
 
 A newly added leaf grows in from the boundary it was placed against; `docs/specs/tiling-engine.md` → "Animation" → Enter owns the hint and its precedence.
 
-Shell-selection replacement shows a short fixed-position notice over the resulting pane, fading in/out over 1500ms via `.shell-spawn-notice`, suppressed to a static render under reduced motion.
+Shell-selection replacement shows a fixed-position notice over the resulting pane, fading in/out over 1500ms via `.shell-spawn-notice`, suppressed to a static render under reduced motion. Moves reuse it for eight seconds in alternate-screen programs; `docs/specs/dor-cli.md` → Surface handles.
 
 ### Kill (two-phase fade + tween reclaim)
 

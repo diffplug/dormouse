@@ -28,6 +28,7 @@ export interface WallHandle {
   adoptSurfaceMove(id: string, meta: LeafMeta): { surfaceRef: string; rollback(): void };
   finishSurfaceMove(): void;
   focusSurface(id: string, acknowledge: boolean): void;
+  showMoveNotice(id: string, text: string): void;
   serializePersistence(options?: SaveOptions): Promise<PersistedSession>;
   workspaceId: WorkspaceId;
   /** The Wall's member Surfaces: visible panes ∪ Doors. */
@@ -126,6 +127,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     adoptSurfaceMove: () => { throw new Error('Surface moves are unavailable'); },
     finishSurfaceMove: () => {},
     focusSurface: () => {},
+    showMoveNotice: () => {},
     serializePersistence: async () => ({ version: 3, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,

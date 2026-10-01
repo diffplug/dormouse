@@ -1025,6 +1025,49 @@ describe('Surface moves between Workspaces', () => {
     adoption.mockRestore();
   });
 
+  it('fences a pre-departure save collected during new Workspace mounting', async () => {
+    const source = await twoWalls();
+    let finishProbe!: (cwd: string | null) => void;
+    let staleSave!: Promise<void>;
+    vi.spyOn(fake, 'getCwd').mockImplementation(id => id === 'pane-a' ? new Promise(resolve => { finishProbe = resolve; }) : Promise.resolve('/other'));
+    const unsubscribe = workspaceStore.subscribeToWorkspaces(() => {
+      if (!staleSave && getWorkspacesSnapshot().workspaces.length === 3) staleSave = getWallHandle(source)!.flushPersistence();
+    });
+    let moved!: NonNullable<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { moved = (await moveSurface('pane-a', request({ new: true })))!; });
+    unsubscribe();
+    expect(finishProbe).toBeTypeOf('function');
+    await act(async () => { finishProbe('/stale'); await staleSave; });
+    expect(previousWorkspaceSession(source)?.panes.map(p => p.id)).toEqual(['pane-b']);
+    expect(previousWorkspaceSession(moved.workspaceId)?.panes.map(p => p.id)).toEqual(['pane-a']);
+  });
+
+  it('keeps committed membership if destination focus fails after the empty source closes', async () => {
+    const source = await twoWalls(['pane-a']);
+    vi.spyOn(workspaceStore, 'setActiveWorkspace').mockImplementation(() => { throw new Error('focus failed'); });
+    await act(async () => { await expect(moveSurface('pane-a', request({ workspace: 'workspace:2' }, true))).rejects.toThrow('focus failed'); });
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(['ws-2']);
+    expect(getWallHandle(source)).toBeNull();
+    expect(getWallHandle('ws-2')!.ownsSurface('pane-a')).toBe(true);
+    expect(previousWorkspaceSession(source)).toBeNull();
+    expect(previousWorkspaceSession('ws-2')?.panes.map(p => p.id)).toContain('pane-a');
+  });
+
+  it('refuses same-Workspace moves before inspecting dirty Tool state', async () => {
+    await twoWalls();
+    await act(async () => { await expect(moveSurface('pane-a', request({ workspace: 'workspace:1' }))).rejects.toThrow('already in that Workspace'); });
+  });
+
+  it('shows alternate-screen move notices over the pane without writing into the program display', async () => {
+    await twoWalls();
+    const write = vi.fn();
+    const terminal = vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({ buffer: { active: { type: 'alternate' } }, write } as unknown as ReturnType<typeof terminalRegistry.getTerminalInstance>);
+    await act(async () => { await moveSurface('pane-a', request({ workspace: 'workspace:2' }, true)); });
+    expect(write).not.toHaveBeenCalled();
+    expect(container.querySelector('.shell-spawn-notice')?.textContent).toContain('Cached surface:N refs now resolve here');
+    terminal.mockRestore();
+  });
+
   it('moves a Door into a pane without terminating it and keeps a nonempty source', async () => {
     const source = await twoWalls();
     // The same minimize proposal used by a header button.

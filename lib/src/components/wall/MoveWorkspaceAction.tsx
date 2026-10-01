@@ -1,7 +1,8 @@
 import { useContext, useSyncExternalStore } from 'react';
 import { CaretDownIcon } from '@phosphor-icons/react';
 import { SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS } from '../design';
-import { getWorkspacesSnapshot, subscribeToWorkspaces } from '../../lib/workspace-store';
+import { getWorkspacesSnapshot, subscribeToWorkspaces, workspaceRefFor } from '../../lib/workspace-store';
+import { getWorkspaceSurfacesSnapshot, subscribeToWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { WindowFocusedContext } from './wall-context';
 import { wallHandleOwning } from './wall-handles';
 import { requestSurfaceMove } from './surface-move';
@@ -9,6 +10,7 @@ import { requestSurfaceMove } from './surface-move';
 /** Native picker matches the context's browser actions and escapes its clipping. */
 export function MoveWorkspaceAction({ id }: { id: string }) {
   const { workspaces } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
+  const members = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
   const focused = useContext(WindowFocusedContext);
   const source = wallHandleOwning(id);
   if (!source?.canMoveSurfaces) return null;
@@ -27,8 +29,8 @@ export function MoveWorkspaceAction({ id }: { id: string }) {
         else if (event.target.value) requestSurfaceMove(id, { workspace: event.target.value });
       }}>
       <option value="">move to workspace…</option>
-      {workspaces.map(workspace => <option key={workspace.id} value={workspace.id} disabled={workspace.id === source.workspaceId}>{workspace.name}</option>)}
-      <option value="+" disabled={source.surfaceIds().length <= 1}>New workspace</option>
+      {workspaces.filter(workspace => workspace.id !== source.workspaceId).map(workspace => <option key={workspace.id} value={workspace.id}>{workspaceRefFor(workspace.id)} — {workspace.name}</option>)}
+      <option value="+" disabled={(members.get(source.workspaceId)?.length ?? 0) <= 1}>New workspace</option>
     </select>
   </span>;
 }

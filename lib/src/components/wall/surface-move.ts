@@ -31,7 +31,7 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
   if (resolved && !resolved.ok) throw new Error(resolved.message);
   let targetId = resolved?.ok ? resolved.id : null;
   const result = (ref: string): MoveSurfaceResponse => ({ status: 'moved', surfaceId: id, surfaceRef: ref, workspaceId: targetId!, workspaceRef: workspaceRefFor(targetId!) });
-  if (targetId === source.workspaceId) return result(source.prepareSurfaceMove(id).surfaceRef);
+  if (targetId === source.workspaceId) throw new Error('The Surface is already in that Workspace');
   if (!targetId && source.surfaceIds().length <= 1) throw new Error('The only Surface is already in its own Workspace');
   if (isWorkspaceTransferPending(source.workspaceId) || (targetId && isWorkspaceTransferPending(targetId))) throw new Error('A Workspace is already moving');
   let target: WallHandle | null = targetId ? getWallHandle(targetId) : null;
@@ -45,6 +45,7 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
   const oldWorkspaceRef = workspaceRefFor(source.workspaceId);
   let iframeConsented = request.dangerouslyDestroyIframePageState;
   let created = false;
+  let committed = false;
   let endBatch: (() => void) | undefined;
   let undoDeparture: (() => void) | undefined;
   let undoAdoption: (() => void) | undefined;
@@ -98,12 +99,20 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
       target!.finishSurfaceMove();
       source.finishSurfaceMove();
     });
+    // Mounting a new Wall can let saves collect the pre-departure layout. Fence
+    // those too, once both ownership changes have completed synchronously.
+    invalidateWorkspaceSaves(source.workspaceId);
+    invalidateWorkspaceSaves(targetId);
     moveRetainedSurfaceRecord(id, source.workspaceId, targetId);
     const [sourceSession, targetSession] = await Promise.all([
       source.serializePersistence({ probeCwd: false }), target!.serializePersistence({ probeCwd: false }),
     ]);
     publishWorkspaceSession(source.workspaceId, sourceSession);
     publishWorkspaceSession(targetId, targetSession);
+    // Closing the source is irreversible. Later UI/notice failures must never
+    // restore membership into a Wall that has already unmounted.
+    committed = true;
+    undoDeparture = undefined; undoAdoption = undefined;
     const sourceEmpty = source.surfaceIds().length === 0;
     flushSync(() => {
       if (sourceEmpty) { closeWorkspace(source.workspaceId); forgetWorkspaceSession(source.workspaceId); forgetWorkspaceBootPlan(source.workspaceId); }
@@ -117,11 +126,15 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
     const response = result(surfaceRef);
     if (prepared.terminal) {
       const safe = (text: string) => text.replace(/[\x00-\x1f\x7f-\x9f]/g, '');
-      getTerminalInstance(id)?.write(`\r\n[Dormouse] Moved ${safe(prepared.surfaceRef)} from ${oldWorkspaceRef} to ${response.workspaceRef} ${response.surfaceRef}. Stable ID: ${safe(id)}.\r\nShort surface:N refs now resolve in the destination Workspace; cached refs may target other panes. Unscoped dor ensure searches here and can duplicate a server left behind. Use stable IDs across moves.\r\n`);
+      const terminal = getTerminalInstance(id);
+      if (terminal?.buffer.active.type === 'alternate') {
+        target!.showMoveNotice(id, `Moved ${prepared.surfaceRef} from ${oldWorkspaceRef} to ${response.workspaceRef} ${response.surfaceRef}. Cached surface:N refs now resolve here; use stable ID ${id}. Unscoped dor ensure can duplicate work left behind.`);
+      } else terminal?.write(`\r\n[Dormouse] Moved ${safe(prepared.surfaceRef)} from ${oldWorkspaceRef} to ${response.workspaceRef} ${response.surfaceRef}. Stable ID: ${safe(id)}.\r\nShort surface:N refs now resolve in the destination Workspace; cached refs may target other panes. Unscoped dor ensure searches here and can duplicate a server left behind. Use stable IDs across moves.\r\n`);
     }
     undoDeparture = undefined; undoAdoption = undefined;
     return response;
   } catch (error) {
+    if (committed) throw error;
     invalidateWorkspaceSaves(source.workspaceId);
     if (targetId) invalidateWorkspaceSaves(targetId);
     flushSync(() => {

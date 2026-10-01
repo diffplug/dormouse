@@ -148,6 +148,7 @@ type ShellSpawnNoticeState = {
   id: string;
   text: string;
   nonce: number;
+  duration: number;
 };
 
 export type { DoorAfterRestoreAction, DoorChip, DooredItem, WallBootProps, WallEvent, WallMode, WallSelectionKind } from './wall/wall-types';
@@ -241,6 +242,8 @@ function ShellSpawnNotice({
         top: rect.top + 38,
         left: rect.left + rect.width / 2,
         transform: 'translateX(-50%)',
+        maxWidth: Math.min(420, Math.max(0, rect.width - 16)),
+        animationDuration: `${notice.duration}ms`,
       }}
     >
       {notice.text}
@@ -624,7 +627,7 @@ export function Wall({
     return false;
   }, [selectPane]);
 
-  const showShellSpawnNotice = useCallback((id: string, text: string) => {
+  const showShellSpawnNotice = useCallback((id: string, text: string, duration = 1500) => {
     if (shellSpawnNoticeTimerRef.current) {
       clearTimeout(shellSpawnNoticeTimerRef.current);
     }
@@ -632,11 +635,12 @@ export function Wall({
       id,
       text,
       nonce: ++shellSpawnNoticeCounterRef.current,
+      duration,
     });
     shellSpawnNoticeTimerRef.current = setTimeout(() => {
       setShellSpawnNotice(null);
       shellSpawnNoticeTimerRef.current = null;
-    }, 1500);
+    }, duration);
   }, []);
 
   /** Why the helper's running work (or a failed inspection) blocks closing its
@@ -1807,7 +1811,7 @@ export function Wall({
         depart: () => {
           const rollback = captureMoveRollback();
           movingSurfaceRef.current = true;
-          cancelContextPortLaunches();
+          if (terminalContextRef.current?.id === id) cancelContextPortLaunches();
           setTerminalContext(current => current?.id === id ? null : current);
           if (nav.hasPane(id)) {
             if (!lath.store.removeLeaf(id).ok) throw new Error('Could not detach the Surface');
@@ -1842,6 +1846,7 @@ export function Wall({
       if (acknowledge) wallActionsRef.current.onFocusPane(id);
       else enterTerminalMode(id);
     },
+    showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
     serializePersistence: persistence.serialize,
 
     surfaceIds: memberSurfaceIds,
