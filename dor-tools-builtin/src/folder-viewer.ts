@@ -1,4 +1,5 @@
 import type { Dirent } from 'node:fs';
+import { opendir, realpath, stat } from 'node:fs/promises';
 import type { IncomingMessage } from 'node:http';
 import { join } from 'node:path';
 import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
@@ -44,8 +45,6 @@ async function gitIgnored(git: string | undefined, dir: string, names: string[])
 /** One Tool process lists one canonical root, a directory at a time, and never
  * serves file contents: select and activate hand a path to `open`. */
 export async function startFolderViewer(input: string, { open }: { open: FolderOpen }): Promise<{ port: number; path: string; root: string; close(): Promise<void> }> {
-  // Loaded on demand, as in the file viewer: this module is bundled into every `dor` invocation.
-  const { opendir, realpath, stat } = await import('node:fs/promises');
   const root = await realpath(input);
   if (!(await stat(root)).isDirectory()) throw new Error('not a directory');
   const page = folderViewerPage(root);

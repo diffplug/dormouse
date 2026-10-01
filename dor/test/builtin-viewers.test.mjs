@@ -3,15 +3,27 @@ import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, test } from 'node:test';
+import { after, afterEach, before, beforeEach, test } from 'node:test';
+import { stageDorCli } from '../../scripts/stage-dor-cli.mjs';
 
 // The `dor __view-*` private entries that run dor-tools-builtin's viewers
 // (docs/specs/dor-tools-builtin.md); the viewers themselves are tested there.
+// One staged CLI, outside the workspace, serves every test that leaves it intact.
+let staged;
+let cli;
 let base;
 let root;
+async function stage(dir) {
+  await stageDorCli(dir);
+  return join(dir, 'dist', 'dor.js');
+}
+before(async () => {
+  staged = await mkdtemp(join(tmpdir(), 'dor-builtin-cli-'));
+  cli = await stage(staged);
+});
+after(async () => { await rm(staged, { recursive: true, force: true }); });
 beforeEach(async () => {
   base = await realpath(await mkdtemp(join(tmpdir(), 'dor-builtin-')));
   root = join(base, 'root');
@@ -38,7 +50,7 @@ function post(viewer, action, body) {
   });
 }
 async function spawnViewer(verb, target, env = withoutControl(), extra = []) {
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), verb, target, ...extra], { stdio: ['ignore', 'pipe', 'pipe'], env });
+  const child = spawn(process.execPath, [cli, verb, target, ...extra], { stdio: ['ignore', 'pipe', 'pipe'], env, cwd: root });
   let output = '';
   const viewer = await new Promise((resolve, reject) => {
     child.once('error', reject);
@@ -70,13 +82,26 @@ test('the file entry titles itself, announces its port and path, serves the stag
   try {
     assert.ok(output.includes('\x1b]2;cli.txt\x07'), JSON.stringify(output));
     assert.equal((await call(viewer, viewer.path)).status, 200);
-    // The bundle reads its assets beside itself, staged from dor-tools-builtin.
+    // The separately staged runtime reads its assets beside itself.
     const prefix = viewer.path.replace(/view$/, '');
     for (const name of ['editor.js', 'editor.css', 'editor.worker.js']) {
       assert.equal((await call(viewer, `${prefix}assets/${name}`)).status, 200, name);
     }
     await terminates(child, viewer);
   } finally { child.kill('SIGKILL'); }
+});
+
+test('ordinary staged CLI commands work without the builtin runtime', async () => {
+  // This must remain independent of both workspace packages and viewer code.
+  const cli = await stage(join(base, 'dor-cli'));
+  await rm(join(base, 'dor-cli', 'dist', 'builtin'), { recursive: true });
+  const result = spawnSync(process.execPath, [cli, 'version'], { env: withoutControl(), cwd: root, timeout: 10_000 });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0, String(result.stderr));
+  assert.match(String(result.stdout), /^dor /m);
+  const viewer = spawnSync(process.execPath, [cli, '__view-file', join(root, 'missing.txt')], { env: withoutControl(), cwd: root, timeout: 10_000 });
+  assert.equal(viewer.status, 1);
+  assert.match(String(viewer.stderr), /runtime\.js/);
 });
 
 test('the folder entry titles itself, announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {

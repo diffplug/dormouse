@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter dor-tools-builtin build && node ../scripts/generate-dor-version.mjs && node ../scripts/generate-dor-skill.mjs",
-    "build": "tsc -p tsconfig.json && esbuild src/dor.ts --bundle --format=esm --platform=node --outfile=dist/dor.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" && node scripts/stage-builtin-viewer.mjs",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json && esbuild src/dor.ts --bundle --format=esm --platform=node --outfile=dist/dor.js --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" && node scripts/stage-builtins.mjs",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "devDependencies": {

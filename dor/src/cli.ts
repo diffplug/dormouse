@@ -8,10 +8,7 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
-import { runErrorViewer } from 'dor-tools-builtin/error-viewer';
-import { runFileViewer } from 'dor-tools-builtin/file-viewer';
 import { VIEW_ERROR_ARGV, VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from 'dor-tools-builtin/file-viewer-format';
-import { runFolderViewer } from 'dor-tools-builtin/folder-viewer';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -228,16 +225,19 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   // (docs/specs/dor-tools-builtin.md -> File viewer). Its server outlives this
   // call; its title and announcement are the only output.
   if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
+    const { runFileViewer } = await loadBuiltinViewers();
     return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
   }
   // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
   // selects and activates files with OSC 367 `open`.
   if (argv[0] === VIEW_FOLDER_ARGV && argv.length === 2) {
+    const { runFolderViewer } = await loadBuiltinViewers();
     return { stdout: await runFolderViewer(argv[1]), stderr: '', exitCode: 0 };
   }
   // `dor __view-error <target> <message>` is the page a failed OSC 367 `open`
   // shows in the preview slot.
   if (argv[0] === VIEW_ERROR_ARGV && argv.length === 3) {
+    const { runErrorViewer } = await loadBuiltinViewers();
     return { stdout: await runErrorViewer(argv[1], argv[2]), stderr: '', exitCode: 0 };
   }
 
@@ -270,6 +270,12 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
   };
+}
+
+/** Resolve from the running CLI, never a workspace package or the caller's cwd.
+ * The URL import leaves the builtins outside dor.js and in this same process. */
+function loadBuiltinViewers(): Promise<typeof import('dor-tools-builtin/runtime')> {
+  return import(new URL('./builtin/runtime.js', import.meta.url).href);
 }
 
 /** Map a bare top-level `--version`/`-v` to the `version` command, as most CLIs

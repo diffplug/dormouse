@@ -5,26 +5,17 @@
   "private": true,
   "type": "module",
   "exports": {
-    "./error-viewer": {
-      "types": "./dist/error-viewer.d.ts",
-      "default": "./dist/error-viewer.js"
-    },
-    "./file-viewer": {
-      "types": "./dist/file-viewer.d.ts",
-      "default": "./dist/file-viewer.js"
-    },
     "./file-viewer-format": {
       "types": "./dist/file-viewer-format.d.ts",
       "default": "./dist/file-viewer-format.js"
     },
-    "./folder-viewer": {
-      "types": "./dist/folder-viewer.d.ts",
-      "default": "./dist/folder-viewer.js"
+    "./runtime": {
+      "types": "./dist/runtime.d.ts"
     }
   },
   "scripts": {
     "prebuild": "pnpm --filter dor-lib-common build && pnpm --filter dor-tools-lib build",
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig.viewer.json && node scripts/build-viewer.mjs",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.viewer.json && node scripts/build.mjs",
     "test": "pnpm run build && node --test test/*.test.mjs"
   },
   "dependencies": {
