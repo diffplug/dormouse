@@ -2835,6 +2835,36 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toEqual([]);
   });
 
+  it.each(['cancel', 'Nothing'] as const)('starts a fresh begin after %s while the old request is pending', async (stop) => {
+    const settle: Array<(response: Response) => void> = [];
+    hosted(undefined, {
+      fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({ url: String(input), init });
+        return new Promise<Response>((resolve) => settle.push(resolve));
+      }) as typeof globalThis.fetch,
+    });
+    const old = command('beginHostedEnrollment', { label: 'old' });
+    await drain(() => settle.length === 1);
+    if (stop === 'cancel') await command('cancelHostedEnrollment');
+    else {
+      await setPolicy(NOTHING);
+      await setPolicy(LOCAL_ON);
+    }
+    const fresh = command('beginHostedEnrollment', { label: 'fresh' });
+    await drain(() => settle.length === 2);
+    expect(settle).toHaveLength(2);
+
+    // The old finally must not clear the replacement begin's promise.
+    settle[0]!(reply(200, begin));
+    expect((await old).error).toContain('cancelled');
+    const joined = command('beginHostedEnrollment', { label: 'joined' });
+    for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+    expect(settle).toHaveLength(2);
+    settle[1]!(reply(200, { ...begin, userCode: '9999-ZZZZ' }));
+    expect((await fresh).result).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+    expect((await joined).result).toEqual((await fresh).result);
+  });
+
   it('holds an enrollment a poll in flight redeems after a cancel: the Relay already spent it', async () => {
     hosted();
     await command('beginHostedEnrollment', { label: 'Work laptop' });
@@ -3043,6 +3073,29 @@ describe('Hosted enrollment', () => {
       message: `keychain is locked ${stranded(BURROW_ID)}`,
     });
     expect((await command('status')).result).toMatchObject({ enrolled: false });
+  });
+
+  it('retains a saved redemption when startup fails, with recovery guidance rather than removal advice', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    store.loadAcl = async () => {
+      throw new Error('ACL store is unavailable');
+    };
+    polls.push(enrolledAnswer());
+    await nextPoll();
+
+    expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID });
+    expect((await command('status')).result).toMatchObject({ enrolled: true });
+    expect(await hostedEnrollment()).toEqual({
+      status: 'ended',
+      reason: 'failed',
+      message: 'ACL store is unavailable This computer saved its enrollment; restart Dormouse to try connecting again.',
+    });
+    expect((await command('beginHostedEnrollment', { label: 'again' })).error).toContain('already enrolled');
+    // An explicit reconnect can also use the retained credential once storage recovers.
+    store.loadAcl = async () => [];
+    expect((await command('reconnect')).error).toBeUndefined();
+    expect(sockets).toHaveLength(1);
   });
 
   it('answers the code already waiting to a second begin', async () => {

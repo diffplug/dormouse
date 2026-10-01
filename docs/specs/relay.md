@@ -820,6 +820,8 @@ memo invalidation — live in that burrow's spec.
     another VS Code window's Enroll reaches the same service. A begin in flight
     is joined; one after an ending ("Get a new code") begins anew.
   - **Never change what ended until the new begin has its code.**
+  - **Must detach a cancelled begin immediately**, so a new begin never joins
+    its stale request.
   - **The device code never leaves the service**, as `burrowToken` does not:
     `status` carries `hostedEnrollment` — `waiting` with `userCode`,
     `verificationUrl`, `expiresAt`, and `accountFull`; `redeeming`; or `ended`
@@ -855,6 +857,8 @@ memo invalidation — live in that burrow's spec.
     enrolled machine cannot; that, the origin check, or a failed save ends it
     `failed`, the message naming the Burrow and `<accountOrigin>/account` to
     remove it at (a console warning once disposed).
+  - **Must retain an enrollment whose save succeeded when startup fails**,
+    reporting the startup error with restart guidance, never removal advice.
 * **Relay socket policy**: one socket at a time, reconnected with exponential
   backoff (1 s, doubling to 30 s) after any close — **except three closes, which
   are terminal** (rationale): the Burrow disposes its sessions, reports a latched state, and

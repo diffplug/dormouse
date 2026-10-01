@@ -793,9 +793,14 @@ export class BurrowService {
    * checked against the baked one, then store-first persistence and the
    * status edge the webview gate needs. **Runs on `#serialize`.** `leftBehind`
    * names, for the operator, the Burrow the Relay recorded for an origin this
-   * build refuses; the Hosted caller names it for every failure itself.
+   * build refuses; `onSaved` lets the Hosted caller distinguish a lost
+   * credential from a startup failure after persistence.
    */
-  async #adoptEnrollment(enrollment: BurrowEnrollment, leftBehind?: string): Promise<void> {
+  async #adoptEnrollment(
+    enrollment: BurrowEnrollment,
+    leftBehind?: string,
+    onSaved?: () => void,
+  ): Promise<void> {
     if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
       // An older Relay, which ignores the request's `origin` and so enrolled a
       // Burrow built for another: nothing is persisted here, and the row it
@@ -810,6 +815,7 @@ export class BurrowService {
     // otherwise, and a brand-new `burrowToken` lost to the failure. Failing here
     // instead leaves the old Burrow running and everything it reports still true.
     await this.#store.saveEnrollment(enrollment);
+    onSaved?.();
     if (this.#burrow) {
       // Swapping one running Burrow for another. The gate the webviews arm their
       // outbound work on is edge-triggered (`enrolled-gate.ts`), and everything
@@ -914,6 +920,7 @@ export class BurrowService {
    */
   #cancelHostedEnrollment(): Record<string, never> {
     this.#enrollSeq++;
+    this.#enrollBegin = null;
     const run = this.#enrollRun && !this.#enrollRun.redeeming ? this.#enrollRun : null;
     const had = run !== null || this.#enrollEnded !== null;
     if (run) this.#clearEnrollRun();
@@ -925,6 +932,7 @@ export class BurrowService {
   /** At disposal: forget every Hosted enrollment, unannounced, and void a begin in flight. */
   #stopHostedEnrollment(): void {
     this.#enrollSeq++;
+    this.#enrollBegin = null;
     this.#clearEnrollRun();
     this.#enrollEnded = null;
   }
@@ -1017,6 +1025,7 @@ export class BurrowService {
     const stranded =
       `Your account holds Burrow ${enrollment.burrowId}, which this computer could not keep; ` +
       `remove it at ${new URL(run.verificationUrl).origin}${ACCOUNT_PAGE_PATH}.`;
+    let saved = false;
     try {
       await this.#serialize(async () => {
         if (this.#disposed) throw new Error('Dormouse closed before it could save the enrollment.');
@@ -1025,10 +1034,17 @@ export class BurrowService {
             `This computer was already enrolled as Burrow ${this.#enrollment.burrowId} when another code was approved.`,
           );
         }
-        await this.#adoptEnrollment(enrollment);
+        await this.#adoptEnrollment(enrollment, undefined, () => {
+          saved = true;
+          // Retain the persisted identity even if startup's ACL read fails.
+          this.#enrollment = enrollment;
+        });
       });
     } catch (error) {
-      const message = `${error instanceof Error ? error.message : String(error)} ${stranded}`;
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = saved
+        ? `${detail} This computer saved its enrollment; restart Dormouse to try connecting again.`
+        : `${detail} ${stranded}`;
       if (this.#disposed) {
         console.warn(`[burrow] ${message}`);
         return;
