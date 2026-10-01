@@ -2837,32 +2837,42 @@ describe('Hosted enrollment', () => {
 
   it.each(['cancel', 'Nothing'] as const)('starts a fresh begin after %s while the old request is pending', async (stop) => {
     const settle: Array<(response: Response) => void> = [];
+    const arrivals = [Promise.withResolvers<void>(), Promise.withResolvers<void>()];
     hosted(undefined, {
       fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
         requests.push({ url: String(input), init });
-        return new Promise<Response>((resolve) => settle.push(resolve));
+        if (settle.length >= arrivals.length) throw new Error('a joined begin asked for a third code');
+        return new Promise<Response>((resolve) => {
+          settle.push(resolve);
+          arrivals[settle.length - 1]!.resolve();
+        });
       }) as typeof globalThis.fetch,
     });
     const old = command('beginHostedEnrollment', { label: 'old' });
-    await drain(() => settle.length === 1);
+    // WebCrypto runs on real worker threads: event-loop spins do not bound
+    // how long it takes to mint the Noise static before fetch is reached.
+    await arrivals[0]!.promise;
     if (stop === 'cancel') await command('cancelHostedEnrollment');
     else {
       await setPolicy(NOTHING);
       await setPolicy(LOCAL_ON);
     }
     const fresh = command('beginHostedEnrollment', { label: 'fresh' });
-    await drain(() => settle.length === 2);
+    await arrivals[1]!.promise;
     expect(settle).toHaveLength(2);
 
     // The old finally must not clear the replacement begin's promise.
     settle[0]!(reply(200, begin));
     expect((await old).error).toContain('cancelled');
     const joined = command('beginHostedEnrollment', { label: 'joined' });
-    for (let turn = 0; turn < 20; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+    // Both commands await the cached policy. This later read resumes after
+    // joined has passed that await and observed the still-pending begin.
+    await command('networkPolicy');
     expect(settle).toHaveLength(2);
     settle[1]!(reply(200, { ...begin, userCode: '9999-ZZZZ' }));
     expect((await fresh).result).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
     expect((await joined).result).toEqual((await fresh).result);
+    expect(beginRequests()).toHaveLength(2);
   });
 
   it('holds an enrollment a poll in flight redeems after a cancel: the Relay already spent it', async () => {
