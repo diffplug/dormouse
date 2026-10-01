@@ -18,7 +18,8 @@
 **`dor` must work without `npm i -g`.** Both hosts stage `dor`
 (`scripts/stage-dor-cli.mjs`) before build and prepend its `bin`
 directory to every spawned PTY's `PATH`. Staged: `bin/dor` + `bin/dor.cmd`,
-`dist/dor.js` (esbuild), and a generated `package.json` declaring
+`dist/dor.js` (esbuild), the builtin runtime tree
+(`docs/specs/dor-tools-builtin.md` → Packaging), and a generated `package.json` declaring
 `"type": "module"` so Node runs ESM independently of parent package metadata.
 
 **Both launchers must set `ELECTRON_RUN_AS_NODE=1` themselves** before
@@ -466,7 +467,7 @@ Wall (Handle Model), and each takes a `workspace:<n|name>` target except `new`:
 |---|---|
 | `new [name]` | **Creates in the background**, never activating: moving the user to another Workspace is a larger theft than the focus a bare `dor split` takes. Answers with the new ref. Without a name it is auto-named (`docs/specs/layout.md` → "Workspace names"). |
 | `rename <ref> <name>\|--auto` | Renames the Workspace only — no Surface title (`docs/specs/layout.md` → "Workspaces"); `--auto` hands the name back to auto-naming and answers with the outgoing name, since the derived one is computed afterwards. **An auto-name follows the terminals**, so a `workspace:<name>` target can stop resolving; `dor list --workspaces --json` reports `auto`. |
-| `close <ref> [--force]` | **Refuses, raising no confirmation, when the Workspace holds a touched or running Surface** unless `--force` — the caller is a command, not someone watching the Wall, exactly as `dor kill` refuses silently. A Workspace whose close meets another already in flight and one whose Wall never registers (`still mounting`, after the routing retry — closing past it would leave its Sessions running with nothing holding them) refuse too. Member Surfaces close in sequence, and a refusal leaves the Workspace open and the user where they were. A dirty Tool refuses even `--force` (`docs/specs/dor-tool.md` → Editing files). |
+| `close <ref> [--force]` | **Refuses, raising no confirmation, when the Workspace holds a touched or running Surface** unless `--force` — the caller is a command, not someone watching the Wall, exactly as `dor kill` refuses silently. A Workspace whose close meets another already in flight and one whose Wall never registers (`still mounting`, after the routing retry — closing past it would leave its Sessions running with nothing holding them) refuse too. Member Surfaces close in sequence, and a refusal leaves the Workspace open and the user where they were. A dirty Tool refuses even `--force` (`docs/specs/dor-tool.md` → Closing unsaved Tools). |
 | `switch <ref>` | Activates it. |
 | `move <ref> [--window <label\|new>] [--index <n>] [--dangerously-destroy-iframe-page-state]` | The Window handling it runs the same transfer the strip's drag does (`docs/specs/standalone.md` → Transfer), with no pointer to place the tab by. **Answers `moved` only once the target Window has adopted the Workspace.** **Refuses a move between Windows while the Workspace holds a plain iframe Surface unless the flag is passed**, naming them: the page state is lost (`docs/specs/layout.md` → Workspaces). A host with one Window reorders only. |
 

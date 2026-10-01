@@ -8,6 +8,7 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
+import { VIEW_ERROR_ARGV, VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -19,15 +20,12 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
-import { TOOL_TIMEOUT_MS, toolCommand } from './commands/tool.js';
+import { toolCommand } from './commands/tool.js';
 import { openCommand } from './commands/open.js';
 import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
-import { errorLine, errorMessage, fail, requireControlClient } from './commands/shared.js';
-import { VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from './file-viewer-format.js';
-import { runFileViewer } from './file-viewer.js';
-import { runFolderViewer } from './folder-viewer.js';
+import { errorLine, errorMessage, fail } from './commands/shared.js';
 import type {
   CliEnv,
   CliOptions,
@@ -224,15 +222,23 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     return BROWSER_CLIS[argv[0]](argv.slice(1), options);
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
-  // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
+  // (docs/specs/dor-tools-builtin.md -> File viewer). Its server outlives this
   // call; its title and announcement are the only output.
   if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
+    const { runFileViewer } = await loadBuiltinViewers();
     return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
   }
   // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
-  // selects and activates files through this terminal's control client.
+  // selects and activates files with OSC 367 `open`.
   if (argv[0] === VIEW_FOLDER_ARGV && argv.length === 2) {
-    return { stdout: await runFolderViewer(argv[1], requireControlClient(options, TOOL_TIMEOUT_MS)), stderr: '', exitCode: 0 };
+    const { runFolderViewer } = await loadBuiltinViewers();
+    return { stdout: await runFolderViewer(argv[1]), stderr: '', exitCode: 0 };
+  }
+  // `dor __view-error <target> <message>` is the page a failed OSC 367 `open`
+  // shows in the preview slot.
+  if (argv[0] === VIEW_ERROR_ARGV && argv.length === 3) {
+    const { runErrorViewer } = await loadBuiltinViewers();
+    return { stdout: await runErrorViewer(argv[1], argv[2]), stderr: '', exitCode: 0 };
   }
 
   const helpTarget = getHelpTarget(argv);
@@ -264,6 +270,12 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
   };
+}
+
+/** Resolve from the running CLI, never a workspace package or the caller's cwd.
+ * The URL import leaves the builtins outside dor.js and in this same process. */
+function loadBuiltinViewers(): Promise<typeof import('dor-tools-builtin/runtime')> {
+  return import(new URL('./builtin/runtime.js', import.meta.url).href);
 }
 
 /** Map a bare top-level `--version`/`-v` to the `version` command, as most CLIs

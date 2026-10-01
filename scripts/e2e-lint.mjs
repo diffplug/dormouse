@@ -12,8 +12,9 @@
  * one Noise suite and no way to select another, no JavaScript curve, no
  * plaintext relay route, no legacy frame discriminant left to answer, no
  * Relay-side or Hosted-side view of protocol-v1 or of the direct path's
- * signaling, no ICE server, no checked-in service worker shadowing the built
- * one, no one-time frame the Relay or `BurrowRuntime` could read, no parse in
+ * signaling, no ICE server but Cloudflare's STUN and no TURN at all, no
+ * checked-in service worker shadowing the built one, no one-time frame the
+ * Relay or `BurrowRuntime` could read, no parse in
  * the Hosted room that forwards one, no grant a one-time connection could
  * leave behind, and no store a one-time phone could keep anything in. An
  * absence is exactly what a
@@ -187,6 +188,21 @@ const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
 const ROUTING_TREES = ['relay/src/', 'hosted/server/'];
 
 /**
+ * The one ICE server URL shipped source may spell, and the one file that may
+ * spell it, as `docs/specs/security-remote.md` -> "Direct path" names them.
+ * Spelled here rather than imported, for the reason {@link NOISE_PROTOCOL_NAME}
+ * is: importing the constant would let a change to it change the expectation.
+ */
+const CLOUDFLARE_STUN_URL = 'stun:stun.cloudflare.com:3478';
+export const ICE_SERVER_MODULE = 'lib/src/remote/direct/ice-servers.ts';
+
+/** The Burrow hosts' peer factory, whose STUN flag only the Burrow service chooses. */
+export const NATIVE_PEER_FACTORY = 'lib/src/host/remote/native-direct-peer.ts';
+
+/** The two peer factories, the only files that build an ICE server list. */
+export const PEER_FACTORIES = [NATIVE_PEER_FACTORY, 'lib/src/remote/client/browser-direct-peer.ts'];
+
+/**
  * The one file the AES-GCM ban excuses, as `docs/specs/security-remote.md` ->
  * "Credentials at rest" names it. Excused by path rather than dropped from the
  * scan, so a rename that leaves the cipher behind turns the rule red.
@@ -319,30 +335,69 @@ export const RULES = [
     violation: "\nimport type { DirectoryEntry } from 'remote-lib-common';\n",
   },
   {
-    rule: 'No STUN or TURN URL in shipped source',
-    security: 'any ICE server reaches shipped source',
+    rule: "No ICE server URL but Cloudflare's STUN, and that only in its constant's file — never TURN",
+    security: 'the only `stun:`, `stuns:`, `turn:`, or `turns:` URL is exactly `stun:stun.cloudflare.com:3478`',
     kind: 'forbid',
     trees: [...SOURCE_TREES, 'hosted/server/'],
     // Anchored on the quote that opens the literal, because the bare scheme is
     // a substring of ordinary prose: `// ... early return:` and `Saturn:` both
-    // contain `turn:`, and a rule that reddened on those would be deleted.
-    pattern: /['"`](?:stuns?|turns?):/g,
+    // contain `turn:`, and a rule that reddened on those would be deleted. The
+    // match runs to the closing quote, so the allowance is the whole URL: a
+    // TURN URL on Cloudflare's own host is still refused.
+    pattern: /(?<=['"`])(?:stuns?|turns?):[^'"`\s]*/g,
+    allow: (match, file) => file === ICE_SERVER_MODULE && match === CLOUDFLARE_STUN_URL,
     violationFile: 'lib/src/remote/pocket-app/App.tsx',
     violation: "\nconst __selftest = 'stun:stun.example.net:19302';\n",
   },
   {
-    rule: 'No non-empty `iceServers` list anywhere',
-    security: 'any ICE server reaches shipped source',
+    rule: '`iceServers` is named only in the two peer factories',
+    security: '`iceServers` appears only in the two peer factories',
     kind: 'forbid',
     trees: [...SOURCE_TREES, 'hosted/server/'],
-    // The empty array is the shipped value at both ends and must keep passing,
-    // so the pattern demands a first element: anything after `[` that is
-    // neither whitespace nor the closing bracket. A server assembled at runtime
-    // is past what a regex can see, which is why the spec row is read by hand
-    // as well.
-    pattern: /iceServers\s*:\s*\[\s*[^\]\s]/g,
+    // The word, not a key: a shorthand `{ iceServers }` or an assignment builds
+    // a list as surely as a literal does, and every list must come from the
+    // factory that takes it from the Burrow service or from who serves the page.
+    pattern: /\biceServers\b/g,
+    allow: (_match, file) => PEER_FACTORIES.includes(file),
     violationFile: 'lib/src/remote/pocket-app/App.tsx',
-    violation: '\nconst __selftest = { iceServers: [{ urls: [] }] };\n',
+    violation: '\nconst __selftest = { iceServers: [] };\n',
+  },
+  {
+    rule: '`CLOUDFLARE_STUN_URL` is named only in `ice-servers.ts`',
+    security: 'listed only by `stunServers` there',
+    kind: 'forbid',
+    trees: [...SOURCE_TREES, 'hosted/server/'],
+    // The name, not a list: a file that holds the constant can list it around
+    // `stunServers` and its flag, so only the module that defines it may.
+    pattern: /\bCLOUDFLARE_STUN_URL\b/g,
+    allow: (_match, file) => file === ICE_SERVER_MODULE,
+    violationFile: NATIVE_PEER_FACTORY,
+    violation: "\nimport { CLOUDFLARE_STUN_URL } from '../../remote/direct/ice-servers';\n",
+  },
+  {
+    rule: '`stunServers` is named only in the two peer factories',
+    security: 'which only the two peer factories call',
+    kind: 'forbid',
+    trees: [...SOURCE_TREES, 'hosted/server/'],
+    // The name, not a call: an aliased import reaches it as surely. Its own
+    // definition is the one other spelling, matched with its `function` so a
+    // call beside it in that module is still refused.
+    pattern: /(?:\bfunction\s+)?\bstunServers\b/g,
+    allow: (match, file) =>
+      PEER_FACTORIES.includes(file) || (file === ICE_SERVER_MODULE && match.startsWith('function')),
+    violationFile: 'lib/src/remote/pocket-app/App.tsx',
+    violation: '\nconst __selftest = stunServers(false);\n',
+  },
+  {
+    rule: 'The native peer factory never passes `stunServers` a literal `true`',
+    security: 'the native one never with a literal `true`',
+    kind: 'forbid',
+    // Its flag comes from the Burrow service, which takes it from the level: a
+    // literal would show Cloudflare this computer's address at every level.
+    files: [NATIVE_PEER_FACTORY],
+    pattern: /\bstunServers\s*\(\s*true\b/g,
+    violationFile: NATIVE_PEER_FACTORY,
+    violation: '\nconst __selftest = stunServers(true);\n',
   },
   {
     rule: 'Neither the Relay nor Hosted names a session control message or an SDP',

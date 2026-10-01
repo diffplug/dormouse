@@ -9,7 +9,13 @@ export type UpdateBannerState =
   | { status: 'restart-refused'; version: string; reason: string }
   | { status: 'dismissed' }
   | { status: 'post-update-success'; from: string; to: string }
-  | { status: 'post-update-failure'; version: string; error?: string };
+  | { status: 'post-update-failure'; version: string; error?: string }
+  // With automatic checks off, the weekly reminder, and the check the user
+  // then asks for (`docs/specs/auto-update.md` → "How it works").
+  | { status: 'check-due'; days: number }
+  | { status: 'checking' }
+  | { status: 'up-to-date'; version: string }
+  | { status: 'check-failed' };
 
 interface UpdateBannerProps {
   state: UpdateBannerState;
@@ -18,12 +24,13 @@ interface UpdateBannerProps {
   onRestart: () => void;
   onOpenChangelog: () => void;
   onOpenDebug: () => void;
+  onCheckNow: () => void;
 }
 
 const linkClass = 'shrink-0 hover:underline';
 const linkStyle = { color: 'var(--vscode-textLink-foreground)' };
 
-export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onOpenChangelog, onOpenDebug }: UpdateBannerProps) {
+export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onOpenChangelog, onOpenDebug, onCheckNow }: UpdateBannerProps) {
   if (state.status === 'idle' || state.status === 'dismissed') return null;
 
   let message: ReactNode;
@@ -71,6 +78,22 @@ export function UpdateBanner({ state, onDismiss, onApproveUpdate, onRestart, onO
     case 'post-update-failure':
       message = 'Update failed';
       links = [{ label: 'Click here to debug', onClick: onOpenDebug }];
+      break;
+    case 'check-due':
+      message = `No update check in ${state.days} days`;
+      links = [{ label: 'Check now', onClick: onCheckNow }];
+      break;
+    case 'checking':
+      message = 'Checking for updates…';
+      links = [];
+      break;
+    case 'up-to-date':
+      message = `Dormouse is up to date (v${state.version})`;
+      links = [];
+      break;
+    case 'check-failed':
+      message = 'Couldn’t check for updates';
+      links = [{ label: 'Try again', onClick: onCheckNow }];
       break;
     default: {
       const _exhaustive: never = state;

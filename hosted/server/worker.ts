@@ -10,6 +10,7 @@ export interface Env extends BetterAuthWorkerBindings {
   ASSETS: { fetch(request: Request): Promise<Response> };
   EMAIL_FROM: string;
   POSTMARK_SERVER_TOKEN: string;
+  ELEVENLABS_API_KEY?: string;
   OAUTH_PROVIDERS?: string;
   BUILD_SHA?: string;
   ONE_TIME_ROOM: DurableObjectNamespace;
@@ -21,28 +22,30 @@ const auth = createBetterAuthWorker<Env>({
   ...authPolicy,
   email: (env) => postmarkEmail(env.POSTMARK_SERVER_TOKEN, env.EMAIL_FROM),
 });
-const app = workerApp(
-  (request, env, ctx) => auth.fetch(request, env, ctx),
-  // A rejected allowlist throws inside the request path, so app.onError answers it.
-  (env) => ({
-    HYPERDRIVE: env.HYPERDRIVE,
-    ASSETS: env.ASSETS,
-    APP_ORIGIN: env.APP_ORIGIN,
-    AUTH_SECRET: env.AUTH_SECRET,
-    EMAIL_FROM: env.EMAIL_FROM,
-    POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
-    BUILD_SHA: env.BUILD_SHA,
-    ONE_TIME_ROOM: env.ONE_TIME_ROOM,
-    ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
-    ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
-    ...providerBindings(env as unknown as Record<string, unknown>),
-  }),
-);
+/** `sweepDelayMs` exists for the test entry; production keeps the default. */
+export function hostedWorker({ sweepDelayMs }: { sweepDelayMs?: number } = {}) {
+  return workerApp(
+    (request, env, ctx) => auth.fetch(request, env, ctx),
+    // A rejected allowlist throws inside the request path, where app.onError
+    // answers it, and fails the cron run.
+    (env) => ({
+      HYPERDRIVE: env.HYPERDRIVE,
+      ASSETS: env.ASSETS,
+      APP_ORIGIN: env.APP_ORIGIN,
+      AUTH_SECRET: env.AUTH_SECRET,
+      EMAIL_FROM: env.EMAIL_FROM,
+      POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
+      ELEVENLABS_API_KEY: env.ELEVENLABS_API_KEY,
+      BUILD_SHA: env.BUILD_SHA,
+      ONE_TIME_ROOM: env.ONE_TIME_ROOM,
+      ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
+      ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
+      ...providerBindings(env as unknown as Record<string, unknown>),
+    }),
+    { sweepDelayMs },
+  );
+}
 
 export { OneTimeRoom } from "./one-time-room";
 
-export default {
-  fetch(request: Request, env: Env, ctx: Parameters<typeof app.fetch>[2]) {
-    return app.fetch(request, env, ctx);
-  },
-};
+export default hostedWorker();

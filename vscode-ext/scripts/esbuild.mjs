@@ -1,17 +1,6 @@
-// Bundles the extension host and the PTY host, and is the single place that
-// bakes the Burrow's allowed relay origins into the build.
-//
-// The published extension is scoped to the SaaS origin only, so the Burrow will
-// not enroll with, or connect to, an arbitrary server. A selfhoster whose relay
-// is on their own domain or tailnet widens it for their own build:
-//
-//   DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
-//
-// This mirrors the standalone binary's build-time override
-// (`standalone/scripts/build-sidecar-proxy.mjs`, which bakes the same value into
-// the sidecar's Burrow) so both Burrows widen the same way with the same variable.
-// `scripts/csp-defaults.mjs` is the one definition of the default for both. See
-// docs/specs/relay.md → "Where a Burrow may reach a Relay".
+// Bundles the extension host and the PTY host, and bakes the Burrow's one relay
+// origin into the extension host as `standalone/scripts/build-sidecar-proxy.mjs`
+// does into the sidecar (docs/specs/relay.md → "Relay origin").
 
 import { fileURLToPath } from 'node:url';
 
@@ -19,27 +8,20 @@ import * as esbuild from 'esbuild';
 
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 import {
-  assertConnectSrcBaked,
-  assertOneTimeOriginBaked,
-  CONNECT_SRC_PLACEHOLDER,
-  ONE_TIME_ORIGIN_PLACEHOLDER,
-  resolveOneTimeOrigin,
-  resolveRemoteConnectSrc,
-} from '../../scripts/csp-defaults.mjs';
-
-const remoteSrc = resolveRemoteConnectSrc(process.env, 'esbuild');
-// The one-time rendezvous, baked beside the allowlist that fences it
-// (docs/specs/one-time.md): `DORMOUSE_ONE_TIME_ORIGIN`, same as the sidecar's.
-const oneTimeOrigin = resolveOneTimeOrigin(process.env, 'esbuild');
+  assertRelayOriginBaked,
+  relayOriginDefine,
+  resolveRelayOrigin,
+} from '../../scripts/relay-origin.mjs';
 
 const watch = process.argv.includes('--watch');
+// `--watch` is VS Code's dev build (docs/specs/relay.md → "Relay origin").
+const relay = resolveRelayOrigin(process.env, 'esbuild', { dev: watch });
 
 // Staged into `dist/node_modules` by `stage-native-direct.mjs`, so it must stay
 // a runtime `require` (`requireNative` in `native-direct-peer.ts`).
 const NATIVE_DIRECT = ['node-datachannel'];
 const assertBuilt = ({ metafile }) => {
-  assertConnectSrcBaked('dist/extension.js', remoteSrc);
-  assertOneTimeOriginBaked('dist/extension.js', oneTimeOrigin);
+  assertRelayOriginBaked('dist/extension.js', relay);
   assertNothingInlined(metafile, NATIVE_DIRECT, 'esbuild dist/extension.js');
 };
 
@@ -59,6 +41,10 @@ const common = {
     // not follow an import out into `lib/`, and `dor` has no package exports to
     // fall back on. Same alias `lib/vite.config.ts` and standalone carry.
     dor: fileURLToPath(new URL('../../dor/src', import.meta.url)),
+    // The built-in viewers' format registry, reached the same way.
+    'dor-tools-builtin': fileURLToPath(new URL('../../dor-tools-builtin/src', import.meta.url)),
+    // And the Tool protocol, which the host's OSC parser reads.
+    'dor-tools-lib': fileURLToPath(new URL('../../dor-tools-lib/src', import.meta.url)),
   },
 };
 
@@ -67,10 +53,7 @@ const builds = [
     ...common,
     entryPoints: ['src/extension.ts'],
     outdir: 'dist',
-    define: {
-      [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
-      [ONE_TIME_ORIGIN_PLACEHOLDER]: JSON.stringify(oneTimeOrigin),
-    },
+    define: relayOriginDefine(relay),
     metafile: true,
   },
   {

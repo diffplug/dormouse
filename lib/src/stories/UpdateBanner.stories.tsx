@@ -11,6 +11,7 @@ function UpdateBannerStory({ state, expectedNullReason }: { state: UpdateBannerS
         onRestart={() => console.log('Restart now')}
         onOpenChangelog={() => console.log('Open changelog')}
         onOpenDebug={() => console.log('Open debug')}
+        onCheckNow={() => console.log('Check now')}
       />
       {expectedNullReason ? (
         <div className="inline-flex border border-dashed border-border bg-surface-raised px-2 py-1 font-mono text-xs text-muted">
@@ -87,4 +88,22 @@ export const NarrowViewport: Story = {
       </div>
     ),
   ],
+};
+
+/** Automatic checks are off and the last check was over a week ago. */
+export const CheckDue: Story = {
+  args: { state: { status: 'check-due', days: 9 } },
+};
+
+export const Checking: Story = {
+  args: { state: { status: 'checking' } },
+};
+
+/** Auto-dismisses like `post-update-success`. */
+export const UpToDate: Story = {
+  args: { state: { status: 'up-to-date', version: '0.5.0' } },
+};
+
+export const CheckFailed: Story = {
+  args: { state: { status: 'check-failed' } },
 };

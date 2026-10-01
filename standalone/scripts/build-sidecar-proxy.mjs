@@ -7,7 +7,7 @@
 //   - lib/src/host/playwright-host.ts     → sidecar/playwright-host.cjs
 //   - lib/src/host/tool-host.ts           → sidecar/tool-host.cjs
 //   - lib/src/host/git-info.ts            → sidecar/git-info.cjs
-//   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs (the alerts too)
+//   - lib/src/host/remote/sidecar-entry.ts → sidecar/burrow.cjs (the alerts and managed voice too)
 //   - lib/src/host/recovery.ts             → sidecar/recovery.cjs
 // See docs/specs/dor-browser.md, docs/specs/remote-api.md,
 // docs/specs/standalone.md -> "Agent recovery", and docs/specs/alert.md.
@@ -17,25 +17,20 @@ import { rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
-  assertConnectSrcBaked,
-  assertOneTimeOriginBaked,
-  CONNECT_SRC_PLACEHOLDER,
-  ONE_TIME_ORIGIN_PLACEHOLDER,
-  resolveOneTimeOrigin,
-  resolveRemoteConnectSrc,
-} from '../../scripts/csp-defaults.mjs';
+  assertRelayOriginBaked,
+  relayOriginDefine,
+  resolveRelayOrigin,
+} from '../../scripts/relay-origin.mjs';
 import { assertNothingInlined } from '../../scripts/assert-not-inlined.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const libHost = path.resolve(here, '../../lib/src/host');
 const sidecar = path.resolve(here, '../sidecar');
 
-// Where the Burrow may reach a Relay. The Burrow runs in the sidecar,
-// so this is the enforcement point — there is no webview CSP in front of it.
-const remoteSrc = resolveRemoteConnectSrc(process.env, 'sidecar');
-// Where the Burrow opens a one-time connection's rendezvous, fenced by the
-// allowlist above at runtime (docs/specs/one-time.md).
-const oneTimeOrigin = resolveOneTimeOrigin(process.env, 'sidecar');
+// The one relay origin, and the mode it sets. The Burrow runs in the sidecar,
+// so this bundle is the enforcement point — there is no webview CSP in front of
+// it. `--dev` marks a dev build (docs/specs/relay.md → "Relay origin").
+const relay = resolveRelayOrigin(process.env, 'sidecar', { dev: process.argv.includes('--dev') });
 
 // What the sidecar installs at runtime, read from the manifest that installs
 // it: `node-datachannel` resolves its platform package and `detect-libc`
@@ -77,10 +72,7 @@ const bundles = [
   {
     entry: 'remote/sidecar-entry.ts',
     out: 'burrow.cjs',
-    define: {
-      [CONNECT_SRC_PLACEHOLDER]: JSON.stringify(remoteSrc),
-      [ONE_TIME_ORIGIN_PLACEHOLDER]: JSON.stringify(oneTimeOrigin),
-    },
+    define: relayOriginDefine(relay),
     assertBaked: true,
     external: NATIVE_DIRECT,
   },
@@ -88,7 +80,7 @@ const bundles = [
 
 // `tauri.conf.json`'s `bundle.resources` globs this whole directory, so a
 // pre-rename `remote-host.cjs` left in an older checkout would ship inside the
-// app — a dead Burrow with its own baked connect-src allowlist — and so would
+// app — a dead Burrow with its own baked relay origin — and so would
 // an `alert-store.cjs` from before the alerts joined `burrow.cjs`.
 for (const retired of ['remote-host.cjs', 'alert-store.cjs']) {
   await rm(path.resolve(sidecar, retired), { force: true });
@@ -101,9 +93,14 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     outfile,
     bundle: true,
     platform: 'node', // node builtins (http/net/fs/child_process) stay external
-    // Match the frontend and VS Code host's dor/* source mapping. Host modules
-    // also share the CLI's pure file-format registry.
-    alias: { dor: path.resolve(here, '../../dor/src') },
+    // Match the frontend and VS Code host's dor/*, dor-tools-builtin/*, and
+    // dor-tools-lib/* source mappings. Host modules share the built-in viewers'
+    // pure format registry and parse OSC 367 with dor-tools-lib.
+    alias: {
+      dor: path.resolve(here, '../../dor/src'),
+      'dor-tools-builtin': path.resolve(here, '../../dor-tools-builtin/src'),
+      'dor-tools-lib': path.resolve(here, '../../dor-tools-lib/src'),
+    },
     format: 'cjs',
     target: 'node24',
     // `ws`'s optional native accelerators stay unresolved rather than bundled.
@@ -113,10 +110,7 @@ for (const { entry, out, define, assertBaked, external } of bundles) {
     // Only the bundle with externals to check reads one.
     ...(external ? { metafile: true } : {}),
   });
-  if (assertBaked) {
-    assertConnectSrcBaked(outfile, remoteSrc);
-    assertOneTimeOriginBaked(outfile, oneTimeOrigin);
-  }
+  if (assertBaked) assertRelayOriginBaked(outfile, relay);
   if (external) assertNothingInlined(result.metafile, SIDECAR_RUNTIME_DEPS, `sidecar ${out}`);
   console.log(`[sidecar] built ${path.relative(process.cwd(), outfile)}`);
 }

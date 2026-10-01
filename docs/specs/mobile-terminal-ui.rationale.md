@@ -33,6 +33,19 @@ suppression a tap or drag never reaches the TUI at all.
 desktop viewports, and Storybook have no touchscreen, and a mouse-only reviewer
 would otherwise see a radial menu that never opens.
 
+## Edge scrolling
+
+The edge gesture routes to either terminal history or a mouse-reporting TUI,
+neither of which is a browser scroll container. Its coast therefore approximates
+native scrolling rather than delegating to an overflow element. The exponential
+decay uses iOS's normal 0.998 rate, documented by
+[React Native](https://reactnative.dev/docs/scrollview#decelerationrate)
+(consulted 2026-09). Elapsed-time integration avoids refresh-rate-dependent
+travel. Recent directional samples avoid stale speed after reversals; release
+time includes a brief pause, while a longer hold suppresses the coast. Whole
+terminal lines preclude native subpixel motion and rubber-band bounce; the
+launch cap bounds wheel reports to a remote TUI.
+
 ## Gesture mode
 
 **The offset direction, worked through.** The hand holding the phone sits over

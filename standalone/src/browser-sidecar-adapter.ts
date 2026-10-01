@@ -1,6 +1,6 @@
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
-import { recordToolEvents } from '../../lib/src/lib/tool-events';
+import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
 import { offerProgramCopy } from '../../lib/src/lib/mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
@@ -36,6 +36,7 @@ import { embedderOrigins } from "dormouse-lib/lib/embedder-origins";
 import { createAlertClient, type AlertClientMethods } from "dormouse-lib/host/alert-client";
 import type { AlertCommand } from "dormouse-lib/host/alert-protocol";
 import { normalizeExternalUri } from "dormouse-lib/lib/external-links";
+import { managedVoicePortForBuild } from "./managed-voice-port";
 import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import { claimRecoveryCommands, windowStateSlot } from "./window-recovery";
 import { coalesceCwds } from "./coalesce-cwds";
@@ -103,10 +104,15 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     this.unlistenHost = this.host.onEvent(({ event, data }) => this.handleHostEvent(event, data));
     // The SSE stream is the only way the alerts' events reach this adapter,
     // and whatever the sidecar sent while it was down is lost: `sync` has the
-    // sidecar re-send this window's Sessions' state and both stores.
-    this.unlistenReconnect = this.host.onReconnect(() => this.alerts.sync());
+    // sidecar re-send this window's Sessions' state and both stores, and
+    // managed voice asks for its status again.
+    this.unlistenReconnect = this.host.onReconnect(() => {
+      this.alerts.sync();
+      this.managedVoice?.refresh();
+    });
     // A reload is a new realm under the same label; see TauriAdapter.
     this.alerts.hello();
+    this.managedVoice?.refresh();
     this.installConsoleForwarder();
     this.unlistenRegistry = await installWorkspaceRegistry({
       invoke: (cmd, args) => this.host.invoke(cmd, args),
@@ -307,20 +313,24 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     return this.windowSlot.read();
   }
 
+  readonly managedVoice = managedVoicePortForBuild((cmd, args) => this.host.invoke(cmd, args));
+
   private handleHostEvent(event: string, data: unknown): void {
     if (event === "dormouse://workspaces") {
       this.onRegistrySnapshot?.(data as WorkspaceRegistrySnapshot);
       return;
     }
     if (this.alerts.onEvent(event, data)) return;
-    if (event === "pty:data") {
+    if (event === "voice:status") {
+      this.managedVoice?.receiveStatus(data);
+    } else if (event === "pty:data") {
       // Already parsed by the sidecar, which owns the PTY; its events arrive as
       // the two messages below (docs/specs/terminal-escapes.md).
       const payload = data as PtyDataDetail;
       for (const handler of this.dataHandlers) handler(payload);
     } else if (event === "terminal:toolEvents") {
       const payload = data as { id: string; events: TerminalProtocolEvent[] };
-      recordToolEvents(payload.id, payload.events);
+      applyLiveToolEvents(payload.id, payload.events);
     } else if (event === "terminal:semanticEvents") {
       const { id, events } = data as { id: string; events: TerminalSemanticEvent[] };
       applyTerminalSemanticEvents(id, events);

@@ -1,94 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { parseToolAnnounce } from './tool-announce';
 import { collectTerminalToolEvents, collectTerminalProtocolResponses, TerminalProtocolParser } from './terminal-protocol';
 import { getToolAnnounce, resetToolAnnounces } from './tool-announce-store';
 import { recordToolEvents } from './tool-events';
 
 const serve = (payload: unknown) => `serve;${JSON.stringify(payload)}`;
-
-describe('parseToolAnnounce', () => {
-  it('accepts a same-origin serve path and drops authority-changing or malformed paths', () => {
-    expect(parseToolAnnounce(serve({ port: 6006, path: '/token/file/a%20b.html?mode=1' }))?.path).toBe('/token/file/a%20b.html?mode=1');
-    for (const path of ['https://evil.test/', '//evil.test/', '/\\evil.test/', '/a\nb', 'relative', `/${'a'.repeat(2048)}`]) {
-      expect(parseToolAnnounce(serve({ port: 6006, path }))?.path).toBeUndefined();
-    }
-  });
-
-  it('reads a full serve payload', () => {
-    expect(parseToolAnnounce(serve({ port: 6006, name: 'Storybook', key: ['storybook', '/repo'], dehydrate: true, persist: 'never', v: 1 }))).toEqual({
-      port: 6006,
-      name: 'Storybook',
-      key: ['storybook', '/repo'],
-      dehydrate: true,
-      persist: 'never',
-    });
-  });
-
-  it('defaults the reserved fields when unstated', () => {
-    expect(parseToolAnnounce(serve({ port: 4242 }))).toEqual({
-      port: 4242,
-      name: null,
-      key: null,
-      dehydrate: false,
-      persist: null,
-    });
-  });
-
-  it('ignores every verb but serve — dehydrate is D2 and half-honoring it is worse than dropping it', () => {
-    expect(parseToolAnnounce('dehydrate;{"v":1}')).toBeNull();
-    expect(parseToolAnnounce('progress;{"v":1}')).toBeNull();
-  });
-
-  it('refuses a serve payload naming a version it does not speak', () => {
-    // A v2 `serve` may reuse a field name for something else, so it is dropped
-    // whole rather than read as v1. An omitted `v` is the shipped v1 shape.
-    expect(parseToolAnnounce(serve({ port: 6006, v: 1 }))?.port).toBe(6006);
-    expect(parseToolAnnounce(serve({ port: 6006 }))?.port).toBe(6006);
-    for (const v of [2, 0, '1', null]) {
-      expect(parseToolAnnounce(serve({ port: 6006, v }))).toBeNull();
-    }
-  });
-
-  it('never throws on malformed output', () => {
-    expect(parseToolAnnounce('serve;not json')).toBeNull();
-    expect(parseToolAnnounce('serve;[1,2]')).toBeNull();
-    expect(parseToolAnnounce('serve;null')).toBeNull();
-    expect(parseToolAnnounce('serve;')).toBeNull();
-    expect(parseToolAnnounce('serve')).toBeNull();
-    expect(parseToolAnnounce('')).toBeNull();
-  });
-
-  it('rejects a payload past the size cap rather than parsing it', () => {
-    expect(parseToolAnnounce(serve({ port: 1, name: 'x'.repeat(8000) }))).toBeNull();
-  });
-
-  it('rejects ports outside the valid range', () => {
-    for (const port of [0, -1, 65536, 1.5, '6006']) {
-      expect(parseToolAnnounce(serve({ port, name: 'n' }))?.port ?? null).toBeNull();
-    }
-  });
-
-  it('sanitizes the name like every other OSC payload', () => {
-    expect(parseToolAnnounce(serve({ port: 1, name: 'Storybook\n\nhere' }))?.name).toBe('Story book here');
-  });
-
-  it('clamps an over-long name instead of dropping the announcement', () => {
-    const announce = parseToolAnnounce(serve({ port: 1, name: 'a'.repeat(500) }));
-    expect(announce?.name).toHaveLength(200);
-  });
-
-  it('rejects a key that is not a list of strings, and caps its length', () => {
-    expect(parseToolAnnounce(serve({ key: 'storybook' }))).toBeNull();
-    expect(parseToolAnnounce(serve({ key: [1, 2] }))).toBeNull();
-    expect(parseToolAnnounce(serve({ key: [] }))).toBeNull();
-    expect(parseToolAnnounce(serve({ key: Array(20).fill('x') }))).toBeNull();
-  });
-
-  it('returns null when nothing actionable is stated', () => {
-    expect(parseToolAnnounce(serve({ v: 1 }))).toBeNull();
-    expect(parseToolAnnounce(serve({ dehydrate: true }))).toBeNull();
-  });
-});
 
 describe('OSC 367 at the PTY boundary', () => {
   // A live or replayed parse records the whole batch; the sidecar forwards its Tool events.
@@ -160,4 +75,14 @@ it('consumes chunked OSC 367 and forwards the announcement without a terminal re
     { kind: 'toolAnnounce', announce: { port: 6006, name: null, key: null, dehydrate: false, persist: null } },
   ]);
   expect(collectTerminalProtocolResponses(parsed.events)).toEqual([]);
+});
+
+it('parses an OSC 367 open as a request the host forwards, which recording ignores', () => {
+  const parsed = new TerminalProtocolParser().process(`before\x1b]367;open;${JSON.stringify({ v: 1, path: '/repo/a.md', preview: true })}\x1b\\after`);
+  expect(parsed.visibleData).toBe('beforeafter');
+  expect(parsed.events).toEqual([{ kind: 'toolOpen', open: { path: '/repo/a.md', preview: true } }]);
+  expect(collectTerminalToolEvents(parsed.events)).toEqual(parsed.events);
+  expect(collectTerminalProtocolResponses(parsed.events)).toEqual([]);
+  recordToolEvents('open-only', parsed.events);
+  expect(getToolAnnounce('open-only')).toBeNull();
 });

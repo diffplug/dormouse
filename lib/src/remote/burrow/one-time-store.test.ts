@@ -188,6 +188,48 @@ describe('one-time store', () => {
     expect(getOneTimeSnapshot()).toEqual({ kind: 'ready', state: { status: 'idle' } });
   });
 
+  it('keeps a state already read through a failed re-read, and takes the next answer', async () => {
+    let answer: () => unknown = () => CONNECTED;
+    fakeLink(async () => answer());
+    subscribe();
+    await flush();
+
+    answer = () => {
+      throw new Error('bridge timed out');
+    };
+    await refreshOneTime();
+    expect(getOneTimeSnapshot()).toEqual({ kind: 'ready', state: CONNECTED });
+
+    answer = () => ({ status: 'idle' });
+    await refreshOneTime();
+    expect(getOneTimeSnapshot()).toEqual({ kind: 'ready', state: { status: 'idle' } });
+  });
+
+  it.each([
+    ['answers having lost its event', async () => ({})],
+    [
+      'is refused',
+      async () => {
+        throw new Error('burrow command timed out: oneTimeEnd');
+      },
+    ],
+  ])('never keeps a state from before an End that %s through a failed read', async (_, end) => {
+    let fail = false;
+    fakeLink(async (cmd) => {
+      if (cmd === 'oneTimeEnd') return end();
+      if (fail) throw new Error('bridge timed out');
+      return CONNECTED;
+    });
+    subscribe();
+    await flush();
+
+    fail = true;
+    await endOneTime().catch(() => {});
+    // The panel opening after it re-reads too.
+    await refreshOneTime();
+    expect(getOneTimeSnapshot()).toEqual({ kind: 'error', message: 'bridge timed out' });
+  });
+
   it('re-reads on request, which is what recovers a failed first read', async () => {
     let fail = true;
     fakeLink(async () => {

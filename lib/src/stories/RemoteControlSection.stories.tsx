@@ -3,23 +3,26 @@ import { fireEvent, userEvent, within } from 'storybook/test';
 import { ModalSurface } from '../components/design';
 import { RemoteControlSection } from '../components/RemoteControlSection';
 import {
+  ANYWHERE_ON,
   enrolledStatus,
   OFFER_STATUS,
+  SELF_HOST_RELAY_ORIGIN,
+  SELF_HOST_UNENROLLED_STATUS,
   UNENROLLED_STATUS,
 } from '../host/remote/test-burrow-link';
+import { networkPolicyResult } from '../remote/network-policy';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 /**
- * The Settings dialog's Remote control section — the one step a self-hoster
- * cannot skip (`docs/specs/relay.md`, "Remote control, in the Settings
- * dialog"). Rendered on its own rather than through `SettingsDialog` so these
- * stories are about the enrollment states themselves; `SettingsDialog`'s
- * `WithRemoteControl` covers it in place.
+ * The Remote control choices in Settings → Network's Phones section — the one
+ * step a self-hoster cannot skip (`docs/specs/relay.md`, "Remote control, in
+ * the Settings dialog"). Rendered on its own rather than through
+ * `SettingsDialog` so these stories are about the enrollment states
+ * themselves; `SettingsDialog`'s `WithRemoteControl` covers it in place.
  *
  * Every state comes from the `primedBurrow` parameter, because the section
  * reads its whole world from `getPlatform().burrow` and renders nothing
- * without one. The leading rule is the section's own `border-t` — it normally
- * separates it from the push settings above.
+ * without one.
  */
 function RemoteControlStory() {
   return (
@@ -58,10 +61,10 @@ export default meta;
 type Story = StoryObj<typeof RemoteControlStory>;
 
 /**
- * The status command is a round trip, so every story opens on "Checking…".
- * Waiting for the settled text keeps Chromatic off that frame — and asserts the
- * story actually reached the state it claims, rather than rendering an empty
- * section because the stub never arrived.
+ * The status command is a round trip, so every story opens empty. Waiting for
+ * the settled text keeps the snapshot off that frame — and asserts the story
+ * actually reached the state it claims, rather than rendering an empty section
+ * because the stub never arrived.
  */
 function settled(text: string | RegExp) {
   return async ({ canvasElement }: { canvasElement: HTMLElement }) => {
@@ -86,8 +89,8 @@ async function openPersistent(canvasElement: HTMLElement) {
 }
 
 /**
- * What a machine that has never enrolled opens on: a one-time connection and a
- * folded Persistent Relay.
+ * What a stock build that has never enrolled opens on: a one-time connection and
+ * a folded Persistent Relay.
  */
 export const Choices: Story = {
   parameters: {
@@ -98,14 +101,30 @@ export const Choices: Story = {
 };
 
 /**
- * A machine that has never enrolled, Persistent Relay unfolded: hosted.dormouse.sh
- * (coming soon), then the typed form for a Relay you run — server, setup
- * password, name.
+ * A stock build, Persistent Relay unfolded: its one Relay is Hosted's, coming
+ * soon, so there is nothing to enroll — a Relay you run takes a build made for
+ * its origin (`docs/specs/relay.md` → "Relay origin").
+ */
+export const HostedPersistentRelay: Story = {
+  parameters: {
+    primedBurrow: { status: UNENROLLED_STATUS },
+    docs: { story: { height: '420px' } },
+  },
+  play: async ({ canvasElement }) => {
+    await openPersistent(canvasElement);
+    await within(canvasElement).findByRole('button', { name: 'Use hosted.dormouse.sh' });
+  },
+};
+
+/**
+ * A self-host build that has never enrolled, Persistent Relay unfolded: the
+ * origin it was built for over the typed form — setup password, name. Its
+ * one-time connection is off.
  */
 export const Unenrolled: Story = {
   parameters: {
-    primedBurrow: { status: UNENROLLED_STATUS },
-    docs: { story: { height: '690px' } },
+    primedBurrow: { status: SELF_HOST_UNENROLLED_STATUS },
+    docs: { story: { height: '640px' } },
   },
   play: async ({ canvasElement }) => {
     await openPersistent(canvasElement);
@@ -114,47 +133,47 @@ export const Unenrolled: Story = {
 };
 
 /**
- * The refusal that matters most. A Burrow bundle only talks to the origins baked
- * into it at build time, so a stock build pointed at a self-host server fails
- * *before* the password leaves the machine — and the form has to say that,
- * rather than let it read as a wrong password.
+ * A Relay whose `DORMOUSE_ORIGIN` is not the origin this build was made for:
+ * enrollment is refused, naming both, and nothing is saved — and the form says
+ * so in the service's words rather than letting it read as a wrong password.
  */
 export const EnrollRefused: Story = {
   parameters: {
     primedBurrow: {
-      status: UNENROLLED_STATUS,
+      status: SELF_HOST_UNENROLLED_STATUS,
       enrollError:
-        'This build will not connect to https://ned-mac.tail9c2f1.ts.net. Allowed: https://*.dormouse.sh wss://*.dormouse.sh',
+        `The Relay says its origin is https://ned-mac.local, but this build was made for ${SELF_HOST_RELAY_ORIGIN}. ` +
+        'Rebuild Dormouse with DORMOUSE_RELAY_ORIGIN=https://ned-mac.local, or set the Relay\'s ' +
+        `DORMOUSE_ORIGIN to ${SELF_HOST_RELAY_ORIGIN}.`,
     },
-    docs: { story: { height: '760px' } },
+    docs: { story: { height: '740px' } },
   },
   // `fireEvent.change` rather than `userEvent.type`: these are controlled
-  // inputs, so per-character typing costs a render each — ten seconds to fill
-  // three fields, long enough that a reader scrolling past sees a half-typed
-  // form — and typing them without awaiting a render between keystrokes
-  // (`delay: null`) loses every character but the last. One change event with
-  // the whole value is what a paste does anyway.
+  // inputs, so per-character typing costs a render each — long enough that a
+  // reader scrolling past sees a half-typed form — and typing them without
+  // awaiting a render between keystrokes (`delay: null`) loses every character
+  // but the last. One change event with the whole value is what a paste does
+  // anyway.
   play: async (context) => {
     const canvas = within(context.canvasElement);
     const fill = (label: string, value: string) =>
       fireEvent.change(canvas.getByLabelText(label), { target: { value } });
 
     await openPersistent(context.canvasElement);
-    await canvas.findByLabelText('Relay');
-    fill('Relay', 'https://ned-mac.tail9c2f1.ts.net');
+    await canvas.findByLabelText('Setup password');
     fill('Setup password', TEST_SETUP_PASSWORD);
     fill('Name for this Burrow', 'Work laptop');
     await userEvent.click(canvas.getByRole('button', { name: 'Connect' }));
-    await canvas.findByText(/This build will not connect/);
+    await canvas.findByText(/The Relay says its origin is/);
   },
 };
 
 /**
  * The installer ran on this machine, so once Persistent Relay is unfolded there
- * is nothing to type: the offer card leads with the origin it found and a name
- * already filled in, and the
- * three-field form folds away behind "Enroll with a different Relay…". The
- * refusal {@link EnrollRefused} shows reaches this card in the same words —
+ * is nothing to type: the offer card leads with the origin it found — the one
+ * this build was made for — and a name already filled in, and the typed form
+ * folds away behind "Enroll with the setup password…". The refusal
+ * {@link EnrollRefused} shows reaches this card in the same words —
  * `RemoteControlSection.test.tsx` pins that.
  */
 export const OfferAvailable: Story = {
@@ -191,7 +210,7 @@ export const ConnectedManyDevices: Story = {
   parameters: {
     primedBurrow: {
       status: enrolledStatus({
-        relayUrl: 'https://neds-16-inch-macbook-pro-2026.tail9c2f1.ts.net',
+        relayOrigin: 'https://neds-16-inch-macbook-pro-2026.tail9c2f1.ts.net',
         pairedClients: 4,
       }),
     },
@@ -413,15 +432,6 @@ export const OneTimeWaiting: Story = {
   },
 };
 
-/** The same panel on a machine that also enrolled with a Relay. */
-export const OneTimeWaitingEnrolled: Story = {
-  parameters: {
-    primedBurrow: { status: enrolledStatus({ pairedClients: 1 }) },
-    docs: { story: { height: '800px' } },
-  },
-  play: OneTimeWaiting.play,
-};
-
 /** A phone used the link and its request is up in the approval modal. */
 export const OneTimeConfirming: Story = {
   parameters: {
@@ -434,7 +444,7 @@ export const OneTimeConfirming: Story = {
   play: settled('Type the two digits your phone shows into the dialog.'),
 };
 
-/** Confirmed; the phone is setting up the direct path on the same Wi-Fi. */
+/** Confirmed; the phone is setting up the direct path over an allowed network. */
 export const OneTimeConnecting: Story = {
   parameters: {
     primedBurrow: {
@@ -474,6 +484,22 @@ export const OneTimeEndedDirectFailed: Story = {
   play: settled(/couldn’t reach this computer directly/),
 };
 
+/**
+ * The same failure under Anywhere, which has no allowed network to name: the
+ * sentence suggests another network instead.
+ */
+export const OneTimeEndedDirectFailedAnywhere: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      network: networkPolicyResult(ANYWHERE_ON, 'hosted', []),
+      oneTime: { status: 'ended', reason: 'direct-failed' },
+    },
+    docs: { story: { height: '380px' } },
+  },
+  play: settled(/such as cellular/),
+};
+
 /** The one attempt was spent on digits the phone was not showing. */
 export const OneTimeEndedMismatch: Story = {
   parameters: {
@@ -487,17 +513,13 @@ export const OneTimeEndedMismatch: Story = {
 };
 
 /**
- * A build whose allowed remote addresses leave the rendezvous out — a
- * self-host build that narrowed them, say — offers the button disabled, and
- * says why.
+ * A self-host build reaches nothing of Dormouse's, the rendezvous included, so
+ * it offers the button disabled and says why.
  */
 export const OneTimeUnavailable: Story = {
   parameters: {
-    primedBurrow: {
-      status: UNENROLLED_STATUS,
-      oneTime: { status: 'unavailable', reason: 'origin-not-allowed' },
-    },
+    primedBurrow: { status: SELF_HOST_UNENROLLED_STATUS },
     docs: { story: { height: '330px' } },
   },
-  play: settled(/it isn’t allowed to reach hosted\.dormouse\.sh/),
+  play: settled(/Not available in a self-host build/),
 };

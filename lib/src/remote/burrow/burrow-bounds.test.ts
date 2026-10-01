@@ -157,7 +157,7 @@ describe('BurrowRuntime bounds', () => {
     const created = new BurrowRuntime({
       enrollment: { ...enrollment, ...enrollmentOverrides },
       reconnect: false,
-      ...(options.createDirectPeer ? { createDirectPeer: options.createDirectPeer } : {}),
+      ...(options.createDirectPeer ? { directPeering: { createPeer: options.createDirectPeer } } : {}),
       createWebSocket: () => (socket = new FakeSocket()),
       loadAcl: () => [] as BurrowAclRecord[],
       saveAcl: () => {},
@@ -968,6 +968,41 @@ describe('BurrowRuntime bounds', () => {
     burrow = makeBurrow(undefined, { createDirectPeer: () => network.createAnswerer() });
     return network;
   }
+
+  it('reads a socket factory that throws as a close, and retries on its backoff', () => {
+    // The service's transport guard throws under Nothing
+    // (`lib/src/host/remote/service.ts`); from the reconnect timer, a throw
+    // that escaped would take the host process down.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let refusing = true;
+    let opened = 0;
+    const refused = new BurrowRuntime({
+      enrollment,
+      createWebSocket: () => {
+        if (refusing) throw new Error('set to Nothing');
+        opened += 1;
+        return new FakeSocket();
+      },
+      loadAcl: () => [],
+      saveAcl: () => {},
+      requestApproval: () => {},
+      dismissApproval: () => {},
+      now: clock.now,
+      setTimer: clock.setTimer,
+    });
+
+    refused.start();
+    expect(refused.status).toBe('disconnected');
+    clock.advance(1_000);
+    expect(refused.status).toBe('disconnected');
+
+    refusing = false;
+    clock.advance(2_000);
+    expect(opened).toBe(1);
+    expect(refused.status).toBe('connecting');
+    refused.stop();
+    warn.mockRestore();
+  });
 
   it('extends the idle deadline on a keepalive that arrived off the channel', async () => {
     // Every bound is path-agnostic: what refreshes the deadline is a decrypted

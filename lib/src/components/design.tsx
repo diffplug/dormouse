@@ -513,6 +513,11 @@ export const SUBTLE_ACTION_INTERACTION_CLASS = 'enabled:not-aria-disabled:hover:
 /** Both of the above, hover and focus included, for a wrapper whose focusable control is a
  *  transparent child (a native `<select>` over a label). The caller drops it while busy. */
 export const SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS = 'hover:bg-current/10 hover:text-link has-[:focus-visible]:text-link has-[:focus-visible]:outline has-[:focus-visible]:outline-focus-ring';
+/** A quiet action inside running text, such as a link to another Settings topic. */
+export const INLINE_ACTION_CLASS = `rounded px-0.5 ${SUBTLE_ACTION_COLOR_CLASS} ${SUBTLE_ACTION_INTERACTION_CLASS}`;
+
+/** A Settings dialog group below another: a rule, and room on both sides of it. */
+export const SETTINGS_SECTION = 'mt-4 border-t border-border pt-3';
 
 /**
  * The app's boolean control: compact track (off left, on right) and one state

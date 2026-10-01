@@ -56,7 +56,7 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import type { DirectPeerFactory } from '../direct/direct-peer';
+import type { DirectPeering, DirectViolationCause } from '../direct/direct-peer';
 import { parseOneTimeFrame, RendezvousHold } from '../one-time-rendezvous';
 import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import {
@@ -87,6 +87,8 @@ export type OneTimeEndReason =
   | 'phone-left'
   /** No direct path: declined, abandoned, or not switched by `ONE_TIME_DIRECT_DEADLINE_MS`. */
   | 'direct-failed'
+  /** The direct path's policy refused it: no allowed network carried it, before the switch or after. */
+  | 'network-not-allowed'
   /** The session went `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` without a word from the phone. */
   | 'idle'
   /** The rendezvous never announced a room. */
@@ -98,14 +100,13 @@ export type OneTimeEndReason =
 
 /**
  * Why the service offers no one-time connection at all. The service's to
- * decide, never this runtime's: a runtime exists only for an available origin
- * (`oneTimeAvailability` in `lib/src/host/remote/one-time-origin.ts`).
+ * decide, never this runtime's: a runtime exists only in a build with a Hosted
+ * origin, under a network policy that allows one (`idleOneTimeState` in
+ * `lib/src/host/remote/service-protocol.ts`). `self-host`: a self-host build,
+ * which reaches no rendezvous. `network-off`: the policy is Nothing
+ * (`docs/specs/remote-network.md` -> "Policy").
  */
-export type OneTimeUnavailableReason =
-  /** Not a bare HTTPS or loopback-HTTP origin a link can carry. */
-  | 'origin-invalid'
-  /** Outside this build's baked connect-src allowlist. */
-  | 'origin-not-allowed';
+export type OneTimeUnavailableReason = 'self-host' | 'network-off';
 
 /**
  * What the one-time connection is doing, as the laptop's panel renders it.
@@ -157,11 +158,13 @@ export interface OneTimeRuntimeOptions {
    */
   createSession(opts: RemoteApiSessionContext): RemoteApiSessionLike;
   /**
-   * How this host builds a peer connection for the direct path, or `null` where
-   * it has none — then every offer is declined, and the connection ends
-   * `direct-failed`.
+   * How this host takes the direct path: with no factory every offer is
+   * declined, and the connection ends `direct-failed`; a path policy's refusal
+   * — under Local networks, the allowed networks
+   * (`docs/specs/remote-network.md` -> "Local networks") — ends it
+   * `network-not-allowed`.
    */
-  readonly createDirectPeer: DirectPeerFactory | null;
+  readonly directPeering: DirectPeering;
   /** This machine's name, as the phone shows it; bounded here before it is sent. */
   readonly burrowLabel: string;
   /** Surface the request for local approval. */
@@ -213,7 +216,7 @@ export class OneTimeRuntime {
   readonly #origin: string;
   readonly #createWebSocket: (url: string) => RemoteWebSocket;
   readonly #createSession: OneTimeRuntimeOptions['createSession'];
-  readonly #createDirectPeer: DirectPeerFactory | null;
+  readonly #directPeering: DirectPeering;
   readonly #burrowLabel: string;
   readonly #requestApproval: (request: OneTimeApprovalRequest) => void;
   readonly #dismissApproval: () => void;
@@ -275,7 +278,7 @@ export class OneTimeRuntime {
     this.#origin = options.origin;
     this.#createWebSocket = options.createWebSocket;
     this.#createSession = options.createSession;
-    this.#createDirectPeer = options.createDirectPeer;
+    this.#directPeering = options.directPeering;
     this.#burrowLabel = options.burrowLabel;
     this.#requestApproval = options.requestApproval;
     this.#dismissApproval = options.dismissApproval;
@@ -601,9 +604,9 @@ export class OneTimeRuntime {
               if (this.#established === e2e) this.#end('user-ended');
             },
           }),
-        createDirectPeer: this.#createDirectPeer,
+        directPeering: this.#directPeering,
         sendRelay: (relayed) => this.#sendFrame('transport', relayed),
-        onFatal: (reason) => this.#onSessionFatal(e2e, reason),
+        onFatal: (reason, cause) => this.#onSessionFatal(e2e, reason, cause),
         onRelayedApp: () => this.#onRelayedApp(e2e),
         onTransportChanged: (path, cause) => this.#onTransportChanged(e2e, path, cause),
         now: this.#now,
@@ -663,11 +666,19 @@ export class OneTimeRuntime {
     this.#end('burrow-error');
   }
 
-  /** The session is over: before the switch no direct path formed, after it the phone went. */
-  #onSessionFatal(e2e: EstablishedE2eSession, reason: string): void {
+  /**
+   * The session is over: the path policy refused its path, or else before the
+   * switch no direct path formed and after it the phone went.
+   */
+  #onSessionFatal(
+    e2e: EstablishedE2eSession,
+    reason: string,
+    cause: DirectViolationCause | undefined,
+  ): void {
     if (this.#established !== e2e) return;
     console.warn(`[one-time] the session ended: ${reason}`);
-    this.#end(this.#state.status === 'connected' ? 'phone-left' : 'direct-failed');
+    if (cause === 'path-refused') this.#end('network-not-allowed');
+    else this.#end(this.#state.status === 'connected' ? 'phone-left' : 'direct-failed');
   }
 
   // --- Deadlines -------------------------------------------------------------

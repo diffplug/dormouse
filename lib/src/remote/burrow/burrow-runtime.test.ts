@@ -1400,9 +1400,8 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
   const OFFER_SDP = 'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n';
 
   it('declines an offer it has no way to answer, and answers a second one not at all', async () => {
-    // No `createDirectPeer`: the VS Code host, and any runtime whose native
-    // addon will not load (`docs/specs/remote-api.md` → Transport →
-    // "Direct path").
+    // No `directPeering`: a runtime whose native addon will not load
+    // (`docs/specs/remote-api.md` → Transport → "Direct path").
     makeBurrow();
     const { session, connectionId, clientId } = await establishSession();
 

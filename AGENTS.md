@@ -35,6 +35,8 @@ The Tool shows the harness in its own pane and prints the command to drive it
 - **`dor/`** — The `dor` CLI (stricli) staged onto the `PATH` of every Dormouse-launched terminal; talks to its host over a private control socket
 - **`remote-lib-common/`** — Security primitives + remote wire contract shared by `relay`, the Burrow module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
+- **`dor-tools-builtin/`** — The built-in Tools (`builtin:file` viewer and Monaco editor, `builtin:folder`), loaded by `dor` from a separate runtime bundle; lib and the hosts import its pure format module.
+- **`dor-tools-lib/`** — The Tool integration protocol (OSC 367 and the iframe save channel) for Tools and their hosts; MIT, no runtime dependencies, private until 1.0.
 - **`canopy/`** — Experimental 3D/WebXR terminal-rendering lab (Storybook-only, not in the production build). Consumes `@diffplug/xterm-addon-webgl-sdf` — the webgl addon from our [xterm.js fork](https://github.com/diffplug/xterm.js) (`sdf` branch).
 
 **Burrow, Client, Relay** — the three remote-control roles — are defined in `docs/specs/glossary.md` -> "Roles". *Host* is reserved for the platform host, the `Host` header, hostnames, and self-hosting; *server* for HTTP servers and dev servers.
@@ -60,6 +62,8 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/dor-cli.md`** — The `dor` CLI on every Dormouse terminal's `PATH`: bundling and env contract, `spawnAndCapture` rules, control-socket plumbing, the Surface handle model, the command set.
 - **`docs/specs/dor-browser.md`** — The browser surface: `BrowserPanel` with swappable `renderMode`, browser chrome, the agent-browser stack, the iframe proxy and CSP boundaries.
 - **`docs/specs/dor-tool.md`** — Dor Tools: the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs, OSC 367 contract, designation, trust, serving, and persistence.
+- **`docs/specs/dor-tools-builtin.md`** — The built-in Tools `builtin:file` (local-file viewer and text editor) and `builtin:folder`: formats, grants, disk saves, listings, and their runtime packaging.
+- **`docs/specs/dor-tools-lib.md`** — `dor-tools-lib`, the MIT Tool-protocol package: its license and dependency boundary, entry points, consumers, and the road to publishing 1.0.
 - **`docs/specs/vscode.md`** — VS Code host: webview hosting, webview ↔ Workspace mapping, persistence ordering, theme integration, CSP, the build/dogfood pipeline.
 - **`docs/specs/standalone.md`** — Tauri host: the Rust ↔ Node-sidecar bridge, boot sequence, AppBar, persistence, shutdown ordering, the build/dev workflow.
 - **`docs/specs/auto-update.md`** — Standalone auto-update: check → approved download → install-on-quit, the Baseboard notice, Windows sidecar teardown, per-platform quit behavior.
@@ -68,6 +72,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/website-docs.md`** — Public documentation on the marketing site: the generated references, the Markdown rendering contract they share, the left rail across the docs section, `vscode-ext/README.md` as the canonical guide published off-site, and the lint that pins their links.
 - **`docs/specs/webgl-text.md`** — SDF text rendering for the 3D/WebXR effort: the diffplug/xterm.js fork pipeline and its version lockstep, the SDF glyph architecture, the canopy Storybook lab.
 - **`docs/specs/remote-security-model.md`** — Remote-control trust model: one Noise channel per ceremony, passkeys proving presence inside it, per-Burrow Client statics, the Burrow (not the Relay) authorizing the pair. Read first for anything remote.
+- **`docs/specs/remote-network.md`** — The network policy (Nothing / Local networks / Anywhere / My Relay only): its choke points, the update reminder, the Local networks path check, Cloudflare STUN, and the staged Hosted persistent transport.
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
 - **`docs/specs/relay.md`** — The selfhost coordinating Relay and shared Burrow-service runtime: env config, JSON-file state, WebAuthn without a library, HTTP API, relay flow, enrollment, running it end to end.
 - **`docs/specs/hosted.md`** — Hosted accounts: application boundary, login/linking policy, local development, and staged paid services.
@@ -78,7 +83,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/deploy.md`** — Release process: artifact matrix, release checklist, two-stage sign-and-release pipeline, updater manifest, changelog flow.
 - **`docs/specs/security.md`** — The guarantees Dormouse makes, what it does not defend, the known gaps, and how it is all checked; published at `/security`, rows split by audience. Read first for anything security. Root `SECURITY.md` is the GitHub policy pointer at it.
 - **`docs/specs/security-local.md`** — The boundaries a user of the local application has: terminal output, browser panes, the `dor` control socket, loopback listeners, persisted state.
-- **`docs/specs/security-remote.md`** — The audited checks on remote control: trust boundary, relay allowlist, credentials at rest, the setup password, cross-origin access, network posture, what crosses the boundary, revocation.
+- **`docs/specs/security-remote.md`** — The audited checks on remote control: trust boundary, relay origin, credentials at rest, the setup password, cross-origin access, network posture, what crosses the boundary, revocation.
 - **`docs/specs/security-supply-chain.md`** — Disclosure of everything that reaches a user's machine, the bundled runtime pin, dependency cooldown and alerts.
 - **`docs/specs/security-ci.md`** — GitHub Actions, the tend bot, and the two release paths: what each identity can reach and what stays admin-gated.
 - **`docs/specs/security-audit.md`** — The nightly audit contract: schedule and release gate, the domains and their prompts in `.github/audit/`, orchestration, outcomes, reporting, `AUDIT_PAT`. `scripts/security-audit-local.sh` runs it locally.

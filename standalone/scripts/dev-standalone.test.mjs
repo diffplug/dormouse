@@ -26,6 +26,11 @@ async function fixture(t) {
   const cli = path.join(bin, 'cli.cjs');
   await writeFile(cli, `
     const args = process.argv.slice(2);
+    // \`pnpm run stage:dev\`, which tauri.mjs runs ahead of a dev run.
+    if (args[0] === 'run') {
+      console.log('STAGE ' + args[1]);
+      process.exit(0);
+    }
     console.log('CLI_ARGS ' + JSON.stringify(args));
     if (args[2] !== 'dev') process.exit(0);
     const config = JSON.parse(args[args.lastIndexOf('--config') + 1]);
@@ -99,6 +104,8 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
     b.start(['dev'], { DORMOUSE_LOG_FILE: path.join(b.root, 'custom.log') }).ready(),
   ]);
   assert.equal(custom.logFile, path.join(b.root, 'custom.log'));
+  // A dev run stages a dev build (docs/specs/relay.md → "Relay origin").
+  assert.match(custom.output, /STAGE stage:dev\r?\n/);
   await custom.stop();
   assert.notEqual(one.url, two.url);
   assert.notEqual(one.config.identifier, two.config.identifier);
@@ -131,6 +138,19 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
   process.kill(two.appPid, 0);
 });
 
+test('the dev server bakes the webview under the dev rule', { timeout: 60000 }, async t => {
+  // A dev build may count a loopback origin as Hosted; `vite build` may not
+  // (docs/specs/relay.md → "Relay origin").
+  const a = await fixture(t);
+  const run = await a.start(['dev'], {
+    DORMOUSE_RELAY_ORIGIN: 'http://localhost:8787', DORMOUSE_RELAY_IS_HOSTED: '1',
+  }).ready();
+  const env = await (await fetch(`${run.url}/@vite/env`)).text();
+  assert.match(env, /"__DORMOUSE_RELAY_ORIGIN__":\s*"http:\/\/localhost:8787"/);
+  assert.match(env, /"__DORMOUSE_RELAY_MODE__":\s*"hosted"/);
+  await run.stop();
+});
+
 test('an occupied explicit port fails without touching its owner; native failures close Vite', { timeout: 60000 }, async t => {
   const [a, b] = await Promise.all([fixture(t), fixture(t)]);
   const one = await a.start().ready();
@@ -151,5 +171,27 @@ test('non-dev Tauri commands retain their arguments and production configuration
   const run = a.start(['build', '--debug']);
   assert.equal((await run.exited).code, 0);
   assert.deepEqual(JSON.parse((await run.wait(/CLI_ARGS (.+)/))[1]), ['exec', 'tauri', 'build', '--debug']);
+  // `beforeBuildCommand` stages a release build; staging here too would bake twice.
+  assert.doesNotMatch(run.output, /STAGE/);
   assert.doesNotMatch(run.output, /app URL|NATIVE_CONFIG/);
+});
+
+test('a self-host build overlays no updater endpoint and no updater artifacts', async t => {
+  const a = await fixture(t);
+  const run = a.start(['build', '--debug'], { DORMOUSE_RELAY_ORIGIN: 'https://relay.example.ts.net' });
+  assert.equal((await run.exited).code, 0);
+  const args = JSON.parse((await run.wait(/CLI_ARGS (.+)/))[1]);
+  assert.deepEqual(args.slice(0, 4).concat(args.slice(5)), ['exec', 'tauri', 'build', '--config', '--debug']);
+  // Tauri merges `--config` as a JSON merge patch, so the empty list replaces
+  // tauri.conf.json's endpoints outright (docs/specs/standalone.md → "Build and
+  // development").
+  assert.deepEqual(JSON.parse(args[4]), {
+    bundle: { createUpdaterArtifacts: false },
+    plugins: { updater: { endpoints: [] } },
+  });
+
+  const refused = a.start(['build'], { DORMOUSE_RELAY_IS_HOSTED: '1' });
+  assert.notEqual((await refused.exited).code, 0);
+  assert.match(refused.output, /DORMOUSE_RELAY_IS_HOSTED is for dev builds only/);
+  assert.doesNotMatch(refused.output, /CLI_ARGS/);
 });

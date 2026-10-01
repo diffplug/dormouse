@@ -90,6 +90,8 @@ are *not* forwarded:
 | `load_session` / `save_session` | Rust | the per-window session file is Rust's store (§Persistence) |
 | the `clipboard` readers (Windows only) | Rust (`clipboard_win.rs`) | native Win32 reads (`docs/specs/mouse-and-clipboard.md` §8.6) |
 
+**Managed-voice audio is the one byte payload that rides the pipe**, as base64 in its `voice:result` line (rationale; `docs/specs/transport.md` → "Managed voice").
+
 Request/response commands block on the sidecar's reply under a timeout.
 `OPEN_PORT_TIMEOUT_MS` and `OPEN_PORT_TIMEOUT_PER_ID_MS` in `lib.rs` mirror the
 constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.js`);
@@ -127,24 +129,23 @@ webview, where `TauriAdapter` converts dor control requests into the
 
 The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
 — runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow
-side", which owns that split and what the webview keeps): the same
+side"): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
-with the relay-origin allowlist and the one-time rendezvous origin baked in
-(`docs/specs/relay.md`, `docs/specs/one-time.md`).
-**Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
+(§Build and development). **Nothing the webview says can widen access** (`docs/specs/remote-security-model.md`).
 
 **State.** Rust creates the app-data directory, locks it owner-only, and passes it
 as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStore`
-keeps enrollment and ACL there as **one** `burrow.json`, 0600 in a 0700
-directory via temp-then-rename — one file, so a write is one atomic rename
-(rationale). `burrowToken` is a bearer credential and **never enters a webview
-realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
+keeps enrollment and ACL there as **one** `burrow.json`, so a write is one atomic
+rename (rationale), and the network policy beside it (`docs/specs/remote-network.md`
+→ "Policy"), both 0600 in a 0700 directory via temp-then-rename. `burrowToken` is
+a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
 
 - **Reads fail closed.** Only `ENOENT` and a read-but-unparseable file answer
-  empty; the parse failure warns. Any other read error is neither answered nor
-  memoized — the load rejects and takes the save behind it with it (rationale). A
-  later read recovers.
+  empty — but the network policy's unparseable file reads as Nothing, never
+  empty (`docs/specs/remote-network.md` → "Policy"); the parse failure warns.
+  Any other read error is neither answered nor memoized — the load rejects and
+  takes the save behind it with it (rationale). A later read recovers.
 - **The in-memory view advances only after the rename succeeds.** Re-tightening a
   directory Rust already created is best-effort; failing the save over it would
   lose the Burrow instead.
@@ -241,8 +242,8 @@ that feeds it: one `AlertManager`, every window a realm under its label
 
 - **Must offer every stdin line to `createSidecarHost`'s `handleCommand` before
   `main.js` dispatches it**: it owns the PTY commands the alerts must see —
-  spawn, input, resize, kill, reap, `pty:requestInit` — every alert and Burrow
-  command, the theme push.
+  spawn, input, resize, kill, reap, `pty:requestInit` — every alert, Burrow, and
+  managed-voice command, the theme push.
 - **Webview → sidecar is one passthrough, `alert_command(payload)`**, and **Rust
   stamps the invoking window's label on it as `window`**, over any the payload
   claimed, exactly as on `burrow_command`. **An unstamped `alert:command` is
@@ -501,6 +502,7 @@ Source of truth: `standalone/src-tauri/src/workspaces.rs`;
 | `dor:controlRequest` | `params.workspace`, `params.window`, `data.surfaceId` | in that precedence: the window holding the named Workspace (§Workspace registry), the named window, the caller's Surface's owner; none → the focused window |
 | `dor:controlCancel` | `data.requestId` | the window its request went to; unknown → every window |
 | `burrow:ask` | `data.params.surfaceId` | its owner; a Surface with no PTY here, or an ask naming none, → every window (§Burrow service) |
+| `voice:result` | — | nowhere: only one that outlived its invoke gets here |
 | everything else | — | every window |
 
 - **Ownership is minted only in `pty_spawn`**, dropped by `pty_kill` or the
@@ -651,7 +653,7 @@ Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
 
 ### Transfer
 
-Dirty Tool consent: `docs/specs/dor-tool.md` → Editing files.
+Dirty Tool consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
 **A Workspace moves between windows without ending anything.** No process is killed: a move is not a closure.
 
@@ -1018,7 +1020,7 @@ Source of truth: `pty:captureRecovery` / `recovery:take` in `standalone/sidecar/
 
 ## Quit flow
 
-Tool close consent: `docs/specs/dor-tool.md` → Editing files.
+Tool close consent: `docs/specs/dor-tool.md` → Closing unsaved Tools.
 
 Source of truth: `standalone/src-tauri/src/lib.rs` (`QuitState`, `request_quit`,
 the `quit_ack` / `quit_progress` / `quit_cancel` / `quit_proceed` commands, the `CloseRequested` /
@@ -1292,17 +1294,21 @@ Source of truth: `standalone/package.json` (package scripts),
 `standalone/src-tauri/tauri.conf.json` (`build`, `bundle.resources`), and the root
 `package.json` for the `dev:standalone` and `innerdogfood` orchestration;
 `runDev` in `standalone/scripts/dev-standalone.mjs`;
+`SELF_HOST_BUILD_CONFIG` in `standalone/scripts/tauri.mjs`;
 `standalone/scripts/clean-dev-sidecar.mjs`.
 
 - `stage` = `stage:dor-cli` (build + stage the dor CLI, `docs/specs/dor-cli.md`)
   plus `stage:sidecar-proxy` (`build-sidecar-proxy.mjs` bundles the
   `lib/src/host/` sources into the sidecar `.cjs` files).
-- The `tauri` script stages, then runs `standalone/scripts/tauri.mjs`, which
-  delegates to the Tauri CLI — except `dev`, which it routes through `runDev`
-  below. `build-sidecar-proxy.mjs` bakes `DORMOUSE_REMOTE_CONNECT_SRC` into the
-  sidecar's Burrow bundle. The webview CSP contains no relay sources, pinned by
-  `standalone/scripts/tauri-conf.test.mjs` (`docs/specs/relay.md`, "Where a Burrow
-  may reach a Relay").
+- `tauri dev` stages `stage:dev`, as `pnpm innerdogfood` does, then runs
+  `runDev` below; other subcommands reach the Tauri CLI unstaged, `build`
+  staging via `beforeBuildCommand`. The sidecar bundle (a dev build under
+  `--dev`) and the webview bake `DORMOUSE_RELAY_ORIGIN` (`docs/specs/relay.md`
+  → "Relay origin"); the webview CSP has no relay sources
+  (`standalone/scripts/tauri-conf.test.mjs`).
+- **A self-host `tauri build` overlays no updater endpoint and no updater
+  artifacts**, so the binary cannot reach `dormouse.sh` and needs no signing
+  key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
   shell-integration scripts (`docs/specs/terminal-escapes.md`).
@@ -1328,6 +1334,9 @@ Source of truth: `standalone/package.json` (package scripts),
   sources.** Frontend edits hot-reload; Tauri watches Rust.
 - `pnpm innerdogfood` runs the sidecar + webview in a normal browser via the
   browser-dev harness instead of the Tauri WebView (below).
+- **May point a dev build at a local `pnpm dev:hosted`** — the origin it prints,
+  with `DORMOUSE_RELAY_IS_HOSTED=1` — to speak managed voice through it; it
+  answers no other `Host` (`docs/specs/security-local.md` -> "Persisted state").
 
 ### Standalone browser-dev harness
 

@@ -5,7 +5,8 @@
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
-phone shows, and the session runs over a direct WebRTC path on the same network.
+phone shows, and the session runs over a direct WebRTC path the network policy
+allows (`docs/specs/remote-network.md`).
 Hosted's rendezvous carries the handshake and nothing after it.
 
 ## Flow
@@ -184,6 +185,7 @@ decides them; a runtime never enters either.
 | `expired` | a link past its expiry, claimed or not; a late request or confirmation; room close `4010` or `4014` |
 | `phone-left` | room close `4013` before the switch; any session failure after it |
 | `direct-failed` | a decline, an abandoned attempt, a session failure before the switch, or the direct deadline |
+| `network-not-allowed` | the path check refused the direct path (`docs/specs/remote-network.md` -> "Local networks") |
 | `idle` | `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` without a decrypted phone message |
 | `unreachable` | no room frame by the open deadline, a first message that is not one, or a socket lost before it |
 | `rendezvous-lost` | any other close before the switch |
@@ -312,6 +314,7 @@ on Pocket's screens, chrome, and mobile wall.
   first render**, parsed or not, and reload on `hashchange` (rationale).
 - **Never open a socket before the Connect tap**: the tap builds the client and
   runs `connectOnce`, so a link-preview crawler spends nothing.
+- Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
 - **Never persist anything** on an origin Hosted's accounts share: no storage,
   IndexedDB, worker, push, or cookie. `applyPocketTheme` applies Pocket's
   default theme without reading or writing a stored pick, for the page and its
@@ -377,9 +380,10 @@ bakes the origin in. `devConfig` sets `APP_ORIGIN` to `http://localhost:<port>`,
 the host a Dor Tool frames, copies the Durable Object, migration, and rate
 limits, and carries no route, Hyperdrive, or secret; `vite build --watch`
 rebuilds the page into the folder Wrangler serves. Once the page answers, the
-loop prints the origin and the Burrow build variables
-(`DORMOUSE_ONE_TIME_ORIGIN`, `DORMOUSE_REMOTE_CONNECT_SRC`) and announces the
-page over OSC 367, since Wrangler's inspector binds a second port.
+loop prints the origin and the dev Burrow build variables
+(`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md`
+-> "Relay origin") and announces the page over OSC 367, since Wrangler's
+inspector binds a second port.
 
 Source of truth: `devConfig` in `hosted/scripts/dev-one-time.mjs`. Pinned by
 `hosted/scripts/dev-one-time.test.mjs`.
@@ -390,7 +394,8 @@ Source of truth: `devConfig` in `hosted/scripts/dev-one-time.mjs`. Pinned by
 enrollment**: it works un-enrolled, survives `clearEnrollment` and
 `reconnect`, and `dispose()` ends it. Its label is the enrollment's, else
 `suggestedBurrowLabel(kind)`; its provider and direct-peer factory are the
-enrolled runtime's.
+enrolled runtime's, under the level's path rules (`docs/specs/remote-network.md`
+-> "Local networks" and "Anywhere").
 
 | Command | Answers |
 | --- | --- |
@@ -403,8 +408,10 @@ enrolled runtime's.
   connection (ending it unannounced), and is **refused while `connecting` or
   `connected`**, and while `unavailable`.
 - **Every state change is a `{ name: 'one-time', state }` event, and so is a
-  service's start**, ahead of its enrollment read (rationale).
-- **`status` and its event carry `serving`**: `enrolled`, or a one-time status
+  service's start**, after its policy read, ahead of its enrollment read
+  (rationale).
+- **`status` and its event carry `serving`**: a running Burrow (none under
+  Nothing), or a one-time status
   of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip
   emits `status`. **A reader missing `serving` takes `enrolled`** (an older VS
   Code broker). What arms on each: `docs/specs/vscode.md` -> "Burrow: a
@@ -420,44 +427,42 @@ enrolled runtime's.
   control of every terminal here until it disconnects or you end it. Nothing is
   saved." beside a "Confirm and allow" button.
 
-**The origin is baked**: `DEFAULT_ONE_TIME_ORIGIN` (`https://hosted.dormouse.sh`),
-overridden by the build variable `DORMOUSE_ONE_TIME_ORIGIN`, which both host
-bundles substitute and assert, failing the build on one `oneTimeAvailability`
-would call `origin-invalid`. **`oneTimeAvailability` decides before any socket
-exists**: `origin-invalid` for anything but a bare HTTPS origin, or HTTP on a
-link loopback host, of at most 167 characters; `origin-not-allowed` outside
-the baked connect-src allowlist; either makes the state `unavailable`.
+**The origin is the build's Hosted origin, which only a Hosted build has**
+(`docs/specs/relay.md` -> "Relay origin", whose "Accepted origins" bounds it). **Availability is decided before any socket exists**:
+without a Hosted origin the state is `unavailable` with reason `self-host`, and
+the service builds no runtime; the network policy's `nothing` makes it
+`unavailable` with reason `network-off`, and a policy change ends a live
+connection (`docs/specs/remote-network.md` -> "Policy").
 
-**Standalone** passes the baked origin from the sidecar entry; Rust broadcasts
+**Standalone** passes the baked pair from the sidecar entry; Rust broadcasts
 every `burrow:event` unchanged. VS Code's bootstrap, idle answers, and serving
 marker are `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
 
-Source of truth: `BurrowService`, `idleOneTimeState`, and `oneTimeServing` in
-`lib/src/host/remote/service.ts`; `OneTimeEvent`, `servingOf`, and
-`approvalKind` in `lib/src/host/remote/service-protocol.ts`; `oneTimeAvailability` and
-`bakedOneTimeOrigin` in `lib/src/host/remote/one-time-origin.ts`;
-`resolveOneTimeOrigin` / `assertOneTimeOriginBaked` in `scripts/csp-defaults.mjs`;
+Source of truth: `BurrowService` and `oneTimeServing` in
+`lib/src/host/remote/service.ts`; `idleOneTimeState`, `OneTimeEvent`,
+`servingOf`, and `approvalKind` in `lib/src/host/remote/service-protocol.ts`;
+`bakedRelay` / `hostedOrigin` in `lib/src/host/relay-origin.ts`;
 `mirrorPairingQueue` in `lib/src/remote/burrow/activation.ts`;
 `RemotePairingModal` in `lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by
-`lib/src/host/remote/service.test.ts` and
-`lib/src/host/remote/one-time-origin.test.ts`.
+`lib/src/host/remote/service.test.ts`.
 
 ## Laptop UI
 
-**`OneTimeConnection` sits in Settings' Remote control choices, above
-Persistent Relay, enrolled or not**; `OneTimeIndicator` sits in the Baseboard's
-right cluster (`docs/specs/layout.md` -> "Baseboard").
+**`OneTimeConnection` sits in the Remote control choices of Settings →
+Network's Phones section, above Persistent Relay, enrolled or not**
+(`docs/specs/remote-network.md` -> "Settings → Network"); `OneTimeIndicator`
+sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
 
 | State | The panel shows | Actions |
 | --- | --- | --- |
-| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Phone and computer must be on the same Wi-Fi. No account needed." | the button opens |
+| `idle` | the **One-time connection** button; "Open a link on your phone for a one-off connection. Your phone must be on an allowed network. No account needed." | the button opens |
 | `unavailable` | the button disabled, the reason's copy for the hint | — |
 | `opening` | "Getting a link…" | Cancel |
 | `waiting` | the link as a QR code and as selectable text; "Good for one phone. Expires in N min." | Copy link, New link, Cancel |
 | `confirming` | "Type the two digits your phone shows into the dialog." | Cancel |
 | `connecting` | "Connecting directly…" | Cancel |
 | `connected` | the phone's label, then "has full control of your terminals." | End |
-| `ended` | one fixed sentence per reason, `direct-failed`'s naming the same Wi-Fi | New link, Done |
+| `ended` | the reason's sentence | New link, Done |
 
 - **The panel renders the service's state and owns only its busy and error**; a
   refused `oneTimeOpen` renders inline. **Closing Settings changes nothing**:
@@ -471,29 +476,32 @@ right cluster (`docs/specs/layout.md` -> "Baseboard").
   to `idle`. `ended {user-ended}` renders as `idle`** (rationale).
 - **An open the panel started shows as `opening` before any event**, with
   Cancel live through it.
-- **End copy is fixed per reason**, looked up own-property only, with a
-  fallback for a reason a newer broker knows.
+- **End copy is fixed per reason and level**, looked up own-property only,
+  with a fallback for a reason a newer broker knows.
+- **Under Anywhere the idle hint and a waiting link say "Your phone can be on
+  any network." instead**, and `direct-failed`'s sentence suggests another
+  network.
 - **The indicator shows only while `connecting` or `connected`**: "Phone
   connecting…" or "Phone connected", then End; the phone's label is its
   tooltip (rationale).
 - **The store seeds from `oneTimeStatus` and replaces its state with every
   `one-time` event that passes `isOneTimeState`**; an answer an event overtook
   is dropped. The indicator holds it for the window's life, so the panel
-  re-reads on mount.
+  re-reads on mount. **Never publish a failed read over a state already read,
+  unless an End has returned since**: a window that missed the End's event
+  must not show the phone connected.
 
-Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
-`lib/src/components/OneTimeConnection.tsx`; `QrCode` in
+Source of truth: `OneTimeConnection` and `oneTimeEndedCopy` in
+`lib/src/components/OneTimeConnection.tsx`; `phoneOnAnyNetwork` in
+`lib/src/remote/network-policy.ts`; `QrCode` in
 `lib/src/components/QrCode.tsx`; `OneTimeIndicator` in
-`lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime` and
-`openOneTime` in `lib/src/remote/burrow/one-time-store.ts`. Pinned by
+`lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime`,
+`refreshOneTime`, `openOneTime`, and `endOneTime` in
+`lib/src/remote/burrow/one-time-store.ts`. Pinned by
 `lib/src/components/RemoteControlSection.test.tsx`,
 `lib/src/components/OneTimeIndicator.test.tsx`, and
 `lib/src/remote/burrow/one-time-store.test.ts`.
 
 ## Future
 
-**Scope: one-time-anywhere** — reach past one network, for paid users: STUN and
-TURN servers for those users alone (the Relay-supplied ICE servers of
-`docs/specs/remote-api.md` -> "8. Direct path"), a budgeted relayed fallback
-when no direct path forms, and a per-IP cap on concurrent rooms beside the mint
-limit.
+**Scope: one-time-limits** — a per-IP cap on concurrent rooms, beside the mint limit.

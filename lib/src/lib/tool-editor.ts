@@ -1,3 +1,4 @@
+import { readFrameMessage, type HostMessage } from 'dor-tools-lib/protocol';
 import { getToolDirty, recordToolDirty } from './tool-dirty-store';
 
 /** The live connection per Tool; `ready` once its frame has answered. */
@@ -63,33 +64,33 @@ export async function decideEditorClose(choice: 'save' | 'discard' | 'cancel'): 
   finish(choice !== 'cancel');
 }
 
-/** Connect only the built-in editor's own frame and origin. A per-mount nonce
- * rejects late reports after navigation or a preview retarget. */
+/** Connect only the built-in editor's own frame and origin over the save
+ * channel (`dor-tools-lib/protocol`). A per-mount nonce rejects late reports
+ * after navigation or a preview retarget. */
 export function connectToolEditor(id: string, label: string, frame: HTMLIFrameElement, origin: string): () => void {
   const connection = crypto.randomUUID();
   let nextRequest = 0;
   const pending = new Map<string, { resolve(): void; reject(error: Error): void; timer: ReturnType<typeof setTimeout> }>();
-  const send = (data: Record<string, unknown>) => frame.contentWindow?.postMessage({ __dormouse: 'editor-command', connection, ...data }, origin);
-  const connect = () => send({ kind: 'connect' });
+  const send = (message: HostMessage) => frame.contentWindow?.postMessage(message, origin);
+  const connect = () => send({ dorTool: 1, kind: 'connect', connection });
   const editor: Editor = { label, ready: false, save: () => new Promise<void>((resolve, reject) => {
     const request = String(++nextRequest);
     const timer = setTimeout(() => { pending.delete(request); reject(new Error('The editor did not finish saving. Your file remains open.')); }, 15000);
     pending.set(request, { resolve, reject, timer });
-    send({ kind: 'save', request });
+    send({ dorTool: 1, kind: 'save', connection, request });
   }) };
   editors.set(id, editor);
   const receive = (event: MessageEvent) => {
-    const data = event.data;
-    if (editors.get(id) !== editor || event.source !== frame.contentWindow || event.origin !== origin || data?.__dormouse !== 'editor'
-      || data.connection !== connection || typeof data.dirty !== 'boolean') return;
-    if (!['ready', 'state', 'saved'].includes(data.kind)) return;
+    const data = readFrameMessage(event.data);
+    if (editors.get(id) !== editor || event.source !== frame.contentWindow || event.origin !== origin
+      || data?.connection !== connection) return;
     editor.ready = true;
     recordToolDirty(id, data.dirty);
-    if (data.kind === 'saved' && typeof data.request === 'string') {
+    if (data.kind === 'saved') {
       const waiting = pending.get(data.request);
       if (waiting) {
         pending.delete(data.request); clearTimeout(waiting.timer);
-        if (typeof data.error === 'string') waiting.reject(new Error(data.error)); else waiting.resolve();
+        if (data.error !== undefined) waiting.reject(new Error(data.error)); else waiting.resolve();
       }
     }
   };

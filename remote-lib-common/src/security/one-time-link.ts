@@ -9,7 +9,7 @@
  */
 
 import { base64UrlLength, fromBase64Url, isExactBase64Url } from './bytes.js';
-import { parseLinkFragment, type LinkUrlShape } from './link-url.js';
+import { isLinkScheme, parseLinkFragment, type LinkUrlShape } from './link-url.js';
 import { NOISE_KEY_LENGTH } from './noise.js';
 import { e2eOneTimePrologue } from './noise-transport.js';
 import { getWebCrypto, type WebCryptoLike } from './webcrypto.js';
@@ -65,6 +65,29 @@ export const ONE_TIME_FRAGMENT_LENGTH =
  * this also bounds the origin a link can name.
  */
 export const ONE_TIME_LINK_MAX_LENGTH = 256;
+
+/**
+ * The longest relay origin a desktop build may bake: everything else in a
+ * one-time link is fixed, so a longer origin mints links no phone can scan.
+ */
+export const MAX_RELAY_ORIGIN_LENGTH =
+  ONE_TIME_LINK_MAX_LENGTH - ONE_TIME_PAGE_PATH.length - ONE_TIME_HASH_PREFIX.length - ONE_TIME_FRAGMENT_LENGTH;
+
+/**
+ * Whether a desktop build may bake `origin` (`docs/specs/relay.md` → "Relay
+ * origin"): a bare origin as `new URL` spells it, on a link scheme
+ * ({@link isLinkScheme}), of at most {@link MAX_RELAY_ORIGIN_LENGTH}
+ * characters. `scripts/relay-origin.mjs` fails the build on anything else.
+ */
+export function isAcceptedRelayOrigin(origin: unknown): boolean {
+  if (typeof origin !== 'string' || origin.length > MAX_RELAY_ORIGIN_LENGTH) return false;
+  try {
+    const url = new URL(origin);
+    return url.origin === origin && isLinkScheme(url);
+  } catch {
+    return false;
+  }
+}
 
 /** Where a one-time link carries its fragment: on the page path, right after `#`. */
 const ONE_TIME_LINK_SHAPE: LinkUrlShape = {

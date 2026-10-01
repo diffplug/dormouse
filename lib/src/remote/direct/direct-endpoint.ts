@@ -25,7 +25,7 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import { DirectPeer, type DirectPeerFactory } from './direct-peer';
+import { DirectPeer, type DirectPeering, type DirectViolationCause } from './direct-peer';
 import { realTimer, type RemoteTimer } from '../ws';
 
 /**
@@ -42,8 +42,11 @@ export type DirectRole = 'offerer' | 'answerer';
 export type DirectCarrier = 'relay' | 'channel';
 
 export interface DirectEndpointDeps {
-  /** How this runtime builds a peer connection, or `null` where it has none. */
-  readonly createPeer: DirectPeerFactory | null;
+  /**
+   * How this runtime builds each attempt's peer, and what holds it, if
+   * anything; the path policy goes to both the factory and the peer.
+   */
+  readonly peering: DirectPeering;
   /**
    * Encrypt one signal as a control message and put it on the relay path;
    * `false` if the session could not send it.
@@ -68,9 +71,10 @@ export interface DirectEndpointDeps {
   /**
    * The session is unrecoverable: the endpoint's owner disposes it (the Burrow
    * through `EstablishedE2eSession`'s `onFatal`, the Client through
-   * `ClientSessionCore.loseBurrow`).
+   * `ClientSessionCore.loseBurrow`). `cause` is the peer's, where a path
+   * policy refused the path.
    */
-  fatal(reason: string): void;
+  fatal(reason: string, cause?: DirectViolationCause): void;
   /**
    * Whether this endpoint's session is still the live one. Both ends re-check
    * it after every await, because a promotion or a teardown can replace the
@@ -332,11 +336,11 @@ export class DirectEndpoint {
 
   /** This attempt's peer, wired to the four channel events, or null if there is none. */
   #build(): DirectPeer | null {
-    const factory = this.#deps.createPeer;
-    if (!factory) return null;
+    const { createPeer, pathPolicy } = this.#deps.peering;
+    if (!createPeer) return null;
     let connection;
     try {
-      connection = factory();
+      connection = createPeer(pathPolicy);
     } catch (error) {
       console.warn('[direct] could not build a peer connection', error);
       return null;
@@ -344,12 +348,13 @@ export class DirectEndpoint {
     if (!connection) return null;
     this.#peer = new DirectPeer({
       peer: connection,
+      pathPolicy,
       setTimer: this.#setTimer,
       handlers: {
         onOpen: () => this.#onOpen(),
         onFrame: (frame) => this.#onFrame(frame),
         onClosed: (reason) => this.#onClosed(reason),
-        onViolation: (reason) => this.#onViolation(reason),
+        onViolation: (reason, cause) => this.#onViolation(reason, cause),
       },
     });
     return this.#peer;
@@ -416,9 +421,9 @@ export class DirectEndpoint {
    * session's, so it is gated like every other channel event: a leftover
    * channel must never end the session that replaced it.
    */
-  #onViolation(reason: string): void {
+  #onViolation(reason: string, cause: DirectViolationCause | undefined): void {
     if (!this.#alive()) return;
-    this.#deps.fatal(reason);
+    this.#deps.fatal(reason, cause);
   }
 
   /**

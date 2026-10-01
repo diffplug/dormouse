@@ -16,7 +16,7 @@ Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `SELF_HOST.md`, and then
 the code they point at — `remote-lib-common/src/security/`, `relay/src/`,
 `lib/src/remote/`, `lib/src/host/remote/`, `vscode-ext/src/burrow*.ts`,
-`scripts/csp-defaults.mjs`, and all three installers —
+`scripts/relay-origin.mjs`, and all three installers —
 `deploy/local/install-macos.sh`, `deploy/local/install-windows.ps1`, and
 `deploy/local/install-linux.sh`. The three hold the same invariants through
 different native mechanisms, so read them against each other: a control present
@@ -36,9 +36,13 @@ run — `docs/specs/security-remote.md` -> "Direct path");
 `established-session.ts` (an authorized session's decrypt, idle clock, and
 direct path), and `one-time-runtime.ts` (the one-time ceremony, which grants
 nothing and must reach the direct path — `docs/specs/security-remote.md` ->
-"One-time connection"); `lib/src/host/remote/one-time-origin.ts` and the
-one-time half of `service.ts` (the baked rendezvous origin, its gate before any
-socket, the single runtime, and the approval routed by `kind`);
+"One-time connection"); `lib/src/host/relay-origin.ts` and the one-time half
+of `service.ts` (the one baked origin and its nullable Hosted origin, the
+rendezvous gate before any socket, the single runtime, and the approval routed
+by `kind`); `lib/src/host/remote/local-networks.ts` and
+`native-direct-peer.ts` (Local networks' hold on a one-time direct path: the
+bound socket, the stripped offer and answer, and the selected-pair check —
+`docs/specs/security-remote.md` -> "One-time connection");
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they
 promote), `one-time-client.ts` (the one-time phone, which keeps nothing and
@@ -50,6 +54,7 @@ harnesses that already exercise this are
 `lib/src/remote/burrow/burrow-bounds.test.ts`,
 `lib/src/remote/burrow/one-time-runtime.test.ts`,
 `lib/src/remote/client/one-time-e2e.test.ts`,
+`lib/src/host/remote/local-networks.test.ts`,
 `lib/src/host/remote/service.test.ts`,
 `relay/test/malicious-relay.test.mjs`,
 `remote-lib-common/test/security-guarantees.test.mjs`,
@@ -63,15 +68,29 @@ The lint scans all tracked JavaScript and TypeScript. Search the same files for
 `createServer`, `.listen(`, `serve(` and `WebSocket` too, because a new API or a
 host built at runtime can escape its patterns.
 The Local-file viewer subsection adds a tokenized file grant: read
-`dor/src/file-viewer.ts`, `dor/src/viewer-server.ts`, and
-`dor/src/file-viewer-loopback-guard.ts`, including its static asset discovery,
-descriptor lifetime, and every request gate. Also read `dor/src/editable-file.ts`,
-`dor/src/viewer-assets.ts`, and `dor/viewer/editor.ts`: writes must target only
-the opened text file, compare disk revisions, reject substituted symlinks,
-and never expose arbitrary assets or execute the source document. The folder viewer shares that
-listener and guard: read `dor/src/folder-viewer.ts` and
-`dor/src/folder-viewer-page.ts` for path containment, the POST gate, how names
-reach the page, and the git invocation.
+`dor-tools-builtin/src/file-viewer.ts`,
+`dor-tools-builtin/src/viewer-server.ts`, and
+`dor-tools-builtin/src/file-viewer-loopback-guard.ts`, including its static
+asset discovery, descriptor lifetime, and every request gate. Also read
+`dor-tools-builtin/src/editable-file.ts`,
+`dor-tools-builtin/src/viewer-assets.ts`, and
+`dor-tools-builtin/viewer/editor.ts`: writes must target only the opened text
+file, compare disk revisions, reject substituted symlinks, and never expose
+arbitrary assets or execute the source document. The folder viewer shares that
+listener and guard: read `dor-tools-builtin/src/folder-viewer.ts` and
+`dor-tools-builtin/src/folder-viewer-page.ts` for path containment, the POST
+gate, how names reach the page, and the git invocation; its POSTs become OSC
+367 `open`. The error viewer, `dor-tools-builtin/src/error-viewer.ts`, shares
+them too. For the OSC 367 `open` rule under `## Terminal output`, read
+`lib/src/lib/tool-open-requests.ts`, the `oscOpen` argument in
+`lib/src/lib/platform/dor-control-dispatch.ts`, and the `oscOpen` gate in
+`lib/src/components/wall/use-dor-control.ts`.
+
+For `## Network policy`, read `docs/specs/remote-network.md` -> "Policy", then
+`lib/src/remote/network-policy.ts`, the policy half of
+`lib/src/host/remote/service.ts` (the transport guard, and each level's hold
+on the Burrow), and its two other choke points,
+`lib/src/host/managed-voice-host.ts` and `standalone/src/updater.ts`.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
 — `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,
@@ -100,6 +119,15 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   default; `DORMOUSE_SETUP_PASSWORD` must not be a runtime input. A malformed
   existing record must stop startup rather than rotate the credential or fall
   back to configuration.
+- **Does a self-host build reach Dormouse's servers with nobody clicking?**
+  Follow `DORMOUSE_RELAY_ORIGIN` from `scripts/relay-origin.mjs` into both host
+  bundles and the standalone webview (`standalone/vite.config.ts`), then list
+  every request a build baked with a non-default origin could make to
+  `dormouse.sh` or `hosted.dormouse.sh` — the one-time half of `service.ts`,
+  `lib/src/host/managed-voice-host.ts`, `standalone/src/updater.ts` and the
+  updater endpoint `standalone/scripts/tauri.mjs` overlays away, and anything
+  else that fetches. A release build that accepts `DORMOUSE_RELAY_IS_HOSTED`
+  or a loopback `http:` origin is the same finding.
 - Can anything reach a Burrow's ACL without a human approving on that Burrow? Trace
   every writer — including the ACL read filter, anything that rehydrates a
   record from disk, and what a compromised webview or a compromised Relay could
@@ -187,8 +215,8 @@ as a subtraction rather than as two named subdirectories, which is the shape
 to prefer when you find the next one.
 
 Today the remainder is `lib/`, `relay/`, `remote-lib-common/`, `standalone/`,
-`vscode-ext/`, `dor/`, `dor-lib-common/`, `canopy/`, `deploy/`, `docs/`,
-`.impeccable/`, and the root files — but treat that as a description of the
+`vscode-ext/`, `dor/`, `dor-lib-common/`, `dor-tools-builtin/`, `dor-tools-lib/`, `canopy/`,
+`deploy/`, `docs/`, `.impeccable/`, and the root files — but treat that as a description of the
 current tree, not as your scope. Your scope is the remainder.
 
 Remote control is where the depth goes; the rest is a sweep for anything that

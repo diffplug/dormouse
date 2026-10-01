@@ -1,4 +1,4 @@
-import { viewerTitle } from 'dor/file-viewer-format';
+import { viewerTitle } from 'dor-tools-builtin/file-viewer-format';
 import { toolCommandFromParams } from '../../lib/session-save';
 
 const ABSOLUTE_PATH = /^(?:[\\/]|[A-Za-z]:[\\/])/;

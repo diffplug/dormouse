@@ -211,6 +211,9 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
             Some(surface_id) => lookup(view.owners, surface_id),
             None => Route::Broadcast,
         },
+        // A managed-voice answer that outlived its invoke: its waiter gave up,
+        // and no window listens for it (docs/specs/transport.md -> "Managed voice").
+        "voice:result" => Route::Drop,
         // `alert:*` naming a window (an await's result, a `sync`'s store
         // snapshots) goes to it. One carrying an id is about one Session, and
         // goes to the window showing it: after the mark the new owner's
@@ -626,6 +629,8 @@ mod tests {
             ("pty:data", json!({"id":"zz"}), Route::Drop),
             ("pty:exit", json!({"id":"zz"}), Route::Drop),
             ("alert:state", json!({"id":"zz"}), Route::Drop),
+            // A late answer carries a whole utterance: never fanned out.
+            ("voice:result", json!({"requestId":"req-9","result":null}), Route::Drop),
             (
                 "terminal:semanticEvents",
                 json!({"id":"b"}),

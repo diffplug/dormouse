@@ -64,6 +64,7 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `OSC 777 ; notify ; <title> ; <body> ST` | rxvt/WezTerm notification | [alert.md](alert.md#terminal-reports) |
 | `OSC 367 ; serve ; <json> ST` | Dor Tool announcement: selects a bound port and optional same-origin path, plus a reserved name and runtime re-key | [dor-tool.md](dor-tool.md#osc-367) |
 | `OSC 367 ; state ; <json> ST` | Tool-reported unsaved state | [dor-tool.md](dor-tool.md#unsaved-changes) |
+| `OSC 367 ; open ; <json> ST` | A running Tool's request to open a local path as `dor open`, preview or not; live output only | [dor-tool.md](dor-tool.md#osc-367) |
 | `OSC 367 ; <any other verb> ST` | Includes the reserved `dehydrate` verb; consumed and ignored. | [dor-tool.md](dor-tool.md#osc-367) |
 | `OSC 1337 ; CurrentDir=<cwd> ST` | CWD (iTerm2 compatibility) | [terminal-state.md](terminal-state.md#supported-osc-inputs) |
 | `OSC 1337 ; File=...:<data> ST` / `MultipartFile=...` / `FilePart=...` / `FileEnd` | iTerm2 inline image protocol (IIP); passed through to ImageAddon. | [Inline graphics](#inline-graphics) |

@@ -74,9 +74,9 @@ it.
 | # | Step | What happens |
 | --- | --- | --- |
 | 1 | `relay` | `pnpm dev:relay` with an isolated `DORMOUSE_STATE_DIR`, then reads its bound origin and waits for it to answer. |
-| 2 | `burrow` | `pnpm innerdogfood` with `DORMOUSE_REMOTE_CONNECT_SRC` pointed at that Relay, then waits for the app's first terminal. → `01-burrow-booted.png` |
-| 3 | `settings` | Clicks the baseboard's Settings button and scrolls to Remote control. → `02-settings-open.png` |
-| 4 | `enroll` | Unfolds **Persistent Relay**, types the Relay URL, the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
+| 2 | `burrow` | `pnpm innerdogfood` with `DORMOUSE_RELAY_ORIGIN` set to that Relay's origin, then waits for the app's first terminal. → `01-burrow-booted.png` |
+| 3 | `settings` | Clicks the baseboard's Settings button, chooses **Network → My Relay only** (a fresh Burrow starts at Nothing, which refuses enrollment), and scrolls to the Phones section. → `02-settings-open.png` |
+| 4 | `enroll` | Unfolds **Persistent Relay**, types the setup password and the machine name into the real form, submits, and waits for **Connected**. → `03-enroll-form.png`, `04-enrolled.png` |
 | 5 | `qr` | Clicks **Set up a phone**, waits for the code, screenshots, crops to the QR, makes a camera-shaped Y4M, and decodes the crop to prove it is legible. → `qr-full.png`, `qr.png`, `qr.y4m`, `invitation-url.txt` |
 | 6 | `pocket` | Launches a second, isolated Chrome with the fake camera pointed at `qr.y4m`, attaches with `agent-browser connect <port>`, opens the **plain origin**, and gives the page a CDP virtual authenticator. → `05-pocket-first-run.png` |
 | 7 | `code` | Taps **Scan a setup code**; Pocket's own scanner decodes the fake camera, registers a passkey with the scanned token, signs in, and shows two digits. Reads them, and waits for the Burrow's modal to open. → `06-scanner.png`, `07-code-screen.png`, `08-burrow-pairing-modal.png`, `pairing-code.txt` |

@@ -91,7 +91,7 @@ async function settle(): Promise<void> {
 function consoleHook() {
   return (globalThis as {
     dormouseBurrow?: {
-      enroll: (a: string, b: string, c: string) => Promise<unknown>;
+      enroll: (password: string, label: string) => Promise<unknown>;
       status: () => unknown;
       reconnect: () => unknown;
       clearEnrollment: () => unknown;
@@ -115,7 +115,7 @@ describe('burrow bridge mode', () => {
     link.results.status = { enrolled: true };
     await installBridge(link);
 
-    await consoleHook().enroll('https://relay.dormouse.sh', 'password', 'Laptop');
+    await consoleHook().enroll('password', 'Laptop');
     expect(await consoleHook().status()).toEqual({ enrolled: true });
     await consoleHook().reconnect();
     await consoleHook().clearEnrollment();
@@ -123,8 +123,8 @@ describe('burrow bridge mode', () => {
     expect(link.commands.map((c) => c.cmd)).toEqual(
       expect.arrayContaining(['enroll', 'status', 'reconnect', 'clearEnrollment']),
     );
+    // No Relay argument: the service enrolls only at the build's baked origin.
     expect(link.commands.find((c) => c.cmd === 'enroll')?.params).toEqual({
-      relayUrl: 'https://relay.dormouse.sh',
       password: 'password',
       label: 'Laptop',
     });

@@ -12,6 +12,10 @@ export default defineConfig({
       // path; Vite (and vitest) do not read tsconfig paths, and `dor` has no
       // package exports, so resolve it to source — the same alias standalone uses.
       dor: path.resolve(import.meta.dirname, "../dor/src"),
+      // The same for the built-in viewers' format registry (`dor-tools-builtin/*`).
+      "dor-tools-builtin": path.resolve(import.meta.dirname, "../dor-tools-builtin/src"),
+      // And for the Tool protocol (`dor-tools-lib/*`).
+      "dor-tools-lib": path.resolve(import.meta.dirname, "../dor-tools-lib/src"),
       // `connect-port.ts` imports `dor-lib-common/browser-providers`; that package's
       // `exports` resolve to a `dist` a vitest run has no reason to have built.
       // Alias to source so the tests never depend on build order.

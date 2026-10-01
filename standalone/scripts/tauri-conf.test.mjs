@@ -12,9 +12,9 @@ const capability = (name) =>
   JSON.parse(readFileSync(join(srcTauri, 'capabilities', `${name}.json`), 'utf8'));
 
 // The Burrow moved into the sidecar, so the webview never speaks to a relay
-// server and its connect-src must not be able to. The allowlist that does apply
-// is baked into the sidecar bundle by build-sidecar-proxy.mjs
-// (docs/specs/relay.md → "Where a Burrow may reach a Relay").
+// server and its connect-src must not be able to. The one relay origin the
+// build reaches is baked into the sidecar bundle by build-sidecar-proxy.mjs
+// (docs/specs/relay.md → "Relay origin").
 test('the webview cannot reach a Relay', () => {
   assert.ok(!csp.includes('dormouse.sh'), 'no SaaS relay sources in the webview CSP');
   // Secure by default: no scheme-wide `https:`/`wss:` in connect-src that
@@ -34,6 +34,16 @@ test('script-src grants WebAssembly compilation and nothing more', () => {
     .map((part) => part.trim().split(/\s+/))
     .find((parts) => parts[0] === 'script-src');
   assert.deepEqual(scriptSrc, ['script-src', "'self'", "'wasm-unsafe-eval'"]);
+});
+
+// Managed voice plays host-fetched audio from a Blob URL
+// (docs/specs/alert.md -> "Spoken alarms"); the webview itself never fetches it.
+test('media-src grants Blob URLs and nothing remote', () => {
+  const mediaSrc = csp
+    .split(';')
+    .map((part) => part.trim().split(/\s+/))
+    .find((parts) => parts[0] === 'media-src');
+  assert.deepEqual(mediaSrc, ['media-src', "'self'", 'blob:']);
 });
 
 test('localhost stays allowed for dev and the loopback proxies', () => {

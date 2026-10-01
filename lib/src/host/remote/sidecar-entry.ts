@@ -1,7 +1,8 @@
 /**
  * What the Tauri sidecar runs beside its PTYs from this bundle: the binding of
- * {@link BurrowService} (`docs/specs/standalone.md` → "Burrow service") and the
- * app's alerts (§Alerts). Stdout is reserved for the JSON-lines bridge, so all
+ * {@link BurrowService} (`docs/specs/standalone.md` → "Burrow service"), the
+ * app's alerts (§Alerts), and managed voice (`docs/specs/alert.md` -> "Managed
+ * voice"). Stdout is reserved for the JSON-lines bridge, so all
  * logging goes to stderr.
  *
  * The sidecar owns the PTYs, so it is also standalone's terminal-protocol parse
@@ -15,15 +16,15 @@ import type { AlertManager, AlertState } from '../../lib/alert-manager';
 import type { TerminalColorProvider, TerminalColors } from '../../lib/terminal-protocol';
 import { createAlertHost, type AlertRealm } from '../alert-host';
 import type { AlertEvents } from '../alert-protocol';
+import { bakedRelay } from '../relay-origin';
+import { createManagedVoiceHost } from '../managed-voice-host';
 import { alertedPty, createOwnerPtyStream } from '../owner-pty';
 import type {
   BurrowSurfaceProvider,
   PtySink,
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
-import { bakedConnectSrc } from './connect-src';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
-import { bakedOneTimeOrigin } from './one-time-origin';
 import {
   createEphemeralBurrowStateStore,
   FileBurrowStateStore,
@@ -409,7 +410,8 @@ export interface SidecarHost {
   readonly alerts: AlertManager;
   /**
    * One stdin command, if it is this module's — the PTY commands the alerts
-   * must see, and every alert and Burrow command. Returns whether it was.
+   * must see, and every alert, Burrow, and managed-voice command. Returns
+   * whether it was.
    */
   handleCommand(event: string, data: unknown): boolean;
   /**
@@ -479,13 +481,14 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const bridge = createSidecarSurfaceBridge({ send, mgr, alerts });
   const pty = alertedPty(alerts, mgr);
 
+  // Read once, here: the Burrow and managed voice take the same baked pair.
+  const relay = bakedRelay();
   const service = new BurrowService({
     store,
     provider: bridge.provider,
     kind: 'standalone',
     sendToUi: send,
-    connectSrc: bakedConnectSrc(),
-    oneTimeOrigin: bakedOneTimeOrigin(),
+    relay,
     // The one host that answers a `direct-offer` today. Building the factory
     // loads nothing: the addon is opened inside the first offer, if one ever
     // comes (`native-direct-peer.ts`).
@@ -493,6 +496,17 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   });
   void service.start().catch((error: unknown) => {
     console.error(`[burrow] failed to start: ${String(error)}`);
+  });
+
+  const voice = createManagedVoiceHost({
+    stateDir: options.stateDir,
+    // Unaddressed, so Rust hands it to every window.
+    onStatus: (status) => send('voice:status', status),
+    log: (message) => console.error(message),
+    relay,
+    // The service holds the network policy; managed voice is its second choke
+    // point (`docs/specs/remote-network.md` → "Policy").
+    networkAllowed: () => service.networkAllowed(),
   });
 
   function handleBurrowCommand(data: unknown): void {
@@ -577,6 +591,14 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           return true;
         case 'burrow:command':
           handleBurrowCommand(data);
+          return true;
+        // Answered under the invoke's `requestId`, which Rust or the harness
+        // correlates (`docs/specs/transport.md` -> "Managed voice").
+        case 'voice:command':
+          voice.handle(data).then(
+            (result) => send('voice:result', { result, requestId: detail.requestId }),
+            (error: unknown) => send('voice:result', { error: String(error), requestId: detail.requestId }),
+          );
           return true;
         // The webview's resolved terminal theme, so the parser here can answer
         // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).

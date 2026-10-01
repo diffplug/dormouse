@@ -1,4 +1,4 @@
-import { BellIcon, BroadcastIcon, GearIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
+import { BellIcon, GearIcon, GlobeIcon, MagnifyingGlassIcon, PulseIcon } from '@phosphor-icons/react';
 import { SecondsField, SwitchRow } from './AlarmSettingsControls';
 import { ScrollFades } from './ScrollFades';
 import type { AlertSink } from '../lib/alert-delivery-model';
@@ -9,7 +9,9 @@ import {
   MODAL_OVERLAY_INSET,
   ModalCloseButton,
   ModalFrame,
+  INLINE_ACTION_CLASS,
   OVERLAY_MAX_HEIGHT,
+  SETTINGS_SECTION,
   Shortcut,
   UNDER_SWITCH_INDENT,
 } from './design';
@@ -17,8 +19,10 @@ import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
-import { RemoteControlSection } from './RemoteControlSection';
+import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
+import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
+import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
 import { getShellsSnapshot, subscribeToShells } from '../lib/shell-store';
 import {
@@ -36,17 +40,28 @@ import {
 const TITLE_ID = 'settings-dialog-title';
 const HOSTED_VOICE_URL = 'https://dormouse.sh/hosted/#voice';
 
-/** The divider above a settings group. */
-const SECTION = 'mt-4 border-t border-border pt-3';
-
 /** A picker row; `min-w-0` lets the picker's trigger truncate in a narrow dialog. */
 const PICKER_ROW = 'flex items-center gap-1.5 text-sm text-foreground [&>div]:min-w-0';
+
+/**
+ * Where Settings → Network is named from another topic: a link to it inside the
+ * dialog, and its path in the Baseboard's preview, which has no topic to reach.
+ */
+function NetworkTopicLink({ onShow }: { onShow?: () => void }) {
+  if (!onShow) return <>Settings → Network</>;
+  return (
+    <button type="button" className={INLINE_ACTION_CLASS} onClick={onShow}>
+      Network
+    </button>
+  );
+}
 
 /**
  * The "Push will be sent to …" line. Every state names a cause, because a push
  * that silently goes nowhere is indistinguishable from one that is broken.
  * `no-burrow` covers two of those causes, which is why `remoteControlBelow` is a
- * separate argument — see the comment on that branch below.
+ * separate argument — see the comment on that branch below. The network
+ * policy's Nothing, which sends none, is the caller's line (`AlarmSettingsSection`).
  *
  * The list is deliberately scoped to *this* machine, not the account: the ACL
  * that authorizes these devices lives on the Burrow and never on the Relay
@@ -59,7 +74,7 @@ function describePushTargets(push: PushDevicesState, remoteControlBelow: boolean
   // The preview never shows Remote control, so it also omits "below".
   // `no-burrow` covers two builds: one whose Burrow service simply has not enrolled,
   // and one with no Burrow service at all (`push-devices.ts` — the website leaves
-  // it here forever). Only the first has a Remote control section beneath this
+  // it here forever). Only the first has Network's Remote control choices beneath this
   // line, because the second is exactly where that section renders nothing, so
   // "below" has to key on the same seam the section gates on rather than on
   // `no-burrow`.
@@ -83,7 +98,7 @@ const TOPICS = [
   { id: 'general', label: 'General', icon: GearIcon, groups: ['theme', 'shell'] },
   { id: 'activity', label: 'Activity', icon: PulseIcon, groups: ['watcher', 'inactivity'] },
   { id: 'notifications', label: 'Notifications', icon: BellIcon, groups: ['speech', 'push'] },
-  { id: 'relay', label: 'Relay', icon: BroadcastIcon, groups: ['relay'] },
+  { id: 'network', label: 'Network', icon: GlobeIcon, groups: ['network', 'phones', 'updates'] },
 ] as const;
 type TopicId = typeof TOPICS[number]['id'];
 type GroupId = typeof TOPICS[number]['groups'][number];
@@ -238,6 +253,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setTopic(id);
     setOpenMenu(null);
     scrollToTopic(id);
+  };
+  // A search can hide the topic its link names, so the link clears it first.
+  const showNetwork = () => {
+    setQuery('');
+    chooseTopic('network');
   };
 
   useLayoutEffect(() => {
@@ -405,7 +425,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   </div>
                 </div>
               </section>
-              <section data-setting="inactivity" hidden={!matches('inactivity')} className={SECTION}>
+              <section data-setting="inactivity" hidden={!matches('inactivity')} className={SETTINGS_SECTION}>
                 <SecondsField
                   label="Inactivity timeout:"
                   valueMs={settings.inactivityTimeoutMs}
@@ -419,16 +439,22 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
             <TopicSection id="notifications" hidden={!visible('notifications')}>
               {(matches('speech') || matches('push')) && <h3 className="mt-4 text-sm font-semibold text-foreground">Application defaults</h3>}
               <div data-setting="speech" hidden={!matches('speech')}>
-                <AlarmSettingsSection sink="speech" />
+                <AlarmSettingsSection sink="speech" onShowNetwork={showNetwork} />
               </div>
               <div data-setting="push" hidden={!matches('push')}>
-                <AlarmSettingsSection sink="push" />
+                <AlarmSettingsSection sink="push" onShowNetwork={showNetwork} />
               </div>
             </TopicSection>
-            {/* Relay stays below push, whose `no-burrow` copy says "below". */}
-            <TopicSection id="relay" hidden={!visible('relay')}>
-              <div data-setting="relay" hidden={!matches('relay')}>
-                <RemoteControlSection />
+            {/* Network stays below push, whose `no-burrow` copy says "below". */}
+            <TopicSection id="network" hidden={!visible('network')}>
+              <div data-setting="network" hidden={!matches('network')}>
+                <NetworkSettings />
+              </div>
+              <div data-setting="phones" hidden={!matches('phones')}>
+                <NetworkPhones />
+              </div>
+              <div data-setting="updates" hidden={!matches('updates')}>
+                <NetworkUpdates />
               </div>
             </TopicSection>
           </div>
@@ -439,12 +465,24 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Shared by the full dialog and the brief, inert baseboard confirmation. */
-export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSink; preview?: boolean }) {
+/**
+ * Shared by the full dialog and the brief, inert baseboard confirmation.
+ * `onShowNetwork` is the dialog's way to its Network topic, which the lines
+ * naming the network policy's Nothing link to.
+ */
+export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
+  sink: AlertSink;
+  preview?: boolean;
+  onShowNetwork?: () => void;
+}) {
   // The dialog edits application defaults; only the baseboard preview shows the Workspace's effective value.
   const { policy: settings } = useWorkspaceAlertPolicy(preview);
   const push = useSyncExternalStore(subscribeToPushDevices, getPushDevices);
   const hasBurrowService = getPlatform().burrow !== undefined;
+  const managedVoiceOffered = useManagedVoiceOffered();
+  // Under Nothing the service sends no push and managed voice asks nothing
+  // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
+  const networkOff = useNetworkPolicy()?.level === 'nothing';
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.
@@ -453,24 +491,42 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
   }, [sink, preview]);
 
   return sink === 'speech' ? (
-    <AlarmSinkSection
-      className={preview ? '' : SECTION}
-      switchLabel="Speak out loud if not attended"
-      delayLabel="Delay before speaking:"
-      enabled={settings.speakEnabled}
-      delayMs={settings.speakDelayMs}
-      onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
-      onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
-      action={preview ? null : <SpeakTestButton />}
-    >
-      Uses your browser or system voice.{' '}
-      <ExternalTextLink href={HOSTED_VOICE_URL}>
-        Managed ElevenLabs voice is coming soon.
-      </ExternalTextLink>
-    </AlarmSinkSection>
+    <>
+      <AlarmSinkSection
+        className={preview ? '' : SETTINGS_SECTION}
+        switchLabel="Speak out loud if not attended"
+        delayLabel="Delay before speaking:"
+        enabled={settings.speakEnabled}
+        delayMs={settings.speakDelayMs}
+        onToggle={(speakEnabled) => updateAlertSettings({ speakEnabled })}
+        onCommitDelay={(speakDelayMs) => updateAlertSettings({ speakDelayMs })}
+        action={preview ? null : <SpeakTestButton />}
+      >
+        {!managedVoiceOffered ? (
+          <>
+            Uses your browser or system voice.{' '}
+            <ExternalTextLink href={HOSTED_VOICE_URL}>
+              Managed ElevenLabs voice is coming soon.
+            </ExternalTextLink>
+          </>
+        ) : networkOff ? (
+          <>
+            Managed voice is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing,
+            so alerts use your browser or system voice.
+          </>
+        ) : (
+          'Uses managed voice while a voice token is saved, otherwise your browser or system voice.'
+        )}
+      </AlarmSinkSection>
+      {preview ? null : (
+        <div className={UNDER_SWITCH_INDENT}>
+          <ManagedVoiceSection />
+        </div>
+      )}
+    </>
   ) : (
     <AlarmSinkSection
-      className={preview ? '' : SECTION}
+      className={preview ? '' : SETTINGS_SECTION}
       switchLabel="Send push notification if not attended"
       delayLabel="Delay before push:"
       enabled={settings.pushEnabled}
@@ -479,7 +535,11 @@ export function AlarmSettingsSection({ sink, preview = false }: { sink: AlertSin
       onCommitDelay={(pushDelayMs) => updateAlertSettings({ pushDelayMs })}
       action={preview ? null : <PushTestButton />}
     >
-      {describePushTargets(push, hasBurrowService && !preview)}
+      {networkOff ? (
+        <>Push is off while <NetworkTopicLink onShow={onShowNetwork} /> is set to Nothing.</>
+      ) : (
+        describePushTargets(push, hasBurrowService && !preview)
+      )}
     </AlarmSinkSection>
   );
 }

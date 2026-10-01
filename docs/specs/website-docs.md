@@ -78,8 +78,7 @@ checkable and by review otherwise:
   independent of WATCHING, whose defaults follow `docs/specs/alert.md` → WATCHING Track
   and which needs `OSC 633` / `OSC 133` shell integration. The guide must not promise that
   every quiet Pane is automatically marked done after a fixed interval.
-- Pocket is described only as shipped or explicitly in development, and never
-  presents WebRTC staged in [remote-api.md](remote-api.md) as available.
+- Pocket is described only as shipped or explicitly in development.
 - Browser Surfaces are explained to match [dor-browser.md](dor-browser.md)
   without exposing persisted params, controller registries, proxy plumbing, or
   future renderers.
@@ -593,8 +592,6 @@ the lint's header comment is the inventory. The rules with no other home:
 - **No page is served under `/docs`, and the homepage links none there**:
   `checkNoDocsPrefixPages` fails on a `DOCS_PAGES` path or a homepage href
   starting with `/docs`, which can only be the entrypoint or a legacy 301.
-- **Public copy does not present staged WebRTC as shipped**, for as long as
-  WebRTC is still under `## Future` in [remote-api.md](remote-api.md).
 
 Each check is isolated, so one malformed source reports its own failure instead
 of aborting the run and hiding every other problem behind a stack trace.

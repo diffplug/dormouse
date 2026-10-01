@@ -3,11 +3,14 @@ import { COPY_OUTCOME_LABEL, ModalReviewBlock, modalActionButton } from './desig
 import {
   FIELD_HINT,
   FIELD_LABEL,
+  hostOf,
   oneTimeControlSentence,
   own,
   revealPanel,
+  useNetworkPolicy,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
+import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import { writeTextToClipboard } from '../lib/clipboard';
 import type { CopyOutcome } from '../lib/mouse-selection';
 import type {
@@ -22,49 +25,67 @@ import {
   refreshOneTime,
   subscribeToOneTime,
 } from '../remote/burrow/one-time-store';
-
-const IDLE_HINT =
-  'Open a link on your phone for a one-off connection. Phone and computer must be on the same ' +
-  'Wi-Fi. No account needed.';
+import { phoneOnAnyNetwork } from '../remote/network-policy';
 
 /**
- * Why this build offers none, in fixed copy per reason. The origin is baked into
- * the host bundle and never crosses to the webview, so the copy names the
- * shipped one.
+ * Why this build offers none, in fixed copy per reason; a reason this build
+ * does not know — an older VS Code broker's, or a newer one's — renders the
+ * generic line below. A self-host build's own origin is its Relay, so it names
+ * the stock build's.
  */
 const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
-  'origin-not-allowed':
-    'Not available in this build: it isn’t allowed to reach hosted.dormouse.sh, where one-time ' +
-    'links are made.',
-  'origin-invalid': 'Not available in this build: its one-time link address is misconfigured.',
+  'self-host':
+    `Not available in a self-host build: one-time links are made at ${hostOf(DEFAULT_RELAY_ORIGIN)}, ` +
+    'which this build never contacts.',
+  'network-off':
+    'Off while Settings → Network is set to Nothing: this computer opens no connections on its own.',
 };
 
 /**
  * How a connection ended, as the person at this machine reads it — **fixed copy
  * chosen by a closed reason this machine's own runtime picked**, never text off
  * a wire, and a fallback for a reason a newer VS Code broker knows and this
- * build does not.
+ * build does not. `host` is this build's relay host, which the rendezvous runs on.
+ * `anyNetwork` ({@link phoneOnAnyNetwork}) has no allowed network to name, so
+ * `direct-failed` suggests another network instead; `network-not-allowed` keeps
+ * its sentence, since no path is held there to end a connection.
  *
  * `user-ended` has no sentence: this machine ended it (End, Cancel), so there is
  * nothing to report, and the panel goes straight back to its button.
  */
-export const ONE_TIME_ENDED_COPY: Record<Exclude<OneTimeEndReason, 'user-ended'>, string> = {
-  'user-denied': 'You cancelled the phone’s request, so nothing connected.',
-  'confirmation-mismatch': 'The two digits did not match, so nothing connected.',
-  expired: 'The link ran out of time before a phone finished connecting.',
-  'phone-left': 'The phone disconnected.',
-  'direct-failed':
-    'The phone couldn’t reach this computer directly. Make sure both are on the same Wi-Fi, then ' +
-    'get a new link.',
-  idle: 'The phone stopped responding, so the connection ended.',
-  unreachable:
-    'Couldn’t reach hosted.dormouse.sh to make a link. Check this computer’s internet connection, ' +
-    'then try again.',
-  'rendezvous-lost': 'The connection to hosted.dormouse.sh dropped before the phone finished connecting.',
-  'burrow-error': 'This computer couldn’t finish the connection.',
-};
+export function oneTimeEndedCopy(
+  host: string,
+  anyNetwork: boolean,
+): Record<Exclude<OneTimeEndReason, 'user-ended'>, string> {
+  return {
+    'user-denied': 'You cancelled the phone’s request, so nothing connected.',
+    'confirmation-mismatch': 'The two digits did not match, so nothing connected.',
+    expired: 'The link ran out of time before a phone finished connecting.',
+    'phone-left': 'The phone disconnected.',
+    'direct-failed': anyNetwork
+      ? 'The phone couldn’t reach this computer directly, which some networks block. Try the phone on ' +
+        'another network, such as cellular or the same Wi-Fi as this computer, then get a new link.'
+      : 'The phone couldn’t reach this computer directly. Make sure it is on an allowed network, then ' +
+        'get a new link.',
+    'network-not-allowed': 'The phone wasn’t on one of your allowed networks, so the connection ended.',
+    idle: 'The phone stopped responding, so the connection ended.',
+    unreachable:
+      `Couldn’t reach ${host} to make a link. Check this computer’s internet connection, ` +
+      'then try again.',
+    'rendezvous-lost': `The connection to ${host} dropped before the phone finished connecting.`,
+    'burrow-error': 'This computer couldn’t finish the connection.',
+  };
+}
 
 const ENDED_FALLBACK = 'The one-time connection ended.';
+
+/**
+ * Where a phone may be: under Anywhere on any network, else — and before the
+ * policy is read — on an allowed one.
+ */
+function phoneWhere(anyNetwork: boolean): string {
+  return anyNetwork ? 'Your phone can be on any network.' : 'Your phone must be on an allowed network.';
+}
 
 /**
  * The accessible name of the region reporting how a connection ended, the
@@ -88,7 +109,7 @@ function atRest(state: OneTimeState): boolean {
 }
 
 /**
- * The one-time connection in Settings' Remote control section, enrolled or not
+ * The one-time connection in Settings → Network's Phones section, enrolled or not
  * (`docs/specs/one-time.md` -> "Laptop UI"): a button at rest, and a framed
  * panel for everything from opening a link to reporting how it ended.
  *
@@ -96,10 +117,13 @@ function atRest(state: OneTimeState): boolean {
  * error.** The link lives in the Burrow service, so closing Settings leaves a
  * waiting link waiting and a connection connected; reopening re-reads it.
  * **Nothing here re-opens on a timer**: a link is single-use, so a fresh one is
- * only ever the user's New link.
+ * only ever the user's New link. `relayOrigin` is this build's, which the
+ * rendezvous runs on in the only build that has one.
  */
-export function OneTimeConnection() {
+export function OneTimeConnection({ relayOrigin }: { relayOrigin: string }) {
   const store = useSyncExternalStore(subscribeToOneTime, getOneTimeSnapshot);
+  const policy = useNetworkPolicy();
+  const anyNetwork = policy !== null && phoneOnAnyNetwork(policy);
   /** The action this panel has in flight: its answer, not an event, clears it. */
   const [pending, setPending] = useState<'open' | 'end' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +165,7 @@ export function OneTimeConnection() {
         </button>
         <div className={FIELD_HINT}>
           {unavailable === null
-            ? IDLE_HINT
+            ? `Open a link on your phone for a one-off connection. ${phoneWhere(anyNetwork)} No account needed.`
             : (own(UNAVAILABLE_COPY, unavailable) ?? 'Not available in this build.')}
         </div>
         {error ? (
@@ -158,6 +182,8 @@ export function OneTimeConnection() {
   return (
     <OneTimePanel
       state={state}
+      anyNetwork={anyNetwork}
+      relayHost={hostOf(relayOrigin)}
       pending={pending}
       error={error}
       onOpen={open}
@@ -172,12 +198,16 @@ export function OneTimeConnection() {
  */
 function OneTimePanel({
   state,
+  anyNetwork,
+  relayHost,
   pending,
   error,
   onOpen,
   onEnd,
 }: {
   state: OneTimeState;
+  anyNetwork: boolean;
+  relayHost: string;
   pending: 'open' | 'end' | null;
   error: string | null;
   onOpen: () => void;
@@ -203,7 +233,7 @@ function OneTimePanel({
       actions = cancel('Cancel');
       break;
     case 'waiting':
-      body = <WaitingLink url={state.url} expiresAt={state.expiresAt} onShown={reveal} />;
+      body = <WaitingLink url={state.url} expiresAt={state.expiresAt} anyNetwork={anyNetwork} onShown={reveal} />;
       actions = (
         <>
           <CopyLinkButton url={state.url} />
@@ -239,7 +269,7 @@ function OneTimePanel({
           aria-label={ONE_TIME_OUTCOME_LABEL}
           className="mt-1 text-sm leading-relaxed text-foreground"
         >
-          {own<string>(ONE_TIME_ENDED_COPY, state.reason) ?? ENDED_FALLBACK}
+          {own<string>(oneTimeEndedCopy(relayHost, anyNetwork), state.reason) ?? ENDED_FALLBACK}
         </div>
       );
       actions = (
@@ -268,17 +298,18 @@ function OneTimePanel({
 function WaitingLink({
   url,
   expiresAt,
+  anyNetwork,
   onShown,
 }: {
   url: string;
   expiresAt: number;
+  anyNetwork: boolean;
   onShown: () => void;
 }) {
   return (
     <>
       <div className="mt-1 text-sm leading-relaxed text-muted">
-        Scan this with your phone’s camera, or open the link below on it. Phone and computer must be
-        on the same Wi-Fi.
+        Scan this with your phone’s camera, or open the link below on it. {phoneWhere(anyNetwork)}
       </div>
       <ExpiringCode
         url={url}

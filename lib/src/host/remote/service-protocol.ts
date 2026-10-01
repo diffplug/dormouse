@@ -27,6 +27,8 @@ import type {
   BurrowStatus,
 } from '../../remote/burrow/burrow-runtime';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
+import type { NetworkLevel, NetworkPolicy, NetworkPolicyResult } from '../../remote/network-policy';
+import type { RelayMode } from '../relay-origin';
 
 /** Transport event names for what the service sends back. */
 export const BURROW_RESULT_EVENT = 'burrow:result';
@@ -194,8 +196,35 @@ export interface OneTimeEvent {
   state: OneTimeState;
 }
 
+/**
+ * service → webview: the network policy changed (`docs/specs/remote-network.md`
+ * -> "Policy"). Complete every time, so a reader replaces rather than merges;
+ * `networkPolicy` answers the same shape, for a reader that arrives after it.
+ */
+export interface NetworkPolicyEvent extends NetworkPolicyResult {
+  name: 'network-policy';
+}
+
 /** Every `burrow:event` the service sends, by `name`. */
-export type BurrowUiEvent = BurrowStatusEvent | PairingQueueEvent | InvitationEvent | OneTimeEvent;
+export type BurrowUiEvent =
+  | BurrowStatusEvent
+  | PairingQueueEvent
+  | InvitationEvent
+  | OneTimeEvent
+  | NetworkPolicyEvent;
+
+/**
+ * The one-time state of a Burrow with no connection, from this build's
+ * `hostedOrigin` (`../relay-origin.ts`) and the network policy's level:
+ * `unavailable` without a Hosted origin — a self-host build, which opens no
+ * rendezvous — or under `nothing`, else `idle`. One builder for every process
+ * that answers it: the service, the VS Code glue for a window with no service
+ * at all (`vscode-ext/src/burrow.ts` → `refuseCommand`), and the Storybook stub.
+ */
+export function idleOneTimeState(hosted: string | null, level: NetworkLevel): OneTimeState {
+  if (hosted === null) return { status: 'unavailable', reason: 'self-host' };
+  return level === 'nothing' ? { status: 'unavailable', reason: 'network-off' } : { status: 'idle' };
+}
 
 /**
  * Whether `value` is a {@link OneTimeState} a panel can render: a known
@@ -253,8 +282,11 @@ export interface InvitationEvent {
 
 // --- Command parameter shapes ---
 
+/**
+ * No Relay URL: the only Relay a Burrow enrolls with is its build's baked
+ * origin (`docs/specs/relay.md` → "Relay origin").
+ */
 export interface EnrollParams {
-  relayUrl: string;
   password: string;
   label: string;
 }
@@ -264,13 +296,7 @@ export interface EnrollParams {
  * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  */
 export interface EnrollOfferParams {
-  /**
-   * The origin the card displayed, echoed back so the service can refuse an
-   * offer file that was rewritten between the render and the click. **Not the
-   * origin that is enrolled against** — that comes off the file, along with the
-   * token this shape deliberately does not carry.
-   */
-  origin: string;
+  /** No token: it comes off the file, which the service re-reads at the click. */
   label: string;
 }
 
@@ -306,6 +332,16 @@ export interface TakeBackResult {
   ended: boolean;
 }
 
+/**
+ * The whole policy to hold from now on (`docs/specs/remote-network.md` ->
+ * "Policy"). The service takes it only exactly: a level this build offers, at
+ * most `MAX_ALLOWED_NETWORKS` CIDRs, a boolean `autoUpdate` — and saves, and
+ * answers, each CIDR in its canonical form.
+ */
+export interface SetNetworkPolicyParams {
+  policy: NetworkPolicy;
+}
+
 /** Answers an outstanding {@link BurrowAsk}; `burrowRequestId` is the ask's, not a new one. */
 export interface AnswerParams {
   burrowRequestId: string;
@@ -316,7 +352,6 @@ export interface AnswerParams {
 
 export interface EnrollResult {
   burrowId: string;
-  relayUrl: string;
 }
 
 /**
@@ -356,7 +391,13 @@ export interface BurrowConsoleStatus {
   enrolled: boolean;
   /** {@link BurrowStatusEvent.serving}, which this seeds. */
   serving: boolean;
-  relayUrl: string | null;
+  /**
+   * The one relay origin this build was baked with, enrolled or not, and the
+   * mode it sets — what the Settings dialog renders (`docs/specs/relay.md` →
+   * "Relay origin").
+   */
+  relayOrigin: string;
+  relayMode: RelayMode;
   burrowId: string | null;
   /**
    * The relay socket's state. `displaced` is the one that needs acting on:
@@ -369,16 +410,16 @@ export interface BurrowConsoleStatus {
   /** What to prefill a "name for this machine" field with: the hostname. */
   suggestedLabel: string;
   /**
-   * The installer's enrollment offer on this machine, when there is one and this
-   * Burrow has not enrolled — the Settings dialog's one-click path
-   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog", which
-   * owns the re-read-at-click rule and what makes the card safe to press).
+   * Whether the installer left an enrollment offer for `relayOrigin` on this
+   * machine, while this self-host Burrow has not enrolled — the Settings
+   * dialog's one-click path (`docs/specs/relay.md` → "Remote control, in the
+   * Settings dialog").
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and
    * the token is a bearer credential exactly like `burrowToken` (`docs/specs/security-remote.md` → "Trust boundary",
    * the no-`burrowToken`-in-a-webview FAIL IF).
    */
-  offer: { origin: string } | null;
+  offer: boolean;
 }
 
 /**

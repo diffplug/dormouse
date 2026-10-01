@@ -1,7 +1,7 @@
 import { getToolDirtySnapshot, subscribeToToolDirty } from '../lib/tool-dirty-store';
 import { setWorkspaceAlertDelivery } from '../lib/workspace-store';
 import { useWorkspaceAlertPolicy } from './wall/use-workspace-alert-policy';
-import { useCallback, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode, type Ref, type KeyboardEvent, type MouseEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo, useLayoutEffect, useContext, useSyncExternalStore, type ReactNode, type Ref, type KeyboardEvent, type MouseEvent } from 'react';
 import {
   DeviceMobileSlashIcon,
   CaretLeftIcon,
@@ -36,6 +36,7 @@ import {
   updateAlertSettings,
 } from '../lib/terminal-registry';
 import { deriveDisplayedSurfaceLabel } from '../lib/session-label';
+import { subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
 
 /** Shared by every baseboard-level button (DESIGN.md -> Navigation). */
 const BASEBOARD_BUTTON_BASE_CLASS = 'h-6 shrink-0 justify-center pb-px text-sm font-medium font-mono';
@@ -170,6 +171,10 @@ export function Baseboard({ items, onReattach, notice, onDoorDragStart }: Basebo
     'aria-description': workspaceId ? 'Right-click or press Shift+F10 for workspace alert settings.' : undefined,
   };
   const workspaceSettingsHint = workspaceId ? '. Right-click for workspace alert settings.' : '';
+
+  // Held for the window's life, so the settings preview reads the level on its
+  // first frame (docs/specs/remote-network.md -> "Settings → Network").
+  useEffect(() => subscribeToNetworkPolicy(() => {}), []);
 
   useLayoutEffect(() => {
     const el = containerRef.current;

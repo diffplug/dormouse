@@ -25,8 +25,8 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { browserDirectPeer } from '../client/browser-direct-peer';
-import { BURROW_IS_AN_APP, SCAN_LABEL } from '../setup-copy';
+import { selfHostDirectPeer } from '../client/browser-direct-peer';
+import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
   indexedDbKnownBurrowStore,
@@ -112,7 +112,7 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
-        createDirectPeer: browserDirectPeer,
+        createDirectPeer: selfHostDirectPeer,
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),
@@ -680,8 +680,8 @@ export const BURROWS_TITLE = 'Burrows';
  * a copy of it.
  */
 export const BURROWS_EMPTY =
-  `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open Settings → `
-  + 'Remote control → Set up a phone, then scan the code.';
+  `No Burrows paired yet. ${BURROW_IS_AN_APP} On the computer, open ${SETUP_PATH}, `
+  + 'then scan the code.';
 
 /** The connected Pocket shell: Burrow navigation chrome over the remote wall. */
 export function ConnectedView({
@@ -800,7 +800,7 @@ export function SetupOrSignin({
           <p className={clsx(PK.lead, 'mt-1')}>
             {signinLeads
               ? 'Sign in with your passkey to reach the Burrows this phone is paired with, or scan a code to pair a new one.'
-              : 'On the computer: Settings → Remote control → Set up a phone. Scan the code it shows.'}
+              : `On the computer: ${SETUP_PATH}. Scan the code it shows.`}
           </p>
         </div>
         {/* Above the actions, never below: the passkey this screen mints

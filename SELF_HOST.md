@@ -43,7 +43,7 @@ change to both.
 
 Before acting:
 
-1. Read `docs/specs/relay.md` ("Configuration", "Where a Burrow may reach a Relay (self-host builds)"), `docs/specs/remote-security-model.md` for the
+1. Read `docs/specs/relay.md` ("Configuration", "Relay origin"), `docs/specs/remote-security-model.md` for the
    trust model, and the [Installer contract](#installer-contract-maintainers).
 2. Establish the OS and pick the installer column; run its `--help` / `-Help`,
    skim the script, and quote its errors rather than paraphrasing — they are
@@ -99,18 +99,21 @@ installed release, which the installer and `manage status` both print.
   profile fails every `tailscale` call with
   `401 Unauthorized: Tailscale already in use by <user>`; that user must sign
   out or quit the tray app. Preflight detects it and names the account.
-- **A Burrow build that can reach a `*.ts.net` origin.** The shipped standalone
-  and VS Code Burrows bake in the SaaS-only relay allowlist, so a self-host relay
-  needs a local build of whichever Burrow the user runs:
+- **A Burrow built for this Relay's origin.** The shipped standalone and VS Code
+  Burrows reach only Dormouse Hosted, so a self-host Relay needs a local build of
+  whichever Burrow the user runs, its `DORMOUSE_RELAY_ORIGIN` byte for byte the
+  `DORMOUSE_ORIGIN` the installer writes to `config/relay.env`,
+  `https://<laptop>.<tailnet>.ts.net`:
 
   ```sh
-  DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:standalone
-  DORMOUSE_REMOTE_CONNECT_SRC='https://*.ts.net wss://*.ts.net' pnpm dogfood:vscode
+  DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:standalone
+  DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:vscode
   ```
 
-  Both bake it into their Node Burrow bundles, and the relay socket is in neither
-  webview, so no webview CSP change widens the allowlist
-  (`docs/specs/relay.md` → "Where a Burrow may reach a Relay (self-host builds)").
+  That is a self-host build: it sends nothing to `dormouse.sh` or
+  `hosted.dormouse.sh` on its own, so it has no one-time connection, no managed
+  voice, and no auto-update — update it by rebuilding
+  (`docs/specs/relay.md` → "Relay origin").
 
 ## What the installer does
 
@@ -365,19 +368,21 @@ Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
    print it into the conversation.
 
 2. **The Burrow.** On this same machine, launch the standalone or VS Code build
-   made with `DORMOUSE_REMOTE_CONNECT_SRC` (Prerequisites) and open
-   **Settings → Remote control** — the sliders icon at the far right of the
-   baseboard. While the offer is unspent, its card enrolls in one click with no
-   setup password; the typed form behind "Enroll with a different Relay…"
-   covers a Relay elsewhere or a spent offer (`docs/specs/relay.md`, "Remote
-   control, in the Settings dialog"). Enrollment persists in the Burrow service's
+   made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings →
+   Network** — the sliders icon at the far right of the baseboard — and choose
+   **My Relay only**: a new install starts at Nothing, which refuses enrollment
+   (`docs/specs/remote-network.md` → "Policy"). Its Phones section then holds
+   the remote-control choices. While the offer is unspent, its card enrolls in one click with no
+   setup password; the typed form behind "Enroll with the setup password…"
+   covers a spent offer or a Burrow on another machine (`docs/specs/relay.md`,
+   "Remote control, in the Settings dialog"). Enrollment persists in the Burrow service's
    own store (`docs/specs/security-remote.md` → "Credentials at rest"), so later launches connect
    on their own; the section then shows the Relay, the relay connection and the
    paired-device count.
 
-   A build without the `*.ts.net` allowlist refuses outright, before any
-   credential leaves the machine, and both card and form render that refusal
-   verbatim: the expected symptom of a stock build, not a Relay problem.
+   A stock build shows only a disabled "Use hosted.dormouse.sh" under
+   **Persistent Relay**, with nothing to enroll: the expected symptom of a stock
+   build, not a Relay problem.
 
 3. **The phone, and only then the code.** On the phone, open
    `https://<laptop>.<tailnet>.ts.net` in Safari and confirm it leads with
@@ -386,7 +391,7 @@ Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
    owns why, and covers the phone's camera). **A setup code is
    live for five minutes**, so that first load — bundle, service worker, Home
    Screen install — must not happen inside the window. With the phone waiting on
-   that screen, press **Set up a phone** in **Settings → Remote control**;
+   that screen, press **Set up a phone** in **Settings → Network**;
    scanning or pasting the code creates the passkey and signs them in, bound to
    this exact origin, with no password typed on the phone.
 
@@ -553,7 +558,9 @@ about any of them.
   byte-for-byte with `DORMOUSE_ORIGIN` in `config/relay.env`; confirm HTTPS and
   the node hostname.
 - **A Burrow cannot connect while Pocket can:** that Burrow build almost certainly
-  lacks the `*.ts.net` `DORMOUSE_REMOTE_CONNECT_SRC` setting.
+  bakes a different origin; its `DORMOUSE_RELAY_ORIGIN` must match
+  `DORMOUSE_ORIGIN` byte for byte, and it reads an enrollment for any other as
+  none.
 - **State disappears:** verify the absolute state path for this platform's
   install root and the installed config. Never initialize a new account until
   the old state is located or restored.
@@ -577,8 +584,8 @@ Lingering is what makes it survive logout and come back at boot
 both the same ones any origin change brings: **`DORMOUSE_ORIGIN` becomes that
 machine's name**, so the passkey and every Burrow enrollment are redone against it
 — a deliberate migration, not an upgrade path, which is why the installers
-refuse to rewrite an origin; and **the Burrow still needs a build whose baked
-allowlist admits `*.ts.net`** (Prerequisites). That machine needs the same
+refuse to rewrite an origin; and **every Burrow is rebuilt with that origin**
+(Prerequisites). That machine needs the same
 backup story as any other install (checkpoint 6): `config/` and `state/` hold
 Burrow bearer credentials and a VAPID private key.
 

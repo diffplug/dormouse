@@ -27,6 +27,7 @@ import {
   SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   BAD_PASSWORD_ERROR,
+  ORIGIN_MISMATCH_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
   PUSH_SEND_DEADLINE_MS,
@@ -38,6 +39,7 @@ import {
   isExactBase64Url,
   isOrigin,
   isPresenceBinding,
+  normalizeOrigin,
   presenceChallenge,
   toBase64Url,
   utf8Decode,
@@ -46,6 +48,7 @@ import {
   TokenBucket,
 } from 'remote-lib-common';
 import type {
+  BurrowEnrollOriginMismatch,
   BurrowEnrollRequest,
   BurrowEnrollResponse,
   BurrowsResponse,
@@ -869,6 +872,14 @@ export function createApp(config: AppConfig): CreatedApp {
 
   app.post(API_ROUTES.burrowEnroll, async (c) => {
     const body = await readJson<BurrowEnrollRequest>(c);
+    // A Burrow built for another origin would send every phone there, so it is
+    // refused before the credential is read — nothing spent, nothing appended.
+    // Absent is an older Burrow, which enrolls as before.
+    const claimed: unknown = body?.origin;
+    if (claimed !== undefined && normalizeOrigin(claimed) !== origin) {
+      const mismatch: BurrowEnrollOriginMismatch = { error: ORIGIN_MISMATCH_ERROR, origin };
+      return c.json(mismatch, 409);
+    }
     // The shape ladder runs out here, ahead of the gate below, which holds only
     // the redemption that has to be serialized.
     const picked = await pickCredential(body, c);
@@ -1390,7 +1401,7 @@ export function createApp(config: AppConfig): CreatedApp {
   async function sweepRevokedBurrows(): Promise<number> {
     const online = hub.onlineBurrowIds();
     if (online.length === 0) return 0;
-    // One read for the whole sweep: `has()` reads the file per call, and a Burrow
+    // One read for the whole sweep: `has()` checks the file per call, and a Burrow
     // deleted mid-sweep is caught by the next one.
     //
     // **Nothing is closed on an answer this sweep did not actually read.**

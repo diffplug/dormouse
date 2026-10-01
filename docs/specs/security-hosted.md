@@ -17,6 +17,7 @@ Pinned by `hosted/server/tests/workers.test.ts`.
 
 - **FAIL IF** the consumer changes `authPolicy` away from explicit linking or multiple independent logins, or accepts an explicit connection callback after its initiating login was revoked; inspect `hosted/server/policy.ts` and the packed adapter.
 - **FAIL IF** an unused provider credential enables login, an unknown provider name is accepted, or incomplete enabled credentials silently degrade; inspect `providerBindings` in `hosted/server/policy.ts`.
+- **FAIL IF** a managed-voice route admits any account but the verified `ADMIN_EMAIL` without rechecking per request, stores a voice token other than as its SHA-256, logs speak text, forwards an ElevenLabs body or status, or lets a binding or request field choose the upstream URL; inspect `hosted/server/admin.ts` and `hosted/server/voice.ts`.
 - **FAIL IF** Hosted account login mints a Burrow ACL grant or substitutes for the existing encrypted pairing/presence proof. The one-time rendezvous carries only handshake ciphertext and authorizes nothing; the ends' handshake and the laptop's confirmation do.
 
 Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.test.ts`.
@@ -36,7 +37,7 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 - **FAIL IF** the `/connect/` page's policy admits a source outside `APP_ORIGIN`'s `/connect/`, a script outside `/connect/assets/`, or a connection but the client route; permits inline or off-origin script, framing, forms, or popups; or takes an `APP_ORIGIN` that is not exactly an origin. Inspect `contentSecurityPolicy` in `hosted/server/headers.ts`.
 - **FAIL IF** a path under `/connect/` is served but the page and its hashed assets, a missing asset gets the SPA shell, or a shell failing `assertPocketShell`'s one-time mode can ship; `build:one-time` in `lib/package.json` and `stageOneTime` in `hosted/scripts/stage-one-time.mjs` each run it. Inspect `oneTimePageRoutes` in `hosted/server/one-time.ts`.
 
-`scripts/e2e-lint.mjs` also holds `hosted/server/` to the Relay's absences: no protocol-v1 type, no direct-path signal or SDP, no ICE server (`docs/specs/security-remote.md` -> "Direct path"). Pinned by `hosted/server/tests/one-time.test.ts`, `hosted/scripts/stage-one-time.test.mjs`, `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`, and `hosted/scripts/production.test.mjs`.
+`scripts/e2e-lint.mjs` also holds `hosted/server/` to the Relay's absences: no protocol-v1 type, no direct-path signal or SDP, no ICE server — the page's STUN is client code (`docs/specs/security-remote.md` -> "Direct path"). Pinned by `hosted/server/tests/one-time.test.ts`, `hosted/scripts/stage-one-time.test.mjs`, `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`, and `hosted/scripts/production.test.mjs`.
 
 ## Deployment boundary
 

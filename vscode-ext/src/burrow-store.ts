@@ -1,6 +1,7 @@
 /**
  * Where the VS Code Burrow keeps the two things it must survive a restart with:
- * the enrollment and the ACL (`lib/src/host/remote/burrow-state-store.ts`).
+ * the enrollment and the ACL (`lib/src/host/remote/burrow-state-store.ts`), and
+ * the network policy beside them.
  *
  * Split by sensitivity. The enrollment blob carries `burrowToken` — a bearer
  * credential that grants the `/ws/burrow` socket — so it goes to `SecretStorage`
@@ -25,6 +26,7 @@ import type { BurrowAclRecord, BurrowStateStore } from '../../lib/src/host/remot
 import { createSerialQueue } from '../../lib/src/host/remote/serial-queue';
 import { filterAclRecords } from '../../lib/src/remote/burrow/acl';
 import { isEnrollment, type BurrowEnrollment } from '../../lib/src/remote/burrow/enrollment';
+import { storedNetworkPolicy, type NetworkPolicy } from '../../lib/src/remote/network-policy';
 // Imported, not mirrored: a key that drifted between the two sides would strand
 // an enrollment that is still on disk.
 import { ENROLLMENT_KEY } from '../../lib/src/remote/burrow/store';
@@ -162,7 +164,23 @@ export class VsCodeBurrowStateStore implements BurrowStateStore {
       this.#context.globalState.update(aclKey(burrowId), JSON.stringify(records)),
     );
   }
+
+  /** Not memoized, like the ACL: `globalState` is in-process, and shared by every window. */
+  async loadNetworkPolicy(): Promise<NetworkPolicy | null> {
+    return storedNetworkPolicy(this.#context.globalState.get<unknown>(NETWORK_POLICY_KEY));
+  }
+
+  saveNetworkPolicy(policy: NetworkPolicy): Promise<void> {
+    return this.#mutate(() => this.#context.globalState.update(NETWORK_POLICY_KEY, policy));
+  }
 }
+
+/**
+ * The network policy's `globalState` key (`docs/specs/remote-network.md` ->
+ * "Policy"): no secret in it, so not the keychain, and machine-wide like the
+ * enrollment.
+ */
+export const NETWORK_POLICY_KEY = 'dormouse.burrow.network-policy';
 
 /**
  * This store's own `globalState` key prefix. It lives here rather than in `lib`

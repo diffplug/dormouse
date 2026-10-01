@@ -84,7 +84,7 @@ export async function closeWorkspaceWithSurfaces(
       flushSync(() => { setActiveWorkspace(id); handle.selectWorkspaceTab(); });
     }
     // One question for every dirty Tool, before any Surface closes; a command
-    // close refuses instead (`docs/specs/dor-tool.md` → Editing files).
+    // close refuses instead (`docs/specs/dor-tool.md` → Closing unsaved Tools).
     const editors = handle.dirtyToolIds();
     if (editors.length && (mode === 'silent' || !await confirmToolEditorsClose(editors))) return UNSAVED_TOOL_REFUSAL;
     const refusal = await handle.closeAll(editors);

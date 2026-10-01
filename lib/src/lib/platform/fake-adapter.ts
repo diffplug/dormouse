@@ -1,5 +1,6 @@
 import { DEFAULT_HELPER_COMMAND, type TerminalContextRequest, type TerminalContextInfo } from '../terminal-context-types';
-import type { OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, WritePtyOptions } from './types';
+import type { OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, UpdatesPort, WritePtyOptions } from './types';
+import type { ManagedVoicePort } from './managed-voice-types';
 import type { AlertManager } from '../alert-manager';
 import { createAlertHost, type AlertHost, type AlertRealm } from '../../host/alert-host';
 import { createAlertClient, type AlertClientMethods } from '../../host/alert-client';
@@ -15,7 +16,7 @@ import {
   applyTerminalSemanticEvents,
 } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
-import { recordToolEvents } from '../tool-events';
+import { applyLiveToolEvents } from '../tool-events';
 import { offerProgramCopy } from '../mouse-selection';
 
 /** This renderer is its host's one realm. */
@@ -90,12 +91,18 @@ export class FakePtyAdapter implements PlatformAdapter {
   // theme or shell selection, which is what hides the Settings dialog's rows.
   hostOwnsTheme?: boolean;
   hostOwnsShells?: boolean;
+  hostOwnsUpdates?: boolean;
 
   // Same reason, one layer up: a fake platform has no Burrow service behind it, so
-  // this stays undefined and the Settings dialog's Remote control section renders
-  // nothing (`docs/specs/relay.md`). The preview decorator installs a stub link
-  // for the stories that are *about* that section.
+  // this stays undefined and the Settings dialog's Network topic renders
+  // nothing (`docs/specs/remote-network.md`). The preview decorator installs a
+  // stub link for the stories that are *about* that topic.
   burrow?: BurrowLink;
+
+  // The updater's and managed voice's ports, likewise absent unless a story
+  // about Settings → Network or managed voice installs one.
+  updates?: UpdatesPort;
+  managedVoice?: ManagedVoicePort;
 
 
   /** Where a due push goes. There is no Burrow here, so by default it reaches
@@ -469,7 +476,7 @@ export class FakePtyAdapter implements PlatformAdapter {
   private emitPtyData(id: string, data: string, options: { skipActivity?: boolean } = {}): void {
     const parsed = this.getProtocolParser(id).process(data);
     // The Tool stores are this renderer's own.
-    recordToolEvents(id, parsed.events);
+    applyLiveToolEvents(id, parsed.events);
     applyTerminalSemanticEvents(id, applyTerminalEvents(this.alertManager, id, parsed.events));
     const inputHandler = this.inputHandlers.get(id);
     for (const response of collectTerminalProtocolResponses(parsed.events)) {

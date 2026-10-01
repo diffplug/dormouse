@@ -315,16 +315,6 @@ transient: `MAX_ESTABLISHED_E2E_SESSIONS` × 4 MiB = 64 MiB of held ciphertext i
 all sixteen authorized phones cut over at once, on a machine that is already
 running their terminals.
 
-**Why no ICE servers, stated as a hard rule rather than a default.** A STUN
-server learns the client's public address and the fact of a session, from a
-party neither endpoint chose; a TURN server learns the traffic pattern and
-carries the ciphertext, which is exactly the position the Relay already holds
-and the whole model treats as untrusted. The shipped deployment is a tailnet,
-where host candidates reach on both ends, so the servers buy connectivity that
-is already there. Relay-supplied ICE servers stay in `remote-api.md`'s
-`## Future` for a SaaS deployment, where the trade is real and would need its
-own analysis.
-
 **What the listener actually opens** *(measured 2026-09, standalone Burrow on
 macOS)*: four host candidates sharing one port, no loopback and no link-local
 address among them. One socket on the unspecified address, advertised once per
@@ -399,7 +389,9 @@ has already committed and the Burrow can never complete. A gate with no backfill
 turns that into a permanently un-enrolled machine over a moment's failure, whose
 only operator recovery is deleting `burrows.json` on the Relay. Persisting before
 the Burrow runs rules out the other alternative, a Burrow running on a static it has
-not yet written.
+not yet written. A service disposed during the mint saves nothing: in VS Code the
+window that took the broker over may already have saved its own static, and a late
+write would replace the key its running Burrow answers with.
 
 **Why a halves mismatch keeps the Burrow down.** A private half that does not
 derive its recorded public half is a corrupt state file, but starting anyway

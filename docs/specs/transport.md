@@ -22,6 +22,7 @@ Optional booleans:
 |---|---|---|---|
 | `hostOwnsTheme?` | `false` | `VSCodeAdapter` → `true` | Settings hides its theme picker (`docs/specs/theme.md` → "Where the user picks a theme") |
 | `hostOwnsShells?` | `false` | `VSCodeAdapter` → `true` | Settings hides its Shell row for the native QuickPick (`docs/specs/vscode.md` → "Shell selection") |
+| `hostOwnsUpdates?` | `false` | `VSCodeAdapter` → `true` | Settings → Network names the Marketplace instead of an update check (`docs/specs/remote-network.md` → "Settings → Network") |
 
 ## PTY lifecycle
 
@@ -215,6 +216,20 @@ Both settings directions share one adapter method, `alertPublishSettings(setting
 **Never add a third app-global store on this pattern** — a third collapses them into one keyed channel with a host-side key→normalizer registry (rationale).
 
 OSC parsing/stripping rules for those rows, and the rule that **only the process owning a PTY parses it**: `docs/specs/terminal-escapes.md` → "Parsing location".
+
+### Managed voice
+
+**Managed voice is one optional adapter member**, `managedVoice?: ManagedVoicePort`, present only in a Hosted standalone build (Tauri and the browser-dev harness); VS Code, Pocket, the website, and a self-host build omit it. Behavior: `docs/specs/alert.md` → "Managed voice".
+
+| Direction | Standalone carrier | Payload |
+| --- | --- | --- |
+| Webview → host | `managed_voice { payload }` → sidecar `voice:command` | op `status`, `configure`, or `speak` |
+| Host → webview | sidecar `voice:result` → invoke result | that op's answer; `speak`'s audio as base64 |
+| Host → every webview | sidecar `voice:status` | the status after each saved `configure` |
+
+**Every window caches the status**: it asks `status` once its `voice:status` listener is live, and again when the harness's event stream reconnects, then takes each broadcast; **an answer never overrides a broadcast that arrived after its request**. Shapes: `ManagedVoicePort` and the wire types beside it.
+
+Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types.ts`; `managedVoicePortForBuild` and `createManagedVoicePort` in `standalone/src/managed-voice-port.ts`; `managed_voice` in `standalone/src-tauri/src/lib.rs`; `createManagedVoiceHost` in `lib/src/host/managed-voice-host.ts`.
 
 ## Persisted session types
 

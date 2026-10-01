@@ -33,23 +33,31 @@ vi.mock('./QrCode', async (importOriginal) => {
   };
 });
 
-import { ONE_TIME_ENDED_COPY, ONE_TIME_OUTCOME_LABEL } from './OneTimeConnection';
+import { ONE_TIME_OUTCOME_LABEL, oneTimeEndedCopy } from './OneTimeConnection';
 import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
+import { hostOf } from './remote-control-shared';
+import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import {
   isOneTimeState,
   type BurrowConsoleStatus,
   type SetupQrResult,
 } from '../host/remote/service-protocol';
 import {
+  ANYWHERE_ON,
   enrolledStatus,
+  LOCAL_ON,
   makeEventedBurrowLink,
   makeStubBurrowLink,
   OFFER_STATUS,
   oneTimeWaiting,
+  SELF_HOST_RELAY_ORIGIN,
+  SELF_HOST_UNENROLLED_STATUS as SELF_HOST_NOT_ENROLLED,
   setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-burrow-link';
 import type { OneTimeEndReason, OneTimeState } from '../remote/burrow/one-time-runtime';
+import { networkPolicyResult, type NetworkPolicy } from '../remote/network-policy';
+import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getOneTimeSnapshot, subscribeToOneTime } from '../remote/burrow/one-time-store';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
@@ -83,7 +91,7 @@ function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
 /** The shared fixture, keeping this file's own Relay/burrow values. */
 const enrolled = (over: Partial<BurrowConsoleStatus> = {}) =>
   enrolledStatus({
-    relayUrl: 'https://laptop.tailnet.ts.net',
+    relayOrigin: 'https://laptop.tailnet.ts.net',
     burrowId: 'burrow-1',
     pairedClients: 1,
     ...over,
@@ -152,10 +160,13 @@ function watchReveals(): { drawnAtReveal: boolean[]; restore: () => void } {
 
 /**
  * An enrolled machine with the panel open on a live code, handing back the link
- * so a case can drive invitation events against it.
+ * so a case can drive invitation events against it. `status` answers every
+ * other command, read at each call.
  */
-async function openSetupPanel(): Promise<ReturnType<typeof makeLink>> {
-  const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : enrolled()));
+async function openSetupPanel(
+  status: () => unknown = () => enrolled(),
+): Promise<ReturnType<typeof makeLink>> {
+  const link = makeLink(async (cmd) => (cmd === 'setupQr' ? qr() : status()));
   platform = { burrow: link };
   await render();
   await act(async () => buttonLabelled('Set up a phone')!.click());
@@ -186,18 +197,18 @@ function buttonLabelled(label: string): HTMLButtonElement | undefined {
 /** The disclosure carries a `+`/`−` prefix, so match on its words rather than all of it. */
 function disclosure(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')].find((button) =>
-    button.textContent?.includes('Enroll with a different Relay'),
+    button.textContent?.includes('Enroll with the setup password'),
   ) as HTMLButtonElement | undefined;
 }
 
 /**
- * The three-field form, which is always mounted: folding it away is the
- * `hidden` attribute, so what is typed into it survives both the disclosure and
- * an offer appearing on disk underneath it.
+ * The two-field form a self-host build shows, which is always mounted: folding
+ * it away is the `hidden` attribute, so what is typed into it survives both the
+ * disclosure and an offer appearing on disk underneath it.
  */
 function typedForm(): HTMLFormElement {
   const form = [...container.querySelectorAll('form')].find((candidate) =>
-    candidate.textContent?.includes('Needs a Dormouse build that allows your Relay’s address'),
+    candidate.textContent?.includes('This Dormouse was built for this Relay:'),
   );
   if (!form) throw new Error('the typed enroll form is not mounted');
   return form;
@@ -210,7 +221,9 @@ async function openPersistent() {
 
 /** The panel Persistent Relay unfolds, which is what `hidden` toggles. */
 function persistentPanel(): HTMLElement {
-  const panel = typedForm().closest<HTMLElement>('div.rounded');
+  const panel = buttonLabelled('Persistent Relay')?.parentElement?.querySelector<HTMLElement>(
+    ':scope > div.rounded',
+  );
   if (!panel) throw new Error('the Persistent Relay panel is not mounted');
   return panel;
 }
@@ -258,14 +271,14 @@ describe('RemoteControlSection', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('offers a one-time connection and a folded Persistent Relay', async () => {
+  it('offers a stock build a one-time connection and a folded Persistent Relay with nothing to enroll', async () => {
     const openExternal = vi.fn();
     platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
     await render();
     expect(buttonLabelled('One-time connection')!.disabled).toBe(false);
     expect(text()).toContain(
-      'Open a link on your phone for a one-off connection. Phone and computer must be on the ' +
-        'same Wi-Fi. No account needed.',
+      'Open a link on your phone for a one-off connection. Your phone must be on an allowed ' +
+        'network. No account needed.',
     );
     expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('false');
     expect(persistentPanel().hidden).toBe(true);
@@ -273,11 +286,13 @@ describe('RemoteControlSection', () => {
     await openPersistent();
     expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('true');
     expect(persistentPanel().hidden).toBe(false);
-    expect(text()).toContain('Needs a Dormouse build that allows your Relay’s address.');
-    expect(text()).toContain('Or a self-hosted Relay you run');
+    // Its one Relay is Hosted's (docs/specs/relay.md → "Relay origin"): no form,
+    // no offer card, and the self-host path named as a build.
+    expect(container.querySelector('form')).toBeNull();
+    expect(buttonLabelled('Connect')).toBeUndefined();
+    expect(text()).toContain('A self-hosted Relay takes a Dormouse built for its address.');
     await act(async () => buttonLabelled('self-hosted Relay')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/self-host/');
-    expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
   it('offers hosted.dormouse.sh as coming soon, linking the Hosted preview', async () => {
@@ -288,6 +303,19 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Use hosted.dormouse.sh')!.disabled).toBe(true);
     await act(async () => buttonLabelled('Get updates on Hosted.')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/#remote-control');
+  });
+
+  it('offers a self-host build its form under the origin it was built for, and no Hosted button', async () => {
+    platform = { burrow: makeLink(async () => SELF_HOST_NOT_ENROLLED) };
+    await render();
+    await openPersistent();
+
+    expect(typedForm().hidden).toBe(false);
+    expect(typedForm().textContent).toContain(SELF_HOST_RELAY_ORIGIN);
+    // The origin is named, never typed: no field for it.
+    expect(container.querySelector('input[type="url"]')).toBeNull();
+    expect(buttonLabelled('Use hosted.dormouse.sh')).toBeUndefined();
+    expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
   it('keeps Persistent Relay folded until clicked, even with an offer waiting', async () => {
@@ -312,22 +340,22 @@ describe('RemoteControlSection', () => {
   });
 
   it('keeps what was typed through folding Persistent Relay', async () => {
-    platform = { burrow: makeLink(async () => NOT_ENROLLED) };
+    platform = { burrow: makeLink(async () => SELF_HOST_NOT_ENROLLED) };
     await render();
     await openPersistent();
-    await type('input[type="url"]', 'https://elsewhere.example');
+    await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await openPersistent();
     expect(persistentPanel().hidden).toBe(true);
     await openPersistent();
-    expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
-      'https://elsewhere.example',
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe(
+      TEST_SETUP_PASSWORD,
     );
   });
 
   it('folds Persistent Relay after a Disconnect', async () => {
     let status: unknown = enrolled();
     const link = makeLink(async (cmd) => {
-      if (cmd === 'clearEnrollment') status = NOT_ENROLLED;
+      if (cmd === 'clearEnrollment') status = SELF_HOST_NOT_ENROLLED;
       return status;
     });
     platform = { burrow: link };
@@ -340,7 +368,7 @@ describe('RemoteControlSection', () => {
   });
 
   it('keeps Connect disabled until every field is filled', async () => {
-    platform = { burrow: makeLink(async () => NOT_ENROLLED) };
+    platform = { burrow: makeLink(async () => SELF_HOST_NOT_ENROLLED) };
     await render();
     await openPersistent();
 
@@ -348,8 +376,6 @@ describe('RemoteControlSection', () => {
     // the offer card uses, so the two paths cannot diverge on it.
     const name = 'input:not([type])';
     expect(container.querySelector<HTMLInputElement>(name)!.value).toBe('ned-mac');
-    expect(buttonLabelled('Connect')!.disabled).toBe(true);
-    await type('input[type="url"]', 'https://laptop.tailnet.ts.net');
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
     expect(buttonLabelled('Connect')!.disabled).toBe(false);
@@ -359,11 +385,11 @@ describe('RemoteControlSection', () => {
   });
 
   it('enrolls with trimmed values and re-reads the status', async () => {
-    let status: unknown = NOT_ENROLLED;
+    let status: unknown = SELF_HOST_NOT_ENROLLED;
     const link = makeLink(async (cmd) => {
       if (cmd === 'enroll') {
         status = enrolled();
-        return { burrowId: 'burrow-1', relayUrl: 'https://laptop.tailnet.ts.net' };
+        return { burrowId: 'burrow-1' };
       }
       return status;
     });
@@ -371,13 +397,12 @@ describe('RemoteControlSection', () => {
     await render();
     await openPersistent();
 
-    await type('input[type="url"]', '  https://laptop.tailnet.ts.net  ');
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await type('input:not([type])', '  Work laptop  ');
     await act(async () => buttonLabelled('Connect')!.click());
 
+    // No origin: the service enrolls only at the build's own.
     expect(link.command).toHaveBeenCalledWith('enroll', {
-      relayUrl: 'https://laptop.tailnet.ts.net',
       password: TEST_SETUP_PASSWORD,
       label: 'Work laptop',
     });
@@ -387,22 +412,26 @@ describe('RemoteControlSection', () => {
   });
 
   it('surfaces an enrollment refusal instead of silently failing', async () => {
+    const refusal =
+      `The Relay says its origin is https://ned-mac.local, but this build was made for ${SELF_HOST_RELAY_ORIGIN}.`;
     const link = makeLink(async (cmd) => {
-      if (cmd === 'enroll') throw new Error('relay origin is not allowed by this build');
-      return NOT_ENROLLED;
+      if (cmd === 'enroll') throw new Error(refusal);
+      return SELF_HOST_NOT_ENROLLED;
     });
     platform = { burrow: link };
     await render();
     await openPersistent();
 
-    await type('input[type="url"]', 'https://evil.example.com');
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await type('input:not([type])', 'Work laptop');
     await act(async () => buttonLabelled('Connect')!.click());
 
-    expect(text()).toContain('relay origin is not allowed by this build');
-    // Still on the form, so the user can correct the origin and retry.
+    expect(text()).toContain(refusal);
+    // Still on the form, with the password kept for a retry.
     expect(buttonLabelled('Connect')).toBeTruthy();
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe(
+      TEST_SETUP_PASSWORD,
+    );
   });
 
   it('leads with the installer’s offer and folds the typed form away', async () => {
@@ -413,7 +442,7 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain('A Dormouse Relay is installed on this machine.');
     expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
     expect(buttonLabelled('Enroll')).toBeTruthy();
-    // The three-field form is behind the disclosure, not beside the card —
+    // The typed form is behind the disclosure, not beside the card —
     // hidden rather than unmounted, so a half-typed one survives the flip.
     expect(typedForm().hidden).toBe(true);
     expect(container.querySelector('input[type="password"]')).toBeTruthy();
@@ -426,7 +455,7 @@ describe('RemoteControlSection', () => {
     const link = makeLink(async (cmd) => {
       if (cmd === 'enrollOffer') {
         status = enrolled();
-        return { burrowId: 'burrow-1', relayUrl: 'https://laptop.tailnet.ts.net' };
+        return { burrowId: 'burrow-1' };
       }
       return status;
     });
@@ -440,13 +469,8 @@ describe('RemoteControlSection', () => {
     await type('input:not([type])', '  Work laptop  ');
     await act(async () => buttonLabelled('Enroll')!.click());
 
-    // The origin is an echo of what the card displayed, so the service can
-    // refuse a file rewritten since; no token, and the origin enrolled against
-    // is still the file's.
-    expect(link.command).toHaveBeenCalledWith('enrollOffer', {
-      origin: 'https://ned-mac.tail9c2f1.ts.net',
-      label: 'Work laptop',
-    });
+    // The name and nothing else: the service re-reads the token off the file.
+    expect(link.command).toHaveBeenCalledWith('enrollOffer', { label: 'Work laptop' });
     expect(text()).toContain('https://laptop.tailnet.ts.net');
     expect(text()).toContain('Connected');
   });
@@ -456,12 +480,12 @@ describe('RemoteControlSection', () => {
     // the offer up. Folding the form away must not empty it.
     vi.useFakeTimers();
     try {
-      let status: unknown = NOT_ENROLLED;
+      let status: unknown = SELF_HOST_NOT_ENROLLED;
       platform = { burrow: makeLink(async () => status) };
       await render();
       await openPersistent();
 
-      await type('input[type="url"]', 'https://elsewhere.example');
+      await type('input[type="password"]', TEST_SETUP_PASSWORD);
       status = OFFER_STATUS;
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
@@ -469,8 +493,8 @@ describe('RemoteControlSection', () => {
 
       expect(text()).toContain('A Dormouse Relay is installed on this machine.');
       expect(typedForm().hidden).toBe(true);
-      expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
-        'https://elsewhere.example',
+      expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe(
+        TEST_SETUP_PASSWORD,
       );
     } finally {
       vi.useRealTimers();
@@ -488,7 +512,7 @@ describe('RemoteControlSection', () => {
       let failEnroll: (error: Error) => void = () => {};
       const link = makeLink(async (cmd) => {
         if (cmd === 'enrollOffer') {
-          status = NOT_ENROLLED;
+          status = SELF_HOST_NOT_ENROLLED;
           return new Promise<unknown>((_resolve, reject) => {
             failEnroll = reject;
           });
@@ -504,7 +528,7 @@ describe('RemoteControlSection', () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
       // The card is still here, on the origin the user reviewed.
-      expect(text()).toContain('https://ned-mac.tail9c2f1.ts.net');
+      expect(text()).toContain(SELF_HOST_RELAY_ORIGIN);
 
       await act(async () => {
         failEnroll(new Error('The Relay did not accept that setup password.'));
@@ -517,8 +541,9 @@ describe('RemoteControlSection', () => {
   });
 
   it('renders a one-click refusal where the typed form renders its own', async () => {
+    const refusal = 'This machine’s enrollment offer is no longer valid. Enroll with the setup password instead.';
     const link = makeLink(async (cmd) => {
-      if (cmd === 'enrollOffer') throw new Error('relay origin is not allowed by this build');
+      if (cmd === 'enrollOffer') throw new Error(refusal);
       return OFFER_STATUS;
     });
     platform = { burrow: link };
@@ -526,13 +551,13 @@ describe('RemoteControlSection', () => {
     await openPersistent();
 
     await act(async () => buttonLabelled('Enroll')!.click());
-    expect(text()).toContain('relay origin is not allowed by this build');
+    expect(text()).toContain(refusal);
     // Still on the card, and the typed form is still one click away.
     expect(buttonLabelled('Enroll')).toBeTruthy();
     expect(disclosure()).toBeTruthy();
   });
 
-  it('unfolds the typed form for a Relay that is somewhere else', async () => {
+  it('unfolds the typed form behind the offer', async () => {
     platform = { burrow: makeLink(async () => OFFER_STATUS) };
     await render();
     await openPersistent();
@@ -545,12 +570,12 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Enroll')).toBeTruthy();
 
     // And refolding hides what was typed rather than discarding it.
-    await type('input[type="url"]', 'https://elsewhere.example');
+    await type('input[type="password"]', TEST_SETUP_PASSWORD);
     await act(async () => disclosure()!.click());
     expect(typedForm().hidden).toBe(true);
     await act(async () => disclosure()!.click());
-    expect(container.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe(
-      'https://elsewhere.example',
+    expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe(
+      TEST_SETUP_PASSWORD,
     );
   });
 
@@ -562,7 +587,7 @@ describe('RemoteControlSection', () => {
           finishOffer = resolve;
         });
       }
-      if (cmd === 'enroll') return { burrowId: 'wrong-racer', relayUrl: 'https://elsewhere' };
+      if (cmd === 'enroll') return { burrowId: 'wrong-racer' };
       return OFFER_STATUS;
     });
     platform = { burrow: link };
@@ -570,7 +595,6 @@ describe('RemoteControlSection', () => {
     await openPersistent();
 
     await act(async () => disclosure()!.click());
-    await type('input[type="url"]', 'https://elsewhere.example');
     await type('input[type="password"]', TEST_SETUP_PASSWORD);
 
     await act(async () => {
@@ -588,7 +612,7 @@ describe('RemoteControlSection', () => {
     expect(buttonLabelled('Connect')!.disabled).toBe(true);
 
     await act(async () => {
-      finishOffer({ burrowId: 'burrow-1', relayUrl: OFFER_STATUS.offer!.origin });
+      finishOffer({ burrowId: 'burrow-1' });
       await Promise.resolve();
     });
   });
@@ -644,6 +668,25 @@ describe('RemoteControlSection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('keeps an open setup code through a failed poll, and takes the next answer', async () => {
+    let status: BurrowConsoleStatus | Error = enrolled();
+    await openSetupPanel(() => {
+      if (status instanceof Error) throw status;
+      return status;
+    });
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    status = new Error('bridge timed out');
+    await act(async () => refreshBurrowStatus());
+    expect(text()).not.toContain('Could not reach');
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
+
+    status = enrolled({ pairedClients: 2 });
+    await act(async () => refreshBurrowStatus());
+    expect(text()).toContain('2 paired phones.');
+    expect(container.querySelector('svg[role="img"]')).toBeTruthy();
   });
 
   it('stops polling once nothing is watching', async () => {
@@ -1077,7 +1120,7 @@ describe('RemoteControlSection', () => {
       await settleQrChunk();
       expect(container.querySelector('svg[role="img"]')).toBeTruthy();
 
-      status = enrolled({ burrowId: 'burrow-2', relayUrl: 'https://other.tailnet.ts.net' });
+      status = enrolled({ burrowId: 'burrow-2', relayOrigin: 'https://other.tailnet.ts.net' });
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2000);
       });
@@ -1385,12 +1428,12 @@ describe('RemoteControlSection', () => {
   });
 
   it('re-reads the status when the service announces a change', async () => {
-    let status: unknown = NOT_ENROLLED;
+    let status: unknown = SELF_HOST_NOT_ENROLLED;
     const link = makeLink(async () => status);
     platform = { burrow: link };
     await render();
     await openPersistent();
-    expect(text()).toContain('Needs a Dormouse build that allows your Relay’s address');
+    expect(text()).toContain('This Dormouse was built for this Relay:');
 
     // Another window enrolled: the event carries only `{ enrolled }`, so the
     // section must re-read rather than patch a field.
@@ -1408,11 +1451,16 @@ describe('RemoteControlSection', () => {
  * (`docs/specs/one-time.md` -> "Service and hosts"): `oneTimeOpen` moves
  * through `opening` to `waiting` and answers the settled state, `oneTimeEnd`
  * ends a live connection `user-ended` and returns an ended one to `idle`, and
- * every change is an event that arrives before the command's answer.
+ * every change is an event that arrives before the command's answer. With a
+ * `policy`, `networkPolicy` answers it; without one, the panel reads no level.
  */
 function oneTimeService(
   initial: OneTimeState = { status: 'idle' },
-  { status = NOT_ENROLLED, openError }: { status?: BurrowConsoleStatus; openError?: string } = {},
+  {
+    status = NOT_ENROLLED,
+    openError,
+    policy,
+  }: { status?: BurrowConsoleStatus; openError?: string; policy?: NetworkPolicy } = {},
 ) {
   let state = initial;
   let links = 0;
@@ -1442,6 +1490,8 @@ function oneTimeService(
           service.set({ status: 'ended', reason: 'user-ended' });
         }
         return {};
+      case 'networkPolicy':
+        return policy ? networkPolicyResult(policy, 'hosted', []) : status;
       default:
         return status;
     }
@@ -1582,7 +1632,7 @@ describe('One-time connection', () => {
   });
 
   it('scrolls each new link into view once its code has drawn, and leaves the dialog alone otherwise', async () => {
-    // Settings' Remote control section sits at the bottom of a scrolling
+    // Settings' Remote control choices sit at the bottom of a scrolling
     // dialog, so the QR arrives below the fold (seen in QC, 2026-09-29).
     const reveals = watchReveals();
     try {
@@ -1681,19 +1731,63 @@ describe('One-time connection', () => {
   });
 
   it('reports every other ending in its own fixed sentence', async () => {
-    const reasons = Object.keys(ONE_TIME_ENDED_COPY) as Array<Exclude<OneTimeEndReason, 'user-ended'>>;
-    expect(new Set(Object.values(ONE_TIME_ENDED_COPY)).size).toBe(reasons.length);
+    const copy = oneTimeEndedCopy(hostOf(NOT_ENROLLED.relayOrigin), false);
+    const reasons = Object.keys(copy) as Array<Exclude<OneTimeEndReason, 'user-ended'>>;
+    expect(new Set(Object.values(copy)).size).toBe(reasons.length);
     for (const reason of reasons) {
       const service = oneTimeService({ status: 'ended', reason });
       await renderOneTime(service);
-      expect(oneTimeOutcome()?.textContent).toBe(ONE_TIME_ENDED_COPY[reason]);
+      expect(oneTimeOutcome()?.textContent).toBe(copy[reason]);
       expect(buttonLabelled('New link')).toBeTruthy();
       expect(buttonLabelled('Done')).toBeTruthy();
       await act(async () => root.unmount());
       root = createRoot(container);
     }
     // The failure this whole feature is most likely to hit names its fix.
-    expect(ONE_TIME_ENDED_COPY['direct-failed']).toContain('same Wi-Fi');
+    expect(copy['direct-failed']).toContain('allowed network');
+  });
+
+  it('names the rendezvous by this build’s relay host, a dev build’s included', async () => {
+    const status = { ...NOT_ENROLLED, relayOrigin: 'http://localhost:8787' };
+    for (const [reason, sentence] of [
+      ['unreachable', 'Couldn’t reach localhost:8787 to make a link.'],
+      ['rendezvous-lost', 'The connection to localhost:8787 dropped'],
+    ] as const) {
+      await renderOneTime(oneTimeService({ status: 'ended', reason }, { status }));
+      expect(oneTimeOutcome()?.textContent).toContain(sentence);
+      await act(async () => root.unmount());
+      root = createRoot(container);
+    }
+  });
+
+  it.each<[string, NetworkPolicy, string, RegExp]>([
+    ['Local networks', LOCAL_ON, 'Your phone must be on an allowed network.', /Make sure it is on an allowed network/],
+    // Anywhere has no allowed network to name, so its fix is another network.
+    ['Anywhere', ANYWHERE_ON, 'Your phone can be on any network.', /Try the phone on another network, such as cellular/],
+  ])(
+    'says where the phone may be under %s, and what to try when no direct path forms',
+    async (_, policy, where, directFailed) => {
+      const service = oneTimeService({ status: 'idle' }, { policy });
+      await renderOneTime(service);
+      expect(text()).toContain(`Open a link on your phone for a one-off connection. ${where} No account needed.`);
+
+      await act(async () => buttonLabelled('One-time connection')!.click());
+      await settleQrChunk();
+      expect(text()).toContain(`open the link below on it. ${where}`);
+
+      await act(async () => service.set({ status: 'ended', reason: 'direct-failed' }));
+      expect(oneTimeOutcome()?.textContent).toMatch(directFailed);
+    },
+  );
+
+  it('reads a policy it has not read as an allowed network', async () => {
+    // Which levels mean any network is `phoneOnAnyNetwork`'s; the panel can
+    // hold a state before the policy's answer lands.
+    const service = oneTimeService({ status: 'ended', reason: 'direct-failed' });
+    await renderOneTime(service);
+    expect(oneTimeOutcome()?.textContent).toBe(oneTimeEndedCopy(hostOf(NOT_ENROLLED.relayOrigin), false)['direct-failed']);
+    await act(async () => service.set({ status: 'idle' }));
+    expect(text()).toContain('Your phone must be on an allowed network.');
   });
 
   it('falls back for a reason this build has no sentence for, prototype names included', async () => {
@@ -1727,10 +1821,23 @@ describe('One-time connection', () => {
     expect(oneTimeCode()).toBeTruthy();
   });
 
-  it('disables the button on a build that cannot reach its rendezvous, saying why', async () => {
-    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'origin-not-allowed' }));
+  it('disables the button in a self-host build, saying why', async () => {
+    await renderOneTime(
+      oneTimeService({ status: 'unavailable', reason: 'self-host' }, { status: SELF_HOST_NOT_ENROLLED }),
+    );
     expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
-    expect(text()).toContain('it isn’t allowed to reach hosted.dormouse.sh');
+    // Its own origin is its Relay; links are made at the stock build's.
+    expect(text()).toContain(
+      `Not available in a self-host build: one-time links are made at ${hostOf(DEFAULT_RELAY_ORIGIN)}, which`,
+    );
+    expect(text()).not.toContain('Open a link on your phone');
+  });
+
+  it('renders a reason this build does not know with the fallback', async () => {
+    // An older VS Code broker in another window still says `origin-not-allowed`.
+    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'origin-not-allowed' } as never));
+    expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
+    expect(text()).toContain('Not available in this build.');
     expect(text()).not.toContain('Open a link on your phone');
   });
 

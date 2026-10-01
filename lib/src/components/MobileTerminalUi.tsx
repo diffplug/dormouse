@@ -44,7 +44,7 @@ import { TouchUiContext } from './touch-ui-context';
 import { AlertRingInset, alertRingRow, useAlertRingBurst } from './alert-ring';
 import type { AlertEpisode } from '../lib/alert-episode';
 import { getTerminalInstance, type SessionStatus } from '../lib/terminal-registry';
-import { EDGE_SCROLL_LINE_PX, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobileTerminal } from '../lib/mobile-terminal-scroll';
+import { EdgeScrollMotion, isEdgeScrollOrigin, isMobileScrollWheel, scrollMobileTerminal } from '../lib/mobile-terminal-scroll';
 import { acknowledgeSession } from '../lib/session-activity-store';
 import type { MouseTrackingMode, OverrideState } from '../lib/mouse-selection';
 import { TERMINAL_TAP_EVENT, type TerminalTapDetail } from '../lib/terminal-mouse-router';
@@ -534,7 +534,8 @@ export function MobileTerminalUi({
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const composingRef = useRef(false);
-  const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; y: number; remainder: number } | null>(null);
+  const edgeScrollRef = useRef<{ pointerId: number; sessionId: string; motion: EdgeScrollMotion } | null>(null);
+  const edgeMomentumFrameRef = useRef<number | null>(null);
   const gestureStateRef = useRef<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const completedGesturePointerIdRef = useRef<number | null>(null);
   const gestureCompletionTimerRef = useRef<number | null>(null);
@@ -547,6 +548,23 @@ export function MobileTerminalUi({
   const [gestureState, setGestureState] = useState<MobileGestureTrackingState>(MOBILE_GESTURE_IDLE_STATE);
   const [pendingGestureConfirmation, setPendingGestureConfirmation] = useState<MobileGestureConfirmationAction | null>(null);
   const [inputValue, setInputValue] = useState('');
+
+  const stopEdgeScroll = useCallback(() => {
+    edgeScrollRef.current = null;
+    if (edgeMomentumFrameRef.current !== null) {
+      window.cancelAnimationFrame(edgeMomentumFrameRef.current);
+      edgeMomentumFrameRef.current = null;
+    }
+  }, []);
+
+  const scrollEdgeLines = useCallback((sessionId: string, lines: number, x: number, y: number): boolean => {
+    const terminal = sessionId === activeSessionId ? getTerminalInstance(sessionId) : undefined;
+    if (!terminal) return false;
+    if (!lines) return true;
+    const scrolling = scrollMobileTerminal(terminal, lines, x, y);
+    onGestureScroll?.(lines);
+    return scrolling;
+  }, [activeSessionId, onGestureScroll]);
 
   const sendInput = useCallback((data: string) => {
     if (!interactive || data.length === 0) return;
@@ -735,17 +753,25 @@ export function MobileTerminalUi({
     return () => observer.disconnect();
   }, [configurePaneTextInputs, terminal]);
 
+  // Also cancels a coast on unmount, rather than keeping an old Session alive
+  // through the animation callback after switching away from it.
+  useEffect(() => stopEdgeScroll, [activeSessionId, interactive, touchMode, stopEdgeScroll]);
+
   useEffect(() => {
-    if (edgeScrollRef.current?.sessionId !== activeSessionId) edgeScrollRef.current = null;
-  }, [activeSessionId]);
+    const onVisibilityChange = () => {
+      if (document.hidden) stopEdgeScroll();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, [stopEdgeScroll]);
 
   useEffect(() => {
     if (touchMode === 'gestures' && interactive) return;
-    edgeScrollRef.current = null;
+    stopEdgeScroll();
     clearGestureCompletionTimer();
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
     setPendingGestureConfirmation(null);
-  }, [clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
+  }, [clearGestureCompletionTimer, commitGestureState, interactive, touchMode, stopEdgeScroll]);
 
   useEffect(() => clearGestureCompletionTimer, [clearGestureCompletionTimer]);
 
@@ -767,6 +793,8 @@ export function MobileTerminalUi({
   }, []);
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    // A second finger may stop a coast, but must not steal a live edge drag.
+    if (edgeMomentumFrameRef.current !== null) stopEdgeScroll();
     if (isPortaledTarget(event)) {
       pendingTapRef.current = null;
       return;
@@ -802,12 +830,14 @@ export function MobileTerminalUi({
     const rect = event.currentTarget.getBoundingClientRect();
     // The starting point owns the whole drag, even if it later leaves the edge.
     if (sessionId && isEdgeScrollOrigin(origin.x, rect.width)) {
-      edgeScrollRef.current = { pointerId: event.pointerId, sessionId, y: event.clientY, remainder: 0 };
+      edgeScrollRef.current = {
+        pointerId: event.pointerId, sessionId, motion: new EdgeScrollMotion(event.clientY, event.timeStamp),
+      };
       commitGestureState(MOBILE_GESTURE_IDLE_STATE);
       return;
     }
     commitGestureState(beginMobileGesture(event.pointerId, origin, displayOriginAwayFromThumb(origin, rect)));
-  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
+  }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode, stopEdgeScroll]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;
@@ -825,15 +855,9 @@ export function MobileTerminalUi({
     if (scroll?.pointerId === event.pointerId) {
       event.preventDefault();
       event.stopPropagation();
-      scroll.remainder += scroll.y - event.clientY;
-      scroll.y = event.clientY;
-      // Natural scrolling: content follows the finger.
-      const lines = Math.trunc(scroll.remainder / EDGE_SCROLL_LINE_PX);
-      scroll.remainder -= lines * EDGE_SCROLL_LINE_PX;
-      const terminal = lines && scroll.sessionId === activeSessionId ? getTerminalInstance(scroll.sessionId) : undefined;
-      if (terminal) {
-        scrollMobileTerminal(terminal, lines, event.clientX, event.clientY);
-        onGestureScroll?.(lines);
+      const samples = event.nativeEvent.getCoalescedEvents?.() ?? [];
+      for (const sample of samples.length ? samples : [event]) {
+        scrollEdgeLines(scroll.sessionId, scroll.motion.move(sample.clientY, sample.timeStamp), event.clientX, event.clientY);
       }
       return;
     }
@@ -852,16 +876,31 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(nextState);
-  }, [activeSessionId, commitGestureState, executeGestureAction, onGestureScroll, scheduleGestureCompletionClear, touchMode]);
+  }, [commitGestureState, executeGestureAction, scrollEdgeLines, scheduleGestureCompletionClear, touchMode]);
 
   const endEdgeScroll = useCallback((event: PointerEvent<HTMLDivElement>): boolean => {
-    if (edgeScrollRef.current?.pointerId !== event.pointerId) return false;
+    const scroll = edgeScrollRef.current;
+    if (scroll?.pointerId !== event.pointerId) return false;
     event.preventDefault();
     event.stopPropagation();
     edgeScrollRef.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.type === 'pointerup') {
+      scrollEdgeLines(scroll.sessionId, scroll.motion.move(event.clientY, event.timeStamp), event.clientX, event.clientY);
+      // Mouse drags still work in desktop previews, but do not fling on release.
+      if (event.pointerType !== 'mouse' && scroll.motion.release(event.timeStamp)) {
+        const { clientX, clientY } = event;
+        const coast = (time: number) => {
+          edgeMomentumFrameRef.current = null;
+          const lines = scroll.motion.step(time);
+          if (lines === null || !scrollEdgeLines(scroll.sessionId, lines, clientX, clientY)) return;
+          edgeMomentumFrameRef.current = window.requestAnimationFrame(coast);
+        };
+        edgeMomentumFrameRef.current = window.requestAnimationFrame(coast);
+      }
+    }
     return true;
-  }, []);
+  }, [scrollEdgeLines]);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
     const tap = pendingTapRef.current;

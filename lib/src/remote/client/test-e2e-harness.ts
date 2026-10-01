@@ -296,7 +296,7 @@ export async function makeE2eHarness(
     enrollment,
     reconnect: false,
     createWebSocket: () => burrowSocket,
-    ...(options.burrowDirect ? { createDirectPeer: options.burrowDirect } : {}),
+    ...(options.burrowDirect ? { directPeering: { createPeer: options.burrowDirect } } : {}),
     loadAcl: options.loadAcl ?? (() => []),
     saveAcl: (_burrowId, records) => {
       savedAcl = [...records];

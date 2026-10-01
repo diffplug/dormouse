@@ -1,6 +1,6 @@
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import { BROWSER_REQUEST_TIMEOUT_MS, type BrowserRequest, type BrowserResult } from './browser-automation';
-import { recordToolEvents } from '../tool-events';
+import { applyLiveToolEvents } from '../tool-events';
 import { offerProgramCopy } from '../mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../terminal-context-types';
 import type { IframeProxyResult, OpenPort, PlatformAdapter, PtyDataDetail, PtyInfo, BurrowLink, SpawnPtyOptions, ToolControlResult, ToolHostRequest, WritePtyOptions } from './types';
@@ -38,6 +38,9 @@ export class VSCodeAdapter implements PlatformAdapter {
   // Same for the shell: VS Code's native `dormouse.selectShell` QuickPick owns
   // shell selection there, so the Settings dialog hides its Shell row.
   readonly hostOwnsShells = true;
+  // And updates: the Marketplace installs them, so Settings → Network shows
+  // that instead of an update check.
+  readonly hostOwnsUpdates = true;
   private vscode: ReturnType<typeof acquireVsCodeApi>;
   private hostState: unknown = (globalThis as typeof globalThis & { __DORMOUSE_HOST_STATE__?: unknown }).__DORMOUSE_HOST_STATE__ ?? null;
   // Captured once, at construction, from the global the extension host injects
@@ -121,7 +124,7 @@ export class VSCodeAdapter implements PlatformAdapter {
           handler({ id: msg.id, data });
         }
       } else if (msg.type === 'terminal:toolEvents') {
-        recordToolEvents(msg.id, msg.events ?? []);
+        applyLiveToolEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:semanticEvents') {
         applyTerminalSemanticEvents(msg.id, msg.events ?? []);
       } else if (msg.type === 'terminal:clipboardOffer') {

@@ -125,16 +125,27 @@ mode**, locking the drag's owner and Session at pointerdown until release or
 cancel. **Must accumulate vertical movement at 18 CSS pixels per line**; content
 follows the finger, with no radial-menu input or native-keyboard focus.
 
+**Must coast after a touch or pen flick**, retaining fractional-line travel and
+estimating release velocity from the last 100 ms of movement in its current
+direction. **Must include release-time pauses in that estimate and suppress
+momentum after an 80 ms hold, a stationary press, a mouse drag, or pointer
+cancellation.** **Must decay velocity by 0.998 per millisecond**, integrate
+elapsed frame time, cap launch speed at 3 CSS pixels/ms, and stop below
+0.05 CSS pixels/ms (rationale).
+
 **Must send wheel events through xterm when the Session captures the mouse**,
 clamping the reported coordinates inside its terminal screen. **Must otherwise
 scroll the terminal buffer directly**, never synthesize alternate-screen arrow
-keys. **Must stop scrolling when interaction is disabled, the touch mode changes,
-or the active Session changes.**
+keys. **Must stop momentum at a buffer boundary or missing terminal, on a new
+pane press, when the document becomes hidden, or on unmount.** **Must stop
+scrolling when interaction is disabled, the touch mode changes, or the active
+Session changes.**
 
 Source of truth: `EDGE_SCROLL_WIDTH_PX`, `EDGE_SCROLL_LINE_PX`, and
-`scrollMobileTerminal` in `lib/src/lib/mobile-terminal-scroll.ts`;
+`EdgeScrollMotion` / `scrollMobileTerminal` in `lib/src/lib/mobile-terminal-scroll.ts`;
 `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`.
-Tests: `lib/src/components/MobileTerminalUi.test.tsx`.
+Tests: `lib/src/components/MobileTerminalUi.test.tsx`;
+`lib/src/lib/mobile-terminal-scroll.test.ts`.
 
 ## Gesture mode
 

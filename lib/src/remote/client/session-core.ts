@@ -404,7 +404,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    */
   #directEndpoint(current: () => EstablishedSession<R>, route: R): DirectEndpoint {
     return new DirectEndpoint('offerer', {
-      createPeer: this.#createDirectPeer,
+      // A Client holds no path policy: the Burrow checks the path.
+      peering: { createPeer: this.#createDirectPeer },
       sendSignal: (signal) => this.#sendDirectSignal(current(), signal),
       sendRelay: (ciphertext) => this.#sendFrame(route, 'transport', ciphertext),
       receive: (ciphertext) => this.#receiveOnSession(current(), ciphertext),
@@ -476,7 +477,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * hidden, so a phone in a pocket crosses that line on its own, and without
    * this check it comes back to a wall whose every request hangs forever with
    * no error and no way out but a reload
-   * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
+   * ([pocket-app.md](../../../../docs/specs/pocket-app.md)).
    *
    * The Burrow's deadline runs from the message it last decrypted, which is the
    * one this Client last sent, so the same constant answers the question on
@@ -493,7 +494,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * Keepalives run **only while the page is visible**, and returning to the
    * foreground sends one immediately — a tab hidden for less than the idle
    * timeout still has a session worth keeping
-   * ([pocket-app.md](../../../docs/specs/pocket-app.md)).
+   * ([pocket-app.md](../../../../docs/specs/pocket-app.md)).
    */
   #startKeepalives(): void {
     this.#stopKeepalives();

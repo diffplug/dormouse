@@ -1,6 +1,6 @@
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
-import { recordToolEvents } from '../../lib/src/lib/tool-events';
+import { applyLiveToolEvents } from '../../lib/src/lib/tool-events';
 import { offerProgramCopy } from '../../lib/src/lib/mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { invoke as rawInvoke } from "@tauri-apps/api/core";
@@ -23,6 +23,7 @@ import type {
   SpawnPtyOptions,
   WritePtyOptions,
 } from "dormouse-lib/lib/platform/types";
+import { managedVoicePortForBuild } from "./managed-voice-port";
 import {
   answerAskCommand,
   createBurrowLinkClient,
@@ -154,7 +155,7 @@ export class TauriAdapter implements PlatformAdapter {
       // The Tool half of the sidecar's parse; its reports stayed with the
       // sidecar's AlertManager.
       listenToWindow<{ id: string; events: TerminalProtocolEvent[] }>("terminal:toolEvents", (event) => {
-        recordToolEvents(event.payload.id, event.payload.events);
+        applyLiveToolEvents(event.payload.id, event.payload.events);
       }),
 
       listenToWindow<{ id: string; events: TerminalSemanticEvent[] }>("terminal:semanticEvents", (event) => {
@@ -253,7 +254,10 @@ export class TauriAdapter implements PlatformAdapter {
       // ownership, its awaits' results, and the two stores' snapshots.
       ...ALERT_EVENTS.map((name) =>
         listenToWindow<unknown>(name, (event) => void this.alerts.onEvent(name, event.payload))),
+
+      listenToWindow<unknown>("voice:status", (event) => this.managedVoice?.receiveStatus(event.payload)),
     ])));
+    this.managedVoice?.refresh();
     // This realm is new, whether the window just opened or reloaded: the
     // engagement and awaits of the one before it are gone (same label).
     this.alerts.hello();
@@ -630,5 +634,7 @@ export class TauriAdapter implements PlatformAdapter {
   getWindowState(): PersistedWindow | null {
     return this.windowSlot.read();
   }
+
+  readonly managedVoice = managedVoicePortForBuild(rawInvoke);
 
 }
