@@ -23,6 +23,12 @@ export function workspaceIsCollapsed(id: string): boolean {
   return controllers.get(id)?.collapsed() ?? false;
 }
 
+/** True while the Workspace's Wall is presented away from its grid box:
+ *  travelling to or from its tab, or collapsed onto it. */
+export function workspaceInTravel(id: string): boolean {
+  return controllers.get(id)?.inTravel() ?? false;
+}
+
 /** Presentation only: the grid box stays full-size, so terminals never fit to
  * intermediate dimensions. The ring lives outside this transformed subtree. */
 export function createWorkspaceMotion(element: HTMLElement, id: string, onVisibilityChange: (visible: boolean) => void = () => {}) {
@@ -139,6 +145,7 @@ export function createWorkspaceMotion(element: HTMLElement, id: string, onVisibi
       return animate(0);
     },
     collapsed: () => departing && progress === 0,
+    inTravel: () => progress !== 1,
     fade() {
       if (!visible || departing) { motion.hide(); return; }
       // Keep half its opacity until the incoming Wall fully covers it.

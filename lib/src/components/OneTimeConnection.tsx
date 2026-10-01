@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ModalReviewBlock, modalActionButton } from './design';
+import { COPY_OUTCOME_LABEL, ModalReviewBlock, modalActionButton } from './design';
 import {
   FIELD_HINT,
   FIELD_LABEL,
   hostOf,
   oneTimeControlSentence,
   own,
+  pathRefusalSentence,
   revealPanel,
   useNetworkPolicy,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import { writeTextToClipboard } from '../lib/clipboard';
+import type { CopyOutcome } from '../lib/mouse-selection';
 import type {
   OneTimeEndReason,
   OneTimeState,
@@ -47,7 +49,10 @@ const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
  * build does not. `host` is this build's relay host, which the rendezvous runs on.
  * `anyNetwork` ({@link phoneOnAnyNetwork}) has no allowed network to name, so
  * `direct-failed` suggests another network instead; `network-not-allowed` keeps
- * its sentence, since no path is held there to end a connection.
+ * its sentence, since no path is held there to end a connection. A
+ * `network-not-allowed` ending that carries its refusal reads
+ * `pathRefusalSentence` instead, naming the address; this is the fallback for
+ * one that does not.
  *
  * `user-ended` has no sentence: this machine ended it (End, Cancel), so there is
  * nothing to report, and the panel goes straight back to its button.
@@ -268,7 +273,9 @@ function OneTimePanel({
           aria-label={ONE_TIME_OUTCOME_LABEL}
           className="mt-1 text-sm leading-relaxed text-foreground"
         >
-          {own<string>(oneTimeEndedCopy(relayHost, anyNetwork), state.reason) ?? ENDED_FALLBACK}
+          {state.reason === 'network-not-allowed' && state.refusal
+            ? pathRefusalSentence(state.refusal, 'one-time')
+            : (own<string>(oneTimeEndedCopy(relayHost, anyNetwork), state.reason) ?? ENDED_FALLBACK)}
         </div>
       );
       actions = (
@@ -327,21 +334,21 @@ function WaitingLink({
 }
 
 function CopyLinkButton({ url }: { url: string }) {
-  const [copied, setCopied] = useState<'copied' | 'failed' | null>(null);
+  const [outcome, setOutcome] = useState<CopyOutcome | null>(null);
 
   useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS);
+    if (!outcome) return;
+    const timer = setTimeout(() => setOutcome(null), COPY_FEEDBACK_MS);
     return () => clearTimeout(timer);
-  }, [copied]);
+  }, [outcome]);
 
   return (
     <button
       type="button"
       className={modalActionButton()}
-      onClick={() => void writeTextToClipboard(url).then((ok) => setCopied(ok ? 'copied' : 'failed'))}
+      onClick={() => void writeTextToClipboard(url).then((ok) => setOutcome(ok ? 'copied' : 'failed'))}
     >
-      {copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Couldn’t copy' : 'Copy link'}
+      {outcome ? COPY_OUTCOME_LABEL[outcome] : 'Copy link'}
     </button>
   );
 }

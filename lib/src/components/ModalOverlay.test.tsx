@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MODAL_LAYERS, ModalFrame, SELECTION_RING_Z_INDEX } from './design';
+import { COPY_EDITOR_Z_INDEX, MODAL_LAYERS, ModalFrame, SELECTION_RING_Z_INDEX } from './design';
 import { ensureResizeObserver } from './wall/wall-test-utils';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -29,6 +29,11 @@ describe('ModalOverlay', () => {
   // the ring; insertion order must not be what does it.
   it('stacks every modal layer above the selection ring', () => {
     expect(Math.min(...Object.values(MODAL_LAYERS))).toBeGreaterThan(SELECTION_RING_Z_INDEX);
+  });
+
+  it('stacks the copy editor between the ring and every modal layer', () => {
+    expect(COPY_EDITOR_Z_INDEX).toBeGreaterThan(SELECTION_RING_Z_INDEX);
+    expect(Math.min(...Object.values(MODAL_LAYERS))).toBeGreaterThan(COPY_EDITOR_Z_INDEX);
   });
 
   it('renders into document.body, outside the stacking context that rendered it', () => {

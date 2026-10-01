@@ -6,6 +6,7 @@ import type { RingFrame } from '../../lib/rect-tween';
 import type { SetTerminalUserTitleResult } from '../../lib/terminal-registry';
 import type { WallMode } from './wall-types';
 import type { RenderMode } from './agent-browser-screen';
+import type { LathWallEngine } from './lath-wall-engine';
 
 export interface PaneElementsState {
   elements: Map<string, HTMLElement>;
@@ -20,6 +21,12 @@ export const PassthroughPaneIdContext = createContext<string | null>(null);
 
 /** The last visible ring frame, carried between active Walls in one Window. */
 export const RingHandoffContext = createContext<RefObject<RingFrame | null> | null>(null);
+
+/** The Lath animator's per-frame signal (`LathWallEngine.subscribeFrames`),
+ *  provided by LathHost. Panes moving under Lath send no render tick, so chrome
+ *  portaled out of a pane re-measures it here. Null outside a LathHost: mobile,
+ *  and stories without a Wall. */
+export const LayoutFramesContext = createContext<LathWallEngine['subscribeFrames'] | null>(null);
 
 /** Terminal fitting waits for committed, fully painted geometry. Standalone
  *  terminal mounts have no layout coordinator and use their resize observer. */

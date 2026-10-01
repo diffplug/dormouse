@@ -92,6 +92,8 @@ function consoleHook() {
   return (globalThis as {
     dormouseBurrow?: {
       enroll: (password: string, label: string) => Promise<unknown>;
+      beginHostedEnrollment: (label: string) => Promise<unknown>;
+      cancelHostedEnrollment: () => Promise<unknown>;
       status: () => unknown;
       reconnect: () => unknown;
       clearEnrollment: () => unknown;
@@ -119,10 +121,21 @@ describe('burrow bridge mode', () => {
     expect(await consoleHook().status()).toEqual({ enrolled: true });
     await consoleHook().reconnect();
     await consoleHook().clearEnrollment();
+    await consoleHook().beginHostedEnrollment('Laptop');
+    await consoleHook().cancelHostedEnrollment();
 
     expect(link.commands.map((c) => c.cmd)).toEqual(
-      expect.arrayContaining(['enroll', 'status', 'reconnect', 'clearEnrollment']),
+      expect.arrayContaining([
+        'enroll',
+        'status',
+        'reconnect',
+        'clearEnrollment',
+        'beginHostedEnrollment',
+        'cancelHostedEnrollment',
+      ]),
     );
+    // Never `replace`: the hook answers a code already waiting, as Enroll does.
+    expect(link.commands.find((c) => c.cmd === 'beginHostedEnrollment')?.params).toEqual({ label: 'Laptop' });
     // No Relay argument: the service enrolls only at the build's baked origin.
     expect(link.commands.find((c) => c.cmd === 'enroll')?.params).toEqual({
       password: 'password',

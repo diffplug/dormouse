@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DIRECT_BUFFER_HIGH,
+  DIRECT_ONLY_DEADLINE_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   chunkAppMessage,
   type DirectPath,
@@ -21,7 +22,7 @@ import {
   utf8Encode,
 } from 'remote-lib-common';
 
-import { EstablishedE2eSession, SESSION_END_FLUSH_MS } from './established-session';
+import { EstablishedE2eSession, SESSION_END_FLUSH_MS, type DirectOnlyBreak } from './established-session';
 import type { DirectPeerFactory } from '../direct/direct-peer';
 import { FakeDirectNetwork, collect, flushMicrotasks, type FakePeer } from '../direct/test-fake-peer';
 import { FORGED_CT, noiseSessionPair, openReceipt } from '../test-e2e-client';
@@ -45,7 +46,7 @@ async function establish(options: Options = {}) {
   const relayed: Uint8Array[] = [];
   const fatals: string[] = [];
   const transports: Array<{ path: DirectPath; cause: DirectRelayCause | null }> = [];
-  let relayedApps = 0;
+  const breaks: DirectOnlyBreak[] = [];
   const api = { disposals: 0, send: (_payload: unknown): void => {} };
   const timers = fakeTimers();
   const e2e: EstablishedE2eSession = new EstablishedE2eSession({
@@ -67,7 +68,8 @@ async function establish(options: Options = {}) {
       if (disposeOnFatal) e2e.dispose();
     },
     onTransportChanged: (path, cause) => void transports.push({ path, cause }),
-    ...(directOnly ? { onRelayedApp: () => void (relayedApps += 1) } : {}),
+    directOnly,
+    onDirectOnlyBroken: (reason) => void breaks.push(reason),
     now: () => clock.now,
     setTimer: timers.setTimer,
   });
@@ -86,7 +88,7 @@ async function establish(options: Options = {}) {
     relayed,
     fatals,
     transports,
-    relayedApps: () => relayedApps,
+    breaks,
     api,
     timers,
     sendFromClient,
@@ -216,20 +218,56 @@ describe('EstablishedE2eSession', () => {
     expect(transports).toEqual([{ path: 'relay', cause: 'unsupported' }]);
   });
 
-  it('hands relayed application data to the owner, never the handler, where the direct path is required', async () => {
-    const { e2e, client, handled, relayed, fatals, relayedApps, sendFromClient } = await establish({
+  it('reports relayed application data to the owner, never the handler, where the session is direct-only', async () => {
+    const { e2e, client, handled, fatals, breaks, sendFromClient } = await establish({
       directOnly: true,
+      disposeOnFatal: false,
     });
     sendFromClient({ requestId: '1', method: 'hello' });
     expect(handled).toEqual([]);
-    expect(relayedApps()).toBe(1);
+    expect(breaks).toEqual(['relayed-app']);
     // Everything that is not application data still rides the relay: a
-    // keepalive, and the direct path's own signals.
+    // keepalive, unreported.
     e2e.onRelayFrame(toBase64Url(client.sendKeepalive()));
-    e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
-    expect(openReceipt(client, relayed[0]!)).toEqual({ v: 1, t: 'direct-decline' });
-    expect(relayedApps()).toBe(1);
+    expect(breaks).toEqual(['relayed-app']);
     expect(fatals).toEqual([]);
+  });
+
+  it('reports a given-up attempt on a direct-only session, after the decline has gone out', async () => {
+    const { e2e, client, relayed, breaks } = await establish({ directOnly: true });
+    e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
+    // The decline first, synchronously; the report a microtask behind it.
+    expect(openReceipt(client, relayed[0]!)).toEqual({ v: 1, t: 'direct-decline' });
+    expect(breaks).toEqual([]);
+    await flushMicrotasks();
+    expect(breaks).toEqual(['given-up']);
+  });
+
+  it('reports nothing about the direct path where the relay may carry the session', async () => {
+    const { e2e, client, handled, breaks, sendFromClient } = await establish();
+    expect(e2e.directDeadlineAt).toBeNull();
+    sendFromClient({ requestId: '1', method: 'hello' });
+    e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
+    await flushMicrotasks();
+    expect(handled).toEqual([{ requestId: '1', method: 'hello' }]);
+    expect(breaks).toEqual([]);
+  });
+
+  it('reports nothing once disposed, a given-up attempt still in flight included', async () => {
+    const { e2e, client, breaks } = await establish({ directOnly: true });
+    e2e.onRelayFrame(toBase64Url(client.sendControl({ v: 1, t: 'direct-offer', sdp: 'v=0\r\n' })));
+    e2e.dispose();
+    await flushMicrotasks();
+    expect(breaks).toEqual([]);
+  });
+
+  it('owns a direct-only deadline that is met for good once both directions switch', async () => {
+    const network = new FakeDirectNetwork({ opening: 'manual' });
+    const run = await establish({ directOnly: true, createDirectPeer: () => network.createAnswerer() });
+    expect(run.e2e.directDeadlineAt).toBe(1_000 + DIRECT_ONLY_DEADLINE_MS);
+    await switchDirect(run, network);
+    expect(run.e2e.directDeadlineAt).toBeNull();
+    expect(run.breaks).toEqual([]);
   });
 
   it('disposes the direct path, then the handler, and ignores the relay afterwards', async () => {
@@ -320,6 +358,19 @@ describe('EstablishedE2eSession', () => {
     run.timers.fireAt(SESSION_END_FLUSH_MS);
     expect(peers[0]!.closed).toBe(true);
     expect(channel.sent).toEqual([]);
+  });
+
+  it('ends without flushing when its owner is stopping: the channel closes at once, no timer armed', async () => {
+    const network = new FakeDirectNetwork({ opening: 'manual' });
+    const peers: FakePeer[] = [];
+    const run = await establish({ createDirectPeer: collect(peers, () => network.createAnswerer()) });
+    const channel = await switchDirect(run, network);
+    channel.bufferedAmount = DIRECT_BUFFER_HIGH;
+
+    run.e2e.end({ flush: false });
+    expect(peers[0]!.closed).toBe(true);
+    expect(run.timers.live.filter((timer) => timer.delayMs === SESSION_END_FLUSH_MS)).toEqual([]);
+    expect(run.api.disposals).toBe(1);
   });
 
   it('ends a poisoned session with no goodbye, and still disposes it', async () => {

@@ -1,0 +1,119 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dormouse-relay",
+  "main": "server/relay-worker.ts",
+  "compatibility_date": "2026-09-08",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "relay.dormouse.sh",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./dist/relay",
+    "binding": "ASSETS",
+    "not_found_handling": "none",
+    "run_worker_first": true
+  },
+  "vars": {
+    "APP_ORIGIN": "https://relay.dormouse.sh",
+    "ACCOUNT_ORIGIN": "https://hosted.dormouse.sh"
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "5bfbeba081b4456f9c3cf36edbb20c1d"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "ONE_TIME_ROOM",
+        "class_name": "OneTimeRoom"
+      },
+      {
+        "name": "RELAY_ROOM",
+        "class_name": "RelayRoom"
+      }
+    ]
+  },
+  // Append-only: a deployed tag is never edited.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "OneTimeRoom"
+      ]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": [
+        "RelayRoom"
+      ]
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "ONE_TIME_MINT_LIMIT",
+      "namespace_id": "1",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "ONE_TIME_JOIN_LIMIT",
+      "namespace_id": "2",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_SIGNIN_LIMIT",
+      "namespace_id": "3",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_SETUP_LIMIT",
+      "namespace_id": "4",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_ENROLL_BEGIN_LIMIT",
+      "namespace_id": "5",
+      "simple": {
+        "limit": 10,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_ENROLL_POLL_LIMIT",
+      "namespace_id": "6",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
+  "triggers": {
+    // The sweep of every Relay table's expired rows (`sweepExpired`).
+    "crons": [
+      "0 * * * *"
+    ]
+  },
+  "observability": {
+    "enabled": false
+  }
+}

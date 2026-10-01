@@ -51,6 +51,15 @@ test('SPA fallback returns index.html for an unknown non-file path', async () =>
   assert.match(await res.text(), /pocket-root/);
 });
 
+test('the deployment file Hosted stages is the shell here, so Pocket reads self-host', async () => {
+  // `lib/src/remote/pocket-app/deployment.ts`: only Hosted's staging writes
+  // `/deployment.json`; a self-host Relay answers it as any unknown path.
+  const { app: hono } = app({ pocketDir: await makePocketDir() });
+  const res = await hono.request('/deployment.json');
+  assert.match(res.headers.get('content-type') ?? '', /text\/html/);
+  assert.match(await res.text(), /pocket-root/);
+});
+
 test('API routes still win over static serving', async () => {
   const { app: hono } = app({ pocketDir: await makePocketDir() });
   // No bearer token → the session-gated API route answers, not the static app.

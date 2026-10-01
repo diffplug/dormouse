@@ -72,8 +72,8 @@ export interface FakeDirectNetworkOptions {
 /** The pair a run selects unless it says otherwise: both ends on one LAN. */
 export const FAKE_LAN_PAIR: DirectSelectedPair = { local: '192.168.1.2', remote: '192.168.1.3' };
 
-/** A pair off that LAN at both ends, which {@link lanOnlyPolicy} refuses. */
-export const OFF_LAN_PAIR: DirectSelectedPair = { local: '10.0.0.2', remote: '10.0.0.3' };
+/** A pair whose phone end is off that LAN, which {@link lanOnlyPolicy} refuses as the remote end's. */
+export const OFF_LAN_PAIR: DirectSelectedPair = { local: '192.168.1.2', remote: '10.0.0.3' };
 
 /** The one host candidate each end describes itself with: its half of {@link FAKE_LAN_PAIR}. */
 const HOST_CANDIDATE: Record<FakePeerRole, string> = {
@@ -117,11 +117,12 @@ function candidateLine(address: string, type: FakeCandidateType): string {
 /**
  * A path policy allowing only {@link FAKE_LAN_PAIR}'s LAN, by string prefix —
  * the address math is the host's, and `lib/src/host/remote/local-networks.test.ts`
- * pins it — recording every pair it is asked about. It binds nothing, and
- * passes both descriptions through as given unless `over` says otherwise.
+ * pins it — recording every pair it is asked about. It binds nothing, passes
+ * both descriptions through as given, and reads no address out of an offer,
+ * unless `over` says otherwise.
  */
 export function lanOnlyPolicy(
-  over: Partial<Pick<DirectPathPolicy, 'describe' | 'acceptRemote'>> = {},
+  over: Partial<Pick<DirectPathPolicy, 'describe' | 'acceptRemote' | 'reportedAddress'>> = {},
 ): DirectPathPolicy & { readonly asked: Array<DirectSelectedPair | null> } {
   const asked: Array<DirectSelectedPair | null> = [];
   const onLan = (address: string | null) => address?.startsWith('192.168.1.') ?? false;
@@ -130,10 +131,14 @@ export function lanOnlyPolicy(
     bindAddress: () => null,
     describe: (sdp) => sdp,
     acceptRemote: (sdp) => sdp,
+    reportedAddress: () => null,
     ...over,
+    // This end first, as the host's policy reads it.
     refusal: (pair) => {
       asked.push(pair);
-      return pair && onLan(pair.local) && onLan(pair.remote) ? null : 'off the LAN';
+      if (!pair) return { reason: 'off the LAN', end: null };
+      if (!onLan(pair.local)) return { reason: 'off the LAN', end: 'local' };
+      return onLan(pair.remote) ? null : { reason: 'off the LAN', end: 'remote' };
     },
   };
 }

@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { API_ROUTES } from 'remote-lib-common';
+
 import { createApp } from '../dist/app.js';
 import { PASSWORD, freshApp } from './helpers.mjs';
 
@@ -59,4 +61,16 @@ test('GET /api/hello returns the fixed health response', async () => {
   const res = await app.request('/api/hello');
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { message: 'Hello, world!' });
+});
+
+test("Hosted's device-code enrollment routes are not this Relay's", async () => {
+  const { app } = await freshApp();
+  for (const path of [API_ROUTES.burrowEnrollBegin, API_ROUTES.burrowEnrollPoll]) {
+    const res = await app.request(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ origin: 'http://localhost:3000' }),
+    });
+    assert.equal(res.status, 404, path);
+  }
 });

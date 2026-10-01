@@ -6,6 +6,8 @@ import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 import { isComposingKey } from '../lib/dom';
+import type { CopyOutcome } from '../lib/mouse-selection';
+import { rectsEqual } from '../lib/rect-tween';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -42,6 +44,16 @@ export const DOOR_TAB_CLASS = clsx(
 /** A Workspace name the app derived rather than one a user set
  *  (`docs/specs/layout.md` → "Workspace names"). */
 export const AUTO_NAME_CLASS = 'italic';
+
+/** What the copy editor's expanded scope adds beyond the drag: its text in the
+ *  preview, and its dashed outline over the terminal (an SVG path). */
+export const COPY_EXPANDED_TEXT_CLASS = 'rounded-[2px] bg-success/15 underline decoration-success decoration-dotted underline-offset-2';
+export const COPY_EXPANDED_PATH_CLASS = 'fill-success/15 stroke-success';
+/** A copied selection's fill while its copy confirms, the copy-confirm accent
+ *  tint (an SVG path; `docs/specs/mouse-and-clipboard.md` §4.5). */
+export const COPY_FLASH_PATH_CLASS = 'fill-header-active-bg/25';
+/** How a Copy button says what its copy did. */
+export const COPY_OUTCOME_LABEL: Record<CopyOutcome, string> = { copied: 'Copied', failed: 'Couldn’t copy' };
 
 /** A preview slot's label in its Pane header and Door, italic as an editor's
  *  preview tab is (`docs/specs/layout.md` → "Pane header"). */
@@ -113,14 +125,9 @@ export const DRAG_THRESHOLD_PX = 5;
 export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
 export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
 
-// Focus-ring motion. The selection ring's travel between panes/doors, the pane
-// header's active/inactive palette crossfade, and the ring's unfocus-saturate
-// fade all run on this single duration so they resolve as one gesture. Half the
-// Lath layout motion (LATH_MOTION_MS = 440) — the ring is a light overlay chasing
-// geometry the wall has already committed, so it settles quicker. The ring travel
-// itself is a JS tween on a pointer-events-none overlay (WorkspaceSelectionOverlay
-// + rect-tween.ts), the same per-frame carve-out the Lath animator holds against
-// DESIGN.md's "don't animate layout properties" rule.
+// Focus-ring motion: the one duration of the ring's travel, the pane header's
+// palette crossfade, the ring's unfocus-saturate fade, and the copy editor's
+// travel. DESIGN.md -> "Focus Ring Travel & Header Crossfade" owns why.
 export const FOCUS_MOTION_MS = 220;
 
 // The pane-header palette crossfade, as a complete Tailwind literal so the
@@ -207,6 +214,10 @@ export const popupButton = tv({
       true: 'animate-copy-flash bg-header-active-bg/25 text-header-active-bg',
       false: 'hover:bg-foreground/10',
     },
+    /** The chosen option of a segmented row (the copy editor's scope and format). */
+    selected: {
+      true: 'bg-header-active-bg text-header-active-fg hover:bg-header-active-bg',
+    },
   },
   defaultVariants: { flashed: false },
 });
@@ -224,6 +235,10 @@ export interface ModalRect {
  *  `document.body`, where every modal layer must sit above it
  *  (docs/specs/layout.md → "Selection overlay"). */
 export const SELECTION_RING_Z_INDEX = 50;
+
+/** The copy editor's z-index, also on `document.body`
+ *  (docs/specs/mouse-and-clipboard.md §4.5). */
+export const COPY_EDITOR_Z_INDEX = 55;
 
 export const MODAL_LAYERS = {
   app: 60,
@@ -560,11 +575,7 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
     const update = () => {
       const next = element.getBoundingClientRect();
       setRect((previous) =>
-        previous
-        && previous.top === next.top
-        && previous.left === next.left
-        && previous.width === next.width
-        && previous.height === next.height
+        previous && rectsEqual(previous, next)
           ? previous
           : { top: next.top, left: next.left, width: next.width, height: next.height },
       );
@@ -581,6 +592,13 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
   }, [element]);
 
   return rect;
+}
+
+/** `node` rendered into `document.body`, so no Workspace's stacking context,
+ *  presentation transform, or clipping holds it; in place under the server
+ *  renderer, which has no portals. */
+export function portalToBody(node: ReactNode): ReactNode {
+  return typeof document === 'undefined' ? node : createPortal(node, document.body);
 }
 
 export function ModalOverlay({
@@ -620,10 +638,8 @@ export function ModalOverlay({
       {children}
     </div>
   );
-  // In `document.body`, so no Workspace's stacking context or presentation
-  // transform holds it under the selection ring (docs/specs/layout.md ->
-  // "Selection overlay"). The server renderer has no portals.
-  return typeof document === 'undefined' ? overlay : createPortal(overlay, document.body);
+  // Over the selection ring (docs/specs/layout.md -> "Selection overlay").
+  return portalToBody(overlay);
 }
 
 export type ModalSurfaceProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants;

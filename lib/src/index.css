@@ -107,7 +107,7 @@ body {
   .kill-letter-flash { animation-duration: 1ms; }
 }
 
-/* --- Copy-confirmation flash for the selection popup button --- */
+/* --- Confirmation flash for a popup button (the mouse override banner's) --- */
 
 @keyframes copy-flash {
   0%   { transform: scale(1);    }
@@ -120,6 +120,19 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .animate-copy-flash { animation: none; }
+}
+
+/* --- A copied selection's fill: in, a dip, and held until it clears --- */
+
+@keyframes copy-flash-fill {
+  0%   { opacity: 0;    }
+  30%  { opacity: 1;    }
+  60%  { opacity: 0.55; }
+  100% { opacity: 1;    }
+}
+/* Gated in JS by `motionIsInstant()`, which also covers `cfg.layout.animate`. */
+.animate-copy-flash-fill {
+  animation: copy-flash-fill 500ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 /* --- Shell selection feedback --- */

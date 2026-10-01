@@ -34,12 +34,21 @@ vi.mock('./QrCode', async (importOriginal) => {
 });
 
 import { ONE_TIME_OUTCOME_LABEL, oneTimeEndedCopy } from './OneTimeConnection';
-import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
-import { hostOf } from './remote-control-shared';
+import {
+  HOSTED_ENROLLMENT_CODE_LABEL,
+  HOSTED_ENROLLMENT_ENDED_COPY,
+  HOSTED_ENROLLMENT_REDEEMING_COPY,
+  NOT_ENTITLED_COPY,
+  PAIRING_OUTCOME_LABEL,
+  RemoteControlSection,
+  removedCopy,
+} from './RemoteControlSection';
+import { hostOf, pathRefusalSentence } from './remote-control-shared';
 import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import {
   isOneTimeState,
   type BurrowConsoleStatus,
+  type HostedEnrollmentState,
   type SetupQrResult,
 } from '../host/remote/service-protocol';
 import {
@@ -60,6 +69,7 @@ import { networkPolicyResult, type NetworkPolicy } from '../remote/network-polic
 import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getOneTimeSnapshot, subscribeToOneTime } from '../remote/burrow/one-time-store';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
+import { SETUP_BUTTON } from '../remote/setup-copy';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -86,6 +96,31 @@ function qr(over: Partial<SetupQrResult> = {}): SetupQrResult {
     expiresAt: NOW + 300_000,
     ...over,
   };
+}
+
+/** A Hosted enrollment waiting for approval, ten minutes out. */
+function hostedWaiting(over: { accountFull?: boolean } = {}): HostedEnrollmentState {
+  return {
+    status: 'waiting',
+    userCode: '23AB-YZ9K',
+    verificationUrl: 'https://hosted.dormouse.sh/enroll#23AB-YZ9K',
+    expiresAt: Date.now() + 10 * 60_000,
+    accountFull: over.accountFull ?? false,
+  };
+}
+
+/** The code a waiting Hosted enrollment shows, by its accessible name. */
+function codeShown(): string | null {
+  return container.querySelector(`[aria-label="${HOSTED_ENROLLMENT_CODE_LABEL}"]`)?.textContent ?? null;
+}
+
+/** The name-and-button form a Hosted build begins with, always mounted once unfolded. */
+function hostedForm(): HTMLFormElement {
+  const form = [...container.querySelectorAll('form')].find((candidate) =>
+    candidate.textContent?.includes('Name for this Burrow'),
+  );
+  if (!form) throw new Error('the Hosted enroll form is not mounted');
+  return form;
 }
 
 /** The shared fixture, keeping this file's own Relay/burrow values. */
@@ -286,23 +321,191 @@ describe('RemoteControlSection', () => {
     await openPersistent();
     expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('true');
     expect(persistentPanel().hidden).toBe(false);
-    // Its one Relay is Hosted's (docs/specs/relay.md → "Relay origin"): no form,
-    // no offer card, and the self-host path named as a build.
-    expect(container.querySelector('form')).toBeNull();
+    // Its one Relay is Hosted's (docs/specs/relay.md → "Relay origin"): no
+    // password form, no offer card, and the self-host path named as a build.
+    expect(container.querySelector('input[type="password"]')).toBeNull();
     expect(buttonLabelled('Connect')).toBeUndefined();
     expect(text()).toContain('A self-hosted Relay takes a Dormouse built for its address.');
     await act(async () => buttonLabelled('self-hosted Relay')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/self-host/');
   });
 
-  it('offers hosted.dormouse.sh as coming soon, linking the Hosted preview', async () => {
-    const openExternal = vi.fn();
-    platform = { burrow: makeLink(async () => NOT_ENROLLED), openExternal };
+  it('begins a Hosted enrollment under the name typed for this machine', async () => {
+    let status: BurrowConsoleStatus = NOT_ENROLLED;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'beginHostedEnrollment') {
+        status = { ...NOT_ENROLLED, hostedEnrollment: hostedWaiting() };
+        return status.hostedEnrollment;
+      }
+      return status;
+    });
+    platform = { burrow: link };
     await render();
     await openPersistent();
-    expect(buttonLabelled('Use hosted.dormouse.sh')!.disabled).toBe(true);
-    await act(async () => buttonLabelled('Get updates on Hosted.')!.click());
-    expect(openExternal).toHaveBeenCalledWith('https://dormouse.sh/hosted/#remote-control');
+    expect(hostedForm().hidden).toBe(false);
+    await type('input:not([type])', 'Work laptop');
+
+    await act(async () => buttonLabelled('Enroll with hosted.dormouse.sh')!.click());
+
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'Work laptop' });
+    expect(codeShown()).toBe('23AB-YZ9K');
+    // Hidden while the code waits, never unmounted: what was typed survives.
+    expect(hostedForm().hidden).toBe(true);
+  });
+
+  it('shows the code waiting in large type, opens the account page the service composed, and cancels', async () => {
+    const openExternal = vi.fn();
+    const link = makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: hostedWaiting() }));
+    platform = { burrow: link, openExternal };
+    await render();
+
+    // Unfolded from the start: the dialog reopened on a code waiting.
+    expect(persistentPanel().hidden).toBe(false);
+    expect(codeShown()).toBe('23AB-YZ9K');
+    expect(text()).toContain('Expires in 10 min.');
+    expect(text()).not.toContain('already has as many computers');
+    await act(async () => buttonLabelled('Open hosted.dormouse.sh to approve')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/enroll#23AB-YZ9K');
+
+    await act(async () => buttonLabelled('Cancel')!.click());
+    expect(link.command).toHaveBeenCalledWith('cancelHostedEnrollment');
+  });
+
+  it('says a full account enrolls on its own once a computer is removed there', async () => {
+    const openExternal = vi.fn();
+    platform = {
+      burrow: makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: hostedWaiting({ accountFull: true }) })),
+      openExternal,
+    };
+    await render();
+
+    expect(text()).toContain('That account already has as many computers as it can enroll.');
+    await act(async () => buttonLabelled('Remove one')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
+  });
+
+  it('says in fixed copy why an enrollment ended, and offers a new code or Done', async () => {
+    let ended: HostedEnrollmentState = { status: 'ended', reason: 'not-entitled' };
+    const link = makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: ended }));
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY['not-entitled']);
+
+    ended = { status: 'ended', reason: 'expired' };
+    await act(async () => refreshBurrowStatus());
+    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY.expired);
+
+    ended = { status: 'ended', reason: 'failed', message: 'keychain is locked' };
+    await act(async () => refreshBurrowStatus());
+    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY.failed);
+    expect(text()).toContain('keychain is locked');
+
+    // A new code is just a begin, which the service answers with a fresh one.
+    await act(async () => buttonLabelled('Get a new code')!.click());
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: NOT_ENROLLED.suggestedLabel });
+    await act(async () => buttonLabelled('Done')!.click());
+    expect(link.command).toHaveBeenCalledWith('cancelHostedEnrollment');
+  });
+
+  it('disables Open once the code’s countdown reaches zero', async () => {
+    const openExternal = vi.fn();
+    platform = {
+      burrow: makeLink(async () => ({
+        ...NOT_ENROLLED,
+        hostedEnrollment: { ...hostedWaiting(), expiresAt: Date.now() - 1 } as HostedEnrollmentState,
+      })),
+      openExternal,
+    };
+    await render();
+    expect(text()).toContain('This code has expired.');
+    expect(buttonLabelled('Open hosted.dormouse.sh to approve')!.disabled).toBe(true);
+  });
+
+  it('says a redeemed code is enrolling, with nothing to cancel or begin', async () => {
+    platform = { burrow: makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: { status: 'redeeming' } })) };
+    await render();
+    expect(persistentPanel().hidden).toBe(false);
+    expect(text()).toContain(HOSTED_ENROLLMENT_REDEEMING_COPY);
+    expect(hostedForm().hidden).toBe(true);
+    expect(buttonLabelled('Cancel')).toBeUndefined();
+  });
+
+  it('sends a lost answer to the account page to remove the Burrow it added, by name', async () => {
+    const openExternal = vi.fn();
+    platform = {
+      burrow: makeLink(async () => ({
+        ...NOT_ENROLLED,
+        hostedEnrollment: { status: 'ended', reason: 'answer-lost', burrowId: 'T7lzkkrPT8nx4m9zf90V4h' },
+      })),
+      openExternal,
+    };
+    await render();
+    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY['answer-lost']);
+    expect(text()).toContain('Remove Burrow T7lzkkrPT8nx4m9zf90V4h from your account');
+    await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
+  });
+
+  it('shows an enrolled machine why a second redemption could not be kept, until dismissed', async () => {
+    const message = 'Your account holds Burrow T7lzkkrPT8nx4m9zf90V4h, which this computer could not keep.';
+    const link = makeLink(async () =>
+      enrolled({
+        relayOrigin: DEFAULT_RELAY_ORIGIN,
+        relayMode: 'hosted',
+        accountOrigin: 'https://hosted.dormouse.sh',
+        hostedEnrollment: { status: 'ended', reason: 'failed', message },
+      }),
+    );
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain(message);
+    await act(async () => buttonLabelled('Dismiss')!.click());
+    expect(link.command).toHaveBeenCalledWith('cancelHostedEnrollment');
+  });
+
+  it('shows a refused begin where the button is', async () => {
+    platform = {
+      burrow: makeLink(async (cmd) => {
+        if (cmd === 'beginHostedEnrollment') throw new Error('Settings → Network is set to Nothing');
+        return NOT_ENROLLED;
+      }),
+    };
+    await render();
+    await openPersistent();
+    await act(async () => buttonLabelled('Enroll with hosted.dormouse.sh')!.click());
+    expect(text()).toContain('Settings → Network is set to Nothing');
+  });
+
+  it('links a Hosted enrollment to the account that manages it, and a self-host one to nothing', async () => {
+    const openExternal = vi.fn();
+    platform = {
+      burrow: makeLink(async () =>
+        enrolled({ relayOrigin: DEFAULT_RELAY_ORIGIN, relayMode: 'hosted', accountOrigin: 'https://hosted.dormouse.sh' }),
+      ),
+      openExternal,
+    };
+    await render();
+    await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
+    await act(async () => root.unmount());
+
+    // A dev Hosted build's account is where its waiting view sent the approval.
+    root = createRoot(container);
+    platform = {
+      burrow: makeLink(async () =>
+        enrolled({ relayOrigin: 'http://localhost:8787', relayMode: 'hosted', accountOrigin: 'http://localhost:5173' }),
+      ),
+      openExternal,
+    };
+    await render();
+    await act(async () => buttonLabelled('Manage computers at localhost:5173')!.click());
+    expect(openExternal).toHaveBeenLastCalledWith('http://localhost:5173/account');
+    await act(async () => root.unmount());
+
+    root = createRoot(container);
+    platform = { burrow: makeLink(async () => enrolled()) };
+    await render();
+    expect(buttonLabelled('Manage computers at hosted.dormouse.sh')).toBeUndefined();
   });
 
   it('offers a self-host build its form under the origin it was built for, and no Hosted button', async () => {
@@ -314,7 +517,7 @@ describe('RemoteControlSection', () => {
     expect(typedForm().textContent).toContain(SELF_HOST_RELAY_ORIGIN);
     // The origin is named, never typed: no field for it.
     expect(container.querySelector('input[type="url"]')).toBeNull();
-    expect(buttonLabelled('Use hosted.dormouse.sh')).toBeUndefined();
+    expect(buttonLabelled('Enroll with hosted.dormouse.sh')).toBeUndefined();
     expect(buttonLabelled('Connect')).toBeTruthy();
   });
 
@@ -631,6 +834,80 @@ describe('RemoteControlSection', () => {
     await render();
 
     expect(text()).toContain('took this Relay’s slot');
+    await act(async () => buttonLabelled('Reconnect')!.click());
+    expect(link.command).toHaveBeenCalledWith('reconnect');
+  });
+
+  it('says a self-host Burrow was removed from its Relay, with Disconnect alone', async () => {
+    platform = { burrow: makeLink(async () => enrolled({ connection: 'removed' })) };
+    await render();
+    expect(text()).toContain(removedCopy(enrolled()));
+    expect(text()).toContain('removed from laptop.tailnet.ts.net');
+    expect(buttonLabelled('Disconnect')).toBeTruthy();
+    for (const absent of ['Reconnect', 'Enroll again', SETUP_BUTTON]) {
+      expect(buttonLabelled(absent), absent).toBeUndefined();
+    }
+  });
+
+  it('enrolls a removed Hosted Burrow again: the dead enrollment cleared, then a code begun', async () => {
+    let enrolledNow = true;
+    const hosted = {
+      relayOrigin: DEFAULT_RELAY_ORIGIN,
+      relayMode: 'hosted' as const,
+      accountOrigin: 'https://hosted.dormouse.sh',
+    };
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'clearEnrollment') {
+        enrolledNow = false;
+        return {};
+      }
+      if (cmd === 'beginHostedEnrollment') return hostedWaiting();
+      return enrolledNow
+        ? enrolled({ ...hosted, connection: 'removed' })
+        : { ...NOT_ENROLLED, hostedEnrollment: hostedWaiting() };
+    });
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain('This computer was removed from your account at hosted.dormouse.sh.');
+    expect(buttonLabelled(SETUP_BUTTON)).toBeUndefined();
+    expect(buttonLabelled('Reconnect')).toBeUndefined();
+    expect(buttonLabelled('Disconnect')).toBeTruthy();
+
+    await act(async () => buttonLabelled('Enroll again')!.click());
+    const order = link.command.mock.calls
+      .map(([cmd]) => cmd)
+      .filter((cmd) => cmd === 'clearEnrollment' || cmd === 'beginHostedEnrollment');
+    expect(order).toEqual(['clearEnrollment', 'beginHostedEnrollment']);
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: 'ned-mac' });
+    // The code is in view, not folded behind Persistent Relay.
+    expect(codeShown()).toBe('23AB-YZ9K');
+  });
+
+  it('shows a begin refused after Enroll again cleared the enrollment', async () => {
+    let enrolledNow = true;
+    const link = makeLink(async (cmd) => {
+      if (cmd === 'clearEnrollment') {
+        enrolledNow = false;
+        return {};
+      }
+      if (cmd === 'beginHostedEnrollment') throw new Error('Couldn’t reach relay.dormouse.sh: the name doesn’t resolve.');
+      return enrolledNow ? enrolled({ relayMode: 'hosted', connection: 'removed' }) : NOT_ENROLLED;
+    });
+    platform = { burrow: link };
+    await render();
+    await act(async () => buttonLabelled('Enroll again')!.click());
+    expect(text()).toContain('Couldn’t reach relay.dormouse.sh: the name doesn’t resolve.');
+    expect(hostedForm().hidden).toBe(false);
+  });
+
+  it('says a Hosted plan no longer includes remote control, with Reconnect and Disconnect', async () => {
+    const link = makeLink(async () => enrolled({ relayMode: 'hosted', connection: 'not-entitled' }));
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain(NOT_ENTITLED_COPY);
+    expect(buttonLabelled(SETUP_BUTTON)).toBeUndefined();
+    expect(buttonLabelled('Enroll again')).toBeUndefined();
+    expect(buttonLabelled('Disconnect')).toBeTruthy();
     await act(async () => buttonLabelled('Reconnect')!.click());
     expect(link.command).toHaveBeenCalledWith('reconnect');
   });
@@ -1482,7 +1759,7 @@ function oneTimeService(
         if (openError) throw new Error(openError);
         service.set({ status: 'opening' });
         links += 1;
-        service.set(oneTimeWaiting({ url: `https://hosted.dormouse.sh/connect/#link-${links}` }));
+        service.set(oneTimeWaiting({ url: `https://relay.dormouse.sh/connect/#link-${links}` }));
         return state;
       case 'oneTimeEnd':
         if (state.status === 'ended') service.set({ status: 'idle' });
@@ -1532,7 +1809,7 @@ describe('One-time connection', () => {
     // The origin is this build's, never the webview's to name.
     expect(oneTimeCalls(service.link, 'oneTimeOpen')).toEqual([['oneTimeOpen']]);
     expect(oneTimeCode()).toBeTruthy();
-    expect(text()).toContain('https://hosted.dormouse.sh/connect/#link-1');
+    expect(text()).toContain('https://relay.dormouse.sh/connect/#link-1');
     expect(text()).toContain('Good for one phone. Expires in 5 min.');
     expect(buttonLabelled('Copy link')).toBeTruthy();
     expect(buttonLabelled('New link')).toBeTruthy();
@@ -1621,13 +1898,13 @@ describe('One-time connection', () => {
   });
 
   it('replaces a waiting link only on New link', async () => {
-    const service = oneTimeService(oneTimeWaiting({ url: 'https://hosted.dormouse.sh/connect/#old' }));
+    const service = oneTimeService(oneTimeWaiting({ url: 'https://relay.dormouse.sh/connect/#old' }));
     await renderOneTime(service);
 
     await act(async () => buttonLabelled('New link')!.click());
     await settleQrChunk();
     expect(oneTimeCalls(service.link, 'oneTimeOpen')).toHaveLength(1);
-    expect(text()).toContain('https://hosted.dormouse.sh/connect/#link-1');
+    expect(text()).toContain('https://relay.dormouse.sh/connect/#link-1');
     expect(text()).not.toContain('#old');
   });
 
@@ -1745,6 +2022,13 @@ describe('One-time connection', () => {
     }
     // The failure this whole feature is most likely to hit names its fix.
     expect(copy['direct-failed']).toContain('allowed network');
+  });
+
+  it('names where the phone connected from when the path ended it, in the Network panel’s words', async () => {
+    const refusal = { at: NOW, kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' } as const;
+    await renderOneTime(oneTimeService({ status: 'ended', reason: 'network-not-allowed', refusal }));
+    expect(oneTimeOutcome()?.textContent).toBe(pathRefusalSentence(refusal, 'one-time'));
+    expect(oneTimeOutcome()?.textContent).toContain('172.58.12.9');
   });
 
   it('names the rendezvous by this build’s relay host, a dev build’s included', async () => {

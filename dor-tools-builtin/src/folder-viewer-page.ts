@@ -178,7 +178,7 @@ const SCRIPT = `(function () {
   }
 
   // The latest request alone owns the status line; a superseded preview is not an error.
-  // Each POST is its own control connection, so an activate waits for every
+  // Each POST is its own HTTP connection, so an activate waits for every
   // select in flight: sent at once, it could overtake a double-click's select and
   // open beside the slot instead of pinning it. Selects stay concurrent, so the
   // newest supersedes.

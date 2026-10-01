@@ -39,7 +39,7 @@ last column means nothing cheaper does.
 
 | Guarantee | Rule | Pinned by |
 | --- | --- | --- |
-| **A program printing to your terminal cannot write your clipboard, read a file, or steal focus.** It can raise an alert, set a title, or mark a prompt; an OSC 8 link requires confirmation unless it is a local file link naming its target, which previews, and a deceptive link has no open action. | [Terminal output](./security-local.md#terminal-output) | `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `lib/src/components/ExternalLinkModalHost.test.tsx` |
+| **A program printing to your terminal cannot write your clipboard, read a file, or steal focus.** Its `OSC 52` copy is only an offer the copy editor shows. It can raise an alert, set a title, or mark a prompt; an OSC 8 link requires confirmation unless it is a local file link naming its target, which previews, and a deceptive link has no open action. | [Terminal output](./security-local.md#terminal-output) | `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `lib/src/components/ExternalLinkModalHost.test.tsx` |
 | **A page in a browser pane cannot forge a host message.** In VS Code every host message carries a per-boot token it cannot read, and the standalone adapters have no inbox for it to post to. | [Browser panes](./security-local.md#browser-panes) | `lib/src/lib/platform/vscode-adapter.test.ts` |
 | **Only your own account can drive your terminals through `dor`.** The socket sits in a directory only you can open, and its token never crosses the wire. | [The dor control socket](./security-local.md#the-dor-control-socket) | `standalone/sidecar/dor-control-server.test.js` |
 | **A loopback listener grants a stranger nothing it could not get from the upstream directly.** | [Loopback Listeners](./security-local.md#loopback-listeners) | `scripts/loopback-lint.mjs` |
@@ -92,7 +92,7 @@ run this knows what they are taking on.
   after which the Relay sees that the session exists and nothing about its
   traffic ([Direct path](./remote-security-model.md#direct-path)). Hosted's
   one-time rendezvous sees a handshake's timing, addresses, and frame sizes,
-  and Cloudflare's STUN server sees the one-time phone's public address, and
+  and Cloudflare's STUN server sees every Hosted-served phone's public address, and
   under Anywhere this computer's ([Direct path](./security-remote.md#direct-path)).
 - **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Relay that
   kept an envelope can re-deliver it ([Push sealing](./remote-security-model.md#push-sealing)).
