@@ -11,6 +11,7 @@ import {
   removeMouseSelectionState,
   setBracketedPaste,
   setHintToken,
+  offerProgramCopy,
   setMouseReporting,
   setOverride,
   setSelection,
@@ -37,6 +38,7 @@ describe('mouse-selection: default state', () => {
       selection: null,
       hintToken: null,
       copyEditor: null,
+      programCopy: null,
       copyFlash: null,
     });
   });
@@ -55,6 +57,23 @@ describe('mouse-selection: shadowed program drags', () => {
     setSelection('a', { startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: true });
     setMouseReporting('a', 'none');
     expect(getMouseSelectionState('a').selection).not.toBeNull();
+  });
+});
+
+describe('mouse-selection: program copy offers', () => {
+  const sel = (owner?: 'program') => ({ startRow: 0, startCol: 0, endRow: 0, endCol: 4, shape: 'linewise' as const, dragging: false, startedInScrollback: false, owner });
+
+  it('takes an offer only over a shadowed drag, and drops it with the selection', () => {
+    offerProgramCopy('a', 'nothing armed');
+    expect(getMouseSelectionState('a').programCopy).toBeNull();
+    setSelection('a', sel());
+    offerProgramCopy('a', 'over a terminal selection');
+    expect(getMouseSelectionState('a').programCopy).toBeNull();
+    setSelection('a', sel('program'));
+    offerProgramCopy('a', 'copied');
+    expect(getMouseSelectionState('a').programCopy).toBe('copied');
+    setSelection('a', sel('program'));
+    expect(getMouseSelectionState('a').programCopy).toBeNull();
   });
 });
 

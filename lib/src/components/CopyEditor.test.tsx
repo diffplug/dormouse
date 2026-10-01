@@ -19,6 +19,7 @@ import {
   endDrag,
   flashCopy,
   getMouseSelectionState,
+  offerProgramCopy,
   setSelection,
 } from '../lib/mouse-selection';
 import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
@@ -166,6 +167,20 @@ describe('CopyEditor: preview and controls', () => {
     expect(getMouseSelectionState('term-1').selection).not.toBeNull();
     act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
     expect(getMouseSelectionState('term-1').selection).toBeNull();
+  });
+});
+
+describe('CopyEditor: the program’s own copy', () => {
+  it('offers it last as "From <program>" and previews its text, scope set aside', () => {
+    act(() => {
+      setSelection('term-1', { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+      offerProgramCopy('term-1', '**The flake** comes from a race');
+      openCopyEditor('term-1', terminal);
+    });
+    render();
+    act(() => button('From program').click());
+    expect(getMouseSelectionState('term-1').copyEditor?.format).toBe('program');
+    expect(container.textContent).toContain('**The flake** comes from a race');
   });
 });
 

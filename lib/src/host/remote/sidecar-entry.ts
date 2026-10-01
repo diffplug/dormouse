@@ -170,6 +170,7 @@ export function createSidecarSurfaceBridge(
       colorProvider: themeColorProvider,
       onToolEvents: (events) => options.send('terminal:toolEvents', { id, events }),
       onSemanticEvents: (events) => options.send('terminal:semanticEvents', { id, events }),
+      onClipboardOffer: (text) => options.send('terminal:clipboardOffer', { id, text }),
       // Guarded because a PTY that died between the read and this write throws
       // — `pty-core`'s own `interrupt` wraps the same call — and this runs ahead
       // of the `pty:data` below. Losing the reply is survivable; losing the

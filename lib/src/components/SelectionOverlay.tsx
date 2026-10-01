@@ -60,7 +60,7 @@ export function SelectionOverlay({ terminalId }: Props) {
 
   // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
   const editor = state.copyEditor;
-  const scopeD = editor && editor.scope > 0
+  const scopeD = editor && editor.scope > 0 && editor.format !== 'program'
     ? rectsToPath(computeRects(selectionOfSpan(editor.scopes[editor.scope].span, selection), dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight))
     : '';
 

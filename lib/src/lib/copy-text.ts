@@ -216,6 +216,9 @@ export type CopyFormat = 'auto' | 'exact' | 'spaces' | 'joined';
 /** In `f` order; Auto is where every editor starts. */
 export const COPY_FORMATS: readonly CopyFormat[] = ['auto', 'exact', 'spaces', 'joined'];
 
+/** A buffer format, or the program's own `OSC 52` text (spec §4.6). */
+export type EditorFormat = CopyFormat | 'program';
+
 export type Piece =
   | { t: 'text'; text: string; added: boolean; lead: boolean }
   /** `auto` is the format's own decision, `kind` it after any override. */
@@ -343,6 +346,27 @@ export function render(buf: CopyBuffer, scope: Span, options: RenderOptions): Re
   });
 
   return { pieces, text, lines: text ? text.split('\n').length : 0 };
+}
+
+/** Literal text as a rendering — a program's own copy — every line break
+ *  kept unless overridden. */
+export function renderText(text: string, overrides: Readonly<Record<number, BreakKind>> = {}): Rendering {
+  const lines = text.split('\n');
+  const pieces: Piece[] = [];
+  let out = '';
+  lines.forEach((raw, i) => {
+    const line = i > 0 && (overrides[i - 1] ?? 'keep') !== 'keep' ? raw.trimStart() : raw;
+    const lead = line.length - line.trimStart().length;
+    if (lead) pieces.push({ t: 'text', text: line.slice(0, lead), added: false, lead: true });
+    if (line.length > lead) pieces.push({ t: 'text', text: line.slice(lead), added: false, lead: false });
+    out += line;
+    if (i + 1 < lines.length) {
+      const kind = overrides[i] ?? 'keep';
+      pieces.push({ t: 'break', index: i, kind, auto: 'keep' });
+      out += kind === 'keep' ? '\n' : kind === 'space' ? ' ' : '';
+    }
+  });
+  return { pieces, text: out, lines: out ? out.split('\n').length : 0 };
 }
 
 // ---------------------------------------------------------------------------

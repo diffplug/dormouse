@@ -9,10 +9,12 @@ import {
   subscribeToMouseSelection,
   subscribeToRenderTick,
 } from '../lib/mouse-selection';
-import { COPY_FORMATS, spanOfSelection, type BreakKind, type CopyFormat, type Piece, type Rendering } from '../lib/copy-text';
-import { duplicateFormats, editorRendering, flipCopyBreak, formatRenderings, setCopyFormat, setCopyScope } from '../lib/copy-editor';
+import { spanOfSelection, type BreakKind, type EditorFormat, type Piece, type Rendering } from '../lib/copy-text';
+import { duplicateFormats, editorFormats, editorRendering, flipCopyBreak, formatRenderings, setCopyFormat, setCopyScope } from '../lib/copy-editor';
 import { copySelection } from '../lib/copy-selection';
 import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
+import { commandProgramName } from '../lib/terminal-state';
+import { getTerminalPaneState } from '../lib/terminal-state-store';
 import { IS_MAC } from '../lib/platform';
 import { modalActionButton, modalSurface, popupButton, Shortcut } from './design';
 import { TouchUiContext } from './touch-ui-context';
@@ -24,19 +26,26 @@ const SHIFT = '⬆︎';
 const LEFT = '◀';
 const RIGHT = '▶';
 
-const COPY_FORMAT_NAMES: Record<CopyFormat, string> = {
+const FORMAT_NAMES: Record<Exclude<EditorFormat, 'program'>, string> = {
   auto: 'Auto',
   exact: 'Exact',
   spaces: 'Spaces',
   joined: 'No breaks',
 };
 
-const FORMAT_BLURBS: Record<CopyFormat, string> = {
+const FORMAT_BLURBS: Record<EditorFormat, string> = {
   auto: 'each line break judged on its own',
   exact: 'as displayed',
   spaces: 'every line break becomes one space',
   joined: 'every line break deleted',
+  program: 'the text the program itself copied',
 };
+
+/** The running program, by name, for its own copy's label (spec §4.6). */
+function programName(terminalId: string): string {
+  const command = getTerminalPaneState(terminalId).currentCommand?.displayCommand.trim().split(/\s+/)[0];
+  return command ? commandProgramName(command) : 'program';
+}
 
 const MARK_GLYPH: Record<BreakKind, string> = { keep: '⏎', space: '␣', none: '⌁' };
 const MARK_TITLE: Record<BreakKind, string> = {
@@ -70,19 +79,19 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
   const workspaceActive = useContext(WorkspaceActiveContext);
 
   const state = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
-  const { selection, copyEditor, copyFlash } = state;
+  const { selection, copyEditor, copyFlash, programCopy } = state;
   const open = workspaceActive && !!copyEditor;
   const terminal = open ? getTerminalInstance(terminalId) : null;
   // Every format at the scope is rendered once per scope, so `f` and the
   // duplicate check reuse it; only a per-break edit renders again.
   const scope = copyEditor?.scopes[copyEditor.scope].span;
   const renderings = useMemo(
-    () => (terminal && selection && scope ? formatRenderings(terminal, selection, scope) : null),
-    [terminal, selection, scope],
+    () => (terminal && selection && scope ? formatRenderings(terminal, selection, scope, programCopy) : null),
+    [terminal, selection, scope, programCopy],
   );
   const rendering = useMemo(
-    () => (terminal && selection && copyEditor && renderings ? editorRendering(terminal, selection, copyEditor, renderings) : null),
-    [terminal, selection, copyEditor, renderings],
+    () => (terminal && selection && copyEditor && renderings ? editorRendering(terminal, selection, copyEditor, programCopy, renderings) : null),
+    [terminal, selection, copyEditor, programCopy, renderings],
   );
   const sameAs = useMemo(() => (renderings ? duplicateFormats(renderings) : {}), [renderings]);
   const onFlip = useCallback((index: number, kind: BreakKind) => flipCopyBreak(terminalId, index, kind), [terminalId]);
@@ -129,6 +138,8 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
   if (!rendering || !placement || !copyEditor || !selection) return null;
 
   const edited = Object.keys(copyEditor.overrides).length > 0;
+  const fromProgram = copyEditor.format === 'program';
+  const formatName = (f: EditorFormat) => (f === 'program' ? `From ${programName(terminalId)}` : FORMAT_NAMES[f]);
   const keys = (node: ReactNode) => (touchUi ? null : <span className="whitespace-nowrap text-xs text-muted">{node}</span>);
   const style: CSSProperties = {
     position: 'absolute',
@@ -148,7 +159,8 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="flex shrink-0 flex-col gap-1 border-b border-border px-2 py-1.5">
-        <div className="flex min-w-0 items-center gap-2">
+        {/* The program's own copy has no scope of Dormouse's to expand. */}
+        <div className={clsx('flex min-w-0 items-center gap-2', fromProgram && 'pointer-events-none opacity-50')}>
           <Segment
             value={copyEditor.scope}
             onPick={(i) => setCopyScope(terminalId, i)}
@@ -160,11 +172,11 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
           <Segment
             value={copyEditor.format}
             onPick={(f) => setCopyFormat(terminalId, f)}
-            items={COPY_FORMATS.map((f) => ({
+            items={editorFormats(programCopy).map((f) => ({
               id: f,
-              label: `${COPY_FORMAT_NAMES[f]}${f === copyEditor.format && edited ? '*' : ''}`,
+              label: `${formatName(f)}${f === copyEditor.format && edited ? '*' : ''}`,
               dim: !!sameAs[f],
-              title: sameAs[f] ? `${FORMAT_BLURBS[f]}: same text as ${COPY_FORMAT_NAMES[sameAs[f]!]}` : FORMAT_BLURBS[f],
+              title: sameAs[f] ? `${FORMAT_BLURBS[f]}: same text as ${formatName(sameAs[f]!)}` : FORMAT_BLURBS[f],
             }))}
           />
           {keys(<><Shortcut>f</Shortcut> <Shortcut>{SHIFT}f</Shortcut></>)}
@@ -178,7 +190,7 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
           <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
           <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
           <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
-          {copyEditor.scope > 0 && <span><span className={clsx(ADDED_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
+          {copyEditor.scope > 0 && !fromProgram && <span><span className={clsx(ADDED_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
         </span>
         {selection.shape !== 'block' && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
         <span className="ml-auto shrink-0 whitespace-nowrap">

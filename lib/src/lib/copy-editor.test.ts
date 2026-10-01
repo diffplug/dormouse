@@ -3,12 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./clipboard', () => ({ writeTextToClipboard: vi.fn() }));
 vi.mock('./terminal-registry', () => ({ getTerminalInstance: vi.fn() }));
 import { writeTextToClipboard } from './clipboard';
-import { cycleCopyFormat, flipCopyBreak, openCopyEditor, stepCopyScope } from './copy-editor';
+import { cycleCopyFormat, flipCopyBreak, openCopyEditor, setCopyFormat, stepCopyScope } from './copy-editor';
 import { copySelection, nudgeSelection } from './copy-selection';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
   getMouseSelectionState,
+  offerProgramCopy,
   setSelection,
   subscribeToMouseSelection,
   type Selection,
@@ -86,6 +87,46 @@ describe('copy editor transitions', () => {
     select({ shape: 'block', endRow: 4, endCol: 11 });
     nudgeSelection(ID, 'end', 1);
     expect(getMouseSelectionState(ID).selection?.endCol).toBe(11);
+  });
+});
+
+describe('the program’s own copy', () => {
+  function shadowWithOffer(text: string): void {
+    setSelection(ID, { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+    offerProgramCopy(ID, text);
+    openCopyEditor(ID, terminal);
+  }
+
+  it('joins the f cycle last, only once the program sent one', () => {
+    select({});
+    cycleCopyFormat(ID, -1);
+    expect(editor().format).toBe('joined');
+    shadowWithOffer('**The flake** comes from a race');
+    cycleCopyFormat(ID, -1);
+    expect(editor().format).toBe('program');
+  });
+
+  it('is never a format without an offer', () => {
+    select({});
+    setCopyFormat(ID, 'program');
+    expect(editor().format).toBe('auto');
+  });
+
+  it('copies the program’s text, as sent', async () => {
+    vi.mocked(writeTextToClipboard).mockResolvedValue(true);
+    shadowWithOffer('**The flake** comes\nfrom a race');
+    setCopyFormat(ID, 'program');
+    await copySelection(ID);
+    expect(writeTextToClipboard).toHaveBeenCalledWith('**The flake** comes\nfrom a race');
+    expect(getMouseSelectionState(ID).copyFlash).toBe('program');
+  });
+
+  it('falls back to Auto when a nudge moves off what the program copied', () => {
+    shadowWithOffer('anything');
+    setCopyFormat(ID, 'program');
+    nudgeSelection(ID, 'end', -1);
+    expect(editor().format).toBe('auto');
+    expect(getMouseSelectionState(ID).programCopy).toBeNull();
   });
 });
 

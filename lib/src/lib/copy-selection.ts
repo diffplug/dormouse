@@ -13,10 +13,10 @@ import { getTerminalInstance } from './terminal-registry';
  * to land, and flashing then would clear the newer selection.
  */
 export async function copySelection(terminalId: string): Promise<void> {
-  const { selection, copyEditor } = getMouseSelectionState(terminalId);
+  const { selection, copyEditor, programCopy } = getMouseSelectionState(terminalId);
   const terminal = getTerminalInstance(terminalId);
   if (!selection || !copyEditor || !terminal) return;
-  const copied = await writeTextToClipboard(editorRendering(terminal, selection, copyEditor).text);
+  const copied = await writeTextToClipboard(editorRendering(terminal, selection, copyEditor, programCopy).text);
   if (copied && getMouseSelectionState(terminalId).selection === selection) flashCopy(terminalId, copyEditor.format);
 }
 

@@ -1,7 +1,7 @@
 /** DOM-free per-terminal mouse/selection store with a
  * `useSyncExternalStore`-compatible subscription API. */
 
-import type { BreakKind, CopyFormat, Scope } from './copy-text';
+import type { BreakKind, EditorFormat, Scope } from './copy-text';
 
 export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
 export type OverrideState = 'off' | 'temporary' | 'permanent';
@@ -54,7 +54,7 @@ export interface CopyEditorState {
   scopes: readonly Scope[];
   /** Index into {@link scopes}. */
   scope: number;
-  format: CopyFormat;
+  format: EditorFormat;
   /** Break index → kind, for the current scope and format only. */
   overrides: Readonly<Record<number, BreakKind>>;
 }
@@ -69,11 +69,14 @@ export interface MouseSelectionState {
   /** Open while non-null: always the editor written with this exact
    *  `selection`, which is finalized. */
   copyEditor: CopyEditorState | null;
+  /** The program's own `OSC 52` text, offered while it holds a shadowed drag
+   *  (spec §4.6); it goes with the selection. */
+  programCopy: string | null;
   /**
    * The format of a copy just confirmed, set briefly so the editor can flash
    * before everything clears.
    */
-  copyFlash: CopyFormat | null;
+  copyFlash: EditorFormat | null;
 }
 
 export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze({
@@ -83,6 +86,7 @@ export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze(
   selection: null,
   hintToken: null,
   copyEditor: null,
+  programCopy: null,
   copyFlash: null,
 }) as MouseSelectionState;
 
@@ -133,6 +137,7 @@ export function setMouseReporting(id: string, mode: MouseTrackingMode): void {
   if (mode === 'none' && s.selection?.owner === 'program') {
     s.selection = null;
     s.copyEditor = null;
+    s.programCopy = null;
     s.copyFlash = null;
   }
   notify();
@@ -165,10 +170,20 @@ export function setSelection(id: string, selection: Selection | null, copyEditor
   if (s.selection === null && selection === null) return;
   s.selection = selection;
   s.copyEditor = selection && !selection.dragging ? copyEditor : null;
+  s.programCopy = null;
   if (selection === null) {
     s.copyFlash = null;
     s.hintToken = null;
   }
+  notify();
+}
+
+/** Take a program's `OSC 52` text as an offer, but only into a pane holding a
+ *  shadowed drag (spec §4.6); dropped anywhere else. */
+export function offerProgramCopy(id: string, text: string): void {
+  const s = states.get(id);
+  if (s?.selection?.owner !== 'program' || s.programCopy === text) return;
+  s.programCopy = text;
   notify();
 }
 
@@ -194,6 +209,7 @@ export function beginDrag(
   // selection when it fires (the timer checks `copyFlash !== kind`).
   s.copyFlash = null;
   s.copyEditor = null;
+  s.programCopy = null;
   s.selection = {
     startRow: args.row,
     startCol: args.col,
@@ -295,7 +311,7 @@ export function setDragAlt(id: string, altKey: boolean): void {
  * The editor reads `copyFlash` and renders a confirmation state; after
  * `durationMs` the flash clears along with the selection, dismissing the editor.
  */
-export function flashCopy(id: string, kind: CopyFormat, durationMs = 700): void {
+export function flashCopy(id: string, kind: EditorFormat, durationMs = 700): void {
   const s = ensure(id);
   const selection = s.selection;
   s.copyFlash = kind;
@@ -305,6 +321,7 @@ export function flashCopy(id: string, kind: CopyFormat, durationMs = 700): void 
     if (current !== s || current.selection !== selection || current.copyFlash !== kind) return;
     current.copyFlash = null;
     current.copyEditor = null;
+    current.programCopy = null;
     current.selection = null;
     notify();
   }, durationMs);

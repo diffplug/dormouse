@@ -168,7 +168,7 @@ The selection overlay draws a wider scope dashed around the outline; the preview
 | Key | Effect |
 |---|---|
 | `e` / `Shift+E` | Next wider / narrower scope, stopping at either end. |
-| `f` / `Shift+F` | Next / previous format, wrapping, in table order (§4.1). |
+| `f` / `Shift+F` | Next / previous format, wrapping, in table order (§4.1), then the program's own copy (§4.6). |
 | `←` `→` / `Shift+←` `→` | Move the end / start one word; a row boundary ends a word. Returns to As selected, keeping the format. |
 | `Enter`, `Cmd+C` (Ctrl+C on non-macOS), either with Shift | Copy what the editor shows. |
 | `Esc` | Close and cancel the selection. |
@@ -190,6 +190,17 @@ Source of truth: `handleCopyEditorKey` in `lib/src/components/wall/keyboard/hand
 - **Must flash only after a successful clipboard write, and only for the selection copied**: the Copy button shows a checkmark for ~700 ms, then the selection clears. Failed writes retain it for retry; canceling clears the flash immediately.
 
 Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `lib/src/components/CopyEditor.test.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
+
+### 4.6 The Program's Own Copy (OSC 52)
+
+An `OSC 52` clipboard write from the inside program is never the clipboard. It becomes an **offer** the editor can show (rationale):
+
+1. The owner's parser decodes the base64 as UTF-8, turns `\r\n` and `\r` into `\n`, and removes every other control character but tab. **Must drop, never truncate, an offer over `CLIPBOARD_OFFER_LIMIT`**; a `?` read is never answered, and an empty or malformed write offers nothing. The sequence is consumed either way.
+2. The host sends it to the owning renderer as `terminal:clipboardOffer` (`docs/specs/transport.md`); replay re-parses output without offers.
+3. **Must accept an offer only into a pane holding a shadowed drag** (§3.8), the latest replacing any earlier; it goes with that selection.
+4. The editor then offers a fifth format, **From <program>** (the running command's name, else `program`), last in `f` order. It ignores scope, its marks still flip, and a nudge returns to Auto. **Never write an offer to the clipboard except as that format, chosen and copied by the user.**
+
+Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, pinned by `lib/src/lib/terminal-protocol.test.ts`; `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, pinned by `lib/src/lib/mouse-selection.test.ts`; `editorFormats` in `lib/src/lib/copy-editor.ts`.
 
 ---
 

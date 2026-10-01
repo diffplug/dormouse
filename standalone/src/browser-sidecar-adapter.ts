@@ -1,6 +1,7 @@
 import { BROWSER_PROVIDER_IDS } from 'dor-lib-common/browser-providers';
 import type { BrowserRequest, BrowserResult } from '../../lib/src/lib/platform/browser-automation';
 import { recordToolEvents } from '../../lib/src/lib/tool-events';
+import { offerProgramCopy } from '../../lib/src/lib/mouse-selection';
 import type { TerminalContextRequest, TerminalContextInfo } from '../../lib/src/lib/terminal-context-types';
 import { installWorkspaceRegistry, type WorkspaceRegistrySnapshot } from "./workspace-registry";
 import type {
@@ -323,6 +324,9 @@ export class BrowserSidecarAdapter implements PlatformAdapter {
     } else if (event === "terminal:semanticEvents") {
       const { id, events } = data as { id: string; events: TerminalSemanticEvent[] };
       applyTerminalSemanticEvents(id, events);
+    } else if (event === "terminal:clipboardOffer") {
+      const { id, text } = data as { id: string; text: string };
+      offerProgramCopy(id, text);
     } else if (event === "pty:exit") {
       const payload = data as { id: string; exitCode: number };
       for (const handler of this.exitHandlers) handler(payload);

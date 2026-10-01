@@ -12,6 +12,10 @@
 
 The editor replaced a two-button Copy Raw / Copy Rewrapped popup. Three shapes were prototyped side by side (the `Prototypes/Copy editor` stories, 2026-09): a numbered chooser, copy-then-show-a-receipt, and this editor. The editor won because restating the selection at full width with every break visible is what lets a user see why a paste came out wrong. Its keys are letters rather than digits: a receipt that took digits after a copy collided with TUIs that answer prompts by number (Claude Code's `1` / `2` / `3` permission menu), and `e` already meant "extend" mid-drag (§5).
 
+## 4.6 The Program's Own Copy (OSC 52)
+
+Before the editor, `OSC 52` was consumed and ignored, because a program that can write the clipboard can plant a command a later paste runs. TUIs that own the mouse copy their own selection this way (Claude Code's fullscreen mode, tmux with `set-clipboard`), and theirs is often the better text: the program knows the source it rendered, Markdown backticks included. An offer shown in full, gated on the user's own drag, and copied only by an explicit choice keeps the clipboard the user's to write. An offer split across PTY reads past the parser's 16 KiB incomplete-OSC bound is discarded with every other oversized OSC.
+
 ## 4.1.1 Auto
 
 The fit test reads a greedy wrapper correctly by construction: a wrapper at width W only breaks where the next word would push past W, and the paragraph's longest row is at most W, so every wrapped break also fails the test against that row. A break the test calls intentional therefore never comes from a greedy wrap. The half-terminal floor exists for two-row paragraphs, whose longest row is the first row itself: without it `Hello` / `World` always read as one wrapped line.
