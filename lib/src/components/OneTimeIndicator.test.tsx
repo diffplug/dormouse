@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BurrowLink } from '../lib/platform/types';
 import { makeEventedBurrowLink, oneTimeWaiting } from '../host/remote/test-burrow-link';
 import type { OneTimeState } from '../remote/burrow/one-time-runtime';
+import { refreshOneTime } from '../remote/burrow/one-time-store';
 
 let burrow: BurrowLink | undefined;
 
@@ -102,5 +103,14 @@ describe('OneTimeIndicator', () => {
     await act(async () => endButton()!.click());
     expect(command).toHaveBeenCalledWith('oneTimeEnd');
     expect(container.innerHTML).toBe('');
+  });
+
+  it('keeps a connected phone through a failed re-read, as opening Settings starts', async () => {
+    const command = serve({ status: 'connected', label: 'Pixel 9', since: 1 });
+    await render();
+    command.mockRejectedValue(new Error('bridge timed out'));
+
+    await act(async () => refreshOneTime());
+    expect(container.textContent).toContain('Phone connected');
   });
 });
