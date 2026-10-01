@@ -13,7 +13,7 @@ import {
 } from '../lib/mouse-selection';
 import { spanOfSelection, type BreakKind, type EditorFormat, type Piece, type Rendering, type Span } from '../lib/copy-text';
 import { duplicateFormats, editorFormats, editorRendering, flipCopyBreak, formatRenderings, isEdited, setCopyFormat, setCopyScope, type FormatRenderings } from '../lib/copy-editor';
-import { nearMiss, placeCopyEditor, selectionBand, type CopyEditorSide } from '../lib/copy-editor-placement';
+import { placeCopyEditor, selectionBand, type CopyEditorSide } from '../lib/copy-editor-placement';
 import { copySelection } from '../lib/copy-selection';
 import { setPortalAnchor } from '../lib/dom';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
@@ -21,7 +21,7 @@ import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
 import { overlayViewportBounds, subscribeOverlayViewport } from '../lib/ui-geometry';
 import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
 import { COPY_EDITOR_Z_INDEX, COPY_EXPANDED_TEXT_CLASS, COPY_OUTCOME_LABEL, modalActionButton, modalSurface, popupButton, portalToBody, Shortcut } from './design';
-import { createHeightMeasurer, measureChromeWidth, measureNaturalWidth, type CopyEditorParts } from './copy-editor-measure';
+import { createHeightMeasurer, measureNaturalWidth, measureWidth, type CopyEditorParts } from './copy-editor-measure';
 import { createRectMotion, type RectMotion } from './rect-motion';
 import { TouchUiContext } from './touch-ui-context';
 import { workspaceInTravel } from './workspace-motion';
@@ -67,9 +67,13 @@ const PROBE_LINES = 3;
 const PROBE_MIN_CELL_PX = 4;
 const PROBE_MARGIN_CELLS = 8;
 
+/** On touch, the root's margin around the visible editor (spec §4.5). */
+export const TOUCH_SLOP_PX = 16;
+
 /** Geometry and, after mounting, visibility are the motion driver's alone:
  *  React sets neither, so a render never undoes a frame. */
-const ROOT_STYLE: CSSProperties = { position: 'fixed', zIndex: COPY_EDITOR_Z_INDEX, contain: 'layout paint', visibility: 'hidden' };
+const ROOT_STYLE: CSSProperties = { position: 'fixed', zIndex: COPY_EDITOR_Z_INDEX, visibility: 'hidden' };
+const SURFACE_STYLE: CSSProperties = { contain: 'layout paint' };
 
 /** A stable gutter: a classic scrollbar appearing never narrows the lines. */
 const PREVIEW_CLASS = 'min-h-10 flex-1 overflow-auto bg-app-bg [scrollbar-gutter:stable]';
@@ -163,35 +167,36 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
 
   const anchorRef = useRef<HTMLSpanElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const surfaceRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const widthProbeRef = useRef<HTMLDivElement>(null);
   const chromeProbeRef = useRef<HTMLDivElement>(null);
-  const essentialProbeRef = useRef<HTMLDivElement>(null);
   const heightProbeRef = useRef<HTMLDivElement>(null);
   const inputs = useRef<Inputs>({ selection, scope, touch: touchUi, zoomedId, workspaceId, naturalWidth: 0, chromeWidth: 0, essentialWidth: 0, heightAt: noHeight, placed: null });
   const motionRef = useRef<RectMotion | null>(null);
   motionRef.current ??= createRectMotion({
+    // `r` is the visible editor; on touch the root pads it with the slop.
     write: (r) => {
+      const slop = inputs.current.touch ? TOUCH_SLOP_PX : 0;
       const style = rootRef.current!.style;
-      style.left = `${r.left}px`;
-      style.top = `${r.top}px`;
-      style.width = `${r.width}px`;
-      style.height = `${r.height}px`;
+      style.padding = `${slop}px`;
+      style.left = `${r.left - slop}px`;
+      style.top = `${r.top - slop}px`;
+      style.width = `${r.width + 2 * slop}px`;
+      style.height = `${r.height + 2 * slop}px`;
     },
     show: (visible) => rootRef.current?.style.setProperty('visibility', visible ? 'visible' : 'hidden'),
   });
   const motion = motionRef.current;
 
   const parts = (): CopyEditorParts => ({
-    root: rootRef.current!,
+    surface: surfaceRef.current!,
     header: headerRef.current!,
     preview: previewRef.current!,
     footer: footerRef.current!,
     widthProbe: widthProbeRef.current!,
-    chromeProbe: chromeProbeRef.current!,
-    essentialProbe: essentialProbeRef.current!,
     heightProbe: heightProbeRef.current!,
   });
 
@@ -252,13 +257,18 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     inputs.current.naturalWidth = measureNaturalWidth(parts());
   }, [renderings]);
 
-  // The chrome probes read only these, none of them the format: `f` never
-  // re-measures them, and a flipped mark only past every format's count.
+  // The chrome probe reads only these, none of them the format: `f` never
+  // re-measures it, and a flipped mark only past every format's count. Whole,
+  // then with its key hints and legend hidden, which is all a side needs.
+  const chromeDeps = [editor.scopes, expanded, program, touchUi, nudgeable, widestCount];
   useLayoutEffect(() => {
-    const p = parts();
-    inputs.current.chromeWidth = measureChromeWidth(p, p.chromeProbe);
-    inputs.current.essentialWidth = measureChromeWidth(p, p.essentialProbe);
-  }, [editor.scopes, expanded, program, touchUi, nudgeable, widestCount]);
+    const surface = surfaceRef.current!;
+    const probe = chromeProbeRef.current!;
+    inputs.current.chromeWidth = measureWidth(surface, probe);
+    probe.setAttribute('data-essential', '');
+    inputs.current.essentialWidth = measureWidth(surface, probe);
+    probe.removeAttribute('data-essential');
+  }, chromeDeps);
 
   useLayoutEffect(() => {
     inputs.current.heightAt = createHeightMeasurer(parts());
@@ -291,80 +301,51 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       () => { if (frame !== null) cancelAnimationFrame(frame); },
     ];
     for (const unsubscribe of unsubscribes) signal.addEventListener('abort', unsubscribe);
-    // A touch or pen press just outside the editor is a missed tap on it:
-    // swallowed, with its compatibility mousedown and click, before anything
-    // under it sees them, so it neither dismisses the editor, starts a
-    // selection, nor presses a control there. A mouse aims; its press dismisses.
-    let swallowed = false;
-    const swallow = (ev: Event) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-    };
-    window.addEventListener('pointerdown', (ev) => {
-      const root = rootRef.current;
-      swallowed = ev.pointerType !== 'mouse' && !!root && root.dataset.copyEditorSide !== undefined
-        && nearMiss(root.getBoundingClientRect(), ev.clientX, ev.clientY);
-      if (swallowed) swallow(ev);
-    }, { capture: true, signal });
-    // Until the next press. A keyboard or scripted click (`detail` 0) has no
-    // press to belong to.
-    window.addEventListener('click', (ev) => {
-      if (swallowed && ev.detail !== 0) swallow(ev);
-    }, { capture: true, signal });
     window.addEventListener('mousedown', (ev) => {
-      if (swallowed) {
-        swallow(ev);
-        return;
-      }
       const target = ev.target as HTMLElement | null;
       if (!target?.closest(`[data-copy-editor-for="${terminalId}"]`)) setSelection(terminalId, null);
     }, { capture: true, signal });
     return () => controller.abort();
   }, [recompute, subscribeLayoutFrames, terminalId]);
 
-  /** Key hints, which touch never shows, nor the essential probe (`bare`). */
-  const hints = (bare: boolean) => (node: ReactNode) => (touchUi || bare
+  /** A key hint, which touch never shows. */
+  const hint = (node: ReactNode) => (touchUi
     ? null
-    : <span className="min-w-0 overflow-hidden whitespace-nowrap text-xs text-muted">{node}</span>);
+    : <span data-chrome-optional="" className="min-w-0 overflow-hidden whitespace-nowrap text-xs text-muted">{node}</span>);
 
   // The header and footer never wrap. The chrome probe lays them out as wide
   // as any format shows them: a `*` on one format, the widest count, and the
   // Copy button, whose labels are stacked to its widest. In a window or side
-  // narrower than that, the key hints and the legend clip first, so the
-  // segments, the count, and Copy still show; the essential probe, `bare`,
-  // lays out those alone.
-  const header = (ref: Ref<HTMLDivElement> | undefined, starred: EditorFormat | null, bare = false) => {
-    const keys = hints(bare);
-    return (
-      <div ref={ref} className="flex shrink-0 flex-col gap-1 border-b border-border px-2 py-1.5">
-        {/* The program's own copy has no scope of Dormouse's to expand. */}
-        <div className={clsx('flex min-w-0 items-center gap-2', fromProgram && 'pointer-events-none opacity-50')}>
-          <Segment
-            value={editor.scope}
-            onPick={(i) => setCopyScope(terminalId, i)}
-            items={editor.scopes.map((s, i) => ({ id: i, label: s.label }))}
-          />
-          {editor.scopes.length > 1 && keys(<><Shortcut>e</Shortcut> expand <Shortcut>{SHIFT}e</Shortcut> shrink</>)}
-        </div>
-        <div className="flex min-w-0 items-center gap-2">
-          <Segment
-            value={editor.format}
-            onPick={(f) => setCopyFormat(terminalId, f)}
-            items={formats.map((f) => ({
-              id: f,
-              label: `${formatName(f)}${f === starred ? '*' : ''}`,
-              dim: !!sameAs[f],
-              title: sameAs[f] ? `${FORMAT_BLURBS[f]}: same text as ${formatName(sameAs[f]!)}` : FORMAT_BLURBS[f],
-            }))}
-          />
-          {keys(<><Shortcut>f</Shortcut> <Shortcut>{SHIFT}f</Shortcut></>)}
-        </div>
+  // narrower than that, the key hints and the legend (`data-chrome-optional`)
+  // clip first, so the segments, the count, and Copy still show.
+  const header = (ref: Ref<HTMLDivElement> | undefined, starred: EditorFormat | null) => (
+    <div ref={ref} className="flex shrink-0 flex-col gap-1 border-b border-border px-2 py-1.5">
+      {/* The program's own copy has no scope of Dormouse's to expand. */}
+      <div className={clsx('flex min-w-0 items-center gap-2', fromProgram && 'pointer-events-none opacity-50')}>
+        <Segment
+          value={editor.scope}
+          onPick={(i) => setCopyScope(terminalId, i)}
+          items={editor.scopes.map((s, i) => ({ id: i, label: s.label }))}
+        />
+        {editor.scopes.length > 1 && hint(<><Shortcut>e</Shortcut> expand <Shortcut>{SHIFT}e</Shortcut> shrink</>)}
       </div>
-    );
-  };
+      <div className="flex min-w-0 items-center gap-2">
+        <Segment
+          value={editor.format}
+          onPick={(f) => setCopyFormat(terminalId, f)}
+          items={formats.map((f) => ({
+            id: f,
+            label: `${formatName(f)}${f === starred ? '*' : ''}`,
+            dim: !!sameAs[f],
+            title: sameAs[f] ? `${FORMAT_BLURBS[f]}: same text as ${formatName(sameAs[f]!)}` : FORMAT_BLURBS[f],
+          }))}
+        />
+        {hint(<><Shortcut>f</Shortcut> <Shortcut>{SHIFT}f</Shortcut></>)}
+      </div>
+    </div>
+  );
   // On touch, Copy is a full-width row of its own, a thumb's height.
-  const footer = (ref: Ref<HTMLDivElement> | undefined, count: string, state: CopyState, bare = false) => {
-    const keys = hints(bare);
+  const footer = (ref: Ref<HTMLDivElement> | undefined, count: string, state: CopyState) => {
     const copy = (
       <button
         type="button"
@@ -380,17 +361,15 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     return (
       <div ref={ref} className={clsx('flex shrink-0 flex-col gap-1.5 border-t border-border px-2 py-1 text-xs text-muted', touchUi && 'pb-2')}>
         <div className="flex min-w-0 items-center gap-3">
-          {!bare && (
-            <span className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
-              <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
-              <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
-              <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
-              {expanded && <span><span className={clsx(COPY_EXPANDED_TEXT_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
-            </span>
-          )}
-          {nudgeable && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
+          <span data-chrome-optional="" className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
+            <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
+            <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
+            <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
+            {expanded && <span><span className={clsx(COPY_EXPANDED_TEXT_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
+          </span>
+          {nudgeable && hint(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
           <span className="ml-auto shrink-0 whitespace-nowrap">{count}</span>
-          {keys(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
+          {hint(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
           {!touchUi && copy}
         </div>
         {touchUi && copy}
@@ -398,12 +377,30 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     );
   };
 
+  // Rendered again only when what it measures, or the format, changes.
+  const chromeProbe = useMemo(() => (
+    <div
+      ref={chromeProbeRef}
+      data-chrome-probe=""
+      aria-hidden
+      inert
+      className="invisible absolute left-0 top-0 flex w-max flex-col [&[data-essential]_[data-chrome-optional]]:hidden"
+    >
+      {header(undefined, formats[0])}
+      {footer(undefined, widestCount, 'idle')}
+    </div>
+  ), [...chromeDeps, editor.format]);
+
+  // On touch the root pads the visible surface with a `TOUCH_SLOP_PX` margin
+  // (spec §4.5): a press that just misses lands on the editor itself, so the
+  // handlers below and the outside-press check make it inert, and no control
+  // sits under it.
   const root = (
     <div
       ref={rootRef}
       data-copy-editor-for={terminalId}
       style={ROOT_STYLE}
-      className={modalSurface({ padding: 'none', elevation: 'modal', class: 'flex touch-manipulation flex-col overflow-hidden border-foreground/20 text-sm' })}
+      className="touch-manipulation"
       // Portaled, its React events still bubble to the pane: keep its presses
       // from focusing the pane and its right-click from opening the terminal
       // context. It never takes focus, so keys stay with the pane (§4.5), but
@@ -414,24 +411,24 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       }}
       onContextMenu={(e) => e.stopPropagation()}
     >
-      {header(headerRef, edited ? editor.format : null)}
-      <div ref={previewRef} className={PREVIEW_CLASS}>
-        <LinedPreview rendering={rendering} onFlip={onFlip} />
-      </div>
-      {footer(footerRef, `${lines} ${lines === 1 ? 'line' : 'lines'} · ${rendering.text.length} ch`, copyState)}
-      <div ref={widthProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 w-max">
-        <WidthProbe renderings={renderings} />
-      </div>
-      <div ref={chromeProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 flex w-max flex-col">
-        {header(undefined, formats[0])}
-        {footer(undefined, widestCount, 'idle')}
-      </div>
-      <div ref={essentialProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 flex w-max flex-col">
-        {header(undefined, formats[0], true)}
-        {footer(undefined, widestCount, 'idle', true)}
-      </div>
-      <div ref={heightProbeRef} aria-hidden inert className={clsx(PREVIEW_CLASS, 'invisible absolute left-0 top-0')}>
-        <LinedPreview rendering={rendering} onFlip={noFlip} />
+      <div
+        ref={surfaceRef}
+        data-copy-editor-surface=""
+        style={SURFACE_STYLE}
+        className={modalSurface({ padding: 'none', elevation: 'modal', class: 'flex h-full w-full flex-col overflow-hidden border-foreground/20 text-sm' })}
+      >
+        {header(headerRef, edited ? editor.format : null)}
+        <div ref={previewRef} className={PREVIEW_CLASS}>
+          <LinedPreview rendering={rendering} onFlip={onFlip} />
+        </div>
+        {footer(footerRef, `${lines} ${lines === 1 ? 'line' : 'lines'} · ${rendering.text.length} ch`, copyState)}
+        <div ref={widthProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 w-max">
+          <WidthProbe renderings={renderings} />
+        </div>
+        {chromeProbe}
+        <div ref={heightProbeRef} aria-hidden inert className={clsx(PREVIEW_CLASS, 'invisible absolute left-0 top-0')}>
+          <LinedPreview rendering={rendering} onFlip={noFlip} />
+        </div>
       </div>
     </div>
   );

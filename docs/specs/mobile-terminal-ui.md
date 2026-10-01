@@ -102,9 +102,7 @@ Event routing, by mode:
   untouched. (rationale)
 
 **Never treat a portaled descendant as pane content**: a press outside the
-host's DOM starts no touch mode, tap, or keyboard dismissal, and its later
-events, keyed by pointer id, are skipped; a press the host took keeps its own
-wherever they land.
+host's DOM starts no touch mode, tap, or keyboard dismissal.
 
 **Must release a tracked Mouse-mode press on pointerup or cancel even after
 leaving Mouse mode.** Cancellation releases on the last target.

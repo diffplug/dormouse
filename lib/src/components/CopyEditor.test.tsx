@@ -10,11 +10,10 @@ vi.mock('../lib/platform', () => ({ IS_MAC: true }));
 // The registry barrel boots xterm; the editor only reads the measured grid.
 vi.mock('../lib/terminal-registry', () => ({ getTerminalOverlayDims: vi.fn() }));
 // jsdom lays nothing out: the editor's natural size is each test's to set.
-vi.mock('./copy-editor-measure', () => ({ measureNaturalWidth: vi.fn(), measureChromeWidth: vi.fn(), createHeightMeasurer: vi.fn() }));
+vi.mock('./copy-editor-measure', () => ({ measureNaturalWidth: vi.fn(), measureWidth: vi.fn(), createHeightMeasurer: vi.fn() }));
 import { cfg } from '../cfg';
 import { copySelection } from '../lib/copy-selection';
 import { followCopySelection, openCopyEditor } from '../lib/copy-editor';
-import { TOUCH_SLOP_PX } from '../lib/copy-editor-placement';
 import { CLAUDE_REPLY, fakeXterm } from '../lib/copy-text-fixtures';
 import { anchoredTarget } from '../lib/dom';
 import {
@@ -29,11 +28,10 @@ import {
   setSelection,
 } from '../lib/mouse-selection';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
-import { CopyEditor } from './CopyEditor';
-import { createHeightMeasurer, measureChromeWidth, measureNaturalWidth } from './copy-editor-measure';
+import { CopyEditor, TOUCH_SLOP_PX } from './CopyEditor';
+import { createHeightMeasurer, measureNaturalWidth, measureWidth } from './copy-editor-measure';
 import { TouchUiContext } from './touch-ui-context';
 import { installFakeFrames } from './motion-test-utils';
-import { pointerEvent } from './wall/wall-test-utils';
 import { createWorkspaceMotion } from './workspace-motion';
 import { LayoutFramesContext, WorkspaceActiveContext, WorkspaceIdContext, ZoomedIdContext } from './wall/wall-context';
 
@@ -73,16 +71,18 @@ let resizeObservers: Set<() => void>;
 const frame = (ms = 16) => frames.advance(ms);
 
 const editor = () => document.body.querySelector<HTMLElement>('[data-copy-editor-for="term-1"]');
+/** The visible editor, inside any touch slop. */
+const surface = () => editor()!.querySelector<HTMLElement>('[data-copy-editor-surface]')!;
 /** What the editor shows, its inert probes left out. */
-const text = () => Array.from(editor()?.children ?? [], (part) => (part.hasAttribute('inert') ? '' : part.textContent)).join('');
+const text = () => Array.from(editor() ? surface().children : [], (part) => (part.hasAttribute('inert') ? '' : part.textContent)).join('');
 /** A shown button by its label: its accessible name, else its text. */
 const button = (label: string) => Array.from(editor()!.querySelectorAll('button'))
   .find((b) => (b.getAttribute('aria-label') ?? b.textContent) === label && !b.closest('[inert]'))!;
 /** The Copy button, and the label it shows of the ones it stacks. */
-const copyButton = () => editor()!.querySelector<HTMLButtonElement>(':scope > div:not([inert]) [data-copy-state]')!;
+const copyButton = () => surface().querySelector<HTMLButtonElement>(':scope > div:not([inert]) [data-copy-state]')!;
 const shownLabel = () => Array.from(copyButton().querySelectorAll('span > span')).find((l) => !l.classList.contains('invisible'))?.textContent;
-/** The probe laying out the header and footer, the inert part with segments. */
-const chromeProbe = () => Array.from(editor()!.querySelectorAll('[inert]')).find((part) => part.querySelector('[aria-pressed]'))!;
+/** The probe laying out the header and footer. */
+const chromeProbe = () => editor()!.querySelector<HTMLElement>('[data-chrome-probe]')!;
 const side = () => editor()?.dataset.copyEditorSide;
 const box = () => {
   const { left, top, width, height } = editor()!.style;
@@ -110,7 +110,7 @@ beforeEach(() => {
   natural = { width: 300, chrome: 200, essential: 150, height: 150 };
   vi.mocked(getTerminalOverlayDims).mockImplementation(() => dims);
   vi.mocked(measureNaturalWidth).mockImplementation(() => natural.width);
-  vi.mocked(measureChromeWidth).mockImplementation((parts, probe) => (probe === parts.essentialProbe ? natural.essential : natural.chrome));
+  vi.mocked(measureWidth).mockImplementation((_, probe) => (probe.hasAttribute('data-essential') ? natural.essential : natural.chrome));
   vi.mocked(createHeightMeasurer).mockImplementation(() => () => natural.height);
   vi.mocked(copySelection).mockReset();
 
@@ -205,9 +205,14 @@ describe('CopyEditor: opening and placement', () => {
     render();
     expect(side()).toBe('right');
     expect(box()).toEqual(px(604, 38, 408, 150));
-    // Its controls, laid out without the key hints and the legend.
-    const essential = Array.from(editor()!.querySelectorAll('[inert]')).filter((part) => part.querySelector('[aria-pressed]'))[1];
+    // Measured again with the key hints and legend hidden, which leaves its
+    // controls, then put back.
+    expect(chromeProbe().hasAttribute('data-essential')).toBe(false);
+    expect(chromeProbe().className).toContain('[&[data-essential]_[data-chrome-optional]]:hidden');
+    const essential = chromeProbe().cloneNode(true) as HTMLElement;
+    for (const optional of essential.querySelectorAll('[data-chrome-optional]')) optional.remove();
     expect(essential.textContent).toContain('Paragraph');
+    expect(essential.textContent).toContain('lines');
     expect(essential.textContent).toContain('Copy');
     expect(essential.textContent).not.toContain('kept');
     expect(essential.textContent).not.toContain('[');
@@ -234,7 +239,9 @@ describe('CopyEditor: opening and placement', () => {
     drag(20, 0, 20, 40);
     render(<TouchUiContext.Provider value><CopyEditor terminalId="term-1" /></TouchUiContext.Provider>);
     expect(side()).toBe('above');
-    expect(box()).toEqual(px(104, 96, 792, 150));
+    // Placed at 104, 96, 792 × 150, the touch slop around it.
+    const slop = TOUCH_SLOP_PX;
+    expect(box()).toEqual(px(104 - slop, 96 - slop, 792 + 2 * slop, 150 + 2 * slop));
     expect(text()).not.toContain('[f]');
   });
 
@@ -468,7 +475,7 @@ describe('CopyEditor: preview and controls', () => {
   it('lays its chrome probe out the same in every format', () => {
     drag(2, 2, 5, 27);
     render();
-    const measured = vi.mocked(measureChromeWidth).mock.calls.length;
+    const measured = vi.mocked(measureWidth).mock.calls.length;
     const laidOut = chromeProbe().textContent;
     // A `*` on one format and the widest count, Exact's four lines.
     expect(laidOut).toContain('Auto*');
@@ -478,7 +485,7 @@ describe('CopyEditor: preview and controls', () => {
     act(() => button('Exact').click());
     act(() => button('No breaks').click());
     expect(chromeProbe().textContent).toBe(laidOut);
-    expect(vi.mocked(measureChromeWidth).mock.calls.length).toBe(measured);
+    expect(vi.mocked(measureWidth).mock.calls.length).toBe(measured);
   });
 
   it('probes each format’s three longest lines, cut to what the screen could show', () => {
@@ -602,59 +609,23 @@ describe('CopyEditor: flash', () => {
   });
 });
 
-describe('CopyEditor: a missed tap', () => {
-  // The editor opens at x 104..896, y 114..264.
-  beforeEach(() => {
+describe('CopyEditor: touch slop', () => {
+  it('pads the editor on touch with a margin that is the editor’s own, and desktop with none', () => {
+    const paneDown = vi.fn();
     drag(2, 25, 5, 27);
+    render(<div onMouseDown={paneDown}><TouchUiContext.Provider value><CopyEditor terminalId="term-1" /></TouchUiContext.Provider></div>);
+    expect(editor()!.style.padding).toBe(`${TOUCH_SLOP_PX}px`);
+    // A press on the margin, past the visible surface, lands on the editor:
+    // never the pane's, never a dismissal, never a control.
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    act(() => { editor()!.dispatchEvent(down); });
+    act(() => { editor()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(down.defaultPrevented).toBe(true);
+    expect(paneDown).not.toHaveBeenCalled();
+    expect(copySelection).not.toHaveBeenCalled();
+    expect(getMouseSelectionState('term-1')).toMatchObject({ selection: { endRow: 5 }, copyEditor: { format: 'auto' } });
     render();
-    editor()!.getBoundingClientRect = () => new DOMRect(104, 114, 792, 150);
-  });
-
-  /** A press at (x, y) on an element under it, and whether that element saw it. */
-  function press(x: number, y: number, pointerType = 'touch'): { down: PointerEvent; reached: boolean } {
-    const under = document.body.appendChild(document.createElement('div'));
-    let reached = false;
-    under.addEventListener('pointerdown', () => { reached = true; });
-    under.addEventListener('mousedown', () => { reached = true; });
-    under.addEventListener('click', () => { reached = true; });
-    const down = pointerEvent('pointerdown', { clientX: x, clientY: y, pointerType });
-    act(() => { under.dispatchEvent(down); });
-    // The compatibility mousedown, where the engine sends one, and the click.
-    act(() => { under.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: x, clientY: y })); });
-    act(() => { under.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y, detail: 1 })); });
-    under.remove();
-    return { down, reached };
-  }
-
-  it('swallows a touch press just outside the editor, keeping it open', () => {
-    // 8px under its bottom edge, and 15px off its left.
-    for (const [x, y] of [[500, 272], [89, 200]]) {
-      const { down, reached } = press(x, y);
-      expect(down.defaultPrevented).toBe(true);
-      expect(reached).toBe(false);
-      expect(getMouseSelectionState('term-1').selection).not.toBeNull();
-    }
-    // A keyboard click (`detail` 0) between the press and its own click goes through.
-    const clicked = vi.fn();
-    document.body.addEventListener('click', clicked);
-    act(() => { document.body.dispatchEvent(pointerEvent('pointerdown', { clientX: 500, clientY: 272 })); });
-    act(() => { document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })); });
-    expect(clicked).toHaveBeenCalledTimes(1);
-    act(() => { document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
-    expect(clicked).toHaveBeenCalledTimes(1);
-    document.body.removeEventListener('click', clicked);
-  });
-
-  it('lets a touch press past the slop through, which dismisses', () => {
-    const { down, reached } = press(500, 264 + TOUCH_SLOP_PX + 2);
-    expect(down.defaultPrevented).toBe(false);
-    expect(reached).toBe(true);
-    expect(getMouseSelectionState('term-1').selection).toBeNull();
-  });
-
-  it('dismisses on a mouse press just outside, which aims', () => {
-    expect(press(500, 272, 'mouse').reached).toBe(true);
-    expect(getMouseSelectionState('term-1').selection).toBeNull();
+    expect(editor()!.style.padding).toBe('0px');
   });
 });
 
