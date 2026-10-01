@@ -681,6 +681,8 @@ export function getTerminalOverlayDims(id: string): TerminalOverlayDims | null {
     rows: entry.terminal.rows,
     viewportY: entry.terminal.buffer.active.viewportY,
     baseY: entry.terminal.buffer.active.baseY,
+    elementLeft: elementRect.left,
+    elementTop: elementRect.top,
     elementWidth: elementRect.width,
     elementHeight: elementRect.height,
     cellWidth,

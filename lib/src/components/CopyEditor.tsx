@@ -11,6 +11,7 @@ import {
 } from '../lib/mouse-selection';
 import { spanOfSelection, type BreakKind, type EditorFormat, type Piece, type Rendering } from '../lib/copy-text';
 import { duplicateFormats, editorFormats, editorRendering, flipCopyBreak, formatRenderings, isEdited, setCopyFormat, setCopyScope } from '../lib/copy-editor';
+import { GAP_PX, MIN_HEIGHT_PX } from '../lib/copy-editor-placement';
 import { copySelection } from '../lib/copy-selection';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
@@ -50,10 +51,6 @@ const MARK_TITLE: Record<BreakKind, string> = {
   space: 'Line break became one space',
   none: 'Line break deleted, joining the two sides',
 };
-
-/** Below this the editor overlays the selection rather than squeezing beside it. */
-const MIN_HEIGHT_PX = 120;
-const GAP_PX = 4;
 
 interface Placement {
   top?: number;

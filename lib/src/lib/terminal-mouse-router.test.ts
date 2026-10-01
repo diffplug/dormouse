@@ -78,6 +78,8 @@ const dims: TerminalOverlayDims = {
   rows: 24,
   viewportY: 0,
   baseY: 0,
+  elementLeft: 0,
+  elementTop: 0,
   elementWidth: 800,
   elementHeight: 240,
   cellWidth: 10,

@@ -38,6 +38,10 @@ export interface TerminalOverlayDims {
   rows: number;
   viewportY: number;
   baseY: number;
+  /** The terminal element's box in viewport (fixed-position) coordinates;
+   *  `gridLeft` / `gridTop` are relative to its corner. */
+  elementLeft: number;
+  elementTop: number;
   elementWidth: number;
   elementHeight: number;
   cellWidth: number;

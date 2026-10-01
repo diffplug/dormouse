@@ -36,6 +36,8 @@ const DIMS = {
   rows: 40,
   viewportY: 0,
   baseY: 10,
+  elementLeft: 0,
+  elementTop: 0,
   elementWidth: 800,
   elementHeight: 400,
   cellWidth: 10,
