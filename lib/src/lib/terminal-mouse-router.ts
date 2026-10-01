@@ -1,18 +1,19 @@
 import type { Terminal } from '@xterm/xterm';
 import {
   beginDrag,
+  dragShape,
   endDrag,
   getMouseSelectionState,
   isDragging,
-  setDragAlt,
   setHintToken,
   setOverride,
   setSelection,
   stateRequiresNativeMouseSuppression,
   updateDrag,
 } from './mouse-selection';
-import { detectTokenInBufferLine } from './smart-token';
-import { extractSelectionText } from './selection-text';
+import { openCopyEditor } from './copy-editor';
+import { boundaryAt, dragCells, type PointerBoundary } from './drag-cells';
+import { detectTokenInBuffer } from './smart-token';
 import type { TerminalOverlayDims } from './terminal-store';
 
 /**
@@ -55,18 +56,18 @@ export function attachTerminalMouseRouter({
   terminal,
   element,
   getOverlayDims,
-  setSelectionBaseline,
 }: {
   id: string;
   terminal: Terminal;
   element: HTMLDivElement;
   getOverlayDims: (id: string) => TerminalOverlayDims | null;
-  setSelectionBaseline: (baseline: string | null) => void;
 }): () => void {
-  const computeCell = (ev: MouseEvent | PointerEvent): { row: number; col: number; startedInScrollback: boolean } => {
+  /** The cell under the pointer, and (`b`) the cell boundary nearest it,
+   *  which is what a selection edge takes (spec §3.1). */
+  const computeCell = (ev: { clientX: number; clientY: number }): { row: number; col: number; b: number; startedInScrollback: boolean } => {
     const dims = getOverlayDims(id);
     if (!dims) {
-      return { row: 0, col: 0, startedInScrollback: false };
+      return { row: 0, col: 0, b: 0, startedInScrollback: false };
     }
     const elementRect = element.getBoundingClientRect();
     const offsetX = ev.clientX - elementRect.left - dims.gridLeft;
@@ -75,7 +76,7 @@ export function attachTerminalMouseRouter({
     const viewportRow = Math.min(dims.rows - 1, Math.max(0, Math.floor(offsetY / dims.cellHeight)));
     const absRow = dims.viewportY + viewportRow;
     const startedInScrollback = absRow < dims.baseY;
-    return { row: absRow, col, startedInScrollback };
+    return { row: absRow, col, b: boundaryAt(offsetX, dims.cellWidth, dims.cols), startedInScrollback };
   };
 
   // xterm's linkifier listens on its screen, not our outer wrapper. Capture
@@ -83,6 +84,21 @@ export function attachTerminalMouseRouter({
   // Take capture on pointerdown: the first move may already be outside the iframe.
   const mouseCaptureElement = element.querySelector<HTMLElement>('.xterm-screen') ?? element;
   const DRAG_THRESHOLD_PX_SQ = 16;
+  const pastDragThreshold = (from: { clientX: number; clientY: number }, ev: { clientX: number; clientY: number }) => {
+    const dx = ev.clientX - from.clientX;
+    const dy = ev.clientY - from.clientY;
+    return dx * dx + dy * dy >= DRAG_THRESHOLD_PX_SQ;
+  };
+  // The active drag's edges as pointer boundaries; the store holds the cells
+  // they resolve to, which depend on the shape and on which edge is earlier.
+  let dragAnchor: PointerBoundary | null = null;
+  let dragHead: PointerBoundary | null = null;
+  const applyDrag = (altKey: boolean) => {
+    const sel = getMouseSelectionState(id).selection;
+    if (!dragAnchor || !dragHead || !sel?.dragging) return;
+    const { anchor, head } = dragCells(dragAnchor, dragHead, dragShape(altKey, sel.blockLatched) === 'block', terminal.cols);
+    updateDrag(id, { row: head.row, col: head.col, altKey, anchor });
+  };
   // Touch has no Alt key, so a double-tap-then-drag is how a block selection is
   // started on touch. A second touch within this window and distance of the
   // previous one (which ended as a tap) arms block mode for the drag it begins.
@@ -91,6 +107,7 @@ export function attachTerminalMouseRouter({
   let pendingDrag: {
     row: number;
     col: number;
+    b: number;
     altKey: boolean;
     block: boolean;
     startedInScrollback: boolean;
@@ -110,6 +127,10 @@ export function attachTerminalMouseRouter({
   // True between a captured mouse pointerup we saw and the compatibility mouseup
   // we expect to follow it for an *inside* release; see onWindowPointerUp.
   let awaitingOutsideMouseUp = false;
+  // A mouse drag the inside program owns (spec §3.8). Its events reach the
+  // program untouched; this only remembers where it went, so a copy chord can
+  // open the editor over what the program is highlighting.
+  let programDrag: { row: number; b: number; clientX: number; clientY: number; last: { clientX: number; clientY: number } | null } | null = null;
 
   const terminalOwnsEvent = (ev: MouseEvent | PointerEvent) => {
     const state = getMouseSelectionState(id);
@@ -126,12 +147,16 @@ export function attachTerminalMouseRouter({
     opts: { touchLike: boolean; block?: boolean },
   ) => {
     const { state, cell, terminalOwns } = terminalOwnsEvent(ev);
-    // Touch suppresses compatibility mousedown, so popup's mouse listener
+    // Touch suppresses compatibility mousedown, so the editor's mouse listener
     // cannot clear a previous selection for us.
     setSelection(id, null);
     setHintToken(id, null);
-    setSelectionBaseline(null);
-    if (!terminalOwns) return false;
+    if (!terminalOwns) {
+      programDrag = ev.button === 0 && !opts.touchLike
+        ? { row: cell.row, b: cell.b, clientX: ev.clientX, clientY: ev.clientY, last: null }
+        : null;
+      return false;
+    }
     const suppressNativeMouse = state.mouseReporting !== 'none';
     if (suppressNativeMouse || opts.touchLike) {
       consumePointerEvent(ev, true);
@@ -144,6 +169,7 @@ export function attachTerminalMouseRouter({
     pendingDrag = {
       row: cell.row,
       col: cell.col,
+      b: cell.b,
       altKey: ev.altKey,
       block: opts.block ?? false,
       startedInScrollback: cell.startedInScrollback,
@@ -162,9 +188,7 @@ export function attachTerminalMouseRouter({
         consumePointerEvent(ev, true);
         consumed = true;
       }
-      const dx = ev.clientX - pendingDrag.clientX;
-      const dy = ev.clientY - pendingDrag.clientY;
-      if (dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) return;
+      if (!pastDragThreshold(pendingDrag, ev)) return;
       // Touch has no Alt to read mid-drag, so its double-tap block mode latches
       // on the selection for the whole drag; desktop Alt stays live. A tap can
       // no longer chain into the next press once a drag has begun.
@@ -176,24 +200,18 @@ export function attachTerminalMouseRouter({
         blockLatched: pendingDrag.block,
         startedInScrollback: pendingDrag.startedInScrollback,
       });
+      dragAnchor = { row: pendingDrag.row, b: pendingDrag.b };
       terminal.clearSelection();
       pendingDrag = null;
     }
     if (!isDragging(id)) return;
     const cell = computeCell(ev);
-    updateDrag(id, { row: cell.row, col: cell.col, altKey: ev.altKey });
+    dragHead = { row: cell.row, b: cell.b };
+    applyDrag(ev.altKey);
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     if (!consumed) consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
 
-    const line = terminal.buffer.active.getLine(cell.row);
-    const token = line ? detectTokenInBufferLine(line, cell.col) : null;
-    setHintToken(id, token ? {
-      kind: token.kind,
-      row: cell.row,
-      startCol: token.start,
-      endCol: token.end,
-      text: token.text,
-    } : null);
+    setHintToken(id, detectTokenInBuffer(terminal.buffer.active, cell.row, cell.col));
   };
 
   const finishPendingOrActiveDrag = (ev: MouseEvent | PointerEvent) => {
@@ -209,9 +227,7 @@ export function attachTerminalMouseRouter({
       // so the next press can be recognized as a double-tap (block selection).
       if (pendingDrag.touchLike) {
         lastTouchTap = { time: Date.now(), x: ev.clientX, y: ev.clientY };
-        const dx = ev.clientX - pendingDrag.clientX;
-        const dy = ev.clientY - pendingDrag.clientY;
-        if ('pointerId' in ev && dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) {
+        if ('pointerId' in ev && !pastDragThreshold(pendingDrag, ev)) {
           element.dispatchEvent(new CustomEvent<TerminalTapDetail>(TERMINAL_TAP_EVENT, {
             bubbles: true,
             detail: { pointerId: ev.pointerId },
@@ -226,10 +242,37 @@ export function attachTerminalMouseRouter({
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
     setHintToken(id, null);
-    const sel = getMouseSelectionState(id).selection;
-    setSelectionBaseline(sel ? extractSelectionText(terminal, sel) : null);
+    openCopyEditor(id, terminal);
     clearTemporaryOverrideAfterMouseDispatch(id);
     consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
+  };
+
+  /** Remember where a program drag is, once it is a drag; the cell is measured
+   *  once, at release. */
+  const trackProgramDrag = (ev: MouseEvent) => {
+    if (programDrag && (programDrag.last || pastDragThreshold(programDrag, ev))) {
+      programDrag.last = { clientX: ev.clientX, clientY: ev.clientY };
+    }
+  };
+
+  /** Keep a program drag that moved as a shadow selection: no outline and no
+   *  editor until the copy chord (spec §3.8). */
+  const finishProgramDrag = () => {
+    const drag = programDrag;
+    programDrag = null;
+    if (!drag?.last || getMouseSelectionState(id).mouseReporting === 'none') return;
+    const end = computeCell(drag.last);
+    const { anchor, head } = dragCells(drag, end, false, terminal.cols);
+    setSelection(id, {
+      startRow: anchor.row,
+      startCol: anchor.col,
+      endRow: head.row,
+      endCol: head.col,
+      shape: 'linewise',
+      dragging: false,
+      startedInScrollback: false,
+      owner: 'program',
+    });
   };
 
   const onMouseDown = (ev: MouseEvent) => {
@@ -297,6 +340,10 @@ export function attachTerminalMouseRouter({
       finishPendingOrActiveDrag(ev);
       return;
     }
+    if (programDrag) {
+      if (ev.buttons === 0) finishProgramDrag();
+      else trackProgramDrag(ev);
+    }
     updatePendingOrActiveDrag(ev);
   };
 
@@ -304,6 +351,10 @@ export function attachTerminalMouseRouter({
     // The button came up inside the iframe; cancel any pending outside-release
     // finalize (see onWindowPointerUp) and end the drag through the normal path.
     awaitingOutsideMouseUp = false;
+    if (programDrag && ev.button === 0) {
+      trackProgramDrag(ev);
+      finishProgramDrag();
+    }
     finishPendingOrActiveDrag(ev);
   };
 
@@ -366,8 +417,10 @@ export function attachTerminalMouseRouter({
   };
 
   const onAltChange = (ev: KeyboardEvent) => {
-    if (!isDragging(id)) return;
-    setDragAlt(id, ev.altKey);
+    const sel = getMouseSelectionState(id).selection;
+    if (!sel?.dragging) return;
+    // Unrelated keys must keep the edge e extended (§5.3).
+    if (sel.shape !== dragShape(ev.altKey, sel.blockLatched)) applyDrag(ev.altKey);
   };
 
   element.addEventListener('mousedown', onMouseDown, true);

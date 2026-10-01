@@ -962,11 +962,13 @@ export default function Home() {
               the thing.
             </p>
             <p className="text-lg leading-relaxed opacity-70">
-              Then copy it the way you meant it. <strong className="font-semibold opacity-100">Raw</strong> keeps
-              the hard wraps; <strong className="font-semibold opacity-100">Rewrapped</strong> joins them back
-              into the line the program actually printed. Tap{" "}
+              Then copy it the way you meant it, seeing exactly what lands on
+              the clipboard with every line break marked.{" "}
+              <strong className="font-semibold opacity-100">Auto</strong> joins the hard wraps back into
+              the line the program actually printed; <strong className="font-semibold opacity-100">Exact</strong>{" "}
+              keeps them. Press{" "}
               <code className={SITE_CODE_CLASS}>e</code>{" "}
-              mid-drag to snap the selection out to the whole URL or file path.
+              to expand a clipped selection out to the whole URL, path, or paragraph.
             </p>
           </div>
           <FeatureVideo src={copyPasteVideoUrl} />

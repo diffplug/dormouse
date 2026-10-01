@@ -46,7 +46,7 @@ vi.mock('../lib/terminal-registry', () => ({
 }));
 vi.mock('./wall/AlertRingIndicator', () => ({ AlertRingIndicator: () => null }));
 vi.mock('./SelectionOverlay', () => ({ SelectionOverlay: () => null }));
-vi.mock('./SelectionPopup', () => ({ SelectionPopup: () => null }));
+vi.mock('./CopyEditor', () => ({ CopyEditor: () => null }));
 vi.mock('./wall/MouseOverrideBanner', () => ({ MouseOverrideBanner: () => null }));
 
 let root: Root;

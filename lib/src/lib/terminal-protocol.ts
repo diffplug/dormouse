@@ -1,7 +1,7 @@
 import { parseToolAnnounce, parseToolOpen, parseToolState, type ToolAnnounce, type ToolOpen, type ToolState } from 'dor-tools-lib/osc';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
-import { sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
+import { sanitizeClipboardText, sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
 import { isProtocolCommandStart } from './tool-events';
 import {
   STRING_CONTROL_INTRODUCER,
@@ -23,6 +23,9 @@ import {
 
 export type TerminalProtocolEvent =
   | { kind: 'notification'; notification: ActivityNotification }
+  /** An `OSC 52` write: never the clipboard, only an offer the copy editor
+   *  shows over a shadowed drag (docs/specs/mouse-and-clipboard.md §4.6). */
+  | { kind: 'clipboardOffer'; text: string }
   | { kind: 'toolAnnounce'; announce: ToolAnnounce }
   | { kind: 'toolState'; state: ToolState }
   /** A request, not a report: acted on live, never reconstructed from replay. */
@@ -97,6 +100,10 @@ const BODY_LIMIT = 4096;
 // control characters that the emit-side escaping had removed
 // (`docs/specs/terminal-escapes.md`). See `commandLineEvents`.
 const COMMAND_LINE_LIMIT = 2048;
+/** The longest `OSC 52` payload offered, in base64 characters; longer is
+ *  dropped. Under {@link OSC_INCOMPLETE_LIMIT} with room for the introducer, so
+ *  how the PTY splits its reads never changes the answer. */
+export const CLIPBOARD_OFFER_LIMIT = 16_000;
 const OSC99_PENDING_TITLE_LIMIT = 2048;
 const OSC99_PENDING_BODY_LIMIT = 16_384;
 const OSC99_SUPPORT_PAYLOAD = 'o=always:p=title,body';
@@ -314,6 +321,7 @@ export class TerminalProtocolParser {
       const open = parseToolOpen(payload);
       return open ? [{ kind: 'toolOpen', open }] : [];
     }
+    if (content === '52' || content.startsWith('52;')) return parseOsc52(content);
     const colorResponse = this.parseColorQuery(content);
     if (colorResponse) return colorResponse;
     if (isKnownUnsupportedIterm2Osc(content)) return [];
@@ -533,6 +541,11 @@ export function collectTerminalToolEvents(
 
 export function collectTerminalProtocolResponses(events: TerminalProtocolEvent[]): string[] {
   return events.flatMap((event) => (event.kind === 'response' ? [event.data] : []));
+}
+
+/** The `OSC 52` offers of one parse, for the renderer that holds the copy editor. */
+export function collectTerminalClipboardOffers(events: readonly TerminalProtocolEvent[]): string[] {
+  return events.flatMap((event) => (event.kind === 'clipboardOffer' ? [event.text] : []));
 }
 
 // Keep ordering across successive PTY reads, including a clock adjustment. A
@@ -911,13 +924,23 @@ function parseOscTitle(content: string, source: TerminalTitle['source']): Termin
 
 function isKnownUnsupportedIterm2Osc(content: string): boolean {
   // Security-sensitive iTerm2 compatibility OSCs are consumed rather than
-  // forwarded to xterm.js. In particular, OSC 52 is a clipboard-write channel.
-  return (
-    content === '50' ||
-    content.startsWith('50;') ||
-    content === '52' ||
-    content.startsWith('52;')
-  );
+  // forwarded to xterm.js: OSC 50 sets the font.
+  return content === '50' || content.startsWith('50;');
+}
+
+/**
+ * `OSC 52 ; <targets> ; <base64>` asks to write the clipboard. Consumed always;
+ * a write becomes an offer and nothing else. A `?` read is never answered, and
+ * an empty, malformed, or oversized payload offers nothing.
+ */
+function parseOsc52(content: string): TerminalProtocolEvent[] {
+  const fields = content.split(';');
+  // Base64 never holds a `;`, so a fourth field is malformed; `?` is a read.
+  const data = fields.length === 3 ? fields[2].replace(/\s+/g, '') : '';
+  if (data.length > CLIPBOARD_OFFER_LIMIT) return [];
+  const decoded = decodeBase64(data);
+  const text = decoded === null ? null : sanitizeClipboardText(decoded);
+  return text ? [{ kind: 'clipboardOffer', text }] : [];
 }
 
 /**

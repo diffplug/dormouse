@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { describe, expect, it } from 'vitest';
-import { isComposingKey, isEditableTarget } from './dom';
+import { anchoredTarget, isComposingKey, isEditableTarget, setPortalAnchor } from './dom';
 
 describe('isEditableTarget', () => {
   it('is true for input, textarea, and contentEditable elements', () => {
@@ -35,5 +35,32 @@ describe('isComposingKey', () => {
     expect(isComposingKey(ending)).toBe(true);
     expect(isComposingKey(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true }))).toBe(true);
     expect(isComposingKey(new KeyboardEvent('keydown', { key: 'Escape' }))).toBe(false);
+  });
+});
+
+describe('anchoredTarget', () => {
+  it('stands a mapped portal root\'s anchor in for every target inside it, until unmapped', () => {
+    const anchor = document.createElement('span');
+    const root = document.createElement('div');
+    const button = document.createElement('button');
+    root.append(button);
+    document.body.append(anchor, root);
+    expect(anchoredTarget(button)).toBe(button);
+    const unmap = setPortalAnchor(root, anchor);
+    expect(root.hasAttribute('data-portal-anchored')).toBe(true);
+    expect(anchoredTarget(button)).toBe(anchor);
+    expect(anchoredTarget(root)).toBe(anchor);
+    unmap();
+    expect(root.hasAttribute('data-portal-anchored')).toBe(false);
+    expect(anchoredTarget(button)).toBe(button);
+    root.remove();
+    anchor.remove();
+  });
+
+  it('passes other elements through, and no element as null', () => {
+    const plain = document.createElement('div');
+    expect(anchoredTarget(plain)).toBe(plain);
+    expect(anchoredTarget(window)).toBeNull();
+    expect(anchoredTarget(null)).toBeNull();
   });
 });

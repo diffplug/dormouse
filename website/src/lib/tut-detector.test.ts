@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MOUSE_SELECTION_STATE, type MouseSelectionState } from "dormouse-lib/lib/mouse-selection";
+import { DEFAULT_MOUSE_SELECTION_STATE, type CopyEditorState, type MouseSelectionState } from "dormouse-lib/lib/mouse-selection";
 import type { ActivityState } from "dormouse-lib/lib/terminal-registry";
 import { watchRuleFor } from "dormouse-lib/lib/terminal-state";
 import { DESKTOP_SECTIONS } from "./tut-items";
@@ -113,6 +113,22 @@ describe("TutDetector", () => {
     ]));
 
     expect(state.isComplete("cp-select")).toBe(true);
+  });
+
+  it("credits a confirmed copy by the format its editor shows, never a failed one", () => {
+    const { state, setMouseSnapshot } = makeDetectorHarness();
+    const editor = (format: CopyEditorState["format"]) => ({ format }) as CopyEditorState;
+    const pane = (format: CopyEditorState["format"], copyOutcome: MouseSelectionState["copyOutcome"]) =>
+      new Map([["pane-a", { ...DEFAULT_MOUSE_SELECTION_STATE, copyEditor: editor(format), copyOutcome }]]);
+
+    setMouseSnapshot(pane("exact", "failed"));
+    expect(state.isComplete("cp-raw")).toBe(false);
+    setMouseSnapshot(pane("exact", "copied"));
+    expect(state.isComplete("cp-raw")).toBe(true);
+    expect(state.isComplete("cp-rewrap")).toBe(false);
+    setMouseSnapshot(pane("auto", null));
+    setMouseSnapshot(pane("auto", "copied"));
+    expect(state.isComplete("cp-rewrap")).toBe(true);
   });
 
   it("credits arrow navigation after the first move away from the command-mode origin pane", () => {

@@ -1,5 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import { collectTerminalSemanticEvents, formatOscColorResponse, ITERM2_DEVICE_ATTRIBUTES_RESPONSE, TerminalProtocolParser } from './terminal-protocol';
+import {
+  CLIPBOARD_OFFER_LIMIT,
+  collectTerminalClipboardOffers,
+  collectTerminalProtocolResponses,
+  collectTerminalSemanticEvents,
+  formatOscColorResponse,
+  ITERM2_DEVICE_ATTRIBUTES_RESPONSE,
+  TerminalProtocolParser,
+} from './terminal-protocol';
 import { commandWatchKey, createTerminalPaneState, deriveHeader, reduceTerminalState, type TerminalSemanticEvent } from './terminal-state';
 
 describe('TerminalProtocolParser', () => {
@@ -430,12 +438,50 @@ describe('TerminalProtocolParser', () => {
     expect(result.textData).toBe('done');
   });
 
-  it('strips known unsupported iTerm2 and clipboard OSC sequences', () => {
+  it('strips an OSC 52 write into a clipboard offer and an OSC 50 into nothing', () => {
     const parser = new TerminalProtocolParser();
     const result = parser.process('a\x1b]52;c;SGVsbG8=\x07b\x1b]50;Monaco\x07c');
 
     expect(result.visibleData).toBe('abc');
-    expect(result.events).toEqual([]);
+    expect(result.events).toEqual([{ kind: 'clipboardOffer', text: 'Hello' }]);
+  });
+
+  describe('OSC 52', () => {
+    const offer = (payload: string) => new TerminalProtocolParser().process(`\x1b]52;${payload}\x07`);
+    const b64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+
+    it('decodes UTF-8 and keeps line breaks and tabs', () => {
+      expect(offer(`c;${b64('pnpm test\r\n\tdone ✓')}`).events).toEqual([{ kind: 'clipboardOffer', text: 'pnpm test\n\tdone ✓' }]);
+    });
+
+    it('removes every other control character, escape included', () => {
+      expect(offer(`c;${b64('rm\x1b[201~ -rf\x07\x9b x')}`).events).toEqual([{ kind: 'clipboardOffer', text: 'rm[201~ -rf x' }]);
+    });
+
+    it('never answers a read, and offers nothing for an empty or malformed write', () => {
+      for (const payload of ['c;?', 'c;', ';', 'c;!!!notbase64', '']) {
+        const result = offer(payload);
+        expect(result.visibleData).toBe('');
+        expect(result.events).toEqual([]);
+      }
+    });
+
+    it('drops an offer over the limit rather than truncating it, wherever the reads split', () => {
+      const atLimit = b64('x'.repeat((CLIPBOARD_OFFER_LIMIT / 4) * 3));
+      expect(atLimit).toHaveLength(CLIPBOARD_OFFER_LIMIT);
+      expect(offer(`c;${atLimit}`).events).toHaveLength(1);
+      expect(offer(`c;${atLimit}AAAA`).events).toEqual([]);
+      const parser = new TerminalProtocolParser();
+      parser.process(`\x1b]52;c;${atLimit.slice(0, 9_000)}`);
+      expect(parser.process(`${atLimit.slice(9_000)}\x07`).events).toHaveLength(1);
+    });
+
+    it('reaches the renderer only through its own collector', () => {
+      const { events } = offer(`c;${b64('hi')}`);
+      expect(collectTerminalClipboardOffers(events)).toEqual(['hi']);
+      expect(collectTerminalProtocolResponses(events)).toEqual([]);
+      expect(collectTerminalSemanticEvents(events)).toEqual([]);
+    });
   });
 
   it('parses and strips CWD OSC sequences into semantic events', () => {

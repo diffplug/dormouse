@@ -119,7 +119,10 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
         // included, and the window receiving it re-derives the semantic and
         // Tool events from them — a held copy would apply on top of what the
         // replay rebuilt, and `commandStart` is not idempotent.
-        "pty:data" | "terminal:semanticEvents" | "terminal:toolEvents" => match str_field(data, "id") {
+        "pty:data"
+        | "terminal:semanticEvents"
+        | "terminal:toolEvents"
+        | "terminal:clipboardOffer" => match str_field(data, "id") {
             Some(id) if view.awaiting_replay.contains_key(id) => Route::Drop,
             Some(id) => showing(view, id),
             None => Route::Broadcast,
@@ -637,6 +640,11 @@ mod tests {
                 "terminal:toolEvents",
                 json!({"id":"a"}),
                 Route::EmitTo("main"),
+            ),
+            (
+                "terminal:clipboardOffer",
+                json!({"id":"b"}),
+                Route::EmitTo("ws-2"),
             ),
             ("pty:exit", json!({"id":"b"}), Route::EmitTo("ws-2")),
             ("pty:replay", json!({"id":"a"}), Route::EmitTo("main")),
