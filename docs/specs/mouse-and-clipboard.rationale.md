@@ -10,7 +10,7 @@
 
 ## 4. Copy Editor
 
-The editor replaced a two-button Copy Raw / Copy Rewrapped popup. Three shapes were prototyped side by side (the `Prototypes/Copy editor` stories, 2026-09): a numbered chooser, copy-then-show-a-receipt, and this editor. The editor won because restating the selection at full width with every break visible is what lets a user see why a paste came out wrong. Its keys are letters rather than digits: a receipt that took digits after a copy collided with TUIs that answer prompts by number (Claude Code's `1` / `2` / `3` permission menu), and `e` already meant "extend" mid-drag (§5).
+The editor replaced a two-button Copy Raw / Copy Rewrapped popup. Three shapes were prototyped side by side as Storybook stories (2026-09, since deleted; commit `8139a27eb`): a numbered chooser, copy-then-show-a-receipt, and this editor. The editor won because restating the selection at full width with every break visible is what lets a user see why a paste came out wrong. Its keys are letters rather than digits: a receipt that took digits after a copy collided with TUIs that answer prompts by number (Claude Code's `1` / `2` / `3` permission menu), and `e` already meant "extend" mid-drag (§5).
 
 ## 4.6 The Program's Own Copy (OSC 52)
 
