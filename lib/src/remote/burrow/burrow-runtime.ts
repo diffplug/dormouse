@@ -58,7 +58,7 @@ import {
 } from 'remote-lib-common';
 import type { BurrowEnrollment } from './enrollment';
 import { createSerialQueue } from '../../host/remote/serial-queue';
-import type { DirectPeerFactory } from '../direct/direct-peer';
+import type { DirectPeering } from '../direct/direct-peer';
 import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import { loadBurrowAcl } from './acl';
 import {
@@ -279,12 +279,12 @@ export interface BurrowOptions {
   /** Auto-reconnect with backoff (default true; tests pass false). */
   reconnect?: boolean;
   /**
-   * How this host builds a peer connection for the direct path
-   * (`docs/specs/remote-api.md` → Transport → "Direct path"), or `null` where it
-   * has none. Absent, every `direct-offer` is declined and every session stays
-   * relayed.
+   * How this host takes the direct path (`docs/specs/remote-api.md` →
+   * Transport → "Direct path"). Absent, or with no factory, every
+   * `direct-offer` is declined and every session stays relayed; a path
+   * policy's refusal ends the session.
    */
-  createDirectPeer?: DirectPeerFactory;
+  directPeering?: DirectPeering;
 }
 
 const INITIAL_BACKOFF_MS = 1_000;
@@ -306,7 +306,7 @@ export class BurrowRuntime {
   readonly #now: () => number;
   readonly #setTimer: RemoteTimer;
   readonly #reconnect: boolean;
-  readonly #createDirectPeer: DirectPeerFactory | null;
+  readonly #directPeering: DirectPeering;
 
   /**
    * Per-client lifecycle state keyed by clientId. Folding the three concerns
@@ -423,7 +423,7 @@ export class BurrowRuntime {
     this.#onInvitationChanged = options.onInvitationChanged ?? (() => {});
     this.#setTimer = options.setTimer ?? realTimer;
     this.#reconnect = options.reconnect ?? true;
-    this.#createDirectPeer = options.createDirectPeer ?? null;
+    this.#directPeering = options.directPeering ?? { createPeer: null };
   }
 
   get status(): BurrowStatus {
@@ -1465,7 +1465,7 @@ export class BurrowRuntime {
           label: boundedPairingLabel(label),
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
         }),
-      createDirectPeer: this.#createDirectPeer,
+      directPeering: this.#directPeering,
       sendRelay: (ciphertext) =>
         this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext),
       onFatal: () => this.#disposeEstablished(clientId),

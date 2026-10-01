@@ -16,6 +16,7 @@ import { hostOf, useBusyAction } from './remote-control-shared';
 import { HeldEnrollment, RemoteControlSection } from './RemoteControlSection';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
+import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
 import type { UpdatesPort, UpdatesSnapshot } from '../lib/platform/types';
 import { getBurrowStatusSnapshot, subscribeToBurrowStatus } from '../remote/burrow/burrow-status-store';
 import {
@@ -30,6 +31,7 @@ import {
   checksForUpdates,
   holdsToAllowedNetworks,
   opensOneTimeLinks,
+  phoneOnAnyNetwork,
   runsBurrow,
   type NetworkInterfaceInfo,
   type NetworkLevel,
@@ -186,14 +188,14 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
       ...(burrowUsesStun(policy.level)
         ? [
             {
-              to: 'stun.cloudflare.com',
+              to: CLOUDFLARE_STUN_HOST,
               when: 'When a phone connects',
               carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
             },
           ]
         : []),
       {
-        to: holdsToAllowedNetworks(policy.level) ? 'Your phone, on an allowed network' : 'Your phone, on any network',
+        to: phoneOnAnyNetwork(policy) ? 'Your phone, on any network' : 'Your phone, on an allowed network',
         when: 'While connected',
         carries: 'Terminal traffic, end-to-end encrypted.',
       },

@@ -157,7 +157,7 @@ describe('BurrowRuntime bounds', () => {
     const created = new BurrowRuntime({
       enrollment: { ...enrollment, ...enrollmentOverrides },
       reconnect: false,
-      ...(options.createDirectPeer ? { createDirectPeer: options.createDirectPeer } : {}),
+      ...(options.createDirectPeer ? { directPeering: { createPeer: options.createDirectPeer } } : {}),
       createWebSocket: () => (socket = new FakeSocket()),
       loadAcl: () => [] as BurrowAclRecord[],
       saveAcl: () => {},

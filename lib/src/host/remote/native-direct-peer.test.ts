@@ -60,7 +60,7 @@ interface NativePolyfill {
 const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill') as NativePolyfill;
 
 /**
- * No ICE server, as the shipped factories build a peer at every level but
+ * No ICE server, as the Burrow's factory builds a peer at every level but
  * Anywhere: host candidates only, and nothing here reaches the network.
  */
 const buildPeer = (): DirectPeerLike => new RTCPeerConnection({ iceServers: [] });

@@ -10,6 +10,7 @@ import {
   UNENROLLED_STATUS,
   enrolledStatus,
 } from '../host/remote/test-burrow-link';
+import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
 import {
   networkPolicyResult,
   nothingPolicy,
@@ -181,7 +182,7 @@ export const Anywhere: Story = {
   play: async ({ canvasElement }) => {
     const canvas = await settled(canvasElement);
     await expect(canvas.getByRole('radio', { name: /^Anywhere/ })).toHaveAttribute('aria-checked', 'true');
-    await canvas.findByText('stun.cloudflare.com');
+    await canvas.findByText(CLOUDFLARE_STUN_HOST);
     await canvas.findByText('Your phone, on any network');
     await canvas.findByText(/Your phone can be on any network\./);
     await expect(canvas.queryByText('Allowed networks')).toBeNull();
@@ -197,7 +198,7 @@ export const SwitchingLevels: Story = {
     await canvas.findByText('Allowed networks');
     await canvas.findByText('Your phone, on an allowed network');
     await userEvent.click(canvas.getByRole('radio', { name: /^Anywhere/ }));
-    await canvas.findByText('stun.cloudflare.com');
+    await canvas.findByText(CLOUDFLARE_STUN_HOST);
     await expect(canvas.queryByText('Allowed networks')).toBeNull();
     await userEvent.click(canvas.getByRole('radio', { name: /^Nothing/ }));
     await canvas.findByText(/^Nothing\. Terminals and browser panes/);

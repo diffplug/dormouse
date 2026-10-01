@@ -20,8 +20,6 @@ In September 2026, both production installations use `createAskSurfaceProvider`:
 
 ## Direct path
 
-**Why host candidates alone reach.** The self-host deployment is a tailnet: the Burrow's tailnet address is a host candidate the phone can route to, and the phone's own mDNS-obfuscated candidate is learned peer-reflexively from the first packet. There a STUN server would buy a public reflexive candidate the deployment does not need, at the price of telling a third party both addresses. Anywhere: see `remote-network.rationale.md` -> "Anywhere".
-
 **What a browser and the addon actually negotiate.** `scripts/direct-interop/run.mjs` is the only fixture that puts the two shipped stacks on one channel — the in-process suites link two fakes or run the addon against itself, and no CI job has a browser. Run on macOS 26.0 with Chromium and node-datachannel 0.33.2 (libdatachannel 0.24.3), 2026-09-10: the browser's whole offer was 587 characters against `MAX_DIRECT_SDP_LENGTH`'s 2 000, one host candidate on a machine with one usable interface; the association reported `maxMessageSize` 262 144 at both ends; and 65 535-, 4 096-, and 33-byte frames crossed browser→addon→browser byte for byte and in order.
 
 **Why the SDP bound is measured rather than reasoned about.** 587 characters is 29% of the budget on a host with one interface, and each further candidate line costs roughly 80 more — so the headroom is real but it is a property of the machine, not of the code. A host with docker bridges, VMs, and several VPNs is the case that would spend it, and the failure there is silent by design: the attempt is skipped and the session stays relayed. Re-run the fixture on such a host before treating the bound as settled.

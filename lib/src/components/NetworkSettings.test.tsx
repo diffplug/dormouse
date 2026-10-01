@@ -11,7 +11,7 @@ import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
 import { makeStubUpdatesPort } from '../lib/platform/test-ports';
-import { CLOUDFLARE_STUN_URL } from '../remote/direct/ice-servers';
+import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
 import {
   ANYWHERE_ON as ANYWHERE,
   LAN,
@@ -91,7 +91,7 @@ describe('connectionsFor', () => {
         carries: 'Encrypted handshakes. Never terminal traffic.',
       },
       {
-        to: 'stun.cloudflare.com',
+        to: CLOUDFLARE_STUN_HOST,
         when: 'When a phone connects',
         carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
       },
@@ -102,12 +102,6 @@ describe('connectionsFor', () => {
     // adds no Relay or push row; the networks left allowed add nothing either.
     const enrolled = { ...UNENROLLED_STATUS, enrolled: true, pairedClients: 1 };
     expect(connectionsFor(facts({ policy: { ...ANYWHERE, allowed: [LAN] }, status: enrolled }))).toEqual(rows);
-  });
-
-  it('names the STUN server the transport gathers through', () => {
-    // `<scheme>:<host>:<port>`: a server changed there must change the row.
-    const [, host] = CLOUDFLARE_STUN_URL.split(':');
-    expect(connectionsFor(facts({ policy: ANYWHERE })).find((row) => row.when === 'When a phone connects')?.to).toBe(host);
   });
 
   it('lists the Relay always, once enrolled, and the phone directly, under My Relay only', () => {

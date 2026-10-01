@@ -315,18 +315,6 @@ transient: `MAX_ESTABLISHED_E2E_SESSIONS` × 4 MiB = 64 MiB of held ciphertext i
 all sixteen authorized phones cut over at once, on a machine that is already
 running their terminals.
 
-**Why ICE servers are a rule, not a default.** A STUN server learns the
-client's public address and the fact of a session, from a party neither
-endpoint chose; a TURN server learns the traffic pattern and carries the
-ciphertext, which is exactly the position the Relay already holds and the whole
-model treats as untrusted; a one-time session is direct-only by design, so it
-never needs TURN. The self-host deployment is a tailnet, where host candidates
-reach on both ends, so the servers buy connectivity that is already there. A
-STUN answer is unauthenticated, and the worst a false one does is advertise a
-candidate that never connects: the session's ciphers decide what rides the
-channel, not the address. Anywhere's STUN: see `remote-network.rationale.md` ->
-"Anywhere".
-
 **What the listener actually opens** *(measured 2026-09, standalone Burrow on
 macOS)*: four host candidates sharing one port, no loopback and no link-local
 address among them. One socket on the unspecified address, advertised once per

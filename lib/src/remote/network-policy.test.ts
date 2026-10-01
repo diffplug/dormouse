@@ -14,6 +14,7 @@ import {
   levelsFor,
   opensOneTimeLinks,
   parseNetworkPolicy,
+  phoneOnAnyNetwork,
   runsBurrow,
   storedNetworkPolicy,
   type NetworkPolicy,
@@ -49,6 +50,14 @@ describe('what each level opens', () => {
 
   it('holds a phone’s path to the allowed networks under Local networks alone', () => {
     expect(NETWORK_LEVELS.filter(holdsToAllowedNetworks)).toEqual(['local']);
+  });
+
+  it('lets a phone on any network under Anywhere alone, whatever is allowed', () => {
+    for (const allowed of [[], LOCAL.allowed]) {
+      expect(NETWORK_LEVELS.filter((level) => phoneOnAnyNetwork({ ...NOTHING, level, allowed }))).toEqual([
+        'anywhere',
+      ]);
+    }
   });
 });
 

@@ -25,7 +25,7 @@ import {
 } from 'remote-lib-common';
 
 import { DirectEndpoint, type DirectCarrier } from '../direct/direct-endpoint';
-import type { DirectPathPolicy, DirectPeerFactory, DirectViolationCause } from '../direct/direct-peer';
+import type { DirectPeering, DirectViolationCause } from '../direct/direct-peer';
 import type { RemoteTimer } from '../ws';
 
 /**
@@ -88,17 +88,12 @@ export interface EstablishedE2eSessionDeps {
    */
   createApi(send: (payload: unknown) => void): RemoteApiSessionLike;
   /**
-   * How this host builds a peer connection for the direct path, or `null` where
-   * it has none — then every `direct-offer` is declined and the session stays
-   * relayed.
+   * How this host takes the direct path: with no factory every `direct-offer`
+   * is declined and the session stays relayed; a path policy's refusal
+   * (`docs/specs/remote-network.md` -> "Local networks") ends the session
+   * through {@link onFatal}, `path-refused`.
    */
-  readonly createDirectPeer: DirectPeerFactory | null;
-  /**
-   * What the network policy holds this session's direct path to, if anything
-   * (`docs/specs/remote-network.md` -> "Local networks"); a refusal ends the
-   * session through {@link onFatal}, `path-refused`.
-   */
-  readonly directPathPolicy?: DirectPathPolicy;
+  readonly directPeering: DirectPeering;
   /**
    * Put one transport ciphertext on the relay path, in whatever envelope the
    * owner's socket carries. Every Burrow→Client byte this session sends before
@@ -157,8 +152,7 @@ export class EstablishedE2eSession {
     this.#now = deps.now;
     this.#api = deps.createApi((payload) => this.#sendApp(payload));
     this.#direct = new DirectEndpoint('answerer', {
-      createPeer: deps.createDirectPeer,
-      pathPolicy: deps.directPathPolicy,
+      peering: deps.directPeering,
       sendSignal: (signal) => this.#sendSignal(signal),
       sendRelay: this.#sendRelay,
       receive: (ciphertext, carrier) => this.#receive(ciphertext, carrier),

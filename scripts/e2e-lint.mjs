@@ -363,20 +363,16 @@ export const RULES = [
     violation: '\nconst __selftest = { iceServers: [] };\n',
   },
   {
-    rule: 'No `iceServers` list literal with an entry in a peer factory',
-    security: 'never as a list literal with an entry',
+    rule: '`CLOUDFLARE_STUN_URL` is named only in `ice-servers.ts`',
+    security: 'listed only by `stunServers` there',
     kind: 'forbid',
-    // Only the factories: the rule above already refuses the word everywhere
-    // else. A factory takes its list from `stunServers`; a literal entry there
-    // would be a server every peer gets, whatever its flag. The empty array
-    // must keep passing, so the pattern demands a first element: anything
-    // after `[` that is neither whitespace nor the closing bracket. A server
-    // assembled at runtime is past what a regex can see, which is why the spec
-    // row is read by hand as well.
-    files: PEER_FACTORIES,
-    pattern: /iceServers\s*:\s*\[\s*[^\]\s]/g,
+    trees: [...SOURCE_TREES, 'hosted/server/'],
+    // The name, not a list: a file that holds the constant can list it around
+    // `stunServers` and its flag, so only the module that defines it may.
+    pattern: /\bCLOUDFLARE_STUN_URL\b/g,
+    allow: (_match, file) => file === ICE_SERVER_MODULE,
     violationFile: NATIVE_PEER_FACTORY,
-    violation: '\nconst __selftest = { iceServers: [{ urls: CLOUDFLARE_STUN_URL }] };\n',
+    violation: "\nimport { CLOUDFLARE_STUN_URL } from '../../remote/direct/ice-servers';\n",
   },
   {
     rule: '`stunServers` is named only in the two peer factories',

@@ -50,14 +50,13 @@ import {
   makeStubBurrowLink,
   OFFER_STATUS,
   oneTimeWaiting,
-  RELAY_ON,
   SELF_HOST_RELAY_ORIGIN,
   SELF_HOST_UNENROLLED_STATUS as SELF_HOST_NOT_ENROLLED,
   setupQrResult,
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-burrow-link';
 import type { OneTimeEndReason, OneTimeState } from '../remote/burrow/one-time-runtime';
-import { networkPolicyResult, nothingPolicy, type NetworkPolicy } from '../remote/network-policy';
+import { networkPolicyResult, type NetworkPolicy } from '../remote/network-policy';
 import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getOneTimeSnapshot, subscribeToOneTime } from '../remote/burrow/one-time-store';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
@@ -1732,7 +1731,7 @@ describe('One-time connection', () => {
   });
 
   it('reports every other ending in its own fixed sentence', async () => {
-    const copy = oneTimeEndedCopy(hostOf(NOT_ENROLLED.relayOrigin));
+    const copy = oneTimeEndedCopy(hostOf(NOT_ENROLLED.relayOrigin), false);
     const reasons = Object.keys(copy) as Array<Exclude<OneTimeEndReason, 'user-ended'>>;
     expect(new Set(Object.values(copy)).size).toBe(reasons.length);
     for (const reason of reasons) {
@@ -1781,18 +1780,14 @@ describe('One-time connection', () => {
     },
   );
 
-  it('reads no level but Anywhere as any network', async () => {
-    // The service shows no link under these, but the panel can hold a state a
-    // moment before the policy's own event lands.
-    for (const policy of [nothingPolicy(), RELAY_ON, { ...LOCAL_ON, allowed: [] }]) {
-      const service = oneTimeService({ status: 'ended', reason: 'direct-failed' }, { policy });
-      await renderOneTime(service);
-      expect(oneTimeOutcome()?.textContent).toBe(oneTimeEndedCopy(hostOf(NOT_ENROLLED.relayOrigin))['direct-failed']);
-      await act(async () => service.set({ status: 'idle' }));
-      expect(text()).toContain('Your phone must be on an allowed network.');
-      await act(async () => root.unmount());
-      root = createRoot(container);
-    }
+  it('reads a policy it has not read as an allowed network', async () => {
+    // Which levels mean any network is `phoneOnAnyNetwork`'s; the panel can
+    // hold a state before the policy's answer lands.
+    const service = oneTimeService({ status: 'ended', reason: 'direct-failed' });
+    await renderOneTime(service);
+    expect(oneTimeOutcome()?.textContent).toBe(oneTimeEndedCopy(hostOf(NOT_ENROLLED.relayOrigin), false)['direct-failed']);
+    await act(async () => service.set({ status: 'idle' }));
+    expect(text()).toContain('Your phone must be on an allowed network.');
   });
 
   it('falls back for a reason this build has no sentence for, prototype names included', async () => {

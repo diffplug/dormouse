@@ -152,12 +152,29 @@ back intact. So an offer stripped to nothing costs no connection, and
 
 ## Anywhere
 
+**Why no ICE server outside Anywhere, and never TURN.** A STUN server learns the
+public address of each end that asks it, and the fact of a session, from a
+party neither endpoint chose. The self-host deployment is a tailnet, where host
+candidates reach on both ends — the Burrow's tailnet address is one the phone
+can route to, and the phone's mDNS-obfuscated candidate is learned
+peer-reflexively from its first check — so there a server buys connectivity
+that is already there. A STUN answer is unauthenticated, and the worst a false
+one does is advertise a candidate that never connects: the session's ciphers
+decide what rides the channel, not the address. A TURN server would learn the
+traffic pattern and carry the ciphertext, exactly the position the Relay
+already holds and the security model treats as untrusted, and a one-time
+session is direct-only by design, so it never needs one.
+
 **Why Hosted-served Clients always use STUN.** Hosted runs on Cloudflare, so a
 phone that loaded Pocket or the one-time page from `hosted.dormouse.sh` has
 already shown Cloudflare its address. STUN to Cloudflare discloses nothing new,
 and making it unconditional removes a policy signal from the wire and from
 version skew. The Burrow's STUN is what reveals the laptop's public address,
-hence the Burrow alone depends on the level.
+hence the Burrow alone depends on the level. The cost falls on Local networks,
+whose phone gathers a srflx it cannot use: with the grace its attempt opened at
+0.59 s against 0.22 s with no STUN (2026-09-30, `remote-api.rationale.md` ->
+"Direct path"), and on a network that drops UDP 3478 its offer waits the whole
+3 s `DIRECT_GATHER_TIMEOUT_MS`.
 
 **The endpoint.** Cloudflare documents `stun:stun.cloudflare.com:3478` as free
 and unlimited in its Realtime FAQ; ordinary Workers expose no UDP listener, so

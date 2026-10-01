@@ -99,6 +99,14 @@ export function holdsToAllowedNetworks(level: NetworkLevel): boolean {
 }
 
 /**
+ * Whether a phone on a one-time link under `policy` may be on any network: a
+ * link opens and no path is held to the allowed networks — Anywhere alone.
+ */
+export function phoneOnAnyNetwork(policy: NetworkPolicy): boolean {
+  return opensOneTimeLinks(policy) && !holdsToAllowedNetworks(policy.level);
+}
+
+/**
  * Whether the Burrow's direct peers gather through Cloudflare STUN under
  * `level`, which shows Cloudflare this computer's public address: Anywhere
  * alone (`docs/specs/remote-network.md` → "Anywhere").

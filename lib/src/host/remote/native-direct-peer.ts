@@ -5,10 +5,9 @@
  * → "The direct path").
  *
  * Host code, so nothing here imports the webview library — only the structural
- * `DirectPeerLike` seam, as a type, and `ice-servers.ts`, which imports
- * nothing. The polyfill satisfies that seam without adaptation; the only thing
- * this module adds is *when* the addon is loaded and what happens when it will
- * not load.
+ * `DirectPeerLike` seam, as a type, and the import-free `ice-servers.ts`. The
+ * polyfill satisfies that seam without adaptation; the only thing this module
+ * adds is *when* the addon is loaded and what happens when it will not load.
  *
  * **The addon is never touched before the first offer.** It is a native library
  * with its own thread pool: loading it at boot would cost every sidecar start,
@@ -22,10 +21,8 @@ import { stunServers } from '../../remote/direct/ice-servers';
 
 /**
  * A Burrow host's peer factory: a `DirectPeerFactory` that also takes whether
- * to gather through Cloudflare STUN. The Burrow service chooses that flag with
- * the path policy, from the policy a runtime opens or starts under, and hands
- * the runtime a `DirectPeerFactory` with it bound, so no runtime ever chooses
- * it (`docs/specs/remote-network.md` -> "Anywhere").
+ * to gather through Cloudflare STUN, which `directPeeringFor` in
+ * `direct-peering.ts` binds.
  */
 export type BurrowDirectPeerFactory = (
   pathPolicy?: DirectPathPolicy,

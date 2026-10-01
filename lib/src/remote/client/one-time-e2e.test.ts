@@ -148,8 +148,9 @@ function makeRuntime(
     createWebSocket: (url) => rendezvous.createBurrowSocket(url),
     createSession: ({ burrowId, send, label }) =>
       new RemoteApiSession({ burrowId, send, provider, holder: { id: 'holder-1', label } }),
-    createDirectPeer:
-      options.createDirectPeer === undefined ? () => network.createAnswerer() : options.createDirectPeer,
+    directPeering: {
+      createPeer: options.createDirectPeer === undefined ? () => network.createAnswerer() : options.createDirectPeer,
+    },
     burrowLabel: BURROW_LABEL,
     requestApproval: (request) => void approvals.push(request),
     dismissApproval: () => {},

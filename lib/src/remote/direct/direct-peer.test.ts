@@ -182,30 +182,27 @@ describe('DirectPeer', () => {
 
   /**
    * The `icecandidate` string is spelled by the stack: a browser's is
-   * `candidate:… typ srflx …`, `node-datachannel`'s polyfill hands up the SDP
-   * line itself, `a=candidate:… typ srflx raddr … rport …`. The event alone arms
-   * the grace here, the description the wait began with holding no srflx. The
-   * live spellings, and when each end settled on them, are checked by hand by
-   * `scripts/direct-interop/run.mjs --stun`.
+   * `candidate:… typ srflx …`, the case above, and `node-datachannel`'s
+   * polyfill hands up the SDP line itself, `a=candidate:… typ srflx raddr …
+   * rport …`. The event alone arms the grace here, the description the wait
+   * began with holding no srflx. The live spellings, and when each end settled
+   * on them, are checked by hand by `scripts/direct-interop/run.mjs --stun`.
    */
-  it.each(['browser', 'polyfill'] as const)(
-    'starts the grace on a server-reflexive candidate in the %s spelling',
-    async (form) => {
-      const { offerer, clientPeer, timers } = pair({ gathering: 'pending' });
+  it('starts the grace on a server-reflexive candidate in the polyfill’s spelling', async () => {
+    const { offerer, clientPeer, timers } = pair({ gathering: 'pending' });
 
-      const offering = clientPeer.offer();
-      await flushMicrotasks();
-      offerer.gatherCandidate('srflx', { form });
-      expect(liveDelays(timers)).toEqual([
-        DIRECT_SETUP_TIMEOUT_MS,
-        DIRECT_GATHER_TIMEOUT_MS,
-        DIRECT_SRFLX_GRACE_MS,
-      ]);
+    const offering = clientPeer.offer();
+    await flushMicrotasks();
+    offerer.gatherCandidate('srflx', { form: 'polyfill' });
+    expect(liveDelays(timers)).toEqual([
+      DIRECT_SETUP_TIMEOUT_MS,
+      DIRECT_GATHER_TIMEOUT_MS,
+      DIRECT_SRFLX_GRACE_MS,
+    ]);
 
-      timers.fireAt(DIRECT_SRFLX_GRACE_MS);
-      expect(await offering).toContain('typ srflx');
-    },
-  );
+    timers.fireAt(DIRECT_SRFLX_GRACE_MS);
+    expect(await offering).toContain('typ srflx');
+  });
 
   /**
    * An answerer's stack starts gathering inside `setRemoteDescription`, so a

@@ -6,9 +6,9 @@
  * the W3C API this stack calls, so the browser's `RTCPeerConnection`, the
  * sidecar's native polyfill, and the in-memory fake all satisfy the same shape
  * and neither endpoint reaches for a global. Constructing one is the injected
- * factory's job (`PocketClientDeps.createDirectPeer`,
- * `BurrowOptions.createDirectPeer`), which is also where the ICE servers are
- * chosen (`ice-servers.ts`) — nothing here knows what an ICE server is.
+ * factory's job (`PocketClientDeps.createDirectPeer`, a Burrow runtime's
+ * {@link DirectPeering}), which is also where the ICE servers are chosen
+ * (`ice-servers.ts`) — nothing here knows what an ICE server is.
  *
  * The wrapper owns the two halves of one negotiation and the channel's four
  * events. It owns no policy: what a closed channel *means* depends on whether
@@ -123,6 +123,18 @@ export interface DirectPeerLike {
  * the socket it binds.
  */
 export type DirectPeerFactory = (pathPolicy?: DirectPathPolicy) => DirectPeerLike | null;
+
+/**
+ * How one end takes the direct path, as one value: the factory that builds
+ * each attempt's peer, `null` where this end has none, and what the Burrow's
+ * network policy holds each attempt to, absent for no restriction. A Burrow
+ * host chooses both from one policy (`docs/specs/remote-network.md` ->
+ * "Anywhere"), and they reach the endpoint together.
+ */
+export interface DirectPeering {
+  readonly createPeer: DirectPeerFactory | null;
+  readonly pathPolicy?: DirectPathPolicy;
+}
 
 /** The selected candidate pair's two addresses, each `null` where unreported. */
 export interface DirectSelectedPair {

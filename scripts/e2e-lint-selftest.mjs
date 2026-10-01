@@ -218,6 +218,7 @@ for (const name of [
   'Neither the Relay nor Hosted names a session control message or an SDP',
   "No ICE server URL but Cloudflare's STUN, and that only in its constant's file — never TURN",
   '`iceServers` is named only in the two peer factories',
+  '`CLOUDFLARE_STUN_URL` is named only in `ice-servers.ts`',
   '`stunServers` is named only in the two peer factories',
 ]) {
   const rule = RULES.find((rule) => rule.rule === name);
@@ -228,13 +229,14 @@ for (const name of [
   selftest.withAppended(HOSTED_ROUTE, rule.violation, `${name}\n      the same violation in ${HOSTED_ROUTE} stays green`);
 }
 
-// The ICE rules allow exactly one URL in one file, and `iceServers` and
-// `stunServers` in two: each way past those allowances must redden, not just
-// the stray STUN server, list, and call the loop appends. Cloudflare's own host
-// under another scheme is not its STUN, the URL outside its constant is a
-// second spelling, a factory that builds the list from a literal entry ignores
-// its flag, a call beside the definition or through an alias is a third
-// caller, and the native factory's flag is the Burrow service's to choose.
+// The ICE rules allow exactly one URL and its constant in one file, and
+// `iceServers` and `stunServers` in two: each way past those allowances must
+// redden, not just the stray STUN server, list, import, and call the loop
+// appends. Cloudflare's own host under another scheme is not its STUN, the URL
+// outside its constant is a second spelling, a factory that lists the constant
+// itself ignores its flag, a call beside the definition or through an alias is
+// a third caller, and the native factory's flag is the Burrow service's to
+// choose.
 for (const [file, violation] of [
   [ICE_SERVER_MODULE, "\nexport const __SELFTEST = 'turn:stun.cloudflare.com:3478';\n"],
   [ICE_SERVER_MODULE, "\nexport const __SELFTEST = 'turns:stun.cloudflare.com:5349';\n"],
@@ -243,11 +245,12 @@ for (const [file, violation] of [
   [ICE_SERVER_MODULE, '\nexport const __SELFTEST = (host: string) => `turn:${host}`;\n'],
   ...PEER_FACTORIES.flatMap((factory) => [
     [factory, "\nconst __selftest = 'stun:stun.cloudflare.com:3478';\n"],
-    [factory, "\nconst __selftest = { iceServers: [{ urls: 'x' }] };\n"],
+    [factory, '\nconst __selftest = [{ urls: CLOUDFLARE_STUN_URL }];\n'],
   ]),
   [ONE_TIME_PAGE, '\nconst __selftest = (iceServers: string[]) => new RTCPeerConnection({ iceServers });\n'],
   [ICE_SERVER_MODULE, '\nexport const __SELFTEST = stunServers(true);\n'],
   [ONE_TIME_PAGE, "\nimport { stunServers as __selftest } from '../direct/ice-servers';\n"],
+  [ONE_TIME_PAGE, "\nimport { CLOUDFLARE_STUN_URL as __selftest } from '../direct/ice-servers';\n"],
   [NATIVE_PEER_FACTORY, '\nconst __selftest = stunServers(\n  true,\n);\n'],
 ]) {
   selftest.withAppended(file, violation, `an ICE server past its allowance in ${file} stays green: ${violation.trim()}`);

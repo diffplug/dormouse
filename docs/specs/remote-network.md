@@ -52,13 +52,13 @@ Source of truth: `holdsToAllowedNetworks` in `lib/src/remote/network-policy.ts`;
 
 Under `anywhere` a one-time link opens with no network allowed, and its attempt carries no path policy: its socket binds every interface, and no pair is refused.
 
-- **Must gather through Cloudflare STUN on the Burrow under Anywhere alone**, else through no ICE server.
+- **Must gather through Cloudflare STUN on the Burrow under Anywhere alone**, else through no ICE server (rationale).
 - **Must choose a runtime's STUN and its path policy together, from the policy it opens or starts under**, and hold both for its life: a change to either ends it ("Policy").
 - **Clients Hosted serves must always gather through Cloudflare STUN; Clients a self-host Relay serves, through none.** No policy crosses the wire, and a Client's extra candidates cannot widen Local networks, whose Burrow checks the path (rationale).
-- **Never TURN** (direct-only: `docs/specs/one-time.md` -> "Burrow runtime").
+- **Never TURN** (direct-only: `docs/specs/one-time.md` -> "Burrow runtime"; rationale).
 - **Never proxy STUN over an HTTP or WebSocket endpoint**; only STUN on the WebRTC socket observes its mapping.
 
-Source of truth: `CLOUDFLARE_STUN_URL` and `stunServers` in `lib/src/remote/direct/ice-servers.ts`; `burrowUsesStun` in `lib/src/remote/network-policy.ts`; `#directPathFor` in `lib/src/host/remote/service.ts`; `BurrowDirectPeerFactory` and `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `hostedDirectPeer` and `selfHostDirectPeer` in `lib/src/remote/client/browser-direct-peer.ts`. Pinned by `lib/src/host/remote/service.test.ts`, `lib/src/remote/client/browser-direct-peer.test.ts`, and on the real addon `lib/src/host/remote/native-direct-peer.test.ts`; by hand, `scripts/direct-interop/run.mjs --stun` (rationale); audited at `docs/specs/security-remote.md` -> "Direct path".
+Source of truth: `CLOUDFLARE_STUN_URL` and `stunServers` in `lib/src/remote/direct/ice-servers.ts`; `burrowUsesStun` in `lib/src/remote/network-policy.ts`; `directPeeringFor` in `lib/src/host/remote/direct-peering.ts`; `BurrowDirectPeerFactory` and `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `hostedDirectPeer` and `selfHostDirectPeer` in `lib/src/remote/client/browser-direct-peer.ts`. Pinned by `lib/src/host/remote/service.test.ts`, `lib/src/remote/client/browser-direct-peer.test.ts`, and on the real addon `lib/src/host/remote/native-direct-peer.test.ts`; by hand, `scripts/direct-interop/run.mjs --stun` (rationale); audited at `docs/specs/security-remote.md` -> "Direct path".
 
 ## Updates
 
@@ -82,7 +82,7 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 |---|---|
 | the Hosted origin: only while a one-time link is open, handshakes and never terminal traffic | `opensOneTimeLinks` (`local`, a network allowed; `anywhere`) |
 | `stun.cloudflare.com`, as a phone connects | `burrowUsesStun` (`anywhere`) |
-| your phone, on an allowed network where `holdsToAllowedNetworks` (`local`), else any | `opensOneTimeLinks` |
+| your phone, on any network where `phoneOnAnyNetwork` (`anywhere`), else an allowed one | `opensOneTimeLinks` |
 | the Relay origin: always (unenrolled, "once this computer is enrolled") | `relay` |
 | your phone, directly | `relay` |
 | the Relay origin to the phone's push service, "where push is on" | `relay`, a phone paired (rationale) |
@@ -94,7 +94,7 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 - **Updates**: a self-host build says it never updates itself, and a host with `hostOwnsUpdates` (VS Code) names the Marketplace. Any other build updates itself: the automatic-check switch, absent under `nothing`, over "Checked at each launch." or "Checked only when you ask."; **only with the platform's `updates` port** (`docs/specs/auto-update.md` -> "Threading") the last successful check — "Never checked on this computer." for none — Check now, and the week the Baseboard waits.
 - **Under `nothing`, Notifications' push and managed-voice lines say they are off because Network is set to Nothing**, each linking to this topic. **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
 
-Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connectionsFor`, and `policyForLevel` in `lib/src/components/NetworkSettings.tsx`; `opensOneTimeLinks`, `burrowUsesStun`, and `holdsToAllowedNetworks` in `lib/src/remote/network-policy.ts`; `changeNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`; `AlarmSettingsSection` in `lib/src/components/SettingsDialog.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`. Pinned by `lib/src/components/NetworkSettings.test.tsx`, `lib/src/components/SettingsDialog.test.tsx`, `lib/src/components/Baseboard.test.tsx`, and `lib/src/stories/NetworkSettings.stories.tsx`.
+Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connectionsFor`, and `policyForLevel` in `lib/src/components/NetworkSettings.tsx`; `opensOneTimeLinks`, `burrowUsesStun`, `phoneOnAnyNetwork`, and `holdsToAllowedNetworks` in `lib/src/remote/network-policy.ts`; `changeNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`; `AlarmSettingsSection` in `lib/src/components/SettingsDialog.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`. Pinned by `lib/src/components/NetworkSettings.test.tsx`, `lib/src/components/SettingsDialog.test.tsx`, `lib/src/components/Baseboard.test.tsx`, and `lib/src/stories/NetworkSettings.stories.tsx`.
 
 ## Future
 
@@ -113,7 +113,7 @@ Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connecti
 - **Must use WebSocket hibernation**, rebuilding routing from attachments and durable metadata, and never store terminal ciphertext.
 - **Under Local networks a paired phone's session is direct-only**, with the one-time rule: an application message off the Relay ends it unread. **May fall back to Hosted relaying under Anywhere.**
 - **Must choose Pocket's direct-peer factory by deployment** ("Anywhere"), one bundle serving both; `lib/src/remote/pocket-app/App.tsx` hard-codes `selfHostDirectPeer`.
-- **Must hand `BurrowRuntime` the path policy `#directPathFor` chooses beside its factory, and restart it on any change `samePaths` sees** ("Anywhere").
+- **Must start `BurrowRuntime` on the level's `directPeeringFor`, restarting it on any change `samePaths` sees** ("Anywhere").
 - **Must accept sealed push independently of terminal transport**, under `docs/specs/remote-security-model.md` -> "Push sealing".
 - **Must resolve the one-origin pin first** (`docs/specs/relay.md` -> "The one-origin pin"): Pocket and the Relay share `hosted.dormouse.sh`, whose root holds the account app.
 - **Never enroll Hosted into a customer's tailnet** or mint per-customer hostnames.

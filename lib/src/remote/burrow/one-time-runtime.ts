@@ -56,7 +56,7 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import type { DirectPathPolicy, DirectPeerFactory, DirectViolationCause } from '../direct/direct-peer';
+import type { DirectPeering, DirectViolationCause } from '../direct/direct-peer';
 import { parseOneTimeFrame, RendezvousHold } from '../one-time-rendezvous';
 import { closeCode, realTimer, type RemoteTimer, type RemoteWebSocket } from '../ws';
 import {
@@ -158,18 +158,13 @@ export interface OneTimeRuntimeOptions {
    */
   createSession(opts: RemoteApiSessionContext): RemoteApiSessionLike;
   /**
-   * How this host builds a peer connection for the direct path, or `null` where
-   * it has none — then every offer is declined, and the connection ends
-   * `direct-failed`.
-   */
-  readonly createDirectPeer: DirectPeerFactory | null;
-  /**
-   * What the network policy holds the direct path to — under Local networks,
-   * the allowed networks (`docs/specs/remote-network.md` -> "Local networks") —
-   * or absent for no restriction. A refusal ends the connection
+   * How this host takes the direct path: with no factory every offer is
+   * declined, and the connection ends `direct-failed`; a path policy's refusal
+   * — under Local networks, the allowed networks
+   * (`docs/specs/remote-network.md` -> "Local networks") — ends it
    * `network-not-allowed`.
    */
-  readonly directPathPolicy?: DirectPathPolicy;
+  readonly directPeering: DirectPeering;
   /** This machine's name, as the phone shows it; bounded here before it is sent. */
   readonly burrowLabel: string;
   /** Surface the request for local approval. */
@@ -221,8 +216,7 @@ export class OneTimeRuntime {
   readonly #origin: string;
   readonly #createWebSocket: (url: string) => RemoteWebSocket;
   readonly #createSession: OneTimeRuntimeOptions['createSession'];
-  readonly #createDirectPeer: DirectPeerFactory | null;
-  readonly #directPathPolicy: DirectPathPolicy | undefined;
+  readonly #directPeering: DirectPeering;
   readonly #burrowLabel: string;
   readonly #requestApproval: (request: OneTimeApprovalRequest) => void;
   readonly #dismissApproval: () => void;
@@ -284,8 +278,7 @@ export class OneTimeRuntime {
     this.#origin = options.origin;
     this.#createWebSocket = options.createWebSocket;
     this.#createSession = options.createSession;
-    this.#createDirectPeer = options.createDirectPeer;
-    this.#directPathPolicy = options.directPathPolicy;
+    this.#directPeering = options.directPeering;
     this.#burrowLabel = options.burrowLabel;
     this.#requestApproval = options.requestApproval;
     this.#dismissApproval = options.dismissApproval;
@@ -611,8 +604,7 @@ export class OneTimeRuntime {
               if (this.#established === e2e) this.#end('user-ended');
             },
           }),
-        createDirectPeer: this.#createDirectPeer,
-        directPathPolicy: this.#directPathPolicy,
+        directPeering: this.#directPeering,
         sendRelay: (relayed) => this.#sendFrame('transport', relayed),
         onFatal: (reason, cause) => this.#onSessionFatal(e2e, reason, cause),
         onRelayedApp: () => this.#onRelayedApp(e2e),

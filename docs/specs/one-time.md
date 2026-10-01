@@ -489,8 +489,9 @@ sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
   is dropped. The indicator holds it for the window's life, so the panel
   re-reads on mount.
 
-Source of truth: `OneTimeConnection`, `oneTimeEndedCopy`, and
-`ANY_NETWORK_DIRECT_FAILED` in `lib/src/components/OneTimeConnection.tsx`; `QrCode` in
+Source of truth: `OneTimeConnection` and `oneTimeEndedCopy` in
+`lib/src/components/OneTimeConnection.tsx`; `phoneOnAnyNetwork` in
+`lib/src/remote/network-policy.ts`; `QrCode` in
 `lib/src/components/QrCode.tsx`; `OneTimeIndicator` in
 `lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime` and
 `openOneTime` in `lib/src/remote/burrow/one-time-store.ts`. Pinned by

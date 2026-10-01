@@ -97,8 +97,8 @@ Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
 signal always fits one control body.
 
 Which ICE servers each end gathers through:
-[remote-network.md](./remote-network.md) -> "Anywhere" (rationale); Local
-networks restricts a one-time attempt further
+[remote-network.md](./remote-network.md) -> "Anywhere"; Local networks
+restricts a one-time attempt further
 ([remote-network.md](./remote-network.md) -> "Local networks").
 
 **The two shipped stacks are proven against each other by hand**, by
@@ -174,8 +174,8 @@ connection).
 **One peer connection per session**, created at the offer, closed on every
 disposal path, never existing before promotion. **Both ends build it through an
 injected factory** — `ClientSessionCoreDeps.createDirectPeer` (Pocket's through `PocketClientDeps`, the one-time phone's through `OneTimeClientDeps`),
-`BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions`, and
-`OneTimeRuntimeOptions.createDirectPeer` —
+and `BurrowServiceOptions.createDirectPeer`, in each Burrow runtime's
+`DirectPeering` —
 `null` where a runtime has none, so neither end reaches a WebRTC global.
 **Pocket shows which path carries the session**, and where it stayed relayed
 which of the three `DirectRelayCause`s it was — **a closed set, never an

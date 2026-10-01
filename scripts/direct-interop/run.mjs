@@ -34,8 +34,8 @@
  *      browser's mDNS names?
  *   5. With `--stun`, the page builds its peer as the one-time page Hosted
  *      serves does (`hostedDirectPeer`: Cloudflare STUN, always), and the addon
- *      gathers as `burrowUsesStun` says for the level — Anywhere's STUN and
- *      every interface unbound, or with `--allow` Local networks' none
+ *      gathers as `directPeeringFor` chooses for the level — Anywhere's STUN
+ *      and every interface unbound, or with `--allow` Local networks' none
  *      (`docs/specs/remote-network.md` -> "Anywhere"). How far do the srflx
  *      candidates take each description toward `MAX_DIRECT_SDP_LENGTH`, does
  *      each end settle its gathering at completion, at `DIRECT_SRFLX_GRACE_MS`
@@ -88,10 +88,11 @@ const blackhole = process.argv.includes('--stun-blackhole');
 /** Whether the page is the one-time page Hosted serves; see question 5. */
 const stunPage = blackhole || process.argv.includes('--stun');
 /**
- * The level the addon's Burrow runs under, which is what `burrowUsesStun`
- * reads: My Relay only's unrestricted Burrow by default, as Pocket meets it.
+ * The policy the addon's Burrow runs under, which `directPeeringFor` reads: My
+ * Relay only's unrestricted Burrow by default, as Pocket meets it.
  */
 const level = allowed ? 'local' : stunPage ? 'anywhere' : 'relay';
+const networkPolicy = { level, allowed: allowed ?? [], autoUpdate: false };
 
 /**
  * Where `--stun-blackhole` points both factories: TEST-NET-1 (RFC 5737), which
@@ -143,13 +144,12 @@ const temp = await mkdtemp(join(tmpdir(), 'dormouse-direct-interop-'));
 // bundles share nothing, so they are built together.
 const [, browserBundle] = await Promise.all([
   build({
-    // The shipped wrapper, the shipped Burrow factory and its STUN choice, and
-    // the shipped Local networks hold on it.
+    // The shipped wrapper, the shipped Burrow factory, and the shipped choice
+    // of its STUN and its Local networks hold.
     entryPoints: {
       'direct-peer': here('../../lib/src/remote/direct/direct-peer.ts'),
-      'local-networks': here('../../lib/src/host/remote/local-networks.ts'),
+      'direct-peering': here('../../lib/src/host/remote/direct-peering.ts'),
       'native-direct-peer': here('../../lib/src/host/remote/native-direct-peer.ts'),
-      'network-policy': here('../../lib/src/remote/network-policy.ts'),
     },
     outdir: temp,
     outExtension: { '.js': '.cjs' },
@@ -175,17 +175,16 @@ const [, browserBundle] = await Promise.all([
 ]);
 const requireBundle = createRequire(import.meta.url);
 const { DirectPeer } = requireBundle(join(temp, 'direct-peer.cjs'));
-const { localNetworksPath } = requireBundle(join(temp, 'local-networks.cjs'));
+const { directPeeringFor } = requireBundle(join(temp, 'direct-peering.cjs'));
 const { createNativeDirectPeerFactory, disposeNativeDirectPeers } = requireBundle(
   join(temp, 'native-direct-peer.cjs'),
 );
-const { burrowUsesStun } = requireBundle(join(temp, 'network-policy.cjs'));
 const javascript = browserBundle.outputFiles[0].text;
 
 /** For the library version alone: the factory loads the same module itself. */
 const addon = sidecarRequire('node-datachannel');
-/** Whether the addon gathers through STUN: as the Burrow service decides it, from the level. */
-const stun = burrowUsesStun(level);
+/** The direct path as the Burrow service chooses it: STUN and the hold, from the policy. */
+const peering = directPeeringFor(networkPolicy, createNativeDirectPeerFactory());
 
 /**
  * A candidate up to its type, which is where its SDP line and its
@@ -223,7 +222,7 @@ const addonPair = () => {
   }
 };
 
-const policy = allowed && localNetworksPath(allowed);
+const policy = peering.pathPolicy;
 /** What the Local networks hold saw, under `--allow`; see question 4. */
 const path = policy && {
   allowed,
@@ -248,8 +247,8 @@ const pathPolicy = policy && {
     return refusal;
   },
 };
-// The shipped factory: bound where the policy names an address, through STUN as `stun` says.
-const connection = createNativeDirectPeerFactory()(pathPolicy ?? undefined, stun);
+// The shipped factory: bound where the policy names an address, through STUN as the level says.
+const connection = peering.createPeer(pathPolicy);
 if (!connection) throw new Error('the WebRTC addon did not load');
 
 /** The browser's offer as `/answer` received it, described once; see {@link describeSdp}. */
@@ -430,7 +429,6 @@ console.log(
       ...(path ? { path } : {}),
       addon: {
         level,
-        stun,
         iceServers: connection.getConfiguration?.().iceServers,
         received: returned.map((frame) => frame.length),
         expected: FRAME_SIZES,

@@ -24,7 +24,7 @@ import {
   refreshOneTime,
   subscribeToOneTime,
 } from '../remote/burrow/one-time-store';
-import { holdsToAllowedNetworks, opensOneTimeLinks } from '../remote/network-policy';
+import { phoneOnAnyNetwork } from '../remote/network-policy';
 
 /**
  * Why this build offers none, in fixed copy per reason; a reason this build
@@ -45,19 +45,27 @@ const UNAVAILABLE_COPY: Record<OneTimeUnavailableReason, string> = {
  * chosen by a closed reason this machine's own runtime picked**, never text off
  * a wire, and a fallback for a reason a newer VS Code broker knows and this
  * build does not. `host` is this build's relay host, which the rendezvous runs on.
+ * `anyNetwork` ({@link phoneOnAnyNetwork}) has no allowed network to name, so
+ * `direct-failed` suggests another network instead; `network-not-allowed` keeps
+ * its sentence, since no path is held there to end a connection.
  *
  * `user-ended` has no sentence: this machine ended it (End, Cancel), so there is
  * nothing to report, and the panel goes straight back to its button.
  */
-export function oneTimeEndedCopy(host: string): Record<Exclude<OneTimeEndReason, 'user-ended'>, string> {
+export function oneTimeEndedCopy(
+  host: string,
+  anyNetwork: boolean,
+): Record<Exclude<OneTimeEndReason, 'user-ended'>, string> {
   return {
     'user-denied': 'You cancelled the phone’s request, so nothing connected.',
     'confirmation-mismatch': 'The two digits did not match, so nothing connected.',
     expired: 'The link ran out of time before a phone finished connecting.',
     'phone-left': 'The phone disconnected.',
-    'direct-failed':
-      'The phone couldn’t reach this computer directly. Make sure it is on an allowed network, then ' +
-      'get a new link.',
+    'direct-failed': anyNetwork
+      ? 'The phone couldn’t reach this computer directly, which some networks block. Try the phone on ' +
+        'another network, such as cellular or the same Wi-Fi as this computer, then get a new link.'
+      : 'The phone couldn’t reach this computer directly. Make sure it is on an allowed network, then ' +
+        'get a new link.',
     'network-not-allowed': 'The phone wasn’t on one of your allowed networks, so the connection ended.',
     idle: 'The phone stopped responding, so the connection ended.',
     unreachable:
@@ -77,15 +85,6 @@ const ENDED_FALLBACK = 'The one-time connection ended.';
 function phoneWhere(anyNetwork: boolean): string {
   return anyNetwork ? 'Your phone can be on any network.' : 'Your phone must be on an allowed network.';
 }
-
-/**
- * `direct-failed` under Anywhere, which has no allowed network to name.
- * `network-not-allowed` keeps its sentence: no path is held there, so it never
- * ends a connection.
- */
-const ANY_NETWORK_DIRECT_FAILED =
-  'The phone couldn’t reach this computer directly, which some networks block. Try the phone on ' +
-  'another network, such as cellular or the same Wi-Fi as this computer, then get a new link.';
 
 /**
  * The accessible name of the region reporting how a connection ended, the
@@ -123,8 +122,7 @@ function atRest(state: OneTimeState): boolean {
 export function OneTimeConnection({ relayOrigin }: { relayOrigin: string }) {
   const store = useSyncExternalStore(subscribeToOneTime, getOneTimeSnapshot);
   const policy = useNetworkPolicy();
-  // Where a link opens, and on any network: never merely where none is held.
-  const anyNetwork = policy !== null && opensOneTimeLinks(policy) && !holdsToAllowedNetworks(policy.level);
+  const anyNetwork = policy !== null && phoneOnAnyNetwork(policy);
   /** The action this panel has in flight: its answer, not an event, clears it. */
   const [pending, setPending] = useState<'open' | 'end' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -270,9 +268,7 @@ function OneTimePanel({
           aria-label={ONE_TIME_OUTCOME_LABEL}
           className="mt-1 text-sm leading-relaxed text-foreground"
         >
-          {anyNetwork && state.reason === 'direct-failed'
-            ? ANY_NETWORK_DIRECT_FAILED
-            : (own<string>(oneTimeEndedCopy(relayHost), state.reason) ?? ENDED_FALLBACK)}
+          {own<string>(oneTimeEndedCopy(relayHost, anyNetwork), state.reason) ?? ENDED_FALLBACK}
         </div>
       );
       actions = (

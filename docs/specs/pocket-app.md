@@ -540,8 +540,8 @@ injected timer, clock, and visibility seams in
 ## The path the session takes
 
 **Pocket offers a direct path once the connection outcome says `ok`**, over the
-browser's own `RTCPeerConnection` with no ICE server
-([remote-network.md](./remote-network.md) → Anywhere), and keeps the session
+browser's own `RTCPeerConnection` (its ICE servers:
+[remote-network.md](./remote-network.md) → Anywhere), and keeps the session
 on the relay when the browser has none or the Burrow declines
 ([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
 
