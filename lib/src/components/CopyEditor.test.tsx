@@ -31,7 +31,7 @@ import { CopyEditor } from './CopyEditor';
 import { createHeightMeasurer, measureNaturalWidth } from './copy-editor-measure';
 import { TouchUiContext } from './touch-ui-context';
 import { createWorkspaceMotion } from './workspace-motion';
-import { LayoutFramesContext, WorkspaceActiveContext, ZoomedIdContext } from './wall/wall-context';
+import { LayoutFramesContext, WorkspaceActiveContext, WorkspaceIdContext, ZoomedIdContext } from './wall/wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -298,7 +298,7 @@ describe('CopyEditor: following its pane', () => {
 
   it('hides while its Wall travels, and shows again when the travel ends', () => {
     drag(2, 25, 5, 27);
-    render(<div data-workspace-wall="ws"><CopyEditor terminalId="term-1" /></div>);
+    render(<WorkspaceIdContext.Provider value="ws"><div data-workspace-wall="ws"><CopyEditor terminalId="term-1" /></div></WorkspaceIdContext.Provider>);
     // The Workspace's own presentation motion transforms the Wall and reports each frame.
     const travel = createWorkspaceMotion(container.querySelector<HTMLElement>('[data-workspace-wall]')!, 'ws');
     expect(editor()!.style.visibility).toBe('visible');

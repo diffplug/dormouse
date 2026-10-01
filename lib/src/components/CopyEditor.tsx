@@ -18,14 +18,15 @@ import { copySelection } from '../lib/copy-selection';
 import { setPortalAnchor } from '../lib/dom';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
-import { overlayViewportBounds } from '../lib/ui-geometry';
+import { overlayViewportBounds, subscribeOverlayViewport } from '../lib/ui-geometry';
 import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
 import { COPY_EDITOR_Z_INDEX, COPY_EXPANDED_TEXT_CLASS, modalActionButton, modalSurface, popupButton, Shortcut } from './design';
 import { createHeightMeasurer, measureNaturalWidth, type CopyEditorParts } from './copy-editor-measure';
 import { createRectMotion, type RectMotion } from './rect-motion';
 import { TouchUiContext } from './touch-ui-context';
-import { subscribeWorkspaceMotionFrames } from './workspace-motion';
-import { LayoutFramesContext, WorkspaceActiveContext, ZoomedIdContext } from './wall/wall-context';
+import { workspaceInTravel } from './workspace-motion';
+import { subscribePaneMotion } from './wall/pane-motion';
+import { LayoutFramesContext, WorkspaceActiveContext, WorkspaceIdContext, ZoomedIdContext } from './wall/wall-context';
 
 /** Shift, and the arrow keys, as the mobile compass rose writes them
  *  (`lib/src/lib/mobile-gesture-menu.ts`). */
@@ -91,19 +92,20 @@ interface Placed {
   scope: Span;
   touch: boolean;
   zoomedId: string | null;
+  workspaceId: string | null;
 }
 
 /** True while the pane is out of sight, which the editor on `document.body`
- *  does not inherit: its Wall in Workspace travel, a presentation transform the
- *  editor does not follow; the pane hidden, as a parked leaf or a Tool's other
- *  face hides it; or another pane zoomed over it, which a terminal context
- *  floats above. */
-function concealed(anchor: Element, zoomedId: string | null): boolean {
-  if (anchor.closest<HTMLElement>('[data-workspace-wall]')?.style.transform) return true;
-  if (getComputedStyle(anchor).visibility === 'hidden') return true;
-  return zoomedId !== null
+ *  does not inherit, cheapest check first: another pane zoomed over it, which
+ *  a terminal context floats above; its Wall in Workspace travel, a
+ *  presentation the editor does not follow; or the pane hidden, as a parked
+ *  leaf or a Tool's other face hides it. */
+function concealed(anchor: Element, { zoomedId, workspaceId }: Placed): boolean {
+  if (zoomedId !== null
     && anchor.closest('[data-lath-leaf]')?.getAttribute('data-lath-leaf') !== zoomedId
-    && !anchor.closest('[data-terminal-context]');
+    && !anchor.closest('[data-terminal-context]')) return true;
+  if (workspaceId !== null && workspaceInTravel(workspaceId)) return true;
+  return getComputedStyle(anchor).visibility === 'hidden';
 }
 
 /** Mounted while the editor is open, so closing drops its motion and side. */
@@ -116,6 +118,7 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
 }) {
   const touchUi = useContext(TouchUiContext);
   const zoomedId = useContext(ZoomedIdContext);
+  const workspaceId = useContext(WorkspaceIdContext);
   const subscribeLayoutFrames = useContext(LayoutFramesContext);
 
   // Each scope's formats are rendered once and cached on it (`copy-editor.ts`),
@@ -153,8 +156,9 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     const motion = motionRef.current;
     const placed = placedRef.current;
     if (!root || !anchor || !motion || !placed) return;
-    const dims = getTerminalOverlayDims(terminalId);
-    if (!dims || dims.rows === 0 || dims.elementWidth === 0 || concealed(anchor, placed.zoomedId)) {
+    const dims = concealed(anchor, placed) ? null : getTerminalOverlayDims(terminalId);
+    if (!dims || dims.rows === 0 || dims.elementWidth === 0) {
+      if (root.dataset.copyEditorSide === undefined) return; // already hidden
       motion.hide();
       root.style.visibility = 'hidden';
       delete root.dataset.copyEditorSide;
@@ -209,14 +213,13 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
   // Before paint, so opening lands placed with no travel, and every selection,
   // scope, or text change re-places it at once.
   useLayoutEffect(() => {
-    placedRef.current = { selection, scope, touch: touchUi, zoomedId };
+    placedRef.current = { selection, scope, touch: touchUi, zoomedId, workspaceId };
     recompute();
-  }, [selection, scope, rendering, touchUi, zoomedId, recompute]);
+  }, [selection, scope, rendering, touchUi, zoomedId, workspaceId, recompute]);
 
   // Anything else that moves the pane or the band, coalesced to one placement
-  // a frame: output and scrolling, Lath and Workspace motion, the window.
+  // a frame: output and scrolling, the pane's own motion, the window.
   useEffect(() => {
-    const root = rootRef.current!;
     let frame: number | null = null;
     const schedule = () => {
       frame ??= requestAnimationFrame(() => {
@@ -224,29 +227,13 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
         recompute();
       });
     };
-    const onScroll = (event: Event) => {
-      if (!(event.target instanceof Node && root.contains(event.target))) schedule();
-    };
-    const viewport = window.visualViewport;
     const unsubscribes = [
       subscribeToRenderTick(schedule),
-      subscribeWorkspaceMotionFrames(schedule),
-      subscribeLayoutFrames?.(schedule),
+      subscribePaneMotion(anchorRef.current?.parentElement, schedule, subscribeLayoutFrames),
+      subscribeOverlayViewport(schedule),
     ];
-    window.addEventListener('resize', schedule);
-    viewport?.addEventListener('resize', schedule);
-    viewport?.addEventListener('scroll', schedule);
-    document.addEventListener('scroll', onScroll, true);
-    const observer = new ResizeObserver(schedule);
-    const pane = anchorRef.current?.parentElement;
-    if (pane) observer.observe(pane);
     return () => {
-      for (const unsubscribe of unsubscribes) unsubscribe?.();
-      window.removeEventListener('resize', schedule);
-      viewport?.removeEventListener('resize', schedule);
-      viewport?.removeEventListener('scroll', schedule);
-      document.removeEventListener('scroll', onScroll, true);
-      observer.disconnect();
+      for (const unsubscribe of unsubscribes) unsubscribe();
       if (frame !== null) cancelAnimationFrame(frame);
     };
   }, [recompute, subscribeLayoutFrames]);

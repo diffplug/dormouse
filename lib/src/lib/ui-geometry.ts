@@ -29,6 +29,18 @@ export function overlayViewportBounds() {
   return { left, top, right: left + width, bottom: top + height, width, height };
 }
 
+/** Call `listener` whenever `overlayViewportBounds()` may have changed: the
+ *  window's resize, and the visual viewport's resize and scroll, which carries
+ *  origin changes that resize neither. Returns the unsubscribe. */
+export function subscribeOverlayViewport(listener: () => void): () => void {
+  const controller = new AbortController();
+  const { signal } = controller;
+  window.addEventListener('resize', listener, { signal });
+  window.visualViewport?.addEventListener('resize', listener, { signal });
+  window.visualViewport?.addEventListener('scroll', listener, { signal });
+  return () => controller.abort();
+}
+
 /** Clamp a fixed-position overlay so it stays inside the viewport with a margin. */
 export function clampOverlayPosition({ left, top, width, height }: {
   left: number;

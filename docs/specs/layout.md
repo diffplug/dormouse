@@ -66,7 +66,7 @@ Source of truth: `useHeldWhile` in `lib/src/components/wall/preview-transition.t
 
 **Must open the terminal context from terminal header, body, and command-mode `a` and `>` entry points.** Browser-only Surfaces and Doors have no context. Tool context displays its primary terminal; `docs/specs/terminal-context.md` → Tool context owns that composition. Application mouse ownership follows `docs/specs/mouse-and-clipboard.md` → Terminal context input.
 
-**Must render one context per Wall in a stable Wall-level overlay**, with a theme-derived edge and raised shadow. Anchor it to the invoking source and follow its painted bounds without resizing panes or remounting the helper. Outside pointer press and explicit close dismiss it; a context terminal's copy editor counts as inside (`anchoredTarget` in `lib/src/lib/dom.ts`).
+**Must render one context per Wall in a stable Wall-level overlay**, with a theme-derived edge and raised shadow. Anchor it to the invoking source and follow its painted bounds without resizing panes or remounting the helper. Outside pointer press and explicit close dismiss it; its copy editors count as inside (`anchoredTarget` in `lib/src/lib/dom.ts`).
 
 **Must choose placement on opening and retain its side while usable.** Never reposition in response to terminal output. Minimized panes do not count; zoom uses single-pane placement.
 
@@ -420,11 +420,11 @@ Source of truth: `lib/src/lib/ring-geometry.ts`.
 
 ### Position tracking
 
-Each pane body registers its DOM element in a `paneElements` Map on mount and removes it on unmount (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement`, so the ring covers header + body. Doors are registered by the `Baseboard` through `DoorElementsContext` (`[data-door-id]`), **only the *visible* subset** — an overflowed door has no element to measure.
+Each pane body registers its DOM element in a `paneElements` Map while mounted (`usePaneChrome`); the overlay resolves the enclosing Lath leaf (`[data-lath-leaf]`) via `resolvePaneElement`, so the ring covers header + body. Doors are registered by the `Baseboard` through `DoorElementsContext` (`[data-door-id]`), **only the *visible* subset** — an overflowed door has no element to measure.
 
-Re-measures on: selection change, target resize, scroll, window resize, Workspace changes, every Lath store commit, and each Lath animation frame. **Must hold the last painted frame when the target is missing, detached, or zero-sized**, including stale Door observer notifications during restore. Pinned by `restores from the last painted Door through a %s target` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
+Re-measures on: selection change, target resize, an ancestor's scroll, window resize, Workspace changes, every Lath store commit, and each Lath animation frame. **Must hold the last painted frame when the target is missing, detached, or zero-sized**, including stale Door observer notifications during restore. Pinned by `restores from the last painted Door through a %s target` in `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 
-Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`; `resolvePaneElement` in `lib/src/components/wall/resolve-pane-element.ts`; `WindowFocusedContext` in `lib/src/components/wall/wall-context.tsx`, which the overlay reads and the Wall fills from `useWindowFocused` in `lib/src/components/wall/use-window-focused.ts`.
+Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`; `subscribePaneMotion` in `lib/src/components/wall/pane-motion.ts`; `resolvePaneElement` in `lib/src/components/wall/resolve-pane-element.ts`; `WindowFocusedContext` in `lib/src/components/wall/wall-context.tsx`, which the overlay reads and the Wall fills from `useWindowFocused` in `lib/src/components/wall/use-window-focused.ts`.
 
 ## Spatial navigation
 
