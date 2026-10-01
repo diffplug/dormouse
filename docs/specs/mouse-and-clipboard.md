@@ -152,19 +152,19 @@ Each break between consecutive rows is, in this order:
 4. **Deleted** if this line fills that width and its last word is token-shaped (a URL or path character, or 16+ token characters) — a token split at the margin.
 5. Otherwise **one space**.
 
-Leading and trailing blank lines are trimmed, a run of blank lines collapses to one, and the indent every line shares is removed, keeping relative indent.
+**Must trim leading/trailing blank lines, collapse blank runs, and remove shared indent**, keeping relative indent. **Must use full row indentation for mid-line starts.**
 
 Source of truth: `autoBreak` in `lib/src/lib/copy-text.ts`.
 
 ### 4.2 Scopes
 
-Narrowest first, each containing the dragged selection, one that adds nothing dropped:
+**Must offer distinct scopes containing the drag, narrowest first.**
 
 | Scope | Covers |
 |---|---|
 | **As selected** | The drag (opens here). |
 | **Whole words** | Each edge grown over its token, across any row break Auto deletes; an edge on a blank grows nothing. Named **Full URL** or **Full path** when the §5.1 detector classifies a grown edge token so. |
-| **Paragraph** | The lines between blank lines, frame-only lines, and box sides (`│ ┃ ║`). |
+| **Paragraph** | The lines between blank lines, frame-only lines, and box sides (`│ ┃ ║`); an edge on a boundary never crosses it. |
 
 The selection overlay draws a wider scope dashed around the outline; the preview marks every cell outside the drag. Source of truth: `computeScopes` in `lib/src/lib/copy-text.ts`.
 
@@ -175,7 +175,7 @@ The selection overlay draws a wider scope dashed around the outline; the preview
 | `Cmd+C` (Ctrl+C on non-macOS), with or without Shift | Copy what the editor shows, in either mode. |
 | `e` / `Shift+E` | Next wider / narrower scope, stopping at either end. |
 | `f` / `Shift+F` | Next / previous format, wrapping, in table order (§4.1), then the program's own copy (§4.6). |
-| `←` `→` / `Shift+←` `→` | Move the end / start one word; from whitespace, land on the adjacent word. A row boundary ends a word. Returns to As selected, keeping the format. |
+| `←` `→` / `Shift+←` `→` | Move the end / start one word; from whitespace, land on the adjacent word. Clamp past-text edges before stepping. A row boundary ends a word. Returns to As selected, keeping the format. |
 | `Enter` | Copy, as the chord does. |
 | `Esc` | Close and cancel the selection. |
 
@@ -207,11 +207,11 @@ Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard
 - **Must re-place on every selection or scope change; never keep a spot that covers the selection while another fits.** A held spot, natural or squished, yields only to one better by `HYSTERESIS_PX` (rationale).
 - **Must ease every move, restarting from the displayed rect; opening snaps**, as does any move under `motionIsInstant()` (rationale). **Must follow its pane at most once a frame** (`docs/specs/layout.md` → "Position tracking").
 - **Never show while its Wall travels**, its pane hidden, or another pane zoomed over it.
-- **Never take focus**; only a press on the preview's own box, its scrollbar, keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
+- **Never take focus**; only an actual scrollbar press keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
 - **Must give the touch editor a `TOUCH_SLOP_PX` hit margin** (rationale) **and `touch-action: manipulation`.**
 - **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
 - **Must flash only after a successful clipboard write, and only for the selection copied**: Copy reads ✓ Copied, never moving, and the copied selection fills, pulsing unless `motionIsInstant()`; after `COPY_FLASH_MS` (700 ms), `TOUCH_COPY_FLASH_MS` (1200 ms) on touch, the selection clears, however it moved meanwhile (rationale). Canceling clears the flash immediately.
-- **Must say a failed write failed**: Copy reads Couldn't copy for `COPY_FAILED_MS` (1500 ms) and the selection stays for a retry. Without the Clipboard API, or refused by it, the write first falls back to `execCommand('copy')` (rationale).
+- **Must leave empty copies idle without writing.** **Must say a failed write failed**: Copy reads Couldn't copy for `COPY_FAILED_MS` (1500 ms) and the selection stays for a retry. Without the Clipboard API, or refused by it, the write first falls back to `execCommand('copy')` (rationale).
 
 Source of truth: `placeCopyEditor` in `lib/src/lib/copy-editor-placement.ts`, pinned by `lib/src/lib/copy-editor-placement.test.ts`; `createRectMotion` in `lib/src/components/rect-motion.ts`; `anchoredTarget` in `lib/src/lib/dom.ts`; `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `moves off a wider scope whose band reaches it`, `lays its chrome probe out the same in every format`, `eases a move from the displayed rect, after opening snapped`, `hides while its Wall travels, and shows again when the travel ends`, and `never takes focus from the pane, but leaves its scrollbar its drag` in `lib/src/components/CopyEditor.test.tsx` and the plays in `lib/src/stories/CopyEditorPlacement.stories.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`; `writeTextToClipboard` in `lib/src/lib/clipboard.ts`, pinned by `lib/src/lib/clipboard-write.test.ts`; the fill in `SelectionOverlay` in `lib/src/components/SelectionOverlay.tsx`, pinned by `lib/src/components/SelectionOverlay.test.tsx`; `TOUCH_SLOP_PX` in `lib/src/components/CopyEditor.tsx`, pinned by `CopyEditor: touch slop` in `lib/src/components/CopyEditor.test.tsx`.
 
@@ -301,7 +301,7 @@ Source of truth: `lib/src/lib/selection-text.ts` (extraction and normalization),
 
 ### 8.2 Paste Keybindings
 
-**`Cmd/Ctrl (+Shift) + V` — all four combinations, on every platform — are intercepted and paste** (`hasPasteModifier`); copy keeps the macOS separation instead (§4.2). The price: the raw control byte `0x16` (readline `quoted-insert`, vim literal-next) never reaches the program by this key — §8.3 is the escape hatch. (rationale)
+**`Cmd/Ctrl (+Shift) + V` — all four combinations, on every platform — are intercepted and paste** (`hasPasteModifier`); copy keeps the macOS separation instead (§4.3). The price: the raw control byte `0x16` (readline `quoted-insert`, vim literal-next) never reaches the program by this key — §8.3 is the escape hatch. (rationale)
 
 Source of truth: `lib/src/components/wall/keyboard/chords.ts`.
 
@@ -311,7 +311,7 @@ Because Ctrl+V is intercepted everywhere, a literal control character goes in th
 
 ### 8.4 Platform Detection
 
-**`IS_MAC` (`lib/src/lib/platform/index.ts`) is computed once at startup** from `navigator.userAgentData.platform`, else `navigator.platform`, matched against `/Mac|iPhone|iPad/i`. It gates the copy chord (§4.2), every platform-dependent label, and the app's own macOS chrome (the AppBar's traffic-light inset, the VS Code workbench chord map) — **the paste chord alone is platform-independent** (§8.2).
+**`IS_MAC` (`lib/src/lib/platform/index.ts`) is computed once at startup** from `navigator.userAgentData.platform`, else `navigator.platform`, matched against `/Mac|iPhone|iPad/i`. It gates the copy chord (§4.3), every platform-dependent label, and the app's own macOS chrome (the AppBar's traffic-light inset, the VS Code workbench chord map) — **the paste chord alone is platform-independent** (§8.2).
 
 ### 8.5 Bracketed Paste
 

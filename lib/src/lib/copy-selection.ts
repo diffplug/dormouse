@@ -16,7 +16,9 @@ import { COPY_FLASH_MS, failCopy, flashCopy, getMouseSelectionState, TOUCH_COPY_
 export async function copySelection(terminalId: string, { touch = false }: { touch?: boolean } = {}): Promise<void> {
   const { selection, copyEditor, programCopy } = getMouseSelectionState(terminalId);
   if (!selection || !copyEditor) return;
-  const copied = await writeTextToClipboard(editorRendering(copyEditor, programCopy).text);
+  const text = editorRendering(copyEditor, programCopy).text;
+  if (!text) return;
+  const copied = await writeTextToClipboard(text);
   if (getMouseSelectionState(terminalId).selection !== selection) return;
   if (!copied) {
     failCopy(terminalId);

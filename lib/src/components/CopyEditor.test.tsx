@@ -202,6 +202,7 @@ describe('CopyEditor: opening and placement', () => {
     Object.assign(dims, { elementLeft: 400, elementTop: 20, elementWidth: 200, elementHeight: 720, cellHeight: 18 });
     Object.assign(natural, { chrome: 500, essential: 260 });
     drag(1, 0, 38, 5);
+    openCopyEditor('term-1', fakeXterm(Array<string>(40).fill('a whole paragraph')));
     render();
     expect(side()).toBe('right');
     expect(box()).toEqual(px(604, 38, 408, 150));
@@ -404,14 +405,27 @@ describe('CopyEditor: presses inside it belong to its pane', () => {
   it('never takes focus from the pane, but leaves its scrollbar its drag', () => {
     drag(2, 2, 5, 27);
     render();
-    const pressed = (target: Element) => {
+    const pressed = (target: Element, offsetX = 0, offsetY = 0) => {
       const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+      Object.defineProperties(down, { offsetX: { value: offsetX }, offsetY: { value: offsetY } });
       act(() => { target.dispatchEvent(down); });
       return down.defaultPrevented;
     };
     expect(pressed(button('Exact'))).toBe(true);
     expect(pressed(button('␣'))).toBe(true);
-    expect(pressed(editor()!.querySelector('.overflow-auto')!)).toBe(false);
+    const preview = editor()!.querySelector<HTMLElement>('.overflow-auto')!;
+    Object.defineProperties(preview, {
+      clientWidth: { value: 100 }, clientHeight: { value: 40 },
+      scrollWidth: { value: 100, configurable: true }, scrollHeight: { value: 40, configurable: true },
+    });
+    expect(pressed(preview, 20, 30)).toBe(true);
+    // A stable gutter without overflow is blank space, not a scrollbar.
+    expect(pressed(preview, 105, 20)).toBe(true);
+    Object.defineProperty(preview, 'scrollHeight', { value: 80 });
+    expect(pressed(preview, 20, 30)).toBe(true);
+    expect(pressed(preview, 105, 20)).toBe(false);
+    Object.defineProperty(preview, 'scrollWidth', { value: 200 });
+    expect(pressed(preview, 20, 45)).toBe(false);
     const buttons = Array.from(editor()!.querySelectorAll('button'));
     expect(buttons.filter((b) => b.tabIndex !== -1)).toEqual([]);
     expect(getMouseSelectionState('term-1').selection).not.toBeNull();

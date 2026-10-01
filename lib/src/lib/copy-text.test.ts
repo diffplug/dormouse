@@ -45,6 +45,12 @@ const narrowed = reflowed(CLAUDE, 60);
 const blankWrap = lines(['intro', '', 'aaaa bbbb cccc dddd ', ' '.repeat(20), 'eeee ffff', '', 'outro'], { cols: 20, wrapped: [3, 4] });
 
 describe('copy-text formats', () => {
+  it.each(['', '    '])('keeps relative Auto indent when the first selected row starts mid-line (%j)', (prefix) => {
+    const rows = [`${prefix}def foo():`, `${prefix}    return 1`, `${prefix}    pass`];
+    const buf = lines(rows, { cols: 80 });
+    expect(text(buf, span(0, prefix.length + 4, 2, rows[2].length - 1), 'auto')).toBe('foo():\n    return 1\n    pass');
+  });
+
   const prose = span(2, 2, 5, 27);
 
   it('Auto joins a hard-wrapped paragraph and drops the reply bullet', () => {
@@ -222,6 +228,19 @@ describe('copy-text autoBreak', () => {
 });
 
 describe('copy-text scopes', () => {
+  it.each(['', '╭──────╮', '│ side │'])('stops Paragraph growth at a boundary edge (%j)', (boundary) => {
+    const buf = lines(['para one a', 'para one b', boundary, 'para two a', 'para two b'], { cols: 80 });
+    const fromAbove = computeScopes(buf, span(1, 3, 2, 0)).find((s) => s.label === 'Paragraph');
+    expect(fromAbove?.span).toMatchObject({ start: { row: 0 }, end: { row: 2 } });
+    const fromBelow = computeScopes(buf, span(2, 0, 3, 3)).find((s) => s.label === 'Paragraph');
+    expect(fromBelow?.span).toMatchObject({ start: { row: 2 }, end: { row: 4 } });
+  });
+
+  it('grows no Paragraph from a selection containing only a blank boundary', () => {
+    const buf = lines(['foo', '', 'bar'], { cols: 80 });
+    expect(computeScopes(buf, span(1, 0, 1, 0)).map((s) => s.label)).toEqual(['As selected']);
+  });
+
   it('expands a clipped URL across the split, then to its paragraph', () => {
     const scopes = computeScopes(claude, span(13, 44, 14, 30));
     expect(scopes.map((s) => s.label)).toEqual(['As selected', 'Full URL', 'Paragraph']);
@@ -284,6 +303,12 @@ describe('copy-text scopes', () => {
 });
 
 describe('copy-text nudge', () => {
+  it.each(['start', 'end'] as const)('nudges an out-of-range %s left into its own row', (edge) => {
+    const buf = lines(['alpha beta', 'gamma delta'], { cols: 80 });
+    expect(nudge(buf, { row: 1, col: 40 }, -1, edge)).toEqual({ row: 1, col: edge === 'end' ? 10 : 6 });
+    expect(nudge(buf, { row: 1, col: 40 }, 1, edge)).toEqual({ row: 1, col: 40 });
+  });
+
   it.each([
     [3, 1, 'start', 4], [7, -1, 'end', 6],
     [7, 1, 'start', 8], [3, -1, 'end', 2],

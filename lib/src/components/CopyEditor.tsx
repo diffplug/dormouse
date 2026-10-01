@@ -404,10 +404,15 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       // Portaled, its React events still bubble to the pane: keep its presses
       // from focusing the pane and its right-click from opening the terminal
       // context. It never takes focus, so keys stay with the pane (§4.5), but
-      // a press on the preview's own box, its scrollbar, keeps its drag.
+      // a press on an actual preview scrollbar keeps its drag.
       onMouseDown={(e) => {
         e.stopPropagation();
-        if (e.target !== previewRef.current) e.preventDefault();
+        const preview = previewRef.current;
+        const onScrollbar = e.target === preview && preview !== null && (
+          (preview.scrollHeight > preview.clientHeight && e.nativeEvent.offsetX >= preview.clientWidth)
+          || (preview.scrollWidth > preview.clientWidth && e.nativeEvent.offsetY >= preview.clientHeight)
+        );
+        if (!onScrollbar) e.preventDefault();
       }}
       onContextMenu={(e) => e.stopPropagation()}
     >

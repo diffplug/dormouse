@@ -141,6 +141,18 @@ describe('the program’s own copy', () => {
 });
 
 describe('copySelection', () => {
+  it.each([['╭──────╮', 'auto'], ['    ', 'auto'], ['    ', 'exact']] as const)(
+    'leaves an empty %s copy in %s idle without writing', async (row, format) => {
+      select({ startRow: 0, startCol: 0, endRow: 0, endCol: row.length - 1 });
+      openCopyEditor(ID, fakeXterm([row]));
+      setCopyFormat(ID, format);
+      const selection = getMouseSelectionState(ID).selection;
+      await copySelection(ID);
+      expect(writeTextToClipboard).not.toHaveBeenCalled();
+      expect(getMouseSelectionState(ID)).toMatchObject({ selection, copyOutcome: null });
+    },
+  );
+
   it('writes what the editor shows and confirms it', async () => {
     vi.mocked(writeTextToClipboard).mockResolvedValue(true);
     select({ endRow: 3, endCol: 14 });

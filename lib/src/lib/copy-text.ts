@@ -401,9 +401,10 @@ function computeLayout({ buf, raw, stripped }: ScopeLines, format: CopyFormat): 
     if (format === 'spaces' || format === 'joined') lines = lines.filter((l) => !blank(l));
     else lines = lines.filter((l, i) => !(blank(l) && i > 0 && blank(lines[i - 1])));
   }
-  // A first line starting mid-row, or a row a soft wrap continues, has no
-  // indent of its own to keep.
-  const indents = lines.filter((l) => !blank(l) && !l.continues).map((l) => l.startCol + leading(l.cells));
+  // A mid-row selection still uses its full row's indent, so the next line's
+  // relative indent survives. Soft-wrap continuations have no indent of their own.
+  const indents = lines.filter((l) => !blank(l) && !l.continues)
+    .map((l) => Math.min(l.startCol + leading(l.cells), contentStart(buf, l.row)));
   const auto = lines.map((line, i): BreakKind => {
     const next = lines[i + 1];
     if (!next) return 'keep';
@@ -540,9 +541,9 @@ function snapToWords(buf: CopyBuffer, sel: Span): Span {
 
 function toParagraph(buf: CopyBuffer, sel: Span): Span {
   let sr = sel.start.row;
-  while (sr > 0 && !line(buf, sr - 1).boundary) sr--;
+  if (!line(buf, sr).boundary) while (sr > 0 && !line(buf, sr - 1).boundary) sr--;
   let er = sel.end.row;
-  while (er + 1 < buf.length && !line(buf, er + 1).boundary) er++;
+  if (!line(buf, er).boundary) while (er + 1 < buf.length && !line(buf, er + 1).boundary) er++;
   return {
     start: { row: sr, col: contentStart(buf, sr) },
     end: { row: er, col: Math.max(0, buf.row(er).cells.length - 1) },
@@ -592,7 +593,7 @@ export function computeScopes(buf: CopyBuffer, sel: Span): Scope[] {
 
 function step(buf: CopyBuffer, p: GridPos, dir: 1 | -1): GridPos | null {
   let { row, col } = p;
-  col += dir;
+  col = Math.min(col, buf.row(row).cells.length) + dir;
   for (;;) {
     const width = buf.row(row).cells.length;
     if (col >= 0 && col < width) return { row, col };

@@ -2,7 +2,7 @@ import { IS_MAC } from '../../../lib/platform';
 
 /** Copy/cut chord: `⌘` on macOS, `Ctrl` elsewhere. macOS keeps the clean
  *  separation where `Ctrl+C` stays the running program's interrupt
- *  (`docs/specs/mouse-and-clipboard.md` §4.2). */
+ *  (`docs/specs/mouse-and-clipboard.md` §4.3). */
 export function hasCopyModifier(e: KeyboardEvent): boolean {
   return IS_MAC ? e.metaKey : e.ctrlKey;
 }
