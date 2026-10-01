@@ -2,10 +2,10 @@
 import type { Context, Hono } from "hono";
 import { digest } from "@pgstencil/auth/security";
 import { SecureRandom, token as randomToken } from "pgstencil";
-import { queryDatabase, withClient } from "pgstencil/postgres";
+import { withClient } from "pgstencil/postgres";
 import { parseBearer } from "remote-lib-common";
 import { isAdmin } from "./admin";
-import { cookieAdmin } from "./account-gate";
+import { accountQuery, cookieAdmin, type AccountHost } from "./account-gate";
 
 export const VOICE_DAILY_CAP = 500;
 const TOKEN = /^dmv_[A-Za-z0-9_-]{43}$/;
@@ -42,13 +42,6 @@ export function elevenLabs(
   };
 }
 
-/** What one request's account deployment provides to the token routes. */
-export interface TokenHost {
-  databaseUrl: string;
-  /** The Better Auth handler, asked for the cookie's login. */
-  auth(request: Request): Response | Promise<Response>;
-}
-
 /** What one request's voice deployment provides to speak. */
 export interface SpeakHost {
   databaseUrl: string;
@@ -74,19 +67,14 @@ const badBody = (c: Context) =>
  */
 export function voiceTokenRoutes(
   app: Hono<any>,
-  host: (c: Context) => TokenHost,
+  host: (c: Context) => AccountHost,
 ) {
   // Cookie routes: only this origin may change tokens, and only the admin.
-  const cookieGate = cookieAdmin((c) => host(c).auth, notAdmin);
-  const query = <Row extends Record<string, unknown>>(
-    c: Context,
-    text: string,
-    values: unknown[],
-  ) => queryDatabase<Row>(host(c).databaseUrl, text, values);
+  const cookieGate = cookieAdmin(host, notAdmin);
 
   app.get("/api/voice/tokens", cookieGate, async (c) => {
-    const tokens = await query(
-      c,
+    const tokens = await accountQuery(
+      host(c),
       `SELECT id, "createdAt", "lastUsedAt", "revokedAt" FROM dormouse_voice_tokens
       WHERE "userId" = $1 ORDER BY "createdAt" DESC, id`,
       [c.get("login").userId],
@@ -96,8 +84,8 @@ export function voiceTokenRoutes(
 
   app.post("/api/voice/tokens", cookieGate, async (c) => {
     const token = "dmv_" + randomToken(new SecureRandom());
-    const [row] = await query<{ id: string; createdAt: Date }>(
-      c,
+    const [row] = await accountQuery<{ id: string; createdAt: Date }>(
+      host(c),
       `INSERT INTO dormouse_voice_tokens ("userId", hash) VALUES ($1, $2)
       RETURNING id, "createdAt"`,
       [c.get("login").userId, digest(token)],
@@ -110,8 +98,8 @@ export function voiceTokenRoutes(
     const revoked =
       UUID.test(id) &&
       (
-        await query(
-          c,
+        await accountQuery(
+          host(c),
           `UPDATE dormouse_voice_tokens SET "revokedAt" = coalesce("revokedAt", now())
           WHERE id = $1 AND "userId" = $2 RETURNING id`,
           [id, c.get("login").userId],

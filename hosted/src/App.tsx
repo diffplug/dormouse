@@ -24,12 +24,8 @@ import {
   type Session,
   type VoiceToken,
 } from "./api";
-import { LOGIN_FRESH_AGE_MS } from "../server/policy-constants";
-
-/** An enrollment link's user code, or null when the link carried none valid. */
-export interface Enrollment {
-  code: string | null;
-}
+import { LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "../server/policy-constants";
+import { takeEnrollment, type Enrollment } from "./enrollment";
 
 export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -41,9 +37,12 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const [computers, setComputers] = useState<Computer[] | null>(null);
   // The enrollment awaiting approval, in memory only: through sign-in and
   // back, never into storage (docs/specs/hosted.md -> "Burrow enrollment").
-  const [enrolling, setEnrolling] = useState(enrollment);
+  const [enrolling, setEnrollingState] = useState(enrollment);
   const enrollingRef = useRef(enrolling);
-  enrollingRef.current = enrolling;
+  const setEnrolling = (next: Enrollment | null) => {
+    enrollingRef.current = next;
+    setEnrollingState(next);
+  };
   const [minted, setMinted] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
@@ -109,6 +108,20 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   useEffect(() => {
     if (enterCode) codeInput.current?.focus();
   }, [enterCode]);
+  useEffect(() => {
+    // A link opened in the tab already on `/enroll` changes only the fragment:
+    // take its code as the first load did, without reloading. Elsewhere a
+    // fragment means nothing.
+    const takeLink = () => {
+      const next = takeEnrollment();
+      if (!next) return;
+      setEnrolling(next);
+      setError("");
+      setNotice("");
+    };
+    window.addEventListener("hashchange", takeLink);
+    return () => window.removeEventListener("hashchange", takeLink);
+  }, []);
 
   async function act(label: string, action: () => Promise<void>) {
     if (actionPending.current) return;
@@ -190,16 +203,14 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
   const approve = (code: string) =>
     act("approve", async () => {
       await approveEnrollment(code);
-      setEnrolling(null);
-      enrollingRef.current = null;
+      clearEnrollment();
       await refresh();
       setNotice(
         `Approved ${code}. Dormouse on your computer finishes enrolling in a few seconds.`,
       );
     });
-  const dismissEnrollment = () => {
+  const clearEnrollment = () => {
     setEnrolling(null);
-    enrollingRef.current = null;
     setError("");
     history.replaceState(null, "", session ? "/account" : "/login");
   };
@@ -292,8 +303,9 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     ) : (
                       <>
                         <p className="help">
-                          Approving a computer needs a login from the last 10
-                          minutes. Sign in again; this code stays on this page.
+                          Approving a computer needs a login from the last{" "}
+                          {RECENT_LOGIN_WINDOW}. Sign in again; this code stays
+                          on this page.
                         </p>
                         <button
                           className="primary"
@@ -315,7 +327,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                   type="button"
                   className="text-button"
                   disabled={!!busy}
-                  onClick={dismissEnrollment}
+                  onClick={clearEnrollment}
                 >
                   {enrolling.code
                     ? "Don’t approve"
@@ -383,7 +395,8 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
                     ) && (
                       <p className="help">
                         To connect another provider, sign out and sign in again.
-                        Connections require a login from the last 10 minutes.
+                        Connections require a login from the last{" "}
+                        {RECENT_LOGIN_WINDOW}.
                       </p>
                     )}
                 </section>

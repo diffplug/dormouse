@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   previewName,
@@ -10,6 +11,7 @@ import {
   findHyperdrives,
   cleanup,
   previewRatelimitNamespace,
+  previewSecrets,
 } from "./preview.mjs";
 import { healthSmoke, smoke, smokeAll } from "./preview-smoke.mjs";
 import { readConfigs } from "./workers.mjs";
@@ -472,4 +474,19 @@ test("a relay or voice health check requires the deployed revision, and nothing 
     /must be healthy/,
   );
   await assert.rejects(healthSmoke(origin + "/", env.BUILD_SHA, answering(200, {})), /exact origin/);
+});
+
+test("each preview Worker with a secret gets its own, derived from the preview secret and its name", async () => {
+  const configs = previewConfigs(await readConfigs(), env, "c".repeat(32));
+  const secret = "p".repeat(32);
+  const derived = (name) => createHmac("sha256", secret).update(name).digest("hex");
+  assert.deepEqual(previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: secret }), {
+    account: { AUTH_SECRET: derived("dormouse-hosted-pr-42") },
+    relay: { RELAY_ENROLL_SECRET: derived("dormouse-relay-pr-42") },
+  });
+  assert.throws(() => previewSecrets(configs, env), /Missing PREVIEW_AUTH_SECRET/);
+  assert.throws(
+    () => previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: "short" }),
+    /at least 32 random characters/,
+  );
 });

@@ -10,7 +10,7 @@ import { EmailDev, SystemTime } from "pgstencil";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
-import { relayAccountRoutes } from "./relay-account";
+import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { voiceTokenRoutes } from "./voice";
 
 // Bind first, then derive the origin from the port actually bound, so an unset
@@ -60,15 +60,14 @@ auth.app.get("/api/dev/emails", (c) =>
   c.json(email.all().map(({ to, text }) => ({ to, text }))),
 );
 const app = new Hono();
-voiceTokenRoutes(app, () => ({
-  databaseUrl,
-  auth: (request: Request) => auth.app.fetch(request),
-}));
-relayAccountRoutes(app, () => ({
+// Built once, so the approval limiter counts across requests.
+const host: RelayAccountHost = {
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
   approveLimit: devLimit(10),
-}));
+};
+voiceTokenRoutes(app, () => host);
+relayAccountRoutes(app, () => host);
 // No speak: a Hosted build speaks only at the fixed voice origin, so no
 // Dormouse build could reach one here.
 app.all("*", (c) => auth.app.fetch(c.req.raw));

@@ -299,8 +299,9 @@ expiry; do not grant tag bypass to the bot or Actions generally.
 
 ### Runtime secrets in the Workers
 
-Auth, mail, and OAuth secrets live in the account Worker, and the ElevenLabs
-key in the voice Worker, never GitHub; the relay Worker holds none. In your
+Auth, mail, and OAuth secrets live in the account Worker, the enrollment
+secret in the relay Worker, and the ElevenLabs key in the voice Worker, never
+GitHub. In your
 own terminal, from `hosted/`, authenticate Wrangler to the production account
 and use its hidden prompt, never a command-line value:
 
@@ -311,6 +312,7 @@ pnpm exec wrangler secret put GITHUB_CLIENT_SECRET
 pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
 pnpm exec wrangler secret put MICROSOFT_CLIENT_SECRET
 pnpm exec wrangler secret put APPLE_CLIENT_SECRET
+pnpm exec wrangler secret put RELAY_ENROLL_SECRET --config wrangler.relay.jsonc
 pnpm exec wrangler secret put ELEVENLABS_API_KEY --config wrangler.voice.jsonc
 ```
 
@@ -326,8 +328,9 @@ so never point it at a shared account. Restrict the key to text-to-speech plus
 speech-history access, and set a spending limit in the ElevenLabs console. How
 the Worker uses the key is `docs/specs/hosted.md` -> "Managed voice".
 
-Generate a fresh cryptographically random `AUTH_SECRET` with at least 32 bytes
-of entropy in your secret manager. Client IDs are public but may be stored
+Generate a fresh cryptographically random `AUTH_SECRET`, and separately
+`RELAY_ENROLL_SECRET`, each with at least 32 bytes of entropy in your secret
+manager. Rotating `RELAY_ENROLL_SECRET` only voids enrollments in progress. Client IDs are public but may be stored
 through the same prompts as `GITHUB_CLIENT_ID`, `GOOGLE_CLIENT_ID`,
 `MICROSOFT_CLIENT_ID`, and `APPLE_CLIENT_ID`. The first secret can create the
 initial Worker stub; it does not activate account service. Set all required

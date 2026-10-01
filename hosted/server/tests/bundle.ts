@@ -32,6 +32,8 @@ const each = <T>(pick: (config: WranglerConfig) => T) =>
   Object.fromEntries(NAMES.map((name) => [name, pick(wrangler[name])])) as Record<Name, T>;
 /** Each Worker's production origin, from its config. */
 export const ORIGINS = each((config) => config.vars.APP_ORIGIN);
+/** The relay's `RELAY_ENROLL_SECRET` in every test; production's is a Worker secret. */
+export const TEST_ENROLL_SECRET = "dormouse-hosted-test-enroll-secret";
 /** Each Worker's production entry, from its config. */
 export const ENTRIES = each((config) => config.main);
 

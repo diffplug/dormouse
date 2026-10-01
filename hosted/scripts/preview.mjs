@@ -170,8 +170,32 @@ export async function findHyperdrives(api, name) {
   }
 }
 
-/** Where `prepare` leaves the account preview's secrets for `deploy`. */
-const SECRETS_FILE = new URL("../.wrangler/preview/secrets.json", import.meta.url);
+/** Where `prepare` leaves a preview Worker's secrets for `deploy`. */
+const secretsFile = (worker) =>
+  new URL(`../.wrangler/preview/secrets.${worker}.json`, import.meta.url);
+
+/**
+ * Each preview Worker's secrets, keyed as `WORKERS` is: its `previewSecret`,
+ * the HMAC of `PREVIEW_AUTH_SECRET` with its preview Worker's name, so no two
+ * Workers or PRs share one and none is stored.
+ */
+export function previewSecrets(configs, env) {
+  const secret = required(env, "PREVIEW_AUTH_SECRET");
+  if (secret.length < 32)
+    throw new Error("PREVIEW_AUTH_SECRET needs at least 32 random characters");
+  return Object.fromEntries(
+    Object.entries(WORKERS)
+      .filter(([, { previewSecret }]) => previewSecret)
+      .map(([worker, { previewSecret }]) => [
+        worker,
+        {
+          [previewSecret]: createHmac("sha256", secret)
+            .update(configs[worker].name)
+            .digest("hex"),
+        },
+      ]),
+  );
+}
 
 /** Each Worker's origin in `configs`, keyed as `WORKERS` is. */
 export const originsOf = (configs) =>
@@ -180,21 +204,15 @@ export const originsOf = (configs) =>
   );
 
 /**
- * Validates every preview config, upserts the PR's Hyperdrive, writes the
- * account's secrets file, and emits the origins: `url` (the account's, for the
+ * Validates every preview config, upserts the PR's Hyperdrive, writes each
+ * Worker's secrets file, and emits the origins: `url` (the account's, for the
  * environment link) and `origins` (all three as JSON, for the smoke).
  */
 export async function prepare(env = process.env) {
   const bases = await readConfigs();
   const name = previewName(env.PR_NUMBER, bases.account.name);
-  // Every config validates before any resource is created.
-  previewConfigs(bases, env, "0".repeat(32));
-  const secret = required(env, "PREVIEW_AUTH_SECRET");
-  if (secret.length < 32)
-    throw new Error("PREVIEW_AUTH_SECRET needs at least 32 random characters");
-  const secrets = {
-    AUTH_SECRET: createHmac("sha256", secret).update(name).digest("hex"),
-  };
+  // Every config and secret validates before any resource is created.
+  const secrets = previewSecrets(previewConfigs(bases, env, "0".repeat(32)), env);
   const origin = hyperdriveOrigin(required(env, "DATABASE_URL"));
   const api = cloudflare(env);
   const matches = await findHyperdrives(api, name);
@@ -209,8 +227,10 @@ export async function prepare(env = process.env) {
   const path = `hyperdrive/configs${matches[0] ? `/${matches[0].id}` : ""}`;
   const { result } = await api(path, matches[0] ? "PUT" : "POST", body);
   const configs = previewConfigs(bases, env, result.id);
-  await mkdir(new URL("./", SECRETS_FILE), { recursive: true, mode: 0o700 });
-  await writeFile(SECRETS_FILE, JSON.stringify(secrets), { mode: 0o600 });
+  for (const [worker, values] of Object.entries(secrets)) {
+    await mkdir(new URL("./", secretsFile(worker)), { recursive: true, mode: 0o700 });
+    await writeFile(secretsFile(worker), JSON.stringify(values), { mode: 0o600 });
+  }
   const origins = originsOf(configs);
   if (env.GITHUB_OUTPUT)
     await appendFile(
@@ -283,12 +303,13 @@ if (
       try {
         await deployWorkers("preview", configs, {
           args: (worker) =>
-            WORKERS[worker].previewSecrets
-              ? ["--secrets-file", fileURLToPath(SECRETS_FILE)]
+            WORKERS[worker].previewSecret
+              ? ["--secrets-file", fileURLToPath(secretsFile(worker))]
               : [],
         });
       } finally {
-        await rm(SECRETS_FILE, { force: true });
+        for (const worker of Object.keys(WORKERS))
+          await rm(secretsFile(worker), { force: true });
       }
     } else throw new Error("Use prepare, deploy or cleanup");
   } catch (error) {

@@ -52,12 +52,16 @@ export function devOrigin(port) {
   return `http://localhost:${port}`;
 }
 
+/** The loop's `RELAY_ENROLL_SECRET`: user codes need one, and nothing here is secret. */
+export const DEV_ENROLL_SECRET = "dormouse-relay-local-development-only";
+
 /**
  * The Wrangler config the loop runs, written beside the staged page.
  * Allowlisted from `hosted/wrangler.relay.jsonc` like the preview's: the relay
  * entry, the rendezvous's Durable Object, migration, and rate limits, and the
- * assets binding over the staging folder — never a route or a secret, so it
- * cannot answer for production.
+ * assets binding over the staging folder — never a route or a production
+ * secret, so it cannot answer for production. Its enrollment secret is
+ * {@link DEV_ENROLL_SECRET}, fixed and public.
  */
 export function devConfig(base, port) {
   return {
@@ -66,7 +70,7 @@ export function devConfig(base, port) {
     compatibility_date: base.compatibility_date,
     compatibility_flags: base.compatibility_flags,
     assets: { ...base.assets, directory: "./assets" },
-    vars: { APP_ORIGIN: devOrigin(port) },
+    vars: { APP_ORIGIN: devOrigin(port), RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET },
     durable_objects: base.durable_objects,
     migrations: base.migrations,
     ratelimits: base.ratelimits,

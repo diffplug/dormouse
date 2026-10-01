@@ -1,5 +1,5 @@
 import { test, expect, beforeAll, afterAll, vi } from "vitest";
-import type { ExecutionContext } from "hono";
+import { Hono, type ExecutionContext } from "hono";
 import { build } from "esbuild";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { readFileSync } from "node:fs";
@@ -22,6 +22,9 @@ import {
   relayRules,
   type RulesFor,
 } from "../headers";
+import { ADMIN_EMAIL } from "../admin";
+import { cookieAdmin } from "../account-gate";
+import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import { voiceApp } from "../voice-app";
 import { workerApp } from "../worker-app";
 import {
@@ -50,6 +53,7 @@ const everything = {
   OAUTH_PROVIDERS: "github",
   GITHUB_CLIENT_ID: "test-github-id",
   GITHUB_CLIENT_SECRET: "test-github-secret",
+  RELAY_ENROLL_SECRET: "test-relay-enroll-secret",
 };
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
@@ -386,10 +390,22 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "ONE_TIME_ROOM",
       "RELAY_ENROLL_BEGIN_LIMIT",
       "RELAY_ENROLL_POLL_LIMIT",
+      "RELAY_ENROLL_SECRET",
       "RELAY_SETUP_LIMIT",
       "RELAY_SIGNIN_LIMIT",
     ].sort(),
   );
+  // `ACCOUNT_ORIGIN` reaches the routes exactly an origin, or not at all.
+  expect(relayBindings(env).ACCOUNT_ORIGIN).toBe(env.ACCOUNT_ORIGIN);
+  for (const loose of [
+    "https://account.example.test/",
+    "https://account.example.test/enroll",
+    "https://account.example.test\nX: y",
+    "javascript:alert(1)",
+    "",
+    undefined,
+  ])
+    expect(relayBindings({ ...env, ACCOUNT_ORIGIN: loose }).ACCOUNT_ORIGIN, String(loose)).toBeUndefined();
   // No auth secret: speak reads the token's owner, never a login.
   expect(keys(voiceBindings(env))).toEqual(
     ["APP_ORIGIN", "BUILD_SHA", "ELEVENLABS_API_KEY", "HYPERDRIVE"].sort(),
@@ -431,4 +447,44 @@ test("the relay bundle reads no cookie and never asks auth", () => {
   }
   // The pattern finds it where it is.
   expect(readFileSync("server/account-gate.ts", "utf8")).toMatch(/["'`]cookie["'`]/);
+});
+
+test("the cookie gate needs no login creation time; approval reads it and fails closed", async () => {
+  // `get-session` as the packed adapter answers it, `createdAt` as given.
+  const host = (createdAt?: unknown) => () => ({
+    databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
+    auth: async () =>
+      Response.json({
+        user: { id: "admin", email: ADMIN_EMAIL, emailVerified: true },
+        session: createdAt === undefined ? {} : { createdAt },
+      }),
+    approveLimit: {
+      limit: async () => {
+        throw new Error("The limit is past the recent-login check");
+      },
+    } as RateLimit,
+  });
+  const origin = "https://account.example.test";
+  // The voice-token routes' gate admits the admin whatever `createdAt` says.
+  for (const createdAt of [undefined, "garbage", new Date().toISOString()]) {
+    const app = new Hono();
+    app.get("/gated", cookieAdmin(host(createdAt), () => new Response(null, { status: 403 })), (c) =>
+      c.json(c.get("login").userId),
+    );
+    const response = await app.request(`${origin}/gated`);
+    expect(response.status, String(createdAt)).toBe(200);
+    expect(await response.json()).toBe("admin");
+  }
+  // Approval refuses a login it cannot date, before the limit or the database.
+  for (const createdAt of [undefined, "garbage", null, new Date(Date.now() - 11 * 60_000).toISOString()]) {
+    const app = new Hono();
+    relayAccountRoutes(app, host(createdAt));
+    const response = await app.request(`${origin}/api/relay/enrollments/approve`, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({ userCode: "ZZZZ-ZZZZ" }),
+    });
+    expect(response.status, String(createdAt)).toBe(403);
+    expect(await response.json()).toEqual({ message: RECENT_LOGIN_REQUIRED });
+  }
 });

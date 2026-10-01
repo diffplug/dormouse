@@ -1,18 +1,16 @@
 /**
  * What the self-host Relay (`relay/`) and the Hosted Relay
  * (`hosted/server/relay-api.ts`) share beyond the wire contract: the bounds
- * both enforce, the bearer shape, the registration checks and the sign-in
- * pipeline in their order, the passkey label reduction, and the Pocket
- * origin's Content-Security-Policy. One copy, so the two Relays cannot
+ * both enforce, the registration checks and the sign-in pipeline in their
+ * order, the passkey label reduction, and the Pocket origin's
+ * Content-Security-Policy. One copy, so the two Relays cannot
  * disagree on what a valid registration, assertion, label, or bound is
  * (`docs/specs/relay.md`, `docs/specs/hosted.md` -> "Relay").
  */
 
 import {
-  base64UrlLength,
   fromBase64Url,
   isBoundedBase64Url,
-  isExactBase64Url,
   toBase64Url,
   utf8Decode,
 } from '../security/bytes.js';
@@ -36,6 +34,9 @@ import {
   UNKNOWN_CREDENTIAL_ERROR,
   assertionRejectedError,
 } from './wire.js';
+
+/** The bearer shape lives in the wire contract; re-exported for the Relays. */
+export { RELAY_BEARER_BYTE_LENGTH, RELAY_BEARER_LENGTH, isRelayBearer } from './wire.js';
 
 /** Sessions live 12 hours (relay.md: "hours-scale TTL"). */
 export const RELAY_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -78,7 +79,8 @@ export const SETUP_TOKEN_TTL_MS = DEFAULT_PAIRING_TTL_MS;
  * self-host Relay it bounds a file that is otherwise append-only and is
  * re-read, re-parsed and compared row by row on every burrow-gated request and
  * every `/ws/burrow` upgrade; on Hosted it bounds what one account's approvals
- * can grow. Far above the machines a person owns; revocation is what makes room.
+ * can grow. Far above the machines a person owns; revocation (self-host) or
+ * removal (Hosted) is what makes room.
  */
 export const MAX_ENROLLED_BURROWS = 32;
 
@@ -109,18 +111,6 @@ export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
  */
 export function reducePasskeyLabel(label: unknown): string {
   return boundedPushText(label, { limit: MAX_PASSKEY_LABEL_LENGTH, fallback: '' });
-}
-
-/**
- * Every bearer a Relay mints — session, Burrow, and setup tokens — is 32
- * random bytes, base64url, so anything else is refused before any lookup.
- */
-export const RELAY_BEARER_BYTE_LENGTH = 32;
-export const RELAY_BEARER_LENGTH = base64UrlLength(RELAY_BEARER_BYTE_LENGTH);
-
-/** Whether `value` has the shape of a bearer a Relay minted. */
-export function isRelayBearer(value: unknown): value is string {
-  return isExactBase64Url(value, RELAY_BEARER_LENGTH);
 }
 
 /** The token of an `Authorization: Bearer <token>` header, or `null`; the caller checks its shape. */

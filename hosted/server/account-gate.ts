@@ -1,13 +1,31 @@
 // Rules: docs/specs/hosted.md -> "Managed voice" and "Burrow enrollment";
 // docs/specs/security-hosted.md -> "Origin boundary".
 import type { Context, MiddlewareHandler } from "hono";
+import { queryDatabase } from "pgstencil/postgres";
 import { isAdmin } from "./admin";
+
+/** What one request's account deployment provides to its cookie routes. */
+export interface AccountHost {
+  databaseUrl: string;
+  /** The Better Auth handler, asked for the cookie's login. */
+  auth(request: Request): Response | Promise<Response>;
+}
+
+/** One query on `host`'s database, on a connection of its own. */
+export const accountQuery = <Row extends Record<string, unknown>>(
+  host: AccountHost,
+  text: string,
+  values: unknown[],
+) => queryDatabase<Row>(host.databaseUrl, text, values);
 
 /** The login a cookie route acts for. */
 export interface AccountLogin {
   userId: string;
-  /** When this login was created, epoch ms: how recent it is. */
-  createdAt: number;
+  /**
+   * `get-session`'s `session.createdAt`, unparsed: only a route that needs a
+   * recent login reads it, and it fails closed on a value it cannot read.
+   */
+  createdAt: unknown;
 }
 
 /**
@@ -18,7 +36,7 @@ export interface AccountLogin {
  * (`refuse` answers anyone else). Sets `login`.
  */
 export function cookieAdmin(
-  auth: (c: Context) => (request: Request) => Response | Promise<Response>,
+  host: (c: Context) => AccountHost,
   refuse: (c: Context) => Response,
 ): MiddlewareHandler<{ Variables: { login: AccountLogin } }> {
   return async (c, next) => {
@@ -34,7 +52,7 @@ export function cookieAdmin(
       const value = c.req.header(name);
       if (value) headers.set(name, value);
     }
-    const response = await auth(c)(
+    const response = await host(c).auth(
       new Request(new URL("/api/auth/get-session", origin), { headers }),
     );
     if (!response.ok) throw new Error("Login lookup failed");
@@ -44,9 +62,10 @@ export function cookieAdmin(
     } | null;
     if (!session?.user) return c.json({ message: "Sign in first." }, 401);
     if (!isAdmin(session.user)) return refuse(c);
-    const createdAt = Date.parse(String(session.session?.createdAt));
-    if (!Number.isFinite(createdAt)) throw new Error("Login has no creation time");
-    c.set("login", { userId: session.user.id, createdAt });
+    c.set("login", {
+      userId: session.user.id,
+      createdAt: session.session?.createdAt,
+    });
     await next();
   };
 }

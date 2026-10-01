@@ -1,15 +1,16 @@
-import type { ExecutionContext, Hono } from "hono";
+import type { Context, ExecutionContext, Hono } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
-import { relayAccountRoutes } from "./relay-account";
+import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
 import { voiceTokenRoutes } from "./voice";
 import { workerApp } from "./worker-app";
 
 /**
  * The account Worker (`hosted.dormouse.sh`): auth, providers, readiness,
- * voice-token minting, the Relay's account routes, and the frontend. The production and preview entries
- * differ only in `fetchAuth`'s mail and in `bindings`.
+ * voice-token minting, the Relay's account routes, and the frontend. The
+ * production and preview entries differ only in `fetchAuth`'s mail and in
+ * `bindings`.
  */
 export function accountApp(
   fetchAuth: (
@@ -42,15 +43,13 @@ export function accountApp(
       app.get("/api/providers", (c) =>
         fetchAuth(c.req.raw, c.env, c.executionCtx),
       );
-      voiceTokenRoutes(app, (c) => ({
-        databaseUrl: c.env.HYPERDRIVE.connectionString,
-        auth: (request) => fetchAuth(request, c.env, c.executionCtx),
-      }));
-      relayAccountRoutes(app, (c) => ({
+      const host = (c: Context<{ Bindings: AccountEnv }>): RelayAccountHost => ({
         databaseUrl: c.env.HYPERDRIVE.connectionString,
         auth: (request) => fetchAuth(request, c.env, c.executionCtx),
         approveLimit: c.env.RELAY_APPROVE_LIMIT,
-      }));
+      });
+      voiceTokenRoutes(app, host);
+      relayAccountRoutes(app, host);
     },
     fallback: (app) => app.get("*", (c) => c.env.ASSETS.fetch(c.req.raw)),
   });

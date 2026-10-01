@@ -1,17 +1,17 @@
 -- Up Migration
 -- The Hosted Relay's account-scoped state (docs/specs/hosted.md -> "Relay").
 -- Every bearer secret is stored only as its SHA-256 (hex): session tokens,
--- Burrow tokens, setup tokens, and enrollment device codes. An account's rows
--- die with it.
+-- Burrow tokens, and setup tokens. An enrollment device code is stored not at
+-- all. An account's rows die with it.
 
 -- Burrows an account enrolled. `burrowId` is the 16-byte base64url routing id
--- every e2e envelope carries; revocation stamps `revokedAt` and never deletes.
+-- every e2e envelope carries; removal deletes the row, and its setup tokens
+-- and setup challenges with it.
 CREATE TABLE dormouse_relay_burrows (
     "burrowId" text PRIMARY KEY CHECK ("burrowId" ~ '^[A-Za-z0-9_-]{22}$'),
     "userId" text NOT NULL REFERENCES "user" (id) ON DELETE CASCADE,
     "tokenHash" text NOT NULL UNIQUE,
-    "enrolledAt" timestamptz NOT NULL DEFAULT now(),
-    "revokedAt" timestamptz
+    "enrolledAt" timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX dormouse_relay_burrows_user ON dormouse_relay_burrows ("userId");
 
@@ -65,20 +65,19 @@ CREATE TABLE dormouse_relay_setup_tokens (
 CREATE INDEX dormouse_relay_setup_tokens_burrow ON dormouse_relay_setup_tokens ("burrowId");
 CREATE INDEX dormouse_relay_setup_tokens_expiry ON dormouse_relay_setup_tokens ("expiresAt");
 
--- Device-code enrollment requests: a Burrow polls with its device code while
--- the account approves the user code on the account origin. Approval stamps
--- "approvedBy" once; the poll that enrolls the Burrow deletes the row.
-CREATE TABLE dormouse_relay_enrollments (
-    "deviceCodeHash" text PRIMARY KEY,
-    "userCode" text NOT NULL UNIQUE CHECK ("userCode" ~ '^[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$'),
-    "expiresAt" timestamptz NOT NULL,
-    "approvedBy" text REFERENCES "user" (id) ON DELETE CASCADE,
-    "approvedAt" timestamptz
+-- Device-code enrollment approvals: the account approved this user code, and
+-- the first poll whose device code derives it enrolls a Burrow owned by
+-- "userId" and deletes the row. Begin writes nothing.
+CREATE TABLE dormouse_relay_enrollment_approvals (
+    "userCode" text PRIMARY KEY CHECK ("userCode" ~ '^[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$'),
+    "userId" text NOT NULL REFERENCES "user" (id) ON DELETE CASCADE,
+    "expiresAt" timestamptz NOT NULL
 );
-CREATE INDEX dormouse_relay_enrollments_expiry ON dormouse_relay_enrollments ("expiresAt");
+CREATE INDEX dormouse_relay_enrollment_approvals_user ON dormouse_relay_enrollment_approvals ("userId");
+CREATE INDEX dormouse_relay_enrollment_approvals_expiry ON dormouse_relay_enrollment_approvals ("expiresAt");
 
 -- Down Migration
-DROP TABLE dormouse_relay_enrollments;
+DROP TABLE dormouse_relay_enrollment_approvals;
 DROP TABLE dormouse_relay_setup_tokens;
 DROP TABLE dormouse_relay_presence_nonces;
 DROP TABLE dormouse_relay_challenges;

@@ -382,7 +382,8 @@ on loopback, without Postgres**: the relay Worker's entry under `wrangler dev
 --local`, bound to `127.0.0.1` on `PORT` or 8787 — fixed, since a Burrow build
 bakes the origin in. `devConfig` sets `APP_ORIGIN` to `http://localhost:<port>`,
 the host a Dor Tool frames, copies the relay config's Durable Object,
-migration, and rate limits, and carries no route or secret; `vite build --watch`
+migration, and rate limits, and carries no route or production secret (its
+`RELAY_ENROLL_SECRET` is the fixed, public `DEV_ENROLL_SECRET`); `vite build --watch`
 rebuilds the page into the folder Wrangler serves. Once the page answers, the
 loop prints the origin and the dev Burrow build variables
 (`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md`

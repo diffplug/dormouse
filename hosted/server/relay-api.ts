@@ -9,8 +9,6 @@ import {
   DUPLICATE_CREDENTIAL_ERROR,
   E2E_ID_BYTE_LENGTH,
   ENROLL_PAGE_PATH,
-  ENROLL_USER_CODE_ALPHABET,
-  ENROLL_USER_CODE_CHARACTERS,
   MALFORMED_ASSERTION_ERROR,
   MALFORMED_BINDING_ERROR,
   MAX_ENROLLED_BURROWS,
@@ -29,10 +27,13 @@ import {
   WRONG_CREDENTIAL_ERROR,
   assertionRejectedError,
   checkRegistration,
+  enrollUserCode,
+  fromBase64Url,
   isPresenceBinding,
   isRelayBearer,
   normalizeOrigin,
   presenceChallenge,
+  randomBase64Url,
   readJson,
   toBase64Url,
   verifyPasskeyAssertion,
@@ -55,8 +56,8 @@ import type {
   SigninFinishResponse,
 } from "remote-lib-common";
 import type { RelayEnv } from "./bindings";
-import { exactOrigin } from "./headers";
 import { allowed } from "./one-time";
+import { ENROLLMENT_TTL_MS } from "./policy-constants";
 import {
   OWNER_COLUMNS,
   database,
@@ -65,6 +66,7 @@ import {
   requireSession,
   unauthorized,
   type Client,
+  type OwnerRow,
 } from "./relay-auth";
 
 /** Passkeys one account may hold; a full account is refused, never evicted (rationale). */
@@ -74,16 +76,13 @@ export const MAX_SESSIONS_PER_ACCOUNT = 32;
 /** One live registration challenge per live setup token of the same Burrow (rationale). */
 export const MAX_SETUP_CHALLENGES_PER_BURROW = MAX_TOKENS_PER_BURROW;
 
-/** How long a device-code enrollment request stays redeemable. */
-export const ENROLLMENT_TTL_MS = 10 * 60 * 1000;
 /** Seconds a Burrow waits between polls. */
 export const ENROLLMENT_POLL_INTERVAL_S = 5;
 /**
- * Live enrollment requests across every caller: begin is unauthenticated, so
- * the cap is global, and a full table refuses rather than evicting a request
- * someone may be approving (rationale).
+ * A device code's leading bytes: its expiry, big-endian epoch seconds; the
+ * rest of its 32 are random.
  */
-export const MAX_LIVE_ENROLLMENTS = 1000;
+const DEVICE_CODE_EXPIRY_BYTES = 4;
 
 /** A table a caller grows, capped per `owner` value. */
 interface Capped {
@@ -124,11 +123,9 @@ const EXPIRING_TABLES = [
   SETUP_CHALLENGES.table,
   SETUP_TOKENS.table,
   SESSIONS.table,
-  "dormouse_relay_enrollments",
+  "dormouse_relay_enrollment_approvals",
 ];
 
-const randomHandle = () =>
-  toBase64Url(crypto.getRandomValues(new Uint8Array(RELAY_BEARER_BYTE_LENGTH)));
 
 /** A `timestamptz` column as epoch milliseconds. */
 const epochMs = (column: string) =>
@@ -190,26 +187,20 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     return database(c, async (db) => {
       const {
         rows: [minter],
-      } = await db.query<{
-        burrowId: string;
-        userId: string;
-        ownerEmail: unknown;
-        ownerEmailVerified: unknown;
-        credentialIds: string[];
-      }>(
+      } = await db.query<OwnerRow & { burrowId: string; credentialIds: string[] }>(
         `SELECT t."burrowId", b."userId", ${OWNER_COLUMNS},
           ARRAY(
             SELECT p."credentialId" FROM dormouse_relay_passkeys p
             WHERE p."userId" = b."userId" ORDER BY p."createdAt", p."credentialId"
           ) AS "credentialIds"
         FROM dormouse_relay_setup_tokens t
-        JOIN dormouse_relay_burrows b ON b."burrowId" = t."burrowId" AND b."revokedAt" IS NULL
+        JOIN dormouse_relay_burrows b ON b."burrowId" = t."burrowId"
         JOIN "user" u ON u.id = b."userId"
         WHERE t."tokenHash" = $1 AND t."expiresAt" > now()`,
         [digest(token)],
       );
       if (!minter || !ownerOf(minter).entitled) return invalidSetup(c);
-      const challenge = randomHandle();
+      const challenge = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
       await admit(
         db,
         SETUP_CHALLENGES,
@@ -289,7 +280,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     database(c, async (db) => {
       // Flat, unauthenticated, and bounded by the per-address limit and the
       // Cron Trigger's sweep (rationale).
-      const challenge = randomHandle();
+      const challenge = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
       await db.query(
         `INSERT INTO dormouse_relay_challenges (challenge, "expiresAt") VALUES ($1, ${after("$2")})`,
         [challenge, DEFAULT_CHALLENGE_TTL_MS],
@@ -306,12 +297,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         findPasskey: async (credentialId) => {
           const {
             rows: [row],
-          } = await db.query<{
-            userId: string;
-            publicKey: string;
-            ownerEmail: unknown;
-            ownerEmailVerified: unknown;
-          }>(
+          } = await db.query<OwnerRow & { publicKey: string }>(
             `SELECT p."userId", p."publicKey", ${OWNER_COLUMNS}
             FROM dormouse_relay_passkeys p JOIN "user" u ON u.id = p."userId"
             WHERE p."credentialId" = $1`,
@@ -326,7 +312,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       const { userId, entitled, publicKey } = verdict.passkey;
       // A session is never minted for an account that is not entitled.
       if (!entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 401);
-      const sessionToken = randomHandle();
+      const sessionToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
       const expiresAt = await admit(
         db,
         SESSIONS,
@@ -355,7 +341,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       [binding.passkeyCredentialId, session.userId],
     );
     if (!rowCount) return c.json({ error: UNKNOWN_CREDENTIAL_ERROR }, 404);
-    const relayNonce = randomHandle();
+    const relayNonce = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
     let challenge: string;
     try {
       challenge = await presenceChallenge(binding, relayNonce);
@@ -423,7 +409,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   app.get(API_ROUTES.burrows, requireSession, async (c) => {
     const { rows } = await c.var.db.query<{ burrowId: string }>(
       `SELECT "burrowId" FROM dormouse_relay_burrows
-      WHERE "userId" = $1 AND "revokedAt" IS NULL ORDER BY "enrolledAt", "burrowId"`,
+      WHERE "userId" = $1 ORDER BY "enrolledAt", "burrowId"`,
       [c.var.session.userId],
     );
     // No relay socket reaches this Worker yet, so none is connected.
@@ -435,7 +421,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
 
   app.post(API_ROUTES.burrowSetupToken, requireBurrow, async (c) => {
     const { burrowId } = c.var.burrow;
-    const token = randomHandle();
+    const token = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
     const expiresAt = await admit(
       c.var.db,
       SETUP_TOKENS,
@@ -452,6 +438,8 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
 
   // --- Enrollment: device code, approved on the account origin --------------
 
+  // Begin writes nothing: the device code carries its own expiry, and the
+  // user code is derived from it, so an unauthenticated caller grows no table.
   app.post(API_ROUTES.burrowEnrollBegin, async (c) => {
     const claimed = (await readJson<{ origin?: unknown }>(c))?.origin;
     if (normalizeOrigin(claimed) !== c.env.APP_ORIGIN) {
@@ -461,100 +449,71 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
       };
       return c.json(mismatch, 409);
     }
-    return database(c, async (db) => {
-      const deviceCode = randomHandle();
-      // A user code already live is drawn again; three draws of thirty to the
-      // eighth against a thousand live codes do not all collide.
-      for (let draw = 0; draw < 3; draw++) {
-        const userCode = mintUserCode();
-        const outcome = await locked(db, "enrollments", async () => {
-          await db.query(`DELETE FROM dormouse_relay_enrollments WHERE "expiresAt" <= now()`);
-          const {
-            rows: [{ live }],
-          } = await db.query<{ live: number }>(
-            `SELECT count(*)::int AS live FROM dormouse_relay_enrollments`,
-          );
-          if (live >= MAX_LIVE_ENROLLMENTS) return "full" as const;
-          const { rows } = await db.query<{ expiresAt: number }>(
-            `INSERT INTO dormouse_relay_enrollments ("deviceCodeHash", "userCode", "expiresAt")
-            VALUES ($1, $2, ${after("$3")}) ON CONFLICT DO NOTHING
-            RETURNING ${epochMs('"expiresAt"')} AS "expiresAt"`,
-            [digest(deviceCode), userCode, ENROLLMENT_TTL_MS],
-          );
-          return rows[0]?.expiresAt;
-        });
-        if (outcome === "full") {
-          c.header("Retry-After", "60");
-          return c.json({ error: "too many pending enrollments" }, 429);
-        }
-        if (outcome === undefined) continue;
-        const accountOrigin = exactOrigin(c.env.ACCOUNT_ORIGIN);
-        const res: BurrowEnrollBeginResponse = {
-          deviceCode,
-          userCode,
-          ...(accountOrigin && {
-            verificationUrl: `${accountOrigin}${ENROLL_PAGE_PATH}#${userCode}`,
-          }),
-          expiresAt: outcome,
-          interval: ENROLLMENT_POLL_INTERVAL_S,
-        };
-        return c.json(res);
-      }
-      throw new Error("No free enrollment user code");
-    });
+    const expiresAtS = Math.floor((Date.now() + ENROLLMENT_TTL_MS) / 1000);
+    const bytes = crypto.getRandomValues(new Uint8Array(RELAY_BEARER_BYTE_LENGTH));
+    new DataView(bytes.buffer).setUint32(0, expiresAtS);
+    const userCode = await userCodeOf(c.env, bytes);
+    const res: BurrowEnrollBeginResponse = {
+      deviceCode: toBase64Url(bytes),
+      userCode,
+      ...(c.env.ACCOUNT_ORIGIN && {
+        verificationUrl: `${c.env.ACCOUNT_ORIGIN}${ENROLL_PAGE_PATH}#${userCode}`,
+      }),
+      expiresAt: expiresAtS * 1000,
+      interval: ENROLLMENT_POLL_INTERVAL_S,
+    };
+    return c.json(res);
   });
 
   app.post(API_ROUTES.burrowEnrollPoll, async (c) => {
     const deviceCode = (await readJson<{ deviceCode?: unknown }>(c))?.deviceCode;
     const answer = (res: BurrowEnrollPollResponse) => c.json(res);
     if (!isRelayBearer(deviceCode)) return answer({ status: "expired" });
-    const deviceCodeHash = digest(deviceCode);
+    const bytes = fromBase64Url(deviceCode);
+    // Expired by its own clock, without the database.
+    const expiresAtS = new DataView(bytes.buffer, bytes.byteOffset, DEVICE_CODE_EXPIRY_BYTES).getUint32(0);
+    if (expiresAtS * 1000 <= Date.now()) return answer({ status: "expired" });
+    const userCode = await userCodeOf(c.env, bytes);
     return database(c, async (db) => {
       const {
-        rows: [request],
-      } = await db.query<{
-        userId: string | null;
-        ownerEmail: unknown;
-        ownerEmailVerified: unknown;
-      }>(
-        `SELECT e."approvedBy" AS "userId", ${OWNER_COLUMNS}
-        FROM dormouse_relay_enrollments e LEFT JOIN "user" u ON u.id = e."approvedBy"
-        WHERE e."deviceCodeHash" = $1 AND e."expiresAt" > now()`,
-        [deviceCodeHash],
+        rows: [approval],
+      } = await db.query<OwnerRow>(
+        `SELECT a."userId", ${OWNER_COLUMNS}
+        FROM dormouse_relay_enrollment_approvals a JOIN "user" u ON u.id = a."userId"
+        WHERE a."userCode" = $1 AND a."expiresAt" > now()`,
+        [userCode],
       );
-      if (!request) return answer({ status: "expired" });
-      if (request.userId === null) return answer({ status: "pending" });
-      const owner = ownerOf({ ...request, userId: request.userId });
+      if (!approval) return answer({ status: "pending" });
+      const owner = ownerOf(approval);
       // Rechecked here: an approval does not outlive its approver's entitlement.
       if (!owner.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
-      const burrowId = toBase64Url(crypto.getRandomValues(new Uint8Array(E2E_ID_BYTE_LENGTH)));
-      const burrowToken = randomHandle();
+      const burrowId = randomBase64Url(E2E_ID_BYTE_LENGTH);
+      const burrowToken = randomBase64Url(RELAY_BEARER_BYTE_LENGTH);
       const outcome = await locked(db, `burrows:${owner.userId}`, async () => {
         const {
           rows: [{ enrolled }],
         } = await db.query<{ enrolled: number }>(
-          `SELECT count(*)::int AS enrolled FROM dormouse_relay_burrows
-          WHERE "userId" = $1 AND "revokedAt" IS NULL`,
+          `SELECT count(*)::int AS enrolled FROM dormouse_relay_burrows WHERE "userId" = $1`,
           [owner.userId],
         );
-        // A full account keeps the request, so a poll after a removal enrolls.
+        // A full account keeps the approval, so a poll after a removal enrolls.
         if (enrolled >= MAX_ENROLLED_BURROWS) return "full";
-        // Single-use: the request is spent in the statement that enrolls its
+        // Single-use: the approval is spent in the statement that enrolls its
         // Burrow, owned by exactly its approver, so two polls cannot mint two.
         const { rowCount } = await db.query(
           `WITH spent AS (
-            DELETE FROM dormouse_relay_enrollments
-            WHERE "deviceCodeHash" = $1 AND "approvedBy" = $2 AND "expiresAt" > now()
-            RETURNING "approvedBy"
+            DELETE FROM dormouse_relay_enrollment_approvals
+            WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > now()
+            RETURNING "userId"
           )
           INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
-          SELECT $3, "approvedBy", $4 FROM spent`,
-          [deviceCodeHash, owner.userId, burrowId, digest(burrowToken)],
+          SELECT $3, "userId", $4 FROM spent`,
+          [userCode, owner.userId, burrowId, digest(burrowToken)],
         );
         return rowCount ? "enrolled" : "spent";
       });
       if (outcome === "full") {
-        const where = exactOrigin(c.env.ACCOUNT_ORIGIN);
+        const where = c.env.ACCOUNT_ORIGIN;
         return c.json(
           {
             error: `this account already has ${MAX_ENROLLED_BURROWS} computers enrolled; remove one ${
@@ -596,7 +555,7 @@ interface SpentSetupToken {
 
 /**
  * Spends `token` in one statement, so of two racing redeemers only one wins,
- * and answers it only while live, its Burrow enrolled, and its owner entitled
+ * and answers it only while live and its owner entitled
  * — and, given `userId`, only a token one of that account's Burrows minted. A
  * token of another account is never touched.
  */
@@ -607,26 +566,18 @@ async function consumeSetupToken(
 ): Promise<SpentSetupToken | null> {
   const {
     rows: [spent],
-  } = await db.query<
-    SpentSetupToken & {
-      live: boolean;
-      enrolled: boolean;
-      ownerEmail: unknown;
-      ownerEmailVerified: unknown;
-    }
-  >(
+  } = await db.query<SpentSetupToken & OwnerRow & { live: boolean }>(
     `WITH spent AS (
       DELETE FROM dormouse_relay_setup_tokens t USING dormouse_relay_burrows b
       WHERE t."tokenHash" = $1 AND b."burrowId" = t."burrowId"
         AND ($2::text IS NULL OR b."userId" = $2)
-      RETURNING t."burrowId", t."expiresAt", b."userId", b."revokedAt"
+      RETURNING t."burrowId", t."expiresAt", b."userId"
     )
-    SELECT s."burrowId", s."expiresAt", s."userId", s."expiresAt" > now() AS live,
-      s."revokedAt" IS NULL AS enrolled, ${OWNER_COLUMNS}
+    SELECT s."burrowId", s."expiresAt", s."userId", s."expiresAt" > now() AS live, ${OWNER_COLUMNS}
     FROM spent s JOIN "user" u ON u.id = s."userId"`,
     [digest(token), userId],
   );
-  if (!spent?.live || !spent.enrolled || !ownerOf(spent).entitled) return null;
+  if (!spent?.live || !ownerOf(spent).entitled) return null;
   return { burrowId: spent.burrowId, userId: spent.userId, expiresAt: spent.expiresAt };
 }
 
@@ -716,22 +667,6 @@ async function admit(
   });
 }
 
-/**
- * A fresh user code, `XXXX-XXXX` over {@link ENROLL_USER_CODE_ALPHABET}: each
- * character from one random byte, a byte past the alphabet's largest multiple
- * drawn again so none is likelier than another.
- */
-export function mintUserCode(random = (n: number) => crypto.getRandomValues(new Uint8Array(n))) {
-  const size = ENROLL_USER_CODE_ALPHABET.length;
-  const usable = 256 - (256 % size);
-  let code = "";
-  while (code.length < ENROLL_USER_CODE_CHARACTERS)
-    for (const byte of random(ENROLL_USER_CODE_CHARACTERS))
-      if (byte < usable && code.length < ENROLL_USER_CODE_CHARACTERS)
-        code += ENROLL_USER_CODE_ALPHABET[byte % size];
-  return `${code.slice(0, 4)}-${code.slice(4)}`;
-}
-
 /** A setup token of the minted shape from a request body, or null. */
 function setupTokenOf(body: unknown): string | null {
   const token = (body as { setupToken?: unknown } | null)?.setupToken;
@@ -739,4 +674,10 @@ function setupTokenOf(body: unknown): string | null {
 }
 
 const rpIdOf = (env: RelayEnv) => new URL(env.APP_ORIGIN).hostname;
+
+/** A device code's user code; a deployment without its secret answers 503. */
+function userCodeOf(env: RelayEnv, deviceCode: Uint8Array) {
+  if (!env.RELAY_ENROLL_SECRET) throw new Error("RELAY_ENROLL_SECRET is not set");
+  return enrollUserCode(env.RELAY_ENROLL_SECRET, deviceCode);
+}
 const invalidSetup = (c: Context) => c.json({ error: SETUP_TOKEN_INVALID_ERROR }, 401);

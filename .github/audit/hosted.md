@@ -97,14 +97,15 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
 - **Does a secret reach a Worker that has no use for it?** Read each mapper in
   `hosted/server/bindings.ts` and each Wrangler config: the relay and voice
   Workers must hold and pass no auth secret and never import Better Auth, and
-  the account and relay no ElevenLabs key. The relay's Hyperdrive reaches only
+  the account and relay no ElevenLabs key, and the account and voice no
+  `RELAY_ENROLL_SECRET`. The relay's Hyperdrive reaches only
   its own tables and the entitlement's user row.
 - **Can one account reach another's Relay rows?** Trace every query in
   `hosted/server/relay-api.ts`: a session or Burrow token of account B must not
   list, prove with, spend, or mint against account A's Burrows, passkeys,
   nonces, setup tokens, or setup challenges; a single-use row must be spent in
   the statement that reads it; a bearer secret must be at rest only as its
-  hash; a de-entitled account or revoked Burrow must act on nothing, the
+  hash; a de-entitled account or removed Burrow must act on nothing, the
   account's sessions and sign-in included; every unauthenticated route that
   reaches Postgres must spend its per-address limit first; and every table a
   caller grows must stay bounded against that caller, a capped write never
@@ -112,13 +113,15 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   `/%61ssets/`) the way `secureHeaders` and the routes do.
 - **Can an enrollment become someone else's Burrow, or a second one?** Trace
   a device code from `begin` through the account's approval
-  (`hosted/server/relay-account.ts`) to the poll that redeems it: a web page
-  must not begin or poll, an approval must need a recent admin login from the
-  account's own origin and stamp its approver once, the code must expire, the
-  redemption must be one statement whose owner is that approver, and a removed
-  Burrow's token must open nothing on any relay route. Look for a guessable
-  code, an unlimited approval loop, and an approval answer that tells an
-  unknown code from an expired or already approved one.
+  (`hosted/server/relay-account.ts`) to the poll that redeems it: begin must
+  write nothing; a web page must not begin or poll; the device code must carry
+  its own expiry and its user code must be the relay secret's HMAC of it, so
+  no one can forge a device code that redeems another's approval; an approval
+  must need a recent admin login from the account's own origin and never
+  replace a live one; the redemption must be one statement whose owner is that
+  approver; and a removed Burrow's row must be gone, its token opening nothing
+  on any relay route. Look for a user code predictable without the secret, an
+  unlimited approval loop, and a table an unauthenticated caller can grow.
 - **Can a Hosted login become terminal access, or an account become someone
   else's?** `authPolicy` must keep explicit linking and independent logins; a
   callback whose initiating login was revoked must fail; an unused or unknown

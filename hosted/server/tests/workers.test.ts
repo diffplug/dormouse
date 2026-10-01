@@ -21,9 +21,16 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
-import { RECENT_LOGIN_REQUIRED } from "../relay-account";
+import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
 import { API_ROUTES, NOT_ENTITLED_ERROR } from "remote-lib-common";
-import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, type Name } from "./bundle";
+import {
+  ENTRIES,
+  ORIGINS,
+  TEST_ENROLL_SECRET,
+  bundleWorker,
+  miniflareOptions,
+  type Name,
+} from "./bundle";
 
 const origin = ORIGINS.account;
 const voiceOrigin = ORIGINS.voice;
@@ -230,7 +237,11 @@ async function fixture(
       const started = new Miniflare(
         workerOptions("relay", {
           script: (await relayBundle).outputFiles![0].text,
-          bindings: { APP_ORIGIN: ORIGINS.relay, ACCOUNT_ORIGIN: origin },
+          bindings: {
+            APP_ORIGIN: ORIGINS.relay,
+            ACCOUNT_ORIGIN: origin,
+            RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
+          },
           database: context.database.url,
           assets: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
           outboundService,
@@ -946,12 +957,16 @@ test("enrollment: only a recent admin login from this origin approves, and the B
     expect((await admin.approve(begun.userCode, sameSite)).status, sameSite).toBe(403);
   expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
 
-  // Unknown and malformed codes are the one 404; the code forgives case and spacing.
-  for (const code of ["ZZZZ-ZZZZ", "not a code", 7])
-    expect((await admin.approve(code)).status, String(code)).toBe(404);
+  // A malformed code is a 400; the code forgives case and spacing.
+  for (const code of ["not a code", "ZZZZ-ZZZ0", 7])
+    expect((await admin.approve(code)).status, String(code)).toBe(400);
   expect((await admin.approve(` ${begun.userCode.toLowerCase().replace("-", "")} `)).status).toBe(204);
-  // Approved once: a second approval is the same 404.
-  expect((await admin.approve(begun.userCode)).status).toBe(404);
+  // A live approval answers the same 409 to a second approval, and never moves.
+  const again = await admin.approve(begun.userCode);
+  expect(again.status).toBe(409);
+  expect(await again.json()).toEqual({ message: ALREADY_APPROVED });
+  // A code no Burrow holds is approved all the same, and expires unredeemed.
+  expect((await admin.approve("ZZZZ-ZZZZ")).status).toBe(204);
 
   const enrolled = await f.poll(begun.deviceCode);
   expect(enrolled.json.status).toBe("enrolled");
@@ -975,17 +990,16 @@ test("enrollment: only a recent admin login from this origin approves, and the B
   );
   expect((await admin.remove(foreign)).status).toBe(404);
   expect((await admin.remove(burrowId)).status).toBe(204);
-  // A revoked Burrow's token opens nothing.
+  // A removed Burrow is gone, so its token opens nothing.
   expect(await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).toEqual({
     status: 401,
     json: { error: "unauthorized" },
   });
   expect(await admin.computers()).toEqual({ burrows: [] });
   expect(
-    await queryDatabase(f.database.url, `SELECT "revokedAt" IS NULL AS live FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [
-      foreign,
-    ]),
-  ).toEqual([{ live: true }]);
+    await queryDatabase(f.database.url, `SELECT "burrowId" FROM dormouse_relay_burrows ORDER BY "burrowId"`),
+  ).toEqual([{ burrowId: foreign }]);
+  expect((await admin.remove(burrowId)).status).toBe(404);
 });
 
 test("enrollment approval needs a login from the recent-login window, and attempts are limited per account", async ({
@@ -1005,7 +1019,7 @@ test("enrollment approval needs a login from the recent-login window, and attemp
 
   // A fresh login approves; every attempt counts toward the account's limit.
   await admin.email(ADMIN_EMAIL);
-  for (let i = 0; i < 9; i++) expect((await admin.approve("ZZZZ-ZZZZ")).status).toBe(404);
+  for (let i = 0; i < 9; i++) expect((await admin.approve("not a code")).status).toBe(400);
   expect((await admin.approve(begun.userCode)).status).toBe(204);
   const limited = await admin.approve("ZZZZ-ZZZZ");
   expect(limited.status).toBe(429);

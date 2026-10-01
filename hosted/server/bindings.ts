@@ -1,4 +1,5 @@
 import type { BetterAuthWorkerBindings } from "@pgstencil/auth/better-auth-workers";
+import { exactOrigin } from "./headers";
 import { providerBindings } from "./policy";
 
 // Each Worker's bindings mapper (`docs/specs/security-hosted.md` -> "Origin
@@ -37,8 +38,13 @@ export interface RelayEnv extends WorkerEnv {
   RELAY_SETUP_LIMIT: RateLimit;
   RELAY_ENROLL_BEGIN_LIMIT: RateLimit;
   RELAY_ENROLL_POLL_LIMIT: RateLimit;
-  /** The account Worker's origin, which a begin answer's `verificationUrl` names; absent, it names none. */
+  /**
+   * The account Worker's origin, which a begin answer's `verificationUrl`
+   * names: exactly an origin once mapped, or absent, and then it names none.
+   */
   ACCOUNT_ORIGIN?: string;
+  /** The HMAC key a device code's user code is derived under. */
+  RELAY_ENROLL_SECRET: string;
 }
 
 /** `voice.dormouse.sh`: managed-voice speech and its history sweep. */
@@ -74,7 +80,9 @@ export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
 
 /**
  * Hyperdrive for the Relay's own tables and no auth secret: the Relay reads a
- * user row only for its entitlement, never a login. Production and preview alike.
+ * user row only for its entitlement, never a login. Its one secret,
+ * `RELAY_ENROLL_SECRET`, derives enrollment user codes. Production and preview
+ * alike.
  */
 export const relayBindings = (env: RelayEnv): RelayEnv => ({
   ASSETS: env.ASSETS,
@@ -88,7 +96,8 @@ export const relayBindings = (env: RelayEnv): RelayEnv => ({
   RELAY_SETUP_LIMIT: env.RELAY_SETUP_LIMIT,
   RELAY_ENROLL_BEGIN_LIMIT: env.RELAY_ENROLL_BEGIN_LIMIT,
   RELAY_ENROLL_POLL_LIMIT: env.RELAY_ENROLL_POLL_LIMIT,
-  ACCOUNT_ORIGIN: env.ACCOUNT_ORIGIN,
+  ACCOUNT_ORIGIN: exactOrigin(env.ACCOUNT_ORIGIN) ?? undefined,
+  RELAY_ENROLL_SECRET: env.RELAY_ENROLL_SECRET,
 });
 
 /** Hyperdrive for the token lookup and the ElevenLabs key; no auth secret. */

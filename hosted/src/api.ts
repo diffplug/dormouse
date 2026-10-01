@@ -86,25 +86,26 @@ async function voice(method: string, path = ""): Promise<Response> {
     "Voice tokens are temporarily unavailable. Try again.",
   );
 }
-const voiceFailed = () =>
+/** A voice or relay call's error when the server gave none written for this page. */
+const failed = () =>
   new Error("That did not work. Reload the page and try again.");
 /** Null when the server says this account may not use managed voice. */
 export async function getVoiceTokens(): Promise<VoiceToken[] | null> {
   const response = await voice("GET");
   if (response.status === 401 || response.status === 403) return null;
-  if (!response.ok) throw voiceFailed();
+  if (!response.ok) throw failed();
   return ((await response.json()) as { tokens: VoiceToken[] }).tokens;
 }
 export async function createVoiceToken() {
   const response = await voice("POST");
-  if (!response.ok) throw voiceFailed();
+  if (!response.ok) throw failed();
   return (await response.json()) as Pick<VoiceToken, "id" | "createdAt"> & {
     token: string;
   };
 }
 export async function revokeVoiceToken(id: string) {
   if (!(await voice("DELETE", `/${encodeURIComponent(id)}`)).ok)
-    throw voiceFailed();
+    throw failed();
 }
 
 export interface Computer {
@@ -123,11 +124,7 @@ async function refused(response: Response): Promise<Error> {
   const body = (await response.json().catch(() => null)) as {
     message?: unknown;
   } | null;
-  return new Error(
-    typeof body?.message === "string"
-      ? body.message
-      : "That did not work. Reload the page and try again.",
-  );
+  return typeof body?.message === "string" ? new Error(body.message) : failed();
 }
 /** Null when the server says this account may not use the Hosted Relay. */
 export async function getComputers(): Promise<Computer[] | null> {

@@ -361,7 +361,6 @@ export interface StoredBurrow {
   readonly enrolledAt: number;
 }
 
-
 /** Thrown by {@link BurrowStore.enroll} when {@link MAX_ENROLLED_BURROWS} is reached. */
 export class BurrowLimitReachedError extends Error {
   constructor() {

@@ -30,13 +30,10 @@ export interface RelaySession extends Owner {
   tokenHash: string;
 }
 
-/** An enrolled, unrevoked Burrow. */
+/** An enrolled Burrow. */
 export interface RelayBurrow extends Owner {
   burrowId: string;
 }
-
-/** The 403 a Burrow-authenticated request gets once its owner is not entitled. */
-export { NOT_ENTITLED_ERROR };
 
 /**
  * The owner columns every lookup selects from `"user" u`, and the one
@@ -44,19 +41,16 @@ export { NOT_ENTITLED_ERROR };
  */
 export const OWNER_COLUMNS = `u.email AS "ownerEmail", u."emailVerified" AS "ownerEmailVerified"`;
 
+/** A row selecting {@link OWNER_COLUMNS} beside its `userId`. */
+export type OwnerRow = { userId: string; ownerEmail: unknown; ownerEmailVerified: unknown };
+
 /** A row carrying {@link OWNER_COLUMNS} as the {@link Owner} it names. */
-export function ownerOf(row: {
-  userId: string;
-  ownerEmail: unknown;
-  ownerEmailVerified: unknown;
-}): Owner {
+export function ownerOf(row: OwnerRow): Owner {
   return {
     userId: row.userId,
     entitled: isAdmin({ email: row.ownerEmail, emailVerified: row.ownerEmailVerified }),
   };
 }
-
-type OwnerRow = { userId: string; ownerEmail: unknown; ownerEmailVerified: unknown };
 
 /** The live session `token` names, its owner joined in the same query, or null. */
 export async function sessionByToken(db: Client, token: string): Promise<RelaySession | null> {
@@ -72,14 +66,14 @@ export async function sessionByToken(db: Client, token: string): Promise<RelaySe
   return row ? { ...ownerOf(row), tokenHash } : null;
 }
 
-/** The unrevoked Burrow `token` names, its owner joined in the same query, or null. */
+/** The Burrow `token` names, its owner joined in the same query, or null. */
 export async function burrowByToken(db: Client, token: string): Promise<RelayBurrow | null> {
   const {
     rows: [row],
   } = await db.query<OwnerRow & { burrowId: string }>(
     `SELECT b."burrowId", b."userId", ${OWNER_COLUMNS}
     FROM dormouse_relay_burrows b JOIN "user" u ON u.id = b."userId"
-    WHERE b."tokenHash" = $1 AND b."revokedAt" IS NULL`,
+    WHERE b."tokenHash" = $1`,
     [digest(token)],
   );
   return row ? { ...ownerOf(row), burrowId: row.burrowId } : null;

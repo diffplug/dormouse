@@ -255,6 +255,7 @@ function provider({
   disabled = true,
   secrets = {
     "dormouse-hosted": accountSecrets,
+    "dormouse-relay": ["RELAY_ENROLL_SECRET"],
     "dormouse-voice": ["ELEVENLABS_API_KEY"],
   },
   read = [],
@@ -273,8 +274,7 @@ function provider({
 test("preflight rejects wrong databases, caching, reused roles, and incomplete secrets on each Worker", async () => {
   const read = [];
   await preflight(env, configs, provider({ read }));
-  // The relay holds no secret, so nothing is asked of it.
-  assert.deepEqual(read.sort(), ["dormouse-hosted", "dormouse-voice"]);
+  assert.deepEqual(read.sort(), ["dormouse-hosted", "dormouse-relay", "dormouse-voice"]);
   for (const missing of accountSecrets)
     await assert.rejects(
       preflight(
@@ -283,6 +283,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
         provider({
           secrets: {
             "dormouse-hosted": accountSecrets.filter((name) => name !== missing),
+            "dormouse-relay": ["RELAY_ENROLL_SECRET"],
             "dormouse-voice": ["ELEVENLABS_API_KEY"],
           },
         }),
@@ -297,11 +298,27 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
       provider({
         secrets: {
           "dormouse-hosted": [...accountSecrets, "ELEVENLABS_API_KEY"],
+          "dormouse-relay": ["RELAY_ENROLL_SECRET"],
           "dormouse-voice": [],
         },
       }),
     ),
     { message: "Missing dormouse-voice secret: ELEVENLABS_API_KEY" },
+  );
+  // The relay's enrollment secret, on the account Worker, does not count either.
+  await assert.rejects(
+    preflight(
+      env,
+      configs,
+      provider({
+        secrets: {
+          "dormouse-hosted": [...accountSecrets, "RELAY_ENROLL_SECRET"],
+          "dormouse-relay": [],
+          "dormouse-voice": ["ELEVENLABS_API_KEY"],
+        },
+      }),
+    ),
+    { message: "Missing dormouse-relay secret: RELAY_ENROLL_SECRET" },
   );
   // Each case supplies every configured secret, so it fails on its own check.
   for (const [override, message] of [
@@ -324,6 +341,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
     provider({
       secrets: {
         "dormouse-hosted": ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN", ...extra],
+        "dormouse-relay": ["RELAY_ENROLL_SECRET"],
         "dormouse-voice": ["ELEVENLABS_API_KEY"],
       },
     });

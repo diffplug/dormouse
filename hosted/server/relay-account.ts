@@ -1,24 +1,25 @@
 // Rules: docs/specs/hosted.md -> "Burrow enrollment".
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { queryDatabase } from "pgstencil/postgres";
-import { NOT_ENTITLED_ERROR, isE2eId, normalizeEnrollUserCode } from "remote-lib-common";
-import { cookieAdmin } from "./account-gate";
-import { LOGIN_FRESH_AGE_MS } from "./policy-constants";
+import {
+  NOT_ENTITLED_ERROR,
+  isE2eId,
+  normalizeEnrollUserCode,
+  readJson,
+} from "remote-lib-common";
+import { accountQuery, cookieAdmin, type AccountHost } from "./account-gate";
+import { ENROLLMENT_TTL_MS, LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./policy-constants";
 
 /** What one request's account deployment provides to the Relay's account routes. */
-export interface RelayAccountHost {
-  databaseUrl: string;
-  /** The Better Auth handler, asked for the cookie's login. */
-  auth(request: Request): Response | Promise<Response>;
+export type RelayAccountHost = AccountHost & {
   /** Approval attempts, keyed by account. */
   approveLimit: RateLimit;
-}
+};
 
 /** The 403 an approval from a login older than the recent-login window gets. */
-export const RECENT_LOGIN_REQUIRED =
-  "Sign in again to approve. Approving a computer needs a login from the last 10 minutes.";
-const UNKNOWN_CODE = "That code is not waiting for approval. It may have expired.";
+export const RECENT_LOGIN_REQUIRED = `Sign in again to approve. Approving a computer needs a login from the last ${RECENT_LOGIN_WINDOW}.`;
+/** The 409 a second approval of a live code gets, whichever account sends it. */
+export const ALREADY_APPROVED = "That code is already approved.";
 
 /**
  * The account's half of the Hosted Relay: approving a device-code enrollment,
@@ -27,12 +28,7 @@ const UNKNOWN_CODE = "That code is not waiting for approval. It may have expired
  * `/api/*` catch-all.
  */
 export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAccountHost) {
-  const gate = cookieAdmin(
-    (c) => host(c).auth,
-    (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403),
-  );
-  const query = <Row extends Record<string, unknown>>(c: Context, text: string, values: unknown[]) =>
-    queryDatabase<Row>(host(c).databaseUrl, text, values);
+  const gate = cookieAdmin(host, (c) => c.json({ message: NOT_ENTITLED_ERROR }, 403));
 
   const small = bodyLimit({
     maxSize: 1024,
@@ -41,56 +37,64 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
 
   app.post("/api/relay/enrollments/approve", small, gate, async (c) => {
     const login = c.get("login");
-    if (Date.now() - login.createdAt >= LOGIN_FRESH_AGE_MS)
+    // Fails closed: a login whose creation time is missing or unreadable is
+    // not recent.
+    const createdAt = Date.parse(String(login.createdAt));
+    if (!(Date.now() - createdAt < LOGIN_FRESH_AGE_MS))
       return c.json({ message: RECENT_LOGIN_REQUIRED }, 403);
-    // Every attempt counts, so a signed-in account cannot walk the code space.
+    // Every attempt counts, so a signed-in account cannot walk the code space;
+    // as the approvals' only writer, this limit is also what bounds them.
     if (!(await host(c).approveLimit.limit({ key: login.userId })).success) {
       c.header("Retry-After", "60");
       return c.json({ message: "Too many attempts. Wait a minute before trying again." }, 429);
     }
-    let body: { userCode?: unknown } | null = null;
-    try {
-      body = await c.req.json();
-    } catch {}
-    const userCode = normalizeEnrollUserCode(body?.userCode);
-    // Unknown, expired, and already approved are one answer; an approval is
-    // stamped once and never moves to another account.
+    const userCode = normalizeEnrollUserCode(
+      (await readJson<{ userCode?: unknown }>(c))?.userCode,
+    );
+    if (userCode === null)
+      return c.json({ message: "That is not a code from Dormouse." }, 400);
+    // Whether the code was ever issued is unknowable here: begin stores
+    // nothing. An approval no Burrow redeems expires. A live approval never
+    // moves to another account; an expired one is replaced.
     const approved =
-      userCode !== null &&
       (
-        await query(
-          c,
-          `UPDATE dormouse_relay_enrollments SET "approvedBy" = $2, "approvedAt" = now()
-          WHERE "userCode" = $1 AND "expiresAt" > now() AND "approvedBy" IS NULL
+        await accountQuery(
+          host(c),
+          `INSERT INTO dormouse_relay_enrollment_approvals AS a ("userCode", "userId", "expiresAt")
+          VALUES ($1, $2, now() + ($3::float8 * interval '1 millisecond'))
+          ON CONFLICT ("userCode") DO UPDATE
+            SET "userId" = EXCLUDED."userId", "expiresAt" = EXCLUDED."expiresAt"
+            WHERE a."expiresAt" <= now()
           RETURNING 1`,
-          [userCode, login.userId],
+          [userCode, login.userId, ENROLLMENT_TTL_MS],
         )
       ).length > 0;
-    return approved ? c.body(null, 204) : c.json({ message: UNKNOWN_CODE }, 404);
+    return approved ? c.body(null, 204) : c.json({ message: ALREADY_APPROVED }, 409);
   });
 
   app.get("/api/relay/burrows", gate, async (c) => {
-    const burrows = await query(
-      c,
+    const burrows = await accountQuery(
+      host(c),
       `SELECT "burrowId", "enrolledAt" FROM dormouse_relay_burrows
-      WHERE "userId" = $1 AND "revokedAt" IS NULL ORDER BY "enrolledAt" DESC, "burrowId"`,
+      WHERE "userId" = $1 ORDER BY "enrolledAt" DESC, "burrowId"`,
       [c.get("login").userId],
     );
     return c.json({ burrows });
   });
 
+  // The row goes, and its setup tokens and setup challenges with it, so its
+  // Burrow token finds nothing on any relay route.
   app.delete("/api/relay/burrows/:burrowId", gate, async (c) => {
     const burrowId = c.req.param("burrowId");
-    const revoked =
+    const removed =
       isE2eId(burrowId) &&
       (
-        await query(
-          c,
-          `UPDATE dormouse_relay_burrows SET "revokedAt" = coalesce("revokedAt", now())
-          WHERE "burrowId" = $1 AND "userId" = $2 RETURNING 1`,
+        await accountQuery(
+          host(c),
+          `DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1 AND "userId" = $2 RETURNING 1`,
           [burrowId, c.get("login").userId],
         )
       ).length > 0;
-    return revoked ? c.body(null, 204) : c.json({ message: "Computer not found." }, 404);
+    return removed ? c.body(null, 204) : c.json({ message: "Computer not found." }, 404);
   });
 }

@@ -6,14 +6,17 @@ import { createTestContext } from "pgstencil/testing";
 import { queryDatabase, withClient } from "pgstencil/postgres";
 import {
   API_ROUTES,
-  ENROLL_USER_CODE_ALPHABET,
   MAX_ENROLLED_BURROWS,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
   MAX_TOKENS_PER_BURROW,
+  NOT_ENTITLED_ERROR,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
-  isBurrowEnrollBeginResponse,
-  isBurrowEnrollPollResponse,
+  enrollUserCode,
+  fromBase64Url,
+  isEnrollUserCode,
+  isRelayBearer,
+  toBase64Url,
   verifyPresenceProof,
   type PresenceBinding,
 } from "remote-lib-common";
@@ -25,18 +28,15 @@ import {
 } from "../../../remote-lib-common/test/harness/actors.mjs";
 import { ADMIN_EMAIL } from "../admin";
 import { migrations } from "../migrations";
+import { ENROLLMENT_TTL_MS } from "../policy-constants";
 import {
   ENROLLMENT_POLL_INTERVAL_S,
-  ENROLLMENT_TTL_MS,
-  MAX_LIVE_ENROLLMENTS,
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
   MAX_SETUP_CHALLENGES_PER_BURROW,
-  mintUserCode,
   restoreSetupToken,
 } from "../relay-api";
-import { NOT_ENTITLED_ERROR } from "../relay-auth";
-import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions } from "./bundle";
+import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions } from "./bundle";
 
 // The Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay") in real
 // workerd against real Postgres, driven the way Pocket and a Burrow drive the
@@ -53,7 +53,11 @@ async function fixture() {
   const context = await createTestContext({ migrations });
   const relay = new Miniflare(
     miniflareOptions("relay", (await script).outputFiles[0].text, {
-      bindings: { APP_ORIGIN: origin, ACCOUNT_ORIGIN: ORIGINS.account },
+      bindings: {
+        APP_ORIGIN: origin,
+        ACCOUNT_ORIGIN: ORIGINS.account,
+        RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
+      },
       hyperdrives: { HYPERDRIVE: context.database.url },
       serviceBindings: {
         ASSETS: () =>
@@ -224,8 +228,13 @@ async function fixture() {
   async function begin() {
     const begun = await call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin } });
     expect(begun.status).toBe(200);
-    expect(isBurrowEnrollBeginResponse(begun.json)).toBe(true);
-    return begun.json as { deviceCode: string; userCode: string; verificationUrl: string; expiresAt: number };
+    return begun.json as {
+      deviceCode: string;
+      userCode: string;
+      verificationUrl: string;
+      expiresAt: number;
+      interval: number;
+    };
   }
 
   const poll = (deviceCode: unknown) =>
@@ -234,7 +243,8 @@ async function fixture() {
   /** What the account Worker's approval writes (`hosted/server/relay-account.ts`). */
   const approve = (userCode: string, userId: string) =>
     sql(
-      `UPDATE dormouse_relay_enrollments SET "approvedBy" = $2, "approvedAt" = now() WHERE "userCode" = $1`,
+      `INSERT INTO dormouse_relay_enrollment_approvals ("userCode", "userId", "expiresAt")
+      VALUES ($1, $2, now() + interval '10 minutes')`,
       [userCode, userId],
     );
 
@@ -386,7 +396,7 @@ test("one setup token registers once, however many finishes race it", async ({ o
   expect(signins.map((result) => result.status).sort()).toEqual([200, 400]);
 });
 
-test("a refused finish puts the token back on its own expiry; a revoked Burrow's tokens die with it", async ({
+test("a refused finish puts the token back on its own expiry; a removed Burrow's tokens die with it", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
@@ -423,7 +433,13 @@ test("a refused finish puts the token back on its own expiry; a revoked Burrow's
   });
 
   const pending = await f.setupToken(laptop.token);
-  await f.sql(`UPDATE dormouse_relay_burrows SET "revokedAt" = now()`);
+  await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: pending } });
+  // Removal deletes the row, its setup tokens and setup challenges with it.
+  await f.sql(`DELETE FROM dormouse_relay_burrows`);
+  for (const table of ["setup_tokens", "challenges"])
+    expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_${table} WHERE "burrowId" IS NOT NULL`), table).toEqual([
+      { n: 0 },
+    ]);
   expect((await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: pending } })).json).toEqual({
     error: SETUP_TOKEN_INVALID_ERROR,
   });
@@ -761,30 +777,40 @@ test("every unauthenticated route that reaches Postgres is rate limited per addr
   }
 });
 
-test("a device-code enrollment: pending until approved, then one Burrow owned by its approver, once", async ({
+/** `deviceCode` with its expiry set to `expiresAtS`, the rest kept. */
+function withExpiry(deviceCode: string, expiresAtS: number) {
+  const bytes = fromBase64Url(deviceCode);
+  new DataView(bytes.buffer, bytes.byteOffset).setUint32(0, expiresAtS);
+  return toBase64Url(bytes);
+}
+
+test("a device-code enrollment: begin stores nothing, pending until approved, then one Burrow owned by its approver, once", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
   onTestFinished(f.close);
   const owner = await f.account(ADMIN_EMAIL);
   const begun = await f.begin();
-  expect(begun.userCode).toMatch(/^[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$/);
-  expect(begun.verificationUrl).toBe(`${ORIGINS.account}/enroll#${begun.userCode}`);
+  // The bearer shape, its expiry in its first four bytes, and the user code the
+  // secret's HMAC of it.
+  expect(isRelayBearer(begun.deviceCode)).toBe(true);
+  const bytes = fromBase64Url(begun.deviceCode);
+  expect(new DataView(bytes.buffer, bytes.byteOffset).getUint32(0) * 1000).toBe(begun.expiresAt);
   expect(Math.abs(begun.expiresAt - (Date.now() + ENROLLMENT_TTL_MS))).toBeLessThan(60_000);
-  expect((begun as unknown as { interval: number }).interval).toBe(ENROLLMENT_POLL_INTERVAL_S);
-  // The device code is at rest only as its hash.
-  expect(await f.sql(`SELECT "deviceCodeHash", "userCode", "approvedBy" FROM dormouse_relay_enrollments`)).toEqual([
-    { deviceCodeHash: digest(begun.deviceCode), userCode: begun.userCode, approvedBy: null },
-  ]);
+  expect(isEnrollUserCode(begun.userCode)).toBe(true);
+  expect(begun.userCode).toBe(await enrollUserCode(TEST_ENROLL_SECRET, bytes));
+  expect(begun.verificationUrl).toBe(`${ORIGINS.account}/enroll#${begun.userCode}`);
+  expect(begun.interval).toBe(ENROLLMENT_POLL_INTERVAL_S);
+  // Begin wrote nothing (`pocket.test.ts` begins with no database at all).
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals`)).toEqual([{ n: 0 }]);
 
   expect(await f.poll(begun.deviceCode)).toMatchObject({ status: 200, json: { status: "pending" } });
-  for (const unknown of [randomSecret(), "short", undefined])
+  for (const unknown of ["short", undefined, withExpiry(begun.deviceCode, Math.floor(Date.now() / 1000) - 1)])
     expect(await f.poll(unknown)).toMatchObject({ status: 200, json: { status: "expired" } });
 
   await f.approve(begun.userCode, owner);
   const enrolled = await f.poll(begun.deviceCode);
   expect(enrolled.status).toBe(200);
-  expect(isBurrowEnrollPollResponse(enrolled.json)).toBe(true);
   const { enrollment } = enrolled.json as { enrollment: Record<string, string> };
   expect(enrolled.json).toEqual({
     status: "enrolled",
@@ -793,10 +819,36 @@ test("a device-code enrollment: pending until approved, then one Burrow owned by
   expect(await f.sql(`SELECT "burrowId", "userId", "tokenHash" FROM dormouse_relay_burrows`)).toEqual([
     { burrowId: enrollment.burrowId, userId: owner, tokenHash: digest(enrollment.burrowToken) },
   ]);
-  // Spent: the code answers as unknown, and the Burrow's token acts.
-  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "expired" });
-  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollments`)).toEqual([{ n: 0 }]);
+  // Spent: the code has nothing left to redeem, and the Burrow's token acts.
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals`)).toEqual([{ n: 0 }]);
   expect((await f.mint(enrollment.burrowToken)).status).toBe(200);
+});
+
+test("an approval redeems only the device code its user code is derived from", async ({ onTestFinished }) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const [a, b] = [await f.begin(), await f.begin()];
+  await f.approve(a.userCode, owner);
+  // Code A's approval never redeems device code B.
+  expect((await f.poll(b.deviceCode)).json).toEqual({ status: "pending" });
+  // A forged code of the minted shape: A with a later expiry, A with a flipped
+  // random byte, and a code whose user code is A's under another secret.
+  const flipped = fromBase64Url(a.deviceCode);
+  flipped[31] ^= 1;
+  const forged = [withExpiry(a.deviceCode, Math.floor(a.expiresAt / 1000) + 60), toBase64Url(flipped)];
+  for (const deviceCode of forged) {
+    expect(isRelayBearer(deviceCode)).toBe(true);
+    expect((await f.poll(deviceCode)).json, deviceCode).toEqual({ status: "pending" });
+  }
+  const other = await f.begin();
+  const underWrongSecret = await enrollUserCode(`${TEST_ENROLL_SECRET}-wrong`, fromBase64Url(other.deviceCode));
+  await f.approve(underWrongSecret, owner);
+  expect((await f.poll(other.deviceCode)).json).toEqual({ status: "pending" });
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 0 }]);
+  // A itself still redeems.
+  expect((await f.poll(a.deviceCode)).json).toMatchObject({ status: "enrolled" });
 });
 
 test("two polls racing one approval mint one Burrow", async ({ onTestFinished }) => {
@@ -807,7 +859,7 @@ test("two polls racing one approval mint one Burrow", async ({ onTestFinished })
     const begun = await f.begin();
     await f.approve(begun.userCode, owner);
     const answers = await Promise.all(Array.from({ length: 4 }, () => f.poll(begun.deviceCode)));
-    expect(answers.map(({ json }) => json!.status).sort()).toEqual(["enrolled", "expired", "expired", "expired"]);
+    expect(answers.filter(({ json }) => json!.status === "enrolled")).toHaveLength(1);
   }
   expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 5 }]);
 });
@@ -818,26 +870,23 @@ test("an enrollment expires, is refused past its approver's entitlement, and wai
   const f = await fixture();
   onTestFinished(f.close);
   const owner = await f.account(ADMIN_EMAIL);
-  const expire = (deviceCode: string) =>
-    f.sql(
-      `UPDATE dormouse_relay_enrollments SET "expiresAt" = now() - interval '1 second' WHERE "deviceCodeHash" = $1`,
-      [digest(deviceCode)],
-    );
 
-  // Expired, approved or not, it enrolls nothing.
+  // An expired approval enrolls nothing, and the Cron Trigger sweeps it.
   const late = await f.begin();
   await f.approve(late.userCode, owner);
-  await expire(late.deviceCode);
-  expect((await f.poll(late.deviceCode)).json).toEqual({ status: "expired" });
+  await f.sql(`UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() - interval '1 second'`);
+  expect((await f.poll(late.deviceCode)).json).toEqual({ status: "pending" });
+  await f.cron();
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals`)).toEqual([{ n: 0 }]);
 
-  // The entitlement is rechecked at redemption; the request survives the refusal.
+  // The entitlement is rechecked at redemption; the approval survives the refusal.
   const begun = await f.begin();
   await f.approve(begun.userCode, owner);
   await f.sql(`UPDATE "user" SET "emailVerified" = false WHERE id = $1`, [owner]);
   expect(await f.poll(begun.deviceCode)).toMatchObject({ status: 403, json: { error: NOT_ENTITLED_ERROR } });
   await f.sql(`UPDATE "user" SET "emailVerified" = true WHERE id = $1`, [owner]);
 
-  // A full account names the page that removes one, and keeps the request.
+  // A full account names the page that removes one, and keeps the approval.
   const enrolled = [];
   for (let i = 0; i < MAX_ENROLLED_BURROWS; i++) enrolled.push(await f.burrow(owner));
   expect(await f.poll(begun.deviceCode)).toMatchObject({
@@ -846,12 +895,12 @@ test("an enrollment expires, is refused past its approver's entitlement, and wai
       error: `this account already has ${MAX_ENROLLED_BURROWS} computers enrolled; remove one at ${ORIGINS.account}/account first`,
     },
   });
-  // Revoked Burrows make room.
-  await f.sql(`UPDATE dormouse_relay_burrows SET "revokedAt" = now() WHERE "burrowId" = $1`, [enrolled[0].burrowId]);
+  // A removed Burrow makes room.
+  await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [enrolled[0].burrowId]);
   expect((await f.poll(begun.deviceCode)).json).toMatchObject({ status: "enrolled" });
 });
 
-test("begin refuses another origin and a full table, and prunes expired requests", async ({ onTestFinished }) => {
+test("begin refuses another origin", async ({ onTestFinished }) => {
   const f = await fixture();
   onTestFinished(f.close);
   for (const claimed of [undefined, "https://relay.example.test", `${origin}.evil.test`])
@@ -861,34 +910,4 @@ test("begin refuses another origin and a full table, and prunes expired requests
     });
   // A trailing slash is the same origin.
   expect((await f.call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin: `${origin}/` } })).status).toBe(200);
-
-  const fill = (expiry: string) =>
-    f.sql(
-      `INSERT INTO dormouse_relay_enrollments ("deviceCodeHash", "userCode", "expiresAt")
-      SELECT md5(random()::text || n), 'ZZZZ-' || substr($3, n / 27000 % 30 + 1, 1)
-        || substr($3, n / 900 % 30 + 1, 1) || substr($3, n / 30 % 30 + 1, 1) || substr($3, n % 30 + 1, 1),
-        now() + $1::interval
-      FROM generate_series(1, $2::int - 1) n`,
-      [expiry, MAX_LIVE_ENROLLMENTS, ENROLL_USER_CODE_ALPHABET],
-    );
-  await fill("10 minutes");
-  const full = await f.call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin } });
-  expect(full).toMatchObject({ status: 429, json: { error: "too many pending enrollments" } });
-  expect(full.headers.get("retry-after")).toBe("60");
-  // Expired requests are pruned on the next begin, which then has room.
-  await f.sql(`UPDATE dormouse_relay_enrollments SET "expiresAt" = now() - interval '1 second'`);
-  expect((await f.call("POST", API_ROUTES.burrowEnrollBegin, { body: { origin } })).status).toBe(200);
-  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollments`)).toEqual([{ n: 1 }]);
-  // The Cron Trigger sweeps what no begin pruned.
-  await f.sql(`UPDATE dormouse_relay_enrollments SET "expiresAt" = now() - interval '1 second'`);
-  await f.cron();
-  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollments`)).toEqual([{ n: 0 }]);
-});
-
-test("a user code draws each character uniformly, redrawing a byte past the alphabet's last multiple", () => {
-  // 240 = 8 × 30: bytes 240–255 would favour the first sixteen characters.
-  const bytes = [240, 255, 0, 29, 30, 59, 239, 100, 7, 248, 1];
-  const random = (n: number) => new Uint8Array(bytes.splice(0, n));
-  expect(mintUserCode(random)).toBe("2Z2Z-ZC93");
-  expect(mintUserCode()).toMatch(/^[2-9A-HJKMNP-TV-Z]{4}-[2-9A-HJKMNP-TV-Z]{4}$/);
 });

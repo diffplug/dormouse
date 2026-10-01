@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { DEFAULT_PORT, devConfig, devOrigin, devPort } from "./dev-one-time.mjs";
+import { DEFAULT_PORT, DEV_ENROLL_SECRET, devConfig, devOrigin, devPort } from "./dev-one-time.mjs";
 import { parseConfig } from "./workers.mjs";
 
 const base = parseConfig(
@@ -20,7 +20,10 @@ test("the dev config runs the relay entry on loopback, with the rendezvous and n
   );
   assert.equal(config.main, "../../server/relay-worker.ts");
   assert.notEqual(config.name, base.name);
-  assert.deepEqual(config.vars, { APP_ORIGIN: "http://localhost:8787" });
+  assert.deepEqual(config.vars, {
+    APP_ORIGIN: "http://localhost:8787",
+    RELAY_ENROLL_SECRET: DEV_ENROLL_SECRET,
+  });
   for (const key of ["routes", "hyperdrive", "d1_databases", "workers_dev"])
     assert.equal(config[key], undefined, key);
   assert.deepEqual(config.durable_objects, base.durable_objects);

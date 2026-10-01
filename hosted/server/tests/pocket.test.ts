@@ -4,10 +4,14 @@ import {
   API_ROUTES,
   ONE_TIME_PAGE_PATH,
   WS_ROUTES,
+  fromBase64Url,
+  isEnrollUserCode,
+  isRelayBearer,
   pocketContentSecurityPolicy,
+  toBase64Url,
 } from "remote-lib-common";
 import { RUNS_NOTHING_POLICY, oneTimePagePolicy } from "../headers";
-import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions } from "./bundle";
+import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions } from "./bundle";
 
 // Pocket at the relay's root (`docs/specs/pocket-app.md` -> "Serving the
 // built bundle"), the production relay bundle in real workerd without
@@ -57,7 +61,7 @@ let relay: Miniflare;
 beforeAll(async () => {
   relay = new Miniflare(
     miniflareOptions("relay", (await bundleWorker(ENTRIES.relay)).outputFiles[0].text, {
-      bindings: { APP_ORIGIN: origin },
+      bindings: { APP_ORIGIN: origin, RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET },
       // Nothing listens here, so a route that reached the database would fail.
       hyperdrives: { HYPERDRIVE: "postgres://user:pass@127.0.0.1:9/none" },
       serviceBindings: { ASSETS: assets },
@@ -164,7 +168,7 @@ test("the self-host password enrollment answers the 401 a wrong credential does"
   expect(await response.json()).toEqual({ error: "unauthorized" });
 });
 
-test("only a Node Burrow begins or polls an enrollment, per-address limited before the database", async () => {
+test("only a Node Burrow begins or polls an enrollment, per-address limited, and begin writes nothing", async () => {
   const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
     relay.dispatchFetch(origin + path, {
       method: "POST",
@@ -178,7 +182,18 @@ test("only a Node Burrow begins or polls an enrollment, per-address limited befo
       expect(response.status, `${path} ${sent}`).toBe(403);
       expect(await response.json()).toEqual({ error: "forbidden" });
     }
-  // Neither answer below reads the database, which refuses every connection.
+  // Begin reaches no database — this one refuses every connection — and answers
+  // a code whose expiry it carries; an expired code is answered the same way.
+  const begun = await post(API_ROUTES.burrowEnrollBegin, { origin }, { "cf-connecting-ip": "192.0.2.4" });
+  expect(begun.status).toBe(200);
+  const { deviceCode, userCode } = (await begun.json()) as { deviceCode: string; userCode: string };
+  expect(isRelayBearer(deviceCode) && isEnrollUserCode(userCode)).toBe(true);
+  const expired = fromBase64Url(deviceCode);
+  expired.set([0, 0, 0, 1]);
+  expect(
+    await (await post(API_ROUTES.burrowEnrollPoll, { deviceCode: toBase64Url(expired) }, { "cf-connecting-ip": "192.0.2.4" })).json(),
+  ).toEqual({ status: "expired" });
+  // Neither answer below reads the database either.
   for (let i = 0; i < 10; i++) {
     const mismatch = await post(API_ROUTES.burrowEnrollBegin, { origin: "https://other.example.test" }, {
       "cf-connecting-ip": "192.0.2.2",
