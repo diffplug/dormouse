@@ -350,7 +350,8 @@ export async function beginHostedEnrollment(
 
 /**
  * What one poll says. `retry` is a poll that told nothing — the Relay
- * unreachable, a 5xx, or a 429, which asks the Burrow to `slowDown` — and the
+ * unreachable, a 5xx, a 2xx whose body was lost mid-read, or a 429, which asks
+ * the Burrow to `slowDown` — and the
  * next poll asks again; `redeemed` is an approval an earlier poll spent on
  * `burrowId`, whose answer never arrived; `refused` keeps the copy for its fixed reasons to the
  * panel; `failed` names what went wrong.
@@ -401,7 +402,16 @@ export async function pollHostedEnrollment(
     if (response.status === 409) return { status: 'refused', reason: 'account-full' };
     return { status: 'failed', message: refusalMessage(response.status, detail, relayOrigin) };
   }
-  const body: unknown = await response.json().catch(() => null);
+  // A body lost on the wire after a 2xx's headers is a transport failure like
+  // one before them: the next poll can still hear `redeemed`. Only a complete
+  // body that is not an enrollment poll fails.
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return { status: 'retry', slowDown: false };
+  }
+  const body = parseJson(text);
   if (!isBurrowEnrollPollResponse(body)) {
     return { status: 'failed', message: 'Could not enroll: the Relay’s answer was not an enrollment poll.' };
   }
@@ -464,6 +474,14 @@ function missingEnrollmentFields(enrollment: Record<string, unknown>): string[] 
   );
   if (!wrong.includes('burrowId') && !isE2eId(enrollment.burrowId)) wrong.unshift('burrowId');
   return wrong;
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function errorMessage(error: unknown): string {

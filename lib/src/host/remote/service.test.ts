@@ -2571,7 +2571,7 @@ describe('Hosted enrollment', () => {
   /** What the fake Hosted Relay's begin answers, and its queue of poll answers. */
   let begin: Record<string, unknown>;
   /** A promise is a poll held on the wire until the test settles it. */
-  let polls: Array<PollAnswer | Error | Promise<PollAnswer>>;
+  let polls: Array<PollAnswer | Error | Response | Promise<PollAnswer>>;
 
   const reply = (status: number, body: unknown) =>
     ({
@@ -2590,6 +2590,7 @@ describe('Hosted enrollment', () => {
       if (url.endsWith(API_ROUTES.burrowEnrollPoll)) {
         const next = await (polls.shift() ?? { status: 200, body: { status: 'pending' } });
         if (next instanceof Error) throw next;
+        if (next instanceof Response) return next;
         return reply(next.status, next.body);
       }
       throw new Error(`unexpected request ${url}`);
@@ -2977,6 +2978,35 @@ describe('Hosted enrollment', () => {
     expect(store.enrollment).toBeNull();
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
     expect(pollRequests()).toHaveLength(1);
+  });
+
+  it('polls again when a 200’s body is lost mid-read, and hears the redemption it spent', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    // Headers arrive; the body stream breaks before the enrollment does.
+    const broken = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"status":"enrolled","enrol'));
+        controller.error(new TypeError('connection reset'));
+      },
+    });
+    polls.push(new Response(broken, { status: 200, headers: { 'content-type': 'application/json' } }));
+    await nextPoll();
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting' });
+
+    const lost = 'A'.repeat(22);
+    polls.push({ status: 200, body: { status: 'redeemed', burrowId: lost } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'answer-lost', burrowId: lost });
+    expect(pollRequests()).toHaveLength(2);
+  });
+
+  it('ends failed on a complete 200 body that is not JSON', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push(new Response('<html>', { status: 200 }));
+    await nextPoll();
+    expect(await hostedEnrollment()).toMatchObject({ status: 'ended', reason: 'failed' });
   });
 
   it('refuses a redemption for another origin, saving nothing, and says so', async () => {

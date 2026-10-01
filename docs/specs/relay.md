@@ -838,8 +838,10 @@ memo invalidation — live in that burrow's spec.
     (the Relay's `expiresAt` held to 1–15 minutes, the clocks being separate), on
     Cancel, on disposal, and on a change to `nothing`.
     A 403 `NOT_ENTITLED_ERROR` ends it `not-entitled`; any other refusal ends it
-    `failed` with the service's sentence. **A transport failure, a 5xx, or a 429
-    polls again**, a 429 adding 5 s to the interval, up to 60 s; **a full
+    `failed` with the service's sentence. **A transport failure (including a
+    2xx body lost mid-read), a 5xx, or a 429 polls again**, a 429 adding 5 s to
+    the interval, up to 60 s; a complete body that fails the guard ends it
+    `failed`; **a full
     account's 409 polls on with `accountFull`**, the Relay keeping the approval.
     The Relay's `redeemed` (an earlier poll's answer lost) ends it `answer-lost`
     with the `burrowId` it names; `isBurrowEnrollPollResponse` guards every
