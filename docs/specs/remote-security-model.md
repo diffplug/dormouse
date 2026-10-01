@@ -598,8 +598,8 @@ encrypted outcome.
 - **Both halves or neither.** `isEnrollment` rejects a single half, a malformed
   encoding, or a wrong decoded length, and accepts a record from before the
   fields existed.
-- **A Burrow missing one mints it at start**, persisting before the Burrow runs
-  (rationale).
+- **A Burrow missing one mints it at start**, persisting before the Burrow runs,
+  and **never once its service is disposed** (rationale).
 - **Whatever consumes the static checks that the halves correspond**
   (`deriveNoiseStaticPublicKey`), and **a mismatch keeps the Burrow down**, loudly
   (rationale). An enrollment carrying no usable static reads as un-enrolled and

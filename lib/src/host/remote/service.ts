@@ -450,9 +450,10 @@ export class BurrowService {
     this.#kind = options.kind;
     // The transport guard (`docs/specs/remote-network.md` → "Policy"): every
     // socket, request, and direct peer this service opens goes through these
-    // three, which refuse at the call while the level is `nothing` or unread,
-    // so a path that forgets its own check still opens nothing. Each feature
-    // keeps its own check, for the error a person reads.
+    // three, which refuse at the call while the level is `nothing` — unread and
+    // disposed included (`#level`) — so a path that forgets its own check still
+    // opens nothing. Each feature keeps its own check, for the error a person
+    // reads.
     const createWebSocket =
       options.createWebSocket ?? ((url: string) => new WebSocket(url) as unknown as WebSocketLike);
     this.#createWebSocket = (url) => {
@@ -598,14 +599,15 @@ export class BurrowService {
   }
 
   /**
-   * The policy as it stands, refused under `nothing` or unread before any
-   * request — by the transport guard at the call, and by a command **after
-   * awaiting `#networkPolicy()` and before the next await**, so a
-   * `setNetworkPolicy` that landed during that await is the one it reads.
+   * The policy as it stands, refused while the level is `nothing` — unread and
+   * disposed included (`#level`) — before any request: by the transport guard
+   * at the call, and by a command **after awaiting `#networkPolicy()` and
+   * before the next await**, so a `setNetworkPolicy` or a `dispose()` that
+   * landed during that await is the one it reads.
    */
   #refuseNothing(): NetworkPolicy {
     const policy = this.#policy;
-    if (!policy || policy.level === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
+    if (!policy || this.#level() === 'nothing') throw new Error(NETWORK_OFF_REFUSAL);
     return policy;
   }
 
@@ -943,9 +945,9 @@ export class BurrowService {
     return this.#policyRead;
   }
 
-  /** The level as it stands: `nothing` until the policy has been read. */
+  /** The level as it stands: `nothing` until the policy has been read, and for good once disposed. */
   #level(): NetworkLevel {
-    return this.#policy?.level ?? 'nothing';
+    return this.#disposed ? 'nothing' : (this.#policy?.level ?? 'nothing');
   }
 
   /** The level once the policy has been read — `nothing` for a read that fails. */
@@ -1133,6 +1135,8 @@ export class BurrowService {
       noiseStaticPrivateKey: material.privateKeyPkcs8,
       noiseStaticPublicKey: material.publicKey,
     };
+    // A disposed service saves nothing: a successor may already hold its own.
+    if (this.#disposed) return null;
     // Persisted first, for the reason enrollment persists first: a Burrow running
     // on an identity no restart can recover is one every paired Client would
     // have to pair with again after a reboot.

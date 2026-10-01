@@ -2201,6 +2201,71 @@ describe('network policy', () => {
       expect(oneTimeStates().at(-1)).toEqual({ status: 'unavailable', reason: 'network-off' });
     });
 
+    describe('a dispose() that lands during the first policy read', () => {
+      /** Holds every policy read until the returned release runs. */
+      function holdPolicyRead(): () => void {
+        const read = Promise.withResolvers<void>();
+        store.loadNetworkPolicy = async () => {
+          await read.promise;
+          return store.network;
+        };
+        return read.resolve;
+      }
+
+      it('opens no one-time link', async () => {
+        createHostedService();
+        const release = holdPolicyRead();
+        const open = service.handleCommand({ burrowRequestId: 'open', cmd: 'oneTimeOpen' });
+        service.dispose();
+        release();
+        await open;
+        expect(rendezvous.rooms).toEqual([]);
+      });
+
+      it('tells managed voice the network is off', async () => {
+        createHostedService();
+        const release = holdPolicyRead();
+        const allowed = service.networkAllowed();
+        service.dispose();
+        release();
+        expect(await allowed).toBe(false);
+      });
+
+      it('sends no enrollment', async () => {
+        createService();
+        const release = holdPolicyRead();
+        const enroll = service.handleCommand({
+          burrowRequestId: 'enroll',
+          cmd: 'enroll',
+          params: { password: 'setup', label: 'Laptop' },
+        });
+        service.dispose();
+        release();
+        await enroll;
+        expect(requests).toEqual([]);
+        expect(sockets).toEqual([]);
+      });
+    });
+
+    it('saves no backfilled Noise static for a dispose() that lands during its mint', async () => {
+      const { noiseStaticPrivateKey: _private, noiseStaticPublicKey: _public, ...legacy } = ENROLLMENT;
+      createService({ enrollment: legacy });
+      const subtle = globalThis.crypto.subtle;
+      const generateKey = subtle.generateKey.bind(subtle) as (...args: unknown[]) => Promise<unknown>;
+      const mint = vi.spyOn(subtle, 'generateKey').mockImplementation(((...args: unknown[]) => {
+        service.dispose();
+        return generateKey(...args);
+      }) as typeof subtle.generateKey);
+      try {
+        await service.start();
+        expect(mint).toHaveBeenCalled();
+      } finally {
+        mint.mockRestore();
+      }
+      expect(store.enrollment).toEqual(legacy);
+      expect(sockets).toEqual([]);
+    });
+
     it('rejects anything but an exact policy this build offers, changing nothing', async () => {
       createService({ enrollment: ENROLLMENT });
       await service.start();
