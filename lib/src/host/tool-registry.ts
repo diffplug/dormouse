@@ -7,7 +7,7 @@
  * bundle.
  */
 import { isMap, isScalar, parseDocument as parseYamlDocument, type Document } from 'yaml';
-import { builtinFor, FOLDER_MATCH_SUFFIX } from 'dor/file-viewer-format';
+import { builtinFor, FOLDER_MATCH_SUFFIX } from 'dor-tools-builtin/file-viewer-format';
 import { isRecord } from '../lib/is-record';
 import { truncateText } from '../lib/osc-sanitize';
 import { hasShellInputControls } from 'dor/commands/shell-quote';

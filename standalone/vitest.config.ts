@@ -5,6 +5,8 @@ export default defineConfig({
   resolve: {
     alias: {
       dor: path.resolve(import.meta.dirname, '../dor/src'),
+      'dor-tools-builtin': path.resolve(import.meta.dirname, '../dor-tools-builtin/src'),
+      'dor-tools-lib': path.resolve(import.meta.dirname, '../dor-tools-lib/src'),
       'dormouse-lib': path.resolve(import.meta.dirname, '../lib/src'),
     },
   },

@@ -20,7 +20,7 @@ import {
 import { listenerUrlsByPort } from './port-url';
 import { getToolAnnounce, subscribeToToolAnnounces } from '../../lib/tool-announce-store';
 import { forgetToolReports } from '../../lib/tool-events';
-import { validToolServePath } from '../../lib/tool-announce';
+import { validToolServePath } from 'dor-tools-lib/osc';
 import { closeBrowserSurface } from './agent-browser-surface-controller';
 import type { LathWallEngine } from './lath-wall-engine';
 import type { DooredItem } from './wall-types';

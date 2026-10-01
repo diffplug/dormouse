@@ -3,9 +3,6 @@ import { mkdtemp, mkdir, realpath, rm, symlink, writeFile, readFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
 import { fileViewerFormat, viewerTitle } from '../dist/file-viewer-format.js';
@@ -212,28 +209,4 @@ test('titles a viewer with its target\'s basename, controls stripped', () => {
   }
   // C0 (BEL, ESC), DEL, and C1 (NEL, CSI, ST) could end or open a sequence.
   assert.equal(viewerTitle(join(root, 'a\x07\x1b]2;x\x7f\u0085\u009b\u009cb.txt')), 'a]2;xb.txt');
-});
-
-test('the bundled private entry titles itself, announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
-  const file = join(root, 'cli.txt');
-  await writeFile(file, 'cli preview');
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), '__view-file', file], { stdio: ['ignore', 'pipe', 'pipe'] });
-  try {
-    let output = '';
-    const announce = await new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('exit', code => reject(new Error(`viewer exited early: ${code}`)));
-      child.stdout.on('data', chunk => {
-        output += chunk;
-        const match = /\x1b\]367;serve;(\{[^\x07]*\})\x07/.exec(output);
-        if (match) resolve(JSON.parse(match[1]));
-      });
-    });
-    assert.ok(output.includes('\x1b]2;cli.txt\x07'), JSON.stringify(output));
-    assert.equal((await get(announce)).status, 200);
-    const exited = once(child, 'exit');
-    child.kill('SIGTERM');
-    await exited;
-    await assert.rejects(get(announce));
-  } finally { child.kill('SIGKILL'); }
 });

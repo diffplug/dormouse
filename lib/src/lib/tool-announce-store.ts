@@ -12,7 +12,7 @@
  * then it only *selects among* the ports the scan found. Output alone never
  * creates surfaces.
  */
-import type { ToolAnnounce } from './tool-announce';
+import type { ToolAnnounce } from 'dor-tools-lib/osc';
 
 const announces = new Map<string, ToolAnnounce>();
 const listeners = new Set<(id: string) => void>();

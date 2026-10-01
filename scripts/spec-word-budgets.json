@@ -1,5 +1,5 @@
 {
-  "AGENTS.md": 3450,
+  "AGENTS.md": 3500,
   "SECURITY.md": 200,
   "SELF_HOST.md": 6100,
   "docs/compatible-agents.md": 1750,
@@ -8,7 +8,9 @@
   "docs/specs/deploy.md": 1950,
   "docs/specs/dor-browser.md": 9350,
   "docs/specs/dor-cli.md": 6450,
-  "docs/specs/dor-tool.md": 6550,
+  "docs/specs/dor-tool.md": 6100,
+  "docs/specs/dor-tools-builtin.md": 950,
+  "docs/specs/dor-tools-lib.md": 450,
   "docs/specs/glossary.md": 3000,
   "docs/specs/hosted.md": 1900,
   "docs/specs/layout.md": 11500,

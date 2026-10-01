@@ -8,6 +8,9 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
+import { runFileViewer } from 'dor-tools-builtin/file-viewer';
+import { VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from 'dor-tools-builtin/file-viewer-format';
+import { runFolderViewer, type FolderOpenRequest } from 'dor-tools-builtin/folder-viewer';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -25,14 +28,12 @@ import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
 import { errorLine, errorMessage, fail, requireControlClient } from './commands/shared.js';
-import { VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from './file-viewer-format.js';
-import { runFileViewer } from './file-viewer.js';
-import { runFolderViewer } from './folder-viewer.js';
 import type {
   CliEnv,
   CliOptions,
   CliResult,
   Command,
+  ControlClient,
   DorCommandContext,
   HelpPatch,
 } from './commands/types.js';
@@ -224,7 +225,7 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     return BROWSER_CLIS[argv[0]](argv.slice(1), options);
   }
   // `dor __view-file <file>` is the built-in viewer's private entry
-  // (docs/specs/dor-tool.md -> Opening local files). Its server outlives this
+  // (docs/specs/dor-tools-builtin.md -> File viewer). Its server outlives this
   // call; its title and announcement are the only output.
   if (argv[0] === VIEW_FILE_ARGV && argv.length === 2) {
     return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
@@ -232,7 +233,7 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
   // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
   // selects and activates files through this terminal's control client.
   if (argv[0] === VIEW_FOLDER_ARGV && argv.length === 2) {
-    return { stdout: await runFolderViewer(argv[1], requireControlClient(options, TOOL_TIMEOUT_MS)), stderr: '', exitCode: 0 };
+    return { stdout: await runFolderViewer(argv[1], openThroughControl(requireControlClient(options, TOOL_TIMEOUT_MS))), stderr: '', exitCode: 0 };
   }
 
   const helpTarget = getHelpTarget(argv);
@@ -263,6 +264,20 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     exitCode: normalizeExitCode(capture.process.exitCode),
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
+  };
+}
+
+/** A folder viewer's select and activate, run as `dor open` (`--preview` for a
+ * select), or the reason no control endpoint is available. */
+function openThroughControl(client: ControlClient | Error): FolderOpenRequest {
+  return async ({ file, preview, cwd }) => {
+    if (client instanceof Error) return { ok: false, error: client.message };
+    try {
+      const response = await client.toolSurface({ file, preview, cwd, fresh: false, minimized: false });
+      return { ok: true, status: response.status };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
+    }
   };
 }
 

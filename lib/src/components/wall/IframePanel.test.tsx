@@ -74,10 +74,10 @@ describe('IframePanel', () => {
     } });
     const post = vi.spyOn(iframe.contentWindow!, 'postMessage');
     iframe.dispatchEvent(new Event('load'));
-    const command = post.mock.calls.find(([data]) => data.__dormouse === 'editor-command')?.[0];
+    const command = post.mock.calls.find(([data]) => data.dorTool === 1 && data.kind === 'connect')?.[0];
     expect(command?.kind).toBe('connect');
     window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, origin: 'http://localhost:4555',
-      data: { __dormouse: 'editor', connection: command.connection, kind: 'ready', dirty: true } }));
+      data: { dorTool: 1, connection: command.connection, kind: 'ready', dirty: true } }));
     const close = confirmToolEditorsClose(['edit']);
     expect(getEditorClosePrompt()?.items.map(item => item.label)).toEqual(['/project/example.ts']);
     await decideEditorClose('cancel'); expect(await close).toBe(false);

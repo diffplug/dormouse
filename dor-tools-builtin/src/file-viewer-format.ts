@@ -13,7 +13,7 @@ const TEXT = new Set(['txt', 'md', 'mdx', 'log', 'csv', 'tsv', 'json', 'jsonl', 
 
 /** The handler name an `open` rule or `--tool` uses to select the viewer, and
  * the private `dor` argv verb that runs it. The lib host's `resolveOpenTool`
- * shares both through the `dor/*` alias; this module stays free of Node APIs. */
+ * shares both through the `dor-tools-builtin/*` alias; this module stays free of Node APIs. */
 export const BUILTIN_FILE_TOOL = 'builtin:file';
 export const VIEW_FILE_ARGV = '__view-file';
 /** The same pair for the folder viewer (docs/specs/dor-tool.md -> Folders). */

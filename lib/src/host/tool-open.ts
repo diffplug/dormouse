@@ -2,7 +2,7 @@ import { realpath } from 'node:fs/promises';
 import { basename, relative, sep } from 'node:path';
 import picomatch from 'picomatch';
 import type { ToolLookupResult } from '../lib/platform/tool-types';
-import { BUILTIN_FILE_TOOL, FOLDER_MATCH_SUFFIX, builtinFor, fileViewerFormat } from 'dor/file-viewer-format';
+import { BUILTIN_FILE_TOOL, FOLDER_MATCH_SUFFIX, builtinFor, fileViewerFormat } from 'dor-tools-builtin/file-viewer-format';
 import { resolveLocalToolTarget } from './tool-input';
 import type { OpenRule } from './tool-registry';
 import { readUserToolFile, resolveUserTool } from './tool-user-config';

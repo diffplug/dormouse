@@ -6,6 +6,8 @@ import { relayOriginDefine, resolveRelayOrigin } from "../scripts/relay-origin.m
 
 const libDir = path.resolve(import.meta.dirname, "../lib");
 const dorDir = path.resolve(import.meta.dirname, "../dor");
+const dorToolsBuiltinDir = path.resolve(import.meta.dirname, "../dor-tools-builtin");
+const dorToolsLibDir = path.resolve(import.meta.dirname, "../dor-tools-lib");
 const remoteLibCommonDir = path.resolve(import.meta.dirname, "../remote-lib-common");
 
 // https://v2.tauri.app/start/frontend/vite/
@@ -25,6 +27,11 @@ export default defineConfig(({ command }) => ({
       // path; Vite governs lib files by lib's (paths-less) tsconfig, and `dor`
       // has no package exports, so resolve it explicitly the same way as lib.
       dor: path.resolve(dorDir, "src"),
+      // The same for the built-in viewers' format registry. `vite build` also
+      // finds it through lib's tsconfig `paths`, but the dev server does not.
+      "dor-tools-builtin": path.resolve(dorToolsBuiltinDir, "src"),
+      // And the Tool protocol the terminal parser and `IframePanel` speak.
+      "dor-tools-lib": path.resolve(dorToolsLibDir, "src"),
       // lib source imports the remote modules, which import `remote-lib-common`;
       // its package exports point at dist, which a clean standalone checkout
       // build has not necessarily produced yet. Match the Pocket and website
@@ -40,7 +47,7 @@ export default defineConfig(({ command }) => ({
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
     fs: {
       // Allow serving files from the source-aliased workspace packages.
-      allow: [libDir, dorDir, remoteLibCommonDir, "."],
+      allow: [libDir, dorDir, dorToolsBuiltinDir, dorToolsLibDir, remoteLibCommonDir, "."],
     },
   },
   // Tauri CLI reads this env var to know where the dev server is

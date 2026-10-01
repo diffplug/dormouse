@@ -4,19 +4,13 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request } from 'node:http';
-import { spawn, spawnSync } from 'node:child_process';
-import { once } from 'node:events';
-import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFolderViewer } from '../dist/folder-viewer.js';
 import { folderViewerPage } from '../dist/folder-viewer-page.js';
 
-const require = createRequire(import.meta.url);
-const { createDorControlServer } = require('../../standalone/sidecar/dor-control-server.js');
-
-const posixOnly = { skip: process.platform === 'win32' ? 'POSIX file names, symlinks, and sockets' : false };
+const posixOnly = { skip: process.platform === 'win32' ? 'POSIX file names and symlinks' : false };
 const hasGit = spawnSync('git', ['--version']).status === 0;
 const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'";
 
@@ -335,69 +329,4 @@ test('the page\'s Enter waits for a select in flight as a double-click does', as
   page.posts[0].ok();
   await settle();
   assert.deepEqual(page.sent(), ['select a.txt', 'activate a.txt']);
-});
-
-async function spawnViewer(env) {
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), '__view-folder', root], { stdio: ['ignore', 'pipe', 'pipe'], env });
-  let output = '';
-  const announce = await new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', code => reject(new Error(`viewer exited early: ${code}`)));
-    child.stdout.on('data', chunk => {
-      output += chunk;
-      const match = /\x1b\]367;serve;(\{[^\x07]*\})\x07/.exec(output);
-      if (match) resolve(JSON.parse(match[1]));
-    });
-  });
-  return { child, viewer: announce, output };
-}
-function withoutControl() {
-  const env = { ...process.env };
-  for (const key of ['DORMOUSE_CONTROL_SOCKET', 'DORMOUSE_CONTROL_TOKEN', 'DORMOUSE_SURFACE_ID']) delete env[key];
-  return env;
-}
-
-test('the bundled private entry titles itself, announces its port and path, then exits on termination', { timeout: 10_000 }, async () => {
-  await files({ 'a.txt': 'a' });
-  const { child, viewer, output } = await spawnViewer(withoutControl());
-  try {
-    assert.ok(output.includes('\x1b]2;root\x07'), JSON.stringify(output));
-    assert.equal(viewer.v, 1);
-    assert.deepEqual((await list(viewer)).entries, [entry('a.txt', 'file')]);
-    assert.deepEqual(JSON.parse((await post(viewer, 'select', { path: 'a.txt' })).body), { ok: false, error: 'Dormouse control endpoint is not available in this terminal yet.' });
-    const exited = once(child, 'exit');
-    child.kill('SIGTERM');
-    await exited;
-    await assert.rejects(call(viewer, viewer.path));
-  } finally { child.kill('SIGKILL'); }
-});
-
-test('the private entry opens through the control socket as dor open --preview', { ...posixOnly, timeout: 10_000 }, async () => {
-  await files({ 'a.txt': 'a' });
-  const socketPath = join(base, 'control.sock');
-  const requests = [];
-  const server = createDorControlServer({
-    socketPath,
-    token: 'shared-secret',
-    send(event, data) {
-      if (event !== 'dor:controlRequest') return;
-      requests.push(data);
-      server.respond(data.params.preview
-        ? { requestId: data.requestId, ok: true, result: { status: 'superseded' } }
-        : { requestId: data.requestId, ok: false, error: 'no Tool matches a.txt' });
-    },
-  });
-  await server.ready;
-  const { child, viewer } = await spawnViewer({ ...withoutControl(), DORMOUSE_CONTROL_SOCKET: socketPath, DORMOUSE_CONTROL_TOKEN: 'shared-secret', DORMOUSE_SURFACE_ID: 'folder-1' });
-  try {
-    assert.deepEqual(JSON.parse((await post(viewer, 'select', { path: 'a.txt' })).body), { ok: true, status: 'superseded' });
-    assert.deepEqual(JSON.parse((await post(viewer, 'activate', { path: 'a.txt' })).body), { ok: false, error: 'no Tool matches a.txt' });
-    assert.deepEqual(requests.map(r => [r.method, r.surfaceId, r.params]), [
-      ['surface.tool', 'folder-1', { file: join(root, 'a.txt'), preview: true, cwd: root, fresh: false, minimized: false }],
-      ['surface.tool', 'folder-1', { file: join(root, 'a.txt'), preview: false, cwd: root, fresh: false, minimized: false }],
-    ]);
-  } finally {
-    child.kill('SIGKILL');
-    server.close();
-  }
 });

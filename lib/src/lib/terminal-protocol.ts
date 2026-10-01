@@ -1,9 +1,8 @@
-import { parseToolState, type ToolState } from './tool-state';
+import { parseToolAnnounce, parseToolState, type ToolAnnounce, type ToolState } from 'dor-tools-lib/osc';
 import type { ActivityNotification, ProtocolProgressUpdate } from './alert-manager';
 import { parseColor } from './css-color';
 import { sanitizeCommandLine, sanitizeText, truncateText } from './osc-sanitize';
 import { isProtocolCommandStart } from './tool-events';
-import { parseToolAnnounce, type ToolAnnounce } from './tool-announce';
 import {
   STRING_CONTROL_INTRODUCER,
   STRING_CONTROL_INTRODUCER_SCAN,

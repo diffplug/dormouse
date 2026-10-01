@@ -12,7 +12,7 @@ function editor() {
   disconnect = connectToolEditor('file', 'example.ts', frame, 'http://localhost:4000');
   const connection = post.mock.calls[0][0].connection;
   const emit = (data: Record<string, unknown>, origin = 'http://localhost:4000') => window.dispatchEvent(new MessageEvent('message', {
-    source: frame.contentWindow, origin, data: { __dormouse: 'editor', connection, ...data },
+    source: frame.contentWindow, origin, data: { dorTool: 1, connection, ...data },
   }));
   return { post, emit };
 }

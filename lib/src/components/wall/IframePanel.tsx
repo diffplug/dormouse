@@ -17,7 +17,7 @@ import {
   type ScreenRegistration,
 } from './agent-browser-screen';
 import { isToolParams, toolScopeFromParams } from './browser-surface';
-import { builtinFor } from 'dor/file-viewer-format';
+import { builtinFor } from 'dor-tools-builtin/file-viewer-format';
 import { connectIframeTheme } from '../../lib/themes/iframe-theme';
 import { connectToolEditor, withToolEditorConsent } from '../../lib/tool-editor';
 import { offeredRenderModes } from './browser-automation';

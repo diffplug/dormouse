@@ -3,7 +3,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { startFolderViewer } from '../../../dor/src/folder-viewer';
+import { startFolderViewer } from '../../../dor-tools-builtin/src/folder-viewer';
 import { createIframeProxyUrl } from './iframe-proxy';
 
 // The folder viewer's page is framed through the iframe proxy, so its POSTs
