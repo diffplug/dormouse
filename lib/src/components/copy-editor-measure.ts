@@ -12,6 +12,8 @@ export interface CopyEditorParts {
   footer: HTMLElement;
   /** A `w-max` row of every format's longest lines, laid out unwrapped. */
   widthProbe: HTMLElement;
+  /** A `w-max` copy of the header and footer, as wide as any format shows them. */
+  chromeProbe: HTMLElement;
   /** A hidden copy of the preview, out of flow inside the root so it inherits
    *  the root's type, its height left to its lines. */
   heightProbe: HTMLElement;
@@ -25,6 +27,12 @@ const borderY = (root: HTMLElement) => root.offsetHeight - root.clientHeight;
  *  preview's scrollbar gutter and the root's borders. */
 export function measureNaturalWidth({ root, preview, widthProbe }: CopyEditorParts): number {
   return Math.ceil(widthProbe.getBoundingClientRect().width) + preview.offsetWidth - preview.clientWidth + borderX(root);
+}
+
+/** The editor's width with its header and footer whole: the chrome probe,
+ *  plus the root's borders. */
+export function measureChromeWidth({ root, chromeProbe }: CopyEditorParts): number {
+  return Math.ceil(chromeProbe.getBoundingClientRect().width) + borderX(root);
 }
 
 /** The editor's whole height at a given width, for the rendering the preview

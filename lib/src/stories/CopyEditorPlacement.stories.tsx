@@ -16,7 +16,7 @@ import { requireElement, settleTerminals } from './settle-terminals';
 // source pane and checks the side the editor took.
 
 const SOURCE = 'copy-placement-source';
-type Layout = 'single' | 'source-over-peer' | 'peer-over-source' | 'three-columns';
+type Layout = 'single' | 'source-over-peer' | 'peer-over-source' | 'three-columns' | 'narrow-source';
 interface Props {
   layout: Layout;
   /** The selected rows of the source's grid, as fractions of its height. */
@@ -29,12 +29,13 @@ interface Props {
 }
 
 const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
-const split = (dir: 'row' | 'col', nodes: LathNode[]): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node) => ({ node, weight: 1 }))) });
+const split = (dir: 'row' | 'col', nodes: LathNode[], weights = nodes.map(() => 1)): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node, i) => ({ node, weight: weights[i] }))) });
 const LAYOUTS: Record<Layout, LathNode> = {
   single: leaf(SOURCE),
   'source-over-peer': split('col', [leaf(SOURCE), leaf('peer')]),
   'peer-over-source': split('col', [leaf('peer'), leaf(SOURCE)]),
   'three-columns': split('row', [leaf(SOURCE), leaf('peer'), leaf('peer-2')]),
+  'narrow-source': split('row', [leaf(SOURCE), leaf('peer')], [1, 5]),
 };
 function boot(layout: Layout): LathPersistedLayout {
   const root = LAYOUTS[layout];
@@ -59,7 +60,7 @@ const write = (term: Terminal, data: string) => new Promise<void>((resolve) => t
 const editor = () => document.querySelector<HTMLElement>(`[data-copy-editor-for="${SOURCE}"]`);
 const sourcePane = () => document.querySelector<HTMLElement>(`[data-lath-leaf="${SOURCE}"]`)!;
 
-async function place({ from, to, fill, exact, expected }: Props) {
+async function place({ from, to, fill, exact, expected }: Props): Promise<{ box: DOMRect; pane: DOMRect }> {
   await settleTerminals();
   const term = sourceTerminal();
   refitSession(SOURCE);
@@ -86,11 +87,15 @@ async function place({ from, to, fill, exact, expected }: Props) {
   // Every spot but the overlay keeps clear of the text being copied.
   if (expected === 'overlay') expect(box.top).toBeLessThan(band.bottom);
   else expect(box.bottom <= band.top + 1 || box.top >= band.bottom - 1 || box.left >= pane.right - 1 || box.right <= pane.left + 1).toBe(true);
-  if (expected === 'below') expect(box.bottom).toBeGreaterThan(pane.bottom);
   if (expected === 'right') expect(box.left).toBeGreaterThanOrEqual(pane.right);
   expect(box.width).toBeGreaterThan(0);
   expect(box.height).toBeGreaterThan(0);
+  return { box, pane };
 }
+
+const passed = (canvasElement: HTMLElement) => {
+  canvasElement.dataset.placementCheck = 'passed';
+};
 
 const meta = {
   title: 'App/Copy editor placement',
@@ -104,7 +109,7 @@ const meta = {
   parameters: { layout: 'fullscreen', fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) } },
   play: async ({ args, canvasElement }) => {
     await place(args);
-    canvasElement.dataset.placementCheck = 'passed';
+    passed(canvasElement);
   },
 } satisfies Meta<typeof PlacementWall>;
 export default meta;
@@ -112,7 +117,14 @@ type Story = StoryObj<typeof meta>;
 
 /** A selection at the source's last rows: the editor hugs it from below,
  *  spilling over the neighbor under the source. */
-export const BelowOverNeighbor: Story = { args: { layout: 'source-over-peer', from: 0, to: 1, expected: 'below' } };
+export const BelowOverNeighbor: Story = {
+  args: { layout: 'source-over-peer', from: 0, to: 1, expected: 'below' },
+  play: async ({ args, canvasElement }) => {
+    const { box, pane } = await place(args);
+    expect(box.bottom).toBeGreaterThan(pane.bottom);
+    passed(canvasElement);
+  },
+};
 
 /** The same selection with the source at the window's bottom: no room below,
  *  so above. */
@@ -127,3 +139,25 @@ export const Squished: Story = { args: { layout: 'single', from: 0.4, to: 0.8, f
 
 /** Every row selected, every line kept: no spot left but over the selection. */
 export const Overlay: Story = { args: { layout: 'single', from: 0, to: 1, fill: true, exact: true, expected: 'overlay' } };
+
+/** One short row of a pane narrower than the editor's header and footer: the
+ *  editor widens past the pane and its line to show every control whole. */
+export const NarrowPane: Story = {
+  args: { layout: 'narrow-source', from: 0, to: 0, expected: 'below' },
+  play: async ({ args, canvasElement }) => {
+    const { box, pane } = await place(args);
+    expect(box.width).toBeGreaterThan(pane.width);
+    const shown = Array.from(editor()!.querySelectorAll('button')).filter((b) => !b.closest('[inert]'));
+    const options = shown.filter((b) => b.hasAttribute('aria-pressed'));
+    const copy = shown.find((b) => b.textContent === 'Copy');
+    expect(copy).toBeDefined();
+    for (const control of [...options, copy!]) {
+      const r = control.getBoundingClientRect();
+      expect(r.left).toBeGreaterThanOrEqual(box.left);
+      expect(r.right).toBeLessThanOrEqual(box.right);
+    }
+    // No scope or format scrolled out of its segment.
+    for (const segment of new Set(options.map((b) => b.parentElement!))) expect(segment.scrollWidth).toBeLessThanOrEqual(segment.clientWidth);
+    passed(canvasElement);
+  },
+};

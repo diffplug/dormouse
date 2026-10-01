@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { CheckIcon } from '@phosphor-icons/react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
@@ -20,7 +20,7 @@ import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
 import { overlayViewportBounds, subscribeOverlayViewport } from '../lib/ui-geometry';
 import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
 import { COPY_EDITOR_Z_INDEX, COPY_EXPANDED_TEXT_CLASS, modalActionButton, modalSurface, popupButton, portalToBody, Shortcut } from './design';
-import { createHeightMeasurer, measureNaturalWidth, type CopyEditorParts } from './copy-editor-measure';
+import { createHeightMeasurer, measureChromeWidth, measureNaturalWidth, type CopyEditorParts } from './copy-editor-measure';
 import { createRectMotion, type RectMotion } from './rect-motion';
 import { TouchUiContext } from './touch-ui-context';
 import { workspaceInTravel } from './workspace-motion';
@@ -99,6 +99,8 @@ interface Inputs {
   workspaceId: string | null;
   /** The longest line across every format of the scope. */
   naturalWidth: number;
+  /** The header and footer whole, as wide as any format shows them. */
+  chromeWidth: number;
   heightAt: (width: number) => number;
   /** Everything the last placement read, so a tick that moved nothing skips
    *  it; null while hidden. */
@@ -143,6 +145,18 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
   const renderings = useMemo(() => formatRenderings(editor, programCopy), [editor.buffer, scope, programCopy]);
   const sameAs = useMemo(() => duplicateFormats(renderings), [renderings]);
   const onFlip = useCallback((index: number, kind: BreakKind) => flipCopyBreak(terminalId, index, kind), [terminalId]);
+  const most = useMemo(() => mostCounted(renderings), [renderings]);
+
+  const edited = isEdited(editor);
+  const lines = lineCount(rendering.text);
+  const fromProgram = editor.format === 'program';
+  const expanded = editor.scope > 0;
+  const nudgeable = selection.shape !== 'block';
+  const formats = editorFormats(programCopy);
+  const program = programCopy === null ? null : programName(terminalId);
+  const formatName = (f: EditorFormat) => (f === 'program' ? `From ${program}` : FORMAT_NAMES[f]);
+  // The widest count any format, or a flipped mark past them, gives.
+  const widestCount = `${Math.max(most.lines, lines)} lines · ${Math.max(most.ch, rendering.text.length)} ch`;
 
   const anchorRef = useRef<HTMLSpanElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -150,8 +164,9 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
   const previewRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const widthProbeRef = useRef<HTMLDivElement>(null);
+  const chromeProbeRef = useRef<HTMLDivElement>(null);
   const heightProbeRef = useRef<HTMLDivElement>(null);
-  const inputs = useRef<Inputs>({ selection, scope, touch: touchUi, zoomedId, workspaceId, naturalWidth: 0, heightAt: noHeight, placed: null });
+  const inputs = useRef<Inputs>({ selection, scope, touch: touchUi, zoomedId, workspaceId, naturalWidth: 0, chromeWidth: 0, heightAt: noHeight, placed: null });
   const motionRef = useRef<RectMotion | null>(null);
   motionRef.current ??= createRectMotion({
     write: (r) => {
@@ -171,6 +186,7 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     preview: previewRef.current!,
     footer: footerRef.current!,
     widthProbe: widthProbeRef.current!,
+    chromeProbe: chromeProbeRef.current!,
     heightProbe: heightProbeRef.current!,
   });
 
@@ -196,7 +212,7 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     }
     const viewport = overlayViewportBounds();
     const key = [
-      at.selection, at.scope, at.touch, at.naturalWidth, at.heightAt,
+      at.selection, at.scope, at.touch, at.naturalWidth, at.chromeWidth, at.heightAt,
       dims.viewportY, dims.rows, dims.cellHeight, dims.gridTop, dims.elementLeft, dims.elementTop, dims.elementWidth, dims.elementHeight,
       viewport.left, viewport.top, viewport.right, viewport.bottom,
     ];
@@ -207,6 +223,7 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       pane: { left: dims.elementLeft, top: dims.elementTop, width: dims.elementWidth, height: dims.elementHeight },
       band: selectionBand(dims, [spanOfSelection(at.selection), at.scope]),
       naturalWidth: at.naturalWidth,
+      chromeWidth: at.chromeWidth,
       naturalHeight: at.heightAt,
       touch: at.touch,
       previous: (root.dataset.copyEditorSide as CopyEditorSide | undefined) ?? null,
@@ -228,6 +245,12 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
   useLayoutEffect(() => {
     inputs.current.naturalWidth = measureNaturalWidth(parts());
   }, [renderings]);
+
+  // The chrome probe reads only these, none of them the format: `f` never
+  // re-measures it, and a flipped mark only past every format's count.
+  useLayoutEffect(() => {
+    inputs.current.chromeWidth = measureChromeWidth(parts());
+  }, [editor.scopes, expanded, program, touchUi, nudgeable, widestCount]);
 
   useLayoutEffect(() => {
     inputs.current.heightAt = createHeightMeasurer(parts());
@@ -267,11 +290,60 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     return () => controller.abort();
   }, [recompute, subscribeLayoutFrames, terminalId]);
 
-  const edited = isEdited(editor);
-  const lines = rendering.text ? rendering.text.split('\n').length : 0;
-  const fromProgram = editor.format === 'program';
-  const formatName = (f: EditorFormat) => (f === 'program' ? `From ${programName(terminalId)}` : FORMAT_NAMES[f]);
-  const keys = (node: ReactNode) => (touchUi ? null : <span className="whitespace-nowrap text-xs text-muted">{node}</span>);
+  const keys = (node: ReactNode) => (touchUi ? null : <span className="min-w-0 overflow-hidden whitespace-nowrap text-xs text-muted">{node}</span>);
+
+  // The header and footer never wrap. The chrome probe lays them out as wide
+  // as any format shows them: a `*` on one format, the Copy button's check,
+  // and the widest count. In a window narrower than that, the key hints and
+  // the legend clip first, so the segments, the count, and Copy still show.
+  const header = (ref: Ref<HTMLDivElement> | undefined, starred: EditorFormat | null) => (
+    <div ref={ref} className="flex shrink-0 flex-col gap-1 border-b border-border px-2 py-1.5">
+      {/* The program's own copy has no scope of Dormouse's to expand. */}
+      <div className={clsx('flex min-w-0 items-center gap-2', fromProgram && 'pointer-events-none opacity-50')}>
+        <Segment
+          value={editor.scope}
+          onPick={(i) => setCopyScope(terminalId, i)}
+          items={editor.scopes.map((s, i) => ({ id: i, label: s.label }))}
+        />
+        {editor.scopes.length > 1 && keys(<><Shortcut>e</Shortcut> expand <Shortcut>{SHIFT}e</Shortcut> shrink</>)}
+      </div>
+      <div className="flex min-w-0 items-center gap-2">
+        <Segment
+          value={editor.format}
+          onPick={(f) => setCopyFormat(terminalId, f)}
+          items={formats.map((f) => ({
+            id: f,
+            label: `${formatName(f)}${f === starred ? '*' : ''}`,
+            dim: !!sameAs[f],
+            title: sameAs[f] ? `${FORMAT_BLURBS[f]}: same text as ${formatName(sameAs[f]!)}` : FORMAT_BLURBS[f],
+          }))}
+        />
+        {keys(<><Shortcut>f</Shortcut> <Shortcut>{SHIFT}f</Shortcut></>)}
+      </div>
+    </div>
+  );
+  const footer = (ref: Ref<HTMLDivElement> | undefined, count: string, flash: boolean) => (
+    <div ref={ref} className="flex shrink-0 items-center gap-3 border-t border-border px-2 py-1 text-xs text-muted">
+      <span className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
+        <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
+        <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
+        <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
+        {expanded && <span><span className={clsx(COPY_EXPANDED_TEXT_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
+      </span>
+      {nudgeable && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
+      <span className="ml-auto shrink-0 whitespace-nowrap">{count}</span>
+      {keys(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => void copySelection(terminalId)}
+        className={modalActionButton({ tone: 'primary', class: 'flex shrink-0 items-center gap-1 py-0.5' })}
+      >
+        {flash && <CheckIcon size={12} weight="bold" />}
+        Copy
+      </button>
+    </div>
+  );
 
   const root = (
     <div
@@ -289,57 +361,17 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       }}
       onContextMenu={(e) => e.stopPropagation()}
     >
-      <div ref={headerRef} className="flex shrink-0 flex-col gap-1 border-b border-border px-2 py-1.5">
-        {/* The program's own copy has no scope of Dormouse's to expand. */}
-        <div className={clsx('flex min-w-0 items-center gap-2', fromProgram && 'pointer-events-none opacity-50')}>
-          <Segment
-            value={editor.scope}
-            onPick={(i) => setCopyScope(terminalId, i)}
-            items={editor.scopes.map((s, i) => ({ id: i, label: s.label }))}
-          />
-          {editor.scopes.length > 1 && keys(<><Shortcut>e</Shortcut> expand <Shortcut>{SHIFT}e</Shortcut> shrink</>)}
-        </div>
-        <div className="flex min-w-0 items-center gap-2">
-          <Segment
-            value={editor.format}
-            onPick={(f) => setCopyFormat(terminalId, f)}
-            items={editorFormats(programCopy).map((f) => ({
-              id: f,
-              label: `${formatName(f)}${f === editor.format && edited ? '*' : ''}`,
-              dim: !!sameAs[f],
-              title: sameAs[f] ? `${FORMAT_BLURBS[f]}: same text as ${formatName(sameAs[f]!)}` : FORMAT_BLURBS[f],
-            }))}
-          />
-          {keys(<><Shortcut>f</Shortcut> <Shortcut>{SHIFT}f</Shortcut></>)}
-        </div>
-      </div>
+      {header(headerRef, edited ? editor.format : null)}
       <div ref={previewRef} className={PREVIEW_CLASS}>
         <LinedPreview rendering={rendering} onFlip={onFlip} />
       </div>
-      <div ref={footerRef} className="flex shrink-0 items-center gap-3 border-t border-border px-2 py-1 text-xs text-muted">
-        <span className="flex items-center gap-2 whitespace-nowrap">
-          <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
-          <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
-          <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
-          {editor.scope > 0 && <span><span className={clsx(COPY_EXPANDED_TEXT_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
-        </span>
-        {selection.shape !== 'block' && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
-        <span className="ml-auto shrink-0 whitespace-nowrap">
-          {lines} {lines === 1 ? 'line' : 'lines'} · {rendering.text.length} ch
-        </span>
-        {keys(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
-        <button
-          type="button"
-          tabIndex={-1}
-          onClick={() => void copySelection(terminalId)}
-          className={modalActionButton({ tone: 'primary', class: 'flex shrink-0 items-center gap-1 py-0.5' })}
-        >
-          {copyFlash && <CheckIcon size={12} weight="bold" />}
-          Copy
-        </button>
-      </div>
+      {footer(footerRef, `${lines} ${lines === 1 ? 'line' : 'lines'} · ${rendering.text.length} ch`, !!copyFlash)}
       <div ref={widthProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 w-max">
         <WidthProbe renderings={renderings} />
+      </div>
+      <div ref={chromeProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 flex w-max flex-col">
+        {header(undefined, formats[0])}
+        {footer(undefined, widestCount, true)}
       </div>
       <div ref={heightProbeRef} aria-hidden inert className={clsx(PREVIEW_CLASS, 'invisible absolute left-0 top-0')}>
         <LinedPreview rendering={rendering} onFlip={noFlip} />
@@ -364,7 +396,7 @@ function Segment<T extends string | number>({ value, items, onPick }: {
   onPick: (v: T) => void;
 }) {
   return (
-    <div className="flex min-w-0 overflow-x-auto rounded border border-border">
+    <div className="flex max-w-full shrink-0 overflow-x-auto rounded border border-border">
       {items.map((it) => (
         <button
           key={it.id}
@@ -402,6 +434,15 @@ function Mark({ index, kind, auto, onFlip }: { index: number; kind: BreakKind; a
       {MARK_GLYPH[kind]}
     </button>
   );
+}
+
+/** The clipboard lines in `text`, as the footer counts them. */
+const lineCount = (text: string) => (text ? text.split('\n').length : 0);
+
+/** The most lines and characters any format's text has. */
+function mostCounted(renderings: FormatRenderings): { lines: number; ch: number } {
+  const texts = Object.values(renderings).map((r) => r.text);
+  return { lines: Math.max(...texts.map(lineCount)), ch: Math.max(...texts.map((t) => t.length)) };
 }
 
 /** One run of pieces per clipboard line, a kept break ending its line, and

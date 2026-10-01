@@ -14,7 +14,7 @@ const PANE = { left: 300, top: 100, width: 600, height: 600 };
 const BAND = { top: 300, bottom: 360 };
 
 const place = (o: Partial<CopyEditorPlacementInput> = {}) => placeCopyEditor({
-  viewport: VIEWPORT, pane: PANE, band: BAND, naturalWidth: 400, naturalHeight: () => 200, touch: false, previous: null, ...o,
+  viewport: VIEWPORT, pane: PANE, band: BAND, naturalWidth: 400, chromeWidth: 0, naturalHeight: () => 200, touch: false, previous: null, ...o,
 });
 
 /** Three columns, the middle one selected nearly top to bottom. */
@@ -128,6 +128,20 @@ describe('placeCopyEditor', () => {
     expect(place({ naturalWidth: 2000 }).rect).toMatchObject({ left: 12, width: 1176 });
     // Too wide to start at the pane: shifted left to stay in the window.
     expect(place({ naturalWidth: 1000 }).rect).toMatchObject({ left: 188, width: 1000 });
+  });
+
+  it('widens past a narrow pane and its lines to show the chrome whole, still inside the window', () => {
+    const narrow = { ...PANE, width: 150 };
+    expect(place({ pane: narrow, naturalWidth: 120, chromeWidth: 460 }).rect).toMatchObject({ left: 304, width: 460 });
+    // Lines wider than the chrome still set the width.
+    expect(place({ pane: narrow, naturalWidth: 700, chromeWidth: 460 }).rect).toMatchObject({ left: 304, width: 700 });
+    expect(place({ pane: narrow, naturalWidth: 120, chromeWidth: 2000 }).rect).toMatchObject({ left: 12, width: 1176 });
+  });
+
+  it('rejects a side too narrow for the chrome', () => {
+    // Either side of the column has 384px.
+    expect(place({ pane: COLUMN, band: TALL, naturalWidth: 300, chromeWidth: 350 }).rect).toMatchObject({ left: 804, width: 384 });
+    expect(place({ pane: COLUMN, band: TALL, naturalWidth: 300, chromeWidth: 390 }).side).toBe('overlay');
   });
 
   it('places inside an offset visual viewport', () => {

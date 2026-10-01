@@ -10,7 +10,7 @@ vi.mock('../lib/platform', () => ({ IS_MAC: true }));
 // The registry barrel boots xterm; the editor only reads the measured grid.
 vi.mock('../lib/terminal-registry', () => ({ getTerminalOverlayDims: vi.fn() }));
 // jsdom lays nothing out: the editor's natural size is each test's to set.
-vi.mock('./copy-editor-measure', () => ({ measureNaturalWidth: vi.fn(), createHeightMeasurer: vi.fn() }));
+vi.mock('./copy-editor-measure', () => ({ measureNaturalWidth: vi.fn(), measureChromeWidth: vi.fn(), createHeightMeasurer: vi.fn() }));
 import { cfg } from '../cfg';
 import { copySelection } from '../lib/copy-selection';
 import { followCopySelection, openCopyEditor } from '../lib/copy-editor';
@@ -28,7 +28,7 @@ import {
 } from '../lib/mouse-selection';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { CopyEditor } from './CopyEditor';
-import { createHeightMeasurer, measureNaturalWidth } from './copy-editor-measure';
+import { createHeightMeasurer, measureChromeWidth, measureNaturalWidth } from './copy-editor-measure';
 import { TouchUiContext } from './touch-ui-context';
 import { installFakeFrames } from './motion-test-utils';
 import { createWorkspaceMotion } from './workspace-motion';
@@ -57,8 +57,9 @@ const DIMS = {
 let container: HTMLDivElement;
 let root: Root;
 let dims: typeof DIMS;
-/** The editor's measured size: its longest line, and its height at any width. */
-let natural: { width: number; height: number };
+/** The editor's measured size: its longest line, its header and footer, and
+ *  its height at any width. */
+let natural: { width: number; chrome: number; height: number };
 const terminal = fakeXterm(CLAUDE_REPLY);
 
 const frames = installFakeFrames();
@@ -69,8 +70,11 @@ let resizeObservers: Set<() => void>;
 const frame = (ms = 16) => frames.advance(ms);
 
 const editor = () => document.body.querySelector<HTMLElement>('[data-copy-editor-for="term-1"]');
-const text = () => editor()?.textContent ?? '';
-const button = (label: string) => Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === label)!;
+/** What the editor shows, its inert probes left out. */
+const text = () => Array.from(editor()?.children ?? [], (part) => (part.hasAttribute('inert') ? '' : part.textContent)).join('');
+const button = (label: string) => Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === label && !b.closest('[inert]'))!;
+/** The probe laying out the header and footer, the inert part with segments. */
+const chromeProbe = () => Array.from(editor()!.querySelectorAll('[inert]')).find((part) => part.querySelector('[aria-pressed]'))!;
 const side = () => editor()?.dataset.copyEditorSide;
 const box = () => {
   const { left, top, width, height } = editor()!.style;
@@ -95,9 +99,10 @@ function drag(r0: number, c0: number, r1: number, c1: number): void {
 beforeEach(() => {
   __resetMouseSelectionForTests();
   dims = { ...DIMS };
-  natural = { width: 300, height: 150 };
+  natural = { width: 300, chrome: 200, height: 150 };
   vi.mocked(getTerminalOverlayDims).mockImplementation(() => dims);
   vi.mocked(measureNaturalWidth).mockImplementation(() => natural.width);
+  vi.mocked(measureChromeWidth).mockImplementation(() => natural.chrome);
   vi.mocked(createHeightMeasurer).mockImplementation(() => () => natural.height);
   vi.mocked(copySelection).mockReset();
 
@@ -152,6 +157,15 @@ describe('CopyEditor: opening and placement', () => {
     drag(2, 25, 5, 27);
     render();
     expect(box()).toEqual(px(62, 114, 950, 150));
+  });
+
+  it('widens past a narrow pane and its lines to show its header and footer whole', () => {
+    // A 19-column pane over a short line.
+    dims.elementWidth = 190;
+    Object.assign(natural, { width: 120, chrome: 460 });
+    drag(2, 25, 2, 30);
+    render();
+    expect(box()).toEqual(px(104, 84, 460, 150));
   });
 
   it('opens above when below has no room', () => {
@@ -425,6 +439,22 @@ describe('CopyEditor: preview and controls', () => {
     expect(vi.mocked(measureNaturalWidth).mock.calls.length).toBe(measured);
     act(() => button('Whole words').click());
     expect(vi.mocked(measureNaturalWidth).mock.calls.length).toBe(measured + 1);
+  });
+
+  it('lays its chrome probe out the same in every format', () => {
+    drag(2, 2, 5, 27);
+    render();
+    const measured = vi.mocked(measureChromeWidth).mock.calls.length;
+    const laidOut = chromeProbe().textContent;
+    // A `*` on one format and the widest count, Exact's four lines.
+    expect(laidOut).toContain('Auto*');
+    expect(laidOut).toContain('4 lines');
+    expect(chromeProbe().querySelector('svg')).not.toBeNull();
+    act(() => button('␣').click());
+    act(() => button('Exact').click());
+    act(() => button('No breaks').click());
+    expect(chromeProbe().textContent).toBe(laidOut);
+    expect(vi.mocked(measureChromeWidth).mock.calls.length).toBe(measured);
   });
 
   it('probes each format’s three longest lines, cut to what the screen could show', () => {

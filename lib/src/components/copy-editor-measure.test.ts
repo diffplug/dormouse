@@ -5,7 +5,7 @@
  * height follows the width last written to it, as wrapped lines would.
  */
 import { expect, it } from 'vitest';
-import { createHeightMeasurer, measureNaturalWidth, type CopyEditorParts } from './copy-editor-measure';
+import { createHeightMeasurer, measureChromeWidth, measureNaturalWidth, type CopyEditorParts } from './copy-editor-measure';
 
 function box(element: HTMLElement, sizes: Partial<Record<'offsetWidth' | 'clientWidth' | 'offsetHeight' | 'clientHeight', () => number>>): HTMLElement {
   for (const [key, get] of Object.entries(sizes)) Object.defineProperty(element, key, { get, configurable: true });
@@ -25,12 +25,15 @@ function parts(): CopyEditorParts & { heightReads: number[] } {
   });
   const widthProbe = document.createElement('div');
   widthProbe.getBoundingClientRect = () => ({ width: 640.4 }) as DOMRect;
+  const chromeProbe = document.createElement('div');
+  chromeProbe.getBoundingClientRect = () => ({ width: 480.2 }) as DOMRect;
   return {
     root: box(document.createElement('div'), { offsetWidth: () => 802, clientWidth: () => 800, offsetHeight: () => 302, clientHeight: () => 300 }),
     header: box(document.createElement('div'), { offsetHeight: () => 50 }),
     preview: box(document.createElement('div'), { offsetWidth: () => 700, clientWidth: () => 688 }),
     footer: box(document.createElement('div'), { offsetHeight: () => 24 }),
     widthProbe,
+    chromeProbe,
     heightProbe,
     heightReads,
   };
@@ -38,6 +41,10 @@ function parts(): CopyEditorParts & { heightReads: number[] } {
 
 it('measures the natural width as the probe, the preview gutter, and the root borders', () => {
   expect(measureNaturalWidth(parts())).toBe(641 + 12 + 2);
+});
+
+it('measures the chrome as its probe and the root borders, with no preview gutter', () => {
+  expect(measureChromeWidth(parts())).toBe(481 + 2);
 });
 
 it('lays the height probe out at the width the root gives its preview, once per width', () => {

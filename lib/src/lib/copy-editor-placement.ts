@@ -35,6 +35,8 @@ export interface CopyEditorPlacementInput {
   band: Band;
   /** The longest line across every format of the current scope. */
   naturalWidth: number;
+  /** The header and footer laid out whole, which never wrap. */
+  chromeWidth: number;
   /** The editor's whole height when laid out at `width`. */
   naturalHeight: (width: number) => number;
   touch: boolean;
@@ -75,10 +77,11 @@ function hold<C extends CopyEditorPlacement>(
  * pane's bottom, the only spot that covers the band.
  */
 export function placeCopyEditor(i: CopyEditorPlacementInput): CopyEditorPlacement {
-  const { pane, band, naturalWidth, naturalHeight, touch, previous } = i;
+  const { pane, band, naturalWidth, chromeWidth, naturalHeight, touch, previous } = i;
   const b = insetOverlayBounds(i.viewport);
   const floor = pane.width - 2 * GAP_PX;
-  const widthIn = (room: number) => Math.min(room, Math.max(floor, naturalWidth));
+  // At least the pane and the chrome, at most the longest line or the chrome.
+  const widthIn = (room: number) => Math.min(room, Math.max(floor, chromeWidth, naturalWidth));
 
   // Above and below may spill over neighbouring panes; only the window clamps them.
   const width = widthIn(b.right - b.left);
@@ -98,7 +101,8 @@ export function placeCopyEditor(i: CopyEditorPlacementInput): CopyEditorPlacemen
   const beside = () => {
     const room = { left: pane.left - GAP_PX - b.left, right: b.right - (pane.left + pane.width + GAP_PX) };
     const spot = (side: 'left' | 'right'): CopyEditorPlacement | null => {
-      if (room[side] < Math.min(floor, naturalWidth)) return null;
+      // Room for the chrome, and for the narrower of the pane and the line.
+      if (room[side] < Math.max(chromeWidth, Math.min(floor, naturalWidth))) return null;
       const w = widthIn(room[side]);
       const h = naturalHeight(w);
       if (h > b.bottom - b.top) return null;
