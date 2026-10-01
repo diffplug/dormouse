@@ -53,6 +53,7 @@ export const UNENROLLED_STATUS: BurrowConsoleStatus = {
   suggestedLabel: 'ned-mac',
   offer: false,
   hostedEnrollment: null,
+  accountOrigin: 'https://hosted.dormouse.sh',
 };
 
 /**
@@ -63,6 +64,7 @@ export const SELF_HOST_UNENROLLED_STATUS: BurrowConsoleStatus = {
   ...UNENROLLED_STATUS,
   relayOrigin: SELF_HOST_RELAY_ORIGIN,
   relayMode: 'self-host',
+  accountOrigin: null,
 };
 
 /**

@@ -909,6 +909,7 @@ describe('burrow service glue', () => {
           suggestedLabel: `${hostname()} (VS Code)`,
           offer: true,
           hostedEnrollment: null,
+          accountOrigin: null,
         },
       },
     ]);
@@ -1626,6 +1627,62 @@ describe('serving the other windows', () => {
     expect(squat.frames.filter((frame) => frame.kind === 'push'))
       .toEqual([{ kind: 'push', sessionId: 'pty-1', title: 'pnpm build' }]);
     expect(bound.posted).toEqual([]);
+  });
+
+  it('answers another window’s Enroll with the code this one is showing, replacing it only when asked', async () => {
+    // A window that never contended answers `status` idle and sees no code;
+    // its Enroll lands on this service, and replacing the code would leave the
+    // first window showing one the account can no longer approve.
+    let begun = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        // `API_ROUTES.burrowEnrollBegin`, which this package does not import.
+        if (!String(input).endsWith('/api/burrow/enroll/begin')) {
+          return new Response(JSON.stringify({ status: 'pending' }), { status: 200 });
+        }
+        begun += 1;
+        const userCode = begun === 1 ? '23AB-YZ9K' : '9999-ZZZZ';
+        return new Response(
+          JSON.stringify({
+            // The bearer shape: 32 bytes, base64url.
+            deviceCode: String(begun).repeat(43),
+            userCode,
+            expiresAt: Date.now() + 10 * 60_000,
+            interval: 5,
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    const mod = await freshBurrow();
+    const bound = fakeDeps();
+    mod.configureBurrow(bound.deps());
+    bridgeLinkToBurrow(mod, opened!, bound);
+    const window = mod.initBurrow(localNetworkContext().context);
+    try {
+      mod.handleBurrowCommand({ burrowRequestId: 'rh-0', cmd: 'beginHostedEnrollment', params: { label: 'Laptop' } });
+      await waitFor(() => results(bound.posted).length > 0);
+      expect(results(bound.posted)[0]).toMatchObject({ result: { status: 'waiting', userCode: '23AB-YZ9K' } });
+
+      const far = fakeWindow();
+      const link = await openFarWindow(far);
+      link.forwardCommand({ burrowRequestId: 'rh-1', cmd: 'beginHostedEnrollment', params: { label: 'Other' } });
+      await waitFor(() => far.results.length > 0);
+      expect(far.results[0]).toMatchObject({ result: { status: 'waiting', userCode: '23AB-YZ9K' } });
+      expect(begun).toBe(1);
+
+      link.forwardCommand({
+        burrowRequestId: 'rh-2',
+        cmd: 'beginHostedEnrollment',
+        params: { label: 'Other', replace: true },
+      });
+      await waitFor(() => far.results.length > 1);
+      expect(far.results[1]).toMatchObject({ result: { status: 'waiting', userCode: '9999-ZZZZ' } });
+      expect(begun).toBe(2);
+    } finally {
+      window.dispose();
+    }
   });
 
   it('answers a forwarded command over the link and nowhere else', async () => {

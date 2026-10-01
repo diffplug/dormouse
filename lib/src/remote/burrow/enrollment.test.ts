@@ -515,9 +515,11 @@ describe('Hosted device-code enrollment', () => {
         .toEqual({ status: 'failed', message: expect.stringContaining('burrowId') });
     });
 
-    it('reads pending and expired as they are', async () => {
+    it('reads pending, expired, and redeemed as they are', async () => {
       expect(await poll(json(200, { status: 'pending' }))).toEqual({ status: 'pending' });
       expect(await poll(json(200, { status: 'expired' }))).toEqual({ status: 'expired' });
+      // An earlier poll's redemption whose answer never arrived.
+      expect(await poll(json(200, { status: 'redeemed' }))).toEqual({ status: 'redeemed' });
     });
 
     it('retries what told it nothing, slowing down on a 429', async () => {

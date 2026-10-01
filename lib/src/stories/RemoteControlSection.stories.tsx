@@ -181,12 +181,41 @@ export const HostedEnrollFailed: Story = {
     primedBurrow: {
       status: {
         ...UNENROLLED_STATUS,
-        hostedEnrollment: { status: 'ended', reason: 'failed', message: 'keychain is locked' },
+        hostedEnrollment: {
+          status: 'ended',
+          reason: 'failed',
+          message:
+            'keychain is locked Your account holds Burrow T7lzkkrPT8nx4m9zf90V4h, which this computer could ' +
+            'not keep; remove it at https://hosted.dormouse.sh/account.',
+        },
       },
     },
-    docs: { story: { height: '540px' } },
+    docs: { story: { height: '560px' } },
   },
-  play: settled('keychain is locked'),
+  play: settled(/keychain is locked/),
+};
+
+/** Approved, and the enrollment being saved and started: no code, nothing to cancel. */
+export const HostedEnrollRedeeming: Story = {
+  parameters: {
+    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'redeeming' } } },
+    docs: { story: { height: '420px' } },
+  },
+  play: settled('Approved. Enrolling this computer…'),
+};
+
+/**
+ * The Relay says an earlier poll redeemed the code, whose answer never
+ * arrived: the computer it added is the account's to remove.
+ */
+export const HostedEnrollAnswerLost: Story = {
+  parameters: {
+    primedBurrow: {
+      status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'ended', reason: 'answer-lost' } },
+    },
+    docs: { story: { height: '560px' } },
+  },
+  play: settled('Manage computers at hosted.dormouse.sh'),
 };
 
 /**
@@ -196,7 +225,12 @@ export const HostedEnrollFailed: Story = {
 export const HostedEnrolled: Story = {
   parameters: {
     primedBurrow: {
-      status: enrolledStatus({ relayOrigin: DEFAULT_RELAY_ORIGIN, relayMode: 'hosted', connection: 'stopped' }),
+      status: enrolledStatus({
+        relayOrigin: DEFAULT_RELAY_ORIGIN,
+        relayMode: 'hosted',
+        accountOrigin: 'https://hosted.dormouse.sh',
+        connection: 'stopped',
+      }),
     },
   },
   play: settled('Manage computers at hosted.dormouse.sh'),

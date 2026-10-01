@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { BurrowLink } from '../../lib/platform/types';
+import { HOSTED_ENROLLMENT_END_REASONS } from '../../host/remote/service-protocol';
 
 let burrowLink: BurrowLink | undefined;
 
@@ -392,6 +393,8 @@ describe('a Hosted enrollment in the status', () => {
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(shown()).toEqual(hostedEnrollment);
+      // A broker older than `accountOrigin` names no account page.
+      expect((getBurrowStatusSnapshot() as { status: { accountOrigin: unknown } }).status.accountOrigin).toBeNull();
       await vi.advanceTimersByTimeAsync(3 * 2000);
       expect(listener).toHaveBeenCalledTimes(1);
 
@@ -399,6 +402,15 @@ describe('a Hosted enrollment in the status', () => {
       hostedEnrollment = { status: 'ended', reason: 'toString' };
       await vi.advanceTimersByTimeAsync(2000);
       expect(shown()).toEqual({ status: 'ended', reason: 'failed' });
+      // Every reason the service exports is read as itself, and so is redeeming.
+      for (const reason of HOSTED_ENROLLMENT_END_REASONS) {
+        hostedEnrollment = { status: 'ended', reason };
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(shown()).toEqual({ status: 'ended', reason });
+      }
+      hostedEnrollment = { status: 'redeeming' };
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(shown()).toEqual({ status: 'redeeming' });
 
       for (const malformed of [undefined, null, { status: 'waiting', userCode: 7 }, { status: 'gone' }]) {
         hostedEnrollment = malformed;

@@ -37,6 +37,7 @@ import { ONE_TIME_OUTCOME_LABEL, oneTimeEndedCopy } from './OneTimeConnection';
 import {
   HOSTED_ENROLLMENT_CODE_LABEL,
   HOSTED_ENROLLMENT_ENDED_COPY,
+  HOSTED_ENROLLMENT_REDEEMING_COPY,
   PAIRING_OUTCOME_LABEL,
   RemoteControlSection,
 } from './RemoteControlSection';
@@ -396,9 +397,65 @@ describe('RemoteControlSection', () => {
     expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY.failed);
     expect(text()).toContain('keychain is locked');
 
+    // A new code replaces whatever code is waiting by now; the first Enroll does not.
     await act(async () => buttonLabelled('Get a new code')!.click());
-    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', { label: NOT_ENROLLED.suggestedLabel });
+    expect(link.command).toHaveBeenCalledWith('beginHostedEnrollment', {
+      label: NOT_ENROLLED.suggestedLabel,
+      replace: true,
+    });
     await act(async () => buttonLabelled('Done')!.click());
+    expect(link.command).toHaveBeenCalledWith('cancelHostedEnrollment');
+  });
+
+  it('disables Open once the code’s countdown reaches zero', async () => {
+    const openExternal = vi.fn();
+    platform = {
+      burrow: makeLink(async () => ({
+        ...NOT_ENROLLED,
+        hostedEnrollment: { ...hostedWaiting(), expiresAt: Date.now() - 1 } as HostedEnrollmentState,
+      })),
+      openExternal,
+    };
+    await render();
+    expect(text()).toContain('This code has expired.');
+    expect(buttonLabelled('Open hosted.dormouse.sh to approve')!.disabled).toBe(true);
+  });
+
+  it('says a redeemed code is enrolling, with nothing to cancel or begin', async () => {
+    platform = { burrow: makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: { status: 'redeeming' } })) };
+    await render();
+    expect(persistentPanel().hidden).toBe(false);
+    expect(text()).toContain(HOSTED_ENROLLMENT_REDEEMING_COPY);
+    expect(hostedForm().hidden).toBe(true);
+    expect(buttonLabelled('Cancel')).toBeUndefined();
+  });
+
+  it('sends a lost answer to the account page to remove what it added', async () => {
+    const openExternal = vi.fn();
+    platform = {
+      burrow: makeLink(async () => ({ ...NOT_ENROLLED, hostedEnrollment: { status: 'ended', reason: 'answer-lost' } })),
+      openExternal,
+    };
+    await render();
+    expect(text()).toContain(HOSTED_ENROLLMENT_ENDED_COPY['answer-lost']);
+    await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
+    expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
+  });
+
+  it('shows an enrolled machine why a second redemption could not be kept, until dismissed', async () => {
+    const message = 'Your account holds Burrow T7lzkkrPT8nx4m9zf90V4h, which this computer could not keep.';
+    const link = makeLink(async () =>
+      enrolled({
+        relayOrigin: DEFAULT_RELAY_ORIGIN,
+        relayMode: 'hosted',
+        accountOrigin: 'https://hosted.dormouse.sh',
+        hostedEnrollment: { status: 'ended', reason: 'failed', message },
+      }),
+    );
+    platform = { burrow: link };
+    await render();
+    expect(text()).toContain(message);
+    await act(async () => buttonLabelled('Dismiss')!.click());
     expect(link.command).toHaveBeenCalledWith('cancelHostedEnrollment');
   });
 
@@ -418,12 +475,27 @@ describe('RemoteControlSection', () => {
   it('links a Hosted enrollment to the account that manages it, and a self-host one to nothing', async () => {
     const openExternal = vi.fn();
     platform = {
-      burrow: makeLink(async () => enrolled({ relayOrigin: DEFAULT_RELAY_ORIGIN, relayMode: 'hosted' })),
+      burrow: makeLink(async () =>
+        enrolled({ relayOrigin: DEFAULT_RELAY_ORIGIN, relayMode: 'hosted', accountOrigin: 'https://hosted.dormouse.sh' }),
+      ),
       openExternal,
     };
     await render();
     await act(async () => buttonLabelled('Manage computers at hosted.dormouse.sh')!.click());
     expect(openExternal).toHaveBeenCalledWith('https://hosted.dormouse.sh/account');
+    await act(async () => root.unmount());
+
+    // A dev Hosted build's account is where its waiting view sent the approval.
+    root = createRoot(container);
+    platform = {
+      burrow: makeLink(async () =>
+        enrolled({ relayOrigin: 'http://localhost:8787', relayMode: 'hosted', accountOrigin: 'http://localhost:5173' }),
+      ),
+      openExternal,
+    };
+    await render();
+    await act(async () => buttonLabelled('Manage computers at localhost:5173')!.click());
+    expect(openExternal).toHaveBeenLastCalledWith('http://localhost:5173/account');
     await act(async () => root.unmount());
 
     root = createRoot(container);

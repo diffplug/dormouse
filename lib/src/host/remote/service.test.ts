@@ -473,6 +473,7 @@ describe('status', () => {
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: false,
       hostedEnrollment: null,
+      accountOrigin: null,
     } satisfies BurrowConsoleStatus);
   });
 
@@ -517,6 +518,7 @@ describe('status', () => {
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: true,
       hostedEnrollment: null,
+      accountOrigin: null,
     } satisfies BurrowConsoleStatus);
     // The one-time token is a bearer credential and this is a service→webview
     // shape (docs/specs/security-remote.md -> "Trust boundary"), so it must not appear anywhere in what was sent.
@@ -550,6 +552,7 @@ describe('status', () => {
       suggestedLabel: `${hostname()} (VS Code)`,
       offer: false,
       hostedEnrollment: null,
+      accountOrigin: null,
     } satisfies BurrowConsoleStatus);
   });
 
@@ -2418,9 +2421,11 @@ describe('Hosted enrollment', () => {
   const INTERVAL_S = 5;
   const TTL_MS = 10 * 60_000;
 
+  type PollAnswer = { status: number; body: unknown };
   /** What the fake Hosted Relay's begin answers, and its queue of poll answers. */
   let begin: Record<string, unknown>;
-  let polls: Array<{ status: number; body: unknown } | Error>;
+  /** A promise is a poll held on the wire until the test settles it. */
+  let polls: Array<PollAnswer | Error | Promise<PollAnswer>>;
 
   const reply = (status: number, body: unknown) =>
     ({
@@ -2437,7 +2442,7 @@ describe('Hosted enrollment', () => {
       requests.push({ url, init });
       if (url.endsWith(API_ROUTES.burrowEnrollBegin)) return reply(200, begin);
       if (url.endsWith(API_ROUTES.burrowEnrollPoll)) {
-        const next = polls.shift() ?? { status: 200, body: { status: 'pending' } };
+        const next = await (polls.shift() ?? { status: 200, body: { status: 'pending' } });
         if (next instanceof Error) throw next;
         return reply(next.status, next.body);
       }
@@ -2445,12 +2450,12 @@ describe('Hosted enrollment', () => {
     }) as unknown as typeof globalThis.fetch;
   }
 
-  const enrolledAnswer = () => ({
+  const enrolledAnswer = (burrowId = BURROW_ID) => ({
     status: 200,
     body: {
       status: 'enrolled',
       enrollment: {
-        burrowId: BURROW_ID,
+        burrowId,
         burrowToken: 'hosted-token',
         origin: HOSTED_ORIGIN,
         rpId: new URL(HOSTED_ORIGIN).hostname,
@@ -2463,6 +2468,18 @@ describe('Hosted enrollment', () => {
   }
 
   const pollRequests = () => requests.filter((request) => request.url.endsWith(API_ROUTES.burrowEnrollPoll));
+  const beginRequests = () => requests.filter((request) => request.url.endsWith(API_ROUTES.burrowEnrollBegin));
+
+  /** Queue a poll the fake Relay holds on the wire until the test answers it. */
+  function heldPoll(): (answer: PollAnswer) => void {
+    let settle: (answer: PollAnswer) => void = () => {};
+    polls.push(new Promise<PollAnswer>((resolve) => (settle = resolve)));
+    return settle;
+  }
+
+  /** The sentence a redemption this machine could not keep ends with. */
+  const stranded = (burrowId: string) =>
+    `Your account holds Burrow ${burrowId}, which this computer could not keep; remove it at https://hosted.dormouse.sh/account.`;
 
   async function hostedEnrollment(): Promise<unknown> {
     return ((await command('status')).result as BurrowConsoleStatus).hostedEnrollment;
@@ -2586,6 +2603,8 @@ describe('Hosted enrollment', () => {
     await drain(() => store.enrollment !== null);
     expect(store.enrollment?.burrowId).toBe(BURROW_ID);
 
+    service.dispose();
+    hosted();
     await command('beginHostedEnrollment', { label: 'x' });
     polls.push({ status: 403, body: { error: NOT_ENTITLED_ERROR } });
     await nextPoll();
@@ -2657,32 +2676,146 @@ describe('Hosted enrollment', () => {
     expect(pollRequests()).toEqual([]);
   });
 
-  it('keeps nothing a poll in flight redeems after a cancel', async () => {
+  it('holds an enrollment a poll in flight redeems after a cancel: the Relay already spent it', async () => {
     hosted();
-    await command('beginHostedEnrollment', { label: 'x' });
-    let answer: (response: Response) => void = () => {};
-    const inFlight = new Promise<Response>((resolve) => {
-      answer = resolve;
-    });
-    const fetch = hostedFetch();
-    service.dispose();
-    hosted(undefined, {
-      fetch: (async (input: RequestInfo | URL, init?: RequestInit) =>
-        String(input).endsWith(API_ROUTES.burrowEnrollPoll)
-          ? (requests.push({ url: String(input), init }), inFlight)
-          : fetch(input, init)) as typeof globalThis.fetch,
-    });
-    await command('beginHostedEnrollment', { label: 'x' });
+    await command('beginHostedEnrollment', { label: 'Work laptop' });
+    const answer = heldPoll();
     await nextPoll();
     await command('cancelHostedEnrollment');
+    expect(await hostedEnrollment()).toBeNull();
+    answer(enrolledAnswer());
+    await drain(() => store.enrollment !== null);
+
+    expect(store.enrollment).toMatchObject({ burrowId: BURROW_ID, label: 'Work laptop' });
+    expect((await command('status')).result).toMatchObject({ enrolled: true, hostedEnrollment: null });
+    // And polls nothing more.
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(1);
+  });
+
+  it('holds one a replaced code’s poll redeems, and drops the code that replaced it', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const answer = heldPoll();
+    await nextPoll();
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    await command('beginHostedEnrollment', { label: 'x', replace: true });
+    expect(await hostedEnrollment()).toMatchObject({ status: 'waiting', userCode: '9999-ZZZZ' });
+    answer(enrolledAnswer());
+    await drain(() => store.enrollment !== null);
+    await drain(() => vi.getTimerCount() === 0);
+
+    expect(store.enrollment?.burrowId).toBe(BURROW_ID);
+    expect(await hostedEnrollment()).toBeNull();
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(1);
+  });
+
+  it('names the Burrow left at the account when a late redemption finds this machine enrolled', async () => {
+    const OTHER = 'T7lzkkrPT8nx4m9zf90V4h';
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const late = heldPoll();
+    await nextPoll();
+    await command('cancelHostedEnrollment');
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push(enrolledAnswer());
+    await nextPoll();
+    await drain(() => store.enrollment !== null);
+
+    late(enrolledAnswer(OTHER));
+    await drain(() => false);
+    expect(store.enrollment?.burrowId).toBe(BURROW_ID);
+    expect((await command('status')).result).toMatchObject({
+      enrolled: true,
+      hostedEnrollment: {
+        status: 'ended',
+        reason: 'failed',
+        message: expect.stringContaining(stranded(OTHER)),
+      },
+    });
+  });
+
+  it('warns, holding nothing, when a redemption lands after disposal', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const answer = heldPoll();
+    await nextPoll();
+    service.dispose();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    answer(reply(200, enrolledAnswer().body));
+    answer(enrolledAnswer());
     await drain(() => warn.mock.calls.length > 0);
 
     expect(store.enrollment).toBeNull();
-    expect(await hostedEnrollment()).toBeNull();
-    expect(String(warn.mock.calls[0]![0])).toContain(BURROW_ID);
+    expect(String(warn.mock.calls[0]![0])).toContain(stranded(BURROW_ID));
     warn.mockRestore();
+  });
+
+  it('reports redeeming until the redeemed enrollment is saved and started', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    const save = store.saveEnrollment.bind(store);
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    store.saveEnrollment = async (enrollment) => {
+      await held;
+      return save(enrollment);
+    };
+    polls.push(enrolledAnswer());
+    await nextPoll();
+
+    // Never a status with neither a code nor an enrollment.
+    expect((await command('status')).result).toMatchObject({
+      enrolled: false,
+      hostedEnrollment: { status: 'redeeming' },
+    });
+    // Nor does a Cancel or a begin void it.
+    await command('cancelHostedEnrollment');
+    expect((await command('beginHostedEnrollment', { label: 'x', replace: true })).result).toEqual({
+      status: 'redeeming',
+    });
+    expect(beginRequests()).toHaveLength(1);
+    release();
+    await drain(() => store.enrollment !== null);
+    await drain(() => false);
+    expect((await command('status')).result).toMatchObject({ enrolled: true, hostedEnrollment: null });
+  });
+
+  it('names the account origin in status: the fixed one in a release build, the begin’s in a dev one', async () => {
+    hosted();
+    expect((await command('status')).result).toMatchObject({ accountOrigin: 'https://hosted.dormouse.sh' });
+    service.dispose();
+
+    hosted(undefined, { relay: { origin: 'http://localhost:8787', mode: 'hosted' } });
+    expect((await command('status')).result).toMatchObject({ accountOrigin: null });
+    await command('beginHostedEnrollment', { label: 'x' });
+    // The origin the panel's waiting view opens, so Manage computers matches it.
+    expect((await command('status')).result).toMatchObject({
+      accountOrigin: 'https://hosted.example',
+      hostedEnrollment: { verificationUrl: `https://hosted.example/enroll#${USER_CODE}` },
+    });
+  });
+
+  it('is refused on an enrolled machine, before any request', async () => {
+    hosted({ enrollment: ENROLLMENT });
+    await service.start();
+    expect((await command('beginHostedEnrollment', { label: 'x' })).error).toContain(
+      `already enrolled as Burrow ${BURROW_ID}`,
+    );
+    expect(requests).toEqual([]);
+  });
+
+  it('ends answer-lost when the Relay says an earlier poll redeemed the code', async () => {
+    hosted();
+    await command('beginHostedEnrollment', { label: 'x' });
+    polls.push({ status: 200, body: { status: 'redeemed' } });
+    await nextPoll();
+
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'answer-lost' });
+    expect(store.enrollment).toBeNull();
+    await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
+    expect(pollRequests()).toHaveLength(1);
   });
 
   it('refuses a redemption for another origin, saving nothing, and says so', async () => {
@@ -2700,6 +2833,7 @@ describe('Hosted enrollment', () => {
       reason: 'failed',
       message: expect.stringContaining('The Relay says its origin is https://relay.example.com'),
     });
+    expect(((await hostedEnrollment()) as { message: string }).message).toContain(stranded(BURROW_ID));
   });
 
   it('ends failed when the redeemed enrollment cannot be saved', async () => {
@@ -2711,15 +2845,69 @@ describe('Hosted enrollment', () => {
     polls.push(enrolledAnswer());
     await nextPoll();
 
-    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'failed', message: 'keychain is locked' });
+    // A fixed sentence naming the Burrow the Relay recorded, and where to remove it.
+    expect(await hostedEnrollment()).toEqual({
+      status: 'ended',
+      reason: 'failed',
+      message: `keychain is locked ${stranded(BURROW_ID)}`,
+    });
     expect((await command('status')).result).toMatchObject({ enrolled: false });
   });
 
-  it('replaces one waiting with the next begin', async () => {
+  it('answers the code already waiting to a begin that does not ask to replace it', async () => {
+    // Another VS Code window's Enroll lands on this service: voiding the code
+    // the first window shows would leave it approving nothing.
+    hosted();
+    const first = (await command('beginHostedEnrollment', { label: 'x' })).result;
+    begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
+    expect((await command('beginHostedEnrollment', { label: 'y' })).result).toEqual(first);
+    expect(beginRequests()).toHaveLength(1);
+  });
+
+  it('joins a begin already in flight rather than asking twice', async () => {
+    hosted();
+    const both = [1, 2].map((n) =>
+      service.handleCommand({ burrowRequestId: `join-${n}`, cmd: 'beginHostedEnrollment', params: { label: 'x' } }),
+    );
+    await Promise.all(both);
+    const answers = sent
+      .filter((message) => message.event === 'burrow:result')
+      .filter((message) => String(message.data.burrowRequestId).startsWith('join-'));
+    expect(answers.map((message) => message.data.result)).toEqual([
+      expect.objectContaining({ userCode: USER_CODE }),
+      expect.objectContaining({ userCode: USER_CODE }),
+    ]);
+    expect(beginRequests()).toHaveLength(1);
+  });
+
+  it('keeps what was waiting or ended until a replacing begin has a code', async () => {
+    hosted();
+    const waiting = (await command('beginHostedEnrollment', { label: 'x' })).result;
+    const events = statusEvents().length;
+    begin = { ...begin, interval: 0 };
+    expect((await command('beginHostedEnrollment', { label: 'x', replace: true })).error).toContain(
+      'not an enrollment code',
+    );
+    expect(await hostedEnrollment()).toEqual(waiting);
+    expect(statusEvents()).toHaveLength(events);
+    // Still polled.
+    await nextPoll();
+    expect(pollRequests()).toHaveLength(1);
+
+    polls.push({ status: 200, body: { status: 'expired' } });
+    await nextPoll();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+    expect((await command('beginHostedEnrollment', { label: 'x', replace: true })).error).toBeDefined();
+    expect(await hostedEnrollment()).toEqual({ status: 'ended', reason: 'expired' });
+  });
+
+  it('replaces one waiting with a begin that asks to, saying so', async () => {
     hosted();
     await command('beginHostedEnrollment', { label: 'x' });
+    const events = statusEvents().length;
     begin = { ...begin, deviceCode: 'E'.repeat(RELAY_BEARER_LENGTH), userCode: '9999-ZZZZ' };
-    await command('beginHostedEnrollment', { label: 'x' });
+    await command('beginHostedEnrollment', { label: 'x', replace: true });
+    expect(statusEvents()).toHaveLength(events + 1);
     await nextPoll();
 
     expect(pollRequests()).toHaveLength(1);

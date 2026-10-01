@@ -17,6 +17,7 @@
  */
 
 import {
+  HOSTED_ENROLLMENT_END_REASONS,
   servingOf,
   type HostedEnrollmentState,
   type InvitationEvent,
@@ -114,6 +115,7 @@ const STATUS_FIELDS: {
   // A fresh object every poll, so field by field: a reference compare would
   // republish every 2 s while a code waits.
   hostedEnrollment: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  accountOrigin: Object.is,
 };
 
 function sameState(a: BurrowStatusState, b: BurrowStatusState): boolean {
@@ -263,6 +265,8 @@ function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
     relayMode: status.relayMode === 'self-host' ? 'self-host' : 'hosted',
     offer: Boolean(status.offer),
     hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment),
+    // Absent from a broker older than the field, which names no account page.
+    accountOrigin: typeof status.accountOrigin === 'string' ? status.accountOrigin : null,
   };
 }
 
@@ -280,14 +284,13 @@ function hostedEnrollmentOf(value: unknown): HostedEnrollmentState | null {
       ? { status: 'waiting', userCode, verificationUrl, expiresAt, accountFull: state.accountFull === true }
       : null;
   }
+  if (state.status === 'redeeming') return { status: 'redeeming' };
   if (state.status !== 'ended') return null;
   const reason = HOSTED_ENROLLMENT_END_REASONS.find((known) => known === state.reason) ?? 'failed';
   return typeof state.message === 'string'
     ? { status: 'ended', reason, message: state.message }
     : { status: 'ended', reason };
 }
-
-const HOSTED_ENROLLMENT_END_REASONS = ['expired', 'not-entitled', 'failed'] as const;
 
 async function readBurrowStatus(): Promise<void> {
   const active = burrowLink();
@@ -340,14 +343,14 @@ export async function enrollOfferBurrow(label: string): Promise<void> {
 
 /**
  * Begin a Hosted build's device-code enrollment under `label`; the service
- * polls it and reports through `status` (`HostedEnrollmentState`). Rejections
- * propagate verbatim — the caller renders them. Re-reads either way, since a
- * begin replaces whatever enrollment was waiting or ended.
+ * polls it and reports through `status` (`HostedEnrollmentState`). A code
+ * already waiting is answered unless `replace` asks for a new one. Rejections
+ * propagate verbatim — the caller renders them. Re-reads either way.
  */
-export async function beginHostedEnrollment(label: string): Promise<void> {
+export async function beginHostedEnrollment(label: string, options: { replace?: boolean } = {}): Promise<void> {
   const active = requireBurrowLink();
   try {
-    await active.command('beginHostedEnrollment', { label });
+    await active.command('beginHostedEnrollment', { label, ...(options.replace ? { replace: true } : {}) });
   } finally {
     await refreshAfterMutation();
   }

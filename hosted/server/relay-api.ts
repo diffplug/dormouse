@@ -489,13 +489,16 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     return database(c, async (db) => {
       const {
         rows: [approval],
-      } = await db.query<OwnerRow>(
-        `SELECT a."userId", ${OWNER_COLUMNS}
+      } = await db.query<OwnerRow & { redeemed: boolean }>(
+        `SELECT a."userId", a."redeemedAt" IS NOT NULL AS redeemed, ${OWNER_COLUMNS}
         FROM dormouse_relay_enrollment_approvals a JOIN "user" u ON u.id = a."userId"
         WHERE a."userCode" = $1 AND a."expiresAt" > now()`,
         [userCode],
       );
       if (!approval) return answer({ status: "pending" });
+      // Spent by an earlier poll whose answer this Burrow never read: the
+      // Burrow it minted is the account's to remove, and nothing redeems twice.
+      if (approval.redeemed) return answer({ status: "redeemed" });
       const owner = ownerOf(approval);
       // Rechecked here: an approval does not outlive its approver's entitlement.
       if (!owner.entitled) return c.json({ error: NOT_ENTITLED_ERROR }, 403);
@@ -510,19 +513,30 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
         );
         // A full account keeps the approval, so a poll after a removal enrolls.
         if (enrolled >= MAX_ENROLLED_BURROWS) return "full";
-        // Single-use: the approval is spent in the statement that enrolls its
-        // Burrow, owned by exactly its approver, so two polls cannot mint two.
+        // Single-use: the approval is marked redeemed in the statement that
+        // enrolls its Burrow, owned by exactly its approver, so two polls
+        // cannot mint two; the marked row stays until it expires.
         const { rowCount } = await db.query(
           `WITH spent AS (
-            DELETE FROM dormouse_relay_enrollment_approvals
+            UPDATE dormouse_relay_enrollment_approvals
+            SET "redeemedBurrowId" = $3, "redeemedAt" = now()
             WHERE "userCode" = $1 AND "userId" = $2 AND "expiresAt" > now()
+              AND "redeemedAt" IS NULL
             RETURNING "userId"
           )
           INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash")
           SELECT $3, "userId", $4 FROM spent`,
           [userCode, owner.userId, burrowId, digest(burrowToken)],
         );
-        return rowCount ? "enrolled" : "spent";
+        if (rowCount) return "enrolled";
+        // Lost to a poll that redeemed it while this one waited on the lock,
+        // or expired since the read above.
+        const { rowCount: redeemed } = await db.query(
+          `SELECT 1 FROM dormouse_relay_enrollment_approvals
+          WHERE "userCode" = $1 AND "expiresAt" > now() AND "redeemedAt" IS NOT NULL`,
+          [userCode],
+        );
+        return redeemed ? "redeemed" : "expired";
       });
       if (outcome === "full") {
         const where = c.env.ACCOUNT_ORIGIN;
@@ -535,7 +549,7 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
           409,
         );
       }
-      if (outcome === "spent") return answer({ status: "expired" });
+      if (outcome !== "enrolled") return answer({ status: outcome });
       return answer({
         status: "enrolled",
         // The Burrow enforces `origin`/`rpId` as its ConnectionPolicy; Hosted

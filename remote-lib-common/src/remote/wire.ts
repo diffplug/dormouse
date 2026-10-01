@@ -425,11 +425,14 @@ export interface BurrowEnrollPollRequest {
 
 /**
  * `expired` also answers an unknown device code. `enrolled` answers once: the
- * redemption is single-use.
+ * redemption is single-use. `redeemed` answers every later poll of that code
+ * until the approval expires: an earlier poll enrolled a Burrow whose answer
+ * never reached this one, which the account must remove.
  */
 export type BurrowEnrollPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
+  | { status: 'redeemed' }
   | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
 
 /**

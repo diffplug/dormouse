@@ -1018,6 +1018,23 @@ test("enrollment: only a recent admin login from this origin approves, and the B
     await queryDatabase(f.database.url, `SELECT "burrowId" FROM dormouse_relay_burrows ORDER BY "burrowId"`),
   ).toEqual([{ burrowId: foreign }]);
   expect((await admin.remove(burrowId)).status).toBe(404);
+
+  // A redeemed approval is approved again only once it has expired, and then unredeemed.
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed" });
+  expect((await admin.approve(begun.userCode)).status).toBe(409);
+  await queryDatabase(
+    f.database.url,
+    `UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() - interval '1 second' WHERE "userCode" = $1`,
+    [begun.userCode],
+  );
+  expect((await admin.approve(begun.userCode)).status).toBe(204);
+  expect(
+    await queryDatabase(
+      f.database.url,
+      `SELECT "redeemedBurrowId", "redeemedAt" FROM dormouse_relay_enrollment_approvals WHERE "userCode" = $1`,
+      [begun.userCode],
+    ),
+  ).toEqual([{ redeemedBurrowId: null, redeemedAt: null }]);
 });
 
 test("enrollment approval needs a login from the recent-login window, and attempts are limited per account", async ({

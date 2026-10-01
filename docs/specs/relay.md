@@ -808,16 +808,24 @@ memo invalidation — live in that burrow's spec.
   unless it succeeded, or a failed delete would leave the credential on disk for
   the next launch to read back.
 * **Hosted enrollment** (a Hosted build, from the Settings dialog):
-  `beginHostedEnrollment` `{ label }` mints the Noise static, posts `{ origin }`
+  `beginHostedEnrollment` `{ label, replace? }` mints the Noise static, posts `{ origin }`
   to `API_ROUTES.burrowEnrollBegin` at the baked origin, and holds an answer only
   if `isBurrowEnrollBeginResponse` passes; the service then polls
   `burrowEnrollPoll` itself every `interval`
   ([hosted.md](./hosted.md) -> "Burrow enrollment"), off the lifecycle chain
   until it redeems. Both requests carry the 10 s timeout and `redirect: 'error'`.
+  Refused on an enrolled machine.
+  - **Must answer a code already waiting, or redeeming, rather than replace it**,
+    unless `replace` is set ("Get a new code"): another VS Code window's Enroll
+    reaches the same service. A begin in flight is joined.
+  - **Never change what is waiting or ended until a replacing begin has its
+    code.**
   - **The device code never leaves the service**, as `burrowToken` does not:
     `status` carries `hostedEnrollment` — `waiting` with `userCode`,
-    `verificationUrl`, `expiresAt`, and `accountFull`, or `ended` with a
-    reason — and each change is a `status` event.
+    `verificationUrl`, `expiresAt`, and `accountFull`; `redeeming`; or `ended`
+    with a reason from `HOSTED_ENROLLMENT_END_REASONS` — and `accountOrigin`
+    (`accountOriginFor`: `HOSTED_ACCOUNT_ORIGIN` in a release build, the last
+    begin's account origin in a dev one). Each change is a `status` event.
   - **Must compose the verification URL, never take it from the Relay in a
     release build**: `enrollVerificationUrl` answers
     `HOSTED_ACCOUNT_ORIGIN/enroll#<userCode>`. A dev Hosted build
@@ -832,10 +840,16 @@ memo invalidation — live in that burrow's spec.
     `failed` with the service's sentence. **A transport failure, a 5xx, or a 429
     polls again**, a 429 adding 5 s to the interval, up to 60 s; **a full
     account's 409 polls on with `accountFull`**, the Relay keeping the approval.
+    The Relay's `redeemed` (an earlier poll's answer lost) ends it `answer-lost`.
   - **An `enrolled` answer takes the Enrollment path above**: `isEnrollment`
     with the label and the static minted before the begin, the origin checked,
-    then store first on the lifecycle chain. One redeemed after a Cancel is
-    dropped with a warning naming the Burrow, for the account to remove.
+    then store first on the lifecycle chain, **reporting `redeeming` until the
+    save and start finish**, which neither Cancel nor a begin interrupts.
+  - **Must hold a redemption that lands after Cancel or a replacing begin**:
+    it is spent and recorded by the Relay. Only a disposed service or an
+    enrolled machine cannot; that, the origin check, or a failed save ends it
+    `failed`, the message naming the Burrow and `<accountOrigin>/account` to
+    remove it at (a console warning once disposed).
 * **Relay socket policy**: one socket at a time, reconnected with exponential
   backoff (1 s, doubling to 30 s) after any close — **except a close carrying
   `WS_CLOSE_BURROW_REPLACED`, which is terminal** (rationale): another Dormouse
@@ -897,7 +911,8 @@ memo invalidation — live in that burrow's spec.
 
 Source of truth: `lib/src/host/remote/service.ts` (`BurrowService`,
 `#enrollWith`, `#adoptEnrollment`, `#beginHostedEnrollment`,
-`#pollHostedEnrollment`, `enrollVerificationUrl`, `#status`, `#setupQr`,
+`#pollHostedEnrollment`, `#redeemHostedEnrollment`, `enrollVerificationUrl`,
+`accountOriginFor`, `#status`, `#setupQr`,
 `unenrolledStatus`, lifecycle + console commands),
 `lib/src/host/remote/burrow-state-store.ts`, `lib/src/host/remote/serial-queue.ts`,
 `lib/src/remote/burrow/enrollment.ts` (`performEnrollment`,
@@ -992,14 +1007,17 @@ exists to honor:
   `openExternal` only on the click, and Cancel — with `accountFull`, a link to
   remove a computer at the account; ended, why, in fixed copy per reason
   (`HOSTED_ENROLLMENT_ENDED_COPY`, `failed` adding the service's sentence), with
-  "Get a new code" and Done, which cancels. **The name field is hidden while a
+  "Get a new code" (`replace`) and Done, which cancels; `answer-lost` links the
+  account page. Redeeming, `HOSTED_ENROLLMENT_REDEEMING_COPY` alone. **Open is
+  disabled once the minutes left reach 0.** **The name field is hidden while a
   code waits, never unmounted**, and **Persistent Relay starts unfolded over an
   enrollment already begun**. Enrolled, the view adds "Manage computers at
-  hosted.dormouse.sh", linking `HOSTED_ACCOUNT_ORIGIN/account`.
+  <host>", linking `status.accountOrigin` + `/account`, the origin the waiting
+  view's link uses, and any `ended` enrollment, with Dismiss.
 - **An older broker's status is read into this shape**: an `offer` object as
   `true`, `relayUrl` as `relayOrigin`, a missing `relayMode` as Hosted, and a
   missing or malformed `hostedEnrollment` as `null`, an unknown end reason as
-  `failed`.
+  `failed`, a missing `accountOrigin` as `null`.
 - **Status is re-read, not patched**: the service's `status` event carries only
   `{ enrolled, serving, serviceId }`, so every event triggers a full `status` command, and the dialog
   re-reads on open since another window may have enrolled meanwhile. **The
@@ -1024,9 +1042,9 @@ bundle); `describePushTargets` in `lib/src/components/SettingsDialog.tsx`;
 path, read by `readUsableOffer` in `lib/src/host/remote/service.ts`.
 
 The `window.dormouseBurrow` console hook — the scripting seam — exposes the
-five enrollment commands: `enroll(password, label)`,
-`enrollOffer(label)`, `status`,
-`reconnect`, `clearEnrollment`. **Pairing confirmation is never here**: it is a
+seven enrollment commands: `enroll(password, label)`,
+`enrollOffer(label)`, `beginHostedEnrollment(label)`,
+`cancelHostedEnrollment`, `status`, `reconnect`, `clearEnrollment`. **Pairing confirmation is never here**: it is a
 modal because it must interrupt, and because the digits it takes are read off a
 phone ([remote-security-model.md](./remote-security-model.md) -> Pairing). The
 one-time commands are not on the hook either; `status()` prints `serving`

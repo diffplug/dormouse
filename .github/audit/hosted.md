@@ -123,7 +123,8 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   no one can forge a device code that redeems another's approval; an approval
   must need a recent admin login from the account's own origin and never
   replace a live one; the redemption must be one statement whose owner is that
-  approver; and a removed Burrow's row must be gone, its token opening nothing
+  approver, and a redeemed approval must never redeem again, even once its
+  Burrow is removed; and a removed Burrow's row must be gone, its token opening nothing
   on any relay route. Look for a user code predictable without the secret, an
   unlimited approval loop, and a table an unauthenticated caller can grow.
 - **Can push leak text, cross an account, or reach somewhere it should not?**

@@ -308,6 +308,11 @@ export interface EnrollOfferParams {
  */
 export interface HostedEnrollParams {
   label: string;
+  /**
+   * Replace a code already waiting with a new one. Without it a begin answers
+   * the code waiting — another VS Code window's, say — rather than voiding it.
+   */
+  replace?: boolean;
 }
 
 /** `kind`, `clientId`, and `pairingId` echo the {@link PairingQueueItem} the modal displayed. */
@@ -395,17 +400,21 @@ export interface SetupQrResult {
 
 /**
  * Why a Hosted enrollment stopped short of enrolling, each read as fixed copy
- * but `failed`, which carries the service's sentence. A reason this build does
- * not know reads as `failed` with no sentence.
+ * but `failed`, which carries the service's sentence. `answer-lost` is an
+ * approval an earlier poll redeemed whose answer never arrived. A reason this
+ * build does not know reads as `failed` with no sentence.
  */
-export type HostedEnrollmentEndReason = 'expired' | 'not-entitled' | 'failed';
+export const HOSTED_ENROLLMENT_END_REASONS = ['expired', 'not-entitled', 'answer-lost', 'failed'] as const;
+export type HostedEnrollmentEndReason = (typeof HOSTED_ENROLLMENT_END_REASONS)[number];
 
 /**
  * A Hosted build's device-code enrollment as `status` reports it: `waiting`
- * for the account to approve `userCode`, or `ended` without an enrollment,
- * until the next begin or a cancel. A success reports none: `enrolled` says it.
- * `accountFull` is an approval the account cannot redeem until it removes a
- * computer, which the Relay keeps, so the service polls on.
+ * for the account to approve `userCode`; `redeeming` once a poll redeemed it,
+ * until the enrollment is saved and started (so status always shows a code or
+ * an enrollment); or `ended` without an enrollment, until the next begin or a
+ * cancel. A success reports none: `enrolled` says it. `accountFull` is an
+ * approval the account cannot redeem until it removes a computer, which the
+ * Relay keeps, so the service polls on.
  *
  * **Never the device code**, which is a bearer the service holds as it holds
  * `burrowToken` (`docs/specs/security-remote.md` -> "Trust boundary").
@@ -414,6 +423,7 @@ export type HostedEnrollmentEndReason = 'expired' | 'not-entitled' | 'failed';
  */
 export type HostedEnrollmentState =
   | { status: 'waiting'; userCode: string; verificationUrl: string; expiresAt: number; accountFull: boolean }
+  | { status: 'redeeming' }
   | { status: 'ended'; reason: HostedEnrollmentEndReason; message?: string };
 
 /**
@@ -458,6 +468,13 @@ export interface BurrowConsoleStatus {
    * begun since the last cancel or success, and always in a self-host build.
    */
   hostedEnrollment: HostedEnrollmentState | null;
+  /**
+   * The Hosted account's origin, where its computers are managed:
+   * `HOSTED_ACCOUNT_ORIGIN` in a release Hosted build, the origin the last
+   * begin resolved in a dev one (`null` before any), `null` in a self-host
+   * build.
+   */
+  accountOrigin: string | null;
 }
 
 /**

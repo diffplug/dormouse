@@ -350,13 +350,15 @@ export async function beginHostedEnrollment(
 /**
  * What one poll says. `retry` is a poll that told nothing — the Relay
  * unreachable, a 5xx, or a 429, which asks the Burrow to `slowDown` — and the
- * next poll asks again; `refused` keeps the copy for its fixed reasons to the
+ * next poll asks again; `redeemed` is an approval an earlier poll spent, whose
+ * answer never arrived; `refused` keeps the copy for its fixed reasons to the
  * panel; `failed` names what went wrong.
  */
 export type HostedEnrollmentPoll =
   | { status: 'pending' }
   | { status: 'retry'; slowDown: boolean }
   | { status: 'expired' }
+  | { status: 'redeemed' }
   | { status: 'enrolled'; enrollment: BurrowEnrollment }
   | { status: 'refused'; reason: 'not-entitled' | 'account-full' }
   | { status: 'failed'; message: string };
@@ -400,7 +402,7 @@ export async function pollHostedEnrollment(
   }
   const body: unknown = await response.json().catch(() => null);
   const status = (body as { status?: unknown } | null)?.status;
-  if (status === 'pending' || status === 'expired') return { status };
+  if (status === 'pending' || status === 'expired' || status === 'redeemed') return { status };
   if (status !== 'enrolled') {
     return { status: 'failed', message: 'Could not enroll: the Relay’s answer was not an enrollment poll.' };
   }

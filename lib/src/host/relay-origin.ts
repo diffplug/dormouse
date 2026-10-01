@@ -34,6 +34,9 @@ export const HOSTED_VOICE_ORIGIN = 'https://voice.dormouse.sh';
  */
 export const HOSTED_ACCOUNT_ORIGIN = 'https://hosted.dormouse.sh';
 
+/** The account page that lists its enrolled computers, with Remove. */
+export const ACCOUNT_PAGE_PATH = '/account';
+
 /**
  * `hosted`: the default origin, or a dev build's `DORMOUSE_RELAY_IS_HOSTED=1`.
  * `self-host`: any other origin, which is then this build's only Relay and

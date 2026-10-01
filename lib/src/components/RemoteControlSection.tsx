@@ -13,7 +13,7 @@ import {
   useMinutesLeft,
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
-import { HOSTED_ACCOUNT_ORIGIN } from '../host/relay-origin';
+import { ACCOUNT_PAGE_PATH } from '../host/relay-origin';
 import type {
   BurrowConsoleStatus,
   HostedEnrollmentEndReason,
@@ -73,9 +73,6 @@ const TONE_CLASS = {
 } as const;
 
 const SELF_HOST_URL = 'https://dormouse.sh/self-host/';
-
-/** Where a Hosted account lists its enrolled computers, with Remove. */
-const ACCOUNT_PATH = '/account';
 
 /**
  * How far ahead of `expiresAt` the phone-setup panel mints a replacement code.
@@ -479,8 +476,9 @@ function BurrowNameField({
  * form would promise something the build cannot do. Nor before the first
  * status, which `NetworkPhones` already waited for.
  *
- * This is the same `enroll` / `enrollOffer` / `status` / `reconnect` /
- * `clearEnrollment` surface as the `window.dormouseBurrow` console hook,
+ * This is the same `enroll` / `enrollOffer` / `beginHostedEnrollment` /
+ * `cancelHostedEnrollment` / `status` / `reconnect` / `clearEnrollment`
+ * surface as the `window.dormouseBurrow` console hook,
  * which stays as the scripting seam (`docs/specs/relay.md`, "Burrow side").
  * Pairing approval is *not* here — it is a modal, because it must interrupt
  * (`docs/specs/remote-security-model.md`, Pairing Ceremony).
@@ -525,7 +523,8 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
             <EnrolledView
               key={status.burrowId ?? 'enrolled'}
               relayOrigin={status.relayOrigin}
-              relayMode={status.relayMode}
+              accountOrigin={status.accountOrigin}
+              hostedEnrollment={status.hostedEnrollment}
               connection={status.connection}
               pairedClients={status.pairedClients}
             />
@@ -564,6 +563,7 @@ function UnenrolledRelay({ status }: { status: BurrowConsoleStatus }) {
           <>
             <HostedEnrollView
               enrollment={status.hostedEnrollment}
+              accountOrigin={status.accountOrigin}
               suggestedLabel={status.suggestedLabel}
             />
             <div className={`${FIELD_HINT} mt-3`}>
@@ -607,16 +607,51 @@ export const HOSTED_ENROLLMENT_ENDED_COPY: Record<HostedEnrollmentEndReason, str
   expired: 'That code expired before it was approved, so this computer was not enrolled.',
   'not-entitled':
     'The account that approved that code can’t use the Hosted Relay, so this computer was not enrolled.',
+  'answer-lost':
+    'That code was approved and used, but the answer never reached this computer, so it was not enrolled. ' +
+    'Remove the computer it added from your account, then enroll again.',
   failed: 'This computer could not finish enrolling.',
 };
 
-/** The account page a URL the service composed belongs to, for "Remove one". */
-function accountPageOf(verificationUrl: string): string {
+/** The copy a status's `redeeming` shows: approved, and the enrollment being saved. */
+export const HOSTED_ENROLLMENT_REDEEMING_COPY = 'Approved. Enrolling this computer…';
+
+/**
+ * The account page the service names in `status.accountOrigin`, or failing
+ * that — a broker older than the field — the origin of the URL it composed.
+ */
+function accountPage(accountOrigin: string | null, verificationUrl?: string): string | null {
+  if (accountOrigin !== null) return `${accountOrigin}${ACCOUNT_PAGE_PATH}`;
+  if (verificationUrl === undefined) return null;
   try {
-    return `${new URL(verificationUrl).origin}${ACCOUNT_PATH}`;
+    return `${new URL(verificationUrl).origin}${ACCOUNT_PAGE_PATH}`;
   } catch {
-    return `${HOSTED_ACCOUNT_ORIGIN}${ACCOUNT_PATH}`;
+    return null;
   }
+}
+
+/** Why the last Hosted enrollment ended, with the account page where it says to go there. */
+function HostedEnrollmentEnded({
+  ended,
+  accountOrigin,
+}: {
+  ended: Extract<HostedEnrollmentState, { status: 'ended' }>;
+  accountOrigin: string | null;
+}) {
+  const page = ended.reason === 'answer-lost' ? accountPage(accountOrigin) : null;
+  return (
+    <div className="mt-1.5 text-sm leading-relaxed" role="status">
+      <div className="text-foreground">
+        {own(HOSTED_ENROLLMENT_ENDED_COPY, ended.reason) ?? HOSTED_ENROLLMENT_ENDED_COPY.failed}
+      </div>
+      {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
+      {page ? (
+        <div className="mt-1">
+          <ExternalTextLink href={page}>Manage computers at {hostOf(page)}</ExternalTextLink>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -632,9 +667,11 @@ function accountPageOf(verificationUrl: string): string {
  */
 function HostedEnrollView({
   enrollment,
+  accountOrigin,
   suggestedLabel,
 }: {
   enrollment: HostedEnrollmentState | null;
+  accountOrigin: string | null;
   suggestedLabel: string;
 }) {
   const [label, setLabel] = useState(suggestedLabel);
@@ -642,12 +679,15 @@ function HostedEnrollView({
   /** Which of the actions sharing {@link useBusyAction}'s gate is the begin, for its label. */
   const [beginning, setBeginning] = useState(false);
   const waiting = enrollment?.status === 'waiting' ? enrollment : null;
+  const redeeming = enrollment?.status === 'redeeming';
   const ended = enrollment?.status === 'ended' ? enrollment : null;
   const begin = () =>
     void run(async () => {
       setBeginning(true);
       try {
-        await beginHostedEnrollment(label.trim());
+        // "Get a new code" replaces whatever code is waiting by now; the
+        // first Enroll joins one another window already has.
+        await beginHostedEnrollment(label.trim(), { replace: ended !== null });
       } finally {
         setBeginning(false);
       }
@@ -656,17 +696,22 @@ function HostedEnrollView({
   return (
     <div>
       {waiting ? (
-        <HostedEnrollmentCode waiting={waiting} busy={busy} onCancel={() => void run(cancelHostedEnrollment)} />
+        <HostedEnrollmentCode
+          waiting={waiting}
+          accountOrigin={accountOrigin}
+          busy={busy}
+          onCancel={() => void run(cancelHostedEnrollment)}
+        />
       ) : null}
-      {ended ? (
-        <div className="mt-1.5 text-sm leading-relaxed" role="status">
-          <div className="text-foreground">{own(HOSTED_ENROLLMENT_ENDED_COPY, ended.reason) ?? HOSTED_ENROLLMENT_ENDED_COPY.failed}</div>
-          {ended.reason === 'failed' && ended.message ? <div className="mt-1 text-error">{ended.message}</div> : null}
+      {redeeming ? (
+        <div className="mt-1.5 text-sm leading-relaxed text-foreground" role="status">
+          {HOSTED_ENROLLMENT_REDEEMING_COPY}
         </div>
       ) : null}
+      {ended ? <HostedEnrollmentEnded ended={ended} accountOrigin={accountOrigin} /> : null}
       <form
         className="mt-1.5"
-        hidden={waiting !== null}
+        hidden={waiting !== null || redeeming}
         onSubmit={(event) => {
           event.preventDefault();
           if (label.trim() !== '' && !busy) begin();
@@ -701,15 +746,18 @@ function HostedEnrollView({
 /** The code waiting for approval, and the way to approve it. */
 function HostedEnrollmentCode({
   waiting,
+  accountOrigin,
   busy,
   onCancel,
 }: {
   waiting: Extract<HostedEnrollmentState, { status: 'waiting' }>;
+  accountOrigin: string | null;
   busy: boolean;
   onCancel: () => void;
 }) {
   const minutesLeft = useMinutesLeft(waiting.expiresAt) ?? 0;
   const account = hostOf(waiting.verificationUrl);
+  const page = accountPage(accountOrigin, waiting.verificationUrl);
   return (
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">Approve this computer at your account. Check that it shows this code:</div>
@@ -725,13 +773,15 @@ function HostedEnrollmentCode({
       {waiting.accountFull ? (
         <div className="mt-1.5 text-error">
           That account already has as many computers as it can enroll.{' '}
-          <ExternalTextLink href={accountPageOf(waiting.verificationUrl)}>Remove one</ExternalTextLink> and this
-          computer enrolls on its own.
+          {page ? <ExternalTextLink href={page}>Remove one</ExternalTextLink> : 'Remove one'} and this computer
+          enrolls on its own.
         </div>
       ) : null}
       <div className="mt-2 flex flex-wrap items-center gap-2">
+        {/* An expired code approves nothing, so it opens nothing. */}
         <button
           type="button"
+          disabled={minutesLeft === 0}
           className={modalActionButton({ tone: 'primary' })}
           onClick={() => getPlatform().openExternal?.(waiting.verificationUrl)}
         >
@@ -952,12 +1002,14 @@ export function HeldEnrollment({ relayOrigin }: { relayOrigin: string }) {
 
 function EnrolledView({
   relayOrigin,
-  relayMode,
+  accountOrigin,
+  hostedEnrollment,
   connection,
   pairedClients,
 }: {
   relayOrigin: string;
-  relayMode: BurrowConsoleStatus['relayMode'];
+  accountOrigin: string | null;
+  hostedEnrollment: HostedEnrollmentState | null;
   connection: BurrowStatus;
   pairedClients: number;
 }) {
@@ -988,11 +1040,26 @@ function EnrolledView({
           ? 'No phone has paired with this machine yet.'
           : `${pairedClients} paired ${pairedClients === 1 ? 'phone' : 'phones'}.`}
       </div>
-      {relayMode === 'hosted' ? (
+      {accountOrigin !== null ? (
         <div className="mt-0.5 text-muted">
-          <ExternalTextLink href={`${HOSTED_ACCOUNT_ORIGIN}${ACCOUNT_PATH}`}>
-            Manage computers at {hostOf(HOSTED_ACCOUNT_ORIGIN)}
+          <ExternalTextLink href={`${accountOrigin}${ACCOUNT_PAGE_PATH}`}>
+            Manage computers at {hostOf(accountOrigin)}
           </ExternalTextLink>
+        </div>
+      ) : null}
+      {/* A second code redeemed onto an enrolled machine leaves a Burrow the
+          account must remove, which is said here until dismissed. */}
+      {hostedEnrollment?.status === 'ended' ? (
+        <div>
+          <HostedEnrollmentEnded ended={hostedEnrollment} accountOrigin={accountOrigin} />
+          <button
+            type="button"
+            disabled={busy}
+            className={`mt-1 ${modalActionButton()}`}
+            onClick={() => void run(cancelHostedEnrollment)}
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
 

@@ -56,8 +56,9 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
     if (userCode === null)
       return c.json({ message: "That is not a code from Dormouse." }, 400);
     // Whether the code was ever issued is unknowable here: begin stores
-    // nothing. An approval no Burrow redeems expires. A live approval never
-    // moves to another account; an expired one is replaced.
+    // nothing. An approval expires, redeemed or not. A live approval never
+    // moves to another account, nor is one approved again once redeemed; an
+    // expired one is replaced, unredeemed.
     const approved =
       (
         await accountQuery(
@@ -65,7 +66,8 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
           `INSERT INTO dormouse_relay_enrollment_approvals AS a ("userCode", "userId", "expiresAt")
           VALUES ($1, $2, now() + ($3::float8 * interval '1 millisecond'))
           ON CONFLICT ("userCode") DO UPDATE
-            SET "userId" = EXCLUDED."userId", "expiresAt" = EXCLUDED."expiresAt"
+            SET "userId" = EXCLUDED."userId", "expiresAt" = EXCLUDED."expiresAt",
+              "redeemedBurrowId" = NULL, "redeemedAt" = NULL
             WHERE a."expiresAt" <= now()
           RETURNING 1`,
           [userCode, login.userId, ENROLLMENT_TTL_MS],
