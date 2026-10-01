@@ -69,10 +69,10 @@ test("each preview configuration isolates its origin and excludes production bin
   }
   // Production alone sweeps ElevenLabs history, on the voice Worker; a preview has no cron.
   assert.ok(bases.voice.triggers?.crons?.length);
-  // The account and voice previews share one database; the relay reaches none.
+  // All three previews share one database.
   assert.deepEqual(configs.account.hyperdrive, [{ binding: "HYPERDRIVE", id: "c".repeat(32) }]);
   assert.deepEqual(configs.voice.hyperdrive, configs.account.hyperdrive);
-  assert.equal(configs.relay.hyperdrive, undefined);
+  assert.deepEqual(configs.relay.hyperdrive, configs.account.hyperdrive);
   assert.equal(configs.account.assets.directory, "../../dist/account");
   assert.equal(configs.relay.assets.directory, "../../dist/relay");
   assert.equal(configs.voice.assets, undefined);

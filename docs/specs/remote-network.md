@@ -101,7 +101,7 @@ Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connecti
 **Scope: remote-network** — build in order:
 
 1. **Anywhere on a phone**: **Must measure iOS Safari's offer size and gathering time, and the Burrow with STUN blocked**, before changing a budget.
-2. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`; Local networks and Anywhere then cover paired phones.
+2. **Hosted persistent**: the Hosted Relay's sockets and push, beyond its routes in `docs/specs/hosted.md` -> "Relay", with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`; Local networks and Anywhere then cover paired phones.
 
 ### Allowed networks
 

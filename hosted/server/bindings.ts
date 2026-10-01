@@ -24,12 +24,14 @@ export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv {
   OAUTH_PROVIDERS?: string;
 }
 
-/** `relay.dormouse.sh`: the one-time rendezvous and its phone page. */
+/** `relay.dormouse.sh`: the Hosted Relay and Pocket, the one-time rendezvous and its phone page. */
 export interface RelayEnv extends WorkerEnv {
   ASSETS: Assets;
+  HYPERDRIVE: { connectionString: string };
   ONE_TIME_ROOM: DurableObjectNamespace;
   ONE_TIME_MINT_LIMIT: RateLimit;
   ONE_TIME_JOIN_LIMIT: RateLimit;
+  RELAY_SIGNIN_LIMIT: RateLimit;
 }
 
 /** `voice.dormouse.sh`: managed-voice speech and its history sweep. */
@@ -61,14 +63,19 @@ export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
   POSTMARK_SERVER_TOKEN: "",
 });
 
-/** No auth secret, no Hyperdrive: the rendezvous reaches neither. Production and preview alike. */
+/**
+ * Hyperdrive for the Relay's own tables and no auth secret: the Relay reads a
+ * user row only for its entitlement, never a login. Production and preview alike.
+ */
 export const relayBindings = (env: RelayEnv): RelayEnv => ({
   ASSETS: env.ASSETS,
+  HYPERDRIVE: env.HYPERDRIVE,
   APP_ORIGIN: env.APP_ORIGIN,
   BUILD_SHA: env.BUILD_SHA,
   ONE_TIME_ROOM: env.ONE_TIME_ROOM,
   ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
   ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
+  RELAY_SIGNIN_LIMIT: env.RELAY_SIGNIN_LIMIT,
 });
 
 /** Hyperdrive for the token lookup and the ElevenLabs key; no auth secret. */

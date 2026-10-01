@@ -23,6 +23,12 @@
   "vars": {
     "APP_ORIGIN": "https://relay.dormouse.sh"
   },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "5bfbeba081b4456f9c3cf36edbb20c1d"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {
@@ -51,6 +57,14 @@
     {
       "name": "ONE_TIME_JOIN_LIMIT",
       "namespace_id": "2",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "RELAY_SIGNIN_LIMIT",
+      "namespace_id": "3",
       "simple": {
         "limit": 30,
         "period": 60

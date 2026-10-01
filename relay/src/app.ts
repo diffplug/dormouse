@@ -32,9 +32,6 @@ import {
   WS_ROUTES,
   PUSH_SEND_DEADLINE_MS,
   WS_TOKEN_PARAM,
-  fromBase64Url,
-  getWebCrypto,
-  boundedPushText,
   isBoundedBase64Url,
   isExactBase64Url,
   isOrigin,
@@ -42,10 +39,18 @@ import {
   normalizeOrigin,
   presenceChallenge,
   toBase64Url,
-  utf8Decode,
   isSealedPushV1,
   verifyPasskeyAssertion,
   TokenBucket,
+  MAX_PENDING_REAUTH_NONCES_PER_SESSION,
+  MAX_REQUEST_BODY_BYTES,
+  RELAY_SESSION_TTL_MS,
+  REAUTH_NONCE_TTL_MS,
+  decodeClientData,
+  importableSpkiP256,
+  normalizeChallenge,
+  pocketContentSecurityPolicy,
+  reducePasskeyLabel,
 } from 'remote-lib-common';
 import type {
   BurrowEnrollOriginMismatch,
@@ -178,30 +183,6 @@ export interface Session {
 
 type AppEnv = { Variables: { session: Session; burrow: StoredBurrow } };
 
-/** Sessions live 12 hours (relay.md: "hours-scale TTL"). */
-const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-/**
- * How long a presence nonce stays redeemable. The same two minutes a Burrow
- * challenge lasts: both bound one ceremony's WebAuthn prompt, and a longer
- * window would only widen the gap between "the user touched the sensor" and
- * "the Burrow believed it".
- */
-const REAUTH_NONCE_TTL_MS = 2 * 60 * 1000;
-/**
- * How many unredeemed presence nonces ONE SESSION will hold.
- *
- * `POST /api/reauth/begin` needs only a session token, so without a cap one
- * signed-in caller can grow this map for the process's lifetime by asking —
- * exactly the reason `ChallengeIssuer.issue` sweeps. Far above any real
- * use: a phone holds one nonce at a time, per ceremony.
- *
- * **Per session, never global.** A nonce is minted *before* its WebAuthn
- * prompt, so it waits out seconds of human latency; a global cap made a flood
- * from any other session evict a legitimate phone's nonce inside that window,
- * failing every pairing and connection ceremony for as long as the flood ran.
- * A caller can now only ever evict its own.
- */
-const MAX_PENDING_REAUTH_NONCES_PER_SESSION = 8;
 /**
  * How many sessions may hold nonces at once. The second half of the bound:
  * per-session caps alone leave the total riding on the session count, so the
@@ -251,14 +232,6 @@ const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
  */
 export const MAX_RELAY_FRAME_BYTES =
   MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 2 * E2E_ID_LENGTH + 1024;
-/**
- * Longest passkey label `account.json` will hold, in code points. A device
- * name, so this is generous — and it is a bound at all because the file is
- * durable and is re-read and re-parsed on every sign-in and every re-auth,
- * while the two sibling fields on the same route are already bounded.
- */
-const MAX_PASSKEY_LABEL_LENGTH = 64;
-
 /** A small fixed delay on a rejected credential. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 
@@ -268,17 +241,8 @@ export const BURROW_ENROLL_ATTEMPT_BURST = 8;
 /** Sustained Burrow-enrollment admission: one attempt per second. */
 export const BURROW_ENROLL_ATTEMPT_REFILL_MS = 1_000;
 
-/**
- * Longest request body any route but `/api/push/send` will read.
- *
- * Unauthenticated routes — `/api/burrow/enroll`, `/api/setup/*`,
- * `/api/signin/finish` — read their body BEFORE the credential gate, so
- * without this any page on the tailnet could make the process buffer gigabytes
- * with no auth, no rate limit, and no delay. Every body this Relay actually
- * takes is a handful of base64url fields, so 64 KiB is orders of magnitude
- * above real use.
- */
-export const MAX_REQUEST_BODY_BYTES = 64 * 1024;
+/** `MAX_REQUEST_BODY_BYTES` lives in `remote-lib-common`, which the Hosted Relay shares. */
+export { MAX_REQUEST_BODY_BYTES };
 
 /**
  * The one route whose legitimate body outgrows {@link MAX_REQUEST_BODY_BYTES}:
@@ -321,7 +285,7 @@ export class SessionStore {
   /** Mint a fresh session token (32 random bytes, base64url) for an account. */
   mint(accountId: string): { token: string; session: Session } {
     const token = toBase64Url(randomBytes(32));
-    const session: Session = { accountId, expiresAt: this.#now() + SESSION_TTL_MS };
+    const session: Session = { accountId, expiresAt: this.#now() + RELAY_SESSION_TTL_MS };
     this.#sessions.set(token, session);
     return { token, session };
   }
@@ -771,13 +735,7 @@ export function createApp(config: AppConfig): CreatedApp {
         await accounts.appendPasskey({
           credentialId: body.credentialId,
           publicKey: body.publicKey,
-          // Reduced rather than refused, so a long device name still
-          // registers, and bounded because `account.json` is durable and is
-          // re-read and re-parsed on every sign-in and every re-auth. The same
-          // `boundedPushText` the Burrow reduces a pairing label with, so a
-          // control or bidi character cannot reorder what an operator reads
-          // out of the file either.
-          label: boundedPushText(body.label, { limit: MAX_PASSKEY_LABEL_LENGTH, fallback: '' }),
+          label: reducePasskeyLabel(body.label),
         });
       } catch (err) {
         if (err instanceof DuplicateCredentialError) {
@@ -1437,57 +1395,6 @@ export function createApp(config: AppConfig): CreatedApp {
 
 const CSP_HEADER = 'Content-Security-Policy';
 
-/**
- * The Pocket origin's Content-Security-Policy
- * (`docs/specs/pocket-app.md` -> Deployment).
- *
- * This origin holds a per-Burrow Client static and the worker that opens sealed
- * pushes, and `docs/specs/security.md` -> "What is not defended" already names active XSS
- * here as the risk it cannot rule out — so it gets the defense in depth the
- * two shipped webview hosts already have.
- *
- * Every source is the app's own origin. The loosenings are load-bearing and no
- * wider than they must be:
- *
- * * `style-src 'unsafe-inline'` — the shell carries an inline `<style>` for
- *   viewport plumbing that has to apply before first paint, and React writes
- *   `style` attributes. A hash covers the first but not the second, and CSS is
- *   not where the risk this policy exists for lives.
- * * `connect-src` names the WebSocket origin explicitly rather than resting on
- *   `'self'`, whose ws/wss coverage browsers have disagreed about. It is the
- *   configured origin with the scheme swapped, so it can only ever be this
- *   deployment's own relay.
- * * `img-src` also admits `data:` and `blob:`, `media-src` `blob:` — images and
- *   media the page builds in memory rather than fetches.
- *
- * `script-src` needs no *script* exception: the build emits no inline script
- * and loads nothing off-origin, which `relay/test/static.test.mjs` pins
- * against the built output. Its one addition is `'wasm-unsafe-eval'`, which
- * `@xterm/addon-image` needs to compile the SIXEL decoder it vendors, at pane
- * creation. It permits WebAssembly compilation and nothing else — `eval` and
- * friends stay blocked, which `'unsafe-eval'` would not have done.
- */
-export function pocketContentSecurityPolicy(origin: string): string {
-  // `createApp` refuses anything but a bare `http(s)` origin, which is what
-  // makes this slice exact rather than a guess.
-  const wsOrigin = `ws${origin.slice('http'.length)}`;
-  return [
-    "default-src 'self'",
-    "script-src 'self' 'wasm-unsafe-eval'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
-    "font-src 'self'",
-    "media-src 'self' blob:",
-    `connect-src 'self' ${wsOrigin}`,
-    "worker-src 'self'",
-    "manifest-src 'self'",
-    "object-src 'none'",
-    "frame-ancestors 'none'",
-    "base-uri 'none'",
-    "form-action 'self'",
-  ].join('; ');
-}
-
 /** Message shown at `GET /` when the Pocket app has not been built yet. */
 const POCKET_MISSING_MESSAGE =
   'Dormouse selfhost Relay. The Pocket web app is not built yet — run ' +
@@ -1639,45 +1546,4 @@ function isSubscriptionPayload(value: unknown): value is PushSubscriptionPayload
 
 function isBoundedNonEmptyString(value: unknown, max: number): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= max;
-}
-
-/** Decode base64url clientDataJSON to its parsed object, or `null` if malformed. */
-function decodeClientData(
-  clientDataJSON: unknown,
-): { type?: unknown; challenge?: unknown; origin?: unknown } | null {
-  if (typeof clientDataJSON !== 'string') return null;
-  try {
-    const parsed: unknown = JSON.parse(utf8Decode(fromBase64Url(clientDataJSON)));
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-/** Canonicalize browser-serialized base64url challenges before single-use lookup. */
-function normalizeChallenge(challenge: unknown): string | null {
-  if (typeof challenge !== 'string') return null;
-  try {
-    return toBase64Url(fromBase64Url(challenge));
-  } catch {
-    return null;
-  }
-}
-
-/** True if `publicKey` (base64url SPKI) imports as an ECDSA P-256 verify key. */
-async function importableSpkiP256(publicKey: unknown): Promise<boolean> {
-  if (typeof publicKey !== 'string') return false;
-  try {
-    await getWebCrypto().subtle.importKey(
-      'spki',
-      fromBase64Url(publicKey),
-      { name: 'ECDSA', namedCurve: 'P-256' },
-      true,
-      ['verify'],
-    );
-    return true;
-  } catch {
-    return false;
-  }
 }

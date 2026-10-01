@@ -70,7 +70,7 @@ export function previewConfig(base, env, worker, hyperdriveId) {
   return config;
 }
 
-/** Every Worker's preview config, keyed as `WORKERS` is; the account and voice share one Hyperdrive, as production does. */
+/** Every Worker's preview config, keyed as `WORKERS` is; all three share one Hyperdrive, as production does. */
 export function previewConfigs(bases, env, hyperdriveId) {
   return Object.fromEntries(
     Object.keys(WORKERS).map((worker) => [

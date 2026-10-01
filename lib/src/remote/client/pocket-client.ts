@@ -21,7 +21,6 @@ import {
   E2E_ID_BYTE_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
-  SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
@@ -312,6 +311,12 @@ export class PocketClient {
 
   #ws: PocketSocket | null = null;
   #sessionToken: string | null = null;
+  /**
+   * The account the Relay answered at sign-in, held and dropped with the
+   * session token: `'owner'` from a self-host Relay, the account's user id
+   * from Hosted. Every presence proof names it, and a pairing outcome must.
+   */
+  #accountId: string | null = null;
   /** The credential id from the most recent sign-in (or registration). */
   #credentialId: string | null = null;
 
@@ -488,6 +493,7 @@ export class PocketClient {
     const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
     this.#sessionToken = finish.sessionToken;
+    this.#accountId = finish.accountId;
     this.#credentialId = assertion.credentialId;
     // Signing in is enough to pair from here. The Relay returns the asserted
     // passkey's public key, so a browser profile that never performed the
@@ -742,7 +748,7 @@ export class PocketClient {
     // is one no later connection can build a handshake from — a record that
     // fails at the *next* attempt, with nothing left on screen to explain it.
     if (
-      outcome.accountId !== SELFHOST_ACCOUNT_ID ||
+      outcome.accountId !== this.#accountId ||
       outcome.passkeyCredentialId !== passkeyCredentialId ||
       outcome.passkeyPublicKeyHash !== passkeyPublicKeyHash ||
       !isNoisePublicKey(outcome.burrowStaticPublicKey)
@@ -1009,7 +1015,7 @@ export class PocketClient {
     return {
       binding,
       relayNonce: begin.relayNonce,
-      accountId: SELFHOST_ACCOUNT_ID,
+      accountId: this.#requireAccountId(),
       passkeyCredentialId: binding.passkeyCredentialId,
       passkeyPublicKey: this.#requirePasskeyPublicKey(binding.passkeyCredentialId),
       assertion,
@@ -1121,7 +1127,7 @@ export class PocketClient {
       // Drop the token here rather than at the call site: every later request
       // and every relay upgrade would fail the same way, and keeping it would
       // let the UI believe it is still signed in.
-      this.#sessionToken = null;
+      this.#dropSession();
       throw new SessionExpiredError();
     }
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
@@ -1162,6 +1168,17 @@ export class PocketClient {
     return this.#sessionToken;
   }
 
+  #requireAccountId(): string {
+    if (this.#accountId === null) throw new Error('sign in first');
+    return this.#accountId;
+  }
+
+  /** Forget the session: its token and the account it named. */
+  #dropSession(): void {
+    this.#sessionToken = null;
+    this.#accountId = null;
+  }
+
   #requireCredentialId(): string {
     const credentialId = this.#credentialId;
     if (!credentialId) throw new Error('sign in before pairing or connecting');
@@ -1171,7 +1188,7 @@ export class PocketClient {
   #requirePasskeyPublicKey(credentialId: string): string {
     const publicKey = this.#storage.getPasskeyPublicKey(credentialId);
     if (!publicKey) {
-      this.#sessionToken = null;
+      this.#dropSession();
       throw new PasskeyUnavailableError();
     }
     return publicKey;

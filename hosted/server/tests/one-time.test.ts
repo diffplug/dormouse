@@ -26,6 +26,7 @@ import {
   type OneTimeRoomFrame,
 } from "remote-lib-common";
 import * as smoke from "../../scripts/one-time-smoke.mjs";
+import { pocketContentSecurityPolicy } from "remote-lib-common";
 import { oneTimePagePolicy, relayPolicy, RUNS_NOTHING_POLICY } from "../headers";
 import { rateLimitKey } from "../one-time";
 import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, wrangler } from "./bundle";
@@ -33,7 +34,7 @@ import { TEST_ROOM_LIMITS } from "./one-time-limits";
 import { rawUpgrade, type RawSocket } from "./raw-socket";
 
 // The relay Worker's rendezvous and phone page in real workerd, without
-// Postgres: the relay reaches no Hyperdrive, so this suite runs in the root
+// Postgres: neither touches Hyperdrive, so this suite runs in the root
 // `pnpm test`.
 
 const origin = ORIGINS.relay;
@@ -537,7 +538,7 @@ test("the page's hashed assets are immutable, and a missing one is a 404, not th
   }
 });
 
-test("nothing else under /connect/ is served, and nothing else on the origin at all", async () => {
+test("nothing else under /connect/ is served, and nothing outside it gets the page's policy", async () => {
   for (const path of [
     `${ONE_TIME_PAGE_PATH}index.html`,
     `${ONE_TIME_PAGE_PATH}other`,
@@ -548,12 +549,11 @@ test("nothing else under /connect/ is served, and nothing else on the origin at 
     expect(response.headers.get("content-security-policy"), path).toBe(PAGE_POLICY);
   }
   expect((await get(ONE_TIME_PAGE_PATH, { method: "POST" })).status).toBe(404);
-  // No SPA fallback: every other path is a 404 under the policy that runs nothing.
+  // Every other path is Pocket's (`pocket.test.ts`), under Pocket's policy.
   for (const path of ["/", "/connected", "/login", "/assets/connect/x.js"]) {
     const response = await get(path);
-    expect(response.status, path).toBe(404);
     expect(response.headers.get("content-security-policy"), path).toBe(
-      RUNS_NOTHING_POLICY,
+      pocketContentSecurityPolicy(origin),
     );
   }
 });
@@ -576,8 +576,10 @@ test("a malformed APP_ORIGIN falls back to the policy that runs nothing on the p
     "https://evil.example,x",
     "https://evil.example'x",
     "javascript:alert(1)",
+    "ws://relay.dormouse.sh",
   ])
-    expect(relayPolicy("/connect/", bad), String(bad)).toBe(
-      RUNS_NOTHING_POLICY,
-    );
+    for (const path of ["/connect/", "/"])
+      expect(relayPolicy(path, bad), `${path} ${String(bad)}`).toBe(
+        RUNS_NOTHING_POLICY,
+      );
 });

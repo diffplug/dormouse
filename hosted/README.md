@@ -1,12 +1,14 @@
 # Dormouse Hosted
 
 Three Hono/Cloudflare Workers built from this package: the account frontend
-and auth at `https://hosted.dormouse.sh` (`dormouse-hosted`), the one-time
+and auth at `https://hosted.dormouse.sh` (`dormouse-hosted`), the Hosted
+Relay's account-scoped routes with Pocket at the root, and the one-time
 connection's rendezvous and `/connect/` phone page at
-`https://relay.dormouse.sh` (`dormouse-relay`; [its spec](../docs/specs/one-time.md)),
+`https://relay.dormouse.sh` (`dormouse-relay`; [the one-time spec](../docs/specs/one-time.md)),
 and managed-voice speech at `https://voice.dormouse.sh` (`dormouse-voice`).
-The marketing website is a separate application. Managed voice exists only as
-an admin-only test slice; the managed Relay is not implemented. See
+The marketing website is a separate application. Managed voice and the Relay
+admit only the admin account; the Relay enrolls no Burrow and carries no
+terminal traffic yet. See
 [the spec](../docs/specs/hosted.md), whose "Application boundary" owns what
 each Worker serves.
 
@@ -42,13 +44,13 @@ pnpm build:hosted
 
 Tests run each production Worker in real workerd, the account's with
 disposable Postgres clones and a local OAuth simulator.
-`pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous and boundary
+`pnpm --filter dormouse-hosted test:miniflare` runs the rendezvous, Pocket, and boundary
 suites alone, without Docker. The build writes each Worker's static files under `dist/<worker>/`
-(`/connect/` at `dist/relay/connect/`) and dry-runs all three Workers; it does
+(Pocket at `dist/relay/`, `/connect/` at `dist/relay/connect/`) and dry-runs all three Workers; it does
 not deploy. Production deploys only through the release workflow.
 
-The relay Worker — the one-time rendezvous and `/connect/` page — runs on its
-own, without Docker or Postgres:
+The relay Worker's one-time rendezvous and `/connect/` page run on their own,
+without Docker or Postgres (its Relay routes answer 503 there):
 
 ```sh
 dor tool one-time      # outside Dormouse: pnpm dev:one-time
@@ -80,8 +82,8 @@ branch.
 | Boundary | Resources |
 | --- | --- |
 | Preview | Dedicated test Cloudflare account with a registered workers.dev subdomain; dedicated empty Neon project and parent branch; GitHub `hosted-preview` environment |
-| Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `OneTimeRoom` Durable Object namespace), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive the account and voice share, and a Neon branch, all reused until close; rate-limit namespaces `1001` and `1002` shared by every relay preview |
-| Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive shared by `dormouse-hosted` and `dormouse-voice`; Workers `dormouse-hosted` (`hosted.dormouse.sh`), `dormouse-relay` (`relay.dormouse.sh`, with its `OneTimeRoom` Durable Object namespace and rate-limit namespaces `1` and `2`), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep Cron Trigger), each on its custom domain; GitHub `hosted-production` environment |
+| Each PR | `dormouse-hosted-pr-N`, `dormouse-relay-pr-N` (with its own `OneTimeRoom` Durable Object namespace), and `dormouse-voice-pr-N` Workers, one uncached Hyperdrive all three share, and a Neon branch, all reused until close; rate-limit namespaces `1001`–`1003` shared by every relay preview |
+| Production | Dedicated Dormouse Postgres database, separate runtime/migration roles, uncached Hyperdrive shared by all three Workers; Workers `dormouse-hosted` (`hosted.dormouse.sh`), `dormouse-relay` (`relay.dormouse.sh`, with its `OneTimeRoom` Durable Object namespace and rate-limit namespaces `1`–`3`), and `dormouse-voice` (`voice.dormouse.sh`, with the history-sweep Cron Trigger), each on its custom domain; GitHub `hosted-production` environment |
 | Email | Dedicated Postmark server, verified `signin@dormouse.sh`, SPF/DKIM/DMARC, Apple Private Email Relay registration |
 | OAuth | Separate Dormouse GitHub, Google, Microsoft, and Apple registrations; exact callbacks below |
 | Release history | `hosted-release-tag` GitHub environment, an admin identity's repository-scoped Contents-write fine-grained PAT, immutable annotated `hosted/` tags |
@@ -98,7 +100,7 @@ remain in the Worker, protected GitHub environments, and Bitwarden.
 
 | Service | Dedicated registration |
 | --- | --- |
-| Cloudflare | Account `0a95e814ccf2b6a95d2dc3bea0a4a2b4`; Workers `dormouse-hosted`, `dormouse-relay`, `dormouse-voice`; Hyperdrive ID in `wrangler.jsonc` and `wrangler.voice.jsonc` |
+| Cloudflare | Account `0a95e814ccf2b6a95d2dc3bea0a4a2b4`; Workers `dormouse-hosted`, `dormouse-relay`, `dormouse-voice`; Hyperdrive ID in `wrangler.jsonc`, `wrangler.relay.jsonc`, and `wrangler.voice.jsonc` |
 | Neon | Project `young-dust-56119072`; production branch `br-billowing-brook-b4cuf3y4`; database `neondb`; migration role `neondb_owner`; SQL-created runtime role `dormouse_app` |
 | Postmark | Server `21034461`, `dormouse-hosted`; sender `signin@dormouse.sh`; return path `pm-bounces.dormouse.sh` |
 | GitHub OAuth | DiffPlug organization app `3890420`; client ID `Ov23liX1HSz03AAN3Psf` |
@@ -194,8 +196,8 @@ accounts.
 2. Create a Cloudflare Hyperdrive configuration for that database with **query
    caching disabled**, using the runtime role, and keep its connection host and
    database identical to the direct migration URL. Enter connection credentials
-   directly in Cloudflare; replace the zero Hyperdrive ID in `wrangler.jsonc`
-   and `wrangler.voice.jsonc` with the resulting public ID for local operator
+   directly in Cloudflare; replace the zero Hyperdrive ID in `wrangler.jsonc`,
+   `wrangler.relay.jsonc`, and `wrangler.voice.jsonc` with the resulting public ID for local operator
    deployment. CI overrides both with the `HYPERDRIVE_ID` variable.
 3. Create the runtime role with SQL (`CREATE ROLE ... LOGIN PASSWORD ...`),
    not Neon’s Console/API role creation, which grants `neon_superuser`.
@@ -406,7 +408,7 @@ credential pair do and do not enable. Facebook is outside this milestone.
    browser `Origin`, joins from the relay origin, crosses a frame each way, and
    is refused a second phone. Load `https://relay.dormouse.sh/connect/` in a
    browser and confirm no injected script or third-party request, and that
-   `https://relay.dormouse.sh/` is a 404.
+   `https://relay.dormouse.sh/` answers Pocket's shell under Pocket's policy.
 10. With a desktop build pointed at this origin, open a one-time link on a real
     iPhone in Safari and a real Android phone in Chrome, each on the same Wi-Fi
     as the laptop and each by scanning the QR code with the native camera, which

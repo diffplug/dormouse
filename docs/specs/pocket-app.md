@@ -476,9 +476,12 @@ previous build's hashed assets (rationale). Two rules make it hold:
   response's cache policy describes the response, and the shell is never a useful
   answer to a subresource miss. (rationale)
 
-Source of truth: `registerPocketServing` in `relay/src/app.ts`. Both built HTML
-shells are checked by `assertPocketShell` in
-`lib/scripts/assert-pocket-worker.mjs`.
+The Hosted Relay serves the same bundle by the same rules
+(`docs/specs/hosted.md` -> "Relay").
+
+Source of truth: `registerPocketServing` in `relay/src/app.ts`; `pocketRoutes` in
+`hosted/server/pocket.ts`. Both built HTML shells are checked by
+`assertPocketShell` in `lib/scripts/assert-pocket-worker.mjs`.
 
 ### The capability harness
 
@@ -608,7 +611,7 @@ passkeys to the serving origin, and Chrome's Private Network Access rules block
 public-site → private-network fetches. Pocket holds itself to it by construction
 — an empty API base, a `wsBase` from `location.origin` — and the Relay enforces
 it: a registration or assertion whose `clientDataJSON.origin` is
-not the configured `DORMOUSE_ORIGIN` is rejected ([relay.md](./relay.md);
+not the configured origin is rejected ([relay.md](./relay.md);
 rationale); the Relay emits no cross-origin grant
 ([security-remote.md](./security-remote.md#cross-origin-access)). **The bundle
 mounts at the origin root, never under a path prefix**: the manifest's
@@ -626,8 +629,8 @@ Every source is the app's own origin
 * **`style-src 'unsafe-inline'`**, because the shell carries a pre-paint
   `<style>` and React writes `style` attributes — a hash covers the first but not
   the second.
-* **`connect-src` names the WebSocket origin explicitly** — `DORMOUSE_ORIGIN`
-  with the scheme swapped — rather than resting on `'self'` (rationale). It can
+* **`connect-src` names the WebSocket origin explicitly** — the origin with
+  the scheme swapped — rather than resting on `'self'` (rationale). It can
   only ever be this deployment's own relay.
 * **`img-src` also admits `data:` and `blob:`, `media-src` `blob:`**; every
   other directive is `'self'`.
@@ -640,26 +643,25 @@ in the emitted `index.html`. (rationale)
 
 One lib-owned bundle, two deployments:
 
-* **Selfhost (shipped):** the Relay serves the bundle (`lib/dist-pocket`);
+* **Selfhost:** the Relay serves the bundle (`lib/dist-pocket`);
   selfhost auth never depends on dormouse.sh existing.
-* **SaaS (staged — see [Future](#future)):** CloudFlare serves the static site
-  and routes `/api/*` and `/ws/*` to the dynamic backend (CloudFlare proxies
-  WebSockets). The same bundle mounts at the site origin; rpId is the site's.
+* **Hosted:** the relay Worker serves it at the root of `relay.dormouse.sh`
+  beside the Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay"); rpId is
+  that host.
 
 **The website stays fully static — playground and marketing pages — in both
 worlds**, sharing all terminal UI through `lib` and never duplicating Pocket
 code.
 
-Source of truth: `pocketContentSecurityPolicy` in `relay/src/app.ts`,
-`assertPocketShell` in `lib/scripts/assert-pocket-worker.mjs`.
+Source of truth: `pocketContentSecurityPolicy` in
+`remote-lib-common/src/remote/relay-common.ts`, `assertPocketShell` in
+`lib/scripts/assert-pocket-worker.mjs`.
 
 ## Future
 
 1. **Dedupe the composition** — the website's `PocketTerminalExperience` and the
    Pocket shell (`PocketWall.tsx`) each wire `MobileTerminalUi` + `MobileWall`
    independently; extract the shared wiring so the two cannot drift.
-2. **CloudFlare routing** — the SaaS deployment above; deferred until SaaS.
-   Nothing in the shipped architecture needs rework for it.
-3. **Theme picker in Pocket** — the app restores the persisted theme but exposes
+2. **Theme picker in Pocket** — the app restores the persisted theme but exposes
    no picker; add the shared `ThemePicker` (and its theme-debugger entry) once
    its dropdown is phone-friendly.

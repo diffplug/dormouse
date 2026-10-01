@@ -166,7 +166,8 @@ Source of truth: `remote-lib-common/src/security/acl.ts` (the schema and
   the assertion against the **stored** key for that exact credential, and
   **extends nothing** — not the session's life, not the relay socket.
 - **`PresenceProofV1` travels only inside the first Client→Burrow transport
-  payload**, carrying the binding, the Relay nonce, `accountId`, the passkey
+  payload**, carrying the binding, the Relay nonce, `accountId` (as the
+  Relay answered sign-in), the passkey
   credential id, its canonical SPKI public key, and the assertion. The Burrow
   recomputes the challenge with the same builder, requires **every binding field
   to equal what it built from its own state**, verifies RP ID, origin,
@@ -245,8 +246,8 @@ newly-added passkey is not automatically trusted; its Client must still pair.
 - **A resumed handshake re-checks that its invitation is still the live one**
   (rationale).
 
-Before storing the record, Pocket verifies the passkey fields match its ceremony
-and compares the Burrow static to any existing pin for that `burrowId`: **a
+Before storing the record, Pocket verifies the passkey fields and its session's
+account match, and compares the Burrow static to any existing pin for that `burrowId`: **a
 mismatch is a terminal security error that keeps the old pin**.
 
 Source of truth: `BurrowRuntime.mintInvitation` / `#onPairingInit` /
@@ -254,7 +255,8 @@ Source of truth: `BurrowRuntime.mintInvitation` / `#onPairingInit` /
 `lib/src/remote/burrow/burrow-runtime.ts`, `PairingRequestV1` / `PairingOutcomeV1` /
 `samplePairingCode` in `remote-lib-common/src/security/e2e-ceremony.ts`,
 `#setupQr` in `lib/src/host/remote/service.ts`,
-`lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by
+`lib/src/remote/burrow/RemotePairingModal.tsx`, `PocketClient.pair` in
+`lib/src/remote/client/pocket-client.ts`. Pinned by
 `lib/src/remote/burrow/burrow-runtime.test.ts`.
 
 ## Connection

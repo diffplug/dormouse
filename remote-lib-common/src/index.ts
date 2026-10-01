@@ -17,6 +17,7 @@ export * from './remote/wire.js';
 export * from './remote/one-time-wire.js';
 export * from './remote/enroll-offer.js';
 export * from './remote/origin.js';
+export * from './remote/relay-common.js';
 export * from './security/webcrypto.js';
 export * from './security/bytes.js';
 export * from './security/ecdsa.js';

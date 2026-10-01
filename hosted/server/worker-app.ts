@@ -1,6 +1,6 @@
 import { Hono, type ExecutionContext } from "hono";
 import type { WorkerEnv } from "./bindings";
-import { secureHeaders, type PolicyFor } from "./headers";
+import { secureHeaders, type HeaderRules } from "./headers";
 
 /**
  * What all three Workers share (`docs/specs/hosted.md` -> "Application
@@ -11,17 +11,15 @@ import { secureHeaders, type PolicyFor } from "./headers";
  */
 export function workerApp<E extends WorkerEnv>({
   bindings,
-  policy,
   hashedAssets = [],
   routes,
   fallback,
   scheduled,
   unavailable,
-}: {
+  ...rules
+}: Omit<HeaderRules, "hashedAssets"> & {
   /** The only bindings that reach the routes. */
   bindings: (env: E) => E;
-  policy: PolicyFor;
-  /** Path prefixes of this Worker's content-hashed files, cached as immutable. */
   hashedAssets?: readonly string[];
   routes: (app: Hono<{ Bindings: E }>) => void;
   /** Answers what nothing else did; without one, Hono's 404. */
@@ -35,7 +33,7 @@ export function workerApp<E extends WorkerEnv>({
   unavailable: string;
 }) {
   const app = new Hono<{ Bindings: E }>();
-  secureHeaders(app, policy, hashedAssets);
+  secureHeaders(app, { ...rules, hashedAssets });
   // The mapper alone decides which bindings reach the routes; resolving it in
   // the request keeps a misconfigured deployment on onError, headers and all.
   app.use("*", async (c, next) => {

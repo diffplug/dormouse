@@ -2,7 +2,13 @@ import { test, expect, beforeAll, afterAll, vi } from "vitest";
 import type { ExecutionContext } from "hono";
 import { build } from "esbuild";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
-import { ONE_TIME_PAGE_PATH, ONE_TIME_WS_ROUTES } from "remote-lib-common";
+import { readFileSync } from "node:fs";
+import {
+  API_ROUTES,
+  ONE_TIME_PAGE_PATH,
+  ONE_TIME_WS_ROUTES,
+  pocketContentSecurityPolicy,
+} from "remote-lib-common";
 import {
   accountBindings,
   accountPreviewBindings,
@@ -11,6 +17,7 @@ import {
   voicePreviewBindings,
 } from "../bindings";
 import {
+  ACCOUNT_HASHED_ASSETS,
   ACCOUNT_POLICY,
   RELAY_HASHED_ASSETS,
   RUNS_NOTHING_POLICY,
@@ -28,8 +35,8 @@ import {
 
 // The partition between Hosted's three Workers (`docs/specs/hosted.md` ->
 // "Application boundary"), each production bundle in real workerd without
-// Postgres: nothing here gets past a 421, a 404, or a missing bearer token, so
-// no route reaches the database.
+// Postgres: nothing here gets past a 421, a 404, a missing bearer token, or a
+// bodyless request, so no route reaches the database.
 
 const sha = "a".repeat(40);
 
@@ -107,9 +114,31 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", ONE_TIME_WS_ROUTES.burrow],
     ["GET", ONE_TIME_WS_ROUTES.client],
     ["GET", ONE_TIME_PAGE_PATH],
+    ["GET", "/api/hello"],
+    ["POST", API_ROUTES.setupBegin],
+    ["POST", API_ROUTES.signinBegin],
+    ["GET", API_ROUTES.burrows],
+    ["POST", API_ROUTES.burrowSetupToken],
+    ["GET", "/"],
   ],
   voice: [["POST", "/api/voice/speak"]],
 };
+
+/** The Hosted Relay's routes, which only the relay serves. */
+const RELAY_API: [string, string][] = [
+  ["GET", "/api/hello"],
+  ["POST", API_ROUTES.setupBegin],
+  ["POST", API_ROUTES.setupFinish],
+  ["POST", API_ROUTES.setupRetire],
+  ["POST", API_ROUTES.signinBegin],
+  ["POST", API_ROUTES.signinFinish],
+  ["POST", API_ROUTES.reauthBegin],
+  ["POST", API_ROUTES.reauthFinish],
+  ["GET", API_ROUTES.burrows],
+  ["POST", API_ROUTES.burrowSetupToken],
+  ["POST", API_ROUTES.burrowEnroll],
+  ["GET", API_ROUTES.pushConfig],
+];
 
 test.for(NAMES)(
   "%s: a foreign origin, each sibling's included, is refused with 421 before any route",
@@ -135,6 +164,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", ONE_TIME_WS_ROUTES.burrow],
     ["GET", ONE_TIME_WS_ROUTES.client],
     ["POST", "/api/voice/speak"],
+    ...RELAY_API,
   ],
   relay: [
     ["GET", "/api/auth/csrf"],
@@ -146,10 +176,9 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["POST", "/api/voice/tokens"],
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
     ["POST", "/api/voice/speak"],
-    ["GET", "/"],
-    ["GET", "/login"],
-    ["GET", "/account"],
-    ["GET", "/assets/app-abc123.js"],
+    ["POST", "/api/push/subscribe"],
+    ["POST", "/api/push/send"],
+    ["GET", "/api/push/devices"],
   ],
   voice: [
     ["GET", "/api/auth/csrf"],
@@ -163,6 +192,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", ONE_TIME_PAGE_PATH],
     ["GET", "/"],
     ["GET", "/login"],
+    ...RELAY_API,
   ],
 };
 
@@ -178,6 +208,16 @@ test.for(NAMES)("%s: serves only its own routes", async (name) => {
   expect(outbound).toEqual([]);
 });
 
+test("the relay answers every other path with Pocket's shell under Pocket's policy", async () => {
+  for (const path of ["/", "/login", "/account", "/pair"]) {
+    const response = await send("relay", ORIGINS.relay + path);
+    expect(response.status, path).toBe(200);
+    expect(response.headers.get("content-security-policy"), path).toBe(
+      pocketContentSecurityPolicy(ORIGINS.relay),
+    );
+  }
+});
+
 test("the account answers /connect/ with its own shell and policy, never the phone page", async () => {
   for (const path of [ONE_TIME_PAGE_PATH, `${ONE_TIME_PAGE_PATH}assets/x.js`]) {
     const response = await send("account", ORIGINS.account + path);
@@ -188,26 +228,33 @@ test("the account answers /connect/ with its own shell and policy, never the pho
 });
 
 test("each Worker caches only its own hashed assets as immutable", async () => {
-  const [account, phone] = HASHED_FILES;
+  const [pocket, phone] = HASHED_FILES;
   const cache = (response: { headers: { get(name: string): string | null } }) =>
     response.headers.get("cache-control");
-  expect(cache(await send("account", ORIGINS.account + account))).toBe(IMMUTABLE);
+  expect(cache(await send("account", ORIGINS.account + pocket))).toBe(IMMUTABLE);
   expect(cache(await send("account", ORIGINS.account + phone))).toBe("no-store");
-  // The relay hands its assets only `/connect/` paths, so its prefixes are
-  // checked on an app that serves a script at both.
-  const relay = workerApp({
-    bindings: (env) => env,
-    policy: () => RUNS_NOTHING_POLICY,
-    hashedAssets: RELAY_HASHED_ASSETS,
-    unavailable: "",
-    routes: (app) =>
-      app.get("*", () =>
-        new Response("export {};", { headers: { "content-type": "text/javascript" } }),
-      ),
-  });
+  expect(cache(await send("relay", ORIGINS.relay + pocket))).toBe(IMMUTABLE);
+  expect(cache(await send("relay", ORIGINS.relay + phone))).toBe(IMMUTABLE);
+  // Each Worker's prefixes, checked on an app that serves a script at every path.
+  const serving = (hashedAssets: readonly string[]) =>
+    workerApp({
+      bindings: (env) => env,
+      policy: () => RUNS_NOTHING_POLICY,
+      hashedAssets,
+      unavailable: "",
+      routes: (app) =>
+        app.get("*", () =>
+          new Response("export {};", { headers: { "content-type": "text/javascript" } }),
+        ),
+    });
   const env = { APP_ORIGIN: ORIGINS.relay };
-  expect(cache(await relay.fetch(new Request(ORIGINS.relay + phone), env))).toBe(IMMUTABLE);
-  expect(cache(await relay.fetch(new Request(ORIGINS.relay + account), env))).toBe("no-store");
+  const relay = serving(RELAY_HASHED_ASSETS);
+  for (const path of [pocket, phone])
+    expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe(IMMUTABLE);
+  for (const path of ["/sw.js", "/connect/x.js", "/api/assets/x.js"])
+    expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe("no-store");
+  const account = serving(ACCOUNT_HASHED_ASSETS);
+  expect(cache(await account.fetch(new Request(ORIGINS.relay + phone), env))).toBe("no-store");
 });
 
 test("speak is the voice Worker's, bearer-only", async () => {
@@ -286,6 +333,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
     ONE_TIME_ROOM: {} as DurableObjectNamespace,
     ONE_TIME_MINT_LIMIT: {} as RateLimit,
     ONE_TIME_JOIN_LIMIT: {} as RateLimit,
+    RELAY_SIGNIN_LIMIT: {} as RateLimit,
   };
   const keys = (bindings: object) => Object.keys(bindings).sort();
   expect(keys(accountBindings(env))).toEqual(
@@ -310,15 +358,17 @@ test("each bindings mapper passes only what its Worker uses", () => {
     EMAIL_FROM: "",
     POSTMARK_SERVER_TOKEN: "",
   });
-  // No auth secret, and no database: the rendezvous reaches neither.
+  // No auth secret: the Relay reads its own tables and a user row, never a login.
   expect(keys(relayBindings(env))).toEqual(
     [
       "APP_ORIGIN",
       "ASSETS",
       "BUILD_SHA",
+      "HYPERDRIVE",
       "ONE_TIME_JOIN_LIMIT",
       "ONE_TIME_MINT_LIMIT",
       "ONE_TIME_ROOM",
+      "RELAY_SIGNIN_LIMIT",
     ].sort(),
   );
   // No auth secret: speak reads the token's owner, never a login.
@@ -345,4 +395,21 @@ test("neither the relay nor the voice bundle carries Better Auth", async () => {
   // The pattern finds it where it is.
   const account = Object.keys(bundles.account.metafile.inputs);
   expect(account.some((input) => /better-auth/.test(input))).toBe(true);
+});
+
+test("the relay bundle reads no cookie and never asks auth", () => {
+  const inputs = Object.keys(bundles.relay.metafile.inputs);
+  expect(inputs.filter((input) => /cookie/.test(input))).toEqual([]);
+  // Its own modules: no cookie header, helper, or auth route in any code line.
+  const ours = inputs.filter((input) => input.startsWith("server/"));
+  expect(ours).toContain("server/relay-api.ts");
+  for (const input of ours) {
+    const code = readFileSync(input, "utf8")
+      .split("\n")
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join("\n");
+    expect(code, input).not.toMatch(/["'`]cookie["'`]|getCookie|\.cookie\b|\/api\/auth\//i);
+  }
+  // The pattern finds it where it is.
+  expect(readFileSync("server/voice.ts", "utf8")).toMatch(/["'`]cookie["'`]/);
 });

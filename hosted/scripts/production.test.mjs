@@ -51,19 +51,20 @@ test("each production config keeps its canonical domain and production entry, an
   // Each config is its own Worker's: none stands in for a sibling.
   assert.throws(() => productionConfig(bases.relay, env, "account"));
   assert.throws(() => productionConfig(bases.account, env, "voice"));
-  // The account and voice share the production database; the relay reaches none.
+  // All three share the production database.
   assert.deepEqual(configs.account.hyperdrive, [{ binding: "HYPERDRIVE", id: env.HYPERDRIVE_ID }]);
   assert.deepEqual(configs.voice.hyperdrive, configs.account.hyperdrive);
-  assert.equal(configs.relay.hyperdrive, undefined);
+  assert.deepEqual(configs.relay.hyperdrive, configs.account.hyperdrive);
   assert.equal(configs.account.assets.directory, "../../dist/account");
   assert.equal(configs.relay.assets.directory, "../../dist/relay");
   assert.equal(configs.voice.assets, undefined);
   assert.throws(() =>
     productionConfig(bases.account, { ...env, HYPERDRIVE_ID: "0".repeat(32) }, "account"),
   );
-  assert.throws(() =>
-    productionConfig(bases.voice, { ...env, HYPERDRIVE_ID: "0".repeat(32) }, "voice"),
-  );
+  for (const worker of ["voice", "relay"])
+    assert.throws(() =>
+      productionConfig(bases[worker], { ...env, HYPERDRIVE_ID: "0".repeat(32) }, worker),
+    );
   assert.throws(() =>
     productionConfig(bases.account, { ...env, BUILD_SHA: "main" }, "account"),
   );
@@ -207,6 +208,7 @@ test("the rendezvous Durable Object and its rate limits are the relay's, and Dur
     [
       ["ONE_TIME_MINT_LIMIT", "1"],
       ["ONE_TIME_JOIN_LIMIT", "2"],
+      ["RELAY_SIGNIN_LIMIT", "3"],
     ],
   );
   // The account deployed `v1` with the room, so it keeps that tag unedited and

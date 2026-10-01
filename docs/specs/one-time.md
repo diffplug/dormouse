@@ -316,8 +316,8 @@ The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`):
 - **Never open a socket before the Connect tap**: the tap builds the client and
   runs `connectOnce`, so a link-preview crawler spends nothing.
 - Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
-- **Never persist anything** on the relay origin: no storage, IndexedDB,
-  worker, push, or cookie. `applyPocketTheme` applies Pocket's
+- **Never persist anything** from the page: no storage, IndexedDB, worker,
+  push, or cookie, though Pocket keeps its own on the same origin. `applyPocketTheme` applies Pocket's
   default theme without reading or writing a stored pick, for the page and its
   `PocketWall`. `scripts/e2e-lint.mjs` holds the page to the client's store rule.
 - **Mounts the wall only on `ok`**, through `mountRemoteWall`. End, Cancel, a
@@ -334,15 +334,17 @@ The relay Worker serves the phone's half at `ONE_TIME_PAGE_PATH` (`/connect/`):
 no module-preload polyfill) into `lib/dist-one-time`, then runs
 `assertPocketShell --one-time`: scripts under `/connect/assets/`, links under
 `/connect/`, nothing inline. Hosted's `build` runs it first, and
-`hosted/scripts/stage-one-time.mjs` empties the relay's assets directory,
-`hosted/dist/relay/`, copies it to `hosted/dist/relay/connect/`, and checks the copy.
+`hosted/scripts/stage-relay.mjs` empties the relay's assets directory,
+`hosted/dist/relay/`, copies it to `hosted/dist/relay/connect/` beside Pocket at
+the root, and checks the copy.
 
 **Serving.** The relay Worker answers `/connect`, `/connect/`, and
-`/connect/assets/*` from its assets, which have no SPA fallback; an HTML answer
-under `/connect/assets/` and any other path, under `/connect/` or not, is a 404.
+`/connect/assets/*` from its assets, with no SPA fallback; an HTML answer
+under `/connect/assets/` and any other path under `/connect/` is a 404.
 A hashed file there is cached immutably. Everything under `/connect` carries
 this policy, from the relay's `APP_ORIGIN` (`<o>`; `<ws-o>` with `http`
-replaced by `ws`); every other relay response carries `RUNS_NOTHING_POLICY`:
+replaced by `ws`); every other relay response carries Pocket's policy or
+`RUNS_NOTHING_POLICY` (`docs/specs/hosted.md` -> "Relay"):
 
 ```
 default-src 'none'; script-src <o>/connect/assets/ 'wasm-unsafe-eval';
@@ -363,13 +365,13 @@ Source of truth: `OneTimeApp` and `oneTimeDeviceLabel` in
 `takeOneTimeLinkUrl` / `reloadOnNewLink` in
 `lib/src/remote/one-time-app/take-link.ts`; `applyPocketTheme` in
 `lib/src/remote/pocket-app/pocket-theme.ts`; `assertPocketShell` in
-`lib/scripts/assert-pocket-worker.mjs`; `stageOneTime` in
-`hosted/scripts/stage-one-time.mjs`; `oneTimePageRoutes` in
+`lib/scripts/assert-pocket-worker.mjs`; `stageRelay` in
+`hosted/scripts/stage-relay.mjs`; `oneTimePageRoutes` in
 `hosted/server/one-time.ts`; `relayPolicy` in
 `hosted/server/headers.ts`. Pinned by
 `lib/src/remote/one-time-app/OneTimeApp.test.tsx`,
 `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`,
-`hosted/scripts/stage-one-time.test.mjs`, and
+`hosted/scripts/stage-relay.test.mjs`, and
 `hosted/server/tests/one-time.test.ts`; `oneTimeSmoke` in
 `hosted/scripts/one-time-smoke.mjs` checks a deployment's page and script.
 

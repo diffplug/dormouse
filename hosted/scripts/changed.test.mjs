@@ -19,6 +19,9 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "lib/src/remote/one-time-app/OneTimeApp.tsx",
     "lib/src/remote/pocket-app/PocketWall.tsx",
     "lib/one-time/index.html",
+    "lib/pocket/index.html",
+    "lib/pocket/diagnostics/page.js",
+    "lib/vite.sw.config.ts",
     "lib/vite.one-time.config.ts",
     "lib/vite.pocket.config.ts",
     "lib/scripts/assert-pocket-worker.mjs",
@@ -31,7 +34,7 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "docs/specs/layout.md",
     ".github/workflows/ci.yml",
     "remote-lib-common/test/one-time-wire.test.mjs",
-    "lib/pocket/index.html",
+    "lib/pocketbook.md",
   ])
     assert.equal(touchesHosted([path]), false, path);
   assert.equal(touchesHosted([]), false);

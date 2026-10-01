@@ -159,8 +159,8 @@ function safeHostname(): string {
 
 /**
  * Whether this build enrolls at all: only a self-host build, a Hosted one's
- * Relay being Hosted's, which runs none yet (`docs/specs/relay.md` → "Relay
- * origin").
+ * Relay being Hosted's, which enrolls no Burrow yet (`docs/specs/relay.md` →
+ * "Relay origin").
  */
 export function canEnroll(relay: RelayBuild): boolean {
   return relay.mode === 'self-host';
