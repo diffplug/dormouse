@@ -18,7 +18,7 @@
 
 | Entry point | Tool side | Host side |
 |---|---|---|
-| `osc` | `serveSequence`, `stateSequence`: throw on a value the host would ignore | `parseToolAnnounce`, `parseToolState`, `validToolServePath` |
+| `osc` | `serveSequence`, `stateSequence`, `openSequence`: throw on a value the host would ignore | `parseToolAnnounce`, `parseToolState`, `parseToolOpen`, `validToolServePath` |
 | `protocol` | `readHostMessage` | `readFrameMessage` (sanitizes and bounds a save error) |
 | `frame` | `connectToolFrame` | — |
 
@@ -32,7 +32,6 @@ Source of truth: `dor-tools-lib/package.json`; `dor-tools-builtin/package.json`.
 **Scope: dor-tools-lib** — what remains before publishing 1.0, in order.
 
 - **New host capabilities**, each carrying its wire, library, and host halves: Tool preferences the host stores, Pane header buttons, and the like.
-- **The `open` verb.** OSC 367 `open` replaces the folder viewer's control-socket `openThroughControl` (`docs/specs/dor-tools-builtin.md` → Folder viewer), amending the verb reservation in `docs/specs/dor-tool.md` → OSC 367. Accepted only from a designated Tool Session; a one-shot event, never reconstructed from replay; no reply, so the host surfaces failures itself; absolute paths, with the `OSC 8` `file:` host rule; a new FAIL IF in `docs/specs/security-local.md`.
 - **Save coordination for third-party Tools.** Extend the save channel beyond `builtin:file` frames, auditing the frame boundary in `docs/specs/security-local.md`.
 - **Theme through the library.** A `frame` subscription to the host's iframe theme (`docs/specs/theme.md` → Tool iframe themes), which today reaches Tools only through the proxy shim.
 - **Publish.** A host-neutral protocol reference inside the package, the OSC 367 collision sweep (`docs/specs/dor-tool.md` → Open questions), and npm trusted publishing.

@@ -32,6 +32,7 @@ const inFlight = new Map<string, AbortController>();
 export function dispatchDorControlRequest(
   payload: DorControlRequestPayload,
   respond: (response: DorControlResult) => void,
+  { oscOpen = false }: { oscOpen?: boolean } = {},
 ): void {
   if (payload.surfaceId && isHelperSession(payload.surfaceId)) {
     respond({ ok: false, error: 'Helper terminals do not support dor' });
@@ -47,6 +48,9 @@ export function dispatchDorControlRequest(
       surfaceId: payload.surfaceId,
       method: payload.method,
       params: payload.params ?? {},
+      // Set only for a Session's own OSC 367 `open` (`tool-open-requests.ts`);
+      // nothing crossing the control socket reaches this argument.
+      ...(oscOpen ? { oscOpen: true } : {}),
       signal: controller.signal,
       respond: (response: DorControlResult) => {
         inFlight.delete(requestId);

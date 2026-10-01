@@ -5,17 +5,11 @@ import { join } from 'node:path';
 import { request } from 'node:http';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, test } from 'node:test';
 
 // The `dor __view-*` private entries that run dor-tools-builtin's viewers
 // (docs/specs/dor-tools-builtin.md); the viewers themselves are tested there.
-const require = createRequire(import.meta.url);
-const { createDorControlServer } = require('../../standalone/sidecar/dor-control-server.js');
-
-const posixOnly = { skip: process.platform === 'win32' ? 'POSIX sockets' : false };
-
 let base;
 let root;
 beforeEach(async () => {
@@ -43,8 +37,8 @@ function post(viewer, action, body) {
     body: JSON.stringify(body),
   });
 }
-async function spawnViewer(verb, target, env = withoutControl()) {
-  const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), verb, target], { stdio: ['ignore', 'pipe', 'pipe'], env });
+async function spawnViewer(verb, target, env = withoutControl(), extra = []) {
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../dist/dor.js', import.meta.url)), verb, target, ...extra], { stdio: ['ignore', 'pipe', 'pipe'], env });
   let output = '';
   const viewer = await new Promise((resolve, reject) => {
     child.once('error', reject);
@@ -55,7 +49,7 @@ async function spawnViewer(verb, target, env = withoutControl()) {
       if (match) resolve(JSON.parse(match[1]));
     });
   });
-  return { child, viewer, output };
+  return { child, viewer, output, read: () => output };
 }
 function withoutControl() {
   const env = { ...process.env };
@@ -92,37 +86,36 @@ test('the folder entry titles itself, announces its port and path, then exits on
     assert.ok(output.includes('\x1b]2;root\x07'), JSON.stringify(output));
     assert.equal(viewer.v, 1);
     assert.deepEqual(JSON.parse((await call(viewer, `${viewer.path}list?dir=`)).body).entries, [{ name: 'a.txt', kind: 'file', ignored: false }]);
-    assert.deepEqual(JSON.parse((await post(viewer, 'select', { path: 'a.txt' })).body), { ok: false, error: 'Dormouse control endpoint is not available in this terminal yet.' });
     await terminates(child, viewer);
   } finally { child.kill('SIGKILL'); }
 });
 
-test('the folder entry opens through the control socket as dor open --preview', { ...posixOnly, timeout: 10_000 }, async () => {
+test('the folder entry selects and activates with OSC 367 open, in the order the page sends them', { timeout: 10_000 }, async () => {
   await writeFile(join(root, 'a.txt'), 'a');
-  const socketPath = join(base, 'control.sock');
-  const requests = [];
-  const server = createDorControlServer({
-    socketPath,
-    token: 'shared-secret',
-    send(event, data) {
-      if (event !== 'dor:controlRequest') return;
-      requests.push(data);
-      server.respond(data.params.preview
-        ? { requestId: data.requestId, ok: true, result: { status: 'superseded' } }
-        : { requestId: data.requestId, ok: false, error: 'no Tool matches a.txt' });
-    },
-  });
-  await server.ready;
-  const { child, viewer } = await spawnViewer('__view-folder', root, { ...withoutControl(), DORMOUSE_CONTROL_SOCKET: socketPath, DORMOUSE_CONTROL_TOKEN: 'shared-secret', DORMOUSE_SURFACE_ID: 'folder-1' });
+  const { child, viewer, read } = await spawnViewer('__view-folder', root);
   try {
-    assert.deepEqual(JSON.parse((await post(viewer, 'select', { path: 'a.txt' })).body), { ok: true, status: 'superseded' });
-    assert.deepEqual(JSON.parse((await post(viewer, 'activate', { path: 'a.txt' })).body), { ok: false, error: 'no Tool matches a.txt' });
-    assert.deepEqual(requests.map(r => [r.method, r.surfaceId, r.params]), [
-      ['surface.tool', 'folder-1', { file: join(root, 'a.txt'), preview: true, cwd: root, fresh: false, minimized: false }],
-      ['surface.tool', 'folder-1', { file: join(root, 'a.txt'), preview: false, cwd: root, fresh: false, minimized: false }],
+    assert.deepEqual(JSON.parse((await post(viewer, 'select', { path: 'a.txt' })).body), { ok: true, status: 'sent' });
+    assert.deepEqual(JSON.parse((await post(viewer, 'activate', { path: 'a.txt' })).body), { ok: true, status: 'sent' });
+    const file = join(root, 'a.txt');
+    // stdout and the HTTP reply travel separately; wait for both requests to arrive.
+    const opens = () => [...read().matchAll(/\x1b\]367;open;(\{[^\x07]*\})\x07/g)].map(match => JSON.parse(match[1]));
+    for (let tries = 0; opens().length < 2 && tries < 100; tries++) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(opens(), [
+      { v: 1, path: file, preview: true },
+      { v: 1, path: file, preview: false },
     ]);
-  } finally {
-    child.kill('SIGKILL');
-    server.close();
-  }
+  } finally { child.kill('SIGKILL'); }
+});
+
+test('the error entry titles itself after its target and serves the escaped message', { timeout: 10_000 }, async () => {
+  const { child, viewer, output } = await spawnViewer('__view-error', join(root, 'report.pdf'), withoutControl(), ['no Tool matches <report.pdf>']);
+  try {
+    assert.ok(output.includes('\x1b]2;report.pdf\x07'), JSON.stringify(output));
+    const page = await call(viewer, viewer.path);
+    assert.equal(page.status, 200);
+    assert.match(page.body, /Can't show report\.pdf/);
+    assert.match(page.body, /no Tool matches &lt;report\.pdf&gt;/);
+    assert.equal((await call(viewer, `${viewer.path}anything`)).status, 404);
+    await terminates(child, viewer);
+  } finally { child.kill('SIGKILL'); }
 });

@@ -19,6 +19,10 @@ export const VIEW_FILE_ARGV = '__view-file';
 /** The same pair for the folder viewer (docs/specs/dor-tool.md -> Folders). */
 export const BUILTIN_FOLDER_TOOL = 'builtin:folder';
 export const VIEW_FOLDER_ARGV = '__view-folder';
+/** The private argv verb for the page a failed OSC 367 `open` shows in the
+ * preview slot (docs/specs/dor-tools-builtin.md -> Error viewer); no handler
+ * name selects it. */
+export const VIEW_ERROR_ARGV = '__view-error';
 /** An `open` rule whose pattern ends in this suffix (U+1F4C1) matches only
  * directories, tested as their names suffixed with it. */
 export const FOLDER_MATCH_SUFFIX = '.📁';

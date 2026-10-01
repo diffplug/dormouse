@@ -8,9 +8,10 @@ import {
   type StricliProcess,
 } from '@stricli/core';
 import { isBrowserProvider, type BrowserAutomationProvider } from 'dor-lib-common';
+import { runErrorViewer } from 'dor-tools-builtin/error-viewer';
 import { runFileViewer } from 'dor-tools-builtin/file-viewer';
-import { VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from 'dor-tools-builtin/file-viewer-format';
-import { runFolderViewer, type FolderOpenRequest } from 'dor-tools-builtin/folder-viewer';
+import { VIEW_ERROR_ARGV, VIEW_FILE_ARGV, VIEW_FOLDER_ARGV } from 'dor-tools-builtin/file-viewer-format';
+import { runFolderViewer } from 'dor-tools-builtin/folder-viewer';
 import { agentBrowserCommand, runAgentBrowserCli } from './commands/agent-browser.js';
 import { appCommand } from './commands/app.js';
 import { awaitCommand } from './commands/await.js';
@@ -22,18 +23,17 @@ import { readCommand } from './commands/read.js';
 import { sendCommand } from './commands/send.js';
 import { skillCommand } from './commands/skill.js';
 import { splitCommand } from './commands/split.js';
-import { TOOL_TIMEOUT_MS, toolCommand } from './commands/tool.js';
+import { toolCommand } from './commands/tool.js';
 import { openCommand } from './commands/open.js';
 import { playwrightCommand, runPlaywrightCli } from './commands/playwright.js';
 import { versionCommand } from './commands/version.js';
 import { workspaceCommand } from './commands/workspace.js';
-import { errorLine, errorMessage, fail, requireControlClient } from './commands/shared.js';
+import { errorLine, errorMessage, fail } from './commands/shared.js';
 import type {
   CliEnv,
   CliOptions,
   CliResult,
   Command,
-  ControlClient,
   DorCommandContext,
   HelpPatch,
 } from './commands/types.js';
@@ -231,9 +231,14 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     return { stdout: await runFileViewer(argv[1]), stderr: '', exitCode: 0 };
   }
   // `dor __view-folder <dir>` is the same for `builtin:folder`, whose page
-  // selects and activates files through this terminal's control client.
+  // selects and activates files with OSC 367 `open`.
   if (argv[0] === VIEW_FOLDER_ARGV && argv.length === 2) {
-    return { stdout: await runFolderViewer(argv[1], openThroughControl(requireControlClient(options, TOOL_TIMEOUT_MS))), stderr: '', exitCode: 0 };
+    return { stdout: await runFolderViewer(argv[1]), stderr: '', exitCode: 0 };
+  }
+  // `dor __view-error <target> <message>` is the page a failed OSC 367 `open`
+  // shows in the preview slot.
+  if (argv[0] === VIEW_ERROR_ARGV && argv.length === 3) {
+    return { stdout: await runErrorViewer(argv[1], argv[2]), stderr: '', exitCode: 0 };
   }
 
   const helpTarget = getHelpTarget(argv);
@@ -264,20 +269,6 @@ export async function runCli(rawArgv: string[], options: CliOptions = {}): Promi
     exitCode: normalizeExitCode(capture.process.exitCode),
     stdout: applyHelpPatches(capture.stdout(), helpTarget),
     stderr: capture.stderr(),
-  };
-}
-
-/** A folder viewer's select and activate, run as `dor open` (`--preview` for a
- * select), or the reason no control endpoint is available. */
-function openThroughControl(client: ControlClient | Error): FolderOpenRequest {
-  return async ({ file, preview, cwd }) => {
-    if (client instanceof Error) return { ok: false, error: client.message };
-    try {
-      const response = await client.toolSurface({ file, preview, cwd, fresh: false, minimized: false });
-      return { ok: true, status: response.status };
-    } catch (error) {
-      return { ok: false, error: errorMessage(error) };
-    }
   };
 }
 

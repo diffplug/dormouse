@@ -115,6 +115,26 @@ export function parseToolState(content: string): ToolState | null {
   return record && record.v === 1 && typeof record.dirty === 'boolean' ? { dirty: record.dirty } : null;
 }
 
+export interface ToolOpen { path: string; preview: boolean }
+
+const OPEN_PATH_LIMIT = 2048;
+
+/** An absolute native path: POSIX, or a Windows drive path. Never a URL, a
+ * relative path, or one carrying a control character. */
+export function validToolOpenPath(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= OPEN_PATH_LIMIT
+    && (value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value)) && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
+}
+
+/** Parse an `open` request; `content` is everything after `367;`. `preview`
+ * defaults to false, as `dor open` does. */
+export function parseToolOpen(content: string): ToolOpen | null {
+  const record = parseToolPayload(content, 'open');
+  if (!record || record.v !== 1 || !validToolOpenPath(record.path)) return null;
+  if (record.preview !== undefined && typeof record.preview !== 'boolean') return null;
+  return { path: record.path, preview: record.preview === true };
+}
+
 /** The `serve` announcement a Tool writes once its server listens: the port to
  * frame and, optionally, the same-origin path to open on it. Throws on a value
  * the host would ignore. */
@@ -127,6 +147,14 @@ export function serveSequence({ port, path }: { port: number; path?: string }): 
 /** The `state` report a Tool writes whenever its unsaved state changes. */
 export function stateSequence({ dirty }: ToolState): string {
   return sequence('state', { v: 1, dirty });
+}
+
+/** The `open` request a Tool writes to show `path` in the Workspace's preview
+ * slot (`preview`) or open it as `dor open` would. The host answers nothing;
+ * a failure shows in the preview slot. Throws on a path the host would ignore. */
+export function openSequence({ path, preview = false }: { path: string; preview?: boolean }): string {
+  if (!validToolOpenPath(path)) throw new RangeError(`not an absolute path: ${JSON.stringify(path)}`);
+  return sequence('open', { v: 1, path, preview });
 }
 
 const sequence = (verb: string, payload: object) => `\x1b]367;${verb};${JSON.stringify(payload)}\x07`;

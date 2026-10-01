@@ -55,6 +55,7 @@ import {
   browserBindingFromParams,
   browserUrlFromParams,
   isPreviewSlotParams,
+  isToolParams,
   matchesToolKey,
   namespacedToolKey,
   surfaceKindFromParams,
@@ -74,6 +75,7 @@ import { listenerUrlsByPort } from './port-url';
 import { becomeToolMeta, dorDirectionForEdge, toolLeafMeta, type LathWallEngine } from './lath-wall-engine';
 import type { WallNav } from './keyboard/types';
 import { toolCommandFromParams } from '../../lib/session-save';
+import { VIEW_ERROR_ARGV } from 'dor-tools-builtin/file-viewer-format';
 import type { LeafMeta } from '../../lib/lath/persistence';
 import type { DooredItem } from './wall-types';
 
@@ -132,6 +134,10 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
   /** Absent on the in-process dispatch path (and in tests), which has no
    *  client to hang up — every consumer must treat it as optional. */
   signal?: AbortSignal;
+  /** The caller's own OSC 367 `open`, which only a running designated Tool
+   *  may make and whose failure shows in the preview slot. Never set by a
+   *  control-socket request. */
+  oscOpen?: true;
 };
 
 /** Outcome of {@link EnsureBrowserSurface}: the fields the caller maps onto
@@ -1099,6 +1105,16 @@ export function useDorControl({
     }
 
     if (detail.method === SURFACE_CONTROL_METHODS.tool) {
+      // An OSC 367 `open` comes only from a Tool Session's running designated
+      // command, as serving does: a later command in that pane is inert.
+      if (detail.oscOpen) {
+        const tool = detail.surfaceId === undefined ? undefined : lath.getMeta(detail.surfaceId)?.params;
+        const run = detail.surfaceId === undefined ? null : getTerminalPaneState(detail.surfaceId).currentCommand;
+        if (!isToolParams(tool) || run?.rawCommandLine !== tool.command) {
+          detail.respond({ ok: false, error: 'OSC 367 open is accepted only from a running Tool' });
+          return;
+        }
+      }
       // The preview slot is one reused pane, never another instance or a Door.
       if (booleanParam(params.preview) && (stringParam(params.file) === undefined
         || booleanParam(params.fresh) || booleanParam(params.minimized))) {
@@ -1357,6 +1373,21 @@ export function useDorControl({
               return;
             }
             default:
+              // Nobody hears a Tool's OSC 367 `open` answer, so its preview
+              // shows the failure in the slot instead (docs/specs/dor-tool.md ->
+              // OSC 367). A process-supplied path and host text become argv:
+              // controls are already absent from the path and stripped here.
+              if (detail.oscOpen && previewSignal && openFile !== undefined) {
+                toolRun = ['dor', VIEW_ERROR_ARGV, openFile, lookup.message.replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ')];
+                command = toolRunCommand(toolRun);
+                toolScope = 'builtin';
+                toolName = 'error';
+                key = namespacedToolKey(toolName, [openFile]);
+                render = 'iframe';
+                port = 'announced';
+                openTarget = openFile;
+                break;
+              }
               detail.respond({ ok: false, error: lookup.message });
               return;
           }
