@@ -28,8 +28,8 @@ one screen of that anchor. `#remote-control` and `#voice` keep resolving as
 section ids.
 
 **Content, in order:** the Relay boundary notice; the tier cards, each with a
-30-day refund beside its buy button; what a member gets today and what ships
-later, as prose rather than checkmarks; "Self-hosting stays free"; and a short
+30-day refund beside its buy button; what a member gets, as prose rather than
+checkmarks; "Self-hosting stays free"; and a short
 FAQ — what forever means, refunds and cancellation, the founding lock, what
 happens if Hosted shuts down, and that team pricing is not yet offered.
 
@@ -47,9 +47,12 @@ by side from `md` up, stacked in that order below. **Mark the recommended tier
 with the accent border and the badge, never a surface of its own**, which would
 be a tint no docs token is derived against.
 
+**Must describe both grants as live, never upcoming.** The Relay boundary
+notice carries the one qualifier: the independent review
+`docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
+
 **A buy button opens the unbuilt-checkout notice** — the tier's name, that
-nothing was charged and no seat taken, and the devlog — and the page repeats
-above the cards that checkout is not open. **Never render a buy button that
+nothing was charged and no seat taken, and the devlog. **Never render a buy button that
 silently does nothing.** The notice is where the devlog signup form lives; it
 is no longer a page section of its own.
 
@@ -106,8 +109,7 @@ Source of truth: `tiersOnSale` and `pricingJsonLd` in
    Settings, verification, grace, revocation.
 3. **Managed voice**: the TTS endpoint, the entitlement check, the disclosure,
    one voice per Pane.
-4. **Hosted Relay inclusion**, gated on the self-host Relay's public beta and
-   the independent review `docs/specs/security-remote.md` -> "Cloud-hosted
+4. **Hosted Relay inclusion**, gated on the independent review `docs/specs/security-remote.md` -> "Cloud-hosted
    mode" requires; the account model is the **saas-multitenant** scope.
 5. **Renewal, cancellation, and refund** paths.
 
@@ -129,10 +131,9 @@ is the ladder as the page prints it today.
   at the billing provider; a refund returns the seat to its cohort.
 - **When a cohort closes the price rises one step and the counter resets to
   100.**
-- **Founding has two stops: the ladder reaching list, or the hosted Relay
-  shipping.** Whichever comes first closes founding annual for good and opens
-  the Annual tier at list the same day, whatever the open cohort's count. The
-  permanent tier closes at its cap. Founding means paid before Hosted existed.
+- **Founding annual closes only when the ladder reaches list**, and that day
+  opens the Annual tier at list. The permanent tier closes at its cap. Founding
+  means bought at launch pricing; the hosted Relay shipping closes neither.
 - **Checkout honors the price it opened at.** Concurrent checkouts may oversell
   a cohort by a few seats; the overage is the customer's, and the next cohort
   still opens at a full 100.
@@ -150,7 +151,7 @@ is the ladder as the page prints it today.
 |---|---|
 | Managed voices for spoken alarms on every machine the member activates | live |
 | One voice per Pane, chosen from a curated set, with a member default | live |
-| Dormouse Hosted: the managed Relay, enrollment of the member's Burrows, sealed push, Pocket without a tailnet | ships after the self-host public beta and the independent review |
+| Dormouse Hosted: the managed Relay, enrollment of the member's Burrows, sealed push, Pocket without a tailnet | live |
 | Founding badge | live for founding tiers |
 
 - **The permanent tier grants everything the Individual plan ever contains**,
@@ -159,7 +160,7 @@ is the ladder as the page prints it today.
 - **"Forever" means for as long as Dormouse Hosted operates**; the Relay stays
   source-available under FSL, so a member can always self-host. The page says
   so in those words.
-- **Members pay nothing extra when the hosted Relay ships.** Reserved: the
+- **The hosted Relay is part of the plan, never a second purchase.** Reserved: the
   **saas-multitenant** scope reads the plan from the licence below rather than
   minting a second account.
 - **Nothing shipped free is ever gated**: the terminal, `dor`, browser panes,
@@ -194,8 +195,8 @@ is the ladder as the page prints it today.
 - **A refund or chargeback revokes**: the server marks the licence, the next
   refresh disables it, and the seat returns to its cohort.
 - **The licence is the identity the hosted Relay will accept.** Reserved: the
-  **saas-multitenant** scope enrolls a Burrow against this licence, so buying
-  before Hosted ships never requires a second sign-up.
+  **saas-multitenant** scope enrolls a Burrow against this licence, so a member
+  never signs up twice.
 
 ### Managed voice
 
@@ -205,7 +206,7 @@ is the ladder as the page prints it today.
   voice id** — the `toSpokenText` output in `lib/src/lib/alert-speech.ts`,
   never terminal content, never a notification body, never a Session id.
   **Disclose this in the enable flow before the first request**, honoring the
-  promise the preview page makes today.
+  promise the Hosted page makes.
 - **Cache clips by voice and text on the client** and regenerate only when the
   label changes; a cache hit makes no request. **Fair use is a daily request
   cap per member**; past it, the system voice speaks.

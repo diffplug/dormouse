@@ -68,6 +68,13 @@ describe("what the Hosted page prerenders", () => {
     expect(markup.match(/Recommended/g)).toHaveLength(1);
   });
 
+  it("describes both grants as live, never upcoming", () => {
+    // docs/specs/pricing.md -> The Hosted page: the boundary notice's pending
+    // review is the one qualifier, and it is about the review, not the service.
+    expect(markup).not.toMatch(/coming soon|once it ships|when it ships|ships after|not (open )?yet|will run|design target/i);
+    expect(markup.match(/Included with any plan/g)).toHaveLength(2);
+  });
+
   it("states the refund beside every buy button", () => {
     // Matched on the label rather than the visible text: the button reads
     // "Buy", and the tier it buys is on its aria-label.
@@ -152,14 +159,13 @@ describe("the buy buttons", () => {
   };
 
   it("say checkout is unbuilt rather than failing silently", async () => {
-    const el = await openFirst();
+    await openFirst();
     const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).not.toBeNull();
     expect(dialog?.textContent).toContain("TODO");
     expect(dialog?.textContent).toContain("Checkout is not wired up yet");
     expect(dialog?.textContent).toContain(tiersOnSale()[0].name);
     expect(dialog?.textContent).toContain("You have not been charged");
-    expect(el.textContent).toContain("Checkout is not open yet");
   });
 
   it("close on Escape", async () => {

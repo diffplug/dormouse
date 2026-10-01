@@ -29,8 +29,6 @@ import {
   CARD_MUTED_TEXT_CLASS,
   LINK_CLASS,
   MUTED_TEXT_CLASS,
-  NOTE_CLASS,
-  NOTE_MUTED_TEXT_CLASS,
 } from "../components/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
 import { fetchCohortSeats, type CohortSeats } from "../lib/hosted-cohorts";
@@ -49,8 +47,8 @@ export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
     title: "Dormouse Hosted",
     description:
-      "The terminal is free. Dormouse Hosted adds managed voices for spoken alarms and, "
-      + "later, a managed Relay for Pocket — from $10 a month, with founding prices while they last.",
+      "The terminal is free. Dormouse Hosted adds a managed Relay for Pocket and managed voices "
+      + "for spoken alarms — from $10 a month, with founding prices while they last.",
   });
 }
 
@@ -249,7 +247,7 @@ export default function Hosted() {
     <DocsLayout
       activePath={PAGE_PATH}
       title="Dormouse Hosted"
-      intro={<HostingRequirementNotice mode="planned-hosted" />}
+      intro={<HostingRequirementNotice mode="hosted" />}
       toc={HOSTED_TOC}
     >
       {/* Prerendered with the prices it repeats, so an assistant fetching the
@@ -263,17 +261,9 @@ export default function Hosted() {
         <AnchoredHeading id="pricing" spacing="mt-0 mb-3">What it costs</AnchoredHeading>
         <p className={`mb-6 ${BODY_TEXT_CLASS}`}>
           The terminal is free and stays free. One plan — Individual — buys the two things
-          I run for you: managed voices for spoken alarms today, and the managed Relay
-          once it ships. One licence covers every machine you use.
+          I run for you: the managed Relay for Pocket and managed voices for spoken alarms.
+          One licence covers every machine you use.
         </p>
-
-        <aside className={`${NOTE_CLASS} mb-6`}>
-          <p className={`text-sm leading-relaxed ${NOTE_MUTED_TEXT_CLASS}`}>
-            <span className="font-display">Checkout is not open yet.</span> The prices
-            below are final, but the buy buttons only explain what is left to build.
-            Nothing takes payment.
-          </p>
-        </aside>
 
         {/* Cheapest commitment on the left, largest on the right, so the
             ladder reads in one pass at desktop and stacks in the same order on
@@ -290,10 +280,9 @@ export default function Hosted() {
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
-          Founding prices are for people who paid before Hosted existed. The annual ladder
-          rises $10 with each cohort of 100 and closes for good when it reaches the $100
-          list price or the managed Relay ships, whichever comes first; permanent seats
-          stop at 100. Team and enterprise plans are not sold here yet.
+          Founding prices go to the first members. The annual ladder rises $10 with each
+          cohort of 100 and closes for good when it reaches the $100 list price; permanent
+          seats stop at 100. Team and enterprise plans are not sold here.
         </p>
       </section>
 
@@ -307,8 +296,8 @@ export default function Hosted() {
         <AnchoredHeading id="voice" spacing="mt-0 mb-3">Managed voices</AnchoredHeading>
         <p className={`mb-3 font-display text-sm ${ACCENT_TEXT_CLASS}`}>Included with any plan</p>
         <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
-          Dormouse speaks an unattended terminal’s name using your browser or system voice
-          today, free and with no account. A plan swaps that for a natural ElevenLabs
+          Free and with no account, Dormouse speaks an unattended terminal’s name in your
+          browser or system voice. A plan swaps that for a natural ElevenLabs
           voice on every machine you activate, chosen per pane from a curated set with a
           default of your own. I hold the vendor key, so there is no second account to set
           up or pay for.
@@ -337,19 +326,18 @@ export default function Hosted() {
         <AnchoredHeading id="remote-control" spacing="mt-0 mb-3">
           The managed Relay
         </AnchoredHeading>
-        <p className={`mb-3 font-display text-sm ${ACCENT_TEXT_CLASS}`}>
-          Ships after the self-host public beta and an independent review
-        </p>
+        <p className={`mb-3 font-display text-sm ${ACCENT_TEXT_CLASS}`}>Included with any plan</p>
         <p className={`mb-4 ${BODY_TEXT_CLASS}`}>
           Dormouse Pocket puts your terminals on your phone. It needs a Relay to connect
-          the two, and today that means running one yourself. Hosted will run it for you:
-          enrollment of your own computers, sealed push notifications, and Pocket without
-          a tailnet. Your terminals still run on your own awake, online computer.
+          the two, and Hosted runs it for you: enrollment of your own computers, sealed
+          push notifications, and Pocket without a tailnet. Your terminals still run on
+          your own awake, online computer.
         </p>
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
-          Members pay nothing extra when it ships — it joins the plan you already have. It
-          is deliberately last: a Relay I operate is a Relay that sees connection metadata,
-          so it waits on the self-hosted beta and an independent review of the trust model.
+          Terminal traffic is end-to-end encrypted between your computer and your phone,
+          so the Relay I operate carries it without reading it. What it does see is
+          connection metadata, and the trust model linked at the top of this page lists
+          exactly which.
         </p>
       </section>
 
@@ -428,7 +416,7 @@ export default function Hosted() {
             system voice, which needs nothing from me at all.
           </FaqEntry>
           <FaqEntry question="Do you sell team or enterprise plans?">
-            Not yet. Org accounts, SSO, and audit export are a separate piece of work and
+            Not on this page. Org accounts, SSO, and audit export are a separate piece of work and
             are not sold through this page. If you need them,{" "}
             <a
               href="https://github.com/diffplug/dormouse/issues"

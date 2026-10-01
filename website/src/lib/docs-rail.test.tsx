@@ -67,10 +67,10 @@ describe("every page in the rail", () => {
     });
   }
 
-  it("labels Hosted security as a reviewed design target, not a current guarantee", () => {
+  it("discloses Hosted's metadata and its pending review", () => {
     const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
-    expect(markup).toContain("Paid hosting remains a design target pending independent review");
-    expect(markup).toContain("would still see connection metadata");
+    expect(markup).toContain("Its independent security review is pending");
+    expect(markup).toContain("It sees connection metadata, never");
     expect(markup).toContain("remote-security-model.md");
   });
 
@@ -91,8 +91,8 @@ describe("every page in the rail", () => {
       .toBeLessThan(selfHostMarkup.indexOf('id="security-model"'));
     expect(hostedMarkup.indexOf("Dormouse is just a terminal —"))
       .toBeLessThan(hostedMarkup.indexOf('id="remote-control"'));
-    expect(selfHostMarkup).toContain("See the planned paid option");
-    expect(hostedMarkup).toContain("Paid hosting remains a design target pending independent review");
+    expect(selfHostMarkup).toContain("See Dormouse Hosted");
+    expect(hostedMarkup).toContain("Its independent security review is pending");
   });
 
   it("names the two hosting choices", () => {

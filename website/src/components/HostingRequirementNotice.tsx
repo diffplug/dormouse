@@ -1,15 +1,15 @@
 import { CARD_ACCENT_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS } from "./docs-tokens";
 import { sitePath } from "../lib/site-meta";
 
-const SELF_HOSTED_SECURITY_MODEL_URL =
+const SECURITY_MODEL_URL =
   "https://github.com/diffplug/dormouse/blob/main/docs/specs/remote-security-model.md";
 
 export function HostingRequirementNotice({
   mode,
 }: {
-  mode: "self-hosted" | "planned-hosted";
+  mode: "self-hosted" | "hosted";
 }) {
-  const planned = mode === "planned-hosted";
+  const hosted = mode === "hosted";
 
   return (
     <aside
@@ -24,20 +24,20 @@ export function HostingRequirementNotice({
         connect your computer and phone and pass encrypted traffic between them. Until you
         configure one, Dormouse’s remote features make no network requests.
       </p>
-      {planned ? (
+      {hosted ? (
         <>
           <p className={`mt-4 leading-relaxed ${CARD_MUTED_TEXT_CLASS}`}>
-            Paid hosting remains a design target pending independent review. A managed
-            Relay would still see connection metadata.
+            Dormouse Hosted runs that Relay for you. It sees connection metadata, never
+            terminal content. Its independent security review is pending.
           </p>
           <p className="mt-4 text-sm">
             <a
-              href={SELF_HOSTED_SECURITY_MODEL_URL}
+              href={SECURITY_MODEL_URL}
               className={LINK_CLASS}
               target="_blank"
               rel="noopener noreferrer"
             >
-              Read the current self-hosted trust model →
+              Read the trust model →
             </a>
           </p>
         </>
@@ -45,7 +45,7 @@ export function HostingRequirementNotice({
         <p className="mt-4 text-sm">
           Prefer not to run it?{" "}
           <a href={`${sitePath("/hosted")}#remote-control`} className={LINK_CLASS}>
-            See the planned paid option →
+            See Dormouse Hosted →
           </a>
         </p>
       )}

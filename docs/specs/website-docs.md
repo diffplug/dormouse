@@ -337,8 +337,8 @@ section owns its place on the site.
 **Must describe the account service and link its account app, privacy policy, and terms.**
 Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`.
 
-**Must mark the managed Relay unavailable:** Hosted operates Pocket's Relay,
-terminals stay on an awake, online computer, and self-hosting remains.
+**Must describe the managed Relay as Pocket's Relay:** terminals stay on an
+awake, online computer, and self-hosting remains.
 `NotifySignupForm` exposes the `nedshed.dev` devlog handoff and keeps email per
 tab. **Must use native required-email validation.**
 `website/src/components/NotifySignupForm.test.tsx` pins all three.

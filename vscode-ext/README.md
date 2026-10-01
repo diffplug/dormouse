@@ -30,7 +30,7 @@ Look at a ring without typing and it becomes a **TODO**; type into the pane to c
 
 Your agent hits a permission prompt after you leave. Dormouse Pocket buzzes your phone, and one drag on its radial menu sends `y`, `n`, Esc, or Ctrl+C. The Relay is yours — one Node process behind `tailscale serve` — and sessions are end-to-end encrypted.
 
-Pocket is in development, and today the extension reaches a self-hosted Relay only when built from source. Try the phone interface at [dormouse.sh/playground/pocket](https://dormouse.sh/playground/pocket).
+The released extension connects through [Dormouse Hosted](https://dormouse.sh/hosted); a self-hosted Relay takes a build from source. Try the phone interface at [dormouse.sh/playground/pocket](https://dormouse.sh/playground/pocket).
 
 ## Terminals that know their ports
 
@@ -82,7 +82,7 @@ The [shortcut reference](https://github.com/diffplug/dormouse/blob/main/docs/spe
 
 ## Dormouse Hosted
 
-Optional and coming soon: a managed Relay so Pocket works without running your own, and an ElevenLabs voice for spoken alarms. [Follow the launch](https://dormouse.sh/hosted).
+Optional and paid: a managed Relay so Pocket works without running your own, and an ElevenLabs voice for spoken alarms. [See plans and pricing](https://dormouse.sh/hosted).
 
 ## Standalone app
 
