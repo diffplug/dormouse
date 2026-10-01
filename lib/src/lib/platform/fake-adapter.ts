@@ -7,6 +7,7 @@ import { createAlertClient, type AlertClientMethods } from '../../host/alert-cli
 import { normalizeExternalUri } from '../external-links';
 import {
   applyTerminalEvents,
+  collectTerminalClipboardOffers,
   collectTerminalProtocolResponses,
   TerminalProtocolParser,
   textProjectionOf,
@@ -16,6 +17,7 @@ import {
 } from '../terminal-state-store';
 import { themeColorProvider } from '../terminal-theme';
 import { applyLiveToolEvents } from '../tool-events';
+import { offerProgramCopy } from '../mouse-selection';
 
 /** This renderer is its host's one realm. */
 const LOCAL_VIEWER = 'local';
@@ -480,6 +482,7 @@ export class FakePtyAdapter implements PlatformAdapter {
     for (const response of collectTerminalProtocolResponses(parsed.events)) {
       inputHandler?.(response);
     }
+    for (const text of collectTerminalClipboardOffers(parsed.events)) offerProgramCopy(id, text);
 
     if (parsed.visibleData.length === 0) return;
     if (!options.skipActivity) this.alertManager.onData(id);

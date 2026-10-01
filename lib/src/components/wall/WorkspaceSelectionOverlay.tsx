@@ -1,7 +1,6 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { getWorkspaceUiSnapshot, subscribeToWorkspaceUi } from '../../lib/workspace-ui-store';
-import { subscribeWorkspaceMotionFrames } from '../workspace-motion';
 import {
   FOCUS_MOTION_MS,
   PANE_GUTTER_PX,
@@ -12,6 +11,7 @@ import {
 import { cfg } from '../../cfg';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import {
+  rectsEqual,
   retargetRingTween,
   sampleRingTween,
   sampleRingVelocity,
@@ -40,7 +40,8 @@ import {
 } from '../../lib/ring-geometry';
 import { SelectionRing } from './SelectionRing';
 import { unionBounds, unionRingOutline } from '../../lib/rect-union-outline';
-import type { ContextHelper } from './lath-wall-engine';
+import type { ContextHelper, LathWallEngine } from './lath-wall-engine';
+import { subscribePaneMotion } from './pane-motion';
 
 /** The subset of the Lath store the overlay needs — a revision that bumps on every
  *  commit, so the ring re-measures as leaves move / resize / restore. Kept
@@ -94,9 +95,6 @@ function measureFrame(el: HTMLElement, kind: WallSelectionKind): RingFrame | nul
 function ringIdentity(type: WallSelectionKind, id: string): string {
   return `${type}:${id}`;
 }
-
-const rectsEqual = (a: RingRect, b: RingRect) =>
-  a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
 
 function framesEqual(a: RingFrame, b: RingFrame): boolean {
   return (
@@ -200,7 +198,7 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
   /** The animator's per-frame subscribe (LathHost pumps it). While the wall streams
    *  frames the ring re-measures the moving leaf each frame; same-identity updates
    *  snap 1:1 so the ring tracks the streamed geometry exactly. Optional-null for tests. */
-  subscribeLathFrames?: ((cb: (settled: boolean) => void) => () => void) | null;
+  subscribeLathFrames?: LathWallEngine['subscribeFrames'] | null;
   selectedId: string | null;
   selectedType: WallSelectionKind;
   mode: WallMode;
@@ -463,24 +461,9 @@ export function WorkspaceSelectionOverlay({ lathStore, subscribeLathFrames, sele
 
     update();
 
-    const ro = new ResizeObserver(update);
-    const targetEl = target();
-    if (targetEl) ro.observe(targetEl);
-    window.addEventListener('resize', update);
-    document.addEventListener('scroll', update, true);
-
     // While the wall streams animator frames the leaf divs carry the interpolated
     // inline geometry, so re-measuring each frame tracks the tween frame-accurately.
-    const unsubFrames = subscribeLathFrames?.(() => update());
-    const unsubWorkspaceFrames = subscribeWorkspaceMotionFrames(update);
-
-    return () => {
-      ro.disconnect();
-      unsubFrames?.();
-      unsubWorkspaceFrames();
-      window.removeEventListener('resize', update);
-      document.removeEventListener('scroll', update, true);
-    };
+    return subscribePaneMotion(target(), update, subscribeLathFrames);
     // The rAF loop is intentionally NOT torn down here: it is keyed to the tween
     // (a ref), so a mid-glide re-run of this effect keeps the ring moving. It is
     // cancelled on selection-clear (above), on snap, and on unmount (below).
