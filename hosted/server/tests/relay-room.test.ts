@@ -1,6 +1,7 @@
-import { test, expect, beforeAll, afterAll } from "vitest";
+import { test, expect, beforeAll, afterAll, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { digest } from "@pgstencil/auth/security";
+import { Hono } from "hono";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
 import { queryDatabase } from "pgstencil/postgres";
@@ -8,6 +9,7 @@ import {
   API_ROUTES,
   MAX_RELAY_CLIENT_SOCKETS,
   NOT_ENTITLED_ERROR,
+  RELAY_IDLE_TIMEOUT_MS,
   RELAY_PING,
   RELAY_PONG,
   UNAUTHORIZED_ERROR,
@@ -35,7 +37,8 @@ import { openFrameSocket, until } from "../../../remote-lib-common/test/harness/
 import { e2eCases, socketCases } from "../../../remote-lib-common/test/harness/relay-parity.mjs";
 import { ADMIN_EMAIL } from "../admin";
 import { migrations } from "../migrations";
-import { RELAY_SILENCE_MS } from "../relay-sockets";
+import { relayAccountRoutes } from "../relay-account";
+import { RELAY_ROOM_SWEEP_MS } from "../relay-room-contract";
 import { ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions, wrangler } from "./bundle";
 
 // The Hosted Relay's sockets and its per-account `RelayRoom`
@@ -87,6 +90,8 @@ const roomOf = (account: string) => ({
   onlineBurrows: (claimed: string) => rpc<string[]>(account, "onlineBurrows", claimed),
   probe: () => rpc<Probe>(account, "probe"),
   skew: (ms: number) => rpc<null>(account, "skew", ms),
+  /** Run the alarm now. */
+  fire: () => rpc<null>(account, "fire"),
   /** The status of an upgrade naming `claimed` and `burrowId`. */
   forge: (claimed: string, burrowId: string) => rpc<number>(account, "forge", claimed, burrowId),
 });
@@ -245,6 +250,9 @@ async function account() {
     },
   };
 }
+
+/** Whether an attachment is a socket the object still routes. */
+const live = (conn: Record<string, unknown>) => !conn.retired;
 
 /** Evict `account`'s object, its sockets hibernated, as the runtime does when nothing is happening. */
 const hibernate = (account: string) =>
@@ -424,7 +432,7 @@ test("routing survives hibernation: across a binding, a replacement, and a pendi
   expect(await second.take()).toMatchObject({ step: "transport" });
 });
 
-test("the session alarm is the earliest held Client's expiry, and there is none while no Client is held", async ({
+test("the alarm is the earliest Client expiry or Burrow sweep; a close leaves it, and the alarm re-arms or clears", async ({
   onTestFinished,
 }) => {
   onTestFinished(closeAll);
@@ -444,12 +452,101 @@ test("the session alarm is the earliest held Client's expiry, and there is none 
   const sooner = await owner.driver.connectClient();
   const soonest = await expiry();
   expect((await room.probe()).alarm).toBe(soonest);
+  // A close writes nothing; the alarm, when it comes, moves to what is left.
   sooner.close();
   await sooner.closed;
-  await until(async () => (await room.probe()).alarm === soonest + 3_600_000);
-  later.close();
-  await later.closed;
-  await until(async () => (await room.probe()).alarm === null);
+  await until(async () => (await room.probe()).attachments.filter(live).length === 1);
+  expect((await room.probe()).alarm).toBe(soonest);
+  await room.fire();
+  expect((await room.probe()).alarm).toBe(soonest + 3_600_000);
+
+  // A Burrow socket brings the alarm to its sweep, at most an hour off.
+  const before = Date.now();
+  await owner.driver.connectBurrow();
+  const swept = (await room.probe()).alarm!;
+  expect(swept).toBeGreaterThanOrEqual(before + RELAY_ROOM_SWEEP_MS);
+  expect(swept).toBeLessThanOrEqual(Date.now() + RELAY_ROOM_SWEEP_MS);
+  // And a sweep, while the Burrow is held, schedules the next one an hour on.
+  const sweeping = Date.now();
+  await room.fire();
+  const next = (await room.probe()).alarm!;
+  expect(next).toBeGreaterThanOrEqual(sweeping + RELAY_ROOM_SWEEP_MS);
+  expect(next).toBeLessThanOrEqual(Date.now() + RELAY_ROOM_SWEEP_MS);
+  closeAll();
+  await until(async () => (await room.probe()).attachments.filter(live).length === 0);
+  await room.fire();
+  expect((await room.probe()).alarm).toBe(null);
+});
+
+test("the sweep closes a Burrow removed or de-entitled behind its socket's back, and keeps the rest", async ({
+  onTestFinished,
+}) => {
+  onTestFinished(closeAll);
+  const owner = await account();
+  const room = await owner.room();
+  const removed = await owner.driver.connectBurrow();
+  const kept = await owner.driver.connectBurrow();
+  const client = await owner.driver.connectClient();
+  client.send(e2eClientFrame(removed.burrowId));
+  await removed.socket.take();
+
+  // Removed with no RPC, as a removal whose close never arrived.
+  await sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [removed.burrowId]);
+  await room.fire();
+  expect((await removed.socket.closed).code).toBe(WS_CLOSE_BURROW_REVOKED);
+  expect(await client.take()).toEqual({ t: "burrow-gone" });
+  expect(await room.onlineBurrows(owner.userId)).toEqual([kept.burrowId]);
+  expect(await kept.socket.quiet(150)).toBe(true);
+
+  // The owner loses the entitlement: every Burrow socket it holds goes.
+  await entitled();
+  await room.fire();
+  expect((await kept.socket.closed).code).toBe(WS_CLOSE_BURROW_REVOKED);
+  expect(await room.onlineBurrows(owner.userId)).toEqual([]);
+});
+
+test("a Burrow removed between the Worker's token check and the object's accept is refused", async ({
+  onTestFinished,
+}) => {
+  onTestFinished(closeAll);
+  const owner = await account();
+  const room = await owner.room();
+  // The object holds the account already: the refusals below are the row's.
+  await owner.driver.connectClient();
+  const enrolled = await burrowRow(owner.userId);
+  // The upgrade as the Worker hands it on once the token resolved: accepted.
+  expect(await room.forge(owner.userId, enrolled.burrowId)).toBe(101);
+  const removed = await burrowRow(owner.userId);
+  await sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [removed.burrowId]);
+  expect(await room.forge(owner.userId, removed.burrowId)).toBe(401);
+  // Another account's Burrow, and one whose owner lost the entitlement.
+  const other = await account();
+  expect(await room.forge(owner.userId, (await burrowRow(other.userId)).burrowId)).toBe(401);
+  expect(await room.forge(owner.userId, (await burrowRow(owner.userId)).burrowId)).toBe(403);
+});
+
+test("a removal answers 204 once the row is gone, even when closing its socket fails", async () => {
+  const userId = await entitled();
+  const { burrowId } = await burrowRow(userId);
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  const app = new Hono();
+  relayAccountRoutes(app, () => ({
+    databaseUrl: context.database.url,
+    auth: async () =>
+      Response.json({ user: { id: userId, email: ADMIN_EMAIL, emailVerified: true }, session: {} }),
+    approveLimit: {} as RateLimit,
+    closeBurrow: async () => {
+      throw new Error("the relay is unreachable");
+    },
+  }));
+  const response = await app.request(`${ORIGINS.account}/api/relay/burrows/${burrowId}`, {
+    method: "DELETE",
+    headers: { origin: ORIGINS.account },
+  });
+  expect(response.status).toBe(204);
+  expect(await sql(`SELECT 1 FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [burrowId])).toEqual([]);
+  expect(logged).toHaveBeenCalledOnce();
+  logged.mockRestore();
 });
 
 test("a ping is answered without waking the object, and changes nothing it holds", async ({
@@ -477,7 +574,7 @@ test("a ping is answered without waking the object, and changes nothing it holds
   expect(after.storage).toEqual(before.storage);
 });
 
-test("a socket silent past three ping intervals is gone when routed to, and when a Burrow arrives", async ({
+test("a Burrow silent past three ping intervals is gone when routed to, and is not reported online", async ({
   onTestFinished,
 }) => {
   onTestFinished(async () => {
@@ -493,7 +590,7 @@ test("a socket silent past three ping intervals is gone when routed to, and when
     expect(await socket.take()).toBe(RELAY_PONG);
   }
   const room = await owner.room();
-  await room.skew(RELAY_SILENCE_MS + 1_000);
+  await room.skew(RELAY_IDLE_TIMEOUT_MS + 1_000);
   // `pinging` pings again on time; `quiet` does not; `neverPinged` is never judged.
   pinging.socket.ws.send(RELAY_PING);
   expect(await pinging.socket.take()).toBe(RELAY_PONG);
@@ -503,14 +600,10 @@ test("a socket silent past three ping intervals is gone when routed to, and when
   expect((await client.take()).error).toBe(`burrow ${quiet.burrowId} is offline`);
   expect((await quiet.socket.closed).code).toBe(WS_CLOSE_IDLE);
 
-  // `pinging`'s last pong is now behind the skewed clock too; a Burrow's
-  // arrival retires it, and only it.
-  await room.skew(2 * RELAY_SILENCE_MS);
-  const arriving = await owner.driver.connectBurrow();
+  // `pinging`'s last pong is now behind the skewed clock too: not online, and gone.
+  await room.skew(2 * RELAY_IDLE_TIMEOUT_MS);
+  expect(await room.onlineBurrows(owner.userId)).toEqual([neverPinged.burrowId]);
   expect((await pinging.socket.closed).code).toBe(WS_CLOSE_IDLE);
-  expect((await room.onlineBurrows(owner.userId)).sort()).toEqual(
-    [neverPinged.burrowId, arriving.burrowId].sort(),
-  );
 });
 
 test("at the Client cap, a silent socket is gone and a live one is never evicted", async ({
@@ -529,7 +622,7 @@ test("at the Client cap, a silent socket is gone and a live one is never evicted
   expect(await silent.take()).toBe(RELAY_PONG);
   // Full, and nobody silent yet: refused.
   expect((await owner.driver.openClient().closed).code).toBe(WS_CLOSE_TRY_AGAIN_LATER);
-  await room.skew(RELAY_SILENCE_MS + 1_000);
+  await room.skew(RELAY_IDLE_TIMEOUT_MS + 1_000);
   // The one that pinged and fell silent goes; those that never pinged stay.
   const admitted = owner.driver.openClient();
   await admitted.ready;

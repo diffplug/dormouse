@@ -35,3 +35,4 @@ export default workerApp<RelayEnv>({
 
 export { OneTimeRoom } from "./one-time-room";
 export { RelayRoom } from "./relay-room";
+export { RelayRows } from "./relay-rows";

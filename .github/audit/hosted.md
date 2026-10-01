@@ -138,9 +138,12 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   open a Burrow socket, nor another origin a Client socket. Look for routing
   state kept in memory that a hibernated object would lose, a socket torn down
   twice or routed after its close began, a frame parsed before its length is
-  bounded, a `ct` decoded, logged, or stored, a Client cap one socket can
-  evict past, a session that outlives its alarm, a ping that wakes the object,
-  and a removed Burrow whose socket stays open.
+  bounded or bounded in characters rather than bytes, a `ct` read, decoded,
+  logged, or stored outside the shared frame layer's field copy, a Client cap
+  one socket can evict past, a session that outlives its alarm, a ping that
+  wakes the object, a Burrow socket accepted on a row removed after the token
+  check, and a removed or de-entitled Burrow whose socket outlives the hourly
+  sweep.
 - **Can the rendezvous become more than a handshake pipe?** Trace a frame
   through `OneTimeRoom`: nothing may read, keep, or log it, and the length,
   type, and count bounds must close both ends before a byte past them is

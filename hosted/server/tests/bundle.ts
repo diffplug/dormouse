@@ -56,7 +56,7 @@ function sqliteClass(config: WranglerConfig, className: string, script?: string)
  * Objects — another Worker's by that Worker's script name — and rate limits
  * bound as the config declares them. `extra` adds the rest, and wins. A
  * Worker binding another's class runs in one Miniflare beside it, real or
- * {@link relayStandIn}.
+ * {@link standIn}.
  */
 export function miniflareOptions(name: Name, script: string, extra: Partial<V4Options> = {}) {
   const config = wrangler[name];
@@ -88,19 +88,21 @@ export function miniflareOptions(name: Name, script: string, extra: Partial<V4Op
 }
 
 /**
- * The relay Worker as a Worker binding its `RelayRoom` sees it, where the
- * test needs no real relay: a `RelayRoom` whose RPC methods report nothing.
+ * Worker `name` as a Worker binding one of its classes sees it, where the test
+ * needs no real one: each class its config implements, empty, and a fetch
+ * that answers 404.
  */
-export function relayStandIn() {
+function standIn(name: Name) {
+  const classes = (wrangler[name].durable_objects?.bindings ?? [])
+    .filter(({ script_name }) => !script_name)
+    .map(({ class_name }) => `export class ${class_name} extends DurableObject {}`);
   return miniflareOptions(
-    "relay",
-    `import { DurableObject } from "cloudflare:workers";
-    export class OneTimeRoom extends DurableObject {}
-    export class RelayRoom extends DurableObject {
-      async closeBurrow() { return false; }
-      async onlineBurrows() { return []; }
-    }
-    export default { fetch: () => new Response(null, { status: 404 }) };`,
+    name,
+    [
+      `import { DurableObject } from "cloudflare:workers";`,
+      ...classes,
+      `export default { fetch: () => new Response(null, { status: 404 }) };`,
+    ].join("\n"),
   );
 }
 
@@ -111,9 +113,14 @@ export function together(main: Options, ...siblings: Options[]): Options {
   return { ...main, workers: [...main.workers, ...siblings.flatMap((sibling) => sibling.workers)] };
 }
 
-/** `options` for Worker `name`, beside the relay stand-in when it binds the relay's `RelayRoom`. */
+/** `options` for Worker `name`, beside a stand-in for each Worker whose class its config binds by `script_name`. */
 export function alone(name: Name, options: Options): Options {
-  return name === "account" ? together(options, relayStandIn()) : options;
+  const scripts = new Set(
+    (wrangler[name].durable_objects?.bindings ?? []).flatMap(({ script_name }) =>
+      script_name ? [script_name] : [],
+    ),
+  );
+  return together(options, ...NAMES.filter((other) => scripts.has(wrangler[other].name)).map(standIn));
 }
 
 /** A Worker entry bundled for workerd the way Wrangler bundles it. */

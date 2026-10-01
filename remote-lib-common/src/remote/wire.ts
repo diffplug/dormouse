@@ -143,9 +143,10 @@ export const UNKNOWN_BURROW_TOKEN_ERROR = 'unknown burrow token';
 
 /**
  * The keepalive a Burrow or a Client sends its relay socket, and the Relay's
- * answer (`docs/specs/relay.md` -> "Routing"). Neither is JSON, so each is
- * compared as a whole string before any parse; neither is forwarded. The
- * Hosted Relay answers without waking its Durable Object.
+ * answer (`docs/specs/relay.md` -> "Routing"); both ends of a one-time
+ * rendezvous send their room the same pair. Neither is JSON, so each is
+ * compared as a whole string before any parse; neither is forwarded. Hosted's
+ * Durable Objects answer without waking.
  */
 export const RELAY_PING = 'ping';
 export const RELAY_PONG = 'pong';

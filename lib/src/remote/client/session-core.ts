@@ -40,7 +40,7 @@ import {
 } from 'remote-lib-common';
 import { DirectEndpoint } from '../direct/direct-endpoint';
 import type { DirectPeerFactory } from '../direct/direct-peer';
-import { realTimer, type RemoteTimer } from '../ws';
+import { realTimer, type RelayHeartbeat, type RemoteTimer } from '../ws';
 import type { RemoteAdapterClient, TerminalHandlers } from './remote-adapter';
 
 /**
@@ -144,8 +144,11 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   #onTransportChanged:
     | ((path: DirectPath, cause: DirectRelayCause | null) => void)
     | null = null;
-  /** Cancels the armed keepalive, and the visibility subscription behind it. */
+  /** Cancels the armed keepalive. */
   #cancelKeepalive: (() => void) | null = null;
+  /** The owner's relay-socket heartbeat, run beside the keepalives; see {@link setSocketHeartbeat}. */
+  #heartbeat: RelayHeartbeat | null = null;
+  /** Cancels the one visibility subscription, held while a session or a heartbeat runs. */
   #cancelVisibility: (() => void) | null = null;
 
   /**
@@ -497,12 +500,40 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    * ([pocket-app.md](../../../../docs/specs/pocket-app.md)).
    */
   #startKeepalives(): void {
-    this.#stopKeepalives();
-    this.#cancelVisibility = this.#visibility.subscribe(() => {
-      if (this.#established && this.#visibility.isVisible()) this.sendKeepalive();
-      // Re-arms while visible and cancels while hidden; one place decides.
-      this.#armKeepalive();
-    });
+    this.#watchVisibility();
+    this.#armKeepalive();
+  }
+
+  /**
+   * Run the owner's relay-socket heartbeat — or, with `null`, none — on this
+   * core's visibility, as keepalives run: stopped while the page is hidden,
+   * whose throttled timers could not judge a pong, and resumed with the
+   * outstanding ping forgiven when it returns. The owner starts and stops the
+   * heartbeat itself.
+   */
+  setSocketHeartbeat(heartbeat: RelayHeartbeat | null): void {
+    this.#heartbeat = heartbeat;
+    if (heartbeat && !this.#visibility.isVisible()) heartbeat.stop();
+    this.#watchVisibility();
+  }
+
+  /** The one visibility subscription: held while a session or a heartbeat runs, and only then. */
+  #watchVisibility(): void {
+    const wanted = this.#established !== null || this.#heartbeat !== null;
+    if (wanted && !this.#cancelVisibility) {
+      this.#cancelVisibility = this.#visibility.subscribe(() => this.#onVisibilityChange());
+    } else if (!wanted && this.#cancelVisibility) {
+      this.#cancelVisibility();
+      this.#cancelVisibility = null;
+    }
+  }
+
+  #onVisibilityChange(): void {
+    const visible = this.#visibility.isVisible();
+    if (visible) this.#heartbeat?.resume();
+    else this.#heartbeat?.stop();
+    if (this.#established && visible) this.sendKeepalive();
+    // Re-arms while visible and cancels while hidden; one place decides.
     this.#armKeepalive();
   }
 
@@ -521,11 +552,6 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     this.#cancelKeepalive = null;
   }
 
-  #stopKeepalives(): void {
-    this.#cancelKeepaliveTimer();
-    this.#cancelVisibility?.();
-    this.#cancelVisibility = null;
-  }
 
   /**
    * One protocol-v1 message on the established session, chunked as it needs.
@@ -659,7 +685,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
 
   /** Erase every session's cipher state; a new ceremony starts from a handshake. */
   disposeSession(): void {
-    this.#stopKeepalives();
+    this.#cancelKeepaliveTimer();
     // The peer connection is this session's: every disposal path closes it, so
     // none can outlive the session that authorized it.
     const direct = this.#established?.direct ?? null;
@@ -670,6 +696,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // stayed relayed would sit in the indicator through the whole of the next.
     if (direct?.relayCause) this.#onTransportChanged?.('relay', null);
     this.#established = null;
+    this.#watchVisibility();
   }
 
   /** Fail every awaited ceremony frame and in-flight request (avoids hangs). */
@@ -705,7 +732,7 @@ function uuid(): string {
  * alternative is a client that silently never keepalives, and the only place
  * this default runs is the app, which always has one.
  */
-export function documentVisibility(): PageVisibility {
+function documentVisibility(): PageVisibility {
   const doc: Document | undefined = globalThis.document;
   return {
     isVisible: () => doc === undefined || doc.visibilityState === 'visible',

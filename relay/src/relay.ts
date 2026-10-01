@@ -3,29 +3,24 @@
  * Burrow authority, replacement, and routing contracts.
  */
 
-import { randomBytes } from 'node:crypto';
-
 import {
   MAX_RELAY_CLIENT_SOCKETS,
   RELAY_PING,
   RELAY_PONG,
-  WS_CLOSE_TRY_AGAIN_LATER,
   WS_CLOSE_UNAUTHORIZED,
   WS_CLOSE_UNAUTHORIZED_REASON,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REPLACED_REASON,
   WS_CLOSE_BURROW_REVOKED,
   WS_CLOSE_BURROW_REVOKED_REASON,
-  isE2eClientFrame,
-  isE2eBurrowFrame,
-  toBase64Url,
+  newClientId,
+  offlineError,
+  readBurrowFrame,
+  readClientFrame,
+  toBurrowEnvelope,
+  toClientEnvelope,
 } from 'remote-lib-common';
-import type {
-  ClientFrame,
-  BurrowFrame,
-  RelayToClientFrame,
-  RelayToBurrowFrame,
-} from 'remote-lib-common';
+import type { RelayToClientFrame, RelayToBurrowFrame } from 'remote-lib-common';
 
 /**
  * The slice of a WebSocket the hub actually uses. `WSContext` from
@@ -66,14 +61,6 @@ export interface ClientConn {
   /** The Burrow this client is currently talking to, or `null` if unbound. */
   burrowId: string | null;
 }
-
-// The Relays' shared socket bounds, re-exported for the self-host tests.
-export {
-  MAX_RELAY_CLIENT_SOCKETS,
-  WS_CLOSE_TRY_AGAIN_LATER,
-  WS_CLOSE_UNAUTHORIZED,
-  WS_CLOSE_UNAUTHORIZED_REASON,
-};
 
 export class RelayHub {
   readonly #burrows = new Map<string, BurrowConn>();
@@ -140,10 +127,10 @@ export class RelayHub {
     // the replacement never made.
     if (this.#burrows.get(burrow.burrowId) !== burrow) return;
     if (answeredPing(burrow.socket, raw)) return;
-    const frame = parseFrame<BurrowFrame>(raw);
     // The shape guard bounds `clientId` before it is used as a map key, and the
     // ciphertext before it is copied onto another socket.
-    if (!frame || !isE2eBurrowFrame(frame)) return;
+    const frame = readBurrowFrame(raw);
+    if (!frame) return;
     // Every burrow frame addresses a specific client; if it has already gone,
     // there is nothing to route.
     const client = this.#clients.get(frame.clientId);
@@ -155,14 +142,7 @@ export class RelayHub {
     // No `authorized` gate: the relay never learns whether the Burrow authorized
     // anything, so the binding checked above is the whole routing rule
     // (relay.md -> "Routing").
-    this.#toClient(client, {
-      t: 'e2e',
-      burrowId: burrow.burrowId,
-      kind: frame.kind,
-      id: frame.id,
-      step: frame.step,
-      ct: frame.ct,
-    });
+    this.#toClient(client, toClientEnvelope(burrow.burrowId, frame));
   }
 
   /**
@@ -208,7 +188,7 @@ export class RelayHub {
    */
   registerClient(socket: RelaySocket, session: RelaySession): ClientConn | null {
     if (this.#clients.size >= MAX_RELAY_CLIENT_SOCKETS) return null;
-    const clientId = toBase64Url(randomBytes(16));
+    const clientId = newClientId();
     const conn: ClientConn = { clientId, socket, session, burrowId: null };
     this.#clients.set(clientId, conn);
     return conn;
@@ -245,22 +225,15 @@ export class RelayHub {
     // it (`docs/specs/relay.md` -> "Routing").
     if (this.#clients.get(client.clientId) !== client) return;
     if (answeredPing(client.socket, raw)) return;
-    const frame = parseFrame<ClientFrame>(raw);
-    if (!frame || typeof frame.t !== 'string') {
-      this.#toClient(client, { t: 'error', error: 'malformed frame' });
-      return;
-    }
-    if (frame.t !== 'e2e') {
-      this.#toClient(client, { t: 'error', error: 'unknown frame type' });
-      return;
-    }
     // The envelope the end-to-end protocol rides in: an `init` binds, and
     // everything after it is forwarded within that binding (relay.md ->
     // Relay). Never decoded here.
-    if (!isE2eClientFrame(frame)) {
-      this.#toClient(client, { t: 'error', error: 'malformed e2e frame' });
+    const read = readClientFrame(raw);
+    if ('error' in read) {
+      this.#toClient(client, read.error);
       return;
     }
+    const { frame } = read;
     const burrow = this.#resolveBurrow(client, frame.burrowId);
     if (!burrow) return;
     if (frame.step === 'init') {
@@ -270,15 +243,7 @@ export class RelayHub {
       // not bound to, so there is nothing to forward it to.
       return;
     }
-    this.#toBurrow(burrow, {
-      t: 'e2e',
-      clientId: client.clientId,
-      burrowId: frame.burrowId,
-      kind: frame.kind,
-      id: frame.id,
-      step: frame.step,
-      ct: frame.ct,
-    });
+    this.#toBurrow(burrow, toBurrowEnvelope(client.clientId, frame));
   }
 
   /**
@@ -324,7 +289,7 @@ export class RelayHub {
   #resolveBurrow(client: ClientConn, burrowId: string): BurrowConn | null {
     const burrow = this.#burrows.get(burrowId);
     if (!burrow) {
-      this.#toClient(client, { t: 'error', error: `burrow ${burrowId} is offline` });
+      this.#toClient(client, offlineError(burrowId));
       return null;
     }
     return burrow;
@@ -343,17 +308,6 @@ export class RelayHub {
 
 // ---------------------------------------------------------------------------
 // Helpers
-
-/** Parse a raw WS text frame; `null` if it is not a JSON object. */
-function parseFrame<T>(raw: string): (T & { t?: unknown }) | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    return parsed as T & { t?: unknown };
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Answer {@link RELAY_PING} with {@link RELAY_PONG}, as the Hosted Relay's

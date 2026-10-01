@@ -244,6 +244,16 @@ export const socketCases = [
     }
   }),
 
+  relayCase('the frame bound counts UTF-8 bytes, not characters', async (relay) => {
+    // Two bytes a character: within the bound in characters, past it in bytes.
+    const text = 'é'.repeat(Math.floor(MAX_RELAY_FRAME_BYTES / 2) + 1);
+    assert.ok(text.length <= MAX_RELAY_FRAME_BYTES);
+    for (const socket of [await relay.connectClient(), (await relay.connectBurrow()).socket]) {
+      socket.ws.send(text);
+      assert.equal((await socket.closed).code, WS_CLOSE_FRAME_TOO_LARGE);
+    }
+  }),
+
   relayCase('a maximal legal frame is read, not refused by size', async (relay) => {
     const socket = await relay.connectClient();
     // Well-formed but addressed to no live Burrow, so the answer is the routing

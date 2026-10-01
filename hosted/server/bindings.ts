@@ -1,7 +1,7 @@
 import type { BetterAuthWorkerBindings } from "@pgstencil/auth/better-auth-workers";
 import { exactOrigin } from "./headers";
 import { providerBindings } from "./policy";
-import type { RelayRoomRpc } from "./relay-sockets";
+import type { RelayRoomRpc } from "./relay-room-contract";
 
 // Each Worker's bindings mapper (`docs/specs/security-hosted.md` -> "Origin
 // boundary"): the only bindings that reach its routes, whatever else the

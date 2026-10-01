@@ -17,7 +17,11 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import {
   API_ROUTES,
   MAX_RELAY_FRAME_BYTES,
+  RELAY_IDLE_TIMEOUT_MS,
   UNKNOWN_BURROW_TOKEN_ERROR,
+  WS_CLOSE_TRY_AGAIN_LATER,
+  WS_CLOSE_UNAUTHORIZED,
+  WS_CLOSE_UNAUTHORIZED_REASON,
   WS_CLOSE_IDLE,
   WS_CLOSE_IDLE_REASON,
   DELIVERY_ID_LENGTH,
@@ -91,16 +95,8 @@ import type {
   SigninFinishResponse,
 } from 'remote-lib-common';
 
-// Shared with the Hosted Relay; re-exported for the self-host tests.
-export { MAX_RELAY_FRAME_BYTES };
-
 import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
-import {
-  RelayHub,
-  WS_CLOSE_TRY_AGAIN_LATER,
-  WS_CLOSE_UNAUTHORIZED,
-  WS_CLOSE_UNAUTHORIZED_REASON,
-} from './relay.js';
+import { RelayHub } from './relay.js';
 import type { ClientConn, BurrowConn } from './relay.js';
 import { secretEquals } from './secrets.js';
 import { SetupTokenIssuer } from './setup-token.js';
@@ -223,13 +219,6 @@ export const BURROW_REVOCATION_SWEEP_MS = 60_000;
  * Client sessions and pings the rest.
  */
 export const RELAY_SWEEP_MS = 30_000;
-/**
- * How long a relay socket may go unheard-from before it is closed. Three sweeps
- * of silence: a live peer answers the first ping, so reaching this means the
- * connection is half-open, not idle. Generous against a phone whose radio has
- * dozed, which reconnects anyway.
- */
-export const RELAY_IDLE_TIMEOUT_MS = 3 * RELAY_SWEEP_MS;
 /** A small fixed delay on a rejected credential. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 

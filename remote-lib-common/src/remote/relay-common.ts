@@ -27,6 +27,7 @@ import {
   E2E_ID_LENGTH,
   MAX_CLIENT_ID_LENGTH,
   MAX_E2E_CIPHERTEXT_LENGTH,
+  RELAY_PING_INTERVAL_MS,
   CLIENT_DATA_TYPE_ERROR,
   MALFORMED_ASSERTION_ERROR,
   MALFORMED_CLIENT_DATA_ERROR,
@@ -77,6 +78,14 @@ export const WS_CLOSE_UNAUTHORIZED_REASON = 'unauthorized';
 /** A socket closed for silence, not for anything it did. */
 export const WS_CLOSE_IDLE = 1001;
 export const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
+
+/**
+ * How long either Relay lets a relay socket go unheard from before it counts
+ * as gone: three ping intervals. A live peer answers the first ping, so
+ * reaching this means the connection is half-open, not idle; generous against
+ * a phone whose radio has dozed, which reconnects anyway.
+ */
+export const RELAY_IDLE_TIMEOUT_MS = 3 * RELAY_PING_INTERVAL_MS;
 
 /** Sessions live 12 hours (relay.md: "hours-scale TTL"). */
 export const RELAY_SESSION_TTL_MS = 12 * 60 * 60 * 1000;

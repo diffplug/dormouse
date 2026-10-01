@@ -29,6 +29,10 @@ interface DurableObjectState {
   setWebSocketAutoResponse(pair?: WebSocketRequestResponsePair): void;
   /** When the runtime last answered `ws` through the auto-response pair, or null if never. */
   getWebSocketAutoResponseTimestamp(ws: WorkerWebSocket): Date | null;
+  /** The Worker's own named entrypoints, each callable as a loopback binding. */
+  readonly exports: Record<string, unknown>;
+  /** Run `callback` with no other event delivered to the object until it settles. */
+  blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
   readonly storage: {
     get<T = unknown>(key: string): Promise<T | undefined>;
     put(key: string, value: unknown): Promise<void>;
@@ -60,6 +64,10 @@ declare module "cloudflare:workers" {
     protected readonly ctx: DurableObjectState;
     protected readonly env: Env;
     constructor(ctx: DurableObjectState, env: Env);
+  }
+  /** A named entrypoint, its public methods called as RPC. */
+  export abstract class WorkerEntrypoint<Env = unknown> {
+    protected readonly env: Env;
   }
 }
 

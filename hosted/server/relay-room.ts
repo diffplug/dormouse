@@ -1,11 +1,16 @@
 // Rules: docs/specs/hosted.md -> "Relay sockets"; the routing it shares with
-// the self-host Relay, docs/specs/relay.md -> "Routing".
+// the self-host Relay, docs/specs/relay.md -> "Routing"; what it may read and
+// keep, docs/specs/security-hosted.md -> "Relay boundary", which
+// scripts/e2e-lint.mjs holds textually here.
 import { DurableObject } from "cloudflare:workers";
 import {
   MAX_RELAY_CLIENT_SOCKETS,
   MAX_RELAY_FRAME_BYTES,
+  NOT_ENTITLED_ERROR,
+  RELAY_IDLE_TIMEOUT_MS,
   RELAY_PING,
   RELAY_PONG,
+  UNKNOWN_BURROW_TOKEN_ERROR,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REPLACED_REASON,
   WS_CLOSE_BURROW_REVOKED,
@@ -17,25 +22,29 @@ import {
   WS_CLOSE_UNAUTHORIZED,
   WS_CLOSE_UNAUTHORIZED_REASON,
   WS_ROUTES,
-  isE2eBurrowFrame,
-  isE2eClientFrame,
-  toBase64Url,
+  exceedsRelayFrameBytes,
+  newClientId,
+  offlineError,
+  readBurrowFrame,
+  readClientFrame,
+  toBurrowEnvelope,
+  toClientEnvelope,
   type RelayToBurrowFrame,
   type RelayToClientFrame,
 } from "remote-lib-common";
-import { RELAY_ROOM_PARAMS, RELAY_SILENCE_MS } from "./relay-sockets";
+import type { RelayBurrow } from "./relay-auth";
+import { RELAY_ROOM_PARAMS, RELAY_ROOM_SWEEP_MS, type RelayRoomRpc } from "./relay-room-contract";
+import type { RelayRows } from "./relay-rows";
+import { OPEN, refuseSocket } from "./socket-room";
 
-/** The object's whole durable state: the account it serves, written once. */
+/** The key of the object's one durable value: the account it serves, written once. */
 const ACCOUNT_KEY = "account";
-
-/** `WebSocket.OPEN`. */
-const OPEN = 1;
 
 /**
  * Everything routing needs of a socket, held as its attachment so a woken
  * object rebuilds it from `ctx.getWebSockets` rather than from memory.
- * `retired` marks a socket unregistered ahead of its close handshake: from
- * then on it is neither routed nor torn down again.
+ * `retired` is the generation guard: set on a socket unregistered ahead of its
+ * close handshake, after which it is neither routed nor torn down again.
  */
 type Conn =
   | { role: "burrow"; burrowId: string; retired?: true }
@@ -52,27 +61,22 @@ type ClientConn = Extract<Conn, { role: "client" }>;
 /** A socket and its attachment. */
 type Held<C extends Conn = Conn> = { ws: WorkerWebSocket; conn: C };
 
-/** The tag every socket of a role carries, and the one naming it by id. */
-const roleTag = (role: Conn["role"]) => role;
+/** Every socket carries its role as one tag, and its id as the other. */
 const burrowTag = (burrowId: string) => `burrow:${burrowId}`;
 const clientTag = (clientId: string) => `client:${clientId}`;
 
 /**
  * One account's Hosted Relay: that account's Burrow and Client sockets,
  * routed by `docs/specs/relay.md` -> "Routing" exactly as the self-host
- * `RelayHub` routes them. The relay Worker names it from the account an
- * authenticated token resolved to, and it serves that account alone. It
- * parses only the routing envelope, after bounding the raw frame, and never
- * stores, logs, or decodes a frame; its one durable value is the account id.
- * Every socket is accepted through the Hibernation API, and a ping is answered
- * by the runtime without waking it.
+ * `RelayHub` routes them, through the same frame layer. The relay Worker names
+ * it from the account an authenticated token resolved to, and it serves that
+ * account alone. Every socket is accepted through the Hibernation API, and a
+ * ping is answered by the runtime without waking it.
  */
-export class RelayRoom extends DurableObject {
+export class RelayRoom extends DurableObject implements RelayRoomRpc {
   constructor(ctx: DurableObjectState, env: unknown) {
     super(ctx, env);
-    ctx.setWebSocketAutoResponse(
-      new WebSocketRequestResponsePair(RELAY_PING, RELAY_PONG),
-    );
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(RELAY_PING, RELAY_PONG));
   }
 
   /** The clock expiry and silence are judged on; a test entry moves it. */
@@ -85,22 +89,18 @@ export class RelayRoom extends DurableObject {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const param = (name: string) => url.searchParams.get(name) ?? "";
+    const account = param(RELAY_ROOM_PARAMS.account);
     const role =
       url.pathname === WS_ROUTES.burrow ? "burrow" : url.pathname === WS_ROUTES.client ? "client" : null;
     if (!role) return new Response(null, { status: 404 });
-    if (!(await this.#claim(param(RELAY_ROOM_PARAMS.account))))
-      return new Response(null, { status: 403 });
+    if (!(await this.#claim(account))) return new Response(null, { status: 403 });
     return role === "burrow"
-      ? this.#openBurrow(param(RELAY_ROOM_PARAMS.burrowId))
+      ? this.#openBurrow(account, param(RELAY_ROOM_PARAMS.burrowId))
       : this.#openClient(Number(param(RELAY_ROOM_PARAMS.expiresAt)));
   }
 
   // --- RPC, from the Workers ------------------------------------------------
 
-  /**
-   * Close `burrowId`'s socket as revoked (4001), its Clients told
-   * `burrow-gone`. The account Worker's removal calls it; it has no route.
-   */
   async closeBurrow(account: string, burrowId: string): Promise<boolean> {
     if (!(await this.#serves(account))) return false;
     const held = this.#burrow(burrowId);
@@ -109,54 +109,74 @@ export class RelayRoom extends DurableObject {
     return true;
   }
 
-  /** Every Burrow holding a live socket: what `GET /api/burrows` reports online. */
   async onlineBurrows(account: string): Promise<string[]> {
     if (!(await this.#serves(account))) return [];
     return this.#held("burrow")
-      .filter((held) => !this.#evictedForSilence(held))
+      .filter((held) => !this.#goneSilent(held))
       .map(({ conn }) => conn.burrowId);
   }
 
   // --- Opening ----------------------------------------------------------------
 
   /**
+   * A Burrow socket, once its row says it may hold one: still enrolled, this
+   * account's, its owner entitled — refused as the Worker refuses a token
+   * otherwise. The Worker's check ran before this request was queued, so a
+   * removal committed since is caught here. Run under `blockConcurrencyWhile`
+   * so that removal's `closeBurrow`, sent after its commit, is delivered only
+   * once the socket is accepted and never between this read and the accept.
+   *
    * One socket per `burrowId`: a second displaces the first — its Clients
    * told `burrow-gone` and their bindings cleared now, since the displaced
    * socket's own close is a no-op — and the first closes 4000.
    */
-  #openBurrow(burrowId: string): Response {
-    const { 0: client, 1: server } = new WebSocketPair();
-    const existing = this.#burrow(burrowId);
-    if (existing)
-      this.#retire(existing, WS_CLOSE_BURROW_REPLACED, WS_CLOSE_BURROW_REPLACED_REASON);
-    for (const held of this.#held("burrow")) this.#evictedForSilence(held);
-    this.ctx.acceptWebSocket(server, [roleTag("burrow"), burrowTag(burrowId)]);
-    server.serializeAttachment({ role: "burrow", burrowId } satisfies BurrowConn);
-    return new Response(null, { status: 101, webSocket: client });
+  #openBurrow(account: string, burrowId: string): Promise<Response> {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      let row: RelayBurrow | undefined;
+      try {
+        [row] = await this.#rows([burrowId]);
+      } catch {
+        console.error("RelayRoom could not read a Burrow's row");
+        return new Response(null, { status: 503 });
+      }
+      if (row?.userId !== account)
+        return Response.json({ error: UNKNOWN_BURROW_TOKEN_ERROR }, { status: 401 });
+      if (!row.entitled) return Response.json({ error: NOT_ENTITLED_ERROR }, { status: 403 });
+      const existing = this.#burrow(burrowId);
+      if (existing)
+        this.#retire(existing, WS_CLOSE_BURROW_REPLACED, WS_CLOSE_BURROW_REPLACED_REASON);
+      const { 0: client, 1: server } = new WebSocketPair();
+      this.ctx.acceptWebSocket(server, ["burrow", burrowTag(burrowId)]);
+      server.serializeAttachment({ role: "burrow", burrowId } satisfies BurrowConn);
+      await this.#armBy(this.now() + RELAY_ROOM_SWEEP_MS);
+      return new Response(null, { status: 101, webSocket: client });
+    });
   }
 
   /**
    * A Client socket with a fresh secret `clientId`, or 1013 at the cap —
-   * refused, never admitted by evicting a live one; a silent one is not live.
+   * refused, never admitted by evicting a live one. A Client silent past the
+   * idle timeout is not live, so one is retired here first; only at the cap,
+   * since judging silence costs a close.
    */
   async #openClient(expiresAt: number): Promise<Response> {
-    const { 0: client, 1: server } = new WebSocketPair();
     if (!(expiresAt > this.now()))
-      return refuse(client, server, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
+      return refuseSocket(WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
     let clients = this.#held("client");
     if (clients.length >= MAX_RELAY_CLIENT_SOCKETS)
-      clients = clients.filter((held) => !this.#evictedForSilence(held));
+      clients = clients.filter((held) => !this.#goneSilent(held));
     if (clients.length >= MAX_RELAY_CLIENT_SOCKETS)
-      return refuse(client, server, WS_CLOSE_TRY_AGAIN_LATER, "too many client sockets");
-    const clientId = toBase64Url(crypto.getRandomValues(new Uint8Array(16)));
-    this.ctx.acceptWebSocket(server, [roleTag("client"), clientTag(clientId)]);
+      return refuseSocket(WS_CLOSE_TRY_AGAIN_LATER, "too many client sockets");
+    const clientId = newClientId();
+    const { 0: client, 1: server } = new WebSocketPair();
+    this.ctx.acceptWebSocket(server, ["client", clientTag(clientId)]);
     server.serializeAttachment({
       role: "client",
       clientId,
       expiresAt,
       burrowId: null,
     } satisfies ClientConn);
-    await this.#armExpiry();
+    await this.#armBy(expiresAt);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -165,32 +185,26 @@ export class RelayRoom extends DurableObject {
   async webSocketMessage(ws: WorkerWebSocket, message: string | ArrayBuffer) {
     const held = this.#registered(ws);
     if (!held) return;
-    // Bounded before anything reads it: the length of the text, never its content.
-    const size = typeof message === "string" ? message.length : message.byteLength;
-    if (size > MAX_RELAY_FRAME_BYTES) {
-      this.#retire(held, WS_CLOSE_FRAME_TOO_LARGE, "frame too large");
-      if (held.conn.role === "client") await this.#armExpiry();
-      return;
-    }
+    // Bounded before anything reads it, in the UTF-8 bytes the self-host
+    // Relay's `maxPayload` counts: the size of the text, never its content.
+    const oversized =
+      typeof message === "string"
+        ? exceedsRelayFrameBytes(message)
+        : message.byteLength > MAX_RELAY_FRAME_BYTES;
+    if (oversized) return this.#retire(held, WS_CLOSE_FRAME_TOO_LARGE, "frame too large");
     if (typeof message !== "string") return;
     if (held.conn.role === "client") this.#onClientFrame(held as Held<ClientConn>, message);
     else this.#onBurrowFrame(held as Held<BurrowConn>, message);
   }
 
   #onClientFrame({ ws, conn }: Held<ClientConn>, raw: string) {
-    const frame = parseFrame(raw);
-    if (!frame || typeof frame.t !== "string")
-      return send(ws, { t: "error", error: "malformed frame" } satisfies RelayToClientFrame);
-    if (frame.t !== "e2e")
-      return send(ws, { t: "error", error: "unknown frame type" } satisfies RelayToClientFrame);
-    if (!isE2eClientFrame(frame))
-      return send(ws, { t: "error", error: "malformed e2e frame" } satisfies RelayToClientFrame);
+    const read = readClientFrame(raw);
+    if ("error" in read) return send(ws, read.error);
+    const { frame } = read;
+    // A Burrow silent past the idle timeout is offline; judged here, where a
+    // frame would otherwise be routed into a dead socket.
     const burrow = this.#burrow(frame.burrowId);
-    if (!burrow || this.#evictedForSilence(burrow))
-      return send(ws, {
-        t: "error",
-        error: `burrow ${frame.burrowId} is offline`,
-      } satisfies RelayToClientFrame);
+    if (!burrow || this.#goneSilent(burrow)) return send(ws, offlineError(frame.burrowId));
     if (frame.step === "init") {
       // An `init` binds, telling the Burrow it replaces that this Client is gone.
       if (conn.burrowId !== null && conn.burrowId !== frame.burrowId) {
@@ -200,39 +214,23 @@ export class RelayRoom extends DurableObject {
       conn.burrowId = frame.burrowId;
       ws.serializeAttachment(conn);
     } else if (conn.burrowId !== frame.burrowId) return;
-    // Rebuilt field by field: nothing the Client added rides along.
-    send(burrow.ws, {
-      t: "e2e",
-      clientId: conn.clientId,
-      burrowId: frame.burrowId,
-      kind: frame.kind,
-      id: frame.id,
-      step: frame.step,
-      ct: frame.ct,
-    } satisfies RelayToBurrowFrame);
+    send(burrow.ws, toBurrowEnvelope(conn.clientId, frame));
   }
 
   #onBurrowFrame({ conn }: Held<BurrowConn>, raw: string) {
-    const frame = parseFrame(raw);
-    if (!frame || !isE2eBurrowFrame(frame)) return;
+    const frame = readBurrowFrame(raw);
+    if (!frame) return;
     const client = this.#client(frame.clientId);
     // Only to a Client bound to this Burrow: a late reply from a Burrow the
     // Client has left goes nowhere.
     if (!client || client.conn.burrowId !== conn.burrowId) return;
-    send(client.ws, {
-      t: "e2e",
-      burrowId: conn.burrowId,
-      kind: frame.kind,
-      id: frame.id,
-      step: frame.step,
-      ct: frame.ct,
-    } satisfies RelayToClientFrame);
+    send(client.ws, toClientEnvelope(conn.burrowId, frame));
   }
 
   // --- Closing ----------------------------------------------------------------
 
   // A socket the object retired is already torn down; only a registered one
-  // tears down here.
+  // tears down here. The alarm is left as it is: `alarm()` re-arms or clears.
   async webSocketClose(ws: WorkerWebSocket, code: number) {
     // Closing by now, so judged by its attachment alone.
     const held = this.#attached(ws);
@@ -242,27 +240,72 @@ export class RelayRoom extends DurableObject {
     } catch {
       // The runtime already answered the close.
     }
-    if (held?.conn.role === "client") await this.#armExpiry();
   }
 
   async webSocketError(ws: WorkerWebSocket) {
     await this.webSocketClose(ws, 1006);
   }
 
-  /** Every Client whose session has expired closes 1008, its Burrow told `client-gone`. */
+  /**
+   * Every Client whose session has expired closes 1008, its Burrow told
+   * `client-gone`; while Burrow sockets are held, each is swept against its
+   * row. Then the alarm moves to the earlier of the next expiry and the next
+   * sweep, or is cleared while nothing is held. Opening a socket only ever
+   * brings the alarm earlier and a close leaves it, so an alarm may find
+   * nothing to do.
+   */
   async alarm() {
     const now = this.now();
     for (const held of this.#held("client"))
       if (held.conn.expiresAt <= now)
         this.#retire(held, WS_CLOSE_UNAUTHORIZED, WS_CLOSE_UNAUTHORIZED_REASON);
-    await this.#armExpiry();
+    if (this.#held("burrow").length > 0) await this.#sweep();
+    const next = this.#held("client").map(({ conn }) => conn.expiresAt);
+    if (this.#held("burrow").length > 0) next.push(this.now() + RELAY_ROOM_SWEEP_MS);
+    if (next.length > 0) await this.ctx.storage.setAlarm(Math.min(...next));
+    else await this.ctx.storage.deleteAlarm();
   }
 
-  /** The alarm at the earliest held session's expiry; none while no Client is held. */
-  async #armExpiry() {
-    const expiries = this.#held("client").map(({ conn }) => conn.expiresAt);
-    if (expiries.length === 0) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(Math.min(...expiries));
+  /**
+   * The backstop to `closeBurrow`: every held Burrow whose row is gone, is
+   * another account's, or whose owner is no longer entitled closes 4001, its
+   * Clients told `burrow-gone`. One query for them all; a failed read leaves
+   * them to the next sweep.
+   */
+  async #sweep() {
+    const account = await this.ctx.storage.get<string>(ACCOUNT_KEY);
+    const burrowIds = this.#held("burrow").map(({ conn }) => conn.burrowId);
+    let rows: RelayBurrow[];
+    try {
+      rows = await this.#rows(burrowIds);
+    } catch {
+      console.error("RelayRoom could not sweep its Burrows");
+      return;
+    }
+    const standing = new Set(
+      rows.filter((row) => row.userId === account && row.entitled).map((row) => row.burrowId),
+    );
+    for (const burrowId of burrowIds) {
+      if (standing.has(burrowId)) continue;
+      const held = this.#burrow(burrowId);
+      if (held) this.#retire(held, WS_CLOSE_BURROW_REVOKED, WS_CLOSE_BURROW_REVOKED_REASON);
+    }
+  }
+
+  /** The alarm at `time`, unless one is already set sooner. */
+  async #armBy(time: number) {
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || time < current) await this.ctx.storage.setAlarm(time);
+  }
+
+  /**
+   * Those of `burrowIds` still enrolled, with their owners, read by the
+   * Worker's own `RelayRows` in an invocation of its own: an object that has
+   * held a database connection is never evicted (rationale).
+   */
+  #rows(burrowIds: string[]): Promise<RelayBurrow[]> {
+    const { RelayRows } = this.ctx.exports as { RelayRows: Pick<RelayRows, "burrows"> };
+    return RelayRows.burrows(burrowIds);
   }
 
   /**
@@ -306,12 +349,14 @@ export class RelayRoom extends DurableObject {
 
   /**
    * Whether `held` stopped answering pings: its last auto-response is older
-   * than {@link RELAY_SILENCE_MS}. A socket that never pinged is not judged.
-   * Such a socket is retired with 1001 here.
+   * than `RELAY_IDLE_TIMEOUT_MS`, and it is retired with 1001 here. A socket
+   * that never pinged is not judged. Checked where a dead socket would cost
+   * something — routing to a Burrow, admitting at the Client cap, reporting a
+   * Burrow online — and nowhere on a timer.
    */
-  #evictedForSilence(held: Held): boolean {
+  #goneSilent(held: Held): boolean {
     const answered = this.ctx.getWebSocketAutoResponseTimestamp(held.ws);
-    if (answered === null || this.now() - answered.getTime() <= RELAY_SILENCE_MS)
+    if (answered === null || this.now() - answered.getTime() <= RELAY_IDLE_TIMEOUT_MS)
       return false;
     this.#retire(held, WS_CLOSE_IDLE, WS_CLOSE_IDLE_REASON);
     return true;
@@ -330,7 +375,7 @@ export class RelayRoom extends DurableObject {
     return conn && !conn.retired ? { ws, conn } : null;
   }
 
-  #held<R extends Conn["role"]>(role: R, tag: string = roleTag(role)) {
+  #held<R extends Conn["role"]>(role: R, tag: string = role) {
     return this.ctx
       .getWebSockets(tag)
       .map((ws) => this.#registered(ws))
@@ -346,42 +391,24 @@ export class RelayRoom extends DurableObject {
   }
 
   /**
-   * Admit `account` to this object: the first upgrade writes it, and
-   * a request naming any other is refused. The Worker names the object from
-   * that same account, so a refusal here is an invariant broken upstream.
+   * Admit `account` to this object: the first upgrade writes it, and one
+   * naming any other is refused. The Worker names the object from that same
+   * account, so a refusal here is an invariant broken upstream.
    */
   async #claim(account: string): Promise<boolean> {
     if (!account) return false;
-    const stored = await this.ctx.storage.get<string>(ACCOUNT_KEY);
-    if (stored === undefined) {
+    if ((await this.ctx.storage.get<string>(ACCOUNT_KEY)) === undefined)
       await this.ctx.storage.put(ACCOUNT_KEY, account);
-      return true;
-    }
-    return this.#matches(stored, account);
+    return this.#serves(account);
   }
 
   /** Whether this object serves `account`; one that never held a socket serves none. */
   async #serves(account: string): Promise<boolean> {
     const stored = await this.ctx.storage.get<string>(ACCOUNT_KEY);
-    return stored !== undefined && this.#matches(stored, account);
-  }
-
-  #matches(stored: string, account: string): boolean {
+    if (stored === undefined) return false;
     if (stored === account) return true;
     console.error("RelayRoom refused a request for another account");
     return false;
-  }
-}
-
-/** Parse a raw text frame; `null` if it is not a JSON object. */
-function parseFrame(raw: string): (Record<string, unknown> & { t?: unknown }) | null {
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
   }
 }
 
@@ -394,15 +421,4 @@ function send(ws: WorkerWebSocket, frame: RelayToClientFrame | RelayToBurrowFram
   } catch {
     // The peer vanished between the lookup and this send.
   }
-}
-
-/**
- * Accept-then-close, so the refused end reads a code rather than a failed
- * upgrade. Accepted outside hibernation: the socket is never the object's, so
- * none of its events reach the handlers above.
- */
-function refuse(client: WorkerWebSocket, server: WorkerWebSocket, code: number, reason: string) {
-  server.accept();
-  server.close(code, reason);
-  return new Response(null, { status: 101, webSocket: client });
 }

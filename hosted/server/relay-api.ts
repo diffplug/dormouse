@@ -58,7 +58,7 @@ import type {
 import type { RelayEnv } from "./bindings";
 import { allowed } from "./one-time";
 import { ENROLLMENT_TTL_MS } from "./policy-constants";
-import { relayRoom } from "./relay-sockets";
+import { relayRoom } from "./relay-room-contract";
 import {
   OWNER_COLUMNS,
   database,
@@ -408,15 +408,18 @@ export function relayApiRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   // --- Discovery and the Burrow's setup tokens ------------------------------
 
   app.get(API_ROUTES.burrows, requireSession, async (c) => {
-    const { rows } = await c.var.db.query<{ burrowId: string }>(
-      `SELECT "burrowId" FROM dormouse_relay_burrows
-      WHERE "userId" = $1 ORDER BY "enrolledAt", "burrowId"`,
-      [c.var.session.userId],
-    );
     const { userId } = c.var.session;
-    const online = new Set(await relayRoom(c.env.RELAY_ROOM, userId).onlineBurrows(userId));
+    // The rows and the live sockets at once: neither waits on the other.
+    const [{ rows }, online] = await Promise.all([
+      c.var.db.query<{ burrowId: string }>(
+        `SELECT "burrowId" FROM dormouse_relay_burrows
+        WHERE "userId" = $1 ORDER BY "enrolledAt", "burrowId"`,
+        [userId],
+      ),
+      relayRoom(c.env.RELAY_ROOM, userId).onlineBurrows(),
+    ]);
     const res: BurrowsResponse = {
-      burrows: rows.map(({ burrowId }) => ({ burrowId, online: online.has(burrowId) })),
+      burrows: rows.map(({ burrowId }) => ({ burrowId, online: online.includes(burrowId) })),
     };
     return c.json(res);
   });

@@ -22,7 +22,7 @@ import {
   NoiseTransportSession,
   ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_LINK_TTL_MS,
-  ONE_TIME_PONG,
+  RELAY_PONG,
   ONE_TIME_WS_ROUTES,
   TokenBucket,
   WS_CLOSE_ONE_TIME_DEADLINE,
@@ -376,7 +376,7 @@ export class OneTimeRuntime {
   #onMessage(raw: unknown): void {
     // A whole string, never JSON; the room answers pings itself and never
     // forwards or counts the answer, so neither does this.
-    if (raw === ONE_TIME_PONG) return;
+    if (raw === RELAY_PONG) return;
     if (!this.#link) {
       this.#onRoomMessage(raw);
       return;

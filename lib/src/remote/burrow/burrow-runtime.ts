@@ -17,7 +17,6 @@ import {
   MAX_TOKENS_PER_BURROW,
   NoiseError,
   NoiseTransportSession,
-  RELAY_PONG,
   TokenBucket,
   WS_CLOSE_BURROW_REPLACED,
   WS_ROUTES,
@@ -788,10 +787,7 @@ export class BurrowRuntime {
     ws.addEventListener('message', (ev) => {
       if (this.#ws !== ws) return;
       const data = (ev as { data?: unknown }).data;
-      if (data === RELAY_PONG) {
-        this.#heartbeat?.pong();
-        return;
-      }
+      if (this.#heartbeat?.read(data)) return;
       this.#onFrame(data);
     });
     ws.addEventListener('error', () => {

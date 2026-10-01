@@ -3,7 +3,7 @@ import { queryDatabase } from "pgstencil/postgres";
 import type { AccountEnv } from "./bindings";
 import { accountRules } from "./headers";
 import { relayAccountRoutes, type RelayAccountHost } from "./relay-account";
-import { relayRoom } from "./relay-sockets";
+import { relayRoom } from "./relay-room-contract";
 import { voiceTokenRoutes } from "./voice";
 import { workerApp } from "./worker-app";
 
@@ -48,8 +48,7 @@ export function accountApp(
         databaseUrl: c.env.HYPERDRIVE.connectionString,
         auth: (request) => fetchAuth(request, c.env, c.executionCtx),
         approveLimit: c.env.RELAY_APPROVE_LIMIT,
-        closeBurrow: (userId, burrowId) =>
-          relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(userId, burrowId),
+        closeBurrow: (userId, burrowId) => relayRoom(c.env.RELAY_ROOM, userId).closeBurrow(burrowId),
       });
       voiceTokenRoutes(app, host);
       relayAccountRoutes(app, host);

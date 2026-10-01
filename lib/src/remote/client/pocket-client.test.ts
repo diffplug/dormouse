@@ -634,6 +634,10 @@ function fakeVisibility() {
       visible = next;
       for (const listener of listeners) listener();
     },
+    /** How many subscriptions are held. */
+    get subscribers(): number {
+      return listeners.size;
+    },
   };
 }
 
@@ -690,6 +694,13 @@ describe('keepalives on an established session', () => {
     visibility.set(true);
     expect(sentSince(harness, before)).toHaveLength(1);
     expect(timers.live).toHaveLength(2);
+  });
+
+  it('shares its one visibility subscription with the relay socket heartbeat', async () => {
+    const { harness, visibility } = await connected();
+    expect(visibility.subscribers).toBe(1);
+    harness.client.close();
+    expect(visibility.subscribers).toBe(0);
   });
 
   it('stops when the session does', async () => {
@@ -816,6 +827,13 @@ describe('the relay socket heartbeat', () => {
     expect(harness.client.socketOpen).toBe(false);
     expect(harness.socket.readyState).toBe(3);
     expect(timers.live).toHaveLength(0);
+  });
+
+  it('holds one visibility subscription while the socket is open, and none after', async () => {
+    const { harness, visibility } = await opened();
+    expect(visibility.subscribers).toBe(1);
+    harness.client.close();
+    expect(visibility.subscribers).toBe(0);
   });
 
   it('pauses while the page is hidden, and forgives the ping it was waiting on', async () => {

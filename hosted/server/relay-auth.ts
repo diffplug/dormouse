@@ -82,6 +82,20 @@ export async function burrowByToken(db: Client, token: string): Promise<RelayBur
   return row ? { ...ownerOf(row), burrowId: row.burrowId } : null;
 }
 
+/**
+ * Those of `burrowIds` still enrolled, each with its owner, in one query: what
+ * a `RelayRoom` rechecks before it accepts a Burrow socket and on its sweep.
+ */
+export async function burrowsById(db: Client, burrowIds: string[]): Promise<RelayBurrow[]> {
+  const { rows } = await db.query<OwnerRow & { burrowId: string }>(
+    `SELECT b."burrowId", b."userId", ${OWNER_COLUMNS}
+    FROM dormouse_relay_burrows b JOIN "user" u ON u.id = b."userId"
+    WHERE b."burrowId" = ANY($1::text[])`,
+    [burrowIds],
+  );
+  return rows.map((row) => ({ ...ownerOf(row), burrowId: row.burrowId }));
+}
+
 /** A route's bindings plus what its credential gate resolved. */
 export type RelayHonoEnv<Var extends object = object> = {
   Bindings: RelayEnv;

@@ -17,9 +17,9 @@ import {
   ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
-  ONE_TIME_PING,
-  ONE_TIME_PING_INTERVAL_MS,
-  ONE_TIME_PONG,
+  RELAY_PING,
+  RELAY_PING_INTERVAL_MS,
+  RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
   WS_CLOSE_BURROW_REPLACED,
@@ -179,12 +179,12 @@ test('the timings: a pairing-length link, a short grace, and a direct deadline i
   assert.ok(ONE_TIME_DIRECT_DEADLINE_MS < ONE_TIME_EXPIRY_GRACE_MS);
 });
 
-test('the keepalive is two fixed strings no frame can be, on a shared interval', () => {
-  assert.equal(ONE_TIME_PING, 'ping');
-  assert.equal(ONE_TIME_PONG, 'pong');
-  assert.equal(ONE_TIME_PING_INTERVAL_MS, 30_000);
+test('the rendezvous keepalive is the relay socket\'s: two fixed strings no frame can be', () => {
+  assert.equal(RELAY_PING, 'ping');
+  assert.equal(RELAY_PONG, 'pong');
+  assert.equal(RELAY_PING_INTERVAL_MS, 30_000);
   // Neither parses as a frame, so neither can be mistaken for one.
-  for (const text of [ONE_TIME_PING, ONE_TIME_PONG]) {
+  for (const text of [RELAY_PING, RELAY_PONG]) {
     assert.throws(() => JSON.parse(text));
   }
 });

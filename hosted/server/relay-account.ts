@@ -87,6 +87,8 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
   // The row goes, and its setup tokens and setup challenges with it, so its
   // Burrow token finds nothing on any relay route; then its live socket, if
   // it holds one, is closed as revoked and its Clients told `burrow-gone`.
+  // The removal is done once the row is: a close that fails is logged, and
+  // the object's hourly sweep closes the socket instead.
   app.delete("/api/relay/burrows/:burrowId", gate, async (c) => {
     const burrowId = c.req.param("burrowId");
     const { userId } = c.get("login");
@@ -100,7 +102,11 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
         )
       ).length > 0;
     if (!removed) return c.json({ message: "Computer not found." }, 404);
-    await host(c).closeBurrow(userId, burrowId);
+    try {
+      await host(c).closeBurrow(userId, burrowId);
+    } catch (error) {
+      console.error("Closing a removed Burrow's relay socket failed; the sweep will", error);
+    }
     return c.body(null, 204);
   });
 }

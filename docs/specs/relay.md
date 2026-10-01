@@ -584,6 +584,7 @@ Its four resource bounds, enforced under `sweepRelaySockets` or at the socket:
   `MAX_E2E_CIPHERTEXT_LENGTH`, `MAX_CLIENT_ID_LENGTH` and `E2E_ID_LENGTH`, the
   same bounds the frame guards enforce — because `ws` otherwise buffers up to
   100 MiB whole before `isE2eClientFrame` runs. Over it, the socket closes 1009.
+  **The bound is in UTF-8 bytes on every Relay**, the unit `maxPayload` counts.
 * **Client sockets are capped** at `MAX_RELAY_CLIENT_SOCKETS` (64), and the
   (n+1)-th **is refused, never admitted by evicting another**: a live socket
   belongs to a ceremony or an attached terminal, so evicting would let a token
@@ -600,8 +601,8 @@ Its four resource bounds, enforced under `sweepRelaySockets` or at the socket:
   session just expired.
 * **A half-open connection is closed by heartbeat**, or its entry and its Burrow
   binding would live until the OS gave up: the sweep pings every socket and
-  closes whatever has not answered within `RELAY_IDLE_TIMEOUT_MS` (three sweeps)
-  with 1001; a message or pong refreshes liveness. **Must unregister both socket
+  closes whatever has not answered within `RELAY_IDLE_TIMEOUT_MS` (three ping
+  intervals) with 1001; a message or pong refreshes liveness. **Must unregister both socket
   kinds before starting the idle close handshake**, releasing routing and Client
   capacity immediately, pinned by `relay/test/relay-limits.test.mjs`.
 
@@ -628,10 +629,15 @@ the evicted Burrow keys its stand-down on the code (see
 socket's own close event is a no-op here, and the new Burrow process has a fresh
 ACL and no memory of them.
 
+**Every Relay reads and rebuilds a frame through one frame layer**:
+`readClientFrame` / `readBurrowFrame`, which answer or drop as above, and
+`toBurrowEnvelope` / `toClientEnvelope`, which rebuild it field by field.
+
 Source of truth: `relay/src/relay.ts` (`registerBurrow`, `answeredPing`);
 `isE2eClientFrame` / `isE2eBurrowFrame` and `RELAY_PING` in
 `remote-lib-common/src/remote/wire.ts`, written for a Burrow to reuse verbatim;
-`MAX_RELAY_FRAME_BYTES` / `MAX_RELAY_CLIENT_SOCKETS` in
+the frame layer in `remote-lib-common/src/remote/relay-routing.ts`;
+`MAX_RELAY_FRAME_BYTES` / `MAX_RELAY_CLIENT_SOCKETS` / `RELAY_IDLE_TIMEOUT_MS` in
 `remote-lib-common/src/remote/relay-common.ts`; `RelayHeartbeat` in
 `lib/src/remote/ws.ts`. **Every Relay passes the same routing cases**,
 `socketCases` / `e2eCases` in `remote-lib-common/test/harness/relay-parity.mjs`,

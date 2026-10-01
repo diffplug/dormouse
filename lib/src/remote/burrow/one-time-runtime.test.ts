@@ -19,9 +19,9 @@ import {
   MAX_ONE_TIME_FRAME_LENGTH,
   ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_LINK_TTL_MS,
-  ONE_TIME_PING,
-  ONE_TIME_PING_INTERVAL_MS,
-  ONE_TIME_PONG,
+  RELAY_PING,
+  RELAY_PING_INTERVAL_MS,
+  RELAY_PONG,
   ONE_TIME_UNKNOWN_DEVICE_LABEL,
   TokenBucket,
   fromBase64Url,
@@ -277,12 +277,12 @@ describe('OneTimeRuntime: the link', () => {
   it('pings the rendezvous while it waits, and neither counts nor parses the answers', async () => {
     makeRuntime();
     const link = await openLink();
-    clock.advance(ONE_TIME_PING_INTERVAL_MS);
+    clock.advance(RELAY_PING_INTERVAL_MS);
     const room = rendezvous.room();
-    expect(room.burrow.sent).toEqual([ONE_TIME_PING]);
-    expect(room.burrow.received).toContain(ONE_TIME_PONG);
+    expect(room.burrow.sent).toEqual([RELAY_PING]);
+    expect(room.burrow.received).toContain(RELAY_PONG);
     // More answers than the message cap: none of them counts against it.
-    for (let i = 0; i <= MAX_ONE_TIME_FORWARDED; i += 1) fromRoom(ONE_TIME_PONG);
+    for (let i = 0; i <= MAX_ONE_TIME_FORWARDED; i += 1) fromRoom(RELAY_PONG);
     expect(runtime.state.status).toBe('waiting');
     await joinPhone(link);
   });

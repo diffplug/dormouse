@@ -1,4 +1,4 @@
-import { RELAY_PING, RELAY_PING_INTERVAL_MS } from 'remote-lib-common';
+import { RELAY_PING, RELAY_PING_INTERVAL_MS, RELAY_PONG } from 'remote-lib-common';
 
 /**
  * The minimal WebSocket surface the remote client and burrow actually use — just
@@ -38,42 +38,44 @@ export const realTimer: RemoteTimer = (run, delayMs) => {
 
 /**
  * A relay socket's heartbeat (`docs/specs/relay.md` -> "Routing"): a
- * {@link RELAY_PING} every {@link RELAY_PING_INTERVAL_MS} while the socket is
- * held. Once a pong has arrived on it, a ping still unanswered when the next
- * one is due ends the socket through `onDead`; until then nothing is
- * enforced, so a Relay that never answers costs nothing.
+ * {@link RELAY_PING} every {@link RELAY_PING_INTERVAL_MS} while it runs. With
+ * `onDead`, once a pong has arrived on the socket, a ping still unanswered when
+ * the next one is due ends the socket through it; until then nothing is
+ * enforced, so a Relay that never answers costs nothing. Without `onDead` it
+ * only keeps the path alive: a one-time rendezvous is bounded by its own
+ * deadlines.
  */
 export class RelayHeartbeat {
   readonly #ws: RemoteWebSocket;
   readonly #setTimer: RemoteTimer;
-  readonly #onDead: () => void;
+  readonly #onDead: (() => void) | null;
   #cancel: (() => void) | null = null;
   /** A pong has arrived on this socket: from now on each ping must be answered. */
   #enforced = false;
   #answered = true;
 
-  constructor(ws: RemoteWebSocket, setTimer: RemoteTimer, onDead: () => void) {
+  constructor(ws: RemoteWebSocket, setTimer: RemoteTimer, onDead?: () => void) {
     this.#ws = ws;
     this.#setTimer = setTimer;
-    this.#onDead = onDead;
+    this.#onDead = onDead ?? null;
     this.#arm();
   }
 
-  /** The Relay's {@link RELAY_PONG} arrived. */
-  pong(): void {
+  /**
+   * Whether `data`, a message off the socket, is the Relay's {@link RELAY_PONG}:
+   * the heartbeat's own, which the caller then never reads as a frame.
+   */
+  read(data: unknown): boolean {
+    if (data !== RELAY_PONG) return false;
     this.#enforced = true;
     this.#answered = true;
+    return true;
   }
 
   /**
-   * Stop pinging until {@link resume}: a page whose timers the browser
-   * throttles would otherwise judge a pong it could not yet read.
+   * Ping again from now, the last ping forgiven: after {@link stop} while a
+   * page was hidden, whose throttled timers could not have read a pong.
    */
-  pause(): void {
-    this.stop();
-  }
-
-  /** Ping again from now, the last ping forgiven. */
   resume(): void {
     this.stop();
     this.#answered = true;
@@ -88,7 +90,7 @@ export class RelayHeartbeat {
   #arm(): void {
     this.#cancel = this.#setTimer(() => {
       this.#cancel = null;
-      if (this.#enforced && !this.#answered) {
+      if (this.#onDead && this.#enforced && !this.#answered) {
         this.#onDead();
         return;
       }

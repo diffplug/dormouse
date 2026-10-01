@@ -1,5 +1,7 @@
 import type { ExecutionContext } from "hono";
-import worker, { OneTimeRoom, RelayRoom as ProductionRoom } from "../relay-worker";
+import { WS_ROUTES } from "remote-lib-common";
+import { RELAY_ROOM_PARAMS } from "../relay-room-contract";
+import worker, { OneTimeRoom, RelayRoom as ProductionRoom, RelayRows } from "../relay-worker";
 
 // Module state outlives an evicted object, so it counts what woke one.
 let constructed = 0;
@@ -61,9 +63,14 @@ export class RelayRoom extends ProductionRoom {
   async skew(ms: number) {
     skewMs = ms;
   }
+
+  /** Run the alarm now, as its time arriving would. */
+  async fire() {
+    await this.alarm();
+  }
 }
 
-export { OneTimeRoom };
+export { OneTimeRoom, RelayRows };
 
 type TestEnv = { RELAY_ROOM: DurableObjectNamespace<Record<string, (...args: unknown[]) => unknown>> };
 
@@ -71,7 +78,9 @@ type TestEnv = { RELAY_ROOM: DurableObjectNamespace<Record<string, (...args: unk
  * The relay Worker, plus `POST /__test/room/<method>?account=<id>`: that
  * RPC on the account's object with the JSON body as its arguments, from
  * inside workerd so no stub outlives the request. `forge` instead hands the
- * object an upgrade naming the account in the body, and answers its status.
+ * object a Burrow upgrade naming the account and the Burrow in the body, as
+ * the Worker would after resolving a token, and answers its status; a socket
+ * it opens is closed at once.
  */
 export default {
   async fetch(request: Request, env: TestEnv, ctx: ExecutionContext) {
@@ -82,10 +91,15 @@ export default {
     const room = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(account));
     const args = (await request.json()) as unknown[];
     if (method === "forge") {
-      const target = new URL(`${url.origin}/ws/burrow`);
-      target.searchParams.set("account", String(args[0]));
-      target.searchParams.set("burrow", String(args[1]));
+      const target = new URL(WS_ROUTES.burrow, url.origin);
+      target.searchParams.set(RELAY_ROOM_PARAMS.account, String(args[0]));
+      target.searchParams.set(RELAY_ROOM_PARAMS.burrowId, String(args[1]));
       const response = await room.fetch(new Request(target, { headers: { upgrade: "websocket" } }));
+      const socket = (response as { webSocket?: WorkerWebSocket | null }).webSocket;
+      if (socket) {
+        socket.accept();
+        socket.close(1000);
+      }
       return Response.json(response.status);
     }
     return Response.json((await room[method](...args)) ?? null);

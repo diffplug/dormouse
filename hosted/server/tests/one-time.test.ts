@@ -7,8 +7,8 @@ import {
   MAX_ONE_TIME_FRAME_LENGTH,
   ONE_TIME_LINK_TTL_MS,
   ONE_TIME_PAGE_PATH,
-  ONE_TIME_PING,
-  ONE_TIME_PONG,
+  RELAY_PING,
+  RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
   WS_CLOSE_ONE_TIME_DEADLINE,
@@ -29,7 +29,7 @@ import * as smoke from "../../scripts/one-time-smoke.mjs";
 import { pocketContentSecurityPolicy } from "remote-lib-common";
 import { oneTimePagePolicy, relayRules, RUNS_NOTHING_POLICY } from "../headers";
 import { rateLimitKey } from "../one-time";
-import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions } from "./bundle";
+import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, wrangler } from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
 import { TEST_ROOM_LIMITS } from "./one-time-limits";
 import { rawUpgrade, type RawSocket } from "./raw-socket";
@@ -229,11 +229,11 @@ test("frames cross both ways byte for byte, JSON or not", async () => {
 test("pings are answered by the runtime, never forwarded or counted", async () => {
   const { burrow, phone } = await pair();
   for (let i = 0; i < MAX_ONE_TIME_FORWARDED + 5; i++) {
-    phone.send(ONE_TIME_PING);
-    expect(await phone.next()).toBe(ONE_TIME_PONG);
+    phone.send(RELAY_PING);
+    expect(await phone.next()).toBe(RELAY_PONG);
   }
-  burrow.send(ONE_TIME_PING);
-  expect(await burrow.next()).toBe(ONE_TIME_PONG);
+  burrow.send(RELAY_PING);
+  expect(await burrow.next()).toBe(RELAY_PONG);
   for (let i = 0; i < MAX_ONE_TIME_FORWARDED; i++) {
     phone.send(`frame ${i}`);
     expect(await burrow.next()).toBe(`frame ${i}`);

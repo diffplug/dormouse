@@ -26,7 +26,7 @@ import {
 import { ADMIN_EMAIL } from "../admin";
 import { cookieAdmin } from "../account-gate";
 import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
-import type { RelayRoomRpc } from "../relay-sockets";
+import type { RelayRoomRpc } from "../relay-room-contract";
 import { voiceApp } from "../voice-app";
 import { workerApp } from "../worker-app";
 import {

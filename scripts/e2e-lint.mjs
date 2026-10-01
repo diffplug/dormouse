@@ -181,15 +181,32 @@ const ONE_TIME_NAME = /[Oo]neTime|ONE_TIME_|['"`]one-time/g;
 /** Hosted's per-account relay object (`docs/specs/hosted.md` -> "Relay sockets"). */
 export const RELAY_ROOM = 'hosted/server/relay-room.ts';
 
+/** The frame layer both Relays route through (`docs/specs/relay.md` -> "Routing"). */
+export const RELAY_ROUTING = 'remote-lib-common/src/remote/relay-routing.ts';
+
 /**
- * Everything {@link RELAY_ROOM} may spell of the pattern its rule forbids: the
- * one storage write, of the account id; the one log, a fixed string; and the
- * `ct` it copies from one envelope into the next, a field never read.
+ * Everything {@link RELAY_ROOM} could keep, log, or read a frame through,
+ * spelled out because it reaches frames only through {@link RELAY_ROUTING}:
+ *
+ * - the ciphertext's field name at all, a parse, or a decode — it never
+ *   names `ct`, so a destructure or a computed key is a match too;
+ * - `console` other than one method called with one plain string;
+ * - `storage` other than the reads, the alarm, and the one write of the
+ *   account id — an alias of it included;
+ * - an attachment other than a connection (`conn`, `x.conn`) or a connection
+ *   literal checked `satisfies` its type without a spread, and a connection
+ *   field written other than the two routing writes.
  */
-const RELAY_ROOM_ALLOWED = [
-  'storage.put(ACCOUNT_KEY, account)',
-  'console.error("RelayRoom refused a request for another account")',
-];
+const RELAY_ROOM_LEAKS = new RegExp(
+  [
+    String.raw`\bct\b|\bJSON\.parse\b|\batob\b|\bBuffer\b|\bTextDecoder\b|[Bb]ase64`,
+    String.raw`\bconsole\b(?!\.\w+\(\s*"[^"\\]*"\s*\))`,
+    String.raw`\bstorage\b(?!\.(?:get|getAlarm|setAlarm|deleteAlarm)\b|\.put\(ACCOUNT_KEY, account\))`,
+    String.raw`\bserializeAttachment\((?!(?:\w+\.)?conn\)|\{(?:(?!\.\.\.)[^{}()])*\}\s*satisfies\s+(?:BurrowConn|ClientConn)\))`,
+    String.raw`\bconn\.(?!retired\b|burrowId\b)\w+\s*=(?!=)`,
+  ].join('|'),
+  'g',
+);
 
 /** The three shipped source trees, scanned whole for the dependency rules. */
 const SOURCE_TREES = ['remote-lib-common/src/', 'lib/src/', 'relay/src/'];
@@ -442,20 +459,31 @@ export const RULES = [
     violation: '\nconst __selftest = (frame: string) => JSON.parse(frame);\n',
   },
   {
-    rule: "Hosted's RelayRoom never decodes, logs, or stores a frame",
+    rule: "Hosted's RelayRoom never names, parses, decodes, logs, or stores a frame",
     spec: HOSTED_SECURITY_SPEC,
     security: 'stores, logs, or decodes a frame or its `ct`',
     kind: 'forbid',
     files: [RELAY_ROOM],
-    // It parses the routing envelope and copies `ct` across field by field, so
-    // it has no reason to decode one; its one log line is a fixed string, and
-    // its one storage write is the account id. Matched whole, call and all, so
-    // an argument added to either is a match the allowance no longer covers.
-    pattern:
-      /\bfromBase64Url\b|\batob\b|\bconsole\.\w+\([^)]*\)|\bstorage\.(?:put|sql|kv|transaction)\b(?:\([^)]*\))?|\.ct\b(?!,)/g,
-    allow: (match) => RELAY_ROOM_ALLOWED.includes(match),
+    // It reads a frame only through the shared frame layer, which hands back
+    // the routing envelope and rebuilds it; everything that could keep, log,
+    // or read one is in `RELAY_ROOM_LEAKS`.
+    pattern: RELAY_ROOM_LEAKS,
     violationFile: RELAY_ROOM,
-    violation: '\nconst __selftest = (ct: string) => fromBase64Url(ct);\n',
+    violation: '\nconst __selftest = (frame: { ct: string }) => Buffer.from(frame.ct, "base64");\n',
+  },
+  {
+    rule: 'The shared frame layer copies `ct` field by field and reads it nowhere',
+    spec: HOSTED_SECURITY_SPEC,
+    security: 'copies `ct` field by field and reads it nowhere else',
+    kind: 'forbid',
+    files: [RELAY_ROUTING],
+    // Its one parse is of the raw frame, after which the guards bound every
+    // field; `ct` appears only as the copy `ct: frame.ct,` into an envelope.
+    pattern:
+      /\bct: frame\.ct,|\bct\b|\bJSON\.parse\b(?!\(raw\))|\batob\b|\bBuffer\b|\bTextDecoder\b|\bfromBase64Url\b|\bconsole\b/g,
+    allow: (match) => match === 'ct: frame.ct,',
+    violationFile: RELAY_ROUTING,
+    violation: '\nconst __selftest = (frame: { ct: string }) => atob(frame.ct);\n',
   },
   {
     rule: 'The Relay never names the one-time family',
@@ -714,7 +742,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     for (const failure of failures) console.error(`  ${failure}\n`);
     console.error(
       `Each line above maps to the "Remote Control" section of ${SECURITY_SPEC}, or to the\n` +
-        `"Rendezvous boundary" section of ${HOSTED_SECURITY_SPEC}. If a\n` +
+        `"Rendezvous boundary" or "Relay boundary" section of ${HOSTED_SECURITY_SPEC}. If a\n` +
         'control moved rather than disappeared, update the rule in scripts/e2e-lint.mjs\n' +
         'in the same commit — and add the self-test case that proves it load-bearing.',
     );
