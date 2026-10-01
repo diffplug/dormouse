@@ -199,11 +199,12 @@ Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard
   | 1 | Below the band | Above, clear of the thumb that ended the drag |
   | 2 | Above the band | Below |
   | 3 | Beside the pane, the roomier side | The same |
-  | 4 | Squished into the roomier of below and above, if 120px | The same |
+  | 4 | Squished into whichever of below, above, and the two sides gives the most area, if 120px tall (rationale) | The same |
   | 5 | Over the band at the pane's bottom, at most 60% of the window | The same |
 
-- **Must be at least as wide as the pane and the chrome** (header and footer, never wrapped, measured at their widest in any format so `f` never resizes the editor), widening with the space to the longest line in any format of the scope, clamped to the window (rationale). A narrower window clips the key hints and legend before the segments, the count, or Copy. Above and below may cover neighbors; a side needs room for the chrome and the narrower of the pane and that line.
-- **Must re-place on every selection or scope change; never keep a spot that covers the selection while another fits.** A held spot yields only to one with `HYSTERESIS_PX` to spare (rationale).
+- **Must be at least as wide as the pane and the chrome** (header and footer, never wrapped, measured at their widest in any format so `f` never resizes the editor), widening with the space to the longest line in any format of the scope, clamped to the window or the side's room (rationale). A narrower window or side clips the key hints and legend before the segments, the count, or Copy. Above and below may cover neighbors.
+- **A side needs only room for the essential chrome**, the segments, the count, and Copy (rationale). A side is top-aligned to the band, clamped into the window; squished, it fills the window's height beside the pane, or its room below or above.
+- **Must re-place on every selection or scope change; never keep a spot that covers the selection while another fits.** A held spot yields only to one with `HYSTERESIS_PX` to spare, and a held squish only to one whose area beats it by `HYSTERESIS_PX` rows at the held width (rationale).
 - **Must ease every move, restarting from the displayed rect; opening snaps**, as does any move under `motionIsInstant()` (rationale). **Must follow its pane at most once a frame** (`docs/specs/layout.md` → "Position tracking").
 - **Never show while its Wall travels**, its pane hidden, or another pane zoomed over it.
 - **Never take focus**; only a press on the preview's own box, its scrollbar, keeps its default (rationale). Presses inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.

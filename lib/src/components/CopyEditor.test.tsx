@@ -57,9 +57,9 @@ const DIMS = {
 let container: HTMLDivElement;
 let root: Root;
 let dims: typeof DIMS;
-/** The editor's measured size: its longest line, its header and footer, and
- *  its height at any width. */
-let natural: { width: number; chrome: number; height: number };
+/** The editor's measured size: its longest line, its header and footer, their
+ *  controls alone, and its height at any width. */
+let natural: { width: number; chrome: number; essential: number; height: number };
 const terminal = fakeXterm(CLAUDE_REPLY);
 
 const frames = installFakeFrames();
@@ -99,10 +99,10 @@ function drag(r0: number, c0: number, r1: number, c1: number): void {
 beforeEach(() => {
   __resetMouseSelectionForTests();
   dims = { ...DIMS };
-  natural = { width: 300, chrome: 200, height: 150 };
+  natural = { width: 300, chrome: 200, essential: 150, height: 150 };
   vi.mocked(getTerminalOverlayDims).mockImplementation(() => dims);
   vi.mocked(measureNaturalWidth).mockImplementation(() => natural.width);
-  vi.mocked(measureChromeWidth).mockImplementation(() => natural.chrome);
+  vi.mocked(measureChromeWidth).mockImplementation((parts, probe) => (probe === parts.essentialProbe ? natural.essential : natural.chrome));
   vi.mocked(createHeightMeasurer).mockImplementation(() => () => natural.height);
   vi.mocked(copySelection).mockReset();
 
@@ -187,6 +187,22 @@ describe('CopyEditor: opening and placement', () => {
     render();
     expect(side()).toBe(expected);
     expect(box()).toEqual(px(x, 38, width, 150));
+  });
+
+  it('takes a side narrower than its chrome, which needs only its controls', () => {
+    // Pane x 400..600: 408px of room to its right, short of the 500px chrome.
+    Object.assign(dims, { elementLeft: 400, elementTop: 20, elementWidth: 200, elementHeight: 720, cellHeight: 18 });
+    Object.assign(natural, { chrome: 500, essential: 260 });
+    drag(1, 0, 38, 5);
+    render();
+    expect(side()).toBe('right');
+    expect(box()).toEqual(px(604, 38, 408, 150));
+    // Its controls, laid out without the key hints and the legend.
+    const essential = Array.from(editor()!.querySelectorAll('[inert]')).filter((part) => part.querySelector('[aria-pressed]'))[1];
+    expect(essential.textContent).toContain('Paragraph');
+    expect(essential.textContent).toContain('Copy');
+    expect(essential.textContent).not.toContain('kept');
+    expect(essential.textContent).not.toContain('[');
   });
 
   it('squishes into the roomier of below and above when neither holds it whole', () => {

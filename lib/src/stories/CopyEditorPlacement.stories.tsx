@@ -16,7 +16,7 @@ import { requireElement, settleTerminals } from './settle-terminals';
 // source pane and checks the side the editor took.
 
 const SOURCE = 'copy-placement-source';
-type Layout = 'single' | 'source-over-peer' | 'peer-over-source' | 'three-columns' | 'narrow-source';
+type Layout = 'single' | 'source-over-peer' | 'peer-over-source' | 'two-columns' | 'three-columns' | 'narrow-source';
 interface Props {
   layout: Layout;
   /** The selected rows of the source's grid, as fractions of its height. */
@@ -34,6 +34,7 @@ const LAYOUTS: Record<Layout, LathNode> = {
   single: leaf(SOURCE),
   'source-over-peer': split('col', [leaf(SOURCE), leaf('peer')]),
   'peer-over-source': split('col', [leaf('peer'), leaf(SOURCE)]),
+  'two-columns': split('row', [leaf(SOURCE), leaf('peer')]),
   'three-columns': split('row', [leaf(SOURCE), leaf('peer'), leaf('peer-2')]),
   'narrow-source': split('row', [leaf(SOURCE), leaf('peer')], [1, 5]),
 };
@@ -87,7 +88,7 @@ async function place({ from, to, fill, exact, expected }: Props): Promise<{ box:
   // Every spot but the overlay keeps clear of the text being copied.
   if (expected === 'overlay') expect(box.top).toBeLessThan(band.bottom);
   else expect(box.bottom <= band.top + 1 || box.top >= band.bottom - 1 || box.left >= pane.right - 1 || box.right <= pane.left + 1).toBe(true);
-  if (expected === 'right') expect(box.left).toBeGreaterThanOrEqual(pane.right);
+  if (expected === 'right' || expected === 'squish-right') expect(box.left).toBeGreaterThanOrEqual(pane.right);
   expect(box.width).toBeGreaterThan(0);
   expect(box.height).toBeGreaterThan(0);
   return { box, pane };
@@ -133,6 +134,17 @@ export const Above: Story = { args: { layout: 'peer-over-source', from: 0, to: 1
 /** A selection as tall as the pane, between neighbors: beside the pane, on
  *  the roomier side. */
 export const Side: Story = { args: { layout: 'three-columns', from: 0, to: 1, expected: 'right' } };
+
+/** Every row of the left column, too many lines to hold whole anywhere: the
+ *  side beside it has the most room, so it squishes there to the window's height. */
+export const SquishedBeside: Story = {
+  args: { layout: 'two-columns', from: 0, to: 1, fill: true, exact: true, expected: 'squish-right' },
+  play: async ({ args, canvasElement }) => {
+    const { box } = await place(args);
+    expect(box.height).toBeGreaterThan(window.innerHeight / 2);
+    passed(canvasElement);
+  },
+};
 
 /** Too many lines for either side whole: squished into the roomier, above. */
 export const Squished: Story = { args: { layout: 'single', from: 0.4, to: 0.8, fill: true, exact: true, expected: 'squish-above' } };

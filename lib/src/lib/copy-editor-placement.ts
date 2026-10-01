@@ -9,14 +9,18 @@ import type { RingRect } from './rect-tween';
 import type { TerminalOverlayDims } from './terminal-store';
 import { insetOverlayBounds, type overlayViewportBounds } from './ui-geometry';
 
-export type CopyEditorSide = 'below' | 'above' | 'left' | 'right' | 'squish-below' | 'squish-above' | 'overlay';
+export type CopyEditorSide =
+  | 'below' | 'above' | 'left' | 'right'
+  | 'squish-below' | 'squish-above' | 'squish-left' | 'squish-right'
+  | 'overlay';
 
 /** Space between the editor and the band, and between the editor and the pane. */
 export const GAP_PX = 4;
 /** Below this, a squished editor yields to the overlay. */
 const MIN_HEIGHT_PX = 120;
 /** The spare room a higher-priority spot needs before the editor leaves a
- *  natural-size spot, and the lead the other squish side needs. */
+ *  natural-size spot, and the lead, as rows this tall at the held spot's
+ *  width, another squish needs. */
 const HYSTERESIS_PX = 24;
 /** The overlay's height cap, as a fraction of the usable viewport. */
 const OVERLAY_MAX_FRACTION = 0.6;
@@ -37,6 +41,9 @@ export interface CopyEditorPlacementInput {
   naturalWidth: number;
   /** The header and footer laid out whole, which never wrap. */
   chromeWidth: number;
+  /** The segments, the count, and Copy, without the key hints and legend:
+   *  the least room a side needs. */
+  essentialWidth: number;
   /** The editor's whole height when laid out at `width`. */
   naturalHeight: (width: number) => number;
   touch: boolean;
@@ -72,13 +79,14 @@ function hold<C extends CopyEditorPlacement>(
 
 /**
  * Natural size first, in order: desktop below, above, then the roomier side of
- * the pane; touch above, below, side. Then squished into the roomier of below
- * and above, while that leaves `MIN_HEIGHT_PX`. Last, the overlay docked at the
- * pane's bottom, the only spot that covers the band.
+ * the pane; touch above, below, side. Then squished into whichever of the four
+ * gives the most area, while that leaves `MIN_HEIGHT_PX`. Last, the overlay
+ * docked at the pane's bottom, the only spot that covers the band.
  */
 export function placeCopyEditor(i: CopyEditorPlacementInput): CopyEditorPlacement {
-  const { pane, band, naturalWidth, chromeWidth, naturalHeight, touch, previous } = i;
+  const { pane, band, naturalWidth, chromeWidth, essentialWidth, naturalHeight, touch, previous } = i;
   const b = insetOverlayBounds(i.viewport);
+  const fullHeight = b.bottom - b.top;
   const floor = pane.width - 2 * GAP_PX;
   // At least the pane and the chrome, at most the longest line or the chrome.
   const widthIn = (room: number) => Math.min(room, Math.max(floor, chromeWidth, naturalWidth));
@@ -97,38 +105,51 @@ export function placeCopyEditor(i: CopyEditorPlacementInput): CopyEditorPlacemen
   // side ranks last, so it is never asked.
   const spare = (c: CopyEditorPlacement) => (c === below ? roomBelow : roomAbove) - height;
 
-  // Left and right share a rank: the held one stays while it fits, else the roomier.
+  // Each side of the pane with room for the editor's buttons, the roomier
+  // first, at the width it would take there; measured once, only if asked. A
+  // side narrower than the chrome clips the key hints and legend.
+  let sides: { side: 'left' | 'right'; left: number; width: number; height: number }[] | undefined;
   const beside = () => {
+    if (sides) return sides;
     const room = { left: pane.left - GAP_PX - b.left, right: b.right - (pane.left + pane.width + GAP_PX) };
-    const spot = (side: 'left' | 'right'): CopyEditorPlacement | null => {
-      // Room for the chrome, and for the narrower of the pane and the line.
-      if (room[side] < Math.max(chromeWidth, Math.min(floor, naturalWidth))) return null;
-      const w = widthIn(room[side]);
-      const h = naturalHeight(w);
-      if (h > b.bottom - b.top) return null;
-      const x = side === 'left' ? pane.left - GAP_PX - w : pane.left + pane.width + GAP_PX;
-      return { side, rect: { left: x, top: clamp(band.top, b.top, b.bottom - h), width: w, height: h } };
-    };
     const order = room.left > room.right ? (['left', 'right'] as const) : (['right', 'left'] as const);
-    return hold(order.map(spot).filter((c) => c !== null), previous);
+    sides = order.filter((side) => room[side] >= essentialWidth).map((side) => {
+      const w = widthIn(room[side]);
+      const x = side === 'left' ? pane.left - GAP_PX - w : pane.left + pane.width + GAP_PX;
+      return { side, left: x, width: w, height: naturalHeight(w) };
+    });
+    return sides;
   };
+  // A side's rect, top-aligned to the band and clamped into the window.
+  const at = (s: { left: number; width: number }, h: number) => ({ left: s.left, top: clamp(band.top, b.top, b.bottom - h), width: s.width, height: h });
 
   const vertical = (touch ? [above, below] : [below, above]).filter((c) => spare(c) >= 0);
   // A side matters only when neither natural spot fits, or while it is held.
-  const side = vertical.length === 0 || previous === 'left' || previous === 'right' ? beside() : undefined;
+  // Left and right share a rank: the held one stays while it fits, else the roomier.
+  const side = vertical.length === 0 || previous === 'left' || previous === 'right'
+    ? hold(beside().filter((s) => s.height <= fullHeight).map((s) => ({ side: s.side, rect: at(s, s.height) })), previous)
+    : undefined;
   const natural = hold(side ? [...vertical, side] : vertical, previous, (c) => spare(c) >= HYSTERESIS_PX);
   if (natural) return natural;
 
-  // No room at natural size: squish into the roomier of below and above, which
-  // the editor fills.
+  // No room at natural size: squish into whichever spot gives the most area,
+  // ties in the natural order. Below and above fill their room; a side takes
+  // the window's height.
   const squishBelow: CopyEditorPlacement = { side: 'squish-below', rect: { left, top: belowTop, width, height: roomBelow } };
   const squishAbove: CopyEditorPlacement = { side: 'squish-above', rect: { left, top: b.top, width, height: roomAbove } };
-  const squishes = (roomAbove > roomBelow ? [squishAbove, squishBelow] : [squishBelow, squishAbove]).filter((c) => c.rect.height >= MIN_HEIGHT_PX);
-  const squish = hold(squishes, previous, (c, held) => c.rect.height - held.rect.height >= HYSTERESIS_PX);
+  const squishSides = beside().map((s): CopyEditorPlacement => {
+    const h = Math.min(s.height, fullHeight);
+    return { side: s.side === 'left' ? 'squish-left' : 'squish-right', rect: at(s, h) };
+  });
+  const area = (c: CopyEditorPlacement) => c.rect.width * c.rect.height;
+  const squishes = [...(touch ? [squishAbove, squishBelow] : [squishBelow, squishAbove]), ...squishSides]
+    .filter((c) => c.rect.height >= MIN_HEIGHT_PX)
+    .sort((x, y) => area(y) - area(x));
+  const squish = hold(squishes, previous, (c, held) => area(c) - area(held) >= HYSTERESIS_PX * held.rect.width);
   if (squish) return squish;
 
   // Last resort: dock at the pane's bottom, over the selection.
-  const h = Math.min(height, (b.bottom - b.top) * OVERLAY_MAX_FRACTION);
+  const h = Math.min(height, fullHeight * OVERLAY_MAX_FRACTION);
   const bottom = Math.min(pane.top + pane.height, b.bottom) - GAP_PX;
   return { side: 'overlay', rect: { left, top: Math.max(b.top, bottom - h), width, height: h } };
 }

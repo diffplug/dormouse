@@ -27,6 +27,8 @@ function parts(): CopyEditorParts & { heightReads: number[] } {
   widthProbe.getBoundingClientRect = () => ({ width: 640.4 }) as DOMRect;
   const chromeProbe = document.createElement('div');
   chromeProbe.getBoundingClientRect = () => ({ width: 480.2 }) as DOMRect;
+  const essentialProbe = document.createElement('div');
+  essentialProbe.getBoundingClientRect = () => ({ width: 300.5 }) as DOMRect;
   return {
     root: box(document.createElement('div'), { offsetWidth: () => 802, clientWidth: () => 800, offsetHeight: () => 302, clientHeight: () => 300 }),
     header: box(document.createElement('div'), { offsetHeight: () => 50 }),
@@ -34,6 +36,7 @@ function parts(): CopyEditorParts & { heightReads: number[] } {
     footer: box(document.createElement('div'), { offsetHeight: () => 24 }),
     widthProbe,
     chromeProbe,
+    essentialProbe,
     heightProbe,
     heightReads,
   };
@@ -44,7 +47,9 @@ it('measures the natural width as the probe, the preview gutter, and the root bo
 });
 
 it('measures the chrome as its probe and the root borders, with no preview gutter', () => {
-  expect(measureChromeWidth(parts())).toBe(481 + 2);
+  const p = parts();
+  expect(measureChromeWidth(p, p.chromeProbe)).toBe(481 + 2);
+  expect(measureChromeWidth(p, p.essentialProbe)).toBe(301 + 2);
 });
 
 it('lays the height probe out at the width the root gives its preview, once per width', () => {

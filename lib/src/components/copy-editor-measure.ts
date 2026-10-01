@@ -14,6 +14,8 @@ export interface CopyEditorParts {
   widthProbe: HTMLElement;
   /** A `w-max` copy of the header and footer, as wide as any format shows them. */
   chromeProbe: HTMLElement;
+  /** The chrome probe without the key hints and legend: what a side keeps. */
+  essentialProbe: HTMLElement;
   /** A hidden copy of the preview, out of flow inside the root so it inherits
    *  the root's type, its height left to its lines. */
   heightProbe: HTMLElement;
@@ -29,10 +31,10 @@ export function measureNaturalWidth({ root, preview, widthProbe }: CopyEditorPar
   return Math.ceil(widthProbe.getBoundingClientRect().width) + preview.offsetWidth - preview.clientWidth + borderX(root);
 }
 
-/** The editor's width with its header and footer whole: the chrome probe,
- *  plus the root's borders. */
-export function measureChromeWidth({ root, chromeProbe }: CopyEditorParts): number {
-  return Math.ceil(chromeProbe.getBoundingClientRect().width) + borderX(root);
+/** The editor's width with its header and footer whole, or (`essentialProbe`)
+ *  with only their controls whole: the probe, plus the root's borders. */
+export function measureChromeWidth({ root }: CopyEditorParts, probe: HTMLElement): number {
+  return Math.ceil(probe.getBoundingClientRect().width) + borderX(root);
 }
 
 /** The editor's whole height at a given width, for the rendering the preview

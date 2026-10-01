@@ -13,8 +13,9 @@ const PANE = { left: 300, top: 100, width: 600, height: 600 };
 // Room below 424, room above 284: a 200px editor fits either way.
 const BAND = { top: 300, bottom: 360 };
 
+// The segments, count, and Copy need 200px: the least a side takes.
 const place = (o: Partial<CopyEditorPlacementInput> = {}) => placeCopyEditor({
-  viewport: VIEWPORT, pane: PANE, band: BAND, naturalWidth: 400, chromeWidth: 0, naturalHeight: () => 200, touch: false, previous: null, ...o,
+  viewport: VIEWPORT, pane: PANE, band: BAND, naturalWidth: 400, chromeWidth: 0, essentialWidth: 200, naturalHeight: () => 200, touch: false, previous: null, ...o,
 });
 
 /** Three columns, the middle one selected nearly top to bottom. */
@@ -62,9 +63,10 @@ describe('placeCopyEditor', () => {
     expect(place({ pane: { ...COLUMN, left: 100, width: 1000 }, band: TALL, naturalWidth: 300 }).side).toBe('overlay');
   });
 
-  it('rejects a side where wrapping makes the editor taller than the window', () => {
+  it('squishes into a side where wrapping makes the editor taller than the window', () => {
     const naturalHeight = (w: number) => (w >= 390 ? 200 : 900);
-    expect(place({ pane: COLUMN, band: TALL, naturalWidth: 300, naturalHeight }).side).toBe('overlay');
+    expect(place({ pane: COLUMN, band: TALL, naturalWidth: 300, naturalHeight }))
+      .toEqual({ side: 'squish-right', rect: { left: 804, top: 12, width: 384, height: 776 } });
   });
 
   it('caps the overlay at 60% of the window and keeps it inside', () => {
@@ -88,7 +90,7 @@ describe('placeCopyEditor', () => {
     expect(place({ pane, band: TALL, naturalWidth: 200, previous: 'left' }).side).toBe('left');
   });
 
-  it('switches squish sides only when the other is roomier by the hysteresis', () => {
+  it('switches squish spots only when another is roomier by the hysteresis', () => {
     const squished = { pane: FULL, naturalHeight: () => 500 };
     // Below 334, above 314.
     expect(place({ ...squished, band: { top: 330, bottom: 450 } }).side).toBe('squish-below');
@@ -97,6 +99,14 @@ describe('placeCopyEditor', () => {
     expect(place({ ...squished, band: { top: 320, bottom: 450 }, previous: 'squish-above' }).side).toBe('squish-below');
     // A held side that fell under the minimum yields to one that has it.
     expect(place({ ...squished, band: { top: 126, bottom: 659 }, previous: 'squish-above' }).side).toBe('squish-below');
+    // A squished side and below, above too short: by area, with a lead of 24
+    // rows at the held width.
+    const beside = { pane: { left: 0, top: 0, width: 800, height: 800 }, naturalWidth: 1200, naturalHeight: () => 900 };
+    // Right: 384 × 776 = 297,984. Below: 1176 × 254 = 298,704.
+    expect(place({ ...beside, band: { top: 100, bottom: 530 } }).side).toBe('squish-below');
+    expect(place({ ...beside, band: { top: 100, bottom: 530 }, previous: 'squish-right' }).side).toBe('squish-right');
+    // Below: 1176 × 274 = 322,224, past the right's lead of 24 × 384.
+    expect(place({ ...beside, band: { top: 100, bottom: 510 }, previous: 'squish-right' }).side).toBe('squish-below');
   });
 
   it('moves off a spot the band grows onto, never keeping one that covers it', () => {
@@ -138,10 +148,10 @@ describe('placeCopyEditor', () => {
     expect(place({ pane: narrow, naturalWidth: 120, chromeWidth: 2000 }).rect).toMatchObject({ left: 12, width: 1176 });
   });
 
-  it('rejects a side too narrow for the chrome', () => {
-    // Either side of the column has 384px.
-    expect(place({ pane: COLUMN, band: TALL, naturalWidth: 300, chromeWidth: 350 }).rect).toMatchObject({ left: 804, width: 384 });
-    expect(place({ pane: COLUMN, band: TALL, naturalWidth: 300, chromeWidth: 390 }).side).toBe('overlay');
+  it('takes a side narrower than the chrome, never than its buttons', () => {
+    // Either side of the column has 384px: the key hints and legend clip.
+    expect(place({ pane: COLUMN, band: TALL, naturalWidth: 300, chromeWidth: 522 }).rect).toMatchObject({ left: 804, width: 384 });
+    expect(place({ pane: COLUMN, band: TALL, naturalWidth: 300, chromeWidth: 522, essentialWidth: 390 }).side).toBe('overlay');
   });
 
   it('places inside an offset visual viewport', () => {
@@ -151,6 +161,37 @@ describe('placeCopyEditor', () => {
     // Above has 84px, too short; below has 244.
     expect(place({ viewport, pane, band: { top: 400, bottom: 440 }, naturalWidth: 200, naturalHeight: () => 150, touch: true }))
       .toEqual({ side: 'below', rect: { left: 62, top: 444, width: 366, height: 150 } });
+  });
+});
+
+// Probed in a 1440×900 window (usable x 12..1428, y 12..888), with the key
+// hints' 522px chrome and 300px of segments, count, and Copy; each went to
+// below, or over the selection, before sides could squish or clip the chrome.
+describe('placeCopyEditor: sides in a wide window', () => {
+  const WIDE = { left: 0, top: 0, right: 1440, bottom: 900, width: 1440, height: 900 };
+  const wide = (o: Partial<CopyEditorPlacementInput>) => placeCopyEditor({
+    viewport: WIDE, pane: { left: 0, top: 0, width: 720, height: 900 }, band: { top: 300, bottom: 600 }, naturalWidth: 700,
+    chromeWidth: 522, essentialWidth: 300, naturalHeight: () => 970, touch: false, previous: null, ...o,
+  });
+
+  it('squishes a 50-line preview beside the left of two columns, not 284px below', () => {
+    expect(wide({})).toEqual({ side: 'squish-right', rect: { left: 724, top: 12, width: 704, height: 876 } });
+  });
+
+  it('takes a 464px side of the middle of three columns, narrower than the chrome', () => {
+    expect(wide({ pane: { left: 480, top: 0, width: 480, height: 900 }, naturalHeight: () => 400 }))
+      .toEqual({ side: 'right', rect: { left: 964, top: 300, width: 464, height: 400 } });
+  });
+
+  it('squishes into the 424px beside a 1000px pane rather than covering its tall selection', () => {
+    const naturalHeight = (w: number) => (w >= 990 ? 500 : 1100);
+    expect(wide({ pane: { left: 0, top: 0, width: 1000, height: 900 }, band: { top: 20, bottom: 880 }, naturalWidth: 990, naturalHeight }))
+      .toEqual({ side: 'squish-right', rect: { left: 1004, top: 12, width: 424, height: 876 } });
+  });
+
+  it('keeps the natural order: a side only when neither below nor above holds it', () => {
+    expect(wide({ naturalHeight: () => 280 }).side).toBe('below');
+    expect(wide({ naturalHeight: () => 280, touch: true }).side).toBe('above');
   });
 });
 
