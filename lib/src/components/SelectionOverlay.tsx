@@ -54,13 +54,27 @@ export function SelectionOverlay({ terminalId }: Props) {
   const borderColor = focusRingColor || 'rgb(100, 149, 237)';
   const pathD = rectsToPath(rects);
 
+  // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
+  const editor = selection.dragging ? null : state.copyEditor;
+  const scope = editor?.scopes[editor.scope];
+  const scopeD = scope && scope.id !== 'selection'
+    ? rectsToPath(computeRects({
+        startRow: scope.span.start.row,
+        startCol: scope.span.start.col,
+        endRow: scope.span.end.row,
+        endCol: scope.span.end.col,
+        shape: 'linewise',
+        dragging: false,
+        startedInScrollback: false,
+      }, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight))
+    : '';
+
   // Mid-drag hint. Placed outside the selection on the side opposite the
   // drag direction: below when the user drags down, above when they drag up.
   // Drag-down anchors by `top` (top edge aligned with where we want the
   // near-selection edge); drag-up anchors by `bottom` so the near-selection
-  // edge lines up regardless of element height — this keeps the hint and
-  // the copy popup visually coincident, since the popup uses the same
-  // anchoring rules. Shown only while the user is dragging (spec §3.3).
+  // edge lines up regardless of element height. Shown only while the user is
+  // dragging (spec §3.3).
   let hint: { left: number; top?: number; bottom?: number } | null = null;
   if (selection.dragging) {
     const endViewportRow = selection.endRow - dims.viewportY;
@@ -99,6 +113,14 @@ export function SelectionOverlay({ terminalId }: Props) {
           style={{ position: 'absolute', top: 0, left: 0, overflow: 'visible' }}
         >
           <g transform={`translate(${gridLeft} ${gridTop})`}>
+            {scopeD && (
+              <path
+                d={scopeD}
+                style={{ fill: 'color-mix(in srgb, var(--color-success) 12%, transparent)', stroke: 'var(--color-success)' }}
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+              />
+            )}
             <path
               d={pathD}
               fill="none"

@@ -1,5 +1,6 @@
 import { doPaste } from '../../../lib/clipboard';
-import { copySelection } from '../../../lib/copy-selection';
+import { cycleCopyFormat, stepCopyScope } from '../../../lib/copy-editor';
+import { copySelection, nudgeSelection } from '../../../lib/copy-selection';
 import { isEditableTarget, isTerminalInputProxy } from '../../../lib/dom';
 import {
   extendSelectionToToken,
@@ -12,9 +13,13 @@ import { hasTerminal } from 'dor/commands/types';
 import { surfaceKindFromParams, toolFace } from '../browser-surface';
 import type { WallKeyboardCtx } from './types';
 
+/** Keys that never dismiss the copy editor: a chord is still being held. */
+const MODIFIER_KEYS = new Set(['Shift', 'Meta', 'Control', 'Alt', 'AltGraph', 'CapsLock', 'Fn']);
+
 /**
- * Mouse-selection-aware shortcuts: token extension + Escape during drag,
- * Cmd-C / Cmd-Shift-C / Cmd-V outside drag. Returns true if handled.
+ * Mouse-selection-aware shortcuts: token extension + Escape during drag, the
+ * copy editor's keys over a finalized selection, Cmd-V always. Returns true if
+ * handled.
  */
 export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx): boolean {
   // Don't shadow native clipboard ops when focus is inside a real text
@@ -62,12 +67,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   }
 
   const keyLower = e.key.toLowerCase();
-  if (sel && !sel.dragging && hasCopyModifier(e) && keyLower === 'c') {
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    void copySelection(sid, e.shiftKey);
-    return true;
-  }
+  if (sel && mouseState.copyEditor && handleCopyEditorKey(e, sid, keyLower)) return true;
   // Paste takes either modifier on every platform (see `hasPasteModifier`).
   // Trade-off: shadows readline's ^V verbatim-insert; not worth surfacing as a
   // setting until someone asks for it.
@@ -77,6 +77,45 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
     void doPaste(sid);
     return true;
   }
+  return false;
+}
+
+/**
+ * The copy editor's keys (spec §4.3). Any other key closes it and goes on to
+ * the terminal, so typing after a selection still types.
+ */
+function handleCopyEditorKey(e: KeyboardEvent, sid: string, keyLower: string): boolean {
+  const consume = () => {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return true;
+  };
+  if (hasCopyModifier(e) && keyLower === 'c') {
+    void copySelection(sid);
+    return consume();
+  }
+  const bare = !e.metaKey && !e.ctrlKey && !e.altKey;
+  if (bare && e.key === 'Enter' && !e.shiftKey) {
+    void copySelection(sid);
+    return consume();
+  }
+  if (e.key === 'Escape') {
+    setMouseSelection(sid, null);
+    return consume();
+  }
+  if (bare && keyLower === 'e') {
+    stepCopyScope(sid, e.shiftKey ? -1 : 1);
+    return consume();
+  }
+  if (bare && keyLower === 'f') {
+    cycleCopyFormat(sid, e.shiftKey ? -1 : 1);
+    return consume();
+  }
+  if (bare && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    nudgeSelection(sid, e.shiftKey ? 'start' : 'end', e.key === 'ArrowRight' ? 1 : -1);
+    return consume();
+  }
+  if (!MODIFIER_KEYS.has(e.key) && !(hasPasteModifier(e) && keyLower === 'v')) setMouseSelection(sid, null);
   return false;
 }
 

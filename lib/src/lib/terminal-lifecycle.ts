@@ -675,6 +675,15 @@ export function getTerminalInstance(id: string): Terminal | null {
   return registry.get(id)?.terminal ?? null;
 }
 
+/** Re-arm cancel-on-change for a selection moved without a drag (the copy
+ *  editor's nudge): the baseline is its text now. */
+export function refreshSelectionBaseline(id: string): void {
+  const entry = registry.get(id);
+  const sel = getMouseSelectionState(id).selection;
+  if (!entry) return;
+  entry.setSelectionBaseline(sel && !sel.dragging ? extractSelectionText(entry.terminal, sel) : null);
+}
+
 export function getTerminalOverlayDims(id: string): TerminalOverlayDims | null {
   const entry = registry.get(id);
   if (!entry) return null;

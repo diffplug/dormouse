@@ -11,6 +11,7 @@ import {
   stateRequiresNativeMouseSuppression,
   updateDrag,
 } from './mouse-selection';
+import { openCopyEditor } from './copy-editor';
 import { detectTokenInBufferLine } from './smart-token';
 import { extractSelectionText } from './selection-text';
 import type { TerminalOverlayDims } from './terminal-store';
@@ -228,6 +229,7 @@ export function attachTerminalMouseRouter({
     setHintToken(id, null);
     const sel = getMouseSelectionState(id).selection;
     setSelectionBaseline(sel ? extractSelectionText(terminal, sel) : null);
+    openCopyEditor(id, terminal);
     clearTemporaryOverrideAfterMouseDispatch(id);
     consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
   };

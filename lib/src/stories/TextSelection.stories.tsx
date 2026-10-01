@@ -3,12 +3,13 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { TerminalPane } from '../components/TerminalPane';
 import { flattenScenario, SCENARIO_LS_OUTPUT } from '../lib/platform';
 import { getMouseSelectionState, setSelection, type Selection } from '../lib/mouse-selection';
-import { getTerminalOverlayDims } from '../lib/terminal-registry';
+import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
+import { openCopyEditor } from '../lib/copy-editor';
 import { settleTerminals, waitForCondition } from './settle-terminals';
 
 /**
  * Wires a programmatic selection state onto a live TerminalPane so we can
- * visualize the overlay, the Alt hint, and the copy popup in their various
+ * visualize the overlay, the Alt hint, and the copy editor in their various
  * positions without scripting a real mouse drag.
  */
 function TextSelectionStory({
@@ -33,6 +34,9 @@ function TextSelectionStory({
         return;
       }
       setSelection(id, { ...selection, startedInScrollback: false });
+      // A finalized drag opens the copy editor, as mouse-up does.
+      const terminal = getTerminalInstance(id);
+      if (!selection.dragging && terminal) openCopyEditor(id, terminal);
     };
 
     timer = setTimeout(tryApply, 100);
@@ -105,11 +109,11 @@ export const HintWhenDraggingUp: Story = {
   },
 };
 
-// --- Copy popup positioning ---------------------------------------------
+// --- Copy editor positioning --------------------------------------------
 
-export const PopupAfterDragDown: Story = {
+export const EditorAfterDragDown: Story = {
   args: {
-    id: 'text-sel-popup-down',
+    id: 'text-sel-editor-down',
     selection: {
       startRow: 2, startCol: 5,
       endRow: 6, endCol: 24,
@@ -119,9 +123,9 @@ export const PopupAfterDragDown: Story = {
   },
 };
 
-export const PopupAfterDragUp: Story = {
+export const EditorAfterDragUp: Story = {
   args: {
-    id: 'text-sel-popup-up',
+    id: 'text-sel-editor-up',
     selection: {
       startRow: 8, startCol: 22,
       endRow: 4, endCol: 6,

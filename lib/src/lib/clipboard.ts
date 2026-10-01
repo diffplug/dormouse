@@ -1,10 +1,8 @@
 import { shellCommandKind } from 'dor/commands/shell-quote';
 import { getMouseSelectionState } from './mouse-selection';
-import { rewrap } from './rewrap';
-import { extractSelectionText } from './selection-text';
 import { getPlatform, PLATFORM_STRING } from './platform';
 import { shellEscapePath } from './shell-escape';
-import { getDefaultShellOpts, getTerminalInstance, getTerminalShellKind, writeUserInput } from './terminal-registry';
+import { getDefaultShellOpts, getTerminalShellKind, writeUserInput } from './terminal-registry';
 
 /** Report failure without throwing so callers retain the selection for retry. */
 export async function writeTextToClipboard(text: string): Promise<boolean> {
@@ -18,24 +16,6 @@ export async function writeTextToClipboard(text: string): Promise<boolean> {
     // Clipboard access can be denied or the webview can lose focus.
   }
   return false;
-}
-
-/** Copy the current selection as-is; no-op without one. */
-export async function copyRaw(terminalId: string): Promise<boolean> {
-  const terminal = getTerminalInstance(terminalId);
-  const sel = getMouseSelectionState(terminalId).selection;
-  if (!terminal || !sel) return false;
-  return writeTextToClipboard(extractSelectionText(terminal, sel));
-}
-
-/** Copy with rewrap, except for rectangular block selections. */
-export async function copyRewrapped(terminalId: string): Promise<boolean> {
-  const terminal = getTerminalInstance(terminalId);
-  const sel = getMouseSelectionState(terminalId).selection;
-  if (!terminal || !sel) return false;
-  const raw = extractSelectionText(terminal, sel);
-  const out = sel.shape === 'block' ? raw : rewrap(raw);
-  return writeTextToClipboard(out);
 }
 
 /** Replace ESC with visible U+241B so clipboard text cannot close a bracketed

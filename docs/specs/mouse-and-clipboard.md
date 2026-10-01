@@ -87,7 +87,7 @@ A small hint sits adjacent to an in-progress selection — below when dragging d
 A selection is anchored to the characters under it, not to screen coordinates: stored in absolute buffer rows (scrollback + viewport).
 
 - **Pure scroll** — vertical translation with no character changes — carries the selection along; coordinate math only, no matching.
-- **Content change:** any change to a cell the finalized selection overlaps cancels it immediately; repaints elsewhere on screen are irrelevant. A text snapshot taken at finalize is compared on each xterm render; **never add a partial-match or content-tracking heuristic** — cancel-on-change is the rule (§9.1).
+- **Content change:** any change to a cell the finalized selection overlaps cancels it immediately; repaints elsewhere on screen are irrelevant. A text snapshot taken at finalize, and again after an editor nudge (§4.3), is compared on each xterm render; **never add a partial-match or content-tracking heuristic** — cancel-on-change is the rule (§9.1).
 - **Terminal resize** counts as a content change and cancels any active selection.
 
 ### 3.5 Selection in the Live Region vs. Scrollback
@@ -103,43 +103,82 @@ Source of truth: `lib/src/components/wall/keyboard/handle-mouse-selection-keys.t
 
 ### 3.7 Ending a Selection
 
-- Releasing the button ends the drag and fixes the selection; the popup (§4) appears.
+- Releasing the button ends the drag and fixes the selection; the copy editor (§4) opens.
 - It persists until something ends it: a completed copy, a content change (§3.4), **Esc**, or a click outside (§4.3).
-- **A new mouse-down in the terminal content area replaces any existing selection immediately** and dismisses its popup.
+- **A new mouse-down in the terminal content area replaces any existing selection immediately** and dismisses its editor.
 
 ---
 
-## 4. Selection Popup
+## 4. Copy Editor
 
-A finalized selection gets a popup of action buttons anchored where §3.3's drag hint sat.
+Mouse-up over a terminal-handled drag opens the **copy editor**: the text a copy would produce, at full pane width, every line break the selection crossed marked (rationale).
 
-### 4.1 Copy Buttons
+### 4.1 Formats
 
-Source of truth: `lib/src/components/SelectionPopup.tsx` (Copy Raw, Copy Rewrapped, platform-dependent shortcut labels).
+| Format | Clipboard text |
+|---|---|
+| **Auto** (opens here) | Decoration stripped, each break judged on its own (§4.1.1). |
+| **Exact** | As displayed: selected rows joined by `\n`, each trimmed of trailing whitespace — soft-wrapped rows included. |
+| **Spaces** | Decoration stripped, blank lines dropped, every break one space, continuation indents removed. |
+| **No breaks** | As Spaces, every break deleted. |
 
-#### 4.1.1 Copy Raw
+**Decoration** is a frame-only line (dropped), a leading or trailing run of box drawing (`U+2500–U+259F`, Box Drawing and Block Elements), and a TUI's leading bullet (`⏺`, `⎿`, `●`). **Must read cells through xterm's wide-character continuation cells.** **Never rewrap a block-shape selection**: it is a rectangular slab, so Auto reads it as Exact, and it has no wider scope (§4.2) and no edge keys (§4.3).
 
-**Must preserve displayed row breaks and decorative characters**, trimming trailing whitespace on each selected row; soft-wrapped rows also get `\n`. Source of truth: `extractSelectionText` in `lib/src/lib/selection-text.ts`.
+Source of truth: `render` in `lib/src/lib/copy-text.ts`, pinned by `lib/src/lib/copy-text.test.ts`.
 
-#### 4.1.2 Copy Rewrapped
+#### 4.1.1 Auto
 
-Copies with two transformations applied (`lib/src/lib/rewrap.ts`):
+Each break between two consecutive rows is, in this order:
 
-1. **Drop frame-only lines**, and **strip leading/trailing runs of box-drawing characters** (`U+2500–U+259F`, both Box Drawing and Block Elements) from each remaining line.
-2. **Group remaining lines into paragraphs** at blank lines: lines within a paragraph join with a single space (unwrapping display wrapping), paragraphs join with `\n\n`.
+1. **Kept** if either row is blank, the next starts a list item, the row ends in `;` `{` `}` or the next starts with `)` `}` `]`, or the next row's indent is not this row's hanging indent.
+2. **Deleted** if the next row is a true soft wrap (xterm's `isWrapped`).
+3. **Kept** if the next row's first word would have fit on this row within the paragraph's wrap width: its longest row, never under half the terminal (rationale).
+4. **Deleted** if this row fills that width and its last word is token-shaped (a URL or path character, or 16+ token characters) — a token split at the margin.
+5. Otherwise **one space**.
 
-**Never rewrap a block-shape selection** — it is an intentionally rectangular slab, so Copy Rewrapped falls back to its raw text.
+Leading and trailing blank lines are trimmed, a run of blank lines collapses to one, and the indent every line shares is removed, keeping relative indent.
 
-### 4.2 Keyboard Shortcuts
+Source of truth: `autoBreak` in `lib/src/lib/copy-text.ts`.
 
-With an active, finalized terminal selection, popup focused or not: **Cmd+C** (Ctrl+C on non-macOS) triggers Copy Raw, **Cmd+Shift+C** (Ctrl+Shift+C) triggers Copy Rewrapped.
+### 4.2 Scopes
 
-**Intercept Ctrl+C as Copy Raw only while a terminal selection is active.** With none it is forwarded to the inside program as usual (SIGINT for shells, app-defined for TUIs). An in-program selection a TUI maintains itself (vim visual mode, less search highlight) is **not** a terminal selection and does not change that routing.
+Narrowest first, each containing the dragged selection, one that adds nothing dropped:
 
-### 4.3 Dismissing the Popup
+| Scope | Covers |
+|---|---|
+| **As selected** | The drag (opens here). |
+| **Whole words** | Each edge grown over the token under it, following a token Auto would rejoin across rows; named **Full URL** or **Full path** when a grown edge token is one. |
+| **Paragraph** | The rows between blank rows, frame-only rows, and box sides (`│ ┃ ║`). |
 
-- **Esc**, or a click outside the selection, dismisses the popup and cancels the selection.
-- **Must flash only after a successful clipboard write, and only for the selection copied**: swap the active button's shortcut text for a checkmark for ~700 ms, then clear the selection. Failed writes retain it for retry; canceling clears the flash immediately. Touch shows the checkmark without a shortcut label. Pinned by `lib/src/components/SelectionPopup.test.tsx`.
+The selection overlay draws a wider scope dashed around the outline; the preview marks every cell outside the drag. Source of truth: `computeScopes` in `lib/src/lib/copy-text.ts`.
+
+### 4.3 Keys
+
+| Key | Effect |
+|---|---|
+| `e` / `Shift+E` | Next wider / narrower scope, stopping at either end. |
+| `f` / `Shift+F` | Next / previous format, wrapping, in table order (§4.1). |
+| `←` `→` / `Shift+←` `→` | Move the end / start one word; a row boundary ends a word. Returns to As selected, keeping the format. |
+| `Enter`, `Cmd+C` (Ctrl+C on non-macOS), either with Shift | Copy what the editor shows. |
+| `Esc` | Close and cancel the selection. |
+
+**Any other key closes the editor and reaches the terminal**, so typing after a selection still types; a bare modifier and the paste chord leave it open. **Intercept Ctrl+C as a copy only while the editor is open**; with none it reaches the inside program (SIGINT for shells, app-defined for TUIs). An in-program selection a TUI maintains itself (vim visual mode, less search highlight) does not open the editor and does not change that routing. The editor's hints write Shift and the arrows as the mobile compass rose does (`⬆︎` `◀` `▶`), and touch shows none.
+
+Source of truth: `handleCopyEditorKey` in `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts`, pinned by its test; the transitions in `lib/src/lib/copy-editor.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
+
+### 4.4 Preview and Marks
+
+- One gutter-numbered row per clipboard line; leading whitespace shows as `·`.
+- Every break is a mark — `⏎` kept, `␣` one space, `⌁` deleted. **A click cycles it keep → space → none**, and the format then reads `Auto*`. A scope or format change, or a nudge, discards those edits.
+- A format whose text an earlier one already gives is dimmed.
+
+### 4.5 Placement and Dismissal
+
+- Full pane width, on the side of the selection with more room; touch prefers above, clear of the thumb that ended the drag. **When neither side has 120px it docks at the bottom over the selection.** Remeasured on every render tick (§7).
+- **Esc**, a click outside the editor, or a content change (§3.4) dismisses it and cancels the selection; a new mouse-down replaces both (§3.7).
+- **Must flash only after a successful clipboard write, and only for the selection copied**: the Copy button shows a checkmark for ~700 ms, then the selection clears. Failed writes retain it for retry; canceling clears the flash immediately.
+
+Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `lib/src/components/CopyEditor.test.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
 
 ---
 
@@ -162,8 +201,8 @@ A second line on the block-selection hint names the detected kind — URL or pat
 ### 5.3 Extension Action
 
 - **e** during a drag, while the hint is visible, extends the selection over the full detected token: the anchor is preserved, the far end moves to the token boundary away from it. The drag then continues normally — movement updates the selection from the new boundary, Alt still toggles block shape.
-- **e** with no qualifying token is consumed (per §3.6) but extends nothing, and has no effect once the drag has ended (once the popup has appeared, §4); on release the selection is finalized at whatever boundaries the drag, `e`-extensions included, produced.
-- **Only this single extension step is offered** — no multi-level extension, no "open URL" action (§9.1).
+- **e** with no qualifying token is consumed (per §3.6) but extends nothing; once the drag has ended, `e` is the editor's expand instead (§4.3). On release the selection is finalized at whatever boundaries the drag, `e`-extensions included, produced.
+- **Only this single extension step is offered mid-drag**, and no "open URL" action (§9.1); the editor's scopes are the wider steps (§4.2).
 
 ---
 
@@ -199,9 +238,9 @@ Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`, 
 
 **Must keep selection and hint updates from rerendering pane headers or override banners** (rationale).
 
-- **Must render outlines, hints, and popups above the cell grid**, isolated from inside-program output and redraws; header icons and banners remain persistent chrome.
+- **Must render outlines, hints, and the copy editor above the cell grid**, isolated from inside-program output and redraws; header icons and banners remain persistent chrome.
 - **Geometry comes from the *measured* xterm cell grid** (`cellWidth`/`cellHeight`/`gridLeft`/`gridTop`), never element-width ÷ cols, so the outline stays aligned across xterm's internal padding.
-- **Must remeasure both overlay and popup on every shared render tick** (scroll, resize, output), even when the selection is unchanged; the popup dismisses if the selection is canceled. Pinned for the popup by `lib/src/components/SelectionPopup.test.tsx`.
+- **Must remeasure both overlay and editor on every shared render tick** (scroll, resize, output), even when the selection is unchanged; the editor dismisses if the selection is canceled. Pinned for the editor by `lib/src/components/CopyEditor.test.tsx`.
 
 Source of truth: `lib/src/lib/selection-text.ts` (extraction and normalization), `lib/src/lib/selection-geometry.ts` (perimeter construction), `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx` — tested in `lib/src/components/wall/mouse-chrome.test.tsx`.
 
@@ -308,13 +347,12 @@ Not implemented today; they may be added in response to user feedback.
 
 - Auto-scroll during a drag that reaches the viewport edge.
 - Double-click to select word, triple-click to select line.
-- Copy modes beyond Raw and Rewrapped (strip ANSI, strip line numbers, strip prompts, join hyphenated line-breaks).
-- Contextual popup actions (Open URL, Open in `$EDITOR`, Copy hash).
-- Multi-level `e` extension (token → line → paragraph).
+- More formats (strip line numbers, strip prompts, join hyphenated line-breaks, Markdown rebuilt from styling) and scopes (a command's output from OSC 133 marks, a TUI message).
+- Contextual editor actions (Open URL, Open in `$EDITOR`, Copy hash).
 - A "quiet mode" setting to suppress hints for experienced users.
 - Content-matching selection tracking when the underlying content changes (today: cancel-on-change).
 - Keyboard activation of the mouse icon and banner buttons.
-- Refining the Copy Rewrapped heuristics based on dogfooding.
+- Refining Auto's heuristics based on dogfooding.
 
 ### 9.2 Paste
 

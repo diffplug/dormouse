@@ -289,8 +289,8 @@ export class TutDetector {
       const prev = this.prevMouse.get(id) ?? DEFAULT_MOUSE_SELECTION_STATE;
 
       if (current.copyFlash && current.copyFlash !== prev.copyFlash) {
-        if (current.copyFlash === "raw") this.state.markComplete("cp-raw");
-        if (current.copyFlash === "rewrapped") this.state.markComplete("cp-rewrap");
+        if (current.copyFlash === "exact") this.state.markComplete("cp-raw");
+        if (current.copyFlash === "auto") this.state.markComplete("cp-rewrap");
       }
 
       if (!prev.selection && current.selection) {

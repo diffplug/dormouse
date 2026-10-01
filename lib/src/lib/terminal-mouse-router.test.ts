@@ -263,6 +263,8 @@ describe('terminal-mouse-router: override suppression', () => {
       endCol: 2,
       dragging: false,
     });
+    // Mouse-up opens the copy editor over what was dragged (spec §4).
+    expect(getMouseSelectionState('t1').copyEditor).toMatchObject({ scope: 0, format: 'auto' });
     cleanup();
   });
 

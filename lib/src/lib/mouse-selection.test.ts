@@ -36,6 +36,7 @@ describe('mouse-selection: default state', () => {
       override: 'off',
       selection: null,
       hintToken: null,
+      copyEditor: null,
       copyFlash: null,
     });
   });
@@ -280,8 +281,8 @@ describe('mouse-selection: flashCopy race', () => {
     endDrag('a');
 
     // Simulate flashCopy — but we call beginDrag before the timer fires.
-    flashCopy('a', 'raw', 500);
-    expect(getMouseSelectionState('a').copyFlash).toBe('raw');
+    flashCopy('a', 'auto', 500);
+    expect(getMouseSelectionState('a').copyFlash).toBe('auto');
 
     // New drag starts before the 500ms timer.
     beginDrag('a', { row: 10, col: 2, altKey: false, startedInScrollback: false });

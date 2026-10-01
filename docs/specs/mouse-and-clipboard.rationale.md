@@ -8,6 +8,14 @@
 
 **How a mouse-up outside the iframe still reaches us.** Capture is taken on mouse-down, and Chromium delivers the captured `pointerup` across the frame boundary even when the button comes up over host chrome. Engines that do not honor cross-frame capture deliver nothing, so a window `mousemove` reporting `buttons === 0` stands in for the missed mouse-up: a pointer still holding the button reports `buttons === 1`, so the heal cannot fire mid-drag, but it does need the pointer to re-enter the frame. Against double-finalizing, the captured-pointerup path defers to a macrotask and stands down if the compatibility mouseup for an *inside* release arrives first.
 
+## 4. Copy Editor
+
+The editor replaced a two-button Copy Raw / Copy Rewrapped popup. Three shapes were prototyped side by side (the `Prototypes/Copy editor` stories, 2026-09): a numbered chooser, copy-then-show-a-receipt, and this editor. The editor won because restating the selection at full width with every break visible is what lets a user see why a paste came out wrong. Its keys are letters rather than digits: a receipt that took digits after a copy collided with TUIs that answer prompts by number (Claude Code's `1` / `2` / `3` permission menu), and `e` already meant "extend" mid-drag (§5).
+
+## 4.1.1 Auto
+
+The fit test reads a greedy wrapper correctly by construction: a wrapper at width W only breaks where the next word would push past W, and the paragraph's longest row is at most W, so every wrapped break also fails the test against that row. A break the test calls intentional therefore never comes from a greedy wrap. The half-terminal floor exists for two-row paragraphs, whose longest row is the first row itself: without it `Hello` / `World` always read as one wrapped line.
+
 ## 5.1 Detection
 
 **Why trailing punctuation is stripped before the patterns run.** Terminal output puts tokens inside sentences: `Error at src/foo.ts:42.` ends in a period no path pattern matches, so matching first leaves nothing to trim afterward. Stripped first it becomes `src/foo.ts:42`, which the error-location pattern recognizes — the `:line[:col]` digits are not trailing punctuation and survive. Matched bracket pairs are exempt for the mirror case: `https://en.wikipedia.org/wiki/Foo_(bar)` really does end in `)`, and trimming truncates the URL.
