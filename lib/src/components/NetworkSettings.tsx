@@ -15,6 +15,7 @@ import { useManagedVoiceConfigured } from './ManagedVoiceSection';
 import { hostOf, useBusyAction } from './remote-control-shared';
 import { HeldEnrollment, RemoteControlSection } from './RemoteControlSection';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
+import { HOSTED_VOICE_ORIGIN } from '../host/relay-origin';
 import { getPlatform } from '../lib/platform';
 import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
 import type { UpdatesPort, UpdatesSnapshot } from '../lib/platform/types';
@@ -227,7 +228,7 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
   }
   if (facts.managedVoice && status.relayMode === 'hosted') {
     rows.push({
-      to: relay,
+      to: hostOf(HOSTED_VOICE_ORIGIN),
       when: 'When an alert is spoken in the managed voice',
       carries: 'The pane’s name and the voice id, which Hosted passes to ElevenLabs.',
     });
