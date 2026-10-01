@@ -23,4 +23,5 @@ Three origins (decided 2026-09-30):
 ## Production releases
 
 - Deploy order (2026-09-30): the account's `v2` deletes the `OneTimeRoom` namespace the relay's `v1` replaces, and a deployed migration is a rollback floor. Deploying the account first would make the deletion permanent before the replacement is known to deploy; with the relay first, a failed relay deploy stops the release before the account changes.
+- Relay smoke before the account (2026-10-01): a relay deploy can succeed while its custom domain or rendezvous does not serve, and the full smoke runs only after the account deployed, so by then `v2` had already deleted the old room. Smoking the relay right after its deploy keeps the deletion behind a proven replacement.
 - Smoke attempts (2026-09-30): the first release after the split attaches `relay.dormouse.sh` and `voice.dormouse.sh` as new custom domains, and a new certificate can take longer to issue than the health GET's six five-second retries. Repeating a relay or voice smoke sends only GETs and WebSockets on a fresh room, so it replays no POST; the account smoke's POSTs keep it at one attempt.

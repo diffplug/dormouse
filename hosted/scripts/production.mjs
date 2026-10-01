@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { required, cloudflare, hyperdriveOrigin, originsOf } from "./preview.mjs";
-import { smokeAll } from "./preview-smoke.mjs";
+import { relaySmoke, smokeAll } from "./preview-smoke.mjs";
 import {
   WORKERS,
   deployWorkers,
@@ -80,15 +80,40 @@ export function requiredSecrets(configs) {
   );
 }
 /**
- * The release's live verification. The relay and voice retry as a preview's
- * parts do, since a first release attaches their custom domains and a new
- * certificate can outlast the health retry; the account's smoke sends POSTs,
- * so it runs once. `options` stands in for the network in tests.
+ * The relay and voice retry as a preview's parts do, since a first release
+ * attaches their custom domains and a new certificate can outlast the health
+ * retry; the account's smoke sends POSTs, so it runs once.
  */
+const ATTEMPTS = { account: 1, relay: 6, voice: 6 };
+
+/**
+ * Deploys relay, voice, then account, stopping at a failure. The relay passes
+ * `relaySmoke` before anything after it deploys, so the account's `v2` deleting
+ * the old `OneTimeRoom` never runs while the replacement is unproven.
+ * `options` stands in for the process and network in tests.
+ */
+export function deployProduction(
+  configs,
+  sha,
+  { stage = "production", spawn, ...options } = {},
+) {
+  return deployWorkers(stage, configs, {
+    spawn,
+    afterDeploy: async (worker) => {
+      if (worker === "relay")
+        await relaySmoke(configs.relay.vars.APP_ORIGIN, sha, {
+          attempts: ATTEMPTS.relay,
+          ...options,
+        });
+    },
+  });
+}
+
+/** The release's live verification, of all three once the account deployed. */
 export function productionSmoke(configs, sha, options = {}) {
   return smokeAll(originsOf(configs), sha, {
     providers: oauthProviders(configs.account),
-    attempts: { account: 1, relay: 6, voice: 6 },
+    attempts: ATTEMPTS,
     ...options,
   });
 }
@@ -163,8 +188,8 @@ if (
     } else if (action === "preflight" || action === "deploy") {
       await verifyPackages();
       await preflight(process.env, configs);
-      // Relay, voice, then account; a failure stops the rest.
-      if (action === "deploy") await deployWorkers("production", configs);
+      if (action === "deploy")
+        await deployProduction(configs, process.env.BUILD_SHA);
     } else throw new Error("Use preflight, deploy or smoke");
   } catch (error) {
     console.error(error.message);

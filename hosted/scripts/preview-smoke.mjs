@@ -260,14 +260,49 @@ async function emailLoginSmoke(request, origin) {
   );
 }
 
+/** Runs `check` up to `limit` times, `retryMs` apart, logging each retry. */
+async function retrying(limit, what, check, { retryMs, wait }) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await check();
+    } catch (error) {
+      if (attempt >= limit) throw error;
+      console.log(
+        `${what} not ready (attempt ${attempt}/${limit}); retrying in ${retryMs / 1000} seconds`,
+      );
+      await wait(retryMs);
+    }
+  }
+}
+
 /**
- * Every Worker's smoke: the account's auth boundary, each other Worker's
- * revision, and the relay's rendezvous once the relay's revision passed — never
- * waiting on the account, so an account failure hides no relay one. Independent
- * parts run concurrently, and each retries on its own up to its `attempts`
- * (one count for all, or `{ account, relay, voice }`; the rendezvous takes the
- * relay's), `retryMs` apart, so a passed part never runs again. Every part
- * settles before the smoke fails, and the failure names each part that failed.
+ * The relay's smoke: its revision, then its one-time rendezvous, each retried
+ * on its own up to `attempts`, `retryMs` apart, so a passed revision never
+ * runs again and the rendezvous never runs on a relay that did not pass.
+ */
+export async function relaySmoke(
+  origin,
+  sha,
+  {
+    fetcher = fetch,
+    oneTime = (origin) => oneTimeSmoke(origin),
+    attempts = 1,
+    retryMs = 10_000,
+    wait = delay,
+  } = {},
+) {
+  const retry = { retryMs, wait };
+  await retrying(attempts, origin, () => healthSmoke(origin, sha, fetcher), retry);
+  await retrying(attempts, `${origin} one-time`, () => oneTime(origin), retry);
+}
+
+/**
+ * Every Worker's smoke: the account's auth boundary, the voice's revision, and
+ * `relaySmoke` — never waiting on the account, so an account failure hides no
+ * relay one. The three run concurrently, each retrying on its own up to its
+ * `attempts` (one count for all, or `{ account, relay, voice }`), `retryMs`
+ * apart. Every part settles before the smoke fails, and the failure names each
+ * part that failed.
  */
 export async function smokeAll(
   { account, relay, voice },
@@ -282,31 +317,18 @@ export async function smokeAll(
     wait = delay,
   } = {},
 ) {
-  const retried = async (part, what, check) => {
-    const limit = typeof attempts === "number" ? attempts : (attempts[part] ?? 1);
-    for (let attempt = 1; ; attempt++) {
-      try {
-        return await check();
-      } catch (error) {
-        if (attempt >= limit) throw error;
-        console.log(
-          `${what} not ready (attempt ${attempt}/${limit}); retrying in ${retryMs / 1000} seconds`,
-        );
-        await wait(retryMs);
-      }
-    }
-  };
-  const relayHealth = retried("relay", relay, () => healthSmoke(relay, sha, fetcher));
+  const limit = (part) =>
+    typeof attempts === "number" ? attempts : (attempts[part] ?? 1);
+  const retry = { retryMs, wait };
   const results = await Promise.allSettled([
-    retried("account", account, () => smoke(account, sha, fetcher, preview, providers)),
-    relayHealth,
-    retried("voice", voice, () => healthSmoke(voice, sha, fetcher)),
-    relayHealth.then(() => retried("relay", `${relay} one-time`, () => oneTime(relay))),
+    retrying(limit("account"), account, () =>
+      smoke(account, sha, fetcher, preview, providers), retry),
+    relaySmoke(relay, sha, { fetcher, oneTime, attempts: limit("relay"), retryMs, wait }),
+    retrying(limit("voice"), voice, () => healthSmoke(voice, sha, fetcher), retry),
   ]);
-  // A relay that failed its revision fails the rendezvous with the same error.
-  const failures = [
-    ...new Set(results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []))),
-  ];
+  const failures = results.flatMap((result) =>
+    result.status === "rejected" ? [result.reason] : [],
+  );
   if (failures.length === 1) throw failures[0];
   if (failures.length)
     throw new AggregateError(failures, failures.map((error) => error.message).join("\n"));

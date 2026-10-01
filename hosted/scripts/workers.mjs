@@ -12,7 +12,7 @@ const hosted = new URL("../", import.meta.url);
  * configs do not carry. Everything else — script name, `main`, `APP_ORIGIN`,
  * assets, Hyperdrive, Durable Objects, rate limits — is read from `config`.
  * The account deploys last, so its `v2` deleting `OneTimeRoom` lands only once
- * the relay serving the replacement is live.
+ * the relay serving the replacement is deployed and, in production, smoked.
  */
 export const WORKERS = {
   relay: {
@@ -73,12 +73,14 @@ export const fromStage = (path) => posix.join("../..", path);
 /**
  * Writes each config to `.wrangler/<stage>/wrangler.<worker>.json` and deploys
  * them in `WORKERS` order, stopping at the first failure. `args` adds a
- * Worker's own flags; `spawn` stands in for the process in tests.
+ * Worker's own flags; `afterDeploy(worker)` checks a deployed Worker before the
+ * next deploys, and its failure stops the rest; `spawn` stands in for the
+ * process in tests.
  */
 export async function deployWorkers(
   stage,
   configs,
-  { args = () => [], spawn = spawnSync } = {},
+  { args = () => [], afterDeploy = async () => {}, spawn = spawnSync } = {},
 ) {
   const directory = new URL(`.wrangler/${stage}/`, hosted);
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -96,5 +98,6 @@ export async function deployWorkers(
     } finally {
       await rm(path, { force: true });
     }
+    await afterDeploy(worker);
   }
 }

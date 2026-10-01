@@ -350,12 +350,14 @@ credential pair do and do not enable. Facebook is outside this milestone.
    protected production environment and runs the preflight, backup and
    restore-test, migration, deployment, and live-verification sequence in
    `docs/specs/hosted.md` -> "Production releases", deploying the relay,
-   voice, and account Workers in that order. No real mail is sent by its smoke
+   voice, and account Workers in that order. The relay's revision and one-time
+   checks pass before the voice or account deploys, and all three are checked
+   again after the account deploys. No real mail is sent by its smoke
    checks, and passing them is not acceptance.
 
    The first release after the split creates the relay's `OneTimeRoom` (`v1`),
    then deletes the account Worker's (its append-only migration `v2`): links
-   open at that moment drop, and both become rollback floors. Its smoke repeats
+   open at that moment drop, and both become rollback floors. Its smokes repeat
    the relay and voice checks up to six times, 10 s apart, while their new
    custom domains' certificates issue.
 3. Tagging runs only after live verification, on the terms in

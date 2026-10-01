@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import {
+  deployProduction,
   productionConfig,
   productionConfigs,
   productionSmoke,
@@ -99,6 +100,61 @@ test("Workers deploy relay, voice, then account from one config path each, and a
   // Each config is removed once deployed, failed or not.
   for (const [, path] of deployed)
     await assert.rejects(readFile(path), { code: "ENOENT" });
+});
+test("production smokes the relay before anything after it deploys, and a relay failure never deploys the account", async (t) => {
+  t.after(() =>
+    rm(new URL("../.wrangler/deploy-production-test/", import.meta.url), {
+      recursive: true,
+      force: true,
+    }),
+  );
+  const events = [];
+  const spawn = (_command, args) => {
+    const path = args[args.indexOf("--config") + 1];
+    events.push(`deploy ${JSON.parse(readFileSync(path, "utf8")).name}`);
+    return { status: 0 };
+  };
+  // The relay's health fails this many times before it passes.
+  let unhealthy = 5;
+  const fetcher = async (url) => {
+    assert.equal(url, "https://relay.dormouse.sh/api/health");
+    events.push("relay health");
+    return unhealthy-- > 0
+      ? Response.json({ ok: false }, { status: 503 })
+      : Response.json({ ok: true, revision: env.BUILD_SHA });
+  };
+  const deploy = (oneTime) =>
+    deployProduction(configs, env.BUILD_SHA, {
+      stage: "deploy-production-test",
+      spawn,
+      fetcher,
+      oneTime,
+      wait: async () => {},
+    });
+  await deploy(async (origin) => {
+    assert.equal(origin, "https://relay.dormouse.sh");
+    events.push("relay one-time");
+  });
+  // The relay retried up to its sixth attempt, then the rendezvous ran once.
+  assert.deepEqual(events, [
+    "deploy dormouse-relay",
+    ...Array(6).fill("relay health"),
+    "relay one-time",
+    "deploy dormouse-voice",
+    "deploy dormouse-hosted",
+  ]);
+  events.length = 0;
+  let rendezvous = 0;
+  await assert.rejects(
+    deploy(async () => {
+      rendezvous++;
+      throw new Error("rendezvous failed");
+    }),
+    { message: "rendezvous failed" },
+  );
+  // Six attempts, then nothing else deploys: the account's `v2` never runs.
+  assert.equal(rendezvous, 6);
+  assert.deepEqual(events, ["deploy dormouse-relay", "relay health"]);
 });
 test("live verification retries the relay and voice while their domains come up, and runs the account's POSTs once", async () => {
   const health = {};
