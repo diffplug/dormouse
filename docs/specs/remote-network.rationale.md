@@ -166,7 +166,7 @@ already holds and the security model treats as untrusted, and a one-time
 session is direct-only by design, so it never needs one.
 
 **Why Hosted-served Clients always use STUN.** Hosted runs on Cloudflare, so a
-phone that loaded Pocket or the one-time page from `hosted.dormouse.sh` has
+phone that loaded Pocket or the one-time page from `relay.dormouse.sh` has
 already shown Cloudflare its address. STUN to Cloudflare discloses nothing new,
 and making it unconditional removes a policy signal from the wire and from
 version skew. The Burrow's STUN is what reveals the laptop's public address,

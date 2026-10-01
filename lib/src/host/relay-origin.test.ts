@@ -12,7 +12,14 @@ import {
   relayOriginDefine,
   resolveRelayOrigin,
 } from '../../../scripts/relay-origin.mjs';
-import { DEFAULT_RELAY_ORIGIN, bakedRelay, bakedRelayMode, hostedOrigin, isRelayOrigin } from './relay-origin';
+import {
+  DEFAULT_RELAY_ORIGIN,
+  bakedRelay,
+  bakedRelayMode,
+  hostedOrigin,
+  hostedVoiceOrigin,
+  isRelayOrigin,
+} from './relay-origin';
 
 /**
  * An `https://` origin of exactly `length` characters under `example`, built
@@ -30,22 +37,22 @@ function originOfLength(length: number): string {
 }
 
 const CANDIDATES = [
-  'https://hosted.dormouse.sh',
-  'https://hosted.dormouse.sh:8443',
+  'https://relay.dormouse.sh',
+  'https://relay.dormouse.sh:8443',
   'https://relay.example.ts.net',
-  'https://hosted.dormouse.sh/',
-  'https://hosted.dormouse.sh/connect',
-  'https://user@hosted.dormouse.sh',
-  'https://hosted.dormouse.sh?x=1',
-  'HTTPS://hosted.dormouse.sh',
-  'http://hosted.dormouse.sh',
+  'https://relay.dormouse.sh/',
+  'https://relay.dormouse.sh/connect',
+  'https://user@relay.dormouse.sh',
+  'https://relay.dormouse.sh?x=1',
+  'HTTPS://relay.dormouse.sh',
+  'http://relay.dormouse.sh',
   'http://localhost:3000',
   'http://127.0.0.1:8787',
   'http://[::1]:8787',
   'http://127.0.0.2:8787',
   'ws://127.0.0.1:8787',
-  'wss://hosted.dormouse.sh',
-  'hosted.dormouse.sh',
+  'wss://relay.dormouse.sh',
+  'relay.dormouse.sh',
   'not an origin',
   '',
   originOfLength(MAX_RELAY_ORIGIN_LENGTH),
@@ -57,7 +64,7 @@ describe('the baked relay origin', () => {
     // Changing this changes what every shipped binary talks to
     // (docs/specs/security-remote.md → "Relay origin"). The build scripts read
     // the `.mjs` and the hosts read the `.ts`.
-    expect(DEFAULT_RELAY_ORIGIN).toBe('https://hosted.dormouse.sh');
+    expect(DEFAULT_RELAY_ORIGIN).toBe('https://relay.dormouse.sh');
     expect(BUILD_DEFAULT).toBe(DEFAULT_RELAY_ORIGIN);
   });
 
@@ -69,6 +76,14 @@ describe('the baked relay origin', () => {
   it('reaches Hosted only in a Hosted build', () => {
     expect(hostedOrigin({ origin: 'http://localhost:8787', mode: 'hosted' })).toBe('http://localhost:8787');
     expect(hostedOrigin({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBeNull();
+  });
+
+  it('speaks managed voice at the fixed voice origin, in a Hosted build only', () => {
+    // Never the relay origin, and never baked: a dev Hosted build on loopback
+    // still speaks to the real voice origin (docs/specs/relay.md → "Relay origin").
+    expect(hostedVoiceOrigin({ origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' })).toBe('https://voice.dormouse.sh');
+    expect(hostedVoiceOrigin({ origin: 'http://localhost:8787', mode: 'hosted' })).toBe('https://voice.dormouse.sh');
+    expect(hostedVoiceOrigin({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBeNull();
   });
 
   it('matches a stored Relay URL by origin, and nothing else', () => {
@@ -187,7 +202,7 @@ describe('assertRelayOriginBaked', () => {
       writeFileSync(bundle, `const a = "https://relay.example.ts.net"; const b = ${placeholder};`);
       expect(() => assertRelayOriginBaked(bundle, relay), placeholder).toThrow(/survived/);
     }
-    writeFileSync(bundle, 'const origin = "https://hosted.dormouse.sh", mode = "hosted";');
+    writeFileSync(bundle, 'const origin = "https://relay.dormouse.sh", mode = "hosted";');
     expect(() => assertRelayOriginBaked(bundle, relay)).toThrow(/does not contain/);
     writeFileSync(bundle, 'const origin = "https://relay.example.ts.net", mode = "self-host";');
     expect(() => assertRelayOriginBaked(bundle, relay)).not.toThrow();

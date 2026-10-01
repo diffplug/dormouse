@@ -84,7 +84,7 @@ vi.mock('../../lib/src/host/remote/native-direct-peer', () => ({
  * a case about a self-host build sets these (docs/specs/relay.md → "Relay origin").
  */
 const relayBuild = vi.hoisted(() => ({
-  origin: 'https://hosted.dormouse.sh',
+  origin: 'https://relay.dormouse.sh',
   mode: 'hosted' as 'hosted' | 'self-host',
 }));
 vi.mock('../../lib/src/host/relay-origin', async (importOriginal) => ({
@@ -720,7 +720,7 @@ describe('burrow service glue', () => {
       result: { status: 'waiting' },
     });
     // On the baked origin, through the same factory the relay socket uses.
-    expect(rendezvous.room().burrowUrl).toBe('wss://hosted.dormouse.sh/api/one-time/burrow');
+    expect(rendezvous.room().burrowUrl).toBe('wss://relay.dormouse.sh/api/one-time/burrow');
   });
 
   it('bootstraps the contention on setNetworkPolicy, so the service is its one writer', async () => {

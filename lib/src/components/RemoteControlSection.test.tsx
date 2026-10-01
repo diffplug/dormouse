@@ -1482,7 +1482,7 @@ function oneTimeService(
         if (openError) throw new Error(openError);
         service.set({ status: 'opening' });
         links += 1;
-        service.set(oneTimeWaiting({ url: `https://hosted.dormouse.sh/connect/#link-${links}` }));
+        service.set(oneTimeWaiting({ url: `https://relay.dormouse.sh/connect/#link-${links}` }));
         return state;
       case 'oneTimeEnd':
         if (state.status === 'ended') service.set({ status: 'idle' });
@@ -1532,7 +1532,7 @@ describe('One-time connection', () => {
     // The origin is this build's, never the webview's to name.
     expect(oneTimeCalls(service.link, 'oneTimeOpen')).toEqual([['oneTimeOpen']]);
     expect(oneTimeCode()).toBeTruthy();
-    expect(text()).toContain('https://hosted.dormouse.sh/connect/#link-1');
+    expect(text()).toContain('https://relay.dormouse.sh/connect/#link-1');
     expect(text()).toContain('Good for one phone. Expires in 5 min.');
     expect(buttonLabelled('Copy link')).toBeTruthy();
     expect(buttonLabelled('New link')).toBeTruthy();
@@ -1621,13 +1621,13 @@ describe('One-time connection', () => {
   });
 
   it('replaces a waiting link only on New link', async () => {
-    const service = oneTimeService(oneTimeWaiting({ url: 'https://hosted.dormouse.sh/connect/#old' }));
+    const service = oneTimeService(oneTimeWaiting({ url: 'https://relay.dormouse.sh/connect/#old' }));
     await renderOneTime(service);
 
     await act(async () => buttonLabelled('New link')!.click());
     await settleQrChunk();
     expect(oneTimeCalls(service.link, 'oneTimeOpen')).toHaveLength(1);
-    expect(text()).toContain('https://hosted.dormouse.sh/connect/#link-1');
+    expect(text()).toContain('https://relay.dormouse.sh/connect/#link-1');
     expect(text()).not.toContain('#old');
   });
 
