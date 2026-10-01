@@ -83,13 +83,13 @@ const isPrivateAddress = allowedAddressTest([
   'fe80::/10',
 ]);
 
+const CANDIDATE_LINE = /^a=candidate:\S+ \S+ \S+ \S+ (\S+) /;
+
 /**
  * The first candidate of `sdp` that is an IP literal outside every private
  * range — a phone's server-reflexive candidate, most often — and outside
  * `skip`, or `null`.
  */
-const CANDIDATE_LINE = /^a=candidate:\S+ \S+ \S+ \S+ (\S+) /;
-
 export function firstPublicCandidate(sdp: string, skip: (address: string) => boolean = () => false): string | null {
   for (const line of sdp.split(/\r?\n/)) {
     const address = CANDIDATE_LINE.exec(line)?.[1];
