@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { readFile, rm } from "node:fs/promises";
 import {
   productionConfig,
   productionConfigs,
   preflight,
 } from "./production.mjs";
-import { readConfigs } from "./preview.mjs";
+import { deployWorkers, oauthProviders, readConfigs } from "./workers.mjs";
 const bases = await readConfigs();
 const env = {
   BUILD_SHA: "a".repeat(40),
@@ -51,16 +53,50 @@ test("each production config keeps its canonical domain and production entry, an
   assert.deepEqual(configs.account.hyperdrive, [{ binding: "HYPERDRIVE", id: env.HYPERDRIVE_ID }]);
   assert.deepEqual(configs.voice.hyperdrive, configs.account.hyperdrive);
   assert.equal(configs.relay.hyperdrive, undefined);
-  assert.equal(configs.account.assets.directory, "../../dist");
-  assert.equal(configs.relay.assets.directory, "../../dist-relay");
+  assert.equal(configs.account.assets.directory, "../../dist/account");
+  assert.equal(configs.relay.assets.directory, "../../dist/relay");
   assert.equal(configs.voice.assets, undefined);
   assert.throws(() =>
-    productionConfig(bases.account, { ...env, HYPERDRIVE_ID: "0".repeat(32) }),
+    productionConfig(bases.account, { ...env, HYPERDRIVE_ID: "0".repeat(32) }, "account"),
   );
   assert.throws(() =>
     productionConfig(bases.voice, { ...env, HYPERDRIVE_ID: "0".repeat(32) }, "voice"),
   );
-  assert.throws(() => productionConfig(bases.account, { ...env, BUILD_SHA: "main" }));
+  assert.throws(() =>
+    productionConfig(bases.account, { ...env, BUILD_SHA: "main" }, "account"),
+  );
+  assert.throws(() => productionConfig(bases.account, env));
+});
+test("Workers deploy in registry order from one config path each, and a failure stops the rest", async (t) => {
+  t.after(() =>
+    rm(new URL("../.wrangler/deploy-test/", import.meta.url), { recursive: true, force: true }),
+  );
+  const deployed = [];
+  // Reads the config while it is on disk, as Wrangler does.
+  const spawn = (failing) => (_command, args) => {
+    const path = args[args.indexOf("--config") + 1];
+    const { name } = JSON.parse(readFileSync(path, "utf8"));
+    deployed.push([name, path]);
+    return { status: name === failing ? 1 : 0 };
+  };
+  await deployWorkers("deploy-test", configs, { spawn: spawn() });
+  assert.deepEqual(
+    deployed.map(([name, path]) => [name, path.split("/").slice(-3).join("/")]),
+    [
+      ["dormouse-hosted", ".wrangler/deploy-test/wrangler.account.json"],
+      ["dormouse-relay", ".wrangler/deploy-test/wrangler.relay.json"],
+      ["dormouse-voice", ".wrangler/deploy-test/wrangler.voice.json"],
+    ],
+  );
+  deployed.length = 0;
+  await assert.rejects(
+    deployWorkers("deploy-test", configs, { spawn: spawn("dormouse-relay") }),
+    { message: "dormouse-relay deploy failed" },
+  );
+  assert.deepEqual(deployed.map(([name]) => name), ["dormouse-hosted", "dormouse-relay"]);
+  // Each config is removed once deployed, failed or not.
+  for (const [, path] of deployed)
+    await assert.rejects(readFile(path), { code: "ENOENT" });
 });
 test("the history sweep's cron is the voice Worker's alone, and the account's removes its old one", () => {
   assert.deepEqual(configs.voice.triggers, { crons: ["*/5 * * * *"] });
@@ -97,7 +133,7 @@ test("the rendezvous Durable Object and its rate limits are the relay's, and Dur
 const accountSecrets = [
   "AUTH_SECRET",
   "POSTMARK_SERVER_TOKEN",
-  ...configs.account.vars.OAUTH_PROVIDERS.split(",").filter(Boolean).flatMap((name) => [
+  ...oauthProviders(configs.account).flatMap((name) => [
     `${name.toUpperCase()}_CLIENT_ID`,
     `${name.toUpperCase()}_CLIENT_SECRET`,
   ]),

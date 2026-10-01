@@ -30,13 +30,11 @@ jobs:
       - run: pnpm build:hosted
       - name: Require accepted package provenance
         run: node --input-type=module -e 'import { verifyPackages } from "./hosted/scripts/production.mjs"; await verifyPackages();'
-      # The account's assets and the relay's; the artifact keeps both folder names.
+      # Every Worker's static files, each under its own `dist/<worker>/`.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: hosted-production-assets
-          path: |
-            hosted/dist
-            hosted/dist-relay
+          path: hosted/dist
           if-no-files-found: error
           retention-days: 3
   deploy:
@@ -67,7 +65,7 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: hosted-production-assets
-          path: hosted
+          path: hosted/dist
       - name: Validate production identities, uncached Hyperdrive and each Worker's secrets
         run: node hosted/scripts/production.mjs preflight
         env:

@@ -15,7 +15,7 @@
     }
   ],
   "assets": {
-    "directory": "./dist",
+    "directory": "./dist/account",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": true
@@ -46,6 +46,8 @@
     }
   ],
   "triggers": {
+    // Empty, never absent: an absent `triggers` leaves a deployed schedule in
+    // place, and the history sweep's moved to the voice Worker.
     "crons": []
   },
   "observability": {

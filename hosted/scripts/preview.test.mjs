@@ -5,15 +5,14 @@ import {
   previewName,
   previewConfig,
   previewConfigs,
-  relayPreviewConfig,
-  readConfigs,
   hyperdriveOrigin,
   cloudflare,
   findHyperdrives,
   cleanup,
   previewRatelimitNamespace,
 } from "./preview.mjs";
-import { healthSmoke, smoke } from "./preview-smoke.mjs";
+import { healthSmoke, smoke, smokeAll } from "./preview-smoke.mjs";
+import { readConfigs } from "./workers.mjs";
 
 const env = {
   PR_NUMBER: "42",
@@ -74,8 +73,8 @@ test("each preview configuration isolates its origin and excludes production bin
   assert.deepEqual(configs.account.hyperdrive, [{ binding: "HYPERDRIVE", id: "c".repeat(32) }]);
   assert.deepEqual(configs.voice.hyperdrive, configs.account.hyperdrive);
   assert.equal(configs.relay.hyperdrive, undefined);
-  assert.equal(configs.account.assets.directory, "../../dist");
-  assert.equal(configs.relay.assets.directory, "../../dist-relay");
+  assert.equal(configs.account.assets.directory, "../../dist/account");
+  assert.equal(configs.relay.assets.directory, "../../dist/relay");
   assert.equal(configs.voice.assets, undefined);
   for (const worker of ["account", "relay"])
     assert.equal(configs[worker].assets.run_worker_first, true, worker);
@@ -93,11 +92,12 @@ test("each preview configuration isolates its origin and excludes production bin
     ]),
   );
   for (const bad of ["0", "-1", "42/../../production", "main", "42\n"])
-    assert.throws(() => previewName(bad));
+    assert.throws(() => previewName(bad, "dormouse-hosted"));
   assert.throws(() =>
     previewConfig(
       bases.account,
       { ...env, CLOUDFLARE_WORKERS_SUBDOMAIN: "example.com" },
+      "account",
       "c".repeat(32),
     ),
   );
@@ -109,10 +109,11 @@ test("preview configuration keeps its own Durable Objects and rate-limit namespa
     bindings: [{ name: "ROOM", class_name: "Room" }],
   };
   const migrations = [{ tag: "v1", new_sqlite_classes: ["Room"] }];
-  const config = relayPreviewConfig(
+  const config = previewConfig(
     {
+      name: "dormouse-relay",
       compatibility_date: "2026-01-01",
-      assets: {},
+      assets: { directory: "./dist/relay" },
       durable_objects,
       migrations,
       ratelimits: [
@@ -120,6 +121,7 @@ test("preview configuration keeps its own Durable Objects and rate-limit namespa
       ],
     },
     env,
+    "relay",
   );
   assert.deepEqual(config.durable_objects, durable_objects);
   assert.deepEqual(config.migrations, migrations);
@@ -349,6 +351,76 @@ test("deployment smoke rejects malformed health before making any auth requests"
     ),
   );
   assert.equal(requests, 1);
+});
+
+test("the smoke runs its parts concurrently, retries each alone, and checks the rendezvous after the account and relay", async () => {
+  const origins = {
+    account: "https://account.example.test",
+    relay: "https://relay.example.test",
+    voice: "https://voice.example.test",
+  };
+  const events = [];
+  let relayHealthy = false;
+  // Every request the production smoke makes, answered as a healthy account would.
+  const fetcher = async (url, init = {}) => {
+    const { origin, pathname } = new URL(url);
+    if (pathname === "/api/health") {
+      events.push(`${origin} health`);
+      if (origin === origins.relay && !relayHealthy) {
+        relayHealthy = true;
+        return Response.json({ ok: false }, { status: 503 });
+      }
+      return Response.json({ ok: true, revision: env.BUILD_SHA });
+    }
+    assert.equal(origin, origins.account);
+    if (pathname === "/api/ready") return new Response(null, { status: 200 });
+    if (pathname === "/api/auth/csrf")
+      return Response.json(
+        { csrf: "csrf-token" },
+        {
+          headers: {
+            "cache-control": "no-store",
+            "set-cookie": "__Host-session=1; Path=/; Secure; HttpOnly; SameSite=Lax",
+          },
+        },
+      );
+    if (pathname === "/api/auth/get-session") return Response.json(null);
+    if (pathname === "/api/providers") return Response.json([]);
+    if (init.method === "POST") return new Response(null, { status: 403 });
+    if (pathname === "/login")
+      return new Response("<html></html>", { headers: { "content-type": "text/html" } });
+    return new Response(null, { status: 404 });
+  };
+  const waits = [];
+  await smokeAll(origins, env.BUILD_SHA, {
+    fetcher,
+    attempts: 2,
+    wait: async (ms) => waits.push(ms),
+    oneTime: async (origin) => {
+      assert.equal(origin, origins.relay);
+      events.push("one-time");
+    },
+  });
+  // The relay alone retried; the rendezvous ran once, after both passed.
+  assert.deepEqual(waits, [10_000]);
+  const count = (event) => events.filter((e) => e === event).length;
+  assert.equal(count(`${origins.account} health`), 1);
+  assert.equal(count(`${origins.voice} health`), 1);
+  assert.equal(count(`${origins.relay} health`), 2);
+  assert.equal(count("one-time"), 1);
+  assert.equal(events.at(-1), "one-time");
+
+  // A part out of attempts fails the smoke, and the rendezvous never runs on a relay that did not pass.
+  relayHealthy = false;
+  events.length = 0;
+  await assert.rejects(
+    smokeAll(origins, env.BUILD_SHA, {
+      fetcher,
+      oneTime: async () => events.push("one-time"),
+    }),
+    /must be healthy/,
+  );
+  assert.ok(!events.includes("one-time"));
 });
 
 test("a relay or voice health check requires the deployed revision, and nothing else", async () => {

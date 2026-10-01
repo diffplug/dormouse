@@ -4,6 +4,7 @@ import { request } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ONE_TIME_BASE } from "../../lib/scripts/assert-pocket-worker.mjs";
+import { parseConfig } from "./workers.mjs";
 
 /**
  * The one-time rendezvous and phone page on loopback (`docs/specs/one-time.md`
@@ -106,7 +107,7 @@ async function waitFor(what, ready, timeoutMs) {
 async function main() {
   const port = devPort(process.env);
   const origin = devOrigin(port);
-  const base = JSON.parse(readFileSync(resolve(hosted, "wrangler.relay.jsonc"), "utf8"));
+  const base = parseConfig(readFileSync(resolve(hosted, "wrangler.relay.jsonc"), "utf8"));
   const pageDir = resolve(devDir, "assets", PAGE_PATH.slice(1));
   // A page left by an earlier run would satisfy the first wait below.
   rmSync(devDir, { recursive: true, force: true });

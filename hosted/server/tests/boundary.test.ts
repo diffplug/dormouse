@@ -1,9 +1,6 @@
-import { test, expect, beforeAll, afterAll } from "vitest";
-import {
-  Miniflare,
-  convertV4MiniflareOptions,
-  Response as WorkerResponse,
-} from "miniflare";
+import { test, expect, beforeAll, afterAll, vi } from "vitest";
+import type { ExecutionContext } from "hono";
+import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { ONE_TIME_PAGE_PATH, ONE_TIME_WS_ROUTES } from "remote-lib-common";
 import {
   accountBindings,
@@ -12,26 +9,27 @@ import {
   voiceBindings,
   voicePreviewBindings,
 } from "../bindings";
-import { ACCOUNT_POLICY, RUNS_NOTHING_POLICY } from "../headers";
-import { bundleWorker, wrangler } from "./bundle";
+import {
+  ACCOUNT_POLICY,
+  RELAY_HASHED_ASSETS,
+  RUNS_NOTHING_POLICY,
+} from "../headers";
+import { voiceApp } from "../voice-app";
+import { workerApp } from "../worker-app";
+import {
+  ENTRIES,
+  NAMES,
+  ORIGINS,
+  bundleWorker,
+  miniflareOptions,
+  type Name,
+} from "./bundle";
 
 // The partition between Hosted's three Workers (`docs/specs/hosted.md` ->
 // "Application boundary"), each production bundle in real workerd without
 // Postgres: nothing here gets past a 421, a 404, or a missing bearer token, so
 // no route reaches the database.
 
-const ORIGINS = {
-  account: "https://hosted.dormouse.sh",
-  relay: "https://relay.dormouse.sh",
-  voice: "https://voice.dormouse.sh",
-} as const;
-type Name = keyof typeof ORIGINS;
-const NAMES = Object.keys(ORIGINS) as Name[];
-const ENTRIES: Record<Name, string> = {
-  account: "server/worker.ts",
-  relay: "server/relay-worker.ts",
-  voice: "server/voice-worker.ts",
-};
 const sha = "a".repeat(40);
 
 /** Every binding any Worker reads, given to each, so only its mapper decides. */
@@ -46,41 +44,35 @@ const everything = {
   GITHUB_CLIENT_SECRET: "test-github-secret",
 };
 
+const IMMUTABLE = "public, max-age=31536000, immutable";
+const HASHED_FILES = ["/assets/app-abc123.js", `${ONE_TIME_PAGE_PATH}assets/page-abc123.js`];
+
 /** Every request any Worker sent upstream. */
 const outbound: string[] = [];
 const workers = {} as Record<Name, Miniflare>;
+const bundles = {} as Record<Name, Awaited<ReturnType<typeof bundleWorker>>>;
 
 beforeAll(async () => {
   await Promise.all(
     NAMES.map(async (name) => {
-      // The relay's own Durable Object; the others implement none to bind.
-      const relay = name === "relay";
+      bundles[name] = await bundleWorker(ENTRIES[name]);
       workers[name] = new Miniflare(
-        convertV4MiniflareOptions({
-          modules: true,
-          script: (await bundleWorker(ENTRIES[name])).outputFiles[0].text,
-          compatibilityDate: wrangler[name].compatibility_date,
-          compatibilityFlags: wrangler[name].compatibility_flags,
+        miniflareOptions(name, bundles[name].outputFiles[0].text, {
           bindings: { ...everything, APP_ORIGIN: ORIGINS[name] },
           // Nothing listens here, so any database access would fail the request.
           hyperdrives: { HYPERDRIVE: "postgres://user:pass@127.0.0.1:9/none" },
-          ...(relay
-            ? {
-                durableObjects: {
-                  ONE_TIME_ROOM: { className: "OneTimeRoom", useSQLite: true },
-                },
-              }
-            : {}),
-          ratelimits: Object.fromEntries(
-            wrangler.relay.ratelimits!.map(({ name, ...limit }) => [name, limit]),
-          ),
-          // An SPA fallback answering every path, so a route that reached the
-          // assets shows as a 200 rather than a 404.
+          // Two content-hashed scripts, one under each Worker's prefix, and an
+          // SPA fallback answering every other path, so a route that reached
+          // the assets shows as a 200 rather than a 404.
           serviceBindings: {
-            ASSETS: () =>
-              new WorkerResponse("<!doctype html>", {
-                headers: { "content-type": "text/html" },
-              }),
+            ASSETS: (request) =>
+              HASHED_FILES.includes(new URL(request.url).pathname)
+                ? new WorkerResponse("export {};", {
+                    headers: { "content-type": "text/javascript" },
+                  })
+                : new WorkerResponse("<!doctype html>", {
+                    headers: { "content-type": "text/html" },
+                  }),
           },
           outboundService(request) {
             outbound.push(request.url);
@@ -194,6 +186,29 @@ test("the account answers /connect/ with its own shell and policy, never the pho
   }
 });
 
+test("each Worker caches only its own hashed assets as immutable", async () => {
+  const [account, phone] = HASHED_FILES;
+  const cache = (response: { headers: { get(name: string): string | null } }) =>
+    response.headers.get("cache-control");
+  expect(cache(await send("account", ORIGINS.account + account))).toBe(IMMUTABLE);
+  expect(cache(await send("account", ORIGINS.account + phone))).toBe("no-store");
+  // The relay hands its assets only `/connect/` paths, so its prefixes are
+  // checked on an app that serves a script at both.
+  const relay = workerApp({
+    bindings: (env) => env,
+    policy: () => RUNS_NOTHING_POLICY,
+    hashedAssets: RELAY_HASHED_ASSETS,
+    unavailable: "",
+    routes: (app) =>
+      app.get("*", () =>
+        new Response("export {};", { headers: { "content-type": "text/javascript" } }),
+      ),
+  });
+  const env = { APP_ORIGIN: ORIGINS.relay };
+  expect(cache(await relay.fetch(new Request(ORIGINS.relay + phone), env))).toBe(IMMUTABLE);
+  expect(cache(await relay.fetch(new Request(ORIGINS.relay + account), env))).toBe("no-store");
+});
+
 test("speak is the voice Worker's, bearer-only", async () => {
   const response = await send("voice", ORIGINS.voice + "/api/voice/speak", "POST");
   expect(response.status).toBe(401);
@@ -220,6 +235,27 @@ test("the ElevenLabs history sweep runs on the voice Worker alone", async () => 
     "https://api.elevenlabs.io/v1/history?page_size=40",
   ]);
   outbound.length = 0;
+});
+
+test("the cron handler gets the mapped bindings: a key the mapper drops never sweeps", async () => {
+  const fetch = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async () => Response.json({ history: [] }));
+  try {
+    const env = {
+      APP_ORIGIN: ORIGINS.voice,
+      HYPERDRIVE: { connectionString: "postgres://example.test/none" },
+      ELEVENLABS_API_KEY: "test-elevenlabs-key",
+    };
+    const ctx = {} as ExecutionContext;
+    await voiceApp(voicePreviewBindings).scheduled!({}, env, ctx);
+    expect(fetch).not.toHaveBeenCalled();
+    // The production mapper passes the same key on, and it sweeps.
+    await voiceApp(voiceBindings).scheduled!({}, env, ctx);
+    expect(fetch).toHaveBeenCalledOnce();
+  } finally {
+    fetch.mockRestore();
+  }
 });
 
 test("each bindings mapper passes only what its Worker uses", () => {
@@ -276,14 +312,18 @@ test("each bindings mapper passes only what its Worker uses", () => {
 });
 
 test("neither the relay nor the voice bundle carries Better Auth", async () => {
-  for (const entry of [ENTRIES.relay, ENTRIES.voice, "server/voice-preview-worker.ts"]) {
-    const inputs = Object.keys((await bundleWorker(entry)).metafile.inputs);
+  for (const [entry, bundle] of [
+    [ENTRIES.relay, bundles.relay],
+    [ENTRIES.voice, bundles.voice],
+    ["server/voice-preview-worker.ts", await bundleWorker("server/voice-preview-worker.ts")],
+  ] as const) {
+    const inputs = Object.keys(bundle.metafile.inputs);
     expect(
       inputs.filter((input) => /better-auth|postmark/.test(input)),
       entry,
     ).toEqual([]);
   }
   // The pattern finds it where it is.
-  const account = Object.keys((await bundleWorker(ENTRIES.account)).metafile.inputs);
+  const account = Object.keys(bundles.account.metafile.inputs);
   expect(account.some((input) => /better-auth/.test(input))).toBe(true);
 });

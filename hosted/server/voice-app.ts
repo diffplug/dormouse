@@ -1,4 +1,3 @@
-import type { ExecutionContext } from "hono";
 import type { VoiceEnv } from "./bindings";
 import { RUNS_NOTHING_POLICY } from "./headers";
 import { elevenLabs, speakRoute, sweepOnCron } from "./voice";
@@ -13,7 +12,7 @@ export function voiceApp(
   bindings: (env: VoiceEnv) => VoiceEnv,
   { sweepDelayMs }: { sweepDelayMs?: number } = {},
 ) {
-  const app = workerApp<VoiceEnv>({
+  return workerApp<VoiceEnv>({
     bindings,
     policy: () => RUNS_NOTHING_POLICY,
     unavailable: "Managed voice is temporarily unavailable. Please try again.",
@@ -32,14 +31,9 @@ export function voiceApp(
         };
       });
     },
-  });
-  return {
-    fetch: (request: Request, env: VoiceEnv, ctx: ExecutionContext) =>
-      app.fetch(request, env, ctx),
-    // The Cron Trigger: the same mapper decides whether a key reaches the sweep.
-    async scheduled(_controller: unknown, env: VoiceEnv) {
-      const key = bindings(env).ELEVENLABS_API_KEY;
-      if (key) await sweepOnCron(key);
+    // The Cron Trigger: the mapper decides whether a key reaches the sweep.
+    async scheduled(_controller, env) {
+      if (env.ELEVENLABS_API_KEY) await sweepOnCron(env.ELEVENLABS_API_KEY);
     },
-  };
+  });
 }

@@ -66,22 +66,29 @@ export function relayPolicy(pathname: string, appOrigin: unknown) {
 /** What a Worker's `secureHeaders` asks for each response's policy. */
 export type PolicyFor = (pathname: string, appOrigin: unknown) => string;
 
-/** Vite's content-hashed output: the account frontend's, and the one-time page's on the relay. */
-const HASHED_ASSETS = ["/assets/", `${ONE_TIME_PAGE_PATH}assets/`];
+/** The account frontend's content-hashed Vite output. */
+export const ACCOUNT_HASHED_ASSETS = ["/assets/"];
+
+/** The one-time page's content-hashed Vite output, on the relay. */
+export const RELAY_HASHED_ASSETS = [`${ONE_TIME_PAGE_PATH}assets/`];
 
 // Applied to the HTML shell as well as APIs: auth's own middleware only covers its routes.
-export function secureHeaders(app: Hono<any>, policy: PolicyFor) {
+export function secureHeaders(
+  app: Hono<any>,
+  policy: PolicyFor,
+  hashedAssets: readonly string[],
+) {
   app.use("*", async (c, next) => {
     await next();
     // A WebSocket upgrade carries no document, and its headers are the runtime's.
     if (c.res.status === 101) return;
     const { pathname } = new URL(c.req.url);
-    // Vite emits content-hashed files under each `assets/`, so they are safe to cache
-    // forever, but the SPA fallback answers an unknown /assets/ path with the HTML shell:
-    // cache only a 200 whose type is not HTML, and leave everything else uncached.
+    // Vite emits content-hashed files under this Worker's `hashedAssets`, so they are safe
+    // to cache forever, but the SPA fallback answers an unknown /assets/ path with the HTML
+    // shell: cache only a 200 whose type is not HTML, and leave everything else uncached.
     const asset =
       c.res.status === 200 &&
-      HASHED_ASSETS.some((prefix) => pathname.startsWith(prefix)) &&
+      hashedAssets.some((prefix) => pathname.startsWith(prefix)) &&
       !(c.res.headers.get("content-type") ?? "").includes("text/html");
     c.header(
       "Cache-Control",

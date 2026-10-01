@@ -1,51 +1,33 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { required, cloudflare, hyperdriveOrigin, originsOf } from "./preview.mjs";
+import { smokeAll } from "./preview-smoke.mjs";
 import {
-  required,
-  cloudflare,
-  hyperdriveOrigin,
-  readConfigs,
   WORKERS,
-} from "./preview.mjs";
-import { healthSmoke, smoke } from "./preview-smoke.mjs";
-import { oneTimeSmoke } from "./one-time-smoke.mjs";
-import { providerIds } from "../server/providers.js";
+  deployWorkers,
+  fromStage,
+  oauthProviders,
+  readConfigs,
+} from "./workers.mjs";
 
-const root = new URL("../", import.meta.url);
-
-/** Each Worker's production identity, which its checked-in config must match. */
+/**
+ * Each Worker's production name and origin, pinned here so an edited config
+ * cannot redirect production or stand in for a sibling.
+ */
 export const PRODUCTION = {
-  account: {
-    name: "dormouse-hosted",
-    origin: "https://hosted.dormouse.sh",
-    main: "server/worker.ts",
-    assets: "dist",
-    hyperdrive: true,
-  },
-  relay: {
-    name: "dormouse-relay",
-    origin: "https://relay.dormouse.sh",
-    main: "server/relay-worker.ts",
-    assets: "dist-relay",
-    hyperdrive: false,
-  },
-  voice: {
-    name: "dormouse-voice",
-    origin: "https://voice.dormouse.sh",
-    main: "server/voice-worker.ts",
-    hyperdrive: true,
-  },
+  account: { name: "dormouse-hosted", origin: "https://hosted.dormouse.sh" },
+  relay: { name: "dormouse-relay", origin: "https://relay.dormouse.sh" },
+  voice: { name: "dormouse-voice", origin: "https://voice.dormouse.sh" },
 };
 
-export function productionConfig(base, env, worker = "account") {
+export function productionConfig(base, env, worker) {
   const identity = PRODUCTION[worker];
+  assert.ok(identity, `Unknown Worker ${worker}`);
   assert.match(required(env, "BUILD_SHA"), /^[a-f0-9]{40}$/);
   assert.match(required(env, "CLOUDFLARE_ACCOUNT_ID"), /^[a-f0-9]{32}$/);
   assert.equal(base.name, identity.name);
-  assert.equal(base.main, identity.main);
   assert.equal(base.vars.APP_ORIGIN, identity.origin);
   // The canonical domain alone: no public alias, candidate, or preview URL.
   assert.deepEqual(base.routes, [
@@ -56,21 +38,23 @@ export function productionConfig(base, env, worker = "account") {
   assert.deepEqual(base.observability, { enabled: false });
   const config = {
     ...base,
-    main: `../../${identity.main}`,
+    main: fromStage(base.main),
     vars: { ...base.vars, BUILD_SHA: env.BUILD_SHA },
   };
-  if (identity.assets)
-    config.assets = { ...base.assets, directory: `../../${identity.assets}` };
-  else assert.equal(base.assets, undefined);
-  if (identity.hyperdrive) {
+  if (base.assets)
+    config.assets = { ...base.assets, directory: fromStage(base.assets.directory) };
+  if (base.hyperdrive) {
     assert.match(required(env, "HYPERDRIVE_ID"), /^[a-f0-9]{32}$/);
     assert.notEqual(
       env.HYPERDRIVE_ID,
       "0".repeat(32),
       "Provision production Hyperdrive first",
     );
-    config.hyperdrive = [{ binding: "HYPERDRIVE", id: env.HYPERDRIVE_ID }];
-  } else assert.equal(base.hyperdrive, undefined);
+    config.hyperdrive = base.hyperdrive.map(({ binding }) => ({
+      binding,
+      id: env.HYPERDRIVE_ID,
+    }));
+  }
   return config;
 }
 
@@ -84,23 +68,16 @@ export function productionConfigs(bases, env) {
   );
 }
 
-/** The secret names each Worker must hold, by script; the relay holds none. */
+/** The secret names each Worker that holds any must hold, by script. */
 export function requiredSecrets(configs) {
-  const account = ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN"];
-  for (const provider of configs.account.vars.OAUTH_PROVIDERS.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)) {
-    assert.ok(providerIds.includes(provider), "Unknown OAuth provider");
-    account.push(
-      `${provider.toUpperCase()}_CLIENT_ID`,
-      `${provider.toUpperCase()}_CLIENT_SECRET`,
-    );
-  }
-  return {
-    [configs.account.name]: account,
-    [configs.relay.name]: [],
-    [configs.voice.name]: ["ELEVENLABS_API_KEY"],
-  };
+  return Object.fromEntries(
+    Object.entries(WORKERS)
+      .filter(([, { secrets }]) => secrets)
+      .map(([worker, { secrets }]) => [
+        configs[worker].name,
+        secrets(configs[worker]),
+      ]),
+  );
 }
 export async function verifyPackages() {
   const commits = [];
@@ -152,7 +129,6 @@ export async function preflight(env, configs, api = cloudflare(env)) {
     "Use separate runtime and migration roles",
   );
   for (const [script, secrets] of Object.entries(requiredSecrets(configs))) {
-    if (!secrets.length) continue;
     const { result: bindings } = await api(`workers/scripts/${script}/secrets`);
     const names = new Set(bindings.map((item) => item.name));
     for (const name of secrets)
@@ -167,47 +143,19 @@ if (
     const configs = productionConfigs(await readConfigs(), process.env);
     const action = process.argv[2];
     if (action === "smoke") {
-      const sha = process.env.BUILD_SHA;
-      await smoke(
-        configs.account.vars.APP_ORIGIN,
-        sha,
-        fetch,
-        false,
-        configs.account.vars.OAUTH_PROVIDERS.split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+      await smokeAll(
+        originsOf(configs),
+        process.env.BUILD_SHA,
+        { providers: oauthProviders(configs.account) },
       );
-      await healthSmoke(configs.relay.vars.APP_ORIGIN, sha);
-      await oneTimeSmoke(configs.relay.vars.APP_ORIGIN);
-      await healthSmoke(configs.voice.vars.APP_ORIGIN, sha);
       console.log(
         "Hosted production revisions, auth boundary, and one-time rendezvous verified.",
       );
     } else if (action === "preflight" || action === "deploy") {
       await verifyPackages();
       await preflight(process.env, configs);
-      if (action === "deploy") {
-        const directory = new URL(".wrangler/production/", root);
-        await mkdir(directory, { recursive: true });
-        // Account, relay, voice; a failure stops the rest.
-        for (const worker of Object.keys(WORKERS)) {
-          const path = new URL(`wrangler.${worker}.json`, directory);
-          await writeFile(
-            path,
-            JSON.stringify(configs[worker], null, 2) + "\n",
-          );
-          const run = spawnSync(
-            "pnpm",
-            ["exec", "wrangler", "deploy", "--config", fileURLToPath(path)],
-            {
-              cwd: fileURLToPath(root),
-              stdio: "inherit",
-            },
-          );
-          await rm(path, { force: true });
-          assert.equal(run.status, 0, `${configs[worker].name} deploy failed`);
-        }
-      }
+      // Account, relay, voice; a failure stops the rest.
+      if (action === "deploy") await deployWorkers("production", configs);
     } else throw new Error("Use preflight, deploy or smoke");
   } catch (error) {
     console.error(error.message);

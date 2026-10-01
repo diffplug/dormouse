@@ -1,13 +1,13 @@
 import type { BetterAuthWorkerBindings } from "@pgstencil/auth/better-auth-workers";
 import { providerBindings } from "./policy";
 
-// Each Worker's bindings mapper (`docs/specs/hosted.md` -> "Application
+// Each Worker's bindings mapper (`docs/specs/security-hosted.md` -> "Origin
 // boundary"): the only bindings that reach its routes, whatever else the
 // deployment carries. A mapper names what its Worker uses and nothing more, so
 // a secret set on the wrong Worker, or left on a preview, stays unread.
 
 /** Every Worker's: its own origin, which the 421 gate holds requests to. */
-interface WorkerEnv {
+export interface WorkerEnv {
   APP_ORIGIN: string;
   BUILD_SHA?: string;
 }

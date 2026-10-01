@@ -1,3 +1,4 @@
+import type { ExecutionContext } from "hono";
 import { voiceBindings } from "../bindings";
 import { voiceApp } from "../voice-app";
 // The after-speech sweep runs within the test instead of 10 s later.
@@ -8,7 +9,7 @@ export default {
   fetch(
     request: Request,
     env: Parameters<typeof worker.fetch>[1],
-    ctx: Parameters<typeof worker.fetch>[2],
+    ctx: ExecutionContext,
   ) {
     if (new URL(request.url).pathname === "/__test/wait-until")
       return new Response(String(waitUntilCalls));

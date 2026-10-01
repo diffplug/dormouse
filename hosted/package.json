@@ -10,7 +10,6 @@
     "db:migrate": "tsx server/db.ts migrate",
     "db:validate": "tsx server/db.ts validate",
     "db:status": "tsx server/db.ts status",
-    "deploy": "pnpm build && wrangler deploy && wrangler deploy --config wrangler.relay.jsonc && wrangler deploy --config wrangler.voice.jsonc",
     "preview:worker": "wrangler dev --local --local-protocol https",
     "test:deploy": "node --test scripts/*.test.mjs",
     "test:miniflare": "vitest run server/tests/one-time.test.ts server/tests/boundary.test.ts",

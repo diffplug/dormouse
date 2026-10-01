@@ -1,5 +1,5 @@
 import { relayBindings, type RelayEnv } from "./bindings";
-import { relayPolicy } from "./headers";
+import { RELAY_HASHED_ASSETS, relayPolicy } from "./headers";
 import { oneTimePageRoutes, oneTimeRoutes } from "./one-time";
 import { workerApp } from "./worker-app";
 
@@ -12,6 +12,7 @@ import { workerApp } from "./worker-app";
 export default workerApp<RelayEnv>({
   bindings: relayBindings,
   policy: relayPolicy,
+  hashedAssets: RELAY_HASHED_ASSETS,
   unavailable: "The relay is temporarily unavailable. Please try again.",
   routes(app) {
     oneTimeRoutes(app);

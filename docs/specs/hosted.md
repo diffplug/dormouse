@@ -13,12 +13,7 @@
 | `dormouse-relay` | `https://relay.dormouse.sh` | the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | `OneTimeRoom`, the one-time rate limits |
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 
-Every Worker answers `/api/health`, 404s any other `/api/*`, `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. Only the account falls back to SPA assets.
-
-- **Must answer 421, before any route, to a request whose URL origin is not the Worker's `APP_ORIGIN`**, a sibling's included.
-- **Must hand routes only the bindings the Worker's mapper names**: no auth secret on the relay or voice, no Hyperdrive on the relay, no `ELEVENLABS_API_KEY` on the account.
-- **Never let the relay or voice Worker reach auth or the login cookie's origin**: Pocket and `/connect/` render untrusted terminal output (rationale).
-- **Must refuse, on every account cookie route, any `Origin` but the account's exactly**: sibling origins are same-site, so a browser sends them the `SameSite=Lax` login cookie.
+Every Worker answers `/api/health`, 404s any other `/api/*`, `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. Only the account falls back to SPA assets. The 421 origin gate, each Worker's bindings mapper, and the cookie routes' exact-`Origin` check are `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
 
 Marketing is a separate bundle and deployment. `remote-lib-common` is compiled in from source through `hosted/tsconfig.json` `paths`, which every esbuild bundle and Wrangler honor.
 
@@ -28,7 +23,7 @@ Marketing is a separate bundle and deployment. `remote-lib-common` is compiled i
 
 **Must declare every peer dependency of the installed packages in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
 
-Source of truth: `workerApp` in `hosted/server/worker-app.ts`; `accountApp` in `hosted/server/account-app.ts`; `hosted/server/relay-worker.ts`; `voiceApp` in `hosted/server/voice-app.ts`; `hosted/server/bindings.ts`; `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`, `hosted/wrangler.voice.jsonc`; `migrations` in `hosted/server/migrations.ts`; `verifyPackages` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts`, and `hosted/server/tests/artifacts.test.ts`.
+Source of truth: `workerApp` in `hosted/server/worker-app.ts`; `accountApp` in `hosted/server/account-app.ts`; `hosted/server/relay-worker.ts`; `voiceApp` in `hosted/server/voice-app.ts`; `hosted/server/bindings.ts`; `WORKERS` in `hosted/scripts/workers.mjs`; `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`, `hosted/wrangler.voice.jsonc`; `migrations` in `hosted/server/migrations.ts`; `verifyPackages` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts`, and `hosted/server/tests/artifacts.test.ts`.
 
 ## Identity and login
 
@@ -93,7 +88,7 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 - **Must bound each pass**; a backlog waits for the next pass. At most six deletes are in flight; a 404 counts as deleted; a failed delete never aborts the pass. Only counts and statuses are logged or thrown.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
-Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceTokenRoutes` / `speakRoute` / `elevenLabs` / `sweepOnCron` / `sweepAfterSpeech` in `hosted/server/voice.ts`; `scheduled` in `hosted/server/voice-app.ts`; `triggers` in `hosted/wrangler.voice.jsonc`; `hosted/server/dormouse-migrations/001_voice_tokens.sql`; `preflight` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/workers.test.ts`, `hosted/server/tests/boundary.test.ts`, `hosted/scripts/production.test.mjs`, and `hosted/scripts/preview.test.mjs`.
+Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceTokenRoutes` / `speakRoute` / `elevenLabs` / `sweepOnCron` / `sweepAfterSpeech` in `hosted/server/voice.ts`; `scheduled` in `hosted/server/voice-app.ts` and `hosted/server/worker-app.ts`; `triggers` in `hosted/wrangler.voice.jsonc`; `hosted/server/dormouse-migrations/001_voice_tokens.sql`; `preflight` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/workers.test.ts`, `hosted/server/tests/boundary.test.ts`, `hosted/scripts/production.test.mjs`, and `hosted/scripts/preview.test.mjs`.
 
 ## Development and release
 
@@ -109,25 +104,25 @@ Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `host
 
 **Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials. Changed paths include rename sources and all API pages. Deployment runs serialize per PR without cancellation; close/merge cleanup ignores path filtering and tolerates absent resources.
 
-**Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive the account and voice share, and a Neon branch from an empty dedicated preview project**, all reused until close. Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay preview its own Durable Object namespace and preview-only rate-limit namespaces**, and delete every preview Worker with `force`. The smoke checks each Worker's revision and runs `oneTimeSmoke` on the relay.
+**Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive the account and voice share, and a Neon branch from an empty dedicated preview project**, all reused until close. Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay preview its own Durable Object namespace and preview-only rate-limit namespaces**, and delete every preview Worker with `force`. The smoke checks what production's does ("Production releases"), with the captured-mail login in place of providers, retrying each part on its own.
 
 **Must run cleanup from the base branch's checkout, never the closed PR's.**
 
 **Must capture preview mail in Postgres and expose escaped text only.** The public inbox shows the newest 100 messages from the last 24 hours, prunes expired rows on capture, and accepts only the preview's configured origin. No test clock is deployed. Preview data is disposable; it is not access-controlled.
 
-Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workflows/hosted-preview.yml`; `previewConfigs` / `cleanup` in `hosted/scripts/preview.mjs`; `postgresInbox` in `hosted/server/preview-inbox.ts`; `hosted/server/preview-worker.ts`; `hosted/server/voice-preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`, `hosted/scripts/changed.test.mjs`, and `hosted/server/tests/workers.test.ts`.
+Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workflows/hosted-preview.yml`; `previewConfig` / `prepare` / `cleanup` in `hosted/scripts/preview.mjs`; `smokeAll` in `hosted/scripts/preview-smoke.mjs`; `postgresInbox` in `hosted/server/preview-inbox.ts`; `hosted/server/preview-worker.ts`; `hosted/server/voice-preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`, `hosted/scripts/changed.test.mjs`, and `hosted/server/tests/workers.test.ts`.
 
 ## Production releases
 
-**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks both installed packages' clean, matching provenance; `productionConfig` holds each config to its Worker's name, entry, origin, and lone custom domain; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and each Worker's own secret names (the voice's is `ELEVENLABS_API_KEY`; the relay has none). Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Deploy account, relay, then voice, stopping at a failure. Production has no public candidate URL.
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks both installed packages' clean, matching provenance; `productionConfig` holds each config to its Worker's pinned name and origin and lone custom domain; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and each Worker's own secret names (the voice's is `ELEVENLABS_API_KEY`; the relay has none). Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Deploy account, relay, then voice, stopping at a failure. Production has no public candidate URL.
 
-**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. The account keeps the `v1` that created `OneTimeRoom` and appends `v2` deleting it; the relay starts its own `v1`. **Must set `triggers.crons` to `[]` on a Worker with no schedule**: an absent `triggers` leaves a deployed one in place. A deploy restarts every room, dropping links still waiting or mid-handshake; a session already on its direct path never touches Hosted. Live verification checks each Worker's revision and runs `oneTimeSmoke` on the relay after the account smoke.
+**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. The account keeps the `v1` that created `OneTimeRoom` and appends `v2` deleting it; the relay starts its own `v1`. A deploy restarts every room, dropping links still waiting or mid-handshake; a session already on its direct path never touches Hosted. Live verification checks each Worker's revision and runs `oneTimeSmoke` on the relay after the account smoke and the relay's revision check.
 
 **Must bound retries.** Health GETs require the selected revision, sharing six five-second retries for transport failures or healthy stale revisions. Retry rate-limited OAuth once; never replay POSTs after transport failures.
 
 **Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification.** Tags identify the deployed commit and verification run/attempt; retries are idempotent and redeployments get new tags. Dating and repeat-deployment suffixes: `recordDeployment`. Code rollback never reverses migrations.
 
-Source of truth: `.github/workflows/hosted-production.yml`; `productionConfig` / `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `hosted/scripts/production-backup.mjs`; `smokeRequest` / `healthSmoke` in `hosted/scripts/preview-smoke.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs`, `hosted/scripts/smoke-request.test.mjs`, and `hosted/scripts/production-tag.test.mjs`.
+Source of truth: `.github/workflows/hosted-production.yml`; `productionConfig` / `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `deployWorkers` in `hosted/scripts/workers.mjs`; `hosted/scripts/production-backup.mjs`; `smokeRequest` / `healthSmoke` / `smokeAll` in `hosted/scripts/preview-smoke.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs`, `hosted/scripts/smoke-request.test.mjs`, and `hosted/scripts/production-tag.test.mjs`.
 
 ## Future
 

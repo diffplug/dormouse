@@ -3,7 +3,6 @@ import { digest } from "@pgstencil/auth/security";
 import { fileURLToPath } from "node:url";
 import {
   Miniflare,
-  convertV4MiniflareOptions,
   Request as WorkerRequest,
   Response as WorkerResponse,
 } from "miniflare";
@@ -22,18 +21,18 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
-import { bundleWorker, wrangler } from "./bundle";
+import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, type Name } from "./bundle";
 
-const origin = "https://hosted.dormouse.sh";
-const voiceOrigin = "https://voice.dormouse.sh";
+const origin = ORIGINS.account;
+const voiceOrigin = ORIGINS.voice;
 /** The sibling Workers' origins: same-site, so a browser sends them the login cookie. */
-const SAME_SITE = ["https://dormouse.sh", "https://relay.dormouse.sh", voiceOrigin];
+const SAME_SITE = ["https://dormouse.sh", ORIGINS.relay, voiceOrigin];
 const bundle = (production: boolean | "preview") =>
   bundleWorker(
     production === "preview"
       ? "server/preview-worker.ts"
       : production
-        ? "server/worker.ts"
+        ? ENTRIES.account
         : "server/tests/worker-entry.ts",
     production
       ? []
@@ -48,7 +47,7 @@ const productionBundle = bundle(true);
 const previewBundle = bundle("preview");
 const voiceBundles = {
   test: bundleWorker("server/tests/voice-entry.ts"),
-  production: bundleWorker("server/voice-worker.ts"),
+  production: bundleWorker(ENTRIES.voice),
   preview: bundleWorker("server/voice-preview-worker.ts"),
 };
 type Result = Awaited<ReturnType<Miniflare["dispatchFetch"]>>;
@@ -56,24 +55,23 @@ type Handler = (
   request: WorkerRequest,
 ) => WorkerResponse | Promise<WorkerResponse>;
 
-/** One Worker under Miniflare; `database` backs the HYPERDRIVE binding. */
-const workerOptions = ({
-  script,
-  database,
-  assets,
-  ...rest
-}: {
-  script: string;
-  database: string;
-  assets?: Handler;
-  bindings: Record<string, string>;
-  outboundService: Handler;
-}) =>
-  convertV4MiniflareOptions({
-    modules: true,
+/** Worker `name` under Miniflare; `database` backs the HYPERDRIVE binding. */
+const workerOptions = (
+  name: Name,
+  {
     script,
-    compatibilityDate: wrangler.account.compatibility_date,
-    compatibilityFlags: wrangler.account.compatibility_flags,
+    database,
+    assets,
+    ...rest
+  }: {
+    script: string;
+    database: string;
+    assets?: Handler;
+    bindings: Record<string, string>;
+    outboundService: Handler;
+  },
+) =>
+  miniflareOptions(name, script, {
     hyperdrives: { HYPERDRIVE: database },
     ...(assets ? { serviceBindings: { ASSETS: assets } } : {}),
     ...rest,
@@ -171,7 +169,7 @@ async function fixture(
     });
   };
   const worker = new Miniflare(
-    workerOptions({
+    workerOptions("account", {
       script: (
         await (production === "preview"
           ? previewBundle
@@ -203,7 +201,7 @@ async function fixture(
   const voice = () =>
     (voiceWorker ??= (async () => {
       const started = new Miniflare(
-        workerOptions({
+        workerOptions("voice", {
           script: (
             await voiceBundles[
               production === "preview"
@@ -797,7 +795,7 @@ test("the voice Worker's cron sweeps ElevenLabs history with only its key and no
     maxInFlight = 0;
   const sweeper = async (bindings: Record<string, string>) => {
     const worker = new Miniflare(
-      workerOptions({
+      workerOptions("voice", {
         script: (await voiceBundles.production).outputFiles![0].text,
         // No APP_ORIGIN.
         bindings,

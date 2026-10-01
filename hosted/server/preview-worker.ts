@@ -10,7 +10,7 @@ const auth = createBetterAuthWorker<AccountEnv>({
   email: (env) => postgresInbox(env.HYPERDRIVE.connectionString),
 });
 export default accountApp(
-  (request, env, ctx) => auth.fetch(request, env, ctx),
+  auth.fetch,
   accountPreviewBindings,
   (app) => {
     app.get("/api/dev/emails", async (c) =>

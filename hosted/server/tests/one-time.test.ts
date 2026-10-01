@@ -1,9 +1,5 @@
 import { test, expect, beforeAll, afterAll } from "vitest";
-import {
-  Miniflare,
-  convertV4MiniflareOptions,
-  Response as WorkerResponse,
-} from "miniflare";
+import { Miniflare, Response as WorkerResponse } from "miniflare";
 import {
   E2E_ID_LENGTH,
   isOneTimeRoomFrame,
@@ -32,7 +28,7 @@ import {
 import * as smoke from "../../scripts/one-time-smoke.mjs";
 import { oneTimePagePolicy, relayPolicy, RUNS_NOTHING_POLICY } from "../headers";
 import { rateLimitKey } from "../one-time";
-import { bundleWorker, wrangler } from "./bundle";
+import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, wrangler } from "./bundle";
 import { TEST_ROOM_LIMITS } from "./one-time-limits";
 import { rawUpgrade, type RawSocket } from "./raw-socket";
 
@@ -40,34 +36,16 @@ import { rawUpgrade, type RawSocket } from "./raw-socket";
 // Postgres: the relay reaches no Hyperdrive, so this suite runs in the root
 // `pnpm test`.
 
-const origin = "https://relay.dormouse.sh";
+const origin = ORIGINS.relay;
 /** The sibling Workers' origins, which share the account's login cookie as same-site. */
-const SIBLINGS = ["https://hosted.dormouse.sh", "https://voice.dormouse.sh"];
+const SIBLINGS = [ORIGINS.account, ORIGINS.voice];
 const PAGE_SCRIPT = `${ONE_TIME_PAGE_PATH}assets/page-abc123.js`;
 const PAGE_SHELL = `<!doctype html><script type="module" crossorigin src="${PAGE_SCRIPT}"></script>`;
 
 async function start(entry: string) {
   const mf = new Miniflare(
-    convertV4MiniflareOptions({
-      modules: true,
-      script: (await bundleWorker(entry)).outputFiles[0].text,
-      compatibilityDate: wrangler.relay.compatibility_date,
-      compatibilityFlags: wrangler.relay.compatibility_flags,
+    miniflareOptions("relay", (await bundleWorker(entry)).outputFiles[0].text, {
       bindings: { APP_ORIGIN: origin },
-      durableObjects: Object.fromEntries(
-        wrangler.relay.durable_objects!.bindings.map(({ name, class_name }) => [
-          name,
-          {
-            className: class_name,
-            useSQLite: wrangler.relay.migrations!.some((migration) =>
-              migration.new_sqlite_classes?.includes(class_name),
-            ),
-          },
-        ]),
-      ),
-      ratelimits: Object.fromEntries(
-        wrangler.relay.ratelimits!.map(({ name, ...limit }) => [name, limit]),
-      ),
       serviceBindings: {
         // The staged page and its hashed script, and an HTML answer for every
         // other path — an unknown one under /connect/assets/ included — as an
@@ -93,7 +71,7 @@ let production: Awaited<ReturnType<typeof start>>;
 let short: Awaited<ReturnType<typeof start>>;
 beforeAll(async () => {
   [production, short] = await Promise.all([
-    start("server/relay-worker.ts"),
+    start(ENTRIES.relay),
     start("server/tests/one-time-entry.ts"),
   ]);
 });

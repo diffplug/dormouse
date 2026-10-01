@@ -10,7 +10,4 @@ const auth = createBetterAuthWorker<AccountEnv>({
   email: (env) => postmarkEmail(env.POSTMARK_SERVER_TOKEN, env.EMAIL_FROM),
 });
 
-export default accountApp(
-  (request, env, ctx) => auth.fetch(request, env, ctx),
-  accountBindings,
-);
+export default accountApp(auth.fetch, accountBindings);

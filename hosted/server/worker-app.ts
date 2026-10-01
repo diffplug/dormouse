@@ -1,30 +1,41 @@
-import { Hono } from "hono";
+import { Hono, type ExecutionContext } from "hono";
+import type { WorkerEnv } from "./bindings";
 import { secureHeaders, type PolicyFor } from "./headers";
 
 /**
  * What all three Workers share (`docs/specs/hosted.md` -> "Application
  * boundary"): the secure headers, the bindings mapper, the 421 gate, `/api/health`,
  * the 404 tail, and `onError`. Each entry mounts only its own routes, between
- * the gate and the tail, and its `fallback` after the tail.
+ * the gate and the tail, and its `fallback` after the tail. A Cron Trigger's
+ * `scheduled` sees the same mapped bindings a route does.
  */
-export function workerApp<E extends { APP_ORIGIN: string; BUILD_SHA?: string }>({
+export function workerApp<E extends WorkerEnv>({
   bindings,
   policy,
+  hashedAssets = [],
   routes,
   fallback,
+  scheduled,
   unavailable,
 }: {
   /** The only bindings that reach the routes. */
   bindings: (env: E) => E;
   policy: PolicyFor;
+  /** Path prefixes of this Worker's content-hashed files, cached as immutable. */
+  hashedAssets?: readonly string[];
   routes: (app: Hono<{ Bindings: E }>) => void;
   /** Answers what nothing else did; without one, Hono's 404. */
   fallback?: (app: Hono<{ Bindings: E }>) => void;
+  scheduled?: (
+    controller: unknown,
+    env: E,
+    ctx: ExecutionContext,
+  ) => Promise<void>;
   /** `onError`'s message. */
   unavailable: string;
 }) {
   const app = new Hono<{ Bindings: E }>();
-  secureHeaders(app, policy);
+  secureHeaders(app, policy, hashedAssets);
   // The mapper alone decides which bindings reach the routes; resolving it in
   // the request keeps a misconfigured deployment on onError, headers and all.
   app.use("*", async (c, next) => {
@@ -46,5 +57,11 @@ export function workerApp<E extends { APP_ORIGIN: string; BUILD_SHA?: string }>(
   app.all("/__test/*", (c) => c.notFound());
   fallback?.(app);
   app.onError((_error, c) => c.json({ message: unavailable }, 503));
-  return app;
+  return {
+    fetch: app.fetch,
+    ...(scheduled && {
+      scheduled: (controller: unknown, env: E, ctx: ExecutionContext) =>
+        scheduled(controller, bindings(env), ctx),
+    }),
+  };
 }

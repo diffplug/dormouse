@@ -1,7 +1,7 @@
 import type { ExecutionContext, Hono } from "hono";
 import { queryDatabase } from "pgstencil/postgres";
 import type { AccountEnv } from "./bindings";
-import { ACCOUNT_POLICY } from "./headers";
+import { ACCOUNT_HASHED_ASSETS, ACCOUNT_POLICY } from "./headers";
 import { voiceTokenRoutes } from "./voice";
 import { workerApp } from "./worker-app";
 
@@ -22,6 +22,7 @@ export function accountApp(
   return workerApp<AccountEnv>({
     bindings,
     policy: () => ACCOUNT_POLICY,
+    hashedAssets: ACCOUNT_HASHED_ASSETS,
     unavailable: "Sign-in is temporarily unavailable. Please try again.",
     routes(app) {
       configure?.(app);

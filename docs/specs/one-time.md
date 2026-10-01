@@ -335,7 +335,7 @@ no module-preload polyfill) into `lib/dist-one-time`, then runs
 `assertPocketShell --one-time`: scripts under `/connect/assets/`, links under
 `/connect/`, nothing inline. Hosted's `build` runs it first, and
 `hosted/scripts/stage-one-time.mjs` empties the relay's assets directory,
-`dist-relay/`, copies it to `dist-relay/connect/`, and checks the copy.
+`hosted/dist/relay/`, copies it to `hosted/dist/relay/connect/`, and checks the copy.
 
 **Serving.** The relay Worker answers `/connect`, `/connect/`, and
 `/connect/assets/*` from its assets, which have no SPA fallback; an HTML answer

@@ -153,14 +153,10 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
   or overridden**, a loopback dev Hosted build included (rationale).
 - **No build bakes `hosted.dormouse.sh`, the account's origin**; the desktop
   reaches it only by a user's click.
-- **Never serve the account from an origin serving Pocket or `/connect/`**,
-  which render terminal output. Reserved: the Hosted Relay serves
-  `relay.dormouse.sh` over TLS with Pocket at its root, never a tailnet or
-  per-tenant host, passkeys binding to the served origin ("Scope:
-  saas-multitenant").
-- **Sibling `dormouse.sh` origins are same-site**: the account's `SameSite=Lax`
-  cookie rides requests from `relay.` and `voice.`, which only the cookie
-  routes' exact-`Origin` check refuses (`docs/specs/security-hosted.md`).
+- Reserved: the Hosted Relay serves `relay.dormouse.sh` over TLS with Pocket at
+  its root, never a tailnet or per-tenant host, passkeys binding to the served
+  origin ("Scope: saas-multitenant"). Hosted's origins: `docs/specs/hosted.md`
+  → "Application boundary".
 
 **The Burrow composes every Relay URL from the baked origin and takes none as
 input**: `enroll` and `enrollOffer` post to it, carrying no Relay URL, and **a

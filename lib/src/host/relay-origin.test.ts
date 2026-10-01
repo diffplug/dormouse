@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,12 +14,19 @@ import {
 } from '../../../scripts/relay-origin.mjs';
 import {
   DEFAULT_RELAY_ORIGIN,
+  HOSTED_VOICE_ORIGIN,
   bakedRelay,
   bakedRelayMode,
   hostedOrigin,
   hostedVoiceOrigin,
   isRelayOrigin,
 } from './relay-origin';
+
+/** The production `APP_ORIGIN` of a Hosted Worker's Wrangler config (JSON plus whole-line `//` comments). */
+function hostedWorkerOrigin(config: string): string {
+  const text = readFileSync(new URL(`../../../hosted/${config}`, import.meta.url), 'utf8');
+  return JSON.parse(text.replace(/^\s*\/\/.*$/gm, '')).vars.APP_ORIGIN;
+}
 
 /**
  * An `https://` origin of exactly `length` characters under `example`, built
@@ -66,6 +73,11 @@ describe('the baked relay origin', () => {
     // the `.mjs` and the hosts read the `.ts`.
     expect(DEFAULT_RELAY_ORIGIN).toBe('https://relay.dormouse.sh');
     expect(BUILD_DEFAULT).toBe(DEFAULT_RELAY_ORIGIN);
+  });
+
+  it('names the origins Hosted deploys its relay and voice Workers at', () => {
+    expect(DEFAULT_RELAY_ORIGIN).toBe(hostedWorkerOrigin('wrangler.relay.jsonc'));
+    expect(HOSTED_VOICE_ORIGIN).toBe(hostedWorkerOrigin('wrangler.voice.jsonc'));
   });
 
   it('reads as the Hosted default where nothing was baked (the test runner)', () => {

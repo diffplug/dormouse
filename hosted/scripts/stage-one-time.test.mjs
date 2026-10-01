@@ -12,7 +12,7 @@ function fixture(script = '<script type="module" src="/connect/assets/index-abc.
   mkdirSync(join(built, "assets"), { recursive: true });
   writeFileSync(join(built, "index.html"), `<!doctype html><head>${script}</head>`);
   writeFileSync(join(built, "assets", "index-abc.js"), "export {};\n");
-  const assets = join(root, "dist-relay");
+  const assets = join(root, "dist", "relay");
   mkdirSync(join(assets, "connect", "assets"), { recursive: true });
   writeFileSync(join(assets, "connect", "assets", "stale.js"), "");
   writeFileSync(join(assets, "index.html"), "<!doctype html><title>stray</title>");

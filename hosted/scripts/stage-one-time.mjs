@@ -34,10 +34,10 @@ if (
   try {
     const scripts = stageOneTime(
       fileURLToPath(new URL("../../lib/dist-one-time", import.meta.url)),
-      fileURLToPath(new URL("../dist-relay", import.meta.url)),
+      fileURLToPath(new URL("../dist/relay", import.meta.url)),
     );
     console.log(
-      `one-time page staged at dist-relay${ONE_TIME_SHELL.base}: ${scripts} script(s) under ${ONE_TIME_SHELL.scriptBase}`,
+      `one-time page staged at dist/relay${ONE_TIME_SHELL.base}: ${scripts} script(s) under ${ONE_TIME_SHELL.scriptBase}`,
     );
   } catch (error) {
     console.error(`one-time staging failed: ${error.message}`);

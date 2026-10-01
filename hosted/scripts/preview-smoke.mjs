@@ -61,10 +61,7 @@ export async function smokeRequest(fetcher, url, options, wait = delay, expected
   }
 }
 
-/**
- * A Worker that is no account — the relay or voice — reports `sha` live from
- * its health route; retries as `smokeRequest` does.
- */
+/** A Worker reports `sha` live from its health route; retries as `smokeRequest` does. */
 export async function healthSmoke(origin, sha, fetcher = fetch) {
   assert.equal(
     new URL(origin).origin,
@@ -84,23 +81,13 @@ export async function smoke(
   expectedProviders = [],
   authOrigin = origin,
 ) {
-  assert.equal(
-    new URL(origin).origin,
-    origin,
-    "Supply an exact origin without a trailing slash",
-  );
   assert.equal(new URL(origin).protocol, "https:");
+  await healthSmoke(origin, sha, fetcher);
   const request = (path, options = {}) =>
     smokeRequest(fetcher, origin + path, {
       redirect: "manual",
       ...options,
     }, delay, sha);
-  const health = await request("/api/health");
-  assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), {
-    ok: true,
-    revision: sha,
-  });
   assert.equal(
     (await request("/api/ready")).status,
     200,
@@ -273,29 +260,59 @@ async function emailLoginSmoke(request, origin) {
   );
 }
 
+/**
+ * Every Worker's smoke: the account's auth boundary, each other Worker's
+ * revision, and the relay's rendezvous once both the account and the relay
+ * passed. Independent parts run concurrently, and each retries on its own up
+ * to `attempts` times, `retryMs` apart, so a passed part never runs again.
+ */
+export async function smokeAll(
+  { account, relay, voice },
+  sha,
+  {
+    fetcher = fetch,
+    preview = false,
+    providers = [],
+    oneTime = (origin) => oneTimeSmoke(origin),
+    attempts = 1,
+    retryMs = 10_000,
+    wait = delay,
+  } = {},
+) {
+  const retried = async (what, check) => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await check();
+      } catch (error) {
+        if (attempt >= attempts) throw error;
+        console.log(
+          `${what} not ready (attempt ${attempt}/${attempts}); retrying in ${retryMs / 1000} seconds`,
+        );
+        await wait(retryMs);
+      }
+    }
+  };
+  const accountSmoke = retried(account, () =>
+    smoke(account, sha, fetcher, preview, providers),
+  );
+  const relayHealth = retried(relay, () => healthSmoke(relay, sha, fetcher));
+  const voiceHealth = retried(voice, () => healthSmoke(voice, sha, fetcher));
+  const rendezvous = Promise.all([accountSmoke, relayHealth]).then(() =>
+    retried(`${relay} one-time`, () => oneTime(relay)),
+  );
+  await Promise.all([accountSmoke, relayHealth, voiceHealth, rendezvous]);
+}
+
 if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const [origin, relayOrigin, voiceOrigin, sha] = process.argv.slice(2);
+  const [origins, sha] = process.argv.slice(2);
   assert.match(sha ?? "", /^[a-f0-9]{40}$/);
+  const { account, relay, voice } = JSON.parse(origins);
   // A just-uploaded Worker may take a short time to become reachable everywhere.
-  for (let attempt = 1; ; attempt++) {
-    try {
-      await smoke(origin, sha, fetch, true);
-      await healthSmoke(relayOrigin, sha);
-      await oneTimeSmoke(relayOrigin);
-      await healthSmoke(voiceOrigin, sha);
-      console.log(
-        `Preview smoke checks passed: ${origin}/login, ${relayOrigin}/connect/, ${voiceOrigin} (${sha})`,
-      );
-      break;
-    } catch (error) {
-      if (attempt === 6) throw error;
-      console.log(
-        `Preview not ready (attempt ${attempt}/6); retrying in 10 seconds`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 10_000));
-    }
-  }
+  await smokeAll({ account, relay, voice }, sha, { preview: true, attempts: 6 });
+  console.log(
+    `Preview smoke checks passed: ${account}/login, ${relay}/connect/, ${voice} (${sha})`,
+  );
 }
