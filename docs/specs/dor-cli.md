@@ -316,7 +316,7 @@ Invariants:
   never a name. **A Window is `window:<label>` — its host's own name for it**
   (`window:main`, `window:ws-2`), and a host with one Window answers
   `window:1`; each accepts its own ref bare.
-  **Every Workspace has a `surface:1`**, so a Surface ref alone
+  Workspaces can each have a `surface:1`, so a Surface ref alone
   never identifies a Workspace.
 - **One Wall answers each request**, resolved in order: the Window's own verbs
   ([dor workspace](#dor-workspace), and `dor list --all`, which fans out to
