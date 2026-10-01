@@ -221,8 +221,8 @@ export function beginDrag(
   args: { row: number; col: number; altKey: boolean; blockLatched?: boolean; startedInScrollback: boolean },
 ): void {
   const s = ensure(id);
-  // Clearing the in-flight copy flash too keeps its timer from nulling out this
-  // new selection when it fires (the timer checks `copyFlash !== kind`).
+  // Clearing the in-flight copy flash too keeps its timer from clearing this
+  // new selection when it fires.
   clearSelection(s);
   s.selection = {
     startRow: args.row,
@@ -309,20 +309,24 @@ export function extendSelectionToToken(id: string, token: TokenHint): void {
   notify();
 }
 
+/** Each state's latest flash, so a timer acts only for its own. */
+const flashes = new WeakMap<MouseSelectionState, object>();
+
 /**
  * Trigger the copy confirmation flash.
  * The editor reads `copyFlash` and renders a confirmation state; after
- * `durationMs` the flash clears along with the selection, dismissing the editor.
+ * `durationMs` the flash clears along with the selection, dismissing the
+ * editor, whatever moved the selection meanwhile.
  */
 export function flashCopy(id: string, kind: EditorFormat, durationMs = 700): void {
   const s = ensure(id);
-  const selection = s.selection;
+  const flash = {};
+  flashes.set(s, flash);
   s.copyFlash = kind;
   notify();
   setTimeout(() => {
-    const current = states.get(id);
-    if (current !== s || current.selection !== selection || current.copyFlash !== kind) return;
-    clearSelection(current);
+    if (states.get(id) !== s || flashes.get(s) !== flash || s.copyFlash === null) return;
+    clearSelection(s);
     notify();
   }, durationMs);
 }

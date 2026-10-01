@@ -1,4 +1,10 @@
-import type { IBufferCell, IBufferLine } from '@xterm/xterm';
+import type { IBuffer, IBufferCell, IBufferLine } from '@xterm/xterm';
+
+/** Row `r`, or undefined outside the buffer: xterm's `getLine` reads its ring
+ *  cyclically past either end. */
+export function lineAt(buffer: IBuffer, r: number): IBufferLine | undefined {
+  return r >= 0 && r < buffer.length ? buffer.getLine(r) : undefined;
+}
 
 /**
  * One string per cell column of `line`: the cell's characters, `' '` for an
@@ -20,8 +26,7 @@ export function readLineCells(line: IBufferLine): string[] {
 }
 
 /** True when `line` ends in the blank xterm leaves when a wide character
- *  wraps to `next` rather than split: padding, not text, which reflow adds
- *  and removes. */
+ *  wraps to `next` rather than split: padding, not text. */
 export function endsInWrapPadding(line: IBufferLine, next: IBufferLine | undefined): boolean {
   if (!next?.isWrapped) return false;
   const last = line.getCell(line.length - 1);

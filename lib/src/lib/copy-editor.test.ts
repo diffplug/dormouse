@@ -7,6 +7,7 @@ import { copySelection } from './copy-selection';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
+  flashCopy,
   getMouseSelectionState,
   offerProgramCopy,
   setSelection,
@@ -144,6 +145,20 @@ describe('copySelection', () => {
     await copySelection(ID);
     expect(writeTextToClipboard).toHaveBeenCalledWith('The flake comes from a race between the PTY exit event and the final flush of the output');
     expect(getMouseSelectionState(ID).copyFlash).toBe('auto');
+  });
+
+  it('closes when the flash ends, though a nudge moved the selection during it', () => {
+    vi.useFakeTimers();
+    try {
+      select({ endRow: 2, endCol: 11 });
+      flashCopy(ID, 'auto');
+      nudgeCopyEdge(ID, 'end', 1);
+      expect(getMouseSelectionState(ID)).toMatchObject({ selection: { endCol: 16 }, copyFlash: 'auto' });
+      vi.advanceTimersByTime(700);
+      expect(getMouseSelectionState(ID)).toMatchObject({ selection: null, copyEditor: null, copyFlash: null });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retains the selection without a flash when the write fails', async () => {

@@ -24,13 +24,8 @@ import {
   getMouseSelectionState,
   removeMouseSelectionState,
   setSelection as setMouseSelection,
-  subscribeToMouseSelection,
-  type Selection,
 } from './mouse-selection';
-import { extractSelectionText } from './selection-text';
-import { anchorSelection, followReflow, type ReflowAnchor } from './selection-reflow';
-import { refollowCopyEditor } from './copy-editor';
-import { spanOfSelection } from './copy-text';
+import { watchSelection, type SelectionWatch } from './selection-watch';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
@@ -228,34 +223,11 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
   };
 }
 
-/** Two readings of the pane's selection, retaken whenever anyone finalizes
- *  or moves it (spec §3.4). */
-interface SelectionWatch {
-  selection: Selection | null;
-  /** Its text, compared on every render: a change cancels it. */
-  baseline: string | null;
-  /** Its edges, carried through a resize's reflow. */
-  anchor: ReflowAnchor | null;
-}
-
-/** A resize keeps a selection reflow can carry, its editor rebuilt over the
- *  moved cells, and cancels any other (spec §3.4). */
-function followSelectionThroughResize(id: string, terminal: Terminal, watch: SelectionWatch): void {
-  const { selection, copyEditor, copyFlash } = getMouseSelectionState(id);
-  if (!selection) return;
-  // A confirmed copy is about to clear, and its timer only clears the
-  // selection it copied.
-  const moved = !copyFlash && watch.anchor ? followReflow(terminal, selection, watch.anchor) : null;
-  if (!moved) setMouseSelection(id, null);
-  else setMouseSelection(id, moved, copyEditor && refollowCopyEditor(copyEditor, terminal, spanOfSelection(moved)));
-}
-
-/** xterm input/resize/render handlers. Returns a dispose. `watch` is read by
- *  reference, since the selection subscription rewrites it. */
+/** xterm input/resize/render handlers. Returns a dispose. */
 function wireXtermHandlers(
   id: string,
   terminal: Terminal,
-  watch: SelectionWatch,
+  selection: SelectionWatch,
 ): () => void {
   const inputDisposable = terminal.onData((data) => {
     // One strip, two readers. While an override is active the reports must not
@@ -294,22 +266,12 @@ function wireXtermHandlers(
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
     getPlatform().resizePty(id, cols, rows);
     bumpRenderTick();
-    followSelectionThroughResize(id, terminal, watch);
+    selection.onResize();
   });
 
   const renderDisposable = terminal.onRender(() => {
     bumpRenderTick();
-    if (watch.baseline === null) return;
-    const sel = getMouseSelectionState(id).selection;
-    if (!sel || sel.dragging) {
-      watch.baseline = null;
-      return;
-    }
-    const current = extractSelectionText(terminal, sel);
-    if (current !== watch.baseline) {
-      setMouseSelection(id, null);
-      watch.baseline = null;
-    }
+    selection.onRender();
   });
 
   return () => {
@@ -323,18 +285,9 @@ interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: H
 
 function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
   const { terminal, fit, serialize, element } = createXtermHost(id, options.grid);
-  const watch: SelectionWatch = { selection: null, baseline: null, anchor: null };
-  const unsubscribeSelectionWatch = subscribeToMouseSelection(() => {
-    const sel = getMouseSelectionState(id).selection;
-    if (sel === watch.selection) return;
-    watch.selection = sel;
-    watch.baseline = sel && !sel.dragging ? extractSelectionText(terminal, sel) : null;
-    watch.anchor?.dispose();
-    watch.anchor = sel && anchorSelection(terminal, sel);
-  });
-
+  const selectionWatch = watchSelection(id, terminal);
   const disposePty = wirePtyEvents(id, terminal);
-  const disposeXterm = wireXtermHandlers(id, terminal, watch);
+  const disposeXterm = wireXtermHandlers(id, terminal, selectionWatch);
   const mouseModeObserver = attachMouseModeObserver(id, terminal);
   // Windows-only: keep win32-input-mode from clobbering kitty-protocol TUIs.
   // Off-Windows win32-input-mode is never advertised, so kitty already wins.
@@ -347,8 +300,7 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
   });
 
   const cleanup = () => {
-    unsubscribeSelectionWatch();
-    watch.anchor?.dispose();
+    selectionWatch.dispose();
     disposePty();
     disposeXterm();
     mouseModeObserver.dispose();

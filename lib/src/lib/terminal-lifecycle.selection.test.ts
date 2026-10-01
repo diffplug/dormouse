@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
+import type { Terminal } from '@xterm/xterm';
 
 /**
  * Any input the terminal receives ends a finalized selection — the copy editor
@@ -29,9 +30,12 @@ vi.mock('./platform', async () => {
 });
 
 import { flipCopyBreak, openCopyEditor, setCopyFormat, setCopyScope } from './copy-editor';
-import { finalizedSelection } from './copy-text-fixtures';
+import type { EditorFormat } from './copy-text';
+import { finalizedSelection, WRAPPING } from './copy-text-fixtures';
 import { beginDrag, flashCopy, getMouseSelectionState, setSelection, type Selection } from './mouse-selection';
 import { getOrCreateTerminal, writeUserInput } from './terminal-registry';
+
+const write = (terminal: Terminal, data: string) => new Promise<void>((resolve) => terminal.write(data, resolve));
 
 describe('writeUserInput', () => {
   it('ends a finalized selection, and a shadowed drag', () => {
@@ -52,55 +56,85 @@ describe('writeUserInput', () => {
 });
 
 describe('a terminal resize', () => {
-  async function paneWith(id: string, data: string) {
+  const editor = (id: string) => getMouseSelectionState(id).copyEditor!;
+
+  /** A 20-column pane, `above` then {@link WRAPPING} (which soft-wraps after
+   *  `dddd ` at 20 columns, and after `bbbb ` at 10), `bbb` through `ee`
+   *  selected, and its editor open at `scope` in `format` with a per-break
+   *  edit. */
+  async function openEdited(id: string, { above = '', format = 'auto', scope = 'As selected', over = {} }: {
+    above?: string; format?: EditorFormat; scope?: string; over?: Partial<Selection>;
+  } = {}) {
     const { terminal } = getOrCreateTerminal(id);
     terminal.resize(20, 10);
-    await new Promise<void>((resolve) => terminal.write(data, resolve));
+    await write(terminal, `${above}${WRAPPING}\r\n`);
+    const row = terminal.buffer.active.baseY + terminal.buffer.active.cursorY - 2;
+    setSelection(id, finalizedSelection({ startRow: row, startCol: 6, endRow: row + 1, endCol: 1, ...over }));
+    openCopyEditor(id, terminal);
+    setCopyScope(id, editor(id).scopes.findIndex((s) => s.label === scope));
+    setCopyFormat(id, format);
+    flipCopyBreak(id, 0, 'keep');
     return terminal;
   }
 
   it('carries a linewise selection and its editor through the reflow', async () => {
-    // Soft-wraps after `dddd ` at 20 columns, and after `bbbb ` at 10.
-    const terminal = await paneWith('resize-1', 'aaaa bbbb cccc dddd eeee ffff\r\n');
-    setSelection('resize-1', finalizedSelection({ startRow: 0, startCol: 6, endRow: 1, endCol: 1 })); // `bbb` through `ee`
-    openCopyEditor('resize-1', terminal);
-    setCopyScope('resize-1', getMouseSelectionState('resize-1').copyEditor!.scopes.findIndex((s) => s.label === 'Whole words'));
-    setCopyFormat('resize-1', 'exact');
-    flipCopyBreak('resize-1', 0, 'keep');
-    expect(getMouseSelectionState('resize-1').copyEditor!.overrides).not.toEqual({});
+    const id = 'resize-1';
+    const terminal = await openEdited(id, { format: 'exact', scope: 'Whole words' });
+    expect(editor(id).overrides).not.toEqual({});
 
     terminal.resize(10, 10);
-    const { selection, copyEditor } = getMouseSelectionState('resize-1');
+    const { selection, copyEditor } = getMouseSelectionState(id);
     expect(selection).toMatchObject({ startRow: 0, startCol: 6, endRow: 2, endCol: 1 });
-    expect(copyEditor).toMatchObject({ format: 'exact', overrides: {} });
+    expect(copyEditor!.format).toBe('exact');
+    expect(copyEditor!.overrides).toEqual({});
     expect(copyEditor!.scopes[copyEditor!.scope].label).toBe('Whole words');
     expect(copyEditor!.scopes[0].span).toEqual({ start: { row: 0, col: 6 }, end: { row: 2, col: 1 }, block: false });
     // The moved selection's two edges, the first selection's released.
     expect(terminal.markers).toHaveLength(2);
   });
 
-  it('keeps per-break edits when only the height changes', async () => {
-    const terminal = await paneWith('resize-3', 'aaaa bbbb cccc dddd eeee ffff\r\n');
-    setSelection('resize-3', finalizedSelection({ startRow: 0, startCol: 6, endRow: 1, endCol: 1 }));
-    openCopyEditor('resize-3', terminal);
-    flipCopyBreak('resize-3', 0, 'keep');
-    const { overrides } = getMouseSelectionState('resize-3').copyEditor!;
+  it('keeps per-break edits through a resize that moves the selection but keeps the width', async () => {
+    const id = 'resize-2';
+    const terminal = await openEdited(id, { above: 'x\r\n'.repeat(7) });
+    terminal.options.scrollback = 0;
+    const { overrides } = editor(id);
 
+    // A shorter full buffer trims rows off its top.
     terminal.resize(20, 6);
-    expect(getMouseSelectionState('resize-3').copyEditor!.overrides).toEqual(overrides);
+    expect(getMouseSelectionState(id).selection).toMatchObject({ startRow: 3, endRow: 4 });
+    expect(editor(id).overrides).toEqual(overrides);
   });
 
-  it('still cancels a block selection, one the program owns, and one whose copy is confirming', async () => {
-    const terminal = await paneWith('resize-2', 'aaaa bbbb cccc dddd eeee ffff\r\n');
-    const resizeCancels = (over: Partial<Selection>, flashing = false) => {
-      setSelection('resize-2', finalizedSelection({ startRow: 0, startCol: 6, endRow: 0, endCol: 8, ...over }));
-      openCopyEditor('resize-2', terminal);
-      if (flashing) flashCopy('resize-2', 'auto');
-      terminal.resize(terminal.cols === 20 ? 10 : 20, 10);
-      expect(getMouseSelectionState('resize-2')).toMatchObject({ selection: null, copyEditor: null });
-    };
-    resizeCancels({ shape: 'block' });
-    resizeCancels({ owner: 'program' });
-    resizeCancels({}, true);
+  it('writes nothing when the resize moved nothing', async () => {
+    const id = 'resize-3';
+    const terminal = await openEdited(id);
+    const { selection, copyEditor } = getMouseSelectionState(id);
+
+    terminal.resize(20, 6);
+    expect(getMouseSelectionState(id).selection).toBe(selection);
+    expect(getMouseSelectionState(id).copyEditor).toBe(copyEditor);
+  });
+
+  it('carries a selection whose copy is confirming, and the flash still closes it', async () => {
+    const id = 'resize-4';
+    const terminal = await openEdited(id);
+    vi.useFakeTimers();
+    try {
+      flashCopy(id, 'auto');
+      terminal.resize(10, 10);
+      expect(getMouseSelectionState(id)).toMatchObject({ selection: { endRow: 2, endCol: 1 }, copyFlash: 'auto' });
+      vi.advanceTimersByTime(700);
+      expect(getMouseSelectionState(id)).toMatchObject({ selection: null, copyEditor: null, copyFlash: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still cancels a block selection, and one the program owns', async () => {
+    for (const [id, over] of [['resize-5', { shape: 'block' }], ['resize-6', { owner: 'program' }]] as const) {
+      const terminal = await openEdited(id, { over });
+      terminal.resize(10, 10);
+      expect(getMouseSelectionState(id)).toMatchObject({ selection: null, copyEditor: null });
+    }
   });
 });

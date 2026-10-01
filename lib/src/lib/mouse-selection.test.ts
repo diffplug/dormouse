@@ -330,19 +330,41 @@ describe('mouse-selection: drag lifecycle', () => {
 });
 
 describe('mouse-selection: flashCopy race', () => {
-  it('beginDrag during a flash clears copyFlash so the timer does not nuke the new selection', () => {
-    beginDrag('a', { row: 0, col: 0, altKey: false, startedInScrollback: false });
-    updateDrag('a', { row: 3, col: 5, altKey: false });
-    endDrag('a');
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-    // Simulate flashCopy — but we call beginDrag before the timer fires.
+  function finalize(row: number): void {
+    beginDrag('a', { row, col: 0, altKey: false, startedInScrollback: false });
+    updateDrag('a', { row: row + 3, col: 5, altKey: false });
+    endDrag('a');
+  }
+
+  it('beginDrag during a flash clears copyFlash so the timer does not nuke the new selection', () => {
+    vi.useFakeTimers();
+    finalize(0);
     flashCopy('a', 'auto', 500);
     expect(getMouseSelectionState('a').copyFlash).toBe('auto');
 
     // New drag starts before the 500ms timer.
     beginDrag('a', { row: 10, col: 2, altKey: false, startedInScrollback: false });
     expect(getMouseSelectionState('a').copyFlash).toBeNull();
+    vi.advanceTimersByTime(500);
     expect(getMouseSelectionState('a').selection?.startRow).toBe(10);
+  });
+
+  it('times each flash from its own copy', () => {
+    vi.useFakeTimers();
+    finalize(0);
+    flashCopy('a', 'auto', 500);
+    vi.advanceTimersByTime(300);
+    finalize(10);
+    flashCopy('a', 'exact', 500);
+
+    vi.advanceTimersByTime(200);
+    expect(getMouseSelectionState('a')).toMatchObject({ selection: { startRow: 10 }, copyFlash: 'exact' });
+    vi.advanceTimersByTime(300);
+    expect(getMouseSelectionState('a')).toMatchObject({ selection: null, copyFlash: null });
   });
 });
 

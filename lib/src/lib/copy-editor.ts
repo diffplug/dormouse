@@ -23,9 +23,9 @@ import { getMouseSelectionState, setCopyEditor, setSelection, type CopyEditorSta
 import { registry } from './terminal-store';
 
 // The copy editor's state transitions over the selection store
-// (docs/specs/mouse-and-clipboard.md §4). Every reading goes through the buffer
-// the editor opened with; only opening, and a resize's refollow, read the
-// terminal.
+// (docs/specs/mouse-and-clipboard.md §4). Every reading goes through the
+// editor's own buffer, read from the terminal only when it opens or a resize
+// rebuilds it.
 
 function editorFor(buffer: CopyBuffer, span: Span, format: EditorFormat): CopyEditorState {
   return { buffer, scopes: computeScopes(buffer, span), scope: 0, format, overrides: {} };
@@ -37,16 +37,23 @@ export function openCopyEditor(id: string, terminal: Terminal | undefined = regi
   if (terminal && sel && !sel.dragging) setCopyEditor(id, editorFor(terminalCopyBuffer(terminal), spanOfSelection(sel), 'auto'));
 }
 
-/** The editor over `span` after a resize's reflow, read afresh because the
- *  old buffer's rows are stale (spec §3.4): its format, its scope by label
- *  when that remains, and its per-break edits only when the width held, since
- *  their indices move with the soft wraps. */
-export function refollowCopyEditor(editor: CopyEditorState, terminal: Terminal, span: Span): CopyEditorState {
+/** Move the selection to `span`, where a resize's reflow put its cells, and
+ *  rebuild its editor from the terminal (spec §3.4). Writes nothing when
+ *  neither the span nor the editor's width changed. */
+export function followCopySelection(id: string, terminal: Terminal, span: Span): void {
+  const { selection, copyEditor: editor } = getMouseSelectionState(id);
+  if (!selection) return;
+  const sameWidth = editor?.buffer.cols === terminal.cols;
+  if (spanEquals(span, spanOfSelection(selection)) && (!editor || sameWidth)) return;
+  const moved = selectionOfSpan(span, selection);
+  if (!editor) {
+    setSelection(id, moved);
+    return;
+  }
   const next = editorFor(terminalCopyBuffer(terminal), span, editor.format);
   const label = editor.scopes[editor.scope].label;
   const scope = next.scopes.findIndex((s) => s.label === label);
-  const sameBreaks = scope >= 0 && editor.buffer.cols === terminal.cols;
-  return { ...next, scope: Math.max(0, scope), overrides: sameBreaks ? editor.overrides : {} };
+  setSelection(id, moved, { ...next, scope: Math.max(0, scope), overrides: scope >= 0 && sameWidth ? editor.overrides : {} });
 }
 
 export type FormatRenderings = Partial<Record<EditorFormat, Rendering>>;

@@ -1,5 +1,5 @@
 import type { IBufferLine, Terminal } from '@xterm/xterm';
-import { endsInWrapPadding, readLineCells } from './buffer-cells';
+import { endsInWrapPadding, lineAt, readLineCells } from './buffer-cells';
 import type { Selection } from './mouse-selection';
 import { normalizeSelection } from './selection-text';
 import { detectTokenAt } from './smart-token';
@@ -38,9 +38,8 @@ export function terminalCopyBuffer(terminal: Terminal): CopyBuffer {
     row(index) {
       let row = rows.get(index);
       if (!row) {
-        const line = index >= 0 && index < buffer.length ? buffer.getLine(index) : undefined;
-        const next = index + 1 < buffer.length ? buffer.getLine(index + 1) : undefined;
-        row = line ? { cells: rowCells(line, next), wrapped: line.isWrapped } : EMPTY_ROW;
+        const line = lineAt(buffer, index);
+        row = line ? { cells: rowCells(line, lineAt(buffer, index + 1)), wrapped: line.isWrapped } : EMPTY_ROW;
         rows.set(index, row);
       }
       return row;
