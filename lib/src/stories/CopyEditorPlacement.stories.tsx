@@ -161,7 +161,7 @@ export const NarrowPane: Story = {
     expect(box.width).toBeGreaterThan(pane.width);
     const shown = Array.from(editor()!.querySelectorAll('button')).filter((b) => !b.closest('[inert]'));
     const options = shown.filter((b) => b.hasAttribute('aria-pressed'));
-    const copy = shown.find((b) => b.textContent === 'Copy');
+    const copy = shown.find((b) => b.dataset.copyState === 'idle');
     expect(copy).toBeDefined();
     for (const control of [...options, copy!]) {
       const r = control.getBoundingClientRect();

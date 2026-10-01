@@ -72,6 +72,9 @@ export interface MouseSelectionState {
    * before everything clears.
    */
   copyFlash: EditorFormat | null;
+  /** Set briefly after a copy whose clipboard write failed; the selection
+   *  stays for a retry. */
+  copyFailed: boolean;
 }
 
 export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze({
@@ -83,6 +86,7 @@ export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze(
   copyEditor: null,
   programCopy: null,
   copyFlash: null,
+  copyFailed: false,
 }) as MouseSelectionState;
 
 const states = new Map<string, MouseSelectionState>();
@@ -96,6 +100,7 @@ function clearSelection(s: MouseSelectionState): void {
   s.copyEditor = null;
   s.programCopy = null;
   s.copyFlash = null;
+  s.copyFailed = false;
   s.hintToken = null;
 }
 
@@ -295,8 +300,16 @@ export function extendSelectionToToken(id: string, token: BufferToken): void {
   notify();
 }
 
-/** Each state's latest flash, so a timer acts only for its own. */
+/** How long a confirmed copy shows before the selection clears (spec §4.5):
+ *  longer on touch, where the finger covers the button and the eye arrives late. */
+export const COPY_FLASH_MS = 700;
+export const TOUCH_COPY_FLASH_MS = 1200;
+/** How long a failed copy says so, the selection kept. */
+export const COPY_FAILED_MS = 1500;
+
+/** Each state's latest flash or failure notice, so a timer acts only for its own. */
 const flashes = new WeakMap<MouseSelectionState, object>();
+const failures = new WeakMap<MouseSelectionState, object>();
 
 /**
  * Trigger the copy confirmation flash.
@@ -304,15 +317,32 @@ const flashes = new WeakMap<MouseSelectionState, object>();
  * `durationMs` the flash clears along with the selection, dismissing the
  * editor, whatever moved the selection meanwhile.
  */
-export function flashCopy(id: string, kind: EditorFormat, durationMs = 700): void {
+export function flashCopy(id: string, kind: EditorFormat, durationMs = COPY_FLASH_MS): void {
   const s = ensure(id);
   const flash = {};
   flashes.set(s, flash);
   s.copyFlash = kind;
+  s.copyFailed = false;
   notify();
   setTimeout(() => {
     if (states.get(id) !== s || flashes.get(s) !== flash || s.copyFlash === null) return;
     clearSelection(s);
+    notify();
+  }, durationMs);
+}
+
+/** Say a copy failed, for `durationMs`, keeping the selection for a retry; a
+ *  no-op without a selection. */
+export function failCopy(id: string, durationMs = COPY_FAILED_MS): void {
+  const s = states.get(id);
+  if (!s?.selection) return;
+  const failure = {};
+  failures.set(s, failure);
+  s.copyFailed = true;
+  notify();
+  setTimeout(() => {
+    if (states.get(id) !== s || failures.get(s) !== failure || !s.copyFailed) return;
+    s.copyFailed = false;
     notify();
   }, durationMs);
 }

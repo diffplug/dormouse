@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { GAP_PX, placeCopyEditor, selectionBand, type Band, type CopyEditorPlacementInput, type CopyEditorSide } from './copy-editor-placement';
+import { GAP_PX, nearMiss, placeCopyEditor, selectionBand, TOUCH_SLOP_PX, type Band, type CopyEditorPlacementInput, type CopyEditorSide } from './copy-editor-placement';
 import type { Span } from './copy-text';
 import type { RingRect } from './rect-tween';
 import type { TerminalOverlayDims } from './terminal-store';
@@ -192,6 +192,22 @@ describe('placeCopyEditor: sides in a wide window', () => {
   it('keeps the natural order: a side only when neither below nor above holds it', () => {
     expect(wide({ naturalHeight: () => 280 }).side).toBe('below');
     expect(wide({ naturalHeight: () => 280, touch: true }).side).toBe('above');
+  });
+});
+
+describe('nearMiss', () => {
+  const rect = { left: 100, top: 100, right: 300, bottom: 200 };
+
+  it('is a press outside the rect within the slop, on any side or corner', () => {
+    expect(nearMiss(rect, 200, 200 + TOUCH_SLOP_PX)).toBe(true);
+    expect(nearMiss(rect, 100 - TOUCH_SLOP_PX, 150)).toBe(true);
+    expect(nearMiss(rect, 310, 90)).toBe(true);
+  });
+
+  it('is never a press inside, or past the slop', () => {
+    expect(nearMiss(rect, 200, 150)).toBe(false);
+    expect(nearMiss(rect, 300, 200)).toBe(false);
+    expect(nearMiss(rect, 200, 201 + TOUCH_SLOP_PX)).toBe(false);
   });
 });
 

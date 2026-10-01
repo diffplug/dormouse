@@ -12,7 +12,7 @@ import {
 } from '../lib/mouse-selection';
 import { spanOfSelection, type BreakKind, type EditorFormat, type Piece, type Rendering, type Span } from '../lib/copy-text';
 import { duplicateFormats, editorFormats, editorRendering, flipCopyBreak, formatRenderings, isEdited, setCopyFormat, setCopyScope, type FormatRenderings } from '../lib/copy-editor';
-import { placeCopyEditor, selectionBand, type CopyEditorSide } from '../lib/copy-editor-placement';
+import { nearMiss, placeCopyEditor, selectionBand, type CopyEditorSide } from '../lib/copy-editor-placement';
 import { copySelection } from '../lib/copy-selection';
 import { setPortalAnchor } from '../lib/dom';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
@@ -85,9 +85,10 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
   // A hidden Workspace consumes no window input (docs/specs/layout.md →
   // "Workspaces"); the selection stays in the store for the way back.
   const workspaceActive = useContext(WorkspaceActiveContext);
-  const { selection, copyEditor, copyFlash, programCopy } = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
+  const { selection, copyEditor, copyFlash, copyFailed, programCopy } = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
   if (!workspaceActive || !copyEditor || !selection) return null;
-  return <OpenCopyEditor terminalId={terminalId} selection={selection} editor={copyEditor} copyFlash={copyFlash} programCopy={programCopy} />;
+  const copyState: CopyState = copyFlash ? 'copied' : copyFailed ? 'failed' : 'idle';
+  return <OpenCopyEditor terminalId={terminalId} selection={selection} editor={copyEditor} copyState={copyState} programCopy={programCopy} />;
 }
 
 /** What placement reads, as last rendered and measured. */
@@ -127,11 +128,11 @@ const noHeight = () => 0;
 const sameKey = (a: readonly unknown[], b: readonly unknown[]) => a.every((v, n) => v === b[n]);
 
 /** Mounted while the editor is open, so closing drops its motion and side. */
-const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, editor, copyFlash, programCopy }: {
+const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, editor, copyState, programCopy }: {
   terminalId: string;
   selection: Selection;
   editor: CopyEditorState;
-  copyFlash: EditorFormat | null;
+  copyState: CopyState;
   programCopy: string | null;
 }) {
   const touchUi = useContext(TouchUiContext);
@@ -290,7 +291,31 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       () => { if (frame !== null) cancelAnimationFrame(frame); },
     ];
     for (const unsubscribe of unsubscribes) signal.addEventListener('abort', unsubscribe);
+    // A touch or pen press just outside the editor is a missed tap on it:
+    // swallowed, with its compatibility mousedown and click, before anything
+    // under it sees them, so it neither dismisses the editor, starts a
+    // selection, nor presses a control there. A mouse aims; its press dismisses.
+    let swallowed = false;
+    const swallow = (ev: Event) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+    };
+    window.addEventListener('pointerdown', (ev) => {
+      const root = rootRef.current;
+      swallowed = ev.pointerType !== 'mouse' && !!root && root.dataset.copyEditorSide !== undefined
+        && nearMiss(root.getBoundingClientRect(), ev.clientX, ev.clientY);
+      if (swallowed) swallow(ev);
+    }, { capture: true, signal });
+    // Until the next press. A keyboard or scripted click (`detail` 0) has no
+    // press to belong to.
+    window.addEventListener('click', (ev) => {
+      if (swallowed && ev.detail !== 0) swallow(ev);
+    }, { capture: true, signal });
     window.addEventListener('mousedown', (ev) => {
+      if (swallowed) {
+        swallow(ev);
+        return;
+      }
       const target = ev.target as HTMLElement | null;
       if (!target?.closest(`[data-copy-editor-for="${terminalId}"]`)) setSelection(terminalId, null);
     }, { capture: true, signal });
@@ -303,10 +328,11 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     : <span className="min-w-0 overflow-hidden whitespace-nowrap text-xs text-muted">{node}</span>);
 
   // The header and footer never wrap. The chrome probe lays them out as wide
-  // as any format shows them: a `*` on one format, the Copy button's check,
-  // and the widest count. In a window or side narrower than that, the key
-  // hints and the legend clip first, so the segments, the count, and Copy
-  // still show; the essential probe, `bare`, lays out those alone.
+  // as any format shows them: a `*` on one format, the widest count, and the
+  // Copy button, whose labels are stacked to its widest. In a window or side
+  // narrower than that, the key hints and the legend clip first, so the
+  // segments, the count, and Copy still show; the essential probe, `bare`,
+  // lays out those alone.
   const header = (ref: Ref<HTMLDivElement> | undefined, starred: EditorFormat | null, bare = false) => {
     const keys = hints(bare);
     return (
@@ -336,30 +362,38 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       </div>
     );
   };
-  const footer = (ref: Ref<HTMLDivElement> | undefined, count: string, flash: boolean, bare = false) => {
+  // On touch, Copy is a full-width row of its own, a thumb's height.
+  const footer = (ref: Ref<HTMLDivElement> | undefined, count: string, state: CopyState, bare = false) => {
     const keys = hints(bare);
+    const copy = (
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={COPY_LABEL[state]}
+        data-copy-state={state}
+        onClick={() => void copySelection(terminalId, { touch: touchUi })}
+        className={modalActionButton({ tone: 'primary', class: touchUi ? 'h-11 w-full shrink-0 text-sm' : 'shrink-0 py-0.5' })}
+      >
+        <CopyLabel state={state} iconSize={touchUi ? 16 : 12} />
+      </button>
+    );
     return (
-      <div ref={ref} className="flex shrink-0 items-center gap-3 border-t border-border px-2 py-1 text-xs text-muted">
-        {!bare && (
-          <span className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
-            <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
-            <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
-            <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
-            {expanded && <span><span className={clsx(COPY_EXPANDED_TEXT_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
-          </span>
-        )}
-        {nudgeable && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
-        <span className="ml-auto shrink-0 whitespace-nowrap">{count}</span>
-        {keys(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
-        <button
-          type="button"
-          tabIndex={-1}
-          onClick={() => void copySelection(terminalId)}
-          className={modalActionButton({ tone: 'primary', class: 'flex shrink-0 items-center gap-1 py-0.5' })}
-        >
-          {flash && <CheckIcon size={12} weight="bold" />}
-          Copy
-        </button>
+      <div ref={ref} className={clsx('flex shrink-0 flex-col gap-1.5 border-t border-border px-2 py-1 text-xs text-muted', touchUi && 'pb-2')}>
+        <div className="flex min-w-0 items-center gap-3">
+          {!bare && (
+            <span className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap">
+              <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
+              <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
+              <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
+              {expanded && <span><span className={clsx(COPY_EXPANDED_TEXT_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
+            </span>
+          )}
+          {nudgeable && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
+          <span className="ml-auto shrink-0 whitespace-nowrap">{count}</span>
+          {keys(<Shortcut>{COPY_CHORD_LABEL}</Shortcut>)}
+          {!touchUi && copy}
+        </div>
+        {touchUi && copy}
       </div>
     );
   };
@@ -369,7 +403,7 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       ref={rootRef}
       data-copy-editor-for={terminalId}
       style={ROOT_STYLE}
-      className={modalSurface({ padding: 'none', elevation: 'modal', class: 'flex flex-col overflow-hidden border-foreground/20 text-sm' })}
+      className={modalSurface({ padding: 'none', elevation: 'modal', class: 'flex touch-manipulation flex-col overflow-hidden border-foreground/20 text-sm' })}
       // Portaled, its React events still bubble to the pane: keep its presses
       // from focusing the pane and its right-click from opening the terminal
       // context. It never takes focus, so keys stay with the pane (§4.5), but
@@ -384,17 +418,17 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       <div ref={previewRef} className={PREVIEW_CLASS}>
         <LinedPreview rendering={rendering} onFlip={onFlip} />
       </div>
-      {footer(footerRef, `${lines} ${lines === 1 ? 'line' : 'lines'} · ${rendering.text.length} ch`, !!copyFlash)}
+      {footer(footerRef, `${lines} ${lines === 1 ? 'line' : 'lines'} · ${rendering.text.length} ch`, copyState)}
       <div ref={widthProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 w-max">
         <WidthProbe renderings={renderings} />
       </div>
       <div ref={chromeProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 flex w-max flex-col">
         {header(undefined, formats[0])}
-        {footer(undefined, widestCount, true)}
+        {footer(undefined, widestCount, 'idle')}
       </div>
       <div ref={essentialProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 flex w-max flex-col">
         {header(undefined, formats[0], true)}
-        {footer(undefined, widestCount, true, true)}
+        {footer(undefined, widestCount, 'idle', true)}
       </div>
       <div ref={heightProbeRef} aria-hidden inert className={clsx(PREVIEW_CLASS, 'invisible absolute left-0 top-0')}>
         <LinedPreview rendering={rendering} onFlip={noFlip} />
@@ -412,6 +446,26 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
     </>
   );
 });
+
+/** What a copy did, as the Copy button shows it. */
+type CopyState = 'idle' | 'copied' | 'failed';
+const COPY_STATES: readonly CopyState[] = ['idle', 'copied', 'failed'];
+const COPY_LABEL: Record<CopyState, string> = { idle: 'Copy', copied: 'Copied', failed: 'Couldn’t copy' };
+
+/** Every state's label stacked in one grid cell, only `state`'s shown, so the
+ *  button is as wide as its widest and never shifts as a copy lands. */
+function CopyLabel({ state, iconSize }: { state: CopyState; iconSize: number }) {
+  return (
+    <span className="grid justify-items-center">
+      {COPY_STATES.map((s) => (
+        <span key={s} className={clsx('col-start-1 row-start-1 flex items-center gap-1 whitespace-nowrap', s !== state && 'invisible')}>
+          {s === 'copied' && <CheckIcon size={iconSize} weight="bold" />}
+          {COPY_LABEL[s]}
+        </span>
+      ))}
+    </span>
+  );
+}
 
 function Segment<T extends string | number>({ value, items, onPick }: {
   value: T;

@@ -7,11 +7,15 @@ import { copySelection } from './copy-selection';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
+  COPY_FAILED_MS,
+  COPY_FLASH_MS,
+  failCopy,
   flashCopy,
   getMouseSelectionState,
   offerProgramCopy,
   setSelection,
   subscribeToMouseSelection,
+  TOUCH_COPY_FLASH_MS,
   type Selection,
 } from './mouse-selection';
 import { CLAUDE_REPLY, fakeXterm } from './copy-text-fixtures';
@@ -161,23 +165,60 @@ describe('copySelection', () => {
     }
   });
 
-  it('retains the selection without a flash when the write fails', async () => {
-    vi.mocked(writeTextToClipboard).mockResolvedValue(false);
-    select({});
-    await copySelection(ID);
-    expect(getMouseSelectionState(ID).copyFlash).toBeNull();
-    expect(getMouseSelectionState(ID).selection).not.toBeNull();
+  it('says a failed write failed, keeping the selection for a retry', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(writeTextToClipboard).mockResolvedValue(false);
+      select({});
+      await copySelection(ID);
+      expect(getMouseSelectionState(ID)).toMatchObject({ copyFlash: null, copyFailed: true });
+      vi.advanceTimersByTime(COPY_FAILED_MS);
+      expect(getMouseSelectionState(ID)).toMatchObject({ copyFlash: null, copyFailed: false });
+      expect(getMouseSelectionState(ID).selection).not.toBeNull();
+      // A retry that lands confirms as any copy does.
+      vi.mocked(writeTextToClipboard).mockResolvedValue(true);
+      failCopy(ID);
+      await copySelection(ID);
+      expect(getMouseSelectionState(ID)).toMatchObject({ copyFlash: 'auto', copyFailed: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('does not flash a newer selection when an earlier copy finishes', async () => {
+  it('holds the flash longer on touch, with a tap of vibration', async () => {
+    vi.useFakeTimers();
+    const vibrate = vi.fn();
+    vi.stubGlobal('navigator', { vibrate });
+    try {
+      vi.mocked(writeTextToClipboard).mockResolvedValue(true);
+      select({});
+      await copySelection(ID, { touch: true });
+      expect(vibrate).toHaveBeenCalledWith(10);
+      vi.advanceTimersByTime(COPY_FLASH_MS);
+      expect(getMouseSelectionState(ID).copyFlash).toBe('auto');
+      vi.advanceTimersByTime(TOUCH_COPY_FLASH_MS - COPY_FLASH_MS);
+      expect(getMouseSelectionState(ID).selection).toBeNull();
+      // Desktop keeps the short flash, and never vibrates.
+      select({});
+      await copySelection(ID);
+      vi.advanceTimersByTime(COPY_FLASH_MS);
+      expect(getMouseSelectionState(ID).selection).toBeNull();
+      expect(vibrate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([true, false])('neither flashes nor fails a newer selection when an earlier copy finishes (copied: %s)', async (copied) => {
     let complete!: (copied: boolean) => void;
     vi.mocked(writeTextToClipboard).mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
     select({});
     const pending = copySelection(ID);
     beginDrag(ID, { row: 9, col: 1, altKey: false, startedInScrollback: false });
-    complete(true);
+    complete(copied);
     await pending;
-    expect(getMouseSelectionState(ID).copyFlash).toBeNull();
+    expect(getMouseSelectionState(ID)).toMatchObject({ copyFlash: null, copyFailed: false });
     expect(getMouseSelectionState(ID).selection?.startRow).toBe(9);
   });
 });

@@ -428,7 +428,8 @@ function withinTapSlop(tap: PendingTap, event: PointerEvent<HTMLElement>): boole
 /** A press inside a portaled descendant (the copy editor) reaches the host's
  *  capture handlers only through React. It is not pane content, so it begins no
  *  touch mode, tap, or keyboard dismissal. Only the press is checked: the later
- *  events of a press the host took are keyed by its pointer id. */
+ *  events of a press are keyed by its pointer id, so a press the host took
+ *  keeps them wherever they land, and a portaled press's are skipped. */
 function isPortaledTarget(event: SyntheticEvent<HTMLElement>): boolean {
   return !event.currentTarget.contains(event.target as Node);
 }
@@ -540,6 +541,15 @@ export function MobileTerminalUi({
   const cursorPointerIdRef = useRef<number | null>(null);
   const cursorPointerTargetRef = useRef<EventTarget | null>(null);
   const pendingTapRef = useRef<PendingTap | null>(null);
+  /** Pointers pressed in a portaled descendant, whose moves and release are
+   *  not the host's either. */
+  const portaledPointersRef = useRef(new Set<number>());
+  /** Whether `event` belongs to a portaled press, forgetting it once `ended`. */
+  const ofPortaledPress = useCallback((event: PointerEvent<HTMLDivElement>, ended: boolean): boolean => {
+    const portaled = portaledPointersRef.current.has(event.pointerId);
+    if (portaled && ended) portaledPointersRef.current.delete(event.pointerId);
+    return portaled;
+  }, []);
   // Cancelled on unmount, including after test DOM teardown.
   const [blurRetries] = useState(() => new RetrySchedule());
   const [focusRetries] = useState(() => new RetrySchedule());
@@ -766,7 +776,12 @@ export function MobileTerminalUi({
   }, []);
 
   const handlePanePointerDownCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (isPortaledTarget(event) || isGestureDialogTarget(event.target)) return;
+    if (isPortaledTarget(event)) {
+      portaledPointersRef.current.add(event.pointerId);
+      return;
+    }
+    portaledPointersRef.current.delete(event.pointerId);
+    if (isGestureDialogTarget(event.target)) return;
     // A tap acknowledges the active Session, a drag or swipe never
     // (`docs/specs/alert.md` -> Engagement): judged on release, and tracked in
     // capture on the host, before any mode below consumes the press.
@@ -805,6 +820,7 @@ export function MobileTerminalUi({
   }, [activeSessionId, blurPaneTextInputs, clearGestureCompletionTimer, commitGestureState, interactive, touchMode]);
 
   const handlePanePointerMoveCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (ofPortaledPress(event, false)) return;
     const tap = pendingTapRef.current;
     if (tap?.pointerId === event.pointerId && !withinTapSlop(tap, event)) pendingTapRef.current = null;
     if (touchMode === 'cursor' && cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
@@ -847,7 +863,7 @@ export function MobileTerminalUi({
       return;
     }
     commitGestureState(nextState);
-  }, [activeSessionId, commitGestureState, executeGestureAction, onGestureScroll, scheduleGestureCompletionClear, touchMode]);
+  }, [activeSessionId, commitGestureState, executeGestureAction, ofPortaledPress, onGestureScroll, scheduleGestureCompletionClear, touchMode]);
 
   const endEdgeScroll = useCallback((event: PointerEvent<HTMLDivElement>): boolean => {
     if (edgeScrollRef.current?.pointerId !== event.pointerId) return false;
@@ -859,6 +875,7 @@ export function MobileTerminalUi({
   }, []);
 
   const handlePanePointerUpCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (ofPortaledPress(event, true)) return;
     const tap = pendingTapRef.current;
     if (tap?.pointerId === event.pointerId) {
       pendingTapRef.current = null;
@@ -902,7 +919,7 @@ export function MobileTerminalUi({
     commitGestureState(completionState ?? result.state);
     executeGestureAction(result.action);
     if (completionState) scheduleGestureCompletionClear();
-  }, [commitGestureState, endEdgeScroll, executeGestureAction, scheduleGestureCompletionClear]);
+  }, [commitGestureState, endEdgeScroll, executeGestureAction, ofPortaledPress, scheduleGestureCompletionClear]);
 
   const handlePaneFocusStartCapture = useCallback((event: SyntheticEvent<HTMLDivElement>) => {
     if (isPortaledTarget(event)) return;
@@ -910,6 +927,7 @@ export function MobileTerminalUi({
   }, [blurPaneTextInputs]);
 
   const handlePanePointerCancelCapture = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    if (ofPortaledPress(event, true)) return;
     if (pendingTapRef.current?.pointerId === event.pointerId) pendingTapRef.current = null;
     if (endEdgeScroll(event)) return;
     if (cursorPointerIdRef.current === event.pointerId && isTouchLikePrimaryPointer(event)) {
@@ -934,7 +952,7 @@ export function MobileTerminalUi({
     }
     if (state.phase === 'idle' || state.pointerId !== event.pointerId) return;
     commitGestureState(MOBILE_GESTURE_IDLE_STATE);
-  }, [commitGestureState, endEdgeScroll]);
+  }, [commitGestureState, endEdgeScroll, ofPortaledPress]);
 
   return (
     <TouchUiContext.Provider value={true}>

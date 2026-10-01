@@ -14,6 +14,7 @@ vi.mock('./copy-editor-measure', () => ({ measureNaturalWidth: vi.fn(), measureC
 import { cfg } from '../cfg';
 import { copySelection } from '../lib/copy-selection';
 import { followCopySelection, openCopyEditor } from '../lib/copy-editor';
+import { TOUCH_SLOP_PX } from '../lib/copy-editor-placement';
 import { CLAUDE_REPLY, fakeXterm } from '../lib/copy-text-fixtures';
 import { anchoredTarget } from '../lib/dom';
 import {
@@ -21,6 +22,7 @@ import {
   beginDrag,
   bumpRenderTick,
   endDrag,
+  failCopy,
   flashCopy,
   getMouseSelectionState,
   offerProgramCopy,
@@ -31,6 +33,7 @@ import { CopyEditor } from './CopyEditor';
 import { createHeightMeasurer, measureChromeWidth, measureNaturalWidth } from './copy-editor-measure';
 import { TouchUiContext } from './touch-ui-context';
 import { installFakeFrames } from './motion-test-utils';
+import { pointerEvent } from './wall/wall-test-utils';
 import { createWorkspaceMotion } from './workspace-motion';
 import { LayoutFramesContext, WorkspaceActiveContext, WorkspaceIdContext, ZoomedIdContext } from './wall/wall-context';
 
@@ -72,7 +75,12 @@ const frame = (ms = 16) => frames.advance(ms);
 const editor = () => document.body.querySelector<HTMLElement>('[data-copy-editor-for="term-1"]');
 /** What the editor shows, its inert probes left out. */
 const text = () => Array.from(editor()?.children ?? [], (part) => (part.hasAttribute('inert') ? '' : part.textContent)).join('');
-const button = (label: string) => Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === label && !b.closest('[inert]'))!;
+/** A shown button by its label: its accessible name, else its text. */
+const button = (label: string) => Array.from(editor()!.querySelectorAll('button'))
+  .find((b) => (b.getAttribute('aria-label') ?? b.textContent) === label && !b.closest('[inert]'))!;
+/** The Copy button, and the label it shows of the ones it stacks. */
+const copyButton = () => editor()!.querySelector<HTMLButtonElement>(':scope > div:not([inert]) [data-copy-state]')!;
+const shownLabel = () => Array.from(copyButton().querySelectorAll('span > span')).find((l) => !l.classList.contains('invisible'))?.textContent;
 /** The probe laying out the header and footer, the inert part with segments. */
 const chromeProbe = () => Array.from(editor()!.querySelectorAll('[inert]')).find((part) => part.querySelector('[aria-pressed]'))!;
 const side = () => editor()?.dataset.copyEditorSide;
@@ -504,7 +512,20 @@ describe('CopyEditor: preview and controls', () => {
     drag(2, 2, 5, 27);
     render();
     act(() => button('Copy').click());
-    expect(copySelection).toHaveBeenCalledWith('term-1');
+    expect(copySelection).toHaveBeenCalledWith('term-1', { touch: false });
+  });
+
+  it('gives touch a full-width Copy row a thumb tall, with no key hints', () => {
+    drag(2, 2, 5, 27);
+    render(<TouchUiContext.Provider value><CopyEditor terminalId="term-1" /></TouchUiContext.Provider>);
+    expect(copyButton().className).toContain('h-11');
+    expect(copyButton().className).toContain('w-full');
+    // A row of its own, under the legend and the count.
+    expect(copyButton().parentElement!.lastElementChild).toBe(copyButton());
+    expect(copyButton().previousElementSibling!.textContent).toContain('kept');
+    expect(editor()!.className).toContain('touch-manipulation');
+    act(() => copyButton().click());
+    expect(copySelection).toHaveBeenCalledWith('term-1', { touch: true });
   });
 });
 
@@ -553,6 +574,23 @@ describe('CopyEditor: flash', () => {
     expect(editor()).toBeNull();
   });
 
+  it('says Copied, then Couldn’t copy, in place, every label laid out in every state', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const labels = () => Array.from(copyButton().querySelectorAll('span > span'), (l) => l.textContent);
+    expect(shownLabel()).toBe('Copy');
+    expect(labels()).toEqual(['Copy', 'Copied', 'Couldn’t copy']);
+    act(() => flashCopy('term-1', 'auto'));
+    expect(shownLabel()).toBe('Copied');
+    expect(copyButton().getAttribute('aria-label')).toBe('Copied');
+    expect(copyButton().querySelector('span > span:not(.invisible) svg')).not.toBeNull();
+    expect(labels()).toEqual(['Copy', 'Copied', 'Couldn’t copy']);
+    act(() => vi.advanceTimersByTime(700));
+    drag(5, 2, 5, 12);
+    act(() => failCopy('term-1'));
+    expect(shownLabel()).toBe('Couldn’t copy');
+    expect(getMouseSelectionState('term-1').selection).not.toBeNull();
+  });
+
   it('keeps a newer copied selection for its own confirmation duration', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     act(() => flashCopy('term-1', 'auto'));
@@ -562,6 +600,62 @@ describe('CopyEditor: flash', () => {
     act(() => vi.advanceTimersByTime(300));
     expect(getMouseSelectionState('term-1').selection?.startRow).toBe(9);
     act(() => vi.advanceTimersByTime(400));
+    expect(getMouseSelectionState('term-1').selection).toBeNull();
+  });
+});
+
+describe('CopyEditor: a missed tap', () => {
+  // The editor opens at x 104..896, y 114..264.
+  beforeEach(() => {
+    drag(2, 25, 5, 27);
+    render();
+    editor()!.getBoundingClientRect = () => new DOMRect(104, 114, 792, 150);
+  });
+
+  /** A press at (x, y) on an element under it, and whether that element saw it. */
+  function press(x: number, y: number, pointerType = 'touch'): { down: PointerEvent; reached: boolean } {
+    const under = document.body.appendChild(document.createElement('div'));
+    let reached = false;
+    under.addEventListener('pointerdown', () => { reached = true; });
+    under.addEventListener('mousedown', () => { reached = true; });
+    under.addEventListener('click', () => { reached = true; });
+    const down = pointerEvent('pointerdown', { clientX: x, clientY: y, pointerType });
+    act(() => { under.dispatchEvent(down); });
+    // The compatibility mousedown, where the engine sends one, and the click.
+    act(() => { under.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientX: x, clientY: y })); });
+    act(() => { under.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y, detail: 1 })); });
+    under.remove();
+    return { down, reached };
+  }
+
+  it('swallows a touch press just outside the editor, keeping it open', () => {
+    // 8px under its bottom edge, and 15px off its left.
+    for (const [x, y] of [[500, 272], [89, 200]]) {
+      const { down, reached } = press(x, y);
+      expect(down.defaultPrevented).toBe(true);
+      expect(reached).toBe(false);
+      expect(getMouseSelectionState('term-1').selection).not.toBeNull();
+    }
+    // A keyboard click (`detail` 0) between the press and its own click goes through.
+    const clicked = vi.fn();
+    document.body.addEventListener('click', clicked);
+    act(() => { document.body.dispatchEvent(pointerEvent('pointerdown', { clientX: 500, clientY: 272 })); });
+    act(() => { document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })); });
+    expect(clicked).toHaveBeenCalledTimes(1);
+    act(() => { document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); });
+    expect(clicked).toHaveBeenCalledTimes(1);
+    document.body.removeEventListener('click', clicked);
+  });
+
+  it('lets a touch press past the slop through, which dismisses', () => {
+    const { down, reached } = press(500, 264 + TOUCH_SLOP_PX + 2);
+    expect(down.defaultPrevented).toBe(false);
+    expect(reached).toBe(true);
+    expect(getMouseSelectionState('term-1').selection).toBeNull();
+  });
+
+  it('dismisses on a mouse press just outside, which aims', () => {
+    expect(press(500, 272, 'mouse').reached).toBe(true);
     expect(getMouseSelectionState('term-1').selection).toBeNull();
   });
 });

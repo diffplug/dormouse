@@ -5,6 +5,7 @@ import {
   beginDrag,
   endDrag,
   extendSelectionToToken,
+  failCopy,
   flashCopy,
   getMouseSelectionSnapshot,
   getMouseSelectionState,
@@ -42,6 +43,7 @@ describe('mouse-selection: default state', () => {
       copyEditor: null,
       programCopy: null,
       copyFlash: null,
+      copyFailed: false,
     });
   });
 });
@@ -401,6 +403,44 @@ describe('mouse-selection: flashCopy race', () => {
     expect(getMouseSelectionState('a')).toMatchObject({ selection: { startRow: 10 }, copyFlash: 'exact' });
     vi.advanceTimersByTime(300);
     expect(getMouseSelectionState('a')).toMatchObject({ selection: null, copyFlash: null });
+  });
+});
+
+describe('mouse-selection: failCopy', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const select = () => setSelection('a', { startRow: 0, startCol: 0, endRow: 1, endCol: 4, shape: 'linewise', dragging: false, startedInScrollback: false });
+
+  it('says so for its duration, keeping the selection', () => {
+    vi.useFakeTimers();
+    select();
+    failCopy('a', 500);
+    expect(getMouseSelectionState('a').copyFailed).toBe(true);
+    vi.advanceTimersByTime(500);
+    expect(getMouseSelectionState('a')).toMatchObject({ copyFailed: false, selection: { endRow: 1 } });
+  });
+
+  it('times each failure from its own copy, and goes with the selection or a flash', () => {
+    vi.useFakeTimers();
+    select();
+    failCopy('a', 500);
+    vi.advanceTimersByTime(300);
+    failCopy('a', 500);
+    vi.advanceTimersByTime(300);
+    expect(getMouseSelectionState('a').copyFailed).toBe(true);
+    flashCopy('a', 'auto', 500);
+    expect(getMouseSelectionState('a').copyFailed).toBe(false);
+    select();
+    failCopy('a');
+    setSelection('a', null);
+    expect(getMouseSelectionState('a').copyFailed).toBe(false);
+  });
+
+  it('is a no-op without a selection', () => {
+    failCopy('a');
+    expect(getMouseSelectionState('a').copyFailed).toBe(false);
   });
 });
 

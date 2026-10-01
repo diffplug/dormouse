@@ -359,6 +359,38 @@ describe('MobileTerminalUi portaled descendants', () => {
     expect(acknowledge).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(input);
   });
+
+  const withEditor = (mode: MobileTerminalTouchMode, sessions: MobileTerminalSessionItem[] = []) => {
+    const ui = renderUi({
+      activeTouchMode: mode,
+      sessions,
+      terminal: <div data-testid="terminal"><PortalAnchoredButton /></div>,
+    });
+    return { ...ui, editor: document.querySelector<HTMLButtonElement>('[data-portaled]')! };
+  };
+
+  it('never lets a press in one finish an earlier host press on its pointer', () => {
+    const acknowledge = vi.spyOn(activity, 'acknowledgeSession');
+    const { terminal, editor } = withEditor('selection', [{ id: 'pane-a', title: 'shell', active: true, episode: null }]);
+    // A host press whose release went elsewhere, then the same pointer on the editor.
+    act(() => { terminal.dispatchEvent(pointerEvent('pointerdown', { pointerType: 'mouse', pointerId: 1 })); });
+    act(() => {
+      editor.dispatchEvent(pointerEvent('pointerdown', { pointerType: 'mouse', pointerId: 1 }));
+      editor.dispatchEvent(pointerEvent('pointermove', { pointerType: 'mouse', pointerId: 1 }));
+      editor.dispatchEvent(pointerEvent('pointerup', { pointerType: 'mouse', pointerId: 1 }));
+    });
+    expect(acknowledge).not.toHaveBeenCalled();
+  });
+
+  it('keeps the release of a press the host took, though it lands in one', () => {
+    const { terminal, editor } = withEditor('gestures');
+    act(() => { terminal.dispatchEvent(pointerEvent('pointerdown')); });
+    expect(setPointerCapture).toHaveBeenCalledWith(7);
+    const up = pointerEvent('pointerup');
+    act(() => { editor.dispatchEvent(up); });
+    expect(up.defaultPrevented).toBe(true);
+    expect(releasePointerCapture).toHaveBeenCalledWith(7);
+  });
 });
 
 describe('MobileTerminalUi session list', () => {

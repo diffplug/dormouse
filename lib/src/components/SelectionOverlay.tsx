@@ -1,3 +1,4 @@
+import { clsx } from 'clsx';
 import { useContext, useSyncExternalStore, type CSSProperties } from 'react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
@@ -12,8 +13,9 @@ import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
 import { computeRects, rectsToPath } from '../lib/selection-geometry';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { IS_MAC } from '../lib/platform';
+import { motionIsInstant } from '../lib/ui-geometry';
 import { useFocusRingColor } from '../lib/themes/use-focus-ring-color';
-import { COPY_EXPANDED_PATH_CLASS, PopupButtonRow } from './design';
+import { COPY_EXPANDED_PATH_CLASS, COPY_FLASH_PATH_CLASS, PopupButtonRow } from './design';
 import { TouchUiContext } from './touch-ui-context';
 
 interface Props {
@@ -114,6 +116,16 @@ export function SelectionOverlay({ terminalId }: Props) {
                 className={COPY_EXPANDED_PATH_CLASS}
                 strokeWidth={1.5}
                 strokeDasharray="4 3"
+              />
+            )}
+            {/* A confirmed copy fills what it copied, where the eye is
+                rather than under the finger (spec §4.5); still under
+                instant motion. */}
+            {state.copyFlash && (
+              <path
+                d={pathD}
+                data-copy-flash=""
+                className={clsx(COPY_FLASH_PATH_CLASS, !motionIsInstant() && 'animate-copy-flash-fill')}
               />
             )}
             <path

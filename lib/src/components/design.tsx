@@ -48,6 +48,9 @@ export const AUTO_NAME_CLASS = 'italic';
  *  preview, and its dashed outline over the terminal (an SVG path). */
 export const COPY_EXPANDED_TEXT_CLASS = 'rounded-[2px] bg-success/15 underline decoration-success decoration-dotted underline-offset-2';
 export const COPY_EXPANDED_PATH_CLASS = 'fill-success/15 stroke-success';
+/** A copied selection's fill while its copy confirms, the copy-confirm accent
+ *  tint (an SVG path; `docs/specs/mouse-and-clipboard.md` §4.5). */
+export const COPY_FLASH_PATH_CLASS = 'fill-header-active-bg/25';
 
 /** A preview slot's label in its Pane header and Door, italic as an editor's
  *  preview tab is (`docs/specs/layout.md` → "Pane header"). */

@@ -25,6 +25,15 @@ const HYSTERESIS_PX = 24;
 /** The overlay's height cap, as a fraction of the usable viewport. */
 const OVERLAY_MAX_FRACTION = 0.6;
 
+/** A touch or pen press this close outside the editor is a missed tap on it. */
+export const TOUCH_SLOP_PX = 16;
+
+/** Whether (x, y) is outside `rect` but within `TOUCH_SLOP_PX` of it. */
+export function nearMiss(rect: { left: number; top: number; right: number; bottom: number }, x: number, y: number): boolean {
+  const within = (slop: number) => x >= rect.left - slop && x <= rect.right + slop && y >= rect.top - slop && y <= rect.bottom + slop;
+  return within(TOUCH_SLOP_PX) && !within(0);
+}
+
 /** A vertical extent in viewport y. */
 export interface Band {
   top: number;
