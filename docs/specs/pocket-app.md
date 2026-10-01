@@ -547,10 +547,13 @@ injected timer, clock, and visibility seams in
 ## The path the session takes
 
 **Pocket offers a direct path once the connection outcome says `ok`**, over the
-browser's own `RTCPeerConnection` (its ICE servers:
+browser's own `RTCPeerConnection` (ICE servers by deployment:
 [remote-network.md](./remote-network.md) → Anywhere), and keeps the session
 on the relay when the browser has none or the Burrow declines
-([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
+([remote-api.md](./remote-api.md) → Direct path owns the whole protocol) —
+**unless the outcome says `directOnly`**, where the connect answers only once
+the direct path carries the session
+([remote-network.md](./remote-network.md) → Local networks).
 
 **Must retire the previous session — its peer, its channel, and its pending
 requests — immediately before the replacement's connection request goes out, and
@@ -578,8 +581,8 @@ fresh handshake and one WebAuthn prompt. Before the switch a failed channel
 costs nothing.
 
 Source of truth: `PocketClient.connect` in
-`lib/src/remote/client/pocket-client.ts`; `selfHostDirectPeer` in
-`lib/src/remote/client/browser-direct-peer.ts`; `ClientSessionCore.transportPath` /
+`lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in
+`lib/src/remote/pocket-app/deployment.ts`; `ClientSessionCore.transportPath` /
 `setOnTransportChanged` in `lib/src/remote/client/session-core.ts`; `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in
 `lib/src/remote/pocket-app/views.tsx`.
@@ -651,7 +654,8 @@ One lib-owned bundle, two deployments:
   selfhost auth never depends on dormouse.sh existing.
 * **Hosted:** the relay Worker serves it at the root of `relay.dormouse.sh`
   beside the Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay"); rpId is
-  that host.
+  that host. The staging adds `deployment.json`, which tells the bundle Hosted
+  serves it ([remote-network.md](./remote-network.md) → Anywhere).
 
 **The website stays fully static — playground and marketing pages — in both
 worlds**, sharing all terminal UI through `lib` and never duplicating Pocket

@@ -168,6 +168,29 @@ function updatesItself(status: Pick<BurrowConsoleStatus, 'relayMode'>): boolean 
 }
 
 /**
+ * What the relay socket carries under `policy`: under Local networks never
+ * terminal traffic, which a paired phone's session may not take through the
+ * relay (`docs/specs/remote-network.md` -> "Local networks").
+ */
+function persistentRelayCarries(policy: NetworkPolicy): string {
+  switch (policy.level) {
+    case 'local':
+      return 'Encrypted handshakes and one-time links, requests for setup codes and the push device list. Never terminal traffic.';
+    case 'anywhere':
+      return 'Encrypted handshakes and one-time links, requests for setup codes and the push device list, and terminal traffic when a phone can’t connect directly.';
+    default:
+      return 'Encrypted handshakes, requests for setup codes and the push device list, and terminal traffic when a phone can’t connect directly.';
+  }
+}
+
+/** Where the phone row says the phone is: on any network, an allowed one, or simply directly. */
+function phoneRowFor(policy: NetworkPolicy, persistent: boolean): string {
+  if (policy.level === 'relay') return 'Your phone, directly';
+  if (phoneOnAnyNetwork(policy)) return persistent ? 'Your phone, directly' : 'Your phone, on any network';
+  return persistent ? 'Your phone, directly, on an allowed network' : 'Your phone, on an allowed network';
+}
+
+/**
  * Every connection Dormouse opens on its own under `facts`, and nothing
  * else — each row backed by code (`docs/specs/remote-network.md` -> "Settings →
  * Network"). Terminals and browser panes reach whatever the user points them
@@ -178,53 +201,48 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
   if (policy.level === 'nothing') return [];
   const relay = hostOf(status.relayOrigin);
   const rows: ConnectionRow[] = [];
-  if (opensOneTimeLinks(policy)) {
-    rows.push(
-      {
-        to: relay,
-        when: 'Only while a one-time link is open',
-        carries: 'Encrypted handshakes. Never terminal traffic.',
-      },
-      // The transport's own predicate, so the row and the gathering never disagree.
-      ...(burrowUsesStun(policy.level)
-        ? [
-            {
-              to: CLOUDFLARE_STUN_HOST,
-              when: 'When a phone connects',
-              carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
-            },
-          ]
-        : []),
-      {
-        to: phoneOnAnyNetwork(policy) ? 'Your phone, on any network' : 'Your phone, on an allowed network',
-        when: 'While connected',
-        carries: 'Terminal traffic, end-to-end encrypted.',
-      },
-    );
+  const oneTime = opensOneTimeLinks(policy);
+  // The relay socket: a self-host build's, enrolled or about to be; a Hosted
+  // build's once it is enrolled, the one-time links riding the same origin.
+  const persistent = runsBurrow(policy.level) && (status.relayMode === 'self-host' || status.enrolled);
+  if (persistent) {
+    rows.push({
+      to: relay,
+      when: status.enrolled ? 'Always' : 'Always, once this computer is enrolled',
+      carries: persistentRelayCarries(policy),
+    });
+  } else if (oneTime) {
+    rows.push({
+      to: relay,
+      when: 'Only while a one-time link is open',
+      carries: 'Encrypted handshakes. Never terminal traffic.',
+    });
   }
-  if (runsBurrow(policy.level)) {
-    rows.push(
-      {
-        to: relay,
-        when: status.enrolled ? 'Always' : 'Always, once this computer is enrolled',
-        carries:
-          'Encrypted handshakes, requests for setup codes and the push device list, and terminal traffic when a phone can’t connect directly.',
-      },
-      {
-        to: 'Your phone, directly',
-        when: 'While connected',
-        carries: 'Terminal traffic, end-to-end encrypted.',
-      },
-    );
-    // Whether push is on is the application's default and every Workspace's
-    // own, some in other windows, so the row names the condition instead.
-    if (status.pairedClients > 0) {
-      rows.push({
-        to: `${relay} → your phone’s push service`,
-        when: 'When an alert goes unattended, where push is on',
-        carries: 'An end-to-end encrypted notification.',
-      });
-    }
+  // The transport's own predicate, so the row and the gathering never disagree.
+  if (oneTime && burrowUsesStun(policy.level)) {
+    rows.push({
+      to: CLOUDFLARE_STUN_HOST,
+      when: 'When a phone connects',
+      carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
+    });
+  }
+  // A phone reaches this computer directly wherever one can connect at all —
+  // not under Local networks with nothing allowed.
+  if (oneTime || policy.level === 'relay') {
+    rows.push({
+      to: phoneRowFor(policy, persistent),
+      when: 'While connected',
+      carries: 'Terminal traffic, end-to-end encrypted.',
+    });
+  }
+  // Whether push is on is the application's default and every Workspace's
+  // own, some in other windows, so the row names the condition instead.
+  if (persistent && status.pairedClients > 0) {
+    rows.push({
+      to: `${relay} → your phone’s push service`,
+      when: 'When an alert goes unattended, where push is on',
+      carries: 'An end-to-end encrypted notification.',
+    });
   }
   if (facts.managedVoice && status.relayMode === 'hosted') {
     rows.push({

@@ -163,6 +163,42 @@ describe('establish', () => {
   });
 });
 
+describe('awaitDirect', () => {
+  /** An established session whose offer has gone out, and the Burrow's half to answer it on. */
+  async function offered() {
+    const made = makeCore({ createDirectPeer: () => new FakeDirectNetwork({ opening: 'never' }).createOfferer() });
+    const { client, burrow } = await noiseSessionPair();
+    made.core.establish(ROUTE, client);
+    await flushMicrotasks();
+    openReceipt(burrow, made.sent.at(-1)!.ciphertext);
+    const reply = (value: object) => made.core.onFrame(ROUTE, 'transport', toBase64Url(burrow.sendControl({ ...value })));
+    return { ...made, reply };
+  }
+
+  it('answers false at once with no session, and when the attempt is given up', async () => {
+    expect(await makeCore().core.awaitDirect(LATER)).toBe(false);
+
+    const { core, reply } = await offered();
+    const waiting = core.awaitDirect(LATER);
+    reply({ v: 1, t: 'direct-decline' });
+    expect(await waiting).toBe(false);
+    // The session itself is still up: what to do about it is the owner's.
+    expect(core.establishedRoute).toBe(ROUTE);
+  });
+
+  it('answers false when the session ends or the time passes', async () => {
+    const ending = await offered();
+    const ended = ending.core.awaitDirect(LATER);
+    ending.reply(SESSION_END_V1);
+    expect(await ended).toBe(false);
+
+    const slow = await offered();
+    const timedOut = slow.core.awaitDirect(LATER);
+    slow.timers.fireAt(LATER);
+    expect(await timedOut).toBe(false);
+  });
+});
+
 describe('an established session', () => {
   it('carries protocol-v1 as application messages, both ways', async () => {
     const { core, sent } = makeCore();

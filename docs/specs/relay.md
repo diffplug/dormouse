@@ -777,8 +777,8 @@ memo invalidation — live in that burrow's spec.
   `noiseStaticPublicKey` this Burrow mints locally **before** the request and
   never sends in it —
   [remote-security-model.md](./remote-security-model.md)) through its
-  `BurrowStateStore`, then opens and maintains `GET /ws/burrow` — only under the
-  network policy's `relay`; any other level holds the enrollment without a socket
+  `BurrowStateStore`, then opens and maintains `GET /ws/burrow` under every
+  network policy level but `nothing`, which holds the enrollment without a socket
   ([remote-network.md](./remote-network.md) -> Policy). **Must persist the operator's
   `label` locally and disclose it only inside encrypted outcomes** — the request body
   carries the credential and the baked `origin`, nothing else

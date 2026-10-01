@@ -189,6 +189,35 @@ export const Anywhere: Story = {
   },
 };
 
+/** A Hosted build, enrolled, with one phone paired. */
+const HOSTED_ENROLLED = { ...UNENROLLED_STATUS, enrolled: true, serving: true, burrowId: 'burrow-6f1c2a90', connection: 'connected', pairedClients: 1 } as const;
+
+/**
+ * Enrolled under Local networks: Hosted always, but never terminal traffic —
+ * a paired phone connects only directly, on an allowed network.
+ */
+export const LocalNetworksEnrolled: Story = {
+  parameters: { primedBurrow: hosted({ level: 'local', allowed: WIFI.prefixes, autoUpdate: false }, HOSTED_ENROLLED) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/Never terminal traffic\./);
+    await canvas.findByText('Your phone, directly, on an allowed network');
+    await canvas.findByText('relay.dormouse.sh → your phone’s push service');
+    await expect(canvas.queryByText(/Only while a one-time link is open\./)).toBeNull();
+  },
+};
+
+/** Enrolled under Anywhere: a phone that can't connect directly relays through Hosted. */
+export const AnywhereEnrolled: Story = {
+  parameters: { primedBurrow: hosted(ANYWHERE_ON, HOSTED_ENROLLED) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await canvas.findByText(/terminal traffic when a phone can’t connect directly\./);
+    await canvas.findByText(CLOUDFLARE_STUN_HOST);
+    await canvas.findByText('Your phone, directly');
+  },
+};
+
 /** Walks the choices and checks that the connection list follows. */
 export const SwitchingLevels: Story = {
   parameters: { primedBurrow: hosted(nothingPolicy()) },

@@ -150,6 +150,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   #heartbeat: RelayHeartbeat | null = null;
   /** Cancels the one visibility subscription, held while a session or a heartbeat runs. */
   #cancelVisibility: (() => void) | null = null;
+  /** The one {@link awaitDirect} in flight, answered by the switch or by its end. */
+  #directWaiter: ((direct: boolean) => void) | null = null;
 
   /**
    * In-flight ceremony waiters, keyed by `${kind}:${id}:${step}`.
@@ -416,9 +418,41 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
       // same event, and the app must leave the wall either way.
       fatal: (reason) => this.loseBurrow(reason),
       isCurrent: () => this.#established === current(),
-      onTransportChanged: (path, cause) => this.#onTransportChanged?.(path, cause),
+      onTransportChanged: (path, cause) => {
+        if (path === 'direct') this.#settleDirect(true);
+        else if (cause !== null) this.#settleDirect(false);
+        this.#onTransportChanged?.(path, cause);
+      },
       setTimer: this.#setTimer,
     });
+  }
+
+  /**
+   * Whether the established session's direct path carries both directions
+   * within `timeoutMs`: `false` once the attempt is given up, the session
+   * ends, or the time passes — and at once with no session. For a session the
+   * Burrow holds to the direct path (`ConnectionOutcomeV1.directOnly`), whose
+   * owner sends no protocol-v1 until this answers `true`.
+   */
+  awaitDirect(timeoutMs: number): Promise<boolean> {
+    const established = this.#established;
+    if (!established) return Promise.resolve(false);
+    if (established.direct.path === 'direct') return Promise.resolve(true);
+    if (established.direct.relayCause !== null) return Promise.resolve(false);
+    this.#settleDirect(false);
+    return new Promise((resolve) => {
+      const cancel = this.#setTimer(() => this.#settleDirect(false), timeoutMs);
+      this.#directWaiter = (direct) => {
+        cancel();
+        resolve(direct);
+      };
+    });
+  }
+
+  #settleDirect(direct: boolean): void {
+    const waiter = this.#directWaiter;
+    this.#directWaiter = null;
+    waiter?.(direct);
   }
 
   /**
@@ -696,6 +730,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // stayed relayed would sit in the indicator through the whole of the next.
     if (direct?.relayCause) this.#onTransportChanged?.('relay', null);
     this.#established = null;
+    this.#settleDirect(false);
     this.#watchVisibility();
   }
 

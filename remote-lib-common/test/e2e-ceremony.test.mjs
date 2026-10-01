@@ -411,6 +411,7 @@ test('isConnectionRequestV1 is the presence proof and nothing else', async () =>
 
 test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denials', () => {
   assert.equal(isConnectionOutcomeV1({ ok: true, burrowLabel: 'Laptop' }), true);
+  assert.equal(isConnectionOutcomeV1({ ok: true, burrowLabel: 'Laptop', directOnly: true }), true);
   for (const code of ['pairing-required', 'presence-rejected', 'protocol-rejected', 'burrow-busy', 'burrow-error']) {
     assert.equal(isConnectionOutcomeV1({ ok: false, code }), true, code);
   }
@@ -421,6 +422,9 @@ test('isConnectionOutcomeV1 takes a labelled success or one of five fixed denial
     // failed is owner-local, so there is no wire spelling for it.
     ['an ACL miss as a denial code', { ok: false, code: 'client-not-paired' }],
     ['a denial code from the other ceremony', { ok: false, code: 'user-denied' }],
+    // Present only as `true`: a Client must never read a falsy spelling as one.
+    ['a directOnly that is not true', { ok: true, burrowLabel: 'Laptop', directOnly: false }],
+    ['a directOnly that is a string', { ok: true, burrowLabel: 'Laptop', directOnly: 'yes' }],
   ]) {
     assert.equal(isConnectionOutcomeV1(value), false, why);
   }

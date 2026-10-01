@@ -25,7 +25,7 @@ import {
   type PocketSocket,
 } from '../client/pocket-client';
 import { PasskeyAlreadyRegisteredError, browserWebAuthn } from '../client/webauthn';
-import { selfHostDirectPeer } from '../client/browser-direct-peer';
+import { deploymentDirectPeer, readPocketDeployment } from './deployment';
 import { BURROW_IS_AN_APP, SCAN_LABEL, SETUP_PATH } from '../setup-copy';
 import { probeNoiseSupport, type PairingInvitation } from 'remote-lib-common';
 import {
@@ -112,7 +112,9 @@ export default function App({
         fetch: window.fetch.bind(window),
         webauthn: browserWebAuthn,
         createWebSocket: (url) => new WebSocket(url) as unknown as PocketSocket,
-        createDirectPeer: selfHostDirectPeer,
+        // Hosted's Pocket gathers through Cloudflare STUN, a self-host Relay's
+        // through none: one bundle, told apart by what its origin serves.
+        createDirectPeer: deploymentDirectPeer(readPocketDeployment(window.fetch.bind(window))),
         knownBurrows: indexedDbKnownBurrowStore(),
         pendingDeletions: indexedDbPendingDeletionStore(),
       }),

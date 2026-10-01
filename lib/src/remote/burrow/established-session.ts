@@ -179,6 +179,11 @@ export class EstablishedE2eSession {
     return this.#lastClientActivityAt + ESTABLISHED_E2E_IDLE_TIMEOUT_MS;
   }
 
+  /** What carries this session: `direct` once **both** directions have switched. */
+  get path(): DirectPath {
+    return this.#direct.path;
+  }
+
   /**
    * One transport frame's `ct` off the relay. Every rule about a frame on an
    * authorized session — which path may carry it, and that its `ct` must

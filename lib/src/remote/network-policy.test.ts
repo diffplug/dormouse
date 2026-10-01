@@ -40,8 +40,8 @@ describe('what each level opens', () => {
     expect(opensOneTimeLinks({ ...NOTHING, level: 'relay' })).toBe(false);
   });
 
-  it('runs the persistent Burrow under My Relay only', () => {
-    expect(NETWORK_LEVELS.filter(runsBurrow)).toEqual(['relay']);
+  it('runs the persistent Burrow under every level but Nothing', () => {
+    expect(NETWORK_LEVELS.filter(runsBurrow)).toEqual(['local', 'anywhere', 'relay']);
   });
 
   it('gathers through STUN on the Burrow under Anywhere alone', () => {

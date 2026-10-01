@@ -214,6 +214,8 @@ function fakeProvider(): BurrowSurfaceProvider {
 }
 
 let sockets: FakeSocket[];
+/** Where each relay socket in {@link sockets} was opened to. */
+let socketUrls: string[];
 /** The one-time rendezvous every one-time socket the service opens reaches. */
 let rendezvous: TestRendezvous;
 /** Where the Burrow's direct peers and the test phone's meet. */
@@ -329,6 +331,7 @@ function createService(seed?: Seed, over: Partial<BurrowServiceOptions> = {}): B
       }
       const socket = new FakeSocket();
       sockets.push(socket);
+      socketUrls.push(url);
       return socket;
     },
     createDirectPeer: () => network.createAnswerer(),
@@ -438,6 +441,7 @@ function answererTo(remote: string, handed: Handed[]): BurrowDirectPeerFactory {
 
 beforeEach(() => {
   sockets = [];
+  socketUrls = [];
   rendezvous = createTestRendezvous();
   network = new FakeDirectNetwork();
   sent = [];
@@ -1929,7 +1933,7 @@ describe('one-time connection', () => {
   });
 
   it('survives the enrollment going, and a reconnect', async () => {
-    // Held, not run: Local networks runs no Burrow (`network policy` below).
+    // Local networks runs the enrolled Burrow beside the link.
     createHostedService({ enrollment: ENROLLMENT });
     await service.start();
     const waiting = await open();
@@ -1938,9 +1942,10 @@ describe('one-time connection', () => {
     await command('reconnect');
     expect((await command('oneTimeStatus')).result).toEqual(waiting);
     expect(rendezvous.room().burrow.readyState).toBe(1);
+    expect(sockets[0]!.readyState).toBe(3);
     // The enrollment gate cycled; the serving one never dropped once up.
-    expect(statusEvents()).toEqual([true, true, false]);
-    expect(servingEvents()).toEqual([false, true, true]);
+    expect(statusEvents()).toEqual([true, false]);
+    expect(servingEvents()).toEqual([true, true]);
 
     // And the link still works end to end, the phone told the enrolled name
     // the connection opened under.
@@ -2173,18 +2178,68 @@ describe('network policy', () => {
     });
   });
 
-  it('holds an enrollment without running it under Local networks, which has no persistent path', async () => {
+  it('runs a Hosted enrollment under Local networks, holding its sessions to the allowed networks with no STUN', async () => {
+    const handed: Handed[] = [];
+    createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON }, { createDirectPeer: answererTo('192.168.1.3', handed) });
+    await service.start();
+    expect(sockets).toHaveLength(1);
+    expect(socketUrls[0]).toMatch(/^wss:\/\/relay\.dormouse\.sh\/ws\/burrow\?/);
+    expect((await command('status')).result).toMatchObject({ enrolled: true, connection: 'connecting' });
+    const { createPeer, pathPolicy } = handedTransport.directPeering!;
+    expect(pathPolicy).toBeDefined();
+    expect(createPeer!(pathPolicy)).not.toBeNull();
+    expect(handed).toEqual([[pathPolicy, false]]);
+
+    // And again on entering Local networks from Nothing.
+    await setPolicy(NOTHING);
+    expect(sockets[0]!.readyState).toBe(3);
+    await setPolicy(LOCAL_ON);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('runs a Hosted enrollment under Anywhere through STUN with no hold, and pushes through relay.dormouse.sh', async () => {
+    const handed: Handed[] = [];
+    createHostedService(
+      { enrollment: ENROLLMENT, network: ANYWHERE_ON, acl: { [BURROW_ID]: [aclRecord('1')] } },
+      { createDirectPeer: answererTo('203.0.113.7', handed) },
+    );
+    await service.start();
+    expect(sockets).toHaveLength(1);
+    const { createPeer, pathPolicy } = handedTransport.directPeering!;
+    expect(pathPolicy).toBeUndefined();
+    expect(createPeer!()).not.toBeNull();
+    expect(handed).toEqual([[undefined, true]]);
+
+    await service.push('session-1', 'Build finished');
+    expect(requests.map((request) => request.url)).toContain(`${HOSTED_ORIGIN}${API_ROUTES.pushSend}`);
+  });
+
+  it('restarts the running Burrow on any change to its paths, and on nothing else', async () => {
     createHostedService({ enrollment: ENROLLMENT, network: LOCAL_ON });
     await service.start();
-    expect(sockets).toEqual([]);
-    expect((await command('status')).result).toMatchObject({ enrolled: true, connection: 'stopped' });
-    await command('reconnect');
+    expect(sockets).toHaveLength(1);
 
-    // Nor on entering Local networks from Nothing.
-    await setPolicy(NOTHING);
-    await setPolicy(LOCAL_ON);
-    expect(sockets).toEqual([]);
-    expect(servingEvents()).not.toContain(true);
+    // `autoUpdate` changes no path.
+    await setPolicy({ ...LOCAL_ON, autoUpdate: true });
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]!.readyState).not.toBe(3);
+
+    // The allowed networks under Local networks do: a runtime holds the ones it started on.
+    await setPolicy({ ...LOCAL_ON, allowed: ['10.0.0.0/8'] });
+    expect(sockets[0]!.readyState).toBe(3);
+    expect(sockets).toHaveLength(2);
+    expect(handedTransport.directPeering!.pathPolicy).toBeDefined();
+
+    // So does the level, Anywhere gathering through STUN with no hold.
+    await setPolicy(ANYWHERE_ON);
+    expect(sockets[1]!.readyState).toBe(3);
+    expect(sockets).toHaveLength(3);
+    expect(handedTransport.directPeering!.pathPolicy).toBeUndefined();
+
+    // Anywhere's allowed networks hold nothing, so they restart nothing.
+    await setPolicy({ ...ANYWHERE_ON, allowed: ['10.0.0.0/8'] });
+    expect(sockets).toHaveLength(3);
+    expect((await command('status')).result).toMatchObject({ enrolled: true });
   });
 
   it('opens no one-time link under Local networks with no network allowed', async () => {
@@ -2539,7 +2594,7 @@ describe('Hosted enrollment', () => {
     expect(JSON.stringify(sent)).not.toContain(DEVICE_CODE);
   });
 
-  it('polls every interval and holds the enrollment it redeems, under Local networks without a socket', async () => {
+  it('polls every interval and starts the enrollment it redeems, under Local networks', async () => {
     hosted();
     await service.start();
     await command('beginHostedEnrollment', { label: 'Work laptop' });
@@ -2563,12 +2618,14 @@ describe('Hosted enrollment', () => {
     expect(store.enrollment?.noiseStaticPublicKey).toEqual(expect.any(String));
     expect((await command('status')).result).toMatchObject({
       enrolled: true,
-      connection: 'stopped',
+      connection: 'connecting',
       hostedEnrollment: null,
     });
     expect(statusEvents().at(-1)).toBe(true);
-    // Only `relay` runs the persistent Burrow, and polling is over.
-    expect(sockets).toEqual([]);
+    // Local networks runs the persistent Burrow on the enrollment's own Relay,
+    // and polling is over.
+    expect(sockets).toHaveLength(1);
+    expect(socketUrls[0]).toMatch(/^wss:\/\/relay\.dormouse\.sh\/ws\/burrow\?/);
     await vi.advanceTimersByTimeAsync(INTERVAL_S * 3000);
     expect(pollRequests()).toHaveLength(2);
   });

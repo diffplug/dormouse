@@ -46,7 +46,7 @@ import type { WebAuthnClient } from './webauthn';
 import { BurrowRuntime } from '../burrow/burrow-runtime';
 import type { BurrowEnrollment } from '../burrow/enrollment';
 import type { PendingPairing } from '../burrow/pairing-approval';
-import type { DirectPeerLike } from '../direct/direct-peer';
+import type { DirectPathPolicy, DirectPeerLike } from '../direct/direct-peer';
 import { FakeSocket } from '../test-fake-socket';
 import { createTestAuthenticator, pollFor, type TestAuthenticator } from '../test-e2e-client';
 import { createTestRelay, type TestRelay } from '../test-relay';
@@ -276,6 +276,8 @@ export async function makeE2eHarness(
     deps?: Partial<PocketClientDeps>;
     /** How this Burrow builds a peer for the direct path; absent, it declines. */
     burrowDirect?: () => DirectPeerLike | null;
+    /** The path policy the Burrow holds each attempt to — Local networks', which makes it direct-only. */
+    burrowPathPolicy?: DirectPathPolicy;
   } = {},
 ): Promise<E2eHarness> {
   const burrowId = options.burrowId ?? randomBase64Url(16);
@@ -303,7 +305,9 @@ export async function makeE2eHarness(
     enrollment,
     reconnect: false,
     createWebSocket: () => burrowSocket,
-    ...(options.burrowDirect ? { directPeering: { createPeer: options.burrowDirect } } : {}),
+    ...(options.burrowDirect || options.burrowPathPolicy
+      ? { directPeering: { createPeer: options.burrowDirect ?? null, pathPolicy: options.burrowPathPolicy } }
+      : {}),
     loadAcl: options.loadAcl ?? (() => []),
     saveAcl: (_burrowId, records) => {
       savedAcl = [...records];

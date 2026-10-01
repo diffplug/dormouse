@@ -292,16 +292,28 @@ const CONNECTION_DENIALS = [
 
 export type ConnectionDenialCode = (typeof CONNECTION_DENIALS)[number];
 
-/** The single Burrow→Client control message that ends a connection attempt. */
+/**
+ * The single Burrow→Client control message that ends a connection attempt.
+ * `directOnly`, present only as `true`, says the Burrow ends this session
+ * unless the direct path carries it: no application message may cross the
+ * relay, and the switch has `DIRECT_ONLY_DEADLINE_MS`
+ * (`docs/specs/remote-network.md` -> "Local networks"). Inside the Noise
+ * session, so no Relay can add or strip it; a Client that ignores it is ended
+ * at its first relayed request.
+ */
 export type ConnectionOutcomeV1 =
-  | { readonly ok: true; readonly burrowLabel: string }
+  | { readonly ok: true; readonly burrowLabel: string; readonly directOnly?: true }
   | { readonly ok: false; readonly code: ConnectionDenialCode };
 
 export function isConnectionOutcomeV1(value: unknown): value is ConnectionOutcomeV1 {
   if (!value || typeof value !== 'object') return false;
   const outcome = value as Record<string, unknown>;
   if (outcome.ok === false) return includesCode(CONNECTION_DENIALS, outcome.code);
-  return outcome.ok === true && bounded(outcome.burrowLabel);
+  return (
+    outcome.ok === true &&
+    bounded(outcome.burrowLabel) &&
+    (outcome.directOnly === undefined || outcome.directOnly === true)
+  );
 }
 
 // ---------------------------------------------------------------------------

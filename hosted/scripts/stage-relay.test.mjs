@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stageRelay } from "./stage-relay.mjs";
@@ -45,11 +45,22 @@ test("Pocket lands at the root and the one-time page at its path, and they are a
   assert.deepEqual(readdirSync(assets).sort(), [
     "assets",
     "connect",
+    "deployment.json",
     "diagnostics",
     "index.html",
     "manifest.webmanifest",
     "sw.js",
   ]);
+  // What tells the one Pocket bundle that Hosted serves it.
+  assert.deepEqual(JSON.parse(readFileSync(join(assets, "deployment.json"), "utf8")), {
+    deployment: "hosted",
+  });
+});
+
+test("a Pocket build carrying the deployment file is refused, since a self-host Relay serves it as it is", () => {
+  const { pocket, oneTime, assets } = fixture();
+  writeFileSync(join(pocket, "deployment.json"), '{"deployment":"hosted"}');
+  assert.throws(() => stageRelay({ pocket, oneTime }, assets), /only Hosted's staging writes/);
 });
 
 test("a shell its policy would refuse is not staged quietly", () => {

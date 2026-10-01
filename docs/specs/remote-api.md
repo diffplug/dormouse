@@ -98,7 +98,7 @@ signal always fits one control body.
 
 Which ICE servers each end gathers through:
 [remote-network.md](./remote-network.md) -> "Anywhere"; Local networks
-restricts a one-time attempt further
+restricts an attempt further
 ([remote-network.md](./remote-network.md) -> "Local networks").
 
 **The two shipped stacks are proven against each other by hand**, by

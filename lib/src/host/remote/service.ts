@@ -1366,7 +1366,8 @@ export class BurrowService {
    * an old path exempt; the allowed networks under any other level, and
    * `autoUpdate`, touch no connection. Then the relay socket follows the
    * level: stopped under one that runs no Burrow, the enrollment kept; started
-   * on entering one that does ({@link runsBurrow}).
+   * under one that does ({@link runsBurrow}), and restarted on any change
+   * {@link samePaths} sees, since a runtime holds its paths for its life.
    */
   async #setNetworkPolicy(params: SetNetworkPolicyParams | undefined): Promise<NetworkPolicyResult> {
     const next = requestedNetworkPolicy(params?.policy, this.#relay);
@@ -1383,14 +1384,14 @@ export class BurrowService {
     }
     const result = networkPolicyResult(next, this.#relay.mode, this.#listInterfaces());
     try {
-      if (!runsBurrow(next.level)) {
-        if (this.#burrow) {
-          this.#stopBurrow();
-          this.#emitStatus();
-        }
-      } else if (!runsBurrow(previous.level) && !this.#burrow) {
-        await this.#start();
+      // A running Burrow holds the paths it started under for its life
+      // (`directPeeringFor`), so any change to them restarts it; its sessions
+      // hear the goodbye as it stops.
+      if (this.#burrow && (!runsBurrow(next.level) || !samePaths(previous, next))) {
+        this.#stopBurrow();
+        this.#emitStatus();
       }
+      if (runsBurrow(next.level) && !this.#burrow) await this.#start();
     } finally {
       // Saved either way, so said either way: a start that failed is its own error.
       this.#emit({ name: 'network-policy', ...result });

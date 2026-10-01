@@ -71,12 +71,13 @@ export function levelsFor(mode: RelayMode): NetworkLevel[] {
 
 /**
  * Whether `level` runs the persistent Burrow — the relay socket and everything
- * that needs it: `relay` alone today. **Every other level holds an enrollment
- * without running it**, since only My Relay only has a path rule for a
- * persistent session (`docs/specs/remote-network.md` → "Policy").
+ * that needs it: every level but `nothing`. **`nothing` holds an enrollment
+ * without running it** (`docs/specs/remote-network.md` → "Policy"); each other
+ * level has its path rule for a paired phone's session — My Relay only and
+ * Anywhere may relay it, Local networks holds it to the direct path.
  */
 export function runsBurrow(level: NetworkLevel): boolean {
-  return level === 'relay';
+  return level === 'relay' || level === 'local' || level === 'anywhere';
 }
 
 /**

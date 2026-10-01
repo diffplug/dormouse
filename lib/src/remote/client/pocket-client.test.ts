@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CONTROL_PAYLOAD_SIZE,
   DEFAULT_PAIRING_TTL_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
@@ -35,6 +36,7 @@ import {
 import {
   CONNECTION_DENIAL_MESSAGES,
   BURROW_UNAVAILABLE_MESSAGE,
+  DIRECT_ONLY_FAILED_MESSAGE,
   BurrowIdentityMismatchError,
   PAIRING_DENIAL_MESSAGES,
   PASSKEY_UNAVAILABLE_MESSAGE,
@@ -51,7 +53,9 @@ import { FakeSocket } from '../test-fake-socket';
 import { fakeTimers } from '../test-timers';
 import {
   FakeDirectNetwork,
+  OFF_LAN_PAIR,
   collect,
+  lanOnlyPolicy,
   type FakeDirectNetworkOptions,
   type FakePeer,
 } from '../direct/test-fake-peer';
@@ -1275,6 +1279,80 @@ describe('the direct path, end to end', () => {
 });
 
 // --- Setup, sign-in, and the token a scan carries ---------------------------
+
+describe('a direct-only session, end to end', () => {
+  /**
+   * A paired phone against a real Burrow holding Local networks' path policy
+   * (`docs/specs/remote-network.md` -> "Local networks"), whose outcome says the
+   * session is direct-only: the connect answers only once the direct path
+   * carries it, and nothing protocol-v1 crosses the relay before then.
+   */
+  async function directOnly(options: { network?: FakeDirectNetworkOptions; clientHasPeer?: boolean } = {}) {
+    const network = new FakeDirectNetwork(options.network);
+    const timers = fakeTimers();
+    const harness = await makeE2eHarness({
+      deps: {
+        setTimer: timers.setTimer,
+        ...(options.clientHasPeer === false ? {} : { createDirectPeer: () => network.createOfferer() }),
+      },
+      burrowDirect: () => network.createAnswerer(),
+      burrowPathPolicy: lanOnlyPolicy(),
+    });
+    await harness.pairAndApprove(await harness.mintInvitation());
+    return { harness, network, timers };
+  }
+
+  /** Every Client→relay transport frame on the connection that is not a fixed-size control. */
+  const relayedApp = (harness: E2eHarness) =>
+    harness
+      .clientTransportFrames()
+      .filter((frame) => fromBase64Url(frame.ct as string).length !== 1 + CONTROL_PAYLOAD_SIZE + 16);
+
+  it('answers ok only once the direct path carries the session, and protocol-v1 rides the channel', async () => {
+    const { harness, network } = await directOnly();
+    const outcome = await harness.client.connect(harness.burrowId);
+    expect(outcome).toEqual({ ok: true, burrowLabel: BURROW_LABEL });
+    expect(harness.client.transportPath).toBe('direct');
+
+    expect(await harness.client.hello()).toMatchObject({ protocolVersion: 1 });
+    expect(relayedApp(harness)).toEqual([]);
+    expect(network.offererChannel!.sent.length).toBeGreaterThan(0);
+  });
+
+  it('fails with fixed copy, sending nothing relayed, when no direct path forms', async () => {
+    // A browser without WebRTC gives the attempt up at once.
+    const unsupported = await directOnly({ clientHasPeer: false });
+    expect(await unsupported.harness.client.connect(unsupported.harness.burrowId)).toEqual({
+      ok: false,
+      message: DIRECT_ONLY_FAILED_MESSAGE,
+      pairingRequired: false,
+    });
+    expect(unsupported.harness.client.connectedBurrowId).toBeNull();
+    expect(relayedApp(unsupported.harness)).toEqual([]);
+
+    // A path off the allowed networks, which the Burrow refuses.
+    const refused = await directOnly({ network: { selectedPair: OFF_LAN_PAIR } });
+    // The closed channel gives the attempt up here too, before the deadline.
+    expect(await refused.harness.client.connect(refused.harness.burrowId)).toMatchObject({
+      ok: false,
+      message: DIRECT_ONLY_FAILED_MESSAGE,
+    });
+    expect(refused.harness.burrow.establishedSessionCount).toBe(0);
+    expect(relayedApp(refused.harness)).toEqual([]);
+  });
+
+  it('gives up at the deadline on a channel that never opens', async () => {
+    const { harness, timers } = await directOnly({ network: { opening: 'never' } });
+    const connecting = harness.client.connect(harness.burrowId);
+    await waitFor(
+      () => timers.live.some((timer) => timer.delayMs === DIRECT_ONLY_DEADLINE_MS),
+      'the connect to wait for the switch',
+    );
+    timers.fireAt(DIRECT_ONLY_DEADLINE_MS);
+    expect(await connecting).toMatchObject({ ok: false, message: DIRECT_ONLY_FAILED_MESSAGE });
+    expect(harness.client.connectedBurrowId).toBeNull();
+  });
+});
 
 describe('setup + signin', () => {
   it('registers with the scanned token, signs in, and sends the session as a bearer', async () => {

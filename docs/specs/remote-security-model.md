@@ -271,7 +271,8 @@ Source of truth: `BurrowRuntime.mintInvitation` / `#onPairingInit` /
   requires one active `BurrowAclRecord` holding all four of `accountId`,
   `passkeyCredentialId`, `passkeyPublicKeyHash`, and the IK-authenticated Client
   static.
-- **Then `ConnectionOutcomeV1`**: success carries the Burrow label; denial carries
+- **Then `ConnectionOutcomeV1`**: success carries the Burrow label (and
+  `directOnly` under Local networks); denial carries
   only `pairing-required`, `presence-rejected`, `protocol-rejected`,
   `burrow-busy`, or `burrow-error`. **Every ACL miss is `pairing-required`** —
   individual ACL and presence failures are logged owner-locally

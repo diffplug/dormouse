@@ -8,6 +8,7 @@
 
 import {
   DEFAULT_PAIRING_TTL_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   E2E_INIT_BURST,
   E2E_INIT_REFILL_INTERVAL_MS,
   BurrowAcl,
@@ -45,6 +46,8 @@ import {
   DELIVERY_ID_BYTE_LENGTH,
   type ConnectionOutcomeV1,
   type ConnectionPolicy,
+  type DirectPath,
+  type DirectRelayCause,
   type E2eRelayToBurrowFrame,
   type BurrowAclRecord,
   type BurrowFrame,
@@ -220,6 +223,12 @@ interface EstablishedSession {
   /** The IK-authenticated Client static — what the session cap is keyed on. */
   readonly clientStaticPublicKey: string;
   readonly e2e: EstablishedE2eSession;
+  /**
+   * Where the direct path is required — the path policy is held — the instant
+   * this session must be direct by ({@link DIRECT_ONLY_DEADLINE_MS} from its
+   * outcome); `null` where the relay may carry it.
+   */
+  readonly directBy: number | null;
 }
 
 /** Per-client lifecycle state tracked by the Burrow, keyed by clientId. */
@@ -610,6 +619,14 @@ export class BurrowRuntime {
           },
         });
       }
+      // Only until the switch: once direct, the deadline is met for good.
+      if (established && established.directBy !== null && established.e2e.path !== 'direct') {
+        const { e2e } = established;
+        out.push({
+          at: established.directBy,
+          expire: () => this.#endDirectOnly(clientId, e2e, 'the direct path did not carry it in time'),
+        });
+      }
       if (established) {
         out.push({
           at: established.e2e.idleDeadlineAt,
@@ -744,7 +761,15 @@ export class BurrowRuntime {
     return this.#noiseStatic;
   }
 
+  /**
+   * Close the relay socket and everything on it. **Every established session
+   * hears the goodbye first**, while the socket can still carry it: a stop is
+   * an ending this Burrow chose — a network policy change, a clear, a swap.
+   */
   stop(): void {
+    for (const clientId of [...this.#clients.keys()]) {
+      this.#disposeEstablished(clientId, { goodbye: true });
+    }
     this.#stopped = true;
     this.#status = 'stopped';
     this.#clearReconnectTimer();
@@ -1453,6 +1478,9 @@ export class BurrowRuntime {
     }
     const state = this.#clientState(clientId);
     state.connection = undefined;
+    // **Direct-only exactly where the path policy is held** (Local networks):
+    // the policy checks the direct path, and the relay is not one it checks.
+    const directOnly = this.#directPeering.pathPolicy !== undefined;
     // The same static under a different relay-chosen key: its predecessor goes
     // before the replacement is promoted, so the cap is never briefly exceeded.
     // Told so, since its socket may still be open — another tab of the same
@@ -1469,6 +1497,7 @@ export class BurrowRuntime {
     this.#sendControl(clientId, 'connection', pending.connectionId, pending.session, {
       ok: true,
       burrowLabel: boundedBurrowLabel(this.#enrollment.label),
+      ...(directOnly ? { directOnly: true as const } : {}),
     } satisfies ConnectionOutcomeV1);
     if (!this.#createSession) {
       // No remote-api behind this Burrow: the outcome is the whole answer, and
@@ -1495,11 +1524,47 @@ export class BurrowRuntime {
       directPeering: this.#directPeering,
       sendRelay: (ciphertext) =>
         this.#sendE2e(clientId, 'connection', connectionId, 'transport', ciphertext),
+      // A refused path ends it with no goodbye, which could only ride the
+      // refused channel; the phone reads the channel's close.
       onFatal: () => this.#disposeEstablished(clientId),
+      ...(directOnly
+        ? {
+            // An application message off the relay ends the session unread.
+            onRelayedApp: () =>
+              this.#endDirectOnly(clientId, e2e, 'an application message arrived over the relay'),
+            // A given-up attempt leaves only the relay, which may not carry it.
+            // Deferred, so a decline the endpoint sends right after giving up
+            // reaches the phone before the goodbye.
+            onTransportChanged: (path: DirectPath, cause: DirectRelayCause | null) => {
+              if (path !== 'relay' || cause === null) return;
+              queueMicrotask(() =>
+                this.#endDirectOnly(clientId, e2e, 'the direct path was given up'),
+              );
+            },
+          }
+        : {}),
       now: this.#now,
       setTimer: this.#setTimer,
     });
-    state.established = { connectionId, clientStaticPublicKey, e2e };
+    state.established = {
+      connectionId,
+      clientStaticPublicKey,
+      e2e,
+      directBy: directOnly ? this.#now() + DIRECT_ONLY_DEADLINE_MS : null,
+    };
+    this.#armReaper();
+  }
+
+  /**
+   * End a direct-only session the relay would otherwise have to carry: with
+   * the goodbye, so the phone reads the computer's ending rather than a
+   * silence (`docs/specs/remote-network.md` -> "Local networks"). `e2e` names
+   * the session meant, so a late call cannot end its replacement.
+   */
+  #endDirectOnly(clientId: string, e2e: EstablishedE2eSession, reason: string): void {
+    if (this.#clients.get(clientId)?.established?.e2e !== e2e) return;
+    console.warn(`[burrow] ended a direct-only session: ${reason}`);
+    this.#disposeEstablished(clientId, { goodbye: true, only: e2e });
     this.#armReaper();
   }
 
@@ -1592,10 +1657,11 @@ export class BurrowRuntime {
    * Tear one client's established session down and prune the entry.
    *
    * `goodbye` is for an ending this Burrow chose — the idle reap, a replacement
-   * from the same Client static, the person at the Burrow taking a pane back —
-   * where the Client is told with {@link EstablishedE2eSession.end} before the
-   * dispose; every other path (a fatal session, `client-gone`, `stop()`) has no
-   * one listening, or no cipher to say it on. `only` names the session the
+   * from the same Client static, the person at the Burrow taking a pane back,
+   * `stop()`, a direct-only session the relay may not carry — where the Client
+   * is told with {@link EstablishedE2eSession.end} before the dispose; every
+   * other path (a fatal session, `client-gone`, a dropped socket) has no one
+   * listening, or no cipher to say it on. `only` names the session the
    * caller means, so a stale ending cannot take down the one that replaced it.
    */
   #disposeEstablished(

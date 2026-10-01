@@ -21,6 +21,15 @@ import { isBoundedString } from './bytes.js';
 export const DIRECT_SETUP_TIMEOUT_MS = 15_000;
 
 /**
+ * How long a direct-only session has, from its connection outcome, for the
+ * direct path to carry both directions before the Burrow ends it
+ * (`ConnectionOutcomeV1.directOnly`). The offerer's own setup bound: an
+ * attempt not switched by then has been given up at that end, and the session
+ * has no relay to stay on.
+ */
+export const DIRECT_ONLY_DEADLINE_MS = DIRECT_SETUP_TIMEOUT_MS;
+
+/**
  * The label of the one data channel a session opens.
  *
  * A two-end agreement rather than one end's naming choice: the answerer checks

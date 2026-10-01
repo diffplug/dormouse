@@ -18,6 +18,7 @@ import {
   API_ROUTES,
   DEFAULT_CHALLENGE_TTL_MS,
   DEFAULT_PAIRING_TTL_MS,
+  DIRECT_ONLY_DEADLINE_MS,
   E2E_ID_BYTE_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
@@ -170,6 +171,15 @@ export class RelayRefusalError extends Error {
  */
 export const BURROW_SESSION_REAPED_MESSAGE =
   'This phone was away too long, so the computer let the session go. Connect again to resume.';
+
+/**
+ * What a connection the computer holds to the direct path reports when no
+ * direct path formed in time — the phone off its allowed networks, most often
+ * (`docs/specs/remote-network.md` -> "Local networks").
+ */
+export const DIRECT_ONLY_FAILED_MESSAGE =
+  'This computer accepts phones only over a direct connection on a network it allows, and one couldn’t be made. ' +
+  'Join one of those networks, then Connect again.';
 
 /** What a request in flight fails with when the computer ends the session on purpose. */
 export const BURROW_SESSION_ENDED_MESSAGE = 'The computer ended this session. Connect again to resume.';
@@ -881,6 +891,15 @@ export class PocketClient {
       // path, and a peer connection that existed ahead of authorization would
       // be one an unauthorized party had steered.
       this.#core.establish(route, session);
+      // **A direct-only session sends no protocol-v1 before the switch**: the
+      // Burrow ends one whose application message crosses the relay, so the
+      // wall mounts only once the direct path carries both directions.
+      if (outcome.directOnly === true && !(await this.#core.awaitDirect(DIRECT_ONLY_DEADLINE_MS))) {
+        if (this.#core.establishedRoute === route) {
+          this.#core.endSession(DIRECT_ONLY_FAILED_MESSAGE, { notifyGone: false });
+        }
+        return { ok: false, message: DIRECT_ONLY_FAILED_MESSAGE, pairingRequired: false };
+      }
       return { ok: true, burrowLabel: outcome.burrowLabel };
     }
     if (outcome.code === 'pairing-required') {

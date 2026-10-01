@@ -98,10 +98,54 @@ describe('connectionsFor', () => {
       { to: 'Your phone, on any network', when: 'While connected', carries: 'Terminal traffic, end-to-end encrypted.' },
     ];
     expect(connectionsFor(facts({ policy: ANYWHERE }))).toEqual(rows);
-    // Anywhere runs no persistent Burrow, so an enrollment with a paired phone
-    // adds no Relay or push row; the networks left allowed add nothing either.
+    // The networks left allowed add nothing.
+    expect(connectionsFor(facts({ policy: { ...ANYWHERE, allowed: [LAN] } }))).toEqual(rows);
+  });
+
+  it('lists Hosted always once enrolled, terminal traffic through it only under Anywhere, and push once a phone is paired', () => {
     const enrolled = { ...UNENROLLED_STATUS, enrolled: true, pairedClients: 1 };
-    expect(connectionsFor(facts({ policy: { ...ANYWHERE, allowed: [LAN] }, status: enrolled }))).toEqual(rows);
+    const push = {
+      to: 'relay.dormouse.sh → your phone’s push service',
+      when: 'When an alert goes unattended, where push is on',
+      carries: 'An end-to-end encrypted notification.',
+    };
+    expect(connectionsFor(facts({ policy: ANYWHERE, status: enrolled }))).toEqual([
+      {
+        to: 'relay.dormouse.sh',
+        when: 'Always',
+        carries:
+          'Encrypted handshakes and one-time links, requests for setup codes and the push device list, and terminal traffic when a phone can’t connect directly.',
+      },
+      {
+        to: CLOUDFLARE_STUN_HOST,
+        when: 'When a phone connects',
+        carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
+      },
+      { to: 'Your phone, directly', when: 'While connected', carries: 'Terminal traffic, end-to-end encrypted.' },
+      push,
+    ]);
+    // Local networks holds a paired phone to the direct path: never terminal
+    // traffic through Hosted, and the phone only on an allowed network.
+    expect(connectionsFor(facts({ status: enrolled }))).toEqual([
+      {
+        to: 'relay.dormouse.sh',
+        when: 'Always',
+        carries:
+          'Encrypted handshakes and one-time links, requests for setup codes and the push device list. Never terminal traffic.',
+      },
+      {
+        to: 'Your phone, directly, on an allowed network',
+        when: 'While connected',
+        carries: 'Terminal traffic, end-to-end encrypted.',
+      },
+      push,
+    ]);
+    // With nothing allowed no phone connects, but the socket still runs.
+    expect(destinations({ policy: { ...LOCAL, allowed: [] }, status: enrolled })).toEqual([
+      'relay.dormouse.sh',
+      push.to,
+    ]);
+    expect(destinations({ policy: ANYWHERE, status: { ...enrolled, pairedClients: 0 } })).not.toContain(push.to);
   });
 
   it('lists the Relay always, once enrolled, and the phone directly, under My Relay only', () => {
