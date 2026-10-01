@@ -17,9 +17,6 @@ export interface TerminalEntry {
   fit: FitAddon;
   element: HTMLDivElement;
   cleanup: () => void;
-  /** Replace the text snapshot the render handler compares a finalized Dormouse
-   *  selection against; `null` stops it watching. */
-  setSelectionBaseline: (baseline: string | null) => void;
   isReplaying: boolean;
   untouched: boolean;
   /** Renderer ownership follows mount/unmount rather than terminal lifetime. */
@@ -71,8 +68,4 @@ export const registry = new Map<string, TerminalEntry>();
 /** Helper Sessions are private to their source: excluded from alerts, `dor`, remote projections, and cross-pane derivations. */
 export const isHelperSession = (id: string): boolean => !!registry.get(id)?.helper;
 export const pendingShellOpts = new Map<string, PendingShellOpts>();
-/** Arm render-tick invalidation for a selection some other module just set, so
- *  it is dropped when the text under it changes (a pin's restored range). */
-export function setTerminalSelectionBaseline(id: string, baseline: string | null): void {
-  registry.get(id)?.setSelectionBaseline(baseline);
-}
+

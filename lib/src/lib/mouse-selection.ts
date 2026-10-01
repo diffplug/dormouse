@@ -54,8 +54,6 @@ export interface CopyEditorState {
   overrides: Readonly<Record<number, BreakKind>>;
 }
 
-/** The format a confirmed copy used. */
-export type CopyFlashKind = CopyFormat;
 
 export interface MouseSelectionState {
   mouseReporting: MouseTrackingMode;
@@ -63,13 +61,14 @@ export interface MouseSelectionState {
   override: OverrideState;
   selection: Selection | null;
   hintToken: TokenHint | null;
-  /** Open while non-null; always over a finalized selection. */
+  /** Open while non-null: always the editor written with this exact
+   *  `selection`, which is finalized. */
   copyEditor: CopyEditorState | null;
   /**
-   * Set briefly after a copy from the editor, so it can flash a confirmation
+   * The format of a copy just confirmed, set briefly so the editor can flash
    * before everything clears.
    */
-  copyFlash: CopyFlashKind | null;
+  copyFlash: CopyFormat | null;
 }
 
 export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze({
@@ -145,24 +144,28 @@ export function setOverride(id: string, override: OverrideState): void {
   notify();
 }
 
-export function setSelection(id: string, selection: Selection | null): void {
+/**
+ * Replace the selection and, in the same write, the copy editor over it: none
+ * unless one is given for a finalized selection, so an editor never outlives
+ * the selection it was opened for.
+ */
+export function setSelection(id: string, selection: Selection | null, copyEditor: CopyEditorState | null = null): void {
   const s = ensure(id);
   if (s.selection === null && selection === null) return;
   s.selection = selection;
+  s.copyEditor = selection && !selection.dragging ? copyEditor : null;
   if (selection === null) {
-    s.copyEditor = null;
     s.copyFlash = null;
     s.hintToken = null;
   }
   notify();
 }
 
-/** Open, update, or (null) close the copy editor; a no-op without a
- *  finalized selection to edit. */
-export function setCopyEditor(id: string, editor: CopyEditorState | null): void {
+/** Open or update the editor over the current finalized selection; a no-op
+ *  without one. */
+export function setCopyEditor(id: string, editor: CopyEditorState): void {
   const s = ensure(id);
-  if (editor && (!s.selection || s.selection.dragging)) return;
-  if (s.copyEditor === editor) return;
+  if (!s.selection || s.selection.dragging || s.copyEditor === editor) return;
   s.copyEditor = editor;
   notify();
 }
@@ -281,7 +284,7 @@ export function setDragAlt(id: string, altKey: boolean): void {
  * The editor reads `copyFlash` and renders a confirmation state; after
  * `durationMs` the flash clears along with the selection, dismissing the editor.
  */
-export function flashCopy(id: string, kind: CopyFlashKind, durationMs = 700): void {
+export function flashCopy(id: string, kind: CopyFormat, durationMs = 700): void {
   const s = ensure(id);
   const selection = s.selection;
   s.copyFlash = kind;

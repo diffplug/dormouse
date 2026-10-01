@@ -1,7 +1,7 @@
 import { writeTextToClipboard } from './clipboard';
-import { copyEditorView, nudgeCopyEdge } from './copy-editor';
+import { editorRendering, nudgeCopyEdge } from './copy-editor';
 import { flashCopy, getMouseSelectionState } from './mouse-selection';
-import { getTerminalInstance, refreshSelectionBaseline } from './terminal-registry';
+import { getTerminalInstance } from './terminal-registry';
 
 /**
  * Copy what the editor shows and confirm it with the flash. Lives apart from
@@ -15,17 +15,13 @@ import { getTerminalInstance, refreshSelectionBaseline } from './terminal-regist
 export async function copySelection(terminalId: string): Promise<void> {
   const { selection, copyEditor } = getMouseSelectionState(terminalId);
   const terminal = getTerminalInstance(terminalId);
-  if (!selection || selection.dragging || !terminal) return;
-  const text = copyEditorView(terminal, selection, copyEditor).rendering.text;
-  const copied = await writeTextToClipboard(text);
-  if (copied && getMouseSelectionState(terminalId).selection === selection) {
-    flashCopy(terminalId, copyEditor?.format ?? 'auto');
-  }
+  if (!selection || !copyEditor || !terminal) return;
+  const copied = await writeTextToClipboard(editorRendering(terminal, selection, copyEditor).text);
+  if (copied && getMouseSelectionState(terminalId).selection === selection) flashCopy(terminalId, copyEditor.format);
 }
 
-/** Move a selection edge a word (`nudgeCopyEdge`) and re-arm its
- *  cancel-on-change baseline. */
+/** Move a selection edge a word (`nudgeCopyEdge`). */
 export function nudgeSelection(terminalId: string, edge: 'start' | 'end', dir: 1 | -1): void {
   const terminal = getTerminalInstance(terminalId);
-  if (terminal && nudgeCopyEdge(terminalId, terminal, edge, dir)) refreshSelectionBaseline(terminalId);
+  if (terminal) nudgeCopyEdge(terminalId, terminal, edge, dir);
 }

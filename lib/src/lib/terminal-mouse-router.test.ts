@@ -105,7 +105,6 @@ function createHarness(windowHost: ListenerHost) {
     terminal: terminal as never,
     element: element as never,
     getOverlayDims: () => dims,
-    setSelectionBaseline: vi.fn(),
   });
   return { cleanup, element, screen, terminal, windowHost };
 }

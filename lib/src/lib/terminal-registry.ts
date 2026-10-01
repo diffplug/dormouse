@@ -39,7 +39,6 @@ export {
   getTerminalShellKind,
   getTerminalInstance,
   getTerminalOverlayDims,
-  refreshSelectionBaseline,
   getSessionInputVersion,
   isUntouched,
   mountElement,

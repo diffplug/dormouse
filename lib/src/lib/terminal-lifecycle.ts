@@ -24,6 +24,8 @@ import {
   getMouseSelectionState,
   removeMouseSelectionState,
   setSelection as setMouseSelection,
+  subscribeToMouseSelection,
+  type Selection,
 } from './mouse-selection';
 import { extractSelectionText } from './selection-text';
 import { normalizeResumeCommand } from './resume-patterns';
@@ -224,8 +226,8 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
 }
 
 /** xterm input/resize/render handlers. Returns a dispose. The render
- *  handler watches selectionBaseline (mutated by the mouse router) so the
- *  baseline is read by reference rather than captured. */
+ *  handler watches selectionBaseline (rewritten whenever the selection
+ *  changes) so the baseline is read by reference rather than captured. */
 function wireXtermHandlers(
   id: string,
   terminal: Terminal,
@@ -298,12 +300,16 @@ interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: H
 
 function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
   const { terminal, fit, serialize, element } = createXtermHost(id, options.grid);
+  // Cancel-on-change follows the selection itself: whoever finalizes or moves
+  // it, its text at that moment is what the render handler compares against.
   const selectionBaselineRef = { current: null as string | null };
-  // Every module that finalizes a selection arms the render handler through
-  // this one setter at drag end.
-  const setSelectionBaseline = (baseline: string | null) => {
-    selectionBaselineRef.current = baseline;
-  };
+  let watchedSelection: Selection | null = null;
+  const unsubscribeSelectionBaseline = subscribeToMouseSelection(() => {
+    const sel = getMouseSelectionState(id).selection;
+    if (sel === watchedSelection) return;
+    watchedSelection = sel;
+    selectionBaselineRef.current = sel && !sel.dragging ? extractSelectionText(terminal, sel) : null;
+  });
 
   const disposePty = wirePtyEvents(id, terminal);
   const disposeXterm = wireXtermHandlers(id, terminal, selectionBaselineRef);
@@ -316,10 +322,10 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
     terminal,
     element,
     getOverlayDims: getTerminalOverlayDims,
-    setSelectionBaseline,
   });
 
   const cleanup = () => {
+    unsubscribeSelectionBaseline();
     disposePty();
     disposeXterm();
     mouseModeObserver.dispose();
@@ -335,7 +341,6 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
     serialize,
     element,
     cleanup,
-    setSelectionBaseline,
     isReplaying: false,
     untouched: options.untouched ?? false,
   };
@@ -673,15 +678,6 @@ export function refitSession(id: string): void {
 
 export function getTerminalInstance(id: string): Terminal | null {
   return registry.get(id)?.terminal ?? null;
-}
-
-/** Re-arm cancel-on-change for a selection moved without a drag (the copy
- *  editor's nudge): the baseline is its text now. */
-export function refreshSelectionBaseline(id: string): void {
-  const entry = registry.get(id);
-  const sel = getMouseSelectionState(id).selection;
-  if (!entry) return;
-  entry.setSelectionBaseline(sel && !sel.dragging ? extractSelectionText(entry.terminal, sel) : null);
 }
 
 export function getTerminalOverlayDims(id: string): TerminalOverlayDims | null {

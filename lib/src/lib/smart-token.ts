@@ -3,7 +3,8 @@
  * Used by the smart-extension feature to offer "Press e to select the full
  * URL/path" during a mid-drag (spec §5).
  */
-import type { IBufferCell, IBufferLine } from '@xterm/xterm';
+import type { IBufferLine } from '@xterm/xterm';
+import { readLineCells } from './buffer-cells';
 
 export interface DetectedToken {
   kind: 'url' | 'path';
@@ -104,21 +105,17 @@ export function detectTokenAt(line: string, col: number): DetectedToken | null {
  * characters have a zero-width continuation cell; combining marks and emoji
  * can occupy several code units within one cell. */
 export function detectTokenInBufferLine(line: IBufferLine, col: number): DetectedToken | null {
+  const cells = readLineCells(line);
   let text = '';
   let probe = -1;
   const starts: number[] = [];
   const ends: number[] = [];
-  // Reuse the first cell for the rest of the line — `getCell` allocates a fresh
-  // CellData per call otherwise, and this runs on every pointermove of a drag.
-  let scratch: IBufferCell | undefined;
-  for (let c = 0; c < line.length; c++) {
-    const cell = line.getCell(c, scratch);
-    if (!cell) continue;
-    scratch ??= cell;
-    const width = cell.getWidth();
-    if (width === 0) continue;
+  for (let c = 0; c < cells.length; c++) {
+    const chars = cells[c];
+    if (chars === '') continue;
+    let width = 1;
+    while (cells[c + width] === '') width++;
     if (c <= col && col < c + width) probe = text.length;
-    const chars = cell.getChars() || ' ';
     for (let i = 0; i < chars.length; i++) {
       starts.push(c);
       ends.push(c + width);

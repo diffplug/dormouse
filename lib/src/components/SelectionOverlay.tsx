@@ -6,6 +6,7 @@ import {
   subscribeToMouseSelection,
   subscribeToRenderTick,
 } from '../lib/mouse-selection';
+import { selectionOfSpan } from '../lib/copy-text';
 import { computeRects, rectsToPath } from '../lib/selection-geometry';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { IS_MAC } from '../lib/platform';
@@ -55,18 +56,9 @@ export function SelectionOverlay({ terminalId }: Props) {
   const pathD = rectsToPath(rects);
 
   // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
-  const editor = selection.dragging ? null : state.copyEditor;
-  const scope = editor?.scopes[editor.scope];
-  const scopeD = scope && scope.id !== 'selection'
-    ? rectsToPath(computeRects({
-        startRow: scope.span.start.row,
-        startCol: scope.span.start.col,
-        endRow: scope.span.end.row,
-        endCol: scope.span.end.col,
-        shape: 'linewise',
-        dragging: false,
-        startedInScrollback: false,
-      }, dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight))
+  const editor = state.copyEditor;
+  const scopeD = editor && editor.scope > 0
+    ? rectsToPath(computeRects(selectionOfSpan(editor.scopes[editor.scope].span, selection), dims.cols, dims.viewportY, dims.rows, cellWidth, cellHeight))
     : '';
 
   // Mid-drag hint. Placed outside the selection on the side opposite the
@@ -116,7 +108,7 @@ export function SelectionOverlay({ terminalId }: Props) {
             {scopeD && (
               <path
                 d={scopeD}
-                style={{ fill: 'color-mix(in srgb, var(--color-success) 12%, transparent)', stroke: 'var(--color-success)' }}
+                style={{ fill: 'color-mix(in srgb, var(--color-success) 15%, transparent)', stroke: 'var(--color-success)' }}
                 strokeWidth={1.5}
                 strokeDasharray="4 3"
               />

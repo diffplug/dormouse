@@ -13,7 +13,6 @@ import {
 } from './mouse-selection';
 import { openCopyEditor } from './copy-editor';
 import { detectTokenInBufferLine } from './smart-token';
-import { extractSelectionText } from './selection-text';
 import type { TerminalOverlayDims } from './terminal-store';
 
 /**
@@ -56,13 +55,11 @@ export function attachTerminalMouseRouter({
   terminal,
   element,
   getOverlayDims,
-  setSelectionBaseline,
 }: {
   id: string;
   terminal: Terminal;
   element: HTMLDivElement;
   getOverlayDims: (id: string) => TerminalOverlayDims | null;
-  setSelectionBaseline: (baseline: string | null) => void;
 }): () => void {
   const computeCell = (ev: MouseEvent | PointerEvent): { row: number; col: number; startedInScrollback: boolean } => {
     const dims = getOverlayDims(id);
@@ -131,7 +128,6 @@ export function attachTerminalMouseRouter({
     // cannot clear a previous selection for us.
     setSelection(id, null);
     setHintToken(id, null);
-    setSelectionBaseline(null);
     if (!terminalOwns) return false;
     const suppressNativeMouse = state.mouseReporting !== 'none';
     if (suppressNativeMouse || opts.touchLike) {
@@ -227,8 +223,6 @@ export function attachTerminalMouseRouter({
     const suppressNativeMouse = stateRequiresNativeMouseSuppression(getMouseSelectionState(id));
     endDrag(id);
     setHintToken(id, null);
-    const sel = getMouseSelectionState(id).selection;
-    setSelectionBaseline(sel ? extractSelectionText(terminal, sel) : null);
     openCopyEditor(id, terminal);
     clearTemporaryOverrideAfterMouseDispatch(id);
     consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));

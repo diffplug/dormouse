@@ -207,6 +207,10 @@ export const popupButton = tv({
       true: 'animate-copy-flash bg-header-active-bg/25 text-header-active-bg',
       false: 'hover:bg-foreground/10',
     },
+    /** The chosen option of a segmented row (the copy editor's scope and format). */
+    selected: {
+      true: 'bg-header-active-bg text-header-active-fg hover:bg-header-active-bg',
+    },
   },
   defaultVariants: { flashed: false },
 });

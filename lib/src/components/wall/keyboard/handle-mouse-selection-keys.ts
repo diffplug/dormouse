@@ -67,7 +67,7 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   }
 
   const keyLower = e.key.toLowerCase();
-  if (sel && mouseState.copyEditor && handleCopyEditorKey(e, sid, keyLower)) return true;
+  if (mouseState.copyEditor && handleCopyEditorKey(e, sid, keyLower)) return true;
   // Paste takes either modifier on every platform (see `hasPasteModifier`).
   // Trade-off: shadows readline's ^V verbatim-insert; not worth surfacing as a
   // setting until someone asks for it.
@@ -90,12 +90,8 @@ function handleCopyEditorKey(e: KeyboardEvent, sid: string, keyLower: string): b
     e.stopImmediatePropagation();
     return true;
   };
-  if (hasCopyModifier(e) && keyLower === 'c') {
-    void copySelection(sid);
-    return consume();
-  }
   const bare = !e.metaKey && !e.ctrlKey && !e.altKey;
-  if (bare && e.key === 'Enter' && !e.shiftKey) {
+  if ((hasCopyModifier(e) && keyLower === 'c') || (bare && e.key === 'Enter' && !e.shiftKey)) {
     void copySelection(sid);
     return consume();
   }

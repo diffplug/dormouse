@@ -1,47 +1,18 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import '@xterm/xterm/css/xterm.css';
-import { CopyEditor } from '../components/CopyEditor';
-import { SelectionOverlay } from '../components/SelectionOverlay';
-import {
-  focusSession,
-  getOrCreateTerminal,
-  getTerminalInstance,
-  getTerminalOverlayDims,
-  mountElement,
-  refitSession,
-  unmountElement,
-} from '../lib/terminal-registry';
+import { TerminalPane } from '../components/TerminalPane';
+import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
+import { CLAUDE_REPLY } from '../lib/copy-text-fixtures';
 import type { FakeScenario } from '../lib/platform';
 import { openCopyEditor, setCopyFormat, setCopyScope } from '../lib/copy-editor';
 import { getMouseSelectionState, setCopyEditor, setSelection, type Selection } from '../lib/mouse-selection';
 import type { BreakKind, CopyFormat } from '../lib/copy-text';
-import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../components/design';
 import { TouchUiContext } from '../components/touch-ui-context';
 import { settleTerminals, waitForCondition } from './settle-terminals';
 
-// A Claude Code reply as Ink hard-wraps it at 76 of 80 columns.
-const REPLY = [
-  '> why is selection-text.test.ts flaky on CI?',
-  '',
-  '⏺ The flake comes from a race between the PTY exit event and the final flush',
-  '  of the output buffer. When the child exits before xterm has drained its',
-  '  write queue, the last chunk is dropped and the assertion on the prompt',
-  '  text fails intermittently.',
-  '',
-  '  The fix is to await the write callback before reading the buffer:',
-  '',
-  '    await new Promise<void>((resolve) => terminal.write(chunk, resolve));',
-  '    const text = extractSelectionText(terminal, selection);',
-  "    expect(text).toBe('user@dormouse:~$ ls');",
-  '',
-  '  I opened a draft with the change: https://github.com/diffplug/dormouse/pul',
-  '  l/853/files#diff-7c1f3e9a2b8d4f6e0a5c7b9d1e3f5a7c9b1d3e5f',
-  '',
-];
 const SCENARIO_CLAUDE_REPLY: FakeScenario = {
   name: 'claude-reply',
-  chunks: [{ delay: 0, data: REPLY.join('\r\n') }],
+  chunks: [{ delay: 0, data: CLAUDE_REPLY.join('\r\n') }],
 };
 
 interface EditorPreset {
@@ -61,25 +32,6 @@ function CopyEditorStory({
   editor?: EditorPreset;
   touch?: boolean;
 }) {
-  const hostRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    getOrCreateTerminal(id);
-    mountElement(id, host);
-    const observer = new ResizeObserver(() => refitSession(id));
-    observer.observe(host);
-    return () => {
-      observer.disconnect();
-      unmountElement(id);
-    };
-  }, [id]);
-
-  useEffect(() => {
-    focusSession(id, true);
-  }, [id]);
-
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
@@ -109,10 +61,8 @@ function CopyEditorStory({
 
   return (
     <TouchUiContext.Provider value={touch}>
-      <div className={`relative bg-terminal-bg ${TERMINAL_BOTTOM_RADIUS_CLASS}`} style={{ width: 640, height: 400 }}>
-        <div ref={hostRef} className="h-full w-full" />
-        <SelectionOverlay terminalId={id} />
-        <CopyEditor terminalId={id} />
+      <div style={{ width: 640, height: 400 }}>
+        <TerminalPane id={id} isFocused />
       </div>
     </TouchUiContext.Provider>
   );

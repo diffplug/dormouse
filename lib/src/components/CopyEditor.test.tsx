@@ -4,7 +4,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Terminal } from '@xterm/xterm';
 
 vi.mock('../lib/copy-selection', () => ({ copySelection: vi.fn() }));
 vi.mock('../lib/platform', () => ({ IS_MAC: true }));
@@ -12,6 +11,7 @@ vi.mock('../lib/platform', () => ({ IS_MAC: true }));
 vi.mock('../lib/terminal-registry', () => ({ getTerminalOverlayDims: vi.fn(), getTerminalInstance: vi.fn() }));
 import { copySelection } from '../lib/copy-selection';
 import { openCopyEditor } from '../lib/copy-editor';
+import { CLAUDE_REPLY, fakeXterm } from '../lib/copy-text-fixtures';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
@@ -27,30 +27,6 @@ import { TouchUiContext } from './touch-ui-context';
 import { WorkspaceActiveContext } from './wall/wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-
-const LINES = [
-  'The flake comes from a race between the PTY exit event and the final flush',
-  'of the output buffer. When the child exits before xterm has drained its',
-  'write queue, the last chunk is dropped and the assertion on the prompt',
-  'text fails intermittently.',
-  '',
-  'https://github.com/diffplug/dormouse/pull/853',
-];
-
-/** An xterm buffer over plain strings, one narrow cell per character. */
-function fakeTerminal(lines: string[]): Terminal {
-  const getLine = (r: number) => {
-    const text = lines[r];
-    if (text === undefined) return undefined;
-    return {
-      length: 80,
-      isWrapped: false,
-      getCell: (c: number) => ({ getChars: () => text[c] ?? '', getWidth: () => 1 }),
-      translateToString: (_trim?: boolean, start = 0, end = 80) => text.slice(start, end),
-    };
-  };
-  return { cols: 80, rows: 24, buffer: { active: { length: lines.length, getLine } } } as unknown as Terminal;
-}
 
 // A forty-row viewport over ten scrollback lines, so a scroll moves the editor
 // by whole cells.
@@ -70,7 +46,7 @@ const DIMS = {
 let container: HTMLDivElement;
 let root: Root;
 let dims: typeof DIMS;
-const terminal = fakeTerminal(LINES);
+const terminal = fakeXterm(CLAUDE_REPLY);
 
 const editor = () => container.querySelector<HTMLElement>('[data-copy-editor-for="term-1"]');
 const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label)!;
@@ -114,12 +90,12 @@ describe('CopyEditor: opening and placement', () => {
   });
 
   it('opens below a selection with room, and reanchors when it scrolls', () => {
-    drag(0, 23, 3, 26);
+    drag(2, 25, 5, 27);
     render();
-    expect(editor()?.style.top).toBe('44px');
+    expect(editor()?.style.top).toBe('64px');
     dims.viewportY = 2;
     act(() => bumpRenderTick());
-    expect(editor()?.style.top).toBe('24px');
+    expect(editor()?.style.top).toBe('44px');
   });
 
   it('opens above when there is more room there', () => {
@@ -145,14 +121,14 @@ describe('CopyEditor: opening and placement', () => {
 
 describe('CopyEditor: preview and controls', () => {
   it('previews Auto with a mark on every break', () => {
-    drag(0, 0, 3, 26);
+    drag(2, 2, 5, 27);
     render();
     expect(container.textContent).toContain('final flush␣of the output');
     expect(container.textContent).toContain('1 line');
   });
 
   it('switches format from the segment and dims a format that adds nothing', () => {
-    drag(0, 0, 3, 26);
+    drag(2, 2, 5, 27);
     render();
     expect(button('Spaces').className).toContain('opacity-50');
     act(() => button('Exact').click());
@@ -161,7 +137,7 @@ describe('CopyEditor: preview and controls', () => {
   });
 
   it('flips one break from its mark and marks the format edited', () => {
-    drag(0, 0, 3, 26);
+    drag(2, 2, 5, 27);
     render();
     act(() => button('␣').click());
     expect(getMouseSelectionState('term-1').copyEditor?.overrides).toEqual({ 0: 'none' });
@@ -169,7 +145,7 @@ describe('CopyEditor: preview and controls', () => {
   });
 
   it('expands from the scope segment and shows what it added', () => {
-    drag(0, 25, 1, 5);
+    drag(2, 27, 3, 5);
     render();
     act(() => button('Whole words').click());
     expect(getMouseSelectionState('term-1').copyEditor?.scope).toBe(1);
@@ -177,14 +153,14 @@ describe('CopyEditor: preview and controls', () => {
   });
 
   it('copies from the button', () => {
-    drag(0, 0, 3, 26);
+    drag(2, 2, 5, 27);
     render();
-    act(() => button('[Cmd+C]Copy').click());
+    act(() => button('Copy').click());
     expect(copySelection).toHaveBeenCalledWith('term-1');
   });
 
   it('dismisses on a click outside, not inside', () => {
-    drag(0, 0, 3, 26);
+    drag(2, 2, 5, 27);
     render();
     act(() => { editor()!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
     expect(getMouseSelectionState('term-1').selection).not.toBeNull();
@@ -195,7 +171,7 @@ describe('CopyEditor: preview and controls', () => {
 
 describe('CopyEditor: flash', () => {
   beforeEach(() => {
-    drag(5, 0, 5, 10);
+    drag(5, 2, 5, 12);
     render();
   });
 
@@ -210,10 +186,10 @@ describe('CopyEditor: flash', () => {
     vi.useFakeTimers();
     act(() => flashCopy('term-1', 'auto'));
     act(() => vi.advanceTimersByTime(400));
-    drag(1, 0, 1, 10);
+    drag(9, 4, 9, 20);
     act(() => flashCopy('term-1', 'auto'));
     act(() => vi.advanceTimersByTime(300));
-    expect(getMouseSelectionState('term-1').selection?.startRow).toBe(1);
+    expect(getMouseSelectionState('term-1').selection?.startRow).toBe(9);
     act(() => vi.advanceTimersByTime(400));
     expect(getMouseSelectionState('term-1').selection).toBeNull();
   });

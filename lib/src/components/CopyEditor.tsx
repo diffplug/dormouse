@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { useContext, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { CheckIcon } from '@phosphor-icons/react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
@@ -10,11 +10,11 @@ import {
   subscribeToRenderTick,
 } from '../lib/mouse-selection';
 import { COPY_FORMATS, spanOfSelection, type BreakKind, type CopyFormat, type Piece, type Rendering } from '../lib/copy-text';
-import { copyEditorView, flipCopyBreak, setCopyFormat, setCopyScope } from '../lib/copy-editor';
+import { duplicateFormats, editorRendering, flipCopyBreak, formatRenderings, setCopyFormat, setCopyScope } from '../lib/copy-editor';
 import { copySelection } from '../lib/copy-selection';
 import { getTerminalInstance, getTerminalOverlayDims } from '../lib/terminal-registry';
 import { IS_MAC } from '../lib/platform';
-import { modalSurface, Shortcut } from './design';
+import { modalActionButton, modalSurface, popupButton, Shortcut } from './design';
 import { TouchUiContext } from './touch-ui-context';
 import { WorkspaceActiveContext } from './wall/wall-context';
 
@@ -71,12 +71,21 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
 
   const state = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
   const { selection, copyEditor, copyFlash } = state;
-  const open = workspaceActive && !!selection && !selection.dragging && !!copyEditor;
+  const open = workspaceActive && !!copyEditor;
   const terminal = open ? getTerminalInstance(terminalId) : null;
-  const view = useMemo(
-    () => (terminal && selection && copyEditor ? copyEditorView(terminal, selection, copyEditor) : null),
-    [terminal, selection, copyEditor],
+  // Every format at the scope is rendered once per scope, so `f` and the
+  // duplicate check reuse it; only a per-break edit renders again.
+  const scope = copyEditor?.scopes[copyEditor.scope].span;
+  const renderings = useMemo(
+    () => (terminal && selection && scope ? formatRenderings(terminal, selection, scope) : null),
+    [terminal, selection, scope],
   );
+  const rendering = useMemo(
+    () => (terminal && selection && copyEditor && renderings ? editorRendering(terminal, selection, copyEditor, renderings) : null),
+    [terminal, selection, copyEditor, renderings],
+  );
+  const sameAs = useMemo(() => (renderings ? duplicateFormats(renderings) : {}), [renderings]);
+  const onFlip = useCallback((index: number, kind: BreakKind) => flipCopyBreak(terminalId, index, kind), [terminalId]);
 
   const [placement, setPlacement] = useState<Placement | null>(null);
   useLayoutEffect(() => {
@@ -117,9 +126,8 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
     return () => window.removeEventListener('mousedown', onMouseDown, true);
   }, [open, terminalId]);
 
-  if (!open || !view || !placement || !copyEditor || !terminal) return null;
+  if (!rendering || !placement || !copyEditor || !selection) return null;
 
-  const { scope, rendering, sameAs } = view;
   const edited = Object.keys(copyEditor.overrides).length > 0;
   const keys = (node: ReactNode) => (touchUi ? null : <span className="whitespace-nowrap text-xs text-muted">{node}</span>);
   const style: CSSProperties = {
@@ -163,25 +171,26 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
         </div>
       </div>
       <div className="min-h-10 flex-1 overflow-auto bg-app-bg">
-        <LinedPreview rendering={rendering} onFlip={(i) => flipCopyBreak(terminalId, terminal, i)} />
+        <LinedPreview rendering={rendering} onFlip={onFlip} />
       </div>
       <div className="flex shrink-0 items-center gap-3 border-t border-border px-2 py-1 text-xs text-muted">
         <span className="flex items-center gap-2 whitespace-nowrap">
           <span><span className="text-foreground">{MARK_GLYPH.keep}</span> kept</span>
           <span><span className="text-foreground">{MARK_GLYPH.space}</span> space</span>
           <span><span className="text-foreground">{MARK_GLYPH.none}</span> joined</span>
-          {scope.id !== 'selection' && <span><span className={clsx(ADDED_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
+          {copyEditor.scope > 0 && <span><span className={clsx(ADDED_CLASS, 'px-0.5 text-foreground')}>abc</span> expanded</span>}
         </span>
         {selection.shape !== 'block' && keys(<><Shortcut>{LEFT}{RIGHT}</Shortcut> end <Shortcut>{SHIFT}{LEFT}{RIGHT}</Shortcut> start</>)}
         <span className="ml-auto shrink-0 whitespace-nowrap">
           {rendering.lines} {rendering.lines === 1 ? 'line' : 'lines'} · {rendering.text.length} ch
         </span>
+        {keys(<Shortcut>{IS_MAC ? 'Cmd+C' : 'Ctrl+C'}</Shortcut>)}
         <button
           type="button"
           onClick={() => void copySelection(terminalId)}
-          className="flex shrink-0 items-center gap-1 rounded bg-header-active-bg px-2 py-0.5 text-header-active-fg"
+          className={modalActionButton({ tone: 'primary', class: 'flex shrink-0 items-center gap-1 py-0.5' })}
         >
-          {copyFlash ? <CheckIcon size={12} weight="bold" /> : !touchUi && <span className="opacity-70">[{IS_MAC ? 'Cmd+C' : 'Ctrl+C'}]</span>}
+          {copyFlash && <CheckIcon size={12} weight="bold" />}
           Copy
         </button>
       </div>
@@ -205,11 +214,10 @@ function Segment<T extends string | number>({ value, items, onPick }: {
           title={it.title}
           aria-pressed={it.id === value}
           onClick={() => onPick(it.id)}
-          className={clsx(
-            'shrink-0 whitespace-nowrap border-r border-border px-1.5 py-0.5 last:border-r-0',
-            it.id === value ? 'bg-header-active-bg text-header-active-fg' : 'hover:bg-foreground/10',
-            it.dim && it.id !== value && 'opacity-50',
-          )}
+          className={popupButton({
+            selected: it.id === value,
+            class: clsx('shrink-0 whitespace-nowrap border-r border-border last:border-r-0', it.dim && it.id !== value && 'opacity-50'),
+          })}
         >
           {it.label}
         </button>
@@ -218,13 +226,13 @@ function Segment<T extends string | number>({ value, items, onPick }: {
   );
 }
 
-function Mark({ kind, auto, onFlip }: { kind: BreakKind; auto: BreakKind; onFlip: () => void }) {
+function Mark({ index, kind, auto, onFlip }: { index: number; kind: BreakKind; auto: BreakKind; onFlip: (index: number, kind: BreakKind) => void }) {
   const edited = kind !== auto;
   return (
     <button
       type="button"
       title={`${MARK_TITLE[kind]}${edited ? ' (changed by hand)' : ''}. Click to cycle.`}
-      onClick={onFlip}
+      onClick={() => onFlip(index, kind)}
       className={clsx(
         'mx-px inline-flex h-[15px] min-w-4 items-center justify-center rounded-sm border px-px align-[-3px] leading-none',
         kind === 'keep' ? 'border-border text-muted hover:text-foreground' : 'border-focus-ring bg-focus-ring/15 text-foreground',
@@ -236,8 +244,12 @@ function Mark({ kind, auto, onFlip }: { kind: BreakKind; auto: BreakKind; onFlip
   );
 }
 
-/** One gutter-numbered row per line that lands on the clipboard. */
-function LinedPreview({ rendering, onFlip }: { rendering: Rendering; onFlip: (index: number) => void }) {
+/** One gutter-numbered row per line that lands on the clipboard. Memoized: the
+ *  editor re-renders on every render tick to place itself. */
+const LinedPreview = memo(function LinedPreview({ rendering, onFlip }: {
+  rendering: Rendering;
+  onFlip: (index: number, kind: BreakKind) => void;
+}) {
   if (rendering.text === '') return <div className="px-2 py-1.5 text-xs italic text-muted">(empty)</div>;
   const lines: ReactNode[][] = [[]];
   rendering.pieces.forEach((p: Piece, i) => {
@@ -247,7 +259,7 @@ function LinedPreview({ rendering, onFlip }: { rendering: Rendering; onFlip: (in
       line.push(<span key={i} className={clsx(p.lead && 'text-muted/60', p.added && ADDED_CLASS)}>{text}</span>);
       return;
     }
-    line.push(<Mark key={i} kind={p.kind} auto={p.auto} onFlip={() => onFlip(p.index)} />);
+    line.push(<Mark key={i} index={p.index} kind={p.kind} auto={p.auto} onFlip={onFlip} />);
     if (p.kind === 'keep') lines.push([]);
   });
   const gutterCh = String(lines.length).length;
@@ -266,4 +278,4 @@ function LinedPreview({ rendering, onFlip }: { rendering: Rendering; onFlip: (in
       ))}
     </div>
   );
-}
+});

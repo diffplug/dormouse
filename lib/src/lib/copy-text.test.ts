@@ -11,36 +11,15 @@ import {
   type CopyFormat,
   type Span,
 } from './copy-text';
+import { CLAUDE_REPLY, fakeXterm } from './copy-text-fixtures';
 import { extractSelectionText } from './selection-text';
 import type { Selection } from './mouse-selection';
 
-// A Claude Code reply as Ink hard-wraps it at 76 of 80 columns.
-const CLAUDE = [
-  '> why is selection-text.test.ts flaky on CI?',
-  '',
-  '⏺ The flake comes from a race between the PTY exit event and the final flush',
-  '  of the output buffer. When the child exits before xterm has drained its',
-  '  write queue, the last chunk is dropped and the assertion on the prompt',
-  '  text fails intermittently.',
-  '',
-  '  The fix is to await the write callback before reading the buffer:',
-  '',
-  '    await new Promise<void>((resolve) => terminal.write(chunk, resolve));',
-  '    const text = extractSelectionText(terminal, selection);',
-  "    expect(text).toBe('user@dormouse:~$ ls');",
-  '',
-  '  I opened a draft with the change: https://github.com/diffplug/dormouse/pul',
-  '  l/853/files#diff-7c1f3e9a2b8d4f6e0a5c7b9d1e3f5a7c9b1d3e5f',
-  '',
-  `╭${'─'.repeat(78)}╮`,
-  `│ > ${' '.repeat(75)}│`,
-  `╰${'─'.repeat(78)}╯`,
-];
+const CLAUDE = CLAUDE_REPLY;
 const claude = stringCopyBuffer(CLAUDE, { cols: 80 });
 
-const span = (r0: number, c0: number, r1: number, c1: number): Span => ({ start: { row: r0, col: c0 }, end: { row: r1, col: c1 } });
-const text = (buf: CopyBuffer, s: Span, format: CopyFormat, extra: Partial<Parameters<typeof render>[2]> = {}) =>
-  render(buf, s, { original: s, format, ...extra }).text;
+const span = (r0: number, c0: number, r1: number, c1: number, block = false): Span => ({ start: { row: r0, col: c0 }, end: { row: r1, col: c1 }, block });
+const text = (buf: CopyBuffer, s: Span, format: CopyFormat) => render(buf, s, { original: s, format }).text;
 
 describe('copy-text formats', () => {
   const prose = span(2, 2, 5, 27);
@@ -53,11 +32,7 @@ describe('copy-text formats', () => {
 
   it('Exact is the old Copy Raw: rows trimmed, indents kept', () => {
     const sel: Selection = { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false };
-    const terminal = {
-      cols: 80,
-      buffer: { active: { getLine: (r: number) => ({ translateToString: (_t: boolean, s = 0, e = 80) => (CLAUDE[r] ?? '').slice(s, e) }) } },
-    } as unknown as Terminal;
-    expect(text(claude, prose, 'exact')).toBe(extractSelectionText(terminal, sel));
+    expect(text(claude, prose, 'exact')).toBe(extractSelectionText(fakeXterm(CLAUDE), sel));
     expect(text(claude, prose, 'exact').split('\n')[1]).toBe('  of the output buffer. When the child exits before xterm has drained its');
   });
 
@@ -107,14 +82,15 @@ describe('copy-text formats', () => {
   });
 
   it('reads a block slab exactly under Auto', () => {
-    const block = span(2, 2, 4, 20);
-    expect(text(claude, block, 'auto', { block: true })).toBe(text(claude, block, 'exact', { block: true }));
-    expect(text(claude, block, 'exact', { block: true }).split('\n')).toEqual(['The flake comes fro', 'of the output buffe', 'write queue, the la']);
+    const block = span(2, 2, 4, 20, true);
+    expect(text(claude, block, 'auto')).toBe(text(claude, block, 'exact'));
+    expect(text(claude, block, 'exact').split('\n')).toEqual(['The flake comes fro', 'of the output buffe', 'write queue, the la']);
   });
 
   it('applies an override to one break and reports the format’s own decisions', () => {
     const r = render(claude, prose, { original: prose, format: 'auto', overrides: { 1: 'keep' } });
-    expect(r.breaks).toEqual(['space', 'space', 'space']);
+    const breaks = r.pieces.flatMap((p) => (p.t === 'break' ? [[p.auto, p.kind]] : []));
+    expect(breaks).toEqual([['space', 'space'], ['space', 'keep'], ['space', 'space']]);
     expect(r.lines).toBe(2);
     expect(r.text.split('\n')[1]).toBe('write queue, the last chunk is dropped and the assertion on the prompt text fails intermittently.');
   });
@@ -145,7 +121,13 @@ describe('copy-text scopes', () => {
 
   it('skips a scope that adds nothing', () => {
     const scopes = computeScopes(claude, span(2, 2, 5, 27));
-    expect(scopes.map((s) => s.id)).toEqual(['selection']);
+    expect(scopes.map((s) => s.label)).toEqual(['As selected']);
+  });
+
+  it('names a path or a plain word the way the smart-token detector does', () => {
+    const buf = stringCopyBuffer(['see ~/projects/dormouse/README.md and src/lib/x.ts too'], { cols: 80 });
+    expect(computeScopes(buf, span(0, 8, 0, 20))[1].label).toBe('Full path');
+    expect(computeScopes(buf, span(0, 42, 0, 46))[1].label).toBe('Whole words');
   });
 
   it('names a growth by its grown edge', () => {
@@ -153,7 +135,7 @@ describe('copy-text scopes', () => {
   });
 
   it('gives a block slab no other scope', () => {
-    expect(computeScopes(claude, span(2, 2, 4, 20), true)).toHaveLength(1);
+    expect(computeScopes(claude, span(2, 2, 4, 20, true))).toHaveLength(1);
   });
 });
 

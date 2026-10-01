@@ -87,7 +87,7 @@ A small hint sits adjacent to an in-progress selection — below when dragging d
 A selection is anchored to the characters under it, not to screen coordinates: stored in absolute buffer rows (scrollback + viewport).
 
 - **Pure scroll** — vertical translation with no character changes — carries the selection along; coordinate math only, no matching.
-- **Content change:** any change to a cell the finalized selection overlaps cancels it immediately; repaints elsewhere on screen are irrelevant. A text snapshot taken at finalize, and again after an editor nudge (§4.3), is compared on each xterm render; **never add a partial-match or content-tracking heuristic** — cancel-on-change is the rule (§9.1).
+- **Content change:** any change to a cell the finalized selection overlaps cancels it immediately; repaints elsewhere on screen are irrelevant. A text snapshot, retaken whenever the selection is finalized or moved (§4.3), is compared on each xterm render; **never add a partial-match or content-tracking heuristic** — cancel-on-change is the rule (§9.1).
 - **Terminal resize** counts as a content change and cancels any active selection.
 
 ### 3.5 Selection in the Live Region vs. Scrollback
