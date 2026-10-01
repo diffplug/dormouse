@@ -14,10 +14,13 @@ export interface WorkspaceUiState {
   pendingClose: { id: WorkspaceId; char: string } | null;
   /** A refused move stays visible until dismissed or retried. */
   moveError: { id: WorkspaceId; reason: string } | null;
+  /** A Surface move between Workspaces awaiting its typed iframe-refresh
+   *  confirmation; `answer` settles the move
+   *  (`docs/specs/layout.md` → "Moving Surfaces between Workspaces"). */
+  pendingSurfaceMove: { id: WorkspaceId; char: string; answer: (accepted: boolean) => void } | null;
   /** A move between Windows awaiting its typed confirmation, because it would
    *  destroy the page state of `iframeCount` iframe Surfaces; `proceed` runs the
    *  move (`docs/specs/layout.md` → "Workspaces"). */
-  pendingSurfaceMove: { id: WorkspaceId; char: string; answer: (accepted: boolean) => void } | null;
   pendingMove: { id: WorkspaceId; char: string; iframeCount: number; proceed: () => void } | null;
 }
 

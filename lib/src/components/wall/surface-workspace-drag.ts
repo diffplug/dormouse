@@ -1,4 +1,5 @@
 import { getWorkspaceUiSnapshot } from '../../lib/workspace-ui-store';
+import { workspaceStripElement, workspaceTabElement, workspaceTabElements } from '../workspace-tab-elements';
 import { wallHandleOwning } from './wall-handles';
 import { requestSurfaceMove } from './surface-move';
 
@@ -9,20 +10,24 @@ export interface SurfaceWorkspaceDrag {
   end(): void;
 }
 
+type Measured = { strip: HTMLElement; stripRect: DOMRect; targets: [HTMLElement, DOMRect][] };
+// The strip cannot reorder under a pane drag, so one measurement serves the gesture.
+let measured: Measured | null | undefined;
+let hovered: HTMLElement | null = null;
 let highlighted: HTMLElement | null = null;
-function clear(): void {
-  highlighted?.removeAttribute('data-surface-drop');
-  highlighted = null;
-}
-function targetAt(x: number, y: number): HTMLElement | null {
-  const strip = document.querySelector<HTMLElement>('[data-workspace-strip]');
+
+const inside = (r: DOMRect, x: number, y: number) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+function measure(): Measured | null {
+  const strip = workspaceStripElement();
   if (!strip) return null;
-  const contains = (element: HTMLElement) => {
-    const r = element.getBoundingClientRect();
-    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-  };
-  if (!contains(strip)) return null;
-  return [...strip.querySelectorAll<HTMLElement>('[data-workspace-tab], [data-workspace-new]')].find(contains) ?? strip;
+  const elements = [...workspaceTabElements(), workspaceTabElement(null)].filter((element): element is HTMLElement => element !== null);
+  return { strip, stripRect: strip.getBoundingClientRect(), targets: elements.map(element => [element, element.getBoundingClientRect()]) };
+}
+/** The tab or + under the pointer, the strip itself over a gap, or null off the strip. */
+function targetAt(x: number, y: number): HTMLElement | null {
+  if (measured === undefined) measured = measure();
+  if (!measured || !inside(measured.stripRect, x, y)) return null;
+  return measured.targets.find(([, rect]) => inside(rect, x, y))?.[0] ?? measured.strip;
 }
 function eligible(id: string, target: HTMLElement): boolean {
   const source = wallHandleOwning(id);
@@ -30,20 +35,32 @@ function eligible(id: string, target: HTMLElement): boolean {
   return !!source?.canMoveSurfaces && !ui.pendingSurfaceMove && !ui.pendingMove && !ui.pendingClose
     && (target.hasAttribute('data-workspace-new') ? source.surfaceIds().length > 1 : !!target.dataset.workspaceTab && target.dataset.workspaceTab !== source.workspaceId);
 }
+function highlight(target: HTMLElement | null): void {
+  if (target === highlighted) return;
+  highlighted?.removeAttribute('data-surface-drop');
+  target?.setAttribute('data-surface-drop', '');
+  highlighted = target;
+}
+function end(): void {
+  highlight(null);
+  hovered = null;
+  measured = undefined;
+}
 export const surfaceWorkspaceDrag: SurfaceWorkspaceDrag = {
   hover(id, x, y) {
-    clear();
     const target = targetAt(x, y);
-    if (!target) return false;
-    if (eligible(id, target)) { highlighted = target; target.setAttribute('data-surface-drop', ''); }
-    return true; // Strip gaps and disabled targets consume the drop too.
+    if (target !== hovered) {
+      hovered = target;
+      highlight(target && eligible(id, target) ? target : null);
+    }
+    return target !== null; // Strip gaps and disabled targets consume the drop too.
   },
   drop(id, x, y) {
     const target = targetAt(x, y);
-    clear();
+    end();
     if (!target) return false;
     if (eligible(id, target)) requestSurfaceMove(id, target.hasAttribute('data-workspace-new') ? { new: true } : { workspace: target.dataset.workspaceTab! });
     return true;
   },
-  end: clear,
+  end,
 };

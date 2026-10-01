@@ -274,17 +274,15 @@ describe('window session aggregator', () => {
 });
 
 
-it('holds the prior complete snapshot through a Surface move, including pagehide and explicit flush', async () => {
+it('holds every write through a Surface move, including pagehide and explicit flush, then writes both records once', async () => {
   const first = getWorkspacesSnapshot().workspaces[0].id;
   const second = createWorkspace({ name: 'Second' }).id;
   publishWorkspaceSession(first, session('moving'));
   publishWorkspaceSession(second, session('other'));
   const write = vi.fn();
   installWindowSessionWriter(write);
-  const before = getWindowSnapshot();
   const end = beginWorkspaceSessionBatch();
   publishWorkspaceSession(first, { version: 3, panes: [] });
-  expect(getWindowSnapshot()).toEqual(before);
   window.dispatchEvent(new Event('pagehide'));
   await flushWindowSession();
   expect(write).not.toHaveBeenCalled();

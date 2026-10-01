@@ -252,11 +252,11 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 
 - **Must move a Pane or Door on release over another Workspace tab**, inserting beside the destination's last selected live pane. Never activate on hover; highlight valid targets. A header/ Door press owns a pane drag; a tab press owns reorder and cross-Window tear-out. Strip gaps, the source tab, and disabled targets consume the drop without a layout move or tear-out. Escape and pointer cancellation change nothing.
 - **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Disable the picker item and `+` drop otherwise, and refuse CLI `--new`.
-- **Must offer Move to workspace beside the copyable Surface ref in terminal and Tool context**, using the same coordinator as dragging. **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
+- **Must offer Move to workspace in terminal and Tool context** (placement: the Title row above), using the same coordinator as dragging. **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
 - **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. Never close a departing Session. Pin a moved preview slot by removing its preview mark.
 - **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with a stable random character over the Window content area. Doors remain minimized while waiting. Show “moving this iframe will trigger a refresh and reopen at its saved URL, possibly losing page state or returning to an earlier page”; the prompted character confirms, anything else cancels. Saved URLs are last-known URLs, not necessarily the page's current location. CLI consent follows `docs/specs/dor-cli.md` → dor move.
 - **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Dirty/pending refusals cannot be bypassed by iframe consent.
-- **Must follow a GUI move into destination passthrough**, acknowledging without input; CLI focus policy follows `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors; if Doors remain but no pane does, refill normally.
+- **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus policy follows `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors; if Doors remain but no pane does, refill normally.
 - **Must prepare before departure and roll back failed adoption**, restoring layout, Doors, parked state, selection, zoom, metadata and refs. Ref allocation belongs to `docs/specs/dor-cli.md` → Handle Model; coordinated durable publication belongs to `docs/specs/transport.md` → Persisted session types; Activity follows `docs/specs/alert.md` → Workspace union.
 
 Source of truth: `moveSurface` in `lib/src/components/wall/surface-move.ts`; `surfaceWorkspaceDrag` in `lib/src/components/wall/surface-workspace-drag.ts`; `MoveWorkspaceAction` in `lib/src/components/wall/MoveWorkspaceAction.tsx`; `prepareSurfaceMove` / `adoptSurfaceMove` in `lib/src/components/Wall.tsx`. Tests: `lib/src/components/WorkspaceWindow.test.tsx`, `lib/src/components/wall/LathHost.test.tsx`.
@@ -578,7 +578,7 @@ Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `Termi
 
 A newly added leaf grows in from the boundary it was placed against; `docs/specs/tiling-engine.md` → "Animation" → Enter owns the hint and its precedence.
 
-Shell-selection replacement shows a fixed-position notice over the resulting pane, fading in/out over 1500ms via `.shell-spawn-notice`, suppressed to a static render under reduced motion. Moves reuse it for eight seconds in alternate-screen programs; `docs/specs/dor-cli.md` → Surface handles.
+Shell-selection replacement shows a fixed-position notice over the resulting pane, fading in/out over 1500ms via `.shell-spawn-notice`, suppressed to a static render under reduced motion. Surface moves reuse it in alternate-screen programs (`docs/specs/dor-cli.md` → Handle Model).
 
 ### Kill (two-phase fade + tween reclaim)
 

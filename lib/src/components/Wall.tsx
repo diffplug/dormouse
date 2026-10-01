@@ -946,15 +946,18 @@ export function Wall({
     [lath],
   );
 
+  /** A member whose live document cannot leave its webview: a move reopens it. */
+  const isIframeSurface = useCallback((id: string): boolean => {
+    const params = lath.getMeta(id)?.params;
+    return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
+      && resolveRenderMode(params) === 'iframe';
+  }, [lath]);
+
   /** The members whose live document a move between Windows cannot carry, by
    *  the ref a `dor` caller can act on. */
   const iframeSurfaceRefs = useCallback(
-    (): string[] => memberSurfaceIds().filter((id) => {
-      const params = lath.getMeta(id)?.params;
-      return (isBrowserParams(params) || (isToolParams(params) && browserUrlFromParams(params) !== null))
-        && resolveRenderMode(params) === 'iframe';
-    }).map(surfaceRefForId),
-    [lath, memberSurfaceIds, surfaceRefForId],
+    (): string[] => memberSurfaceIds().filter(isIframeSurface).map(surfaceRefForId),
+    [isIframeSurface, memberSurfaceIds, surfaceRefForId],
   );
 
   const browserSessions = useCallback(
@@ -1807,7 +1810,7 @@ export function Wall({
       delete params.toolPreview;
       return {
         meta: { ...meta, params }, surfaceRef,
-        iframe: iframeSurfaceRefs().includes(surfaceRef), terminal: surfaceHasTerminal(id),
+        iframe: isIframeSurface(id), terminal: surfaceHasTerminal(id),
         depart: () => {
           const rollback = captureMoveRollback();
           movingSurfaceRef.current = true;
@@ -1819,7 +1822,7 @@ export function Wall({
           forgetSurfaceRef(id);
           if (selectedIdRef.current === id) {
             exitTerminalMode();
-            const nextId = lath.store.leafIds()[0];
+            const nextId = livePaneId();
             if (nextId) selectPane(nextId);
             else { selectedIdRef.current = null; setSelectedId(null); lastPaneIdRef.current = null; }
           }

@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type ReactNode, type RefObject } from 'react';
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type DependencyList, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { ArrowCounterClockwiseIcon, ArrowLineUpIcon, ArrowSquareOutIcon, BugBeetleIcon, CaretDownIcon, CheckIcon, CircleNotchIcon, CopyIcon, PauseIcon, PushPinIcon, SlidersHorizontalIcon, TerminalIcon, WarningIcon, XIcon } from '@phosphor-icons/react';
 import { ELEVATED_PANE_SHADOW, OnOffSwitch, POPUP_SURFACE_CLASS, SUBTLE_ACTION_COLOR_CLASS, SUBTLE_ACTION_INTERACTION_CLASS, SUBTLE_ACTION_REST_COLOR_CLASS, SUBTLE_ACTION_WRAPPER_INTERACTION_CLASS, TERMINAL_CONTEXT_SURFACE_CLASS, TERMINAL_CONTEXT_EXIT_MS, TERMINAL_SELECTION_BORDER_RADIUS } from '../design';
 import { stepFocus } from '../focus-step';
@@ -83,7 +83,7 @@ export interface TerminalContextViewProps {
 }
 
 /** A context action's box, shared with the port row's off-screen measurements. */
-const ACTION_BOX_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-1.5';
+export const ACTION_BOX_CLASS = 'inline-flex h-6 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded px-1.5';
 
 export function ContextAction({ children, label, onClick, disabled = false, busy = false, muted = false, pressed, keepFocus = false }: { children: ReactNode; label: string; onClick?: () => void; disabled?: boolean; busy?: boolean; muted?: boolean; pressed?: boolean; keepFocus?: boolean }) {
   const windowFocused = useContext(WindowFocusedContext);
@@ -244,6 +244,14 @@ const MORE = <span className="inline-flex items-center gap-1">more…<CaretDownI
 /** Keys that open, close, or leave a closed select. Chromium on Windows and Linux
  *  lets any other key change a closed select's value, which here would launch. */
 const SELECT_PASSTHROUGH_KEYS = new Set(['Enter', ' ', 'Tab', 'Escape', 'F4']);
+/** Only a choice from the open list commits; arrows open it instead. */
+export function closedSelectKeyDown(event: KeyboardEvent<HTMLSelectElement>): void {
+  if (SELECT_PASSTHROUGH_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+  event.preventDefault();
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    try { event.currentTarget.showPicker(); } catch { /* Space and Alt+↓ still open it */ }
+  }
+}
 
 /** Measure natural action widths so overflow follows this row, not the window.
  * The native dropdown escapes the context's scroll/animation clipping and owns
@@ -308,14 +316,7 @@ function PortLaunchActions({ providers, canIframe, onPort }: {
       {hiddenPending ? OPENING : MORE}
       <select aria-label="More browser actions" title="More browser actions" value="" aria-busy={pending !== null || undefined} aria-disabled={pending !== null || undefined}
         className="absolute inset-0 cursor-pointer appearance-none opacity-0"
-        onKeyDown={event => {
-          if (SELECT_PASSTHROUGH_KEYS.has(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
-          // Only a choice from the open list launches; arrows open it instead.
-          event.preventDefault();
-          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            try { event.currentTarget.showPicker(); } catch { /* Space and Alt+↓ still open it */ }
-          }
-        }}
+        onKeyDown={closedSelectKeyDown}
         onChange={event => { const action = actions.find(item => key(item) === event.target.value); if (action) void run(action); }}>
         <option value="">More browser actions</option>
         {actions.slice(visible).map(action => <option key={key(action)} value={key(action)} disabled={action.disabled}>{action.disabled ? action.label : action.text}</option>)}

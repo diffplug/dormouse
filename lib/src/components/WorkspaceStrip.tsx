@@ -266,7 +266,7 @@ export function WorkspaceStrip({
           onConfirm={() => pendingSurfaceMove.answer(true)}
           onCancel={() => pendingSurfaceMove.answer(false)} />
       )}
-      {pendingMove && !pendingSurfaceMove && !pendingClose && !pendingSurfaceMove && !renamingId && (
+      {pendingMove && !pendingSurfaceMove && !pendingClose && !renamingId && (
         <WorkspaceKillConfirm
           char={pendingMove.char}
           targetElement={confirmTarget}

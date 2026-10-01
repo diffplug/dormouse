@@ -59,7 +59,7 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint.
 
-**Must expose the shared workspace picker only in Window hosts**, alongside the source ref; placement and behavior follow `docs/specs/layout.md` → Moving Surfaces between Workspaces.
+The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
 ## Tool context
 

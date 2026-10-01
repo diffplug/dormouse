@@ -15,17 +15,18 @@ import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId
  */
 
 const revisions = new Map<WorkspaceId, number>();
-let batchSnapshot: PersistedWindow | null = null;
+/** Set while a Surface move publishes both Walls: no write sees one half. */
+let batchHeld = false;
 /** Fence asynchronous saves collected before ownership changed. */
 export function workspaceSessionRevision(id: WorkspaceId): number { return revisions.get(id) ?? 0; }
 export function invalidateWorkspaceSaves(id: WorkspaceId): void { revisions.set(id, workspaceSessionRevision(id) + 1); }
 
-/** Hold the Window's durable projection until both Walls have published. */
+/** Hold every write until both Walls have published. */
 export function beginWorkspaceSessionBatch(): () => void {
-  if (batchSnapshot) throw new Error('A Workspace persistence batch is already running');
-  batchSnapshot = getWindowSnapshot();
+  if (batchHeld) throw new Error('A Workspace persistence batch is already running');
+  batchHeld = true;
   cancelPending();
-  return () => { batchSnapshot = null; scheduleWrite(); };
+  return () => { batchHeld = false; scheduleWrite(); };
 }
 
 /** Preserve a dead Session's retained cwd/alert while its Wall changes. */
@@ -143,7 +144,6 @@ export function previousWorkspaceSession(workspaceId: WorkspaceId): PersistedSes
  * but only after the user has already landed somewhere unexpected).
  */
 export function getWindowSnapshot(): PersistedWindow {
-  if (batchSnapshot) return batchSnapshot;
   const { workspaces, activeId } = getWorkspacesSnapshot();
   const collected: PersistedWorkspace[] = [];
   for (const workspace of workspaces) {
@@ -226,7 +226,7 @@ export async function flushWindowSession(): Promise<void> {
 }
 
 function scheduleWrite(): void {
-  if (!writer || batchSnapshot) return;
+  if (!writer || batchHeld) return;
   // A publish that lands during `pagehide` — the Walls flush there too — has no
   // later tick to be written on.
   if (unloading) {
@@ -242,7 +242,7 @@ function scheduleWrite(): void {
 }
 
 function writeNow(): void {
-  if (!writer || batchSnapshot) return;
+  if (!writer || batchHeld) return;
   const result = writer(getWindowSnapshot());
   inFlight = result ? Promise.resolve(result).catch(() => undefined) : null;
 }
@@ -257,7 +257,7 @@ function cancelPending(): void {
 export function resetWindowSessionAggregator(): void {
   records.clear();
   revisions.clear();
-  batchSnapshot = null;
+  batchHeld = false;
   transferring.clear();
   pendingTransfers.clear();
   writer = null;

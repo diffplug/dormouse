@@ -971,7 +971,7 @@ Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
 `vscode-ext/src/message-router.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`.
 
-**Must remount moved iframe Surfaces at their saved URL after consent**; cross-origin navigation may not be visible to the host. Workspace move interaction follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
+A moved iframe Surface remounts at its saved URL after consent: `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
 ## Future
 

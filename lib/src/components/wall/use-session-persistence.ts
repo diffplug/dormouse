@@ -130,15 +130,6 @@ export function useSessionPersistence({
     return { panes, doors, lathLayout: lath.serializeLayout(), surfaceRefs };
   }, [lath, doorsRef, surfaceRefsForSave]);
 
-  const doSave = useCallback((options?: SaveOptions): Promise<void> => {
-    const { panes, doors, lathLayout, surfaceRefs } = collect();
-    if (workspaceId === undefined) return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
-    const revision = workspaceSessionRevision(workspaceId);
-    return buildPersistedSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink?.previous() ?? null, saveOptions(options)).then(session => {
-      if (revision === workspaceSessionRevision(workspaceId) && hasWorkspace(workspaceId)) publishWorkspaceSession(workspaceId, session);
-    });
-  }, [collect, sink, saveOptions, workspaceId]);
-
   /** The same record a save would publish, handed back instead. The Workspace
    *  is leaving, so nothing here may touch this Window's aggregator. */
   const serialize = useCallback((options?: SaveOptions): Promise<PersistedSession> => {
@@ -148,6 +139,18 @@ export function useSessionPersistence({
       sink?.previous() ?? null, saveOptions(options),
     );
   }, [collect, sink, saveOptions]);
+
+  const doSave = useCallback((options?: SaveOptions): Promise<void> => {
+    if (workspaceId === undefined) {
+      const { panes, doors, lathLayout, surfaceRefs } = collect();
+      return saveSession(getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next, sink, saveOptions(options));
+    }
+    // A Surface move bumps the revision; a record collected before it is stale.
+    const revision = workspaceSessionRevision(workspaceId);
+    return serialize(options).then(session => {
+      if (revision === workspaceSessionRevision(workspaceId) && hasWorkspace(workspaceId)) publishWorkspaceSession(workspaceId, session);
+    });
+  }, [collect, serialize, sink, saveOptions, workspaceId]);
 
   const persistSessionNow = useCallback(async (options?: SaveOptions): Promise<void> => {
     const runSave = (): Promise<void> => {

@@ -34,7 +34,7 @@ import { cwdPathsEqual, surfaceRunsCommand, type TerminalPaneState } from '../..
 import { isAllowedBinaryFor } from '../../lib/agent-browser-binary';
 import { getHelper } from '../../lib/helper-terminal';
 import { isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
-import { stringParam } from './dor-control-shared';
+import { errorText, stringParam } from './dor-control-shared';
 import { getAgentBrowserSurfaceController, handOverBrowserStream } from './agent-browser-surface-controller';
 import {
   callerStillPlaceable,
@@ -564,6 +564,14 @@ const INTEGRATION_DETECT_TIMEOUT_MS = 8_000;
 function missingIntegrationError(shell?: string): string {
   const name = (shell ?? '').replace(/\\/g, '/').split('/').pop() || 'this shell';
   return `dor ensure requires OSC 633 shell integration, which ${name} does not provide. Run it from a shell with Dormouse integration, such as Git Bash or PowerShell.`;
+}
+
+/** Exactly one of `{ new: true }` or `{ workspace }`, as `dor move` sends it. */
+function moveDestinationParam(value: unknown): { new: true } | { workspace: string } | null {
+  if (!value || typeof value !== 'object' || Object.keys(value).length !== 1) return null;
+  const destination = value as { new?: unknown; workspace?: unknown };
+  if (destination.new === true) return { new: true };
+  return typeof destination.workspace === 'string' ? { workspace: destination.workspace } : null;
 }
 
 function killConfirmationParam(value: unknown): { mode: 'if-read'; text: string } | { mode: 'dangerously' } | null {
@@ -1896,18 +1904,17 @@ export function useDorControl({
     if (detail.method === SURFACE_CONTROL_METHODS.move) {
       const target = requireListedSurface(params.surface, detail);
       if (!target) return;
-      const destination = params.destination;
-      if (!destination || typeof destination !== 'object'
-        || !((Object.keys(destination).length === 1) && (('new' in destination && destination.new === true) || ('workspace' in destination && typeof destination.workspace === 'string')))) {
+      const destination = moveDestinationParam(params.destination);
+      if (!destination) {
         detail.respond({ ok: false, error: 'Specify exactly one destination Workspace or --new' }); return;
       }
       try {
         const result = await moveSurface(target.id, {
-          destination: destination as { new: true } | { workspace: string }, focus: params.focus === true,
-          dangerouslyDestroyIframePageState: params.dangerouslyDestroyIframePageState === true,
+          destination, focus: booleanParam(params.focus),
+          dangerouslyDestroyIframePageState: booleanParam(params.dangerouslyDestroyIframePageState),
         });
         detail.respond({ ok: true, result });
-      } catch (error) { detail.respond({ ok: false, error: error instanceof Error ? error.message : String(error) }); }
+      } catch (error) { detail.respond({ ok: false, error: errorText(error) }); }
       return;
     }
 

@@ -1,5 +1,5 @@
 import { buildCommand } from '@stricli/core';
-import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
+import type { Command, DorCommandContext, MoveSurfaceResponse, WorkspaceScopedFlags } from './types.js';
 import { errorMessage, renderJson, requireControlClient, stringParser, workspaceFlag, workspaceParam, writeStdout } from './shared.js';
 
 interface MoveFlags extends WorkspaceScopedFlags {
@@ -47,8 +47,13 @@ Text output: moved surface:4 workspace:2`,
           focus: flags.focus === true, dangerouslyDestroyIframePageState: flags.dangerouslyDestroyIframePageState === true,
           ...workspaceParam(flags.workspace),
         });
-        writeStdout(this, flags.json ? renderJson({ status: result.status, surface_id: result.surfaceId, surface_ref: result.surfaceRef, workspace_id: result.workspaceId, workspace_ref: result.workspaceRef }) : `${result.status} ${result.surfaceRef} ${result.workspaceRef}\n`);
+        writeStdout(this, renderMoveResponse(result, flags.json === true));
       } catch (error) { return new Error(errorMessage(error)); }
     },
   }),
 };
+
+function renderMoveResponse(result: MoveSurfaceResponse, json: boolean): string {
+  if (!json) return `${result.status} ${result.surfaceRef} ${result.workspaceRef}\n`;
+  return renderJson({ status: result.status, surface_id: result.surfaceId, surface_ref: result.surfaceRef, workspace_id: result.workspaceId, workspace_ref: result.workspaceRef });
+}

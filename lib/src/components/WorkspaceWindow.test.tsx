@@ -1110,4 +1110,29 @@ describe('Surface moves between Workspaces', () => {
     await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(true); await pending; });
     expect(getWallHandle('ws-2')!.ownsSurface('frame')).toBe(true);
   });
+
+  it('asks again when a Surface becomes an iframe during the persistence flush: dor refuses, the GUI prompts', async () => {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    const meta = browserLeafMeta('Frame', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:3000/saved' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { restoredLathLayout: { version: 1, tree: leafTree('frame'), leafMeta: { frame: meta } } }, 'ws-2': { initialPaneIds: ['pane-x'] } }} /></>);
+    // Only the first preparation, before the flush, sees no iframe yet.
+    const notYetServing = () => {
+      const handle = getWallHandle(source)!;
+      const real = handle.prepareSurfaceMove;
+      return vi.spyOn(handle, 'prepareSurfaceMove').mockImplementationOnce(id => ({ ...real(id), iframe: false }));
+    };
+    const cli = notYetServing();
+    await act(async () => { await expect(moveSurface('frame', request({ workspace: 'workspace:2' }))).rejects.toThrow('dangerously-destroy'); });
+    expect(cli.mock.calls.length).toBeGreaterThan(1);
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+    cli.mockRestore();
+    notYetServing();
+    let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
+    expect(getWorkspaceUiSnapshot().pendingSurfaceMove).not.toBeNull();
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+    await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(false); expect(await pending).toBeNull(); });
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+  });
 });

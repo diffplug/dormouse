@@ -188,11 +188,8 @@ export function createDragController(deps: DragControllerDeps): DragController {
       deps.suppressNextClickRef.current = false;
     }, 0);
     const chosen = d.candidates.length > 0 ? d.candidates[Math.min(d.depth, d.candidates.length - 1)] : null;
-    if (!commit) {
-      if (d.external) deps.latestRef.current.onExternalDrop?.(null); // Escape → put the Door back
-      return;
-    }
-    if (deps.latestRef.current.workspaceDrag?.drop(d.id, d.lastX, d.lastY)) {
+    // Escape, or a release the Workspace strip took: a Door goes back.
+    if (!commit || deps.latestRef.current.workspaceDrag?.drop(d.id, d.lastX, d.lastY)) {
       if (d.external) deps.latestRef.current.onExternalDrop?.(null);
       return;
     }
