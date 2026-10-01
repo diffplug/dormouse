@@ -74,6 +74,11 @@ export class QuiesceDetector {
     return this.status === 'BUSY' || this.status === 'MIGHT_NEED_ATTENTION';
   }
 
+  /** Deferring an owed alert needs only recent output, not confirmed work. */
+  hasRecentOutput(): boolean {
+    return this.lastAcceptedOutputAt !== null && Date.now() < this.quietAt();
+  }
+
   /**
    * When the pane counts as quiet if nothing more arrives — the instant a
    * settle would confirm. The one place that composition is written down, so an
@@ -92,8 +97,8 @@ export class QuiesceDetector {
     this.setStatus('NOTHING_TO_SHOW');
   }
 
-  onData(): void {
-    if (this.disposed || this.resizeGrace) return;
+  onData(): boolean {
+    if (this.disposed || this.resizeGrace) return false;
 
     const now = Date.now();
     // Candidate history only describes one run of output. A timer callback can
@@ -123,6 +128,7 @@ export class QuiesceDetector {
         this.enterBusy();
         break;
     }
+    return true;
   }
 
   onResize(): void {

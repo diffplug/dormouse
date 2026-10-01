@@ -1,4 +1,4 @@
-/** One uninterrupted interval with at least one ringing track. Never cold-persisted. */
+/** One unresolved summons, retained through animation pauses. Never cold-persisted. */
 export interface AlertEpisode {
   id: string;
   startedAt: number;

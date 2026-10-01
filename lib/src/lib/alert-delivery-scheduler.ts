@@ -52,9 +52,11 @@ interface Published {
 export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOptions): AlertDeliveryScheduler {
   const { manager } = options;
   let defaults = DEFAULT_ALERT_SETTINGS;
-  /** Each ringing Session's episode, and the sinks whose deadline is still to
-   *  come; a sink missing from `timers` is consumed for that episode. */
-  const episodes = new Map<string, { episodeId: string; timers: Map<AlertSink, ReturnType<typeof setTimeout>> }>();
+  /** Deadlines survive pauses; a sink missing from `pending` is consumed. */
+  const episodes = new Map<string, {
+    episodeId: string;
+    pending: Map<AlertSink, { dueAt: number; timer: ReturnType<typeof setTimeout> | null }>;
+  }>();
   /** Each Session's last publication, and the realm that made it. */
   const published = new Map<string, Published>();
 
@@ -86,40 +88,52 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
   /** A sink turned off consumes its pending deadline; one turned on never
    *  replays it. */
   function recheck(id: string): void {
-    const timers = episodes.get(id)?.timers;
-    if (!timers) return;
+    const pending = episodes.get(id)?.pending;
+    if (!pending) return;
     const effective = policy(id);
-    for (const [sink, timer] of timers) {
+    for (const [sink, delivery] of pending) {
       if (sinks[sink].enabled(effective)) continue;
-      clearTimeout(timer);
-      timers.delete(sink);
+      if (delivery.timer !== null) clearTimeout(delivery.timer);
+      pending.delete(sink);
     }
   }
 
   function onState(id: string, state: AlertState): void {
     const episode = state.episode ?? null;
-    const current = episodes.get(id);
-    // At most once per sink per episode: a source joining it delivers nothing.
-    if (current && current.episodeId === episode?.id) return;
-    if (current) {
-      for (const timer of current.timers.values()) clearTimeout(timer);
+    let current = episodes.get(id);
+    if (current && current.episodeId !== episode?.id) {
+      for (const delivery of current.pending.values()) {
+        if (delivery.timer !== null) clearTimeout(delivery.timer);
+      }
       episodes.delete(id);
+      current = undefined;
     }
     if (!episode) return;
-    const effective = policy(id);
-    const timers = new Map<AlertSink, ReturnType<typeof setTimeout>>();
-    episodes.set(id, { episodeId: episode.id, timers });
-    for (const sink of Object.keys(sinks) as AlertSink[]) {
+    if (!current) {
+      const effective = policy(id);
+      current = { episodeId: episode.id, pending: new Map() };
+      episodes.set(id, current);
+      for (const sink of Object.keys(sinks) as AlertSink[]) {
+        const rule = sinks[sink];
+        // Fixed at episode start; disabled sinks and delay edits never replay it.
+        if (rule.enabled(effective)) current.pending.set(sink, {
+          dueAt: episode.startedAt + rule.delayMs(effective), timer: null,
+        });
+      }
+    }
+    const { pending } = current;
+    for (const [sink, delivery] of pending) {
+      if (state.status !== 'ALERT_RINGING') {
+        if (delivery.timer !== null) clearTimeout(delivery.timer);
+        delivery.timer = null;
+        continue;
+      }
+      if (delivery.timer !== null) continue;
       const rule = sinks[sink];
-      // Off at the start consumes it: turning the sink on never replays it.
-      if (!rule.enabled(effective)) continue;
-      // Fixed here, so a later delay edit never moves it. A deadline that
-      // fails is consumed, never retried.
-      const dueAt = episode.startedAt + rule.delayMs(effective);
-      timers.set(sink, setTimeout(() => {
-        timers.delete(sink);
+      delivery.timer = setTimeout(() => {
+        pending.delete(sink);
         if (!rule.blocked(id)) rule.deliver(id, episode.id);
-      }, Math.max(0, dueAt - Date.now())));
+      }, Math.max(0, delivery.dueAt - Date.now()));
     }
   }
 
@@ -160,8 +174,10 @@ export function createAlertDeliveryScheduler(options: AlertDeliverySchedulerOpti
 
     dispose() {
       for (const stop of stops) stop();
-      for (const { timers } of episodes.values()) {
-        for (const timer of timers.values()) clearTimeout(timer);
+      for (const { pending } of episodes.values()) {
+        for (const delivery of pending.values()) {
+          if (delivery.timer !== null) clearTimeout(delivery.timer);
+        }
       }
       episodes.clear();
       published.clear();
