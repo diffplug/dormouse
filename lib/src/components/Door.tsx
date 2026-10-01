@@ -30,8 +30,8 @@ export interface DoorProps {
   status?: SessionStatus;
   todo?: TodoState;
   speechState?: AlertSpeechState;
-  /** `ActivityState.episode` — the Session's current ringing interval. A new one
-   *  replays the alarm ring's arrival burst; `null` while the Session is quiet. */
+  /** `ActivityState.episode` — the Session's unresolved summons, retained during
+   *  pauses. A new one replays the alarm ring's arrival burst. */
   episode: AlertEpisode | null;
   onClick?: () => void;
   /** When provided, a primary-button press reports its start point and the Wall begins

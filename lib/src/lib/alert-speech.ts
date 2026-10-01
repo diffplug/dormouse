@@ -88,6 +88,7 @@ export function startAlertSpeech(): AlertSpeaker {
         text: () => toSpokenText(deriveSessionLabel(id)),
         voice: () => getSessionAlertPolicy(id).speakVoice,
         eligible: () => eligible(id, episodeId),
+        paused: () => getActivity(id).status !== 'ALERT_RINGING',
         onStart: () => { renderedEpisodes.set(id, episodeId); setAlertSpeechState(id, 'speaking'); },
         onFinish: (started) => {
           if (started && eligible(id, episodeId)) { setAlertSpeechState(id, 'spoken'); return; }

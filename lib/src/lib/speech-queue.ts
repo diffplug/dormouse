@@ -6,6 +6,8 @@ export interface SpeechJob {
   text: () => string;
   voice?: () => string | null;
   eligible: () => boolean;
+  /** A still-owed job waits without blocking other Sessions. */
+  paused?: () => boolean;
   onStart?: () => void;
   onFinish?: (started: boolean) => void;
 }
@@ -48,7 +50,8 @@ export class SpeechQueue {
   enqueue(job: SpeechJob): boolean {
     if (!this.engine.available()) return false;
     if (this.active?.job.key === job.key || this.pending.some(pending => pending.key === job.key)) return true;
-    if (this.pending.length >= MAX_PENDING) return false;
+    // Reserve a slot for an unstarted attempt that a pause may return here.
+    if (this.pending.length + (this.active && !this.active.started ? 1 : 0) >= MAX_PENDING) return false;
     this.pending.push(job);
     this.pump();
     return true;
@@ -60,6 +63,7 @@ export class SpeechQueue {
     if (!this.active && this.pending.length === 0) return;
     if (this.pending.length) this.pending = this.pending.filter(job => job.eligible());
     if (this.active && !this.active.job.eligible()) this.finish(this.active, true);
+    if (this.active?.job.paused?.()) this.pause(this.active);
     this.pump();
   }
 
@@ -79,13 +83,22 @@ export class SpeechQueue {
     this.pump();
   }
 
+  private pause(attempt: Attempt): void {
+    // Preparation is not delivery. Retain a job that never actually started,
+    // and revoke the old engine attempt before cancellation can call back.
+    if (!attempt.started) this.pending.unshift(attempt.job);
+    this.finish(attempt, true);
+  }
+
   private pump(): void {
     if (this.pumping) return;
     this.pumping = true;
     try {
       while (!this.active && this.pending.length) {
-        const job = this.pending.shift()!;
-        if (!job.eligible()) continue;
+        this.pending = this.pending.filter(job => job.eligible());
+        const index = this.pending.findIndex(job => !job.paused?.());
+        if (index === -1) break;
+        const [job] = this.pending.splice(index, 1);
         const attempt: Attempt = {
           job, handle: null, started: false,
           timer: setTimeout(() => this.finish(attempt, true), SPEECH_ENGINE_TIMEOUT_MS),
@@ -96,6 +109,7 @@ export class SpeechQueue {
             onStart: () => {
               if (this.active !== attempt || attempt.started) return;
               if (!job.eligible()) { this.finish(attempt, true); return; }
+              if (job.paused?.()) { this.pause(attempt); return; }
               attempt.started = true;
               job.onStart?.();
             },

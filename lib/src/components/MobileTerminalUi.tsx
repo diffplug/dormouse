@@ -59,8 +59,8 @@ export interface MobileTerminalSessionItem {
   secondary?: string | null;
   active?: boolean;
   status?: SessionStatus;
-  /** `ActivityState.episode` — the Session's current ringing interval, which
-   *  anchors the row's arrival burst; `null` while it is quiet. */
+  /** `ActivityState.episode` — the Session's unresolved summons, retained during
+   *  pauses, which anchors the row's arrival burst. */
   episode: AlertEpisode | null;
   todo?: boolean;
 }

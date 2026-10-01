@@ -564,6 +564,9 @@ describe('alarm delivery', () => {
       moveWindow({ focused: true });
       ptys.callbacks!.onData('pty-1', REPORT);
       vi.advanceTimersByTime(1_000);
+      expect(wiring.pushes).toEqual([]);
+      // Recent output defers the ring; its alarm delay starts after quiet.
+      vi.advanceTimersByTime(5_000);
       expect(wiring.pushes).toEqual([['pty-1', 'terminal']]);
     } finally {
       disposable.dispose();

@@ -140,6 +140,8 @@
 
 ## Spoken alarms
 
+**Why paused preparation is retained.** Host admission is not playback: Web Speech can queue an utterance and managed voice can prepare audio before the start callback. Treating a pause as cancellation lost an unsent alarm. An unstarted attempt returns to the pending queue, while revoking its callbacks prevents an old answer from starting or finishing the resumed job; a job that already started is not replayed (product decision, 2026-10-01).
+
 **Why an entropy heuristic, and what it costs.** A bare token can reach a terminal-supplied title without credential-related wording. Finite samples often fall below their alphabet's maximum entropy, so the cutoffs sit below those maxima and still miss some random tokens. Conversely, `/`, `-`, and `_` are token characters: 135 of this repo's 1102 tracked paths redact (12.3%, measured 2026-09), and `vim lib/src/lib/redact-high-entropy.ts` speaks as `vim REDACTED.ts`. Speech accepts this loss of detail to reduce accidental disclosure. Redacting before punctuation cleanup and truncation prevents those transforms from hiding a token's recognizable shape while leaving its contents speakable.
 
 **Why only hex grouping is normalized.** Grouped hex otherwise falls into the base64 tier and almost always misses its higher cutoff. In review samples of 20,000 random UUIDs, removing hex separators reduced misses from 100% to 0.01%, with no additional matches among the 1102 tracked paths (measured 2026-09). Applying separator removal to other alphabets would also redact `PostgreSQL_Connection_Manager` and `implementation_details_v2`; limiting normalization to hex keeps those identifiers unchanged.
