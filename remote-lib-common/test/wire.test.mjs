@@ -1,9 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 
 import {
   API_ROUTES,
   E2E_ID_LENGTH,
+  ENROLL_USER_CODE_ALPHABET,
+  enrollUserCode,
+  isEnrollUserCode,
+  normalizeEnrollUserCode,
   MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_CLIENT_ID_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
@@ -238,4 +243,59 @@ test('isE2eRelayToClientFrame takes the burrow steps with a stamped burrowId', (
   ]) {
     assert.equal(isE2eRelayToClientFrame(frame), false, JSON.stringify(frame));
   }
+});
+
+// --- Hosted's device-code enrollment ---------------------------------------
+
+const userCode = '23AB-YZ9K';
+
+test('the user code alphabet is thirty characters no one misreads, and only those', () => {
+  assert.equal(ENROLL_USER_CODE_ALPHABET.length, 30);
+  assert.equal(new Set(ENROLL_USER_CODE_ALPHABET).size, 30);
+  for (const misread of '01OILU') assert.ok(!ENROLL_USER_CODE_ALPHABET.includes(misread), misread);
+  for (let code = 0; code < 128; code += 1) {
+    const char = String.fromCharCode(code);
+    assert.equal(isEnrollUserCode(`${char}AAA-AAAA`), ENROLL_USER_CODE_ALPHABET.includes(char), char);
+  }
+});
+
+test('normalizeEnrollUserCode forgives case, spaces, and dashes, and nothing else', () => {
+  for (const typed of ['23ab-yz9k', ' 23AB YZ9K ', '23ABYZ9K', '23-AB-YZ-9K']) {
+    assert.equal(normalizeEnrollUserCode(typed), userCode, typed);
+  }
+  for (const bad of ['23AB-YZ9', '23AB-YZ9KK', '23AB-YZ0K', 'O3AB-YZ9K', 7, null, `${userCode}${' '.repeat(40)}`]) {
+    assert.equal(normalizeEnrollUserCode(bad), null, String(bad));
+  }
+});
+
+test('enrollUserCode is the HMAC of the device code, five bits a character, past thirty skipped', async () => {
+  const secret = 'test-enroll-secret';
+  const deviceCode = new Uint8Array(32).map((_, i) => i * 7);
+  // An independent reading of the same rule over node's HMAC.
+  const bits = [...createHmac('sha256', secret).update(deviceCode).digest()]
+    .map((byte) => byte.toString(2).padStart(8, '0'))
+    .join('');
+  const chars = [];
+  for (let at = 0; chars.length < 8; at += 5) {
+    const value = parseInt(bits.slice(at, at + 5), 2);
+    if (value < 30) chars.push(ENROLL_USER_CODE_ALPHABET[value]);
+  }
+  const expected = `${chars.slice(0, 4).join('')}-${chars.slice(4).join('')}`;
+  assert.equal(await enrollUserCode(secret, deviceCode), expected);
+  assert.ok(isEnrollUserCode(expected));
+  // Another secret, or one changed byte, is another code.
+  assert.notEqual(await enrollUserCode(`${secret}x`, deviceCode), expected);
+  assert.notEqual(await enrollUserCode(secret, deviceCode.map((byte, i) => (i === 31 ? byte ^ 1 : byte))), expected);
+
+  // 30 and 31 are skipped, never folded onto the first characters.
+  const macOf = (groups) => {
+    const text = groups.map((value) => value.toString(2).padStart(5, '0')).join('').padEnd(256, '1');
+    return Uint8Array.from({ length: 32 }, (_, i) => parseInt(text.slice(i * 8, i * 8 + 8), 2));
+  };
+  const fake = (mac) => ({ importKey: async () => ({}), sign: async () => mac.buffer });
+  assert.equal(
+    await enrollUserCode(secret, deviceCode, fake(macOf([30, 0, 31, 29, 1, 2, 3, 4, 5, 6]))),
+    '2Z34-5678',
+  );
+  await assert.rejects(enrollUserCode(secret, deviceCode, fake(macOf([0, 1, 2, 3, 4, 5, 6]))), /No user code/);
 });

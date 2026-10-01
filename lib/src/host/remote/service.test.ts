@@ -584,7 +584,7 @@ describe('status', () => {
 
 describe('enroll', () => {
   it('refuses in a Hosted build, before the setup password leaves the machine', async () => {
-    // Its one Relay is Hosted's, which runs none yet (docs/specs/relay.md → "Relay origin").
+    // Its one Relay is Hosted's, which enrolls no Burrow yet (docs/specs/relay.md → "Relay origin").
     createHostedService();
     const result = await command('enroll', { password: 'setup', label: 'Laptop' });
 

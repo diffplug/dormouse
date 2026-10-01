@@ -1,8 +1,13 @@
 import { test, expect, beforeAll, afterAll, vi } from "vitest";
-import type { ExecutionContext } from "hono";
+import { Hono, type ExecutionContext } from "hono";
 import { build } from "esbuild";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
-import { ONE_TIME_PAGE_PATH, ONE_TIME_WS_ROUTES } from "remote-lib-common";
+import { readFileSync } from "node:fs";
+import {
+  API_ROUTES,
+  ONE_TIME_PAGE_PATH,
+  ONE_TIME_WS_ROUTES,
+} from "remote-lib-common";
 import {
   accountBindings,
   accountPreviewBindings,
@@ -12,9 +17,14 @@ import {
 } from "../bindings";
 import {
   ACCOUNT_POLICY,
-  RELAY_HASHED_ASSETS,
   RUNS_NOTHING_POLICY,
+  accountRules,
+  relayRules,
+  type RulesFor,
 } from "../headers";
+import { ADMIN_EMAIL } from "../admin";
+import { cookieAdmin } from "../account-gate";
+import { RECENT_LOGIN_REQUIRED, relayAccountRoutes } from "../relay-account";
 import { voiceApp } from "../voice-app";
 import { workerApp } from "../worker-app";
 import {
@@ -28,8 +38,8 @@ import {
 
 // The partition between Hosted's three Workers (`docs/specs/hosted.md` ->
 // "Application boundary"), each production bundle in real workerd without
-// Postgres: nothing here gets past a 421, a 404, or a missing bearer token, so
-// no route reaches the database.
+// Postgres: nothing here gets past a 421, a 404, a missing bearer token, or a
+// bodyless request, so no route reaches the database.
 
 const sha = "a".repeat(40);
 
@@ -43,6 +53,7 @@ const everything = {
   OAUTH_PROVIDERS: "github",
   GITHUB_CLIENT_ID: "test-github-id",
   GITHUB_CLIENT_SECRET: "test-github-secret",
+  RELAY_ENROLL_SECRET: "test-relay-enroll-secret",
 };
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
@@ -94,6 +105,13 @@ afterAll(async () => {
 const send = (name: Name, url: string, method = "GET") =>
   workers[name].dispatchFetch(url, { method, redirect: "manual" });
 
+/** The Relay's routes the account serves: approval, and its Burrows. */
+const ACCOUNT_RELAY: [string, string][] = [
+  ["POST", "/api/relay/enrollments/approve"],
+  ["GET", "/api/relay/burrows"],
+  ["DELETE", "/api/relay/burrows/AAAAAAAAAAAAAAAAAAAAAA"],
+];
+
 /** A route each Worker serves, as method and path. */
 const SERVED: Record<Name, [string, string][]> = {
   account: [
@@ -101,15 +119,38 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", "/api/providers"],
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
+    ...ACCOUNT_RELAY,
     ["GET", "/login"],
   ],
   relay: [
     ["GET", ONE_TIME_WS_ROUTES.burrow],
     ["GET", ONE_TIME_WS_ROUTES.client],
     ["GET", ONE_TIME_PAGE_PATH],
+    ["POST", API_ROUTES.setupBegin],
+    ["POST", API_ROUTES.signinBegin],
+    ["GET", API_ROUTES.burrows],
+    ["POST", API_ROUTES.burrowSetupToken],
+    ["POST", API_ROUTES.burrowEnrollBegin],
+    ["POST", API_ROUTES.burrowEnrollPoll],
+    ["GET", "/"],
   ],
   voice: [["POST", "/api/voice/speak"]],
 };
+
+/** The Hosted Relay's routes, which only the relay serves. */
+const RELAY_API: [string, string][] = [
+  ["POST", API_ROUTES.setupBegin],
+  ["POST", API_ROUTES.setupFinish],
+  ["POST", API_ROUTES.setupRetire],
+  ["POST", API_ROUTES.signinBegin],
+  ["POST", API_ROUTES.signinFinish],
+  ["POST", API_ROUTES.reauthBegin],
+  ["POST", API_ROUTES.reauthFinish],
+  ["GET", API_ROUTES.burrows],
+  ["POST", API_ROUTES.burrowSetupToken],
+  ["POST", API_ROUTES.burrowEnroll],
+  ["GET", API_ROUTES.pushConfig],
+];
 
 test.for(NAMES)(
   "%s: a foreign origin, each sibling's included, is refused with 421 before any route",
@@ -135,6 +176,7 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", ONE_TIME_WS_ROUTES.burrow],
     ["GET", ONE_TIME_WS_ROUTES.client],
     ["POST", "/api/voice/speak"],
+    ...RELAY_API,
   ],
   relay: [
     ["GET", "/api/auth/csrf"],
@@ -145,11 +187,18 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", "/api/voice/tokens"],
     ["POST", "/api/voice/tokens"],
     ["DELETE", "/api/voice/tokens/00000000-0000-4000-8000-000000000000"],
+    ...ACCOUNT_RELAY,
     ["POST", "/api/voice/speak"],
-    ["GET", "/"],
-    ["GET", "/login"],
-    ["GET", "/account"],
-    ["GET", "/assets/app-abc123.js"],
+    ["POST", "/api/push/subscribe"],
+    ["POST", "/api/push/send"],
+    ["GET", "/api/push/devices"],
+    // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
+    ["GET", "/api/hello"],
+    // No relay socket is served yet, and the non-page prefixes 404 whole.
+    ["GET", "/ws/client"],
+    ["GET", "/ws/other"],
+    ["GET", "/api"],
+    ["GET", "/ws"],
   ],
   voice: [
     ["GET", "/api/auth/csrf"],
@@ -163,6 +212,8 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["GET", ONE_TIME_PAGE_PATH],
     ["GET", "/"],
     ["GET", "/login"],
+    ...RELAY_API,
+    ...ACCOUNT_RELAY,
   ],
 };
 
@@ -188,26 +239,34 @@ test("the account answers /connect/ with its own shell and policy, never the pho
 });
 
 test("each Worker caches only its own hashed assets as immutable", async () => {
-  const [account, phone] = HASHED_FILES;
+  const [pocket, phone] = HASHED_FILES;
   const cache = (response: { headers: { get(name: string): string | null } }) =>
     response.headers.get("cache-control");
-  expect(cache(await send("account", ORIGINS.account + account))).toBe(IMMUTABLE);
+  expect(cache(await send("account", ORIGINS.account + pocket))).toBe(IMMUTABLE);
   expect(cache(await send("account", ORIGINS.account + phone))).toBe("no-store");
-  // The relay hands its assets only `/connect/` paths, so its prefixes are
-  // checked on an app that serves a script at both.
-  const relay = workerApp({
-    bindings: (env) => env,
-    policy: () => RUNS_NOTHING_POLICY,
-    hashedAssets: RELAY_HASHED_ASSETS,
-    unavailable: "",
-    routes: (app) =>
-      app.get("*", () =>
-        new Response("export {};", { headers: { "content-type": "text/javascript" } }),
-      ),
-  });
+  expect(cache(await send("relay", ORIGINS.relay + pocket))).toBe(IMMUTABLE);
+  expect(cache(await send("relay", ORIGINS.relay + phone))).toBe(IMMUTABLE);
+  // Each Worker's rules, checked on an app that serves a script at every path.
+  const serving = (rules: RulesFor) =>
+    workerApp({
+      bindings: (env) => env,
+      rules,
+      nonPagePrefixes: [],
+      unavailable: "",
+      routes: (app) =>
+        app.get("*", () =>
+          new Response("export {};", { headers: { "content-type": "text/javascript" } }),
+        ),
+    });
   const env = { APP_ORIGIN: ORIGINS.relay };
-  expect(cache(await relay.fetch(new Request(ORIGINS.relay + phone), env))).toBe(IMMUTABLE);
-  expect(cache(await relay.fetch(new Request(ORIGINS.relay + account), env))).toBe("no-store");
+  const relay = serving(relayRules);
+  for (const path of [pocket, phone, "/%61ssets/app-abc123.js"])
+    expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe(IMMUTABLE);
+  expect(cache(await relay.fetch(new Request(ORIGINS.relay + "/sw.js"), env))).toBe("no-cache");
+  for (const path of ["/connect/x.js", "/api/assets/x.js", "/ws/assets/x.js"])
+    expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe("no-store");
+  const account = serving(accountRules);
+  expect(cache(await account.fetch(new Request(ORIGINS.relay + phone), env))).toBe("no-store");
 });
 
 test("speak is the voice Worker's, bearer-only", async () => {
@@ -286,6 +345,12 @@ test("each bindings mapper passes only what its Worker uses", () => {
     ONE_TIME_ROOM: {} as DurableObjectNamespace,
     ONE_TIME_MINT_LIMIT: {} as RateLimit,
     ONE_TIME_JOIN_LIMIT: {} as RateLimit,
+    RELAY_SIGNIN_LIMIT: {} as RateLimit,
+    RELAY_SETUP_LIMIT: {} as RateLimit,
+    RELAY_ENROLL_BEGIN_LIMIT: {} as RateLimit,
+    RELAY_ENROLL_POLL_LIMIT: {} as RateLimit,
+    RELAY_APPROVE_LIMIT: {} as RateLimit,
+    ACCOUNT_ORIGIN: "https://account.example.test",
   };
   const keys = (bindings: object) => Object.keys(bindings).sort();
   expect(keys(accountBindings(env))).toEqual(
@@ -299,28 +364,48 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "GITHUB_CLIENT_SECRET",
       "HYPERDRIVE",
       "POSTMARK_SERVER_TOKEN",
+      "RELAY_APPROVE_LIMIT",
     ].sort(),
   );
   expect(accountPreviewBindings(env)).toEqual({
     APP_ORIGIN: env.APP_ORIGIN,
     ASSETS: env.ASSETS,
+    RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
     AUTH_SECRET: env.AUTH_SECRET,
     BUILD_SHA: sha,
     HYPERDRIVE: env.HYPERDRIVE,
     EMAIL_FROM: "",
     POSTMARK_SERVER_TOKEN: "",
   });
-  // No auth secret, and no database: the rendezvous reaches neither.
+  // No auth secret: the Relay reads its own tables and a user row, never a login.
   expect(keys(relayBindings(env))).toEqual(
     [
+      "ACCOUNT_ORIGIN",
       "APP_ORIGIN",
       "ASSETS",
       "BUILD_SHA",
+      "HYPERDRIVE",
       "ONE_TIME_JOIN_LIMIT",
       "ONE_TIME_MINT_LIMIT",
       "ONE_TIME_ROOM",
+      "RELAY_ENROLL_BEGIN_LIMIT",
+      "RELAY_ENROLL_POLL_LIMIT",
+      "RELAY_ENROLL_SECRET",
+      "RELAY_SETUP_LIMIT",
+      "RELAY_SIGNIN_LIMIT",
     ].sort(),
   );
+  // `ACCOUNT_ORIGIN` reaches the routes exactly an origin, or not at all.
+  expect(relayBindings(env).ACCOUNT_ORIGIN).toBe(env.ACCOUNT_ORIGIN);
+  for (const loose of [
+    "https://account.example.test/",
+    "https://account.example.test/enroll",
+    "https://account.example.test\nX: y",
+    "javascript:alert(1)",
+    "",
+    undefined,
+  ])
+    expect(relayBindings({ ...env, ACCOUNT_ORIGIN: loose }).ACCOUNT_ORIGIN, String(loose)).toBeUndefined();
   // No auth secret: speak reads the token's owner, never a login.
   expect(keys(voiceBindings(env))).toEqual(
     ["APP_ORIGIN", "BUILD_SHA", "ELEVENLABS_API_KEY", "HYPERDRIVE"].sort(),
@@ -345,4 +430,61 @@ test("neither the relay nor the voice bundle carries Better Auth", async () => {
   // The pattern finds it where it is.
   const account = Object.keys(bundles.account.metafile.inputs);
   expect(account.some((input) => /better-auth/.test(input))).toBe(true);
+});
+
+test("the relay bundle reads no cookie and never asks auth", () => {
+  const inputs = Object.keys(bundles.relay.metafile.inputs);
+  expect(inputs.filter((input) => /cookie/.test(input))).toEqual([]);
+  // Its own modules: no cookie header, helper, or auth route in any code line.
+  const ours = inputs.filter((input) => input.startsWith("server/"));
+  expect(ours).toContain("server/relay-api.ts");
+  for (const input of ours) {
+    const code = readFileSync(input, "utf8")
+      .split("\n")
+      .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+      .join("\n");
+    expect(code, input).not.toMatch(/["'`]cookie["'`]|getCookie|\.cookie\b|\/api\/auth\//i);
+  }
+  // The pattern finds it where it is.
+  expect(readFileSync("server/account-gate.ts", "utf8")).toMatch(/["'`]cookie["'`]/);
+});
+
+test("the cookie gate needs no login creation time; approval reads it and fails closed", async () => {
+  // `get-session` as the packed adapter answers it, `createdAt` as given.
+  const host = (createdAt?: unknown) => () => ({
+    databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
+    auth: async () =>
+      Response.json({
+        user: { id: "admin", email: ADMIN_EMAIL, emailVerified: true },
+        session: createdAt === undefined ? {} : { createdAt },
+      }),
+    approveLimit: {
+      limit: async () => {
+        throw new Error("The limit is past the recent-login check");
+      },
+    } as RateLimit,
+  });
+  const origin = "https://account.example.test";
+  // The voice-token routes' gate admits the admin whatever `createdAt` says.
+  for (const createdAt of [undefined, "garbage", new Date().toISOString()]) {
+    const app = new Hono();
+    app.get("/gated", cookieAdmin(host(createdAt), () => new Response(null, { status: 403 })), (c) =>
+      c.json(c.get("login").userId),
+    );
+    const response = await app.request(`${origin}/gated`);
+    expect(response.status, String(createdAt)).toBe(200);
+    expect(await response.json()).toBe("admin");
+  }
+  // Approval refuses a login it cannot date, before the limit or the database.
+  for (const createdAt of [undefined, "garbage", null, new Date(Date.now() - 11 * 60_000).toISOString()]) {
+    const app = new Hono();
+    relayAccountRoutes(app, host(createdAt));
+    const response = await app.request(`${origin}/api/relay/enrollments/approve`, {
+      method: "POST",
+      headers: { origin, "content-type": "application/json" },
+      body: JSON.stringify({ userCode: "ZZZZ-ZZZZ" }),
+    });
+    expect(response.status, String(createdAt)).toBe(403);
+    expect(await response.json()).toEqual({ message: RECENT_LOGIN_REQUIRED });
+  }
 });

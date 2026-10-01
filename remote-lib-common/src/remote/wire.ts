@@ -28,6 +28,9 @@ export const API_ROUTES = {
   reauthBegin: '/api/reauth/begin',
   reauthFinish: '/api/reauth/finish',
   burrowEnroll: '/api/burrow/enroll',
+  /** Hosted only: the device-code enrollment ({@link BurrowEnrollBeginResponse}). */
+  burrowEnrollBegin: '/api/burrow/enroll/begin',
+  burrowEnrollPoll: '/api/burrow/enroll/poll',
   burrowSetupToken: '/api/burrow/setup-token',
   burrows: '/api/burrows',
   pushConfig: '/api/push/config',
@@ -42,6 +45,19 @@ export const API_ROUTES = {
   pushDevices: '/api/push/devices',
   pushSend: '/api/push/send',
 } as const;
+
+/**
+ * Every bearer a Relay mints — session, Burrow, and setup tokens, and Hosted's
+ * enrollment device code — is 32 bytes, base64url, so anything else is
+ * refused before any lookup.
+ */
+export const RELAY_BEARER_BYTE_LENGTH = 32;
+export const RELAY_BEARER_LENGTH = base64UrlLength(RELAY_BEARER_BYTE_LENGTH);
+
+/** Whether `value` has the shape of a bearer a Relay minted. */
+export function isRelayBearer(value: unknown): value is string {
+  return isExactBase64Url(value, RELAY_BEARER_LENGTH);
+}
 
 /**
  * `DELETE` path for one delivery row. The id is a bearer capability rather than
@@ -87,6 +103,32 @@ export const BAD_PASSWORD_ERROR = 'invalid setup password';
  * ({@link BurrowEnrollOriginMismatch}).
  */
 export const ORIGIN_MISMATCH_ERROR = 'origin mismatch';
+
+/**
+ * The `error` the Hosted Relay answers when the account behind a credential is
+ * not entitled to it: 403 to a Burrow token, a setup redemption, or an
+ * enrollment poll, and 401 to a sign-in. A Burrow keys on it to stop retrying.
+ */
+export const NOT_ENTITLED_ERROR = 'this account is not entitled to the Hosted Relay';
+
+// The rest of the `error` strings both Relays answer, verbatim, so the
+// self-host and Hosted Relays cannot drift on what a Client reads. Only the
+// three above are recovery keys; these are shown, never matched.
+// `POST /api/setup/finish` also answers `ORIGIN_MISMATCH_ERROR`, with 400.
+export const BODY_TOO_LARGE_ERROR = 'request body too large';
+export const MALFORMED_CLIENT_DATA_ERROR = 'malformed clientDataJSON';
+export const CLIENT_DATA_TYPE_ERROR = 'clientData type must be webauthn.create';
+export const UNKNOWN_CHALLENGE_ERROR = 'unrecognized or expired challenge';
+export const UNIMPORTABLE_KEY_ERROR = 'unimportable public key';
+export const MALFORMED_CREDENTIAL_ID_ERROR = 'malformed credentialId';
+export const DUPLICATE_CREDENTIAL_ERROR = 'credential already registered';
+export const MALFORMED_ASSERTION_ERROR = 'malformed assertion';
+export const UNKNOWN_CREDENTIAL_ERROR = 'unknown credential';
+export const MALFORMED_BINDING_ERROR = 'malformed presence binding';
+export const UNKNOWN_NONCE_ERROR = 'unrecognized or expired nonce';
+export const WRONG_CREDENTIAL_ERROR = 'assertion is for a different credential';
+/** The 401 a failed `verifyPasskeyAssertion` answers with, naming its reason. */
+export const assertionRejectedError = (reason: string) => `assertion rejected: ${reason}`;
 
 export const WS_ROUTES = {
   burrow: '/ws/burrow',
@@ -285,6 +327,55 @@ export interface BurrowEnrollResponse {
    */
   requireUserVerification?: boolean;
 }
+
+/**
+ * Hosted's device-code enrollment (`docs/specs/hosted.md` -> "Burrow
+ * enrollment"), in place of the setup password the self-host Relay takes: the
+ * Burrow begins, the account approves the user code on the account origin,
+ * and the Burrow polls until it is enrolled. Only a Node Burrow calls either
+ * route; a request carrying `Origin` is refused. The self-host Relay serves
+ * neither.
+ */
+export interface BurrowEnrollBeginRequest {
+  /** The relay origin the Burrow was built for; any other is a 409 {@link BurrowEnrollOriginMismatch}. */
+  origin: string;
+}
+
+/** The account page a `verificationUrl` names, the user code in its fragment. */
+export const ENROLL_PAGE_PATH = '/enroll';
+
+export interface BurrowEnrollBeginResponse {
+  /**
+   * The Burrow's secret for polling, in the {@link isRelayBearer} shape. The
+   * Burrow holds it opaque; Hosted's layout is `docs/specs/hosted.md` ->
+   * "Burrow enrollment".
+   */
+  deviceCode: string;
+  /** What Dormouse shows and the account approves, `XXXX-XXXX`. */
+  userCode: string;
+  /**
+   * The account page that approves `userCode`, the code in its fragment;
+   * absent where the deployment names no account origin.
+   */
+  verificationUrl?: string;
+  /** Epoch ms after which neither code redeems. */
+  expiresAt: number;
+  /** Seconds the Burrow waits between polls. */
+  interval: number;
+}
+
+export interface BurrowEnrollPollRequest {
+  deviceCode: string;
+}
+
+/**
+ * `expired` also answers an unknown device code. `enrolled` answers once: the
+ * redemption is single-use.
+ */
+export type BurrowEnrollPollResponse =
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
 
 /**
  * Burrow-token auth. The single-use setup credential an enrolled Burrow mints for

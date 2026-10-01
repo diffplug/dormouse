@@ -1,5 +1,5 @@
 import type { VoiceEnv } from "./bindings";
-import { RUNS_NOTHING_POLICY } from "./headers";
+import { NO_PAGE_RULES } from "./headers";
 import { elevenLabs, speakRoute, sweepOnCron } from "./voice";
 import { workerApp } from "./worker-app";
 
@@ -14,7 +14,7 @@ export function voiceApp(
 ) {
   return workerApp<VoiceEnv>({
     bindings,
-    policy: () => RUNS_NOTHING_POLICY,
+    rules: () => NO_PAGE_RULES,
     unavailable: "Managed voice is temporarily unavailable. Please try again.",
     routes(app) {
       speakRoute(app, (c) => {

@@ -1,4 +1,5 @@
 import type { BetterAuthWorkerBindings } from "@pgstencil/auth/better-auth-workers";
+import { exactOrigin } from "./headers";
 import { providerBindings } from "./policy";
 
 // Each Worker's bindings mapper (`docs/specs/security-hosted.md` -> "Origin
@@ -19,17 +20,31 @@ interface Assets {
 /** `hosted.dormouse.sh`: the account frontend, auth, and voice-token minting. */
 export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv {
   ASSETS: Assets;
+  /** Enrollment approvals, per account. */
+  RELAY_APPROVE_LIMIT: RateLimit;
   EMAIL_FROM: string;
   POSTMARK_SERVER_TOKEN: string;
   OAUTH_PROVIDERS?: string;
 }
 
-/** `relay.dormouse.sh`: the one-time rendezvous and its phone page. */
+/** `relay.dormouse.sh`: the Hosted Relay and Pocket, the one-time rendezvous and its phone page. */
 export interface RelayEnv extends WorkerEnv {
   ASSETS: Assets;
+  HYPERDRIVE: { connectionString: string };
   ONE_TIME_ROOM: DurableObjectNamespace;
   ONE_TIME_MINT_LIMIT: RateLimit;
   ONE_TIME_JOIN_LIMIT: RateLimit;
+  RELAY_SIGNIN_LIMIT: RateLimit;
+  RELAY_SETUP_LIMIT: RateLimit;
+  RELAY_ENROLL_BEGIN_LIMIT: RateLimit;
+  RELAY_ENROLL_POLL_LIMIT: RateLimit;
+  /**
+   * The account Worker's origin, which a begin answer's `verificationUrl`
+   * names: exactly an origin once mapped, or absent, and then it names none.
+   */
+  ACCOUNT_ORIGIN?: string;
+  /** The HMAC key a device code's user code is derived under. */
+  RELAY_ENROLL_SECRET: string;
 }
 
 /** `voice.dormouse.sh`: managed-voice speech and its history sweep. */
@@ -42,6 +57,7 @@ export interface VoiceEnv extends WorkerEnv {
 export const accountBindings = (env: AccountEnv): AccountEnv => ({
   HYPERDRIVE: env.HYPERDRIVE,
   ASSETS: env.ASSETS,
+  RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
   APP_ORIGIN: env.APP_ORIGIN,
   AUTH_SECRET: env.AUTH_SECRET,
   EMAIL_FROM: env.EMAIL_FROM,
@@ -54,6 +70,7 @@ export const accountBindings = (env: AccountEnv): AccountEnv => ({
 export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
   HYPERDRIVE: env.HYPERDRIVE,
   ASSETS: env.ASSETS,
+  RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
   APP_ORIGIN: env.APP_ORIGIN,
   AUTH_SECRET: env.AUTH_SECRET,
   BUILD_SHA: env.BUILD_SHA,
@@ -61,14 +78,26 @@ export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
   POSTMARK_SERVER_TOKEN: "",
 });
 
-/** No auth secret, no Hyperdrive: the rendezvous reaches neither. Production and preview alike. */
+/**
+ * Hyperdrive for the Relay's own tables and no auth secret: the Relay reads a
+ * user row only for its entitlement, never a login. Its one secret,
+ * `RELAY_ENROLL_SECRET`, derives enrollment user codes. Production and preview
+ * alike.
+ */
 export const relayBindings = (env: RelayEnv): RelayEnv => ({
   ASSETS: env.ASSETS,
+  HYPERDRIVE: env.HYPERDRIVE,
   APP_ORIGIN: env.APP_ORIGIN,
   BUILD_SHA: env.BUILD_SHA,
   ONE_TIME_ROOM: env.ONE_TIME_ROOM,
   ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
   ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
+  RELAY_SIGNIN_LIMIT: env.RELAY_SIGNIN_LIMIT,
+  RELAY_SETUP_LIMIT: env.RELAY_SETUP_LIMIT,
+  RELAY_ENROLL_BEGIN_LIMIT: env.RELAY_ENROLL_BEGIN_LIMIT,
+  RELAY_ENROLL_POLL_LIMIT: env.RELAY_ENROLL_POLL_LIMIT,
+  ACCOUNT_ORIGIN: exactOrigin(env.ACCOUNT_ORIGIN) ?? undefined,
+  RELAY_ENROLL_SECRET: env.RELAY_ENROLL_SECRET,
 });
 
 /** Hyperdrive for the token lookup and the ElevenLabs key; no auth secret. */

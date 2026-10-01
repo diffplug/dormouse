@@ -21,7 +21,17 @@ import {
 import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
-import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, type Name } from "./bundle";
+import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
+import { API_ROUTES, NOT_ENTITLED_ERROR } from "remote-lib-common";
+import {
+  ENTRIES,
+  ORIGINS,
+  TEST_ENROLL_SECRET,
+  bundleWorker,
+  miniflareOptions,
+  type Name,
+} from "./bundle";
+import { limitOf, untilLimited } from "./rate-limit";
 
 const origin = ORIGINS.account;
 const voiceOrigin = ORIGINS.voice;
@@ -45,6 +55,7 @@ const bundle = (production: boolean | "preview") =>
 const testBundle = bundle(false);
 const productionBundle = bundle(true);
 const previewBundle = bundle("preview");
+const relayBundle = bundleWorker(ENTRIES.relay);
 const voiceBundles = {
   test: bundleWorker("server/tests/voice-entry.ts"),
   production: bundleWorker(ENTRIES.voice),
@@ -219,6 +230,39 @@ async function fixture(
       await started.ready;
       return started;
     })());
+  // The relay Worker on the same database, its enrollment links naming this
+  // account, started on first use.
+  let relayWorker: Promise<Miniflare> | undefined;
+  const relay = () =>
+    (relayWorker ??= (async () => {
+      const started = new Miniflare(
+        workerOptions("relay", {
+          script: (await relayBundle).outputFiles![0].text,
+          bindings: {
+            APP_ORIGIN: ORIGINS.relay,
+            ACCOUNT_ORIGIN: origin,
+            RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
+          },
+          database: context.database.url,
+          assets: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
+          outboundService,
+        }),
+      );
+      await started.ready;
+      return started;
+    })());
+  /** One relay request as a Burrow sends it: JSON, no cookie, no Origin. */
+  const burrowCall = async (path: string, body?: unknown, bearer?: string) => {
+    const response = await (await relay()).dispatchFetch(ORIGINS.relay + path, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+      },
+      body: JSON.stringify(body ?? {}),
+    });
+    return { status: response.status, json: (await response.json()) as Record<string, any> };
+  };
   try {
     await worker.ready;
   } catch (error) {
@@ -336,7 +380,20 @@ async function fixture(
       });
     const mint = async () =>
       (await (await tokens("POST")).json()) as { id: string; token: string };
-    return { request, post, session, email, oauth, tokens, speak, mint };
+    /** The account's Relay routes, from this origin unless `from` names another. */
+    const approve = (userCode: unknown, from = origin) =>
+      request("/api/relay/enrollments/approve", {
+        method: "POST",
+        body: JSON.stringify({ userCode }),
+        headers: { origin: from, "content-type": "application/json" },
+      });
+    const computers = async () =>
+      (await request("/api/relay/burrows")).json() as Promise<{
+        burrows: { burrowId: string; enrolledAt: string }[];
+      }>;
+    const remove = (burrowId: string, from = origin) =>
+      request(`/api/relay/burrows/${burrowId}`, { method: "DELETE", headers: { origin: from } });
+    return { request, post, session, email, oauth, tokens, speak, mint, approve, computers, remove };
   }
   return {
     ...context,
@@ -344,6 +401,15 @@ async function fixture(
     provider,
     elevenLabs,
     browser,
+    burrowCall,
+    /** A device-code enrollment begun as the Burrow begins one. */
+    begin: async () =>
+      (await burrowCall(API_ROUTES.burrowEnrollBegin, { origin: ORIGINS.relay })).json as {
+        deviceCode: string;
+        userCode: string;
+        verificationUrl: string;
+      },
+    poll: (deviceCode: string) => burrowCall(API_ROUTES.burrowEnrollPoll, { deviceCode }),
     advance: (time: string) =>
       worker.dispatchFetch(origin + "/__test/time", {
         method: "POST",
@@ -359,6 +425,7 @@ async function fixture(
     close: async () => {
       await worker.dispose();
       await (await voiceWorker)?.dispose();
+      await (await relayWorker)?.dispose();
       await provider.close();
       await context.close();
     },
@@ -867,4 +934,98 @@ test("the voice Worker's cron sweeps ElevenLabs history with only its key and no
   gone = "";
   expect((await scheduled()).outcome).toBe("ok");
   expect(history.size).toBe(0);
+});
+
+test("enrollment: only a recent admin login from this origin approves, and the Burrow is the approver's until removed", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser(),
+    other = f.browser();
+  const begun = await f.begin();
+  expect(begun.verificationUrl).toBe(`${origin}/enroll#${begun.userCode}`);
+
+  expect((await admin.approve(begun.userCode)).status).toBe(401);
+  await other.email("other@example.test");
+  const refused = await other.approve(begun.userCode);
+  expect(refused.status).toBe(403);
+  expect(await refused.json()).toEqual({ message: NOT_ENTITLED_ERROR });
+  expect((await other.request("/api/relay/burrows")).status).toBe(403);
+  await admin.email(ADMIN_EMAIL);
+  // A same-site page — a sibling Worker's included — carries the cookie but not this origin.
+  for (const sameSite of SAME_SITE)
+    expect((await admin.approve(begun.userCode, sameSite)).status, sameSite).toBe(403);
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
+
+  // A malformed code is a 400; the code forgives case and spacing.
+  for (const code of ["not a code", "ZZZZ-ZZZ0", 7])
+    expect((await admin.approve(code)).status, String(code)).toBe(400);
+  expect((await admin.approve(` ${begun.userCode.toLowerCase().replace("-", "")} `)).status).toBe(204);
+  // A live approval answers the same 409 to a second approval, and never moves.
+  const again = await admin.approve(begun.userCode);
+  expect(again.status).toBe(409);
+  expect(await again.json()).toEqual({ message: ALREADY_APPROVED });
+  // A code no Burrow holds is approved all the same, and expires unredeemed.
+  expect((await admin.approve("ZZZZ-ZZZZ")).status).toBe(204);
+
+  const enrolled = await f.poll(begun.deviceCode);
+  expect(enrolled.json.status).toBe("enrolled");
+  const { burrowId, burrowToken } = enrolled.json.enrollment;
+  const adminId = (await admin.session())!.user.id;
+  expect(
+    await queryDatabase(f.database.url, `SELECT "userId" FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [burrowId]),
+  ).toEqual([{ userId: adminId }]);
+  const listed = await admin.computers();
+  expect(listed.burrows.map(({ burrowId }) => burrowId)).toEqual([burrowId]);
+  expect(Math.abs(Date.parse(listed.burrows[0].enrolledAt) - Date.now())).toBeLessThan(60_000);
+  expect((await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).status).toBe(200);
+
+  // Remove: this origin only; another account's Burrow is not found.
+  expect((await admin.remove(burrowId, ORIGINS.relay)).status).toBe(403);
+  const foreign = "BBBBBBBBBBBBBBBBBBBBBB";
+  await queryDatabase(
+    f.database.url,
+    `INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash") VALUES ($1, $2, 'x')`,
+    [foreign, (await other.session())!.user.id],
+  );
+  expect((await admin.remove(foreign)).status).toBe(404);
+  expect((await admin.remove(burrowId)).status).toBe(204);
+  // A removed Burrow is gone, so its token opens nothing.
+  expect(await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).toEqual({
+    status: 401,
+    json: { error: "unauthorized" },
+  });
+  expect(await admin.computers()).toEqual({ burrows: [] });
+  expect(
+    await queryDatabase(f.database.url, `SELECT "burrowId" FROM dormouse_relay_burrows ORDER BY "burrowId"`),
+  ).toEqual([{ burrowId: foreign }]);
+  expect((await admin.remove(burrowId)).status).toBe(404);
+});
+
+test("enrollment approval needs a login from the recent-login window, and attempts are limited per account", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const admin = f.browser();
+  await admin.email(ADMIN_EMAIL);
+  const begun = await f.begin();
+  const signedIn = Date.parse((await admin.session())!.session.createdAt);
+  await f.advance(new Date(signedIn + 10 * 60_000).toISOString());
+  const stale = await admin.approve(begun.userCode);
+  expect(stale.status).toBe(403);
+  expect(await stale.json()).toEqual({ message: RECENT_LOGIN_REQUIRED });
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
+
+  // A fresh login approves; every attempt counts toward the account's limit.
+  await admin.email(ADMIN_EMAIL);
+  const approveLimit = limitOf("RELAY_APPROVE_LIMIT");
+  const limited = await untilLimited(approveLimit, async (i) => {
+    const valid = i === approveLimit - 1;
+    const response = await admin.approve(valid ? begun.userCode : "not a code");
+    if (response.status !== 429) expect(response.status).toBe(valid ? 204 : 400);
+    return response;
+  });
+  expect(limited.headers.get("retry-after")).toBe("60");
 });

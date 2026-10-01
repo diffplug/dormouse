@@ -26,14 +26,16 @@ import {
   type OneTimeRoomFrame,
 } from "remote-lib-common";
 import * as smoke from "../../scripts/one-time-smoke.mjs";
-import { oneTimePagePolicy, relayPolicy, RUNS_NOTHING_POLICY } from "../headers";
+import { pocketContentSecurityPolicy } from "remote-lib-common";
+import { oneTimePagePolicy, relayRules, RUNS_NOTHING_POLICY } from "../headers";
 import { rateLimitKey } from "../one-time";
-import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, wrangler } from "./bundle";
+import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions } from "./bundle";
+import { limitOf, untilLimited } from "./rate-limit";
 import { TEST_ROOM_LIMITS } from "./one-time-limits";
 import { rawUpgrade, type RawSocket } from "./raw-socket";
 
 // The relay Worker's rendezvous and phone page in real workerd, without
-// Postgres: the relay reaches no Hyperdrive, so this suite runs in the root
+// Postgres: neither touches Hyperdrive, so this suite runs in the root
 // `pnpm test`.
 
 const origin = ORIGINS.relay;
@@ -388,21 +390,21 @@ test("a joined room that outlives the deadline closes both ends", async () => {
   );
 });
 
-const limitOf = (binding: string) =>
-  wrangler.relay.ratelimits!.find(({ name }) => name === binding)!.simple.limit;
-
 test("minting is limited per address, and per /64 for IPv6", async () => {
   const mintFrom = (ip: string) =>
     upgrade(ONE_TIME_WS_ROUTES.burrow, { "cf-connecting-ip": ip });
   const sockets: RawSocket[] = [];
-  for (let i = 0; i < limitOf("ONE_TIME_MINT_LIMIT"); i++) {
-    const minted = await mintFrom(
-      i % 2 ? "2001:db8:1:2::1" : "2001:0db8:0001:0002:ffff::2",
-    );
-    expect(minted.status).toBe(101);
-    sockets.push(minted.socket!);
-  }
-  expect((await mintFrom("2001:db8:1:2::3")).status).toBe(429);
+  // Three addresses in one /64, two spellings of each: keyed by address
+  // instead, they would mint three times the limit before any 429.
+  const sameSlash64 = ["2001:db8:1:2::1", "2001:0db8:0001:0002:ffff::2", "2001:db8:1:2::3"];
+  await untilLimited(limitOf("ONE_TIME_MINT_LIMIT"), async (i) => {
+    const minted = await mintFrom(sameSlash64[i % sameSlash64.length]);
+    if (minted.status !== 429) {
+      expect(minted.status).toBe(101);
+      sockets.push(minted.socket!);
+    }
+    return minted;
+  });
   const neighbour = await mintFrom("2001:db8:1:3::1");
   expect(neighbour.status).toBe(101);
   sockets.push(neighbour.socket!);
@@ -411,14 +413,17 @@ test("minting is limited per address, and per /64 for IPv6", async () => {
 
 test("joining is limited per address", async () => {
   const ip = freshIp();
-  const joinFrom = () =>
+  const joinFrom = (from = ip) =>
     upgrade(joinPath("C".repeat(E2E_ID_LENGTH)), {
       origin,
-      "cf-connecting-ip": ip,
+      "cf-connecting-ip": from,
     });
-  for (let i = 0; i < limitOf("ONE_TIME_JOIN_LIMIT"); i++)
-    expect((await joinFrom()).status).toBe(101);
-  expect((await joinFrom()).status).toBe(429);
+  await untilLimited(limitOf("ONE_TIME_JOIN_LIMIT"), async () => {
+    const joined = await joinFrom();
+    if (joined.status !== 429) expect(joined.status).toBe(101);
+    return joined;
+  });
+  expect((await joinFrom(freshIp())).status).toBe(101);
 });
 
 test("rate-limit keys", () => {
@@ -537,7 +542,7 @@ test("the page's hashed assets are immutable, and a missing one is a 404, not th
   }
 });
 
-test("nothing else under /connect/ is served, and nothing else on the origin at all", async () => {
+test("nothing else under /connect/ is served, and nothing outside it gets the page's policy", async () => {
   for (const path of [
     `${ONE_TIME_PAGE_PATH}index.html`,
     `${ONE_TIME_PAGE_PATH}other`,
@@ -548,18 +553,17 @@ test("nothing else under /connect/ is served, and nothing else on the origin at 
     expect(response.headers.get("content-security-policy"), path).toBe(PAGE_POLICY);
   }
   expect((await get(ONE_TIME_PAGE_PATH, { method: "POST" })).status).toBe(404);
-  // No SPA fallback: every other path is a 404 under the policy that runs nothing.
+  // Every other path is Pocket's (`pocket.test.ts`), under Pocket's policy.
   for (const path of ["/", "/connected", "/login", "/assets/connect/x.js"]) {
     const response = await get(path);
-    expect(response.status, path).toBe(404);
     expect(response.headers.get("content-security-policy"), path).toBe(
-      RUNS_NOTHING_POLICY,
+      pocketContentSecurityPolicy(origin),
     );
   }
 });
 
 test("a malformed APP_ORIGIN falls back to the policy that runs nothing on the page", () => {
-  expect(relayPolicy("/connect/", "http://localhost:8787")).toBe(
+  expect(relayRules("/connect/", "http://localhost:8787").policy).toBe(
     oneTimePagePolicy("http://localhost:8787"),
   );
   expect(oneTimePagePolicy("http://localhost:8787")).toContain(
@@ -576,8 +580,10 @@ test("a malformed APP_ORIGIN falls back to the policy that runs nothing on the p
     "https://evil.example,x",
     "https://evil.example'x",
     "javascript:alert(1)",
+    "ws://relay.dormouse.sh",
   ])
-    expect(relayPolicy("/connect/", bad), String(bad)).toBe(
-      RUNS_NOTHING_POLICY,
-    );
+    for (const path of ["/connect/", "/"])
+      expect(relayRules(path, bad).policy, `${path} ${String(bad)}`).toBe(
+        RUNS_NOTHING_POLICY,
+      );
 });

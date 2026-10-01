@@ -121,7 +121,7 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 
 | `DORMOUSE_RELAY_ORIGIN` | Mode | Relay | One-time connection | Managed voice | Standalone auto-update |
 | --- | --- | --- | --- | --- | --- |
-| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, which runs none yet | at this origin | at `https://voice.dormouse.sh` | on |
+| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, which enrolls no Burrow yet | at this origin | at `https://voice.dormouse.sh` | on |
 | any other accepted origin | self-host | exactly this origin | off | off | off |
 
 - **A self-host build sends nothing to `dormouse.sh` or any host under it
@@ -153,15 +153,15 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
   or overridden**, a loopback dev Hosted build included (rationale).
 - **No build bakes `hosted.dormouse.sh`, the account's origin**; the desktop
   reaches it only by a user's click.
-- Reserved: the Hosted Relay serves `relay.dormouse.sh` over TLS with Pocket at
-  its root, never a tailnet or per-tenant host, passkeys binding to the served
-  origin ("Scope: saas-multitenant"). Hosted's origins: `docs/specs/hosted.md`
+- The Hosted Relay serves `relay.dormouse.sh` with Pocket at its root, never a
+  tailnet or per-tenant host, passkeys binding to that origin
+  (`docs/specs/hosted.md` → "Relay"). Hosted's origins: `docs/specs/hosted.md`
   → "Application boundary".
 
 **The Burrow composes every Relay URL from the baked origin and takes none as
 input**: `enroll` and `enrollOffer` post to it, carrying no Relay URL, and **a
-Hosted build refuses both**, Hosted running no Relay
-(`docs/specs/hosted.md` → Future), as does any build under the network
+Hosted build refuses both**, Hosted taking no setup password and enrolling no
+Burrow yet (`docs/specs/hosted.md` → Future), as does any build under the network
 policy's `nothing` (`docs/specs/remote-network.md` → "Policy"); **a command still naming a Relay** (an older
 webview's) **is refused unless it names the baked origin**. **An enrollment
 whose Relay URL or `origin` names another origin reads as none** wherever one is
@@ -293,17 +293,22 @@ parse. **Assertions go through `verifyPasskeyAssertion` in `remote-lib-common`,
 the same function the Burrow uses**, so Relay and Burrow cannot disagree on what a
 valid assertion is.
 
-`POST /api/setup/finish` takes `{ credentialId, publicKey, clientDataJSON }` and
-checks, in order: `clientDataJSON` decodes; `type === 'webauthn.create'`; its
-challenge redeems (400 otherwise); `origin` equals the configured origin; the
-public key imports as an ECDSA P-256 verify key — refusing anything assertions
-could not later be verified against; and the credential id is new (409
-otherwise, so a re-registered credential cannot silently displace a stored key).
+`POST /api/setup/finish` takes `{ credentialId, publicKey, clientDataJSON }`.
+`checkRegistration`, which this and the Hosted Relay both call, checks, in
+order, each a 400: `clientDataJSON` decodes; `type === 'webauthn.create'`; its
+challenge redeems; `origin` equals the configured origin; the public key
+imports as an ECDSA P-256 verify key — refusing anything assertions could not
+later be verified against; and the credential id is bounded base64url. Each
+Relay's store then requires the credential id be new (409 otherwise, so a
+re-registered credential cannot silently displace a stored key).
 
 **Must verify sign-in and re-auth against the stored passkey under the Relay's
-UV policy.** Sign-in consumes the challenge from `clientDataJSON` before
-`verifyPasskeyAssertion`; re-auth consumes its stored nonce and recomputes the
-bound challenge before invoking that same verifier. An unknown credential is 404.
+UV policy.** Sign-in runs `verifySigninAssertion`, which both Relays call: it
+consumes the challenge from `clientDataJSON` before `verifyPasskeyAssertion`.
+Re-auth consumes its stored nonce and recomputes the bound challenge before
+invoking that same verifier. An unknown credential is 404. Both Relays answer
+every route refusal with the error-string constants in
+`remote-lib-common/src/remote/wire.ts`.
 
 Challenges are `ChallengeIssuer` from `remote-lib-common` — a generic
 single-use/TTL store despite the name — and **setup and sign-in each get their
@@ -315,6 +320,10 @@ Re-auth uses `PresenceNonceStore`; push subscription uses delivery-id possession
 `clientDataJSON.challenge` by decoded base64url bytes**, so padded browser
 serializations redeem the issued challenge without weakening single-use replay
 protection.
+
+Source of truth: `checkRegistration` / `verifySigninAssertion` in
+`remote-lib-common/src/remote/relay-common.ts`, pinned by
+`remote-lib-common/test/relay-common.test.mjs`.
 
 ## HTTP API
 
@@ -346,6 +355,8 @@ The Relay owns the fixed `/api/hello` health response, pinned by
 | `GET /ws/burrow`                   | burrow token     | The Burrow's relay socket                            |
 | `GET /ws/client`                 | session token  | A Client's relay socket                            |
 | `GET /*`                         | —              | The built Pocket app, registered last so every route above wins. Cache policy and SPA fallback: [pocket-app.md](./pocket-app.md) |
+
+The Hosted Relay's device-code enrollment routes, `API_ROUTES.burrowEnrollBegin` and `burrowEnrollPoll`, are not served here: each is the Relay's usual 404 ([hosted.md](./hosted.md) -> "Burrow enrollment").
 
 The Relay emits no cross-origin grant
 ([security-remote.md](./security-remote.md#cross-origin-access)). **WS auth rides
@@ -1119,18 +1130,13 @@ Unstaged but adjacent: origin migration (re-binding the passkey and enrollments
 after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
 
-**Scope: saas-multitenant** — Hosted accounts, Burrow enrollment, and tenant isolation for the managed Relay on `relay.dormouse.sh` ("Relay origin"). Hosted identity belongs to [hosted.md](./hosted.md). The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design; Pocket serving remains staged in [pocket-app.md](./pocket-app.md) `## Future`.
+**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes, Pocket, and the device-code enrollment [hosted.md](./hosted.md) → "Relay" and "Burrow enrollment" serve, in order: tenant-scoped relay sockets, and push. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
 
 ### From single-owner to multi-tenant
 
 Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
 that lifts each single-tenant simplification, every one chosen to be liftable:
 
-* **Accounts.** One `accountId: "owner"` behind a shared setup password becomes
-  many Hosted account IDs with enrolled passkeys. The two hand-edited JSON files
-  (`account.json`, `burrows.json`) become
-  a real per-tenant store with per-tenant revocation, and Burrow enrollment moves
-  from the global setup password to the authenticated account.
 * **Relay tenant-scoping (an invariant, not a check).** The relay binds one Burrow
   per Client socket with no notion of tenant; multi-tenant makes tenancy
   intrinsic to that binding — a Client may only ever be offered, and bound to,

@@ -17,7 +17,6 @@ import {
   E2E_KEEPALIVE_INTERVAL_MS,
   ESTABLISHED_E2E_IDLE_TIMEOUT_MS,
   KEEPALIVE_BODY_SIZE,
-  SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   formatPairingInvitationUrl,
   fromBase64Url,
@@ -58,6 +57,7 @@ import type { RemoteTimer } from '../ws';
 import { createTestAuthenticator, settle, type TestAuthenticator } from '../test-e2e-client';
 import { PasskeyAlreadyRegisteredError, type WebAuthnClient } from './webauthn';
 import {
+  ACCOUNT_ID,
   AUTH_ROUTES,
   BURROW_LABEL,
   CREDENTIAL_ID,
@@ -180,7 +180,7 @@ async function seedRecord(
   const clientStatic = await generateNoiseKeyPair();
   const record: KnownBurrowV1 = {
     burrowId,
-    accountId: SELFHOST_ACCOUNT_ID,
+    accountId: ACCOUNT_ID,
     label: 'Laptop',
     burrowStaticPublicKey: toBase64Url((await generateNoiseKeyPair()).publicKey),
     clientStaticKeyPair: {
@@ -236,6 +236,29 @@ describe('pairing, end to end', () => {
     // The Burrow authorized the static this handshake authenticated, not one the
     // payload claimed.
     expect(harness.savedAcl[0]!.clientStaticPublicKey).toBe(record.clientStaticKeyPair.publicKeyRaw);
+    // Both ends name the account the Relay answered at sign-in, never a constant.
+    expect(record.accountId).toBe(ACCOUNT_ID);
+    expect(harness.savedAcl[0]!.accountId).toBe(ACCOUNT_ID);
+  });
+
+  it("refuses an outcome naming another account than the session's, and stores nothing", async () => {
+    const harness = await makeE2eHarness();
+    const invitation = await harness.mintInvitation();
+    let shown: string | null = null;
+    const pairing = harness.client.pair(invitation, 'iPhone Safari', (code) => {
+      shown = code;
+    });
+    // The proof named the first account; the phone then signs in to another.
+    await waitFor(() => harness.approvals.length > 0, 'the approval modal');
+    harness.answerSigninAs('another-account');
+    await harness.client.signin();
+    harness.approvals[0]!.approve(shown!);
+
+    expect(await pairing).toEqual({
+      ok: false,
+      message: PAIRING_DENIAL_MESSAGES['burrow-error'],
+    });
+    expect(harness.knownBurrows.records.size).toBe(0);
   });
 
   it('takes the invitation straight off the URL the Burrow renders', async () => {

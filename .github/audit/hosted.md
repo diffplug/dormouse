@@ -7,18 +7,23 @@
 **Output file:** `audit-hosted.md`
 
 This is a code-and-specs audit of Hosted's three Workers — the account
-application (`hosted.dormouse.sh`), the relay that serves the one-time
-rendezvous (`relay.dormouse.sh`), and managed voice (`voice.dormouse.sh`). You need no
+application (`hosted.dormouse.sh`), the relay that serves the Hosted Relay's
+account-scoped routes, Pocket, and the one-time rendezvous
+(`relay.dormouse.sh`), and managed voice (`voice.dormouse.sh`). You need no
 PAT — do not use one. The two pgstencil provenance checks below do read the
 GitHub API, but only a public repository, which the workflow's default
 `GITHUB_TOKEN` and the operator's own `gh` login both reach; if that API is
 unreachable, report those two checks as `UNVERIFIABLE`.
 
 Read `docs/specs/hosted.md`, `docs/specs/one-time.md` (its "Wire contract",
-"Hosted rendezvous", and "Phone page"), `hosted/server/`, `hosted/src/`,
+"Hosted rendezvous", and "Phone page"), `docs/specs/relay.md` (its "HTTP API",
+"Setup tokens and the pairing QR", and "WebAuthn without a WebAuthn library",
+whose semantics the Hosted Relay keeps), `hosted/server/`, `hosted/src/`,
 `hosted/scripts/`, `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`,
 `hosted/wrangler.voice.jsonc`,
-`remote-lib-common/src/remote/one-time-wire.ts`, the phone page the relay serves —
+`remote-lib-common/src/remote/one-time-wire.ts`,
+`remote-lib-common/src/remote/relay-common.ts`, the Pocket build the relay
+serves (`lib/vite.pocket.config.ts`, `lib/pocket/`), the phone page it serves —
 `lib/vite.one-time.config.ts`, `lib/one-time/`, `lib/src/remote/one-time-app/`,
 and `lib/scripts/assert-pocket-worker.mjs` — and
 `.github/workflows/hosted-preview.yml` and
@@ -91,14 +96,40 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   reaches browser JSON or storage.
 - **Does a secret reach a Worker that has no use for it?** Read each mapper in
   `hosted/server/bindings.ts` and each Wrangler config: the relay and voice
-  Workers must hold and pass no auth secret and never import Better Auth, the
-  relay no Hyperdrive, the account no ElevenLabs key.
+  Workers must hold and pass no auth secret and never import Better Auth, and
+  the account and relay no ElevenLabs key, and the account and voice no
+  `RELAY_ENROLL_SECRET`. The relay's Hyperdrive reaches only
+  its own tables and the entitlement's user row.
+- **Can one account reach another's Relay rows?** Trace every query in
+  `hosted/server/relay-api.ts`: a session or Burrow token of account B must not
+  list, prove with, spend, or mint against account A's Burrows, passkeys,
+  nonces, setup tokens, or setup challenges; a single-use row must be spent in
+  the statement that reads it; a bearer secret must be at rest only as its
+  hash; a de-entitled account or removed Burrow must act on nothing, the
+  account's sessions and sign-in included; every unauthenticated route that
+  reaches Postgres must spend its per-address limit first; and every table a
+  caller grows must stay bounded against that caller, a capped write never
+  touching another key's rows. Classify a percent-encoded path (`/%63onnect/`,
+  `/%61ssets/`) the way `secureHeaders` and the routes do.
+- **Can an enrollment become someone else's Burrow, or a second one?** Trace
+  a device code from `begin` through the account's approval
+  (`hosted/server/relay-account.ts`) to the poll that redeems it: begin must
+  write nothing; a web page must not begin or poll; the device code must carry
+  its own expiry and its user code must be the relay secret's HMAC of it, so
+  no one can forge a device code that redeems another's approval; an approval
+  must need a recent admin login from the account's own origin and never
+  replace a live one; the redemption must be one statement whose owner is that
+  approver; and a removed Burrow's row must be gone, its token opening nothing
+  on any relay route. Look for a user code predictable without the secret, an
+  unlimited approval loop, and a table an unauthenticated caller can grow.
 - **Can a Hosted login become terminal access, or an account become someone
   else's?** `authPolicy` must keep explicit linking and independent logins; a
   callback whose initiating login was revoked must fail; an unused or unknown
   provider credential must enable nothing. No Hosted endpoint may mint a Burrow
-  ACL grant or stand in for the encrypted pairing and presence proof, and the
-  rendezvous authorizes nothing.
+  ACL grant or stand in for the encrypted pairing and presence proof, the
+  Relay must read no cookie, and the rendezvous authorizes nothing. Pocket and
+  `/connect/` share the relay origin; check what each page's policy lets it
+  reach of the other.
 - **Can the rendezvous become more than a handshake pipe?** Trace a frame
   through `OneTimeRoom`: nothing may read, keep, or log it, and the length,
   type, and count bounds must close both ends before a byte past them is

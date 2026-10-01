@@ -6,10 +6,11 @@ import { join } from 'node:path';
 
 import {
   E2E_ID_BYTE_LENGTH,
+  MAX_ENROLLED_BURROWS,
+  RELAY_BEARER_BYTE_LENGTH,
   SELFHOST_ACCOUNT_ID,
-  base64UrlLength,
   isE2eId,
-  isExactBase64Url,
+  isRelayBearer,
   toBase64Url,
 } from 'remote-lib-common';
 import type { PushSubscriptionPayload } from 'remote-lib-common';
@@ -360,30 +361,6 @@ export interface StoredBurrow {
   readonly enrolledAt: number;
 }
 
-/**
- * The one shape a `burrowToken` has: 32 random bytes, base64url. Minted here and
- * required at every lookup, the way `burrowId` is pinned to `isE2eId`
- * (`docs/specs/relay.md` -> State files).
- */
-const BURROW_TOKEN_BYTE_LENGTH = 32;
-export const BURROW_TOKEN_LENGTH = base64UrlLength(BURROW_TOKEN_BYTE_LENGTH);
-
-/** Whether `value` could be a token this Relay minted. */
-export function isBurrowToken(value: unknown): value is string {
-  return isExactBase64Url(value, BURROW_TOKEN_LENGTH);
-}
-
-/**
- * How many Burrows one account may have enrolled.
- *
- * Enrollment is credential-gated, so this is not a flood defense — it is the
- * bound on a file that is otherwise append-only and is re-read, re-parsed and
- * compared row by row on every burrow-gated request and every `/ws/burrow`
- * upgrade. Far above the machines a person owns; revocation (deleting a row by
- * hand) is what makes room.
- */
-export const MAX_ENROLLED_BURROWS = 32;
-
 /** Thrown by {@link BurrowStore.enroll} when {@link MAX_ENROLLED_BURROWS} is reached. */
 export class BurrowLimitReachedError extends Error {
   constructor() {
@@ -464,7 +441,9 @@ export class BurrowStore extends JsonFileStore {
    * The same reasoning `isDeliveryId` applies at the push routes.
    */
   async findByToken(burrowToken: string): Promise<StoredBurrow | undefined> {
-    if (!isBurrowToken(burrowToken)) return undefined;
+    // The one shape a `burrowToken` has, required at every lookup the way
+    // `burrowId` is pinned to `isE2eId` (`docs/specs/relay.md` -> State files).
+    if (!isRelayBearer(burrowToken)) return undefined;
     const burrows = await this.list();
     let match: StoredBurrow | undefined;
     for (const h of burrows) {
@@ -507,7 +486,7 @@ export class BurrowStore extends JsonFileStore {
       if (burrows.length >= MAX_ENROLLED_BURROWS) throw new BurrowLimitReachedError();
       const burrow: StoredBurrow = {
         burrowId: toBase64Url(randomBytes(E2E_ID_BYTE_LENGTH)),
-        burrowToken: toBase64Url(randomBytes(BURROW_TOKEN_BYTE_LENGTH)),
+        burrowToken: toBase64Url(randomBytes(RELAY_BEARER_BYTE_LENGTH)),
         enrolledAt: this.now(),
       };
       burrows.push(burrow);

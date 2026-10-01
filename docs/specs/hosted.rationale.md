@@ -25,3 +25,24 @@ Three origins (decided 2026-09-30):
 - Deploy order (2026-09-30): the account's `v2` deletes the `OneTimeRoom` namespace the relay's `v1` replaces, and a deployed migration is a rollback floor. Deploying the account first would make the deletion permanent before the replacement is known to deploy; with the relay first, a failed relay deploy stops the release before the account changes.
 - Relay smoke before the account (2026-10-01): a relay deploy can succeed while its custom domain or rendezvous does not serve, and the full smoke runs only after the account deployed, so by then `v2` had already deleted the old room. Smoking the relay right after its deploy keeps the deletion behind a proven replacement.
 - Smoke attempts (2026-09-30): the first release after the split attaches `relay.dormouse.sh` and `voice.dormouse.sh` as new custom domains, and a new certificate can take longer to issue than the health GET's six five-second retries. Repeating a relay or voice smoke sends only GETs and WebSockets on a fresh room, so it replays no POST; the account smoke's POSTs keep it at one attempt.
+
+## Relay
+
+Caps (2026-09-30):
+
+- Passkeys per account (`MAX_PASSKEYS_PER_ACCOUNT`, 32): registration needs a setup token the account's own Burrow minted, so only the account grows its rows. A person registers one per phone or unsynced browser profile, and every `setup/begin` returns the whole list as `excludeCredentials`. A full account is refused rather than evicted, since evicting a passkey would sign a device out without saying so.
+- Sessions per account (`MAX_SESSIONS_PER_ACCOUNT`, 32): each costs an assertion by one of the account's own passkeys, so only the account can spend it, and 32 is far above the browsers a person signs in from within the 12-hour lifetime. Evicting the oldest costs at worst one re-sign-in.
+- Setup challenges are keyed by the Burrow whose token began them, which also makes a challenge unredeemable with another Burrow's token. The self-host Relay's single flat issuer was the accepted exception for one tenant; across accounts, a flat map would let one account evict another's live registration.
+- Sign-in challenges stay flat: `signin/begin` has no caller to key on. The per-address limit, the two-minute expiry, and the hourly sweep bound them, rather than a global cap whose flood would evict every account's live sign-in.
+- A capped write prunes only its own key's expired rows because a table-wide prune would make every unauthenticated request a full-table delete; the Cron Trigger sweeps the rest.
+
+Sweep interval (2026-09-30): hourly, not the voice sweep's five minutes. Each pass opens a Postgres connection, which wakes a suspended Neon compute; expired rows are refused on read whatever their age, so the sweep only bounds storage, and an hour of sign-in challenges is the per-address limit times an hour per address.
+
+Rate limits (2026-09-30): `signin/*` and `setup/begin`/`finish` are the unauthenticated routes that reach Postgres. A ceremony's two routes share one budget, so 30 a minute per address is 15 ceremonies, far above one person's retries and enough that a burst costs Postgres little. Like the one-time limits, they are keyed per address (an IPv6 /64), so they bound one caller, not a botnet.
+
+## Burrow enrollment
+
+- Begin stores nothing (2026-10-01): a stored request needed a cap, and `begin` is unauthenticated, so the cap could only be global, which a few /64s at the per-address limit could fill, locking every Burrow out of enrolling. With the expiry inside the device code and the user code derived from it, begin costs one HMAC and grows nothing.
+- User code derivation: the HMAC key keeps the user code unpredictable from the device code, so no one can mint a device code for a code a victim is about to approve without about 30⁸ ≈ 6.6 × 10¹¹ begins, against 10 a minute per address. Two live device codes sharing a user code is a 40-bit collision; the approval then redeems for whichever polls first, as owned by the approver. Skipping the two 5-bit values past the alphabet keeps characters uniform; a 256-bit MAC holds 51 groups for 8 characters.
+- Approvals table bound: the approval route is its only writer, authenticated, admin-only, and limited to 10 attempts a minute per account, each approval living 10 minutes, so one account holds at most about 100 live approvals.
+- Guessing: approving a well-formed code no Burrow holds enrolls nothing; to steal a pending enrollment the account would have to be the one approving its code, which is the flow itself.

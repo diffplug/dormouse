@@ -48,22 +48,33 @@ test("each production config keeps its canonical domain and production entry, an
       worker,
     );
   }
+  // The relay's enrollment links name production's account, and no other.
+  assert.equal(configs.relay.vars.ACCOUNT_ORIGIN, "https://hosted.dormouse.sh");
+  for (const elsewhere of [undefined, "https://evil.example.test"])
+    assert.throws(() =>
+      productionConfig(
+        { ...bases.relay, vars: { ...bases.relay.vars, ACCOUNT_ORIGIN: elsewhere } },
+        env,
+        "relay",
+      ),
+    );
   // Each config is its own Worker's: none stands in for a sibling.
   assert.throws(() => productionConfig(bases.relay, env, "account"));
   assert.throws(() => productionConfig(bases.account, env, "voice"));
-  // The account and voice share the production database; the relay reaches none.
+  // All three share the production database.
   assert.deepEqual(configs.account.hyperdrive, [{ binding: "HYPERDRIVE", id: env.HYPERDRIVE_ID }]);
   assert.deepEqual(configs.voice.hyperdrive, configs.account.hyperdrive);
-  assert.equal(configs.relay.hyperdrive, undefined);
+  assert.deepEqual(configs.relay.hyperdrive, configs.account.hyperdrive);
   assert.equal(configs.account.assets.directory, "../../dist/account");
   assert.equal(configs.relay.assets.directory, "../../dist/relay");
   assert.equal(configs.voice.assets, undefined);
   assert.throws(() =>
     productionConfig(bases.account, { ...env, HYPERDRIVE_ID: "0".repeat(32) }, "account"),
   );
-  assert.throws(() =>
-    productionConfig(bases.voice, { ...env, HYPERDRIVE_ID: "0".repeat(32) }, "voice"),
-  );
+  for (const worker of ["voice", "relay"])
+    assert.throws(() =>
+      productionConfig(bases[worker], { ...env, HYPERDRIVE_ID: "0".repeat(32) }, worker),
+    );
   assert.throws(() =>
     productionConfig(bases.account, { ...env, BUILD_SHA: "main" }, "account"),
   );
@@ -189,13 +200,13 @@ test("live verification retries the relay and voice while their domains come up,
   });
   assert.equal(rendezvous, 1);
 });
-test("the history sweep's cron is the voice Worker's alone, and the account's removes its old one", () => {
+test("the history sweep's cron is the voice Worker's, the relay's sweeps its expired rows, and the account's removes its old one", () => {
   assert.deepEqual(configs.voice.triggers, { crons: ["*/5 * * * *"] });
+  assert.deepEqual(configs.relay.triggers, { crons: ["0 * * * *"] });
   // An absent `triggers` would leave a deployed schedule in place.
   assert.deepEqual(configs.account.triggers, { crons: [] });
-  assert.equal(configs.relay.triggers, undefined);
 });
-test("the rendezvous Durable Object and its rate limits are the relay's, and Durable Object migrations are append-only", () => {
+test("the rendezvous Durable Object is the relay's, each rate limit its Worker's, and Durable Object migrations are append-only", () => {
   assert.deepEqual(configs.relay.durable_objects, {
     bindings: [{ name: "ONE_TIME_ROOM", class_name: "OneTimeRoom" }],
   });
@@ -207,7 +218,16 @@ test("the rendezvous Durable Object and its rate limits are the relay's, and Dur
     [
       ["ONE_TIME_MINT_LIMIT", "1"],
       ["ONE_TIME_JOIN_LIMIT", "2"],
+      ["RELAY_SIGNIN_LIMIT", "3"],
+      ["RELAY_SETUP_LIMIT", "4"],
+      ["RELAY_ENROLL_BEGIN_LIMIT", "5"],
+      ["RELAY_ENROLL_POLL_LIMIT", "6"],
     ],
+  );
+  // Approvals are limited per account, on the account.
+  assert.deepEqual(
+    configs.account.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+    [["RELAY_APPROVE_LIMIT", "7"]],
   );
   // The account deployed `v1` with the room, so it keeps that tag unedited and
   // appends the deletion.
@@ -215,10 +235,9 @@ test("the rendezvous Durable Object and its rate limits are the relay's, and Dur
     { tag: "v1", new_sqlite_classes: ["OneTimeRoom"] },
     { tag: "v2", deleted_classes: ["OneTimeRoom"] },
   ]);
-  for (const worker of ["account", "voice"]) {
+  for (const worker of ["account", "voice"])
     assert.equal(configs[worker].durable_objects, undefined, worker);
-    assert.equal(configs[worker].ratelimits, undefined, worker);
-  }
+  assert.equal(configs.voice.ratelimits, undefined);
   assert.equal(configs.voice.migrations, undefined);
 });
 const accountSecrets = [
@@ -236,6 +255,7 @@ function provider({
   disabled = true,
   secrets = {
     "dormouse-hosted": accountSecrets,
+    "dormouse-relay": ["RELAY_ENROLL_SECRET"],
     "dormouse-voice": ["ELEVENLABS_API_KEY"],
   },
   read = [],
@@ -254,8 +274,7 @@ function provider({
 test("preflight rejects wrong databases, caching, reused roles, and incomplete secrets on each Worker", async () => {
   const read = [];
   await preflight(env, configs, provider({ read }));
-  // The relay holds no secret, so nothing is asked of it.
-  assert.deepEqual(read.sort(), ["dormouse-hosted", "dormouse-voice"]);
+  assert.deepEqual(read.sort(), ["dormouse-hosted", "dormouse-relay", "dormouse-voice"]);
   for (const missing of accountSecrets)
     await assert.rejects(
       preflight(
@@ -264,6 +283,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
         provider({
           secrets: {
             "dormouse-hosted": accountSecrets.filter((name) => name !== missing),
+            "dormouse-relay": ["RELAY_ENROLL_SECRET"],
             "dormouse-voice": ["ELEVENLABS_API_KEY"],
           },
         }),
@@ -278,11 +298,27 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
       provider({
         secrets: {
           "dormouse-hosted": [...accountSecrets, "ELEVENLABS_API_KEY"],
+          "dormouse-relay": ["RELAY_ENROLL_SECRET"],
           "dormouse-voice": [],
         },
       }),
     ),
     { message: "Missing dormouse-voice secret: ELEVENLABS_API_KEY" },
+  );
+  // The relay's enrollment secret, on the account Worker, does not count either.
+  await assert.rejects(
+    preflight(
+      env,
+      configs,
+      provider({
+        secrets: {
+          "dormouse-hosted": [...accountSecrets, "RELAY_ENROLL_SECRET"],
+          "dormouse-relay": [],
+          "dormouse-voice": ["ELEVENLABS_API_KEY"],
+        },
+      }),
+    ),
+    { message: "Missing dormouse-relay secret: RELAY_ENROLL_SECRET" },
   );
   // Each case supplies every configured secret, so it fails on its own check.
   for (const [override, message] of [
@@ -305,6 +341,7 @@ test("preflight rejects wrong databases, caching, reused roles, and incomplete s
     provider({
       secrets: {
         "dormouse-hosted": ["AUTH_SECRET", "POSTMARK_SERVER_TOKEN", ...extra],
+        "dormouse-relay": ["RELAY_ENROLL_SECRET"],
         "dormouse-voice": ["ELEVENLABS_API_KEY"],
       },
     });

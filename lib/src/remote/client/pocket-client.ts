@@ -21,7 +21,6 @@ import {
   E2E_ID_BYTE_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   NoiseTransportSession,
-  SELFHOST_ACCOUNT_ID,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
   WS_ROUTES,
@@ -311,7 +310,12 @@ export class PocketClient {
   readonly #core: ClientSessionCore<E2eRoute>;
 
   #ws: PocketSocket | null = null;
-  #sessionToken: string | null = null;
+  /**
+   * The sign-in session: its token, and the account the Relay answered with
+   * it — `'owner'` from a self-host Relay, the account's user id from Hosted.
+   * Every presence proof names that account, and a pairing outcome must.
+   */
+  #session: { readonly token: string; readonly accountId: string } | null = null;
   /** The credential id from the most recent sign-in (or registration). */
   #credentialId: string | null = null;
 
@@ -340,7 +344,7 @@ export class PocketClient {
   }
 
   get sessionToken(): string | null {
-    return this.#sessionToken;
+    return this.#session?.token ?? null;
   }
 
   get connectedBurrowId(): string | null {
@@ -487,7 +491,7 @@ export class PocketClient {
     const begin = await this.#api<SigninBeginResponse>(API_ROUTES.signinBegin, {});
     const assertion = await this.#webauthn.getAssertion(begin.challenge, begin.rpId);
     const finish = await this.#api<SigninFinishResponse>(API_ROUTES.signinFinish, { assertion });
-    this.#sessionToken = finish.sessionToken;
+    this.#session = { token: finish.sessionToken, accountId: finish.accountId };
     this.#credentialId = assertion.credentialId;
     // Signing in is enough to pair from here. The Relay returns the asserted
     // passkey's public key, so a browser profile that never performed the
@@ -606,7 +610,7 @@ export class PocketClient {
    * that can simply be retried on the next one.
    */
   async retirePendingDeletions(): Promise<void> {
-    if (this.#sessionToken === null) return;
+    if (this.#session === null) return;
     let queued;
     try {
       queued = await this.#pendingDeletions.list();
@@ -643,7 +647,7 @@ export class PocketClient {
   }
 
   #openSocket(): Promise<void> {
-    const token = this.#requireToken();
+    const token = this.#requireSession().token;
     const url = `${this.#wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(token)}`;
     const ws = this.#createWebSocket(url);
     this.#ws = ws;
@@ -742,7 +746,7 @@ export class PocketClient {
     // is one no later connection can build a handshake from — a record that
     // fails at the *next* attempt, with nothing left on screen to explain it.
     if (
-      outcome.accountId !== SELFHOST_ACCOUNT_ID ||
+      outcome.accountId !== this.#session?.accountId ||
       outcome.passkeyCredentialId !== passkeyCredentialId ||
       outcome.passkeyPublicKeyHash !== passkeyPublicKeyHash ||
       !isNoisePublicKey(outcome.burrowStaticPublicKey)
@@ -976,7 +980,7 @@ export class PocketClient {
   }
 
   #auth(): { headers: Record<string, string> } {
-    return { headers: { authorization: `Bearer ${this.#requireToken()}` } };
+    return { headers: { authorization: `Bearer ${this.#requireSession().token}` } };
   }
 
   /**
@@ -1009,7 +1013,7 @@ export class PocketClient {
     return {
       binding,
       relayNonce: begin.relayNonce,
-      accountId: SELFHOST_ACCOUNT_ID,
+      accountId: this.#requireSession().accountId,
       passkeyCredentialId: binding.passkeyCredentialId,
       passkeyPublicKey: this.#requirePasskeyPublicKey(binding.passkeyCredentialId),
       assertion,
@@ -1121,7 +1125,7 @@ export class PocketClient {
       // Drop the token here rather than at the call site: every later request
       // and every relay upgrade would fail the same way, and keeping it would
       // let the UI believe it is still signed in.
-      this.#sessionToken = null;
+      this.#session = null;
       throw new SessionExpiredError();
     }
     // A refusal, not a bare Error: an answer arrived, which is what `setup`
@@ -1143,11 +1147,11 @@ export class PocketClient {
    * question and costs one request on a path that has already failed.
    */
   async #diagnoseSocketFailure(original: Error): Promise<never> {
-    if (this.#sessionToken === null) throw original;
+    if (this.#session === null) throw original;
     try {
       await this.#api<BurrowsResponse>(API_ROUTES.burrows, undefined, {
         method: 'GET',
-        headers: { authorization: `Bearer ${this.#sessionToken}` },
+        headers: { authorization: `Bearer ${this.#session.token}` },
       });
     } catch (err) {
       if (err instanceof SessionExpiredError) throw err;
@@ -1157,9 +1161,9 @@ export class PocketClient {
     throw original;
   }
 
-  #requireToken(): string {
-    if (!this.#sessionToken) throw new Error('sign in first');
-    return this.#sessionToken;
+  #requireSession(): { readonly token: string; readonly accountId: string } {
+    if (!this.#session) throw new Error('sign in first');
+    return this.#session;
   }
 
   #requireCredentialId(): string {
@@ -1171,7 +1175,7 @@ export class PocketClient {
   #requirePasskeyPublicKey(credentialId: string): string {
     const publicKey = this.#storage.getPasskeyPublicKey(credentialId);
     if (!publicKey) {
-      this.#sessionToken = null;
+      this.#session = null;
       throw new PasskeyUnavailableError();
     }
     return publicKey;

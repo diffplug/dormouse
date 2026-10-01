@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   previewName,
@@ -10,6 +11,7 @@ import {
   findHyperdrives,
   cleanup,
   previewRatelimitNamespace,
+  previewSecrets,
 } from "./preview.mjs";
 import { healthSmoke, smoke, smokeAll } from "./preview-smoke.mjs";
 import { readConfigs } from "./workers.mjs";
@@ -59,6 +61,10 @@ test("each preview configuration isolates its origin and excludes production bin
       {
         APP_ORIGIN: `https://${name}.hosted-tests.workers.dev`,
         BUILD_SHA: env.BUILD_SHA,
+        // The relay's enrollment links name this PR's account preview.
+        ...(worker === "relay" && {
+          ACCOUNT_ORIGIN: "https://dormouse-hosted-pr-42.hosted-tests.workers.dev",
+        }),
       },
       worker,
     );
@@ -69,10 +75,10 @@ test("each preview configuration isolates its origin and excludes production bin
   }
   // Production alone sweeps ElevenLabs history, on the voice Worker; a preview has no cron.
   assert.ok(bases.voice.triggers?.crons?.length);
-  // The account and voice previews share one database; the relay reaches none.
+  // All three previews share one database.
   assert.deepEqual(configs.account.hyperdrive, [{ binding: "HYPERDRIVE", id: "c".repeat(32) }]);
   assert.deepEqual(configs.voice.hyperdrive, configs.account.hyperdrive);
-  assert.equal(configs.relay.hyperdrive, undefined);
+  assert.deepEqual(configs.relay.hyperdrive, configs.account.hyperdrive);
   assert.equal(configs.account.assets.directory, "../../dist/account");
   assert.equal(configs.relay.assets.directory, "../../dist/relay");
   assert.equal(configs.voice.assets, undefined);
@@ -83,16 +89,17 @@ test("each preview configuration isolates its origin and excludes production bin
   assert.ok(bases.account.migrations?.length);
   assert.equal(configs.account.migrations, undefined);
   assert.equal(configs.account.durable_objects, undefined);
-  assert.equal(configs.account.ratelimits, undefined);
   assert.deepEqual(configs.relay.durable_objects, bases.relay.durable_objects);
   assert.deepEqual(configs.relay.migrations, bases.relay.migrations);
-  assert.deepEqual(
-    configs.relay.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
-    bases.relay.ratelimits.map(({ name, namespace_id }) => [
-      name,
-      String(Number(namespace_id) + 1000),
-    ]),
-  );
+  for (const worker of ["relay", "account"])
+    assert.deepEqual(
+      configs[worker].ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+      bases[worker].ratelimits.map(({ name, namespace_id }) => [
+        name,
+        String(Number(namespace_id) + 1000),
+      ]),
+      worker,
+    );
   for (const bad of ["0", "-1", "42/../../production", "main", "42\n"])
     assert.throws(() => previewName(bad, "dormouse-hosted"));
   assert.throws(() =>
@@ -467,4 +474,19 @@ test("a relay or voice health check requires the deployed revision, and nothing 
     /must be healthy/,
   );
   await assert.rejects(healthSmoke(origin + "/", env.BUILD_SHA, answering(200, {})), /exact origin/);
+});
+
+test("each preview Worker with a secret gets its own, derived from the preview secret and its name", async () => {
+  const configs = previewConfigs(await readConfigs(), env, "c".repeat(32));
+  const secret = "p".repeat(32);
+  const derived = (name) => createHmac("sha256", secret).update(name).digest("hex");
+  assert.deepEqual(previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: secret }), {
+    account: { AUTH_SECRET: derived("dormouse-hosted-pr-42") },
+    relay: { RELAY_ENROLL_SECRET: derived("dormouse-relay-pr-42") },
+  });
+  assert.throws(() => previewSecrets(configs, env), /Missing PREVIEW_AUTH_SECRET/);
+  assert.throws(
+    () => previewSecrets(configs, { ...env, PREVIEW_AUTH_SECRET: "short" }),
+    /at least 32 random characters/,
+  );
 });

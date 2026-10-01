@@ -53,14 +53,19 @@ export function oneTimePageRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   const assets = (c: OneTimeContext) => c.env.ASSETS.fetch(c.req.raw);
   app.get(ONE_TIME_PAGE_PATH.slice(0, -1), assets);
   app.get(ONE_TIME_PAGE_PATH, assets);
-  app.get(`${ONE_TIME_PAGE_PATH}assets/*`, async (c) => {
-    const response = await assets(c);
-    // An HTML document is never an answer to a script or stylesheet request.
-    return (response.headers.get("content-type") ?? "").includes("text/html")
-      ? c.notFound()
-      : response;
-  });
+  app.get(`${ONE_TIME_PAGE_PATH}assets/*`, async (c) => assetOrNotFound(c, await assets(c)));
   app.get(`${ONE_TIME_PAGE_PATH}*`, (c) => c.notFound());
+}
+
+/**
+ * A content-hashed asset's answer: the file itself, or a 404 — never HTML,
+ * which would be cached as immutable under the hashed name.
+ */
+export function assetOrNotFound(c: OneTimeContext, response: Response) {
+  return response.ok &&
+    !(response.headers.get("content-type") ?? "").includes("text/html")
+    ? response
+    : c.notFound();
 }
 
 function upgrade(c: OneTimeContext) {
@@ -75,7 +80,8 @@ function tooMany(c: OneTimeContext) {
   return c.json({ message: "Too many requests." }, 429);
 }
 
-async function allowed(c: OneTimeContext, limit: RateLimit) {
+/** Whether `limit` admits this caller, keyed by {@link rateLimitKey}. */
+export async function allowed(c: OneTimeContext, limit: RateLimit) {
   return (
     await limit.limit({
       key: rateLimitKey(c.req.raw.headers.get("cf-connecting-ip")),

@@ -29,6 +29,9 @@ export function productionConfig(base, env, worker) {
   assert.match(required(env, "CLOUDFLARE_ACCOUNT_ID"), /^[a-f0-9]{32}$/);
   assert.equal(base.name, identity.name);
   assert.equal(base.vars.APP_ORIGIN, identity.origin);
+  // The relay's enrollment links name production's account, and only it.
+  if (worker === "relay")
+    assert.equal(base.vars.ACCOUNT_ORIGIN, PRODUCTION.account.origin);
   // The canonical domain alone: no public alias, candidate, or preview URL.
   assert.deepEqual(base.routes, [
     { pattern: new URL(identity.origin).host, custom_domain: true },

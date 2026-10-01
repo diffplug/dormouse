@@ -19,6 +19,8 @@ export const WORKERS = {
     config: "wrangler.relay.jsonc",
     // The production entry: its mapper passes nothing a preview lacks.
     previewMain: "server/relay-worker.ts",
+    secrets: () => ["RELAY_ENROLL_SECRET"],
+    previewSecret: "RELAY_ENROLL_SECRET",
   },
   voice: {
     config: "wrangler.voice.jsonc",
@@ -40,8 +42,8 @@ export const WORKERS = {
         ];
       }),
     ],
-    /** Its preview is deployed with the derived `AUTH_SECRET`. */
-    previewSecrets: true,
+    /** The one secret its preview is deployed with, derived from the preview secret. */
+    previewSecret: "AUTH_SECRET",
   },
 };
 

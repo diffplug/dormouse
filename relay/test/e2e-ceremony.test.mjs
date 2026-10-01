@@ -36,13 +36,12 @@ import {
 } from './helpers.mjs';
 import { FakeClient } from './harness/fake-client.mjs';
 import { FakeBurrow } from './harness/fake-burrow.mjs';
+import { randomSecret } from '../../remote-lib-common/test/harness/actors.mjs';
 
 const BURROW_LABEL = 'Ned Laptop';
 
 /** A well-formed base64url 32-byte value that is nobody's real handshake hash. */
-function foreignHash() {
-  return toBase64Url(globalThis.crypto.getRandomValues(new Uint8Array(32)));
-}
+const foreignHash = randomSecret;
 
 /**
  * A live Relay, one enrolled Burrow holding a Noise static and connected to the
