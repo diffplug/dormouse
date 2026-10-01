@@ -89,7 +89,11 @@ A selection is anchored to the characters under it, not to screen coordinates: s
 
 - **Pure scroll** — vertical translation with no character changes — carries the selection along; coordinate math only, no matching.
 - **Content change:** any change to a cell the finalized selection overlaps cancels it immediately; repaints elsewhere on screen are irrelevant. A text snapshot, retaken whenever the selection is finalized or moved (§4.3), is compared on each xterm render; **never add a partial-match or content-tracking heuristic** — cancel-on-change is the rule (§9.1).
-- **Terminal resize** counts as a content change and cancels any active selection.
+- **Terminal resize** carries a finalized linewise selection Dormouse owns through xterm's reflow, each edge as a cell offset into its logical line (rationale). Its editor stays open in the same format and same-labeled scope, else As selected; per-break edits drop.
+  - **Must cancel if an edge's line was trimmed or its cells, soft wraps joined, no longer read as the selected text** (rationale).
+  - **Must cancel block, program-owned (§3.8), alternate-buffer, dragging, and copy-confirming selections.**
+
+Source of truth: `lib/src/lib/selection-reflow.ts`, pinned by `lib/src/lib/selection-reflow.test.ts`; `refollowCopyEditor` in `lib/src/lib/copy-editor.ts`, pinned by `carries a linewise selection and its editor through the reflow` in `lib/src/lib/terminal-lifecycle.selection.test.ts`.
 
 ### 3.5 Selection in the Live Region vs. Scrollback
 
@@ -188,7 +192,7 @@ Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard
 ### 4.5 Placement and Dismissal
 
 - Full pane width, on the side of the selection with more room; touch prefers above, clear of the thumb that ended the drag. **When neither side has 120px it docks at the bottom over the selection.** Remeasured on every render tick (§7).
-- **Esc**, a click outside the editor, a content change (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
+- **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
 - **Must flash only after a successful clipboard write, and only for the selection copied**: the Copy button shows a checkmark for ~700 ms, then the selection clears. Failed writes retain it for retry; canceling clears the flash immediately.
 
 Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `lib/src/components/CopyEditor.test.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.

@@ -28,6 +28,9 @@ import {
   type Selection,
 } from './mouse-selection';
 import { extractSelectionText } from './selection-text';
+import { anchorSelection, followReflow, type ReflowAnchor } from './selection-reflow';
+import { refollowCopyEditor } from './copy-editor';
+import { spanOfSelection } from './copy-text';
 import { normalizeResumeCommand } from './resume-patterns';
 import {
   pendingShellOpts,
@@ -225,13 +228,34 @@ function wirePtyEvents(id: string, terminal: Terminal): () => void {
   };
 }
 
-/** xterm input/resize/render handlers. Returns a dispose. The render
- *  handler watches selectionBaseline (rewritten whenever the selection
- *  changes) so the baseline is read by reference rather than captured. */
+/** Two readings of the pane's selection, retaken whenever anyone finalizes
+ *  or moves it (spec §3.4). */
+interface SelectionWatch {
+  selection: Selection | null;
+  /** Its text, compared on every render: a change cancels it. */
+  baseline: string | null;
+  /** Its edges, carried through a resize's reflow. */
+  anchor: ReflowAnchor | null;
+}
+
+/** A resize keeps a selection reflow can carry, its editor rebuilt over the
+ *  moved cells, and cancels any other (spec §3.4). */
+function followSelectionThroughResize(id: string, terminal: Terminal, watch: SelectionWatch): void {
+  const { selection, copyEditor, copyFlash } = getMouseSelectionState(id);
+  if (!selection) return;
+  // A confirmed copy is about to clear, and its timer only clears the
+  // selection it copied.
+  const moved = !copyFlash && watch.anchor ? followReflow(terminal, selection, watch.anchor) : null;
+  if (!moved) setMouseSelection(id, null);
+  else setMouseSelection(id, moved, copyEditor && refollowCopyEditor(copyEditor, terminal, spanOfSelection(moved)));
+}
+
+/** xterm input/resize/render handlers. Returns a dispose. `watch` is read by
+ *  reference, since the selection subscription rewrites it. */
 function wireXtermHandlers(
   id: string,
   terminal: Terminal,
-  selectionBaselineRef: { current: string | null },
+  watch: SelectionWatch,
 ): () => void {
   const inputDisposable = terminal.onData((data) => {
     // One strip, two readers. While an override is active the reports must not
@@ -270,22 +294,21 @@ function wireXtermHandlers(
   const resizeDisposable = terminal.onResize(({ cols, rows }) => {
     getPlatform().resizePty(id, cols, rows);
     bumpRenderTick();
-    if (getMouseSelectionState(id).selection) setMouseSelection(id, null);
-    selectionBaselineRef.current = null;
+    followSelectionThroughResize(id, terminal, watch);
   });
 
   const renderDisposable = terminal.onRender(() => {
     bumpRenderTick();
-    if (selectionBaselineRef.current === null) return;
+    if (watch.baseline === null) return;
     const sel = getMouseSelectionState(id).selection;
     if (!sel || sel.dragging) {
-      selectionBaselineRef.current = null;
+      watch.baseline = null;
       return;
     }
     const current = extractSelectionText(terminal, sel);
-    if (current !== selectionBaselineRef.current) {
+    if (current !== watch.baseline) {
       setMouseSelection(id, null);
-      selectionBaselineRef.current = null;
+      watch.baseline = null;
     }
   });
 
@@ -300,19 +323,18 @@ interface TerminalEntryOptions { shell?: string; untouched?: boolean; helper?: H
 
 function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): TerminalEntry {
   const { terminal, fit, serialize, element } = createXtermHost(id, options.grid);
-  // Cancel-on-change follows the selection itself: whoever finalizes or moves
-  // it, its text at that moment is what the render handler compares against.
-  const selectionBaselineRef = { current: null as string | null };
-  let watchedSelection: Selection | null = null;
-  const unsubscribeSelectionBaseline = subscribeToMouseSelection(() => {
+  const watch: SelectionWatch = { selection: null, baseline: null, anchor: null };
+  const unsubscribeSelectionWatch = subscribeToMouseSelection(() => {
     const sel = getMouseSelectionState(id).selection;
-    if (sel === watchedSelection) return;
-    watchedSelection = sel;
-    selectionBaselineRef.current = sel && !sel.dragging ? extractSelectionText(terminal, sel) : null;
+    if (sel === watch.selection) return;
+    watch.selection = sel;
+    watch.baseline = sel && !sel.dragging ? extractSelectionText(terminal, sel) : null;
+    watch.anchor?.dispose();
+    watch.anchor = sel && anchorSelection(terminal, sel);
   });
 
   const disposePty = wirePtyEvents(id, terminal);
-  const disposeXterm = wireXtermHandlers(id, terminal, selectionBaselineRef);
+  const disposeXterm = wireXtermHandlers(id, terminal, watch);
   const mouseModeObserver = attachMouseModeObserver(id, terminal);
   // Windows-only: keep win32-input-mode from clobbering kitty-protocol TUIs.
   // Off-Windows win32-input-mode is never advertised, so kitty already wins.
@@ -325,7 +347,8 @@ function setupTerminalEntry(id: string, options: TerminalEntryOptions = {}): Ter
   });
 
   const cleanup = () => {
-    unsubscribeSelectionBaseline();
+    unsubscribeSelectionWatch();
+    watch.anchor?.dispose();
     disposePty();
     disposeXterm();
     mouseModeObserver.dispose();

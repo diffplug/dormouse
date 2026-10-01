@@ -24,7 +24,8 @@ import { registry } from './terminal-store';
 
 // The copy editor's state transitions over the selection store
 // (docs/specs/mouse-and-clipboard.md §4). Every reading goes through the buffer
-// the editor opened with; only opening reads the terminal.
+// the editor opened with; only opening, and a resize's refollow, read the
+// terminal.
 
 function editorFor(buffer: CopyBuffer, span: Span, format: EditorFormat): CopyEditorState {
   return { buffer, scopes: computeScopes(buffer, span), scope: 0, format, overrides: {} };
@@ -34,6 +35,16 @@ function editorFor(buffer: CopyBuffer, span: Span, format: EditorFormat): CopyEd
 export function openCopyEditor(id: string, terminal: Terminal | undefined = registry.get(id)?.terminal): void {
   const sel = getMouseSelectionState(id).selection;
   if (terminal && sel && !sel.dragging) setCopyEditor(id, editorFor(terminalCopyBuffer(terminal), spanOfSelection(sel), 'auto'));
+}
+
+/** The editor over `span` after a resize's reflow, read afresh because the
+ *  old buffer's rows are stale (spec §3.4): its format, its scope by label
+ *  when that remains, and no per-break edits, whose indices move with the
+ *  soft wraps. */
+export function refollowCopyEditor(editor: CopyEditorState, terminal: Terminal, span: Span): CopyEditorState {
+  const next = editorFor(terminalCopyBuffer(terminal), span, editor.format);
+  const label = editor.scopes[editor.scope].label;
+  return { ...next, scope: Math.max(0, next.scopes.findIndex((s) => s.label === label)) };
 }
 
 export type FormatRenderings = Partial<Record<EditorFormat, Rendering>>;
