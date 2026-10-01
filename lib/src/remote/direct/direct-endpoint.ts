@@ -25,12 +25,7 @@ import {
   type TransportReceipt,
 } from 'remote-lib-common';
 
-import {
-  DirectPeer,
-  type DirectPathPolicy,
-  type DirectPeerFactory,
-  type DirectViolationCause,
-} from './direct-peer';
+import { DirectPeer, type DirectPeering, type DirectViolationCause } from './direct-peer';
 import { realTimer, type RemoteTimer } from '../ws';
 
 /**
@@ -47,13 +42,11 @@ export type DirectRole = 'offerer' | 'answerer';
 export type DirectCarrier = 'relay' | 'channel';
 
 export interface DirectEndpointDeps {
-  /** How this runtime builds a peer connection, or `null` where it has none. */
-  readonly createPeer: DirectPeerFactory | null;
   /**
-   * What the Burrow's network policy holds each attempt to, if anything; see
-   * {@link DirectPathPolicy}. Handed to {@link createPeer} and to the peer.
+   * How this runtime builds each attempt's peer, and what holds it, if
+   * anything; the path policy goes to both the factory and the peer.
    */
-  readonly pathPolicy?: DirectPathPolicy;
+  readonly peering: DirectPeering;
   /**
    * Encrypt one signal as a control message and put it on the relay path;
    * `false` if the session could not send it.
@@ -343,11 +336,11 @@ export class DirectEndpoint {
 
   /** This attempt's peer, wired to the four channel events, or null if there is none. */
   #build(): DirectPeer | null {
-    const factory = this.#deps.createPeer;
-    if (!factory) return null;
+    const { createPeer, pathPolicy } = this.#deps.peering;
+    if (!createPeer) return null;
     let connection;
     try {
-      connection = factory(this.#deps.pathPolicy);
+      connection = createPeer(pathPolicy);
     } catch (error) {
       console.warn('[direct] could not build a peer connection', error);
       return null;
@@ -355,7 +348,7 @@ export class DirectEndpoint {
     if (!connection) return null;
     this.#peer = new DirectPeer({
       peer: connection,
-      pathPolicy: this.#deps.pathPolicy,
+      pathPolicy,
       setTimer: this.#setTimer,
       handlers: {
         onOpen: () => this.#onOpen(),

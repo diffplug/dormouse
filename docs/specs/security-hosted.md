@@ -37,7 +37,7 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 - **FAIL IF** the `/connect/` page's policy admits a source outside `APP_ORIGIN`'s `/connect/`, a script outside `/connect/assets/`, or a connection but the client route; permits inline or off-origin script, framing, forms, or popups; or takes an `APP_ORIGIN` that is not exactly an origin. Inspect `contentSecurityPolicy` in `hosted/server/headers.ts`.
 - **FAIL IF** a path under `/connect/` is served but the page and its hashed assets, a missing asset gets the SPA shell, or a shell failing `assertPocketShell`'s one-time mode can ship; `build:one-time` in `lib/package.json` and `stageOneTime` in `hosted/scripts/stage-one-time.mjs` each run it. Inspect `oneTimePageRoutes` in `hosted/server/one-time.ts`.
 
-`scripts/e2e-lint.mjs` also holds `hosted/server/` to the Relay's absences: no protocol-v1 type, no direct-path signal or SDP, no ICE server (`docs/specs/security-remote.md` -> "Direct path"). Pinned by `hosted/server/tests/one-time.test.ts`, `hosted/scripts/stage-one-time.test.mjs`, `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`, and `hosted/scripts/production.test.mjs`.
+`scripts/e2e-lint.mjs` also holds `hosted/server/` to the Relay's absences: no protocol-v1 type, no direct-path signal or SDP, no ICE server — the page's STUN is client code (`docs/specs/security-remote.md` -> "Direct path"). Pinned by `hosted/server/tests/one-time.test.ts`, `hosted/scripts/stage-one-time.test.mjs`, `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`, and `hosted/scripts/production.test.mjs`.
 
 ## Deployment boundary
 

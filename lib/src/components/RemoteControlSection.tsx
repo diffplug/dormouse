@@ -494,7 +494,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
     <div className="mt-1.5 text-sm leading-relaxed">
       <div className="text-muted">Control this Dormouse from your phone.</div>
 
-      <OneTimeConnection />
+      <OneTimeConnection relayOrigin={status.relayOrigin} />
 
       <div className="mt-3">
         {status.enrolled ? (

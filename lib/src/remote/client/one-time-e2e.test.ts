@@ -148,8 +148,9 @@ function makeRuntime(
     createWebSocket: (url) => rendezvous.createBurrowSocket(url),
     createSession: ({ burrowId, send, label }) =>
       new RemoteApiSession({ burrowId, send, provider, holder: { id: 'holder-1', label } }),
-    createDirectPeer:
-      options.createDirectPeer === undefined ? () => network.createAnswerer() : options.createDirectPeer,
+    directPeering: {
+      createPeer: options.createDirectPeer === undefined ? () => network.createAnswerer() : options.createDirectPeer,
+    },
     burrowLabel: BURROW_LABEL,
     requestApproval: (request) => void approvals.push(request),
     dismissApproval: () => {},
@@ -356,7 +357,7 @@ describe('one-time connection, end to end', () => {
     expect(await result).toEqual({ ok: false, message: ONE_TIME_ENDED_MESSAGE });
   });
 
-  it('gives the allowed-network copy when the laptop builds no peer', async () => {
+  it('gives the direct-failed copy when the laptop builds no peer', async () => {
     makeRuntime({ createDirectPeer: null });
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
     approval.approve(shown);
@@ -365,7 +366,7 @@ describe('one-time connection, end to end', () => {
     expect(oneTimeEndReason(runtime)).toBe('direct-failed');
   });
 
-  it('gives the allowed-network copy when no channel opens by the direct deadline', async () => {
+  it('gives the direct-failed copy when no channel opens by the direct deadline', async () => {
     makeRuntime({ network: { opening: 'never' } });
     const { result, approval, shown } = await tapConnect(makePhone(), await openLink());
     approval.approve(shown);

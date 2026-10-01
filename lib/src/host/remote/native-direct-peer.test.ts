@@ -31,6 +31,7 @@ import {
   type TerminalDataEvent,
 } from 'remote-lib-common';
 import { DirectPeer, type DirectPeerLike } from '../../remote/direct/direct-peer';
+import { CLOUDFLARE_STUN_URL } from '../../remote/direct/ice-servers';
 import { STREAMED_CHUNK, makeE2eHarness, waitFor } from '../../remote/client/test-e2e-harness';
 import { collect } from '../../remote/direct/test-fake-peer';
 import { localNetworksPath } from './local-networks';
@@ -47,15 +48,20 @@ const sidecarRequire = createRequire(
   fileURLToPath(new URL('../../../../standalone/sidecar/package.json', import.meta.url)),
 );
 
+/** The polyfill's peer, with the one call the STUN case reads that the seam has no reason to. */
+interface NativePeer extends DirectPeerLike {
+  getConfiguration(): { iceServers?: unknown };
+}
+
 interface NativePolyfill {
-  readonly RTCPeerConnection: new (config: { iceServers: [] }) => DirectPeerLike;
+  readonly RTCPeerConnection: new (config: { iceServers: Array<{ urls: string }> }) => NativePeer;
 }
 
 const { RTCPeerConnection } = sidecarRequire('node-datachannel/polyfill') as NativePolyfill;
 
 /**
- * `iceServers: []` as both shipped factories pass it: host candidates only,
- * never a public STUN or TURN default.
+ * No ICE server, as the Burrow's factory builds a peer at every level but
+ * Anywhere: host candidates only, and nothing here reaches the network.
  */
 const buildPeer = (): DirectPeerLike => new RTCPeerConnection({ iceServers: [] });
 
@@ -485,6 +491,27 @@ describe('the direct path over the native addon', () => {
     },
     CASE_BUDGET_MS,
   );
+
+  /**
+   * Anywhere on the real stack (`docs/specs/remote-network.md` -> "Anywhere"):
+   * the addon parses each ICE server URL when the peer is built, refusing one
+   * it cannot read, so a peer built through Cloudflare's STUN is one it took.
+   * Built and never offered: gathering through it would reach the network.
+   */
+  it('builds a peer through Cloudflare STUN when handed it, and through none by default', () => {
+    expect(() => new RTCPeerConnection({ iceServers: [{ urls: 'stun:' }] })).toThrow(/ICE server URL/);
+
+    const factory = createNativeDirectPeerFactory();
+    const stun = factory(undefined, true) as NativePeer;
+    const none = factory() as NativePeer;
+    try {
+      expect(stun.getConfiguration().iceServers).toEqual([{ urls: [CLOUDFLARE_STUN_URL] }]);
+      expect(none.getConfiguration().iceServers).toEqual([]);
+    } finally {
+      stun.close();
+      none.close();
+    }
+  });
 
   /**
    * The shipped factory, last because its teardown is the process's.

@@ -60,7 +60,7 @@ async function establish(options: Options = {}) {
         dispose: () => void (api.disposals += 1),
       };
     },
-    createDirectPeer,
+    directPeering: { createPeer: createDirectPeer },
     sendRelay: (ciphertext) => void relayed.push(ciphertext),
     onFatal: (reason) => {
       fatals.push(reason);

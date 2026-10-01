@@ -20,6 +20,7 @@ import {
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_HANDOFF_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
+  DIRECT_SRFLX_GRACE_MS,
   DirectCutover,
   DirectFrameQueue,
   MAX_DIRECT_PENDING_BYTES,
@@ -108,6 +109,9 @@ test('the timings the spec names are the values that ship', () => {
   assert.equal(DIRECT_ANSWER_TIMEOUT_MS, 10_000);
   assert.equal(DIRECT_GATHER_TIMEOUT_MS, 3_000);
   assert.ok(DIRECT_GATHER_TIMEOUT_MS < DIRECT_SETUP_TIMEOUT_MS);
+  // A grace that outlasted the cap would never settle anything early.
+  assert.equal(DIRECT_SRFLX_GRACE_MS, 500);
+  assert.ok(DIRECT_SRFLX_GRACE_MS < DIRECT_GATHER_TIMEOUT_MS);
   // The answerer arms its deadline a relay hop after the offerer arms its own,
   // so it has to be the end that gives up first: its channel closing reaches
   // the offerer while the offerer is still unswitched and can abandon cleanly.

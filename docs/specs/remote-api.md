@@ -84,9 +84,11 @@ this stack simply stays relayed.
 **The Client offers once, after `ConnectionOutcomeV1 { ok: true }`, and never
 retries**; it is always the offerer and creates the one ordered, reliable data
 channel (`dormouse`, `arraybuffer`). **The Burrow answers at most one offer per
-session**, and declines where it has no peer to build. **Each side sends its
-whole description only after ICE gathering completes** — no trickle — bounded by
-`DIRECT_GATHER_TIMEOUT_MS`, past which what it has is what travels. **The
+session**, and declines where it has no peer to build. **Must send each side's
+whole description once, without trickle, at the first of: gathering completing;
+`DIRECT_GATHER_TIMEOUT_MS` from setting its local description; or
+`DIRECT_SRFLX_GRACE_MS` from its first server-reflexive candidate or that
+setting, whichever is later**; what it has then travels (rationale). **The
 answerer's setup budget is the shorter one** (`DIRECT_ANSWER_TIMEOUT_MS`, not
 `DIRECT_SETUP_TIMEOUT_MS`), since it arms a relay hop later and must be the end
 that gives up first. **An SDP
@@ -94,9 +96,9 @@ over `MAX_DIRECT_SDP_LENGTH` is never sent**: the Client skips the offer, the
 Burrow declines. That bound derives from `CONTROL_PAYLOAD_SIZE`, so a maximal
 signal always fits one control body.
 
-**No ICE servers**, and **never a public STUN or TURN default**: `iceServers:
-[]` at both ends, host candidates only. (rationale) Local networks restricts a
-one-time attempt further
+Which ICE servers each end gathers through:
+[remote-network.md](./remote-network.md) -> "Anywhere"; Local networks
+restricts a one-time attempt further
 ([remote-network.md](./remote-network.md) -> "Local networks").
 
 **The two shipped stacks are proven against each other by hand**, by
@@ -172,8 +174,8 @@ connection).
 **One peer connection per session**, created at the offer, closed on every
 disposal path, never existing before promotion. **Both ends build it through an
 injected factory** — `ClientSessionCoreDeps.createDirectPeer` (Pocket's through `PocketClientDeps`, the one-time phone's through `OneTimeClientDeps`),
-`BurrowOptions.createDirectPeer`, threaded through `BurrowServiceOptions`, and
-`OneTimeRuntimeOptions.createDirectPeer` —
+and `BurrowServiceOptions.createDirectPeer`, in each Burrow runtime's
+`DirectPeering` —
 `null` where a runtime has none, so neither end reaches a WebRTC global.
 **Pocket shows which path carries the session**, and where it stayed relayed
 which of the three `DirectRelayCause`s it was — **a closed set, never an
@@ -435,7 +437,7 @@ These are the methods the dor CLI speaks today; the remote API reuses their requ
 
 **Scope: direct-path** — latency. The shipped half is [Transport → Direct path](#direct-path), which Pocket and both Burrows speak today. What remains is to **dogfood** it across a tailnet, keystroke round-trip measured relayed and direct into the rationale.
 
-STUN discovery and a paired phone's network restrictions follow the **remote-network** scope in [remote-network.md](./remote-network.md). A session surviving relay loss remains unstaged.
+A paired phone's network levels follow the **remote-network** scope in [remote-network.md](./remote-network.md). A session surviving relay loss remains unstaged.
 
 ### 9. Audio
 

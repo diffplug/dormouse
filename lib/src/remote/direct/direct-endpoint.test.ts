@@ -105,13 +105,15 @@ function pair(options: Options = {}) {
       sides.get(role === 'offerer' ? 'answerer' : 'offerer')?.endpoint.onSignal({ ...signal });
     };
     side.endpoint = new DirectEndpoint(role, {
-      createPeer: hasPeer
-        ? () => {
-            const peer = role === 'offerer' ? fake.createOfferer() : fake.createAnswerer();
-            peers.push(peer);
-            return peer;
-          }
-        : null,
+      peering: {
+        createPeer: hasPeer
+          ? () => {
+              const peer = role === 'offerer' ? fake.createOfferer() : fake.createAnswerer();
+              peers.push(peer);
+              return peer;
+            }
+          : null,
+      },
       sendSignal: (signal) => {
         if (!side.sendable) return false;
         side.sent.push(signal);

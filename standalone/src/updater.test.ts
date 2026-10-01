@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
+import { networkPolicyResult, type NetworkLevel } from 'dormouse-lib/remote/network-policy';
 
 // --- Mocks ---
 
@@ -57,13 +58,9 @@ const CHECK_KEY = 'dormouse:update-check';
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
 
-/** What `networkPolicy` answers for `policy`. */
-function networkPolicy(policy: { level: string; autoUpdate: boolean }) {
-  return {
-    policy: { allowed: [], ...policy },
-    levels: ['nothing', 'local'],
-    interfaces: [],
-  };
+/** What a Hosted build's `networkPolicy` answers for `policy`. */
+function networkPolicy(policy: { level: NetworkLevel; autoUpdate: boolean }) {
+  return networkPolicyResult({ allowed: [], ...policy }, 'hosted', []);
 }
 
 /** The level the lifecycle cases run under: automatic checks on. */

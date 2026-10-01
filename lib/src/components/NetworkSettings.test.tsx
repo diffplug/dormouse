@@ -11,7 +11,9 @@ import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
 import { makeStubUpdatesPort } from '../lib/platform/test-ports';
+import { CLOUDFLARE_STUN_HOST } from '../remote/direct/ice-servers';
 import {
+  ANYWHERE_ON as ANYWHERE,
   LAN,
   LOCAL_ON as LOCAL,
   RELAY_ON,
@@ -81,6 +83,27 @@ describe('connectionsFor', () => {
     expect(connectionsFor(facts({ policy: { ...LOCAL, allowed: [] } }))).toEqual([]);
   });
 
+  it('lists Hosted while a link is open, Cloudflare’s STUN as a phone connects, and the phone on any network, under Anywhere', () => {
+    const rows = [
+      {
+        to: 'hosted.dormouse.sh',
+        when: 'Only while a one-time link is open',
+        carries: 'Encrypted handshakes. Never terminal traffic.',
+      },
+      {
+        to: CLOUDFLARE_STUN_HOST,
+        when: 'When a phone connects',
+        carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
+      },
+      { to: 'Your phone, on any network', when: 'While connected', carries: 'Terminal traffic, end-to-end encrypted.' },
+    ];
+    expect(connectionsFor(facts({ policy: ANYWHERE }))).toEqual(rows);
+    // Anywhere runs no persistent Burrow, so an enrollment with a paired phone
+    // adds no Relay or push row; the networks left allowed add nothing either.
+    const enrolled = { ...UNENROLLED_STATUS, enrolled: true, pairedClients: 1 };
+    expect(connectionsFor(facts({ policy: { ...ANYWHERE, allowed: [LAN] }, status: enrolled }))).toEqual(rows);
+  });
+
   it('lists the Relay always, once enrolled, and the phone directly, under My Relay only', () => {
     expect(connectionsFor(facts(relayFacts())).map((row) => [row.to, row.when])).toEqual([
       ['ned-mac.tail9c2f1.ts.net', 'Always'],
@@ -146,6 +169,8 @@ describe('policyForLevel', () => {
     const typed = { ...nothingPolicy(), allowed: ['10.8.0.0/24'] };
     expect(policyForLevel(network(typed), 'local').allowed).toEqual(['10.8.0.0/24']);
     expect(policyForLevel(network(nothingPolicy()), 'relay').allowed).toEqual([]);
+    expect(policyForLevel(network(nothingPolicy()), 'anywhere')).toEqual(ANYWHERE);
+    expect(policyForLevel(network(LOCAL), 'anywhere')).toEqual({ ...ANYWHERE, allowed: [LAN] });
     expect(policyForLevel(network({ ...LOCAL, autoUpdate: true }), 'nothing')).toEqual({
       level: 'nothing',
       allowed: [LAN],
@@ -203,6 +228,11 @@ function button(label: string): HTMLButtonElement {
   return found;
 }
 
+/** The level picker's radio titled `name`. */
+function radio(name: string): HTMLElement {
+  return [...container.querySelectorAll<HTMLElement>('[role="radio"]')].find((el) => el.textContent?.startsWith(name))!;
+}
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -222,23 +252,31 @@ describe('Settings → Network', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('offers only the levels the service offers and has copy for', async () => {
-    link({
-      status: UNENROLLED_STATUS,
-      network: { ...networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES), levels: ['nothing', 'local', 'anywhere'] },
-    });
+  it('offers the levels the service offers, in its order', async () => {
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
     await render();
     const radios = [...container.querySelectorAll('[role="radio"]')].map((radio) => radio.textContent);
-    expect(radios.map((label) => label?.split('.')[0])).toEqual([
-      'NothingDormouse opens no connections on its own, and phones can’t reach it',
-      'Local networksPhones connect only over networks you choose',
+    expect(radios).toEqual([
+      'NothingDormouse opens no connections on its own, and phones can’t reach it.',
+      'Local networksPhones connect only over networks you choose.',
+      'AnywherePhones connect directly from any network.',
     ]);
+  });
+
+  it('chooses Anywhere, which shows no allowed networks', async () => {
+    link({ status: UNENROLLED_STATUS, network: networkPolicyResult(LOCAL, 'hosted', INTERFACES) });
+    await render();
+    expect(text()).toContain('Allowed networks');
+    await act(async () => radio('Anywhere').click());
+    await act(async () => {});
+    expect(radio('Anywhere').getAttribute('aria-checked')).toBe('true');
+    expect(text()).not.toContain('Allowed networks');
   });
 
   it('chooses Local networks from the Phones hint, allowing the LAN interfaces', async () => {
     link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
     await render();
-    expect(text()).toContain('Choose Local networks to connect a phone.');
+    expect(text()).toContain('Choose Local networks or Anywhere to connect a phone.');
     await act(async () => button('Local networks').click());
     expect(command).toHaveBeenCalledWith('setNetworkPolicy', {
       policy: { level: 'local', allowed: [LAN, 'fd00:1::/64', '10.1.0.0/16'], autoUpdate: false },
@@ -297,8 +335,6 @@ describe('Settings → Network', () => {
       link({ status: UNENROLLED_STATUS, network: networkPolicyResult(nothingPolicy(), 'hosted', INTERFACES) });
       const release = holdSets();
       await render();
-      const radio = (name: string) =>
-        [...container.querySelectorAll<HTMLElement>('[role="radio"]')].find((el) => el.textContent?.startsWith(name))!;
       const [local, nothing] = [radio('Local networks'), radio('Nothing')];
       await act(async () => {
         local.click();
@@ -356,7 +392,7 @@ describe('Settings → Network', () => {
     await render();
     intercept((cmd) => (cmd === 'status' ? Promise.reject(new Error('bridge timed out')) : undefined));
     await act(async () => refreshBurrowStatus());
-    expect(container.querySelectorAll('[role="radio"]')).toHaveLength(2);
+    expect(container.querySelectorAll('[role="radio"]')).toHaveLength(3);
     expect(text()).not.toContain('Could not reach');
   });
 
@@ -370,7 +406,7 @@ describe('Settings → Network', () => {
       expect(getNetworkPolicySnapshot().kind).toBe('error');
       up = true;
       await render();
-      expect(container.querySelectorAll('[role="radio"]')).toHaveLength(2);
+      expect(container.querySelectorAll('[role="radio"]')).toHaveLength(3);
     } finally {
       release();
     }

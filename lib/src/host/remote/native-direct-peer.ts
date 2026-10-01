@@ -5,9 +5,9 @@
  * → "The direct path").
  *
  * Host code, so nothing here imports the webview library — only the structural
- * `DirectPeerLike` seam, as a type. The polyfill satisfies that seam without
- * adaptation; the only thing this module adds is *when* the addon is loaded and
- * what happens when it will not load.
+ * `DirectPeerLike` seam, as a type, and the import-free `ice-servers.ts`. The
+ * polyfill satisfies that seam without adaptation; the only thing this module
+ * adds is *when* the addon is loaded and what happens when it will not load.
  *
  * **The addon is never touched before the first offer.** It is a native library
  * with its own thread pool: loading it at boot would cost every sidecar start,
@@ -16,14 +16,25 @@
  * gets no `direct-offer` never opens it at all.
  */
 
-import type { DirectPeerFactory, DirectPeerLike } from '../../remote/direct/direct-peer';
+import type { DirectPathPolicy, DirectPeerLike } from '../../remote/direct/direct-peer';
+import { stunServers } from '../../remote/direct/ice-servers';
+
+/**
+ * A Burrow host's peer factory: a `DirectPeerFactory` that also takes whether
+ * to gather through Cloudflare STUN, which `directPeeringFor` in
+ * `direct-peering.ts` binds.
+ */
+export type BurrowDirectPeerFactory = (
+  pathPolicy?: DirectPathPolicy,
+  stun?: boolean,
+) => DirectPeerLike | null;
 
 /**
  * The polyfill's configuration, which it spreads into the native
  * `PeerConnection`: `bindAddress` reaches the addon unchanged.
  */
 interface DirectPeerConfig {
-  readonly iceServers: [];
+  readonly iceServers: Array<{ urls: string }>;
   readonly bindAddress?: string;
 }
 
@@ -72,7 +83,7 @@ function requireNative(): NativeDirect {
 }
 
 /**
- * A {@link DirectPeerFactory} over the native polyfill.
+ * A {@link BurrowDirectPeerFactory} over the native polyfill.
  *
  * **A load failure is warned once and declines forever after.** A missing
  * platform package or a wrong ABI is a property of the installation, not of the
@@ -81,10 +92,11 @@ function requireNative(): NativeDirect {
  * way: `direct-decline`, and the session stays on the relay.
  *
  * Handed a path policy, the attempt's socket binds the address it names, if
- * any (`docs/specs/remote-network.md` -> "Local networks").
+ * any (`docs/specs/remote-network.md` -> "Local networks"). Handed `stun`, it
+ * gathers through Cloudflare STUN, and through no ICE server by default.
  */
-export function createNativeDirectPeerFactory(): DirectPeerFactory {
-  return (pathPolicy) => {
+export function createNativeDirectPeerFactory(): BurrowDirectPeerFactory {
+  return (pathPolicy, stun = false) => {
     if (!native && !declined) {
       try {
         native = requireNative();
@@ -95,10 +107,8 @@ export function createNativeDirectPeerFactory(): DirectPeerFactory {
     }
     if (!native) return null;
     const bindAddress = pathPolicy?.bindAddress() ?? null;
-    // `iceServers: []` here and nowhere else: host candidates only, never a
-    // public STUN or TURN default (`docs/specs/remote-api.md` → "Direct path").
     return new native.polyfill.RTCPeerConnection({
-      iceServers: [],
+      iceServers: stunServers(stun),
       ...(bindAddress === null ? {} : { bindAddress }),
     });
   };

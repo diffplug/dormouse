@@ -32,10 +32,18 @@ address, which only Tailscale draws from, or Tailscale's name. Once allowed, the
 range is still an address range: an address inside it on another interface,
 WARP's included, passes the path check as the level's proximity caveat says.
 
-**Why `autoUpdate` alone ends nothing.** The rule that a change ends the live
-one-time session exists so a narrowed policy cannot leave an old path exempt.
-`autoUpdate` governs no path a phone uses, so ending a phone's session because
-the person toggled update checks would cost them the connection and protect
+**Three personas set the levels (2026-09-30).** One wants no network requests at
+all; one will try Pocket but only over their LAN or VPN; one wants it to work
+anywhere. One choice per persona, with the connections it implies listed beside
+it, replaced a transport matrix (persistent vs one-time × restricted vs not)
+whose rows the UI never needed to distinguish.
+
+**Why `autoUpdate`, and the allowed networks outside Local networks, end
+nothing.** The rule that a change ends the live one-time session exists so a
+narrowed policy cannot leave an old path exempt. `autoUpdate` governs no path a
+phone uses, and the allowed networks govern one only under Local networks, so
+ending a phone's session because the person toggled update checks, or edited a
+list that Anywhere never reads, would cost them the connection and protect
 nothing.
 
 ## Updates
@@ -50,7 +58,7 @@ needs no policy to run.
 
 **Why the list states only what is built (2026-09-30).** The list is what a
 person reads to decide which level to trust, so a row for a connection no code
-makes — Anywhere's STUN, the Hosted Relay — would promise traffic that never
+makes — the Hosted Relay — would promise traffic that never
 happens, and a missing row would hide one that does. The prototype listed the
 whole design; the real list drops each row until its stage ships.
 
@@ -64,14 +72,6 @@ omitted a push the code sends. Listed whenever a phone is paired, the row's
 only exactly and answers what it saved; filling in networks there would save
 something the request did not say. The panel already holds the interfaces the
 person is looking at, and the switches show at once what was allowed.
-
-## Levels
-
-**Three personas set the levels (2026-09-30).** One wants no network requests at
-all; one will try Pocket but only over their LAN or VPN; one wants it to work
-anywhere. One choice per persona, with the connections it implies listed beside
-it, replaced a transport matrix (persistent vs one-time × restricted vs not)
-whose rows the UI never needed to distinguish.
 
 ## Local networks
 
@@ -152,16 +152,58 @@ back intact. So an offer stripped to nothing costs no connection, and
 
 ## Anywhere
 
+**Why no ICE server outside Anywhere, and never TURN.** A STUN server learns the
+public address of each end that asks it, and the fact of a session, from a
+party neither endpoint chose. The self-host deployment is a tailnet, where host
+candidates reach on both ends — the Burrow's tailnet address is one the phone
+can route to, and the phone's mDNS-obfuscated candidate is learned
+peer-reflexively from its first check — so there a server buys connectivity
+that is already there. A STUN answer is unauthenticated, and the worst a false
+one does is advertise a candidate that never connects: the session's ciphers
+decide what rides the channel, not the address. A TURN server would learn the
+traffic pattern and carry the ciphertext, exactly the position the Relay
+already holds and the security model treats as untrusted, and a one-time
+session is direct-only by design, so it never needs one.
+
 **Why Hosted-served Clients always use STUN.** Hosted runs on Cloudflare, so a
 phone that loaded Pocket or the one-time page from `hosted.dormouse.sh` has
 already shown Cloudflare its address. STUN to Cloudflare discloses nothing new,
 and making it unconditional removes a policy signal from the wire and from
 version skew. The Burrow's STUN is what reveals the laptop's public address,
-hence the Burrow alone depends on the level.
+hence the Burrow alone depends on the level. The cost falls on Local networks,
+whose phone gathers a srflx it cannot use: with the grace its attempt opened at
+0.59 s against 0.22 s with no STUN (2026-09-30, `remote-api.rationale.md` ->
+"Direct path"), and on a network that drops UDP 3478 its offer waits the whole
+3 s `DIRECT_GATHER_TIMEOUT_MS`.
+
+**On a real phone** *(2026-10-01, iPhone 15 Pro, iOS Safari, against PR #865's Hosted preview; laptop on home Wi-Fi, macOS 27, innerdogfood)*. Under Anywhere, the phone on Verizon cellular with Wi-Fi and Tailscale off connected directly and felt instant from the confirmation, as did the phone on the same home Wi-Fi; typed and pasted input arrived intact. Under Local networks with only the home Wi-Fi allowed, the phone on cellular never reached a terminal: the attempt ended `direct-failed` about 5 s after the confirmation (Burrow log: the direct channel did not open in time), because both ends' candidates outside the allowed network were stripped and no pair formed, so the page's STUN did not widen the level. Not yet measured on the phone: its offer size and gathering time, and a Burrow whose STUN is blocked.
 
 **The endpoint.** Cloudflare documents `stun:stun.cloudflare.com:3478` as free
 and unlimited in its Realtime FAQ; ordinary Workers expose no UDP listener, so
 Hosted cannot run its own. Checked 2026-09-30.
+
+**What STUN adds** *(2026-09-30, macOS 27, HeadlessChrome 150 against
+`node-datachannel` 0.33.4 / libdatachannel 0.24.5 / libjuice 1.7.2,
+`scripts/direct-interop/run.mjs --stun`)*.
+- One `srflx` per end. Chrome's offer grew from 587 to 720 characters (one mDNS
+  host, one srflx), the Burrow's answer from 759 to 843 (four host, one srflx).
+  libjuice completed gathering in 57–84 ms, against 13–21 ms with none.
+  Chrome's settle, and the ceiling on the answer: `remote-api.rationale.md` ->
+  "Direct path".
+- Every run selected host↔prflx on the LAN, never srflx, which on one machine
+  would need router hairpinning. The two ends named different pairs (the addon
+  an IPv6 ULA one, Chrome an IPv4 one), harmless where no path is checked.
+  Under `--allow … --stun` the Burrow stripped the page's srflx and the pair
+  stayed on the allowed LAN.
+
+**When STUN goes unanswered** *(same setup, `--stun-blackhole`: both factories
+pointed at TEST-NET-1)*. Uncapped, libjuice gives up after 23.5 s
+(`MAX_STUN_SERVER_RETRANSMISSION_COUNT`) and Chrome later still
+(`remote-api.rationale.md` -> "Direct path"), so `DIRECT_GATHER_TIMEOUT_MS` is
+what bounds the attempt. Capped, each end sent its host candidates at 3.0 s and
+the attempt opened at 6.07–6.08 s on the offerer and 3.07 s on the answerer,
+inside every setup budget. Across a NAT that answer carries no srflx, so the
+phone has nothing to reach: a reachability failure, not a budget one.
 
 ## Allowed networks
 

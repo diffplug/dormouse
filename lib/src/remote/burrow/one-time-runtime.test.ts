@@ -38,7 +38,12 @@ import {
   type OneTimeState,
 } from './one-time-runtime';
 import type { RemoteApiSessionLike } from './established-session';
-import { DIRECT_PATH_RECHECK_MS, DirectPeer, type DirectPeerFactory } from '../direct/direct-peer';
+import {
+  DIRECT_PATH_RECHECK_MS,
+  DirectPeer,
+  type DirectPathPolicy,
+  type DirectPeerFactory,
+} from '../direct/direct-peer';
 import {
   FakeDirectNetwork,
   OFF_LAN_PAIR as OFF_LAN,
@@ -119,7 +124,8 @@ function makeRuntime(
     rendezvous?: TestRendezvousOptions;
     network?: FakeDirectNetworkOptions;
     createDirectPeer?: DirectPeerFactory | null;
-  } & Partial<Pick<OneTimeRuntimeOptions, 'burrowLabel' | 'directPathPolicy'>> = {},
+    pathPolicy?: DirectPathPolicy;
+  } & Partial<Pick<OneTimeRuntimeOptions, 'burrowLabel'>> = {},
 ): OneTimeRuntime {
   rendezvous = createTestRendezvous({ now: clock.now, setTimer: clock.setTimer, ...options.rendezvous });
   if (options.network) network = new FakeDirectNetwork(options.network);
@@ -140,8 +146,7 @@ function makeRuntime(
         },
       } satisfies RemoteApiSessionLike;
     },
-    createDirectPeer,
-    directPathPolicy: options.directPathPolicy,
+    directPeering: { createPeer: createDirectPeer, pathPolicy: options.pathPolicy },
     burrowLabel: options.burrowLabel ?? BURROW_LABEL,
     requestApproval: (request) => void approvals.push(request),
     dismissApproval: () => void (dismissals += 1),
@@ -567,13 +572,13 @@ describe('OneTimeRuntime: the session', () => {
 
   describe('held to a path policy', () => {
     it('connects over a pair the policy allows', async () => {
-      makeRuntime({ directPathPolicy: lanOnlyPolicy() });
+      makeRuntime({ pathPolicy: lanOnlyPolicy() });
       await connected();
       expect(runtime.state.status).toBe('connected');
     });
 
     it('ends network-not-allowed on a pair it refuses, before anything is served', async () => {
-      makeRuntime({ directPathPolicy: lanOnlyPolicy(), network: { selectedPair: OFF_LAN } });
+      makeRuntime({ pathPolicy: lanOnlyPolicy(), network: { selectedPair: OFF_LAN } });
       const { phone } = await connecting();
       await offerOneTimeDirect(phone, network, clock.setTimer);
       await settleUntil(() => runtime.state.status === 'ended');
@@ -584,7 +589,7 @@ describe('OneTimeRuntime: the session', () => {
     });
 
     it('ends network-not-allowed, not phone-left, when ICE moves a connected session off it', async () => {
-      makeRuntime({ directPathPolicy: lanOnlyPolicy() });
+      makeRuntime({ pathPolicy: lanOnlyPolicy() });
       await connected();
       answerers[0]!.setConnectionState('connected');
       answerers[0]!.reselect(OFF_LAN);
@@ -594,7 +599,7 @@ describe('OneTimeRuntime: the session', () => {
     });
 
     it('ends network-not-allowed when ICE moves a connected session off it with no event', async () => {
-      makeRuntime({ directPathPolicy: lanOnlyPolicy() });
+      makeRuntime({ pathPolicy: lanOnlyPolicy() });
       await connected();
       answerers[0]!.setConnectionState('connected');
       answerers[0]!.selectedPair = OFF_LAN;
@@ -604,7 +609,7 @@ describe('OneTimeRuntime: the session', () => {
     });
 
     it('ends network-not-allowed when no candidate of its own is on an allowed network', async () => {
-      makeRuntime({ directPathPolicy: lanOnlyPolicy({ describe: () => null }) });
+      makeRuntime({ pathPolicy: lanOnlyPolicy({ describe: () => null }) });
       const { phone } = await connecting();
       phone.sendControl({ v: 1, t: 'direct-offer', sdp: (await network.createOfferer().createOffer()).sdp! });
       await settleUntil(() => runtime.state.status === 'ended');

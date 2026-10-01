@@ -19,7 +19,8 @@ import { ExternalTextLink } from './ExternalTextLink';
 import { ThemePicker } from './ThemePicker';
 import { ShellPicker } from './ShellPicker';
 import { WatchedCommandList } from './WatchedCommandList';
-import { NetworkPhones, NetworkSettings, NetworkUpdates, useNetworkOff } from './NetworkSettings';
+import { NetworkPhones, NetworkSettings, NetworkUpdates } from './NetworkSettings';
+import { useNetworkPolicy } from './remote-control-shared';
 import { PushTestButton, SpeakTestButton } from './AlarmTestButtons';
 import { ManagedVoiceSection, useManagedVoiceOffered } from './ManagedVoiceSection';
 import { getPlatform } from '../lib/platform';
@@ -481,7 +482,7 @@ export function AlarmSettingsSection({ sink, preview = false, onShowNetwork }: {
   const managedVoiceOffered = useManagedVoiceOffered();
   // Under Nothing the service sends no push and managed voice asks nothing
   // (`docs/specs/remote-network.md` -> "Policy"), so both lines say why.
-  const networkOff = useNetworkOff();
+  const networkOff = useNetworkPolicy()?.level === 'nothing';
 
   // The brief preview uses the cached list: refreshing immediately publishes
   // loading, and the bridge reply may arrive after the preview has faded away.

@@ -540,8 +540,9 @@ injected timer, clock, and visibility seams in
 ## The path the session takes
 
 **Pocket offers a direct path once the connection outcome says `ok`**, over the
-browser's own `RTCPeerConnection` with no ICE servers, and keeps the session on
-the relay when the browser has none or the Burrow declines
+browser's own `RTCPeerConnection` (its ICE servers:
+[remote-network.md](./remote-network.md) → Anywhere), and keeps the session
+on the relay when the browser has none or the Burrow declines
 ([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
 
 **Must retire the previous session — its peer, its channel, and its pending
@@ -570,7 +571,7 @@ fresh handshake and one WebAuthn prompt. Before the switch a failed channel
 costs nothing.
 
 Source of truth: `PocketClient.connect` in
-`lib/src/remote/client/pocket-client.ts`; `browserDirectPeer` in
+`lib/src/remote/client/pocket-client.ts`; `selfHostDirectPeer` in
 `lib/src/remote/client/browser-direct-peer.ts`; `ClientSessionCore.transportPath` /
 `setOnTransportChanged` in `lib/src/remote/client/session-core.ts`; `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in

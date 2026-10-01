@@ -40,12 +40,20 @@ export const DIRECT_CHANNEL_LABEL = 'dormouse';
 export const DIRECT_ANSWER_TIMEOUT_MS = 10_000;
 
 /**
- * How long a peer waits for ICE gathering to finish before sending whatever
- * local description it has. There is no trickle path — the SDP crosses inside
- * the session as one control message — so a gatherer that never completes must
- * not strand the attempt.
+ * The outer cap on a peer's gathering wait, from setting its local
+ * description: past it, the description as it stands is sent. When the wait
+ * settles is `DirectPeer`'s `#awaitGathering` in
+ * `lib/src/remote/direct/direct-peer.ts` (`docs/specs/remote-api.md` ->
+ * Transport -> "Direct path").
  */
 export const DIRECT_GATHER_TIMEOUT_MS = 3_000;
+
+/**
+ * How long a peer's gathering wait runs on after its first server-reflexive
+ * candidate, inside {@link DIRECT_GATHER_TIMEOUT_MS}; see `#awaitGathering`, as
+ * above. The ordering is pinned by `remote-lib-common/test/direct-path.test.mjs`.
+ */
+export const DIRECT_SRFLX_GRACE_MS = 500;
 
 /**
  * The most SDP one signal may carry, in characters.

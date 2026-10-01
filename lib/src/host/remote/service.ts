@@ -47,7 +47,6 @@ import {
   type OneTimeApprovalRequest,
   type OneTimeState,
 } from '../../remote/burrow/one-time-runtime';
-import type { DirectPeerFactory } from '../../remote/direct/direct-peer';
 import {
   MAX_ALLOWED_NETWORKS,
   levelsFor,
@@ -64,7 +63,8 @@ import {
 import { hostedOrigin, isRelayOrigin, type RelayBuild } from '../relay-origin';
 import { readEnrollmentOffer } from './enroll-offer';
 import type { BurrowStateStore } from './burrow-state-store';
-import { localNetworksPath } from './local-networks';
+import { directPeeringFor, samePaths } from './direct-peering';
+import type { BurrowDirectPeerFactory } from './native-direct-peer';
 import { canonicalCidr, listNetworkInterfaces } from './network-interfaces';
 import { createSerialQueue } from './serial-queue';
 import {
@@ -123,11 +123,10 @@ export interface BurrowServiceOptions {
    * How this host builds a peer connection for the direct path
    * (`docs/specs/remote-api.md` → Transport → "Direct path"). Threaded rather
    * than defaulted: the runtimes that have one differ per host, and a Burrow
-   * without it declines every offer and stays relayed. Under Local networks a
-   * one-time attempt hands it its path policy
-   * (`docs/specs/remote-network.md` → "Local networks").
+   * without it declines every offer and stays relayed. Each runtime takes it
+   * through {@link directPeeringFor}.
    */
-  createDirectPeer?: DirectPeerFactory;
+  createDirectPeer?: BurrowDirectPeerFactory;
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   /**
@@ -224,15 +223,6 @@ function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolic
     allowed.push(canonical);
   }
   return { ...policy, allowed };
-}
-
-/** Whether two policies allow the same paths: the level, and the networks as a set. */
-function samePaths(a: NetworkPolicy, b: NetworkPolicy): boolean {
-  return (
-    a.level === b.level &&
-    a.allowed.length === b.allowed.length &&
-    a.allowed.every((cidr) => b.allowed.includes(cidr))
-  );
 }
 
 /** What `enroll` and `enrollOffer` answer where {@link canEnroll} is false. */
@@ -367,7 +357,8 @@ export class BurrowService {
   readonly #kind: BurrowKind;
   /** The injected socket factory behind the transport guard (constructor). */
   readonly #createWebSocket: (url: string) => WebSocketLike;
-  readonly #createDirectPeer?: DirectPeerFactory;
+  /** The injected peer factory behind the transport guard, bound per runtime by {@link directPeeringFor}. */
+  readonly #createDirectPeer?: BurrowDirectPeerFactory;
   /** The injected fetch, or the global one, behind the transport guard. */
   readonly #fetch: typeof globalThis.fetch;
   readonly #now: () => number;
@@ -470,7 +461,7 @@ export class BurrowService {
     const createDirectPeer = options.createDirectPeer;
     this.#createDirectPeer =
       createDirectPeer &&
-      ((pathPolicy) => (this.#level() === 'nothing' ? null : createDirectPeer(pathPolicy)));
+      ((pathPolicy, stun) => (this.#level() === 'nothing' ? null : createDirectPeer(pathPolicy, stun)));
     this.#now = options.now ?? (() => Date.now());
     this.#readOffer = options.readOffer ?? (() => readEnrollmentOffer());
     this.#listInterfaces = options.listInterfaces ?? listNetworkInterfaces;
@@ -870,10 +861,7 @@ export class BurrowService {
       origin: hosted,
       createWebSocket: this.#createWebSocket,
       createSession: (opts) => this.#createApiSession(opts),
-      createDirectPeer: this.#createDirectPeer ?? null,
-      // Local networks holds the attempt to the networks allowed at the open: a
-      // change to them ends this runtime before any later attempt could run.
-      directPathPolicy: policy.level === 'local' ? localNetworksPath(policy.allowed) : undefined,
+      directPeering: directPeeringFor(policy, this.#createDirectPeer),
       // The name the phone shows: the one this machine enrolled under, else the
       // one the enrollment form would have suggested.
       burrowLabel: this.#enrollment?.label || suggestedBurrowLabel(this.#kind),
@@ -967,9 +955,10 @@ export class BurrowService {
   /**
    * Hold `params.policy` from now on (`docs/specs/remote-network.md` →
    * "Policy"). **Persisted first**: a save that fails changes nothing. A change
-   * to the level or the allowed networks ends the live one-time connection,
-   * `user-ended`, so a narrowed policy never leaves an old path exempt;
-   * `autoUpdate` alone touches no connection. Then the relay socket follows the
+   * to the level, or to the allowed networks under Local networks, ends the
+   * live one-time connection, `user-ended`, so a narrowed policy never leaves
+   * an old path exempt; the allowed networks under any other level, and
+   * `autoUpdate`, touch no connection. Then the relay socket follows the
    * level: stopped under one that runs no Burrow, the enrollment kept; started
    * on entering one that does ({@link runsBurrow}).
    */
@@ -1154,8 +1143,10 @@ export class BurrowService {
     this.#stopBurrow();
     // The one gate on the relay socket, and on everything that needs a running
     // Burrow — push, the device list, setup codes: under a level that runs
-    // none the enrollment is held and reported, `stopped`, and nothing is opened.
-    if (!runsBurrow(this.#level())) {
+    // none, or before the policy is read, the enrollment is held and reported,
+    // `stopped`, and nothing is opened. Disposal was checked just above.
+    const policy = this.#policy;
+    if (policy === null || !runsBurrow(policy.level)) {
       this.#enrollment = enrollment;
       return;
     }
@@ -1170,7 +1161,7 @@ export class BurrowService {
     this.#burrow = new BurrowRuntime({
       enrollment,
       createWebSocket: this.#createWebSocket,
-      createDirectPeer: this.#createDirectPeer,
+      directPeering: directPeeringFor(policy, this.#createDirectPeer),
       createSession: (opts) => this.#createApiSession(opts),
       loadAcl: () => records,
       saveAcl: (burrowId, next) => this.#store.saveAcl(burrowId, next),

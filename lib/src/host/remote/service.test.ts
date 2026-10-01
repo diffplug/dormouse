@@ -9,13 +9,13 @@ import { hostname } from 'node:os';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * The socket factory and fetch the service handed on, kept so a case can play a
- * path that forgot its own policy check. The runtime and the exchange are the
- * real ones.
+ * The socket factory, direct path, and fetch the service handed on, kept so a
+ * case can play a path that forgot its own policy check. The runtime and the
+ * exchange are the real ones.
  */
 const handedTransport = vi.hoisted(() => ({
   createWebSocket: null as ((url: string) => unknown) | null,
-  createDirectPeer: null as (() => unknown) | null,
+  directPeering: null as DirectPeering | null,
   fetch: null as typeof globalThis.fetch | null,
 }));
 
@@ -25,7 +25,7 @@ vi.mock('../../remote/burrow/burrow-runtime', async (importOriginal) => {
     constructor(options: ConstructorParameters<typeof real.BurrowRuntime>[0]) {
       super(options);
       handedTransport.createWebSocket = options.createWebSocket ?? null;
-      handedTransport.createDirectPeer = options.createDirectPeer ?? null;
+      handedTransport.directPeering = options.directPeering ?? null;
     }
   }
   return { ...real, BurrowRuntime };
@@ -60,8 +60,8 @@ import type {
   SurfaceHold,
 } from '../../remote/burrow/burrow-surface-provider';
 import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
-import { nothingPolicy, type NetworkInterfaceInfo, type NetworkPolicy } from '../../remote/network-policy';
-import type { DirectPathPolicy, DirectPeerFactory } from '../../remote/direct/direct-peer';
+import { levelsFor, nothingPolicy, type NetworkInterfaceInfo, type NetworkPolicy } from '../../remote/network-policy';
+import type { DirectPathPolicy, DirectPeering } from '../../remote/direct/direct-peer';
 import { FakeDirectNetwork } from '../../remote/direct/test-fake-peer';
 import { FakeSocket } from '../../remote/test-fake-socket';
 import {
@@ -86,8 +86,9 @@ import {
 } from '../../remote/test-rendezvous';
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
+import type { BurrowDirectPeerFactory } from './native-direct-peer';
 import { BurrowService, type BurrowServiceOptions } from './service';
-import { LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
+import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
   BurrowStatusEvent,
@@ -377,6 +378,11 @@ async function command(cmd: string, params?: unknown): Promise<Record<string, un
   return result.data;
 }
 
+/** Run `setNetworkPolicy` with `policy`, as the Network panel sends it. */
+function setPolicy(policy: unknown): Promise<Record<string, unknown>> {
+  return command('setNetworkPolicy', { policy });
+}
+
 function queueEvents(): PairingQueueEvent[] {
   return uiEvents().filter((event): event is PairingQueueEvent => event.name === 'pairing-queue');
 }
@@ -410,6 +416,22 @@ function oneTimeStates(): OneTimeState[] {
   return uiEvents()
     .filter((event): event is OneTimeEvent => event.name === 'one-time')
     .map((event) => event.state);
+}
+
+/** One factory call: the path policy, and whether to gather through STUN, the service handed it. */
+type Handed = [DirectPathPolicy | undefined, boolean | undefined];
+
+/**
+ * A factory whose answerer selects `remote` from this end on the allowed
+ * LAN, recording what each attempt hands it.
+ */
+function answererTo(remote: string, handed: Handed[]): BurrowDirectPeerFactory {
+  return (pathPolicy, stun) => {
+    handed.push([pathPolicy, stun]);
+    const answerer = network.createAnswerer();
+    answerer.selectedPair = { local: '192.168.1.2', remote };
+    return answerer;
+  };
 }
 
 beforeEach(() => {
@@ -1387,7 +1409,7 @@ describe('push', () => {
 
     // Sealing awaits WebCrypto; the change to Nothing lands first.
     const pushing = service.push('pty-1', 'x');
-    await command('setNetworkPolicy', { policy: nothingPolicy() });
+    await setPolicy(nothingPolicy());
     await pushing;
     expect(requests.some((request) => request.url.endsWith('/api/push/send'))).toBe(false);
     warn.mockRestore();
@@ -1544,6 +1566,19 @@ describe('one-time connection', () => {
     await negotiateOneTimeDirect(phone, network);
     phone.sendControl({ v: 1, t: 'direct-switch' });
     await settleUntil(() => oneTimeStates().at(-1)?.status === 'connected');
+  }
+
+  /** Open a link and have a phone confirm it, its outcome `ok`. */
+  async function approvedPhone(): Promise<TestOneTimePhone> {
+    const phone = await join((await open()).url);
+    await approve(await request(phone));
+    expect(await phone.next()).toMatchObject({ ok: true });
+    return phone;
+  }
+
+  /** Open a link, have a phone confirm it, and switch onto the direct path. */
+  async function connectPhone(): Promise<void> {
+    await switchDirect(await approvedPhone());
   }
 
   it('is idle on a machine that never enrolled, serving nothing', async () => {
@@ -1755,9 +1790,7 @@ describe('one-time connection', () => {
         streamPty: () => ({ stop: () => {}, ready: Promise.resolve() }),
       },
     });
-    const phone = await join((await open()).url);
-    await approve(await request(phone));
-    expect(await phone.next()).toMatchObject({ ok: true });
+    const phone = await approvedPhone();
     const { peer, inbound } = await negotiateOneTimeDirect(phone, network);
     phone.sendControl({ v: 1, t: 'direct-switch' });
     await settleUntil(() => oneTimeStates().at(-1)?.status === 'connected');
@@ -1783,50 +1816,80 @@ describe('one-time connection', () => {
   });
 
   describe('under Local networks', () => {
-    /**
-     * A factory whose answerer selects `remote` from this end on the allowed
-     * LAN, recording the path policy each attempt hands it.
-     */
-    function answererTo(remote: string, handed: Array<DirectPathPolicy | undefined>): DirectPeerFactory {
-      return (pathPolicy) => {
-        handed.push(pathPolicy);
-        const answerer = network.createAnswerer();
-        answerer.selectedPair = { local: '192.168.1.2', remote };
-        return answerer;
-      };
-    }
-
-    it('hands the attempt a policy over the allowed networks, and connects over them', async () => {
-      const handed: Array<DirectPathPolicy | undefined> = [];
+    it('hands the attempt a policy over the allowed networks and no ICE server, and connects over them', async () => {
+      const handed: Handed[] = [];
       createHostedService(undefined, { createDirectPeer: answererTo('192.168.1.3', handed) });
-      const phone = await join((await open()).url);
-      await approve(await request(phone));
-      expect(await phone.next()).toMatchObject({ ok: true });
+      await connectPhone();
 
-      await switchDirect(phone);
       expect(handed).toHaveLength(1);
-      expect(handed[0]!.refusal({ local: '192.168.1.2', remote: '192.168.1.3' })).toBeNull();
-      expect(handed[0]!.refusal({ local: '192.168.1.2', remote: '10.0.0.3' })).not.toBeNull();
+      const [pathPolicy, stun] = handed[0]!;
+      expect(stun).toBe(false);
+      expect(pathPolicy!.refusal({ local: '192.168.1.2', remote: '192.168.1.3' })).toBeNull();
+      expect(pathPolicy!.refusal({ local: '192.168.1.2', remote: '10.0.0.3' })).not.toBeNull();
     });
 
     it('ends network-not-allowed when the phone’s end of the pair is off them', async () => {
       createHostedService(undefined, { createDirectPeer: answererTo('10.0.0.3', []) });
-      const phone = await join((await open()).url);
-      await approve(await request(phone));
-      expect(await phone.next()).toMatchObject({ ok: true });
+      const phone = await approvedPhone();
 
       await offerOneTimeDirect(phone, network);
       await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
       expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
       expect(servingEvents().at(-1)).toBe(false);
     });
+
+    it('rests that ending, its runtime gone, on a change of path, so no other level reports it', async () => {
+      createHostedService(undefined, { createDirectPeer: answererTo('10.0.0.3', []) });
+      await offerOneTimeDirect(await approvedPhone(), network);
+      await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
+
+      // `autoUpdate` alone changes no path, so the ending stays to report.
+      await setPolicy({ ...LOCAL_ON, autoUpdate: true });
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
+      await setPolicy(ANYWHERE_ON);
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'idle' });
+    });
+  });
+
+  describe('under Anywhere', () => {
+    it('opens a link with no network allowed, its attempt unrestricted and gathering through Cloudflare STUN', async () => {
+      const handed: Handed[] = [];
+      // A public address, which no allowed network holds and Anywhere never reads.
+      createHostedService({ network: ANYWHERE_ON }, { createDirectPeer: answererTo('203.0.113.7', handed) });
+      await connectPhone();
+
+      expect(handed).toEqual([[undefined, true]]);
+    });
+
+    it('chooses a new link’s STUN with its path policy, from the level at its open', async () => {
+      const handed: Handed[] = [];
+      createHostedService({ network: ANYWHERE_ON }, { createDirectPeer: answererTo('192.168.1.3', handed) });
+      await connectPhone();
+
+      await setPolicy(LOCAL_ON);
+      // Forgotten, so the second request is read off its own approval item.
+      sent = [];
+      await connectPhone();
+
+      // Anywhere's link: STUN and no hold; Local networks': a hold and no STUN.
+      expect(handed.map(([pathPolicy, stun]) => [pathPolicy !== undefined, stun])).toEqual([
+        [false, true],
+        [true, false],
+      ]);
+    });
+
+    it('keeps a live session through a change to the allowed networks, which govern no path here', async () => {
+      createHostedService({ network: ANYWHERE_ON });
+      await connectPhone();
+
+      expect((await setPolicy({ ...ANYWHERE_ON, allowed: [LAN] })).error).toBeUndefined();
+      expect(oneTimeStates().at(-1)).toMatchObject({ status: 'connected' });
+    });
   });
 
   it('refuses a new link while a phone holds this one, connecting or connected', async () => {
     createHostedService();
-    const phone = await join((await open()).url);
-    await approve(await request(phone));
-    expect(await phone.next()).toMatchObject({ ok: true });
+    const phone = await approvedPhone();
 
     expect((await command('oneTimeOpen')).error).toMatch(/already/);
     await switchDirect(phone);
@@ -1934,10 +1997,6 @@ describe('network policy', () => {
     return uiEvents().filter((event): event is NetworkPolicyEvent => event.name === 'network-policy');
   }
 
-  function setPolicy(policy: unknown) {
-    return command('setNetworkPolicy', { policy });
-  }
-
   describe('its first read', () => {
     it('saves Nothing for a machine that never enrolled', async () => {
       createService({ network: null });
@@ -1971,11 +2030,11 @@ describe('network policy', () => {
       warn.mockRestore();
     });
 
-    it('offers a Hosted build Nothing and Local networks, starting at Nothing', async () => {
+    it('offers a Hosted build Nothing, Local networks, and Anywhere, starting at Nothing', async () => {
       createHostedService({ network: null });
       expect((await command('networkPolicy')).result).toEqual({
         policy: NOTHING,
-        levels: ['nothing', 'local'],
+        levels: levelsFor('hosted'),
         interfaces: INTERFACES,
       });
     });
@@ -2081,7 +2140,7 @@ describe('network policy', () => {
     it('refuses a socket, a request, or a direct peer at the transport, for a path that forgot its check', async () => {
       createService({ network: RELAY_ON });
       expect((await command('enroll', { password: 'setup', label: 'Laptop' })).error).toBeUndefined();
-      const { createWebSocket, createDirectPeer, fetch } = handedTransport;
+      const { createWebSocket, directPeering, fetch } = handedTransport;
       expect(sockets).toHaveLength(1);
       const made = requests.length;
       const answerers = vi.spyOn(network, 'createAnswerer');
@@ -2090,7 +2149,7 @@ describe('network policy', () => {
       expect(() => createWebSocket!(`${ORIGIN.replace(/^http/, 'ws')}/ws/burrow`)).toThrow('set to Nothing');
       await expect(fetch!(`${ORIGIN}${API_ROUTES.pushDevices}`)).rejects.toThrow('set to Nothing');
       // Its `null` declines the direct path, as a host without one does.
-      expect(createDirectPeer!()).toBeNull();
+      expect(directPeering!.createPeer!()).toBeNull();
       expect(sockets).toHaveLength(1);
       expect(requests).toHaveLength(made);
       expect(answerers).not.toHaveBeenCalled();
@@ -2126,6 +2185,16 @@ describe('network policy', () => {
     expect(rendezvous.rooms).toEqual([]);
   });
 
+  it('hands the running Burrow’s direct peers no ICE server and no hold under My Relay only', async () => {
+    const handed: Handed[] = [];
+    createService({ enrollment: ENROLLMENT, network: RELAY_ON }, { createDirectPeer: answererTo('192.168.1.3', handed) });
+    await service.start();
+    const { createPeer, pathPolicy } = handedTransport.directPeering!;
+    expect(pathPolicy).toBeUndefined();
+    expect(createPeer!()).not.toBeNull();
+    expect(handed).toEqual([[undefined, false]]);
+  });
+
   describe('setNetworkPolicy', () => {
     it('starts the enrolled Burrow out of Nothing, and stops it again, keeping the enrollment', async () => {
       createService({ enrollment: ENROLLMENT, network: NOTHING });
@@ -2154,7 +2223,7 @@ describe('network policy', () => {
       expect(sockets).toHaveLength(1);
     });
 
-    it('ends a live one-time link on a change of level or networks, never on autoUpdate alone', async () => {
+    it('ends a live one-time link on a change of level or Local networks’ networks, never on autoUpdate alone', async () => {
       createHostedService();
       await service.start();
       expect((await command('oneTimeOpen')).result).toMatchObject({ status: 'waiting' });

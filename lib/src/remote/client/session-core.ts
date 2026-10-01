@@ -404,7 +404,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
    */
   #directEndpoint(current: () => EstablishedSession<R>, route: R): DirectEndpoint {
     return new DirectEndpoint('offerer', {
-      createPeer: this.#createDirectPeer,
+      // A Client holds no path policy: the Burrow checks the path.
+      peering: { createPeer: this.#createDirectPeer },
       sendSignal: (signal) => this.#sendDirectSignal(current(), signal),
       sendRelay: (ciphertext) => this.#sendFrame(route, 'transport', ciphertext),
       receive: (ciphertext) => this.#receiveOnSession(current(), ciphertext),

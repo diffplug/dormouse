@@ -33,15 +33,19 @@ vi.mock('./QrCode', async (importOriginal) => {
   };
 });
 
-import { ONE_TIME_ENDED_COPY, ONE_TIME_OUTCOME_LABEL } from './OneTimeConnection';
+import { ONE_TIME_OUTCOME_LABEL, oneTimeEndedCopy } from './OneTimeConnection';
 import { PAIRING_OUTCOME_LABEL, RemoteControlSection } from './RemoteControlSection';
+import { hostOf } from './remote-control-shared';
+import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
 import {
   isOneTimeState,
   type BurrowConsoleStatus,
   type SetupQrResult,
 } from '../host/remote/service-protocol';
 import {
+  ANYWHERE_ON,
   enrolledStatus,
+  LOCAL_ON,
   makeEventedBurrowLink,
   makeStubBurrowLink,
   OFFER_STATUS,
@@ -52,6 +56,7 @@ import {
   UNENROLLED_STATUS as NOT_ENROLLED,
 } from '../host/remote/test-burrow-link';
 import type { OneTimeEndReason, OneTimeState } from '../remote/burrow/one-time-runtime';
+import { networkPolicyResult, type NetworkPolicy } from '../remote/network-policy';
 import { refreshBurrowStatus } from '../remote/burrow/burrow-status-store';
 import { getOneTimeSnapshot, subscribeToOneTime } from '../remote/burrow/one-time-store';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
@@ -1446,11 +1451,16 @@ describe('RemoteControlSection', () => {
  * (`docs/specs/one-time.md` -> "Service and hosts"): `oneTimeOpen` moves
  * through `opening` to `waiting` and answers the settled state, `oneTimeEnd`
  * ends a live connection `user-ended` and returns an ended one to `idle`, and
- * every change is an event that arrives before the command's answer.
+ * every change is an event that arrives before the command's answer. With a
+ * `policy`, `networkPolicy` answers it; without one, the panel reads no level.
  */
 function oneTimeService(
   initial: OneTimeState = { status: 'idle' },
-  { status = NOT_ENROLLED, openError }: { status?: BurrowConsoleStatus; openError?: string } = {},
+  {
+    status = NOT_ENROLLED,
+    openError,
+    policy,
+  }: { status?: BurrowConsoleStatus; openError?: string; policy?: NetworkPolicy } = {},
 ) {
   let state = initial;
   let links = 0;
@@ -1480,6 +1490,8 @@ function oneTimeService(
           service.set({ status: 'ended', reason: 'user-ended' });
         }
         return {};
+      case 'networkPolicy':
+        return policy ? networkPolicyResult(policy, 'hosted', []) : status;
       default:
         return status;
     }
@@ -1719,19 +1731,63 @@ describe('One-time connection', () => {
   });
 
   it('reports every other ending in its own fixed sentence', async () => {
-    const reasons = Object.keys(ONE_TIME_ENDED_COPY) as Array<Exclude<OneTimeEndReason, 'user-ended'>>;
-    expect(new Set(Object.values(ONE_TIME_ENDED_COPY)).size).toBe(reasons.length);
+    const copy = oneTimeEndedCopy(hostOf(NOT_ENROLLED.relayOrigin), false);
+    const reasons = Object.keys(copy) as Array<Exclude<OneTimeEndReason, 'user-ended'>>;
+    expect(new Set(Object.values(copy)).size).toBe(reasons.length);
     for (const reason of reasons) {
       const service = oneTimeService({ status: 'ended', reason });
       await renderOneTime(service);
-      expect(oneTimeOutcome()?.textContent).toBe(ONE_TIME_ENDED_COPY[reason]);
+      expect(oneTimeOutcome()?.textContent).toBe(copy[reason]);
       expect(buttonLabelled('New link')).toBeTruthy();
       expect(buttonLabelled('Done')).toBeTruthy();
       await act(async () => root.unmount());
       root = createRoot(container);
     }
     // The failure this whole feature is most likely to hit names its fix.
-    expect(ONE_TIME_ENDED_COPY['direct-failed']).toContain('allowed network');
+    expect(copy['direct-failed']).toContain('allowed network');
+  });
+
+  it('names the rendezvous by this build’s relay host, a dev build’s included', async () => {
+    const status = { ...NOT_ENROLLED, relayOrigin: 'http://localhost:8787' };
+    for (const [reason, sentence] of [
+      ['unreachable', 'Couldn’t reach localhost:8787 to make a link.'],
+      ['rendezvous-lost', 'The connection to localhost:8787 dropped'],
+    ] as const) {
+      await renderOneTime(oneTimeService({ status: 'ended', reason }, { status }));
+      expect(oneTimeOutcome()?.textContent).toContain(sentence);
+      await act(async () => root.unmount());
+      root = createRoot(container);
+    }
+  });
+
+  it.each<[string, NetworkPolicy, string, RegExp]>([
+    ['Local networks', LOCAL_ON, 'Your phone must be on an allowed network.', /Make sure it is on an allowed network/],
+    // Anywhere has no allowed network to name, so its fix is another network.
+    ['Anywhere', ANYWHERE_ON, 'Your phone can be on any network.', /Try the phone on another network, such as cellular/],
+  ])(
+    'says where the phone may be under %s, and what to try when no direct path forms',
+    async (_, policy, where, directFailed) => {
+      const service = oneTimeService({ status: 'idle' }, { policy });
+      await renderOneTime(service);
+      expect(text()).toContain(`Open a link on your phone for a one-off connection. ${where} No account needed.`);
+
+      await act(async () => buttonLabelled('One-time connection')!.click());
+      await settleQrChunk();
+      expect(text()).toContain(`open the link below on it. ${where}`);
+
+      await act(async () => service.set({ status: 'ended', reason: 'direct-failed' }));
+      expect(oneTimeOutcome()?.textContent).toMatch(directFailed);
+    },
+  );
+
+  it('reads a policy it has not read as an allowed network', async () => {
+    // Which levels mean any network is `phoneOnAnyNetwork`'s; the panel can
+    // hold a state before the policy's answer lands.
+    const service = oneTimeService({ status: 'ended', reason: 'direct-failed' });
+    await renderOneTime(service);
+    expect(oneTimeOutcome()?.textContent).toBe(oneTimeEndedCopy(hostOf(NOT_ENROLLED.relayOrigin), false)['direct-failed']);
+    await act(async () => service.set({ status: 'idle' }));
+    expect(text()).toContain('Your phone must be on an allowed network.');
   });
 
   it('falls back for a reason this build has no sentence for, prototype names included', async () => {
@@ -1766,9 +1822,14 @@ describe('One-time connection', () => {
   });
 
   it('disables the button in a self-host build, saying why', async () => {
-    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'self-host' }));
+    await renderOneTime(
+      oneTimeService({ status: 'unavailable', reason: 'self-host' }, { status: SELF_HOST_NOT_ENROLLED }),
+    );
     expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
-    expect(text()).toContain('Not available in a self-host build');
+    // Its own origin is its Relay; links are made at the stock build's.
+    expect(text()).toContain(
+      `Not available in a self-host build: one-time links are made at ${hostOf(DEFAULT_RELAY_ORIGIN)}, which`,
+    );
     expect(text()).not.toContain('Open a link on your phone');
   });
 

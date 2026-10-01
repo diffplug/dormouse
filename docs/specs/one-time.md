@@ -5,7 +5,8 @@
 
 A phone reaches a laptop with no account, no Relay, and no passkey: the laptop
 shows a link, the phone opens it, a person types on the laptop the two digits the
-phone shows, and the session runs over a direct WebRTC path on the same network.
+phone shows, and the session runs over a direct WebRTC path the network policy
+allows (`docs/specs/remote-network.md`).
 Hosted's rendezvous carries the handshake and nothing after it.
 
 ## Flow
@@ -313,6 +314,7 @@ on Pocket's screens, chrome, and mobile wall.
   first render**, parsed or not, and reload on `hashchange` (rationale).
 - **Never open a socket before the Connect tap**: the tap builds the client and
   runs `connectOnce`, so a link-preview crawler spends nothing.
+- Its ICE servers: `docs/specs/remote-network.md` -> "Anywhere".
 - **Never persist anything** on an origin Hosted's accounts share: no storage,
   IndexedDB, worker, push, or cookie. `applyPocketTheme` applies Pocket's
   default theme without reading or writing a stored pick, for the page and its
@@ -392,8 +394,8 @@ Source of truth: `devConfig` in `hosted/scripts/dev-one-time.mjs`. Pinned by
 enrollment**: it works un-enrolled, survives `clearEnrollment` and
 `reconnect`, and `dispose()` ends it. Its label is the enrollment's, else
 `suggestedBurrowLabel(kind)`; its provider and direct-peer factory are the
-enrolled runtime's, held under Local networks to the allowed networks
-(`docs/specs/remote-network.md` -> "Local networks").
+enrolled runtime's, under the level's path rules (`docs/specs/remote-network.md`
+-> "Local networks" and "Anywhere").
 
 | Command | Answers |
 | --- | --- |
@@ -460,7 +462,7 @@ sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
 | `confirming` | "Type the two digits your phone shows into the dialog." | Cancel |
 | `connecting` | "Connecting directly…" | Cancel |
 | `connected` | the phone's label, then "has full control of your terminals." | End |
-| `ended` | one fixed sentence per reason, `direct-failed`'s and `network-not-allowed`'s naming the allowed networks | New link, Done |
+| `ended` | the reason's sentence | New link, Done |
 
 - **The panel renders the service's state and owns only its busy and error**; a
   refused `oneTimeOpen` renders inline. **Closing Settings changes nothing**:
@@ -474,8 +476,11 @@ sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
   to `idle`. `ended {user-ended}` renders as `idle`** (rationale).
 - **An open the panel started shows as `opening` before any event**, with
   Cancel live through it.
-- **End copy is fixed per reason**, looked up own-property only, with a
-  fallback for a reason a newer broker knows.
+- **End copy is fixed per reason and level**, looked up own-property only,
+  with a fallback for a reason a newer broker knows.
+- **Under Anywhere the idle hint and a waiting link say "Your phone can be on
+  any network." instead**, and `direct-failed`'s sentence suggests another
+  network.
 - **The indicator shows only while `connecting` or `connected`**: "Phone
   connecting…" or "Phone connected", then End; the phone's label is its
   tooltip (rationale).
@@ -486,8 +491,9 @@ sits in the Baseboard's right cluster (`docs/specs/layout.md` -> "Baseboard").
   unless an End has returned since**: a window that missed the End's event
   must not show the phone connected.
 
-Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
-`lib/src/components/OneTimeConnection.tsx`; `QrCode` in
+Source of truth: `OneTimeConnection` and `oneTimeEndedCopy` in
+`lib/src/components/OneTimeConnection.tsx`; `phoneOnAnyNetwork` in
+`lib/src/remote/network-policy.ts`; `QrCode` in
 `lib/src/components/QrCode.tsx`; `OneTimeIndicator` in
 `lib/src/components/OneTimeIndicator.tsx`; `subscribeToOneTime`,
 `refreshOneTime`, `openOneTime`, and `endOneTime` in
@@ -498,4 +504,4 @@ Source of truth: `OneTimeConnection` and `ONE_TIME_ENDED_COPY` in
 
 ## Future
 
-**Scope: one-time-anywhere** — Anywhere's STUN follows the **remote-network** scope in [remote-network.md](./remote-network.md). A per-IP cap on concurrent rooms remains beside the mint limit.
+**Scope: one-time-limits** — a per-IP cap on concurrent rooms, beside the mint limit.

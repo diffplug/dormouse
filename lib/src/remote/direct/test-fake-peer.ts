@@ -39,8 +39,11 @@ export type FakeChannelOpening =
 export interface FakeDirectNetworkOptions {
   readonly opening?: FakeChannelOpening;
   /**
-   * Leave `iceGatheringState` at `gathering` forever, so the wrapper falls back
-   * on its own gathering deadline instead of an event.
+   * Leave `iceGatheringState` at `gathering` until the case completes it, with
+   * no candidate gathered but those the case gathers
+   * ({@link FakePeer.gatherCandidate}), so the wrapper falls back on its own
+   * gathering deadlines instead of an event. `complete`, the default, starts
+   * each end done, with its one host candidate.
    */
   readonly gathering?: 'complete' | 'pending';
   /** Which side describes itself with an SDP over the signal's bound. */
@@ -77,6 +80,39 @@ const HOST_CANDIDATE: Record<FakePeerRole, string> = {
   answerer: FAKE_LAN_PAIR.local!,
   offerer: FAKE_LAN_PAIR.remote!,
 };
+
+/** The public address a srflx reports unless a case names another (TEST-NET-3, RFC 5737). */
+const SRFLX_ADDRESS = '203.0.113.7';
+
+/** The kinds of candidate a case can have an end gather. */
+export type FakeCandidateType = 'host' | 'srflx';
+
+/**
+ * How a stack spells the string an `icecandidate` event carries. Its SDP line is
+ * `a=candidate:…` either way.
+ */
+export type FakeCandidateForm =
+  /** A browser's: the line without its `a=`. */
+  | 'browser'
+  /** `node-datachannel`'s polyfill: the line itself. */
+  | 'polyfill';
+
+/** What {@link FakePeer.gatherCandidate} gathers, past its type. */
+export interface FakeCandidate {
+  /**
+   * Its address, an IPv6 one for a second family: by default this end's host
+   * address, or {@link SRFLX_ADDRESS} for a srflx.
+   */
+  readonly address?: string;
+  /** How its `icecandidate` string is spelled; a browser's by default. */
+  readonly form?: FakeCandidateForm;
+}
+
+/** One candidate as its SDP line, `a=candidate:…`. */
+function candidateLine(address: string, type: FakeCandidateType): string {
+  const related = type === 'srflx' ? ` raddr ${address.includes(':') ? '::' : '0.0.0.0'} rport 0` : '';
+  return `a=candidate:1 1 udp 2130706431 ${address} 9 typ ${type}${related}`;
+}
 
 /**
  * A path policy allowing only {@link FAKE_LAN_PAIR}'s LAN, by string prefix —
@@ -200,7 +236,8 @@ export class FakeDirectNetwork {
 
 /**
  * One end of the pair. Descriptions are plausible rather than parsed: nothing
- * reads them but the signal guard, and the pairing is done by the network.
+ * reads them but the signal guard and the gathering wait, and the pairing is
+ * done by the network.
  */
 export class FakePeer implements DirectPeerLike {
   readonly #role: FakePeerRole;
@@ -208,6 +245,10 @@ export class FakePeer implements DirectPeerLike {
   readonly #network: FakeDirectNetwork;
   readonly #events = new FakeEventTarget();
   #local: DirectSessionDescription | null = null;
+  /** Every candidate this end has gathered, as the SDP lines its local description carries. */
+  readonly #gathered: string[] = [];
+  /** What {@link gatherWithRemoteOffer} queued for the next offer this end is handed. */
+  readonly #gatherOnOffer: Array<[FakeCandidateType, FakeCandidate]> = [];
   /** The peer's description as this end was handed it. */
   remoteDescription: DirectSessionDescription | null = null;
   #gathering: string;
@@ -228,6 +269,10 @@ export class FakePeer implements DirectPeerLike {
     this.#options = options;
     this.#network = network;
     this.#gathering = options.gathering === 'pending' ? 'gathering' : 'complete';
+    // One host candidate, whatever pair ICE goes on to select: a description is
+    // a claim, never the path. A pending end has gathered nothing yet, and gets
+    // its candidates from the case.
+    if (this.#gathering === 'complete') this.#gathered.push(candidateLine(HOST_CANDIDATE[role], 'host'));
     this.selectedPair = options.selectedPair === undefined ? FAKE_LAN_PAIR : options.selectedPair;
   }
 
@@ -235,8 +280,15 @@ export class FakePeer implements DirectPeerLike {
     return this.#gathering;
   }
 
+  /**
+   * As a real stack's does, it carries every candidate gathered so far, those
+   * gathered before it was set included.
+   */
   get localDescription(): DirectSessionDescription | null {
-    return this.#local;
+    const local = this.#local;
+    if (!local) return null;
+    const gathered = this.#gathered.map((line) => `${line}\r\n`).join('');
+    return { ...local, sdp: `${local.sdp ?? ''}${gathered}` };
   }
 
   get sctp(): DirectSctpLike | null {
@@ -305,6 +357,7 @@ export class FakePeer implements DirectPeerLike {
       const channel = new FakeChannel(DIRECT_CHANNEL_LABEL, this.#defect);
       this.#network.registerChannel(this.#role, channel);
       this.#emit('datachannel', { channel });
+      for (const [type, candidate] of this.#gatherOnOffer.splice(0)) this.gatherCandidate(type, candidate);
       return;
     }
     this.#network.negotiated();
@@ -325,15 +378,40 @@ export class FakePeer implements DirectPeerLike {
     this.#emit('icegatheringstatechange', {});
   }
 
+  /**
+   * Gather one candidate: into the local description, then reported through
+   * `icecandidate`, in that order as both shipped stacks do it. `null` reports
+   * end-of-candidates. A stack reports each candidate once, so a second of the
+   * same throws.
+   */
+  gatherCandidate(type: FakeCandidateType | null, candidate: FakeCandidate = {}): void {
+    if (type === null) {
+      this.#emit('icecandidate', { candidate: null });
+      return;
+    }
+    const address = candidate.address ?? (type === 'srflx' ? SRFLX_ADDRESS : HOST_CANDIDATE[this.#role]);
+    const line = candidateLine(address, type);
+    if (this.#gathered.includes(line)) throw new Error(`${line} is already gathered`);
+    this.#gathered.push(line);
+    const reported = (candidate.form ?? 'browser') === 'browser' ? line.slice('a='.length) : line;
+    this.#emit('icecandidate', { candidate: { candidate: reported } });
+  }
+
+  /**
+   * Gather one candidate from inside the next `setRemoteDescription` of an
+   * offer, before this end has a description of its own — where an answerer's
+   * stack starts gathering, so the `icecandidate` fires before any wait exists.
+   */
+  gatherWithRemoteOffer(type: FakeCandidateType, candidate: FakeCandidate = {}): void {
+    this.#gatherOnOffer.push([type, candidate]);
+  }
+
   #describe(kind: 'offer' | 'answer'): string {
-    // One host candidate, whatever pair ICE goes on to select: a description
-    // is a claim, never the path.
-    const host = HOST_CANDIDATE[this.#role];
+    // Its candidates are the gathered ones, which `localDescription` appends.
     const body =
       'v=0\r\no=- 1 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' +
       'm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\n' +
-      `a=setup:${kind === 'offer' ? 'actpass' : 'active'}\r\na=mid:0\r\na=sctp-port:5000\r\n` +
-      `a=candidate:1 1 udp 2130706431 ${host} 9 typ host\r\n`;
+      `a=setup:${kind === 'offer' ? 'actpass' : 'active'}\r\na=mid:0\r\na=sctp-port:5000\r\n`;
     // A machine with many interfaces describes itself in more candidates than a
     // signal can carry; the attempt is skipped or declined rather than sent.
     return this.#options.oversize === kind ? `${body}a=x:${'c'.repeat(4000)}\r\n` : body;
