@@ -1,15 +1,32 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { getNetworkPolicySnapshot, subscribeToNetworkPolicy } from '../remote/burrow/network-policy-store';
+import type { NetworkPolicy } from '../remote/network-policy';
 
 /**
  * What the Remote control choices' two QR panels share: the Relay's "Set up a
  * phone" (`RemoteControlSection.tsx`) and the one-time connection
  * (`OneTimeConnection.tsx`), whose Baseboard indicator (`OneTimeIndicator.tsx`)
- * repeats its connected sentence — and the action hook Settings → Network's
- * panels share with them.
+ * repeats its connected sentence — and the hooks and helpers the Settings
+ * dialog and its Network panels share with them.
  */
 
 export const FIELD_LABEL = 'text-xs text-muted';
 export const FIELD_HINT = `${FIELD_LABEL} mt-1 block`;
+
+/** The network policy, or `null` before the service answers or without one. */
+export function useNetworkPolicy(): NetworkPolicy | null {
+  const network = useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot);
+  return network.kind === 'ready' ? network.network.policy : null;
+}
+
+/** An origin's host, as the copy names it. */
+export function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin;
+  }
+}
 
 /**
  * A busy/error pair for an action surface with one error location; `run`

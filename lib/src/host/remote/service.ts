@@ -51,6 +51,7 @@ import type { DirectPathPolicy, DirectPeerFactory } from '../../remote/direct/di
 import {
   MAX_ALLOWED_NETWORKS,
   burrowUsesStun,
+  holdsToAllowedNetworks,
   levelsFor,
   networkPolicyResult,
   nothingPolicy,
@@ -229,12 +230,12 @@ function requestedNetworkPolicy(value: unknown, relay: RelayBuild): NetworkPolic
 }
 
 /**
- * Whether two policies allow the same paths: the level, and under Local
- * networks — the only level they govern — the allowed networks as a set.
+ * Whether two policies allow the same paths: the level, and where it
+ * {@link holdsToAllowedNetworks}, the allowed networks as a set.
  */
 function samePaths(a: NetworkPolicy, b: NetworkPolicy): boolean {
   if (a.level !== b.level) return false;
-  if (a.level !== 'local') return true;
+  if (!holdsToAllowedNetworks(a.level)) return true;
   return a.allowed.length === b.allowed.length && a.allowed.every((cidr) => b.allowed.includes(cidr));
 }
 
@@ -957,9 +958,10 @@ export class BurrowService {
    * The direct path a runtime opened or started under `policy` holds for its
    * life (`docs/specs/remote-network.md` → "Anywhere"), both halves chosen
    * here from that one policy: its peer factory, gathering through Cloudflare
-   * STUN only where {@link burrowUsesStun}, and under Local networks the hold
-   * on each attempt. A change to either ends the runtime (`#setNetworkPolicy`);
-   * the factory still refuses at each call under `nothing` (constructor).
+   * STUN only where {@link burrowUsesStun}, and where
+   * {@link holdsToAllowedNetworks} the hold on each attempt. A change to either
+   * ends the runtime (`#setNetworkPolicy`); the factory still refuses at each
+   * call under `nothing` (constructor).
    */
   #directPathFor(policy: NetworkPolicy): {
     createDirectPeer: DirectPeerFactory | undefined;
@@ -969,7 +971,7 @@ export class BurrowService {
     const stun = burrowUsesStun(policy.level);
     return {
       createDirectPeer: create && ((pathPolicy) => create(pathPolicy, stun)),
-      directPathPolicy: policy.level === 'local' ? localNetworksPath(policy.allowed) : undefined,
+      directPathPolicy: holdsToAllowedNetworks(policy.level) ? localNetworksPath(policy.allowed) : undefined,
     };
   }
 

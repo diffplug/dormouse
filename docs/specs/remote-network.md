@@ -20,7 +20,7 @@
 - **Until the policy is read, the service reads it as `nothing`**; a read that fails leaves the Burrow down, and `setNetworkPolicy` saves over it.
 - **Only `relay` runs the persistent Burrow.** Under any other level an enrollment is held and reported — `enrolled`, `connection: 'stopped'` — and the relay socket stays shut, since no other level has a path rule for a persistent session yet (`## Future`).
 - **`setNetworkPolicy` takes a policy only exactly**: its three keys, a level the build offers, at most 32 CIDRs, and a boolean `autoUpdate`. **Must save each CIDR in its canonical form** (`canonicalCidr`), refusing one that does not parse or repeats once canonical, and answer what it saved. **Must save before acting**: a save that fails changes nothing.
-- **Must end the live one-time link or session with `user-ended` on a change to the level, or to the allowed networks under `local`, and start or stop the relay socket to match**; a narrowed policy never leaves an old path exempt. **The allowed networks under any other level, and `autoUpdate`, end nothing** (rationale).
+- **Must end the live one-time link or session with `user-ended`, and rest an ended one, on a change to the level, or to the allowed networks under `local`, and start or stop the relay socket to match**; a narrowed policy never leaves an old path exempt. **The allowed networks under any other level, and `autoUpdate`, end nothing** (rationale).
 - **Every change is a `network-policy` event** carrying what `networkPolicy` answers: the policy, the build's levels, and this machine's interfaces, each with its addresses' canonical prefixes (loopback and link-local, `169.254.0.0/16` included, left out) and a `lan`, `vpn`, or `virtual` kind. **A Tailscale interface — named `tailscale*`, or carrying an `fd7a:115c:a1e0::/48` address — offers a host route as its tailnet range**, `100.64.0.0/10` or `fd7a:115c:a1e0::/48`, since a `/32` admits no phone; any other host route is offered as reported (rationale).
 
 **Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater ("Updates"); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
@@ -46,7 +46,7 @@ Under `local` each one-time runtime is held to the networks allowed at its open;
 - **The check gates terminal traffic, not approval** (rationale): an off-network phone holding a link can reach the two-digit prompt and still receives no terminal byte.
 - **Never describe the level as proof of proximity** — a range is an address range, which another network can reuse, and a permitted peer can forward.
 
-Source of truth: `bindAddressFor` and `localNetworksPath` in `lib/src/host/remote/local-networks.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `DirectPathPolicy` and `DirectPeer` in `lib/src/remote/direct/direct-peer.ts`; `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts`; `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`; `BurrowService` in `lib/src/host/remote/service.ts`. Pinned by `lib/src/host/remote/local-networks.test.ts`, `lib/src/remote/direct/direct-peer.test.ts`, `lib/src/remote/burrow/one-time-runtime.test.ts`, `lib/src/host/remote/service.test.ts`, and on the real addon `lib/src/host/remote/native-direct-peer.test.ts`; against a browser by hand, `scripts/direct-interop/run.mjs --allow` (rationale).
+Source of truth: `holdsToAllowedNetworks` in `lib/src/remote/network-policy.ts`; `bindAddressFor` and `localNetworksPath` in `lib/src/host/remote/local-networks.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `DirectPathPolicy` and `DirectPeer` in `lib/src/remote/direct/direct-peer.ts`; `DirectEndpoint` in `lib/src/remote/direct/direct-endpoint.ts`; `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts`; `BurrowService` in `lib/src/host/remote/service.ts`. Pinned by `lib/src/host/remote/local-networks.test.ts`, `lib/src/remote/direct/direct-peer.test.ts`, `lib/src/remote/burrow/one-time-runtime.test.ts`, `lib/src/host/remote/service.test.ts`, and on the real addon `lib/src/host/remote/native-direct-peer.test.ts`; against a browser by hand, `scripts/direct-interop/run.mjs --allow` (rationale).
 
 ## Anywhere
 
@@ -56,9 +56,9 @@ Under `anywhere` a one-time link opens with no network allowed, and its attempt 
 - **Must choose a runtime's STUN and its path policy together, from the policy it opens or starts under**, and hold both for its life: a change to either ends it ("Policy").
 - **Clients Hosted serves must always gather through Cloudflare STUN; Clients a self-host Relay serves, through none.** No policy crosses the wire, and a Client's extra candidates cannot widen Local networks, whose Burrow checks the path (rationale).
 - **Never TURN** (direct-only: `docs/specs/one-time.md` -> "Burrow runtime").
-- **Never proxy STUN over an HTTP or WebSocket endpoint**; only STUN on the WebRTC socket observes that socket's own mapping.
+- **Never proxy STUN over an HTTP or WebSocket endpoint**; only STUN on the WebRTC socket observes its mapping.
 
-Source of truth: `CLOUDFLARE_STUN_URL` and `stunServers` in `lib/src/remote/direct/ice-servers.ts`; `burrowUsesStun` in `lib/src/remote/network-policy.ts`; `#directPathFor` in `lib/src/host/remote/service.ts`; `BurrowDirectPeerFactory` and `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `hostedDirectPeer` and `selfHostDirectPeer` in `lib/src/remote/client/browser-direct-peer.ts`. Pinned by `lib/src/host/remote/service.test.ts`, `lib/src/remote/client/browser-direct-peer.test.ts`, and on the real addon `lib/src/host/remote/native-direct-peer.test.ts` (rationale); audited at `docs/specs/security-remote.md` -> "Direct path".
+Source of truth: `CLOUDFLARE_STUN_URL` and `stunServers` in `lib/src/remote/direct/ice-servers.ts`; `burrowUsesStun` in `lib/src/remote/network-policy.ts`; `#directPathFor` in `lib/src/host/remote/service.ts`; `BurrowDirectPeerFactory` and `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `hostedDirectPeer` and `selfHostDirectPeer` in `lib/src/remote/client/browser-direct-peer.ts`. Pinned by `lib/src/host/remote/service.test.ts`, `lib/src/remote/client/browser-direct-peer.test.ts`, and on the real addon `lib/src/host/remote/native-direct-peer.test.ts`; by hand, `scripts/direct-interop/run.mjs --stun` (rationale); audited at `docs/specs/security-remote.md` -> "Direct path".
 
 ## Updates
 
@@ -74,14 +74,15 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 
 - **Renders nothing without a Burrow service**, which holds the policy.
 - **Never keep a draft**: every change sends a whole policy through `setNetworkPolicy`, and the panel renders the store's mirror of the answer; a refusal shows where the change was made. **Must make each change from the service's latest answer, one at a time** (`changeNetworkPolicy`).
-- **Offer the service's `levels`, in its order**, `relay` titled "My Relay only"; a level the panel has no copy for — `anywhere` — is not offered.
-- **Choosing Local networks with nothing allowed must first allow every prefix of this machine's `lan` interfaces**, never a `vpn` or `virtual` one; the panel fills them, not the service (rationale).
+- **Offer the service's `levels`, in its order**, `relay` titled "My Relay only".
+- **Choosing Local networks with nothing allowed must first allow every prefix of this machine's `lan` interfaces**, never a `vpn` or `virtual` one; the panel fills them, not the service (rationale). **Any other choice must keep `allowed`.**
 - **The connection list states only what is built** (rationale): `connectionsFor` answers these rows and no others. Under `nothing` it answers none, and the list reads "Nothing. Terminals and browser panes still reach whatever you open in them, including panes restored at launch."
 
 | Row | Listed when |
 |---|---|
-| the Hosted origin: only while a one-time link is open, handshakes and never terminal traffic | `local`, a network allowed |
-| your phone, on an allowed network | `local`, a network allowed |
+| the Hosted origin: only while a one-time link is open, handshakes and never terminal traffic | `opensOneTimeLinks` (`local`, a network allowed; `anywhere`) |
+| `stun.cloudflare.com`, as a phone connects | `burrowUsesStun` (`anywhere`) |
+| your phone, on an allowed network where `holdsToAllowedNetworks` (`local`), else any | `opensOneTimeLinks` |
 | the Relay origin: always (unenrolled, "once this computer is enrolled") | `relay` |
 | your phone, directly | `relay` |
 | the Relay origin to the phone's push service, "where push is on" | `relay`, a phone paired (rationale) |
@@ -93,15 +94,14 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 - **Updates**: a self-host build says it never updates itself, and a host with `hostOwnsUpdates` (VS Code) names the Marketplace. Any other build updates itself: the automatic-check switch, absent under `nothing`, over "Checked at each launch." or "Checked only when you ask."; **only with the platform's `updates` port** (`docs/specs/auto-update.md` -> "Threading") the last successful check — "Never checked on this computer." for none — Check now, and the week the Baseboard waits.
 - **Under `nothing`, Notifications' push and managed-voice lines say they are off because Network is set to Nothing**, each linking to this topic. **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
 
-Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connectionsFor`, and `policyForLevel` in `lib/src/components/NetworkSettings.tsx`; `changeNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`; `AlarmSettingsSection` in `lib/src/components/SettingsDialog.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`. Pinned by `lib/src/components/NetworkSettings.test.tsx`, `lib/src/components/SettingsDialog.test.tsx`, `lib/src/components/Baseboard.test.tsx`, and `lib/src/stories/NetworkSettings.stories.tsx`.
+Source of truth: `NetworkSettings`, `NetworkPhones`, `NetworkUpdates`, `connectionsFor`, and `policyForLevel` in `lib/src/components/NetworkSettings.tsx`; `opensOneTimeLinks`, `burrowUsesStun`, and `holdsToAllowedNetworks` in `lib/src/remote/network-policy.ts`; `changeNetworkPolicy` in `lib/src/remote/burrow/network-policy-store.ts`; `AlarmSettingsSection` in `lib/src/components/SettingsDialog.tsx`; `Baseboard` in `lib/src/components/Baseboard.tsx`. Pinned by `lib/src/components/NetworkSettings.test.tsx`, `lib/src/components/SettingsDialog.test.tsx`, `lib/src/components/Baseboard.test.tsx`, and `lib/src/stories/NetworkSettings.stories.tsx`.
 
 ## Future
 
 **Scope: remote-network** — build in order:
 
-1. **Anywhere in Settings → Network**: the choice, and its connections in `connectionsFor`, in one change.
-2. **Anywhere on real networks**: **Must validate both shipped stacks on cellular and home Wi-Fi** — SDP size against `MAX_DIRECT_SDP_LENGTH`, gathering and setup budgets, STUN failure — before changing a budget.
-3. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`; Local networks and Anywhere then cover paired phones.
+1. **Anywhere on a phone**: **Must validate iOS Safari on cellular and Wi-Fi** — SDP size, gathering against `DIRECT_SRFLX_GRACE_MS`, NAT traversal, Burrow STUN blocked — before changing a budget.
+2. **Hosted persistent**: the Hosted Relay and push, with **saas-multitenant** in `docs/specs/relay.md`, its connections in `connectionsFor`; Local networks and Anywhere then cover paired phones.
 
 ### Allowed networks
 

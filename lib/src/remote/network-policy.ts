@@ -25,7 +25,7 @@ const isLevel = (value: unknown): value is NetworkLevel =>
 
 export interface NetworkPolicy {
   level: NetworkLevel;
-  /** Canonical CIDRs a phone's direct path must fall within, under `local`. */
+  /** Canonical CIDRs a phone's direct path must fall within, where {@link holdsToAllowedNetworks}. */
   allowed: string[];
   /** Whether Standalone checks for updates at launch, where the level is not `nothing`. */
   autoUpdate: boolean;
@@ -85,7 +85,17 @@ export function runsBurrow(level: NetworkLevel): boolean {
  * one there (`docs/specs/remote-network.md` → "Local networks").
  */
 export function opensOneTimeLinks(policy: NetworkPolicy): boolean {
-  return policy.level === 'anywhere' || (policy.level === 'local' && policy.allowed.length > 0);
+  if (holdsToAllowedNetworks(policy.level)) return policy.allowed.length > 0;
+  return policy.level === 'anywhere';
+}
+
+/**
+ * Whether a phone's direct path under `level` must fall within the policy's
+ * `allowed` networks: Local networks alone (`docs/specs/remote-network.md` →
+ * "Local networks"). Every other level keeps `allowed` and holds no path to it.
+ */
+export function holdsToAllowedNetworks(level: NetworkLevel): boolean {
+  return level === 'local';
 }
 
 /**

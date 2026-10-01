@@ -12,7 +12,7 @@ import {
   modalActionButton,
 } from './design';
 import { useManagedVoiceConfigured } from './ManagedVoiceSection';
-import { useBusyAction } from './remote-control-shared';
+import { hostOf, useBusyAction } from './remote-control-shared';
 import { HeldEnrollment, RemoteControlSection } from './RemoteControlSection';
 import type { BurrowConsoleStatus } from '../host/remote/service-protocol';
 import { getPlatform } from '../lib/platform';
@@ -26,7 +26,9 @@ import {
 } from '../remote/burrow/network-policy-store';
 import {
   MAX_ALLOWED_NETWORKS,
+  burrowUsesStun,
   checksForUpdates,
+  holdsToAllowedNetworks,
   opensOneTimeLinks,
   runsBurrow,
   type NetworkInterfaceInfo,
@@ -73,12 +75,6 @@ function useNetworkView(): NetworkView {
   return { kind: 'ready', network: network.network, status: burrow.status };
 }
 
-/** Whether the service holds Nothing; `false` before it answers or without a service. */
-export function useNetworkOff(): boolean {
-  const network = useSyncExternalStore(subscribeToNetworkPolicy, getNetworkPolicySnapshot);
-  return network.kind === 'ready' && network.network.policy.level === 'nothing';
-}
-
 type NetworkChange = Parameters<typeof changeNetworkPolicy>[0];
 
 /**
@@ -99,7 +95,7 @@ function useSave() {
  */
 export function policyForLevel(network: NetworkPolicyResult, level: NetworkLevel): NetworkPolicy {
   const { policy, interfaces } = network;
-  if (level !== 'local' || policy.allowed.length > 0) return { ...policy, level };
+  if (!holdsToAllowedNetworks(level) || policy.allowed.length > 0) return { ...policy, level };
   const lan = interfaces.filter((item) => item.kind === 'lan').flatMap((item) => item.prefixes);
   return { ...policy, level, allowed: [...new Set(lan)].slice(0, MAX_ALLOWED_NETWORKS) };
 }
@@ -108,15 +104,6 @@ export function policyForLevel(network: NetworkPolicyResult, level: NetworkLevel
 const chooseLevel = (level: NetworkLevel): NetworkChange => (network) =>
   network.policy.level === level ? null : policyForLevel(network, level);
 
-/** An origin's host, as the copy names it. */
-function hostOf(origin: string): string {
-  try {
-    return new URL(origin).host;
-  } catch {
-    return origin;
-  }
-}
-
 interface LevelChoice {
   level: NetworkLevel;
   title: string;
@@ -124,34 +111,28 @@ interface LevelChoice {
 }
 
 /**
- * What the picker says for `level`, or `null` for one this build has no copy
- * for, which is not offered: `anywhere` until its stage ships. Each says what
- * the level is for; what it connects to is {@link connectionsFor}'s alone.
+ * What the picker says for `level`: what the level is for. What it connects to
+ * is {@link connectionsFor}'s alone.
  */
-function choiceFor(level: NetworkLevel, relayOrigin: string): LevelChoice | null {
+function choiceFor(level: NetworkLevel, relayOrigin: string): Omit<LevelChoice, 'level'> {
   switch (level) {
     case 'nothing':
-      return {
-        level,
-        title: 'Nothing',
-        detail: 'Dormouse opens no connections on its own, and phones can’t reach it.',
-      };
+      return { title: 'Nothing', detail: 'Dormouse opens no connections on its own, and phones can’t reach it.' };
     case 'local':
-      return { level, title: 'Local networks', detail: 'Phones connect only over networks you choose.' };
+      return { title: 'Local networks', detail: 'Phones connect only over networks you choose.' };
+    case 'anywhere':
+      return { title: 'Anywhere', detail: 'Phones connect directly from any network.' };
     case 'relay':
       return {
-        level,
         title: 'My Relay only',
         detail: `Phones reach Dormouse through ${hostOf(relayOrigin)}, the Relay this build was made for.`,
       };
-    case 'anywhere':
-      return null;
   }
 }
 
 /** The choices the service offers, in its order. */
 function choicesFor(network: NetworkPolicyResult, status: BurrowConsoleStatus): LevelChoice[] {
-  return network.levels.flatMap((level) => choiceFor(level, status.relayOrigin) ?? []);
+  return network.levels.map((level) => ({ level, ...choiceFor(level, status.relayOrigin) }));
 }
 
 interface ConnectionRow {
@@ -201,8 +182,18 @@ export function connectionsFor(facts: NetworkFacts): ConnectionRow[] {
         when: 'Only while a one-time link is open',
         carries: 'Encrypted handshakes. Never terminal traffic.',
       },
+      // The transport's own predicate, so the row and the gathering never disagree.
+      ...(burrowUsesStun(policy.level)
+        ? [
+            {
+              to: 'stun.cloudflare.com',
+              when: 'When a phone connects',
+              carries: 'A lookup that shows Cloudflare this computer’s public IP address.',
+            },
+          ]
+        : []),
       {
-        to: 'Your phone, on an allowed network',
+        to: holdsToAllowedNetworks(policy.level) ? 'Your phone, on an allowed network' : 'Your phone, on any network',
         when: 'While connected',
         carries: 'Terminal traffic, end-to-end encrypted.',
       },
@@ -277,7 +268,7 @@ export function NetworkSettings() {
       />
       {error ? <div className={ERROR}>{error}</div> : null}
       <ConnectionList rows={rows} />
-      {policy.level === 'local' ? <AllowedNetworks network={network} /> : null}
+      {holdsToAllowedNetworks(policy.level) ? <AllowedNetworks network={network} /> : null}
     </div>
   );
 }

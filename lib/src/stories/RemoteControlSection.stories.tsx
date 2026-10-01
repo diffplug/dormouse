@@ -3,12 +3,14 @@ import { fireEvent, userEvent, within } from 'storybook/test';
 import { ModalSurface } from '../components/design';
 import { RemoteControlSection } from '../components/RemoteControlSection';
 import {
+  ANYWHERE_ON,
   enrolledStatus,
   OFFER_STATUS,
   SELF_HOST_RELAY_ORIGIN,
   SELF_HOST_UNENROLLED_STATUS,
   UNENROLLED_STATUS,
 } from '../host/remote/test-burrow-link';
+import { networkPolicyResult } from '../remote/network-policy';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 /**
@@ -480,6 +482,22 @@ export const OneTimeEndedDirectFailed: Story = {
     docs: { story: { height: '380px' } },
   },
   play: settled(/couldn’t reach this computer directly/),
+};
+
+/**
+ * The same failure under Anywhere, which has no allowed network to name: the
+ * sentence suggests another network instead.
+ */
+export const OneTimeEndedDirectFailedAnywhere: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      network: networkPolicyResult(ANYWHERE_ON, 'hosted', []),
+      oneTime: { status: 'ended', reason: 'direct-failed' },
+    },
+    docs: { story: { height: '380px' } },
+  },
+  play: settled(/such as cellular/),
 };
 
 /** The one attempt was spent on digits the phone was not showing. */

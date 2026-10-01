@@ -1832,6 +1832,18 @@ describe('one-time connection', () => {
       expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
       expect(servingEvents().at(-1)).toBe(false);
     });
+
+    it('rests that ending, its runtime gone, on a change of path, so no other level reports it', async () => {
+      createHostedService(undefined, { createDirectPeer: answererTo('10.0.0.3', []) });
+      await offerOneTimeDirect(await approvedPhone(), network);
+      await settleUntil(() => oneTimeStates().at(-1)?.status === 'ended');
+
+      // `autoUpdate` alone changes no path, so the ending stays to report.
+      await command('setNetworkPolicy', { policy: { ...LOCAL_ON, autoUpdate: true } });
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'ended', reason: 'network-not-allowed' });
+      await command('setNetworkPolicy', { policy: ANYWHERE_ON });
+      expect(oneTimeStates().at(-1)).toEqual({ status: 'idle' });
+    });
   });
 
   describe('under Anywhere', () => {

@@ -3,6 +3,7 @@ import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { ModalSurface } from '../components/design';
 import { NetworkPhones, NetworkSettings, NetworkUpdates } from '../components/NetworkSettings';
 import {
+  ANYWHERE_ON,
   LOCAL_ON,
   RELAY_ON,
   SELF_HOST_UNENROLLED_STATUS,
@@ -90,8 +91,7 @@ export const Nothing: Story = {
     await expect(canvas.getByRole('radio', { name: /^Nothing/ })).toHaveAttribute('aria-checked', 'true');
     await canvas.findByText(/^Nothing\. Terminals and browser panes/);
     await canvas.findByText(/Checked only when you ask\. Never checked on this computer\./);
-    // Anywhere is not built yet, so no Hosted build offers it.
-    await expect(canvas.queryByRole('radio', { name: /^Anywhere/ })).toBeNull();
+    await expect(canvas.getByRole('radio', { name: /^Anywhere/ })).toHaveAttribute('aria-checked', 'false');
   },
 };
 
@@ -172,6 +172,22 @@ export const LocalNetworksNoneAllowed: Story = {
   },
 };
 
+/**
+ * Phones on any network: one-time links only, Cloudflare's STUN as a phone
+ * connects, and no allowed networks to pick.
+ */
+export const Anywhere: Story = {
+  parameters: { primedBurrow: hosted(ANYWHERE_ON) },
+  play: async ({ canvasElement }) => {
+    const canvas = await settled(canvasElement);
+    await expect(canvas.getByRole('radio', { name: /^Anywhere/ })).toHaveAttribute('aria-checked', 'true');
+    await canvas.findByText('stun.cloudflare.com');
+    await canvas.findByText('Your phone, on any network');
+    await canvas.findByText(/Your phone can be on any network\./);
+    await expect(canvas.queryByText('Allowed networks')).toBeNull();
+  },
+};
+
 /** Walks the choices and checks that the connection list follows. */
 export const SwitchingLevels: Story = {
   parameters: { primedBurrow: hosted(nothingPolicy()) },
@@ -180,10 +196,14 @@ export const SwitchingLevels: Story = {
     await userEvent.click(canvas.getByRole('radio', { name: /^Local networks/ }));
     await canvas.findByText('Allowed networks');
     await canvas.findByText('Your phone, on an allowed network');
+    await userEvent.click(canvas.getByRole('radio', { name: /^Anywhere/ }));
+    await canvas.findByText('stun.cloudflare.com');
+    await expect(canvas.queryByText('Allowed networks')).toBeNull();
     await userEvent.click(canvas.getByRole('radio', { name: /^Nothing/ }));
     await canvas.findByText(/^Nothing\. Terminals and browser panes/);
     await expect(canvas.queryByText('Allowed networks')).toBeNull();
     await canvas.findByRole('button', { name: 'Local networks' });
+    await canvas.findByRole('button', { name: 'Anywhere' });
   },
 };
 

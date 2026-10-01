@@ -9,6 +9,7 @@ import {
   MAX_ALLOWED_NETWORKS,
   NETWORK_LEVELS,
   burrowUsesStun,
+  holdsToAllowedNetworks,
   isNetworkPolicyResult,
   levelsFor,
   opensOneTimeLinks,
@@ -44,6 +45,10 @@ describe('what each level opens', () => {
 
   it('gathers through STUN on the Burrow under Anywhere alone', () => {
     expect(NETWORK_LEVELS.filter(burrowUsesStun)).toEqual(['anywhere']);
+  });
+
+  it('holds a phone’s path to the allowed networks under Local networks alone', () => {
+    expect(NETWORK_LEVELS.filter(holdsToAllowedNetworks)).toEqual(['local']);
   });
 });
 
