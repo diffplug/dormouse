@@ -11,7 +11,10 @@ export interface CopyEditorParts {
   preview: HTMLElement;
   footer: HTMLElement;
   /** A `w-max` row of every format's longest lines, laid out unwrapped. */
-  probe: HTMLElement;
+  widthProbe: HTMLElement;
+  /** A hidden copy of the preview, out of flow inside the root so it inherits
+   *  the root's type, its height left to its lines. */
+  heightProbe: HTMLElement;
 }
 
 /** The root's own borders: it clips, so it never shows a scrollbar. */
@@ -20,29 +23,22 @@ const borderY = (root: HTMLElement) => root.offsetHeight - root.clientHeight;
 
 /** The editor's width with its longest line unwrapped: the probe, plus the
  *  preview's scrollbar gutter and the root's borders. */
-export function measureNaturalWidth({ root, preview, probe }: CopyEditorParts): number {
-  return Math.ceil(probe.getBoundingClientRect().width) + preview.offsetWidth - preview.clientWidth + borderX(root);
+export function measureNaturalWidth({ root, preview, widthProbe }: CopyEditorParts): number {
+  return Math.ceil(widthProbe.getBoundingClientRect().width) + preview.offsetWidth - preview.clientWidth + borderX(root);
 }
 
 /** The editor's whole height at a given width, for the rendering the preview
  *  shows now: header, footer and borders as laid out, which never wrap, plus
- *  the preview's lines rewrapped at that width. Cached per width; build a new
- *  one when the rendering changes. */
-export function createHeightMeasurer({ root, header, preview, footer }: CopyEditorParts): (width: number) => number {
+ *  the height probe's lines rewrapped at the width the root would give the
+ *  preview. Cached per width; build a new one when the rendering changes. */
+export function createHeightMeasurer({ root, header, footer, heightProbe }: CopyEditorParts): (width: number) => number {
   const cache = new Map<number, number>();
   return (width) => {
     const w = Math.round(width);
     let height = cache.get(w);
     if (height === undefined) {
-      // A detached copy of the preview, out of flow inside the root so it
-      // inherits the root's type, laid out at the width the root would give it.
-      const copy = preview.cloneNode(true) as HTMLElement;
-      copy.setAttribute('aria-hidden', 'true');
-      copy.inert = true;
-      copy.style.cssText = `position:absolute;left:0;top:0;visibility:hidden;height:auto;width:${w - borderX(root)}px`;
-      root.append(copy);
-      height = header.offsetHeight + footer.offsetHeight + copy.offsetHeight + borderY(root);
-      copy.remove();
+      heightProbe.style.width = `${w - borderX(root)}px`;
+      height = header.offsetHeight + footer.offsetHeight + heightProbe.offsetHeight + borderY(root);
       cache.set(w, height);
     }
     return height;

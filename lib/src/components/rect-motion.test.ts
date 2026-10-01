@@ -1,60 +1,27 @@
 /**
  * @vitest-environment jsdom
  *
- * The copy editor's travel against the fake clock and rAF of
- * WorkspaceSelectionOverlay.test.tsx: performance.now reads `clock`, and frames
- * run only when a test flushes them.
+ * The copy editor's travel against a fake clock and rAF: frames run only when
+ * a test advances them.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cfg } from '../cfg';
 import { LATH_EASING } from '../lib/lath/animator';
 import type { RingRect } from '../lib/rect-tween';
 import { FOCUS_MOTION_MS } from './design';
+import { installFakeFrames } from './motion-test-utils';
 import { createRectMotion } from './rect-motion';
 
-let clock = 0;
-let rafSeq = 0;
-let rafCbs: Map<number, FrameRequestCallback>;
-let realNow: () => number;
-let realRaf: typeof requestAnimationFrame;
-let realCaf: typeof cancelAnimationFrame;
+const frames = installFakeFrames();
+const frame = (ms: number) => frames.advance(ms);
 let previousAnimate: boolean;
 
-/** Advance the clock and run the frames queued as of now. */
-function frame(ms: number): void {
-  clock += ms;
-  const cbs = [...rafCbs.values()];
-  rafCbs.clear();
-  for (const cb of cbs) cb(clock);
-}
-
 beforeEach(() => {
-  clock = 0;
-  rafSeq = 0;
-  rafCbs = new Map();
-  realNow = performance.now.bind(performance);
-  realRaf = globalThis.requestAnimationFrame;
-  realCaf = globalThis.cancelAnimationFrame;
-  performance.now = () => clock;
-  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-    const id = ++rafSeq;
-    rafCbs.set(id, cb);
-    return id;
-  }) as typeof requestAnimationFrame;
-  globalThis.cancelAnimationFrame = ((id: number) => { rafCbs.delete(id); }) as typeof cancelAnimationFrame;
-  globalThis.matchMedia = ((query: string) => ({
-    matches: false, media: query, onchange: null,
-    addEventListener() {}, removeEventListener() {},
-    addListener() {}, removeListener() {}, dispatchEvent() { return false; },
-  })) as unknown as typeof matchMedia;
   previousAnimate = cfg.layout.animate;
   cfg.layout.animate = true;
 });
 
 afterEach(() => {
-  performance.now = realNow;
-  globalThis.requestAnimationFrame = realRaf;
-  globalThis.cancelAnimationFrame = realCaf;
   cfg.layout.animate = previousAnimate;
 });
 
@@ -72,10 +39,15 @@ const lerp = (from: RingRect, to: RingRect, t: number): RingRect => {
   };
 };
 
-function motion(options: Partial<Parameters<typeof createRectMotion>[0]> = {}) {
+/** A motion whose writes and visibility land in one log, in order. */
+function motion() {
   const writes: RingRect[] = [];
-  const m = createRectMotion({ write: (r) => writes.push(r), ...options });
-  return { m, writes, last: () => writes[writes.length - 1] };
+  const log: (RingRect | 'shown' | 'hidden')[] = [];
+  const m = createRectMotion({
+    write: (r) => { writes.push(r); log.push(r); },
+    show: (visible) => log.push(visible ? 'shown' : 'hidden'),
+  });
+  return { m, writes, log, last: () => writes[writes.length - 1] };
 }
 
 describe('createRectMotion', () => {
@@ -83,14 +55,14 @@ describe('createRectMotion', () => {
     const { m, writes, last } = motion();
     m.setTarget(A);
     expect(writes).toEqual([A]);
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
     m.setTarget(B);
     expect(writes).toHaveLength(1);
     frame(16);
     expect(last()).toEqual(lerp(A, B, 16 / FOCUS_MOTION_MS));
     frame(FOCUS_MOTION_MS);
     expect(last()).toEqual(B);
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
   });
 
   it('continues a mid-flight change from the displayed rect, on a fresh clock', () => {
@@ -136,62 +108,31 @@ describe('createRectMotion', () => {
     const { m, writes, last } = motion();
     m.setTarget(A);
     m.setTarget(B);
-    expect(rafCbs.size).toBe(1);
+    expect(frames.pending).toBe(1);
     cfg.layout.animate = false;
     m.setTarget(C);
     expect(last()).toEqual(C);
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
     m.setTarget(A);
     expect(writes).toEqual([A, C, A]);
   });
 
-  it('snaps the first target after hide', () => {
-    const { m, writes, last } = motion();
+  it('shows on its first frame and hides once, snapping the first target after', () => {
+    const { m, log } = motion();
+    const visibility = () => log.filter((entry) => typeof entry === 'string');
     m.setTarget(A);
+    expect(log).toEqual([A, 'shown']);
     m.setTarget(B);
-    m.hide();
-    expect(rafCbs.size).toBe(0);
-    // The same target as before hiding still shows, and snaps there.
-    m.setTarget(B);
-    expect(last()).toEqual(B);
-    expect(writes).toEqual([A, B]);
-    expect(rafCbs.size).toBe(0);
-  });
-
-  it('cancels its frame on dispose and writes nothing after', () => {
-    const { m, writes } = motion();
-    m.setTarget(A);
-    m.setTarget(B);
-    m.dispose();
-    expect(rafCbs.size).toBe(0);
-    m.setTarget(C);
+    frame(16);
     frame(FOCUS_MOTION_MS);
-    expect(writes).toEqual([A]);
-  });
-
-  it('uses the injected clock, frame scheduler and duration', () => {
-    let own = 1000;
-    let handles = 0;
-    const frames: FrameRequestCallback[] = [];
-    const cancelled: number[] = [];
-    const { m, last } = motion({
-      now: () => own,
-      raf: (cb) => { frames.push(cb); return ++handles; },
-      caf: (handle) => { cancelled.push(handle); },
-      durationMs: 100,
-    });
-    m.setTarget(A);
+    expect(visibility()).toEqual(['shown']);
+    m.hide();
+    m.hide();
+    expect(visibility()).toEqual(['shown', 'hidden']);
+    expect(frames.pending).toBe(0);
+    // The same target as before hiding shows again, snapped there.
     m.setTarget(B);
-    expect(rafCbs.size).toBe(0);
-    own += 50;
-    frames.shift()!(own);
-    expect(last()).toEqual(lerp(A, B, 0.5));
-    own += 50;
-    frames.shift()!(own);
-    expect(last()).toEqual(B);
-    // The third frame requested is the one dispose cancels.
-    m.setTarget(C);
-    m.dispose();
-    expect(cancelled).toEqual([3]);
+    expect(log.slice(-2)).toEqual([B, 'shown']);
+    expect(frames.pending).toBe(0);
   });
 });

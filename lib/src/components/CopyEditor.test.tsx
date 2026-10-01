@@ -30,6 +30,7 @@ import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { CopyEditor } from './CopyEditor';
 import { createHeightMeasurer, measureNaturalWidth } from './copy-editor-measure';
 import { TouchUiContext } from './touch-ui-context';
+import { installFakeFrames } from './motion-test-utils';
 import { createWorkspaceMotion } from './workspace-motion';
 import { LayoutFramesContext, WorkspaceActiveContext, WorkspaceIdContext, ZoomedIdContext } from './wall/wall-context';
 
@@ -60,23 +61,12 @@ let dims: typeof DIMS;
 let natural: { width: number; height: number };
 const terminal = fakeXterm(CLAUDE_REPLY);
 
-// Fake clock + rAF, as rect-motion.test.ts: frames run only when a test flushes them.
-let clock = 0;
-let rafSeq = 0;
-let rafCbs: Map<number, FrameRequestCallback>;
-let realNow: () => number;
-let realRaf: typeof requestAnimationFrame;
-let realCaf: typeof cancelAnimationFrame;
+const frames = installFakeFrames();
 let previousAnimate: boolean;
 let resizeObservers: Set<() => void>;
 
 /** Advance the clock and run the frames queued as of now. */
-function frame(ms = 16): void {
-  clock += ms;
-  const cbs = [...rafCbs.values()];
-  rafCbs.clear();
-  for (const cb of cbs) cb(clock);
-}
+const frame = (ms = 16) => frames.advance(ms);
 
 const editor = () => document.body.querySelector<HTMLElement>('[data-copy-editor-for="term-1"]');
 const text = () => editor()?.textContent ?? '';
@@ -111,19 +101,6 @@ beforeEach(() => {
   vi.mocked(createHeightMeasurer).mockImplementation(() => () => natural.height);
   vi.mocked(copySelection).mockReset();
 
-  clock = 0;
-  rafSeq = 0;
-  rafCbs = new Map();
-  realNow = performance.now.bind(performance);
-  realRaf = globalThis.requestAnimationFrame;
-  realCaf = globalThis.cancelAnimationFrame;
-  performance.now = () => clock;
-  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-    const id = ++rafSeq;
-    rafCbs.set(id, cb);
-    return id;
-  }) as typeof requestAnimationFrame;
-  globalThis.cancelAnimationFrame = ((id: number) => { rafCbs.delete(id); }) as typeof cancelAnimationFrame;
   // Position assertions read settled rects; the easing case turns motion back on.
   previousAnimate = cfg.layout.animate;
   cfg.layout.animate = false;
@@ -146,9 +123,6 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
-  performance.now = realNow;
-  globalThis.requestAnimationFrame = realRaf;
-  globalThis.cancelAnimationFrame = realCaf;
   cfg.layout.animate = previousAnimate;
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -170,7 +144,7 @@ describe('CopyEditor: opening and placement', () => {
     // At least the pane's width less the gaps, though its lines are narrower.
     expect(box()).toEqual(px(104, 114, 792, 150));
     expect(editor()!.style.visibility).toBe('visible');
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
   });
 
   it('grows to its longest line, held inside the window', () => {
@@ -235,7 +209,8 @@ describe('CopyEditor: opening and placement', () => {
     render();
     expect(side()).toBe('below');
     act(() => button('Paragraph').click());
-    expect(getMouseSelectionState('term-1').copyEditor?.scopes[getMouseSelectionState('term-1').copyEditor!.scope].label).toBe('Paragraph');
+    const { scopes, scope } = getMouseSelectionState('term-1').copyEditor!;
+    expect(scopes[scope].label).toBe('Paragraph');
     expect(side()).toBe('above');
     expect(box()).toEqual(px(104, 46, 792, 320));
   });
@@ -247,9 +222,25 @@ describe('CopyEditor: following its pane', () => {
     render();
     dims.viewportY = 2;
     act(() => { bumpRenderTick(); bumpRenderTick(); });
-    expect(rafCbs.size).toBe(1);
+    expect(frames.pending).toBe(1);
     expect(editor()!.style.top).toBe('114px');
     frame();
+    expect(editor()!.style.top).toBe('94px');
+  });
+
+  it('skips placement on a tick that moved nothing', () => {
+    const heightAt = vi.fn(() => natural.height);
+    vi.mocked(createHeightMeasurer).mockImplementation(() => heightAt);
+    drag(2, 25, 5, 27);
+    render();
+    const placed = heightAt.mock.calls.length;
+    act(() => bumpRenderTick());
+    frame();
+    expect(heightAt.mock.calls.length).toBe(placed);
+    dims.viewportY = 2;
+    act(() => bumpRenderTick());
+    frame();
+    expect(heightAt.mock.calls.length).toBeGreaterThan(placed);
     expect(editor()!.style.top).toBe('94px');
   });
 
@@ -318,7 +309,7 @@ describe('CopyEditor: following its pane', () => {
     render();
     dims.viewportY = 2;
     editor()!.querySelector('.overflow-auto')!.dispatchEvent(new Event('scroll'));
-    expect(rafCbs.size).toBe(0);
+    expect(frames.pending).toBe(0);
     document.dispatchEvent(new Event('scroll'));
     frame();
     expect(editor()!.style.top).toBe('94px');
@@ -436,6 +427,25 @@ describe('CopyEditor: preview and controls', () => {
     expect(vi.mocked(measureNaturalWidth).mock.calls.length).toBe(measured + 1);
   });
 
+  it('probes each format’s three longest lines, cut to what the screen could show', () => {
+    const innerWidth = window.innerWidth;
+    // 40px of window at the narrowest cell leaves 18 cells a line.
+    Object.defineProperty(window, 'innerWidth', { value: 40, configurable: true });
+    try {
+      drag(7, 0, 11, 79);
+      render();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { value: innerWidth, configurable: true });
+    }
+    const probe = editor()!.querySelector('.w-max')!;
+    const [, exact, , joined] = Array.from(probe.children);
+    const rows = (format: Element) => Array.from(format.children, (row) => ({ n: row.firstElementChild!.textContent, text: row.lastElementChild!.textContent! }));
+    // Rows 9, 7 and 10 of the reply, heaviest first.
+    expect(rows(exact).map((r) => r.n)).toEqual(['3', '1', '4']);
+    expect(rows(exact).every((r) => r.text.length <= 18)).toBe(true);
+    expect(rows(joined)).toEqual([{ n: '1', text: 'The fix is to awai' }]);
+  });
+
   it('expands from the scope segment and shows what it added', () => {
     drag(2, 27, 3, 5);
     render();
@@ -453,6 +463,24 @@ describe('CopyEditor: preview and controls', () => {
 });
 
 describe('CopyEditor: the program’s own copy', () => {
+  it('takes the width an offer adds on the next tick', () => {
+    act(() => {
+      setSelection('term-1', { startRow: 2, startCol: 25, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });
+      openCopyEditor('term-1', terminal);
+    });
+    render();
+    expect(box().width).toBe('792px');
+    natural.width = 950;
+    act(() => offerProgramCopy('term-1', 'the program’s own, wider copy'));
+    act(() => bumpRenderTick());
+    frame();
+    expect(box().width).toBe('950px');
+    // Its offer kept, a flipped mark changes no format's widest line.
+    const measured = vi.mocked(measureNaturalWidth).mock.calls.length;
+    act(() => button('␣').click());
+    expect(vi.mocked(measureNaturalWidth).mock.calls.length).toBe(measured);
+  });
+
   it('offers it last as "From <program>" and previews its text, scope set aside', () => {
     act(() => {
       setSelection('term-1', { startRow: 2, startCol: 2, endRow: 5, endCol: 27, shape: 'linewise', dragging: false, startedInScrollback: false, owner: 'program' });

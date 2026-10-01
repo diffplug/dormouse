@@ -17,6 +17,9 @@ export interface RingRect {
   height: number;
 }
 
+export const rectsEqual = (a: RingRect, b: RingRect): boolean =>
+  a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
+
 /** The ring's corner radii + stroke inset. Carried alongside the rect so a
  *  pane↔door selection morphs its shape (radii lerp) instead of popping. */
 export interface RingShape {
@@ -159,9 +162,7 @@ export function sampleRingVelocity(tween: RingTween, now: number): RingEdgeSpeed
 }
 
 /** A rect-only motion segment, for chrome that moves and resizes but carries no
- *  ring shape (the copy editor). It has no retarget: moving the destination late
- *  in a segment would jump the box, so a new destination always restarts from
- *  the displayed rect with a fresh clock. */
+ *  ring shape (the copy editor). It has no retarget. */
 export interface RectTween {
   from: RingRect;
   to: RingRect;

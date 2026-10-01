@@ -30,11 +30,14 @@ interface Props {
 
 const leaf = (id: string): LathNode => ({ kind: 'leaf', id });
 const split = (dir: 'row' | 'col', nodes: LathNode[]): LathNode => ({ kind: 'split', dir, children: normalizeWeights(nodes.map((node) => ({ node, weight: 1 }))) });
+const LAYOUTS: Record<Layout, LathNode> = {
+  single: leaf(SOURCE),
+  'source-over-peer': split('col', [leaf(SOURCE), leaf('peer')]),
+  'peer-over-source': split('col', [leaf('peer'), leaf(SOURCE)]),
+  'three-columns': split('row', [leaf(SOURCE), leaf('peer'), leaf('peer-2')]),
+};
 function boot(layout: Layout): LathPersistedLayout {
-  const root = layout === 'single' ? leaf(SOURCE)
-    : layout === 'source-over-peer' ? split('col', [leaf(SOURCE), leaf('peer')])
-    : layout === 'peer-over-source' ? split('col', [leaf('peer'), leaf(SOURCE)])
-    : split('row', [leaf(SOURCE), leaf('peer'), leaf('peer-2')]);
+  const root = LAYOUTS[layout];
   return { version: 1, tree: { root }, leafMeta: Object.fromEntries(leaves({ root }).map((id) => [id, { component: 'terminal', tabComponent: 'terminal', title: id === SOURCE ? 'Source terminal' : 'Neighbor terminal' }])) };
 }
 

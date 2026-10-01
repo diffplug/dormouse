@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 import { isComposingKey } from '../lib/dom';
+import { rectsEqual } from '../lib/rect-tween';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
 // App-wide type scale, color strategy, and chrome conventions: see
@@ -118,15 +119,9 @@ export const DRAG_THRESHOLD_PX = 5;
 export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
 export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
 
-// Focus-ring motion. The selection ring's travel between panes/doors, the pane
-// header's active/inactive palette crossfade, the ring's unfocus-saturate fade,
-// and the copy editor's travel all run on this single duration so they resolve
-// as one gesture. Half the Lath layout motion (LATH_MOTION_MS = 440) — the ring
-// and the editor are light chrome chasing geometry the wall has already
-// committed, so they settle quicker. Both travels are JS per-frame tweens over
-// rect-tween.ts (WorkspaceSelectionOverlay for the ring, rect-motion.ts for the
-// editor), the carve-out the Lath animator shares in DESIGN.md's "don't animate
-// layout properties" rule.
+// Focus-ring motion: the one duration of the ring's travel, the pane header's
+// palette crossfade, the ring's unfocus-saturate fade, and the copy editor's
+// travel. DESIGN.md -> "Focus Ring Travel & Header Crossfade" owns why.
 export const FOCUS_MOTION_MS = 220;
 
 // The pane-header palette crossfade, as a complete Tailwind literal so the
@@ -235,9 +230,8 @@ export interface ModalRect {
  *  (docs/specs/layout.md → "Selection overlay"). */
 export const SELECTION_RING_Z_INDEX = 50;
 
-/** The copy editor's z-index, also on `document.body`: above the ring and any
- *  in-Wall chrome, below every `MODAL_LAYERS` value. Never `app`: a tie with
- *  `SettingsDialog` would fall back to insertion order. */
+/** The copy editor's z-index, also on `document.body`
+ *  (docs/specs/mouse-and-clipboard.md §4.5). */
 export const COPY_EDITOR_Z_INDEX = 55;
 
 export const MODAL_LAYERS = {
@@ -570,11 +564,7 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
     const update = () => {
       const next = element.getBoundingClientRect();
       setRect((previous) =>
-        previous
-        && previous.top === next.top
-        && previous.left === next.left
-        && previous.width === next.width
-        && previous.height === next.height
+        previous && rectsEqual(previous, next)
           ? previous
           : { top: next.top, left: next.left, width: next.width, height: next.height },
       );
@@ -591,6 +581,13 @@ export function useMeasuredElementRect(element: HTMLElement | null): ModalRect |
   }, [element]);
 
   return rect;
+}
+
+/** `node` rendered into `document.body`, so no Workspace's stacking context,
+ *  presentation transform, or clipping holds it; in place under the server
+ *  renderer, which has no portals. */
+export function portalToBody(node: ReactNode): ReactNode {
+  return typeof document === 'undefined' ? node : createPortal(node, document.body);
 }
 
 export function ModalOverlay({
@@ -630,10 +627,8 @@ export function ModalOverlay({
       {children}
     </div>
   );
-  // In `document.body`, so no Workspace's stacking context or presentation
-  // transform holds it under the selection ring (docs/specs/layout.md ->
-  // "Selection overlay"). The server renderer has no portals.
-  return typeof document === 'undefined' ? overlay : createPortal(overlay, document.body);
+  // Over the selection ring (docs/specs/layout.md -> "Selection overlay").
+  return portalToBody(overlay);
 }
 
 export type ModalSurfaceProps = HTMLAttributes<HTMLDivElement> & ModalSurfaceVariants;

@@ -1,6 +1,5 @@
 import { clsx } from 'clsx';
 import { memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import { CheckIcon } from '@phosphor-icons/react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
@@ -20,7 +19,7 @@ import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
 import { overlayViewportBounds, subscribeOverlayViewport } from '../lib/ui-geometry';
 import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
-import { COPY_EDITOR_Z_INDEX, COPY_EXPANDED_TEXT_CLASS, modalActionButton, modalSurface, popupButton, Shortcut } from './design';
+import { COPY_EDITOR_Z_INDEX, COPY_EXPANDED_TEXT_CLASS, modalActionButton, modalSurface, popupButton, portalToBody, Shortcut } from './design';
 import { createHeightMeasurer, measureNaturalWidth, type CopyEditorParts } from './copy-editor-measure';
 import { createRectMotion, type RectMotion } from './rect-motion';
 import { TouchUiContext } from './touch-ui-context';
@@ -62,12 +61,17 @@ const MARK_TITLE: Record<BreakKind, string> = {
 
 /** The lines of each format the width probe lays out. */
 const PROBE_LINES = 3;
+/** Under any monospace cell the editor's type renders, so a probed line cut to
+ *  a window's width in these still fills it. */
+const PROBE_MIN_CELL_PX = 4;
+const PROBE_MARGIN_CELLS = 8;
 
-/** Geometry is the motion driver's alone: React sets none of it, so a render
- *  never undoes a frame, and never sets `visibility` again after mounting, so
- *  the driver's first write is what shows it. */
+/** Geometry and, after mounting, visibility are the motion driver's alone:
+ *  React sets neither, so a render never undoes a frame. */
 const ROOT_STYLE: CSSProperties = { position: 'fixed', zIndex: COPY_EDITOR_Z_INDEX, contain: 'layout paint', visibility: 'hidden' };
 
+/** A stable gutter: a classic scrollbar appearing never narrows the lines. */
+const PREVIEW_CLASS = 'min-h-10 flex-1 overflow-auto bg-app-bg [scrollbar-gutter:stable]';
 const PREVIEW_LINES_CLASS = 'py-1 font-mono text-sm leading-[18px] text-foreground';
 
 /**
@@ -86,13 +90,19 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
   return <OpenCopyEditor terminalId={terminalId} selection={selection} editor={copyEditor} copyFlash={copyFlash} programCopy={programCopy} />;
 }
 
-/** What placement reads, as last rendered. */
-interface Placed {
+/** What placement reads, as last rendered and measured. */
+interface Inputs {
   selection: Selection;
   scope: Span;
   touch: boolean;
   zoomedId: string | null;
   workspaceId: string | null;
+  /** The longest line across every format of the scope. */
+  naturalWidth: number;
+  heightAt: (width: number) => number;
+  /** Everything the last placement read, so a tick that moved nothing skips
+   *  it; null while hidden. */
+  placed: readonly unknown[] | null;
 }
 
 /** True while the pane is out of sight, which the editor on `document.body`
@@ -100,13 +110,17 @@ interface Placed {
  *  a terminal context floats above; its Wall in Workspace travel, a
  *  presentation the editor does not follow; or the pane hidden, as a parked
  *  leaf or a Tool's other face hides it. */
-function concealed(anchor: Element, { zoomedId, workspaceId }: Placed): boolean {
+function concealed(anchor: Element, { zoomedId, workspaceId }: Inputs): boolean {
   if (zoomedId !== null
     && anchor.closest('[data-lath-leaf]')?.getAttribute('data-lath-leaf') !== zoomedId
     && !anchor.closest('[data-terminal-context]')) return true;
   if (workspaceId !== null && workspaceInTravel(workspaceId)) return true;
   return getComputedStyle(anchor).visibility === 'hidden';
 }
+
+const noFlip = () => {};
+const noHeight = () => 0;
+const sameKey = (a: readonly unknown[], b: readonly unknown[]) => a.every((v, n) => v === b[n]);
 
 /** Mounted while the editor is open, so closing drops its motion and side. */
 const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, editor, copyFlash, programCopy }: {
@@ -120,106 +134,118 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
   const zoomedId = useContext(ZoomedIdContext);
   const workspaceId = useContext(WorkspaceIdContext);
   const subscribeLayoutFrames = useContext(LayoutFramesContext);
+  const scope = editor.scopes[editor.scope].span;
 
   // Each scope's formats are rendered once and cached on it (`copy-editor.ts`),
   // so `f`, the duplicate check, the width probe, and the copy all reuse them.
+  // They read only the scope's buffer and span, so a flipped mark keeps them.
   const rendering = useMemo(() => editorRendering(editor, programCopy), [editor, programCopy]);
-  const renderings = useMemo(() => formatRenderings(editor, programCopy), [editor, programCopy]);
+  const renderings = useMemo(() => formatRenderings(editor, programCopy), [editor.buffer, scope, programCopy]);
   const sameAs = useMemo(() => duplicateFormats(renderings), [renderings]);
   const onFlip = useCallback((index: number, kind: BreakKind) => flipCopyBreak(terminalId, index, kind), [terminalId]);
-  const scope = editor.scopes[editor.scope].span;
 
   const anchorRef = useRef<HTMLSpanElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
-  const probeRef = useRef<HTMLDivElement>(null);
+  const widthProbeRef = useRef<HTMLDivElement>(null);
+  const heightProbeRef = useRef<HTMLDivElement>(null);
+  const inputs = useRef<Inputs>({ selection, scope, touch: touchUi, zoomedId, workspaceId, naturalWidth: 0, heightAt: noHeight, placed: null });
   const motionRef = useRef<RectMotion | null>(null);
-  const sideRef = useRef<CopyEditorSide | null>(null);
-  const naturalWidthRef = useRef(0);
-  const heightAtRef = useRef<(width: number) => number>(() => 0);
-  const placedRef = useRef<Placed | null>(null);
+  motionRef.current ??= createRectMotion({
+    write: (r) => {
+      const style = rootRef.current!.style;
+      style.left = `${r.left}px`;
+      style.top = `${r.top}px`;
+      style.width = `${r.width}px`;
+      style.height = `${r.height}px`;
+    },
+    show: (visible) => rootRef.current?.style.setProperty('visibility', visible ? 'visible' : 'hidden'),
+  });
+  const motion = motionRef.current;
 
-  const parts = useCallback((): CopyEditorParts => ({
+  const parts = (): CopyEditorParts => ({
     root: rootRef.current!,
     header: headerRef.current!,
     preview: previewRef.current!,
     footer: footerRef.current!,
-    probe: probeRef.current!,
-  }), []);
+    widthProbe: widthProbeRef.current!,
+    heightProbe: heightProbeRef.current!,
+  });
+
+  /** Hide the editor and forget its side, so the next placement starts fresh. */
+  const conceal = useCallback(() => {
+    const root = rootRef.current;
+    if (!root || root.dataset.copyEditorSide === undefined) return;
+    motion.hide();
+    delete root.dataset.copyEditorSide;
+    inputs.current.placed = null;
+  }, [motion]);
 
   /** Place the editor against the selection and pane as they are now. */
   const recompute = useCallback(() => {
     const root = rootRef.current;
     const anchor = anchorRef.current;
-    const motion = motionRef.current;
-    const placed = placedRef.current;
-    if (!root || !anchor || !motion || !placed) return;
-    const dims = concealed(anchor, placed) ? null : getTerminalOverlayDims(terminalId);
+    if (!root || !anchor) return;
+    const at = inputs.current;
+    const dims = concealed(anchor, at) ? null : getTerminalOverlayDims(terminalId);
     if (!dims || dims.rows === 0 || dims.elementWidth === 0) {
-      if (root.dataset.copyEditorSide === undefined) return; // already hidden
-      motion.hide();
-      root.style.visibility = 'hidden';
-      delete root.dataset.copyEditorSide;
+      conceal();
       return;
     }
+    const viewport = overlayViewportBounds();
+    const key = [
+      at.selection, at.scope, at.touch, at.naturalWidth, at.heightAt,
+      dims.viewportY, dims.rows, dims.cellHeight, dims.gridTop, dims.elementLeft, dims.elementTop, dims.elementWidth, dims.elementHeight,
+      viewport.left, viewport.top, viewport.right, viewport.bottom,
+    ];
+    if (at.placed && sameKey(at.placed, key)) return;
+    at.placed = key;
     const { side, rect } = placeCopyEditor({
-      viewport: overlayViewportBounds(),
+      viewport,
       pane: { left: dims.elementLeft, top: dims.elementTop, width: dims.elementWidth, height: dims.elementHeight },
-      band: selectionBand(dims, [spanOfSelection(placed.selection), placed.scope]),
-      naturalWidth: naturalWidthRef.current,
-      naturalHeight: heightAtRef.current,
-      touch: placed.touch,
-      previous: sideRef.current,
+      band: selectionBand(dims, [spanOfSelection(at.selection), at.scope]),
+      naturalWidth: at.naturalWidth,
+      naturalHeight: at.heightAt,
+      touch: at.touch,
+      previous: (root.dataset.copyEditorSide as CopyEditorSide | undefined) ?? null,
     });
-    sideRef.current = side;
     root.dataset.copyEditorSide = side;
     motion.setTarget(rect);
-  }, [terminalId]);
+  }, [terminalId, motion, conceal]);
 
   useLayoutEffect(() => {
-    const root = rootRef.current!;
-    const motion = createRectMotion({
-      write: (r) => {
-        root.style.left = `${r.left}px`;
-        root.style.top = `${r.top}px`;
-        root.style.width = `${r.width}px`;
-        root.style.height = `${r.height}px`;
-        root.style.visibility = 'visible';
-      },
-    });
-    motionRef.current = motion;
-    const unmap = setPortalAnchor(root, anchorRef.current!);
+    const unmap = setPortalAnchor(rootRef.current!, anchorRef.current!);
     return () => {
-      motion.dispose();
-      motionRef.current = null;
-      sideRef.current = null;
-      root.style.visibility = 'hidden';
+      conceal();
       unmap();
     };
-  }, []);
+  }, [conceal]);
 
   // The width shows every format's longest line whole, so `f` and a flipped
   // mark never change it; a scope, a nudge, or an offer may.
   useLayoutEffect(() => {
-    naturalWidthRef.current = measureNaturalWidth(parts());
-  }, [parts, scope, programCopy]);
+    inputs.current.naturalWidth = measureNaturalWidth(parts());
+  }, [renderings]);
 
   useLayoutEffect(() => {
-    heightAtRef.current = createHeightMeasurer(parts());
-  }, [parts, rendering]);
+    inputs.current.heightAt = createHeightMeasurer(parts());
+  }, [rendering]);
 
   // Before paint, so opening lands placed with no travel, and every selection,
   // scope, or text change re-places it at once.
   useLayoutEffect(() => {
-    placedRef.current = { selection, scope, touch: touchUi, zoomedId, workspaceId };
+    Object.assign(inputs.current, { selection, scope, touch: touchUi, zoomedId, workspaceId });
     recompute();
   }, [selection, scope, rendering, touchUi, zoomedId, workspaceId, recompute]);
 
   // Anything else that moves the pane or the band, coalesced to one placement
-  // a frame: output and scrolling, the pane's own motion, the window.
+  // a frame: output and scrolling, the pane's own motion, the window. And a
+  // press anywhere outside the editor dismisses it.
   useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
     let frame: number | null = null;
     const schedule = () => {
       frame ??= requestAnimationFrame(() => {
@@ -231,21 +257,15 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
       subscribeToRenderTick(schedule),
       subscribePaneMotion(anchorRef.current?.parentElement, schedule, subscribeLayoutFrames),
       subscribeOverlayViewport(schedule),
+      () => { if (frame !== null) cancelAnimationFrame(frame); },
     ];
-    return () => {
-      for (const unsubscribe of unsubscribes) unsubscribe();
-      if (frame !== null) cancelAnimationFrame(frame);
-    };
-  }, [recompute, subscribeLayoutFrames]);
-
-  useEffect(() => {
-    const onMouseDown = (ev: MouseEvent) => {
+    for (const unsubscribe of unsubscribes) signal.addEventListener('abort', unsubscribe);
+    window.addEventListener('mousedown', (ev) => {
       const target = ev.target as HTMLElement | null;
       if (!target?.closest(`[data-copy-editor-for="${terminalId}"]`)) setSelection(terminalId, null);
-    };
-    window.addEventListener('mousedown', onMouseDown, true);
-    return () => window.removeEventListener('mousedown', onMouseDown, true);
-  }, [terminalId]);
+    }, { capture: true, signal });
+    return () => controller.abort();
+  }, [recompute, subscribeLayoutFrames, terminalId]);
 
   const edited = isEdited(editor);
   const lines = rendering.text ? rendering.text.split('\n').length : 0;
@@ -293,8 +313,7 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
           {keys(<><Shortcut>f</Shortcut> <Shortcut>{SHIFT}f</Shortcut></>)}
         </div>
       </div>
-      {/* A stable gutter: a classic scrollbar appearing never narrows the lines. */}
-      <div ref={previewRef} className="min-h-10 flex-1 overflow-auto bg-app-bg [scrollbar-gutter:stable]">
+      <div ref={previewRef} className={PREVIEW_CLASS}>
         <LinedPreview rendering={rendering} onFlip={onFlip} />
       </div>
       <div ref={footerRef} className="flex shrink-0 items-center gap-3 border-t border-border px-2 py-1 text-xs text-muted">
@@ -319,19 +338,22 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
           Copy
         </button>
       </div>
-      <div ref={probeRef} aria-hidden inert className="invisible absolute left-0 top-0 w-max">
+      <div ref={widthProbeRef} aria-hidden inert className="invisible absolute left-0 top-0 w-max">
         <WidthProbe renderings={renderings} />
+      </div>
+      <div ref={heightProbeRef} aria-hidden inert className={clsx(PREVIEW_CLASS, 'invisible absolute left-0 top-0')}>
+        <LinedPreview rendering={rendering} onFlip={noFlip} />
       </div>
     </div>
   );
 
   // In `document.body`, free of the pane's clipping and of any Workspace's
   // stacking context; the anchor keeps its presses inside the pane for DOM
-  // containment checks (`anchoredTarget`). The server renderer has no portals.
+  // containment checks (`anchoredTarget`).
   return (
     <>
       <span ref={anchorRef} hidden data-copy-editor-anchor="" />
-      {typeof document === 'undefined' ? root : createPortal(root, document.body)}
+      {portalToBody(root)}
     </>
   );
 });
@@ -382,17 +404,16 @@ function Mark({ index, kind, auto, onFlip }: { index: number; kind: BreakKind; a
   );
 }
 
-/** One run of pieces per clipboard line: a kept break ends its line. */
-function previewLines(rendering: Rendering): Piece[][] {
+/** One run of pieces per clipboard line, a kept break ending its line, and
+ *  the gutter's width in digits. */
+function previewLines(rendering: Rendering): { lines: Piece[][]; gutterCh: number } {
   const lines: Piece[][] = [[]];
   for (const p of rendering.pieces) {
     lines[lines.length - 1].push(p);
     if (p.t === 'break' && p.kind === 'keep') lines.push([]);
   }
-  return lines;
+  return { lines, gutterCh: String(lines.length).length };
 }
-
-const noFlip = () => {};
 
 /** One gutter-numbered clipboard line, `gutterCh` digits wide. */
 function PreviewRow({ n, gutterCh, pieces, onFlip }: { n: number; gutterCh: number; pieces: Piece[]; onFlip: (index: number, kind: BreakKind) => void }) {
@@ -422,8 +443,7 @@ const LinedPreview = memo(function LinedPreview({ rendering, onFlip }: {
   onFlip: (index: number, kind: BreakKind) => void;
 }) {
   if (rendering.text === '') return <div className="px-2 py-1.5 text-xs italic text-muted">(empty)</div>;
-  const lines = previewLines(rendering);
-  const gutterCh = String(lines.length).length;
+  const { lines, gutterCh } = previewLines(rendering);
   return (
     <div className={PREVIEW_LINES_CLASS}>
       {lines.map((pieces, n) => <PreviewRow key={n} n={n} gutterCh={gutterCh} pieces={pieces} onFlip={onFlip} />)}
@@ -432,18 +452,55 @@ const LinedPreview = memo(function LinedPreview({ rendering, onFlip }: {
 });
 
 /** A line's rough width in cells, for ranking: a mark takes about two. */
-const lineWeight = (pieces: Piece[]) => pieces.reduce((sum, p) => sum + (p.t === 'text' ? p.text.length : 2), 0);
+const pieceWeight = (p: Piece) => (p.t === 'text' ? p.text.length : 2);
+
+/** The `count` heaviest of `lines`, heaviest first and the earlier on a tie,
+ *  each weighed once. */
+function heaviestLines(lines: Piece[][], count: number): { pieces: Piece[]; n: number }[] {
+  const top: { pieces: Piece[]; n: number; weight: number }[] = [];
+  lines.forEach((pieces, n) => {
+    const weight = pieces.reduce((sum, p) => sum + pieceWeight(p), 0);
+    if (top.length === count && weight <= top[count - 1].weight) return;
+    const at = top.findIndex((t) => weight > t.weight);
+    top.splice(at < 0 ? top.length : at, 0, { pieces, n, weight });
+    if (top.length > count) top.pop();
+  });
+  return top;
+}
+
+/** `pieces` cut once they reach `cells`, weighed as `heaviestLines` weighs them. */
+function cutToCells(pieces: Piece[], cells: number): Piece[] {
+  const cut: Piece[] = [];
+  let used = 0;
+  for (const p of pieces) {
+    if (used >= cells) break;
+    if (p.t === 'text' && used + p.text.length > cells) {
+      cut.push({ ...p, text: p.text.slice(0, cells - used) });
+      break;
+    }
+    cut.push(p);
+    used += pieceWeight(p);
+  }
+  return cut;
+}
+
+/** The cells a probed line keeps: the widest the window could grow to, which
+ *  the screen bounds, and a margin. Past that the editor is capped anyway. */
+const probeCells = () => (typeof window === 'undefined'
+  ? Infinity
+  : Math.ceil(Math.max(window.innerWidth, window.screen.width) / PROBE_MIN_CELL_PX) + PROBE_MARGIN_CELLS);
 
 /** Each format's few longest lines, each beside its own gutter, unwrapped in
  *  the `w-max` probe: the widest of them is the editor's natural width. */
 const WidthProbe = memo(function WidthProbe({ renderings }: { renderings: FormatRenderings }) {
+  const cells = probeCells();
   return Object.entries(renderings).map(([format, rendering]) => {
-    const lines = previewLines(rendering);
-    const gutterCh = String(lines.length).length;
-    const longest = lines.map((pieces, n) => ({ pieces, n })).sort((a, b) => lineWeight(b.pieces) - lineWeight(a.pieces)).slice(0, PROBE_LINES);
+    const { lines, gutterCh } = previewLines(rendering);
     return (
       <div key={format} className={PREVIEW_LINES_CLASS}>
-        {longest.map(({ pieces, n }) => <PreviewRow key={n} n={n} gutterCh={gutterCh} pieces={pieces} onFlip={noFlip} />)}
+        {heaviestLines(lines, PROBE_LINES).map(({ pieces, n }) => (
+          <PreviewRow key={n} n={n} gutterCh={gutterCh} pieces={cutToCells(pieces, cells)} onFlip={noFlip} />
+        ))}
       </div>
     );
   });

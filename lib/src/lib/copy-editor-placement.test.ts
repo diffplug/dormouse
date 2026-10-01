@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GAP_PX, placeCopyEditor, selectionBand, type Band, type CopyEditorPlacementInput, type CopyEditorSide } from './copy-editor-placement';
 import type { Span } from './copy-text';
 import type { RingRect } from './rect-tween';
 import type { TerminalOverlayDims } from './terminal-store';
 
 // A 1200×800 window: usable bounds are inset 12px, so x 12..1188 and y 12..788.
-const VIEWPORT = { left: 0, top: 0, right: 1200, bottom: 800 };
+const VIEWPORT = { left: 0, top: 0, right: 1200, bottom: 800, width: 1200, height: 800 };
+/** A pane filling the window. */
+const FULL = { left: 0, top: 0, width: 1200, height: 800 };
 // A 600px pane with 300px either side; floor width 592, left edge 304.
 const PANE = { left: 300, top: 100, width: 600, height: 600 };
 // Room below 424, room above 284: a 200px editor fits either way.
@@ -32,9 +34,9 @@ describe('placeCopyEditor', () => {
     ['the roomier side', { pane: { ...COLUMN, left: 700, width: 200 }, band: TALL, naturalWidth: 150 }, 'left', { left: 504, top: 20, width: 192, height: 200 }],
     ['a side as wide as its region', { pane: { ...COLUMN, left: 700, width: 300 }, band: TALL, naturalWidth: 1000 }, 'left', { left: 12, top: 20, width: 684, height: 200 }],
     ['a side top clamped into the window', { pane: COLUMN, band: { top: 700, bottom: 780 }, naturalWidth: 300, naturalHeight: () => 700 }, 'right', { left: 804, top: 88, width: 384, height: 700 }],
-    ['squished below, the roomier side', { pane: { left: 0, top: 0, width: 1200, height: 800 }, band: { top: 300, bottom: 450 }, naturalHeight: () => 500 }, 'squish-below', { left: 12, top: 454, width: 1176, height: 334 }],
-    ['squished above, the roomier side', { pane: { left: 0, top: 0, width: 1200, height: 800 }, band: { top: 350, bottom: 500 }, naturalHeight: () => 500 }, 'squish-above', { left: 12, top: 12, width: 1176, height: 334 }],
-    ['the overlay, docked at the pane bottom', { pane: { left: 0, top: 0, width: 1200, height: 800 }, band: { top: 100, bottom: 700 }, naturalHeight: () => 400 }, 'overlay', { left: 12, top: 384, width: 1176, height: 400 }],
+    ['squished below, the roomier side', { pane: FULL, band: { top: 300, bottom: 450 }, naturalHeight: () => 500 }, 'squish-below', { left: 12, top: 454, width: 1176, height: 334 }],
+    ['squished above, the roomier side', { pane: FULL, band: { top: 350, bottom: 500 }, naturalHeight: () => 500 }, 'squish-above', { left: 12, top: 12, width: 1176, height: 334 }],
+    ['the overlay, docked at the pane bottom', { pane: FULL, band: { top: 100, bottom: 700 }, naturalHeight: () => 400 }, 'overlay', { left: 12, top: 384, width: 1176, height: 400 }],
   ])('places %s', (_name, input, side, rect) => {
     expect(place(input)).toEqual({ side, rect });
   });
@@ -43,6 +45,17 @@ describe('placeCopyEditor', () => {
     expect(place({ touch: true }).side).toBe('above');
     expect(place({ touch: true, band: { top: 200, bottom: 360 } }).side).toBe('below');
     expect(place({ touch: true, pane: COLUMN, band: TALL, naturalWidth: 300 }).side).toBe('right');
+  });
+
+  it('measures a side only when neither natural spot fits, or while a side is held', () => {
+    const naturalHeight = vi.fn(() => 200);
+    // Below fits, and the right side has room for a 300px line.
+    expect(place({ pane: COLUMN, naturalWidth: 300, naturalHeight }).side).toBe('below');
+    expect(naturalHeight.mock.calls).toEqual([[392]]);
+    naturalHeight.mockClear();
+    // Held, both sides are measured, though below has room to spare and wins.
+    expect(place({ pane: COLUMN, naturalWidth: 300, naturalHeight, previous: 'right' }).side).toBe('below');
+    expect(naturalHeight.mock.calls).toEqual([[392], [384], [384]]);
   });
 
   it('rejects a side too narrow for the editor', () => {
@@ -55,9 +68,8 @@ describe('placeCopyEditor', () => {
   });
 
   it('caps the overlay at 60% of the window and keeps it inside', () => {
-    const full = { left: 0, top: 0, width: 1200, height: 800 };
-    expect(place({ pane: full, band: { top: 100, bottom: 700 }, naturalHeight: () => 1000 }).rect.height).toBeCloseTo(776 * 0.6, 6);
-    const short = place({ viewport: { ...VIEWPORT, bottom: 200 }, pane: { ...full, height: 100 }, band: { top: 0, bottom: 100 } });
+    expect(place({ pane: FULL, band: { top: 100, bottom: 700 }, naturalHeight: () => 1000 }).rect.height).toBeCloseTo(776 * 0.6, 6);
+    const short = place({ viewport: { ...VIEWPORT, bottom: 200, height: 200 }, pane: { ...FULL, height: 100 }, band: { top: 0, bottom: 100 } });
     expect(short.side).toBe('overlay');
     expect(short.rect.top).toBe(12);
     expect(short.rect.height).toBeCloseTo(176 * 0.6, 6);
@@ -77,7 +89,7 @@ describe('placeCopyEditor', () => {
   });
 
   it('switches squish sides only when the other is roomier by the hysteresis', () => {
-    const squished = { pane: { left: 0, top: 0, width: 1200, height: 800 }, naturalHeight: () => 500 };
+    const squished = { pane: FULL, naturalHeight: () => 500 };
     // Below 334, above 314.
     expect(place({ ...squished, band: { top: 330, bottom: 450 } }).side).toBe('squish-below');
     expect(place({ ...squished, band: { top: 330, bottom: 450 }, previous: 'squish-above' }).side).toBe('squish-above');
@@ -107,8 +119,7 @@ describe('placeCopyEditor', () => {
   it('yields the overlay as soon as anything else fits', () => {
     // Below fits with no spare at all.
     expect(place({ band: { top: 300, bottom: 584 }, previous: 'overlay' }).side).toBe('below');
-    const full = { left: 0, top: 0, width: 1200, height: 800 };
-    expect(place({ pane: full, band: { top: 300, bottom: 450 }, naturalHeight: () => 500, previous: 'overlay' }).side).toBe('squish-below');
+    expect(place({ pane: FULL, band: { top: 300, bottom: 450 }, naturalHeight: () => 500, previous: 'overlay' }).side).toBe('squish-below');
   });
 
   it('floors the width at the pane, caps it at the natural width, and clamps it to the window', () => {
@@ -121,7 +132,7 @@ describe('placeCopyEditor', () => {
 
   it('places inside an offset visual viewport', () => {
     // The keyboard is up and the page is scrolled: usable y 312..688, x 62..428.
-    const viewport = { left: 50, top: 300, right: 440, bottom: 700 };
+    const viewport = { left: 50, top: 300, right: 440, bottom: 700, width: 390, height: 400 };
     const pane = { left: 50, top: 250, width: 390, height: 500 };
     // Above has 84px, too short; below has 244.
     expect(place({ viewport, pane, band: { top: 400, bottom: 440 }, naturalWidth: 200, naturalHeight: () => 150, touch: true }))

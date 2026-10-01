@@ -11,6 +11,7 @@ import {
 import { cfg } from '../../cfg';
 import { motionIsInstant } from '../../lib/ui-geometry';
 import {
+  rectsEqual,
   retargetRingTween,
   sampleRingTween,
   sampleRingVelocity,
@@ -94,9 +95,6 @@ function measureFrame(el: HTMLElement, kind: WallSelectionKind): RingFrame | nul
 function ringIdentity(type: WallSelectionKind, id: string): string {
   return `${type}:${id}`;
 }
-
-const rectsEqual = (a: RingRect, b: RingRect) =>
-  a.top === b.top && a.left === b.left && a.width === b.width && a.height === b.height;
 
 function framesEqual(a: RingFrame, b: RingFrame): boolean {
   return (

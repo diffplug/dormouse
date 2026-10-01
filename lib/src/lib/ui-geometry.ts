@@ -41,6 +41,13 @@ export function subscribeOverlayViewport(listener: () => void): () => void {
   return () => controller.abort();
 }
 
+/** `viewport` less `OVERLAY_VIEWPORT_MARGIN_PX` on every side: where a fixed
+ *  overlay may sit. */
+export function insetOverlayBounds(viewport: { left: number; top: number; right: number; bottom: number }) {
+  const margin = OVERLAY_VIEWPORT_MARGIN_PX;
+  return { left: viewport.left + margin, top: viewport.top + margin, right: viewport.right - margin, bottom: viewport.bottom - margin };
+}
+
 /** Clamp a fixed-position overlay so it stays inside the viewport with a margin. */
 export function clampOverlayPosition({ left, top, width, height }: {
   left: number;
@@ -48,16 +55,13 @@ export function clampOverlayPosition({ left, top, width, height }: {
   width: number;
   height: number;
 }): CSSProperties {
-  const margin = OVERLAY_VIEWPORT_MARGIN_PX;
-  const viewport = overlayViewportBounds();
-  const minLeft = viewport.left + margin;
-  const minTop = viewport.top + margin;
-  const maxLeft = Math.max(minLeft, viewport.right - width - margin);
-  const maxTop = Math.max(minTop, viewport.bottom - height - margin);
+  const bounds = insetOverlayBounds(overlayViewportBounds());
+  const maxLeft = Math.max(bounds.left, bounds.right - width);
+  const maxTop = Math.max(bounds.top, bounds.bottom - height);
 
   return {
     position: 'fixed',
-    left: Math.min(Math.max(left, minLeft), maxLeft),
-    top: Math.min(Math.max(top, minTop), maxTop),
+    left: Math.min(Math.max(left, bounds.left), maxLeft),
+    top: Math.min(Math.max(top, bounds.top), maxTop),
   };
 }
