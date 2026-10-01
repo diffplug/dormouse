@@ -79,6 +79,17 @@ describe('a terminal resize', () => {
     expect(terminal.markers).toHaveLength(2);
   });
 
+  it('keeps per-break edits when only the height changes', async () => {
+    const terminal = await paneWith('resize-3', 'aaaa bbbb cccc dddd eeee ffff\r\n');
+    setSelection('resize-3', finalizedSelection({ startRow: 0, startCol: 6, endRow: 1, endCol: 1 }));
+    openCopyEditor('resize-3', terminal);
+    flipCopyBreak('resize-3', 0, 'keep');
+    const { overrides } = getMouseSelectionState('resize-3').copyEditor!;
+
+    terminal.resize(20, 6);
+    expect(getMouseSelectionState('resize-3').copyEditor!.overrides).toEqual(overrides);
+  });
+
   it('still cancels a block selection, one the program owns, and one whose copy is confirming', async () => {
     const terminal = await paneWith('resize-2', 'aaaa bbbb cccc dddd eeee ffff\r\n');
     const resizeCancels = (over: Partial<Selection>, flashing = false) => {

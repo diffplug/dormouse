@@ -39,12 +39,14 @@ export function openCopyEditor(id: string, terminal: Terminal | undefined = regi
 
 /** The editor over `span` after a resize's reflow, read afresh because the
  *  old buffer's rows are stale (spec §3.4): its format, its scope by label
- *  when that remains, and no per-break edits, whose indices move with the
- *  soft wraps. */
+ *  when that remains, and its per-break edits only when the width held, since
+ *  their indices move with the soft wraps. */
 export function refollowCopyEditor(editor: CopyEditorState, terminal: Terminal, span: Span): CopyEditorState {
   const next = editorFor(terminalCopyBuffer(terminal), span, editor.format);
   const label = editor.scopes[editor.scope].label;
-  return { ...next, scope: Math.max(0, next.scopes.findIndex((s) => s.label === label)) };
+  const scope = next.scopes.findIndex((s) => s.label === label);
+  const sameBreaks = scope >= 0 && editor.buffer.cols === terminal.cols;
+  return { ...next, scope: Math.max(0, scope), overrides: sameBreaks ? editor.overrides : {} };
 }
 
 export type FormatRenderings = Partial<Record<EditorFormat, Rendering>>;

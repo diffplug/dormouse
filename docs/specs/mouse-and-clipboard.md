@@ -89,7 +89,7 @@ A selection is anchored to the characters under it, not to screen coordinates: s
 
 - **Pure scroll** — vertical translation with no character changes — carries the selection along; coordinate math only, no matching.
 - **Content change:** any change to a cell the finalized selection overlaps cancels it immediately; repaints elsewhere on screen are irrelevant. A text snapshot, retaken whenever the selection is finalized or moved (§4.3), is compared on each xterm render; **never add a partial-match or content-tracking heuristic** — cancel-on-change is the rule (§9.1).
-- **Terminal resize** carries a finalized linewise selection Dormouse owns through xterm's reflow, each edge as a cell offset into its logical line (rationale). Its editor stays open in the same format and same-labeled scope, else As selected; per-break edits drop.
+- **Terminal resize** carries a finalized linewise selection Dormouse owns through xterm's reflow, each edge as a cell offset into its logical line (rationale). Its editor stays open in the same format and same-labeled scope, else As selected; per-break edits drop unless the width held.
   - **Must cancel if an edge's line was trimmed or its cells, soft wraps joined, no longer read as the selected text** (rationale).
   - **Must cancel block, program-owned (§3.8), alternate-buffer, dragging, and copy-confirming selections.**
 
