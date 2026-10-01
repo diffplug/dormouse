@@ -15,8 +15,8 @@ import {
   setHintToken,
   setSelection,
   type Selection,
-  type TokenHint,
 } from '../lib/mouse-selection';
+import type { BufferToken } from '../lib/smart-token';
 import { TERMINAL_BOTTOM_RADIUS_CLASS } from '../components/design';
 import { TouchUiContext } from '../components/touch-ui-context';
 import { settleTerminals, waitForCondition } from './settle-terminals';
@@ -30,7 +30,7 @@ function SelectionOverlayStory({
 }: {
   id: string;
   selection: Omit<Selection, 'startedInScrollback'>;
-  hintToken?: TokenHint | null;
+  hintToken?: BufferToken | null;
   touch?: boolean;
 }) {
   const terminalHostRef = useRef<HTMLDivElement>(null);

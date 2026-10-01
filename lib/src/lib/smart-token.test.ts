@@ -8,6 +8,16 @@ const bufferOf = (lines: readonly IBufferLine[], wrapped: readonly number[] = []
   ({ length: lines.length, getLine: (r: number) => lines[r] && { ...lines[r], isWrapped: wrapped.includes(r) } }) as unknown as IBuffer;
 const cellsOf = (text: string) => [...text].map((c): [string, number] => [c, 1]);
 
+/** `buffer`, recording each row whose cells a read touches, and how many. */
+function spied(buffer: IBuffer) {
+  const reads: number[] = [];
+  const getLine = (r: number) => {
+    const line = buffer.getLine(r);
+    return line && { ...line, getCell: (c: number) => (reads.push(r), line.getCell(c)) };
+  };
+  return { buffer: { length: buffer.length, getLine } as unknown as IBuffer, reads };
+}
+
 function at(line: string, anchor: string) {
   const col = line.indexOf(anchor);
   return detectTokenAt(line, col);
@@ -41,6 +51,32 @@ describe('detectTokenInBuffer', () => {
     expect(detectTokenInBuffer(fakeXterm(rows, { cols: 20, wrapped: [0, 1, 2] }).buffer.active, 0, 8)).toEqual(token);
     // A row the program ended is whitespace.
     expect(detectTokenInBuffer(fakeXterm(rows, { cols: 20 }).buffer.active, 1, 2)).toBeNull();
+  });
+
+  it('reads a row a soft wrap joins only when the token runs into it', () => {
+    const rows = ['aaaa bbbb cccc ddddd', 'x https://a.co/b yyy', 'eeee ffff gggg hhhhh'];
+    const inside = spied(fakeXterm(rows, { cols: 20, wrapped: [1, 2] }).buffer.active);
+    expect(detectTokenInBuffer(inside.buffer, 1, 5)).toMatchObject({ text: 'https://a.co/b', start: { row: 1, col: 2 }, end: { row: 1, col: 15 } });
+    expect(new Set(inside.reads)).toEqual(new Set([1]));
+    rows[1] = 'see https://a.co/bbb';
+    rows[2] = 'ccc dddd eeee ffffff';
+    const below = spied(fakeXterm(rows, { cols: 20, wrapped: [1, 2] }).buffer.active);
+    expect(detectTokenInBuffer(below.buffer, 1, 5)).toMatchObject({ text: 'https://a.co/bbbccc', start: { row: 1, col: 4 }, end: { row: 2, col: 2 } });
+    expect(new Set(below.reads)).toEqual(new Set([1, 2]));
+  });
+
+  it('reads only the cell under the pointer when it is blank or unchanged', () => {
+    const rows = ['see https://a.co/bbb'];
+    const { buffer, reads } = spied(fakeXterm(rows, { cols: 20 }).buffer.active);
+    expect(detectTokenInBuffer(buffer, 0, 3)).toBeNull();
+    expect(reads).toHaveLength(1);
+    const token = detectTokenInBuffer(buffer, 0, 12);
+    reads.length = 0;
+    expect(detectTokenInBuffer(buffer, 0, 12)).toBe(token);
+    expect(reads).toHaveLength(1);
+    // A new character under the pointer is read afresh.
+    rows[0] = 'see https://b.co/bbb';
+    expect(detectTokenInBuffer(buffer, 0, 12)?.text).toBe('https://b.co/bbb');
   });
 
   it('skips the blank a wide character leaves when it wraps', () => {

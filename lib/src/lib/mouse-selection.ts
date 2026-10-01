@@ -1,7 +1,7 @@
 /** DOM-free per-terminal mouse/selection store with a
  * `useSyncExternalStore`-compatible subscription API. */
 
-import type { BreakKind, CopyBuffer, EditorFormat, Scope } from './copy-text';
+import { comparePos, type BreakKind, type CopyBuffer, type EditorFormat, type Scope } from './copy-text';
 import type { BufferToken } from './smart-token';
 
 export type MouseTrackingMode = 'none' | 'x10' | 'vt200' | 'drag' | 'any';
@@ -39,9 +39,6 @@ export interface Selection {
   startedInScrollback: boolean;
 }
 
-/** The token under a drag's head, in absolute buffer rows. */
-export type TokenHint = BufferToken;
-
 /** The copy editor over a finalized selection (spec §4). */
 export interface CopyEditorState {
   /** The buffer read when the editor opened, so what it shows is what it
@@ -62,7 +59,8 @@ export interface MouseSelectionState {
   bracketedPaste: boolean;
   override: OverrideState;
   selection: Selection | null;
-  hintToken: TokenHint | null;
+  /** The token under a drag's head, in absolute buffer rows. */
+  hintToken: BufferToken | null;
   /** Open while non-null: always the editor written with this exact
    *  `selection`, which is finalized. */
   copyEditor: CopyEditorState | null;
@@ -287,11 +285,11 @@ export function stateRequiresNativeMouseSuppression(state: MouseSelectionState):
  * toward whichever token boundary is farther from the anchor so the drag
  * direction is respected.
  */
-export function extendSelectionToToken(id: string, token: TokenHint): void {
+export function extendSelectionToToken(id: string, token: BufferToken): void {
   const s = states.get(id);
   if (!s?.selection?.dragging) return;
   const sel = s.selection;
-  const forward = sel.startRow < token.start.row || (sel.startRow === token.start.row && sel.startCol <= token.start.col);
+  const forward = comparePos({ row: sel.startRow, col: sel.startCol }, token.start) <= 0;
   const edge = forward ? token.end : token.start;
   s.selection = { ...sel, endRow: edge.row, endCol: edge.col };
   notify();
@@ -319,9 +317,14 @@ export function flashCopy(id: string, kind: EditorFormat, durationMs = 700): voi
   }, durationMs);
 }
 
-export function setHintToken(id: string, hint: TokenHint | null): void {
+const sameToken = (a: BufferToken | null, b: BufferToken | null) => a === b || (!!a && !!b
+  && a.kind === b.kind && a.text === b.text && comparePos(a.start, b.start) === 0 && comparePos(a.end, b.end) === 0);
+
+/** Set the drag's token hint. Every drag move sets it, and a write rebuilds
+ *  every pane's snapshot, so the same token writes nothing. */
+export function setHintToken(id: string, hint: BufferToken | null): void {
   const s = ensure(id);
-  if (s.hintToken === null && hint === null) return;
+  if (sameToken(s.hintToken, hint)) return;
   s.hintToken = hint;
   notify();
 }

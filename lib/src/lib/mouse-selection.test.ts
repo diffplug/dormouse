@@ -20,8 +20,8 @@ import {
   subscribeToMouseSelection,
   updateDrag,
   type Selection,
-  type TokenHint,
 } from './mouse-selection';
+import type { BufferToken } from './smart-token';
 
 afterEach(() => {
   __resetMouseSelectionForTests();
@@ -124,12 +124,25 @@ describe('mouse-selection: state setters', () => {
   });
 
   it('setHintToken stores a hint', () => {
-    const hint: TokenHint = { kind: 'url', start: { row: 1, col: 0 }, end: { row: 1, col: 18 }, text: 'https://example.com' };
+    const hint: BufferToken = { kind: 'url', start: { row: 1, col: 0 }, end: { row: 1, col: 18 }, text: 'https://example.com' };
     setHintToken('a', hint);
     expect(getMouseSelectionState('a').hintToken).toBe(hint);
 
     setHintToken('a', null);
     expect(getMouseSelectionState('a').hintToken).toBeNull();
+  });
+
+  it('setHintToken writes nothing for the token it already holds', () => {
+    const hint: BufferToken = { kind: 'url', start: { row: 1, col: 0 }, end: { row: 1, col: 18 }, text: 'https://example.com' };
+    setHintToken('a', hint);
+    const listener = vi.fn();
+    subscribeToMouseSelection(listener);
+    // Each drag move detects the token afresh: an equal object.
+    setHintToken('a', { ...hint, start: { ...hint.start }, end: { ...hint.end } });
+    expect(listener).not.toHaveBeenCalled();
+    expect(getMouseSelectionState('a').hintToken).toBe(hint);
+    setHintToken('a', { ...hint, end: { row: 1, col: 17 } });
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it('removeMouseSelectionState drops all state for an id', () => {
@@ -142,7 +155,7 @@ describe('mouse-selection: state setters', () => {
 
 describe('mouse-selection: smart extension', () => {
   // A URL a soft wrap carries from row 3 onto row 4.
-  const token: TokenHint = { kind: 'url', start: { row: 3, col: 50 }, end: { row: 4, col: 9 }, text: 'https://example.com/a/b' };
+  const token: BufferToken = { kind: 'url', start: { row: 3, col: 50 }, end: { row: 4, col: 9 }, text: 'https://example.com/a/b' };
 
   it('moves the end to the token edge away from the anchor, across rows', () => {
     beginDrag('a', { row: 3, col: 10, altKey: false, startedInScrollback: false });
@@ -154,6 +167,11 @@ describe('mouse-selection: smart extension', () => {
     updateDrag('a', { row: 4, col: 5, altKey: false });
     extendSelectionToToken('a', token);
     expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 4, startCol: 30, endRow: 3, endCol: 50 });
+
+    // An anchor on the token's first cell reads as a forward drag.
+    beginDrag('a', { row: 3, col: 50, altKey: false, startedInScrollback: false });
+    extendSelectionToToken('a', token);
+    expect(getMouseSelectionState('a').selection).toMatchObject({ startRow: 3, startCol: 50, endRow: 4, endCol: 9 });
   });
 });
 
