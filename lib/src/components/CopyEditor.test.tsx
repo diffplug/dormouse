@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { act } from 'react';
+import { act, StrictMode, type ReactElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,9 +9,13 @@ vi.mock('../lib/copy-selection', () => ({ copySelection: vi.fn() }));
 vi.mock('../lib/platform', () => ({ IS_MAC: true }));
 // The registry barrel boots xterm; the editor only reads the measured grid.
 vi.mock('../lib/terminal-registry', () => ({ getTerminalOverlayDims: vi.fn() }));
+// jsdom lays nothing out: the editor's natural size is each test's to set.
+vi.mock('./copy-editor-measure', () => ({ measureNaturalWidth: vi.fn(), createHeightMeasurer: vi.fn() }));
+import { cfg } from '../cfg';
 import { copySelection } from '../lib/copy-selection';
-import { openCopyEditor } from '../lib/copy-editor';
+import { followCopySelection, openCopyEditor } from '../lib/copy-editor';
 import { CLAUDE_REPLY, fakeXterm } from '../lib/copy-text-fixtures';
+import { anchoredTarget } from '../lib/dom';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
@@ -24,20 +28,23 @@ import {
 } from '../lib/mouse-selection';
 import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { CopyEditor } from './CopyEditor';
+import { createHeightMeasurer, measureNaturalWidth } from './copy-editor-measure';
 import { TouchUiContext } from './touch-ui-context';
-import { WorkspaceActiveContext } from './wall/wall-context';
+import { createWorkspaceMotion } from './workspace-motion';
+import { LayoutFramesContext, WorkspaceActiveContext, ZoomedIdContext } from './wall/wall-context';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
-// A forty-row viewport over ten scrollback lines, so a scroll moves the editor
-// by whole cells.
+// A forty-row grid of 10px cells in an 800×400 pane at (100, 50), in jsdom's
+// 1024×768 window: the usable viewport is 12..1012 × 12..756. Rows 2..5 band
+// y 70..110, so below starts at 114, and the pane's left plus the gap is 104.
 const DIMS = {
   cols: 80,
   rows: 40,
   viewportY: 0,
   baseY: 10,
-  elementLeft: 0,
-  elementTop: 0,
+  elementLeft: 100,
+  elementTop: 50,
   elementWidth: 800,
   elementHeight: 400,
   cellWidth: 10,
@@ -49,12 +56,39 @@ const DIMS = {
 let container: HTMLDivElement;
 let root: Root;
 let dims: typeof DIMS;
+/** The editor's measured size: its longest line, and its height at any width. */
+let natural: { width: number; height: number };
 const terminal = fakeXterm(CLAUDE_REPLY);
 
-const editor = () => container.querySelector<HTMLElement>('[data-copy-editor-for="term-1"]');
-const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent === label)!;
+// Fake clock + rAF, as rect-motion.test.ts: frames run only when a test flushes them.
+let clock = 0;
+let rafSeq = 0;
+let rafCbs: Map<number, FrameRequestCallback>;
+let realNow: () => number;
+let realRaf: typeof requestAnimationFrame;
+let realCaf: typeof cancelAnimationFrame;
+let previousAnimate: boolean;
+let resizeObservers: Set<() => void>;
 
-function render(ui = <CopyEditor terminalId="term-1" />): void {
+/** Advance the clock and run the frames queued as of now. */
+function frame(ms = 16): void {
+  clock += ms;
+  const cbs = [...rafCbs.values()];
+  rafCbs.clear();
+  for (const cb of cbs) cb(clock);
+}
+
+const editor = () => document.body.querySelector<HTMLElement>('[data-copy-editor-for="term-1"]');
+const text = () => editor()?.textContent ?? '';
+const button = (label: string) => Array.from(editor()!.querySelectorAll('button')).find((b) => b.textContent === label)!;
+const side = () => editor()?.dataset.copyEditorSide;
+const box = () => {
+  const { left, top, width, height } = editor()!.style;
+  return { left, top, width, height };
+};
+const px = (left: number, top: number, width: number, height: number) => ({ left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px` });
+
+function render(ui: ReactElement = <CopyEditor terminalId="term-1" />): void {
   act(() => root.render(ui));
 }
 
@@ -71,8 +105,39 @@ function drag(r0: number, c0: number, r1: number, c1: number): void {
 beforeEach(() => {
   __resetMouseSelectionForTests();
   dims = { ...DIMS };
+  natural = { width: 300, height: 150 };
   vi.mocked(getTerminalOverlayDims).mockImplementation(() => dims);
+  vi.mocked(measureNaturalWidth).mockImplementation(() => natural.width);
+  vi.mocked(createHeightMeasurer).mockImplementation(() => () => natural.height);
   vi.mocked(copySelection).mockReset();
+
+  clock = 0;
+  rafSeq = 0;
+  rafCbs = new Map();
+  realNow = performance.now.bind(performance);
+  realRaf = globalThis.requestAnimationFrame;
+  realCaf = globalThis.cancelAnimationFrame;
+  performance.now = () => clock;
+  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+    const id = ++rafSeq;
+    rafCbs.set(id, cb);
+    return id;
+  }) as typeof requestAnimationFrame;
+  globalThis.cancelAnimationFrame = ((id: number) => { rafCbs.delete(id); }) as typeof cancelAnimationFrame;
+  // Position assertions read settled rects; the easing case turns motion back on.
+  previousAnimate = cfg.layout.animate;
+  cfg.layout.animate = false;
+  resizeObservers = new Set();
+  vi.stubGlobal('ResizeObserver', class {
+    private readonly fire: () => void;
+    constructor(callback: ResizeObserverCallback) {
+      this.fire = () => callback([], this as unknown as ResizeObserver);
+    }
+    observe(): void { resizeObservers.add(this.fire); }
+    unobserve(): void {}
+    disconnect(): void { resizeObservers.delete(this.fire); }
+  });
+
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -81,6 +146,11 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  performance.now = realNow;
+  globalThis.requestAnimationFrame = realRaf;
+  globalThis.cancelAnimationFrame = realCaf;
+  cfg.layout.animate = previousAnimate;
+  vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
@@ -91,33 +161,225 @@ describe('CopyEditor: opening and placement', () => {
     expect(editor()).toBeNull();
   });
 
-  it('opens below a selection with room, and reanchors when it scrolls', () => {
+  it('opens below the selection on document.body, placed before any frame', () => {
     drag(2, 25, 5, 27);
     render();
-    expect(editor()?.style.top).toBe('64px');
-    dims.viewportY = 2;
-    act(() => bumpRenderTick());
-    expect(editor()?.style.top).toBe('44px');
+    expect(editor()!.parentElement).toBe(document.body);
+    expect(container.contains(editor())).toBe(false);
+    expect(side()).toBe('below');
+    // At least the pane's width less the gaps, though its lines are narrower.
+    expect(box()).toEqual(px(104, 114, 792, 150));
+    expect(editor()!.style.visibility).toBe('visible');
+    expect(rafCbs.size).toBe(0);
   });
 
-  it('opens above when there is more room there', () => {
+  it('grows to its longest line, held inside the window', () => {
+    natural.width = 950;
+    drag(2, 25, 5, 27);
+    render();
+    expect(box()).toEqual(px(62, 114, 950, 150));
+  });
+
+  it('opens above when below has no room', () => {
+    dims.elementTop = 350;
     drag(30, 0, 31, 5);
     render();
-    expect(editor()?.style.top).toBe('');
-    expect(editor()?.style.bottom).toBe('104px');
+    expect(side()).toBe('above');
+    expect(box()).toEqual(px(104, 496, 792, 150));
   });
 
-  it('docks over a selection that leaves no room beside it', () => {
-    drag(2, 0, 37, 5);
+  it.each([
+    // Pane x 400..600: 408px of room to its right, 384 to its left.
+    { left: 400, expected: 'right', x: 604, width: 300 },
+    // Pane x 600..800: 208px to its right, 584 to its left.
+    { left: 600, expected: 'left', x: 296, width: 300 },
+  ])('takes the roomier side of the pane beside a tall selection ($expected)', ({ left, expected, x, width }) => {
+    Object.assign(dims, { elementLeft: left, elementTop: 20, elementWidth: 200, elementHeight: 720, cellHeight: 18 });
+    drag(1, 0, 38, 5);
     render();
-    expect(editor()?.style.bottom).toBe('4px');
+    expect(side()).toBe(expected);
+    expect(box()).toEqual(px(x, 38, width, 150));
   });
 
-  it('prefers above on touch, clear of the thumb', () => {
+  it('squishes into the roomier of below and above when neither holds it whole', () => {
+    Object.assign(dims, { elementLeft: 0, elementTop: 0, elementWidth: 1024 });
+    natural.height = 700;
+    drag(10, 0, 11, 5);
+    render();
+    expect(side()).toBe('squish-below');
+    expect(box()).toEqual(px(12, 124, 1000, 632));
+  });
+
+  it('docks over the selection at the pane bottom when no spot has room', () => {
+    Object.assign(dims, { elementLeft: 0, elementTop: 0, elementWidth: 1024, elementHeight: 760, cellHeight: 19 });
+    drag(0, 0, 39, 5);
+    render();
+    expect(side()).toBe('overlay');
+    expect(box()).toEqual(px(12, 602, 1000, 150));
+  });
+
+  it('prefers above on touch, clear of the thumb, with no key hints', () => {
     drag(20, 0, 20, 40);
     render(<TouchUiContext.Provider value><CopyEditor terminalId="term-1" /></TouchUiContext.Provider>);
-    expect(editor()?.style.bottom).not.toBe('');
-    expect(container.textContent).not.toContain('[f]');
+    expect(side()).toBe('above');
+    expect(box()).toEqual(px(104, 96, 792, 150));
+    expect(text()).not.toContain('[f]');
+  });
+
+  it('moves off a wider scope whose band reaches it', () => {
+    // 20px rows from y 330: As selected bands rows 2..3, Paragraph rows 2..5,
+    // and a 320px editor fits below the first but only above the second.
+    Object.assign(dims, { elementTop: 330, rows: 20, cellHeight: 20 });
+    natural.height = 320;
+    drag(2, 30, 3, 20);
+    render();
+    expect(side()).toBe('below');
+    act(() => button('Paragraph').click());
+    expect(getMouseSelectionState('term-1').copyEditor?.scopes[getMouseSelectionState('term-1').copyEditor!.scope].label).toBe('Paragraph');
+    expect(side()).toBe('above');
+    expect(box()).toEqual(px(104, 46, 792, 320));
+  });
+});
+
+describe('CopyEditor: following its pane', () => {
+  it('re-places on the render tick, once a frame', () => {
+    drag(2, 25, 5, 27);
+    render();
+    dims.viewportY = 2;
+    act(() => { bumpRenderTick(); bumpRenderTick(); });
+    expect(rafCbs.size).toBe(1);
+    expect(editor()!.style.top).toBe('114px');
+    frame();
+    expect(editor()!.style.top).toBe('94px');
+  });
+
+  it('re-places on a Lath layout frame', () => {
+    const frames = new Set<(settled: boolean) => void>();
+    const subscribe = (cb: (settled: boolean) => void) => {
+      frames.add(cb);
+      return () => { frames.delete(cb); };
+    };
+    drag(2, 25, 5, 27);
+    render(<LayoutFramesContext.Provider value={subscribe}><CopyEditor terminalId="term-1" /></LayoutFramesContext.Provider>);
+    dims.elementTop = 80;
+    frames.forEach((cb) => cb(false));
+    frame();
+    expect(editor()!.style.top).toBe('144px');
+  });
+
+  it('stays open through a resize and re-places against the reflowed pane', () => {
+    drag(2, 25, 5, 27);
+    render();
+    dims.elementWidth = 600;
+    resizeObservers.forEach((fire) => fire());
+    frame();
+    expect(box()).toEqual(px(104, 114, 592, 150));
+    // The reflow carried the selection two rows down (spec §3.4).
+    act(() => followCopySelection('term-1', fakeXterm(CLAUDE_REPLY, { cols: 60 }), { start: { row: 4, col: 25 }, end: { row: 7, col: 27 }, block: false }));
+    expect(getMouseSelectionState('term-1').copyEditor).not.toBeNull();
+    expect(editor()!.style.top).toBe('134px');
+  });
+
+  it('eases a move from the displayed rect, after opening snapped', () => {
+    cfg.layout.animate = true;
+    drag(2, 25, 5, 27);
+    render();
+    expect(editor()!.style.top).toBe('114px');
+    dims.viewportY = 2;
+    act(() => bumpRenderTick());
+    frame(0);
+    frame(110);
+    const top = parseFloat(editor()!.style.top);
+    expect(top).toBeGreaterThan(94);
+    expect(top).toBeLessThan(114);
+    frame(220);
+    expect(editor()!.style.top).toBe('94px');
+  });
+
+  it('hides while its Wall travels, and shows again when the travel ends', () => {
+    drag(2, 25, 5, 27);
+    render(<div data-workspace-wall="ws"><CopyEditor terminalId="term-1" /></div>);
+    // The Workspace's own presentation motion transforms the Wall and reports each frame.
+    const travel = createWorkspaceMotion(container.querySelector<HTMLElement>('[data-workspace-wall]')!, 'ws');
+    expect(editor()!.style.visibility).toBe('visible');
+    void travel.collapse();
+    frame();
+    expect(editor()!.style.visibility).toBe('hidden');
+    expect(side()).toBeUndefined();
+    travel.expand(true);
+    frame();
+    expect(editor()!.style.visibility).toBe('visible');
+    expect(side()).toBe('below');
+    travel.dispose();
+  });
+
+  it('re-places on a window resize and a scroll outside it, never its own scroll', () => {
+    drag(2, 25, 5, 27);
+    render();
+    dims.viewportY = 2;
+    editor()!.querySelector('.overflow-auto')!.dispatchEvent(new Event('scroll'));
+    expect(rafCbs.size).toBe(0);
+    document.dispatchEvent(new Event('scroll'));
+    frame();
+    expect(editor()!.style.top).toBe('94px');
+    dims.viewportY = 0;
+    window.dispatchEvent(new Event('resize'));
+    frame();
+    expect(editor()!.style.top).toBe('114px');
+  });
+
+  it('hides under another pane’s zoom, not its own', () => {
+    drag(2, 25, 5, 27);
+    const zoomed = (id: string) => (
+      <ZoomedIdContext.Provider value={id}>
+        <div data-lath-leaf="term-1"><CopyEditor terminalId="term-1" /></div>
+      </ZoomedIdContext.Provider>
+    );
+    render(zoomed('other'));
+    expect(editor()!.style.visibility).toBe('hidden');
+    render(zoomed('term-1'));
+    expect(editor()!.style.visibility).toBe('visible');
+  });
+
+  it('hides while its pane is hidden, as a parked leaf or a Tool’s other face is', () => {
+    drag(2, 25, 5, 27);
+    const pane = (visibility?: 'hidden') => <div style={{ visibility }}><div><CopyEditor terminalId="term-1" /></div></div>;
+    render(pane());
+    expect(editor()!.style.visibility).toBe('visible');
+    render(pane('hidden'));
+    act(() => bumpRenderTick());
+    frame();
+    expect(editor()!.style.visibility).toBe('hidden');
+  });
+
+  it('survives StrictMode’s second run of its effects', () => {
+    drag(2, 25, 5, 27);
+    render(<StrictMode><CopyEditor terminalId="term-1" /></StrictMode>);
+    expect(box()).toEqual(px(104, 114, 792, 150));
+    expect(container.contains(anchoredTarget(button('Copy')) as Node)).toBe(true);
+    dims.viewportY = 2;
+    act(() => bumpRenderTick());
+    frame();
+    expect(editor()!.style.top).toBe('94px');
+  });
+});
+
+describe('CopyEditor: presses inside it belong to its pane', () => {
+  it('dismisses on a press outside, not inside, and keeps inside presses from the pane', () => {
+    const paneDown = vi.fn();
+    const paneMenu = vi.fn();
+    drag(2, 2, 5, 27);
+    render(<div onMouseDown={paneDown} onContextMenu={paneMenu}><CopyEditor terminalId="term-1" /></div>);
+    // DOM containment checks see the editor where its anchor sits.
+    expect(container.contains(anchoredTarget(button('Copy')) as Node)).toBe(true);
+    act(() => { button('Copy').dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    act(() => { editor()!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })); });
+    expect(getMouseSelectionState('term-1').selection).not.toBeNull();
+    expect(paneDown).not.toHaveBeenCalled();
+    expect(paneMenu).not.toHaveBeenCalled();
+    act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
+    expect(getMouseSelectionState('term-1').selection).toBeNull();
+    expect(editor()).toBeNull();
   });
 });
 
@@ -125,8 +387,8 @@ describe('CopyEditor: preview and controls', () => {
   it('previews Auto with a mark on every break', () => {
     drag(2, 2, 5, 27);
     render();
-    expect(container.textContent).toContain('final flush␣of the output');
-    expect(container.textContent).toContain('1 line');
+    expect(text()).toContain('final flush␣of the output');
+    expect(text()).toContain('1 line');
   });
 
   it('switches format from the segment and dims a format that adds nothing', () => {
@@ -135,7 +397,7 @@ describe('CopyEditor: preview and controls', () => {
     expect(button('Spaces').className).toContain('opacity-50');
     act(() => button('Exact').click());
     expect(getMouseSelectionState('term-1').copyEditor?.format).toBe('exact');
-    expect(container.textContent).toContain('4 lines');
+    expect(text()).toContain('4 lines');
   });
 
   it('flips one break from its mark and marks the format edited', () => {
@@ -146,12 +408,24 @@ describe('CopyEditor: preview and controls', () => {
     expect(button('Auto*')).toBeDefined();
   });
 
+  it('measures its width once per scope, never for a format or a flipped mark', () => {
+    drag(2, 27, 3, 5);
+    render();
+    const measured = vi.mocked(measureNaturalWidth).mock.calls.length;
+    act(() => button('Exact').click());
+    act(() => button('Auto').click());
+    act(() => button('␣').click());
+    expect(vi.mocked(measureNaturalWidth).mock.calls.length).toBe(measured);
+    act(() => button('Whole words').click());
+    expect(vi.mocked(measureNaturalWidth).mock.calls.length).toBe(measured + 1);
+  });
+
   it('expands from the scope segment and shows what it added', () => {
     drag(2, 27, 3, 5);
     render();
     act(() => button('Whole words').click());
     expect(getMouseSelectionState('term-1').copyEditor?.scope).toBe(1);
-    expect(container.textContent).toContain('expanded');
+    expect(text()).toContain('expanded');
   });
 
   it('copies from the button', () => {
@@ -159,15 +433,6 @@ describe('CopyEditor: preview and controls', () => {
     render();
     act(() => button('Copy').click());
     expect(copySelection).toHaveBeenCalledWith('term-1');
-  });
-
-  it('dismisses on a click outside, not inside', () => {
-    drag(2, 2, 5, 27);
-    render();
-    act(() => { editor()!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
-    expect(getMouseSelectionState('term-1').selection).not.toBeNull();
-    act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); });
-    expect(getMouseSelectionState('term-1').selection).toBeNull();
   });
 });
 
@@ -181,7 +446,7 @@ describe('CopyEditor: the program’s own copy', () => {
     render();
     act(() => button('From program').click());
     expect(getMouseSelectionState('term-1').copyEditor?.format).toBe('program');
-    expect(container.textContent).toContain('**The flake** comes from a race');
+    expect(text()).toContain('**The flake** comes from a race');
   });
 });
 
@@ -192,14 +457,14 @@ describe('CopyEditor: flash', () => {
   });
 
   it('dismisses immediately when the selection is canceled during the flash', () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     act(() => flashCopy('term-1', 'auto'));
     act(() => setSelection('term-1', null));
     expect(editor()).toBeNull();
   });
 
   it('keeps a newer copied selection for its own confirmation duration', () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     act(() => flashCopy('term-1', 'auto'));
     act(() => vi.advanceTimersByTime(400));
     drag(9, 4, 9, 20);
