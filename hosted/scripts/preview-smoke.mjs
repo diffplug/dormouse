@@ -61,6 +61,21 @@ export async function smokeRequest(fetcher, url, options, wait = delay, expected
   }
 }
 
+/**
+ * A Worker that is no account — the relay or voice — reports `sha` live from
+ * its health route; retries as `smokeRequest` does.
+ */
+export async function healthSmoke(origin, sha, fetcher = fetch) {
+  assert.equal(
+    new URL(origin).origin,
+    origin,
+    "Supply an exact origin without a trailing slash",
+  );
+  const health = await smokeRequest(fetcher, origin + "/api/health", {}, delay, sha);
+  assert.equal(health.status, 200, `${origin} must be healthy`);
+  assert.deepEqual(await health.json(), { ok: true, revision: sha });
+}
+
 export async function smoke(
   origin,
   sha,
@@ -262,14 +277,18 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const [origin, sha] = process.argv.slice(2);
+  const [origin, relayOrigin, voiceOrigin, sha] = process.argv.slice(2);
   assert.match(sha ?? "", /^[a-f0-9]{40}$/);
   // A just-uploaded Worker may take a short time to become reachable everywhere.
   for (let attempt = 1; ; attempt++) {
     try {
       await smoke(origin, sha, fetch, true);
-      await oneTimeSmoke(origin);
-      console.log(`Preview smoke checks passed: ${origin}/login (${sha})`);
+      await healthSmoke(relayOrigin, sha);
+      await oneTimeSmoke(relayOrigin);
+      await healthSmoke(voiceOrigin, sha);
+      console.log(
+        `Preview smoke checks passed: ${origin}/login, ${relayOrigin}/connect/, ${voiceOrigin} (${sha})`,
+      );
       break;
     } catch (error) {
       if (attempt === 6) throw error;

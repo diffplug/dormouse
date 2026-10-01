@@ -123,7 +123,7 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   Follow `DORMOUSE_RELAY_ORIGIN` from `scripts/relay-origin.mjs` into both host
   bundles and the standalone webview (`standalone/vite.config.ts`), then list
   every request a build baked with a non-default origin could make to
-  `dormouse.sh` or `hosted.dormouse.sh` — the one-time half of `service.ts`,
+  `dormouse.sh` or any of its subdomains (`hosted.`, `relay.`, `voice.`) — the one-time half of `service.ts`,
   `lib/src/host/managed-voice-host.ts`, `standalone/src/updater.ts` and the
   updater endpoint `standalone/scripts/tauri.mjs` overlays away, and anything
   else that fetches. A release build that accepts `DORMOUSE_RELAY_IS_HOSTED`

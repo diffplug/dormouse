@@ -71,6 +71,7 @@ hosted/.dev.vars*
 hosted/.wrangler/
 hosted/.pgstencil/
 hosted/dist-worker/
+hosted/dist-relay/
 
 # Storybook / Chromatic / Argos
 storybook-static/

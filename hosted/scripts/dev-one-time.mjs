@@ -7,9 +7,8 @@ import { ONE_TIME_BASE } from "../../lib/scripts/assert-pocket-worker.mjs";
 
 /**
  * The one-time rendezvous and phone page on loopback (`docs/specs/one-time.md`
- * -> "Dev loop"): the production Worker under `wrangler dev`, with its Durable
- * Object and rate limits and no Hyperdrive, serving the page `vite build
- * --watch` rebuilds. Root `pnpm dev:one-time`; inside Dormouse, `dor tool
+ * -> "Dev loop"): the relay Worker under `wrangler dev`, with its Durable
+ * Object and rate limits, serving the page `vite build --watch` rebuilds. Root `pnpm dev:one-time`; inside Dormouse, `dor tool
  * one-time`. A loopback bind is not an access control, and this needs none of
  * its own: the Worker's origin gate refuses any Host but the loopback origin,
  * and the routes' Origin rules are the deployed ones.
@@ -54,19 +53,19 @@ export function devOrigin(port) {
 
 /**
  * The Wrangler config the loop runs, written beside the staged page.
- * Allowlisted from `hosted/wrangler.jsonc` like the preview's: the production
+ * Allowlisted from `hosted/wrangler.relay.jsonc` like the preview's: the relay
  * entry, the rendezvous's Durable Object, migration, and rate limits, and the
- * assets binding over the staging folder — never a route, Hyperdrive, or a
- * secret, so it can neither answer for production nor reach a database.
+ * assets binding over the staging folder — never a route or a secret, so it
+ * cannot answer for production.
  */
 export function devConfig(base, port) {
   return {
-    name: `${base.name}-one-time-dev`,
-    main: "../../server/worker.ts",
+    name: `${base.name}-dev`,
+    main: "../../server/relay-worker.ts",
     compatibility_date: base.compatibility_date,
     compatibility_flags: base.compatibility_flags,
     assets: { ...base.assets, directory: "./assets" },
-    vars: { APP_ORIGIN: devOrigin(port), OAUTH_PROVIDERS: "" },
+    vars: { APP_ORIGIN: devOrigin(port) },
     durable_objects: base.durable_objects,
     migrations: base.migrations,
     ratelimits: base.ratelimits,
@@ -107,7 +106,7 @@ async function waitFor(what, ready, timeoutMs) {
 async function main() {
   const port = devPort(process.env);
   const origin = devOrigin(port);
-  const base = JSON.parse(readFileSync(resolve(hosted, "wrangler.jsonc"), "utf8"));
+  const base = JSON.parse(readFileSync(resolve(hosted, "wrangler.relay.jsonc"), "utf8"));
   const pageDir = resolve(devDir, "assets", PAGE_PATH.slice(1));
   // A page left by an earlier run would satisfy the first wait below.
   rmSync(devDir, { recursive: true, force: true });

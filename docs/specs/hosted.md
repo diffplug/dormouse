@@ -1,13 +1,26 @@
 # Dormouse Hosted accounts
 
 > See `docs/specs/glossary.md` for Burrow, Client, Relay, and Session vocabulary.
-> Owns the Hosted account application and the Worker's deployment. The one-time rendezvous it also serves belongs to `docs/specs/one-time.md` -> "Hosted rendezvous"; remote authorization to `docs/specs/remote-security-model.md`; the multi-tenant Relay remains in `docs/specs/relay.md` -> Future.
+> Owns the Hosted account application and the deployment of Hosted's three Workers. The one-time rendezvous the relay Worker serves belongs to `docs/specs/one-time.md` -> "Hosted rendezvous"; remote authorization to `docs/specs/remote-security-model.md`; the multi-tenant Relay remains in `docs/specs/relay.md` -> Future.
 
 ## Application boundary
 
-**Must serve the account frontend and its API from `https://hosted.dormouse.sh`.** The Hono Worker serves Vite assets and pgstencil's request-scoped Better Auth adapter. Requests addressed to another origin receive 421. Marketing remains a separate bundle and deployment; no marketing component is imported.
+**Must serve Hosted as three Workers from `hosted/`, one origin each:**
 
-The one-time rendezvous routes and `/connect/` page mount in this app (`docs/specs/one-time.md` -> "Hosted rendezvous", "Phone page"). Both bindings mappers pass its Durable Object and rate-limit bindings; `remote-lib-common` is compiled in from source through `hosted/tsconfig.json` `paths`, which every esbuild bundle and Wrangler honor.
+| Worker | Origin | Serves | Holds |
+|---|---|---|---|
+| `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, `/api/ready`, voice tokens | the login cookie, auth secrets, Hyperdrive |
+| `dormouse-relay` | `https://relay.dormouse.sh` | the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | `OneTimeRoom`, the one-time rate limits |
+| `dormouse-voice` | `https://voice.dormouse.sh` | speak and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
+
+Every Worker answers `/api/health`, 404s any other `/api/*`, `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. Only the account falls back to SPA assets.
+
+- **Must answer 421, before any route, to a request whose URL origin is not the Worker's `APP_ORIGIN`**, a sibling's included.
+- **Must hand routes only the bindings the Worker's mapper names**: no auth secret on the relay or voice, no Hyperdrive on the relay, no `ELEVENLABS_API_KEY` on the account.
+- **Never let the relay or voice Worker reach auth or the login cookie's origin**: Pocket and `/connect/` render untrusted terminal output (rationale).
+- **Must refuse, on every account cookie route, any `Origin` but the account's exactly**: sibling origins are same-site, so a browser sends them the `SameSite=Lax` login cookie.
+
+Marketing is a separate bundle and deployment. `remote-lib-common` is compiled in from source through `hosted/tsconfig.json` `paths`, which every esbuild bundle and Wrangler honor.
 
 **Must run committed Better Auth migrations before deploying code that needs them, never during a Worker request.** Postgres is reached through an uncached Hyperdrive binding. The runtime creates and closes its database pool within each request.
 
@@ -15,7 +28,7 @@ The one-time rendezvous routes and `/connect/` page mount in this app (`docs/spe
 
 **Must declare every peer dependency of the installed packages in `hosted/package.json`**, so they share Hosted's copy and Renovate updates them.
 
-Source of truth: `auth` in `hosted/server/worker.ts`; `workerApp` in `hosted/server/worker-app.ts`; `migrations` in `hosted/server/migrations.ts`; `verifyPackages` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/artifacts.test.ts`.
+Source of truth: `workerApp` in `hosted/server/worker-app.ts`; `accountApp` in `hosted/server/account-app.ts`; `hosted/server/relay-worker.ts`; `voiceApp` in `hosted/server/voice-app.ts`; `hosted/server/bindings.ts`; `hosted/wrangler.jsonc`, `hosted/wrangler.relay.jsonc`, `hosted/wrangler.voice.jsonc`; `migrations` in `hosted/server/migrations.ts`; `verifyPackages` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts`, and `hosted/server/tests/artifacts.test.ts`.
 
 ## Identity and login
 
@@ -47,7 +60,7 @@ Source of truth: `App` in `hosted/src/App.tsx`; `restoreTheme` in `hosted/src/ma
 
 ## Managed voice
 
-An admin-only test slice: Dormouse desktop exchanges a pasted voice token for ElevenLabs speech.
+An admin-only test slice: Dormouse desktop exchanges a pasted voice token for ElevenLabs speech. The account Worker serves the token routes; the voice Worker serves speak.
 
 | Route | Credential | Success |
 |---|---|---|
@@ -71,50 +84,50 @@ Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 
 5. 429 once the owner's UTC-day counter reaches 500. The increment is atomic and precedes the upstream call, so failed upstream attempts count.
 6. 502 when ElevenLabs throws or answers non-2xx.
 
-**Never log the text or forward an upstream body or status.** The upstream URL, model `eleven_flash_v2_5`, and format `mp3_44100_128` are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is a Worker secret that production preflight requires; the preview mapper never passes it. Only the local development entry substitutes silent MP3 when the key is unset. Tests fake ElevenLabs in Miniflare's outbound service, so no entry carries an upstream override.
+**Never log the text or forward an upstream body or status.** The upstream URL, model `eleven_flash_v2_5`, and format `mp3_44100_128` are fixed in code; no binding or request field redirects them. `ELEVENLABS_API_KEY` is the voice Worker's secret, which production preflight requires there; the voice preview mapper never passes it. Only the local development entry substitutes silent MP3 when the key is unset. Tests fake ElevenLabs in Miniflare's outbound service, so no entry carries an upstream override.
 
-**Must delete ElevenLabs speech history, which keeps each generation's text, from the production Worker only.** A successful speak schedules one sweep about 10 s later in `waitUntil`; a Cron Trigger every 5 minutes sweeps what that missed. No retention bound is guaranteed (rationale).
+**Must delete ElevenLabs speech history, which keeps each generation's text, from the production voice Worker only.** A successful speak schedules one sweep about 10 s later in `waitUntil`; a Cron Trigger every 5 minutes sweeps what that missed. No retention bound is guaranteed (rationale).
 
 - **Must use an ElevenLabs account dedicated to Dormouse voice.** A sweep deletes the whole account's history.
-- **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep, and the preview config drops `triggers`.
+- **Never touch the database or any binding but `ELEVENLABS_API_KEY` in a sweep**, so an idle deployment lets Postgres suspend. Without the key nothing runs; development and previews never sweep, and the preview configs drop `triggers`.
 - **Must bound each pass**; a backlog waits for the next pass. At most six deletes are in flight; a 404 counts as deleted; a failed delete never aborts the pass. Only counts and statuses are logged or thrown.
 - **Must fail the cron invocation when its pass cannot list or any delete fails; the after-speech pass only logs** (rationale).
 
-Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceRoutes` / `elevenLabs` / `sweepOnCron` / `sweepAfterSpeech` in `hosted/server/voice.ts`; `scheduled` in `hosted/server/worker-app.ts`; `triggers` in `hosted/wrangler.jsonc`; `hosted/server/dormouse-migrations/001_voice_tokens.sql`; `preflight` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/workers.test.ts`, `hosted/scripts/production.test.mjs`, and `hosted/scripts/preview.test.mjs`.
+Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceTokenRoutes` / `speakRoute` / `elevenLabs` / `sweepOnCron` / `sweepAfterSpeech` in `hosted/server/voice.ts`; `scheduled` in `hosted/server/voice-app.ts`; `triggers` in `hosted/wrangler.voice.jsonc`; `hosted/server/dormouse-migrations/001_voice_tokens.sql`; `preflight` in `hosted/scripts/production.mjs`. Pinned by `hosted/server/tests/workers.test.ts`, `hosted/server/tests/boundary.test.ts`, `hosted/scripts/production.test.mjs`, and `hosted/scripts/preview.test.mjs`.
 
 ## Development and release
 
-**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; the production entry imports no inbox or test-control handler. `dor tool one-time` runs the rendezvous and phone page on loopback, without a database (`docs/specs/one-time.md` -> "Dev loop").
+**Must run local development with `dor tool hosted` inside Dormouse.** A single `http://localhost:<port>` origin, bound to loopback on an OS-assigned port unless `PORT` pins one, serves Vite and Node auth, with a disposable development database, and mounts speak beside the token routes. Host, Origin, and Fetch Metadata checks guard the local captured-email inbox; no production entry imports an inbox or test-control handler. `dor tool one-time` runs the relay Worker on loopback, without a database (`docs/specs/one-time.md` -> "Dev loop").
 
-**Must verify the production Worker bundle and run the consumer's integration suite before release.** Root `pnpm test` runs the `hosted/scripts/*.test.mjs` deploy suites and `test:one-time`, the rendezvous's Miniflare suite, which needs no Docker; the rest of `pnpm test:hosted`'s vitest half needs Docker and is skipped there. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
+**Must verify the three production Worker bundles and run the consumer's integration suite before release.** Root `pnpm test` runs the `hosted/scripts/*.test.mjs` deploy suites and `test:miniflare`, the Docker-free Miniflare suites (the rendezvous, and the three Workers' boundary); the rest of `pnpm test:hosted`'s vitest half runs only there, `workers.test.ts` needing Docker. The test entry alone injects the packed Better Auth deterministic module. Simulated callbacks do not certify provider registrations; production acceptance requires real browser login with each enabled provider and email delivery.
 
 **Must keep production, test, and preview databases and credentials separate.** The development and preview entries are email-only. Production configuration and operator steps live in `hosted/README.md`.
 
-Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `hosted/server/tests/workers.test.ts`; `hosted/wrangler.jsonc`.
+Source of truth: `allowedDevRequest` in `hosted/server/dev-host-guard.ts`; `hosted/server/dev.ts`; `hosted/server/tests/workers.test.ts`; `build` in `hosted/package.json`.
 
 ## PR previews
 
 **Must deploy only verified same-repository PR merge revisions touching Hosted or its shared build inputs.** Drafts qualify; forks receive no deployment credentials. Changed paths include rename sources and all API pages. Deployment runs serialize per PR without cancellation; close/merge cleanup ignores path filtering and tolerates absent resources.
 
-**Must isolate each PR in a persistent Worker, uncached Hyperdrive, and Neon branch from an empty dedicated preview project.** Reuse `dormouse-hosted-pr-N` until close. The preview config excludes production routes and credentials; runtime bindings cannot enable OAuth or Postmark. **Must give each preview its own Durable Object namespace and preview-only rate-limit namespaces**, and delete its Worker with `force` so the namespace goes with it.
+**Must isolate each PR in three persistent workers.dev Workers (`dormouse-{hosted,relay,voice}-pr-N`), one uncached Hyperdrive the account and voice share, and a Neon branch from an empty dedicated preview project**, all reused until close. Preview configs exclude production routes, triggers, and credentials; runtime bindings cannot enable OAuth, Postmark, or ElevenLabs. **Must give each relay preview its own Durable Object namespace and preview-only rate-limit namespaces**, and delete every preview Worker with `force`. The smoke checks each Worker's revision and runs `oneTimeSmoke` on the relay.
 
 **Must run cleanup from the base branch's checkout, never the closed PR's.**
 
 **Must capture preview mail in Postgres and expose escaped text only.** The public inbox shows the newest 100 messages from the last 24 hours, prunes expired rows on capture, and accepts only the preview's configured origin. No test clock is deployed. Preview data is disposable; it is not access-controlled.
 
-Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workflows/hosted-preview.yml`; `previewConfig` / `cleanup` in `hosted/scripts/preview.mjs`; `postgresInbox` in `hosted/server/preview-inbox.ts`; `hosted/server/preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`, `hosted/scripts/changed.test.mjs`, and `hosted/server/tests/workers.test.ts`.
+Source of truth: `touchesHosted` in `hosted/scripts/changed.mjs`; `.github/workflows/hosted-preview.yml`; `previewConfigs` / `cleanup` in `hosted/scripts/preview.mjs`; `postgresInbox` in `hosted/server/preview-inbox.ts`; `hosted/server/preview-worker.ts`; `hosted/server/voice-preview-worker.ts`. Pinned by `hosted/scripts/preview.test.mjs`, `hosted/scripts/changed.test.mjs`, and `hosted/server/tests/workers.test.ts`.
 
 ## Production releases
 
-**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks both installed packages' clean, matching provenance; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and required Worker secret names. Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Production has no public candidate URL.
+**Must deploy only manually selected main revisions after Hosted tests/build and accepted clean package provenance.** `verifyPackages` checks both installed packages' clean, matching provenance; `productionConfig` holds each config to its Worker's name, entry, origin, and lone custom domain; preflight checks uncached Hyperdrive, matching migration/runtime database identity with distinct roles, and each Worker's own secret names (the voice's is `ELEVENLABS_API_KEY`; the relay has none). Back up, encrypt, decrypt, and restore-test before applying migrations; upload only the encrypted archive. Deploy account, relay, then voice, stopping at a failure. Production has no public candidate URL.
 
-**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so the deploy that adds a class is a rollback floor. A deploy restarts every room, dropping links still waiting or mid-handshake; a session already on its direct path never touches Hosted. Live verification runs `oneTimeSmoke` after the account smoke.
+**Must only append Durable Object migrations**: a deployed tag is never edited or removed, and Cloudflare refuses a rollback across one, so each is a rollback floor. The account keeps the `v1` that created `OneTimeRoom` and appends `v2` deleting it; the relay starts its own `v1`. **Must set `triggers.crons` to `[]` on a Worker with no schedule**: an absent `triggers` leaves a deployed one in place. A deploy restarts every room, dropping links still waiting or mid-handshake; a session already on its direct path never touches Hosted. Live verification checks each Worker's revision and runs `oneTimeSmoke` on the relay after the account smoke.
 
 **Must bound retries.** Health GETs require the selected revision, sharing six five-second retries for transport failures or healthy stale revisions. Retry rate-limited OAuth once; never replay POSTs after transport failures.
 
 **Must record an immutable annotated hosted/YYYY-MM-DD tag only after live verification.** Tags identify the deployed commit and verification run/attempt; retries are idempotent and redeployments get new tags. Dating and repeat-deployment suffixes: `recordDeployment`. Code rollback never reverses migrations.
 
-Source of truth: `.github/workflows/hosted-production.yml`; `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `hosted/scripts/production-backup.mjs`; `smokeRequest` in `hosted/scripts/preview-smoke.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs`, `hosted/scripts/smoke-request.test.mjs`, and `hosted/scripts/production-tag.test.mjs`.
+Source of truth: `.github/workflows/hosted-production.yml`; `productionConfig` / `verifyPackages` / `preflight` in `hosted/scripts/production.mjs`; `hosted/scripts/production-backup.mjs`; `smokeRequest` / `healthSmoke` in `hosted/scripts/preview-smoke.mjs`; `oneTimeSmoke` in `hosted/scripts/one-time-smoke.mjs`; `recordDeployment` in `hosted/scripts/production-tag.mjs`. Pinned by `hosted/scripts/production.test.mjs`, `hosted/scripts/smoke-request.test.mjs`, and `hosted/scripts/production-tag.test.mjs`.
 
 ## Future
 

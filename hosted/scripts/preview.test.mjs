@@ -4,13 +4,16 @@ import { readFile } from "node:fs/promises";
 import {
   previewName,
   previewConfig,
+  previewConfigs,
+  relayPreviewConfig,
+  readConfigs,
   hyperdriveOrigin,
   cloudflare,
   findHyperdrives,
   cleanup,
   previewRatelimitNamespace,
 } from "./preview.mjs";
-import { smoke } from "./preview-smoke.mjs";
+import { healthSmoke, smoke } from "./preview-smoke.mjs";
 
 const env = {
   PR_NUMBER: "42",
@@ -24,40 +27,67 @@ const env = {
 const result = (value, extra = {}) =>
   Response.json({ success: true, result: value, ...extra });
 
-test("preview configuration isolates the origin and excludes production bindings", async () => {
-  const base = JSON.parse(
-    await readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
-  );
-  const config = previewConfig(
+test("each preview configuration isolates its origin and excludes production bindings", async () => {
+  const bases = await readConfigs();
+  // Every production field a preview must never copy, added to each base.
+  const stale = (base) => ({
+    ...base,
+    routes: ["production.example/*"],
+    vars: { ...base.vars, GOOGLE_CLIENT_SECRET: "do-not-copy", ELEVENLABS_API_KEY: "do-not-copy" },
+    d1_databases: [{ production: true }],
+    triggers: { crons: ["* * * * *"] },
+  });
+  const configs = previewConfigs(
     {
-      ...base,
-      routes: ["production.example/*"],
-      vars: { GOOGLE_CLIENT_SECRET: "do-not-copy" },
-      d1_databases: [{ production: true }],
+      account: stale(bases.account),
+      relay: stale(bases.relay),
+      voice: stale(bases.voice),
     },
     env,
     "c".repeat(32),
   );
-  assert.equal(config.name, "dormouse-hosted-pr-42");
-  assert.equal(
-    config.vars.APP_ORIGIN,
-    "https://dormouse-hosted-pr-42.hosted-tests.workers.dev",
-  );
-  assert.equal(config.workers_dev, true);
-  assert.equal(config.main, "../../server/preview-worker.ts");
-  assert.equal(config.vars.EMAIL_FROM, undefined);
-  assert.equal(config.routes, undefined);
-  // Production alone sweeps ElevenLabs history; a preview has no cron.
-  assert.ok(base.triggers?.crons?.length);
-  assert.equal(config.triggers, undefined);
-  assert.equal(config.d1_databases, undefined);
-  assert.equal(config.vars.GOOGLE_CLIENT_SECRET, undefined);
-  assert.equal(config.assets.run_worker_first, true);
-  assert.deepEqual(config.durable_objects, base.durable_objects);
-  assert.deepEqual(config.migrations, base.migrations);
+  const expected = {
+    account: ["dormouse-hosted-pr-42", "../../server/preview-worker.ts"],
+    relay: ["dormouse-relay-pr-42", "../../server/relay-worker.ts"],
+    voice: ["dormouse-voice-pr-42", "../../server/voice-preview-worker.ts"],
+  };
+  for (const [worker, [name, main]] of Object.entries(expected)) {
+    const config = configs[worker];
+    assert.equal(config.name, name, worker);
+    assert.equal(config.main, main, worker);
+    assert.deepEqual(
+      config.vars,
+      {
+        APP_ORIGIN: `https://${name}.hosted-tests.workers.dev`,
+        BUILD_SHA: env.BUILD_SHA,
+      },
+      worker,
+    );
+    assert.equal(config.workers_dev, true, worker);
+    assert.equal(config.preview_urls, false, worker);
+    for (const key of ["routes", "triggers", "d1_databases", "observability"])
+      assert.equal(config[key], undefined, `${worker} ${key}`);
+  }
+  // Production alone sweeps ElevenLabs history, on the voice Worker; a preview has no cron.
+  assert.ok(bases.voice.triggers?.crons?.length);
+  // The account and voice previews share one database; the relay reaches none.
+  assert.deepEqual(configs.account.hyperdrive, [{ binding: "HYPERDRIVE", id: "c".repeat(32) }]);
+  assert.deepEqual(configs.voice.hyperdrive, configs.account.hyperdrive);
+  assert.equal(configs.relay.hyperdrive, undefined);
+  assert.equal(configs.account.assets.directory, "../../dist");
+  assert.equal(configs.relay.assets.directory, "../../dist-relay");
+  assert.equal(configs.voice.assets, undefined);
+  for (const worker of ["account", "relay"])
+    assert.equal(configs[worker].assets.run_worker_first, true, worker);
+  // The account's migrations, append-only, delete the class its Worker no longer implements.
+  assert.deepEqual(configs.account.migrations, bases.account.migrations);
+  assert.equal(configs.account.durable_objects, undefined);
+  assert.equal(configs.account.ratelimits, undefined);
+  assert.deepEqual(configs.relay.durable_objects, bases.relay.durable_objects);
+  assert.deepEqual(configs.relay.migrations, bases.relay.migrations);
   assert.deepEqual(
-    config.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
-    base.ratelimits.map(({ name, namespace_id }) => [
+    configs.relay.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
+    bases.relay.ratelimits.map(({ name, namespace_id }) => [
       name,
       String(Number(namespace_id) + 1000),
     ]),
@@ -66,11 +96,12 @@ test("preview configuration isolates the origin and excludes production bindings
     assert.throws(() => previewName(bad));
   assert.throws(() =>
     previewConfig(
-      base,
+      bases.account,
       { ...env, CLOUDFLARE_WORKERS_SUBDOMAIN: "example.com" },
       "c".repeat(32),
     ),
   );
+  assert.throws(() => previewConfigs(bases, env, "not-an-id"));
 });
 
 test("preview configuration keeps its own Durable Objects and rate-limit namespaces", () => {
@@ -78,7 +109,7 @@ test("preview configuration keeps its own Durable Objects and rate-limit namespa
     bindings: [{ name: "ROOM", class_name: "Room" }],
   };
   const migrations = [{ tag: "v1", new_sqlite_classes: ["Room"] }];
-  const config = previewConfig(
+  const config = relayPreviewConfig(
     {
       compatibility_date: "2026-01-01",
       assets: {},
@@ -89,7 +120,6 @@ test("preview configuration keeps its own Durable Objects and rate-limit namespa
       ],
     },
     env,
-    "c".repeat(32),
   );
   assert.deepEqual(config.durable_objects, durable_objects);
   assert.deepEqual(config.migrations, migrations);
@@ -235,13 +265,14 @@ test("cleanup only deletes this PR's resources and can run twice", async (t) => 
   await cleanup(env);
   existing = false;
   await cleanup(env);
+  const workers = ["dormouse-hosted-pr-42", "dormouse-relay-pr-42", "dormouse-voice-pr-42"];
   assert.deepEqual(
     removed.map((path) => path.split("/").pop()),
-    ["dormouse-hosted-pr-42", "ours", "br-ours", "dormouse-hosted-pr-42"],
+    [...workers, "ours", "br-ours", ...workers],
   );
   assert.deepEqual(
     forced,
-    [true, true],
+    Array(6).fill(true),
     "a Worker implementing a Durable Object is deleted with force",
   );
 });
@@ -318,4 +349,21 @@ test("deployment smoke rejects malformed health before making any auth requests"
     ),
   );
   assert.equal(requests, 1);
+});
+
+test("a relay or voice health check requires the deployed revision, and nothing else", async () => {
+  const origin = "https://dormouse-voice-pr-42.test.workers.dev";
+  const answering = (status, body) => async (url) => {
+    assert.equal(url, origin + "/api/health");
+    return Response.json(body, { status });
+  };
+  await healthSmoke(origin, env.BUILD_SHA, answering(200, { ok: true, revision: env.BUILD_SHA }));
+  await assert.rejects(
+    healthSmoke(origin, env.BUILD_SHA, answering(200, { ok: true, revision: env.BUILD_SHA, extra: 1 })),
+  );
+  await assert.rejects(
+    healthSmoke(origin, env.BUILD_SHA, answering(503, { ok: false })),
+    /must be healthy/,
+  );
+  await assert.rejects(healthSmoke(origin + "/", env.BUILD_SHA, answering(200, {})), /exact origin/);
 });

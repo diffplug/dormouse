@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       promote:
-        description: Deploy to hosted.dormouse.sh after verification
+        description: Deploy the account, relay, and voice Workers after verification
         type: boolean
         default: false
 permissions:
@@ -30,10 +30,13 @@ jobs:
       - run: pnpm build:hosted
       - name: Require accepted package provenance
         run: node --input-type=module -e 'import { verifyPackages } from "./hosted/scripts/production.mjs"; await verifyPackages();'
+      # The account's assets and the relay's; the artifact keeps both folder names.
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: hosted-production-assets
-          path: hosted/dist
+          path: |
+            hosted/dist
+            hosted/dist-relay
           if-no-files-found: error
           retention-days: 3
   deploy:
@@ -64,8 +67,8 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: hosted-production-assets
-          path: hosted/dist
-      - name: Validate production identity, uncached Hyperdrive and Worker secrets
+          path: hosted
+      - name: Validate production identities, uncached Hyperdrive and each Worker's secrets
         run: node hosted/scripts/production.mjs preflight
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
@@ -87,12 +90,12 @@ jobs:
         run: pnpm --filter dormouse-hosted db:migrate && pnpm --filter dormouse-hosted db:validate
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      - name: Deploy verified build
+      - name: Deploy verified build to the account, relay, and voice Workers
         run: node hosted/scripts/production.mjs deploy
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      - name: Verify live production revision and auth boundary
+      - name: Verify live production revisions, auth boundary and rendezvous
         id: live
         run: |
           node hosted/scripts/production.mjs smoke

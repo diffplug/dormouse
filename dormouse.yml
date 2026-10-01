@@ -54,8 +54,9 @@ tools:
     port: auto
     prespawn_dedupe: [relay, $PROJECT_ROOT]
 
-  # The Hosted accounts frontend with email sign-in; read the codes at
-  # /api/dev/emails on the printed origin. Needs Docker running.
+  # The Hosted accounts frontend with email sign-in, plus speak beside its
+  # voice-token routes; read the codes at /api/dev/emails on the printed
+  # origin. Needs Docker running.
   hosted:
     run: pnpm dev:hosted
     # Email sign-in sets a session cookie, which an iframe drops.
@@ -65,10 +66,10 @@ tools:
     port: auto
     prespawn_dedupe: [hosted, $PROJECT_ROOT]
 
-  # The one-time rendezvous and phone page on loopback, for trying a one-time
-  # connection end to end: build a Burrow with the variables it prints, then
-  # open a link from its Settings. Port 8787 (or PORT), fixed because that
-  # Burrow build bakes the origin in, so one checkout at a time.
+  # The relay Worker's one-time rendezvous and phone page on loopback, for
+  # trying a one-time connection end to end: build a Burrow with the variables
+  # it prints, then open a link from its Settings. Port 8787 (or PORT), fixed
+  # because that Burrow build bakes the origin in, so one checkout at a time.
   one-time:
     run: pnpm dev:one-time
     # A real browser, so an agent can drive the phone page at a phone viewport.

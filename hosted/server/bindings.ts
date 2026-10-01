@@ -1,0 +1,87 @@
+import type { BetterAuthWorkerBindings } from "@pgstencil/auth/better-auth-workers";
+import { providerBindings } from "./policy";
+
+// Each Worker's bindings mapper (`docs/specs/hosted.md` -> "Application
+// boundary"): the only bindings that reach its routes, whatever else the
+// deployment carries. A mapper names what its Worker uses and nothing more, so
+// a secret set on the wrong Worker, or left on a preview, stays unread.
+
+/** Every Worker's: its own origin, which the 421 gate holds requests to. */
+interface WorkerEnv {
+  APP_ORIGIN: string;
+  BUILD_SHA?: string;
+}
+
+interface Assets {
+  fetch(request: Request): Promise<Response>;
+}
+
+/** `hosted.dormouse.sh`: the account frontend, auth, and voice-token minting. */
+export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv {
+  ASSETS: Assets;
+  EMAIL_FROM: string;
+  POSTMARK_SERVER_TOKEN: string;
+  OAUTH_PROVIDERS?: string;
+}
+
+/** `relay.dormouse.sh`: the one-time rendezvous and its phone page. */
+export interface RelayEnv extends WorkerEnv {
+  ASSETS: Assets;
+  ONE_TIME_ROOM: DurableObjectNamespace;
+  ONE_TIME_MINT_LIMIT: RateLimit;
+  ONE_TIME_JOIN_LIMIT: RateLimit;
+}
+
+/** `voice.dormouse.sh`: managed-voice speech and its history sweep. */
+export interface VoiceEnv extends WorkerEnv {
+  HYPERDRIVE: { connectionString: string };
+  ELEVENLABS_API_KEY?: string;
+}
+
+/** A rejected provider allowlist throws inside the request, where `onError` answers it. */
+export const accountBindings = (env: AccountEnv): AccountEnv => ({
+  HYPERDRIVE: env.HYPERDRIVE,
+  ASSETS: env.ASSETS,
+  APP_ORIGIN: env.APP_ORIGIN,
+  AUTH_SECRET: env.AUTH_SECRET,
+  EMAIL_FROM: env.EMAIL_FROM,
+  POSTMARK_SERVER_TOKEN: env.POSTMARK_SERVER_TOKEN,
+  BUILD_SHA: env.BUILD_SHA,
+  ...providerBindings(env as unknown as Record<string, unknown>),
+});
+
+/** Ignores stale production, OAuth, and mail bindings on an existing preview Worker. */
+export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
+  HYPERDRIVE: env.HYPERDRIVE,
+  ASSETS: env.ASSETS,
+  APP_ORIGIN: env.APP_ORIGIN,
+  AUTH_SECRET: env.AUTH_SECRET,
+  BUILD_SHA: env.BUILD_SHA,
+  EMAIL_FROM: "",
+  POSTMARK_SERVER_TOKEN: "",
+});
+
+/** No auth secret, no Hyperdrive: the rendezvous reaches neither. Production and preview alike. */
+export const relayBindings = (env: RelayEnv): RelayEnv => ({
+  ASSETS: env.ASSETS,
+  APP_ORIGIN: env.APP_ORIGIN,
+  BUILD_SHA: env.BUILD_SHA,
+  ONE_TIME_ROOM: env.ONE_TIME_ROOM,
+  ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
+  ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
+});
+
+/** Hyperdrive for the token lookup and the ElevenLabs key; no auth secret. */
+export const voiceBindings = (env: VoiceEnv): VoiceEnv => ({
+  HYPERDRIVE: env.HYPERDRIVE,
+  APP_ORIGIN: env.APP_ORIGIN,
+  BUILD_SHA: env.BUILD_SHA,
+  ELEVENLABS_API_KEY: env.ELEVENLABS_API_KEY,
+});
+
+/** A preview never speaks or sweeps: the ElevenLabs key never reaches it. */
+export const voicePreviewBindings = (env: VoiceEnv): VoiceEnv => ({
+  HYPERDRIVE: env.HYPERDRIVE,
+  APP_ORIGIN: env.APP_ORIGIN,
+  BUILD_SHA: env.BUILD_SHA,
+});

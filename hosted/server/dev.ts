@@ -10,7 +10,12 @@ import { EmailDev, SystemTime } from "pgstencil";
 import { authPolicy } from "./policy";
 import { migrations } from "./migrations";
 import { allowedDevRequest } from "./dev-host-guard";
-import { elevenLabs, voiceRoutes, type Synthesize } from "./voice";
+import {
+  elevenLabs,
+  speakRoute,
+  voiceTokenRoutes,
+  type Synthesize,
+} from "./voice";
 
 // Bind first, then derive the origin from the port actually bound, so an unset
 // PORT runs beside another checkout's server. `localhost`, not `127.0.0.1`: it
@@ -68,13 +73,17 @@ const silence: Synthesize = async () => {
   return new Response(audio, { headers: { "content-type": "audio/mpeg" } });
 };
 const elevenLabsKey = process.env.ELEVENLABS_API_KEY;
-const voice = {
+const app = new Hono();
+voiceTokenRoutes(app, () => ({
   databaseUrl,
   auth: (request: Request) => auth.app.fetch(request),
+}));
+// Deployed, speak is the voice Worker's alone; locally it sits beside the
+// token routes on this one origin, so a minted token can be tried with curl.
+speakRoute(app, () => ({
+  databaseUrl,
   synthesize: elevenLabsKey ? elevenLabs(elevenLabsKey) : silence,
-};
-const app = new Hono();
-voiceRoutes(app, () => voice);
+}));
 app.all("*", (c) => auth.app.fetch(c.req.raw));
 const vite = await createViteServer({
   server: {
