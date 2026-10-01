@@ -416,7 +416,11 @@ export function attachTerminalMouseRouter({
   };
 
   const onAltChange = (ev: KeyboardEvent) => {
-    if (isDragging(id)) applyDrag(ev.altKey);
+    const sel = getMouseSelectionState(id).selection;
+    if (!sel?.dragging) return;
+    const shape = ev.altKey || sel.blockLatched ? 'block' : 'linewise';
+    // Unrelated keys must keep the edge e extended (§5.3).
+    if (sel.shape !== shape) applyDrag(ev.altKey);
   };
 
   element.addEventListener('mousedown', onMouseDown, true);

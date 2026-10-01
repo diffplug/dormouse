@@ -175,7 +175,7 @@ The selection overlay draws a wider scope dashed around the outline; the preview
 | `Cmd+C` (Ctrl+C on non-macOS), with or without Shift | Copy what the editor shows, in either mode. |
 | `e` / `Shift+E` | Next wider / narrower scope, stopping at either end. |
 | `f` / `Shift+F` | Next / previous format, wrapping, in table order (§4.1), then the program's own copy (§4.6). |
-| `←` `→` / `Shift+←` `→` | Move the end / start one word; a row boundary ends a word. Returns to As selected, keeping the format. |
+| `←` `→` / `Shift+←` `→` | Move the end / start one word; from whitespace, land on the adjacent word. A row boundary ends a word. Returns to As selected, keeping the format. |
 | `Enter` | Copy, as the chord does. |
 | `Esc` | Close and cancel the selection. |
 
@@ -230,7 +230,7 @@ Source of truth: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/termin
 
 ## 5. Smart Extension (URL / Path Detection)
 
-Offered **mid-drag**, alongside the Alt block modifier (§3.2–§3.3): each drag update re-examines the cell under the cursor for a URL- or path-shaped token, and offers **e** to extend the selection over the whole token.
+**Must re-examine the URL/path token under the cursor on each drag update**, including surrounding content and soft-wrap boundaries when the probed cell is unchanged. Offer **e** to extend over it, alongside Alt (§3.2–§3.3).
 
 ### 5.1 Detection
 
@@ -249,6 +249,7 @@ A second line on the block-selection hint names the detected kind — URL or pat
 - **e** during a drag, while the hint is visible, extends the selection over the full detected token: the anchor is preserved, the far end moves to the token boundary away from it. The drag then continues normally — movement updates the selection from the new boundary, Alt still toggles block shape.
 - **e** with no qualifying token is consumed (per §3.6) but extends nothing; once the drag has ended, `e` is the editor's expand instead (§4.3). On release the selection is finalized at whatever boundaries the drag, `e`-extensions included, produced.
 - **Only this single extension step is offered mid-drag**, and no "open URL" action (§9.1); the editor's scopes are the wider steps (§4.2).
+- **Must preserve extension on keys that leave the shape unchanged.** Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
 
 ---
 

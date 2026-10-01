@@ -284,6 +284,15 @@ describe('copy-text scopes', () => {
 });
 
 describe('copy-text nudge', () => {
+  it.each([
+    [3, 1, 'start', 4], [7, -1, 'end', 6],
+    [7, 1, 'start', 8], [3, -1, 'end', 2],
+    [3, -1, 'start', 0], [3, 1, 'end', 6],
+  ] as const)('moves from whitespace at %s in direction %s to the adjacent word %s', (col, dir, edge, target) => {
+    const buf = lines(['one two three'], { cols: 20 });
+    expect(nudge(buf, { row: 0, col }, dir, edge)).toEqual({ row: 0, col: target });
+  });
+
   it('moves an end to the next or previous word end', () => {
     expect(nudge(claude, { row: 2, col: 10 }, 1, 'end')).toEqual({ row: 2, col: 16 });
     expect(nudge(claude, { row: 2, col: 16 }, -1, 'end')).toEqual({ row: 2, col: 10 });

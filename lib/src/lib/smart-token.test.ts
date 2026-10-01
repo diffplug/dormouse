@@ -65,18 +65,38 @@ describe('detectTokenInBuffer', () => {
     expect(new Set(below.reads)).toEqual(new Set([1, 2]));
   });
 
-  it('reads only the cell under the pointer when it is blank or unchanged', () => {
+  it('reads only the cell under the pointer when it is blank', () => {
     const rows = ['see https://a.co/bbb'];
     const { buffer, reads } = spied(fakeXterm(rows, { cols: 20 }).buffer.active);
     expect(detectTokenInBuffer(buffer, 0, 3)).toBeNull();
     expect(reads).toHaveLength(1);
-    const token = detectTokenInBuffer(buffer, 0, 12);
-    reads.length = 0;
-    expect(detectTokenInBuffer(buffer, 0, 12)).toBe(token);
-    expect(reads).toHaveLength(1);
-    // A new character under the pointer is read afresh.
-    rows[0] = 'see https://b.co/bbb';
-    expect(detectTokenInBuffer(buffer, 0, 12)?.text).toBe('https://b.co/bbb');
+  });
+
+  it('re-examines surrounding text when the probed character stays unchanged', () => {
+    const rows = ['see https://a.co'];
+    const buffer = fakeXterm(rows).buffer.active;
+    expect(detectTokenInBuffer(buffer, 0, 5)?.text).toBe('https://a.co');
+    rows[0] = 'see https://b.co/longer';
+    expect(detectTokenInBuffer(buffer, 0, 5)).toEqual({
+      kind: 'url', text: 'https://b.co/longer', start: { row: 0, col: 4 }, end: { row: 0, col: 22 },
+    });
+    rows[0] = 'see nothing';
+    expect(detectTokenInBuffer(buffer, 0, 5)).toBeNull();
+    rows[0] = 'see https://c.co';
+    expect(detectTokenInBuffer(buffer, 0, 5)?.text).toBe('https://c.co');
+  });
+
+  it('re-examines changed soft-wrap contents and boundaries at the same cell', () => {
+    const rows = ['see https://a.co/', 'old'];
+    const wrapped = [1];
+    const buffer = fakeXterm(rows, { cols: 17, wrapped }).buffer.active;
+    expect(detectTokenInBuffer(buffer, 0, 5)?.text).toBe('https://a.co/old');
+    rows[1] = 'longer';
+    expect(detectTokenInBuffer(buffer, 0, 5)).toEqual({
+      kind: 'url', text: 'https://a.co/longer', start: { row: 0, col: 4 }, end: { row: 1, col: 5 },
+    });
+    wrapped.length = 0;
+    expect(detectTokenInBuffer(buffer, 0, 5)?.text).toBe('https://a.co/');
   });
 
   it('skips the blank a wide character leaves when it wraps', () => {

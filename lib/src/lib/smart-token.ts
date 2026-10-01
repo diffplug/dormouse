@@ -109,14 +109,12 @@ export type BufferToken = Omit<DetectedToken, 'start' | 'end'> & { start: GridPo
  * bounds the work of each drag update. */
 const WRAP_REACH = 16;
 
-/** Each buffer's last answer, by the cell it read: a drag's moves mostly stay
- * in one cell. */
-const lastProbe = new WeakMap<IBuffer, { row: number; col: number; chars: string; token: BufferToken | null }>();
 let scratch: IBufferCell | undefined;
 
 /** The token at `col` of buffer row `row`, read across the soft wraps either
- * side of it: a soft wrap is not whitespace. Runs on every drag update, so a
- * cell unchanged since the last call, or blank, reads nothing more. */
+ * side of it: a soft wrap is not whitespace. Blank cells read nothing more.
+ * Must re-read surrounding cells even at an unchanged pointer: terminal output
+ * can change the token or its wrap boundaries without changing that cell. */
 export function detectTokenInBuffer(buffer: IBuffer, row: number, col: number): BufferToken | null {
   const cell = lineAt(buffer, row)?.getCell(col, scratch);
   if (!cell) return null;
@@ -124,11 +122,7 @@ export function detectTokenInBuffer(buffer: IBuffer, row: number, col: number): 
   const chars = cell.getChars();
   // An empty cell, or the padding a wide character leaves when it wraps.
   if (cell.getWidth() !== 0 && (chars === '' || isWhitespace(chars[0]))) return null;
-  const last = lastProbe.get(buffer);
-  if (last?.row === row && last.col === col && last.chars === chars) return last.token;
-  const token = readToken(buffer, row, col);
-  lastProbe.set(buffer, { row, col, chars, token });
-  return token;
+  return readToken(buffer, row, col);
 }
 
 /** One row as the detector reads it: its cells, their text, and the cell

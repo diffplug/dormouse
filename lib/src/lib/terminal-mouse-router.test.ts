@@ -4,6 +4,7 @@ import {
   __resetMouseSelectionForTests,
   beginDrag,
   endDrag,
+  extendSelectionToToken,
   getMouseSelectionState,
   setMouseReporting,
   setOverride,
@@ -334,6 +335,36 @@ describe('terminal-mouse-router: override suppression', () => {
     // A hardware keyboard event must not unlatch the touch gesture's shape.
     windowHost.emit('keydown', mouseEvent({ altKey: false }));
     expect(getMouseSelectionState('t1').selection?.shape).toBe('block');
+    cleanup();
+  });
+
+  it.each([false, true])('keeps token extension through unrelated keys and mouse-up (Alt=%s)', (altKey) => {
+    const { cleanup, element } = createHarness(windowHost);
+    element.emit('mousedown', mouseEvent({ altKey }));
+    windowHost.emit('mousemove', mouseEvent({ clientX: 25, clientY: 15, buttons: 1, altKey }));
+    windowHost.emit('keydown', mouseEvent({ altKey }));
+    extendSelectionToToken('t1', {
+      kind: 'url', text: 'https://a.co', start: { row: 1, col: 0 }, end: { row: 1, col: 10 },
+    });
+    const extended = getMouseSelectionState('t1').selection;
+    // Releasing e, or pressing/releasing another key, keeps the extended edge.
+    windowHost.emit('keyup', mouseEvent({ altKey }));
+    windowHost.emit('keydown', mouseEvent({ altKey }));
+    windowHost.emit('keyup', mouseEvent({ altKey }));
+    expect(getMouseSelectionState('t1').selection).toEqual(extended);
+    windowHost.emit('mouseup', mouseEvent({ clientX: 25, clientY: 15, altKey }));
+    expect(getMouseSelectionState('t1').selection).toEqual({ ...extended, dragging: false });
+    cleanup();
+  });
+
+  it('recomputes pointer boundaries only when Alt changes the drag shape', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    element.emit('mousedown', mouseEvent({ clientX: 19, clientY: 5 }));
+    windowHost.emit('mousemove', mouseEvent({ clientX: 61, clientY: 25, buttons: 1 }));
+    windowHost.emit('keydown', mouseEvent({ altKey: true }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ shape: 'block', startCol: 2, endCol: 5 });
+    windowHost.emit('keyup', mouseEvent({ altKey: false }));
+    expect(getMouseSelectionState('t1').selection).toMatchObject({ shape: 'linewise', startCol: 2, endCol: 5 });
     cleanup();
   });
 

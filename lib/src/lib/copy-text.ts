@@ -610,7 +610,7 @@ const cellAt = (buf: CopyBuffer, p: GridPos) => buf.row(p.row).cells[p.col];
  * boundary ends a word.
  */
 export function nudge(buf: CopyBuffer, p: GridPos, dir: 1 | -1, edge: 'start' | 'end'): GridPos {
-  const leavingWord = (dir > 0) === (edge === 'start');
+  const leavingWord = (dir > 0) === (edge === 'start') && !isBlankCell(cellAt(buf, p));
   let q = step(buf, p, dir);
   while (q && leavingWord && q.row === p.row && !isBlankCell(cellAt(buf, q))) q = step(buf, q, dir);
   while (q && isBlankCell(cellAt(buf, q))) q = step(buf, q, dir);
