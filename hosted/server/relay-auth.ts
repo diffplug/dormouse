@@ -28,6 +28,8 @@ export interface Owner {
 /** A live sign-in session, by its token's hash. */
 export interface RelaySession extends Owner {
   tokenHash: string;
+  /** When it expires, epoch milliseconds: a relay socket it opens closes then. */
+  expiresAt: number;
 }
 
 /** An enrolled Burrow. */
@@ -57,13 +59,14 @@ export async function sessionByToken(db: Client, token: string): Promise<RelaySe
   const tokenHash = digest(token);
   const {
     rows: [row],
-  } = await db.query<OwnerRow>(
-    `SELECT s."userId", ${OWNER_COLUMNS}
+  } = await db.query<OwnerRow & { expiresAt: number }>(
+    `SELECT s."userId", ${OWNER_COLUMNS},
+      floor(extract(epoch from s."expiresAt") * 1000)::float8 AS "expiresAt"
     FROM dormouse_relay_sessions s JOIN "user" u ON u.id = s."userId"
     WHERE s."tokenHash" = $1 AND s."expiresAt" > now()`,
     [tokenHash],
   );
-  return row ? { ...ownerOf(row), tokenHash } : null;
+  return row ? { ...ownerOf(row), tokenHash, expiresAt: row.expiresAt } : null;
 }
 
 /** The Burrow `token` names, its owner joined in the same query, or null. */
@@ -77,6 +80,20 @@ export async function burrowByToken(db: Client, token: string): Promise<RelayBur
     [digest(token)],
   );
   return row ? { ...ownerOf(row), burrowId: row.burrowId } : null;
+}
+
+/**
+ * Those of `burrowIds` still enrolled, each with its owner, in one query: what
+ * a `RelayRoom` rechecks before it accepts a Burrow socket and on its sweep.
+ */
+export async function burrowsById(db: Client, burrowIds: string[]): Promise<RelayBurrow[]> {
+  const { rows } = await db.query<OwnerRow & { burrowId: string }>(
+    `SELECT b."burrowId", b."userId", ${OWNER_COLUMNS}
+    FROM dormouse_relay_burrows b JOIN "user" u ON u.id = b."userId"
+    WHERE b."burrowId" = ANY($1::text[])`,
+    [burrowIds],
+  );
+  return rows.map((row) => ({ ...ownerOf(row), burrowId: row.burrowId }));
 }
 
 /** A route's bindings plus what its credential gate resolved. */

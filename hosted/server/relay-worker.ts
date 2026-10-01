@@ -4,6 +4,7 @@ import { RELAY_NON_PAGE_PREFIXES, relayRules } from "./headers";
 import { oneTimePageRoutes, oneTimeRoutes } from "./one-time";
 import { pocketRoutes } from "./pocket";
 import { relayApiRoutes, sweepExpired } from "./relay-api";
+import { relaySocketRoutes } from "./relay-sockets";
 import { workerApp } from "./worker-app";
 
 /**
@@ -21,6 +22,7 @@ export default workerApp<RelayEnv>({
   unavailable: "The relay is temporarily unavailable. Please try again.",
   routes(app) {
     relayApiRoutes(app);
+    relaySocketRoutes(app);
     oneTimeRoutes(app);
     oneTimePageRoutes(app);
   },
@@ -32,3 +34,5 @@ export default workerApp<RelayEnv>({
 });
 
 export { OneTimeRoom } from "./one-time-room";
+export { RelayRoom } from "./relay-room";
+export { RelayRows } from "./relay-rows";

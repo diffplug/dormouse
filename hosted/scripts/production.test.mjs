@@ -206,13 +206,21 @@ test("the history sweep's cron is the voice Worker's, the relay's sweeps its exp
   // An absent `triggers` would leave a deployed schedule in place.
   assert.deepEqual(configs.account.triggers, { crons: [] });
 });
-test("the rendezvous Durable Object is the relay's, each rate limit its Worker's, and Durable Object migrations are append-only", () => {
+test("the Durable Objects are the relay's, each rate limit its Worker's, and Durable Object migrations are append-only", () => {
   assert.deepEqual(configs.relay.durable_objects, {
-    bindings: [{ name: "ONE_TIME_ROOM", class_name: "OneTimeRoom" }],
+    bindings: [
+      { name: "ONE_TIME_ROOM", class_name: "OneTimeRoom" },
+      { name: "RELAY_ROOM", class_name: "RelayRoom" },
+    ],
   });
   assert.deepEqual(configs.relay.migrations, [
     { tag: "v1", new_sqlite_classes: ["OneTimeRoom"] },
+    { tag: "v2", new_sqlite_classes: ["RelayRoom"] },
   ]);
+  // The account reaches the relay's `RelayRoom` by name, implementing nothing.
+  assert.deepEqual(configs.account.durable_objects, {
+    bindings: [{ name: "RELAY_ROOM", class_name: "RelayRoom", script_name: configs.relay.name }],
+  });
   assert.deepEqual(
     configs.relay.ratelimits.map(({ name, namespace_id }) => [name, namespace_id]),
     [
@@ -235,8 +243,7 @@ test("the rendezvous Durable Object is the relay's, each rate limit its Worker's
     { tag: "v1", new_sqlite_classes: ["OneTimeRoom"] },
     { tag: "v2", deleted_classes: ["OneTimeRoom"] },
   ]);
-  for (const worker of ["account", "voice"])
-    assert.equal(configs[worker].durable_objects, undefined, worker);
+  assert.equal(configs.voice.durable_objects, undefined);
   assert.equal(configs.voice.ratelimits, undefined);
   assert.equal(configs.voice.migrations, undefined);
 });

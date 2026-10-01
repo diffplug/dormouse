@@ -31,6 +31,17 @@
       "id": "5bfbeba081b4456f9c3cf36edbb20c1d"
     }
   ],
+  // The relay Worker's, so removing a Burrow closes its live socket. It is
+  // implemented there; this Worker creates no class of it.
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RELAY_ROOM",
+        "class_name": "RelayRoom",
+        "script_name": "dormouse-relay"
+      }
+    ]
+  },
   "migrations": [
     {
       "tag": "v1",

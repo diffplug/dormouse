@@ -22,13 +22,22 @@ import type { Session } from "../../src/api";
 import { ADMIN_EMAIL } from "../admin";
 import { CRON_SWEEP_CAP, SPEECH_SWEEP_CAP, VOICE_DAILY_CAP } from "../voice";
 import { ALREADY_APPROVED, RECENT_LOGIN_REQUIRED } from "../relay-account";
-import { API_ROUTES, NOT_ENTITLED_ERROR } from "remote-lib-common";
+import {
+  API_ROUTES,
+  NOT_ENTITLED_ERROR,
+  WS_CLOSE_BURROW_REVOKED,
+  WS_ROUTES,
+  WS_TOKEN_PARAM,
+} from "remote-lib-common";
+import { rawUpgrade } from "./raw-socket";
 import {
   ENTRIES,
   ORIGINS,
   TEST_ENROLL_SECRET,
   bundleWorker,
   miniflareOptions,
+  together,
+  wrangler,
   type Name,
 } from "./bundle";
 import { limitOf, untilLimited } from "./rate-limit";
@@ -80,6 +89,7 @@ const workerOptions = (
     assets?: Handler;
     bindings: Record<string, string>;
     outboundService: Handler;
+    routes?: string[];
   },
 ) =>
   miniflareOptions(name, script, {
@@ -179,32 +189,49 @@ async function fixture(
       },
     });
   };
+  // The relay Worker runs beside the account, as its `RelayRoom` binding needs,
+  // on the same database, answering for its own host; its enrollment links
+  // name this account.
   const worker = new Miniflare(
-    workerOptions("account", {
-      script: (
-        await (production === "preview"
-          ? previewBundle
-          : production
-            ? productionBundle
-            : testBundle)
-      ).outputFiles![0].text,
-      bindings,
-      database: context.database.url,
-      // Vite's content-hashed build output, with the SPA fallback answering
-      // every other path — including an unknown one under /assets/ — with the shell.
-      assets: (request) =>
-          new URL(request.url).pathname === "/assets/app-abc123.js"
-            ? new WorkerResponse("export const build = 1;\n", {
-                headers: { "content-type": "text/javascript" },
-              })
-            : new WorkerResponse(
-                "<!doctype html><html><title>Dormouse Hosted</title></html>",
-                {
-                  headers: { "content-type": "text/html" },
-                },
-              ),
-      outboundService,
-    }),
+    together(
+      workerOptions("account", {
+        script: (
+          await (production === "preview"
+            ? previewBundle
+            : production
+              ? productionBundle
+              : testBundle)
+        ).outputFiles![0].text,
+        bindings,
+        database: context.database.url,
+        // Vite's content-hashed build output, with the SPA fallback answering
+        // every other path — including an unknown one under /assets/ — with the shell.
+        assets: (request) =>
+            new URL(request.url).pathname === "/assets/app-abc123.js"
+              ? new WorkerResponse("export const build = 1;\n", {
+                  headers: { "content-type": "text/javascript" },
+                })
+              : new WorkerResponse(
+                  "<!doctype html><html><title>Dormouse Hosted</title></html>",
+                  {
+                    headers: { "content-type": "text/html" },
+                  },
+                ),
+        outboundService,
+      }),
+      workerOptions("relay", {
+        script: (await relayBundle).outputFiles![0].text,
+        bindings: {
+          APP_ORIGIN: ORIGINS.relay,
+          ACCOUNT_ORIGIN: origin,
+          RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
+        },
+        database: context.database.url,
+        assets: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
+        outboundService,
+        routes: [`${new URL(ORIGINS.relay).host}/*`],
+      }),
+    ),
   );
   // The voice Worker on the same database, with every binding the account
   // has (its mapper drops what it does not use), started on first use.
@@ -230,27 +257,7 @@ async function fixture(
       await started.ready;
       return started;
     })());
-  // The relay Worker on the same database, its enrollment links naming this
-  // account, started on first use.
-  let relayWorker: Promise<Miniflare> | undefined;
-  const relay = () =>
-    (relayWorker ??= (async () => {
-      const started = new Miniflare(
-        workerOptions("relay", {
-          script: (await relayBundle).outputFiles![0].text,
-          bindings: {
-            APP_ORIGIN: ORIGINS.relay,
-            ACCOUNT_ORIGIN: origin,
-            RELAY_ENROLL_SECRET: TEST_ENROLL_SECRET,
-          },
-          database: context.database.url,
-          assets: () => new WorkerResponse("<!doctype html>", { headers: { "content-type": "text/html" } }),
-          outboundService,
-        }),
-      );
-      await started.ready;
-      return started;
-    })());
+  const relay = async () => worker;
   /** One relay request as a Burrow sends it: JSON, no cookie, no Origin. */
   const burrowCall = async (path: string, body?: unknown, bearer?: string) => {
     const response = await (await relay()).dispatchFetch(ORIGINS.relay + path, {
@@ -263,8 +270,9 @@ async function fixture(
     });
     return { status: response.status, json: (await response.json()) as Record<string, any> };
   };
+  let url: URL;
   try {
-    await worker.ready;
+    url = await worker.ready;
   } catch (error) {
     await worker.dispose();
     await provider.close();
@@ -398,6 +406,9 @@ async function fixture(
   return {
     ...context,
     worker,
+    /** A relay socket's upgrade, from a Burrow: no Origin. */
+    burrowSocket: (burrowToken: string) =>
+      rawUpgrade(url, `${ORIGINS.relay}${WS_ROUTES.burrow}?${WS_TOKEN_PARAM}=${burrowToken}`, {}),
     provider,
     elevenLabs,
     browser,
@@ -425,7 +436,6 @@ async function fixture(
     close: async () => {
       await worker.dispose();
       await (await voiceWorker)?.dispose();
-      await (await relayWorker)?.dispose();
       await provider.close();
       await context.close();
     },
@@ -561,11 +571,12 @@ test("same-site requests fail, the sibling Workers' included; production exclude
     "/api/auth/revoke-sessions",
   ])
     expect((await browser.request(path)).status).toBe(404);
+  // Straight to the account Worker: the relay beside it answers its own host.
+  const account = (await f.worker.getWorker(wrangler.account.name)) as unknown as {
+    fetch(url: string): Promise<Response>;
+  };
   for (const sameSite of SAME_SITE)
-    expect(
-      (await f.worker.dispatchFetch(sameSite + "/api/auth/csrf")).status,
-      sameSite,
-    ).toBe(421);
+    expect((await account.fetch(sameSite + "/api/auth/csrf")).status, sameSite).toBe(421);
   await browser.email("real-clock@example.test");
   expect(
     Math.abs(
@@ -980,6 +991,8 @@ test("enrollment: only a recent admin login from this origin approves, and the B
   expect(listed.burrows.map(({ burrowId }) => burrowId)).toEqual([burrowId]);
   expect(Math.abs(Date.parse(listed.burrows[0].enrolledAt) - Date.now())).toBeLessThan(60_000);
   expect((await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).status).toBe(200);
+  const socket = await f.burrowSocket(burrowToken);
+  expect(socket.status).toBe(101);
 
   // Remove: this origin only; another account's Burrow is not found.
   expect((await admin.remove(burrowId, ORIGINS.relay)).status).toBe(403);
@@ -990,7 +1003,11 @@ test("enrollment: only a recent admin login from this origin approves, and the B
     [foreign, (await other.session())!.user.id],
   );
   expect((await admin.remove(foreign)).status).toBe(404);
+  expect(socket.socket!.closedWith()).toBeUndefined();
   expect((await admin.remove(burrowId)).status).toBe(204);
+  // Its live relay socket closes as revoked, pushed from the account Worker.
+  expect((await socket.socket!.closed).code).toBe(WS_CLOSE_BURROW_REVOKED);
+  expect((await f.burrowSocket(burrowToken)).status).toBe(401);
   // A removed Burrow is gone, so its token opens nothing.
   expect(await f.burrowCall(API_ROUTES.burrowSetupToken, undefined, burrowToken)).toEqual({
     status: 401,

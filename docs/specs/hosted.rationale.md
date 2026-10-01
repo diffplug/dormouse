@@ -40,6 +40,10 @@ Sweep interval (2026-09-30): hourly, not the voice sweep's five minutes. Each pa
 
 Rate limits (2026-09-30): `signin/*` and `setup/begin`/`finish` are the unauthenticated routes that reach Postgres. A ceremony's two routes share one budget, so 30 a minute per address is 15 ceremonies, far above one person's retries and enough that a burst costs Postgres little. Like the one-time limits, they are keyed per address (an IPv6 /64), so they bound one caller, not a botnet.
 
+## Relay sockets
+
+A `RelayRoom` that opened a Postgres connection through Hyperdrive could not be evicted afterwards: `unsafeEvictDurableObject` timed out on "it still has active references" even after the client had ended and its socket was closed, while an object that opened and closed a bare socket to the same host evicted normally (measured in Miniflare 5.20260908, 2026-10). Reading the rows in a Worker invocation of their own, through `ctx.exports`, leaves the object hibernatable.
+
 ## Burrow enrollment
 
 - Begin stores nothing (2026-10-01): a stored request needed a cap, and `begin` is unauthenticated, so the cap could only be global, which a few /64s at the per-address limit could fill, locking every Burrow out of enrolling. With the expiry inside the device code and the user code derived from it, begin costs one HMAC and grows nothing.

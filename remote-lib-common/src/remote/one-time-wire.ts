@@ -127,17 +127,6 @@ export function isOneTimeBurrowFrame(value: unknown): value is OneTimeBurrowFram
   );
 }
 
-/**
- * The keepalive either end may send the room, and the room's answer. The room
- * answers without waking and never forwards or counts either, and neither is
- * JSON, so each is compared as a whole string before any parse.
- */
-export const ONE_TIME_PING = 'ping';
-export const ONE_TIME_PONG = 'pong';
-
-/** How often either end pings its rendezvous socket while it is open. */
-export const ONE_TIME_PING_INTERVAL_MS = 30_000;
-
 // ---------------------------------------------------------------------------
 // Bounds and timings
 

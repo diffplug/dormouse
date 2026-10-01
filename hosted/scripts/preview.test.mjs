@@ -85,10 +85,13 @@ test("each preview configuration isolates its origin and excludes production bin
   for (const worker of ["account", "relay"])
     assert.equal(configs[worker].assets.run_worker_first, true, worker);
   // Production's account keeps the migrations that deleted its old room; its
-  // preview, implementing no Durable Object, carries none.
+  // preview, implementing no Durable Object, carries none, and its binding to
+  // the relay's `RelayRoom` names this PR's relay preview.
   assert.ok(bases.account.migrations?.length);
   assert.equal(configs.account.migrations, undefined);
-  assert.equal(configs.account.durable_objects, undefined);
+  assert.deepEqual(configs.account.durable_objects, {
+    bindings: [{ name: "RELAY_ROOM", class_name: "RelayRoom", script_name: "dormouse-relay-pr-42" }],
+  });
   assert.deepEqual(configs.relay.durable_objects, bases.relay.durable_objects);
   assert.deepEqual(configs.relay.migrations, bases.relay.migrations);
   for (const worker of ["relay", "account"])
@@ -137,6 +140,27 @@ test("preview configuration keeps its own Durable Objects and rate-limit namespa
   assert.deepEqual(config.ratelimits, [
     { name: "LIMIT", namespace_id: "1007", simple: { limit: 1, period: 60 } },
   ]);
+  // Another Worker's class: its preview's, and it carries this Worker's
+  // migrations only beside a class of its own.
+  const foreign = { name: "OTHER", class_name: "Other", script_name: "dormouse-other" };
+  const previewForeign = { ...foreign, script_name: "dormouse-other-pr-42" };
+  const base = { name: "dormouse-hosted", compatibility_date: "2026-01-01", migrations };
+  const onlyForeign = previewConfig(
+    { ...base, durable_objects: { bindings: [foreign] } },
+    env,
+    "account",
+  );
+  assert.deepEqual(onlyForeign.durable_objects, { bindings: [previewForeign] });
+  assert.equal(onlyForeign.migrations, undefined);
+  const both = previewConfig(
+    { ...base, durable_objects: { bindings: [...durable_objects.bindings, foreign] } },
+    env,
+    "account",
+  );
+  assert.deepEqual(both.durable_objects, {
+    bindings: [...durable_objects.bindings, previewForeign],
+  });
+  assert.deepEqual(both.migrations, migrations);
   for (const bad of ["0", "1000", "-3", "x", "1.5"])
     assert.throws(() => previewRatelimitNamespace(bad));
 });

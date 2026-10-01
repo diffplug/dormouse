@@ -89,9 +89,10 @@ Each message is one JSON frame with exact keys, forwarded verbatim by the room:
 | `OneTimeBurrowFrame` | Burrow → phone | `{t: 'one-time', step: 'response' \| 'transport', ct}` |
 
 `ct` is one base64url Noise message, bounded as on the relay envelope.
-`ONE_TIME_PING` / `ONE_TIME_PONG` are whole-string keepalives, never JSON:
-each end pings its open socket every `ONE_TIME_PING_INTERVAL_MS` (30 s) and
-counts no answer.
+Each end keeps its open socket alive with the relay socket's heartbeat
+(`docs/specs/relay.md` -> "Routing"): `RELAY_PING` every
+`RELAY_PING_INTERVAL_MS` (30 s), whole strings never JSON, holding the room to
+no deadline.
 
 - **Must measure a frame's raw text against `MAX_ONE_TIME_FRAME_LENGTH` before
   parsing it**; both ends read the room through `parseOneTimeFrame`. A room
@@ -267,7 +268,7 @@ string verbatim (rationale).
   per 60 seconds.
 - **The room's state is the Burrow socket's hibernation attachment** —
   `expiresAt`, `joined`, and a count of every frame received — never memory, so
-  a hibernated room keeps its join and its count. `ONE_TIME_PING` is answered by
+  a hibernated room keeps its join and its count. `RELAY_PING` is answered by
   the runtime's auto-response and never wakes, forwards, or counts.
 
 A room's life, each step one event on the object:

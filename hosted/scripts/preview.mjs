@@ -56,11 +56,18 @@ export function previewConfig(base, env, worker, hyperdriveId) {
       id: hyperdriveId,
     }));
   }
-  // Migrations travel only with the Durable Objects they create: a preview
-  // Worker that implements none starts with none to delete.
+  // A binding to another Worker's class names that Worker's preview, never
+  // production's. Migrations travel only with the Durable Objects a Worker
+  // implements: one that implements none starts with none to delete.
   if (base.durable_objects) {
-    config.durable_objects = base.durable_objects;
-    if (base.migrations) config.migrations = base.migrations;
+    const bindings = base.durable_objects.bindings.map((binding) =>
+      binding.script_name
+        ? { ...binding, script_name: previewName(env.PR_NUMBER, binding.script_name) }
+        : binding,
+    );
+    config.durable_objects = { ...base.durable_objects, bindings };
+    if (base.migrations && bindings.some((binding) => !binding.script_name))
+      config.migrations = base.migrations;
   }
   if (base.ratelimits)
     config.ratelimits = base.ratelimits.map((limit) => ({

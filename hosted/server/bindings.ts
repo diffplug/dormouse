@@ -1,6 +1,7 @@
 import type { BetterAuthWorkerBindings } from "@pgstencil/auth/better-auth-workers";
 import { exactOrigin } from "./headers";
 import { providerBindings } from "./policy";
+import type { RelayRoomRpc } from "./relay-room-contract";
 
 // Each Worker's bindings mapper (`docs/specs/security-hosted.md` -> "Origin
 // boundary"): the only bindings that reach its routes, whatever else the
@@ -22,6 +23,8 @@ export interface AccountEnv extends BetterAuthWorkerBindings, WorkerEnv {
   ASSETS: Assets;
   /** Enrollment approvals, per account. */
   RELAY_APPROVE_LIMIT: RateLimit;
+  /** The relay Worker's `RelayRoom`s, which a Burrow's removal closes the socket of. */
+  RELAY_ROOM: DurableObjectNamespace<RelayRoomRpc>;
   EMAIL_FROM: string;
   POSTMARK_SERVER_TOKEN: string;
   OAUTH_PROVIDERS?: string;
@@ -32,6 +35,8 @@ export interface RelayEnv extends WorkerEnv {
   ASSETS: Assets;
   HYPERDRIVE: { connectionString: string };
   ONE_TIME_ROOM: DurableObjectNamespace;
+  /** One `RelayRoom` per account, holding its relay sockets. */
+  RELAY_ROOM: DurableObjectNamespace<RelayRoomRpc>;
   ONE_TIME_MINT_LIMIT: RateLimit;
   ONE_TIME_JOIN_LIMIT: RateLimit;
   RELAY_SIGNIN_LIMIT: RateLimit;
@@ -58,6 +63,7 @@ export const accountBindings = (env: AccountEnv): AccountEnv => ({
   HYPERDRIVE: env.HYPERDRIVE,
   ASSETS: env.ASSETS,
   RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
+  RELAY_ROOM: env.RELAY_ROOM,
   APP_ORIGIN: env.APP_ORIGIN,
   AUTH_SECRET: env.AUTH_SECRET,
   EMAIL_FROM: env.EMAIL_FROM,
@@ -71,6 +77,7 @@ export const accountPreviewBindings = (env: AccountEnv): AccountEnv => ({
   HYPERDRIVE: env.HYPERDRIVE,
   ASSETS: env.ASSETS,
   RELAY_APPROVE_LIMIT: env.RELAY_APPROVE_LIMIT,
+  RELAY_ROOM: env.RELAY_ROOM,
   APP_ORIGIN: env.APP_ORIGIN,
   AUTH_SECRET: env.AUTH_SECRET,
   BUILD_SHA: env.BUILD_SHA,
@@ -90,6 +97,7 @@ export const relayBindings = (env: RelayEnv): RelayEnv => ({
   APP_ORIGIN: env.APP_ORIGIN,
   BUILD_SHA: env.BUILD_SHA,
   ONE_TIME_ROOM: env.ONE_TIME_ROOM,
+  RELAY_ROOM: env.RELAY_ROOM,
   ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
   ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
   RELAY_SIGNIN_LIMIT: env.RELAY_SIGNIN_LIMIT,

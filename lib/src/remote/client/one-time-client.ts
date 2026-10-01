@@ -19,7 +19,7 @@ import {
   NoiseTransportSession,
   ONE_TIME_DIRECT_DEADLINE_MS,
   ONE_TIME_EXPIRY_GRACE_MS,
-  ONE_TIME_PONG,
+  RELAY_PONG,
   ONE_TIME_ROOM_PARAM,
   ONE_TIME_WS_ROUTES,
   WS_CLOSE_ONE_TIME_DEADLINE,
@@ -449,7 +449,7 @@ export class OneTimeClient implements RemoteAdapterClient {
   #onMessage(raw: unknown): void {
     // A whole string, never JSON: the room answers a ping itself and never
     // forwards the answer.
-    if (raw === ONE_TIME_PONG) return;
+    if (raw === RELAY_PONG) return;
     const frame = parseOneTimeFrame(raw);
     // The shared guard bounds every value before any is used as a key or
     // decoded; this phone runs it rather than trusting the room to have.

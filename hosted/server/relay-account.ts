@@ -14,6 +14,8 @@ import { ENROLLMENT_TTL_MS, LOGIN_FRESH_AGE_MS, RECENT_LOGIN_WINDOW } from "./po
 export type RelayAccountHost = AccountHost & {
   /** Approval attempts, keyed by account. */
   approveLimit: RateLimit;
+  /** Close the removed Burrow's live relay socket (`RelayRoom.closeBurrow`). */
+  closeBurrow(userId: string, burrowId: string): Promise<unknown>;
 };
 
 /** The 403 an approval from a login older than the recent-login window gets. */
@@ -83,18 +85,28 @@ export function relayAccountRoutes(app: Hono<any>, host: (c: Context) => RelayAc
   });
 
   // The row goes, and its setup tokens and setup challenges with it, so its
-  // Burrow token finds nothing on any relay route.
+  // Burrow token finds nothing on any relay route; then its live socket, if
+  // it holds one, is closed as revoked and its Clients told `burrow-gone`.
+  // The removal is done once the row is: a close that fails is logged, and
+  // the object's hourly sweep closes the socket instead.
   app.delete("/api/relay/burrows/:burrowId", gate, async (c) => {
     const burrowId = c.req.param("burrowId");
+    const { userId } = c.get("login");
     const removed =
       isE2eId(burrowId) &&
       (
         await accountQuery(
           host(c),
           `DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1 AND "userId" = $2 RETURNING 1`,
-          [burrowId, c.get("login").userId],
+          [burrowId, userId],
         )
       ).length > 0;
-    return removed ? c.body(null, 204) : c.json({ message: "Computer not found." }, 404);
+    if (!removed) return c.json({ message: "Computer not found." }, 404);
+    try {
+      await host(c).closeBurrow(userId, burrowId);
+    } catch (error) {
+      console.error("Closing a removed Burrow's relay socket failed; the sweep will", error);
+    }
+    return c.body(null, 204);
   });
 }

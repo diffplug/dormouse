@@ -16,7 +16,7 @@
  * low-level door for the transport cases in `relay/test/e2e-relay.test.mjs`.
  *
  * Constructor: `{ relayUrl, sessionToken, burrowId, staticKeyPair,
- * burrowStaticPublicKey, origin, rpId, label }`. `relayUrl` may be
+ * burrowStaticPublicKey, origin, rpId, label, socket, socketInit }`. `relayUrl` may be
  * `http(s)://…` or `ws(s)://…`. Together with the Burrow's, this peer's `frames`
  * and `sent` are exactly what the relay saw, which is what the opacity
  * assertions read.
@@ -40,9 +40,9 @@ import {
   toBase64Url,
   utf8Decode,
   utf8Encode,
-} from 'remote-lib-common';
+} from '../../dist/index.js';
 
-import { e2ePrologueFor, newE2eId } from './e2e.mjs';
+import { e2ePrologueFor, newE2eId } from './envelope.mjs';
 import {
   attachFrameSocket,
   closeSocket,
@@ -63,6 +63,7 @@ export class FakeClient extends EventEmitter {
     rpId,
     label = 'Fake Phone',
     socket,
+    socketInit,
   }) {
     super();
     this.burrowId = burrowId;
@@ -96,6 +97,7 @@ export class FakeClient extends EventEmitter {
       this,
       `${wsBase}${WS_ROUTES.client}?${WS_TOKEN_PARAM}=${encodeURIComponent(sessionToken)}`,
       socket,
+      socketInit,
     );
     ws.addEventListener('message', (ev) => receiveFrame(this, ev.data));
   }

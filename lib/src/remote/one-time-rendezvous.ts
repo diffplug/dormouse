@@ -7,13 +7,9 @@
  * since only the phone's may throw.
  */
 
-import {
-  MAX_ONE_TIME_FRAME_LENGTH,
-  ONE_TIME_PING,
-  ONE_TIME_PING_INTERVAL_MS,
-} from 'remote-lib-common';
+import { MAX_ONE_TIME_FRAME_LENGTH } from 'remote-lib-common';
 
-import type { RemoteTimer, RemoteWebSocket } from './ws';
+import { RelayHeartbeat, type RemoteTimer, type RemoteWebSocket } from './ws';
 
 /** The close an end ends its own rendezvous socket with. */
 const NORMAL_CLOSURE = 1000;
@@ -42,7 +38,7 @@ export class RendezvousHold {
    * close.
    */
   #ws: RemoteWebSocket | null = null;
-  #cancelPing: (() => void) | null = null;
+  #heartbeat: RelayHeartbeat | null = null;
 
   constructor(setTimer: RemoteTimer) {
     this.#setTimer = setTimer;
@@ -63,26 +59,21 @@ export class RendezvousHold {
     return this.#ws === ws;
   }
 
-  /** Keep the socket's path alive while it is open; the room answers without waking. */
+  /**
+   * Keep the socket's path alive while it is open: the relay socket's
+   * heartbeat, which the room answers without waking, holding the room to no
+   * deadline — the end's own deadlines bound it.
+   */
   armPing(ws: RemoteWebSocket): void {
-    this.#cancelPing = this.#setTimer(() => {
-      this.#cancelPing = null;
-      if (this.#ws !== ws) return;
-      try {
-        ws.send(ONE_TIME_PING);
-      } catch {
-        // socket mid-close
-      }
-      this.armPing(ws);
-    }, ONE_TIME_PING_INTERVAL_MS);
+    this.#heartbeat = new RelayHeartbeat(ws, this.#setTimer);
   }
 
   /** Stop reading the socket: nothing it says or does from here is an event. */
   detach(): RemoteWebSocket | null {
     const ws = this.#ws;
     this.#ws = null;
-    this.#cancelPing?.();
-    this.#cancelPing = null;
+    this.#heartbeat?.stop();
+    this.#heartbeat = null;
     return ws;
   }
 

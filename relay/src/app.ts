@@ -16,11 +16,16 @@ import type { NodeWebSocket } from '@hono/node-ws';
 import { serveStatic } from '@hono/node-server/serve-static';
 import {
   API_ROUTES,
+  MAX_RELAY_FRAME_BYTES,
+  RELAY_IDLE_TIMEOUT_MS,
+  UNKNOWN_BURROW_TOKEN_ERROR,
+  WS_CLOSE_TRY_AGAIN_LATER,
+  WS_CLOSE_UNAUTHORIZED,
+  WS_CLOSE_UNAUTHORIZED_REASON,
+  WS_CLOSE_IDLE,
+  WS_CLOSE_IDLE_REASON,
   DELIVERY_ID_LENGTH,
-  E2E_ID_LENGTH,
   ChallengeIssuer,
-  MAX_CLIENT_ID_LENGTH,
-  MAX_E2E_CIPHERTEXT_LENGTH,
   MAX_PUSH_QUERY_DELIVERY_IDS,
   MAX_SEALED_PUSH_LENGTH,
   SELFHOST_ACCOUNT_ID,
@@ -91,12 +96,7 @@ import type {
 } from 'remote-lib-common';
 
 import { invalidateEnrollOffer, redeemEnrollToken } from './enroll-token.js';
-import {
-  RelayHub,
-  WS_CLOSE_TRY_AGAIN_LATER,
-  WS_CLOSE_UNAUTHORIZED,
-  WS_CLOSE_UNAUTHORIZED_REASON,
-} from './relay.js';
+import { RelayHub } from './relay.js';
 import type { ClientConn, BurrowConn } from './relay.js';
 import { secretEquals } from './secrets.js';
 import { SetupTokenIssuer } from './setup-token.js';
@@ -219,24 +219,6 @@ export const BURROW_REVOCATION_SWEEP_MS = 60_000;
  * Client sessions and pings the rest.
  */
 export const RELAY_SWEEP_MS = 30_000;
-/**
- * How long a relay socket may go unheard-from before it is closed. Three sweeps
- * of silence: a live peer answers the first ping, so reaching this means the
- * connection is half-open, not idle. Generous against a phone whose radio has
- * dozed, which reconnects anyway.
- */
-export const RELAY_IDLE_TIMEOUT_MS = 3 * RELAY_SWEEP_MS;
-/** A socket closed for silence, not for anything it did. */
-const WS_CLOSE_IDLE = 1001;
-const WS_CLOSE_IDLE_REASON = 'no response to heartbeat';
-/**
- * The largest frame `ws` may buffer for us. Derived from the wire bounds the
- * relay's own guards enforce — a maximal `ct` plus the envelope around it —
- * because without it `ws` buffers up to 100 MiB before any guard has run.
- * `MAX_CLIENT_ID_LENGTH` is in here because a Burrow frame carries one.
- */
-export const MAX_RELAY_FRAME_BYTES =
-  MAX_E2E_CIPHERTEXT_LENGTH + MAX_CLIENT_ID_LENGTH + 2 * E2E_ID_LENGTH + 1024;
 /** A small fixed delay on a rejected credential. */
 const CREDENTIAL_FAILURE_DELAY_MS = 250;
 
@@ -1200,7 +1182,7 @@ export function createApp(config: AppConfig): CreatedApp {
     async (c, next) => {
       const token = c.req.query(WS_TOKEN_PARAM);
       const burrow = token ? await burrowStore.findByToken(token) : undefined;
-      if (!burrow) return c.json({ error: 'unknown burrow token' }, 401);
+      if (!burrow) return c.json({ error: UNKNOWN_BURROW_TOKEN_ERROR }, 401);
       c.set('burrow', burrow);
       return next();
     },

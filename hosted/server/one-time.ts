@@ -8,6 +8,7 @@ import {
   toBase64Url,
 } from "remote-lib-common";
 import type { RelayEnv } from "./bindings";
+import { forwardUpgrade, isUpgrade, upgradeRequired } from "./socket-room";
 
 type OneTimeContext = Context<{ Bindings: RelayEnv }>;
 
@@ -19,7 +20,7 @@ type OneTimeContext = Context<{ Bindings: RelayEnv }>;
  */
 export function oneTimeRoutes(app: Hono<{ Bindings: RelayEnv }>) {
   app.get(ONE_TIME_WS_ROUTES.burrow, async (c) => {
-    if (!upgrade(c)) return upgradeRequired(c);
+    if (!isUpgrade(c)) return upgradeRequired(c, "message");
     // Every browser sends Origin on a WebSocket handshake and the Burrow's
     // native socket sends none, so refusing any Origin keeps web pages from
     // minting rooms.
@@ -32,7 +33,7 @@ export function oneTimeRoutes(app: Hono<{ Bindings: RelayEnv }>) {
     return forward(c, ONE_TIME_WS_ROUTES.burrow, room);
   });
   app.get(ONE_TIME_WS_ROUTES.client, async (c) => {
-    if (!upgrade(c)) return upgradeRequired(c);
+    if (!isUpgrade(c)) return upgradeRequired(c, "message");
     if (c.req.raw.headers.get("origin") !== c.env.APP_ORIGIN)
       return c.json({ message: "Forbidden." }, 403);
     const rooms = new URL(c.req.url).searchParams.getAll(ONE_TIME_ROOM_PARAM);
@@ -66,14 +67,6 @@ export function assetOrNotFound(c: OneTimeContext, response: Response) {
     !(response.headers.get("content-type") ?? "").includes("text/html")
     ? response
     : c.notFound();
-}
-
-function upgrade(c: OneTimeContext) {
-  return c.req.raw.headers.get("upgrade")?.toLowerCase() === "websocket";
-}
-
-function upgradeRequired(c: OneTimeContext) {
-  return c.json({ message: "WebSocket upgrade required." }, 426);
 }
 
 function tooMany(c: OneTimeContext) {
@@ -142,13 +135,8 @@ function ipv6Groups(ip: string): string[] {
   ];
 }
 
-/**
- * A fresh request carrying only the upgrade and the room, so no cookie,
- * address, or Origin reaches the room.
- */
+/** The room's object, handed a bare upgrade naming the room and nothing else of the caller's. */
 function forward(c: OneTimeContext, route: string, room: string) {
-  const url = new URL(route, c.req.url);
-  url.searchParams.set(ONE_TIME_ROOM_PARAM, room);
   const stub = c.env.ONE_TIME_ROOM.get(c.env.ONE_TIME_ROOM.idFromName(room));
-  return stub.fetch(new Request(url, { headers: { upgrade: "websocket" } }));
+  return forwardUpgrade(stub, new URL(route, c.req.url), { [ONE_TIME_ROOM_PARAM]: room });
 }
