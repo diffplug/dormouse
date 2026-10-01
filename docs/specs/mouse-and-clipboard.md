@@ -93,7 +93,7 @@ A selection is anchored to the characters under it, not to screen coordinates: s
 ### 3.5 Selection in the Live Region vs. Scrollback
 
 - **Scrollback selection is always available**, whatever the reporting or override state; live-region availability follows §6.1's matrix.
-- **Crossing the boundary:** a drag beginning in scrollback and continuing into the live region is a single continuous selection. A drag beginning in the live region under mouse reporting, with no override, goes to the inside program instead.
+- **Crossing the boundary:** a drag beginning in scrollback and continuing into the live region is a single continuous selection. A drag beginning in the live region under mouse reporting, with no override, goes to the inside program instead, shadowed (§3.8).
 
 ### 3.6 During a Drag
 
@@ -107,11 +107,22 @@ Source of truth: `lib/src/components/wall/keyboard/handle-mouse-selection-keys.t
 - It persists until something ends it: a completed copy, a content change (§3.4), **Esc**, or a click outside (§4.3).
 - **A new mouse-down in the terminal content area replaces any existing selection immediately** and dismisses its editor.
 
+### 3.8 Drags the Inside Program Owns
+
+A primary mouse drag that reaches the inside program (§6.1) is **shadowed**: its events reach the program untouched, and on release the cells it crossed become a linewise selection the program owns.
+
+- **Must never consume, delay, or reorder a shadowed drag's events**; only a press that crosses the drag threshold counts, so a program click shadows nothing.
+- It draws no outline, only a `Press Cmd+C to copy` hint (Ctrl+C on non-macOS): the program paints its own highlight.
+- **The copy chord opens the copy editor over it** (§4), outline included. Any other key goes to the program and drops the shadow, as do a new mouse-down, a content change (§3.4), and the program ending mouse reporting.
+- Touch never shadows; a touch drag over a reporting program takes §6.1's rows.
+
+Source of truth: `finishProgramDrag` in `lib/src/lib/terminal-mouse-router.ts`, pinned by `lib/src/lib/terminal-mouse-router.test.ts`; the chord in `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts`.
+
 ---
 
 ## 4. Copy Editor
 
-Mouse-up over a terminal-handled drag opens the **copy editor**: the text a copy would produce, at full pane width, every line break the selection crossed marked (rationale).
+Mouse-up over a terminal-handled drag opens the **copy editor**, as does the copy chord over a shadowed one (§3.8): the text a copy would produce, at full pane width, every line break the selection crossed marked (rationale).
 
 ### 4.1 Formats
 
@@ -162,7 +173,7 @@ The selection overlay draws a wider scope dashed around the outline; the preview
 | `Enter`, `Cmd+C` (Ctrl+C on non-macOS), either with Shift | Copy what the editor shows. |
 | `Esc` | Close and cancel the selection. |
 
-**Any other key closes the editor and reaches the terminal**, so typing after a selection still types; a bare modifier and the paste chord leave it open. **Intercept Ctrl+C as a copy only while the editor is open**; with none it reaches the inside program (SIGINT for shells, app-defined for TUIs). An in-program selection a TUI maintains itself (vim visual mode, less search highlight) does not open the editor and does not change that routing. The editor's hints write Shift and the arrows as the mobile compass rose does (`⬆︎` `◀` `▶`), and touch shows none.
+**Any other key closes the editor and reaches the terminal**, so typing after a selection still types; a bare modifier and the paste chord leave it open. **Intercept Ctrl+C only while the editor is open or a shadowed drag waits for it** (§3.8); otherwise it reaches the inside program (SIGINT for shells, app-defined for TUIs). A selection a TUI makes from the keyboard (vim visual mode, less search highlight) is neither, and does not change that routing. The editor's hints write Shift and the arrows as the mobile compass rose does (`⬆︎` `◀` `▶`), and touch shows none.
 
 Source of truth: `handleCopyEditorKey` in `lib/src/components/wall/keyboard/handle-mouse-selection-keys.ts`, pinned by its test; the transitions in `lib/src/lib/copy-editor.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
 
@@ -215,7 +226,7 @@ Where a drag goes; **Terminal** means the terminal's own selection.
 | Program requests mouse | Override | Live-region drag | Scrollback drag |
 |---|---|---|---|
 | No | — | Terminal | Terminal |
-| Yes | No | Inside program | Terminal |
+| Yes | No | Inside program, shadowed (§3.8) | Terminal |
 | Yes | Temporary | Terminal, ends on mouse-up | Terminal |
 | Yes | Sticky | Terminal | Terminal |
 

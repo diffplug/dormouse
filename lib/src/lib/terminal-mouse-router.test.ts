@@ -150,6 +150,33 @@ describe('terminal-mouse-router: override suppression', () => {
     cleanup();
   });
 
+  it('shadows a drag the program owns without touching its events (spec §3.8)', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    setMouseReporting('t1', 'vt200');
+
+    const events = [mouseEvent({ clientX: 5, clientY: 5 }), mouseEvent({ clientX: 45, clientY: 25, buttons: 1 }), mouseEvent({ clientX: 45, clientY: 25 })];
+    element.emit('mousedown', events[0]);
+    windowHost.emit('mousemove', events[1]);
+    windowHost.emit('mouseup', events[2]);
+
+    for (const ev of events) expect(ev.preventDefault).not.toHaveBeenCalled();
+    expect(getMouseSelectionState('t1').selection).toMatchObject({
+      startRow: 0, startCol: 0, endRow: 2, endCol: 4, dragging: false, owner: 'program',
+    });
+    expect(getMouseSelectionState('t1').copyEditor).toBeNull();
+    cleanup();
+  });
+
+  it('shadows nothing for a program click that never crosses the drag threshold', () => {
+    const { cleanup, element } = createHarness(windowHost);
+    setMouseReporting('t1', 'vt200');
+    element.emit('mousedown', mouseEvent());
+    windowHost.emit('mousemove', mouseEvent({ clientX: 6, buttons: 1 }));
+    windowHost.emit('mouseup', mouseEvent({ clientX: 6 }));
+    expect(getMouseSelectionState('t1').selection).toBeNull();
+    cleanup();
+  });
+
   it('suppresses pre-drag movement and clears temporary override after the paired mouseup', async () => {
     const { cleanup, element } = createHarness(windowHost);
     setMouseReporting('t1', 'vt200');

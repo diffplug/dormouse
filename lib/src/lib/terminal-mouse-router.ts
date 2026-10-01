@@ -108,6 +108,10 @@ export function attachTerminalMouseRouter({
   // True between a captured mouse pointerup we saw and the compatibility mouseup
   // we expect to follow it for an *inside* release; see onWindowPointerUp.
   let awaitingOutsideMouseUp = false;
+  // A mouse drag the inside program owns (spec §3.8). Its events reach the
+  // program untouched; this only remembers the cells it crossed, so a copy
+  // chord can open the editor over what the program is highlighting.
+  let programDrag: { row: number; col: number; clientX: number; clientY: number; end: { row: number; col: number } | null } | null = null;
 
   const terminalOwnsEvent = (ev: MouseEvent | PointerEvent) => {
     const state = getMouseSelectionState(id);
@@ -128,7 +132,12 @@ export function attachTerminalMouseRouter({
     // cannot clear a previous selection for us.
     setSelection(id, null);
     setHintToken(id, null);
-    if (!terminalOwns) return false;
+    if (!terminalOwns) {
+      programDrag = ev.button === 0 && !opts.touchLike
+        ? { row: cell.row, col: cell.col, clientX: ev.clientX, clientY: ev.clientY, end: null }
+        : null;
+      return false;
+    }
     const suppressNativeMouse = state.mouseReporting !== 'none';
     if (suppressNativeMouse || opts.touchLike) {
       consumePointerEvent(ev, true);
@@ -228,6 +237,33 @@ export function attachTerminalMouseRouter({
     consumePointerEvent(ev, suppressNativeMouse || isNonMousePointerEvent(ev));
   };
 
+  const trackProgramDrag = (ev: MouseEvent) => {
+    if (!programDrag) return;
+    const dx = ev.clientX - programDrag.clientX;
+    const dy = ev.clientY - programDrag.clientY;
+    if (!programDrag.end && dx * dx + dy * dy < DRAG_THRESHOLD_PX_SQ) return;
+    const cell = computeCell(ev);
+    programDrag.end = { row: cell.row, col: cell.col };
+  };
+
+  /** Keep a program drag that moved as a shadow selection: no outline and no
+   *  editor until the copy chord (spec §3.8). */
+  const finishProgramDrag = () => {
+    const drag = programDrag;
+    programDrag = null;
+    if (!drag?.end || getMouseSelectionState(id).mouseReporting === 'none') return;
+    setSelection(id, {
+      startRow: drag.row,
+      startCol: drag.col,
+      endRow: drag.end.row,
+      endCol: drag.end.col,
+      shape: 'linewise',
+      dragging: false,
+      startedInScrollback: false,
+      owner: 'program',
+    });
+  };
+
   const onMouseDown = (ev: MouseEvent) => {
     if (Date.now() < suppressSyntheticMouseUntil) {
       consumePointerEvent(ev, true);
@@ -293,6 +329,10 @@ export function attachTerminalMouseRouter({
       finishPendingOrActiveDrag(ev);
       return;
     }
+    if (programDrag) {
+      if (ev.buttons === 0) finishProgramDrag();
+      else trackProgramDrag(ev);
+    }
     updatePendingOrActiveDrag(ev);
   };
 
@@ -300,6 +340,10 @@ export function attachTerminalMouseRouter({
     // The button came up inside the iframe; cancel any pending outside-release
     // finalize (see onWindowPointerUp) and end the drag through the normal path.
     awaitingOutsideMouseUp = false;
+    if (programDrag && ev.button === 0) {
+      trackProgramDrag(ev);
+      finishProgramDrag();
+    }
     finishPendingOrActiveDrag(ev);
   };
 

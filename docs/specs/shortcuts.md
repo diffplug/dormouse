@@ -61,7 +61,7 @@ Both modes, ahead of the passthrough gate, and only on a terminal **selected** S
 | `e` / `⇧E` | Expand / shrink | Copy editor: the next wider / narrower scope. |
 | `f` / `⇧F` | Next / previous format | Copy editor: Auto, Exact, Spaces, No breaks, wrapping. |
 | `←` `→` / `⇧←` `⇧→` | Move end / start | Copy editor: the selection's end / start, one word. |
-| `⌘C` (macOS) / `Ctrl+C` (others), `↵` | Copy | Copy editor: copy what it shows; `⇧` optional on the chord. |
+| `⌘C` (macOS) / `Ctrl+C` (others), `↵` | Copy | Copy editor: copy what it shows, `⇧` optional; over a program-owned drag, open it. |
 | `⌘V` / `⌘⇧V` / `Ctrl+V` / `Ctrl+Shift+V` | Paste | Paste into the terminal; the `Ctrl` variants are intercepted on every platform, macOS included. |
 
 On macOS `Ctrl+C` still reaches the running program; a literal `0x16` needs the shell's `quoted-insert` (`Ctrl+Q`) (`docs/specs/mouse-and-clipboard.md` §8.3).

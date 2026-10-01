@@ -1,5 +1,5 @@
 import { writeTextToClipboard } from './clipboard';
-import { editorRendering, nudgeCopyEdge } from './copy-editor';
+import { editorRendering, nudgeCopyEdge, openCopyEditor } from './copy-editor';
 import { flashCopy, getMouseSelectionState } from './mouse-selection';
 import { getTerminalInstance } from './terminal-registry';
 
@@ -24,4 +24,10 @@ export async function copySelection(terminalId: string): Promise<void> {
 export function nudgeSelection(terminalId: string, edge: 'start' | 'end', dir: 1 | -1): void {
   const terminal = getTerminalInstance(terminalId);
   if (terminal) nudgeCopyEdge(terminalId, terminal, edge, dir);
+}
+
+/** The copy chord over a drag the inside program owned (spec §3.8). */
+export function openProgramSelection(terminalId: string): void {
+  const terminal = getTerminalInstance(terminalId);
+  if (terminal) openCopyEditor(terminalId, terminal);
 }

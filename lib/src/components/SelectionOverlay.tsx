@@ -53,7 +53,10 @@ export function SelectionOverlay({ terminalId }: Props) {
   };
 
   const borderColor = focusRingColor || 'rgb(100, 149, 237)';
-  const pathD = rectsToPath(rects);
+  // A shadowed program drag (spec §3.8): the program paints its own highlight,
+  // so Dormouse draws only the hint until the copy chord opens the editor.
+  const shadowed = selection.owner === 'program' && !state.copyEditor;
+  const pathD = shadowed ? '' : rectsToPath(rects);
 
   // The copy editor's expanded scope, dashed around what it adds (spec §4.2).
   const editor = state.copyEditor;
@@ -66,9 +69,9 @@ export function SelectionOverlay({ terminalId }: Props) {
   // Drag-down anchors by `top` (top edge aligned with where we want the
   // near-selection edge); drag-up anchors by `bottom` so the near-selection
   // edge lines up regardless of element height. Shown only while the user is
-  // dragging (spec §3.3).
+  // dragging (spec §3.3), or over a shadowed drag.
   let hint: { left: number; top?: number; bottom?: number } | null = null;
-  if (selection.dragging) {
+  if (selection.dragging || shadowed) {
     const endViewportRow = selection.endRow - dims.viewportY;
     if (endViewportRow >= 0 && endViewportRow < dims.rows) {
       const draggedDown = selection.endRow >= selection.startRow;
@@ -129,11 +132,17 @@ export function SelectionOverlay({ terminalId }: Props) {
           style={{ left: hint.left, top: hint.top, bottom: hint.bottom }}
         >
           <div className="flex flex-col gap-0.5 leading-none text-muted">
-            <div>
-              {touchUi
-                ? 'Start drag with double-tap for block selection'
-                : `Hold ${IS_MAC ? 'Opt' : 'Alt'} for block selection`}
-            </div>
+            {shadowed ? (
+              <div>
+                Press <span className="text-foreground">{IS_MAC ? 'Cmd+C' : 'Ctrl+C'}</span> to copy
+              </div>
+            ) : (
+              <div>
+                {touchUi
+                  ? 'Start drag with double-tap for block selection'
+                  : `Hold ${IS_MAC ? 'Opt' : 'Alt'} for block selection`}
+              </div>
+            )}
             {state.hintToken && (
               <div>
                 Press <span className="text-foreground">e</span> to select the full{' '}

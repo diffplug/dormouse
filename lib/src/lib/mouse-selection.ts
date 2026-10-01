@@ -26,6 +26,11 @@ export interface Selection {
   /** True while the user is still dragging; false once the mouse is released. */
   dragging: boolean;
   /**
+   * `'program'` for a drag the inside program owned, which Dormouse only
+   * shadowed: no outline and no editor until the copy chord (spec §3.8).
+   */
+  owner?: 'program';
+  /**
    * True when the drag originated in scrollback. Scrollback-origin drags are
    * always handled by the terminal regardless of the inside program's mouse
    * reporting (spec §3.5).
@@ -123,6 +128,12 @@ export function setMouseReporting(id: string, mode: MouseTrackingMode): void {
   // Spec §2 (auto-clear on reporting off): with nothing left to override, end it.
   if (mode === 'none' && s.override !== 'off') {
     s.override = 'off';
+  }
+  // A shadowed drag (§3.8) belonged to the program that just stopped reporting.
+  if (mode === 'none' && s.selection?.owner === 'program') {
+    s.selection = null;
+    s.copyEditor = null;
+    s.copyFlash = null;
   }
   notify();
 }

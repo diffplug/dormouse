@@ -11,6 +11,7 @@ vi.mock('../../../lib/clipboard', () => ({
 vi.mock('../../../lib/copy-selection', () => ({
   copySelection: vi.fn(),
   nudgeSelection: vi.fn(),
+  openProgramSelection: vi.fn(),
 }));
 vi.mock('../../../lib/copy-editor', () => ({
   cycleCopyFormat: vi.fn(),
@@ -152,6 +153,40 @@ describe('handleMouseSelectionKeys', () => {
     const alt = fakeEvent(document.createElement('div'), { key: 'Alt' });
     expect(handleMouseSelectionKeys(alt, ctx)).toBe(true);
     expect(alt.defaultPrevented).toBe(false);
+  });
+
+  describe('over a shadowed program drag', () => {
+    const shadow = async () => {
+      const { getMouseSelectionState, setSelection } = await import('../../../lib/mouse-selection');
+      const { openProgramSelection } = await import('../../../lib/copy-selection');
+      vi.mocked(setSelection).mockClear();
+      vi.mocked(openProgramSelection).mockClear();
+      vi.mocked(getMouseSelectionState).mockReturnValue({ selection: { dragging: false, owner: 'program' }, copyEditor: null } as never);
+      return { setSelection, openProgramSelection };
+    };
+
+    it('opens the editor on the copy chord', async () => {
+      const { openProgramSelection } = await shadow();
+      const e = fakeEvent(document.createElement('div'), { key: 'c', metaKey: true });
+      expect(handleMouseSelectionKeys(e, makeCtx())).toBe(true);
+      expect(e.defaultPrevented).toBe(true);
+      expect(openProgramSelection).toHaveBeenCalledWith('pane-a');
+    });
+
+    it('lets any other key reach the program and drops the shadow', async () => {
+      const { setSelection, openProgramSelection } = await shadow();
+      const e = fakeEvent(document.createElement('div'), { key: 'Escape' });
+      expect(handleMouseSelectionKeys(e, makeCtx())).toBe(false);
+      expect(e.defaultPrevented).toBe(false);
+      expect(setSelection).toHaveBeenCalledWith('pane-a', null);
+      expect(openProgramSelection).not.toHaveBeenCalled();
+    });
+
+    it('keeps the shadow across a bare modifier', async () => {
+      const { setSelection } = await shadow();
+      handleMouseSelectionKeys(fakeEvent(document.createElement('div'), { key: 'Meta', metaKey: true }), makeCtx());
+      expect(setSelection).not.toHaveBeenCalled();
+    });
   });
 
   describe('with the copy editor open', () => {

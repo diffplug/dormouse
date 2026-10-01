@@ -1,6 +1,6 @@
 import { doPaste } from '../../../lib/clipboard';
 import { cycleCopyFormat, stepCopyScope } from '../../../lib/copy-editor';
-import { copySelection, nudgeSelection } from '../../../lib/copy-selection';
+import { copySelection, nudgeSelection, openProgramSelection } from '../../../lib/copy-selection';
 import { isEditableTarget, isTerminalInputProxy } from '../../../lib/dom';
 import {
   extendSelectionToToken,
@@ -67,7 +67,19 @@ export function handleMouseSelectionKeys(e: KeyboardEvent, ctx: WallKeyboardCtx)
   }
 
   const keyLower = e.key.toLowerCase();
-  if (mouseState.copyEditor && handleCopyEditorKey(e, sid, keyLower)) return true;
+  if (mouseState.copyEditor) {
+    if (handleCopyEditorKey(e, sid, keyLower)) return true;
+  } else if (sel?.owner === 'program') {
+    // A shadowed program drag (spec §3.8): the copy chord opens the editor
+    // over it; any other key belongs to the program, which ends the shadow.
+    if (hasCopyModifier(e) && keyLower === 'c') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      openProgramSelection(sid);
+      return true;
+    }
+    if (!MODIFIER_KEYS.has(e.key)) setMouseSelection(sid, null);
+  }
   // Paste takes either modifier on every platform (see `hasPasteModifier`).
   // Trade-off: shadows readline's ^V verbatim-insert; not worth surfacing as a
   // setting until someone asks for it.
