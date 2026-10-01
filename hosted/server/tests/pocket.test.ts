@@ -12,6 +12,7 @@ import {
 } from "remote-lib-common";
 import { RUNS_NOTHING_POLICY, oneTimePagePolicy } from "../headers";
 import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions } from "./bundle";
+import { limitOf, untilLimited } from "./rate-limit";
 
 // Pocket at the relay's root (`docs/specs/pocket-app.md` -> "Serving the
 // built bundle"), the production relay bundle in real workerd without
@@ -193,25 +194,33 @@ test("only a Node Burrow begins or polls an enrollment, per-address limited, and
   expect(
     await (await post(API_ROUTES.burrowEnrollPoll, { deviceCode: toBase64Url(expired) }, { "cf-connecting-ip": "192.0.2.4" })).json(),
   ).toEqual({ status: "expired" });
-  // Neither answer below reads the database either.
-  for (let i = 0; i < 10; i++) {
-    const mismatch = await post(API_ROUTES.burrowEnrollBegin, { origin: "https://other.example.test" }, {
-      "cf-connecting-ip": "192.0.2.2",
-    });
-    expect(mismatch.status).toBe(409);
-    expect(await mismatch.json()).toEqual({ error: "origin mismatch", origin });
-  }
-  const limited = await post(API_ROUTES.burrowEnrollBegin, { origin }, { "cf-connecting-ip": "192.0.2.2" });
-  expect(limited.status).toBe(429);
+  // Neither answer below reads the database either. A mismatched origin spends
+  // the address's budget, and a matching one is refused once it is spent.
+  const beginLimit = limitOf("RELAY_ENROLL_BEGIN_LIMIT");
+  const limited = await untilLimited(beginLimit, async (i) => {
+    const mismatched = i < beginLimit;
+    const response = await post(
+      API_ROUTES.burrowEnrollBegin,
+      { origin: mismatched ? "https://other.example.test" : origin },
+      { "cf-connecting-ip": "192.0.2.2" },
+    );
+    if (response.status !== 429) {
+      expect(response.status).toBe(mismatched ? 409 : 200);
+      if (mismatched) expect(await response.json()).toEqual({ error: "origin mismatch", origin });
+    }
+    return response;
+  });
   expect(limited.headers.get("retry-after")).toBe("60");
   expect(await limited.json()).toEqual({ error: "too many enrollment attempts" });
-  for (let i = 0; i < 60; i++) {
+  const pollLimited = await untilLimited(limitOf("RELAY_ENROLL_POLL_LIMIT"), async () => {
     const unknown = await post(API_ROUTES.burrowEnrollPoll, { deviceCode: "short" }, { "cf-connecting-ip": "192.0.2.3" });
-    expect(await unknown.json()).toEqual({ status: "expired" });
-  }
-  expect(
-    (await post(API_ROUTES.burrowEnrollPoll, { deviceCode: "short" }, { "cf-connecting-ip": "192.0.2.3" })).status,
-  ).toBe(429);
+    if (unknown.status !== 429) expect(await unknown.json()).toEqual({ status: "expired" });
+    return unknown;
+  });
+  expect(await pollLimited.json()).toEqual({ error: "too many enrollment attempts" });
+  // Another address is another caller.
+  for (const path of [API_ROUTES.burrowEnrollBegin, API_ROUTES.burrowEnrollPoll])
+    expect((await post(path, { origin, deviceCode: "short" }, { "cf-connecting-ip": "192.0.2.5" })).status, path).not.toBe(429);
 });
 
 test("every body is bounded before any route, a credential gate included", async () => {

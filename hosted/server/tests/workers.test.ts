@@ -31,6 +31,7 @@ import {
   miniflareOptions,
   type Name,
 } from "./bundle";
+import { limitOf, untilLimited } from "./rate-limit";
 
 const origin = ORIGINS.account;
 const voiceOrigin = ORIGINS.voice;
@@ -1019,9 +1020,12 @@ test("enrollment approval needs a login from the recent-login window, and attemp
 
   // A fresh login approves; every attempt counts toward the account's limit.
   await admin.email(ADMIN_EMAIL);
-  for (let i = 0; i < 9; i++) expect((await admin.approve("not a code")).status).toBe(400);
-  expect((await admin.approve(begun.userCode)).status).toBe(204);
-  const limited = await admin.approve("ZZZZ-ZZZZ");
-  expect(limited.status).toBe(429);
+  const approveLimit = limitOf("RELAY_APPROVE_LIMIT");
+  const limited = await untilLimited(approveLimit, async (i) => {
+    const valid = i === approveLimit - 1;
+    const response = await admin.approve(valid ? begun.userCode : "not a code");
+    if (response.status !== 429) expect(response.status).toBe(valid ? 204 : 400);
+    return response;
+  });
   expect(limited.headers.get("retry-after")).toBe("60");
 });

@@ -37,6 +37,7 @@ import {
   restoreSetupToken,
 } from "../relay-api";
 import { ENTRIES, ORIGINS, TEST_ENROLL_SECRET, bundleWorker, miniflareOptions } from "./bundle";
+import { limitOf, untilLimited } from "./rate-limit";
 
 // The Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay") in real
 // workerd against real Postgres, driven the way Pocket and a Burrow drive the
@@ -760,20 +761,33 @@ test("every unauthenticated route that reaches Postgres is rate limited per addr
 }) => {
   const f = await fixture();
   onTestFinished(f.close);
-  for (const [routes, error] of [
-    [[API_ROUTES.signinBegin, API_ROUTES.signinFinish], "too many sign-in attempts"],
-    [[API_ROUTES.setupBegin, API_ROUTES.setupFinish], "too many setup attempts"],
+  let addresses = 0;
+  for (const [routes, binding, error] of [
+    [[API_ROUTES.signinBegin, API_ROUTES.signinFinish], "RELAY_SIGNIN_LIMIT", "too many sign-in attempts"],
+    [[API_ROUTES.setupBegin, API_ROUTES.setupFinish], "RELAY_SETUP_LIMIT", "too many setup attempts"],
   ] as const) {
-    // A ceremony's two routes spend one budget.
-    for (let i = 0; i < 30; i++)
-      expect((await f.call("POST", routes[i % 2], { ip: "203.0.113.7", body: {} })).status).not.toBe(429);
-    for (const route of routes) {
-      const limited = await f.call("POST", route, { ip: "203.0.113.7", body: {} });
-      expect(limited, route).toMatchObject({ status: 429, json: { error } });
-      expect(limited.headers.get("retry-after")).toBe("60");
+    const limit = limitOf(binding);
+    // A ceremony's two routes spend one budget: alternating between them from
+    // one address, exactly `limit` are admitted before the 429. A run that
+    // straddles a window boundary admits more, and of two runs at most one
+    // straddles. Each order ends the budget on the other route.
+    for (const order of [routes, [...routes].reverse()]) {
+      let admitted = 0;
+      for (let run = 0; run < 2 && admitted !== limit; run++) {
+        const ip = `203.0.113.${++addresses}`;
+        admitted = 0;
+        const limited = await untilLimited(limit, async (i) => {
+          const response = await f.call("POST", order[i % 2], { ip, body: {} });
+          if (response.status !== 429) admitted++;
+          return response;
+        });
+        expect(limited, order[admitted % 2]).toMatchObject({ json: { error } });
+        expect(limited.headers.get("retry-after")).toBe("60");
+      }
+      expect(admitted, "admitted before the 429, in one of two runs").toBe(limit);
     }
     // Another address is another caller.
-    expect((await f.call("POST", routes[0], { ip: "203.0.113.8", body: {} })).status).not.toBe(429);
+    expect((await f.call("POST", routes[0], { ip: `203.0.113.${++addresses}`, body: {} })).status).not.toBe(429);
   }
 });
 
