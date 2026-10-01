@@ -34,26 +34,32 @@ export function bindAddressFor(
   return family.length === 1 ? family[0]! : null;
 }
 
-/** `c=` and `a=candidate` lines, with the address each names. */
-const CONNECTION_LINE = /^c=IN IP[46] (\S+)$/;
-const CANDIDATE_LINE = /^a=candidate:\S+ \S+ \S+ \S+ (\S+) /;
-
 /**
- * `sdp` with every candidate outside `inAllowed` removed and a default address
- * outside it written as `0.0.0.0`, and how many candidates are left.
+ * `sdp` with every candidate outside `inAllowed`, or with no address to read,
+ * removed and a default address outside it written as `0.0.0.0`, and how many
+ * candidates are left. Lines end at any of CRLF, LF, or CR and fields at the
+ * C-locale whitespace libdatachannel splits on, never JavaScript's wider `\s`,
+ * so no line the native parser reads as a candidate escapes this one; lines
+ * rejoin with the first ending found.
  */
 function keepAllowed(sdp: string, inAllowed: (address: string) => boolean): { sdp: string; candidates: number } {
-  const eol = sdp.includes('\r\n') ? '\r\n' : '\n';
+  const eol = /\r\n|\r|\n/.exec(sdp)?.[0] ?? '\n';
   let candidates = 0;
   const lines: string[] = [];
-  for (const line of sdp.split(eol)) {
-    const candidate = CANDIDATE_LINE.exec(line);
-    if (candidate) {
-      if (!inAllowed(candidate[1]!)) continue;
+  for (const line of sdp.split(/\r\n|\r|\n/)) {
+    const fields = line.split(/[ \t\v\f]+/).filter((field) => field !== '');
+    if (/^a=candidate:/i.test(fields[0] ?? '')) {
+      const address = fields[4];
+      if (!address || !inAllowed(address)) continue;
       candidates += 1;
+    } else if (/^c=/i.test(fields[0] ?? '')) {
+      const address = fields[2];
+      if (!address || !inAllowed(address)) {
+        lines.push('c=IN IP4 0.0.0.0');
+        continue;
+      }
     }
-    const connection = CONNECTION_LINE.exec(line);
-    lines.push(connection && !inAllowed(connection[1]!) ? 'c=IN IP4 0.0.0.0' : line);
+    lines.push(line);
   }
   return { sdp: lines.join(eol), candidates };
 }
@@ -76,6 +82,8 @@ const isPrivateAddress = allowedAddressTest([
   'fc00::/7',
   'fe80::/10',
 ]);
+
+const CANDIDATE_LINE = /^a=candidate:\S+ \S+ \S+ \S+ (\S+) /;
 
 /**
  * The first candidate of `sdp` that is an IP literal outside every private
