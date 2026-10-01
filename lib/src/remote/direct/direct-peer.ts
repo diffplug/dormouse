@@ -23,6 +23,7 @@ import {
   DIRECT_DISCONNECTED_GRACE_MS,
   DIRECT_GATHER_TIMEOUT_MS,
   DIRECT_SETUP_TIMEOUT_MS,
+  DIRECT_SRFLX_GRACE_MS,
   DirectFrameQueue,
   MAX_DIRECT_PENDING_BYTES,
   MAX_DIRECT_PENDING_FRAMES,
@@ -38,6 +39,13 @@ import { realTimer, type RemoteTimer } from '../ws';
  * any event, so a state change alone would never see it.
  */
 export const DIRECT_PATH_RECHECK_MS = 1_000;
+
+/**
+ * A server-reflexive candidate (RFC 8839 `typ srflx`), in an SDP line or an
+ * `icecandidate` event's string: `candidate:…` in a browser, `a=candidate:…` in
+ * `node-datachannel`'s polyfill.
+ */
+const SRFLX_CANDIDATE = / typ srflx\b/;
 
 /** The four `RTCSdpType` values, so a real description assigns to ours. */
 export type DirectSdpType = 'offer' | 'answer' | 'pranswer' | 'rollback';
@@ -198,11 +206,11 @@ export interface DirectPeerDeps {
  * One session's peer connection and its single ordered, reliable data channel.
  *
  * **One negotiation, no trickle**: each side sends its whole description once
- * ICE gathering has completed (or `DIRECT_GATHER_TIMEOUT_MS` has passed), so
- * the candidates travel inside the session with the SDP and the relay never
- * sees either. **The channel must be open by `DIRECT_SETUP_TIMEOUT_MS`** — by
- * `DIRECT_ANSWER_TIMEOUT_MS` on the answering side, which arms later — or the
- * attempt is abandoned and the session stays relayed.
+ * gathering settles ({@link #awaitGathering}), so the candidates travel inside
+ * the session with the SDP and the relay never sees either. **The channel must
+ * be open by `DIRECT_SETUP_TIMEOUT_MS`** — by `DIRECT_ANSWER_TIMEOUT_MS` on the
+ * answering side, which arms later — or the attempt is abandoned and the
+ * session stays relayed.
  *
  * **Sends are bounded here, not left to the implementation.** Past
  * `DIRECT_BUFFER_HIGH` the ciphertext queues instead, draining on the channel's
@@ -228,8 +236,8 @@ export class DirectPeer {
   /** Cancels the next {@link DIRECT_PATH_RECHECK_MS} check, while one is armed. */
   #cancelPathRecheck: (() => void) | null = null;
   /**
-   * Settles the gathering wait — cancelling its deadline with it — or null when
-   * none is outstanding. Held on the instance because {@link close} has to
+   * Settles the gathering wait — cancelling its deadlines with it — or null
+   * when none is outstanding. Held on the instance because {@link close} has to
    * reach it: `RTCPeerConnection.close()` fires no `icegatheringstatechange`,
    * so nothing else would.
    */
@@ -603,22 +611,41 @@ export class DirectPeer {
   }
 
   /**
-   * Wait for `iceGatheringState === 'complete'`, bounded by
-   * {@link DIRECT_GATHER_TIMEOUT_MS} — after which the description as it stands
-   * is what gets sent, candidates gathered so far included.
+   * Wait for gathering to settle, at the first of: `iceGatheringState ===
+   * 'complete'`; {@link DIRECT_SRFLX_GRACE_MS} from the first server-reflexive
+   * candidate or the wait's start, whichever is later; or
+   * {@link DIRECT_GATHER_TIMEOUT_MS} from the wait's start — after which the
+   * description as it stands is what gets sent, candidates gathered so far
+   * included. The wait starts once the local description is set, and finds a
+   * srflx already in it: an answerer's stack gathers from inside
+   * `setRemoteDescription`, before there is a wait to hear the event.
    */
   #awaitGathering(): Promise<void> {
     if (this.#peer.iceGatheringState === 'complete') return Promise.resolve();
     return new Promise<void>((resolve) => {
-      let cancel: (() => void) | null = null;
+      let cancelGrace: (() => void) | null = null;
       const finish = (): void => {
         if (this.#endGathering !== finish) return;
         this.#endGathering = null;
-        cancel?.();
+        cancelDeadline();
+        cancelGrace?.();
         resolve();
       };
+      // Once, and only while the wait is outstanding: the listener outlives it.
+      // It reads the stack's own candidates, so a srflx a path policy's
+      // `describe` would strip still arms it; no level combines the two today
+      // (`burrowUsesStun` is Anywhere alone, `holdsToAllowedNetworks` Local
+      // networks alone, in `lib/src/remote/network-policy.ts`).
+      const graceIfSrflx = (text: unknown): void => {
+        if (this.#endGathering !== finish || typeof text !== 'string') return;
+        if (SRFLX_CANDIDATE.test(text)) cancelGrace ??= this.#setTimer(finish, DIRECT_SRFLX_GRACE_MS);
+      };
       this.#endGathering = finish;
-      cancel = this.#setTimer(finish, DIRECT_GATHER_TIMEOUT_MS);
+      const cancelDeadline = this.#setTimer(finish, DIRECT_GATHER_TIMEOUT_MS);
+      graceIfSrflx(this.#peer.localDescription?.sdp);
+      this.#peer.addEventListener('icecandidate', (ev) =>
+        graceIfSrflx((ev as { candidate?: { candidate?: unknown } | null } | null)?.candidate?.candidate),
+      );
       this.#peer.addEventListener('icegatheringstatechange', () => {
         if (this.#peer.iceGatheringState === 'complete') finish();
       });

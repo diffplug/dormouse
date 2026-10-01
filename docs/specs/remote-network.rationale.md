@@ -163,10 +163,28 @@ hence the Burrow alone depends on the level.
 and unlimited in its Realtime FAQ; ordinary Workers expose no UDP listener, so
 Hosted cannot run its own. Checked 2026-09-30.
 
-**What STUN adds on the addon** *(2026-09-30, `node-datachannel` 0.33.4 on
-macOS 27)*. Gathering through Cloudflare's STUN completed in 84 ms, against
-21 ms with none, and added one `srflx` candidate to the four host ones, the
-offer growing from 760 to 844 characters.
+**What STUN adds** *(2026-09-30, macOS 27, HeadlessChrome 150 against
+`node-datachannel` 0.33.4 / libdatachannel 0.24.5 / libjuice 1.7.2,
+`scripts/direct-interop/run.mjs --stun`)*.
+- One `srflx` per end. Chrome's offer grew from 587 to 720 characters (one mDNS
+  host, one srflx), the Burrow's answer from 759 to 843 (four host, one srflx).
+  libjuice completed gathering in 57–84 ms, against 13–21 ms with none.
+  Chrome's settle, and the ceiling on the answer: `remote-api.rationale.md` ->
+  "Direct path".
+- Every run selected host↔prflx on the LAN, never srflx, which on one machine
+  would need router hairpinning. The two ends named different pairs (the addon
+  an IPv6 ULA one, Chrome an IPv4 one), harmless where no path is checked.
+  Under `--allow … --stun` the Burrow stripped the page's srflx and the pair
+  stayed on the allowed LAN.
+
+**When STUN goes unanswered** *(same setup, `--stun-blackhole`: both factories
+pointed at TEST-NET-1)*. Uncapped, libjuice gives up after 23.5 s
+(`MAX_STUN_SERVER_RETRANSMISSION_COUNT`) and Chrome later still
+(`remote-api.rationale.md` -> "Direct path"), so `DIRECT_GATHER_TIMEOUT_MS` is
+what bounds the attempt. Capped, each end sent its host candidates at 3.0 s and
+the attempt opened at 6.07–6.08 s on the offerer and 3.07 s on the answerer,
+inside every setup budget. Across a NAT that answer carries no srflx, so the
+phone has nothing to reach: a reachability failure, not a budget one.
 
 ## Allowed networks
 

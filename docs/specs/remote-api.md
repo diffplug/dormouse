@@ -84,9 +84,11 @@ this stack simply stays relayed.
 **The Client offers once, after `ConnectionOutcomeV1 { ok: true }`, and never
 retries**; it is always the offerer and creates the one ordered, reliable data
 channel (`dormouse`, `arraybuffer`). **The Burrow answers at most one offer per
-session**, and declines where it has no peer to build. **Each side sends its
-whole description only after ICE gathering completes** — no trickle — bounded by
-`DIRECT_GATHER_TIMEOUT_MS`, past which what it has is what travels. **The
+session**, and declines where it has no peer to build. **Must send each side's
+whole description once, without trickle, at the first of: gathering completing;
+`DIRECT_GATHER_TIMEOUT_MS` from setting its local description; or
+`DIRECT_SRFLX_GRACE_MS` from its first server-reflexive candidate or that
+setting, whichever is later**; what it has then travels (rationale). **The
 answerer's setup budget is the shorter one** (`DIRECT_ANSWER_TIMEOUT_MS`, not
 `DIRECT_SETUP_TIMEOUT_MS`), since it arms a relay hop later and must be the end
 that gives up first. **An SDP
