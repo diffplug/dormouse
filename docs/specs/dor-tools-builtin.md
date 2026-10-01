@@ -18,7 +18,7 @@
 
 `dor-tools-builtin` is a private workspace package with a separate Node runtime bundle.
 
-- **Must bundle the viewers and their runtime dependencies into `dor-tools-builtin/dist/runtime.js`**, without workspace or installed-package resolution at runtime. `dor`'s prebuild builds this package first.
+- **Must bundle the viewers and their runtime dependencies into `dist/runtime.js` in `dor-tools-builtin`**, without workspace or installed-package resolution at runtime. `dor`'s prebuild builds this package first.
 - **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` resolves assets relative to the runtime module.
 - **Must keep `file-viewer-format` free of Node runtime dependencies**: lib's renderer and host modules import it, and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles it for a browser.
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
