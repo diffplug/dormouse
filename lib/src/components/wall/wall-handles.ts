@@ -1,3 +1,5 @@
+import type { LeafMeta } from '../../lib/lath/persistence';
+import type { PersistedSession } from '../../lib/session-types';
 import type { BrowserAutomationProvider } from 'dor-lib-common/browser-providers';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { SaveOptions } from '../../lib/session-save';
@@ -11,7 +13,23 @@ import type { DorControlRequest } from './use-dor-control';
  * under `DEFAULT_WORKSPACE_ID`, so exactly one handle answers a `dor` request
  * even in the single-Workspace hosts.
  */
+export interface PreparedSurfaceMove {
+  meta: LeafMeta;
+  surfaceRef: string;
+  iframe: boolean;
+  terminal: boolean;
+  /** Detach membership, never the Session. Returns a complete Wall rollback. */
+  depart(): () => void;
+}
+
 export interface WallHandle {
+  canMoveSurfaces: boolean;
+  prepareSurfaceMove(id: string): PreparedSurfaceMove;
+  adoptSurfaceMove(id: string, meta: LeafMeta): { surfaceRef: string; rollback(): void };
+  finishSurfaceMove(): void;
+  focusSurface(id: string, acknowledge: boolean): void;
+  showMoveNotice(id: string, text: string): void;
+  serializePersistence(options?: SaveOptions): Promise<PersistedSession>;
   workspaceId: WorkspaceId;
   /** The Wall's member Surfaces: visible panes ∪ Doors. */
   surfaceIds(): string[];
@@ -104,6 +122,13 @@ export function resetWallHandles(): void {
 export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<WallHandle> = {}): WallHandle {
   return {
     workspaceId,
+    canMoveSurfaces: false,
+    prepareSurfaceMove: () => { throw new Error('Surface moves are unavailable'); },
+    adoptSurfaceMove: () => { throw new Error('Surface moves are unavailable'); },
+    finishSurfaceMove: () => {},
+    focusSurface: () => {},
+    showMoveNotice: () => {},
+    serializePersistence: async () => ({ version: 3, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,
     iframeSurfaceRefs: () => [],

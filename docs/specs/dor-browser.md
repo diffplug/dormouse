@@ -971,6 +971,8 @@ Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
 `vscode-ext/src/message-router.ts`, `vscode-ext/src/webview-html.ts`,
 `standalone/src/tauri-adapter.ts`.
 
+A moved iframe Surface remounts at its saved URL after consent: `docs/specs/layout.md` → Moving Surfaces between Workspaces.
+
 ## Future
 
 - Stable agent-browser profile/state persistence so pop-out preserves logins,

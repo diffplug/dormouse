@@ -72,7 +72,7 @@ export function WorkspaceStrip({
   const { workspaces, activeId } = useSyncExternalStore(subscribeToWorkspaces, getWorkspacesSnapshot);
   const membership = useSyncExternalStore(subscribeToWorkspaceSurfaces, getWorkspaceSurfacesSnapshot);
   const activity = useSyncExternalStore(subscribeToActivity, getActivitySnapshot);
-  const { renamingId, pendingClose, pendingMove, moveError } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
+  const { renamingId, pendingClose, pendingMove, pendingSurfaceMove, moveError } = useSyncExternalStore(subscribeToWorkspaceUi, getWorkspaceUiSnapshot);
   const [draggingId, setDraggingId] = useState<WorkspaceId | null>(null);
 
   const stripRef = useRef<HTMLDivElement>(null);
@@ -80,7 +80,7 @@ export function WorkspaceStrip({
 
   // The editor and the confirmation both sit outside every Wall, so a
   // capture-phase command-mode shortcut would still fire behind them.
-  useDialogKeyboardOwner(renamingId !== null || pendingClose !== null || pendingMove !== null || moveError !== null, acquireChromeKeyboardLease);
+  useDialogKeyboardOwner(renamingId !== null || pendingClose !== null || pendingMove !== null || pendingSurfaceMove !== null || moveError !== null, acquireChromeKeyboardLease);
 
   const activate = useCallback((id: WorkspaceId) => {
     getWallHandle(id)?.enterCommandMode();
@@ -160,8 +160,8 @@ export function WorkspaceStrip({
   // confirmation lands in the same place whichever Workspace it is about. No
   // Window (Storybook) leaves it viewport-centered.
   const confirmTarget = useMemo(
-    () => (pendingClose || pendingMove || moveError ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
-    [pendingClose, pendingMove, moveError],
+    () => (pendingClose || pendingMove || pendingSurfaceMove || moveError ? document.querySelector<HTMLElement>('[data-workspace-content]') : null),
+    [pendingClose, pendingMove, pendingSurfaceMove, moveError],
   );
 
   // One union per tab, computed in the loop it is rendered in: every tab shows
@@ -236,15 +236,15 @@ export function WorkspaceStrip({
           The move gate is the same typed letter (the page state it destroys is
           as gone as a killed pane's process) and waits behind a close, so only
           one gate ever listens for the letter on screen. */}
-      {moveError && !pendingClose && !pendingMove && !renamingId && (
+      {moveError && !pendingSurfaceMove && !pendingClose && !pendingMove && !renamingId && (
         <ModalFrame titleId="workspace-move-error" targetElement={confirmTarget}
           onEscape={() => setWorkspaceMoveError(null)} className={clsx("w-80 max-w-full overflow-auto text-sm", OVERLAY_MAX_HEIGHT.modal)}>
-          <h2 id="workspace-move-error" className="mb-2 font-semibold">Workspace could not move</h2>
+          <h2 id="workspace-move-error" className="mb-2 font-semibold">Move could not complete</h2>
           <p role="alert" className="mb-3 break-words">{moveError.reason}</p>
           <button type="button" className={modalActionButton()} onClick={() => setWorkspaceMoveError(null)}>Close</button>
         </ModalFrame>
       )}
-      {pendingClose && !renamingId && (
+      {pendingClose && !pendingSurfaceMove && !renamingId && (
         <WorkspaceKillConfirm
           char={pendingClose.char}
           detail={workspaces.find(workspace => workspace.id === pendingClose.id)?.name}
@@ -258,7 +258,15 @@ export function WorkspaceStrip({
           onCancel={() => setPendingWorkspaceClose(null)}
         />
       )}
-      {pendingMove && !pendingClose && !renamingId && (
+      {pendingSurfaceMove && (
+        <WorkspaceKillConfirm char={pendingSurfaceMove.char} targetElement={confirmTarget}
+          title="Move iframe?"
+          detail="moving this iframe will trigger a refresh and reopen at its saved URL, possibly losing page state or returning to an earlier page."
+          cancelHint="anything else to cancel"
+          onConfirm={() => pendingSurfaceMove.answer(true)}
+          onCancel={() => pendingSurfaceMove.answer(false)} />
+      )}
+      {pendingMove && !pendingSurfaceMove && !pendingClose && !renamingId && (
         <WorkspaceKillConfirm
           char={pendingMove.char}
           targetElement={confirmTarget}

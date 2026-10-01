@@ -10,6 +10,10 @@ import { flushSync } from 'react-dom';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { moveSurface } from './wall/surface-move';
+import { recordToolDirty, resetToolDirty } from '../lib/tool-dirty-store';
+import { browserLeafMeta, toolLeafMeta } from './wall/lath-wall-engine';
+import { leafTree } from '../lib/lath/model';
 import { WorkspaceWindow } from './WorkspaceWindow';
 import { WorkspaceStrip } from './WorkspaceStrip';
 import * as workspaceStore from '../lib/workspace-store';
@@ -66,6 +70,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetToolDirty();
   harness.dispose();
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -919,12 +924,234 @@ it('routes Tools to the requested Workspace and never launches after lookup race
 
   const handle = getWallHandle('ws-2')!;
   const late = vi.fn();
-  act(() => handle.handleDorControl({ requestId: 'late-tool', method: SURFACE_CONTROL_METHODS.tool,
-    params: { name: 'storybook', cwd: '/repo' }, respond: late }));
+  act(() => { void handle.handleDorControl({ requestId: 'late-tool', method: SURFACE_CONTROL_METHODS.tool,
+    params: { name: 'storybook', cwd: '/repo' }, respond: late }); });
   await flush();
   await act(async () => { await handle.closeAll(); });
   await act(async () => gate.resolve(lookup));
   await flush();
   expect(late).toHaveBeenCalledWith({ ok: false, error: 'this workspace is closing' });
   expect(handle.surfaceIds()).toEqual([]);
+});
+
+
+describe('Surface moves between Workspaces', () => {
+  const request = (destination: { workspace: string } | { new: true }, focus = false) => ({ destination, focus, dangerouslyDestroyIframePageState: false });
+  async function twoWalls(sourcePanes = ['pane-a', 'pane-b']) {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', name: 'new', activate: false });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { initialPaneIds: sourcePanes }, 'ws-2': { initialPaneIds: ['pane-x'] } }} /></>);
+    return source;
+  }
+
+  it('preserves Session identity, TODO and retained cwd, retires the source ref, and recomputes both unions', async () => {
+    const source = await twoWalls();
+    publishWorkspaceSession(source, { version: 3, panes: [{ id: 'pane-a', title: 'exited', cwd: '/retained' }, { id: 'pane-b', title: 'other' }] });
+    await act(async () => setTerminalActivity('pane-a', { todo: true }));
+    const kill = vi.spyOn(fake, 'killPty');
+    const acknowledge = vi.spyOn(fake, 'alertAcknowledge');
+    let result;
+    await act(async () => { result = await moveSurface('pane-a', request({ workspace: 'new' })); });
+    expect(result).toMatchObject({ surfaceId: 'pane-a', surfaceRef: 'surface:2', workspaceId: 'ws-2' });
+    expect(getWallHandle(source)!.surfaceIds()).toEqual(['pane-b']);
+    expect(getWallHandle('ws-2')!.surfaceIds()).toEqual(['pane-x', 'pane-a']);
+    expect(getActiveWorkspaceId()).toBe(source);
+    expect(kill).not.toHaveBeenCalled();
+    expect(acknowledge).not.toHaveBeenCalled();
+    expect(getActivitySnapshot().get('pane-a')?.todo).toBe(true);
+    expect(getWorkspaceSurfacesSnapshot().get(source)).toEqual(['pane-b']);
+    expect(getWorkspaceSurfacesSnapshot().get('ws-2')).toContain('pane-a');
+    expect(previousWorkspaceSession(source)?.surfaceRefs).not.toHaveProperty('pane-a');
+    expect(previousWorkspaceSession('ws-2')?.panes.find(p => p.id === 'pane-a')?.cwd).toBe('/retained');
+    const respond = vi.fn();
+    await act(async () => getWallHandle(source)!.handleDorControl({ requestId: 'retired', method: SURFACE_CONTROL_METHODS.read, params: { surface: 'surface:1' }, respond }));
+    expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
+  });
+
+  it('routes a moved dor caller to its destination: short refs can name another pane and ensure can duplicate work left behind', async () => {
+    const source = await twoWalls();
+    terminalRegistry.seedTerminalManualCwd('pane-b', '/repo');
+    terminalRegistry.applyTerminalSemanticEvents('pane-b', [{ type: 'commandLine', commandLine: 'pnpm dev' }, { type: 'commandStart', source: 'osc633_boundaries' }]);
+    await act(async () => { await moveSurface('pane-a', request({ workspace: 'workspace:2' })); });
+    const ask = async (method: string, params: Record<string, unknown>) => {
+      let answer: unknown;
+      await act(async () => { answer = await new Promise(resolve => {
+        window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+          requestId: 'moved-caller', surfaceId: 'pane-a', method, params, respond: resolve,
+        } }));
+        if (method === SURFACE_CONTROL_METHODS.ensure) {
+          const created = getWallHandle('ws-2')!.surfaceIds().find(id => id !== 'pane-x' && id !== 'pane-a')!;
+          terminalRegistry.applyTerminalSemanticEvents(created, [{ type: 'promptStart' }]);
+        }
+      }); });
+      return answer;
+    };
+    expect(await ask(SURFACE_CONTROL_METHODS.read, { surface: 'surface:1' })).toMatchObject({ ok: true, result: { surfaceId: 'pane-x' } });
+    expect(await ask(SURFACE_CONTROL_METHODS.read, { surface: 'surface:pane-b' })).toMatchObject({ ok: true, result: { surfaceId: 'pane-b' } });
+    expect(await ask(SURFACE_CONTROL_METHODS.ensure, { command: ['pnpm', 'dev'], cwd: '/repo', minimized: false, restart: false })).toMatchObject({ ok: true, result: { status: 'created' } });
+    expect(getWallHandle(source)!.surfaceIds()).toEqual(['pane-b']);
+    expect(getWallHandle('ws-2')!.surfaceIds()).toHaveLength(3);
+  });
+
+  it('removes an emptied source and activates the destination in command mode for a neutral CLI move', async () => {
+    const source = await twoWalls(['pane-a']);
+    await act(async () => { await moveSurface('pane-a', request({ workspace: 'workspace:2' })); });
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(['ws-2']);
+    expect(getWallHandle(source)).toBeNull();
+    expect(getActiveWorkspaceId()).toBe('ws-2');
+    expect(wallFor('ws-2').querySelector('[data-focused="true"]')).toBeNull();
+  });
+
+  it('creates a receiving Workspace with only the moved Surface and follows a GUI move into passthrough', async () => {
+    const source = await twoWalls();
+    let result: Awaited<ReturnType<typeof moveSurface>> = null;
+    await act(async () => { result = await moveSurface('pane-a', request({ new: true }), true); });
+    const target = getActiveWorkspaceId();
+    expect(target).not.toBe(source);
+    expect(getWallHandle(target)!.surfaceIds()).toEqual(['pane-a']);
+    expect(wallFor(target).querySelector('[data-session-id="pane-a"][data-focused="true"]')).not.toBeNull();
+    expect(result).toMatchObject({ surfaceRef: 'surface:1' });
+    await act(async () => { await expect(moveSurface('pane-a', request({ new: true }))).rejects.toThrow('only Surface'); });
+  });
+
+  it('rolls back layout, ownership, references and allocator when destination adoption fails', async () => {
+    const source = await twoWalls();
+    const target = getWallHandle('ws-2')!;
+    const adoption = vi.spyOn(target, 'adoptSurfaceMove').mockImplementation(() => { throw new Error('placement failed'); });
+    await act(async () => { await expect(moveSurface('pane-a', request({ workspace: 'workspace:2' }))).rejects.toThrow('placement failed'); });
+    expect(getWallHandle(source)!.surfaceIds()).toEqual(['pane-a', 'pane-b']);
+    expect(target.surfaceIds()).toEqual(['pane-x']);
+    expect((await getWallHandle(source)!.serializePersistence({ probeCwd: false })).surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'pane-b': 'surface:2' });
+    adoption.mockRestore();
+  });
+
+  it('fences a pre-departure save collected during new Workspace mounting', async () => {
+    const source = await twoWalls();
+    let finishProbe!: (cwd: string | null) => void;
+    let staleSave!: Promise<void>;
+    vi.spyOn(fake, 'getCwd').mockImplementation(id => id === 'pane-a' ? new Promise(resolve => { finishProbe = resolve; }) : Promise.resolve('/other'));
+    const unsubscribe = workspaceStore.subscribeToWorkspaces(() => {
+      if (!staleSave && getWorkspacesSnapshot().workspaces.length === 3) staleSave = getWallHandle(source)!.flushPersistence();
+    });
+    let moved!: NonNullable<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { moved = (await moveSurface('pane-a', request({ new: true })))!; });
+    unsubscribe();
+    expect(finishProbe).toBeTypeOf('function');
+    await act(async () => { finishProbe('/stale'); await staleSave; });
+    expect(previousWorkspaceSession(source)?.panes.map(p => p.id)).toEqual(['pane-b']);
+    expect(previousWorkspaceSession(moved.workspaceId)?.panes.map(p => p.id)).toEqual(['pane-a']);
+  });
+
+  it('keeps committed membership if destination focus fails after the empty source closes', async () => {
+    const source = await twoWalls(['pane-a']);
+    vi.spyOn(workspaceStore, 'setActiveWorkspace').mockImplementation(() => { throw new Error('focus failed'); });
+    await act(async () => { await expect(moveSurface('pane-a', request({ workspace: 'workspace:2' }, true))).rejects.toThrow('focus failed'); });
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual(['ws-2']);
+    expect(getWallHandle(source)).toBeNull();
+    expect(getWallHandle('ws-2')!.ownsSurface('pane-a')).toBe(true);
+    expect(previousWorkspaceSession(source)).toBeNull();
+    expect(previousWorkspaceSession('ws-2')?.panes.map(p => p.id)).toContain('pane-a');
+  });
+
+  it('refuses same-Workspace moves before inspecting dirty Tool state', async () => {
+    await twoWalls();
+    await act(async () => { await expect(moveSurface('pane-a', request({ workspace: 'workspace:1' }))).rejects.toThrow('already in that Workspace'); });
+  });
+
+  it('shows alternate-screen move notices over the pane without writing into the program display', async () => {
+    await twoWalls();
+    const write = vi.fn();
+    const terminal = vi.spyOn(terminalRegistry, 'getTerminalInstance').mockReturnValue({ buffer: { active: { type: 'alternate' } }, write } as unknown as ReturnType<typeof terminalRegistry.getTerminalInstance>);
+    await act(async () => { await moveSurface('pane-a', request({ workspace: 'workspace:2' }, true)); });
+    expect(write).not.toHaveBeenCalled();
+    expect(container.querySelector('.shell-spawn-notice')?.textContent).toContain('Cached surface:N refs now resolve here');
+    terminal.mockRestore();
+  });
+
+  it('moves a Door into a pane without terminating it and keeps a nonempty source', async () => {
+    const source = await twoWalls();
+    // The same minimize proposal used by a header button.
+    const minimize = wallFor(source).querySelector<HTMLButtonElement>('[aria-label="Minimize"]');
+    expect(minimize).not.toBeNull();
+    await act(async () => minimize!.click());
+    const minimized = getWallHandle(source)!.surfaceIds().find(id => !leafIdsIn(source).includes(id))!;
+    expect(minimized).toBeTruthy();
+    await act(async () => { await moveSurface(minimized, request({ workspace: 'workspace:2' })); });
+    expect(leafIdsIn('ws-2')).toContain(minimized);
+    expect(getWallHandle(source)!.surfaceIds()).not.toContain(minimized);
+  });
+
+  it.each(['browser', 'tool'] as const)('requires consent for %s iframes; cancellation preserves membership and dirty Tools cannot bypass refusal', async kind => {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    if (kind === 'tool') terminalRegistry.applyTerminalSemanticEvents('frame', [{ type: 'commandLine', commandLine: 'file-editor' }, { type: 'commandStart', source: 'osc633_boundaries' }]);
+    const meta = kind === 'browser' ? browserLeafMeta('Frame', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:3000/saved' })
+      : toolLeafMeta('Editor', { surfaceType: 'tool', command: 'file-editor', toolArgv: ['dor', 'builtin:file', '/tmp/file.txt'], renderMode: 'iframe', toolRender: 'iframe', url: 'http://localhost:3000/saved' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { restoredLathLayout: { version: 1, tree: leafTree('frame'), leafMeta: { frame: meta } } }, 'ws-2': { initialPaneIds: ['pane-x'] } }} /></>);
+    await act(async () => { await expect(moveSurface('frame', request({ workspace: 'workspace:2' }))).rejects.toThrow('dangerously-destroy'); });
+    let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
+    expect(getWorkspaceUiSnapshot().pendingSurfaceMove).not.toBeNull();
+    expect(document.body.textContent).toContain('saved URL');
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+    await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(false); await pending; });
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+    if (kind === 'tool') {
+      recordToolDirty('frame', true);
+      await act(async () => { await expect(moveSurface('frame', { ...request({ workspace: 'workspace:2' }), dangerouslyDestroyIframePageState: true })).rejects.toThrow('edits'); });
+      recordToolDirty('frame', false);
+      await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
+      recordToolDirty('frame', true);
+      await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(true); await expect(pending).rejects.toThrow('edits'); });
+      expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+      recordToolDirty('frame', false);
+    }
+    await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
+    await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(true); await pending; });
+    expect(getWallHandle('ws-2')!.ownsSurface('frame')).toBe(true);
+  });
+
+  it('rechecks a Tool that becomes dirty in the final preparation microtask', async () => {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    terminalRegistry.applyTerminalSemanticEvents('editor', [{ type: 'commandLine', commandLine: 'file-editor' }, { type: 'commandStart', source: 'osc633_boundaries' }]);
+    const meta = toolLeafMeta('Editor', { surfaceType: 'tool', command: 'file-editor', toolArgv: ['dor', 'builtin:file', '/tmp/file.txt'], renderMode: 'iframe', toolRender: 'iframe', url: 'http://localhost:3000/saved' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { restoredLathLayout: { version: 1, tree: leafTree('editor'), leafMeta: { editor: meta } } }, 'ws-2': { initialPaneIds: ['pane-x'] } }} /></>);
+    const handle = getWallHandle(source)!;
+    const prepare = handle.prepareSurfaceMove;
+    let calls = 0;
+    vi.spyOn(handle, 'prepareSurfaceMove').mockImplementation(id => {
+      const prepared = prepare(id);
+      if (++calls === 2) queueMicrotask(() => recordToolDirty(id, true));
+      return prepared;
+    });
+    await act(async () => { await expect(moveSurface('editor', { ...request({ workspace: 'workspace:2' }), dangerouslyDestroyIframePageState: true })).rejects.toThrow('edits'); });
+    expect(handle.ownsSurface('editor')).toBe(true);
+    expect(getWallHandle('ws-2')!.ownsSurface('editor')).toBe(false);
+  });
+
+  it('asks again when a Surface becomes an iframe during the persistence flush: dor refuses, the GUI prompts', async () => {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    const meta = browserLeafMeta('Frame', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:3000/saved' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { restoredLathLayout: { version: 1, tree: leafTree('frame'), leafMeta: { frame: meta } } }, 'ws-2': { initialPaneIds: ['pane-x'] } }} /></>);
+    // Only the first preparation, before the flush, sees no iframe yet.
+    const notYetServing = () => {
+      const handle = getWallHandle(source)!;
+      const real = handle.prepareSurfaceMove;
+      return vi.spyOn(handle, 'prepareSurfaceMove').mockImplementationOnce(id => ({ ...real(id), iframe: false }));
+    };
+    const cli = notYetServing();
+    await act(async () => { await expect(moveSurface('frame', request({ workspace: 'workspace:2' }))).rejects.toThrow('dangerously-destroy'); });
+    expect(cli.mock.calls.length).toBeGreaterThan(1);
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+    cli.mockRestore();
+    notYetServing();
+    let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
+    expect(getWorkspaceUiSnapshot().pendingSurfaceMove).not.toBeNull();
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+    await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(false); expect(await pending).toBeNull(); });
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+  });
 });

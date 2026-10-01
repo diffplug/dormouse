@@ -151,3 +151,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .shell-spawn-notice { animation: none; }
 }
+
+/* The Workspace tab or + a pane drag would move its Surface to on release. */
+[data-surface-drop] {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}

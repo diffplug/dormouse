@@ -88,7 +88,7 @@ Popups share the zoomed pane’s app-background halo.
 
 | Row | Content |
 |---|---|
-| Title | Derived display title, labeled Explain action, copyable source Surface ref and close at right |
+| Title | Derived display title, icon-only Explain bug immediately beside the title, copyable source Surface ref and close at right |
 | Dir | Home-abbreviated directory, its unlabeled absolute-path copy, native explorer action |
 | Ports | One scan per opening; scanning/empty/failure states; one port inline, multiple ports in a dropdown with count beside it; labeled launch actions |
 | Alerts | Source Watch and TODO controls; notification details directly below |
@@ -98,7 +98,7 @@ Popups share the zoomed pane’s app-background halo.
 
 **Must write visible action text in the Title, Dir, and Ports rows in lowercase**, since `iframe` and `agent-browser` cannot be capitalized; proper nouns such as Finder, tooltips, and accessible names keep their case.
 
-**Must keep the Title and Dir rows on one line.** Title: explain drops its label, the title truncates to 8 characters, the Surface ref drops to its copy icon (the tooltip keeps it), then the title truncates further. Dir: the explorer action drops its label before the directory truncates from its start, keeping its end.
+**Must keep the title and its icon-only Explain bug on one line**, with the bug immediately beside the title. In Window hosts, wrap the copyable ref and Move to workspace picker together below the title; keep Dir on one line. Title: the title truncates to 8 characters, the Surface ref drops to its copy icon (the tooltip keeps it), then the title truncates further. Dir: the explorer action drops its label before the directory truncates from its start, keeping its end.
 
 **Must focus context controls on opening.** Explicit entry into helper xterm gives it terminal keys; Escape there belongs to its program. Escape from controls closes the innermost disclosure, then context. Terminal clipboard routing uses the focused helper rather than the selected source. Actions use subdued link color and shared compact `OnOffSwitch` controls.
 
@@ -247,6 +247,19 @@ Source of truth: `deriveWorkspaceAutoName` in `lib/src/lib/workspace-autoname.ts
 - **Must render the selection ring outside the transformed Workspace and remeasure on its animation frames.** Its opacity follows the selected target's Workspace.
 
 Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion.ts`; `WorkspaceMotion` in `lib/src/components/WorkspaceMotion.tsx`; `closeAll` in `lib/src/components/Wall.tsx`.
+
+### Moving Surfaces between Workspaces
+
+- **Must move a Pane or Door on release over another Workspace tab**, inserting beside the destination's last selected live pane. Never activate on hover; highlight valid targets. A header/ Door press owns a pane drag; a tab press owns reorder and cross-Window tear-out. Strip gaps, the source tab, and disabled targets consume the drop without a layout move or tear-out. Escape and pointer cancellation change nothing.
+- **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Disable the picker item and `+` drop otherwise, and refuse CLI `--new`.
+- **Must offer Move to workspace in terminal and Tool context** (placement: the Title row above), using the same coordinator as dragging. **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
+- **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. Never close a departing Session. Pin a moved preview slot by removing its preview mark.
+- **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with a stable random character over the Window content area. Doors remain minimized while waiting. Show “moving this iframe will trigger a refresh and reopen at its saved URL, possibly losing page state or returning to an earlier page”; the prompted character confirms, anything else cancels. Saved URLs are last-known URLs, not necessarily the page's current location. CLI consent follows `docs/specs/dor-cli.md` → dor move.
+- **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Dirty/pending refusals cannot be bypassed by iframe consent.
+- **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus policy follows `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors; if Doors remain but no pane does, refill normally.
+- **Must prepare before departure and roll back failed adoption**, restoring layout, Doors, parked state, selection, zoom, metadata and refs. Ref allocation belongs to `docs/specs/dor-cli.md` → Handle Model; coordinated durable publication belongs to `docs/specs/transport.md` → Persisted session types; Activity follows `docs/specs/alert.md` → Workspace union.
+
+Source of truth: `moveSurface` in `lib/src/components/wall/surface-move.ts`; `surfaceWorkspaceDrag` in `lib/src/components/wall/surface-workspace-drag.ts`; `MoveWorkspaceAction` in `lib/src/components/wall/MoveWorkspaceAction.tsx`; `prepareSurfaceMove` / `adoptSurfaceMove` in `lib/src/components/Wall.tsx`. Tests: `lib/src/components/WorkspaceWindow.test.tsx`, `lib/src/components/wall/LathHost.test.tsx`.
 
 ### Workspace lifecycle
 
@@ -565,7 +578,7 @@ Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `Termi
 
 A newly added leaf grows in from the boundary it was placed against; `docs/specs/tiling-engine.md` → "Animation" → Enter owns the hint and its precedence.
 
-Shell-selection replacement shows a short fixed-position notice over the resulting pane, fading in/out over 1500ms via `.shell-spawn-notice`, suppressed to a static render under reduced motion.
+Shell-selection replacement shows a fixed-position notice over the resulting pane, fading in/out over 1500ms via `.shell-spawn-notice`, suppressed to a static render under reduced motion. Surface moves reuse it in alternate-screen programs (`docs/specs/dor-cli.md` → Handle Model).
 
 ### Kill (two-phase fade + tween reclaim)
 

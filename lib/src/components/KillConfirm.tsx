@@ -27,6 +27,7 @@ export function KillConfirmModal({
   targetElement,
   title = 'Confirm kill',
   detail,
+  cancelHint,
   layer,
 }: {
   char: string;
@@ -37,6 +38,7 @@ export function KillConfirmModal({
    *  (a Workspace move that loses iframe page state); they name themselves. */
   title?: string;
   detail?: string;
+  cancelHint?: string;
   layer?: ModalLayer;
 }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
@@ -74,7 +76,7 @@ export function KillConfirmModal({
           className="contents group cursor-pointer"
         >
           <Shortcut className="justify-self-end group-hover:text-foreground transition-colors">Esc</Shortcut>
-          <span className="justify-self-start group-hover:text-foreground transition-colors">to cancel</span>
+          <span className="justify-self-start group-hover:text-foreground transition-colors">{cancelHint ?? 'to cancel'}</span>
         </button>
       </div>
     </ModalFrame>

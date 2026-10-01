@@ -14,6 +14,28 @@ import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId
  * `cwd` out of (`previousWorkspaceSession`).
  */
 
+const revisions = new Map<WorkspaceId, number>();
+/** Set while a Surface move publishes both Walls: no write sees one half. */
+let batchHeld = false;
+/** Fence asynchronous saves collected before ownership changed. */
+export function workspaceSessionRevision(id: WorkspaceId): number { return revisions.get(id) ?? 0; }
+export function invalidateWorkspaceSaves(id: WorkspaceId): void { revisions.set(id, workspaceSessionRevision(id) + 1); }
+
+/** Hold every write until both Walls have published. */
+export function beginWorkspaceSessionBatch(): () => void {
+  if (batchHeld) throw new Error('A Workspace persistence batch is already running');
+  batchHeld = true;
+  cancelPending();
+  return () => { batchHeld = false; scheduleWrite(); };
+}
+
+/** Preserve a dead Session's retained cwd/alert while its Wall changes. */
+export function moveRetainedSurfaceRecord(id: string, source: WorkspaceId, destination: WorkspaceId): void {
+  const row = records.get(source)?.panes.find(pane => pane.id === id);
+  const target = records.get(destination);
+  if (row && target) records.set(destination, { ...target, panes: [...target.panes.filter(pane => pane.id !== id), row] });
+}
+
 const records = new Map<WorkspaceId, PersistedSession>();
 /** Workspaces this Window has handed to another one and not yet released. */
 const transferring = new Set<WorkspaceId>();
@@ -204,7 +226,7 @@ export async function flushWindowSession(): Promise<void> {
 }
 
 function scheduleWrite(): void {
-  if (!writer) return;
+  if (!writer || batchHeld) return;
   // A publish that lands during `pagehide` — the Walls flush there too — has no
   // later tick to be written on.
   if (unloading) {
@@ -220,7 +242,7 @@ function scheduleWrite(): void {
 }
 
 function writeNow(): void {
-  if (!writer) return;
+  if (!writer || batchHeld) return;
   const result = writer(getWindowSnapshot());
   inFlight = result ? Promise.resolve(result).catch(() => undefined) : null;
 }
@@ -234,6 +256,8 @@ function cancelPending(): void {
 /** Forget every session, seed, transfer guard, and installed writer (tests). */
 export function resetWindowSessionAggregator(): void {
   records.clear();
+  revisions.clear();
+  batchHeld = false;
   transferring.clear();
   pendingTransfers.clear();
   writer = null;

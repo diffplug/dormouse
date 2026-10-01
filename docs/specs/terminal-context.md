@@ -59,6 +59,8 @@ Source of truth: `context` in `standalone/sidecar/pty-core.js`; `terminalContext
 
 Source of truth: `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`; `lib/src/stories/TerminalContext.stories.tsx` supplies sample output; `lib/src/stories/Wall.stories.tsx` exercises the live helper. `lib/src/stories/HelperPlacement.stories.tsx` checks rendered placement and real xterm input/focus retention; the gallery checks narrow controls and always-visible details. `visualSnapshot` in `lib/.storybook/preview.ts` suppresses scrollbar paint.
 
+The Window-host workspace picker follows `docs/specs/layout.md` → Moving Surfaces between Workspaces.
+
 ## Tool context
 
 **Must show a Tool's primary Session in Terminal Context instead of creating an auxiliary helper.** Reuse the title, directory, port, and alert presentation, showing Tool command status without helper Modify, Reset, or Promote controls; a preview slot's adds Keep open (`docs/specs/layout.md` → Pane header). Pending approval cannot open context.
