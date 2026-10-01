@@ -191,11 +191,26 @@ Source of truth: `handleMouseSelectionKeys` in `lib/src/components/wall/keyboard
 
 ### 4.5 Placement and Dismissal
 
-- Full pane width, on the side of the selection with more room; touch prefers above, clear of the thumb that ended the drag. **When neither side has 120px it docks at the bottom over the selection.** Remeasured on every render tick (§7).
+- **Must render into `document.body` at `COPY_EDITOR_Z_INDEX`**: above the selection ring, below every `MODAL_LAYERS` value (rationale).
+- It takes the first spot holding it whole in the window, less `OVERLAY_VIEWPORT_MARGIN_PX`. All but the last stay clear of the **band**, the rows of the selection and its scope:
+
+  | Rank | Desktop | Touch |
+  |---|---|---|
+  | 1 | Below the band | Above, clear of the thumb that ended the drag |
+  | 2 | Above the band | Below |
+  | 3 | Beside the pane, the roomier side | The same |
+  | 4 | Squished into the roomier of below and above, if 120px | The same |
+  | 5 | Over the band at the pane's bottom, at most 60% of the window | The same |
+
+- **Width:** at least the pane's, as wide as the space allows, at most the longest line in any format of the scope (rationale). Above and below may cover neighbors; a side needs room for the narrower of the pane and that line.
+- **Must re-place on every selection or scope change; never keep a spot that covers the selection while another fits.** A held spot yields only to one with `HYSTERESIS_PX` to spare (rationale).
+- **Must ease every move, restarting from the displayed rect; opening snaps**, as does any move under `motionIsInstant()` (rationale). It follows its pane at most once a frame: on the render tick, the visual viewport, a terminal resize, and the sources `docs/specs/layout.md` → "Position tracking" lists, never its own scroll.
+- **Never show while its Wall is transformed**, its pane hidden, or another pane zoomed over it.
+- Presses and keys inside it count as inside its pane (`anchoredTarget`); its `mousedown` and `contextmenu` never reach the pane.
 - **Esc**, a click outside the editor, a content change or a resize it cannot follow (§3.4), a confirmed copy, or **any input the terminal receives** — typing, a paste, Pocket's input bar — dismisses it and cancels the selection. Source of truth: `writeUserInput` in `lib/src/lib/terminal-lifecycle.ts`, pinned by `lib/src/lib/terminal-lifecycle.selection.test.ts`.
 - **Must flash only after a successful clipboard write, and only for the selection copied**: the Copy button shows a checkmark for ~700 ms, then the selection clears, however it moved meanwhile. Failed writes retain it for retry; canceling clears the flash immediately.
 
-Source of truth: `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `lib/src/components/CopyEditor.test.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
+Source of truth: `placeCopyEditor` in `lib/src/lib/copy-editor-placement.ts`, pinned by `lib/src/lib/copy-editor-placement.test.ts`; `createRectMotion` in `lib/src/components/rect-motion.ts`; `anchoredTarget` in `lib/src/lib/dom.ts`; `CopyEditor` in `lib/src/components/CopyEditor.tsx`, pinned by `moves off a wider scope whose band reaches it`, `eases a move from the displayed rect, after opening snapped`, and `hides while its Wall travels, and shows again when the travel ends` in `lib/src/components/CopyEditor.test.tsx` and the plays in `lib/src/stories/CopyEditorPlacement.stories.tsx`; `copySelection` in `lib/src/lib/copy-selection.ts`, pinned by `lib/src/lib/copy-editor.test.ts`.
 
 ### 4.6 The Program's Own Copy (OSC 52)
 
@@ -266,9 +281,9 @@ Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`, 
 
 **Must keep selection and hint updates from rerendering pane headers or override banners** (rationale).
 
-- **Must render outlines, hints, and the copy editor above the cell grid**, isolated from inside-program output and redraws; header icons and banners remain persistent chrome.
+- **Must render outlines and hints above the cell grid, and the copy editor on `document.body`** (§4.5), each isolated from inside-program output and redraws; header icons and banners remain persistent chrome.
 - **Geometry comes from the *measured* xterm cell grid** (`cellWidth`/`cellHeight`/`gridLeft`/`gridTop`), never element-width ÷ cols, so the outline stays aligned across xterm's internal padding.
-- **Must remeasure both overlay and editor on every shared render tick** (scroll, resize, output), even when the selection is unchanged. Pinned for the editor by `lib/src/components/CopyEditor.test.tsx`.
+- **Must remeasure the overlay on every shared render tick** (scroll, resize, output), even when the selection is unchanged; the editor follows its pane as §4.5 says, after `docs/specs/layout.md` → "Position tracking".
 
 Source of truth: `lib/src/lib/selection-text.ts` (extraction and normalization), `lib/src/lib/selection-geometry.ts` (perimeter construction), `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx` — tested in `lib/src/components/wall/mouse-chrome.test.tsx`.
 

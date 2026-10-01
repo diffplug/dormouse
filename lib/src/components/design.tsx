@@ -119,13 +119,14 @@ export const SELECTION_RING_INFLATE_PX = (PANE_GUTTER_PX + 1) / 2;
 export const PANE_SELECTION_RING_RADIUS_PX = TERMINAL_BORDER_RADIUS_PX + SELECTION_RING_INFLATE_PX;
 
 // Focus-ring motion. The selection ring's travel between panes/doors, the pane
-// header's active/inactive palette crossfade, and the ring's unfocus-saturate
-// fade all run on this single duration so they resolve as one gesture. Half the
-// Lath layout motion (LATH_MOTION_MS = 440) — the ring is a light overlay chasing
-// geometry the wall has already committed, so it settles quicker. The ring travel
-// itself is a JS tween on a pointer-events-none overlay (WorkspaceSelectionOverlay
-// + rect-tween.ts), the same per-frame carve-out the Lath animator holds against
-// DESIGN.md's "don't animate layout properties" rule.
+// header's active/inactive palette crossfade, the ring's unfocus-saturate fade,
+// and the copy editor's travel all run on this single duration so they resolve
+// as one gesture. Half the Lath layout motion (LATH_MOTION_MS = 440) — the ring
+// and the editor are light chrome chasing geometry the wall has already
+// committed, so they settle quicker. Both travels are JS per-frame tweens over
+// rect-tween.ts (WorkspaceSelectionOverlay for the ring, rect-motion.ts for the
+// editor), the carve-out the Lath animator shares in DESIGN.md's "don't animate
+// layout properties" rule.
 export const FOCUS_MOTION_MS = 220;
 
 // The pane-header palette crossfade, as a complete Tailwind literal so the
