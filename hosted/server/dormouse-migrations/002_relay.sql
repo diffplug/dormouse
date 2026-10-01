@@ -36,13 +36,11 @@ CREATE INDEX dormouse_relay_sessions_expiry ON dormouse_relay_sessions ("expires
 
 -- Single-use WebAuthn challenges. A setup challenge names the Burrow whose
 -- setup token began it, so only that Burrow's tokens can finish it; a sign-in
--- challenge names none.
+-- challenge is the one with no Burrow.
 CREATE TABLE dormouse_relay_challenges (
     challenge text PRIMARY KEY,
-    kind text NOT NULL CHECK (kind IN ('setup', 'signin')),
     "burrowId" text REFERENCES dormouse_relay_burrows ("burrowId") ON DELETE CASCADE,
-    "expiresAt" timestamptz NOT NULL,
-    CHECK ((kind = 'setup') = ("burrowId" IS NOT NULL))
+    "expiresAt" timestamptz NOT NULL
 );
 CREATE INDEX dormouse_relay_challenges_expiry ON dormouse_relay_challenges ("expiresAt");
 CREATE INDEX dormouse_relay_challenges_burrow ON dormouse_relay_challenges ("burrowId");

@@ -11,9 +11,6 @@ import { randomBytes } from 'node:crypto';
 
 import { MAX_TOKENS_PER_BURROW, SETUP_TOKEN_TTL_MS, toBase64Url } from 'remote-lib-common';
 
-// Both live in `remote-lib-common`, which the Hosted Relay shares.
-export { MAX_TOKENS_PER_BURROW, SETUP_TOKEN_TTL_MS };
-
 // `MAX_TOKENS_PER_BURROW` bounds this map, which anything holding a `burrowToken`
 // can otherwise grow for the process's lifetime by re-rendering its QR in a
 // loop. Per-burrow rather than global: a global cap makes one Burrow's minting loop

@@ -88,6 +88,25 @@ export const BAD_PASSWORD_ERROR = 'invalid setup password';
  */
 export const ORIGIN_MISMATCH_ERROR = 'origin mismatch';
 
+// The rest of the `error` strings both Relays answer, verbatim, so the
+// self-host and Hosted Relays cannot drift on what a Client reads. Only the
+// three above are recovery keys; these are shown, never matched.
+// `POST /api/setup/finish` also answers `ORIGIN_MISMATCH_ERROR`, with 400.
+export const BODY_TOO_LARGE_ERROR = 'request body too large';
+export const MALFORMED_CLIENT_DATA_ERROR = 'malformed clientDataJSON';
+export const CLIENT_DATA_TYPE_ERROR = 'clientData type must be webauthn.create';
+export const UNKNOWN_CHALLENGE_ERROR = 'unrecognized or expired challenge';
+export const UNIMPORTABLE_KEY_ERROR = 'unimportable public key';
+export const MALFORMED_CREDENTIAL_ID_ERROR = 'malformed credentialId';
+export const DUPLICATE_CREDENTIAL_ERROR = 'credential already registered';
+export const MALFORMED_ASSERTION_ERROR = 'malformed assertion';
+export const UNKNOWN_CREDENTIAL_ERROR = 'unknown credential';
+export const MALFORMED_BINDING_ERROR = 'malformed presence binding';
+export const UNKNOWN_NONCE_ERROR = 'unrecognized or expired nonce';
+export const WRONG_CREDENTIAL_ERROR = 'assertion is for a different credential';
+/** The 401 a failed `verifyPasskeyAssertion` answers with, naming its reason. */
+export const assertionRejectedError = (reason: string) => `assertion rejected: ${reason}`;
+
 export const WS_ROUTES = {
   burrow: '/ws/burrow',
   client: '/ws/client',

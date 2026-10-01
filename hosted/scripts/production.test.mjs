@@ -190,11 +190,11 @@ test("live verification retries the relay and voice while their domains come up,
   });
   assert.equal(rendezvous, 1);
 });
-test("the history sweep's cron is the voice Worker's alone, and the account's removes its old one", () => {
+test("the history sweep's cron is the voice Worker's, the relay's sweeps its expired rows, and the account's removes its old one", () => {
   assert.deepEqual(configs.voice.triggers, { crons: ["*/5 * * * *"] });
+  assert.deepEqual(configs.relay.triggers, { crons: ["0 * * * *"] });
   // An absent `triggers` would leave a deployed schedule in place.
   assert.deepEqual(configs.account.triggers, { crons: [] });
-  assert.equal(configs.relay.triggers, undefined);
 });
 test("the rendezvous Durable Object and its rate limits are the relay's, and Durable Object migrations are append-only", () => {
   assert.deepEqual(configs.relay.durable_objects, {
@@ -209,6 +209,7 @@ test("the rendezvous Durable Object and its rate limits are the relay's, and Dur
       ["ONE_TIME_MINT_LIMIT", "1"],
       ["ONE_TIME_JOIN_LIMIT", "2"],
       ["RELAY_SIGNIN_LIMIT", "3"],
+      ["RELAY_SETUP_LIMIT", "4"],
     ],
   );
   // The account deployed `v1` with the room, so it keeps that tag unedited and

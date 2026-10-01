@@ -69,8 +69,22 @@
         "limit": 30,
         "period": 60
       }
+    },
+    {
+      "name": "RELAY_SETUP_LIMIT",
+      "namespace_id": "4",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
     }
   ],
+  "triggers": {
+    // The sweep of every Relay table's expired rows (`sweepExpired`).
+    "crons": [
+      "0 * * * *"
+    ]
+  },
   "observability": {
     "enabled": false
   }

@@ -32,6 +32,7 @@ export interface RelayEnv extends WorkerEnv {
   ONE_TIME_MINT_LIMIT: RateLimit;
   ONE_TIME_JOIN_LIMIT: RateLimit;
   RELAY_SIGNIN_LIMIT: RateLimit;
+  RELAY_SETUP_LIMIT: RateLimit;
 }
 
 /** `voice.dormouse.sh`: managed-voice speech and its history sweep. */
@@ -76,6 +77,7 @@ export const relayBindings = (env: RelayEnv): RelayEnv => ({
   ONE_TIME_MINT_LIMIT: env.ONE_TIME_MINT_LIMIT,
   ONE_TIME_JOIN_LIMIT: env.ONE_TIME_JOIN_LIMIT,
   RELAY_SIGNIN_LIMIT: env.RELAY_SIGNIN_LIMIT,
+  RELAY_SETUP_LIMIT: env.RELAY_SETUP_LIMIT,
 });
 
 /** Hyperdrive for the token lookup and the ElevenLabs key; no auth secret. */

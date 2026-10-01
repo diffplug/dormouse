@@ -1,7 +1,12 @@
 import { test, expect, beforeAll, afterAll } from "vitest";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
-import { API_ROUTES, WS_ROUTES, pocketContentSecurityPolicy } from "remote-lib-common";
-import { RUNS_NOTHING_POLICY } from "../headers";
+import {
+  API_ROUTES,
+  ONE_TIME_PAGE_PATH,
+  WS_ROUTES,
+  pocketContentSecurityPolicy,
+} from "remote-lib-common";
+import { RUNS_NOTHING_POLICY, oneTimePagePolicy } from "../headers";
 import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions } from "./bundle";
 
 // Pocket at the relay's root (`docs/specs/pocket-app.md` -> "Serving the
@@ -19,8 +24,12 @@ const IMMUTABLE = "public, max-age=31536000, immutable";
  * `index.html`, which itself redirects to the directory) and no not-found
  * handling, so a missing file is a bare 404.
  */
+/** Every path the relay asked its assets for, in order. */
+const fetched: string[] = [];
+
 function assets(request: Request) {
   const { pathname } = new URL(request.url);
+  fetched.push(pathname);
   const file = (body: string, type: string) =>
     new WorkerResponse(body, { headers: { "content-type": type } });
   switch (pathname) {
@@ -80,6 +89,18 @@ test("the shell answers the root, every deep link, and its own name, uncached-un
   }
 });
 
+test("a deep link costs one asset fetch: the shell's", async () => {
+  for (const path of ["/pair", "/some/deep/link?x=1", "/"]) {
+    fetched.length = 0;
+    expect(await (await get(path)).text(), path).toBe(SHELL);
+    expect(fetched, path).toEqual(["/"]);
+  }
+  // A file-like miss is asked for itself first, then answered with the shell.
+  fetched.length = 0;
+  expect(await (await get("/missing.png")).text()).toBe(SHELL);
+  expect(fetched).toEqual(["/missing.png", "/"]);
+});
+
 test("the diagnostics harness is served at its own name, never the shell", async () => {
   const response = await get("/diagnostics/index.html");
   expect(response.status).toBe(200);
@@ -95,7 +116,8 @@ test("hashed assets are immutable; root files revalidate; a missing asset is a 4
     expect(response.status, path).toBe(200);
     expect(response.headers.get("cache-control"), path).toBe("no-cache");
   }
-  for (const path of ["/assets/missing-abc123.js", "/assets/"]) {
+  // A percent-encoded `/assets/` is the same route, and as much a hashed asset.
+  for (const path of ["/assets/missing-abc123.js", "/assets/", "/%61ssets/missing-abc123.js"]) {
     const response = await get(path);
     expect(response.status, path).toBe(404);
     expect(response.headers.get("content-type") ?? "", path).not.toContain("text/html");
@@ -105,7 +127,6 @@ test("hashed assets are immutable; root files revalidate; a missing asset is a 4
 
 test("the API and socket routes are never Pocket's: no shell, no page policy, no camera, never stored", async () => {
   for (const [method, path] of [
-    ["GET", "/api/hello"],
     ["GET", "/api/unknown"],
     ["GET", API_ROUTES.pushConfig],
     ["GET", WS_ROUTES.client],
@@ -120,9 +141,21 @@ test("the API and socket routes are never Pocket's: no shell, no page policy, no
       "camera=(), microphone=(), geolocation=()",
     );
   }
-  expect(await (await get("/api/hello")).json()).toEqual({ message: "Hello, world!" });
+  // The self-host installers' probe is not Hosted's.
+  expect((await get("/api/hello")).status).toBe(404);
   expect(await (await get(API_ROUTES.pushConfig)).json()).toEqual({ applicationServerKey: null });
   expect((await get(WS_ROUTES.client)).status).toBe(404);
+});
+
+test("a percent-encoded /connect path is the page's route, under its policy and without the camera", async () => {
+  for (const path of ["/%63onnect/", "/%63onnect", `${ONE_TIME_PAGE_PATH}%61ssets/x.js`]) {
+    const response = await get(path);
+    expect(response.headers.get("content-type") ?? "", path).not.toContain("text/html");
+    expect(response.headers.get("content-security-policy"), path).toBe(oneTimePagePolicy(origin));
+    expect(response.headers.get("permissions-policy"), path).toBe(
+      "camera=(), microphone=(), geolocation=()",
+    );
+  }
 });
 
 test("the self-host password enrollment answers the 401 a wrong credential does", async () => {

@@ -26,6 +26,15 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "lib/vite.pocket.config.ts",
     "lib/scripts/assert-pocket-worker.mjs",
     "lib/package.json",
+    // Pocket's whole import graph, not only its remote modules.
+    "lib/src/components/wall/MobileWall.tsx",
+    "lib/src/lib/platform/types.ts",
+    "lib/src/index.css",
+    "dor-lib-common/src/spawn.ts",
+    "dor-lib-common/package.json",
+    "remote-lib-common/package.json",
+    "remote-lib-common/test/harness/actors.mjs",
+    "lib/tsconfig.app.json",
   ])
     assert.equal(touchesHosted([path]), true, path);
   for (const path of [
@@ -33,8 +42,10 @@ test("Hosted and shared inputs trigger previews; unrelated application changes d
     "standalone/src/main.tsx",
     "docs/specs/layout.md",
     ".github/workflows/ci.yml",
-    "remote-lib-common/test/one-time-wire.test.mjs",
     "lib/pocketbook.md",
+    "lib/scripts/other.mjs",
+    "relay/src/app.ts",
+    "vscode-ext/src/extension.ts",
   ])
     assert.equal(touchesHosted([path]), false, path);
   assert.equal(touchesHosted([]), false);

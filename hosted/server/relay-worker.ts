@@ -1,13 +1,9 @@
+import { withClient } from "pgstencil/postgres";
 import { relayBindings, type RelayEnv } from "./bindings";
-import {
-  RELAY_HASHED_ASSETS,
-  isPocketPath,
-  relayPermissions,
-  relayPolicy,
-} from "./headers";
+import { RELAY_NON_PAGE_PREFIXES, relayRules } from "./headers";
 import { oneTimePageRoutes, oneTimeRoutes } from "./one-time";
 import { pocketRoutes } from "./pocket";
-import { relayApiRoutes } from "./relay-api";
+import { relayApiRoutes, sweepExpired } from "./relay-api";
 import { workerApp } from "./worker-app";
 
 /**
@@ -15,14 +11,13 @@ import { workerApp } from "./worker-app";
  * routes and Pocket at the root, the one-time rendezvous, and its `/connect/`
  * page. It holds no auth secret and never asks auth; Hyperdrive reaches only
  * its own tables and the entitlement's user row. Its PR previews run this
- * entry too: the mapper passes nothing a preview lacks.
+ * entry too: the mapper passes nothing a preview lacks, and a preview has no
+ * Cron Trigger.
  */
 export default workerApp<RelayEnv>({
   bindings: relayBindings,
-  policy: relayPolicy,
-  hashedAssets: RELAY_HASHED_ASSETS,
-  permissions: relayPermissions,
-  revalidated: isPocketPath,
+  rules: relayRules,
+  nonPagePrefixes: RELAY_NON_PAGE_PREFIXES,
   unavailable: "The relay is temporarily unavailable. Please try again.",
   routes(app) {
     relayApiRoutes(app);
@@ -30,6 +25,10 @@ export default workerApp<RelayEnv>({
     oneTimePageRoutes(app);
   },
   fallback: pocketRoutes,
+  // The Cron Trigger sweeps every Relay table's expired rows.
+  async scheduled(_controller, env) {
+    await withClient(env.HYPERDRIVE.connectionString, sweepExpired);
+  },
 });
 
 export { OneTimeRoom } from "./one-time-room";

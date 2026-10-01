@@ -2,8 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DEFAULT_PORT, devConfig, devOrigin, devPort } from "./dev-one-time.mjs";
+import { parseConfig } from "./workers.mjs";
 
-const base = JSON.parse(
+const base = parseConfig(
   await readFile(new URL("../wrangler.relay.jsonc", import.meta.url), "utf8"),
 );
 

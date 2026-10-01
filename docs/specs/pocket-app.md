@@ -82,6 +82,9 @@ lands** ([remote-security-model.md](./remote-security-model.md) → Pairing).
 * **A passkey the authenticator already holds outranks an empty store**:
   `excludeCredentials` refusing (`PasskeyAlreadyRegisteredError`) proves this
   device can sign in, so sign-in leads. (rationale)
+* **A registered passkey is named `Dormouse Pocket (<rpId>)`**, self-host and
+  Hosted alike, for the platform's passkey manager; the account id the Relay
+  answered is only its `user.id`.
 * **A refused token is reported, never folded away**:
   `SETUP_TOKEN_INVALID_ERROR` — expired, spent, or minted by a since-revoked
   Burrow — becomes `SetupTokenInvalidError`, whose message is the recovery: show a
@@ -157,7 +160,8 @@ gate in `lib/src/remote/pocket-app/App.tsx`; `PairingCodeView` in
 `lib/src/remote/pocket-app/PocketWall.tsx`;
 `lib/src/remote/pocket-app/pair-link.ts`;
 `lib/src/remote/pocket-app/ScanInvitation.tsx`; `PocketClient.pair` in
-`lib/src/remote/client/pocket-client.ts`; `RemotePtyAdapter` in
+`lib/src/remote/client/pocket-client.ts`; `passkeyUserName` in
+`lib/src/remote/client/webauthn.ts`; `RemotePtyAdapter` in
 `lib/src/remote/client/remote-adapter.ts`; `attachableDirectoryEntries` in
 `lib/src/remote/pocket-app/wall-model.ts`.
 

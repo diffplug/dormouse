@@ -7,7 +7,13 @@ import assert from 'node:assert/strict';
 
 import {
   MAX_PASSKEY_LABEL_LENGTH,
+  RELAY_BEARER_LENGTH,
+  checkRegistration,
   decodeClientData,
+  isRelayBearer,
+  parseBearer,
+  readJson,
+  verifySigninAssertion,
   importableSpkiP256,
   normalizeChallenge,
   pocketContentSecurityPolicy,
@@ -15,7 +21,10 @@ import {
   toBase64Url,
   utf8Encode,
 } from '../dist/index.js';
+import { SimAuthenticator, randomSecret, registrationClientData } from './harness/actors.mjs';
 
+const ORIGIN = 'https://relay.example';
+const RP_ID = 'relay.example';
 const encode = (value) => toBase64Url(utf8Encode(JSON.stringify(value)));
 
 test('decodeClientData answers an object or null', () => {
@@ -51,4 +60,129 @@ test("pocketContentSecurityPolicy names only the origin's own socket", () => {
   assert.match(policy, /connect-src 'self' wss:\/\/relay\.example(;|$)/);
   assert.match(policy, /script-src 'self' 'wasm-unsafe-eval'(;|$)/);
   assert.match(pocketContentSecurityPolicy('http://localhost:8787'), /connect-src 'self' ws:\/\/localhost:8787(;|$)/);
+});
+
+test('parseBearer and isRelayBearer: the minted 32-byte shape, from a Bearer header only', () => {
+  const token = randomSecret();
+  assert.equal(token.length, RELAY_BEARER_LENGTH);
+  assert.equal(parseBearer(`Bearer ${token}`), token);
+  for (const header of [undefined, null, '', `bearer ${token}`, `Basic ${token}`, `Bearer ${token} x`, 'Bearer '])
+    assert.equal(parseBearer(header), null, String(header));
+  assert.equal(isRelayBearer(token), true);
+  for (const bad of [token.slice(1), `${token}A`, `${token.slice(1)}!`, 7, undefined])
+    assert.equal(isRelayBearer(bad), false, String(bad));
+});
+
+test('readJson answers the body or null, never throws', async () => {
+  const request = (json) => ({ req: { json } });
+  assert.deepEqual(await readJson(request(async () => ({ a: 1 }))), { a: 1 });
+  assert.equal(await readJson(request(async () => { throw new SyntaxError('x'); })), null);
+});
+
+/** A registration body for `authenticator` that passes every check. */
+async function registration(overrides = {}) {
+  const authenticator = await SimAuthenticator.create({ rpId: RP_ID });
+  return {
+    credentialId: authenticator.credentialId,
+    publicKey: authenticator.publicKey,
+    clientDataJSON: registrationClientData({ challenge: 'AAEC', origin: ORIGIN }),
+    label: '  Phone\u0007 ',
+    ...overrides,
+  };
+}
+
+test('checkRegistration runs its checks in order, redeeming the challenge before the origin', async () => {
+  const redeemed = [];
+  const redeem = (challenge) => (redeemed.push(challenge), true);
+  const body = await registration();
+  assert.deepEqual(await checkRegistration(body, { origin: ORIGIN, redeem }), {
+    ok: true,
+    credentialId: body.credentialId,
+    publicKey: body.publicKey,
+    label: 'Phone',
+  });
+  const refused = (status, error) => ({ ok: false, status, error });
+  // Each case breaks one check and every later one; the first check's refusal answers.
+  const cases = [
+    [{ clientDataJSON: '***', publicKey: 'AAAA' }, refused(400, 'malformed clientDataJSON'), false],
+    [
+      { clientDataJSON: registrationClientData({ challenge: 'AAEC', origin: 'x', type: 'webauthn.get' }) },
+      refused(400, 'clientData type must be webauthn.create'),
+      false,
+    ],
+    [
+      { clientDataJSON: registrationClientData({ challenge: '!!', origin: 'https://evil.example' }) },
+      refused(400, 'unrecognized or expired challenge'),
+      false,
+    ],
+    [
+      { clientDataJSON: registrationClientData({ challenge: 'AAEC', origin: 'https://evil.example' }), publicKey: 'AAAA' },
+      refused(400, 'origin mismatch'),
+      true,
+    ],
+    [{ publicKey: 'AAAA', credentialId: '***' }, refused(400, 'unimportable public key'), true],
+    [{ credentialId: 'not base64url!' }, refused(400, 'malformed credentialId'), true],
+  ];
+  for (const [overrides, expected, redeems] of cases) {
+    redeemed.length = 0;
+    assert.deepEqual(await checkRegistration({ ...body, ...overrides }, { origin: ORIGIN, redeem }), expected);
+    assert.equal(redeemed.length, redeems ? 1 : 0, expected.error);
+  }
+  // A challenge that does not redeem stops the checks there.
+  assert.deepEqual(
+    await checkRegistration({ ...body, publicKey: 'AAAA' }, { origin: ORIGIN, redeem: () => false }),
+    refused(400, 'unrecognized or expired challenge'),
+  );
+  // The challenge is canonicalized before it redeems.
+  redeemed.length = 0;
+  await checkRegistration(
+    { ...body, clientDataJSON: registrationClientData({ challenge: 'AAE=', origin: ORIGIN }) },
+    { origin: ORIGIN, redeem },
+  );
+  assert.deepEqual(redeemed, ['AAE']);
+});
+
+test('verifySigninAssertion spends the challenge before verifying, and verifies under the policy', async () => {
+  const authenticator = await SimAuthenticator.create({ rpId: RP_ID, userVerification: false });
+  const challenge = randomSecret();
+  const assertion = await authenticator.assert({ challenge, origin: ORIGIN });
+  const passkey = { publicKey: authenticator.publicKey };
+  const steps = (live, policy = {}) => {
+    const log = [];
+    return {
+      log,
+      findPasskey: async (id) => (log.push(`find ${id}`), id === authenticator.credentialId ? passkey : undefined),
+      consumeChallenge: (value) => (log.push(`consume ${value}`), live),
+      policy: { origin: ORIGIN, rpId: RP_ID, ...policy },
+    };
+  };
+  const ok = steps(true);
+  assert.deepEqual(await verifySigninAssertion(assertion, ok), { ok: true, passkey });
+  assert.deepEqual(ok.log, [`find ${authenticator.credentialId}`, `consume ${challenge}`]);
+
+  const refused = (status, error) => ({ ok: false, status, error });
+  assert.deepEqual(await verifySigninAssertion(undefined, steps(true)), refused(400, 'malformed assertion'));
+  assert.deepEqual(
+    await verifySigninAssertion({ ...assertion, credentialId: 'other' }, steps(true)),
+    refused(404, 'unknown credential'),
+  );
+  assert.deepEqual(
+    await verifySigninAssertion({ ...assertion, clientDataJSON: '***' }, steps(true)),
+    refused(400, 'malformed clientDataJSON'),
+  );
+  assert.deepEqual(await verifySigninAssertion(assertion, steps(false)), refused(400, 'unrecognized or expired challenge'));
+  // A forged signature is refused only after its challenge was spent: it never replays.
+  const forged = await authenticator.assert({
+    challenge,
+    origin: ORIGIN,
+    tamper: { signWith: await SimAuthenticator.foreignSigningKey() },
+  });
+  const spent = steps(true);
+  assert.deepEqual(await verifySigninAssertion(forged, spent), refused(401, 'assertion rejected: signature-invalid'));
+  assert.equal(spent.log.at(-1), `consume ${challenge}`);
+  // The UV policy reaches the verifier.
+  assert.deepEqual(
+    await verifySigninAssertion(assertion, steps(true, { requireUserVerification: true })),
+    refused(401, 'assertion rejected: user-verification-missing'),
+  );
 });

@@ -344,7 +344,7 @@ under `/connect/assets/` and any other path under `/connect/` is a 404.
 A hashed file there is cached immutably. Everything under `/connect` carries
 this policy, from the relay's `APP_ORIGIN` (`<o>`; `<ws-o>` with `http`
 replaced by `ws`); every other relay response carries Pocket's policy or
-`RUNS_NOTHING_POLICY` (`docs/specs/hosted.md` -> "Relay"):
+`RUNS_NOTHING_POLICY` (`docs/specs/security-hosted.md` -> "Relay boundary"):
 
 ```
 default-src 'none'; script-src <o>/connect/assets/ 'wasm-unsafe-eval';
@@ -367,7 +367,7 @@ Source of truth: `OneTimeApp` and `oneTimeDeviceLabel` in
 `lib/src/remote/pocket-app/pocket-theme.ts`; `assertPocketShell` in
 `lib/scripts/assert-pocket-worker.mjs`; `stageRelay` in
 `hosted/scripts/stage-relay.mjs`; `oneTimePageRoutes` in
-`hosted/server/one-time.ts`; `relayPolicy` in
+`hosted/server/one-time.ts`; `relayRules` in
 `hosted/server/headers.ts`. Pinned by
 `lib/src/remote/one-time-app/OneTimeApp.test.tsx`,
 `lib/src/remote/pocket-app/assert-pocket-worker.test.ts`,

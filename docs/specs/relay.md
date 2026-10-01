@@ -293,18 +293,22 @@ parse. **Assertions go through `verifyPasskeyAssertion` in `remote-lib-common`,
 the same function the Burrow uses**, so Relay and Burrow cannot disagree on what a
 valid assertion is.
 
-`POST /api/setup/finish` takes `{ credentialId, publicKey, clientDataJSON }` and,
-through the helpers both this and the Hosted Relay import from
-`remote-lib-common/src/remote/relay-common.ts`, checks, in order: `clientDataJSON` decodes; `type === 'webauthn.create'`; its
-challenge redeems (400 otherwise); `origin` equals the configured origin; the
-public key imports as an ECDSA P-256 verify key — refusing anything assertions
-could not later be verified against; and the credential id is new (409
-otherwise, so a re-registered credential cannot silently displace a stored key).
+`POST /api/setup/finish` takes `{ credentialId, publicKey, clientDataJSON }`.
+`checkRegistration`, which this and the Hosted Relay both call, checks, in
+order, each a 400: `clientDataJSON` decodes; `type === 'webauthn.create'`; its
+challenge redeems; `origin` equals the configured origin; the public key
+imports as an ECDSA P-256 verify key — refusing anything assertions could not
+later be verified against; and the credential id is bounded base64url. Each
+Relay's store then requires the credential id be new (409 otherwise, so a
+re-registered credential cannot silently displace a stored key).
 
 **Must verify sign-in and re-auth against the stored passkey under the Relay's
-UV policy.** Sign-in consumes the challenge from `clientDataJSON` before
-`verifyPasskeyAssertion`; re-auth consumes its stored nonce and recomputes the
-bound challenge before invoking that same verifier. An unknown credential is 404.
+UV policy.** Sign-in runs `verifySigninAssertion`, which both Relays call: it
+consumes the challenge from `clientDataJSON` before `verifyPasskeyAssertion`.
+Re-auth consumes its stored nonce and recomputes the bound challenge before
+invoking that same verifier. An unknown credential is 404. Both Relays answer
+every route refusal with the error-string constants in
+`remote-lib-common/src/remote/wire.ts`.
 
 Challenges are `ChallengeIssuer` from `remote-lib-common` — a generic
 single-use/TTL store despite the name — and **setup and sign-in each get their
@@ -316,6 +320,10 @@ Re-auth uses `PresenceNonceStore`; push subscription uses delivery-id possession
 `clientDataJSON.challenge` by decoded base64url bytes**, so padded browser
 serializations redeem the issued challenge without weakening single-use replay
 protection.
+
+Source of truth: `checkRegistration` / `verifySigninAssertion` in
+`remote-lib-common/src/remote/relay-common.ts`, pinned by
+`remote-lib-common/test/relay-common.test.mjs`.
 
 ## HTTP API
 

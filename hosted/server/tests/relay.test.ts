@@ -3,27 +3,31 @@ import { randomUUID } from "node:crypto";
 import { digest } from "@pgstencil/auth/security";
 import { Miniflare, Response as WorkerResponse } from "miniflare";
 import { createTestContext } from "pgstencil/testing";
-import { queryDatabase } from "pgstencil/postgres";
+import { queryDatabase, withClient } from "pgstencil/postgres";
 import {
   API_ROUTES,
   MAX_PENDING_REAUTH_NONCES_PER_SESSION,
   MAX_TOKENS_PER_BURROW,
   SETUP_TOKEN_INVALID_ERROR,
   UNAUTHORIZED_ERROR,
-  toBase64Url,
-  utf8Encode,
   verifyPresenceProof,
   type PresenceBinding,
 } from "remote-lib-common";
-import { SimAuthenticator } from "../../../remote-lib-common/test/harness/actors.mjs";
+import {
+  SimAuthenticator,
+  randomRoutingId,
+  randomSecret,
+  registrationClientData,
+} from "../../../remote-lib-common/test/harness/actors.mjs";
 import { ADMIN_EMAIL } from "../admin";
 import { migrations } from "../migrations";
 import {
   MAX_PASSKEYS_PER_ACCOUNT,
   MAX_SESSIONS_PER_ACCOUNT,
   MAX_SETUP_CHALLENGES_PER_BURROW,
-  NOT_ENTITLED_ERROR,
+  restoreSetupToken,
 } from "../relay-api";
+import { NOT_ENTITLED_ERROR } from "../relay-auth";
 import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions } from "./bundle";
 
 // The Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay") in real
@@ -34,9 +38,6 @@ import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions } from "./bundle";
 const origin = ORIGINS.relay;
 const rpId = new URL(origin).hostname;
 const script = bundleWorker(ENTRIES.relay);
-
-const random = (bytes: number) =>
-  toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));
 
 type Authenticator = Awaited<ReturnType<typeof SimAuthenticator.create>>;
 
@@ -100,10 +101,22 @@ async function fixture() {
     return id;
   }
 
+  /**
+   * Makes `userId` the one entitled account: `ADMIN_EMAIL` is unique, so
+   * whoever held it gets another address first.
+   */
+  async function entitle(userId: string) {
+    await sql(`UPDATE "user" SET email = id || '@example.test' WHERE email = $1`, [ADMIN_EMAIL]);
+    await sql(`UPDATE "user" SET email = $2, "emailVerified" = true WHERE id = $1`, [
+      userId,
+      ADMIN_EMAIL,
+    ]);
+  }
+
   /** An enrolled Burrow, as phase B's device-code flow will write one. */
   async function burrow(userId: string) {
-    const burrowId = random(16);
-    const token = random(32);
+    const burrowId = randomRoutingId();
+    const token = randomSecret();
     await sql(
       `INSERT INTO dormouse_relay_burrows ("burrowId", "userId", "tokenHash") VALUES ($1, $2, $3)`,
       [burrowId, userId, digest(token)],
@@ -142,16 +155,7 @@ async function fixture() {
         setupToken: token,
         credentialId: authenticator.credentialId,
         publicKey: authenticator.publicKey,
-        clientDataJSON: toBase64Url(
-          utf8Encode(
-            JSON.stringify({
-              type: "webauthn.create",
-              challenge,
-              origin: clientOrigin,
-              crossOrigin: false,
-            }),
-          ),
-        ),
+        clientDataJSON: registrationClientData({ challenge, origin: clientOrigin }),
         label,
       },
     });
@@ -173,7 +177,7 @@ async function fixture() {
   const pairing = (burrowId: string, authenticator: Authenticator): PresenceBinding => ({
     kind: "pairing",
     burrowId,
-    handshakeHash: random(32),
+    handshakeHash: randomSecret(),
     passkeyCredentialId: authenticator.credentialId,
   });
 
@@ -208,8 +212,20 @@ async function fixture() {
     };
   }
 
+  /** The relay's Cron Trigger, as Cloudflare fires it. */
+  async function cron() {
+    // Without @cloudflare/workers-types, the Fetcher's scheduled() is untyped.
+    const worker = (await relay.getWorker()) as unknown as {
+      scheduled(options: { cron: string }): Promise<{ outcome: string }>;
+    };
+    expect((await worker.scheduled({ cron: "0 * * * *" })).outcome).toBe("ok");
+  }
+
   return {
     sql,
+    cron,
+    entitle,
+    url: context.database.url,
     call,
     account,
     burrow,
@@ -364,11 +380,7 @@ test("a refused finish puts the token back on its own expiry; a revoked Burrow's
         credentialId: phone.credentialId,
         publicKey: phone.publicKey,
         label: "x",
-        clientDataJSON: toBase64Url(
-          utf8Encode(
-            JSON.stringify({ type: "webauthn.create", challenge: begin.json!.challenge, origin }),
-          ),
-        ),
+        clientDataJSON: registrationClientData({ challenge: begin.json!.challenge, origin }),
         [field]: value,
       },
     });
@@ -402,9 +414,20 @@ test("a setup challenge redeems only with its own Burrow's tokens", async ({ onT
     status: 400,
     json: { error: "unrecognized or expired challenge" },
   });
-  // Both codes survive the refusal, and the challenge is still its own Burrow's.
+  // Nor does a sign-in challenge register.
+  const signinChallenge = (await f.call("POST", API_ROUTES.signinBegin)).json!.challenge;
+  expect((await f.finish(phone, token, signinChallenge)).json).toEqual({
+    error: "unrecognized or expired challenge",
+  });
+  // Both codes survive the refusals, and the challenge is still its own Burrow's.
   expect((await f.finish(phone, token, begin.json!.challenge)).status).toBe(200);
-  expect((await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: other } })).status).toBe(200);
+  const otherBegin = await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: other } });
+  expect(otherBegin.status).toBe(200);
+  // A setup challenge never signs in, even for a registered credential.
+  const assertion = await phone.assert({ challenge: otherBegin.json!.challenge, origin });
+  expect((await f.call("POST", API_ROUTES.signinFinish, { body: { assertion } })).json).toEqual({
+    error: "unrecognized or expired challenge",
+  });
 });
 
 test("another account's session sees, proves with, and retires none of this account's rows", async ({
@@ -422,7 +445,10 @@ test("another account's session sees, proves with, and retires none of this acco
     `INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label) VALUES ($1, $2, $3, '')`,
     [phoneB.credentialId, b, phoneB.publicKey],
   );
+  // One account is entitled at a time, and each request rechecks it: each
+  // account acts while it holds `ADMIN_EMAIL`.
   const sessionA = await f.session(phoneA);
+  await f.entitle(b);
   const sessionB = await f.session(phoneB);
   expect([sessionA.accountId, sessionB.accountId]).toEqual([a, b]);
 
@@ -437,6 +463,7 @@ test("another account's session sees, proves with, and retires none of this acco
     }),
   ).toMatchObject({ status: 404, json: { error: "unknown credential" } });
   // …nor spend A's nonce, which A still redeems.
+  await f.entitle(a);
   const binding = f.pairing(laptopA.burrowId, phoneA);
   const begin = await f.call("POST", API_ROUTES.reauthBegin, {
     bearer: sessionA.sessionToken,
@@ -448,17 +475,18 @@ test("another account's session sees, proves with, and retires none of this acco
       bearer,
       body: { relayNonce: begin.json!.relayNonce, assertion },
     });
+  const code = await f.setupToken(laptopA.token);
+  await f.entitle(b);
   expect(await finish(sessionB.sessionToken)).toMatchObject({
     status: 400,
     json: { error: "unrecognized or expired nonce" },
   });
-  expect((await finish(sessionA.sessionToken)).status).toBe(200);
-
   // B cannot retire A's code, which still registers for A.
-  const code = await f.setupToken(laptopA.token);
   expect(
     await f.call("POST", API_ROUTES.setupRetire, { bearer: sessionB.sessionToken, body: { setupToken: code } }),
   ).toMatchObject({ status: 401, json: { error: SETUP_TOKEN_INVALID_ERROR } });
+  await f.entitle(a);
+  expect((await finish(sessionA.sessionToken)).status).toBe(200);
   const begun = await f.call("POST", API_ROUTES.setupBegin, { body: { setupToken: code } });
   // Only A's own credentials are excluded, never B's.
   expect(begun.json).toMatchObject({ accountId: a, existingCredentialIds: [phoneA.credentialId] });
@@ -524,7 +552,7 @@ test("every table a caller grows is capped by whoever grows it, and expired rows
   for (let i = 1; i < MAX_PASSKEYS_PER_ACCOUNT; i++)
     await f.sql(
       `INSERT INTO dormouse_relay_passkeys ("credentialId", "userId", "publicKey", label) VALUES ($1, $2, 'x', '')`,
-      [random(16), owner],
+      [randomRoutingId(), owner],
     );
   const phone = await newAuthenticator();
   expect((await f.register(phone, tokens.at(-1)!)).status).toBe(200);
@@ -566,7 +594,7 @@ test("every table a caller grows is capped by whoever grows it, and expired rows
   // Another session's nonce costs this one nothing.
   expect(await count("dormouse_relay_presence_nonces")).toBe(MAX_PENDING_REAUTH_NONCES_PER_SESSION + 1);
 
-  // Expired rows are refused, then pruned by the next write that grows their table.
+  // Expired rows are refused; a write prunes only its own key's, the Cron Trigger the rest.
   await f.sql(`UPDATE dormouse_relay_sessions SET "expiresAt" = now() - interval '1 second' WHERE "tokenHash" = $1`, [
     digest(sibling),
   ]);
@@ -592,22 +620,114 @@ test("every table a caller grows is capped by whoever grows it, and expired rows
     body: { binding: f.pairing(laptop.burrowId, phone) },
   });
   await f.setupToken(laptop.token);
-  expect(await count("dormouse_relay_sessions", `"expiresAt" <= now()`)).toBe(0);
-  expect(await count("dormouse_relay_presence_nonces", `"expiresAt" <= now()`)).toBe(0);
-  expect(await count("dormouse_relay_setup_tokens", `"expiresAt" <= now()`)).toBe(0);
-  expect(await count("dormouse_relay_challenges", `"expiresAt" <= now()`)).toBe(0);
+  const expired = `"expiresAt" <= now()`;
+  // The account's expired session went with the new one (and its nonces with
+  // it), the session's own nonces with the new nonce, the laptop's tokens with
+  // its mint…
+  expect(await count("dormouse_relay_sessions", expired)).toBe(0);
+  expect(await count("dormouse_relay_presence_nonces", expired)).toBe(0);
+  expect(await count("dormouse_relay_setup_tokens", `${expired} AND "burrowId" = $1`, [laptop.burrowId])).toBe(0);
+  // …but never another key's: the desktop's token and every challenge wait.
+  expect(await count("dormouse_relay_setup_tokens", `${expired} AND "burrowId" = $1`, [desktop.burrowId])).toBe(1);
+  expect(await count("dormouse_relay_challenges", expired)).toBeGreaterThan(0);
+  const live = {
+    sessions: await count("dormouse_relay_sessions"),
+    nonces: await count("dormouse_relay_presence_nonces"),
+    tokens: await count("dormouse_relay_setup_tokens", `NOT ${expired}`),
+  };
+  await f.cron();
+  for (const table of ["sessions", "presence_nonces", "setup_tokens", "challenges"])
+    expect(await count(`dormouse_relay_${table}`, expired), table).toBe(0);
+  // The sweep takes nothing live.
+  expect({
+    sessions: await count("dormouse_relay_sessions"),
+    nonces: await count("dormouse_relay_presence_nonces"),
+    tokens: await count("dormouse_relay_setup_tokens"),
+  }).toEqual(live);
 });
 
-test("sign-in challenges, minted unauthenticated, are rate limited per address", async ({
+test("restoring a setup token that has since expired never evicts a live one", async ({
   onTestFinished,
 }) => {
   const f = await fixture();
   onTestFinished(f.close);
-  for (let i = 0; i < 30; i++)
-    expect((await f.call("POST", API_ROUTES.signinBegin, { ip: "203.0.113.7" })).status).toBe(200);
-  const limited = await f.call("POST", API_ROUTES.signinBegin, { ip: "203.0.113.7" });
-  expect(limited).toMatchObject({ status: 429, json: { error: "too many sign-in attempts" } });
-  expect(limited.headers.get("retry-after")).toBe("60");
-  // Another address is another caller.
-  expect((await f.call("POST", API_ROUTES.signinBegin, { ip: "203.0.113.8" })).status).toBe(200);
+  const owner = await f.account(ADMIN_EMAIL);
+  const laptop = await f.burrow(owner);
+  const live: string[] = [];
+  for (let i = 0; i < MAX_TOKENS_PER_BURROW; i++) live.push(digest(await f.setupToken(laptop.token)));
+  const hashes = async () =>
+    (await f.sql<{ tokenHash: string }>(`SELECT "tokenHash" FROM dormouse_relay_setup_tokens`))
+      .map((row) => row.tokenHash)
+      .sort();
+  const restore = (token: string, expiresAt: Date) =>
+    withClient(f.url, (db) =>
+      restoreSetupToken(db, token, { burrowId: laptop.burrowId, userId: owner, expiresAt }),
+    );
+  await restore(randomSecret(), new Date(Date.now() - 1000));
+  expect(await hashes()).toEqual([...live].sort());
+  // A live one is restored within the cap: the Burrow's oldest makes room.
+  const back = randomSecret();
+  await restore(back, new Date(Date.now() + 60_000));
+  const after = await hashes();
+  expect(after).toHaveLength(MAX_TOKENS_PER_BURROW);
+  expect(after).toContain(digest(back));
+});
+
+test("a de-entitled account signs in to nothing, and its sessions answer as expired", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const laptop = await f.burrow(owner);
+  const phone = await newAuthenticator();
+  expect((await f.register(phone, await f.setupToken(laptop.token))).status).toBe(200);
+  const { sessionToken } = await f.session(phone);
+  const binding = f.pairing(laptop.burrowId, phone);
+  const begun = await f.call("POST", API_ROUTES.reauthBegin, { bearer: sessionToken, body: { binding } });
+  const assertion = await phone.assert({ challenge: begun.json!.challenge, origin });
+  const code = await f.setupToken(laptop.token);
+  const gated: [string, string, unknown][] = [
+    ["GET", API_ROUTES.burrows, undefined],
+    ["POST", API_ROUTES.reauthBegin, { binding }],
+    ["POST", API_ROUTES.reauthFinish, { relayNonce: begun.json!.relayNonce, assertion }],
+    ["POST", API_ROUTES.setupRetire, { setupToken: code }],
+  ];
+
+  await f.sql(`UPDATE "user" SET "emailVerified" = false`);
+  for (const [method, path, body] of gated)
+    expect(await f.call(method, path, { bearer: sessionToken, body }), path).toMatchObject({
+      status: 401,
+      json: { error: UNAUTHORIZED_ERROR },
+    });
+  expect(await f.signin(phone)).toMatchObject({ status: 401, json: { error: NOT_ENTITLED_ERROR } });
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_sessions`)).toEqual([{ n: 1 }]);
+
+  // Entitled again, the same session acts: nothing above spent the nonce or the code.
+  await f.sql(`UPDATE "user" SET "emailVerified" = true`);
+  const [, , finish, retire] = gated;
+  for (const [[method, path, body], status] of [[retire, 204], [finish, 200]] as const)
+    expect((await f.call(method, path, { bearer: sessionToken, body })).status, path).toBe(status);
+});
+
+test("every unauthenticated route that reaches Postgres is rate limited per address", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  for (const [routes, error] of [
+    [[API_ROUTES.signinBegin, API_ROUTES.signinFinish], "too many sign-in attempts"],
+    [[API_ROUTES.setupBegin, API_ROUTES.setupFinish], "too many setup attempts"],
+  ] as const) {
+    // A ceremony's two routes spend one budget.
+    for (let i = 0; i < 30; i++)
+      expect((await f.call("POST", routes[i % 2], { ip: "203.0.113.7", body: {} })).status).not.toBe(429);
+    for (const route of routes) {
+      const limited = await f.call("POST", route, { ip: "203.0.113.7", body: {} });
+      expect(limited, route).toMatchObject({ status: 429, json: { error } });
+      expect(limited.headers.get("retry-after")).toBe("60");
+    }
+    // Another address is another caller.
+    expect((await f.call("POST", routes[0], { ip: "203.0.113.8", body: {} })).status).not.toBe(429);
+  }
 });

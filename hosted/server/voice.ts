@@ -3,6 +3,7 @@ import type { Context, Hono, MiddlewareHandler } from "hono";
 import { digest } from "@pgstencil/auth/security";
 import { SecureRandom, token as randomToken } from "pgstencil";
 import { queryDatabase, withClient } from "pgstencil/postgres";
+import { parseBearer } from "remote-lib-common";
 import { isAdmin } from "./admin";
 
 export const VOICE_DAILY_CAP = 500;
@@ -153,8 +154,8 @@ export function voiceTokenRoutes(
  */
 export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
   app.post("/api/voice/speak", async (c) => {
-    const bearer = /^Bearer (\S+)$/.exec(c.req.header("authorization") ?? "");
-    if (!bearer || !TOKEN.test(bearer[1])) return tokenRequired(c);
+    const bearer = parseBearer(c.req.header("authorization"));
+    if (!bearer || !TOKEN.test(bearer)) return tokenRequired(c);
     const { databaseUrl, synthesize } = host(c);
     // One connection for the owner lookup and the count; released before the upstream call.
     const speech = await withClient(databaseUrl, async (db) => {
@@ -169,7 +170,7 @@ export function speakRoute(app: Hono<any>, host: (c: Context) => SpeakHost) {
         `SELECT t.id, t."userId", u.email, u."emailVerified"
         FROM dormouse_voice_tokens t JOIN "user" u ON u.id = t."userId"
         WHERE t.hash = $1 AND t."revokedAt" IS NULL`,
-        [digest(bearer[1])],
+        [digest(bearer)],
       );
       if (!owner) return tokenRequired(c);
       if (!isAdmin(owner)) return notAdmin(c);

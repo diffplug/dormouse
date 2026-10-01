@@ -16,7 +16,6 @@ import type { NodeWebSocket } from '@hono/node-ws';
 import { serveStatic } from '@hono/node-server/serve-static';
 import {
   API_ROUTES,
-  CEREMONY_FIELD_LIMIT,
   DELIVERY_ID_LENGTH,
   E2E_ID_LENGTH,
   ChallengeIssuer,
@@ -32,7 +31,6 @@ import {
   WS_ROUTES,
   PUSH_SEND_DEADLINE_MS,
   WS_TOKEN_PARAM,
-  isBoundedBase64Url,
   isExactBase64Url,
   isOrigin,
   isPresenceBinding,
@@ -46,18 +44,25 @@ import {
   MAX_REQUEST_BODY_BYTES,
   RELAY_SESSION_TTL_MS,
   REAUTH_NONCE_TTL_MS,
-  decodeClientData,
-  importableSpkiP256,
-  normalizeChallenge,
+  BODY_TOO_LARGE_ERROR,
+  DUPLICATE_CREDENTIAL_ERROR,
+  MALFORMED_ASSERTION_ERROR,
+  MALFORMED_BINDING_ERROR,
+  UNKNOWN_CREDENTIAL_ERROR,
+  UNKNOWN_NONCE_ERROR,
+  WRONG_CREDENTIAL_ERROR,
+  assertionRejectedError,
+  checkRegistration,
+  parseBearer,
   pocketContentSecurityPolicy,
-  reducePasskeyLabel,
+  readJson,
+  verifySigninAssertion,
 } from 'remote-lib-common';
 import type {
   BurrowEnrollOriginMismatch,
   BurrowEnrollRequest,
   BurrowEnrollResponse,
   BurrowsResponse,
-  PasskeyAssertion,
   PresenceBinding,
   PushConfigResponse,
   PushDevicesResponse,
@@ -241,9 +246,6 @@ export const BURROW_ENROLL_ATTEMPT_BURST = 8;
 /** Sustained Burrow-enrollment admission: one attempt per second. */
 export const BURROW_ENROLL_ATTEMPT_REFILL_MS = 1_000;
 
-/** `MAX_REQUEST_BODY_BYTES` lives in `remote-lib-common`, which the Hosted Relay shares. */
-export { MAX_REQUEST_BODY_BYTES };
-
 /**
  * The one route whose legitimate body outgrows {@link MAX_REQUEST_BODY_BYTES}:
  * a fan-out of `MAX_PUSH_QUERY_DELIVERY_IDS` sealed envelopes, each already
@@ -259,7 +261,7 @@ export const MAX_PUSH_SEND_BODY_BYTES =
 
 /** The one answer to an over-long body: 413, before any route has run. */
 function tooLarge(c: Context<AppEnv>): Response {
-  return c.json({ error: 'request body too large' }, 413);
+  return c.json({ error: BODY_TOO_LARGE_ERROR }, 413);
 }
 
 /** The credential fields `pickCredential` reads. */
@@ -703,52 +705,24 @@ export function createApp(config: AppConfig): CreatedApp {
     const { body, spent } = gated;
     let registered = false;
     try {
-      // Decode and sanity-check clientDataJSON — we do NOT parse attestation
-      // (attestation: 'none'); the browser already handed us the public key.
-      const clientData = decodeClientData(body.clientDataJSON);
-      if (!clientData) return c.json({ error: 'malformed clientDataJSON' }, 400);
-      if (clientData.type !== 'webauthn.create') {
-        return c.json({ error: 'clientData type must be webauthn.create' }, 400);
-      }
-      const challenge = normalizeChallenge(clientData.challenge);
-      if (!challenge || !setupChallenges.consume(challenge)) {
-        return c.json({ error: 'unrecognized or expired challenge' }, 400);
-      }
-      if (clientData.origin !== origin) {
-        return c.json({ error: 'origin mismatch' }, 400);
-      }
-
-      // Reject any key we could not verify assertions against later.
-      if (!(await importableSpkiP256(body.publicKey))) {
-        return c.json({ error: 'unimportable public key' }, 400);
-      }
-      // And any credential id we could not hand back. It is stored verbatim and
-      // returned to every later `setup/begin` as an `existingCredentialIds`
-      // entry, which the Client base64url-decodes — so one malformed id from a
-      // holder of one live setup token wedges passkey registration for the
-      // account until `account.json` is hand-edited.
-      if (!isBoundedBase64Url(body.credentialId, CEREMONY_FIELD_LIMIT)) {
-        return c.json({ error: 'malformed credentialId' }, 400);
-      }
-
+      // The checks both Relays run, in their order (`checkRegistration`).
+      const checked = await checkRegistration(body, {
+        origin,
+        redeem: (challenge) => setupChallenges.consume(challenge),
+      });
+      if (!checked.ok) return c.json({ error: checked.error }, checked.status);
+      const { credentialId, publicKey, label } = checked;
       try {
-        await accounts.appendPasskey({
-          credentialId: body.credentialId,
-          publicKey: body.publicKey,
-          label: reducePasskeyLabel(body.label),
-        });
+        await accounts.appendPasskey({ credentialId, publicKey, label });
       } catch (err) {
         if (err instanceof DuplicateCredentialError) {
-          return c.json({ error: 'credential already registered' }, 409);
+          return c.json({ error: DUPLICATE_CREDENTIAL_ERROR }, 409);
         }
         throw err;
       }
       registered = true;
 
-      const res: SetupFinishResponse = {
-        accountId: SELFHOST_ACCOUNT_ID,
-        credentialId: body.credentialId,
-      };
+      const res: SetupFinishResponse = { accountId: SELFHOST_ACCOUNT_ID, credentialId };
       return c.json(res);
     } finally {
       // Its original expiry rides along, so a retry never buys extra time.
@@ -764,56 +738,16 @@ export function createApp(config: AppConfig): CreatedApp {
     return c.json(res);
   });
 
-  /**
-   * Sign-in's verifier: pull the challenge out of the assertion's own
-   * clientDataJSON and consume it (single-use, BEFORE verifying — a captured
-   * assertion can never be replayed even if verification succeeds), then verify
-   * against the STORED passkey for the asserted credential. Re-auth verifies
-   * the same way but against a challenge it *derives*, so it cannot share this.
-   */
-  const verifyFreshAssertion = async (
-    assertion: SigninFinishRequest['assertion'] | undefined,
-  ): Promise<
-    { ok: true; publicKey: string } | { ok: false; status: 400 | 401 | 404; error: string }
-  > => {
-    if (!assertion || typeof assertion.credentialId !== 'string') {
-      return { ok: false, status: 400, error: 'malformed assertion' };
-    }
-    const stored = await accounts.findPasskey(assertion.credentialId);
-    if (!stored) return { ok: false, status: 404, error: 'unknown credential' };
-
-    const clientData = decodeClientData(assertion.clientDataJSON);
-    if (!clientData || typeof clientData.challenge !== 'string') {
-      return { ok: false, status: 400, error: 'malformed clientDataJSON' };
-    }
-    const challenge = normalizeChallenge(clientData.challenge);
-    if (!challenge) {
-      return { ok: false, status: 400, error: 'malformed clientDataJSON' };
-    }
-    if (!signinChallenges.consume(challenge)) {
-      return { ok: false, status: 400, error: 'unrecognized or expired challenge' };
-    }
-
-    const result = await verifyPasskeyAssertion(assertion as PasskeyAssertion, stored.publicKey, {
-      challenge,
-      origin,
-      rpId,
-      // Same Relay-wide UV policy re-auth enforces, so sign-in is not a
-      // softer path than a presence proof when UV is required.
-      requireUserVerification: config.requireUserVerification,
-    });
-    if (!result.ok) {
-      return { ok: false, status: 401, error: `assertion rejected: ${result.reason}` };
-    }
-    // The verified passkey's public key travels back to the caller. It is
-    // public, and a Client needs it to build pair/connect requests — see
-    // `SigninFinishResponse.passkeyPublicKey`.
-    return { ok: true, publicKey: stored.publicKey };
-  };
-
   app.post(API_ROUTES.signinFinish, async (c) => {
     const body = await readJson<SigninFinishRequest>(c);
-    const verdict = await verifyFreshAssertion(body?.assertion);
+    // The pipeline both Relays run (`verifySigninAssertion`), under the same
+    // Relay-wide UV policy re-auth enforces, so sign-in is not a softer path
+    // than a presence proof when UV is required.
+    const verdict = await verifySigninAssertion(body?.assertion, {
+      findPasskey: (credentialId) => accounts.findPasskey(credentialId),
+      consumeChallenge: (challenge) => signinChallenges.consume(challenge),
+      policy: { origin, rpId, requireUserVerification: config.requireUserVerification },
+    });
     if (!verdict.ok) return c.json({ error: verdict.error }, verdict.status);
 
     const { token, session } = sessions.mint(SELFHOST_ACCOUNT_ID);
@@ -821,7 +755,9 @@ export function createApp(config: AppConfig): CreatedApp {
       sessionToken: token,
       accountId: session.accountId,
       expiresAt: session.expiresAt,
-      passkeyPublicKey: verdict.publicKey,
+      // Public, and a Client needs it to build pair/connect requests
+      // (`SigninFinishResponse.passkeyPublicKey`).
+      passkeyPublicKey: verdict.passkey.publicKey,
     };
     return c.json(res);
   });
@@ -903,7 +839,7 @@ export function createApp(config: AppConfig): CreatedApp {
 
   // Gate a route on a valid `Authorization: Bearer` session token.
   const requireSession: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const token = bearerToken(c);
+    const token = parseBearer(c.req.header('Authorization'));
     const session = token ? sessions.validate(token) : null;
     if (!session) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
     c.set('session', session);
@@ -914,7 +850,7 @@ export function createApp(config: AppConfig): CreatedApp {
   // `requireSession`, resolving through the constant-time `findByToken`.
   // Wrong-shaped values short-circuit before the store read.
   const requireBurrow: MiddlewareHandler<AppEnv> = async (c, next) => {
-    const token = bearerToken(c);
+    const token = parseBearer(c.req.header('Authorization'));
     const burrow = token ? await burrowStore.findByToken(token) : undefined;
     if (!burrow) return c.json({ error: UNAUTHORIZED_ERROR }, 401);
     c.set('burrow', burrow);
@@ -933,13 +869,13 @@ export function createApp(config: AppConfig): CreatedApp {
     const body = await readJson<Partial<ReauthBeginRequest>>(c);
     const binding: unknown = body?.binding;
     if (!isPresenceBinding(binding)) {
-      return c.json({ error: 'malformed presence binding' }, 400);
+      return c.json({ error: MALFORMED_BINDING_ERROR }, 400);
     }
     // The binding's credential must be one this account can actually assert
     // with: it is the sole `allowCredentials` entry, so naming an unregistered
     // one could only ever produce an assertion `finish` has no key to check.
     if (!(await accounts.findPasskey(binding.passkeyCredentialId))) {
-      return c.json({ error: 'unknown credential' }, 404);
+      return c.json({ error: UNKNOWN_CREDENTIAL_ERROR }, 404);
     }
     const relayNonce = toBase64Url(randomBytes(32));
     let challenge: string;
@@ -948,7 +884,7 @@ export function createApp(config: AppConfig): CreatedApp {
     } catch {
       // A bounded-but-not-base64url field: the builder throws, and nothing is
       // remembered, so a broken binding costs a 400 rather than a map entry.
-      return c.json({ error: 'malformed presence binding' }, 400);
+      return c.json({ error: MALFORMED_BINDING_ERROR }, 400);
     }
     // The caller's own session owns the entry, so a flood can only evict its own.
     presenceNonces.remember(c.get('session'), relayNonce, binding);
@@ -970,23 +906,23 @@ export function createApp(config: AppConfig): CreatedApp {
     // The shape first, so nothing below has to re-narrow it; every value that
     // could possibly be a nonce still reaches `consume`.
     if (typeof relayNonce !== 'string') {
-      return c.json({ error: 'unrecognized or expired nonce' }, 400);
+      return c.json({ error: UNKNOWN_NONCE_ERROR }, 400);
     }
     // Consumed FIRST, whatever the rest of this decides: single use is what
     // stops one WebAuthn prompt proving presence for a second ceremony.
     const pending = presenceNonces.consume(relayNonce);
-    if (!pending) return c.json({ error: 'unrecognized or expired nonce' }, 400);
+    if (!pending) return c.json({ error: UNKNOWN_NONCE_ERROR }, 400);
     const assertion = body?.assertion;
     if (!assertion || typeof assertion.credentialId !== 'string') {
-      return c.json({ error: 'malformed assertion' }, 400);
+      return c.json({ error: MALFORMED_ASSERTION_ERROR }, 400);
     }
     // The assertion must be by the credential the binding named — the one the
     // Burrow will check the ACL against — not merely by some registered passkey.
     if (assertion.credentialId !== pending.binding.passkeyCredentialId) {
-      return c.json({ error: 'assertion is for a different credential' }, 401);
+      return c.json({ error: WRONG_CREDENTIAL_ERROR }, 401);
     }
     const stored = await accounts.findPasskey(pending.binding.passkeyCredentialId);
-    if (!stored) return c.json({ error: 'unknown credential' }, 404);
+    if (!stored) return c.json({ error: UNKNOWN_CREDENTIAL_ERROR }, 404);
     // Recomputed from the binding this Relay stored, never from anything the
     // caller sent back with the assertion.
     const challenge = await presenceChallenge(pending.binding, relayNonce);
@@ -996,7 +932,7 @@ export function createApp(config: AppConfig): CreatedApp {
       rpId,
       requireUserVerification: config.requireUserVerification,
     });
-    if (!result.ok) return c.json({ error: `assertion rejected: ${result.reason}` }, 401);
+    if (!result.ok) return c.json({ error: assertionRejectedError(result.reason) }, 401);
     // It extends nothing: no session TTL, no presence stamp. The Burrow is what
     // consumes this proof, and it verifies the assertion itself.
     const res: ReauthFinishResponse = { verifiedAt: now() };
@@ -1476,20 +1412,6 @@ function pocketCacheControl(requestPath: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function readJson<T>(c: { req: { json(): Promise<unknown> } }): Promise<T | null> {
-  try {
-    return (await c.req.json()) as T;
-  } catch {
-    return null;
-  }
-}
-
-/** Read an `Authorization: Bearer <token>` header, or null if absent/malformed. */
-function bearerToken(c: Context<AppEnv>): string | null {
-  const match = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '');
-  return match ? match[1]! : null;
 }
 
 /**

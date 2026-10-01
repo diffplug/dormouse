@@ -7,7 +7,6 @@ import {
   API_ROUTES,
   ONE_TIME_PAGE_PATH,
   ONE_TIME_WS_ROUTES,
-  pocketContentSecurityPolicy,
 } from "remote-lib-common";
 import {
   accountBindings,
@@ -17,10 +16,11 @@ import {
   voicePreviewBindings,
 } from "../bindings";
 import {
-  ACCOUNT_HASHED_ASSETS,
   ACCOUNT_POLICY,
-  RELAY_HASHED_ASSETS,
   RUNS_NOTHING_POLICY,
+  accountRules,
+  relayRules,
+  type RulesFor,
 } from "../headers";
 import { voiceApp } from "../voice-app";
 import { workerApp } from "../worker-app";
@@ -114,7 +114,6 @@ const SERVED: Record<Name, [string, string][]> = {
     ["GET", ONE_TIME_WS_ROUTES.burrow],
     ["GET", ONE_TIME_WS_ROUTES.client],
     ["GET", ONE_TIME_PAGE_PATH],
-    ["GET", "/api/hello"],
     ["POST", API_ROUTES.setupBegin],
     ["POST", API_ROUTES.signinBegin],
     ["GET", API_ROUTES.burrows],
@@ -126,7 +125,6 @@ const SERVED: Record<Name, [string, string][]> = {
 
 /** The Hosted Relay's routes, which only the relay serves. */
 const RELAY_API: [string, string][] = [
-  ["GET", "/api/hello"],
   ["POST", API_ROUTES.setupBegin],
   ["POST", API_ROUTES.setupFinish],
   ["POST", API_ROUTES.setupRetire],
@@ -179,6 +177,13 @@ const ABSENT: Record<Name, [string, string][]> = {
     ["POST", "/api/push/subscribe"],
     ["POST", "/api/push/send"],
     ["GET", "/api/push/devices"],
+    // The self-host installers' probe; neither a Burrow nor Pocket asks Hosted for it.
+    ["GET", "/api/hello"],
+    // No relay socket is served yet, and the non-page prefixes 404 whole.
+    ["GET", "/ws/client"],
+    ["GET", "/ws/other"],
+    ["GET", "/api"],
+    ["GET", "/ws"],
   ],
   voice: [
     ["GET", "/api/auth/csrf"],
@@ -208,16 +213,6 @@ test.for(NAMES)("%s: serves only its own routes", async (name) => {
   expect(outbound).toEqual([]);
 });
 
-test("the relay answers every other path with Pocket's shell under Pocket's policy", async () => {
-  for (const path of ["/", "/login", "/account", "/pair"]) {
-    const response = await send("relay", ORIGINS.relay + path);
-    expect(response.status, path).toBe(200);
-    expect(response.headers.get("content-security-policy"), path).toBe(
-      pocketContentSecurityPolicy(ORIGINS.relay),
-    );
-  }
-});
-
 test("the account answers /connect/ with its own shell and policy, never the phone page", async () => {
   for (const path of [ONE_TIME_PAGE_PATH, `${ONE_TIME_PAGE_PATH}assets/x.js`]) {
     const response = await send("account", ORIGINS.account + path);
@@ -235,12 +230,12 @@ test("each Worker caches only its own hashed assets as immutable", async () => {
   expect(cache(await send("account", ORIGINS.account + phone))).toBe("no-store");
   expect(cache(await send("relay", ORIGINS.relay + pocket))).toBe(IMMUTABLE);
   expect(cache(await send("relay", ORIGINS.relay + phone))).toBe(IMMUTABLE);
-  // Each Worker's prefixes, checked on an app that serves a script at every path.
-  const serving = (hashedAssets: readonly string[]) =>
+  // Each Worker's rules, checked on an app that serves a script at every path.
+  const serving = (rules: RulesFor) =>
     workerApp({
       bindings: (env) => env,
-      policy: () => RUNS_NOTHING_POLICY,
-      hashedAssets,
+      rules,
+      nonPagePrefixes: [],
       unavailable: "",
       routes: (app) =>
         app.get("*", () =>
@@ -248,12 +243,13 @@ test("each Worker caches only its own hashed assets as immutable", async () => {
         ),
     });
   const env = { APP_ORIGIN: ORIGINS.relay };
-  const relay = serving(RELAY_HASHED_ASSETS);
-  for (const path of [pocket, phone])
+  const relay = serving(relayRules);
+  for (const path of [pocket, phone, "/%61ssets/app-abc123.js"])
     expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe(IMMUTABLE);
-  for (const path of ["/sw.js", "/connect/x.js", "/api/assets/x.js"])
+  expect(cache(await relay.fetch(new Request(ORIGINS.relay + "/sw.js"), env))).toBe("no-cache");
+  for (const path of ["/connect/x.js", "/api/assets/x.js", "/ws/assets/x.js"])
     expect(cache(await relay.fetch(new Request(ORIGINS.relay + path), env)), path).toBe("no-store");
-  const account = serving(ACCOUNT_HASHED_ASSETS);
+  const account = serving(accountRules);
   expect(cache(await account.fetch(new Request(ORIGINS.relay + phone), env))).toBe("no-store");
 });
 
@@ -334,6 +330,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
     ONE_TIME_MINT_LIMIT: {} as RateLimit,
     ONE_TIME_JOIN_LIMIT: {} as RateLimit,
     RELAY_SIGNIN_LIMIT: {} as RateLimit,
+    RELAY_SETUP_LIMIT: {} as RateLimit,
   };
   const keys = (bindings: object) => Object.keys(bindings).sort();
   expect(keys(accountBindings(env))).toEqual(
@@ -368,6 +365,7 @@ test("each bindings mapper passes only what its Worker uses", () => {
       "ONE_TIME_JOIN_LIMIT",
       "ONE_TIME_MINT_LIMIT",
       "ONE_TIME_ROOM",
+      "RELAY_SETUP_LIMIT",
       "RELAY_SIGNIN_LIMIT",
     ].sort(),
   );

@@ -10,10 +10,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { serve } from '@hono/node-server';
-import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM, toBase64Url, utf8Encode } from 'remote-lib-common';
+import { API_ROUTES, WS_ROUTES, WS_TOKEN_PARAM } from 'remote-lib-common';
 
 import { createApp } from '../dist/app.js';
-import { SimAuthenticator } from '../../remote-lib-common/test/harness/actors.mjs';
+import {
+  SimAuthenticator,
+  registrationClientData as browserRegistrationClientData,
+} from '../../remote-lib-common/test/harness/actors.mjs';
 import { ORIGIN, PASSWORD, RP_ID } from './fixtures.mjs';
 
 export * from './fixtures.mjs';
@@ -98,9 +101,9 @@ export function newAuthenticator() {
   return SimAuthenticator.create({ rpId: RP_ID });
 }
 
-/** Build registration clientDataJSON exactly as a browser would (webauthn.create). */
-export function registrationClientData({ challenge, origin = ORIGIN, type = 'webauthn.create' }) {
-  return toBase64Url(utf8Encode(JSON.stringify({ type, challenge, origin, crossOrigin: false })));
+/** The shared harness's registration clientDataJSON, from this suite's `ORIGIN` unless named. */
+export function registrationClientData({ origin = ORIGIN, ...rest }) {
+  return browserRegistrationClientData({ origin, ...rest });
 }
 
 /** Serialize an unpadded base64url challenge the way some browsers do in clientDataJSON. */

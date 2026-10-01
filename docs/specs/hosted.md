@@ -10,10 +10,10 @@
 | Worker | Origin | Serves | Holds |
 |---|---|---|---|
 | `dormouse-hosted` | `https://hosted.dormouse.sh` | the account frontend, `/api/auth/*`, `/api/providers`, `/api/ready`, voice tokens | the login cookie, auth secrets, Hyperdrive |
-| `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay and Pocket ("Relay"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, the one-time and sign-in rate limits |
+| `dormouse-relay` | `https://relay.dormouse.sh` | the Hosted Relay and Pocket ("Relay"), the one-time rendezvous and `/connect/` (`docs/specs/one-time.md` -> "Hosted rendezvous") | Hyperdrive, `OneTimeRoom`, the one-time, sign-in, and setup rate limits |
 | `dormouse-voice` | `https://voice.dormouse.sh` | speak and the history sweep ("Managed voice") | `ELEVENLABS_API_KEY`, Hyperdrive |
 
-Every Worker answers `/api/health`, 404s any other `/api/*`, `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. The account falls back to its SPA assets, the relay to Pocket's. The 421 origin gate, each Worker's bindings mapper, and the cookie routes' exact-`Origin` check are `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
+Every Worker answers `/api/health`, 404s anything else under its non-page prefixes (`/api`, and the relay's `/ws` too), `/dev/*`, or `/__test/*`, and answers a thrown request 503 under `secureHeaders`. The account falls back to its SPA assets, the relay to Pocket's. The 421 origin gate, each Worker's bindings mapper, and the cookie routes' exact-`Origin` check are `docs/specs/security-hosted.md` -> "Origin boundary" (rationale).
 
 Marketing is a separate bundle and deployment. `remote-lib-common` is compiled in from source through `hosted/tsconfig.json` `paths`, which every esbuild bundle and Wrangler honor.
 
@@ -33,7 +33,7 @@ Source of truth: `workerApp` in `hosted/server/worker-app.ts`; `accountApp` in `
 
 **May create provider-only accounts without verified email.** Public email is null; pgstencil's internal placeholder is never a delivery address. Email-code login remains an access path to an account's canonical verified mailbox. No merge, email adoption, unlink, or account-recovery interface exists.
 
-**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exception: the `ADMIN_EMAIL` gate of "Managed voice" and "Relay".
+**Must identify accounts by immutable user ID, never email.** Provider-only accounts keep their identity when a provider subsequently supplies email. Exception: `ADMIN_EMAIL` ("Managed voice").
 
 **Must enable providers explicitly in `OAUTH_PROVIDERS`.** The allowed set is GitHub, Google, Microsoft, and Apple. Missing paired credentials or unknown names fail closed; unused credentials enable nothing. Email uses Postmark in production and local capture in development.
 
@@ -66,7 +66,7 @@ An admin-only test slice: Dormouse desktop exchanges a pasted voice token for El
 
 Errors are JSON `{ message }`. Cookie routes answer 401 without a login and 403 for any account but the admin.
 
-**Must admit only `ADMIN_EMAIL` while it is the account's verified email, rechecked on every request.** This and the Relay's entitlement are the only exceptions to "never email" ("Identity and login"); nothing else may key on an address, and both end with the entitlement in Future item 3. Cookie routes ask the Better Auth handler's `get-session` for the login; speak reads the token owner's user row.
+**Must admit only `ADMIN_EMAIL` while it is the account's verified email, rechecked on every request.** This gate, `isAdmin`, is also the Relay's entitlement ("Relay") and the only exception to "never email" ("Identity and login"); nothing else may key on an address, and it ends with the entitlement in Future item 3. Cookie routes ask the Better Auth handler's `get-session` for the login; speak reads the token owner's user row.
 
 **Must store only a token's SHA-256.** A token is `dmv_` plus base64url of 32 random bytes, returned only by the mint response. Revocation is permanent; speak stamps `lastUsedAt`.
 
@@ -92,33 +92,32 @@ Source of truth: `isAdmin` in `hosted/server/admin.ts`; `voiceTokenRoutes` / `sp
 
 ## Relay
 
-The relay Worker serves the self-host Relay's HTTP API to many accounts: the paths, shapes, statuses, and error strings of `docs/specs/relay.md` -> "HTTP API", "Setup tokens and the pairing QR", and "WebAuthn without a WebAuthn library", so a Burrow and Pocket cannot tell the two apart. Only the differences:
+The relay Worker serves the self-host Relay's HTTP API to many accounts: the paths, shapes, statuses, and error strings of `docs/specs/relay.md` -> "HTTP API", "Setup tokens and the pairing QR", and "WebAuthn without a WebAuthn library", so a Burrow and Pocket cannot tell the two apart; both run the checks and bounds in `remote-lib-common/src/remote/relay-common.ts`. Assertions demand presence, not verification. Security checks: `docs/specs/security-hosted.md` -> "Relay boundary". Only the differences:
 
 | Route | On Hosted |
 |---|---|
 | `POST /api/setup/begin`, `/finish` | The passkey joins the account owning the token's Burrow: `accountId` is its user ID, `existingCredentialIds` its passkeys; 409 at `MAX_PASSKEYS_PER_ACCOUNT` |
 | `POST /api/setup/retire` | Spends only a token one of the session's account's Burrows minted |
-| `POST /api/signin/begin` | 429 with `Retry-After` past `RELAY_SIGNIN_LIMIT` per address |
-| `POST /api/signin/finish` | The account owning the asserted credential; `accountId` is its user ID |
+| `POST /api/signin/finish` | The asserted credential's account; `accountId` is its user ID. 401 `NOT_ENTITLED_ERROR`, and no session, for an account not entitled |
 | `POST /api/reauth/begin`, `/finish` | Only the session's account's credentials and nonces |
 | `GET /api/burrows` | The session's account's unrevoked Burrows, each `online: false`: no relay socket reaches Hosted yet |
 | `POST /api/burrow/setup-token` | 401 for a revoked Burrow, 403 `NOT_ENTITLED_ERROR` for an owner not entitled |
 | `POST /api/burrow/enroll` | Always 401 `UNAUTHORIZED_ERROR`: Hosted has no setup password, and no route enrolls a Burrow yet (Future) |
-| `GET /api/push/config` | `{ applicationServerKey: null }`: push is off; every other push route and `/ws/*` is 404 |
+| `GET /api/push/config` | `{ applicationServerKey: null }`: push is off; every other push route, `/ws/*`, and `GET /api/hello` (the self-host installers' probe) are 404 |
 | `GET /*` | Pocket (below) |
 
-- **Must keep the Relay's state in Postgres, every bearer secret only as its SHA-256**: session, Burrow, and setup tokens, and enrollment device codes. An account's rows cascade with it.
-- **Must scope every query reading a Burrow, passkey, nonce, or setup token to the caller's account**, the session's or the Burrow token's owner. A setup challenge redeems only with a token of the Burrow that began it.
-- **Must spend a setup token, challenge, or presence nonce in one statement.** A refused `finish` restores its token on the original expiry within the Burrow's cap.
-- **Must admit a Burrow only while its owner is entitled, rechecked on every Burrow-authenticated request and every setup redemption.** Until billing exists the entitlement is "Managed voice"'s `isAdmin`.
-- **Must cap every table a caller grows, keyed by whoever grows it**, as `docs/specs/relay.md` -> "Guardrails" does: setup tokens and setup challenges per Burrow (`MAX_TOKENS_PER_BURROW`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`), and sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), each evicting its key's own oldest; passkeys per account are refused at the cap (rationale). Sign-in challenges, minted unauthenticated, take the per-address limit. Each write path prunes its table's expired rows.
-- **Never read a cookie or ask auth**: the Relay reads a user row only for the entitlement.
+A session-gated route answers a session of an account no longer entitled with the expired session's 401 `UNAUTHORIZED_ERROR`, so Pocket returns to sign-in.
 
-The bounds are the self-host Relay's, shared through `remote-lib-common`; assertions demand presence, not verification.
+- **Must keep the Relay's state in Postgres** (`hosted/server/dormouse-migrations/002_relay.sql`). A sign-in challenge is the challenge row with no Burrow.
+- **Must resolve each bearer and its owner's entitlement in one query joining `"user"`** (`sessionByToken`, `burrowByToken`). The entitlement is `isAdmin` ("Managed voice"). Reserved: the relay socket upgrades (Future item 4) call the same lookups with the query-parameter token.
+- **Must cap every table a caller grows, keyed by whoever grows it**, as `docs/specs/relay.md` -> "Guardrails" does: setup tokens and setup challenges per Burrow (`MAX_TOKENS_PER_BURROW`), presence nonces per session (`MAX_PENDING_REAUTH_NONCES_PER_SESSION`), and sessions per account (`MAX_SESSIONS_PER_ACCOUNT`), each evicting its key's own oldest; passkeys per account are refused at the cap (rationale). A capped insert runs under its key's advisory lock and, in one statement, prunes that key's own expired rows, trims its live rows, and inserts; it never touches another key's rows.
+- **Must sweep every Relay table's expired rows from the relay's hourly Cron Trigger** (rationale); sign-in challenges, minted unauthenticated and flat, are bounded by it and the per-address limit.
+- **Must answer 429 with `Retry-After` past the per-address limit on `signin/*` (`RELAY_SIGNIN_LIMIT`) and `setup/begin`/`finish` (`RELAY_SETUP_LIMIT`)**, before the body limit and any database read: 30 a minute, a ceremony's two routes sharing one budget (rationale).
+- **Must restore a token a refused `finish` spent on its original expiry, within the Burrow's cap, and never once that expiry has passed.**
 
-**Pocket at the root.** `build` stages `lib/dist-pocket` at the root of the relay's assets and the one-time page beside it, checking both shells. **Must serve Pocket under `docs/specs/pocket-app.md` -> "Serving the built bundle"**: a file as itself, `…/index.html` from its directory (the diagnostics harness), a missing `/assets/` file as a 404, and every other miss as the shell. Every path outside `/connect`, `/api/`, and `/ws/` carries Pocket's policy, `camera=(self)` for its scanner, and `no-cache` unless a hashed asset.
+**Pocket at the root.** `build` stages `lib/dist-pocket` at the root of the relay's assets and the one-time page beside it, checking both shells. Pocket is served per `docs/specs/pocket-app.md` -> "Serving the built bundle", except that a path naming no file (no extension, outside `/diagnostics`) gets the shell in one asset fetch.
 
-Source of truth: `relayApiRoutes` in `hosted/server/relay-api.ts`; `hosted/server/dormouse-migrations/002_relay.sql`; `pocketRoutes` in `hosted/server/pocket.ts`; `relayPolicy` / `relayPermissions` / `isPocketPath` in `hosted/server/headers.ts`; `stageRelay` in `hosted/scripts/stage-relay.mjs`; `remote-lib-common/src/remote/relay-common.ts`. Pinned by `hosted/server/tests/relay.test.ts`, `hosted/server/tests/pocket.test.ts`, `hosted/server/tests/boundary.test.ts`, and `hosted/scripts/stage-relay.test.mjs`.
+Source of truth: `relayApiRoutes` / `sweepExpired` in `hosted/server/relay-api.ts`; `sessionByToken` / `burrowByToken` / `requireSession` / `requireBurrow` in `hosted/server/relay-auth.ts`; `hosted/server/dormouse-migrations/002_relay.sql`; `triggers` and `ratelimits` in `hosted/wrangler.relay.jsonc`; `pocketRoutes` in `hosted/server/pocket.ts`; `relayRules` / `relayPathKind` in `hosted/server/headers.ts`; `stageRelay` in `hosted/scripts/stage-relay.mjs`; `checkRegistration` / `verifySigninAssertion` in `remote-lib-common/src/remote/relay-common.ts`. Pinned by `hosted/server/tests/relay.test.ts`, `hosted/server/tests/pocket.test.ts`, `hosted/server/tests/boundary.test.ts`, `hosted/scripts/stage-relay.test.mjs`, and `remote-lib-common/test/relay-common.test.mjs`.
 
 ## Development and release
 

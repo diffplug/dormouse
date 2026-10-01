@@ -104,8 +104,12 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   list, prove with, spend, or mint against account A's Burrows, passkeys,
   nonces, setup tokens, or setup challenges; a single-use row must be spent in
   the statement that reads it; a bearer secret must be at rest only as its
-  hash; a de-entitled or revoked Burrow must act on nothing; and every table a
-  caller grows must stay bounded against that caller.
+  hash; a de-entitled account or revoked Burrow must act on nothing, the
+  account's sessions and sign-in included; every unauthenticated route that
+  reaches Postgres must spend its per-address limit first; and every table a
+  caller grows must stay bounded against that caller, a capped write never
+  touching another key's rows. Classify a percent-encoded path (`/%63onnect/`,
+  `/%61ssets/`) the way `secureHeaders` and the routes do.
 - **Can a Hosted login become terminal access, or an account become someone
   else's?** `authPolicy` must keep explicit linking and independent logins; a
   callback whose initiating login was revoked must fail; an unused or unknown

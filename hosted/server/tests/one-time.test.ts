@@ -27,7 +27,7 @@ import {
 } from "remote-lib-common";
 import * as smoke from "../../scripts/one-time-smoke.mjs";
 import { pocketContentSecurityPolicy } from "remote-lib-common";
-import { oneTimePagePolicy, relayPolicy, RUNS_NOTHING_POLICY } from "../headers";
+import { oneTimePagePolicy, relayRules, RUNS_NOTHING_POLICY } from "../headers";
 import { rateLimitKey } from "../one-time";
 import { ENTRIES, ORIGINS, bundleWorker, miniflareOptions, wrangler } from "./bundle";
 import { TEST_ROOM_LIMITS } from "./one-time-limits";
@@ -559,7 +559,7 @@ test("nothing else under /connect/ is served, and nothing outside it gets the pa
 });
 
 test("a malformed APP_ORIGIN falls back to the policy that runs nothing on the page", () => {
-  expect(relayPolicy("/connect/", "http://localhost:8787")).toBe(
+  expect(relayRules("/connect/", "http://localhost:8787").policy).toBe(
     oneTimePagePolicy("http://localhost:8787"),
   );
   expect(oneTimePagePolicy("http://localhost:8787")).toContain(
@@ -579,7 +579,7 @@ test("a malformed APP_ORIGIN falls back to the policy that runs nothing on the p
     "ws://relay.dormouse.sh",
   ])
     for (const path of ["/connect/", "/"])
-      expect(relayPolicy(path, bad), `${path} ${String(bad)}`).toBe(
+      expect(relayRules(path, bad).policy, `${path} ${String(bad)}`).toBe(
         RUNS_NOTHING_POLICY,
       );
 });
