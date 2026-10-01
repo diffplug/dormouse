@@ -1,5 +1,5 @@
-import type { IBuffer, IBufferLine, Terminal } from '@xterm/xterm';
-import { endsInWrapPadding, lineAt, readLineCells } from './buffer-cells';
+import type { IBuffer, Terminal } from '@xterm/xterm';
+import { textCells, wrapRun } from './buffer-cells';
 import type { Selection } from './mouse-selection';
 import { normalizeSelection } from './selection-text';
 import { detectTokenAt } from './smart-token';
@@ -9,7 +9,7 @@ import { detectTokenAt } from './smart-token';
 // overlay, and the tests share one reading of the terminal
 // (docs/specs/mouse-and-clipboard.md §4).
 
-/** One buffer row: a string per cell column (`readLineCells`). Trailing blanks
+/** One buffer row: a string per cell column (`textCells`). Trailing blanks
  *  are trimmed only where the text of the row's logical line ends: before a
  *  soft wrap that more text follows they are text, all but a wide character's
  *  wrap padding. */
@@ -17,6 +17,10 @@ export interface CopyRow {
   readonly cells: readonly string[];
   /** xterm's `isWrapped`: a true soft wrap continuing the previous row. */
   readonly wrapped: boolean;
+  /** The first and last rows of its logical line: the rows soft wraps join
+   *  to it. */
+  readonly top: number;
+  readonly bottom: number;
 }
 
 export interface CopyBuffer {
@@ -25,8 +29,6 @@ export interface CopyBuffer {
   /** Out of range reads as an empty row. Returns the same object per index. */
   row(index: number): CopyRow;
 }
-
-const EMPTY_ROW: CopyRow = Object.freeze({ cells: Object.freeze([]) as readonly string[], wrapped: false });
 
 /** A lazily read, memoized view of a terminal's active buffer: the copy
  *  editor keeps one per open, so its preview and its copy read the same rows. */
@@ -37,34 +39,29 @@ export function terminalCopyBuffer(terminal: Terminal): CopyBuffer {
     cols: terminal.cols,
     length: buffer.length,
     row(index) {
-      let row = rows.get(index);
-      if (!row) {
-        const line = lineAt(buffer, index);
-        row = line ? { cells: rowCells(buffer, index, line), wrapped: line.isWrapped } : EMPTY_ROW;
-        rows.set(index, row);
-      }
-      return row;
+      if (!rows.has(index)) readRows(buffer, index, rows);
+      return rows.get(index)!;
     },
   };
 }
 
-function rowCells(buffer: IBuffer, index: number, line: IBufferLine): string[] {
-  const cells = readLineCells(line);
-  const next = lineAt(buffer, index + 1);
-  if (textContinues(buffer, index + 1)) {
-    if (endsInWrapPadding(line, next)) cells.pop();
-    return cells;
+/** Read every row of the logical line through row `index` into `rows` at
+ *  once: whether a row keeps its trailing blanks depends on the rows after. */
+function readRows(buffer: IBuffer, index: number, rows: Map<number, CopyRow>): void {
+  const { top, lines } = wrapRun(buffer, index);
+  if (!lines.length) {
+    rows.set(index, { cells: [], wrapped: false, top: index, bottom: index });
+    return;
   }
-  while (cells.length && /^\s*$/.test(cells[cells.length - 1])) cells.pop();
-  return cells;
-}
-
-/** Whether rows a soft wrap continues from row `r` on hold any text. */
-function textContinues(buffer: IBuffer, r: number): boolean {
-  for (let line = lineAt(buffer, r); line?.isWrapped; line = lineAt(buffer, ++r)) {
-    if (/\S/.test(line.translateToString(true))) return true;
+  const bottom = top + lines.length - 1;
+  let textFollows = false;
+  for (let k = lines.length - 1; k >= 0; k--) {
+    const cells = textCells(lines[k], lines[k + 1]);
+    const holdsText = cells.some((c) => /\S/.test(c));
+    if (!textFollows) while (cells.length && /^\s*$/.test(cells[cells.length - 1])) cells.pop();
+    rows.set(top + k, { cells, wrapped: lines[k].isWrapped, top, bottom });
+    textFollows ||= holdsText;
   }
-  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,10 +142,9 @@ interface LineFacts {
   /** Its first and last rows. */
   top: number;
   bottom: number;
-  /** The rows' text joined, as a deleted soft wrap joins them. */
-  text: string;
-  /** The text with its decoration blanked (spaces at the marker, so indents
-   *  still line up with the columns under them) and trimmed. */
+  /** The rows' text joined as a deleted soft wrap joins them, with its
+   *  decoration blanked (spaces at the marker, so indents still line up with
+   *  the columns under them) and trimmed. */
   plain: string;
   /** Blank, a frame, or a box's side: what bounds a paragraph. */
   boundary: boolean;
@@ -159,17 +155,15 @@ const lineFacts = new WeakMap<CopyRow, LineFacts>();
 
 /** The logical line buffer row `r` is part of. */
 function line(buf: CopyBuffer, r: number): LineFacts {
-  const cached = lineFacts.get(buf.row(r));
+  const row = buf.row(r);
+  const cached = lineFacts.get(row);
   if (cached) return cached;
-  let top = r;
-  while (top > 0 && buf.row(top).wrapped) top--;
-  let bottom = top;
-  while (bottom + 1 < buf.length && buf.row(bottom + 1).wrapped) bottom++;
+  const { top, bottom } = row;
   let text = '';
   for (let i = top; i <= bottom; i++) text += buf.row(i).cells.join('');
   const d = decoration(text);
   const plain = (text.slice(0, d.blankFrom) + ' '.repeat(d.blankTo - d.blankFrom) + text.slice(d.blankTo, d.keepTo)).trimEnd();
-  const f = { top, bottom, text, plain, boundary: !text.trim() || isFrameOnly(text) || /^[│┃║]/.test(text) };
+  const f = { top, bottom, plain, boundary: !text.trim() || isFrameOnly(text) || /^[│┃║]/.test(text) };
   for (let i = top; i <= bottom; i++) lineFacts.set(buf.row(i), f);
   return f;
 }
@@ -183,23 +177,44 @@ function hangIndent(text: string): number {
   return indent + (list ? list[0].length : 0);
 }
 
+/** How many lines `wrapWidth` reads either side of a break, bounding its
+ *  work. */
+const WIDTH_REACH = 64;
+
+/** The lines from `from` on in `dir`, up to a boundary, the buffer's edge, or
+ *  {@link WIDTH_REACH} of them. */
+function paragraphLines(buf: CopyBuffer, from: LineFacts, dir: 1 | -1): LineFacts[] {
+  const out: LineFacts[] = [];
+  for (let at = from; out.length < WIDTH_REACH;) {
+    const r = dir < 0 ? at.top - 1 : at.bottom + 1;
+    if (r < 0 || r >= buf.length) break;
+    at = line(buf, r);
+    if (at.boundary) break;
+    out.push(at);
+  }
+  return out;
+}
+
+/** A paragraph's widest line, by each of its lines, once one break's walks
+ *  read the whole of it: with the line's index and the paragraph's size. */
+const paragraphWidth = new WeakMap<LineFacts, { width: number; index: number; size: number }>();
+
 /** The width a program wrapped the paragraph around the break after row `r`
  *  at, as best the text says: its longest line (rationale). */
 function wrapWidth(buf: CopyBuffer, r: number): number {
-  let above = line(buf, r);
-  let below = line(buf, r + 1);
-  let widest = Math.max(above.plain.length, below.plain.length);
-  for (let n = 0; n < 64 && above.top > 0; n++) {
-    above = line(buf, above.top - 1);
-    if (above.boundary) break;
-    widest = Math.max(widest, above.plain.length);
+  const above = line(buf, r);
+  const below = line(buf, r + 1);
+  const known = below.boundary ? undefined : paragraphWidth.get(above);
+  // This break's own walks would read the whole paragraph too.
+  if (known && known.index <= WIDTH_REACH && known.size - known.index - 2 <= WIDTH_REACH) return known.width;
+  const up = paragraphLines(buf, above, -1);
+  const down = paragraphLines(buf, below, 1);
+  const width = Math.max(...[above, below, ...up, ...down].map((l) => l.plain.length));
+  if (!above.boundary && !below.boundary && up.length < WIDTH_REACH && down.length < WIDTH_REACH) {
+    const paragraph = [...up.reverse(), above, below, ...down];
+    paragraph.forEach((l, index) => paragraphWidth.set(l, { width, index, size: paragraph.length }));
   }
-  for (let n = 0; n < 64 && below.bottom + 1 < buf.length; n++) {
-    below = line(buf, below.bottom + 1);
-    if (below.boundary) break;
-    widest = Math.max(widest, below.plain.length);
-  }
-  return widest;
+  return width;
 }
 
 /** A paragraph whose longest row is narrower than this was never wrapped:
@@ -264,23 +279,37 @@ interface Line {
   trail: Cell[];
   row: number;
   startCol: number;
+  /** A row a soft wrap continues, whose start is wherever the wrap fell;
+   *  never in a block slab. */
+  continues: boolean;
 }
+/** One logical line's rows in a scope: a row and the rows soft wraps join
+ *  to it. */
+type LineRows = readonly Line[];
 
-function extract(buf: CopyBuffer, scope: Span, original: Span): Line[] {
-  const lines: Line[] = [];
+/** The rows of `scope` from `buf`, grouped by logical line. */
+function extract(buf: CopyBuffer, scope: Span, original: Span): Line[][] {
+  const lines: Line[][] = [];
   for (let r = scope.start.row; r <= scope.end.row; r++) {
-    const cells = buf.row(r).cells;
+    const row = buf.row(r);
     const a = scope.block || r === scope.start.row ? scope.start.col : 0;
-    const b = scope.block || r === scope.end.row ? scope.end.col + 1 : cells.length;
+    const b = scope.block || r === scope.end.row ? scope.end.col + 1 : row.cells.length;
     const out: Cell[] = [];
-    for (let c = a; c < Math.min(b, cells.length); c++) {
-      if (cells[c] !== '') out.push({ ch: cells[c], added: !contains(original, r, c) });
+    for (let c = a; c < Math.min(b, row.cells.length); c++) {
+      if (row.cells[c] !== '') out.push({ ch: row.cells[c], added: !contains(original, r, c) });
     }
-    let end = out.length;
-    while (end && /^\s*$/.test(out[end - 1].ch)) end--;
-    lines.push({ cells: out.slice(0, end), trail: out.slice(end), row: r, startCol: a });
+    const line = { ...splitTrail(out), row: r, startCol: a, continues: !scope.block && row.wrapped };
+    if (line.continues && lines.length) lines[lines.length - 1].push(line);
+    else lines.push([line]);
   }
   return lines;
+}
+
+/** `cells` as a line's text and the trailing blanks after it. */
+function splitTrail(cells: Cell[]): Pick<Line, 'cells' | 'trail'> {
+  let end = cells.length;
+  while (end && /^\s*$/.test(cells[end - 1].ch)) end--;
+  return { cells: cells.slice(0, end), trail: cells.slice(end) };
 }
 
 const leading = (cells: readonly Cell[]) => {
@@ -296,65 +325,99 @@ function cellsForChars(cells: readonly Cell[], chars: number): number {
   return n;
 }
 
-/** The line with its decoration blanked, as `facts` blanks its row; null for a
+/** A logical line's rows with its decoration blanked, judged on the rows
+ *  joined as a deleted soft wrap joins them, as `line` judges; null for a
  *  frame-only line. */
-function stripDecoration(line: Line): Line | null {
-  const text = line.cells.map((c) => c.ch).join('');
+function stripDecoration(rows: LineRows): Line[] | null {
+  // Every row but the last keeps the blanks the join puts back.
+  const own = rows.map((l, k) => (k < rows.length - 1 ? [...l.cells, ...l.trail] : l.cells));
+  const joined = own.flat();
+  const text = joined.map((c) => c.ch).join('');
   if (isFrameOnly(text)) return null;
   const d = decoration(text);
-  const from = cellsForChars(line.cells, d.blankFrom);
-  const to = cellsForChars(line.cells, d.blankTo);
-  const cells = line.cells.slice(0, cellsForChars(line.cells, d.keepTo)).map((c, k) => (k >= from && k < to ? { ...c, ch: ' ' } : c));
-  while (cells.length && cells[cells.length - 1].ch === ' ') cells.pop();
-  return { ...line, cells };
+  const from = cellsForChars(joined, d.blankFrom);
+  const to = cellsForChars(joined, d.blankTo);
+  const keepTo = cellsForChars(joined, d.keepTo);
+  let kept = joined.slice(0, keepTo).map((c, j) => (j >= from && j < to ? { ...c, ch: ' ' } : c));
+  const cut = keepTo < joined.length;
+  // A cut ends the line at its last kept text, and drops the rows past it.
+  if (cut) kept = splitTrail(kept).cells;
+  const out: Line[] = [];
+  let at = 0;
+  for (const [k, l] of rows.entries()) {
+    const first = at;
+    at += own[k].length;
+    if (cut && k > 0 && first >= kept.length) break;
+    // A row the decoration misses stays as read.
+    out.push(at <= kept.length && (first >= to || at <= from) ? l : { ...l, ...splitTrail(kept.slice(first, at)) });
+  }
+  return out;
 }
 
 /** A scope's rows, read once for every format: as displayed, and with
- *  decoration stripped. */
+ *  decoration stripped, each grouped by logical line. */
 export interface ScopeLines {
   buf: CopyBuffer;
   block: boolean;
-  raw: readonly Line[];
-  stripped: readonly Line[];
+  raw: readonly LineRows[];
+  stripped: readonly LineRows[];
 }
 
 /** Read `scope`, marking every cell outside `original` (the dragged
  *  selection) as added. */
 export function readScope(buf: CopyBuffer, scope: Span, original: Span): ScopeLines {
   const raw = extract(buf, scope, original);
-  return { buf, block: scope.block, raw, stripped: raw.map(stripDecoration).filter((l): l is Line => l !== null) };
+  return { buf, block: scope.block, raw, stripped: raw.map(stripDecoration).filter((l): l is Line[] => l !== null) };
 }
 
-export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, overrides: Readonly<Record<number, BreakKind>> = {}): Rendering {
-  const { buf, block } = scopeLines;
-  // Never rewrap a block slab (spec §4.1).
-  const format = block && chosen === 'auto' ? 'exact' : chosen;
-  /** A row a soft wrap continues, whose start is wherever the wrap fell. */
-  const continues = (l: Line) => !block && buf.row(l.row).wrapped;
-  let lines = [...(format === 'exact' ? scopeLines.raw : scopeLines.stripped)];
+/** What a format shows of a scope before any per-break override: its lines,
+ *  Auto's shared indent, and its own decision at each line's break. */
+interface Layout {
+  lines: readonly Line[];
+  /** In absolute columns. */
+  base: number;
+  auto: readonly BreakKind[];
+}
+
+/** Each scope's layout per format, which every override render reuses. */
+const layouts = new WeakMap<ScopeLines, Partial<Record<CopyFormat, Layout>>>();
+
+function layout(scopeLines: ScopeLines, format: CopyFormat): Layout {
+  let byFormat = layouts.get(scopeLines);
+  if (!byFormat) layouts.set(scopeLines, (byFormat = {}));
+  return (byFormat[format] ??= computeLayout(scopeLines, format));
+}
+
+function computeLayout({ buf, raw, stripped }: ScopeLines, format: CopyFormat): Layout {
+  const logical = format === 'exact' ? raw : stripped;
   // A blank line is a logical line with no text in the scope: a blank row a
   // soft wrap joins to text is part of that text's line.
-  const blanks = new Set<Line>();
-  for (let i = 0; i < lines.length;) {
-    let j = i + 1;
-    while (j < lines.length && continues(lines[j]) && lines[j].row === lines[j - 1].row + 1) j++;
-    const logical = lines.slice(i, j);
-    if (logical.every((l) => l.cells.length === 0)) for (const l of logical) blanks.add(l);
-    i = j;
-  }
+  const blanks = new Set(logical.filter((rows) => rows.every((l) => l.cells.length === 0)).flat());
   const blank = (l: Line) => blanks.has(l);
+  let lines = logical.flat();
   if (format !== 'exact') {
     while (lines.length && blank(lines[0])) lines.shift();
     while (lines.length && blank(lines[lines.length - 1])) lines.pop();
     if (format === 'spaces' || format === 'joined') lines = lines.filter((l) => !blank(l));
     else lines = lines.filter((l, i) => !(blank(l) && i > 0 && blank(lines[i - 1])));
   }
+  // A first line starting mid-row, or a row a soft wrap continues, has no
+  // indent of its own to keep.
+  const indents = lines.filter((l) => !blank(l) && !l.continues).map((l) => l.startCol + leading(l.cells));
+  const auto = lines.map((line, i): BreakKind => {
+    const next = lines[i + 1];
+    if (!next) return 'keep';
+    // The row its line ends at, past any rows a cut decoration dropped.
+    const end = next.continues ? line.row : buf.row(line.row).bottom;
+    return FIXED_BREAK[format] ?? (blank(line) || blank(next) || next.row !== end + 1 ? 'keep' : autoBreak(buf, end));
+  });
+  return { lines, base: indents.length ? Math.min(...indents) : 0, auto };
+}
 
-  // Auto's shared indent, in absolute columns. A first line starting mid-row,
-  // or a row a soft wrap continues, has no indent of its own to keep.
-  const indents = lines.filter((l) => !blank(l) && !continues(l)).map((l) => l.startCol + leading(l.cells));
-  const base = indents.length ? Math.min(...indents) : 0;
-
+export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, overrides: Readonly<Record<number, BreakKind>> = {}): Rendering {
+  // Never rewrap a block slab (spec §4.1).
+  const format = scopeLines.block && chosen === 'auto' ? 'exact' : chosen;
+  const { lines, base, auto } = layout(scopeLines, format);
   const pieces: Piece[] = [];
   let text = '';
   let joined = false;
@@ -362,16 +425,14 @@ export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, override
   let rejoined = false;
   lines.forEach((line, i) => {
     const next = lines[i + 1];
-    const auto = !next ? 'keep' : FIXED_BREAK[format]
-      ?? (blank(line) || blank(next) || next.row !== line.row + 1 ? 'keep' : autoBreak(buf, line.row));
-    const kind = overrides[i] ?? auto;
-    const rejoins = kind === 'none' && next?.row === line.row + 1 && continues(next);
+    const kind = overrides[i] ?? auto[i];
+    const rejoins = kind === 'none' && !!next?.continues;
     const lead = leading(line.cells);
     let strip: number;
     if (rejoined) strip = 0;
     else if (format === 'exact') strip = joined ? lead : 0;
     else if (joined || format !== 'auto') strip = lead;
-    else strip = line.startCol > base || continues(line) ? lead : Math.min(lead, base - line.startCol);
+    else strip = line.startCol > base || line.continues ? lead : Math.min(lead, base - line.startCol);
     const cells = rejoins ? [...line.cells.slice(strip), ...line.trail] : line.cells.slice(strip);
     const leadRun = rejoined ? 0 : leading(cells);
     let run: Extract<Piece, { t: 'text' }> | null = null;
@@ -385,7 +446,7 @@ export function renderLines(scopeLines: ScopeLines, chosen: CopyFormat, override
     });
     text += cells.map((c) => c.ch).join('');
     if (!next) return;
-    pieces.push({ t: 'break', index: i, kind, auto });
+    pieces.push({ t: 'break', index: i, kind, auto: auto[i] });
     text += BREAK_TEXT[kind];
     joined = kind !== 'keep';
     rejoined = rejoins;

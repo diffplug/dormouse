@@ -61,7 +61,7 @@ import {
   setTerminalUserTitle,
   type PromptLineReader,
 } from './terminal-state-store';
-import { readLogicalLineFromBuffer, type BufferLike } from './terminal-buffer-read';
+import { readLogicalLineFromBuffer } from './terminal-buffer-read';
 import { UNNAMED_PANEL_TITLE } from './terminal-state';
 import { vscodeWorkbenchCommandForKeydown } from './vscode-keybindings';
 
@@ -95,19 +95,7 @@ function makePromptLineReader(terminal: Terminal): PromptLineReader {
     readLine() {
       const buffer = terminal.buffer?.active;
       if (!buffer) return null;
-      const cursorAbsRow = buffer.baseY + buffer.cursorY;
-      const bufferLike: BufferLike = {
-        getLine(index) {
-          const line = buffer.getLine(index);
-          if (!line) return undefined;
-          return {
-            isWrapped: line.isWrapped,
-            translateToString: (trimRight, startColumn, endColumn) =>
-              line.translateToString(trimRight, startColumn, endColumn),
-          };
-        },
-      };
-      return readLogicalLineFromBuffer(bufferLike, cursorAbsRow, buffer.cursorX);
+      return readLogicalLineFromBuffer(buffer, buffer.baseY + buffer.cursorY, buffer.cursorX);
     },
   };
 }

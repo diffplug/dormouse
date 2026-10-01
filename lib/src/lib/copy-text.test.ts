@@ -84,6 +84,17 @@ describe('copy-text formats', () => {
     expect(text(claude, span(15, 0, 18, 79), 'auto')).toBe('>');
   });
 
+  it('judges decoration on a soft wrap’s rows as one line', () => {
+    // A box run, a bullet, or a row of box drawing a wrap put mid-line is text.
+    for (const line of ['aaaa bbbb cccc dddd ── eeee', 'aaaa bbbb cccc dddd ● eeee', `aaaa bbbb cccc dddd ${'─'.repeat(20)}eeee`]) {
+      const buf = reflowed([line], 20);
+      expect(text(buf, span(0, 0, buf.length - 1, 19), 'auto')).toBe(line);
+    }
+    // A box's side still ends its line, with the rows of blanks a wrap put before it.
+    const side = reflowed([CLAUDE[17]], 24);
+    for (const format of ['auto', 'spaces'] as const) expect(text(side, span(0, 0, side.length - 1, 23), format)).toBe('>');
+  });
+
   it('joins a true soft wrap exactly, whatever the text', () => {
     const buf = lines(['abcdefghij', 'klm'], { cols: 10, wrapped: [1] });
     expect(text(buf, span(0, 0, 1, 2), 'auto')).toBe('abcdefghijklm');
@@ -191,6 +202,12 @@ describe('copy-text autoBreak', () => {
     expect(autoBreak(claude, 13)).toBe('none');
   });
 
+  it('judges a long paragraph’s break by the lines near it', () => {
+    // The widest line first, then a greedy wrap at 44 columns.
+    const buf = lines(['wwww '.repeat(15).trimEnd(), ...Array<string>(127).fill('word '.repeat(9).trimEnd())], { cols: 80 });
+    expect([63, 100].map((r) => autoBreak(buf, r))).toEqual(['keep', 'space']);
+  });
+
   it('judges the lines a soft wrap joins, not its rows', () => {
     // Each wrapped reply row ends on a short continuation row; the next starts at the hanging indent.
     expect([2, 3, 4, 5, 6, 7, 8].map((r) => autoBreak(narrowed, r))).toEqual(['none', 'space', 'none', 'space', 'none', 'space', 'keep']);
@@ -284,6 +301,19 @@ describe('copy-text nudge', () => {
 });
 
 describe('copy-text terminalCopyBuffer', () => {
+  it('reads each row of a soft-wrapped line once', () => {
+    const rows = ['aaaa', ...Array<string>(10).fill(' '.repeat(20)), 'bbbb'];
+    const { buffer } = fakeXterm(rows, { cols: 20, wrapped: rows.map((_, r) => r).slice(1) });
+    const reads = new Map<number, number>();
+    const getLine = (r: number) => (reads.set(r, (reads.get(r) ?? 0) + 1), buffer.active.getLine(r));
+    const buf = terminalCopyBuffer({ cols: 20, buffer: { active: { length: rows.length, getLine } } } as unknown as Terminal);
+    for (let r = rows.length - 1; r >= 0; r--) buf.row(r);
+    expect([...reads.keys()].sort((a, b) => a - b)).toEqual(rows.map((_, r) => r));
+    expect([...reads.values()].every((n) => n === 1)).toBe(true);
+    // A blank row the line's text continues after holds blanks.
+    expect(buf.row(5).cells).toHaveLength(20);
+  });
+
   it('maps wide characters through their continuation cells', () => {
     const terminal = { cols: 5, buffer: { active: { length: 1, getLine: () => bufferLine([['中', 2], ['x', 1]]) } } } as unknown as Terminal;
     const buf = terminalCopyBuffer(terminal);

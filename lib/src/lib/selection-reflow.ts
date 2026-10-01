@@ -1,5 +1,5 @@
-import type { IBuffer, IBufferLine, IMarker, Terminal } from '@xterm/xterm';
-import { endsInWrapPadding, lineAt } from './buffer-cells';
+import type { IBuffer, IMarker, Terminal } from '@xterm/xterm';
+import { lineAt, textWidth, wrapRun } from './buffer-cells';
 import { spanOfSelection, type GridPos, type Span } from './copy-text';
 import type { Selection } from './mouse-selection';
 
@@ -24,9 +24,6 @@ interface Anchor extends ReflowAnchor {
   text: string;
 }
 
-/** The cells of `line` its logical line's text holds: all but wrap padding. */
-const textWidth = (line: IBufferLine, next: IBufferLine | undefined) => line.length - (endsInWrapPadding(line, next) ? 1 : 0);
-
 /** From `from` through `to`, soft wraps joined, wrap padding skipped, and each
  *  logical line's trailing blanks trimmed; null past the buffer. */
 function reflowText(buffer: IBuffer, from: GridPos, to: GridPos): string | null {
@@ -50,32 +47,23 @@ function reflowText(buffer: IBuffer, from: GridPos, to: GridPos): string | null 
  *  buffer. An edge on wrap padding moves to where the text resumes: the next
  *  row's first cell for a start, the cell before the padding for an end. */
 function lineOffset(buffer: IBuffer, pos: GridPos, edge: 'start' | 'end'): { first: number; offset: number } | null {
-  let line = lineAt(buffer, pos.row);
-  if (!line) return null;
-  const width = textWidth(line, lineAt(buffer, pos.row + 1));
+  const { top, lines } = wrapRun(buffer, pos.row);
+  const k = pos.row - top;
+  if (!lines.length) return null;
+  const width = textWidth(lines[k], lines[k + 1]);
   let offset = pos.col < width ? pos.col : edge === 'start' ? width : width - 1;
-  let first = pos.row;
-  while (line.isWrapped) {
-    const above = lineAt(buffer, first - 1);
-    if (!above) break;
-    offset += textWidth(above, line);
-    line = above;
-    first--;
-  }
-  return { first, offset };
+  for (let i = 0; i < k; i++) offset += textWidth(lines[i], lines[i + 1]);
+  return { first: top, offset };
 }
 
 /** Past its line's last row an offset stays on that row, at its last cell. */
 function locateEdge(buffer: IBuffer, edge: EdgeAnchor): GridPos | null {
-  let row = edge.marker.line;
-  let line = lineAt(buffer, row);
-  if (!line) return null;
-  for (let rest = edge.offset; ; row++) {
-    const next = lineAt(buffer, row + 1);
-    const width = textWidth(line, next);
-    if (rest < width || !next?.isWrapped) return { row, col: Math.min(rest, line.length - 1) };
+  const { top, lines } = wrapRun(buffer, edge.marker.line);
+  if (!lines.length) return null;
+  for (let k = edge.marker.line - top, rest = edge.offset; ; k++) {
+    const width = textWidth(lines[k], lines[k + 1]);
+    if (rest < width || k + 1 === lines.length) return { row: top + k, col: Math.min(rest, lines[k].length - 1) };
     rest -= width;
-    line = next;
   }
 }
 

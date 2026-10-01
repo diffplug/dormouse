@@ -4,7 +4,7 @@
  * URL/path" during a mid-drag (spec §5).
  */
 import type { IBuffer } from '@xterm/xterm';
-import { endsInWrapPadding, lineAt, readLineCells } from './buffer-cells';
+import { textCells, wrapRun } from './buffer-cells';
 
 export interface DetectedToken {
   kind: 'url' | 'path';
@@ -121,19 +121,14 @@ const WRAP_REACH = 16;
  * continuation cell; combining marks and emoji can occupy several code units
  * within one cell. */
 export function detectTokenInBuffer(buffer: IBuffer, row: number, col: number): BufferToken | null {
-  let top = row;
-  while (top > 0 && top > row - WRAP_REACH && lineAt(buffer, top)?.isWrapped) top--;
-  let bottom = row;
-  while (bottom < row + WRAP_REACH && lineAt(buffer, bottom + 1)?.isWrapped) bottom++;
+  const { top, lines } = wrapRun(buffer, row, WRAP_REACH);
   let text = '';
   let probe = -1;
   const starts: BufferCell[] = [];
   const ends: BufferCell[] = [];
-  for (let r = top; r <= bottom; r++) {
-    const line = lineAt(buffer, r);
-    if (!line) break;
-    const cells = readLineCells(line);
-    if (endsInWrapPadding(line, lineAt(buffer, r + 1))) cells.pop();
+  for (const [k, line] of lines.entries()) {
+    const r = top + k;
+    const cells = textCells(line, lines[k + 1]);
     for (let c = 0; c < cells.length; c++) {
       const chars = cells[c];
       if (chars === '') continue;
