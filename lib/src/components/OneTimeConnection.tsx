@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ModalReviewBlock, modalActionButton } from './design';
+import { COPY_OUTCOME_LABEL, ModalReviewBlock, modalActionButton } from './design';
 import {
   FIELD_HINT,
   FIELD_LABEL,
@@ -9,6 +9,7 @@ import {
 } from './remote-control-shared';
 import { ExpiringCode } from './ScannableCode';
 import { writeTextToClipboard } from '../lib/clipboard';
+import type { CopyOutcome } from '../lib/mouse-selection';
 import type {
   OneTimeEndReason,
   OneTimeState,
@@ -296,21 +297,21 @@ function WaitingLink({
 }
 
 function CopyLinkButton({ url }: { url: string }) {
-  const [copied, setCopied] = useState<'copied' | 'failed' | null>(null);
+  const [outcome, setOutcome] = useState<CopyOutcome | null>(null);
 
   useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(null), COPY_FEEDBACK_MS);
+    if (!outcome) return;
+    const timer = setTimeout(() => setOutcome(null), COPY_FEEDBACK_MS);
     return () => clearTimeout(timer);
-  }, [copied]);
+  }, [outcome]);
 
   return (
     <button
       type="button"
       className={modalActionButton()}
-      onClick={() => void writeTextToClipboard(url).then((ok) => setCopied(ok ? 'copied' : 'failed'))}
+      onClick={() => void writeTextToClipboard(url).then((ok) => setOutcome(ok ? 'copied' : 'failed'))}
     >
-      {copied === 'copied' ? 'Copied' : copied === 'failed' ? 'Couldn’t copy' : 'Copy link'}
+      {outcome ? COPY_OUTCOME_LABEL[outcome] : 'Copy link'}
     </button>
   );
 }

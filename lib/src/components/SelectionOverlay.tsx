@@ -1,5 +1,5 @@
 import { clsx } from 'clsx';
-import { useContext, useSyncExternalStore, type CSSProperties } from 'react';
+import { useContext, useMemo, useSyncExternalStore, type CSSProperties } from 'react';
 import {
   DEFAULT_MOUSE_SELECTION_STATE,
   getMouseSelectionSnapshot,
@@ -36,6 +36,9 @@ export function SelectionOverlay({ terminalId }: Props) {
   const focusRingColor = useFocusRingColor();
 
   const state = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
+  const copied = state.copyOutcome === 'copied';
+  // Read once per flash, not per render tick.
+  const pulse = useMemo(() => copied && !motionIsInstant(), [copied]);
   const selection = state.selection;
   if (!selection) return null;
 
@@ -118,14 +121,12 @@ export function SelectionOverlay({ terminalId }: Props) {
                 strokeDasharray="4 3"
               />
             )}
-            {/* A confirmed copy fills what it copied, where the eye is
-                rather than under the finger (spec §4.5); still under
-                instant motion. */}
-            {state.copyFlash && (
+            {/* Spec §4.5: the copied selection fills. */}
+            {copied && (
               <path
                 d={pathD}
                 data-copy-flash=""
-                className={clsx(COPY_FLASH_PATH_CLASS, !motionIsInstant() && 'animate-copy-flash-fill')}
+                className={clsx(COPY_FLASH_PATH_CLASS, pulse && 'animate-copy-flash-fill')}
               />
             )}
             <path

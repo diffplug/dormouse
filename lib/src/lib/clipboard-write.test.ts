@@ -12,9 +12,12 @@ vi.mock('./terminal-registry', () => ({ getDefaultShellOpts: () => null, getTerm
 
 import { writeTextToClipboard } from './clipboard';
 
-/** What `execCommand('copy')` saw selected, each time it ran. */
+/** What each `execCommand('copy')` copied: a `copy` listener's `setData`,
+ *  else what a focused textarea had selected. */
 let copiedText: string[];
 let execCommand: ReturnType<typeof vi.fn>;
+/** Whether `execCommand` fires `copy`, as WebKit may not without a selection. */
+let firesCopy: boolean;
 
 function stubClipboard(clipboard: Partial<Clipboard> | undefined): void {
   Object.defineProperty(navigator, 'clipboard', { value: clipboard, configurable: true });
@@ -22,17 +25,21 @@ function stubClipboard(clipboard: Partial<Clipboard> | undefined): void {
 
 beforeEach(() => {
   copiedText = [];
+  firesCopy = false;
   execCommand = vi.fn((command: string) => {
-    const field = document.activeElement as HTMLTextAreaElement;
-    copiedText.push(field.value.slice(field.selectionStart, field.selectionEnd));
+    let data: string | undefined;
+    if (firesCopy) {
+      const event = new Event('copy', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { setData: (_type: string, value: string) => { data = value; } } });
+      (document.activeElement ?? document.body).dispatchEvent(event);
+      if (!event.defaultPrevented) data = undefined;
+    }
+    const field = document.activeElement;
+    if (data !== undefined) copiedText.push(data);
+    else if (field instanceof HTMLTextAreaElement) copiedText.push(field.value.slice(field.selectionStart, field.selectionEnd));
     return command === 'copy';
   });
   Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true });
-});
-
-afterEach(() => {
-  stubClipboard(undefined);
-  document.body.replaceChildren();
 });
 
 describe('writeTextToClipboard', () => {
@@ -44,7 +51,29 @@ describe('writeTextToClipboard', () => {
     expect(execCommand).not.toHaveBeenCalled();
   });
 
-  it('copies from a hidden field without one, inside the same task, and puts focus back', async () => {
+  it('copies through a copy listener without one, inside the same task, never moving focus', async () => {
+    stubClipboard(undefined);
+    firesCopy = true;
+    const input = document.body.appendChild(document.createElement('input'));
+    input.focus();
+    const blurred = vi.fn();
+    input.addEventListener('blur', blurred);
+    const otherHandler = vi.fn();
+    input.addEventListener('copy', otherHandler);
+    const copied = writeTextToClipboard('two\nlines');
+    // Before the caller's click or key returns, while it still grants the copy.
+    expect(copiedText).toEqual(['two\nlines']);
+    expect(await copied).toBe(true);
+    expect(execCommand).toHaveBeenCalledTimes(1);
+    expect(blurred).not.toHaveBeenCalled();
+    expect(otherHandler).not.toHaveBeenCalled();
+    // One-shot: a later copy of the user's own is left alone.
+    const own = new Event('copy', { bubbles: true, cancelable: true });
+    input.dispatchEvent(own);
+    expect(own.defaultPrevented).toBe(false);
+  });
+
+  it('copies from a hidden field when no copy event fires, and puts focus back', async () => {
     stubClipboard(undefined);
     const input = document.body.appendChild(document.createElement('input'));
     input.value = 'draft';
@@ -57,10 +86,12 @@ describe('writeTextToClipboard', () => {
     expect(document.activeElement).toBe(input);
     expect([input.selectionStart, input.selectionEnd]).toEqual([1, 3]);
     expect(document.querySelector('textarea')).toBeNull();
+    expect(execCommand).toHaveBeenCalledTimes(2);
   });
 
   it('falls back when the Clipboard API refuses', async () => {
     stubClipboard({ writeText: () => Promise.reject(new DOMException('denied', 'NotAllowedError')) });
+    firesCopy = true;
     expect(await writeTextToClipboard('hello')).toBe(true);
     expect(copiedText).toEqual(['hello']);
   });

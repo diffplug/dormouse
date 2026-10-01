@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, ComponentProps, CSSProperties, HTMLAttributes, InputHTMLAttributes, ReactNode, RefObject } from 'react';
 import { stepFocus } from './focus-step';
 import { isComposingKey } from '../lib/dom';
+import type { CopyOutcome } from '../lib/mouse-selection';
 import { rectsEqual } from '../lib/rect-tween';
 import { OVERLAY_VIEWPORT_MARGIN_PX } from '../lib/ui-geometry';
 
@@ -51,6 +52,8 @@ export const COPY_EXPANDED_PATH_CLASS = 'fill-success/15 stroke-success';
 /** A copied selection's fill while its copy confirms, the copy-confirm accent
  *  tint (an SVG path; `docs/specs/mouse-and-clipboard.md` §4.5). */
 export const COPY_FLASH_PATH_CLASS = 'fill-header-active-bg/25';
+/** How a Copy button says what its copy did. */
+export const COPY_OUTCOME_LABEL: Record<CopyOutcome, string> = { copied: 'Copied', failed: 'Couldn’t copy' };
 
 /** A preview slot's label in its Pane header and Door, italic as an editor's
  *  preview tab is (`docs/specs/layout.md` → "Pane header"). */

@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import { ProhibitIcon, WarningOctagonIcon } from '@phosphor-icons/react';
+import { writeTextToClipboard } from '../lib/clipboard';
 import type { DisplayMatchVerdict, ExternalUriDecision } from '../lib/external-links';
 import {
   MODAL_OVERLAY_INSET,
@@ -64,7 +65,7 @@ export function ExternalLinkModal({
     : 'URL';
 
   const handleCopy = () => {
-    void navigator.clipboard.writeText(request.uri);
+    void writeTextToClipboard(request.uri);
     onCancel();
   };
 

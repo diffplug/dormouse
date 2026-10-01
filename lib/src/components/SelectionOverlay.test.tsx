@@ -51,7 +51,7 @@ describe('SelectionOverlay: a confirmed copy', () => {
   it('fills the copied selection, pulsing, while the copy confirms', () => {
     cfg.layout.animate = true;
     expect(flashFill()).toBeNull();
-    act(() => flashCopy('term-1', 'auto'));
+    act(() => flashCopy('term-1'));
     const outline = container.querySelector('path[stroke]')!;
     expect(flashFill()!.getAttribute('d')).toBe(outline.getAttribute('d'));
     expect(flashFill()!.getAttribute('class')).toContain('fill-header-active-bg/25');
@@ -62,7 +62,7 @@ describe('SelectionOverlay: a confirmed copy', () => {
 
   it('shows the fill still under instant motion', () => {
     cfg.layout.animate = false;
-    act(() => flashCopy('term-1', 'auto'));
+    act(() => flashCopy('term-1'));
     expect(flashFill()!.getAttribute('class')).toContain('fill-header-active-bg/25');
     expect(flashFill()!.getAttribute('class')).not.toContain('animate-');
   });

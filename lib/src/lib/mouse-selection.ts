@@ -67,15 +67,13 @@ export interface MouseSelectionState {
   /** The program's own `OSC 52` text, offered while it holds a shadowed drag
    *  (spec §4.6); it goes with the selection. */
   programCopy: string | null;
-  /**
-   * The format of a copy just confirmed, set briefly so the editor can flash
-   * before everything clears.
-   */
-  copyFlash: EditorFormat | null;
-  /** Set briefly after a copy whose clipboard write failed; the selection
-   *  stays for a retry. */
-  copyFailed: boolean;
+  /** What the latest copy did, set briefly: a confirmed copy, after which
+   *  the selection clears, or a failed write, which keeps it for a retry. */
+  copyOutcome: CopyOutcome | null;
 }
+
+/** What a copy did, as its Copy button says (spec §4.5). */
+export type CopyOutcome = 'copied' | 'failed';
 
 export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze({
   mouseReporting: 'none',
@@ -85,8 +83,7 @@ export const DEFAULT_MOUSE_SELECTION_STATE: MouseSelectionState = Object.freeze(
   hintToken: null,
   copyEditor: null,
   programCopy: null,
-  copyFlash: null,
-  copyFailed: false,
+  copyOutcome: null,
 }) as MouseSelectionState;
 
 const states = new Map<string, MouseSelectionState>();
@@ -99,8 +96,7 @@ function clearSelection(s: MouseSelectionState): void {
   s.selection = null;
   s.copyEditor = null;
   s.programCopy = null;
-  s.copyFlash = null;
-  s.copyFailed = false;
+  s.copyOutcome = null;
   s.hintToken = null;
 }
 
@@ -307,44 +303,35 @@ export const TOUCH_COPY_FLASH_MS = 1200;
 /** How long a failed copy says so, the selection kept. */
 export const COPY_FAILED_MS = 1500;
 
-/** Each state's latest flash or failure notice, so a timer acts only for its own. */
-const flashes = new WeakMap<MouseSelectionState, object>();
-const failures = new WeakMap<MouseSelectionState, object>();
+/** Each state's latest copy outcome, so a timer acts only for its own. */
+const outcomes = new WeakMap<MouseSelectionState, object>();
 
-/**
- * Trigger the copy confirmation flash.
- * The editor reads `copyFlash` and renders a confirmation state; after
- * `durationMs` the flash clears along with the selection, dismissing the
- * editor, whatever moved the selection meanwhile.
- */
-export function flashCopy(id: string, kind: EditorFormat, durationMs = COPY_FLASH_MS): void {
-  const s = ensure(id);
-  const flash = {};
-  flashes.set(s, flash);
-  s.copyFlash = kind;
-  s.copyFailed = false;
+/** Show `outcome` for `durationMs`, unless the selection or a newer outcome
+ *  replaces it: then a confirmed copy clears the selection, dismissing the
+ *  editor whatever moved the selection meanwhile, and a failure clears only
+ *  itself. */
+function showCopyOutcome(id: string, s: MouseSelectionState, outcome: CopyOutcome, durationMs: number): void {
+  const token = {};
+  outcomes.set(s, token);
+  s.copyOutcome = outcome;
   notify();
   setTimeout(() => {
-    if (states.get(id) !== s || flashes.get(s) !== flash || s.copyFlash === null) return;
-    clearSelection(s);
+    if (states.get(id) !== s || outcomes.get(s) !== token || s.copyOutcome === null) return;
+    if (outcome === 'copied') clearSelection(s);
+    else s.copyOutcome = null;
     notify();
   }, durationMs);
 }
 
-/** Say a copy failed, for `durationMs`, keeping the selection for a retry; a
- *  no-op without a selection. */
-export function failCopy(id: string, durationMs = COPY_FAILED_MS): void {
+/** Confirm a copy, the selection clearing after `durationMs`. */
+export function flashCopy(id: string, durationMs = COPY_FLASH_MS): void {
+  showCopyOutcome(id, ensure(id), 'copied', durationMs);
+}
+
+/** Say a copy failed, keeping the selection for a retry; a no-op without one. */
+export function failCopy(id: string): void {
   const s = states.get(id);
-  if (!s?.selection) return;
-  const failure = {};
-  failures.set(s, failure);
-  s.copyFailed = true;
-  notify();
-  setTimeout(() => {
-    if (states.get(id) !== s || failures.get(s) !== failure || !s.copyFailed) return;
-    s.copyFailed = false;
-    notify();
-  }, durationMs);
+  if (s?.selection) showCopyOutcome(id, s, 'failed', COPY_FAILED_MS);
 }
 
 const sameToken = (a: BufferToken | null, b: BufferToken | null) => a === b || (!!a && !!b

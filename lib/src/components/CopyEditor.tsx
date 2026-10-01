@@ -8,6 +8,7 @@ import {
   subscribeToMouseSelection,
   subscribeToRenderTick,
   type CopyEditorState,
+  type CopyOutcome,
   type Selection,
 } from '../lib/mouse-selection';
 import { spanOfSelection, type BreakKind, type EditorFormat, type Piece, type Rendering, type Span } from '../lib/copy-text';
@@ -19,7 +20,7 @@ import { getTerminalOverlayDims } from '../lib/terminal-registry';
 import { getRunningCommandWatchKey } from '../lib/terminal-state-store';
 import { overlayViewportBounds, subscribeOverlayViewport } from '../lib/ui-geometry';
 import { COPY_CHORD_LABEL } from './wall/keyboard/chords';
-import { COPY_EDITOR_Z_INDEX, COPY_EXPANDED_TEXT_CLASS, modalActionButton, modalSurface, popupButton, portalToBody, Shortcut } from './design';
+import { COPY_EDITOR_Z_INDEX, COPY_EXPANDED_TEXT_CLASS, COPY_OUTCOME_LABEL, modalActionButton, modalSurface, popupButton, portalToBody, Shortcut } from './design';
 import { createHeightMeasurer, measureChromeWidth, measureNaturalWidth, type CopyEditorParts } from './copy-editor-measure';
 import { createRectMotion, type RectMotion } from './rect-motion';
 import { TouchUiContext } from './touch-ui-context';
@@ -85,10 +86,9 @@ export function CopyEditor({ terminalId }: { terminalId: string }) {
   // A hidden Workspace consumes no window input (docs/specs/layout.md →
   // "Workspaces"); the selection stays in the store for the way back.
   const workspaceActive = useContext(WorkspaceActiveContext);
-  const { selection, copyEditor, copyFlash, copyFailed, programCopy } = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
+  const { selection, copyEditor, copyOutcome, programCopy } = states.get(terminalId) ?? DEFAULT_MOUSE_SELECTION_STATE;
   if (!workspaceActive || !copyEditor || !selection) return null;
-  const copyState: CopyState = copyFlash ? 'copied' : copyFailed ? 'failed' : 'idle';
-  return <OpenCopyEditor terminalId={terminalId} selection={selection} editor={copyEditor} copyState={copyState} programCopy={programCopy} />;
+  return <OpenCopyEditor terminalId={terminalId} selection={selection} editor={copyEditor} copyState={copyOutcome ?? 'idle'} programCopy={programCopy} />;
 }
 
 /** What placement reads, as last rendered and measured. */
@@ -448,19 +448,18 @@ const OpenCopyEditor = memo(function OpenCopyEditor({ terminalId, selection, edi
 });
 
 /** What a copy did, as the Copy button shows it. */
-type CopyState = 'idle' | 'copied' | 'failed';
-const COPY_STATES: readonly CopyState[] = ['idle', 'copied', 'failed'];
-const COPY_LABEL: Record<CopyState, string> = { idle: 'Copy', copied: 'Copied', failed: 'Couldn’t copy' };
+type CopyState = 'idle' | CopyOutcome;
+const COPY_LABEL: Record<CopyState, string> = { idle: 'Copy', ...COPY_OUTCOME_LABEL };
 
 /** Every state's label stacked in one grid cell, only `state`'s shown, so the
  *  button is as wide as its widest and never shifts as a copy lands. */
 function CopyLabel({ state, iconSize }: { state: CopyState; iconSize: number }) {
   return (
     <span className="grid justify-items-center">
-      {COPY_STATES.map((s) => (
+      {(Object.entries(COPY_LABEL) as [CopyState, string][]).map(([s, label]) => (
         <span key={s} className={clsx('col-start-1 row-start-1 flex items-center gap-1 whitespace-nowrap', s !== state && 'invisible')}>
           {s === 'copied' && <CheckIcon size={iconSize} weight="bold" />}
-          {COPY_LABEL[s]}
+          {label}
         </span>
       ))}
     </span>

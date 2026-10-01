@@ -569,34 +569,32 @@ describe('CopyEditor: flash', () => {
 
   it('dismisses immediately when the selection is canceled during the flash', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    act(() => flashCopy('term-1', 'auto'));
+    act(() => flashCopy('term-1'));
     act(() => setSelection('term-1', null));
     expect(editor()).toBeNull();
   });
 
-  it('says Copied, then Couldn’t copy, in place, every label laid out in every state', () => {
+  it.each([
+    { outcome: 'copied', label: 'Copied' },
+    { outcome: 'failed', label: 'Couldn’t copy' },
+  ] as const)('says $label in place, every label laid out', ({ outcome, label }) => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const labels = () => Array.from(copyButton().querySelectorAll('span > span'), (l) => l.textContent);
     expect(shownLabel()).toBe('Copy');
     expect(labels()).toEqual(['Copy', 'Copied', 'Couldn’t copy']);
-    act(() => flashCopy('term-1', 'auto'));
-    expect(shownLabel()).toBe('Copied');
-    expect(copyButton().getAttribute('aria-label')).toBe('Copied');
-    expect(copyButton().querySelector('span > span:not(.invisible) svg')).not.toBeNull();
+    act(() => (outcome === 'copied' ? flashCopy('term-1') : failCopy('term-1')));
+    expect(shownLabel()).toBe(label);
+    expect(copyButton().getAttribute('aria-label')).toBe(label);
+    expect(copyButton().querySelector('span > span:not(.invisible) svg') !== null).toBe(outcome === 'copied');
     expect(labels()).toEqual(['Copy', 'Copied', 'Couldn’t copy']);
-    act(() => vi.advanceTimersByTime(700));
-    drag(5, 2, 5, 12);
-    act(() => failCopy('term-1'));
-    expect(shownLabel()).toBe('Couldn’t copy');
-    expect(getMouseSelectionState('term-1').selection).not.toBeNull();
   });
 
   it('keeps a newer copied selection for its own confirmation duration', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    act(() => flashCopy('term-1', 'auto'));
+    act(() => flashCopy('term-1'));
     act(() => vi.advanceTimersByTime(400));
     drag(9, 4, 9, 20);
-    act(() => flashCopy('term-1', 'auto'));
+    act(() => flashCopy('term-1'));
     act(() => vi.advanceTimersByTime(300));
     expect(getMouseSelectionState('term-1').selection?.startRow).toBe(9);
     act(() => vi.advanceTimersByTime(400));

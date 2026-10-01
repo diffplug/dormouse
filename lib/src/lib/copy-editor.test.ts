@@ -7,9 +7,7 @@ import { copySelection } from './copy-selection';
 import {
   __resetMouseSelectionForTests,
   beginDrag,
-  COPY_FAILED_MS,
   COPY_FLASH_MS,
-  failCopy,
   flashCopy,
   getMouseSelectionState,
   offerProgramCopy,
@@ -130,7 +128,7 @@ describe('the program’s own copy', () => {
     setCopyFormat(ID, 'program');
     await copySelection(ID);
     expect(writeTextToClipboard).toHaveBeenCalledWith('**The flake** comes\nfrom a race');
-    expect(getMouseSelectionState(ID).copyFlash).toBe('program');
+    expect(getMouseSelectionState(ID).copyOutcome).toBe('copied');
   });
 
   it('falls back to Auto when a nudge moves off what the program copied', () => {
@@ -143,46 +141,34 @@ describe('the program’s own copy', () => {
 });
 
 describe('copySelection', () => {
-  it('writes what the editor shows and flashes its format', async () => {
+  it('writes what the editor shows and confirms it', async () => {
     vi.mocked(writeTextToClipboard).mockResolvedValue(true);
     select({ endRow: 3, endCol: 14 });
     await copySelection(ID);
     expect(writeTextToClipboard).toHaveBeenCalledWith('The flake comes from a race between the PTY exit event and the final flush of the output');
-    expect(getMouseSelectionState(ID).copyFlash).toBe('auto');
+    expect(getMouseSelectionState(ID).copyOutcome).toBe('copied');
   });
 
   it('closes when the flash ends, though a nudge moved the selection during it', () => {
     vi.useFakeTimers();
     try {
       select({ endRow: 2, endCol: 11 });
-      flashCopy(ID, 'auto');
+      flashCopy(ID);
       nudgeCopyEdge(ID, 'end', 1);
-      expect(getMouseSelectionState(ID)).toMatchObject({ selection: { endCol: 16 }, copyFlash: 'auto' });
+      expect(getMouseSelectionState(ID)).toMatchObject({ selection: { endCol: 16 }, copyOutcome: 'copied' });
       vi.advanceTimersByTime(700);
-      expect(getMouseSelectionState(ID)).toMatchObject({ selection: null, copyEditor: null, copyFlash: null });
+      expect(getMouseSelectionState(ID)).toMatchObject({ selection: null, copyEditor: null, copyOutcome: null });
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('says a failed write failed, keeping the selection for a retry', async () => {
-    vi.useFakeTimers();
-    try {
-      vi.mocked(writeTextToClipboard).mockResolvedValue(false);
-      select({});
-      await copySelection(ID);
-      expect(getMouseSelectionState(ID)).toMatchObject({ copyFlash: null, copyFailed: true });
-      vi.advanceTimersByTime(COPY_FAILED_MS);
-      expect(getMouseSelectionState(ID)).toMatchObject({ copyFlash: null, copyFailed: false });
-      expect(getMouseSelectionState(ID).selection).not.toBeNull();
-      // A retry that lands confirms as any copy does.
-      vi.mocked(writeTextToClipboard).mockResolvedValue(true);
-      failCopy(ID);
-      await copySelection(ID);
-      expect(getMouseSelectionState(ID)).toMatchObject({ copyFlash: 'auto', copyFailed: false });
-    } finally {
-      vi.useRealTimers();
-    }
+  it('says a failed write failed, for that selection', async () => {
+    vi.mocked(writeTextToClipboard).mockResolvedValue(false);
+    select({});
+    const { selection } = getMouseSelectionState(ID);
+    await copySelection(ID);
+    expect(getMouseSelectionState(ID)).toMatchObject({ selection, copyOutcome: 'failed' });
   });
 
   it('holds the flash longer on touch, with a tap of vibration', async () => {
@@ -195,7 +181,7 @@ describe('copySelection', () => {
       await copySelection(ID, { touch: true });
       expect(vibrate).toHaveBeenCalledWith(10);
       vi.advanceTimersByTime(COPY_FLASH_MS);
-      expect(getMouseSelectionState(ID).copyFlash).toBe('auto');
+      expect(getMouseSelectionState(ID).copyOutcome).toBe('copied');
       vi.advanceTimersByTime(TOUCH_COPY_FLASH_MS - COPY_FLASH_MS);
       expect(getMouseSelectionState(ID).selection).toBeNull();
       // Desktop keeps the short flash, and never vibrates.
@@ -218,7 +204,6 @@ describe('copySelection', () => {
     beginDrag(ID, { row: 9, col: 1, altKey: false, startedInScrollback: false });
     complete(copied);
     await pending;
-    expect(getMouseSelectionState(ID)).toMatchObject({ copyFlash: null, copyFailed: false });
-    expect(getMouseSelectionState(ID).selection?.startRow).toBe(9);
+    expect(getMouseSelectionState(ID)).toMatchObject({ copyOutcome: null, selection: { startRow: 9 } });
   });
 });

@@ -22,6 +22,6 @@ export async function copySelection(terminalId: string, { touch = false }: { tou
     failCopy(terminalId);
     return;
   }
-  flashCopy(terminalId, copyEditor.format, touch ? TOUCH_COPY_FLASH_MS : COPY_FLASH_MS);
+  flashCopy(terminalId, touch ? TOUCH_COPY_FLASH_MS : COPY_FLASH_MS);
   if (touch) navigator.vibrate?.(10);
 }

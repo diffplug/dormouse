@@ -288,9 +288,11 @@ export class TutDetector {
     for (const [id, current] of snapshot) {
       const prev = this.prevMouse.get(id) ?? DEFAULT_MOUSE_SELECTION_STATE;
 
-      if (current.copyFlash && current.copyFlash !== prev.copyFlash) {
-        if (current.copyFlash === "exact") this.state.markComplete("cp-raw");
-        if (current.copyFlash === "auto") this.state.markComplete("cp-rewrap");
+      // A confirmed copy, in the format its editor shows.
+      if (current.copyOutcome === "copied" && prev.copyOutcome !== "copied") {
+        const format = current.copyEditor?.format;
+        if (format === "exact") this.state.markComplete("cp-raw");
+        if (format === "auto") this.state.markComplete("cp-rewrap");
       }
 
       if (!prev.selection && current.selection) {

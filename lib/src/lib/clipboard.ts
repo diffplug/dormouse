@@ -21,10 +21,36 @@ export async function writeTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
-/** Copy `text` from a hidden textarea, synchronously, putting focus back
- *  after; a field keeps its own selection through the blur. */
+/** Copy `text` through a one-shot `copy` listener, leaving focus where it is:
+ *  moving it would blur xterm, which reports the focus change, and commit an
+ *  inline rename. WebKit may fire no `copy` without a selection; then a hidden
+ *  textarea holds one. */
 function copyWithExecCommand(text: string): boolean {
   if (typeof document === 'undefined' || typeof document.execCommand !== 'function') return false;
+  let wrote = false;
+  const onCopy = (event: ClipboardEvent) => {
+    if (!event.clipboardData) return;
+    event.clipboardData.setData('text/plain', text);
+    event.preventDefault();
+    // Ours alone: no other copy handler writes over it.
+    event.stopImmediatePropagation();
+    wrote = true;
+  };
+  document.addEventListener('copy', onCopy, { capture: true });
+  try {
+    const copied = document.execCommand('copy');
+    if (wrote) return copied;
+  } catch {
+    // Fall through to the textarea, which fails the same way if it must.
+  } finally {
+    document.removeEventListener('copy', onCopy, { capture: true });
+  }
+  return copyFromTextarea(text);
+}
+
+/** Copy `text` from a hidden textarea, putting focus back after; a field
+ *  keeps its own selection through the blur. */
+function copyFromTextarea(text: string): boolean {
   const previous = document.activeElement;
   const textarea = document.createElement('textarea');
   textarea.value = text;

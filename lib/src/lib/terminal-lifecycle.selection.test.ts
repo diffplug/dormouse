@@ -120,11 +120,11 @@ describe('a terminal resize', () => {
     const terminal = await openEdited(id);
     vi.useFakeTimers();
     try {
-      flashCopy(id, 'auto');
+      flashCopy(id);
       terminal.resize(10, 10);
-      expect(getMouseSelectionState(id)).toMatchObject({ selection: { endRow: 2, endCol: 1 }, copyFlash: 'auto' });
+      expect(getMouseSelectionState(id)).toMatchObject({ selection: { endRow: 2, endCol: 1 }, copyOutcome: 'copied' });
       vi.advanceTimersByTime(700);
-      expect(getMouseSelectionState(id)).toMatchObject({ selection: null, copyEditor: null, copyFlash: null });
+      expect(getMouseSelectionState(id)).toMatchObject({ selection: null, copyEditor: null, copyOutcome: null });
     } finally {
       vi.useRealTimers();
     }
