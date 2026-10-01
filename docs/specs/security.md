@@ -92,7 +92,7 @@ run this knows what they are taking on.
   after which the Relay sees that the session exists and nothing about its
   traffic ([Direct path](./remote-security-model.md#direct-path)). Hosted's
   one-time rendezvous sees a handshake's timing, addresses, and frame sizes,
-  and Cloudflare's STUN server sees the one-time phone's public address, and
+  and Cloudflare's STUN server sees every Hosted-served phone's public address, and
   under Anywhere this computer's ([Direct path](./security-remote.md#direct-path)).
 - **Push replay, when push is enabled.** A push proves confidentiality, not freshness: a Relay that
   kept an envelope can re-deliver it ([Push sealing](./remote-security-model.md#push-sealing)).

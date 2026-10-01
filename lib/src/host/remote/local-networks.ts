@@ -59,6 +59,39 @@ function keepAllowed(sdp: string, inAllowed: (address: string) => boolean): { sd
 }
 
 /**
+ * Every range an address a phone reports could be private to some network:
+ * RFC 1918, carrier-grade NAT, loopback, link-local, unspecified, and IPv6
+ * unique-local. What is left is an address the internet routes.
+ */
+const isPrivateAddress = allowedAddressTest([
+  '0.0.0.0/8',
+  '10.0.0.0/8',
+  '100.64.0.0/10',
+  '127.0.0.0/8',
+  '169.254.0.0/16',
+  '172.16.0.0/12',
+  '192.168.0.0/16',
+  '::/128',
+  '::1/128',
+  'fc00::/7',
+  'fe80::/10',
+]);
+
+/**
+ * The first candidate of `sdp` that is an IP literal outside every private
+ * range — a phone's server-reflexive candidate, most often — and outside
+ * `skip`, or `null`.
+ */
+export function firstPublicCandidate(sdp: string, skip: (address: string) => boolean = () => false): string | null {
+  for (const line of sdp.split(/\r?\n/)) {
+    const address = CANDIDATE_LINE.exec(line)?.[1];
+    if (address === undefined || address.includes('%') || isIP(address) === 0) continue;
+    if (!isPrivateAddress(address) && !skip(address)) return address;
+  }
+  return null;
+}
+
+/**
  * The Burrow's hold on one attempt under Local networks: the bind is read from
  * this machine's interfaces at the attempt, since a laptop moves between
  * networks, and a platform that will not list them binds nothing and leaves
@@ -82,13 +115,17 @@ export function localNetworksPath(allowed: readonly string[]): DirectPathPolicy 
     // A browser that offers only mDNS names is left none: its checks reach the
     // answer's candidates, and the pair forms peer-reflexive (rationale).
     acceptRemote: (sdp) => keepAllowed(sdp, inAllowed).sdp,
+    // Never evidence: the phone wrote it, and nothing here decides on it.
+    reportedAddress: (sdp) => firstPublicCandidate(sdp, inAllowed),
+    // This end first: a phone's address says nothing while this machine is
+    // itself off the allowed networks.
     refusal(pair) {
-      if (!pair) return 'the connection reports no selected candidate pair';
+      if (!pair) return { reason: 'the connection reports no selected candidate pair', end: null };
       if (pair.local === null || !inAllowed(pair.local)) {
-        return 'the selected pair’s local end is not on an allowed network';
+        return { reason: 'the selected pair’s local end is not on an allowed network', end: 'local' };
       }
       if (pair.remote === null || !inAllowed(pair.remote)) {
-        return 'the selected pair’s remote end is not on an allowed network';
+        return { reason: 'the selected pair’s remote end is not on an allowed network', end: 'remote' };
       }
       return null;
     },

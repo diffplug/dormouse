@@ -40,9 +40,10 @@ nothing and must reach the direct path — `docs/specs/security-remote.md` ->
 of `service.ts` (the one baked origin and its nullable Hosted origin, the
 rendezvous gate before any socket, the single runtime, and the approval routed
 by `kind`); `lib/src/host/remote/local-networks.ts` and
-`native-direct-peer.ts` (Local networks' hold on a one-time direct path: the
-bound socket, the stripped offer and answer, and the selected-pair check —
-`docs/specs/security-remote.md` -> "One-time connection");
+`native-direct-peer.ts` (Local networks' hold on a direct path: the bound
+socket, the stripped offer and answer, and the selected-pair check —
+`docs/specs/security-remote.md` -> "One-time connection" — and a paired
+session's that nothing relayed is read — "Direct path");
 `lib/src/remote/burrow/push-delivery.ts`; `lib/src/remote/client/pocket-client.ts`
 and `session-core.ts` (the phone's ceremonies, and the established session they
 promote), `one-time-client.ts` (the one-time phone, which keeps nothing and

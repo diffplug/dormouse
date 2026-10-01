@@ -33,6 +33,7 @@ import {
   type NoiseTransportSession,
   type RemoteEventMsg,
   type RemoteResponse,
+  type SessionEndV1,
   type TerminalAttachResult,
   type TerminalClosedEvent,
   type TerminalDataEvent,
@@ -50,6 +51,37 @@ import type { RemoteAdapterClient, TerminalHandlers } from './remote-adapter';
 export interface CeremonyRoute {
   readonly kind: string;
   readonly id: string;
+}
+
+/**
+ * Why {@link ClientSessionCore.awaitDirect} answered without a direct path:
+ * the attempt's own {@link DirectRelayCause}; `timeout`; the session lost
+ * (`lost`) or ended by the Burrow's goodbye (`ended-by-burrow`); or `retired`
+ * by its owner — a replacing Connect, a teardown — which reports nothing.
+ */
+export type DirectWaitFailure = DirectRelayCause | 'timeout' | 'lost' | 'ended-by-burrow' | 'retired';
+
+/**
+ * What a phone reads when the computer's goodbye says the path ended a
+ * direct-only session (`docs/specs/remote-network.md` -> "Local networks") and
+ * names this phone's address, or `null` — a goodbye that says nothing of why,
+ * or names no address, which leaves the Client's generic direct-failure copy.
+ * One sentence for Pocket and the one-time page, never naming the computer's
+ * allowed networks, which the phone is not told; an address the phone
+ * `reported` is not asserted to be off them.
+ */
+export function networkNotAllowedMessage(goodbye: SessionEndV1 | null): string | null {
+  if (!goodbye || !('address' in goodbye)) return null;
+  if (goodbye.addressSource === 'reported') {
+    return (
+      `This phone couldn’t reach the computer directly over one of its allowed networks (it reported ${goodbye.address}). ` +
+      'If it’s on another network, join the same Wi-Fi or VPN as the computer and try again.'
+    );
+  }
+  return (
+    `This computer only accepts phones on its allowed networks. Yours connected from ${goodbye.address} — ` +
+    'join the same Wi-Fi or VPN as the computer and try again.'
+  );
 }
 
 /**
@@ -150,6 +182,10 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
   #heartbeat: RelayHeartbeat | null = null;
   /** Cancels the one visibility subscription, held while a session or a heartbeat runs. */
   #cancelVisibility: (() => void) | null = null;
+  /** The one {@link awaitDirect} in flight, answered by the switch or by its end. */
+  #directWaiter: ((failure: DirectWaitFailure | null) => void) | null = null;
+  /** The goodbye that ended the last session, until the next is established; see {@link goodbye}. */
+  #goodbye: SessionEndV1 | null = null;
 
   /**
    * In-flight ceremony waiters, keyed by `${kind}:${id}:${step}`.
@@ -171,6 +207,15 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     this.#setTimer = deps.setTimer ?? realTimer;
     this.#visibility = deps.visibility ?? documentVisibility();
     this.#createDirectPeer = deps.createDirectPeer ?? null;
+  }
+
+  /**
+   * The Burrow's goodbye that ended the last session — which says why, where
+   * the path ended a direct-only one ({@link networkNotAllowedMessage}) — or
+   * `null`: none arrived, or a session has been established since.
+   */
+  get goodbye(): SessionEndV1 | null {
+    return this.#goodbye;
   }
 
   /** The established session's route, or null while there is none. */
@@ -294,6 +339,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // the owner's own retire before its request cannot see: without it that
     // session's endpoint and peer would be overwritten below rather than closed.
     this.disposeSession();
+    this.#goodbye = null;
     // Declared first so the endpoint's deps can name the session they serve;
     // assigned before anything can reach them.
     let established: EstablishedSession<R>;
@@ -416,9 +462,45 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
       // same event, and the app must leave the wall either way.
       fatal: (reason) => this.loseBurrow(reason),
       isCurrent: () => this.#established === current(),
-      onTransportChanged: (path, cause) => this.#onTransportChanged?.(path, cause),
+      onTransportChanged: (path, cause) => {
+        if (path === 'direct') this.#settleDirect(null);
+        else if (cause !== null) this.#settleDirect(cause);
+        this.#onTransportChanged?.(path, cause);
+      },
       setTimer: this.#setTimer,
     });
+  }
+
+  /**
+   * Wait for the established session's direct path to carry both directions
+   * within `timeoutMs`: `null` once it does, else why not
+   * ({@link DirectWaitFailure}) — at once with no session, or with an attempt
+   * already given up. For a session that runs direct or not at all — a
+   * one-time connection, or one whose outcome says `directOnly` — whose owner
+   * sends no protocol-v1 until this answers `null`. A session that ends
+   * meanwhile answers it with how it ended; burrow loss is still reported
+   * ({@link setOnBurrowGone}), and an owner with no wall up yet ignores it.
+   */
+  awaitDirect(timeoutMs: number): Promise<DirectWaitFailure | null> {
+    const established = this.#established;
+    if (!established) return Promise.resolve('lost');
+    if (established.direct.path === 'direct') return Promise.resolve(null);
+    const cause = established.direct.relayCause;
+    if (cause !== null) return Promise.resolve(cause);
+    this.#settleDirect('retired');
+    return new Promise((resolve) => {
+      const cancel = this.#setTimer(() => this.#settleDirect('timeout'), timeoutMs);
+      this.#directWaiter = (failure) => {
+        cancel();
+        resolve(failure);
+      };
+    });
+  }
+
+  #settleDirect(failure: DirectWaitFailure | null): void {
+    const waiter = this.#directWaiter;
+    this.#directWaiter = null;
+    waiter?.(failure);
   }
 
   /**
@@ -633,6 +715,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // flight will be answered. Taken here rather than by the endpoint, which
     // both ends run, because only a Client is ever told.
     if (receipt.kind === 'control' && isSessionEndV1(receipt.value)) {
+      this.#goodbye = receipt.value;
       this.loseBurrow(this.#messages.ended, { endedByBurrow: true });
       return null;
     }
@@ -678,6 +761,8 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     reason: string,
     { notifyGone, endedByBurrow = false }: { notifyGone: boolean; endedByBurrow?: boolean },
   ): void {
+    // An {@link awaitDirect} in flight hears how the session ended.
+    this.#settleDirect(!notifyGone ? 'retired' : endedByBurrow ? 'ended-by-burrow' : 'lost');
     this.disposeSession();
     this.rejectAll(new Error(reason));
     if (notifyGone) this.#onBurrowGone?.(endedByBurrow);
@@ -696,6 +781,7 @@ export class ClientSessionCore<R extends CeremonyRoute> implements RemoteAdapter
     // stayed relayed would sit in the indicator through the whole of the next.
     if (direct?.relayCause) this.#onTransportChanged?.('relay', null);
     this.#established = null;
+    this.#settleDirect('retired');
     this.#watchVisibility();
   }
 

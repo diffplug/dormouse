@@ -15,11 +15,14 @@ import {
 import { readConfigs } from '../../../hosted/scripts/workers.mjs';
 import {
   DEFAULT_RELAY_ORIGIN,
+  HOSTED_ACCOUNT_ORIGIN,
   HOSTED_VOICE_ORIGIN,
   bakedRelay,
   bakedRelayMode,
+  hostedAccountOrigin,
   hostedOrigin,
   hostedVoiceOrigin,
+  isDevHostedBuild,
   isRelayOrigin,
 } from './relay-origin';
 
@@ -70,10 +73,24 @@ describe('the baked relay origin', () => {
     expect(BUILD_DEFAULT).toBe(DEFAULT_RELAY_ORIGIN);
   });
 
-  it('names the origins Hosted deploys its relay and voice Workers at', async () => {
-    const { relay, voice } = await readConfigs();
+  it('names the origins Hosted deploys its three Workers at', async () => {
+    const { account, relay, voice } = await readConfigs();
     expect(DEFAULT_RELAY_ORIGIN).toBe(relay.vars.APP_ORIGIN);
     expect(HOSTED_VOICE_ORIGIN).toBe(voice.vars.APP_ORIGIN);
+    expect(HOSTED_ACCOUNT_ORIGIN).toBe(account.vars.APP_ORIGIN);
+  });
+
+  it('approves enrollment at the fixed account origin, in a Hosted build only', () => {
+    expect(hostedAccountOrigin({ origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' })).toBe('https://hosted.dormouse.sh');
+    expect(hostedAccountOrigin({ origin: 'http://localhost:8787', mode: 'hosted' })).toBe('https://hosted.dormouse.sh');
+    expect(hostedAccountOrigin({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBeNull();
+  });
+
+  it('tells a dev Hosted build by its non-default origin', () => {
+    expect(isDevHostedBuild({ origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' })).toBe(false);
+    expect(isDevHostedBuild({ origin: `${DEFAULT_RELAY_ORIGIN}/`, mode: 'hosted' })).toBe(false);
+    expect(isDevHostedBuild({ origin: 'http://localhost:8787', mode: 'hosted' })).toBe(true);
+    expect(isDevHostedBuild({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBe(false);
   });
 
   it('reads as the Hosted default where nothing was baked (the test runner)', () => {

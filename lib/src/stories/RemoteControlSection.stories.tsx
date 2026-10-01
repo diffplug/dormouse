@@ -10,6 +10,8 @@ import {
   SELF_HOST_UNENROLLED_STATUS,
   UNENROLLED_STATUS,
 } from '../host/remote/test-burrow-link';
+import { DEFAULT_RELAY_ORIGIN } from '../host/relay-origin';
+import type { HostedEnrollmentState } from '../host/remote/service-protocol';
 import { networkPolicyResult } from '../remote/network-policy';
 import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
@@ -101,19 +103,120 @@ export const Choices: Story = {
 };
 
 /**
- * A stock build, Persistent Relay unfolded: its one Relay is Hosted's, coming
- * soon, so there is nothing to enroll — a Relay you run takes a build made for
- * its origin (`docs/specs/relay.md` → "Relay origin").
+ * A stock build, Persistent Relay unfolded: its one Relay is Hosted's, which
+ * it enrolls with by a code approved at the account (`docs/specs/hosted.md` →
+ * "Burrow enrollment") — the name to keep, and the button that gets one.
  */
 export const HostedPersistentRelay: Story = {
   parameters: {
     primedBurrow: { status: UNENROLLED_STATUS },
-    docs: { story: { height: '420px' } },
+    docs: { story: { height: '470px' } },
   },
   play: async ({ canvasElement }) => {
     await openPersistent(canvasElement);
-    await within(canvasElement).findByRole('button', { name: 'Use hosted.dormouse.sh' });
+    await within(canvasElement).findByRole('button', { name: 'Enroll with hosted.dormouse.sh' });
   },
+};
+
+/** A Hosted enrollment waiting at the account, as `status` reports it. */
+function hostedWaiting(accountFull = false): HostedEnrollmentState {
+  return {
+    status: 'waiting',
+    userCode: '7KQM-X4TD',
+    verificationUrl: 'https://hosted.dormouse.sh/enroll#7KQM-X4TD',
+    expiresAt: STORY_NOW + 10 * 60_000,
+    accountFull,
+  };
+}
+
+/**
+ * The code waiting for approval, in large type: the account page shows the
+ * same one beside Approve. Open opens the page the service composed; the
+ * service polls, so nothing here waits on a click but the person's.
+ */
+export const HostedEnrollWaiting: Story = {
+  parameters: {
+    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: hostedWaiting() } },
+    docs: { story: { height: '500px' } },
+  },
+  play: settled('7KQM-X4TD'),
+};
+
+/**
+ * Approved by an account that already has as many computers as it may enroll:
+ * the Relay keeps the approval, so the service polls on and this computer
+ * enrolls once one is removed.
+ */
+export const HostedEnrollAccountFull: Story = {
+  parameters: {
+    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: hostedWaiting(true) } },
+    docs: { story: { height: '540px' } },
+  },
+  play: settled(/already has as many computers/),
+};
+
+/** Redeemed, and then refused here — the service's own sentence under the fixed one. */
+export const HostedEnrollFailed: Story = {
+  parameters: {
+    primedBurrow: {
+      status: {
+        ...UNENROLLED_STATUS,
+        hostedEnrollment: {
+          status: 'ended',
+          reason: 'failed',
+          message:
+            'keychain is locked Your account holds Burrow T7lzkkrPT8nx4m9zf90V4h, which this computer could ' +
+            'not keep; remove it at https://hosted.dormouse.sh/account.',
+        },
+      },
+    },
+    docs: { story: { height: '560px' } },
+  },
+  play: settled(/keychain is locked/),
+};
+
+/** Approved, and the enrollment being saved and started: no code, nothing to cancel. */
+export const HostedEnrollRedeeming: Story = {
+  parameters: {
+    primedBurrow: { status: { ...UNENROLLED_STATUS, hostedEnrollment: { status: 'redeeming' } } },
+    docs: { story: { height: '420px' } },
+  },
+  play: settled('Approved. Enrolling this computer…'),
+};
+
+/**
+ * The Relay says an earlier poll redeemed the code, whose answer never
+ * arrived: the Burrow it names is the account's to remove.
+ */
+export const HostedEnrollAnswerLost: Story = {
+  parameters: {
+    primedBurrow: {
+      status: {
+        ...UNENROLLED_STATUS,
+        hostedEnrollment: { status: 'ended', reason: 'answer-lost', burrowId: 'T7lzkkrPT8nx4m9zf90V4h' },
+      },
+    },
+    docs: { story: { height: '560px' } },
+  },
+  play: settled('Manage computers at hosted.dormouse.sh'),
+};
+
+/**
+ * Enrolled with Hosted: the self-host view, with the account that manages
+ * this computer a link away. Held without a socket under Local networks.
+ */
+export const HostedEnrolled: Story = {
+  parameters: {
+    primedBurrow: {
+      status: enrolledStatus({
+        relayOrigin: DEFAULT_RELAY_ORIGIN,
+        relayMode: 'hosted',
+        accountOrigin: 'https://hosted.dormouse.sh',
+        connection: 'stopped',
+      }),
+    },
+  },
+  play: settled('Manage computers at hosted.dormouse.sh'),
 };
 
 /**
@@ -219,7 +322,7 @@ export const ConnectedManyDevices: Story = {
 };
 
 /**
- * The only connection state with a button. `displaced` is terminal by design —
+ * A latched state, so it gets a button. `displaced` is terminal by design —
  * another instance took the relay slot and this one stood down — so nothing
  * brings it back on its own.
  */
@@ -229,6 +332,52 @@ export const Displaced: Story = {
     docs: { story: { height: '410px' } },
   },
   play: settled(/Another Dormouse instance took/),
+};
+
+/** The Hosted status a removed or de-entitled Burrow reports. */
+const HOSTED_ENROLLED = {
+  relayOrigin: DEFAULT_RELAY_ORIGIN,
+  relayMode: 'hosted',
+  accountOrigin: 'https://hosted.dormouse.sh',
+  pairedClients: 1,
+} as const;
+
+/**
+ * Removed from the account page: the Relay closed the socket 4001, and this
+ * machine stood down. Enroll again clears the dead enrollment and begins a
+ * new code.
+ */
+export const RemovedHosted: Story = {
+  parameters: {
+    primedBurrow: { status: enrolledStatus({ ...HOSTED_ENROLLED, connection: 'removed' }) },
+    docs: { story: { height: '450px' } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('This computer was removed from your account at hosted.dormouse.sh.');
+    await canvas.findByRole('button', { name: 'Enroll again' });
+  },
+};
+
+/** A self-host Burrow its operator removed: Disconnect, then enroll again from the form. */
+export const RemovedSelfHost: Story = {
+  parameters: {
+    primedBurrow: { status: enrolledStatus({ connection: 'removed', pairedClients: 1 }) },
+  },
+  play: settled(/This computer was removed from .* Disconnect to enroll it again\./),
+};
+
+/** The account lost its plan: the Relay closed the socket 4002. Reconnect tries again. */
+export const NotEntitled: Story = {
+  parameters: {
+    primedBurrow: { status: enrolledStatus({ ...HOSTED_ENROLLED, connection: 'not-entitled' }) },
+    docs: { story: { height: '450px' } },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await canvas.findByText('Your Hosted plan doesn’t include remote control right now.');
+    await canvas.findByRole('button', { name: 'Reconnect' });
+  },
 };
 
 /** Disconnect asks first: it drops every paired phone until each pairs again. */
@@ -498,6 +647,27 @@ export const OneTimeEndedDirectFailedAnywhere: Story = {
     docs: { story: { height: '380px' } },
   },
   play: settled(/such as cellular/),
+};
+
+/**
+ * Local networks ended it for the path: the sentence names the address the
+ * Burrow saw, in Settings → Network's words.
+ */
+export const OneTimeEndedNetworkNotAllowed: Story = {
+  parameters: {
+    primedBurrow: {
+      status: UNENROLLED_STATUS,
+      oneTime: {
+        status: 'ended',
+        reason: 'network-not-allowed',
+        refusal: { at: Date.now(), kind: 'path-refused', end: 'remote', address: '172.58.12.9', addressSource: 'observed' },
+      },
+    },
+    docs: { story: { height: '360px' } },
+  },
+  play: settled(
+    'The phone tried to connect from 172.58.12.9, which isn’t on one of your allowed networks, so the connection ended.',
+  ),
 };
 
 /** The one attempt was spent on digits the phone was not showing. */

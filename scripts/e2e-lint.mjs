@@ -16,7 +16,8 @@
  * checked-in service worker shadowing the built one, no one-time frame the
  * Relay or `BurrowRuntime` could read, no parse in
  * the Hosted room that forwards one, no grant a one-time connection could
- * leave behind, and no store a one-time phone could keep anything in. An
+ * leave behind, no store a one-time phone could keep anything in, and no
+ * relayed application message a Local-networks session would read. An
  * absence is exactly what a
  * reviewer stops noticing: nothing in a
  * diff says "a second cipher suite is now reachable", and the nightly audit is
@@ -126,6 +127,9 @@ const FRAME_MODULES = [
   'lib/src/remote/client/one-time-client.ts',
   'lib/src/remote/one-time-rendezvous.ts',
 ];
+
+/** The paired Burrow's runtime, which holds a session to the direct path under Local networks. */
+const BURROW_RUNTIME = 'lib/src/remote/burrow/burrow-runtime.ts';
 
 /** The laptop's one-time runtime, which authorizes one session and writes nothing. */
 const ONE_TIME_RUNTIME = 'lib/src/remote/burrow/one-time-runtime.ts';
@@ -520,6 +524,35 @@ export const RULES = [
     pattern: ONE_TIME_NAME,
     violationFile: 'lib/src/remote/burrow/burrow-runtime.ts',
     violation: "\nimport { isOneTimeClientFrame } from 'remote-lib-common';\n",
+  },
+  {
+    rule: '`BurrowRuntime` makes a session direct-only exactly where the path policy is held',
+    security: 'must derive `directOnly` from the path policy alone',
+    kind: 'require',
+    file: BURROW_RUNTIME,
+    // Local networks' path policy checks the direct path; the relay is a path
+    // it does not check, so a held policy is what makes a paired session
+    // direct-only — never the level, a Client, or the Relay.
+    pattern: /^    const directOnly = this\.#directPeering\.pathPolicy !== undefined;$/m,
+  },
+  {
+    rule: '`BurrowRuntime` hands its session that derivation and no other',
+    security: 'must derive `directOnly` from the path policy alone',
+    kind: 'require',
+    file: BURROW_RUNTIME,
+    // `EstablishedE2eSession` owns every direct-only rule — the deadline, the
+    // given-up attempt, the relayed application message — so what this
+    // runtime decides is the one flag, as derived above.
+    pattern: /^      directOnly,$/m,
+  },
+  {
+    rule: '`OneTimeRuntime` makes its one session direct-only',
+    security: 'must make its one session `directOnly`',
+    kind: 'require',
+    file: ONE_TIME_RUNTIME,
+    // A one-time connection has no relayed fallback at all: the rendezvous
+    // carries a handshake, never a session.
+    pattern: /^        directOnly: true,$/m,
   },
   {
     rule: '`OneTimeRuntime` names nothing that grants or persists',

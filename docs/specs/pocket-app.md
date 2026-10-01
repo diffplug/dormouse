@@ -152,6 +152,16 @@ discarding the pin (rationale). Each row carries **Remove**, which tombstones th
 delivery id before deleting the record; the list carries **Scan a setup code**.
 Pairing continues into connecting.
 
+**A record of the signed-in account the Relay's list no longer names is
+removed**, marked only off a `GET /api/burrows` that succeeded; a listed
+offline Burrow, and another account's record, keep the offline row.
+**Must bind removal checks to the account that started the list read.** Its
+row reads `BURROW_REMOVED_COPY` for the deployment Pocket read
+(`docs/specs/remote-network.md` -> "Anywhere") and offers **Forget** alone,
+which is Remove. **A Connect answered `BURROW_UNAVAILABLE_MESSAGE` re-reads the
+list**, showing that copy instead where the Burrow is gone; a failed re-read
+keeps the original.
+
 Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`;
 `SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
 gate in `lib/src/remote/pocket-app/App.tsx`; `PairingCodeView` in
@@ -547,10 +557,14 @@ injected timer, clock, and visibility seams in
 ## The path the session takes
 
 **Pocket offers a direct path once the connection outcome says `ok`**, over the
-browser's own `RTCPeerConnection` (its ICE servers:
-[remote-network.md](./remote-network.md) → Anywhere), and keeps the session
+browser's own `RTCPeerConnection` (ICE servers by deployment, read before
+every Connect and pairing: [remote-network.md](./remote-network.md) →
+Anywhere), and keeps the session
 on the relay when the browser has none or the Burrow declines
-([remote-api.md](./remote-api.md) → Direct path owns the whole protocol).
+([remote-api.md](./remote-api.md) → Direct path owns the whole protocol) —
+**unless the outcome says `directOnly`**, where the connect answers only once
+the direct path carries the session
+([remote-network.md](./remote-network.md) → Local networks).
 
 **Must retire the previous session — its peer, its channel, and its pending
 requests — immediately before the replacement's connection request goes out, and
@@ -578,8 +592,8 @@ fresh handshake and one WebAuthn prompt. Before the switch a failed channel
 costs nothing.
 
 Source of truth: `PocketClient.connect` in
-`lib/src/remote/client/pocket-client.ts`; `selfHostDirectPeer` in
-`lib/src/remote/client/browser-direct-peer.ts`; `ClientSessionCore.transportPath` /
+`lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in
+`lib/src/remote/pocket-app/deployment.ts`; `ClientSessionCore.transportPath` /
 `setOnTransportChanged` in `lib/src/remote/client/session-core.ts`; `TRANSPORT_PATH_LABELS` /
 `TRANSPORT_RELAY_CAUSES` / `transportTitle` in
 `lib/src/remote/pocket-app/views.tsx`.
@@ -651,7 +665,8 @@ One lib-owned bundle, two deployments:
   selfhost auth never depends on dormouse.sh existing.
 * **Hosted:** the relay Worker serves it at the root of `relay.dormouse.sh`
   beside the Hosted Relay's routes (`docs/specs/hosted.md` -> "Relay"); rpId is
-  that host.
+  that host. The staging adds `deployment.json`, which tells the bundle Hosted
+  serves it ([remote-network.md](./remote-network.md) → Anywhere).
 
 **The website stays fully static — playground and marketing pages — in both
 worlds**, sharing all terminal UI through `lib` and never duplicating Pocket

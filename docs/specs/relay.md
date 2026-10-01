@@ -27,7 +27,8 @@ primitive lives in `remote-lib-common`, the terminal UI in `lib`/`standalone`.
   (`BURROW_REVOCATION_SWEEP_MS`, one minute), since the upgrade check runs once and
   a Burrow may stay connected indefinitely. The sweep closes it with
   `WS_CLOSE_BURROW_REVOKED` (4001) and its Clients get `burrow-gone`, the teardown a
-  disconnect performs; the Burrow may reconnect, and the upgrade then answers 401.
+  disconnect performs; the Burrow stands down ("Burrow side", relay socket
+  policy), and an upgrade it still tries answers 401.
   Revoking a *Client* is the Burrow's own ACL and still needs a Burrow restart
   ([remote-security-model.md](./remote-security-model.md)).
 * A dropped WebSocket is handled by reloading the page / reconnecting the burrow;
@@ -121,7 +122,7 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 
 | `DORMOUSE_RELAY_ORIGIN` | Mode | Relay | One-time connection | Managed voice | Standalone auto-update |
 | --- | --- | --- | --- | --- | --- |
-| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, which enrolls no Burrow yet | at this origin | at `https://voice.dormouse.sh` | on |
+| unset, or `https://relay.dormouse.sh` | Hosted | Hosted's, enrolled by device code | at this origin | at `https://voice.dormouse.sh` | on |
 | any other accepted origin | self-host | exactly this origin | off | off | off |
 
 - **A self-host build sends nothing to `dormouse.sh` or any host under it
@@ -151,8 +152,9 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
   `DORMOUSE_ONE_TIME_ORIGIN`.
 - **Managed voice's origin is the constant `HOSTED_VOICE_ORIGIN`, never baked
   or overridden**, a loopback dev Hosted build included (rationale).
-- **No build bakes `hosted.dormouse.sh`, the account's origin**; the desktop
-  reaches it only by a user's click.
+- **The account's origin is the constant `HOSTED_ACCOUNT_ORIGIN`
+  (`https://hosted.dormouse.sh`), never baked and never requested**: the desktop
+  opens it only on a user's click, in the browser.
 - The Hosted Relay serves `relay.dormouse.sh` with Pocket at its root, never a
   tailnet or per-tenant host, passkeys binding to that origin
   (`docs/specs/hosted.md` → "Relay"). Hosted's origins: `docs/specs/hosted.md`
@@ -160,9 +162,10 @@ webview CSPs carry no relay sources** (`docs/specs/vscode.md` → "CSP policy";
 
 **The Burrow composes every Relay URL from the baked origin and takes none as
 input**: `enroll` and `enrollOffer` post to it, carrying no Relay URL, and **a
-Hosted build refuses both**, Hosted taking no setup password and enrolling no
-Burrow yet (`docs/specs/hosted.md` → Future), as does any build under the network
-policy's `nothing` (`docs/specs/remote-network.md` → "Policy"); **a command still naming a Relay** (an older
+Hosted build refuses both**, Hosted taking no setup password; it enrolls by
+device code instead (`beginHostedEnrollment`, "Burrow side"), which a self-host
+build refuses. Any build refuses all three under the network policy's `nothing`
+(`docs/specs/remote-network.md` → "Policy"); **a command still naming a Relay** (an older
 webview's) **is refused unless it names the baked origin**. **An enrollment
 whose Relay URL or `origin` names another origin reads as none** wherever one is
 read — `start`, `status`, VS Code's activation — and stays on disk untouched, so
@@ -184,15 +187,16 @@ pins it.
 
 **Enrollment and Burrow-authenticated push fetches must use `redirect: 'error'`** —
 a Node process does not re-check a redirect target, so following one could carry
-the setup password, Burrow bearer token, or notification metadata to another
-origin.
+the setup password, a device code, Burrow bearer token, or notification metadata
+to another origin.
 
 Source of truth: `resolveRelayOrigin` and `assertRelayOriginBaked` in
 `scripts/relay-origin.mjs`; `isAcceptedRelayOrigin` in
 `remote-lib-common/src/security/one-time-link.ts`; `standalone/vite.config.ts`; `bakedRelay`,
-`bakedRelayMode`, `hostedOrigin`, `hostedVoiceOrigin`, and `HOSTED_VOICE_ORIGIN` in
+`bakedRelayMode`, `hostedOrigin`, `hostedVoiceOrigin`, `hostedAccountOrigin`,
+`isDevHostedBuild`, `HOSTED_VOICE_ORIGIN`, and `HOSTED_ACCOUNT_ORIGIN` in
 `lib/src/host/relay-origin.ts`;
-`BurrowService`, `canEnroll`, and `loadEnrollmentFor` in
+`BurrowService` and `loadEnrollmentFor` in
 `lib/src/host/remote/service.ts`. Pinned by `lib/src/host/relay-origin.test.ts`
 and `lib/src/host/remote/service.test.ts`.
 
@@ -774,8 +778,8 @@ memo invalidation — live in that burrow's spec.
   `noiseStaticPublicKey` this Burrow mints locally **before** the request and
   never sends in it —
   [remote-security-model.md](./remote-security-model.md)) through its
-  `BurrowStateStore`, then opens and maintains `GET /ws/burrow` — only under the
-  network policy's `relay`; any other level holds the enrollment without a socket
+  `BurrowStateStore`, then opens and maintains `GET /ws/burrow` under every
+  network policy level but `nothing`, which holds the enrollment without a socket
   ([remote-network.md](./remote-network.md) -> Policy). **Must persist the operator's
   `label` locally and disclose it only inside encrypted outcomes** — the request body
   carries the credential and the baked `origin`, nothing else
@@ -804,18 +808,84 @@ memo invalidation — live in that burrow's spec.
   same rule backwards**: the delete is awaited first and nothing else happens
   unless it succeeded, or a failed delete would leave the credential on disk for
   the next launch to read back.
+* **Hosted enrollment** (a Hosted build, from the Settings dialog):
+  `beginHostedEnrollment` `{ label }` mints the Noise static, posts `{ origin }`
+  to `API_ROUTES.burrowEnrollBegin` at the baked origin, and holds an answer only
+  if `isBurrowEnrollBeginResponse` passes; the service then polls
+  `burrowEnrollPoll` itself every `interval`
+  ([hosted.md](./hosted.md) -> "Burrow enrollment"), off the lifecycle chain
+  until it redeems. Both requests carry the 10 s timeout and `redirect: 'error'`.
+  Refused on an enrolled machine.
+  - **Must answer a code already waiting, or redeeming, rather than replace it**:
+    another VS Code window's Enroll reaches the same service. A begin in flight
+    is joined; one after an ending ("Get a new code") begins anew.
+  - **Never change what ended until the new begin has its code.**
+  - **Must detach a cancelled begin immediately**, so a new begin never joins
+    its stale request.
+  - **The device code never leaves the service**, as `burrowToken` does not:
+    `status` carries `hostedEnrollment` — `waiting` with `userCode`,
+    `verificationUrl`, `expiresAt`, and `accountFull`; `redeeming`; or `ended`
+    with a reason from `HOSTED_ENROLLMENT_END_REASONS`, `answer-lost` naming its
+    `burrowId` — and `accountOrigin`
+    (`accountOriginFor`: `HOSTED_ACCOUNT_ORIGIN` in a release build, the last
+    begin's account origin in a dev one). Each change is a `status` event.
+  - **Must compose the verification URL, never take it from the Relay in a
+    release build**: `enrollVerificationUrl` answers
+    `HOSTED_ACCOUNT_ORIGIN/enroll#<userCode>`. A dev Hosted build
+    (`isDevHostedBuild`: Hosted mode at a non-default origin) takes only the
+    origin of the Relay's `verificationUrl`, after `parseLinkFragment`'s checks
+    with path `/enroll` and the fragment exactly the code, and refuses the begin
+    without one.
+  - **Must stop polling** on the Relay's `expired`, at this machine's deadline
+    (the Relay's `expiresAt` held to 1–15 minutes, the clocks being separate), on
+    Cancel, on disposal, and on a change to `nothing`.
+    A 403 `NOT_ENTITLED_ERROR` ends it `not-entitled`; any other refusal ends it
+    `failed` with the service's sentence. **A transport failure (including a
+    2xx body lost mid-read), a 5xx, or a 429 polls again**, a 429 adding 5 s to
+    the interval, up to 60 s; a complete body that fails the guard ends it
+    `failed`; **a full
+    account's 409 polls on with `accountFull`**, the Relay keeping the approval.
+    The Relay's `redeemed` (an earlier poll's answer lost) ends it `answer-lost`
+    with the `burrowId` it names; `isBurrowEnrollPollResponse` guards every
+    answer.
+  - **An `enrolled` answer takes the Enrollment path above**: `isEnrollment`
+    with the label and the static minted before the begin, the origin checked,
+    then store first on the lifecycle chain, **reporting `redeeming` until the
+    save and start finish**, which neither Cancel nor a begin interrupts.
+  - **Must hold a redemption that lands after Cancel and a new begin**:
+    it is spent and recorded by the Relay. Only a disposed service or an
+    enrolled machine cannot; that, the origin check, or a failed save ends it
+    `failed`, the message naming the Burrow and `<accountOrigin>/account` to
+    remove it at (a console warning once disposed).
+  - **Must retain an enrollment whose save succeeded when startup fails**,
+    reporting the startup error with restart guidance, never removal advice.
 * **Relay socket policy**: one socket at a time, reconnected with exponential
-  backoff (1 s, doubling to 30 s) after any close — **except a close carrying
-  `WS_CLOSE_BURROW_REPLACED`, which is terminal** (rationale): another Dormouse
-  instance enrolled with the same `burrowId` took the relay slot, so this one
-  disposes its sessions, reports `displaced`, and arms no timer. Coming back is
-  an explicit act — `reconnect()` — which takes the slot back and displaces the
-  other Burrow in turn, so `displaced` is the one connection state the user has to
-  act on. **Ignore open, message, and close events from sockets the controller
-  no longer owns** (rationale).
-  `lib/src/remote/burrow/burrow-runtime.test.ts` pins late delivery after stop and
-  restart. **Never construct a socket after service disposal**, including
-  from an enrollment or ACL read already in flight.
+  backoff (1 s, doubling to 30 s) after any close — **except three closes, which
+  are terminal** (rationale): the Burrow disposes its sessions, reports a latched state, and
+  arms no timer.
+
+  | Close | State | Meaning |
+  |---|---|---|
+  | `WS_CLOSE_BURROW_REPLACED` (4000; rationale) | `displaced` | another Dormouse instance enrolled with the same `burrowId` took the relay slot |
+  | `WS_CLOSE_BURROW_REVOKED` (4001) | `removed` | the Burrow's row is gone |
+  | `WS_CLOSE_BURROW_NOT_ENTITLED` (4002, Hosted only) | `not-entitled` | its owner is no longer entitled |
+
+  Coming back is an explicit act — `reconnect()` or a fresh start — which after
+  `displaced` takes the slot back and displaces the other Burrow in turn.
+  **A socket that never opened is probed before its next backoff**, since a
+  refused upgrade reaches the Burrow only as an error event: one
+  `GET /api/push/devices` as the Burrow, through the service's guarded fetch,
+  bounded at `BURROW_REQUEST_TIMEOUT_MS`. A 401 `UNAUTHORIZED_ERROR` (or
+  `UNKNOWN_BURROW_TOKEN_ERROR`) latches `removed`, a 403 `NOT_ENTITLED_ERROR`
+  `not-entitled`, and any other 2xx, 401, or 403 backs off. **At most one
+  answered probe per failure streak**; an open ends the streak, and **only a
+  2xx, 401, or 403 spends it**: no answer, a 5xx, or any other status counts
+  as none (rationale). **A latched `removed` or `not-entitled` Burrow
+  (`relayRefuses`) asks its Relay nothing more**: no push, device list, or
+  setup code. **Ignore open, message, and close events, and probe answers,
+  from sockets the controller no longer owns** (rationale). **Never construct
+  a socket after service disposal**, including from an enrollment or ACL read
+  already in flight.
 * **Security**: `BurrowAcl` (persisted through the `BurrowStateStore`, **keyed per
   `burrowId`**, so an enrollment onto a fresh one starts with an empty ACL while a
   re-enrollment onto the same one keeps its paired devices),
@@ -864,13 +934,21 @@ memo invalidation — live in that burrow's spec.
   authority holds at the PTY level** through that same resize path.
 
 Source of truth: `lib/src/host/remote/service.ts` (`BurrowService`,
-`#enrollWith`, `#status`, `#setupQr`, `unenrolledStatus`, lifecycle + console
-commands),
+`#enrollWith`, `#adoptEnrollment`, `#beginHostedEnrollment`,
+`#pollHostedEnrollment`, `#redeemHostedEnrollment`, `enrollVerificationUrl`,
+`accountOriginFor`, `#status`, `#setupQr`,
+`unenrolledStatus`, lifecycle + console commands),
 `lib/src/host/remote/burrow-state-store.ts`, `lib/src/host/remote/serial-queue.ts`,
-`lib/src/remote/burrow/enrollment.ts`, `BurrowRuntime.mintInvitation` in
+`lib/src/remote/burrow/enrollment.ts` (`performEnrollment`,
+`beginHostedEnrollment`, `pollHostedEnrollment`), `isBurrowEnrollBeginResponse`
+in `remote-lib-common/src/remote/wire.ts`, `BurrowRuntime.mintInvitation` in
 `lib/src/remote/burrow/burrow-runtime.ts`, `lib/src/remote/burrow/burrow-fetch.ts`,
 `lib/src/remote/burrow/enrolled-gate.ts`, `lib/src/remote/burrow/activation.ts` (the
-webview's client half).
+webview's client half); the relay socket policy in `BurrowRuntime.#onClose` in
+`lib/src/remote/burrow/burrow-runtime.ts`, `probeBurrowStanding` in `lib/src/remote/burrow/burrow-fetch.ts`, and
+`relayRefuses` in `lib/src/host/remote/service-protocol.ts`. Pinned by
+`lib/src/remote/burrow/burrow-relay-socket.test.ts` and, for late delivery after
+stop and restart, `lib/src/remote/burrow/burrow-runtime.test.ts`.
 
 ### Remote control, in the Settings dialog
 
@@ -878,9 +956,8 @@ Enrolling is the one step a self-hoster cannot skip, so it is UI, not a console
 incantation: the **Remote control** choices in the Phones section of Settings →
 Network, shown under any level but Nothing
 ([remote-network.md](./remote-network.md) -> "Settings → Network"). A self-host
-build enrolls only under **My Relay only**, which the user chooses first.
-Its managed-Relay link follows [website-docs.md](./website-docs.md) ->
-`/hosted` preview.
+build enrolls only under **My Relay only**, which the user chooses first; a
+Hosted build under Local networks or Anywhere.
 
 **It renders nothing at all where `getPlatform().burrow` is absent** — the
 website and lib dev server have no Burrow service, so the form would promise what
@@ -896,15 +973,25 @@ notifications). Only the first has a Network topic beneath it, so only the first
 and Persistent Relay**, which un-enrolled discloses, **folded until clicked,
 offer or not — hidden, never unmounted**, what the build's mode allows:
 `status` carries the baked `relayOrigin` and `relayMode` (Relay origin), and a
-Hosted build shows only a disabled "Use hosted.dormouse.sh", a self-host build
-the enroll view.
+Hosted build shows the Hosted enroll view, a self-host build the enroll view.
 
 The enroll view names `relayOrigin` over a two-field form (setup password,
 Burrow name — prefilled with the `suggestedLabel` `status` carries) calling the
 service's `enroll`;
 enrolled, it shows unclicked the Relay origin, relay connection state, and paired-device
-count, with `Disconnect` and — only on `displaced` — `Reconnect`. Rules the UI
-exists to honor:
+count, with `Disconnect`, and per latched state:
+
+| State | Reads | Offers |
+|---|---|---|
+| `displaced` | another instance took the slot | Reconnect |
+| `removed`, Hosted | `removedCopy`: removed from your account at the account host | **Enroll again**: clears the enrollment, then begins a device-code enrollment |
+| `removed`, self-host | `removedCopy`: removed from the Relay's host, Disconnect to enroll again | nothing more |
+| `not-entitled` | `NOT_ENTITLED_COPY` | Reconnect |
+
+**`removed` and `not-entitled` offer no "Set up a phone".** Enroll again's busy
+and error live above both views, so a begin refused after the clear still
+shows, and Persistent Relay starts unfolded over it. Rules the UI exists to
+honor:
 
 - **The offer leads, but only where it can be pressed.** The card shows when an
   unexpired local offer file names the baked origin and this self-host Burrow is
@@ -925,7 +1012,9 @@ exists to honor:
 - **The password is passed through, never held**, cleared on success; `enroll`
   answers `{ burrowId }`, so `burrowToken` never re-enters the webview.
 - **Refusals are shown, not swallowed**, the offer card included: the service's
-  own error is what the form renders, never a generic wrong-password message.
+  own error is what the form renders, never a generic wrong-password message —
+  for a Relay that never answered, the host and why
+  (`docs/specs/remote-network.md` -> "Policy").
 - **Enrolled, "Set up a phone" opens an inline QR panel**, so a phone is set up
   by pointing a camera at the laptop rather than typing an origin and a 64-hex
   password. It mints on open and never before, re-mints shortly before
@@ -951,9 +1040,25 @@ exists to honor:
     costs a retry rather than the app-wide ErrorBoundary.
 - **Disconnect asks first**: clearing the enrollment drops every paired phone
   until each pairs again.
+- **The Hosted enroll view renders `status.hostedEnrollment` and holds no state
+  of its own** ("Burrow side" -> Hosted enrollment). Un-begun, the name field
+  prefilled with `suggestedLabel` and "Enroll with <account host>"; waiting,
+  the code in large type under `HOSTED_ENROLLMENT_CODE_LABEL`, the minutes left,
+  "Open <account host> to approve", which opens `verificationUrl` with
+  `openExternal` only on the click, and Cancel — with `accountFull`, a link to
+  remove a computer at the account; ended, why, in fixed copy per reason
+  (`HOSTED_ENROLLMENT_ENDED_COPY`, `failed` adding the service's sentence), with
+  "Get a new code", a plain begin, and Done, which cancels; `answer-lost` names
+  the Burrow to remove and links the account page. Redeeming, `HOSTED_ENROLLMENT_REDEEMING_COPY` alone. **Open is
+  disabled once the minutes left reach 0.** **The name field is hidden while a
+  code waits, never unmounted**, and **Persistent Relay starts unfolded over an
+  enrollment already begun**. Enrolled, the view adds "Manage computers at
+  <host>", linking `status.accountOrigin` + `/account`, the origin the waiting
+  view's link uses, and any `ended` enrollment, with Dismiss.
 - **An older broker's status is read into this shape**: an `offer` object as
-  `true`, `relayUrl` as `relayOrigin`, and a missing `relayMode` as Hosted, so
-  it shows no enroll form.
+  `true`, `relayUrl` as `relayOrigin`, a missing `relayMode` as Hosted, and a
+  missing or malformed `hostedEnrollment` as `null`, an unknown end reason as
+  `failed`, a missing `accountOrigin` as `null`.
 - **Status is re-read, not patched**: the service's `status` event carries only
   `{ enrolled, serving, serviceId }`, so every event triggers a full `status` command, and the dialog
   re-reads on open since another window may have enrolled meanwhile. **The
@@ -963,22 +1068,24 @@ exists to honor:
   **Never publish a failed read over a status already read**: the next poll
   retries, and only a subscription that has read none shows the error.
 - **Reads are serialized, and coalescing stops at anything that changes the
-  answer** — `enroll`, `reconnect`, `clearEnrollment` and losing the last
-  subscriber each drop the read in flight (rationale).
+  answer** — `enroll`, `beginHostedEnrollment`, `cancelHostedEnrollment`,
+  `reconnect`, `clearEnrollment` and losing the last subscriber each drop the
+  read in flight (rationale).
 
-Source of truth: `RelayChoices`, `UnenrolledRelay`, and `useSetupQr` in
-`lib/src/components/RemoteControlSection.tsx`, `ScannableCode` in
+Source of truth: `RelayChoices`, `UnenrolledRelay`, `HostedEnrollView`, and
+`useSetupQr` in `lib/src/components/RemoteControlSection.tsx`, `ScannableCode` in
 `lib/src/components/ScannableCode.tsx` over `lib/src/components/QrCode.tsx`
 (`uqr` encodes; that draws, lazily, so the encoder stays out of every main
 bundle); `describePushTargets` in `lib/src/components/SettingsDialog.tsx`;
-`dropInFlightRead` in `lib/src/remote/burrow/burrow-status-store.ts`;
+`dropInFlightRead` and `hostedEnrollmentOf` in
+`lib/src/remote/burrow/burrow-status-store.ts`;
 `lib/src/host/remote/enroll-offer.ts` for the offer's well-known per-platform
 path, read by `readUsableOffer` in `lib/src/host/remote/service.ts`.
 
 The `window.dormouseBurrow` console hook — the scripting seam — exposes the
-five enrollment commands: `enroll(password, label)`,
-`enrollOffer(label)`, `status`,
-`reconnect`, `clearEnrollment`. **Pairing confirmation is never here**: it is a
+seven enrollment commands: `enroll(password, label)`,
+`enrollOffer(label)`, `beginHostedEnrollment(label)`,
+`cancelHostedEnrollment`, `status`, `reconnect`, `clearEnrollment`. **Pairing confirmation is never here**: it is a
 modal because it must interrupt, and because the digits it takes are read off a
 phone ([remote-security-model.md](./remote-security-model.md) -> Pairing). The
 one-time commands are not on the hook either; `status()` prints `serving`
@@ -1155,12 +1262,3 @@ session requires fresh WebAuthn presence, by design
 Unstaged but adjacent: origin migration (re-binding the passkey and enrollments
 after a Tailscale node rename), and the revocation UI staged in
 [remote-security-model.md](./remote-security-model.md) `## Future`.
-
-**Scope: saas-multitenant** — the managed Relay on `relay.dormouse.sh` beyond the account-scoped routes, push, Pocket, the device-code enrollment, and the per-account relay sockets [hosted.md](./hosted.md) → "Relay", "Relay sockets", and "Burrow enrollment" serve: the Hosted transport below. The **remote-network** scope in [remote-network.md](./remote-network.md) owns the deployment, transport, and network restriction design.
-
-### From single-owner to multi-tenant
-
-Selfhost (everything above the fold) stays as-is; SaaS is a parallel deployment
-that lifts each single-tenant simplification, every one chosen to be liftable:
-
-* **Hosted transport.** Follow the **remote-network** scope in [remote-network.md](./remote-network.md) for routing and lifecycle.

@@ -11,6 +11,8 @@ import {
   RELAY_PING,
   RELAY_PONG,
   UNKNOWN_BURROW_TOKEN_ERROR,
+  WS_CLOSE_BURROW_NOT_ENTITLED,
+  WS_CLOSE_BURROW_NOT_ENTITLED_REASON,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REPLACED_REASON,
   WS_CLOSE_BURROW_REVOKED,
@@ -272,10 +274,10 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
   }
 
   /**
-   * The backstop to `closeBurrow`: every held Burrow whose row is gone, is
-   * another account's, or whose owner is no longer entitled closes 4001, its
-   * Clients told `burrow-gone`. One query for them all; a failed or timed-out
-   * read leaves them to the next sweep.
+   * The backstop to `closeBurrow`: every held Burrow whose row is gone or is
+   * another account's closes 4001, and one whose owner is no longer entitled
+   * 4002, its Clients told `burrow-gone`. One query for them all; a failed or
+   * timed-out read leaves them to the next sweep.
    */
   async #sweep() {
     const account = await this.ctx.storage.get<string>(ACCOUNT_KEY);
@@ -287,13 +289,19 @@ export class RelayRoom extends DurableObject implements RelayRoomRpc {
       console.error("RelayRoom could not sweep its Burrows");
       return;
     }
-    const standing = new Set(
-      rows.filter((row) => row.userId === account && row.entitled).map((row) => row.burrowId),
+    const owned = new Map(
+      rows.filter((row) => row.userId === account).map((row) => [row.burrowId, row.entitled]),
     );
     for (const burrowId of burrowIds) {
-      if (standing.has(burrowId)) continue;
+      const entitled = owned.get(burrowId);
+      if (entitled) continue;
       const held = this.#burrow(burrowId);
-      if (held) this.#retire(held, WS_CLOSE_BURROW_REVOKED, WS_CLOSE_BURROW_REVOKED_REASON);
+      if (!held) continue;
+      if (entitled === false) {
+        this.#retire(held, WS_CLOSE_BURROW_NOT_ENTITLED, WS_CLOSE_BURROW_NOT_ENTITLED_REASON);
+      } else {
+        this.#retire(held, WS_CLOSE_BURROW_REVOKED, WS_CLOSE_BURROW_REVOKED_REASON);
+      }
     }
   }
 

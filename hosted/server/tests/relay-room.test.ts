@@ -14,6 +14,7 @@ import {
   RELAY_PONG,
   UNAUTHORIZED_ERROR,
   UNKNOWN_BURROW_TOKEN_ERROR,
+  WS_CLOSE_BURROW_NOT_ENTITLED,
   WS_CLOSE_BURROW_REPLACED,
   WS_CLOSE_BURROW_REVOKED,
   WS_CLOSE_IDLE,
@@ -22,7 +23,10 @@ import {
   WS_CLOSE_UNAUTHORIZED_REASON,
   WS_ROUTES,
   WS_TOKEN_PARAM,
+  REMOTE_METHODS,
+  SESSION_END_V1,
   generateNoiseKeyPair,
+  utf8Encode,
 } from "remote-lib-common";
 import {
   SimAuthenticator,
@@ -480,7 +484,7 @@ test("the alarm is the earliest Client expiry or Burrow sweep; a close leaves it
   expect((await room.probe()).alarm).toBe(null);
 });
 
-test("the sweep closes a Burrow removed or de-entitled behind its socket's back, and keeps the rest", async ({
+test("the sweep closes a Burrow removed (4001) or de-entitled (4002) behind its socket's back, and keeps the rest", async ({
   onTestFinished,
 }) => {
   onTestFinished(closeAll);
@@ -500,10 +504,11 @@ test("the sweep closes a Burrow removed or de-entitled behind its socket's back,
   expect(await room.onlineBurrows(owner.userId)).toEqual([kept.burrowId]);
   expect(await kept.socket.quiet(150)).toBe(true);
 
-  // The owner loses the entitlement: every Burrow socket it holds goes.
+  // The owner loses the entitlement: every Burrow socket it holds goes, on
+  // the code that says why.
   await entitled();
   await room.fire();
-  expect((await kept.socket.closed).code).toBe(WS_CLOSE_BURROW_REVOKED);
+  expect((await kept.socket.closed).code).toBe(WS_CLOSE_BURROW_NOT_ENTITLED);
   expect(await room.onlineBurrows(owner.userId)).toEqual([]);
 });
 
@@ -715,4 +720,89 @@ test("one object per account: another account's session never reaches this accou
   expect(await roomA.onlineBurrows(b.userId)).toEqual([]);
   expect((await roomA.probe()).storage).toEqual({ account: a.userId });
   expect(await roomA.onlineBurrows(a.userId)).toEqual([burrowId]);
+});
+
+test("a Burrow enrolled by device code pairs and connects a phone, and under Local networks ends the session its first request relays", async ({
+  onTestFinished,
+}) => {
+  const peers: { close(): void }[] = [];
+  onTestFinished(() => {
+    for (const peer of peers) peer.close();
+  });
+  const userId = await entitled();
+
+  // The Burrow asks the relay for a code, as `beginHostedEnrollment` does …
+  const begun = await call(API_ROUTES.burrowEnrollBegin, { body: { origin } });
+  expect(begun.status).toBe(200);
+  // … its account approves it on the account origin, as the enroll page posts …
+  const account = new Hono();
+  relayAccountRoutes(account, () => ({
+    databaseUrl: context.database.url,
+    auth: async () =>
+      Response.json({
+        user: { id: userId, email: ADMIN_EMAIL, emailVerified: true },
+        session: { createdAt: new Date().toISOString() },
+      }),
+    approveLimit: { limit: async () => ({ success: true }) } as unknown as RateLimit,
+    closeBurrow: async () => true,
+  }));
+  const approved = await account.request(`${ORIGINS.account}/api/relay/enrollments/approve`, {
+    method: "POST",
+    headers: { origin: ORIGINS.account, "content-type": "application/json" },
+    body: JSON.stringify({ userCode: begun.json.userCode }),
+  });
+  expect(approved.status).toBe(204);
+  // … and its poll answers the enrollment, once.
+  const polled = await call(API_ROUTES.burrowEnrollPoll, { body: { deviceCode: begun.json.deviceCode } });
+  expect(polled.json.status).toBe("enrolled");
+  const { burrowId, burrowToken } = polled.json.enrollment as { burrowId: string; burrowToken: string };
+
+  // The Burrow under Local networks (`BurrowRuntime` with the path policy
+  // held), on the relay socket that token opens.
+  const burrowStatic = await generateNoiseKeyPair();
+  const burrow = harness(FakeBurrow, {
+    relayUrl: wsBase,
+    burrowToken,
+    burrowId,
+    origin,
+    rpId,
+    noiseStaticKeyPair: burrowStatic,
+    directOnly: true,
+  });
+  peers.push(burrow);
+  await burrow.ready;
+
+  // A phone whose passkey joined the account off this Burrow's setup code,
+  // paired and connected through the account's object.
+  const { authenticator, sessionToken } = await signedIn(burrowToken);
+  const client = harness(FakeClient, {
+    relayUrl: base.href.replace(/\/$/, ""),
+    sessionToken,
+    burrowId,
+    staticKeyPair: await generateNoiseKeyPair(),
+    burrowStaticPublicKey: burrowStatic.publicKey,
+    origin,
+    rpId,
+    socketInit: POCKET,
+  });
+  peers.push(client);
+  await client.ready;
+  const paired = await client.pair({ invitation: await burrow.mintInvitation(), authenticator, accountId: userId });
+  expect(paired.ok).toBe(true);
+  const connected = await client.connect({ authenticator });
+  expect(connected.outcome).toEqual({ ok: true, burrowLabel: burrow.label, directOnly: true });
+
+  // A keepalive is no application message; the first request is, and the
+  // Burrow ends the session unread, saying goodbye through the relay.
+  const answered: unknown[] = [];
+  burrow.on("msg", (event: unknown) => answered.push(event));
+  const relayed = new Promise((resolve) => burrow.once("relayed-app", resolve));
+  client.sendKeepalive();
+  client.sendApp(
+    utf8Encode(JSON.stringify({ requestId: "r1", method: REMOTE_METHODS.hello, params: { protocolVersion: 1, viewer: "phone" } })),
+  );
+  await relayed;
+  const goodbye = client.receiveFrame(await client.nextTransport());
+  expect(goodbye).toEqual({ kind: "control", value: SESSION_END_V1 });
+  expect(answered).toEqual([]);
 });

@@ -879,10 +879,23 @@ test("a device-code enrollment: begin stores nothing, pending until approved, th
   expect(await f.sql(`SELECT "burrowId", "userId", "tokenHash" FROM dormouse_relay_burrows`)).toEqual([
     { burrowId: enrollment.burrowId, userId: owner, tokenHash: digest(enrollment.burrowToken) },
   ]);
-  // Spent: the code has nothing left to redeem, and the Burrow's token acts.
-  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
-  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals`)).toEqual([{ n: 0 }]);
+  // Spent: the approval stays, marked with the Burrow it minted, so a poll
+  // whose answer was lost learns it was redeemed; nothing redeems twice.
+  expect(
+    await f.sql(`SELECT "userId", "redeemedBurrowId", "redeemedAt" IS NOT NULL AS redeemed FROM dormouse_relay_enrollment_approvals`),
+  ).toEqual([{ userId: owner, redeemedBurrowId: enrollment.burrowId, redeemed: true }]);
+  // Naming the Burrow it minted, for the Burrow to tell the account to remove.
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed", burrowId: enrollment.burrowId });
   expect((await f.mint(enrollment.burrowToken)).status).toBe(200);
+  // Removing the Burrow never makes its approval redeemable again.
+  await f.sql(`DELETE FROM dormouse_relay_burrows`);
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "redeemed", burrowId: enrollment.burrowId });
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 0 }]);
+  // Expired, the marker is swept with the rest.
+  await f.sql(`UPDATE dormouse_relay_enrollment_approvals SET "expiresAt" = now() - interval '1 second'`);
+  expect((await f.poll(begun.deviceCode)).json).toEqual({ status: "pending" });
+  await f.cron();
+  expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_enrollment_approvals`)).toEqual([{ n: 0 }]);
 });
 
 test("an approval redeems only the device code its user code is derived from", async ({ onTestFinished }) => {
@@ -919,7 +932,14 @@ test("two polls racing one approval mint one Burrow", async ({ onTestFinished })
     const begun = await f.begin();
     await f.approve(begun.userCode, owner);
     const answers = await Promise.all(Array.from({ length: 4 }, () => f.poll(begun.deviceCode)));
-    expect(answers.filter(({ json }) => json!.status === "enrolled")).toHaveLength(1);
+    const won = answers.filter(({ json }) => json!.status === "enrolled");
+    expect(won).toHaveLength(1);
+    // Every other poll learns the approval was spent, and on what, whether it
+    // read it spent or lost the race at the lock.
+    const { burrowId } = (won[0]!.json as { enrollment: { burrowId: string } }).enrollment;
+    expect(answers.filter(({ json }) => json!.status === "redeemed").map(({ json }) => json)).toEqual(
+      Array(3).fill({ status: "redeemed", burrowId }),
+    );
   }
   expect(await f.sql(`SELECT count(*)::int AS n FROM dormouse_relay_burrows`)).toEqual([{ n: 5 }]);
 });
@@ -958,6 +978,11 @@ test("an enrollment expires, is refused past its approver's entitlement, and wai
   // A removed Burrow makes room.
   await f.sql(`DELETE FROM dormouse_relay_burrows WHERE "burrowId" = $1`, [enrolled[0].burrowId]);
   expect((await f.poll(begun.deviceCode)).json).toMatchObject({ status: "enrolled" });
+  // Full again, a poll whose answer was lost still learns it was redeemed,
+  // and so does one past its approver's entitlement.
+  expect(await f.poll(begun.deviceCode)).toMatchObject({ status: 200, json: { status: "redeemed", burrowId: expect.any(String) } });
+  await f.sql(`UPDATE "user" SET "emailVerified" = false WHERE id = $1`, [owner]);
+  expect(await f.poll(begun.deviceCode)).toMatchObject({ status: 200, json: { status: "redeemed", burrowId: expect.any(String) } });
 });
 
 test("begin refuses another origin", async ({ onTestFinished }) => {

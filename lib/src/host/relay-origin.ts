@@ -2,7 +2,8 @@
  * The one relay origin this build was baked with, and the mode it sets
  * (`docs/specs/relay.md` → "Relay origin"): the Burrow's only Relay, and — in a
  * Hosted build — where the one-time rendezvous goes too. Managed voice speaks
- * at {@link HOSTED_VOICE_ORIGIN} instead.
+ * at {@link HOSTED_VOICE_ORIGIN} instead, and enrollment is approved at
+ * {@link HOSTED_ACCOUNT_ORIGIN}.
  *
  * Baked by `scripts/relay-origin.mjs` into both host bundles. **Never webview
  * input** — no command carries an origin.
@@ -24,6 +25,17 @@ export const DEFAULT_RELAY_ORIGIN = 'https://relay.dormouse.sh';
  * speaks here (`docs/specs/relay.md` → "Relay origin").
  */
 export const HOSTED_VOICE_ORIGIN = 'https://voice.dormouse.sh';
+
+/**
+ * The Hosted account's origin, where a Hosted build's enrollment is approved
+ * and its computers are managed. A fixed constant, never baked: **the desktop
+ * never requests it**, and opens it only on the user's click
+ * (`docs/specs/relay.md` → "Relay origin").
+ */
+export const HOSTED_ACCOUNT_ORIGIN = 'https://hosted.dormouse.sh';
+
+/** The account page that lists its enrolled computers, with Remove. */
+export const ACCOUNT_PAGE_PATH = '/account';
 
 /**
  * `hosted`: the default origin, or a dev build's `DORMOUSE_RELAY_IS_HOSTED=1`.
@@ -85,6 +97,25 @@ export function hostedOrigin(relay: RelayBuild): string | null {
  */
 export function hostedVoiceOrigin(relay: RelayBuild): string | null {
   return relay.mode === 'hosted' ? HOSTED_VOICE_ORIGIN : null;
+}
+
+/**
+ * Where this build's enrollment is approved: {@link HOSTED_ACCOUNT_ORIGIN} in
+ * a Hosted build, and `null` in a self-host one, which enrolls with its own
+ * Relay's setup password.
+ */
+export function hostedAccountOrigin(relay: RelayBuild): string | null {
+  return relay.mode === 'hosted' ? HOSTED_ACCOUNT_ORIGIN : null;
+}
+
+/**
+ * Whether this is a dev Hosted build: Hosted mode at an origin other than the
+ * default, which only `DORMOUSE_RELAY_IS_HOSTED` in a dev build can bake
+ * (`scripts/relay-origin.mjs`). Its Relay is a local or preview Worker whose
+ * account page is not {@link HOSTED_ACCOUNT_ORIGIN}.
+ */
+export function isDevHostedBuild(relay: RelayBuild): boolean {
+  return relay.mode === 'hosted' && !isRelayOrigin(relay.origin, DEFAULT_RELAY_ORIGIN);
 }
 
 /**

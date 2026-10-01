@@ -12,6 +12,7 @@ import {
   isExactBase64Url,
 } from '../security/bytes.js';
 import { NOISE_MAX_MESSAGE_LENGTH } from '../security/noise.js';
+import { isEnrollUserCode } from './enroll-code.js';
 import type { PasskeyAssertion } from '../security/passkey.js';
 import type { PresenceBinding } from '../security/presence.js';
 import type { SealedPushV1 } from '../security/push-seal.js';
@@ -73,7 +74,9 @@ export function pushSubscriptionDeletePath(deliveryId: string): string {
  * unknown or expired. Shared because Pocket keys recovery on it: a 401 alone is
  * ambiguous (a spent setup token answers 401 too), and only this one means
  * "sign in again". Changing the string on one side without the other would
- * silently strand users on a dead session.
+ * silently strand users on a dead session. A Burrow-gated route answers it
+ * too, for a burrow token that names no Burrow, and a Burrow's standing probe
+ * reads it as removal (`docs/specs/relay.md` -> "Burrow side").
  */
 export const UNAUTHORIZED_ERROR = 'unauthorized';
 
@@ -175,17 +178,26 @@ export const WS_CLOSE_BURROW_REPLACED = 4000;
 export const WS_CLOSE_BURROW_REPLACED_REASON = 'replaced by a newer burrow connection';
 
 /**
- * The Burrow's `burrows.json` row is gone, so its bearer token names nothing.
- *
- * A distinct code from {@link WS_CLOSE_BURROW_REPLACED} because the two mean
- * opposite things to a reconnect: a replaced Burrow must stand down, while a
- * revoked one may retry as often as it likes — the upgrade will simply 401,
- * which is the whole of what revocation is.
+ * The Burrow's row is gone — removed from the account, or deleted from
+ * `burrows.json` — so its bearer token names nothing. Terminal at the Burrow,
+ * which reports `removed` rather than retrying an upgrade that can only 401
+ * (`docs/specs/relay.md` -> "Burrow side").
  */
 export const WS_CLOSE_BURROW_REVOKED = 4001;
 
 /** Human-readable reason paired with {@link WS_CLOSE_BURROW_REVOKED}. */
 export const WS_CLOSE_BURROW_REVOKED_REASON = 'this burrow is no longer enrolled';
+
+/**
+ * The Burrow is still enrolled, but its owner is no longer entitled to the
+ * Hosted Relay. Only Hosted sends it; terminal at the Burrow, which reports
+ * `not-entitled`. Distinct from {@link WS_CLOSE_BURROW_REVOKED} because the
+ * fix differs: a plan, not a re-enrollment.
+ */
+export const WS_CLOSE_BURROW_NOT_ENTITLED = 4002;
+
+/** Human-readable reason paired with {@link WS_CLOSE_BURROW_NOT_ENTITLED}. */
+export const WS_CLOSE_BURROW_NOT_ENTITLED_REASON = 'this account is not entitled to the Hosted Relay';
 
 /** The selfhost mode has exactly one account. */
 export const SELFHOST_ACCOUNT_ID = 'owner';
@@ -384,18 +396,76 @@ export interface BurrowEnrollBeginResponse {
   interval: number;
 }
 
+/** The shortest poll interval a Burrow accepts, in seconds. */
+export const MIN_ENROLL_POLL_INTERVAL_S = 1;
+/** The longest, which also caps a Burrow slowing down after a 429. */
+export const MAX_ENROLL_POLL_INTERVAL_S = 60;
+/** The longest `verificationUrl` a Burrow reads; Hosted's is under fifty characters. */
+const MAX_ENROLL_VERIFICATION_URL_LENGTH = 512;
+
+/**
+ * Structural validation of a {@link BurrowEnrollBeginResponse}, beside the type
+ * so a field added here cannot be silently accepted by the Burrow that reads
+ * one. The device code is a bearer, the user code goes on screen in large
+ * type, and `interval` and `expiresAt` go straight into timers, so each is
+ * held to its shape and bounds: an integer `interval` of
+ * {@link MIN_ENROLL_POLL_INTERVAL_S}–{@link MAX_ENROLL_POLL_INTERVAL_S} seconds,
+ * a finite positive `expiresAt`. `verificationUrl` is only bounded: the Burrow
+ * composes the URL it opens (`docs/specs/hosted.md` -> "Burrow enrollment").
+ */
+export function isBurrowEnrollBeginResponse(value: unknown): value is BurrowEnrollBeginResponse {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  const { interval, expiresAt, verificationUrl } = candidate;
+  return (
+    isRelayBearer(candidate.deviceCode) &&
+    isEnrollUserCode(candidate.userCode) &&
+    (verificationUrl === undefined || isBoundedString(verificationUrl, MAX_ENROLL_VERIFICATION_URL_LENGTH)) &&
+    typeof expiresAt === 'number' &&
+    Number.isFinite(expiresAt) &&
+    expiresAt > 0 &&
+    Number.isInteger(interval) &&
+    (interval as number) >= MIN_ENROLL_POLL_INTERVAL_S &&
+    (interval as number) <= MAX_ENROLL_POLL_INTERVAL_S
+  );
+}
+
 export interface BurrowEnrollPollRequest {
   deviceCode: string;
 }
 
 /**
  * `expired` also answers an unknown device code. `enrolled` answers once: the
- * redemption is single-use.
+ * redemption is single-use. `redeemed` answers every later poll of that code
+ * until the approval expires: an earlier poll enrolled `burrowId`, whose answer
+ * never reached this one, and which the account must remove.
  */
 export type BurrowEnrollPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
+  | { status: 'redeemed'; burrowId: string }
   | { status: 'enrolled'; enrollment: BurrowEnrollResponse };
+
+/**
+ * A poll answer of a known status, `redeemed` naming a routing-id-shaped
+ * Burrow. `enrolled`'s enrollment is only an object here: the Burrow holds it
+ * to its own enrollment guard.
+ */
+export function isBurrowEnrollPollResponse(value: unknown): value is BurrowEnrollPollResponse {
+  if (!value || typeof value !== 'object') return false;
+  const answer = value as Record<string, unknown>;
+  switch (answer.status) {
+    case 'pending':
+    case 'expired':
+      return true;
+    case 'redeemed':
+      return isE2eId(answer.burrowId);
+    case 'enrolled':
+      return !!answer.enrollment && typeof answer.enrollment === 'object';
+    default:
+      return false;
+  }
+}
 
 /**
  * Burrow-token auth. The single-use setup credential an enrolled Burrow mints for
