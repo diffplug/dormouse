@@ -16,7 +16,7 @@
 | `frame` | `connectToolFrame` | — |
 
 - **The host (`lib`) must reach the package through source aliases**, beside every `dor-tools-builtin/*` alias (tsconfig `paths`, Vite, Storybook, esbuild, vitest), since no host build compiles the package first.
-- **`dor-tools-builtin` consumes the built package**: its prebuild builds `dor-tools-lib`, the viewer process imports `osc`, and the Monaco page bundles `frame`.
+- **`dor-tools-builtin` consumes the built package**: its prebuild builds `dor-tools-lib`, the viewer process imports `osc`, and the editor pages bundle `frame`.
 
 Source of truth: `dor-tools-lib/src/` (a module per entry point); `dor-tools-lib/package.json`; `dor-tools-builtin/package.json`.
 

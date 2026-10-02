@@ -1,12 +1,12 @@
 # Built-in Tools
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> Owns the built-in Tools — `builtin:file` (the local-file viewer and its text editor) and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
+> Owns the built-in Tools — `builtin:file` (the local-file viewer and its text and Markdown editors) and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
 
 ## Packaging
 
 - **Must bundle the viewers and their runtime dependencies into `dist/runtime.js` in `dor-tools-builtin`**, without workspace or installed-package resolution at runtime. `dor`'s prebuild builds this package first.
-- **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` resolves assets relative to the runtime module.
+- **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` serves the files the build placed in it, by exact name, relative to the runtime module.
 - **Must keep `file-viewer-format` free of Node runtime dependencies**: lib's renderer and host modules import it, and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles it for a browser.
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
@@ -17,7 +17,7 @@ Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tool
 
 **Must prefer known extensions over filename-based text fallbacks; source extensions open as inert text in the editor.**
 
-**Must run the built-in viewer as a Tool-owned `dor` process.** Text/source previews grant only their opened file and skip dependency inspection. (rationale) Oversized HTML and referenced CSS still stream without dependency inspection. **The grant contains at most 256 files** — the opened document and statically referenced relative HTML/CSS assets within its directory tree — and exceeding that bound fails the open without serving a partial grant. **Never expand the grant through root-relative, external, or dynamic references**; requests can read only granted paths.
+**Must run the built-in viewer as a Tool-owned `dor` process.** Text/source previews grant only their opened file, apart from [Markdown images](#markdown-editor), and skip dependency inspection. (rationale) Oversized HTML and referenced CSS still stream without dependency inspection. **The grant contains at most 256 files** — the opened document and statically referenced relative HTML/CSS assets within its directory tree — and exceeding that bound fails the open without serving a partial grant. **Never expand the grant through root-relative, external, or dynamic references**; requests can read only granted paths.
 
 **Must title the built-in viewers' Session with the canonical target's basename via `OSC 2`**, controls stripped. (rationale)
 
@@ -29,7 +29,7 @@ Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fil
 
 ## Editing files
 
-**Must render supported UTF-8 text in bundled Monaco**. Use the workbench's editor colors and fonts with Monaco's light/dark syntax defaults; iframe theme delivery belongs to `docs/specs/theme.md` → Tool iframe themes. Never execute source text or load its referenced assets.
+**Must render supported UTF-8 text other than Markdown in bundled Monaco**. Use the workbench's editor colors and fonts with Monaco's light/dark syntax defaults; iframe theme delivery belongs to `docs/specs/theme.md` → Tool iframe themes. Never execute source text or load its referenced assets.
 
 **Must save only on Save or Cmd/Ctrl+S, to the opened canonical file.** Preserve UTF-8 BOM and the dominant line ending (mixed endings are normalized). Bound text to 8 MiB; reject invalid UTF-8. Atomically replace only after comparing the submitted revision with current disk bytes and file identity; a conflict or write failure keeps the edit dirty. New edits during a save remain dirty after that save succeeds. Reload asks before discarding edits and reads the current file at the authorized path, including atomic replacements.
 
@@ -38,6 +38,19 @@ Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fil
 **Must report dirty state immediately to the containing iframe and in order through OSC 367** (`docs/specs/dor-tool.md` → Unsaved changes), and answer the host's iframe save channel (`docs/specs/dor-tool.md` → Closing unsaved Tools) with `connectToolFrame`.
 
 Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`; `dor-tools-builtin/viewer/editor.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`.
+
+## Markdown editor
+
+`.md` and `.markdown` open in the bundled MDXEditor page; `.mdx` and other text stay in Monaco. Saving, reloading, and dirty reports follow [Editing files](#editing-files).
+
+- **Must support GFM tables, task lists, frontmatter, code blocks, fenced `mermaid` diagrams, and a whole-document source mode**, which opens with the error when the rich editor cannot parse a file. Mermaid stays on 11 (rationale).
+- **Must keep HTML comments verbatim and save with one final newline and the file's majority bullet and thematic-break marker**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
+- **Never let document HTML reach the live DOM outside an allowlist** of tags and attributes, `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths; saving keeps every original attribute, escaped, and HTML images serialize in an inert document. Mermaid runs with `securityLevel: 'strict'` (rationale).
+- **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
+- **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
+- **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
+
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `openImage` / `writePastedImage` / `renameImage` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Folder viewer
 

@@ -70,15 +70,18 @@ test('known formats override source-name heuristics, PDFs never preview, and pro
     assert.deepEqual(fileViewerFormat(name), { mime, text: false });
   }
   for (const name of ['report.pdf', 'README.pdf', 'LICENSE.PDF']) assert.equal(fileViewerFormat(name), null, name);
-  for (const name of ['README', 'Dockerfile.dev', 'README.md', '.gitignore']) {
+  for (const name of ['README', 'Dockerfile.dev', 'notes.mdx', '.gitignore']) {
     assert.deepEqual(fileViewerFormat(name), { mime: 'text/plain; charset=utf-8', text: true });
+  }
+  for (const name of ['README.md', 'guide.MARKDOWN']) {
+    assert.deepEqual(fileViewerFormat(name), { mime: 'text/plain; charset=utf-8', text: true, markdown: true });
   }
   assert.deepEqual(fileViewerFormat('README.css'), { mime: 'text/css; charset=utf-8', text: true });
   assert.equal(fileViewerFormat('file.constructor'), null);
 });
 
 test('keeps text out of the editor HTML and requires the per-run token on every method', async () => {
-  const viewer = await start('README.md', '<script>bad()</script> & hello');
+  const viewer = await start('README', '<script>bad()</script> & hello');
   const good = await get(viewer);
   assert.equal(good.status, 200);
   assert.ok(!good.body.includes('bad()'));
@@ -99,7 +102,7 @@ test('keeps text out of the editor HTML and requires the per-run token on every 
   assert.equal((await get(viewer, viewer.path, { Origin: 'https://evil.test' })).status, 403);
   assert.equal((await get(viewer, viewer.path, {}, 'POST')).status, 403);
   assert.equal((await get(viewer, viewer.path, {}, 'HEAD')).body, '');
-  const second = await startFileViewer(join(root, 'README.md'));
+  const second = await startFileViewer(join(root, 'README'));
   viewers.push(second);
   assert.notEqual(second.path, viewer.path);
   assert.equal((await get(second, viewer.path)).status, 403);

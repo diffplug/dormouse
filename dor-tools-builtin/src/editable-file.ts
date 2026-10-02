@@ -47,6 +47,15 @@ export async function readEditableFile(target: string): Promise<{ text: string; 
   catch { throw new HttpError(415, 'This editor supports UTF-8 text. Open this file in another editor.'); }
 }
 
+/** `text` with the majority line ending of the file's `bytes` (mixed endings
+ * normalize to it); a file without line breaks keeps `text`'s own. */
+function withLineEndings(text: string, bytes: Buffer): string {
+  const disk = bytes.toString('latin1');
+  const lines = disk.split('\n').length - 1;
+  if (!lines) return text;
+  return (disk.split('\r\n').length - 1) * 2 > lines ? text.replace(/\r?\n/g, '\r\n') : text.replace(/\r\n/g, '\n');
+}
+
 /** Optimistic concurrency: write and flush a sibling, recheck contents
  * and identity, then replace atomically. No arbitrary destination or force API.
  * Like other local editors, this cannot lock out an uncooperative writer. */
@@ -54,7 +63,7 @@ export async function saveEditableFile(target: string, text: string, version: st
   const current = await readEditableBytes(target);
   if (current.version !== version) throw new HttpError(409, 'The file changed on disk. Your edits are safe here; compare or reload before saving.');
   const bom = current.bytes.subarray(0, UTF8_BOM.length).equals(UTF8_BOM);
-  const bytes = Buffer.from((bom ? '﻿' : '') + text, 'utf8');
+  const bytes = Buffer.from((bom ? '﻿' : '') + withLineEndings(text, current.bytes), 'utf8');
   if (bytes.length > TEXT_LIMIT) throw tooLarge();
   // Check document write permission even if the directory permits replacement.
   const writable = await open(target, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));

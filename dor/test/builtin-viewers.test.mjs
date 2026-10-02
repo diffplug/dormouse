@@ -84,7 +84,7 @@ test('the file entry titles itself, announces its port and path, serves the stag
     assert.equal((await call(viewer, viewer.path)).status, 200);
     // The separately staged runtime reads its assets beside itself.
     const prefix = viewer.path.replace(/view$/, '');
-    for (const name of ['editor.js', 'editor.css', 'editor.worker.js']) {
+    for (const name of ['editor.js', 'editor.css', 'editor.worker.js', 'markdown.js', 'markdown.css']) {
       assert.equal((await call(viewer, `${prefix}assets/${name}`)).status, 200, name);
     }
     await terminates(child, viewer);

@@ -19,6 +19,19 @@ test('saves the opened UTF-8 file, preserving its BOM, line endings and permissi
   assert.equal((await readEditableFile(file)).version, saved.version);
   if (process.platform !== 'win32') assert.equal((await stat(file)).mode & 0o777, 0o640);
 });
+
+test('a save takes the file\'s majority line ending, whatever the editor sent', async () => {
+  await writeFile(file, 'a\r\nb\r\nc\n');
+  await saveEditableFile(file, 'x\ny\r\nz\n', (await readEditableFile(file)).version);
+  assert.equal(await readFile(file, 'utf8'), 'x\r\ny\r\nz\r\n');
+  await writeFile(file, 'a\nb\r\nc\n');
+  await saveEditableFile(file, 'x\r\ny\n', (await readEditableFile(file)).version);
+  assert.equal(await readFile(file, 'utf8'), 'x\ny\n');
+  await writeFile(file, 'one line');
+  await saveEditableFile(file, 'x\r\ny', (await readEditableFile(file)).version);
+  assert.equal(await readFile(file, 'utf8'), 'x\r\ny');
+});
+
 test('rejects a stale save after another editor changes or replaces the file', async () => {
   await writeFile(file, 'original');
   const source = await readEditableFile(file);
