@@ -8,7 +8,7 @@
 
 **Why every live PTY is interrupted.** Gating on "is this pane running an agent" would need per-pane foreground-command knowledge the host does not have, and every one of these processes is killed seconds later regardless.
 
-**Why the clocks start at the ack.** The ~600 ms fallback and the ~200 ms silence window are statements about the agent, not about the round trip; measuring from step entry folds the interrupt's own latency into the window and shortens it by an amount that varies with load.
+**Why the clocks start at the ack.** The fallback and silence windows are statements about the agent, not about the round trip; measuring from step entry folds the interrupt's own latency into the window and shortens it by an amount that varies with load.
 
 **Why the ask gate keys on an English UI string.** Claude's `Press Ctrl-C again` and Cursor's `Press Ctrl+C again` (supplied macOS exit excerpt, Cursor 2026.09.23-86fc751) could change. That failure loses recovery for that shutdown, where a mistimed second press destroys Codex's hint every time.
 
@@ -33,6 +33,8 @@
 Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was absent from every codex cell, so an ask-gated second press can only ever serve the agents that ask (claude, and Cursor's `Ctrl+C` spelling). The 262 ms idle case leaves the retry set before the ~600 ms fallback fires. Confirmed end to end in a real pane: fallback press at +625 ms, hint at +789 ms, applied on the next activation.
 
 **Additional CLI probes** (macOS, 2026-09-24). The production capture function ran against native PTYs in disposable conversations, then launched each captured command in a fresh process. Copilot 1.0.88 captured at 659 ms while idle and 697 ms with unsent input; Antigravity 1.2.10 at 83/81 ms; Cursor 2026.09.23-86fc751 at 82/83 ms. Each restored the test reply and retained the same conversation ID through the second capture. These probes exercised shared capture and agent resume, not a complete app restart. Warp v0.2026.09.16.08.27.stable_02 stayed on its startup animation and yielded no hint; its fixture uses the supplied real exit excerpt, and its installed help confirms `--resume <RESUME>`.
+
+**Pi's double-press window** (installed Pi 1.0.0, macOS, 2026-10-01). `InteractiveMode.handleCtrlC` clears the editor on the first press and calls shutdown only when the next press arrives within 500 ms. It prints no request for the second press. The previous 600 ms fallback therefore missed that window. The fallback is now 400 ms, still beyond Codex's measured 262 ms one-press exit, retaining the separate 200 ms quiet gate. This is a shared fallback; a busy pane can still defer the retry beyond Pi's window. Native PTY probes captured the same conversation with the second press at 416 ms while idle and 413 ms with unsent text; a fresh process rendered the persisted test reply. The probes used an isolated session store with synthetic messages and no model requests, and exercised shared capture and Pi resume rather than a full app restart. The supplied exit excerpt verifies `pi --session <uuid>` followed by a shell prompt on the same line; attention watching has not been verified.
 
 ## Detection
 
