@@ -4,16 +4,43 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCli } from '../dist/cli.js';
-import { fuzzyMatch, rankMatches } from '../dist/commands/fuzzy.js';
+import { fuzzyMatch, Ranker } from '../dist/commands/fuzzy.js';
 import { parseKeys } from '../dist/commands/open-picker.js';
+import { listFiles } from '../dist/commands/file-list.js';
+import { execFileSync } from 'node:child_process';
 
-test('ranking prefers basename and boundary matches, then shorter paths', () => {
+/** Ranks `items` against `query` to completion, best first. */
+async function rank(query, ...batches) {
+  const ranker = new Ranker(() => {});
+  for (const batch of batches) ranker.add(batch);
+  ranker.setQuery(query);
+  while (ranker.scanning) await new Promise(resolve => setImmediate(resolve));
+  return Array.from({ length: ranker.count }, (_, i) => ranker.at(i));
+}
+
+test('ranking prefers basename and boundary matches, then shorter paths', async () => {
   const files = ['lib/src/host/tool-open.test.ts', 'docs/topen.md', 'lib/src/host/tool-open.ts', 'tools/open/x.ts'];
-  assert.deepEqual(rankMatches('toolopen', files).results.slice(0, 2), ['lib/src/host/tool-open.ts', 'lib/src/host/tool-open.test.ts']);
-  assert.deepEqual(rankMatches('readme', ['docs/README.md', 'README.md', 'src/read/me.ts']).results[0], 'README.md');
-  // Every term must match; matched keeps input order for narrowing.
-  assert.deepEqual(rankMatches('host test', files).matched, ['lib/src/host/tool-open.test.ts']);
-  assert.deepEqual(rankMatches('', files).results, files);
+  assert.deepEqual((await rank('toolopen', files)).slice(0, 2), ['lib/src/host/tool-open.ts', 'lib/src/host/tool-open.test.ts']);
+  assert.equal((await rank('readme', ['docs/README.md', 'README.md', 'src/read/me.ts']))[0], 'README.md');
+  assert.deepEqual(await rank('host test', files), ['lib/src/host/tool-open.test.ts']);
+  assert.deepEqual(await rank('', files), files);
+});
+
+test('the ranker merges streamed batches, narrows an extended query, and yields between slices', async () => {
+  const many = Array.from({ length: 50_000 }, (_, i) => `src/module${i}/index.ts`);
+  const ranker = new Ranker(() => {}, 0);
+  ranker.add(many);
+  ranker.setQuery('module4');
+  assert.equal(ranker.scanning, true, 'a large scan does not finish synchronously');
+  while (ranker.scanning) await new Promise(resolve => setImmediate(resolve));
+  const first = ranker.count;
+  ranker.add(['zz/module4.ts']);
+  while (ranker.scanning) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ranker.count, first + 1);
+  assert.equal(ranker.at(0), 'zz/module4.ts', 'a later batch ranks into place');
+  ranker.setQuery('module49');
+  while (ranker.scanning) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(ranker.count > 0 && ranker.count < first);
 });
 
 test('matching is smart-case and reports matched indices', () => {
@@ -194,4 +221,32 @@ test('without a terminal, dor open needs a path; dor o FILE is dor open FILE', a
     await runCli(['o', 'main.ts'], { client, env: { PWD: dir } });
     assert.equal(client.requests.find(r => r.method === 'toolSurface').request.file, 'main.ts');
   });
+});
+
+test('outside git, the walk hands each repo it reaches to git and skips macOS Library', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dor-walk-'));
+  try {
+    const repo = join(dir, 'projects', 'app');
+    for (const sub of ['.github', 'build', 'src']) await mkdir(join(repo, sub), { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    await writeFile(join(repo, '.gitignore'), 'build/\n');
+    await writeFile(join(repo, '.github', 'ci.yml'), '');
+    await writeFile(join(repo, 'build', 'out.js'), '');
+    await writeFile(join(repo, 'src', 'a.ts'), '');
+    await mkdir(join(dir, 'Library', 'Caches'), { recursive: true });
+    await writeFile(join(dir, 'Library', 'Caches', 'junk'), '');
+    await mkdir(join(dir, '.hidden'));
+    await writeFile(join(dir, '.hidden', 'x'), '');
+    await writeFile(join(dir, 'notes.txt'), '');
+    const batches = [];
+    const { truncated } = await listFiles(dir, { onFiles: paths => batches.push(paths), home: dir });
+    const files = batches.flat().sort();
+    assert.equal(truncated, false);
+    assert.deepEqual(files, [
+      ...(process.platform === 'darwin' ? [] : ['Library/Caches/junk']),
+      'notes.txt', 'projects/app/.github/ci.yml', 'projects/app/.gitignore', 'projects/app/src/a.ts',
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

@@ -4,8 +4,7 @@
  * (`docs/specs/dor-tool.md` -> Choosing a file).
  */
 import type { OpenHandlersResponse, PickerTerminal } from './types.js';
-import type { FileList } from './file-list.js';
-import { fuzzyMatch, rankMatches } from './fuzzy.js';
+import { fuzzyMatch, Ranker } from './fuzzy.js';
 import { printable, stripControls } from './shared.js';
 
 export interface PickerChoice {
@@ -17,7 +16,8 @@ export interface PickerChoice {
 
 export interface PickerOptions {
   terminal: PickerTerminal;
-  files: Promise<FileList>;
+  /** Streams the files, batch by batch, until the listing ends. */
+  listFiles(onFiles: (paths: string[]) => void): Promise<{ truncated: boolean }>;
   /** What could open a file; rejects when the host cannot say. */
   handlers(file: string): Promise<OpenHandlersResponse>;
   /** `--tool` fixed the handler. */
@@ -38,6 +38,8 @@ interface Line { text: string; handler?: number }
 const PANEL_MIN_COLUMNS = 100;
 const HANDLER_DEBOUNCE_MS = 30;
 const DOUBLE_CLICK_MS = 400;
+/** How often streamed files and slices of ranking redraw the screen. */
+const REDRAW_MS = 50;
 
 const ESC = '\x1b';
 const CSI = `${ESC}[`;
@@ -45,21 +47,21 @@ const SGR = {
   reset: `${CSI}0m`, bold: `${CSI}1m`, dim: `${CSI}2m`,
   match: `${CSI}1;36m`, accent: `${CSI}1;33m`,
 };
+const NUMBER = new Intl.NumberFormat('en-US');
 const dim = (text: string) => `${SGR.dim}${text}${SGR.reset}`;
 const ENTER_SCREEN = `${CSI}?1049h${CSI}?1000h${CSI}?1006h${CSI}?2004h`;
 const LEAVE_SCREEN = `${CSI}?2004l${CSI}?1006l${CSI}?1000l${CSI}?25h${CSI}?1049l`;
 
 export function runFilePicker(options: PickerOptions): Promise<PickerChoice | null> {
   const { terminal } = options;
-  let list: FileList | null = null;
+  /** Null while listing, then whether the limit cut the listing short. */
+  let listed: { truncated: boolean } | null = null;
   let query = '';
-  /** Ranked matches for `query`; stale while `dirty`. */
-  let results: string[] = [];
-  let dirty = false;
-  /** The items matching `poolQuery`, in listing order: a longer query only narrows it. */
-  let pool: string[] = [];
-  let poolQuery = '';
   let cursor = 0;
+  /** The file the person moved to, kept under the cursor as results arrive. */
+  let pinned: string | undefined;
+  /** Enter arrived while the query was still ranking: open the best match once it settles. */
+  let acceptWhenRanked = false;
   let scroll = 0;
   let handlerIndex = 0;
   let handlerFile: string | undefined;
@@ -70,6 +72,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
   /** Screen rows (0-based) whose click chooses a handler. */
   let handlerRows = new Map<number, number>();
   let listRows = 0;
+  let redrawTimer: ReturnType<typeof setTimeout> | undefined;
 
   return new Promise((resolve) => {
     let done = false;
@@ -77,12 +80,29 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       if (done) return;
       done = true;
       clearTimeout(handlerTimer);
+      clearTimeout(redrawTimer);
       stop();
       terminal.write(LEAVE_SCREEN);
       resolve(choice);
     };
 
-    const current = (): string | undefined => results[cursor];
+    /** Results change as files stream in and slices rank: keep a pinned file
+     *  under the cursor, otherwise the best match. */
+    const ranker = new Ranker(() => {
+      const position = pinned === undefined ? -1 : ranker.positionOf(pinned);
+      if (position < 0) pinned = undefined;
+      cursor = Math.max(0, position);
+      if (cursor < scroll) scroll = cursor;
+      requestHandlers();
+      if (acceptWhenRanked && !ranker.scanning) {
+        acceptWhenRanked = false;
+        accept();
+        return;
+      }
+      if (redrawTimer === undefined) redrawTimer = setTimeout(() => { redrawTimer = undefined; if (!done) render(); }, REDRAW_MS);
+    });
+
+    const current = (): string | undefined => ranker.at(cursor);
     const handlerState = (): HandlerState | undefined => {
       const file = current();
       return file === undefined ? undefined : handlerCache.get(file);
@@ -90,18 +110,6 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     const handlerList = () => {
       const state = handlerState();
       return state?.status === 'ok' ? state.response.handlers : [];
-    };
-
-    /** Reranks once per input chunk, so a burst of keys costs one scan. */
-    const refilter = () => {
-      if (!list || !dirty) return;
-      dirty = false;
-      const narrows = poolQuery.trim() !== '' && query.startsWith(poolQuery);
-      ({ results, matched: pool } = rankMatches(query, narrows ? pool : list.files));
-      poolQuery = query;
-      cursor = 0;
-      scroll = 0;
-      requestHandlers();
     };
 
     /** At most one read in flight: holding an arrow key asks only about where it stops. */
@@ -130,8 +138,9 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     };
 
     const move = (delta: number) => {
-      if (results.length === 0) return;
-      cursor = Math.max(0, Math.min(results.length - 1, cursor + delta));
+      if (ranker.count === 0) return;
+      cursor = Math.max(0, Math.min(ranker.count - 1, cursor + delta));
+      pinned = current();
       if (cursor < scroll) scroll = cursor;
       if (cursor >= scroll + listRows) scroll = cursor - listRows + 1;
       requestHandlers();
@@ -139,10 +148,17 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
 
     const cycleHandler = (delta: number) => {
       const count = handlerList().length;
-      if (count > 1) handlerIndex = (handlerIndex + delta + count) % count;
+      if (count > 1) {
+        handlerIndex = (handlerIndex + delta + count) % count;
+        pinned = current();
+      }
     };
 
     const accept = () => {
+      if (ranker.scanning && pinned === undefined) {
+        acceptWhenRanked = true;
+        return;
+      }
       const file = current();
       if (file === undefined) return;
       const handler = handlerIndex > 0 ? handlerList()[handlerIndex] : undefined;
@@ -152,7 +168,12 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     const setQuery = (next: string) => {
       if (next === query) return;
       query = next;
-      dirty = true;
+      pinned = undefined;
+      acceptWhenRanked = false;
+      cursor = 0;
+      scroll = 0;
+      ranker.setQuery(query);
+      requestHandlers();
     };
 
     const click = (row: number, column: number) => {
@@ -160,11 +181,12 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       if (handler !== undefined && (column >= listWidth() + 2 || row > listRows)) {
         if (handler < 0) cycleHandler(1);
         else handlerIndex = handler;
+        pinned = current();
         return;
       }
       if (row < 1 || row > listRows || column >= listWidth()) return;
       const index = scroll + row - 1;
-      if (index >= results.length) return;
+      if (index >= ranker.count) return;
       const now = Date.now();
       const repeat = lastClick.row === row && now - lastClick.at < DOUBLE_CLICK_MS && index === cursor;
       lastClick = { row, at: now };
@@ -174,8 +196,6 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
 
     const onInput = (chunk: string) => {
       for (const key of parseKeys(chunk)) {
-        // Navigation reads the ranking a typed key changed.
-        if (key.kind !== 'text' && key.kind !== 'backspace' && key.kind !== 'clear' && key.kind !== 'word') refilter();
         switch (key.kind) {
           case 'text': setQuery(query + key.text); break;
           case 'backspace': setQuery(Array.from(query).slice(0, -1).join('')); break;
@@ -186,7 +206,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
           case 'pageUp': move(-Math.max(1, listRows - 1)); break;
           case 'pageDown': move(Math.max(1, listRows - 1)); break;
           case 'home': move(-cursor); break;
-          case 'end': move(results.length); break;
+          case 'end': move(ranker.count); break;
           case 'nextHandler': cycleHandler(1); break;
           case 'previousHandler': cycleHandler(-1); break;
           case 'enter': accept(); break;
@@ -195,7 +215,6 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
         }
         if (done) return;
       }
-      refilter();
       render();
     };
 
@@ -214,17 +233,17 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       const lines: string[] = [];
       handlerRows = new Map();
 
-      const count = list ? `${results.length}/${list.files.length}${list.truncated ? '+' : ''}` : '';
+      const total = `${NUMBER.format(ranker.size)}${!listed ? '…' : listed.truncated ? '+ · capped, run from a subfolder' : ''}`;
+      const count = `${NUMBER.format(ranker.count)}${ranker.scanning ? '…' : ''}/${total}`;
       const shown = clip(printable(query), columns - 4 - count.length);
       lines.push(padTo(`${SGR.accent}>${SGR.reset} ${shown}`, columns - count.length) + dim(count));
 
       const panelLines = panel ? renderPanel(columns - width - 3) : [];
       for (let row = 0; row < listRows; row++) {
         let line: string;
-        if (!list) line = row === 0 ? dim('  Listing files…') : '';
-        else if (list.files.length === 0 && row === 0) line = dim('  No files here');
+        if (ranker.size === 0 && row === 0) line = dim(listed ? '  No files here' : '  Listing files…');
         else {
-          const item = results[scroll + row];
+          const item = ranker.at(scroll + row);
           line = item === undefined ? '' : renderItem(item, fuzzyMatch(query, item)?.positions ?? [], scroll + row === cursor, width);
         }
         if (panel) {
@@ -289,17 +308,10 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     terminal.write(ENTER_SCREEN);
     const stop = terminal.listen(onInput, () => { if (!done) render(); });
     render();
-    options.files.then((files) => {
-      if (done) return;
-      list = files;
-      dirty = true;
-      refilter();
-      render();
-    }, () => {
-      if (done) return;
-      list = { files: [], truncated: false };
-      render();
-    });
+    options.listFiles(paths => { if (!done) ranker.add(paths); }).then(
+      result => { listed = result; },
+      () => { listed = { truncated: false }; },
+    ).finally(() => { if (!done) render(); });
   });
 }
 

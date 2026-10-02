@@ -112,24 +112,107 @@ function boundaryBonus(text: string, i: number): number {
   return isLower(before) && isUpper(text.charCodeAt(i)) ? BOUNDARY_CAMEL : 0;
 }
 
-export interface Ranked {
-  /** Best first; ties prefer the shorter path, then the earlier item. */
-  results: string[];
-  /** The same items in input order, which a longer query only narrows. */
-  matched: string[];
+interface Entry { index: number; score: number }
+
+/**
+ * Ranks a growing list against a changing query a time slice at a time, so a
+ * keystroke never waits on a large list: a new query restarts the scan, and
+ * one that extends a finished query rescans only that query's matches. Best
+ * first; ties prefer the shorter path, then the earlier item. An empty query
+ * keeps the list order.
+ */
+export class Ranker {
+  private readonly items: string[] = [];
+  private query = '';
+  private terms: Term[] = [];
+  /** Item indices the scan tests, or null for every item in order. */
+  private queue: number[] | null = null;
+  private next = 0;
+  /** Indices matching `query` so far, in list order. */
+  private matched: number[] = [];
+  private ranked: Entry[] = [];
+  private scheduled = false;
+
+  constructor(private readonly onChange: () => void, private readonly sliceMs = 8) {}
+
+  /** Every item listed so far. */
+  get size(): number { return this.items.length; }
+  /** The items matching so far. */
+  get count(): number { return this.terms.length ? this.ranked.length : this.items.length; }
+  /** Whether matches may still arrive for the items listed so far. */
+  get scanning(): boolean { return this.terms.length > 0 && this.next < this.scanLength(); }
+
+  at(position: number): string | undefined {
+    return this.terms.length ? this.items[this.ranked[position]?.index ?? -1] : this.items[position];
+  }
+
+  /** Where `item` ranks now, or -1. */
+  positionOf(item: string): number {
+    if (!this.terms.length) return this.items.indexOf(item);
+    return this.ranked.findIndex(entry => this.items[entry.index] === item);
+  }
+
+  add(paths: readonly string[]): void {
+    const start = this.items.length;
+    for (const path of paths) this.items.push(path);
+    if (this.queue) for (let i = start; i < this.items.length; i++) this.queue.push(i);
+    if (this.terms.length) this.schedule();
+    else this.onChange();
+  }
+
+  setQuery(query: string): void {
+    const narrows = this.terms.length > 0 && query.startsWith(this.query) && !this.scanning;
+    this.queue = narrows ? this.matched : null;
+    this.query = query;
+    this.terms = compile(query);
+    this.next = 0;
+    this.matched = [];
+    this.ranked = [];
+    this.schedule();
+  }
+
+  private scanLength(): number {
+    return this.queue ? this.queue.length : this.items.length;
+  }
+
+  private schedule(): void {
+    if (this.scheduled || !this.scanning) return;
+    this.scheduled = true;
+    setImmediate(() => { this.scheduled = false; this.step(); });
+  }
+
+  private step(): void {
+    const deadline = performance.now() + this.sliceMs;
+    const terms = this.terms;
+    const found: Entry[] = [];
+    const end = this.scanLength();
+    while (this.next < end) {
+      const index = this.queue ? this.queue[this.next] : this.next;
+      this.next++;
+      const match = matchTerms(terms, this.items[index], null);
+      if (match) {
+        this.matched.push(index);
+        found.push({ index, score: match.score });
+      }
+      if ((this.next & 1023) === 0 && performance.now() > deadline) break;
+    }
+    if (found.length) this.ranked = merge(this.ranked, found.sort(this.compare), this.compare);
+    this.onChange();
+    this.schedule();
+  }
+
+  private readonly compare = (a: Entry, b: Entry): number =>
+    b.score - a.score || this.items[a.index].length - this.items[b.index].length || a.index - b.index;
 }
 
-/** Every item matching `query`. An empty query keeps the input order. Scores
- *  only: a row's positions come from `fuzzyMatch` when it is drawn. */
-export function rankMatches(query: string, items: readonly string[]): Ranked {
-  const terms = compile(query);
-  if (terms.length === 0) return { results: [...items], matched: [...items] };
-  const ranked: { item: string; score: number; index: number }[] = [];
-  items.forEach((item, index) => {
-    const match = matchTerms(terms, item, null);
-    if (match) ranked.push({ item, score: match.score, index });
-  });
-  const matched = ranked.map(entry => entry.item);
-  ranked.sort((a, b) => b.score - a.score || a.item.length - b.item.length || a.index - b.index);
-  return { results: ranked.map(entry => entry.item), matched };
+/** Two arrays sorted by `compare`, as one, in linear time. */
+function merge(a: Entry[], b: Entry[], compare: (x: Entry, y: Entry) => number): Entry[] {
+  const out: Entry[] = new Array(a.length + b.length);
+  let i = 0;
+  let j = 0;
+  let k = 0;
+  while (i < a.length && j < b.length) out[k++] = compare(a[i], b[j]) <= 0 ? a[i++] : b[j++];
+  while (i < a.length) out[k++] = a[i++];
+  while (j < b.length) out[k++] = b[j++];
+  return out;
 }

@@ -92,11 +92,12 @@ async function pickFile(context: DorCommandContext, cwd: string, flags: OpenFlag
   // Fail before drawing anything when there is no Dormouse to open in.
   const client = requireControlClient(context.options, TOOL_TIMEOUT_MS);
   if (client instanceof Error) return client;
+  const home = context.options.env?.HOME ?? homedir();
   return runFilePicker({
     terminal,
-    files: listFiles(cwd),
+    listFiles: onFiles => listFiles(cwd, { onFiles, home }),
     handlers: file => client.openHandlers({ target: file, cwd, ...(flags.preview ? { preview: true } : {}) }),
     fixedTool: flags.tool,
-    home: context.options.env?.HOME ?? homedir(),
+    home,
   });
 }
