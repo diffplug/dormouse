@@ -496,6 +496,30 @@ test("the relay bundle reads no cookie and never asks auth", () => {
   expect(readFileSync("server/account-gate.ts", "utf8")).toMatch(/["'`]cookie["'`]/);
 });
 
+test("the cookie gate refuses a presented foreign Origin on every method", async () => {
+  const origin = "https://account.example.test";
+  const app = new Hono();
+  const gate = cookieAdmin(
+    () => ({
+      databaseUrl: "postgres://user:pass@127.0.0.1:9/none",
+      auth: async () =>
+        Response.json({ user: { id: "admin", email: ADMIN_EMAIL, emailVerified: true }, session: {} }),
+    }),
+    () => new Response(null, { status: 403 }),
+  );
+  app.on(["GET", "HEAD", "POST"], "/gated", gate, (c) => c.body(null, 204));
+  const sibling = "https://relay.example.test";
+  for (const method of ["GET", "HEAD", "POST"]) {
+    const send = (headers: Record<string, string>) =>
+      app.request(`${origin}/gated`, { method, headers });
+    expect((await send({ origin: sibling })).status, method).toBe(403);
+    expect((await send({ origin: "null" })).status, method).toBe(403);
+    expect((await send({ origin })).status, method).toBe(204);
+    // Only a read may omit `Origin`.
+    expect((await send({})).status, method).toBe(method === "POST" ? 403 : 204);
+  }
+});
+
 test("the cookie gate needs no login creation time; approval reads it and fails closed", async () => {
   // `get-session` as the packed adapter answers it, `createdAt` as given.
   const host = (createdAt?: unknown) => () => ({
