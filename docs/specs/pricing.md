@@ -54,7 +54,7 @@ card carries a 30-day refund beneath its buy button.
 | Card | Price line | Includes | Action |
 |---|---|---|---|
 | Free | $0, no account, no card | the terminal, spoken alarms in the system voice, no Relay or network request until one is chosen, a self-hosted Relay | Download |
-| Hosted | Monthly / Yearly toggle | the managed Relay, sealed push, managed voices, one licence for every machine | Subscribe |
+| Hosted | Monthly / Yearly toggle | the managed Relay, sealed push, managed voices, one licence for every machine | Get Hosted |
 | Founding | founding price, list struck beside it | everything in Hosted, the locked price, the badge, the founders row | Become a founder |
 
 - **Mark the Hosted card with the accent border, never a surface of its own**,

@@ -28,7 +28,6 @@ import {
   CARD_ACCENT_CLASS,
   CARD_CLASS,
   CARD_MUTED_TEXT_CLASS,
-  CODE_CLASS,
   LINK_CLASS,
   MUTED_TEXT_CLASS,
 } from "../components/docs-tokens";
@@ -267,14 +266,14 @@ function FreeCard() {
           Download
         </a>
       }
-      footnote="Every platform"
+      footnote="Desktop app or VS Code"
     >
       <Includes
         items={[
-          <>The whole terminal: panes, browsers, the notepad, and <code className={CODE_CLASS}>dor</code></>,
+          "The whole terminal, nothing held back",
           "Spoken alarms in your system voice",
-          "No Relay unless you choose one, and no network requests until then",
-          "Run your own Relay for Pocket",
+          "Zero network requests until you choose a Relay",
+          "Pocket over a Relay you run yourself",
         ]}
       />
     </PlanCard>
@@ -297,14 +296,14 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
           ? "Two months free against monthly"
           : `Save $${YEARLY_SAVING} by paying yearly`
       }
-      action={<BuyButton tier={tier} label="Subscribe" onBuy={onBuy} />}
+      action={<BuyButton tier={tier} label="Get Hosted" onBuy={onBuy} />}
       footnote="30-day refund"
     >
       <Includes
         items={[
-          "The managed Relay: Pocket with no server to run",
-          "Sealed push notifications to your phone",
-          "Natural ElevenLabs voices for spoken alarms",
+          "Pocket on your phone, with no server to run",
+          "Your phone buzzes when a terminal needs you",
+          "A natural ElevenLabs voice for each pane",
           "One license for your whole personal fleet of machines",
         ]}
       />
@@ -317,7 +316,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
   return (
     <PlanCard
       name="Founding"
-      above={<p className="font-display text-lg leading-snug">Locked launch price</p>}
+      above={<p className="font-display text-lg leading-snug">Your price, locked</p>}
       price={<Price tier={tier} />}
       below={
         cohort.seatsLeft !== null
@@ -331,8 +330,8 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
       <Includes
         items={[
           "Everything in Hosted",
-          `$${tier.price} a year for as long as you stay subscribed`,
-          "A founding badge, and your avatar in this row if you choose",
+          `$${tier.price} a year, never raised while you stay`,
+          "A founding badge and an optional spot here",
         ]}
       />
     </PlanCard>
@@ -449,8 +448,9 @@ export default function Hosted() {
       <section>
         <AnchoredHeading id="pricing" spacing="mt-0 mb-3">What it costs</AnchoredHeading>
         <p className={`mb-6 ${BODY_TEXT_CLASS}`}>
-          The terminal is free and stays free. Hosted buys the two things I run for you:
-          the managed Relay for Pocket and managed voices for spoken alarms.
+          The terminal is free and stays free. Hosted is for when you walk away: a terminal
+          needs you, your phone buzzes, and you answer with your thumb, with no server of
+          your own to run.
         </p>
 
         {/* Free, then Hosted, then Founding: side by side from `md`, stacked
@@ -462,9 +462,9 @@ export default function Hosted() {
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
-          Founding prices go to the first members. The price rises $10 with each cohort of
-          100 and founding closes for good when it reaches the $100 list price. Team and
-          enterprise plans are not sold here.
+          The founding price rises as each cohort of 100 sells out, and founding closes for
+          good at the $100 list price. Whatever you paid stays locked. Team and enterprise
+          plans are not sold here.
         </p>
       </section>
 
