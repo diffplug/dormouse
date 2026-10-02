@@ -98,8 +98,7 @@ function Toolbar() {
   );
 }
 
-// Stable `tok-*` classes on code tokens, which markdown.css colors per theme;
-// MDXEditor's own CodeMirror theme is light-only.
+// Stable `tok-*` classes on code tokens, colored per theme in markdown.css.
 const tokenClasses = [syntaxHighlighting(classHighlighter)];
 
 const plugins = [
