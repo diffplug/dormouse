@@ -40,6 +40,7 @@ jobs:
             echo "hosted=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Every page, and rename sources too: moving a file out of Hosted changes Hosted.
           gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[] | .filename, (.previous_filename // empty)' > "$RUNNER_TEMP/hosted-files"
           node hosted/scripts/changed.mjs "$RUNNER_TEMP/hosted-files" >> "$GITHUB_OUTPUT"
 

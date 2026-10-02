@@ -85,6 +85,7 @@ export function App({ enrollment }: { enrollment: Enrollment | null }) {
     );
   }, []);
   useEffect(() => {
+    // An auth callback's query parameters (`?error=`) never stay in history.
     history.replaceState(null, "", location.pathname);
     void refresh()
       .catch((error) => setError(error.message))

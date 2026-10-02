@@ -1,6 +1,6 @@
 /*
- * The Hosted type scale (docs/specs/hosted.md -> Interface owns the rule that
- * it is a narrow single-column form on product theme tokens): 13px body copy,
+ * The Hosted type scale, a narrow single-column form on product theme tokens
+ * (docs/specs/hosted.md -> "Interface"): 13px body copy,
  * an 18px page heading, 16px inputs — below that iOS Safari zooms the form on
  * focus — and a 44px minimum control height, the platform touch target.
  */
