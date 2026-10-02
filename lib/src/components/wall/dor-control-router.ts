@@ -51,9 +51,11 @@ function wallHandleOwningTarget(target: unknown): WallHandle | null {
 }
 
 /** The host supplies this before cross-window routing. In-process requests
- * (OSC, fake adapter) capture the same origin from the renderer registry. */
+ * (OSC, fake adapter) capture the same origin from the renderer registry, once
+ * on arrival, so a promotion during route retries cannot clear it. */
 function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
-  const parent = detail.helperParentId ?? (detail.surfaceId ? registry.get(detail.surfaceId)?.helper?.parentId : undefined);
+  if (detail.helperParentId || !detail.surfaceId) return detail;
+  const parent = registry.get(detail.surfaceId)?.helper?.parentId;
   return parent ? { ...detail, helperParentId: parent } : detail;
 }
 
@@ -66,7 +68,6 @@ function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
   if (isAppControlMethod(detail.method)) return { kind: 'app' };
   if (isToolControlMethod(detail.method)) return { kind: 'tool' };
-  detail = withHelperOrigin(detail);
   const params: WindowControlParams = detail.params ?? {};
   if (typeof params.surface === 'string') {
     const target = classifySurfaceTarget(params.surface);
@@ -119,7 +120,6 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
 }
 
 function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
-  detail = withHelperOrigin(detail);
   const route = resolveDorControlRoute(detail);
   if (route.kind === 'error') {
     detail.respond({ ok: false, error: route.message });
@@ -181,7 +181,7 @@ export const installDorControlRouter = createRefCount({
     const listener = (event: Event) => {
       const detail = (event as CustomEvent<DorControlRequest>).detail;
       if (!detail) return;
-      dispatchDorControl(detail, 0);
+      dispatchDorControl(withHelperOrigin(detail), 0);
     };
     window.addEventListener('dormouse:control-request', listener);
     return () => window.removeEventListener('dormouse:control-request', listener);

@@ -695,10 +695,10 @@ Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
 
 **Must derive helper-origin metadata from the PTY host before routing across Windows**, preserving the actual caller Session id. Never accept that metadata from a control-socket client.
 
-- **Must allow helper-origin commands through ordinary command checks**, routing an unscoped request through the source's Workspace. Explicit Workspace and public-target routing retain their precedence. A missing source refuses rather than falling back to an unrelated active Workspace.
+- **Must route an unscoped helper-origin request through the source's Workspace.** A missing source refuses rather than falling back to the active Workspace.
 - **Must keep unpromoted helpers out of discovery, matching, and explicit targeting**, including `surface:self` and internal ids. Never substitute the source for an explicit helper target or mark the source as the caller in a listing. Promotion assigns the ordinary public Surface ref without changing Session identity.
-- **Must use the source as the helper's default placement reference**, separately from caller identity. Explicit placement retains its normal scope; the helper's invocation directory supplies new work's CWD, including `split`.
-- **Never promote, take over, or replace a helper or placement reference to fulfill a helper-origin creation.** Matching, keyed reuse, preview slots, minimized creation, and focus rules remain unchanged. A request accepted before promotion retains this restriction; a captured placement reference disappearing before creation fails.
+- **Must use the source as the helper's default placement reference**, separately from caller identity. The helper's invocation directory supplies new work's CWD, including `split`.
+- **Never promote, take over, or replace a helper or placement reference to fulfill a helper-origin creation**, including for a request accepted before promotion; matching, keyed reuse, and preview slots still apply. A captured placement reference disappearing before creation fails.
 - **Must retain the actual helper Session as an app-restart requester**, without exempting its source from running-work checks.
 
 Source of truth: `resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`; `handleDorControl` in `lib/src/components/wall/use-dor-control.ts`; `createDorControlServer` in `standalone/sidecar/dor-control-server.js`.

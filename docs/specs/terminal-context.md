@@ -3,11 +3,10 @@
 > See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
 > This spec owns the helper terminal lifecycle and global autorun preference.
 > Layout owns context composition and input focus; terminal-state owns shell
-> semantics; alert owns suppression; transport owns live recovery.
+> semantics; alert owns suppression; transport owns live recovery; dor-cli
+> owns helper-origin `dor` commands.
 
 ## Helper lifecycle
-
-Helper CLI behavior belongs to `docs/specs/dor-cli.md` → Helper callers and targets.
 
 - **Must create at most one helper per source, lazily on first context opening.** Concurrent openings share the same pending creation. Closing the source during startup cancels creation, including while its registry entry remains for the exit animation. Helpers cannot have helpers.
 - **Must start with the configured shell in the source's local directory**, using the ordinary split fallback when unavailable. Shell exports and virtual environments are not inherited. SSH integration is outside this feature.

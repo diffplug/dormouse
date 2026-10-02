@@ -1,4 +1,3 @@
-import { getInheritableCwd } from '../../lib/terminal-state-store';
 import { moveSurface } from './surface-move';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
@@ -1053,8 +1052,8 @@ export function useDorControl({
     // the anchor for an explicitly selected foreign Workspace. A captured
     // anchor disappearing while lookup waits must fail, not fall back to focus.
     const placementCaller = detail.helperParentId ? detail.placementSurfaceId : detail.surfaceId;
-    const resolvePlacement = (visible = false): ParseResult<DorSurface> => {
-      const result = (visible ? resolveVisibleSurface : resolveListedSurface)(stringParam(params.surface), placementCaller);
+    const resolvePlacement = (resolve: typeof resolveListedSurface): ParseResult<DorSurface> => {
+      const result = resolve(stringParam(params.surface), placementCaller);
       if (result.ok && detail.helperParentId && !isTargetable(result.value.id)) {
         return { ok: false, message: 'The placement Surface is closing' };
       }
@@ -1064,7 +1063,7 @@ export function useDorControl({
     // Resolve the split reference surface across listed Surfaces. A minimized
     // reference is valid: the Wall creates the new split as a sibling Door.
     const resolveSplitTarget = () => {
-      const target = resolvePlacement();
+      const target = resolvePlacement(resolveListedSurface);
       if (!target.ok) {
         detail.respond({ ok: false, error: target.message });
         return null;
@@ -1114,9 +1113,9 @@ export function useDorControl({
         direction,
         minimized: booleanParam(params.minimized),
         reference: resolved.target,
-        // Ordinary splits inherit their reference's directory. Helpers have
-        // their own directory, even when their source lives elsewhere.
-        cwd: detail.helperParentId ? stringParam(params.callerCwd) ?? getInheritableCwd(detail.surfaceId!) : undefined,
+        // Ordinary splits inherit their reference's directory; a helper's
+        // invocation directory wins over its source's.
+        cwd: detail.helperParentId ? stringParam(params.callerCwd) : undefined,
         // The CLI computes the focus intent — a bare `dor split` steals focus;
         // a `--` tail or an initial command does not — and sends it as
         // focusNeutral. Honor it.
@@ -1994,7 +1993,7 @@ export function useDorControl({
         detail.respond({ ok: false, error: `${refusal} — open it with dor agent-browser open ${url}` });
         return;
       }
-      const target = resolvePlacement(true);
+      const target = resolvePlacement(resolveVisibleSurface);
       if (!target.ok) {
         detail.respond({ ok: false, error: target.message });
         return;
@@ -2252,7 +2251,7 @@ export function useDorControl({
         // agent-browser's is its session; every host answer names one.
         nativeIdentity: status.nativeIdentity ?? session,
         minimized: booleanParam(params.minimized),
-        reference: () => resolvePlacement(true),
+        reference: () => resolvePlacement(resolveVisibleSurface),
         preserveSource: !!detail.helperParentId,
       });
       if (!result.ok) {

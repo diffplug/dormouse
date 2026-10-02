@@ -4465,7 +4465,6 @@ it.each(['Shift', 'Meta'])('cancels an interrupted %s leader without leaving pas
   expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
 });
 
-
 describe('dor from helper terminals', () => {
   async function issue(method: string, params: Record<string, unknown> = {}, helperParentId = 'pane-a') {
     const respond = vi.fn();
@@ -4475,6 +4474,8 @@ describe('dor from helper terminals', () => {
     await flush();
     return respond;
   }
+  const expectStatus = (respond: ReturnType<typeof vi.fn>, status: string, extra = {}) =>
+    expect(respond).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status, ...extra }) }));
 
   it('splits from the source using the helper directory, while helpers remain absent from discovery', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
@@ -4492,7 +4493,7 @@ describe('dor from helper terminals', () => {
   it('preserves an untouched placement target when creating an iframe', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
     const response = await issue('surface.iframe', { url: 'http://localhost:8080' });
-    expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+    expectStatus(response, 'created');
     expect(leafCount()).toBe(2);
     expect(container.querySelector('[data-session-id="pane-a"]')).not.toBeNull();
   });
@@ -4500,7 +4501,7 @@ describe('dor from helper terminals', () => {
   it('preserves an explicitly selected untouched target in a foreign Workspace', async () => {
     await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
     const response = await issue('surface.iframe', { url: 'http://localhost:8080', workspace: 'workspace:1', surface: 'pane-a' }, 'foreign-parent');
-    expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+    expectStatus(response, 'created');
     expect(leafCount()).toBe(2);
   });
 
@@ -4511,10 +4512,10 @@ describe('dor from helper terminals', () => {
       initialViewport: { mode: 'fixed', width: 800, height: 600, deviceScaleFactor: 1 } };
     const response = await issue('surface.browser', params);
     await waitUntil(() => response.mock.calls.length > 0);
-    expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+    expectStatus(response, 'created');
     const second = await issue('surface.browser', params);
     await waitUntil(() => second.mock.calls.length > 0);
-    expect(second).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'existing' }) }));
+    expectStatus(second, 'existing');
     expect(leafCount()).toBe(2);
   });
 
@@ -4548,7 +4549,7 @@ describe('dor from helper terminals', () => {
       expect(created).toBeDefined();
       act(() => promptBack(created!));
       await waitUntil(() => response.mock.calls.length > 0);
-      expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created', surfaceId: created }) }));
+      expectStatus(response, 'created', { surfaceId: created });
       expect(container.querySelector('[data-session-id="helper-a"]')).not.toBeNull();
     } finally { await act(async () => { controller.abort(); }); }
   });

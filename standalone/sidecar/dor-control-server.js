@@ -269,17 +269,9 @@ function createDorControlServer({ socketPath, socketDir, token, send, getHelperP
     }
 
     const surfaceId = typeof request.surfaceId === 'string' ? request.surfaceId : undefined;
+    // Only the host knows a helper's source before cross-window routing; the
+    // renderer refuses helper targets (docs/specs/dor-cli.md -> Helper callers).
     const helperParentId = getHelperParentId(surfaceId);
-    // Helpers may issue commands, but remain private targets. Resolve only the
-    // stable/self spellings here; short refs and titles belong to the renderer.
-    const target = request.params?.surface;
-    const targetId = target === 'surface:self' ? surfaceId
-      : typeof target === 'string' ? target.replace(/^surface:/, '') : undefined;
-    if (getHelperParentId(targetId)) {
-      writeResponse(socket, { requestId: request.requestId, ok: false,
-        error: 'Helper terminals are not public Surface targets; promote the helper first' });
-      return;
-    }
 
     const timeout = setTimeout(() => {
       reap(request.requestId);

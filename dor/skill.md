@@ -53,7 +53,7 @@ Bare numbers and `pane:N` are not valid handles.
 
 ## Helpers
 
-From an auxiliary helper, `dor` commands work on ordinary Surfaces. New panes default to beside the helper's source, using the helper's working directory; Tool and browser creation never takes over the helper or its source. Normal reuse, preview, and minimize behavior still applies. Helpers stay out of `dor list` and matching, and cannot be explicit targets, including `surface:self`: promote one through the UI first if you need to target it. A Tool's terminal context is its ordinary Session, not an auxiliary helper.
+From an auxiliary helper, `dor` commands work on ordinary Surfaces. New panes default to beside the helper's source, using the helper's working directory; Tool and browser creation never takes over the helper or its source. Helpers stay out of `dor list` and matching, and cannot be explicit targets, including `surface:self`: promote one through the UI first if you need to target it. A Tool's terminal context is its ordinary Session, not an auxiliary helper.
 
 ## Terminals
 
