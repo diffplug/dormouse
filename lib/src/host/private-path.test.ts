@@ -2,8 +2,8 @@ import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ensurePrivateDirectorySync, ensurePrivateFileSync } from './private-path';
-import { readAcl, seedEveryoneRead } from './private-path.test-utils';
+import { ensurePrivateDirectory, ensurePrivateDirectorySync, ensurePrivateFileSync } from './private-path';
+import { readAcl, runAclScript, seedEveryoneRead } from './private-path.test-utils';
 
 let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(join(tmpdir(), 'dormouse-private-path-')); });
@@ -57,3 +57,27 @@ describe('private recovery paths', () => {
     expect(fs.statSync(real).mode & 0o777).toBe(0o755);
   });
 });
+
+it.skipIf(process.platform !== 'win32')('can migrate an administrator-owned legacy directory when Windows authorizes it', async (context) => {
+  const nested = join(dir, 'elevated-legacy');
+  fs.mkdirSync(nested);
+  try {
+    runAclScript(`$acl=Get-Acl -LiteralPath $p;
+      $acl.SetOwner([System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'));
+      Set-Acl -LiteralPath $p -AclObject $acl`, nested);
+  } catch (error) {
+    // Unelevated Windows CI tokens cannot assign the administrators group owner.
+    // Do not turn a real ACL setup failure into a platform skip.
+    if (/privilege|not allowed|UnauthorizedAccess|IdentityNotMapped/.test(String(error))) {
+      context.skip();
+      return;
+    }
+    throw error;
+  }
+  expect(readAcl(nested).owner).toBe('S-1-5-32-544');
+  await ensurePrivateDirectory(nested);
+  const acl = readAcl(nested);
+  expect(acl.owner).toBe(acl.currentUser);
+  expect(acl.protected).toBe(true);
+  expect(acl.rules).toEqual([{ sid: acl.currentUser, rights: 0x001F01FF, allow: true, inheritance: 3 }]);
+}, 10_000);

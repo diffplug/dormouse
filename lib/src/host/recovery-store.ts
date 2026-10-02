@@ -14,7 +14,7 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { noCommands, silent, type RecoveryLog } from './recovery-capture';
-import { ensurePrivateDirectorySync, ensurePrivateFileSync } from './private-path';
+import { ensurePrivateDirectory, ensurePrivateFile } from './private-path';
 
 const FILE_NAME = 'recovery.json';
 
@@ -29,6 +29,8 @@ interface PersistedRecovery {
 }
 
 export interface RecoveryStore {
+  /** Startup privacy setup has finished; failures are logged, never rejected here. */
+  readonly ready: Promise<void>;
   /**
    * A teardown is about to capture. The FIRST call of a process replaces
    * whatever the last run left; later calls merge, because a Window captures
@@ -38,7 +40,7 @@ export interface RecoveryStore {
   /** Merge one detected invocation and persist immediately. */
   record(id: string, command: string): void;
   /** Claim the commands belonging to `paneIds`, removing each as it is handed out. */
-  take(paneIds: Iterable<string>): Record<string, string>;
+  take(paneIds: Iterable<string>): Promise<Record<string, string>>;
   /** Whether a write survives this process. `false` is the no-directory store. */
   readonly persistent: boolean;
 }
@@ -64,16 +66,18 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
   // What is left of the record on disk, once read. `null` until the first `take`.
   let unclaimed: Record<string, string> | null = null;
   let directoryPrepared = false;
-  const prepareDirectory = (): void => {
-    if (!dir || directoryPrepared) return;
-    ensurePrivateDirectorySync(dir);
-    directoryPrepared = true;
+  let preparation: Promise<void> | null = null;
+  const prepareDirectory = (): Promise<void> => {
+    if (!dir || directoryPrepared) return Promise.resolve();
+    preparation ??= ensurePrivateDirectory(dir).then(() => { directoryPrepared = true; })
+      .finally(() => { preparation = null; });
+    return preparation;
   };
-  // Prime outside teardown: Windows ACL setup launches a bounded system process.
-  // Failed preparation remains retryable and never permits record bytes.
-  try { prepareDirectory(); } catch (err) {
+  // Begin startup work immediately without blocking extension activation or sidecar I/O.
+  const ready = prepareDirectory().catch((err) => {
     log.error(`[recovery] private directory unavailable: ${String(err)}`);
-  }
+  });
+  let claim: Promise<void> | null = null;
   const requirePrivateDirectory = (): void => {
     // Never launch a permission helper inside the bounded teardown capture.
     // Cold-start claims can retry a failed startup preparation.
@@ -81,7 +85,8 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
   };
   const clearPreviousRecord = (): void => {
     if (clearedThisProcess) return;
-    requirePrivateDirectory();
+    // Unlink exposes no record bytes. Even failed preparation must not preserve
+    // a stale invocation across a teardown that captured nothing.
     if (file) fs.rmSync(file, { force: true });
     clearedThisProcess = true;
   };
@@ -109,6 +114,7 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
 
   return {
     persistent: file !== null,
+    ready,
 
     beginCapture(): void {
       // Clear before anything can return early. A record is only ever consumed by
@@ -120,6 +126,7 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
       if (!captureStarted) {
         captureStarted = true;
         captured = noCommands();
+        if (file) unclaimed = noCommands();
       }
       try {
         clearPreviousRecord();
@@ -134,29 +141,32 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
       persist();
     },
 
-    take(paneIds: Iterable<string>): Record<string, string> {
+    async take(paneIds: Iterable<string>): Promise<Record<string, string>> {
       if (unclaimed === null) {
-        try {
-          prepareDirectory();
-          unclaimed = file ? readAndClearRecord(file, log) : captured;
-        } catch (err) {
-          // Preserve the durable record for a later successful preparation;
-          // nothing from an unprotected path is handed to a shell.
+        claim ??= (async () => {
+          await ready;
+          await prepareDirectory();
+          // Teardown can start while permission setup is pending. Never read
+          // this activation's newly captured record as a cold-start invocation.
+          unclaimed = file ? (captureStarted ? noCommands() : await readAndClearRecord(file, log, () => !captureStarted)) : captured;
+        })().finally(() => { claim = null; });
+        try { await claim; } catch (err) {
           log.error(`[recovery] private record unavailable: ${String(err)}`);
           return noCommands();
         }
       }
+      const remaining = unclaimed ?? noCommands();
       const claimed: Record<string, string> = noCommands();
       for (const id of paneIds) {
-        const command = unclaimed[id];
+        const command = remaining[id];
         if (command === undefined) continue;
         claimed[id] = command;
         // Entries leave the map as they are claimed, so no id is ever handed out
         // twice — a second container claiming its share sees only the remainder.
-        delete unclaimed[id];
+        delete remaining[id];
       }
       log.info(`[recovery] handing ${Object.keys(claimed).length} command(s) to a cold restore`
-        + ` (${Object.keys(unclaimed).length} unclaimed)`);
+        + ` (${Object.keys(remaining).length} unclaimed)`);
       return claimed;
     },
   };
@@ -167,9 +177,10 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
  * the durable copy is gone before anything can act on it and a failed start
  * cannot replay it.
  */
-function readAndClearRecord(file: string, log: RecoveryLog): Record<string, string> {
+async function readAndClearRecord(file: string, log: RecoveryLog, mayClaim: () => boolean): Promise<Record<string, string>> {
   if (!fs.existsSync(file)) return noCommands();
-  ensurePrivateFileSync(file);
+  await ensurePrivateFile(file);
+  if (!mayClaim()) return noCommands();
 
   let recovery: PersistedRecovery | null = null;
   try {
