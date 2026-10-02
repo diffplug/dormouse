@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFile, execFileSync, spawn } = require('node:child_process');
+const { createPortScanner } = require('./port-scanner');
 
 function safeResolve(resolver) {
   try {
@@ -1149,7 +1150,7 @@ function dedupeListeningPorts(ports) {
  *
  * Batched at this layer for the same reason `getCwdsForPids` is: `dor list --all
  * --ports` asks about every terminal of every Workspace at once, and each step is
- * a synchronous subprocess on the sidecar's only event loop — two spawns for N
+ * synchronous subprocesses in a port-scan worker — two spawns for N
  * terminals instead of 2N. Returns [] per pid on any platform failure rather than
  * throwing.
  */
@@ -1273,7 +1274,7 @@ module.exports.pacedInputSegments = pacedInputSegments;
 // `onHelper(id, isHelper)` hears every helper decision — each spawn and each
 // promotion that succeeds — so the host's alerts, which keep a helper inert,
 // read this map's answer rather than keeping their own (docs/specs/alert.md).
-module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null, onHelper = () => {} } = {}) {
+module.exports.create = function create(send, ptyModule, { replay = false, sliceSince = null, onHelper = () => {}, scanPorts = createPortScanner() } = {}) {
   if (!ptyModule || typeof ptyModule.spawn !== 'function') {
     throw new TypeError('create() requires a node-pty compatible module');
   }
@@ -1669,32 +1670,35 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     send('cwds', { cwds, requestId });
   }
 
-  function getOpenPorts(id, requestId) {
+  async function getOpenPorts(id, requestId) {
     const p = ptys.get(id);
-    // getOpenPortsForPid is fail-soft (returns [] on any platform error).
-    send('openPorts', { id, ports: p ? getOpenPortsForPid(p.pid) : [], requestId });
+    const resolved = p ? await scanPorts([p.pid]) : new Map();
+    // A scan completing after exit or replacement cannot describe the new PTY.
+    send('openPorts', { id, ports: p && ptys.get(id) === p ? resolved.get(p.pid) ?? [] : [], requestId });
   }
 
   /** One answer for every id a listing asks about, so N terminals cost one
    *  process scan rather than N (`docs/specs/dor-cli.md` -> "Current Implemented
    *  Commands"). An id with no live PTY answers `[]`, exactly as `getOpenPorts`
    *  does. */
-  function getOpenPortsMany(ids, requestId) {
+  async function getOpenPortsMany(ids, requestId) {
     const targets = Array.isArray(ids) ? ids : [];
     const ports = {};
     const idsByPid = new Map();
+    const originals = new Map();
     for (const id of targets) {
       ports[id] = [];
       const p = ptys.get(id);
       if (!p) continue;
+      originals.set(id, p);
       const sharing = idsByPid.get(p.pid);
       if (sharing) sharing.push(id);
       else idsByPid.set(p.pid, [id]);
     }
-    const resolved = getOpenPortsForPids([...idsByPid.keys()]);
+    const resolved = await scanPorts([...idsByPid.keys()]);
     for (const [pid, sharing] of idsByPid) {
       const found = resolved.get(pid) ?? [];
-      for (const id of sharing) ports[id] = found;
+      for (const id of sharing) if (ptys.get(id) === originals.get(id)) ports[id] = found;
     }
     send('openPortsMany', { ports, requestId });
   }

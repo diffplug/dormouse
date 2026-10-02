@@ -314,6 +314,11 @@ Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/s
 
 ## Port scan deadlines
 
+**Must run port enumeration outside the PTY I/O thread**, for single and batched
+requests in both hosts. **Must discard results for a PTY that exited or was
+replaced during the scan.** Pinned by `standalone/sidecar/port-scanner.test.js`
+and the pending-scan tests in `standalone/sidecar/pty-core.test.js` (rationale).
+
 **Must budget port requests for both serial scans and an IPC margin per hop**:
 `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`.
 VS Code's child request uses one hop; its webview request uses two. Tauri's
@@ -326,7 +331,8 @@ the Windows budget tests in `standalone/sidecar/pty-core.test.js` and by the por
 and `lib/src/lib/mirrored-constants.test.ts`.
 
 Source of truth: `openPortRequestTimeoutMs` in `lib/src/lib/platform/types.ts`;
-`open_ports_many_timeout` in `standalone/src-tauri/src/lib.rs`.
+`open_ports_many_timeout` in `standalone/src-tauri/src/lib.rs`;
+`createPortScanner` in `standalone/sidecar/port-scanner.js`.
 
 ## Auxiliary helper metadata
 

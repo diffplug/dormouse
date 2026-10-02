@@ -65,6 +65,18 @@ moving a Workspace and losing it.
 
 **What made it safe to persist again.** The two objections to the old store were both about content, not about persistence: it wrote transcripts, and it wrote them into a WKWebView `localStorage` WAL that grew without bound (`docs/specs/standalone.md` → "Persistence", rationale). Both were already fixed — no writer accepts a transcript-bearing shape, and the blob rides a Rust file store — before the rule changed.
 
+## Port scan deadlines
+
+Measured on Windows, 2026-10-02: the installed 1.1.0 sidecar blocked its event
+loop for 1.7–2.3 seconds during PowerShell process/listener scans. Tool discovery
+and dev-server chips can request these in the background, so ordinary input
+waited behind decorative work. Scheduling the request in webview idle time did
+not make the host's synchronous scan idle-safe. A real node-pty raw-echo probe
+measured 767–855 ms input delay during scans, versus 1 ms without scanning;
+moving enumeration to a worker returned all three scan-time samples in 1 ms.
+Batching remains useful to limit subprocess work, but cannot by itself keep
+the PTY thread responsive.
+
 ## Universal invariants
 
 **VS Code scrollback outlives the process for repeat resumes.** Recovery capture runs before any kill (`docs/compatible-agents.md` → "Capture"), but a webview reopened over an exited pane still needs its transcript. The shared PTY core formerly kept a second buffer: VS Code never read it, and standalone's reader became unreachable when the adapter stopped persisting transcripts. Removing that duplicate leaves buffering with its actual consumer.
