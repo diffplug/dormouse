@@ -17,7 +17,7 @@ History sweep (sources checked 2026-09-22):
 Three origins (decided 2026-09-30):
 
 - Pocket (staged for the relay origin's root) and the `/connect/` page render untrusted terminal output. Script running on the account's origin could make any request the login cookie authorizes and read the answer, so `/connect/` moved to `relay.dormouse.sh` and the account kept its origin.
-- Sibling origins under `dormouse.sh` are same-site, not same-origin: `SameSite=Lax` does not stop a browser from attaching the account's cookie to a request a `relay.` or `voice.` page makes to `hosted.`. The exact-`Origin` check refuses state-changing cookie requests; admin reads retain the gap recorded in the spec.
+- Sibling origins under `dormouse.sh` are same-site, not same-origin: `SameSite=Lax` does not stop a browser from attaching the account's cookie to a request a `relay.` or `voice.` page makes to `hosted.`. The exact-`Origin` check on every cookie route is what refuses those requests.
 - No released desktop build bakes `hosted.dormouse.sh` (v1.1.0, the last release, predates one-time and managed voice), so the routes moved off it with no compatibility shim.
 
 ## Production releases
