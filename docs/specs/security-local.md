@@ -102,7 +102,7 @@ handshake are the whole of it. **Neither spelling may derive from the PID.**
 host process, never written to disk, proven by HMAC-SHA256 over the peer's nonce
 under a per-direction domain and compared in constant time. **The server
 challenges first and proves its own half before the client sends any request**;
-a peer that fails its half is hung up on with no reply.
+a peer that fails its half is hung up on with no reply. **A peer that has not finished the handshake within 10 s is dropped** (`HANDSHAKE_BUDGET_MS`).
 
 **A lost bind stands the channel down rather than weakening it**: both hosts
 delete the two control variables at startup and re-attach them to spawned shells
@@ -122,7 +122,7 @@ either** (rationale).
 
 **Never grant an unrecognized caller anything it could not obtain directly from the upstream.** Listeners check their loopback name and recognize callers; the iframe proxy admits strangers but declines to vouch. **Use URL tokens only where the listener owns the page URL**, as the browser-dev harness does; iframe proxies cannot preserve them through upstream routing and subresources (rationale).
 
-- **FAIL IF** any loopback HTTP or WebSocket listener grants an unrecognized caller a privilege it could not obtain by reaching the upstream directly. Refusing the request is one way; the iframe proxy's *admits all, vouches for none, names its embedder* is another, and is not a violation (rationale). `scripts/loopback-lint.mjs` mechanizes the guard-reference half (AGENTS.md lint table); whether every request calls the guard is the audit's. The Relay is separate (`docs/specs/security-remote.md` -> "Cross-origin access"). A Unix-domain socket or named pipe is out of scope — no browser can reach one — so the `dor` control channel is bounded by socket permissions instead.
+- **FAIL IF** any loopback HTTP or WebSocket listener grants an unrecognized caller a privilege it could not obtain by reaching the upstream directly. Refusing the request is one way; the iframe proxy's *admits all, vouches for none, names its embedder* is another, and is not a violation (rationale). `scripts/loopback-lint.mjs` mechanizes the guard-reference half (AGENTS.md lint table); whether every request calls the guard is the audit's. `BIND_FORMS` in `scripts/loopback-lint.mjs` is the bind inventory; a new server dependency adds its spelling there. The Relay is separate (`docs/specs/security-remote.md` -> "Cross-origin access"). A Unix-domain socket or named pipe is out of scope — no browser can reach one — so the `dor` control channel is bounded by socket permissions instead.
 - **FAIL IF** the iframe proxy rewrites `Origin` to the upstream's own origin for a caller whose inbound `Origin` is not the proxy's own — in `handleRequest` **or** `handleUpgrade`. A foreign `Origin` must be forwarded untouched rather than blocked, so the upstream sees the truth and applies its own policy (rationale).
 - **FAIL IF** the iframe proxy forwards `Cookie` upstream or `Set-Cookie` downstream on HTTP or WebSocket handshakes, including refused upgrades. Pinned by `lib/src/host/iframe-proxy.test.ts` (rationale).
 - **FAIL IF** the iframe proxy stops checking that `Host` names its own grant port, on either path. Its per-grant ephemeral port and one-fixed-upstream binding are real mitigations but neither is a secret, so the `Host` check is what makes DNS rebinding fail.
@@ -156,7 +156,7 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 
 **FAIL IF** `gitIgnored` runs git by bare name or lets `core.fsmonitor` run, which the browsed folder's own `.git/config` can name.
 
-Source of truth: `startCapabilityViewer` in `dor-tools-builtin/src/viewer-server.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`.
+Source of truth: `startCapabilityViewer` in `dor-tools-builtin/src/viewer-server.ts`; `dor-tools-builtin/src/folder-viewer.ts`; `dor-tools-builtin/src/folder-viewer-page.ts`; `sanitizeResponseHeaders` in `lib/src/host/iframe-proxy.ts`.
 
 ## Network policy
 
@@ -172,7 +172,7 @@ behind is `docs/specs/security-remote.md` -> "Credentials at rest".
 
 **Standalone's session store is owner-only before any bytes are written** —
 every window snapshot, its geometry sibling, and the arrival journal
-(`docs/specs/standalone.md` -> "Persistence"), on every platform. The same
+(`docs/specs/standalone.md` -> "Persistence", "Boot and geometry", "Arrival queue"), on every platform. The same
 helper locks the whole standalone app-data directory before the sidecar spawns.
 
 **No writer persists scrollback** (`docs/specs/transport.md` -> "What is

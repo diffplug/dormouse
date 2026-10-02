@@ -22,7 +22,7 @@ The [tend](https://github.com/max-sixty/tend) agent harness runs as the GitHub u
 | --- | --- | --- |
 | `TEND_BOT_TOKEN` (worst case) | full `repo` + `workflow` write *as a trusted collaborator*: issue/PR spam, force-pushing or deleting feature branches, persistent compromise by authoring new workflows — also how the repo-level secrets are reached | cannot itself merge to `main`, push tags, or reach env-scoped secrets; new workflows are caught by `.github/workflows/workflow-audit.yaml`; the trusted identity can still social-engineer an admin toward a `main` merge |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Anthropic API-credit abuse | the bot account's spend limit |
-| repo-level secrets (inventory below) | corrupted snapshot testing, a replaced Storybook deploy | rotation; abuse is visible in the service's own dashboard |
+| `ARGOS_TOKEN`, the unused `CHROMATIC_PROJECT_TOKEN` | corrupted snapshot testing, a replaced Storybook deploy | rotation; abuse is visible in each service's own dashboard |
 
 **Assume a prompt injection can push a workflow that sends a repo-level secret to an external URL.** The harness reads PR descriptions, diffs, issue text, comments, and CI logs, all attacker-influenceable; admin-gated release paths stay sealed, but a workflow on a bot-pushed feature branch executes with repo-level secrets in scope.
 
@@ -34,7 +34,7 @@ The [tend](https://github.com/max-sixty/tend) agent harness runs as the GitHub u
 
 **The notifications poll widens its input.** `tend-notifications.yaml` alone takes its subjects from the bot's own unread feed, and its pre-check re-subscribes the bot to all repository activity (`PUT /repos/diffplug/dormouse/subscription`) every `*/15` cycle; its prompt decides whether to respond (rationale). On an undispatched thread the bot is still bounded by `author_association` tiering and the admin gate on `main`. **Never expect unwatching by hand to stick**: the lever is `tend-notifications.yaml`, not the Unwatch button.
 
-**Reachable repo-level secrets.** Every repo-level secret is reachable by any workflow the bot can author: `.github/workflows/argos.yml` is `pull_request`-triggered, and environment policies cannot tell a bot from a human contributor at the ref level. **Accepted, with rotation as the mitigation** — each is scoped to one project. `OVSX_PAT` and `VSCE_PAT` live only in the `vscode-extension-publish` environment, which admits only admin-created `v*` tags.
+**Reachable repo-level secrets.** Every repo-level secret is reachable by any workflow the bot can author: `.github/workflows/argos.yml` is `pull_request`-triggered, and environment policies cannot tell a bot from a human contributor at the ref level. **Accepted for `ARGOS_TOKEN` and the unused `CHROMATIC_PROJECT_TOKEN` alone, with rotation as the mitigation** — each is scoped to one project; any other repo-level secret needs its own acceptance here. `OVSX_PAT` and `VSCE_PAT` live only in the `vscode-extension-publish` environment, which admits only admin-created `v*` tags.
 
 **Never create an `ANTHROPIC_API_KEY` secret.** Every generated `tend-*.yaml` passes `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` to `max-sixty/tend/claude`; with no such secret it resolves empty and the harness uses `CLAUDE_CODE_OAUTH_TOKEN`. The input cannot be deleted locally, so the inventory `FAIL IF` below makes adding one a deliberate expansion of the bot's reach (rationale).
 
@@ -109,7 +109,7 @@ Source of truth: `hosted/scripts/setup-github.mjs`; `.github/workflows/hosted-pr
 
 ## Desktop Releases
 
-**Desktop releases are signed locally, never in CI.** GitHub Actions builds unsigned artifacts, publishes attestations and hash manifests, and uploads them; `scripts/sign-and-deploy.sh` **must verify the CI artifact attestations and the recorded SHA-256 hashes before signing**, then signs each platform locally (Windows Authenticode needs a physical YubiKey and the signing PIN; macOS signing and notarization run locally too) and uploads the release assets. **CI must never hold the production Tauri updater private key**: CI uses an ephemeral key, and **Tauri updater signing is applied locally after OS signing**, so the updater signs the bundles users download. Procedure: `docs/specs/deploy.md` -> "Two-stage pipeline".
+**Production signing is local, never in CI.** GitHub Actions builds unsigned artifacts, publishes attestations and hash manifests, and uploads them; `scripts/sign-and-deploy.sh` **must verify the CI artifact attestations and the recorded SHA-256 hashes before signing**, then signs each platform locally (Windows Authenticode needs a physical YubiKey and the signing PIN; macOS signing and notarization run locally too) and uploads the release assets. **CI must never hold the production Tauri updater private key**: CI uses an ephemeral key, and **Tauri updater signing is applied locally after OS signing**, so the updater signs the bundles users download. Procedure: `docs/specs/deploy.md` -> "Two-stage pipeline".
 
 **Signing credentials and argv.** Three secrets reach `scripts/sign-and-deploy.sh` through the environment; argv is readable via `ps` by any process on the machine for the lifetime of a call (rationale).
 

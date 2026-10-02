@@ -105,7 +105,7 @@ Cargo tests run in separate CI jobs, outside root `pnpm test`.
   could change what the bot runs without a diff here. Accepted: the trust equals
   what the harness already holds ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 - **The repo-level snapshot-testing tokens are reachable by any workflow the bot can author.**
-  Accepted with rotation; the service's dashboard shows abuse
+  Accepted with rotation; each service's dashboard shows abuse
   ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 
 ## Known gaps
