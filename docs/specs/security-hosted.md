@@ -15,8 +15,8 @@
 
 Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts`, and `hosted/server/tests/one-time.test.ts`.
 
-Known gap: `cookieAdmin` skips its Origin check on GET/HEAD, so a presented
-foreign Origin on an admin read does not meet the cookie-route rule above.
+Known gap: `cookieAdmin` skips Origin checks on GET/HEAD, admitting presented
+foreign Origins contrary to the cookie-route rule above.
 
 ## Account boundary
 
