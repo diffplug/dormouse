@@ -173,7 +173,9 @@ export async function requirePocketKeyStorage(): Promise<void> {
  * probes on fresh disposable keys in Pocket's own record shape, so a format is
  * selected only once it has survived a reopen and identical key agreement; both
  * failing leaves the caller with a compatibility error and the pairing records
- * untouched.
+ * untouched. Storing the key separately (an explicit-key store) is a
+ * diagnostic experiment only (`lib/pocket/diagnostics/capabilities.js`): it
+ * never selects a production format, so it stays out of this preflight.
  */
 async function selectKeyStorage(): Promise<PocketKeyStorageMode> {
   try {
