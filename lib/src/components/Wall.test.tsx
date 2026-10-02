@@ -9,6 +9,7 @@
 import { act } from 'react';
 import { type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { dispatchDorControlRequest } from '../lib/platform/dor-control-dispatch';
 import { SURFACE_CONTROL_METHODS } from 'dor/protocol';
 import { sessionForKey } from 'dor-lib-common/browser-providers';
 import { Wall } from './Wall';
@@ -4462,4 +4463,104 @@ it.each(['Shift', 'Meta'])('cancels an interrupted %s leader without leaving pas
   await press(modifier, 1);
   await press(modifier, 2);
   expect(container.querySelector('[data-session-id="pane-a"]')?.getAttribute('data-focused')).toBe('false');
+});
+
+
+describe('dor from helper terminals', () => {
+  async function issue(method: string, params: Record<string, unknown> = {}, helperParentId = 'pane-a') {
+    const respond = vi.fn();
+    await act(async () => dispatchDorControlRequest({
+      requestId: `helper-${method}`, surfaceId: 'helper-a', helperParentId, method, params,
+    }, respond));
+    await flush();
+    return respond;
+  }
+
+  it('splits from the source using the helper directory, while helpers remain absent from discovery', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'pane-b']} />));
+    terminalRegistry.seedTerminalManualCwd('pane-a', '/source');
+    const response = await issue('surface.split', { direction: 'right', callerCwd: '/helper', focusNeutral: true });
+    const created = response.mock.calls[0][0].result.surfaceId;
+    expect(pendingShellOpts.get(created)?.cwd).toBe('/helper');
+    expect(leafCount()).toBe(3);
+    const listed = await issue('surface.list');
+    expect(listed.mock.calls[0][0].result.surfaces.map((s: { id: string }) => s.id))
+      .toEqual(expect.arrayContaining(['pane-a', 'pane-b', created]));
+    expect(listed.mock.calls[0][0].result.surfaces.some((s: { id: string }) => s.id === 'helper-a')).toBe(false);
+  });
+
+  it('preserves an untouched placement target when creating an iframe', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    const response = await issue('surface.iframe', { url: 'http://localhost:8080' });
+    expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+    expect(leafCount()).toBe(2);
+    expect(container.querySelector('[data-session-id="pane-a"]')).not.toBeNull();
+  });
+
+  it('preserves an explicitly selected untouched target in a foreign Workspace', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    const response = await issue('surface.iframe', { url: 'http://localhost:8080', workspace: 'workspace:1', surface: 'pane-a' }, 'foreign-parent');
+    expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+    expect(leafCount()).toBe(2);
+  });
+
+  it.each(['agent-browser', 'playwright'] as const)('creates and reuses a %s browser without replacing the source', async provider => {
+    hostBrowsers();
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    const params = { provider, key: 'helper-browser', session: 'helper-browser', cwd: '/helper',
+      initialViewport: { mode: 'fixed', width: 800, height: 600, deviceScaleFactor: 1 } };
+    const response = await issue('surface.browser', params);
+    await waitUntil(() => response.mock.calls.length > 0);
+    expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created' }) }));
+    const second = await issue('surface.browser', params);
+    await waitUntil(() => second.mock.calls.length > 0);
+    expect(second).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'existing' }) }));
+    expect(leafCount()).toBe(2);
+  });
+
+  it.each(['surface.read', 'surface.send', 'surface.await', 'surface.kill', 'surface.move', 'surface.resolveOpen', 'surface.resolveBrowser', 'surface.split'])(
+    'rejects explicit helper self for %s before the handler can act', async method => {
+      await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+      const response = await issue(method, { surface: 'surface:self' });
+      expect(response).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
+      expect(leafCount()).toBe(1);
+    },
+  );
+
+  it.each(['tool', 'open', 'preview'] as const)('places a new %s in a separate pane, even if the helper was promoted before lookup finished', async verb => {
+    // The origin was captured while auxiliary. By dispatch its Session is a
+    // primary leaf, with a naked invocation eligible for takeover otherwise.
+    Object.assign(fake, { toolControl: vi.fn(async () => okToolLookup(null)) });
+    const controller = new AbortController();
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a', 'helper-a']} />));
+    terminalRegistry.seedTerminalManualCwd('helper-a', '/repo');
+    reportRunning('helper-a', verb === 'tool' ? 'dor tool storybook' : 'dor open README.md');
+    const response = vi.fn();
+    await act(async () => window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: {
+      requestId: 'helper-tool', method: 'surface.tool', surfaceId: 'helper-a', helperParentId: 'pane-a',
+      params: { cwd: '/repo', ...(verb === 'tool' ? { name: 'storybook' } : { file: '/repo/README.md', preview: verb === 'preview' }) },
+      signal: controller.signal, respond: response,
+    } })));
+    await flush();
+    const created = Array.from(container.querySelectorAll('[data-lath-leaf]')).map(el => el.getAttribute('data-lath-leaf')!)
+      .find(id => id !== 'pane-a' && id !== 'helper-a');
+    try {
+      expect(created).toBeDefined();
+      act(() => promptBack(created!));
+      await waitUntil(() => response.mock.calls.length > 0);
+      expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'created', surfaceId: created }) }));
+      expect(container.querySelector('[data-session-id="helper-a"]')).not.toBeNull();
+    } finally { await act(async () => { controller.abort(); }); }
+  });
+
+  it('reuses an ordinary ensure match from a helper', async () => {
+    await act(async () => root.render(<Wall initialPaneIds={['pane-a']} />));
+    act(() => {
+      terminalRegistry.applyTerminalSemanticEvents('pane-a', [{ type: 'cwd', cwd: terminalRegistry.cwdFromOsc633('/helper')! }]);
+      reportRunning('pane-a', 'pnpm dev');
+    });
+    const response = await issue('surface.ensure', { command: ['pnpm', 'dev'], cwd: '/helper' });
+    expect(response).toHaveBeenCalledWith(expect.objectContaining({ result: expect.objectContaining({ status: 'existing', surfaceId: 'pane-a' }) }));
+    expect(leafCount()).toBe(1);
+  });
 });

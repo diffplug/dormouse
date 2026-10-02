@@ -1,3 +1,4 @@
+import { getInheritableCwd } from '../../lib/terminal-state-store';
 import { moveSurface } from './surface-move';
 import { recordToolDirty } from '../../lib/tool-dirty-store';
 import { createSerialQueue } from '../../host/remote/serial-queue';
@@ -92,6 +93,7 @@ export type DorControlParams = {
   command?: unknown;
   confirmation?: unknown;
   cwd?: unknown;
+  callerCwd?: unknown;
   direction?: unknown;
   focusNeutral?: unknown;
   input?: unknown;
@@ -142,6 +144,9 @@ export type DorControlRequest = Omit<DorControlRequestPayload, 'params'> & {
    *  may make and whose failure shows in the preview slot. Never set by a
    *  control-socket request. */
   oscOpen?: true;
+  /** Helper's source when it belongs to the answering Wall. Separate from the
+   * actual caller so actions and restart never treat the parent as self. */
+  placementSurfaceId?: string;
 };
 
 /** Outcome of {@link EnsureBrowserSurface}: the fields the caller maps onto
@@ -169,6 +174,7 @@ type EnsureBrowserSurface = (args: {
    *  terminal refreshing an existing surface). */
   reference: () => ParseResult<DorSurface>;
   minimized?: boolean;
+  preserveSource?: boolean;
 }) => EnsureBrowserSurfaceResult;
 
 /**
@@ -676,6 +682,7 @@ export function useDorControl({
     reference: DorSurface;
     title: string;
     focusNeutral?: boolean;
+    preserveSource?: boolean;
   }) => ParseResult<{ id: string; ref: string; status: 'created' | 'replaced' }>;
   /** A Wall closure in flight. */
   isClosingSurface: (id: string) => boolean;
@@ -966,6 +973,7 @@ export function useDorControl({
     initialViewport,
     reference,
     minimized = false,
+    preserveSource,
   }) => {
     const refreshedParams = {
       nativeIdentity,
@@ -1011,6 +1019,7 @@ export function useDorControl({
         ...refreshedParams,
       },
       reference: target.value,
+      preserveSource,
       title,
       // `dor agent-browser` opens the screencast in the background; caller keeps focus.
       focusNeutral: true,
@@ -1040,10 +1049,22 @@ export function useDorControl({
       return;
     }
 
+    // Helpers borrow geometry, never caller identity. The router drops only
+    // the anchor for an explicitly selected foreign Workspace. A captured
+    // anchor disappearing while lookup waits must fail, not fall back to focus.
+    const placementCaller = detail.helperParentId ? detail.placementSurfaceId : detail.surfaceId;
+    const resolvePlacement = (visible = false): ParseResult<DorSurface> => {
+      const result = (visible ? resolveVisibleSurface : resolveListedSurface)(stringParam(params.surface), placementCaller);
+      if (result.ok && detail.helperParentId && !isTargetable(result.value.id)) {
+        return { ok: false, message: 'The placement Surface is closing' };
+      }
+      return result;
+    };
+
     // Resolve the split reference surface across listed Surfaces. A minimized
     // reference is valid: the Wall creates the new split as a sibling Door.
     const resolveSplitTarget = () => {
-      const target = resolveListedSurface(stringParam(params.surface), detail.surfaceId);
+      const target = resolvePlacement();
       if (!target.ok) {
         detail.respond({ ok: false, error: target.message });
         return null;
@@ -1093,6 +1114,9 @@ export function useDorControl({
         direction,
         minimized: booleanParam(params.minimized),
         reference: resolved.target,
+        // Ordinary splits inherit their reference's directory. Helpers have
+        // their own directory, even when their source lives elsewhere.
+        cwd: detail.helperParentId ? stringParam(params.callerCwd) ?? getInheritableCwd(detail.surfaceId!) : undefined,
         // The CLI computes the focus intent — a bare `dor split` steals focus;
         // a `--` tail or an initial command does not — and sends it as
         // focusNeutral. Honor it.
@@ -1431,7 +1455,7 @@ export function useDorControl({
         const toolParams = { surfaceType: 'tool', cwd, ...identity };
 
         const callerId = detail.surfaceId;
-        const callerGate = callerId === undefined ? null : readCallerGate(callerId, cwd);
+        const callerGate = callerId === undefined || detail.helperParentId ? null : readCallerGate(callerId, cwd);
 
         /**
          * Run the resolved Tool in the preview slot in place: interrupt it, then
@@ -1970,7 +1994,7 @@ export function useDorControl({
         detail.respond({ ok: false, error: `${refusal} — open it with dor agent-browser open ${url}` });
         return;
       }
-      const target = resolveVisibleSurface(stringParam(params.surface), detail.surfaceId);
+      const target = resolvePlacement(true);
       if (!target.ok) {
         detail.respond({ ok: false, error: target.message });
         return;
@@ -1979,6 +2003,7 @@ export function useDorControl({
         minimized: booleanParam(params.minimized),
         params: { surfaceType: 'browser', renderMode: 'iframe', url },
         reference: target.value,
+        preserveSource: !!detail.helperParentId,
         title: hostPathDisplay(url, true),
         // `dor iframe` opens the embed in the background; caller keeps focus.
         focusNeutral: true,
@@ -2227,7 +2252,8 @@ export function useDorControl({
         // agent-browser's is its session; every host answer names one.
         nativeIdentity: status.nativeIdentity ?? session,
         minimized: booleanParam(params.minimized),
-        reference: () => resolveVisibleSurface(stringParam(params.surface), detail.surfaceId),
+        reference: () => resolvePlacement(true),
+        preserveSource: !!detail.helperParentId,
       });
       if (!result.ok) {
         detail.respond({ ok: false, error: result.message });

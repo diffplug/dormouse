@@ -10,6 +10,7 @@ import type {
   WorkspaceScopedFlags,
 } from './types.js';
 import {
+  callerWorkingDirectory,
   errorMessage,
   renderJson,
   requireControlClient,
@@ -143,6 +144,7 @@ async function runSplitCommand(this: DorCommandContext, flags: SplitFlags, ...co
     const response = await client.splitSurface({
       ...(command ? { command } : {}),
       direction: direction.value,
+      callerCwd: callerWorkingDirectory(undefined, this.options.env),
       minimized: flags.minimize === true,
       surface: flags.surface,
       // Only a bare `dor split` (no `--`, no command) steals focus; a `--` tail

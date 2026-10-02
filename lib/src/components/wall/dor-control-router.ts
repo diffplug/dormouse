@@ -1,4 +1,5 @@
 import { isAppControlMethod, isToolControlMethod, isWorkspaceControlMethod, SURFACE_CONTROL_METHODS } from 'dor/protocol';
+import { registry, isHelperSession } from '../../lib/terminal-store';
 import { createRefCount } from '../../lib/ref-count';
 import { getActiveWorkspaceId, isWindowRef, resolveWorkspaceRef, workspaceRefFor } from '../../lib/workspace-store';
 import { handleAppControl } from './app-control';
@@ -49,6 +50,13 @@ function wallHandleOwningTarget(target: unknown): WallHandle | null {
   return classified.kind === 'stable' ? wallHandleOwning(classified.id) : null;
 }
 
+/** The host supplies this before cross-window routing. In-process requests
+ * (OSC, fake adapter) capture the same origin from the renderer registry. */
+function withHelperOrigin(detail: DorControlRequest): DorControlRequest {
+  const parent = detail.helperParentId ?? (detail.surfaceId ? registry.get(detail.surfaceId)?.helper?.parentId : undefined);
+  return parent ? { ...detail, helperParentId: parent } : detail;
+}
+
 /**
  * Resolution order: the app verbs, the Tool reads, the Window's own verbs, an explicit
  * container target, a target Surface named by its stable id, else the caller's
@@ -58,7 +66,15 @@ function wallHandleOwningTarget(target: unknown): WallHandle | null {
 export function resolveDorControlRoute(detail: DorControlRequest): DorControlRoute {
   if (isAppControlMethod(detail.method)) return { kind: 'app' };
   if (isToolControlMethod(detail.method)) return { kind: 'tool' };
+  detail = withHelperOrigin(detail);
   const params: WindowControlParams = detail.params ?? {};
+  if (typeof params.surface === 'string') {
+    const target = classifySurfaceTarget(params.surface);
+    if ((target.kind === 'self' && detail.helperParentId)
+      || (target.kind === 'stable' && isHelperSession(target.id))) {
+      return { kind: 'error', message: 'Helper terminals are not public Surface targets; promote the helper first' };
+    }
+  }
   // Typed before use: `params` is whatever crossed the control socket, and a
   // non-string ref reaching `.trim()` would throw out of the window listener,
   // leaving the caller to block until its own deadline.
@@ -89,8 +105,10 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
   if (owningTarget) return { kind: 'handle', handle: owningTarget };
   // The caller's own Workspace: `dor split` from a background Workspace lands
   // beside its caller, not in whichever Workspace the user is looking at.
-  const owner = detail.surfaceId ? wallHandleOwning(detail.surfaceId) : null;
+  const callerAnchor = detail.helperParentId ?? detail.surfaceId;
+  const owner = callerAnchor ? wallHandleOwning(callerAnchor) : null;
   if (owner) return { kind: 'handle', handle: owner };
+  if (detail.helperParentId) return { kind: 'error', message: 'The helper source Surface is no longer available' };
   // An unknown caller (a shell started outside Dormouse, a killed Surface's
   // late request) is served by the Workspace the user is in.
   const activeId = getActiveWorkspaceId();
@@ -101,6 +119,7 @@ export function resolveDorControlRoute(detail: DorControlRequest): DorControlRou
 }
 
 function dispatchDorControl(detail: DorControlRequest, attempt: number): void {
+  detail = withHelperOrigin(detail);
   const route = resolveDorControlRoute(detail);
   if (route.kind === 'error') {
     detail.respond({ ok: false, error: route.message });
@@ -141,13 +160,14 @@ function runRoute(route: Extract<DorControlRoute, { kind: 'app' | 'tool' | 'wind
 }
 
 /**
- * The request as the answering Wall sees it: a caller that Wall does not hold
- * is dropped here, so `surface:self` and an omitted target fall back to that
- * Workspace's own focused Surface rather than naming a Surface no consumer down
- * there can find. Rewritten once, at the seam, instead of re-checked by every
- * consumer of the caller id.
+ * Helpers keep their actual identity; only their placement anchor is scoped
+ * to this Wall. Ordinary foreign callers retain the existing omitted-placement
+ * fallback by dropping their id. Explicit self never aliases the source.
  */
 function callerFor(handle: WallHandle, detail: DorControlRequest): DorControlRequest {
+  if (detail.helperParentId) {
+    return { ...detail, placementSurfaceId: handle.ownsSurface(detail.helperParentId) ? detail.helperParentId : undefined };
+  }
   if (!detail.surfaceId || handle.ownsSurface(detail.surfaceId)) return detail;
   return { ...detail, surfaceId: undefined };
 }

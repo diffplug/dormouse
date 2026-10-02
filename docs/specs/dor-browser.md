@@ -88,7 +88,7 @@ Source of truth: `lib/src/components/wall/BrowserPanel.tsx` (`BrowserPanelParams
 replace an untouched, helper-less *terminal* caller in place, else split next to
 the reference surface. **Never replace a reference that already has a browser** —
 web content is not destroyed to make room. A replacement transfers the target
-Surface's `surface:N` ref to the new browser Surface id.
+Surface's `surface:N` ref to the new browser Surface id. Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets.
 
 **Must open focus-neutrally**, like `dor ensure`, with one exception: replacing
 the pane the user is currently selected on moves selection to the replacement

@@ -271,7 +271,7 @@ Invariants:
 - A target may be `surface:N`, a stable Surface id, or `surface:<stable-id>`.
   `surface:focused` selects the focused Surface in the current Workspace;
   `surface:self` the invoking Surface from `DORMOUSE_SURFACE_ID`. An omitted
-  target falls back to the caller, then to the focused Surface.
+  target falls back to the caller, then to the focused Surface. Helper callers follow [Helper callers and targets](#helper-callers-and-targets).
 - Short refs (`surface:1`, `surface:2`, …) are Workspace-scoped stable refs, not
   layout/list positions: each Workspace starts at `surface:1` and assigns the
   next number when a Surface is created/restored. The map and its counter
@@ -691,13 +691,17 @@ Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
 `dor/skill.md`, whose byte-identity with `dor skill` output is pinned by
 `dor/test/cli-output.test.mjs`.
 
-## Helper exclusion
+## Helper callers and targets
 
 **Must derive helper-origin metadata from the PTY host before routing across Windows**, preserving the actual caller Session id. Never accept that metadata from a control-socket client.
 
-**Must exclude unpromoted helpers from discovery and control**, including direct internal-id targets and helper-origin requests. Promotion assigns the ordinary public Surface ref without changing Session identity; subsequent CLI operations use ordinary Surface semantics.
+- **Must allow helper-origin commands through ordinary command checks**, routing an unscoped request through the source's Workspace. Explicit Workspace and public-target routing retain their precedence. A missing source refuses rather than falling back to an unrelated active Workspace.
+- **Must keep unpromoted helpers out of discovery, matching, and explicit targeting**, including `surface:self` and internal ids. Never substitute the source for an explicit helper target or mark the source as the caller in a listing. Promotion assigns the ordinary public Surface ref without changing Session identity.
+- **Must use the source as the helper's default placement reference**, separately from caller identity. Explicit placement retains its normal scope; the helper's invocation directory supplies new work's CWD, including `split`.
+- **Never promote, take over, or replace a helper or placement reference to fulfill a helper-origin creation.** Matching, keyed reuse, preview slots, minimized creation, and focus rules remain unchanged. A request accepted before promotion retains this restriction; a captured placement reference disappearing before creation fails.
+- **Must retain the actual helper Session as an app-restart requester**, without exempting its source from running-work checks.
 
-Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `dispatchDorControlRequest` in `lib/src/lib/platform/dor-control-dispatch.ts`.
+Source of truth: `resolveDorControlRoute` in `lib/src/components/wall/dor-control-router.ts`; `handleDorControl` in `lib/src/components/wall/use-dor-control.ts`; `createDorControlServer` in `standalone/sidecar/dor-control-server.js`.
 
 ## Dor Tools
 

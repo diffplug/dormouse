@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { registry, type TerminalEntry } from '../../lib/terminal-store';
 import { installDorControlRouter, resolveDorControlRoute } from './dor-control-router';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
 import type { DorControlRequest } from './use-dor-control';
@@ -53,6 +54,74 @@ describe('dor control routing', () => {
     const owner = handleFor(first, ['pane-a']);
     handleFor(second, ['pane-b']);
     expect(resolveDorControlRoute(request({ surfaceId: 'pane-a' }))).toEqual({ kind: 'handle', handle: owner });
+  });
+
+  it('passes the actual helper id to app restart', async () => {
+    const previous = getPlatformOrNull();
+    const restart = vi.fn(async () => true);
+    setPlatform({ requestAppRestart: restart } as unknown as PlatformAdapter);
+    const release = installDorControlRouter();
+    try {
+      const detail = request({ method: 'app.restart', surfaceId: 'helper', helperParentId: 'parent' });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      await Promise.resolve();
+      expect(restart).toHaveBeenCalledExactlyOnceWith('helper');
+      expect(detail.respond).toHaveBeenCalledWith({ ok: true, result: { relaunch: true } });
+    } finally { setPlatform(previous!); release(); }
+  });
+
+  it('routes helper callers through their source without making helpers members', () => {
+    const first = getWorkspacesSnapshot().workspaces[0].id;
+    const owner = handleFor(first, ['parent']);
+    handleFor(createWorkspace({ id: 'other' }).id, ['other-pane']);
+    const detail = request({ surfaceId: 'helper', helperParentId: 'parent' });
+    expect(resolveDorControlRoute(detail)).toEqual({ kind: 'handle', handle: owner });
+    const release = installDorControlRouter();
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+    expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
+      surfaceId: 'helper', helperParentId: 'parent', placementSurfaceId: 'parent',
+    }));
+    expect(owner.ownsSurface('helper')).toBe(false);
+    release();
+  });
+
+  it('keeps helper origin and self identity when explicitly routed to another window or Workspace', () => {
+    const target = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['destination']);
+    const detail = request({ surfaceId: 'foreign-helper', helperParentId: 'foreign-parent',
+      params: { workspace: 'workspace:1' } });
+    const release = installDorControlRouter();
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+    expect(target.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
+      surfaceId: 'foreign-helper', helperParentId: 'foreign-parent', placementSurfaceId: undefined,
+    }));
+    const self = request({ ...detail, method: 'surface.kill', params: { workspace: 'workspace:1', surface: 'surface:self' } });
+    window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail: self }));
+    expect(self.respond).toHaveBeenCalledWith({ ok: false, error: expect.stringContaining('not public Surface targets') });
+    expect(target.handleDorControl).toHaveBeenCalledTimes(1);
+    release();
+  });
+
+  it('refuses a missing helper source instead of falling back to the active Workspace', () => {
+    handleFor(getWorkspacesSnapshot().workspaces[0].id, ['unrelated']);
+    expect(resolveDorControlRoute(request({ surfaceId: 'helper', helperParentId: 'gone' })))
+      .toEqual({ kind: 'error', message: 'The helper source Surface is no longer available' });
+  });
+
+  it('captures in-process helper identity from the registry without aliasing self', () => {
+    const owner = handleFor(getWorkspacesSnapshot().workspaces[0].id, ['parent']);
+    registry.set('helper', { helper: { parentId: 'parent', command: '' } } as TerminalEntry);
+    const release = installDorControlRouter();
+    try {
+      const detail = request({ surfaceId: 'helper' });
+      window.dispatchEvent(new CustomEvent('dormouse:control-request', { detail }));
+      expect(owner.handleDorControl).toHaveBeenCalledWith(expect.objectContaining({
+        surfaceId: 'helper', helperParentId: 'parent', placementSurfaceId: 'parent',
+      }));
+      for (const surface of ['helper', 'surface:helper', 'surface:self']) {
+        expect(resolveDorControlRoute(request({ surfaceId: 'helper', params: { surface } })))
+          .toEqual({ kind: 'error', message: expect.stringContaining('not public Surface targets') });
+      }
+    } finally { registry.delete('helper'); release(); }
   });
 
   it('falls back to the active Workspace for an unknown caller', () => {

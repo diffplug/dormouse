@@ -234,7 +234,7 @@ Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation
 
 ## Take-over
 
-**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. (rationale)
+**Must run a standalone `dor tool` or `dor open` invocation in its calling pane when every takeover condition holds.** Otherwise use the ordinary split path. Trust approval and keyed reuse take precedence. Helper callers follow `docs/specs/dor-cli.md` → Helper callers and targets. (rationale)
 
 | Condition | Required state |
 | --- | --- |
