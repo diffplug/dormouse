@@ -82,7 +82,7 @@ release, which the installer and `manage status` both print.
   (`docs/specs/security-remote.md` → "Network posture (self-hosted)").
 - **On Linux, this account must be allowed to operate `tailscaled`.** Preflight
   checks before the build and prints the fix, but never runs `sudo`; this is the
-  only step of a Linux install needing root (rationale):
+  only step of a Linux install needing root:
 
   ```sh
   sudo tailscale set --operator=$USER
@@ -143,7 +143,7 @@ terminate private HTTPS — all under the current user's profile:
 ```
 
 Logs: `~/Library/Logs/Dormouse Relay/` on macOS, `<install root>\logs` on
-Windows, `~/.local/state/dormouse-relay/logs` on Linux (rationale). Service
+Windows, `~/.local/state/dormouse-relay/logs` on Linux. Service
 definition: `~/Library/LaunchAgents/sh.dormouse.relay.plist`, the Scheduled Task
 `\Dormouse Relay`, or `~/.config/systemd/user/dormouse-relay.service`.
 
@@ -212,7 +212,7 @@ Establish with the user what the script cannot:
 - **Port 3100 is free.** Unchecked before installation; a stale listener blocks
   the new Relay from binding and fails the post-install identity check. A dev
   Relay is not normally the culprit: `pnpm dev:relay` takes any free port unless
-  `PORT` names one (rationale).
+  `PORT` names one.
 
   ```sh
   # macOS
@@ -296,9 +296,9 @@ pkill -f 'Dormouse Relay/current/relay/dist/index.js'
 ```
 
 ```powershell
-# Windows — select by install-root path and command line, never by image name
-# (rationale). The supervision loop restarts after a 10s throttle, so wait
-# ~15s before reading status.
+# Windows — select by install-root path and command line, never by image name:
+# other node.exe processes on this machine are not the Relay. The supervision
+# loop restarts after a 10s throttle, so wait ~15s before reading status.
 $root = "$env:LOCALAPPDATA\Dormouse Relay"
 Get-CimInstance Win32_Process |
   Where-Object { $_.ExecutablePath -like "$root\*" -or $_.CommandLine -like "*$root*" } |
@@ -337,13 +337,14 @@ tokens and the pairing QR).
    print it into the conversation.
 
 2. **The Burrow.** On this same machine, launch the build made with
-   `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings → Network**, and
-   choose **My Relay only**: a new install starts at Nothing, which refuses
-   enrollment (`docs/specs/remote-network.md` → "Policy"). While the offer is
+   `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings → Network** (the
+   baseboard's Settings button), and choose **My Relay only**: a new install
+   starts at Nothing, which refuses enrollment (`docs/specs/remote-network.md` → "Policy"). While the offer is
    unspent, its card enrolls in one click; "Enroll with the setup password…"
    covers a spent offer or a Burrow on another machine
    (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
-   Enrollment persists, so later launches connect on their own.
+   Enrollment persists, so later launches connect on their own; the section
+   then shows the Relay and its connection.
 
    A Burrow that offers only "Enroll with hosted.dormouse.sh" is a stock build,
    not a Relay problem.
@@ -388,7 +389,7 @@ Prove it once, while the user is watching:
 3. Run `manage rollback`, confirm the previous release comes back healthy, then
    return to the desired release.
 
-`manage uninstall` removes the service definition and installed code, keeps
+`manage uninstall` removes the service definition, installed code and `run/`, keeps
 `config` and `state` and reports where they are, and keeps `manage` itself.
 `manage purge` is the separate, irreversible deletion behind a typed
 confirmation phrase; run it after `uninstall`, and it prints the one command
@@ -557,7 +558,7 @@ equivalent (rationale).
 | --- | --- | --- | --- |
 | RunAtLoad | plist `RunAtLoad` | the at-logon trigger, `LogonType=Interactive` (no stored password), `RunLevel=Limited` | `WantedBy=default.target`; survives logout only with opt-in `--linger`, which the installer never enables silently and `verify` reports rather than asserts |
 | KeepAlive | plist `KeepAlive` | the supervision loop in `bin\run-relay.ps1`; Task Scheduler's `RestartCount` is defence in depth, not the mechanism | `Restart=always`, `RestartSec=10` |
-| Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; before every start the installer reaps its children by install-root image path and command line, never image name | `systemctl --user stop` takes the whole cgroup |
+| Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; before every start the installer and `manage` reap its children by install-root image path and command line, never image name | `systemctl --user stop` takes the whole cgroup |
 | `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file | symlinks, swapped with `rename(2)` on the link path |
 | `0700` / `0600` | modes under `umask 077`; `verify` checks mode and owner | an owner-only DACL; `verify` also checks owner SID | modes under `umask 077`; `verify` checks mode and owner |
 | Entry | `/bin/bash bin/run-relay` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File bin\run-relay.ps1`, at an absolute interpreter path | `ExecStart=/bin/bash "<root>/bin/run-relay"` |
@@ -631,8 +632,8 @@ the separately-confirmed `purge`.
 `config/` and `state/`. **`purge` deletes `run/` along with `state/` and
 `config/`**, and once uninstalled prints the one command removing the install
 root and, on macOS and Linux, the log directory outside it. Source of truth:
-`cmd_purge` in `deploy/local/install-linux.sh` and
-`deploy/local/install-macos.sh`; `Invoke-Purge` in
+`cmd_uninstall` / `cmd_purge` in `deploy/local/install-linux.sh` and
+`deploy/local/install-macos.sh`; `Invoke-Uninstall` / `Invoke-Purge` in
 `deploy/local/install-windows.ps1`.
 
 Two test-only hooks, each refused unless `DORMOUSE_INSTALL_TEST=1`:

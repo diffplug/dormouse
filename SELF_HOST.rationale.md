@@ -50,7 +50,7 @@ never enough.
 
 Why 3100 rather than 3000: the number only has to be one a casual dev server is
 unlikely to take, and 3000 is the most contended port on a developer's machine.
-Nothing else depends on the number — `config/relay.env` carries it and every
+Nothing outside the installers depends on the number — `config/relay.env` carries it and every
 consumer reads it back.
 
 Why a failed restore must not clear `previous`: `rollback_release` re-reads
