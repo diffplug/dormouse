@@ -217,6 +217,8 @@ at most one session**, on `ClientSessionCore`, direct or not at all.
 
 - **Never open a socket outside `connectOnce`**, which runs once per client
   and opens none for an expired link.
+- **Must end steps 1–2 at the room's hard deadline**, WebCrypto and the
+  socket's open included; step 3 runs on the direct deadline instead.
 - **Never import store, passkey, push, or worker code** (the static's rule:
   `docs/specs/remote-security-model.md` -> "One-time connection").
 - Every protocol-v1 method refuses until both directions are direct (Direct
