@@ -15,10 +15,10 @@ model exists to make *authorized* hard to reach and impossible to reach by accid
 still applies to it is [One-time connection](#one-time-connection) — the one way in
 without them, one session confirmed at the Burrow and writing nothing — with the
 direct path it runs on and the service→webview checks. Two deployment modes are
-defined (`docs/specs/remote-api.md` -> "Transport"); all of the below but the
-one-time connection, which needs no Relay, is **self-hosted**, the only one that
-ships. Cloud-hosted is staged
-([Cloud-hosted mode](#cloud-hosted-mode)).
+defined (`docs/specs/remote-api.md` -> "Transport"). Self-host deployment rules
+are scoped below; Hosted's implemented admin-entitled account routing and
+one-time rendezvous defer to `docs/specs/security-hosted.md`. Paid activation
+remains staged ([Cloud-hosted mode](#cloud-hosted-mode)).
 
 ### Trust boundary
 
@@ -31,6 +31,10 @@ ships. Cloud-hosted is staged
 terminal stream; there is no negotiation, no cipher or pattern selector,
 no plaintext relay route, and no reader for any of the pre-cutover frames.
 
+The setup-password and `burrowToken` escalation rows describe the self-host
+Relay's passkey account. Hosted login is `docs/specs/security-hosted.md` ->
+"Account boundary".
+
 | Compromise | Buys | What still stands |
 | --- | --- | --- |
 | Relay | account state, routing metadata | **no new authorization and no plaintext**. On an established session, availability only — drop, delay, reorder, or refuse, never read and never inject — and the first invalid ciphertext destroys the session. Web Push holds **confidentiality**, not **freshness**: a kept envelope re-delivers as current, accepted residual (rationale). A session switched to the [direct path](#direct-path) leaves it the lifecycle levers alone — it can still end that session by dropping a socket, but sees, delays, and reorders none of its traffic |
@@ -39,11 +43,11 @@ no plaintext relay route, and no reader for any of the pre-cutover frames.
 | Synced or stolen passkey | sign-in, and the ability to *ask* | the paired Client static is missing, so `BurrowAcl` answers `client-not-paired` |
 | Client static | use in place; encrypted fallback also permits private-byte extraction by compromised same-origin code | connecting still needs the paired passkey's fresh assertion, and it authorizes exactly one Burrow |
 
-**The only path into a Burrow's ACL is a human typing, on that Burrow, two digits displayed
-on the phone that is asking**, and the Burrow gets the comparison exactly once. **The
-webview is inside the trust boundary for *relaying* a confirmation and for nothing
-else** — it cannot choose what is authorized, satisfy the confirmation without the
-phone, or fabricate a request (rationale). The only path back out is
+**Must mint an ACL record only after the Burrow accepts one local confirmation
+of the phone's two digits.** The webview relays the immutable ceremony id and
+typed digits; it cannot read the expected code, choose the record, or fabricate
+a pending request. A compromised webview gets one guess at an honest Client's unknown uniform
+code: 1/100 success, without proving a person read the phone (rationale). Removal is
 [Revocation and the audit trail](#revocation-and-the-audit-trail).
 
 - **FAIL IF** the Burrow stops being the final authority: `BurrowRuntime.#onConnectionTransport` in `lib/src/remote/burrow/burrow-runtime.ts` must consume its own challenge, verify the presence proof with `verifyPresenceProof` against a binding built from the Burrow's own `burrowId`, connection id, challenge and handshake hash, and require one active `BurrowAclRecord` holding the account, the passkey credential, that key's hash, and the IK-authenticated Client static — before any session is established, and with no code path letting a Relay-supplied claim stand in for any of them.
@@ -59,7 +63,7 @@ phone, or fabricate a request (rationale). The only path back out is
 - **FAIL IF** the Burrow's Noise static is ever sent to the Relay, or a Burrow runs with halves that do not correspond: it is minted locally *before* the enrollment request and never sent in it, persisted only where `burrowToken` is, and `BurrowService` derives the public point from the private half and compares before starting — a mismatch keeps the Burrow down (rationale).
 - **FAIL IF** `remote-lib-common/src/security/` stops being the shared implementation: the Relay, the Burrow, and the Pocket client must verify assertions, presence challenges, handshakes, and transport framing with the same modules. Conformance is proven against an independent implementation's published vector (`remote-lib-common/test/noise.test.mjs`), never against a value the production state machine computed, and this section's properties are driven end to end by `remote-lib-common/test/security-guarantees.test.mjs`.
 - **FAIL IF** `scripts/e2e-lint.mjs` and `scripts/e2e-lint-selftest.mjs` stop running in the root `pnpm test`, or a rule is added to the lint without the self-test proving it load-bearing. Each rule in `RULES` names the line above that it enforces, or one in `docs/specs/security-hosted.md` -> "Rendezvous boundary" (rationale).
-- **FAIL IF** the self-host Relay (`relay/`) begins admitting an `accountId` other than `SELFHOST_ACCOUNT_ID` (`remote-lib-common/src/remote/wire.ts`), or gains a self-serve signup path. The Hosted Relay's accounts are `docs/specs/security-hosted.md` -> "Relay boundary"; Reserved: the cloud boundary is analyzed in `## Future` -> Cloud-hosted mode before Hosted carries terminal traffic.
+- **FAIL IF** the self-host Relay (`relay/`) begins admitting an `accountId` other than `SELFHOST_ACCOUNT_ID` (`remote-lib-common/src/remote/wire.ts`), or gains a self-serve signup path. The Hosted Relay's accounts are `docs/specs/security-hosted.md` -> "Relay boundary"; Reserved: paid activation remains subject to `## Future` -> Cloud-hosted mode.
 
 ### Relay origin
 
@@ -76,10 +80,10 @@ phone, or fabricate a request (rationale). The only path back out is
 ### Credentials at rest
 
 **Persistent credentials are a full bypass of some layer if they leak to another
-local account.** Protection states the *property* — reachable only by
-the owning user account — and every row reaches it the same way, the caption of the
-column: mode `0700`/`0600` on unix, a one-ACE DACL on Windows, where Node's file modes
-are a silent no-op. Rows carry only what is additional.
+local account.** File-backed credentials use mode `0700`/`0600` on Unix and
+owner-only DACLs in the installed Windows Relay and standalone Burrow; Node
+modes do not protect Windows files. VS Code uses its own storage mechanisms,
+as specified in each row.
 
 | Credential | Where it lives | Protection |
 | --- | --- | --- |
@@ -87,10 +91,10 @@ are a silent no-op. Rows carry only what is additional.
 | Enrollment offer | `run/enroll-offer.json` in the install root, under an owner-only `run/` | mode and DACL both applied before the token is written; one-time (`docs/specs/relay.md` -> "Configuration"); never printed, the service definition and wrapper carrying only its path |
 | `burrowToken` (the `/ws/burrow` bearer) and the Burrow's Noise static private key | Relay `burrows.json` (the token only); Burrow side both in the enrollment record, the Noise static minted locally and never sent to the Relay (`docs/specs/remote-security-model.md` -> "Burrow identity") | the Relay state dir and every file in it; on Windows the files inherit the installer's DACL on `state`, so `manage verify` checks them individually. Burrow side a `0600` file in standalone (on Windows the app-data-dir DACL the Rust side applies), `SecretStorage` (the OS keychain) in VS Code — never a webview realm |
 | VAPID private key | Relay `vapid.json` | nothing additional |
-| Burrow ACL | `BurrowStateStore`, keyed per `burrowId` | a `0600` file in standalone; VS Code `globalState`. Mostly public keys, with one exception: each record's `deliveryId` is a bearer capability for that Client's push rows, so a reader could delete or hijack a subscription — not reach a terminal. Neither store provides *integrity* against a same-user process and nothing here claims otherwise; the mode only stops another local **account** adding a record (rationale). Deliberately never on the Relay |
+| Burrow ACL | `BurrowStateStore`, keyed per `burrowId` | a `0600` file in standalone; VS Code `globalState`, protected by VS Code's storage permissions rather than a Dormouse-applied DACL. Mostly public keys, with one exception: each record's `deliveryId` is a bearer capability for that Client's push rows, so a reader could delete or hijack a subscription — not reach a terminal. Neither store provides *integrity* against a same-user process and nothing here claims otherwise; standalone's private storage stops another local **account** adding a record (rationale). Deliberately never on the Relay |
 
-**Without explicit modes these files inherit the umask and end up world-readable**,
-handing live burrow tokens to any other local account on a shared machine. The Client's
+**Must apply explicit private permissions to file-backed credentials rather
+than rely on the ambient umask.** The Client's
 per-Burrow browser storage follows `docs/specs/remote-security-model.md` ->
 "Client statics".
 
@@ -111,7 +115,7 @@ per-Burrow browser storage follows `docs/specs/remote-security-model.md` ->
 - **FAIL IF** `relay/src/state.ts` stops creating `$DORMOUSE_STATE_DIR` mode `0o700`, or stops writing every file through `writeAtomic` at mode `0o600`. The "every file" clause is a negative search over `relay/src/`: no `writeFile`, `appendFile`, or `createWriteStream` may target the state directory outside `writeAtomic`. A cheap default, not a cross-platform guarantee; the installer's directory permissions below protect the installed Relay's state (rationale).
 - **FAIL IF** `FileBurrowStateStore` (`lib/src/host/remote/burrow-state-store.ts`) stops creating its directory `0o700` and writing `0o600` on non-Windows platforms, or if `VsCodeBurrowStateStore` stops keeping the **enrollment** in `SecretStorage`. The ACL's home in `globalState` is deliberate and is not a finding; the enrollment's is what carries `burrowToken`.
 - **FAIL IF** a credential the Host→Burrow rename retired stops being deleted unread at boot: `state/hosts.json` on the Relay (`forgetRetiredState` in `relay/src/state.ts`, called from `relay/src/start.ts`), `remote-host.json` on a Node-resident Burrow (`forgetRetiredState` in `lib/src/host/remote/burrow-state-store.ts`, called from `sidecar-entry.ts`), and `dormouse.remote-host.enrollment`, `dormouse.remote-host.acl.*`, `remote-host.peer-token` in VS Code (`vscode-ext/src/retired-state.ts`, called from `activate()`). Each held a live `burrowToken` or peer secret, and `SecretStorage` cannot be enumerated — a key nothing removes *by name* outlives every build that knew it. Pinned by `relay/test/state-records.test.mjs`, `lib/src/host/remote/burrow-state-store.test.ts` and `vscode-ext/test/retired-state.test.ts`.
-- **FAIL IF** `burrow_state_dir` in `standalone/src-tauri/src/lib.rs` stops calling `restrict_to_owner` on the state directory **before** spawning the sidecar — on Windows those Node modes are no-ops and Node cannot set an ACL, so the guarantee is held one layer down. That call carries both legs: a newly written enrollment file *inherits* the owner-only entry, and one a prior version already left under the `%LOCALAPPDATA%` ACL — with a live `burrowToken` in it — has that entry *propagated* onto it, the half `restrict_to_owner_leaves_one_owner_only_ace` covers with its pre-existing `before.json`.
+- **FAIL IF** `burrow_state_dir` in `standalone/src-tauri/src/lib.rs` passes the sidecar a state directory `restrict_to_owner` did not lock — on Windows those Node modes are no-ops and Node cannot set an ACL, so the guarantee is held one layer down; a refusal keeps the Burrow in memory (`burrow_directory_permission_failure_disables_durable_state`). That call carries both legs: a newly written enrollment file *inherits* the owner-only entry, and one a prior version already left under the `%LOCALAPPDATA%` ACL — with a live `burrowToken` in it — has that entry *propagated* onto it, the half `restrict_to_owner_leaves_one_owner_only_ace` covers with its pre-existing `before.json`.
 - **FAIL IF** `relay/src/start.ts` stops obtaining the setup password from `SetupPasswordStore.loadOrCreate(generateSetupPassword)`, `generateSetupPassword` stops using `crypto.randomBytes(32)`, `readConfig` reads `DORMOUSE_SETUP_PASSWORD` or any other setup-password input, or `SetupPasswordStore` stops refusing a persisted or generated value outside 64 lowercase hexadecimal characters. Pinned by `relay/test/config.test.mjs` and `relay/test/setup-password-store.test.mjs`.
 - **FAIL IF** `createApp` accepts anything but 64 lowercase hexadecimal characters as the setup password injected by the entrypoint; pinned by `relay/test/app.test.mjs`.
 - **FAIL IF** any installer stops making `config/`, `state/`, and `config/relay.env` reachable only by the installing user — the effective property `manage verify` tests: no principal other than that user may appear in the effective permissions. macOS and Linux achieve it with `0700`/`0600` under `umask 077`; Windows with a single owner-only ACE, whether the path carries it directly or inherits it from an already-locked parent. The Windows and Linux installers create `relay.env` and lock it before writing its contents (rationale).
@@ -144,12 +148,12 @@ a fixed delay (rationale).
 
 ### Cross-origin access
 
-**No browser origin but the configured one may drive the API.** Pocket is served
-with the API at that origin and calls it with relative URLs; a Burrow's HTTP client runs
-in its Node service, not a webview. No supported caller is a cross-origin browser, so
-a grant would widen the guessing surface and buy no compatibility (rationale).
+**Never grant cross-origin browser reads or authenticate from a cookie.**
+Pocket uses relative API URLs at the configured origin; Burrow HTTP runs in
+Node. The Relay grants no preflight or CORS response; it does not reject every
+request carrying a foreign `Origin` (rationale).
 
-- **FAIL IF** the Relay installs CORS middleware, emits `Access-Control-Allow-Origin`, or accepts authentication from a cookie — the two clauses hold each other up (rationale). Pinned by `relay/test/cors.test.mjs`.
+- **FAIL IF** the Relay installs CORS middleware, emits `Access-Control-Allow-Origin`, or accepts authentication from a cookie (rationale). Pinned by `relay/test/cors.test.mjs`.
 
 ### Network posture (self-hosted)
 
@@ -256,7 +260,7 @@ connection" owns the ceremony.
 - **FAIL IF** the Relay or `BurrowRuntime` can accept a one-time frame: `E2eKind` and `isE2eKind` in `remote-lib-common/src/remote/wire.ts` must admit exactly `pairing` and `connection`, and no one-time name may appear under `relay/src/`, in `remote-lib-common/src/remote/wire.ts`, or in `lib/src/remote/burrow/burrow-runtime.ts`. `scripts/e2e-lint.mjs` holds both textually.
 - **FAIL IF** the one-time prologue stops binding every link field under its own kind: `oneTimeLinkPrologue` in `remote-lib-common/src/security/one-time-link.ts` must hash, through `e2eOneTimePrologue` in `remote-lib-common/src/security/noise-transport.ts`, the E2E domain, `one-time`, the room id, then the link's version, expiry, and one-use key in link order. Pinned by `remote-lib-common/test/one-time-link.test.mjs`.
 - **FAIL IF** a one-time connection grants or writes anything that outlives it. `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts` must name no ACL, ACL store, delivery id, or presence verifier, persist nothing, and send a success outcome carrying the Burrow label alone. `scripts/e2e-lint.mjs` holds the naming textually.
-- **FAIL IF** a link can admit a second phone or a second guess. The first message 1 that completes IK against the link's key must reserve the link and erase that key; every later `init` is dropped before any WebCrypto, and one that fails leaves the link open. `OneTimeRuntime.#approve` must set `attempted` before its expiry check and `constantTimeEqual`, and every outcome — success and each denial — is one padded control message sealed with `sealControl` in `lib/src/remote/burrow/established-session.ts`.
+- **FAIL IF** a link can admit a second phone or a second guess. The first handshake whose message 1, message 2, and Split succeed against the link's key must reserve the link and erase that key; every later `init` is dropped before any WebCrypto, and one that fails leaves the link open. `OneTimeRuntime.#approve` must set `attempted` before its expiry check and `constantTimeEqual`, and every outcome — success and each denial — is one padded control message sealed with `sealControl` in `lib/src/remote/burrow/established-session.ts`.
 - **FAIL IF** the one-time approval modal can show text the phone chose, which could tell the person which digits to type. `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts` must pass the request's label through `knownOneTimeDeviceLabel` in `remote-lib-common/src/security/e2e-ceremony.ts` before `requestApproval` or any `OneTimeState` carries it, so a label that is not exactly a member of `ONE_TIME_DEVICE_LABELS` reaches the modal, the panel, and the Baseboard as `Phone browser`; the page's `oneTimeDeviceLabel` in `lib/src/remote/one-time-app/OneTimeApp.tsx` returns only members. Pinned by `lib/src/remote/burrow/one-time-runtime.test.ts` and `remote-lib-common/test/e2e-ceremony.test.mjs`.
 - **FAIL IF** an application message crosses the rendezvous, or a one-time session outlives a missed direct deadline. `OneTimeRuntime` in `lib/src/remote/burrow/one-time-runtime.ts` must make its one session `directOnly` on `EstablishedE2eSession`: after the outcome an application message decrypted off the rendezvous ends the session unread, and a decline, an abandoned attempt, or no switch by `DIRECT_ONLY_DEADLINE_MS` ends it — no relayed fallback. `scripts/e2e-lint.mjs` holds the flag textually. After the switch the direct channel is the lifecycle authority: the runtime closes the rendezvous, and channel loss or `ESTABLISHED_E2E_IDLE_TIMEOUT_MS` idle ends the session.
 - **FAIL IF** the phone can reach the room unasked or put protocol-v1 on it. `OneTimeClient` in `lib/src/remote/client/one-time-client.ts` must open its socket only inside `connectOnce`, refuse every protocol-v1 method until both directions are direct, and close the rendezvous normally at the switch; a decline, an abandoned attempt, or no switch by `DIRECT_ONLY_DEADLINE_MS` fails the attempt. It reads every frame through `parseOneTimeFrame` in `lib/src/remote/one-time-rendezvous.ts`, which measures it against `MAX_ONE_TIME_FRAME_LENGTH` before `JSON.parse`, and runs `isOneTimeBurrowFrame` on it. Pinned by `lib/src/remote/client/one-time-client.test.ts` and `lib/src/remote/client/one-time-e2e.test.ts`.
@@ -281,10 +285,10 @@ restart is the whole lever — it reloads the ACL and, by dropping the relay soc
 every established session. Relay-pushed propagation is staged in
 `docs/specs/remote-security-model.md` -> "Future" (Revocation propagation).
 
-**There is no audit trail.** The ACL records `approvedAt` / `approvedBy` for a pairing,
-and nothing records connects, attaches, denials, or writes. A self-hoster cannot answer
-"did anyone connect to my laptop last night", which also means an ACL entry added by
-any of the paths above would be invisible after the fact.
+**There is no structured audit trail covering connects, attaches, denials, or
+writes.** The ACL records `approvedAt` / `approvedBy`; owner-local logs report
+some rejections, without recording a complete session history. A self-hoster cannot answer
+"did anyone connect to my laptop last night".
 
 ## Auxiliary helpers
 
@@ -296,11 +300,10 @@ Source of truth: `collectDirectorySnapshot` in `lib/src/remote/burrow/directory-
 
 ### Cloud-hosted mode
 
-Nothing here is implemented; it exists so the boundary is stated before the code
-arrives. When Dormouse operates the coordinating Relay, "Relay compromise buys no
-Burrow access" is unchanged, but two things change character and must be re-analyzed here
-rather than inherited:
+Hosted's admin-entitled routing is implemented (`docs/specs/security-hosted.md`
+-> "Relay boundary"). Broad paid activation remains staged; its review must
+cover these operator responsibilities:
 
-- **We become the operator** of the relay. The end-to-end protocol keeps ceremony, terminal, remote-api, and notification content out of that operator's reach; what stays visible is exactly the metadata in `docs/specs/remote-security-model.md` -> "Residual metadata".
+- **Must review Hosted operator handling of residual metadata before paid activation.** The visible metadata is `docs/specs/remote-security-model.md` -> "Residual metadata"; the trust boundary above still excludes plaintext and new Burrow authorization.
 - **An independent cryptographic review is a precondition** of claiming this model for a paid service (`docs/specs/remote-security-model.md` -> "Security Guarantees").
-- **The tailnet stops carrying load.** Every argument above that leans on "the origin is reachable only from the user's tailnet" has no cloud equivalent, and the multi-tenant account model replaces the single-owner setup password entirely (`docs/specs/hosted.md` -> "Burrow enrollment").
+- **Never rely on tailnet reachability for paid Hosted admission.** Review public admission and the multi-tenant account boundary before activation (`docs/specs/hosted.md` -> "Burrow enrollment"); the self-host setup password supplies no Hosted identity.

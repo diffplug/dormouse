@@ -3,7 +3,16 @@ name: running-tend
 description: Project-specific guidance for tend workflows running on this repo.
 ---
 
-No project-specific tend preferences yet beyond the notes below. Add guidance here as needed — this file is loaded by tend workflows alongside AGENTS.md.
+Project-specific guidance for tend workflows. Add to it as needed; tend workflows load this file alongside AGENTS.md.
+
+## Reviewing PRs: judge necessity before correctness
+
+Ask whether a change carries its weight before asking whether it is correct. Apply these checks in **Review**, and fold what they find into the same review:
+
+- **Must name the trigger for every new guard, retry, fallback, or state.** Name the actor (user action, peer, Relay, local same-user process) and the shipping configuration that reaches it, and cite the caller. If nothing reachable triggers it, that is the finding: drop it, or file an issue. Do not review the robustness of a mechanism that should not exist. Code no CI job runs (Windows-only paths, PowerShell) needs a proportionally stronger trigger.
+- **Never answer a gap in a hardening mechanism by asking for more of it.** When a fix needs a fix (an unbounded retry, a missed owner case, a stuck state), first ask whether a smaller design avoids the problem, and propose that instead. For example, write the journal before ownership moves and refuse the move on failure, rather than adding phases, retries, and parking.
+
+When these checks are the only findings, submit `COMMENT`, not `APPROVE`.
 
 ## Filing issues in other repos
 

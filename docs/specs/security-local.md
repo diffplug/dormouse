@@ -38,7 +38,7 @@ shell-integration scripts — the parser scans raw bytes and cannot defend it
 
 - **FAIL IF** `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts` stops consuming `OSC 52` or `OSC 50`, or a parse site stops running it before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.
 - **FAIL IF** an `OSC 52` payload can reach the clipboard except as the copy editor's program format the user chose and copied, is retained unbounded or with control characters other than newline and tab, or is accepted into a pane with no shadowed drag: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, `copySelection` in `lib/src/lib/copy-selection.ts`. Pinned by `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/mouse-selection.test.ts`, and `lib/src/lib/copy-editor.test.ts`.
-- **FAIL IF** a value the parser retains stops being bounded and control-stripped before storage, or a new one arrives without a limit — `TITLE_LIMIT`, `BODY_LIMIT`, `COMMAND_LINE_LIMIT` and `sanitizeText` in `lib/src/lib/terminal-protocol.ts`, `MAX_CWD_LENGTH` and `boundedCwdValue` in `lib/src/lib/terminal-state.ts`. `COMMAND_LINE_LIMIT` binds *after* the `\xNN` unescape, a 4x bound before it (rationale).
+- **FAIL IF** a value the parser retains stops being bounded and control-stripped before storage, or a new one arrives without a limit — `TITLE_LIMIT`, `BODY_LIMIT`, `COMMAND_LINE_LIMIT` and `sanitizeText` in `lib/src/lib/terminal-protocol.ts`, `MAX_CWD_LENGTH` and `boundedCwdValue` in `lib/src/lib/terminal-state.ts`. `commandLineEvents` caps decoded command lines at `COMMAND_LINE_LIMIT` after sanitization, with source caps of 4× that limit for OSC 633 or shell quoting and 12× for percent-encoded UTF-8 (rationale).
 - **FAIL IF** an `OSC 8` activation reaches an adapter's `openExternal` without the confirmation dialog, or the dialog renders an open action for a **deceptive** verdict: `linkHandler` in `lib/src/lib/terminal-lifecycle.ts`, `classifyDisplayMatch` in `lib/src/lib/external-links.ts`, the render branches in `lib/src/components/ExternalLinkModal.tsx`. Pinned by `lib/src/lib/external-links.test.ts` and `lib/src/components/ExternalLinkModalHost.test.tsx`; the host also rejects a deceptive confirmation (rationale).
 - **FAIL IF** an `OSC 8` activation reaches the preview path when its display text is not a whole-component suffix of its decoded target, or the host opens a `file:` URL whose host is not empty, `localhost`, or this machine: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`, `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`, `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`. Pinned by `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, and `local file URLs` in `lib/src/host/tool-input.test.ts`.
 - **FAIL IF** an OSC 367 `open` reaches `surface.tool` from replay, from a Session that is not a Tool running its designated command, or naming anything but an absolute path free of controls; or if a control-socket request can set its `oscOpen` flag, or its failure reaches the error viewer's argv with a control character. Read `parseToolOpen` in `dor-tools-lib/src/osc.ts`, `dispatchToolOpens` in `lib/src/lib/tool-open-requests.ts` (reached from `applyLiveToolEvents`, never from `parseReplay` in `lib/src/lib/platform/replay-parse.ts`), the `oscOpen` argument of `dispatchDorControlRequest` in `lib/src/lib/platform/dor-control-dispatch.ts`, and the `oscOpen` gate in `lib/src/components/wall/use-dor-control.ts`. Pinned by `an OSC 367 open` in `lib/src/components/wall/preview-slot.test.tsx`.
@@ -46,6 +46,13 @@ shell-integration scripts — the parser scans raw bytes and cannot defend it
 ## Browser panes
 
 The attacker is the page inside a browser pane.
+
+**Known gap: Windows screenshots and pasted clipboard images inherit their
+parent's ACL** — private under the default per-user `%TEMP%`, exposed only when
+it (or the capture parent) is shared or loosened.
+
+Source of truth: `lib/src/host/private-capture-dir.ts`,
+`standalone/sidecar/clipboard-ops.js`, `standalone/src-tauri/src/clipboard_win.rs`.
 
 **Every listener the webview realm exposes to a framed page checks the sender's
 origin before it acts** — `IframePanel` against its own panel's proxy origin, the
@@ -198,14 +205,16 @@ buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record"
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
-`recovery.json` under the extension's storage directory, owner-only and
-temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
+`recovery.json` in extension storage, mode `0600` on Unix
+and temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
 unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`
 with `wx`, its socket directory re-checked on every contention round. **Neither
-control does anything on Windows** (rationale).
+control does anything on Windows** (rationale). VS Code's `tool-trust` receipts
+likewise inherit the extension storage ACL; Dormouse applies no dedicated
+Windows DACL to them.
 
 **The standalone log is unprotected and names the control socket.**
 `$DORMOUSE_LOG_FILE`, else `%LOCALAPPDATA%\Dormouse Terminal\dormouse.log`, else

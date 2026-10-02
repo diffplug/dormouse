@@ -29,7 +29,7 @@ function testSocketPath(name) {
  * peer that gets the handshake wrong.
  */
 function sendSocketRequest(socketPath, request, options = {}) {
-  const { token = 'secret', hello, expectLines = 3 } = options;
+  const { token = 'secret', hello, expectLines = 3, sendNull = false } = options;
   return new Promise((resolve, reject) => {
     const socket = net.createConnection({ path: socketPath });
     const nonce = 'client-nonce';
@@ -50,7 +50,7 @@ function sendSocketRequest(socketPath, request, options = {}) {
             nonce,
             proof: proveToken(token, CLIENT_PROOF_DOMAIN, lines[0].nonce),
           })}\n`);
-        } else if (lines.length === 2 && request) {
+        } else if (lines.length === 2 && (request || sendNull)) {
           socket.write(`${JSON.stringify(request)}\n`);
         }
         if (lines.length >= expectLines) {
@@ -515,4 +515,22 @@ test('a lost bind is fatal to the channel, not to the host', { skip: process.pla
   assert.ok(server);
   await assert.rejects(server.ready);
   server.close();
+});
+
+
+test('authenticated null and non-object requests are rejected without crashing the control server', async () => {
+  const sent = [];
+  const server = createDorControlServer({ socketPath: testSocketPath('malformed-request'), token: 'secret', send: (...args) => sent.push(args) });
+  await server.ready;
+  try {
+    for (const request of [null, true, 42, 'request', []]) {
+      const { lines } = await sendSocketRequest(server.socketPath, request, { sendNull: true });
+      assert.deepEqual(lines[2], { ok: false, error: 'invalid Dormouse control request' });
+    }
+    assert.deepEqual(sent, []);
+    const response = sendSocketRequest(server.socketPath, { requestId: 'after-invalid', method: 'surface.list' });
+    await waitFor(() => sent.length === 1, 'request after malformed input');
+    server.respond({ requestId: 'after-invalid', ok: true, result: { surfaces: [] } });
+    assert.equal((await response).lines[2].ok, true);
+  } finally { server.close(); }
 });

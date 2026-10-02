@@ -43,7 +43,7 @@ export interface BurrowEnrollment {
    *
    * **Local only.** It is delivered to a Client inside the encrypted pairing and
    * connection outcomes and nowhere else; the Relay never stores or sees it
-   * past the enroll request. Optional because an enrollment persisted before
+   * in an enrollment request. Optional because an enrollment persisted before
    * this field existed must keep loading rather than reading as un-enrolled.
    */
   label?: string;
@@ -65,7 +65,7 @@ export interface BurrowEnrollment {
    * and it lives only where the enrollment lives, which is owner-only storage
    * on both burrows (`docs/specs/security-remote.md` → "Credentials at rest"). Optional today
    * because an enrollment persisted before this field existed must keep
-   * loading; nothing reads it yet.
+   * loading; the service backfills a missing static before starting.
    */
   noiseStaticPrivateKey?: string;
   /** The raw 32-byte public half of that static, base64url. */

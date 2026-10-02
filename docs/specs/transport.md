@@ -1,65 +1,41 @@
 # Transport and PTY Protocol Spec
 
-> Adapter-agnostic protocol shared by every `PlatformAdapter`: PTY lifecycle, buffering, the webview ↔ platform message protocol, persisted-session types, and the invariants every adapter must honor. Host-specific layering lives in `docs/specs/vscode.md` and `docs/specs/standalone.md`; the phone's adapter in `docs/specs/pocket-app.md`. See `docs/specs/glossary.md` for the Process / Link state vocabulary, `docs/specs/alert.md` for `AlertManager` semantics, and `docs/specs/terminal-state.md` for the semantic events delivered over this transport.
+> See `docs/specs/glossary.md` for Session / Pane / Door and Process / Link vocabulary.
+>
+> Adapter-agnostic protocol shared by every `PlatformAdapter`: PTY lifecycle, buffering, the webview ↔ platform message protocol, persisted-session types, and the invariants every adapter must honor. Host-specific layering lives in `docs/specs/vscode.md` and `docs/specs/standalone.md`; the phone's adapter in `docs/specs/pocket-app.md`. See `docs/specs/alert.md` for `AlertManager` semantics and `docs/specs/terminal-state.md` for semantic events.
 
 ## Adapter model
 
-Each adapter wraps a PTY-spawning runtime and a transport channel between webview and host process. Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
+**Must expose platform capabilities through `PlatformAdapter`; unsupported optional capabilities are absent.**
 
 | Adapter | Host runtime | Transport |
 |---|---|---|
 | VS Code extension | extension host (Node.js) | `vscode.Webview.postMessage` ↔ `acquireVsCodeApi().postMessage` |
 | Standalone (Tauri) | sidecar process | Tauri command/event bridge |
 | Standalone browser-dev | sidecar + local dev HTTP bridge | fetch commands + Server-Sent Events |
-| Pocket (`RemotePtyAdapter`) | the paired laptop's Host | remote protocol-v1 over the relay (`docs/specs/remote-api.md`) |
+| Pocket (`RemotePtyAdapter`) | paired laptop’s Burrow | encrypted protocol-v1 over the selected Relay/direct session (`docs/specs/remote-api.md`); one-time is direct-only (`docs/specs/one-time.md`) |
 | Fake (tests, playground) | in-process | direct calls / event emitter |
 
 **A host that cannot do something must say so by absence, never by the UI branching on host identity.** `RemotePtyAdapter` implements only the PTY core (list/data/write/resize/exit) and no-ops or omits the rest.
 
-Optional booleans:
+**Must treat absent host-ownership capabilities as false.** Their members, defaults, and consumers are canonical comments on `PlatformAdapter`; behavior belongs to `docs/specs/theme.md` → Where the user picks a theme, `docs/specs/vscode.md` → Shell selection, and `docs/specs/remote-network.md` → Settings → Network.
 
-| Member | Absent reads | Set by | Effect when set |
-|---|---|---|---|
-| `hostOwnsTheme?` | `false` | `VSCodeAdapter` → `true` | Settings hides its theme picker (`docs/specs/theme.md` → "Where the user picks a theme") |
-| `hostOwnsShells?` | `false` | `VSCodeAdapter` → `true` | Settings hides its Shell row for the native QuickPick (`docs/specs/vscode.md` → "Shell selection") |
-| `hostOwnsUpdates?` | `false` | `VSCodeAdapter` → `true` | Settings → Network names the Marketplace instead of an update check (`docs/specs/remote-network.md` → "Settings → Network") |
+Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 
 ## PTY lifecycle
 
-PTYs are managed by the platform host, not by the webview. The webview **resumes** over live PTYs (host-preserved) or **restores** from a Snapshot (cold start).
-
-```
-Platform host (always running while the adapter is active)
-├── pty-manager (forks pty-host child process)
-│   ├── pty-1 (Process: Live)
-│   ├── pty-2 (Process: Live)
-│   └── pty-3 (Process: Exited)
-│
-├── Webview (e.g. VS Code WebviewView, a standalone window)
-│   └── message-router: owns pty-1, pty-2
-│
-└── Secondary webview (a VS Code editor-tab WebviewPanel, another standalone window)
-    └── message-router: owns pty-3
-```
-
-**Every host is multi-webview**, and **a router never takes a PTY another
-owns**: ownership keeps one webview's traffic out of another's, and each host
-owns the map (`docs/specs/vscode.md` → "Peer surfaces across windows",
-`docs/specs/standalone.md` → Routing).
+**Must keep PTYs in their platform runtime across webview hide/recreate and isolate each webview’s ownership.** Local host mechanisms belong to `docs/specs/vscode.md` → Webview hosting and `docs/specs/standalone.md` → Routing. The webview resumes over preserved PTYs or restores from a Snapshot.
 
 - **Hiding a webview does not kill its PTYs**, and becoming visible again resumes over the still-owned ones ("Reconnection protocol").
 - **A naturally exited PTY may stay mounted as an exited pane**; frontend semantic state — CWD, title candidates, last command — is retained until the Session is disposed.
 - **Must keep explicitly killed PTYs non-resumable.** VS Code tombstones their ids (`Process: Tombstoned`) in `pty-manager.ts` so late child-process output cannot recreate a buffer; the shared `pty-core.js` drops its live record and retains no output.
-- **Each host instance gets its own pty-host child process** (e.g. one per VS Code window).
 - **Must mark live VS Code PTYs exited and notify their owners when the child process exits unexpectedly**, retaining transcripts and already-recorded exits. **Must ignore retired-child output and exit events after replacement**; pinned by `vscode-ext/test/pty-manager.test.ts`.
 
 ### PTY buffering
 
-VS Code's `pty-manager` keeps two buffers plus one counter per PTY. **Must cap each buffer at 1,000,000 characters**, dropping oldest chunks and truncating an oversized final chunk; pinned by `vscode-ext/test/pty-manager.test.ts`.
+**Must cap each VS Code replay and scrollback buffer at 1,000,000 characters**, evicting oldest chunks and truncating an oversized final chunk. **Must clear replay on first consume and retain host-only scrollback until `kill`/`killAll`**, for repeat resume and recovery. Stream positions follow Universal invariants.
 
-- **replayChunks** — cleared on first consume; used for resume (webview hidden then shown).
-- **scrollbackChunks** — never cleared short of `kill`/`killAll`; used for repeat resumes (a re-serving router's replay buffer is already spent) and for recovery capture at teardown. Host-side only — no adapter exposes it to the renderer.
-- **receivedChars** — every char ever buffered, never decremented by a trim ("A position in a pane's output is a received count", below).
+Source of truth: `bufferData` / `getReplayData` in `vscode-ext/src/pty-manager.ts`, pinned by `vscode-ext/test/pty-manager.test.ts`.
 
 ### Paced input
 
@@ -76,16 +52,10 @@ Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-cor
 
 ### Reconnection protocol
 
-```
-1. Webview becomes visible (or panel deserializes) and sends { type: 'dormouse:init' }.
-2. Host answers { type: 'pty:list', ptys: [{ id, alive, exitCode, shell }] } for all owned PTYs,
-   then per PTY { type: 'pty:replay', id, data } and { type: 'alert:state', id, … }.
-3. Webview restores terminals from replay data, including each PTY's launch-shell path, which
-   the rebuilt registry needs for Session-specific clipboard/drop escaping.
-4. If the saved session covers those live PTYs, the frontend uses the saved Lath layout when its
-   leaf set matches and reattaches saved minimized doors; minimized PTYs are registered but stay
-   doors, not visible panes.
-```
+1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`).
+2. The host answers `pty:list` (one `PtyInfo` per owned PTY: `id`, `alive`, `exitCode`, `shell`), then `pty:replay` for each PTY with buffered output, then `alert:state` for each.
+3. The webview resumes terminals with their launch shells for Session-specific clipboard/drop escaping.
+4. A saved layout is reused only when its leaves match the live visible pane set; saved minimized PTYs are registered as Doors.
 
 **A collection finishes only on its own answer.** A `requestInit` carries the
 asking collector's token, and a host serving several windows echoes it on the
@@ -177,7 +147,7 @@ Source of truth: the message schema in `vscode-ext/src/message-types.ts` (`Webvi
 
 **`dormouse:runWorkbenchCommand` (webview → host) is allowlisted** against `lib/src/lib/vscode-keybindings.ts` before `vscode.commands.executeCommand`; generic command execution over the webview boundary is not allowed.
 
-**Reaching the Burrow is one optional adapter member.** `burrow?: BurrowLink` is present exactly when a PTY-owning process sits behind the webview — standalone's sidecar, VS Code's extension host — and absent on the website. Its four calls are `command`, `respond`, `notify` (argless — the directory is the only thing a peer answers), and `on`. The webview half is `lib/src/host/remote/link-client.ts`, shared by all three adapters so no host settles a command differently: command correlation, a 15 s timeout, and the rule that **an ask is always answered even when nothing matches**. Both ends compile against `lib/src/host/remote/service-protocol.ts`. **Nothing crossing this seam carries authority** (`docs/specs/remote-security-model.md`).
+**Reaching the Burrow is one optional adapter member.** `burrow?: BurrowLink` is present exactly when a PTY-owning process sits behind the webview — standalone's sidecar, VS Code's extension host — and absent on the website. The webview half is `lib/src/host/remote/link-client.ts`, shared by all three adapters so no host settles a command differently: command correlation, a 15 s timeout, and the rule that **an ask is always answered even when nothing matches**. Both ends compile against `lib/src/host/remote/service-protocol.ts`; `BurrowLink` in `lib/src/lib/platform/types.ts` owns the call shapes. **Nothing crossing this seam carries authority** (`docs/specs/remote-security-model.md`).
 
 Each host maps those calls onto its own transport:
 
@@ -197,9 +167,9 @@ Transport constraints:
 | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink. **Hosts must revalidate**, rejecting malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:` — `lib/src/lib/external-links.ts`). |
 | Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, resolved from the root pid, answered with `pty:openPorts`. `getOpenPortsForPids()` in `standalone/sidecar/pty-core.js` (VS Code loads it through the `lib/pty-core.cjs` shim). |
-| Host → webview | `pty:openPorts` | `ports: OpenPort[]` (`{ protocol, family, address, port, pid, processName }`), de-duplicated by `(family, address, port)`, sorted by port then address. Empty when the PTY is gone or enumeration fails. |
+| Host → webview | `pty:openPorts` | `OpenPort[]`, de-duplicated by `(family, address, port)`, sorted by port then address. Empty when the PTY is gone or enumeration fails. |
 | Webview → host | `pty:getOpenPortsMany` | `ids: string[]`, answered by `pty:openPortsMany` from one scan. |
-| Host → webview | `pty:openPortsMany` | `ports: Record<id, OpenPort[]>`, `[]` for an id with no live PTY. |
+| Host → webview | `pty:openPortsMany` | `Record<id, OpenPort[]>`; `[]` for an id with no live PTY. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. **Carries an optional `textData`** (string-control payloads removed, for the prompt heuristic), **omitted when it would equal `data`**. |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
 | Host → webview | `terminal:toolEvents` | Ordered Tool announcements, state, and command-start resets (`docs/specs/dor-tool.md` → OSC 367). |
@@ -243,7 +213,7 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 
 **Surface kinds in the snapshot.** Each `PersistedPane` records a `surfaceType` (`docs/specs/glossary.md`): `'terminal'` — the default, **omitted from the row** so terminal snapshots stay byte-identical — `'browser'`, or `'tool'`, whose extra `command` and `tool` fields are `docs/specs/dor-tool.md` → Persistence and hosts. It routes restore/resume, and **a pane lacking it reads as `'terminal'`**. `restoreSession` skips terminal restoration for a browser pane rather than minting a stray PTY + xterm per browser pane id, and the resume plan keeps browser panes and minimized browser doors despite their having no live PTY, so the saved layout's leaf set still matches and is not discarded. A browser pane rebuilds from the persisted layout (visible) or `PersistedDoor.params` (minimized) — its render params (`renderMode`, `url`, agent-browser `session`) live there, not in `PersistedPane`. **Must reject a layout whose leaves differ from the visible pane set during restore or resume, and omit visible browser ids from the terminal fallback.** Browser doors retain their independent render params; pinned by `lib/src/lib/session-restore.test.ts` and `lib/src/lib/reconnect.test.ts`.
 
-**Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and writes the whole Window through one debounced writer the host installs at boot. **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a snapshot taken mid-boot cannot replace a restored Workspace with a blank one. **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace. **Reordering, renaming, or switching the active Workspace writes too**: each changes the blob with no Session changing. A `PersistedWorkspace` is a `WorkspaceId`, a `name`, `nameIsAuto`, and that Workspace's `PersistedSession`. **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto. The top-level snapshot is a `PersistedWindow` (its own `version: 1`) wrapping v3 sessions: the ordered `PersistedWorkspace` list plus the active `WorkspaceId`. **VS Code does not use it** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
+**Each mounted Workspace publishes its `PersistedSession` to a Window collector**, which orders them by the Workspace store and writes the whole Window through one debounced writer the host installs at boot. **A Workspace with neither a published nor a boot-seeded session is dropped rather than written empty**, so a snapshot taken mid-boot cannot replace a restored Workspace with a blank one. **A Workspace's save compares against its own previous record** — seeded from disk until its Wall publishes — never the Window's active one, or a dead PTY's retained cwd and alert would come from the wrong Workspace. **Reordering, renaming, or switching the active Workspace writes too**: each changes the blob with no Session changing. **Always write `nameIsAuto`**; lacking it, only a `Workspace <n>` name is auto. **VS Code does not use it** — each webview persists one bare `PersistedSession`, its single Workspace, through its own per-surface state API (`docs/specs/vscode.md`).
 
 **Must publish both Workspace records in one synchronous step with the Surface move's ownership change**, unprobed and behind one Window write (`pagehide` included), fencing saves collected before or during the ownership change and retaining a departed Session's previous cwd/alert in the destination. Source of truth: `publishWorkspaceSessions` / `invalidateWorkspaceSaves` / `moveRetainedSurfaceRecord` in `lib/src/lib/window-session-aggregator.ts`; `serializeNow` / `doSave` in `lib/src/components/wall/use-session-persistence.ts`; `assemblePersistedSession` in `lib/src/lib/session-save.ts`.
 
@@ -263,7 +233,7 @@ Source of truth: `PersistedSession` in `lib/src/lib/session-types.ts`; `surfaceR
 
 ### What is persisted
 
-Structure only: panes (id, cwd, title, `untouched`, `surfaceType`, TODO/alert blob), doors and their Lath restore tokens, the Lath layout, and the Workspace's `dor` surface refs and delivery overrides. **Scrollback is never persisted by any writer**, and neither is the recovery command (above).
+**Must persist structure only, never scrollback or recovery commands.** The accepted shapes are `PersistedSession` / `PersistedWindow` in `lib/src/lib/session-types.ts`; their behavioral contracts are in Persisted session types.
 
 ### Retiring the transcripts already on disk
 

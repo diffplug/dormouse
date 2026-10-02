@@ -1161,7 +1161,7 @@ export class PocketClient {
 
   /**
    * Ping the relay socket while the page is visible, on the session core's
-   * visibility as keepalives run (`docs/specs/pocket-app.md`); a socket that
+   * visibility as keepalives run (`docs/specs/relay.md` → "Routing"); a socket that
    * stops answering is a drop, though no close arrived.
    */
   #startHeartbeat(ws: PocketSocket): void {

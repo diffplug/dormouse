@@ -15,22 +15,13 @@ Three consumers compose them: the website Pocket playground
 
 ## Core layout
 
-```text
-┌─────────────────────────┐
-│ Mobile session header    │ MobileWall, fixed/small
-├─────────────────────────┤
-│ Pane content             │ MobileWall, flexible terminal area
-├─────────────────────────┤
-│ Touch mode selector      │ always visible
-├─────────────────────────┤
-│ Input mode selector      │ always visible
-├─────────────────────────┤
-│ Reserve area             │ stable height
-│                         │
-│ Shows app keyboard UI    │ when OS keyboard hidden
-│ Occupied by OS keyboard  │ when OS keyboard visible
-└─────────────────────────┘
-```
+| Region, top to bottom | Owner / sizing |
+| --- | --- |
+| Session header | `MobileWall`, fixed height |
+| Pane content | `MobileWall`, flexible |
+| Touch selector | Always visible |
+| Input selector | Always visible |
+| Reserve | Fixed CSS height; app UI when the OS keyboard is hidden, occupied by the OS keyboard otherwise |
 
 Chrome rules:
 
@@ -78,11 +69,9 @@ short mode label (rationale).
 Default **Gestures**. **Mouse mode falls back to Gestures when the active pane
 stops capturing mouse events.**
 
-Touch mode is global, so **each mounted pane's mouse override is a pure function
-of that mode and the pane's *own* mouse-reporting state** (`selection` +
-reporting ≠ `none` → `permanent`, else `off`), recomputed for **every** pane,
-not just the active one — a pane switched away from must not keep a stale
-override. `lib` exports the function; the consumer owns the loop.
+**Must recompute `paneMouseOverride` for every mounted pane from the global
+touch mode and that pane's own reporting state**; a switched-away pane must
+not retain a stale override. The consumer owns the loop.
 
 Select mode **must route touch and pen drags through the shared terminal
 mouse-selection router**, never a mobile-only one, so every selection and copy
@@ -125,13 +114,10 @@ mode**, locking the drag's owner and Session at pointerdown until release or
 cancel. **Must accumulate vertical movement at 18 CSS pixels per line**; content
 follows the finger, with no radial-menu input or native-keyboard focus.
 
-**Must coast after a touch or pen flick**, retaining fractional-line travel and
-estimating release velocity from the last 100 ms of movement in its current
-direction. **Must include release-time pauses in that estimate and suppress
-momentum after an 80 ms hold, a stationary press, a mouse drag, or pointer
-cancellation.** **Must decay velocity by 0.998 per millisecond**, integrate
-elapsed frame time, cap launch speed at 3 CSS pixels/ms, and stop below
-0.05 CSS pixels/ms (rationale).
+**Must coast after a touch or pen flick**, retaining fractional-line travel;
+a held or stationary press, mouse drag, or pointer cancellation launches no
+momentum. The recent-direction velocity estimate, pause cutoff, launch cap,
+and elapsed-time decay live at `EdgeScrollMotion` (rationale).
 
 **Must send wheel events through xterm when the Session captures the mouse**,
 clamping the reported coordinates inside its terminal screen. **Must otherwise
@@ -163,7 +149,7 @@ The radii order `RADIUS_FADE_START` < `RADIUS_HIGHLIGHT` < `RADIUS_SELECT` <
 
 | Variable | Behavior |
 | --- | --- |
-| `RADIUS_LAYOUT` | Circular radius for exploded option anchors around the offset rose origin; diagonal ones use normalized compass vectors, so their x/y offsets are `RADIUS_LAYOUT * Math.SQRT1_2`. Root labels use packed square-keypad geometry instead ([Root layout](#root-layout)); the quit submenu uses its own tighter `QUIT_RADIUS`. |
+| `RADIUS_LAYOUT` | Circular radius for exploded option anchors around the offset rose origin, using normalized compass vectors. Root labels use packed square-keypad geometry instead ([Root layout](#root-layout)); the quit submenu uses its own tighter `QUIT_RADIUS`. |
 | `RADIUS_SELECT` | Visible circle around the offset rose origin; the mirrored drag reaching it selects the closest compass direction. |
 | `RADIUS_FADE_START` | No directional root-group fading before this drag distance. |
 | `RADIUS_HIGHLIGHT` | No circle drawn; the drag reaching it highlights the closest compass direction without selecting it. |
@@ -191,30 +177,14 @@ in `lib/src/components/MobileGestureRadialMenu.tsx`.
 
 ### Root layout
 
-Root labels are laid out as a square keypad, not on a circle (rationale). The
-four cardinal arrow chips share one `GAP_CARDINAL_RING` from the select circle
-edge. **Each diagonal group renders as three separate labels at `GAP_CLUSTER`,
-never one combined pill**: its first option is the cluster center, that option's
-inward corner aligned with the diagonal tick at the same ring gap, scaled to
-read as the same horizontal/vertical gap rather than a longer diagonal one.
-Diagonal center corners — SE aligns Enter's top-left, NE Backspace's
-bottom-left, SW Tab's top-right, NW Esc's bottom-right. NE and SE place their
-two secondaries right of the center option, one above and one below; NW and SW
-place theirs left.
+**Must pack root labels as a square keypad** (rationale). Cardinal chips share
+one gap from the select circle; **each diagonal group renders three separate
+labels, never one combined pill**, with its primary nearest the circle and its
+secondaries above and below its far side. Corner anchors and spacing live at
+`rootOptionLayout`; the key inventory lives at `MOBILE_GESTURE_GROUPS`.
 
-| Group | Center | Secondary (above) | Secondary (below) |
-| --- | --- | --- | --- |
-| NW | Esc | ⌃C\* | Quit\*\* |
-| N | ▲ | — | — |
-| NE | Backspace | Paste\* | n |
-| W | ◀ | — | — |
-| E | ▶ | — | — |
-| SW | Tab | ⬆︎Tab | Space |
-| S | ▼ | — | — |
-| SE | Enter | ⬆︎Enter | y |
-
-\* `⌃C` and `Paste` require an in-pane confirmation modal before they run.
-\*\* `Quit` opens a second exploded-option menu (`q` | `⌃X` | `:q↵`) instead of
+**Must confirm `⌃C` and `Paste` in an in-pane modal before running them.**
+**Must open a second exploded-option menu for `Quit`** instead of
 sending input, under the same reset-center, highlight, select, and
 expand-and-fade completion rules as normal option selection.
 

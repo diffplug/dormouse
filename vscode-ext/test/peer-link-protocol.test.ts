@@ -18,6 +18,42 @@ import {
 } from '../src/peer-link-protocol';
 
 describe('FrameDecoder', () => {
+  it('caps complete UTF-8 frames before parsing and preserves surrounding frames', () => {
+    const good = { kind: 'notify' } as const;
+    for (const data of ['x'.repeat(100), '\u00e9'.repeat(20)]) {
+      const encoded = encodeFrame({ kind: 'data', ptyId: 'p', data });
+      expect(Buffer.byteLength(encoded.slice(0, -1), 'utf8')).toBeGreaterThan(64);
+      const decoder = new FrameDecoder(64);
+      expect(decoder.push(encodeFrame(good) + encoded + encodeFrame(good))).toEqual([good, good]);
+    }
+  });
+
+  it('discards an oversized multibyte partial frame through its newline', () => {
+    const decoder = new FrameDecoder(64);
+    const encoded = encodeFrame({ kind: 'data', ptyId: 'p', data: '\u00e9'.repeat(20) });
+    expect(decoder.push(encoded.slice(0, -1))).toEqual([]);
+    expect(decoder.push('\n' + encodeFrame({ kind: 'notify' }))).toEqual([{ kind: 'notify' }]);
+  });
+
+  it('accepts exactly the UTF-8 byte cap and rejects one byte more', () => {
+    const frame = { kind: 'data', ptyId: 'p', data: '\u00e9'.repeat(20) } as const;
+    const encoded = encodeFrame(frame);
+    const cap = Buffer.byteLength(encoded.slice(0, -1), 'utf8');
+    expect(new FrameDecoder(cap).push(encoded)).toEqual([frame]);
+    expect(new FrameDecoder(cap - 1).push(encoded)).toEqual([]);
+  });
+
+  it('counts UTF-8 bytes across a frame delivered one character at a time', () => {
+    const frame = { kind: 'data', ptyId: 'p', data: '\u00e9'.repeat(20) } as const;
+    const encoded = encodeFrame(frame);
+    const cap = Buffer.byteLength(encoded.slice(0, -1), 'utf8');
+    const trickle = (decoder: FrameDecoder) => [...encoded].flatMap((ch) => decoder.push(ch));
+    expect(trickle(new FrameDecoder(cap))).toEqual([frame]);
+    const over = new FrameDecoder(cap - 1);
+    expect(trickle(over)).toEqual([]);
+    expect(over.push(encodeFrame({ kind: 'notify' }))).toEqual([{ kind: 'notify' }]);
+  });
+
   it('reads one frame per line', () => {
     const decoder = new FrameDecoder();
     const frames = decoder.push(

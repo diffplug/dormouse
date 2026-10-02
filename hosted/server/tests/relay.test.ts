@@ -765,6 +765,35 @@ test("restoring a setup token that has since expired never evicts a live one", a
   expect(after).toContain(digest(back));
 });
 
+test("a setup token that expires while its restore waits on the lock is not restored", async ({
+  onTestFinished,
+}) => {
+  const f = await fixture();
+  onTestFinished(f.close);
+  const owner = await f.account(ADMIN_EMAIL);
+  const laptop = await f.burrow(owner);
+  const live: string[] = [];
+  for (let i = 0; i < MAX_TOKENS_PER_BURROW; i++) live.push(digest(await f.setupToken(laptop.token)));
+  const expiresAt = new Date(Date.now() + 1000);
+  // Another write holds the Burrow's token lock across the restored token's expiry.
+  await withClient(f.url, async (holder) => {
+    await holder.query("BEGIN");
+    await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      `dormouse-relay:dormouse_relay_setup_tokens:${laptop.burrowId}`,
+    ]);
+    const restoring = withClient(f.url, (db) =>
+      restoreSetupToken(db, randomSecret(), { burrowId: laptop.burrowId, userId: owner, expiresAt }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, expiresAt.getTime() - Date.now() + 500));
+    await holder.query("COMMIT");
+    await restoring;
+  });
+  const hashes = (await f.sql<{ tokenHash: string }>(`SELECT "tokenHash" FROM dormouse_relay_setup_tokens`))
+    .map((row) => row.tokenHash)
+    .sort();
+  expect(hashes).toEqual([...live].sort());
+});
+
 test("a de-entitled account signs in to nothing, and its sessions answer as expired", async ({
   onTestFinished,
 }) => {

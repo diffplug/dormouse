@@ -1045,7 +1045,7 @@ test('resolveSpawnConfig injects bash integration for Git Bash despite its --log
 
   // The --login -i defaults are subsumed by the init-file script, which sources
   // the login profile itself.
-  const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+  const script = path.win32.join(integrationDir, 'bash', 'shellIntegration.bash');
   assert.deepEqual(config.shellArgs, ['--init-file', script]);
 });
 
@@ -1098,7 +1098,7 @@ test('resolveSpawnConfig injects pwsh integration via -NoExit -Command dot-sourc
     },
   );
 
-  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  const script = path.win32.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
   assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
 });
 
@@ -1119,7 +1119,7 @@ test('resolveSpawnConfig injects Windows PowerShell (powershell.exe) too', () =>
     },
   );
 
-  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  const script = path.win32.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
   assert.deepEqual(config.shellArgs, ['-NoExit', '-Command', `. '${script}'`]);
 });
 
@@ -1142,7 +1142,7 @@ test('resolveSpawnConfig merges integration into an interactive pwsh -Command (e
   );
 
   // The dev-shell command runs first, then our dot-source installs the prompt wrapper.
-  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  const script = path.win32.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
   assert.deepEqual(config.shellArgs, [
     '-NoExit',
     '-Command',
@@ -1165,7 +1165,7 @@ test('resolveSpawnConfig adds a -Command to an interactive pwsh launch that has 
     },
   );
 
-  const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+  const script = path.win32.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
   assert.deepEqual(config.shellArgs, ['-NoExit', '-NoLogo', '-Command', `. '${script}'`]);
 });
 

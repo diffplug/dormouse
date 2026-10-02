@@ -110,6 +110,13 @@ export function database<T>(
   return withClient(c.env.HYPERDRIVE.connectionString, action);
 }
 
+/**
+ * "Now" for a liveness check inside `locked`'s action: the statement's start,
+ * after the lock wait. Not `now()`, the transaction's start before that wait,
+ * so a row that expired while its writer waited would still read as live.
+ */
+export const LOCKED_NOW = "statement_timestamp()";
+
 /** Runs `action` in a transaction holding `key`'s advisory lock, so a cap check and its insert cannot interleave. */
 export async function locked<T>(db: Client, key: string, action: () => Promise<T>) {
   await db.query("BEGIN");

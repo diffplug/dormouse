@@ -200,6 +200,30 @@ describe('toPushText', () => {
   });
 });
 
+describe('push target preview', () => {
+  it('names only the newest subscribed records a bounded send can target', async () => {
+    const base = aclRecord(PHONE, 'base');
+    records = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 3 }, (_, i) => ({
+      ...base, deliveryId: id32(`preview-${i}-`), label: `phone ${i}`,
+    }));
+    subscribed = records.map((record) => record.deliveryId);
+    expect(new Set(subscribed).size).toBe(records.length);
+    const expected = records.slice(-MAX_PUSH_QUERY_DELIVERY_IDS);
+    expect(await loadPushDevices(deps())).toEqual(expected.map(({ label }) => ({ label })));
+    await sendPush(deps(), 'pty-1', 'terminal');
+    expect(lastRecipients()).toEqual(expected.map(({ deliveryId }) => deliveryId));
+  });
+
+  it('does not list an older subscription excluded before the Relay intersection', async () => {
+    const base = aclRecord(PHONE, 'base');
+    records = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 1 }, (_, i) => ({
+      ...base, deliveryId: id32(`preview-${i}-`), label: `phone ${i}`,
+    }));
+    subscribed = [records[0]!.deliveryId];
+    expect(await loadPushDevices(deps())).toEqual([]);
+  });
+});
+
 describe('sendPush', () => {
   it('sends the label sealed, tagged per Session', async () => {
     await sendPush(deps(), 'pty-1', 'terminal');
@@ -342,7 +366,7 @@ describe('sealed push', () => {
     // dead records accumulate.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const ids = Array.from({ length: MAX_PUSH_QUERY_DELIVERY_IDS + 3 }, (_, i) =>
-      id32(`delivery-${i}`),
+      id32(`delivery-${i}-`),
     );
     // Real statics, since `aclRecord` seals against whatever this map holds.
     for (const deliveryId of ids) clientStatics.set(deliveryId, await generateNoiseKeyPair());

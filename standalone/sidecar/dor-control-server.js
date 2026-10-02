@@ -262,7 +262,8 @@ function createDorControlServer({ socketPath, socketDir, token, send, timeoutMs 
       return;
     }
 
-    if (typeof request.requestId !== 'string' || typeof request.method !== 'string') {
+    if (!request || typeof request !== 'object' || Array.isArray(request)
+      || typeof request.requestId !== 'string' || typeof request.method !== 'string') {
       writeResponse(socket, { ok: false, error: 'invalid Dormouse control request' });
       return;
     }

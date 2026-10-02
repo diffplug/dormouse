@@ -41,10 +41,11 @@ Why deceptive links are gated twice. The modal omits its Open action and focuses
 Why the origin check is not an authenticity check. The iframe proxy serves the
 untrusted upstream on the same origin it grants the shim, so `e.origin` cannot
 tell a message the shim sent from one the page sent; what the check buys is that
-no *other* frame can send them at all. The four shim messages are bounded
-downstream instead — exiting passthrough, selecting a pane, an `http:`/`https:`
-only `browserSurfaceUrl` behind an open prompt, and a frame-URL reading that may
-lie. `use-wall-keyboard`'s leader channel accepts any live grant rather than one
+no *other* frame can send them at all. The shim's actions are bounded
+downstream — exiting passthrough, selecting a pane, an `http:`/`https:` URL
+behind an open prompt, a frame-URL reading that may lie, and read-only theme
+variables. Theme delivery additionally checks the actual iframe window;
+requesting it grants no host command. `use-wall-keyboard`'s leader channel accepts any live grant rather than one
 panel's, so a page in one browser pane can exit passthrough while another is
 focused. The nested-frame relay preserves this boundary: it accepts only the
 same proxy origin and reconstructs one of the three pane-level shapes, so

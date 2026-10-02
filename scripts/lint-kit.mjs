@@ -1,6 +1,6 @@
 /**
- * The plumbing `spec-lint`, `deploy-lint` and `e2e-lint` share with their
- * self-tests, and the script tests that execute shipped workflow blocks.
+ * The plumbing the repo's lints share with their self-tests, and the script
+ * tests that execute shipped workflow blocks.
  *
  * Rules and patterns stay in each lint — this is only the machinery around
  * them, factored out because the self-test contract is the part that must never
@@ -25,7 +25,6 @@ export const repoRoot = fileURLToPath(new URL('..', import.meta.url));
  * Line endings, normalized to `\n`. Patterns that span two adjacent lines see a
  * `\r` in front of every newline on a `core.autocrlf=true` checkout — which no
  * pattern spells, so every span rule would report a present control as missing.
- * Shared with the self-tests, which match and edit the same text.
  */
 export function normalizeEol(text) {
   return text.replace(/\r\n/g, '\n');

@@ -6,13 +6,6 @@ import type { SaveOptions } from '../../lib/session-save';
 import type { PreparedWorkspaceTransfer } from './workspace-transfer';
 import type { DorControlRequest } from './use-dor-control';
 
-/**
- * The imperative surface a mounted `<Wall>` exposes to code outside its React
- * tree: the strip, the window-level persistence owner, and the `dor` router
- * (`docs/specs/layout.md` → "Workspaces"). Every Wall registers one, a bare Wall
- * under `DEFAULT_WORKSPACE_ID`, so exactly one handle answers a `dor` request
- * even in the single-Workspace hosts.
- */
 export interface PreparedSurfaceMove {
   meta: LeafMeta;
   surfaceRef: string;
@@ -22,6 +15,13 @@ export interface PreparedSurfaceMove {
   depart(): () => void;
 }
 
+/**
+ * The imperative surface a mounted `<Wall>` exposes to code outside its React
+ * tree: the strip, the window-level persistence owner, and the `dor` router
+ * (`docs/specs/layout.md` → "Workspaces"). Every Wall registers one, a bare Wall
+ * under `DEFAULT_WORKSPACE_ID`, so exactly one handle answers a `dor` request
+ * even in the single-Workspace hosts.
+ */
 export interface WallHandle {
   canMoveSurfaces: boolean;
   prepareSurfaceMove(id: string): PreparedSurfaceMove;

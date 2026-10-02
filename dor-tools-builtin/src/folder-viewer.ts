@@ -169,8 +169,16 @@ export async function runFolderViewer(dir: string): Promise<string> {
  * page shows, rather than throwing into a 500. */
 export function oscOpen(write: (text: string) => void): FolderOpen {
   return async (path, preview) => {
-    if (!validToolOpenPath(path)) return { ok: false, error: `Cannot open ${JSON.stringify(path)} from a Tool` };
-    write(openSequence({ path, preview }));
+    let sequence: string;
+    try {
+      if (!validToolOpenPath(path)) throw new RangeError('invalid Tool open path');
+      sequence = openSequence({ path, preview });
+    } catch {
+      // A field can fit its own bound while JSON escaping exceeds the host's
+      // serialized payload cap. Report that refusal to the page without a write.
+      return { ok: false, error: `Cannot open ${JSON.stringify(path)} from a Tool` };
+    }
+    write(sequence);
     return { ok: true, status: 'sent' };
   };
 }

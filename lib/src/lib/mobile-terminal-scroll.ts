@@ -13,7 +13,15 @@ const RELEASE_PAUSE_MS = 80;
 const MIN_VELOCITY = 0.05; // CSS px/ms (also the stopping speed)
 const MAX_VELOCITY = 3;
 
-/** Pixel motion shared by the drag and its coast; xterm consumes whole lines. */
+/** Pixel motion shared by drag and coast; xterm consumes whole lines while
+ * fractional-line travel survives release. Estimate velocity over the last
+ * `VELOCITY_WINDOW_MS` (100 ms) of the current direction, resetting history
+ * on reversal or a held finger. Include release-time pauses in the estimate;
+ * `RELEASE_PAUSE_MS` (80 ms) suppresses momentum. Clamp launch speed to
+ * `MAX_VELOCITY` (3 CSS px/ms), decay by 0.998 per millisecond, integrate over
+ * elapsed frame time, and stop below `MIN_VELOCITY` (0.05 CSS px/ms).
+ * The caller alone decides whether the pointer type/release may coast.
+ */
 export class EdgeScrollMotion {
   private samples: Array<{ y: number; time: number }>;
   private remainder = 0;
