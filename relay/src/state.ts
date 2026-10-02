@@ -370,8 +370,8 @@ export class BurrowLimitReachedError extends Error {
 }
 
 /**
- * What {@link BurrowStore} read before the Host→Burrow rename. Every row held a
- * plaintext `burrowToken` — the `/ws/burrow` bearer for one machine — and
+ * What the v1.0–v1.1 `server/` Relay kept before the Host→Burrow rename. Every
+ * row held a plaintext `hostToken` — that Relay's `/ws/host` bearer for one machine — and
  * nothing reads the file any more, so it is deleted unread at boot rather than
  * left behind (`docs/specs/security-remote.md` → "Credentials at rest").
  *

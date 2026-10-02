@@ -13,7 +13,9 @@ PAT — do not use one.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/relay.md`,
-`docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `SELF_HOST.md`, and then
+`docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `docs/specs/one-time.md`
+("Link", "Wire contract", "Burrow runtime", "Phone client"),
+`docs/specs/remote-network.md` ("Local networks", "Anywhere"), `SELF_HOST.md`, and then
 the code they point at — `remote-lib-common/src/security/`, `relay/src/`,
 `lib/src/remote/`, `lib/src/host/remote/`, `vscode-ext/src/burrow*.ts`,
 `scripts/relay-origin.mjs`, and all three installers —
