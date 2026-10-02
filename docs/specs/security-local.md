@@ -203,8 +203,8 @@ buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record"
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
 (`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
-`recovery.json` under the extension's storage directory, owner-only and
-temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
+`recovery.json` in extension storage, mode `0600` on Unix
+and temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
 unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The VS Code peer-link token is a local credential at rest** —
