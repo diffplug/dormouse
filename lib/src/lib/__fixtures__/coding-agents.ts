@@ -12,6 +12,11 @@ export const AGENT_EXIT_FIXTURES = [
     command: 'codex resume 22222222-2222-4222-8222-222222222222',
   },
   {
+    agent: 'Pi', version: 'not recorded (supplied exit excerpt)', os: 'macOS',
+    output: '~\r\n?16k ?996 R30k CH98.0% $0.044 (sub) 5.9%/272k (auto)             (openai) gpt-6.1-sol � medium To resume this session: pi --session 77777777-7777-7777-8777-777777777777 user@machine ~ % ',
+    command: 'pi --session 77777777-7777-7777-8777-777777777777',
+  },
+  {
     agent: 'GitHub Copilot', version: '1.0.88', os: 'macOS',
     output: '  Changes    +0 -0\r\n  AI Credits 0.56 (21s)\r\n  Resume     copilot --resume=33333333-3333-4333-8333-333333333333\r\n',
     command: 'copilot --resume 33333333-3333-4333-8333-333333333333',
