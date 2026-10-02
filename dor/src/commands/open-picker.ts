@@ -284,7 +284,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       return `${SGR.bold}${clip(head, columns)}${SGR.reset}${dim(clip(rest, columns - displayWidth(head)))}`;
     };
 
-    const hints = () => ['↑↓ select', ...(handlerList().length > 1 ? ['⇥ handler'] : []), '⏎ open', 'esc cancel'];
+    const hints = () => ['Select [↑↓]', 'Open [Enter]', ...(handlerList().length > 1 ? ['Handler [Tab]'] : [])];
 
     terminal.write(ENTER_SCREEN);
     const stop = terminal.listen(onInput, () => { if (!done) render(); });
