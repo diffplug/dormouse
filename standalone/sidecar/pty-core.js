@@ -753,7 +753,9 @@ async function getDescendantPids(rootPid, runtime = {}) {
   return [rootPid];
 }
 
-/** Every `[pid, ppid]` pair on this platform, or null when the scan fails or the platform is unknown. */
+/** Every `[pid, ppid]` pair on this platform — `[pid, ppid, name]` on Windows,
+ *  where the same query names each process — or null when the scan fails or
+ *  the platform is unknown. */
 async function readProcessTable(runtime) {
   const platform = runtime.platform || process.platform;
   const fsModule = runtime.fsModule || fs;
@@ -780,11 +782,11 @@ async function readProcessTable(runtime) {
 
     if (platform === 'win32') {
       const rows = await runPowerShellJson(
-        'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress',
+        'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress',
         runtime,
       );
       return rows
-        .map((r) => [Number(r.ProcessId), Number(r.ParentProcessId)])
+        .map((r) => [Number(r.ProcessId), Number(r.ParentProcessId), r.Name == null ? undefined : String(r.Name)])
         .filter(([pid, ppid]) => Number.isInteger(pid) && Number.isInteger(ppid));
     }
   } catch {
@@ -1082,7 +1084,9 @@ async function windowsListeningPorts(pids, runtime = {}) {
   }
   if (!ports.length) return ports;
 
-  // Names are best-effort: exhaustion here must still return the ports.
+  // Names are best-effort: exhaustion here must still return the ports. A
+  // process table read just before already named every pid; reuse it.
+  if (runtime.processNames) return ports.map((port) => ({ ...port, processName: runtime.processNames.get(port.pid) }));
   const nameByPid = new Map();
   try {
     const rows = await runPowerShellJson(
@@ -1140,7 +1144,14 @@ async function getOpenPortsForPids(rootPids, runtime = {}) {
   // The socket scan's budget scales with the request (`budgetCount` when
   // coalesced requests share this scan); the process-table read above does
   // not, its cost being the whole table either way.
-  const ports = await getListeningPortsForPids([...union], { ...runtime, scanTimeoutMs: openPortScanTimeoutMs(runtime.budgetCount ?? roots.length) });
+  const processNames = pairs?.some((row) => row[2] !== undefined)
+    ? new Map(pairs.map(([pid, , name]) => [pid, name]))
+    : undefined;
+  const ports = await getListeningPortsForPids([...union], {
+    ...runtime,
+    scanTimeoutMs: openPortScanTimeoutMs(runtime.budgetCount ?? roots.length),
+    processNames,
+  });
   for (const [root, pids] of owned) {
     byRoot.set(root, dedupeListeningPorts(ports.filter((entry) => pids.has(entry.pid))));
   }

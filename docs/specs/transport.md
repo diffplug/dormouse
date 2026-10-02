@@ -328,8 +328,9 @@ VS Code's child request uses one hop; its webview request uses two. Tauri's
 sidecar request uses one. **Must share the Windows socket-scan allowance across
 `Get-NetTCPConnection`, its `netstat` fallback, then optional name lookup**,
 reducing each subprocess timeout by elapsed time and starting none after
-exhaustion. **Must return enumerated ports even when optional name lookup
-times out.** Pinned by
+exhaustion. **Must take Windows names from a successful process-table read**,
+skipping the lookup (rationale). **Must return enumerated ports even when
+optional name lookup times out.** Pinned by
 the Windows budget tests in `standalone/sidecar/pty-core.test.js` and by the port-deadline tests in
 `lib/src/lib/platform/vscode-adapter.test.ts`, `vscode-ext/test/pty-manager.test.ts`,
 and `lib/src/lib/mirrored-constants.test.ts`.

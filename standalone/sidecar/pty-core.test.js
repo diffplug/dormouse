@@ -1727,12 +1727,10 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
     const script = args.at(-1);
     if (script.includes('ParentProcessId')) {
       now += OPEN_PORT_TIMEOUT_MS;
-      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1 }]);
+      return JSON.stringify([{ ProcessId: 4242, ParentProcessId: 1, Name: 'node.exe' }]);
     }
-    if (script.includes('Win32_Process')) {
-      now += options.timeout;
-      return JSON.stringify([{ ProcessId: 4242, Name: 'node.exe' }]);
-    }
+    // The process table above already named every pid.
+    if (script.includes('Win32_Process')) assert.fail('second process query');
     if (script.includes('Get-NetTCPConnection')) {
       now += 1000;
       throw new Error('cmdlet failed');
@@ -1743,8 +1741,8 @@ test('Windows port subprocesses share the socket budget, including netstat fallb
   };
   const result = await getOpenPortsForPids([4242], { platform: 'win32', execFile, now: () => now });
   const budget = openPortScanTimeoutMs(1);
-  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000, budget - 1500]);
-  assert.equal(now, OPEN_PORT_TIMEOUT_MS + budget);
+  assert.deepEqual(timeouts, [OPEN_PORT_TIMEOUT_MS, budget, budget - 1000]);
+  assert.equal(now, OPEN_PORT_TIMEOUT_MS + 1500);
   assert.equal(result.get(4242)[0].processName, 'node.exe');
 });
 
