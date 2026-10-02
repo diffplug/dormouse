@@ -76,11 +76,11 @@ export type ToolControlMethod = (typeof TOOL_CONTROL_METHODS)[keyof typeof TOOL_
  * a typed command line, so it resolves these as the CLI does
  * (`docs/specs/dor-tool.md` -> Take-over).
  */
-export const DOR_VERB_ALIASES = { o: 'open' } as const;
+const DOR_VERB_ALIASES: Readonly<Record<string, string>> = { o: 'open' };
 
 /** The verb a typed `dor` command line names, its alias resolved. */
-export function canonicalDorVerb(verb: string | undefined): string | undefined {
-  return verb !== undefined && Object.hasOwn(DOR_VERB_ALIASES, verb) ? DOR_VERB_ALIASES[verb as keyof typeof DOR_VERB_ALIASES] : verb;
+export function canonicalDorVerb(verb: string): string {
+  return Object.hasOwn(DOR_VERB_ALIASES, verb) ? DOR_VERB_ALIASES[verb] : verb;
 }
 
 /** Every method the control channel carries. */

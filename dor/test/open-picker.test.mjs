@@ -9,11 +9,11 @@ import { parseKeys } from '../dist/commands/open-picker.js';
 
 test('ranking prefers basename and boundary matches, then shorter paths', () => {
   const files = ['lib/src/host/tool-open.test.ts', 'docs/topen.md', 'lib/src/host/tool-open.ts', 'tools/open/x.ts'];
-  assert.deepEqual(rankMatches('toolopen', files).results.map(r => r.item).slice(0, 2), ['lib/src/host/tool-open.ts', 'lib/src/host/tool-open.test.ts']);
-  assert.deepEqual(rankMatches('readme', ['docs/README.md', 'README.md', 'src/read/me.ts']).results[0].item, 'README.md');
+  assert.deepEqual(rankMatches('toolopen', files).results.slice(0, 2), ['lib/src/host/tool-open.ts', 'lib/src/host/tool-open.test.ts']);
+  assert.deepEqual(rankMatches('readme', ['docs/README.md', 'README.md', 'src/read/me.ts']).results[0], 'README.md');
   // Every term must match; matched keeps input order for narrowing.
   assert.deepEqual(rankMatches('host test', files).matched, ['lib/src/host/tool-open.test.ts']);
-  assert.deepEqual(rankMatches('', files).results.map(r => r.item), files);
+  assert.deepEqual(rankMatches('', files).results, files);
 });
 
 test('matching is smart-case and reports matched indices', () => {
@@ -29,9 +29,9 @@ test('parseKeys decodes keys, mouse, paste, and a lone escape', () => {
     { kind: 'text', text: 'ab' }, { kind: 'up' }, { kind: 'down' }, { kind: 'nextHandler' }, { kind: 'previousHandler' }, { kind: 'enter' },
   ]);
   assert.deepEqual(parseKeys('\x1b[<0;5;3M\x1b[<0;5;3m\x1b[<64;1;1M\x1b[<65;1;1M'), [
-    { kind: 'click', row: 2, column: 4 }, { kind: 'wheelUp' }, { kind: 'wheelDown' },
+    { kind: 'click', row: 2, column: 4 }, { kind: 'up' }, { kind: 'down' },
   ]);
-  assert.deepEqual(parseKeys('\x1b[200~a\nb\x1b\x1b[201~'), [{ kind: 'paste', text: 'a b' }]);
+  assert.deepEqual(parseKeys('\x1b[200~a\nb\x1b\x1b[201~'), [{ kind: 'text', text: 'a b' }]);
   assert.deepEqual(parseKeys('\x1b'), [{ kind: 'cancel' }]);
   assert.deepEqual(parseKeys('\x1b[5~\x1b[6~\x7f\x15\x17'), [
     { kind: 'pageUp' }, { kind: 'pageDown' }, { kind: 'backspace' }, { kind: 'clear' }, { kind: 'word' },

@@ -189,14 +189,14 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 A folder viewer is any Tool that selects on single-click and activates on double-click through the [Preview slot](#preview-slot) invocations. `builtin:folder`, the default, belongs to `docs/specs/dor-tools-builtin.md` → Folder viewer.
 
-Source of truth: `FOLDER_MATCH_SUFFIX` / `builtinFor` in `dor-tools-builtin/src/file-viewer-format.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseOpenRules` in `lib/src/host/tool-registry.ts`. Tests: `folders` in `lib/src/host/tool-open.test.ts`, `folder rules and preview handlers` in `lib/src/host/tool-registry.test.ts`, `a folder in the slot` in `lib/src/components/wall/preview-slot.test.tsx`.
+Source of truth: `FOLDER_MATCH_SUFFIX` / `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseOpenRules` in `lib/src/host/tool-registry.ts`. Tests: `folders` in `lib/src/host/tool-open.test.ts`, `folder rules and preview handlers` in `lib/src/host/tool-registry.test.ts`, `a folder in the slot` in `lib/src/components/wall/preview-slot.test.tsx`.
 
 ## Choosing a file
 
 **Must open a fuzzy file picker for `dor open` with no path when stdin and stdout are TTYs**, else fail asking for a path. The chosen file opens as `dor open <file>` with the invocation's flags; a cancel prints nothing and exits 1. Generated help owns the keys.
 
 - **Must list the files under the resolved CWD**: inside a git work tree, tracked plus untracked less ignored and deleted; otherwise a breadth-first walk skipping dot-entries and `node_modules`; at most 200,000.
-- **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects (both read `matchingOpenRules`), then later matching rules' `tool` and `preview`, then each built-in supporting it — each once, with what it runs and what offers it.
+- **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects (both read `openCandidates`), then later matching rules' `tool` and `preview`, then each built-in supporting it — each once, with what it runs and what offers it.
 - **Must open the first without `--tool` and any other as `--tool <name>`.** `--tool` fixes the handler and skips the read; a host refusing the read leaves the default openable.
 - **Must show the handlers beside the list from 100 columns, else on one status line.**
 

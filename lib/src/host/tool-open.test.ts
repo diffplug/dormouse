@@ -75,7 +75,7 @@ it.each(['explicit', 'association'] as const)('explains unsupported formats when
   if (selection === 'association') await writeConfig('open:\n  - {match: "*.binary", tool: "builtin:file"}\n');
   else await rm(config);
   expect(await host().handle({ op: 'open', target, cwd: root, ...(selection === 'explicit' ? { tool: 'builtin:file' } : {}) })).toEqual({
-    status: 'error', message: `the built-in viewer does not support 'unknown.binary'; add an open rule to ${config} naming a user Tool`,
+    status: 'error', message: `builtin:file does not support 'unknown.binary'; add an open rule to ${config} naming a user Tool`,
   });
 });
 
@@ -178,7 +178,7 @@ describe('builtin:code', () => {
     const image = join(root, 'a.png');
     await writeFile(image, 'png');
     expect(await host().handle({ op: 'open', target: image, cwd: root, tool: 'builtin:code' }))
-      .toMatchObject({ status: 'error', message: expect.stringContaining("opens only text, not 'a.png'") });
+      .toMatchObject({ status: 'error', message: expect.stringContaining("builtin:code does not support 'a.png'") });
     expect(await host().handle({ op: 'open', target: 'docs', cwd: root, tool: 'builtin:code' }))
       .toEqual({ status: 'error', message: "builtin:code cannot open the folder 'docs'; use builtin:folder" });
   });
@@ -207,7 +207,7 @@ open:
 `);
     const target = join(root, 'docs', 'README.md');
     expect(await handlers('docs/README.md')).toEqual({
-      target, directory: false, config, warnings: [],
+      config,
       handlers: [
         { tool: 'special', description: 'special $TARGET', reason: "open rule 1, 'docs/README.md'" },
         { tool: 'markdown', description: 'markdown --watch $TARGET', reason: "open rule 3, '**/*.md'" },

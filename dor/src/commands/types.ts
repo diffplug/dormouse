@@ -377,14 +377,10 @@ export interface OpenHandler {
 }
 
 export interface OpenHandlersResponse {
-  /** The canonical absolute path. */
-  target: string;
-  directory: boolean;
   /** The first is what `dor open` selects; empty when nothing opens it. */
   handlers: OpenHandler[];
   /** The user `dormouse.yml` the rules come from, whether or not it exists. */
   config: string;
-  warnings: string[];
 }
 
 export interface SendSurfaceRequest extends WorkspaceScopedRequest {

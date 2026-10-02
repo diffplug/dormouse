@@ -5,9 +5,9 @@
  */
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { spawnAndCapture } from 'dor-lib-common';
+import { resolveBinaryPath, spawnAndCapture } from 'dor-lib-common';
 
-export const FILE_LIST_LIMIT = 200_000;
+const FILE_LIST_LIMIT = 200_000;
 const GIT_TIMEOUT_MS = 15_000;
 const SKIPPED_DIRECTORIES = new Set(['node_modules']);
 
@@ -28,7 +28,12 @@ const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /** Tracked and untracked-but-not-ignored files, less deleted ones. Null
  *  outside a work tree or without git. */
 async function gitFiles(cwd: string): Promise<FileList | null> {
-  const run = (args: string[]) => spawnAndCapture('git', ['ls-files', '-z', ...args], {
+  // PATH-resolved, never the bare name, which Windows also searches for in the
+  // cwd (docs/specs/dor-cli.md -> "Spawning External Binaries"); reading the
+  // index runs `core.fsmonitor`, which the listed repo's own config may name.
+  const git = resolveBinaryPath('git', process.env);
+  if (!git) return null;
+  const run = (args: string[]) => spawnAndCapture(git, ['-c', 'core.fsmonitor=false', 'ls-files', '-z', ...args], {
     cwd, timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 256 * 1024 * 1024,
   });
   const [listed, deleted] = await Promise.all([run(['--cached', '--others', '--exclude-standard']), run(['--deleted'])]);

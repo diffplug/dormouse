@@ -2,7 +2,7 @@ import { realpath, type FileHandle } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { stateSequence } from 'dor-tools-lib/osc';
-import { codeViewerFormat, fileViewerFormat } from './file-viewer-format.js';
+import { fileViewerFormat, type FileFormat } from './file-viewer-format.js';
 import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 import { editorPage, markdownPage } from './editor-page.js';
 import { IMAGE_LIMIT, openImage, renameImage, writePastedImage } from './markdown-images.js';
@@ -88,10 +88,11 @@ async function stream(req: IncomingMessage, res: ServerResponse, resource: Resou
 
 /** One Tool process owns one file grant and its file descriptors. Restarting
  * creates a fresh capability; only the file argument is persisted by Dormouse. */
-export async function startFileViewer(input: string, { onDirty = () => {}, code = false }: { onDirty?: (dirty: boolean) => void; code?: boolean } = {}): Promise<{ port: number; path: string; target: string; close(): Promise<void> }> {
+/** `formatOf` is the handler's (`BuiltinHandler.format`): `builtin:code`'s
+ * serves every textual format as source. */
+export async function startFileViewer(input: string, { onDirty = () => {}, formatOf = fileViewerFormat }: { onDirty?: (dirty: boolean) => void; formatOf?: (path: string) => FileFormat | null } = {}): Promise<{ port: number; path: string; target: string; close(): Promise<void> }> {
   const target = await realpath(input);
-  // `builtin:code` edits every textual format as source in Monaco.
-  const format: ReturnType<typeof fileViewerFormat> = code ? codeViewerFormat(target) : fileViewerFormat(target);
+  const format = formatOf(target);
   if (!format) throw new Error('unsupported file format; configure a user Tool association');
   // Source reaches Monaco as inert JSON; none of its references load.
   const inspectDependencies = !format.text;
@@ -202,9 +203,9 @@ export async function startFileViewer(input: string, { onDirty = () => {}, code 
   } catch (error) { await closeFiles(); throw error; }
 }
 
-/** The `dor __view-file <file>` entry (`__view-code` sets `code`): starts the viewer, which outlives the
+/** The `dor __view-file <file>` entry, and `__view-code`'s: starts the viewer, which outlives the
  * call, and returns its title and OSC 367 announcement for the caller to print. */
-export async function runFileViewer(file: string, { code = false }: { code?: boolean } = {}): Promise<string> {
-  const viewer = await startFileViewer(file, { code, onDirty: dirty => { process.stdout.write(stateSequence({ dirty })); } });
+export async function runFileViewer(file: string, formatOf: (path: string) => FileFormat | null): Promise<string> {
+  const viewer = await startFileViewer(file, { formatOf, onDirty: dirty => { process.stdout.write(stateSequence({ dirty })); } });
   return announceViewer(viewer, viewer.target);
 }

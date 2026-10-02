@@ -20,78 +20,38 @@ const CONSECUTIVE = 6;
 /** A term matching wholly inside the basename outranks one spread over directories. */
 const BASENAME = 12;
 
-/**
- * Whitespace-separated terms must each match; an all-lowercase term matches
- * case-insensitively, any uppercase makes it exact (smart case). An empty
- * query matches everything with score 0.
- */
+/** A query's whitespace-separated terms: an all-lowercase term matches
+ *  case-insensitively, any uppercase makes it exact (smart case). */
+interface Term { text: string; fold: boolean }
+
+function compile(query: string): Term[] {
+  return query.split(/\s+/).filter(Boolean).map(text => ({ text, fold: text === text.toLowerCase() }));
+}
+
+/** Every term must match; an empty query matches everything with score 0. */
 export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
-  const terms = query.split(/\s+/).filter(Boolean);
-  let score = 0;
-  const positions = new Set<number>();
-  for (const term of terms) {
-    const match = matchTerm(term, text);
-    if (!match) return null;
-    score += match.score;
-    for (const position of match.positions) positions.add(position);
-  }
-  return { score, positions: [...positions].sort((a, b) => a - b) };
+  return matchTerms(compile(query), text, []);
 }
 
-function matchTerm(term: string, text: string): FuzzyMatch | null {
-  const fold = term === term.toLowerCase();
-  const haystack = fold ? foldCase(text) : text;
-  const whole = matchRange(term, haystack, text, 0);
-  if (!whole) return null;
+/** The score, filling `positions` when given; null when a term misses. */
+function matchTerms(terms: readonly Term[], text: string, positions: number[] | null): FuzzyMatch | null {
+  const folded = terms.some(term => term.fold) ? foldCase(text) : text;
   const base = text.lastIndexOf('/') + 1;
-  const inBase = base > 0 ? matchRange(term, haystack, text, base) : null;
-  if (inBase && inBase.score + BASENAME > whole.score) return { score: inBase.score + BASENAME, positions: inBase.positions };
-  return base === 0 ? { score: whole.score + BASENAME, positions: whole.positions } : whole;
-}
-
-/** The tightest window in `haystack[from..]` holding `term` as a subsequence. */
-function matchRange(term: string, haystack: string, text: string, from: number): FuzzyMatch | null {
-  let t = 0;
-  let end = -1;
-  for (let i = from; i < haystack.length; i++) {
-    if (haystack[i] === term[t] && ++t === term.length) { end = i; break; }
-  }
-  if (end < 0) return null;
-  // Walk back from the end so the window starts as late as it can.
-  let start = end;
-  for (let i = end, k = term.length - 1; i >= from; i--) {
-    if (haystack[i] === term[k]) { start = i; if (--k < 0) break; }
-  }
-  const positions: number[] = [];
   let score = 0;
-  let previous = -2;
-  let runBonus = 0;
-  for (let i = start, k = 0; i <= end && k < term.length; i++) {
-    if (haystack[i] !== term[k]) continue;
-    const bonus = boundaryBonus(text, i);
-    if (previous === i - 1) {
-      runBonus = Math.max(runBonus, bonus, CONSECUTIVE);
-      score += MATCH + runBonus;
-    } else {
-      if (previous >= 0) score += GAP_START + GAP_EXTENSION * (i - previous - 2);
-      runBonus = bonus;
-      score += MATCH + bonus;
-    }
-    positions.push(i);
-    previous = i;
-    k++;
+  for (const term of terms) {
+    const haystack = term.fold ? folded : text;
+    const whole = matchRange(term.text, haystack, text, 0, positions && []);
+    if (!whole) return null;
+    const inBase = base > 0 ? matchRange(term.text, haystack, text, base, positions && []) : null;
+    const best = inBase && inBase.score + BASENAME > whole.score ? inBase : whole;
+    score += best.score + (best === inBase || base === 0 ? BASENAME : 0);
+    if (positions) positions.push(...best.positions);
   }
-  return { score, positions };
-}
-
-function boundaryBonus(text: string, i: number): number {
-  if (i === 0) return BOUNDARY_PATH;
-  const before = text[i - 1];
-  if (before === '/' || before === '\\') return BOUNDARY_PATH;
-  if (before === '_' || before === '-' || before === '.' || before === ' ') return BOUNDARY_WORD;
-  const current = text[i];
-  if (/[a-z0-9]/.test(before) && /[A-Z]/.test(current)) return BOUNDARY_CAMEL;
-  return 0;
+  if (positions && terms.length > 1) {
+    const unique = [...new Set(positions)].sort((a, b) => a - b);
+    positions.splice(0, positions.length, ...unique);
+  }
+  return { score, positions: positions ?? [] };
 }
 
 /** Lowercase with indices unchanged: a character whose lowercase is longer
@@ -107,22 +67,69 @@ function foldCase(text: string): string {
   return out;
 }
 
+/** The tightest window in `haystack[from..]` holding `term` as a subsequence. */
+function matchRange(term: string, haystack: string, text: string, from: number, positions: number[] | null): FuzzyMatch | null {
+  let t = 0;
+  let end = -1;
+  for (let i = from; i < haystack.length; i++) {
+    if (haystack[i] === term[t] && ++t === term.length) { end = i; break; }
+  }
+  if (end < 0) return null;
+  // Walk back from the end so the window starts as late as it can.
+  let start = end;
+  for (let i = end, k = term.length - 1; i >= from; i--) {
+    if (haystack[i] === term[k]) { start = i; if (--k < 0) break; }
+  }
+  let score = 0;
+  let previous = -2;
+  let runBonus = 0;
+  for (let i = start, k = 0; i <= end && k < term.length; i++) {
+    if (haystack[i] !== term[k]) continue;
+    const bonus = boundaryBonus(text, i);
+    if (previous === i - 1) {
+      runBonus = Math.max(runBonus, bonus, CONSECUTIVE);
+      score += MATCH + runBonus;
+    } else {
+      if (previous >= 0) score += GAP_START + GAP_EXTENSION * (i - previous - 2);
+      runBonus = bonus;
+      score += MATCH + bonus;
+    }
+    positions?.push(i);
+    previous = i;
+    k++;
+  }
+  return { score, positions: positions ?? [] };
+}
+
+const isLower = (code: number) => (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
+const isUpper = (code: number) => code >= 65 && code <= 90;
+
+function boundaryBonus(text: string, i: number): number {
+  if (i === 0) return BOUNDARY_PATH;
+  const before = text.charCodeAt(i - 1);
+  if (before === 47 /* / */ || before === 92 /* \ */) return BOUNDARY_PATH;
+  if (before === 95 /* _ */ || before === 45 /* - */ || before === 46 /* . */ || before === 32) return BOUNDARY_WORD;
+  return isLower(before) && isUpper(text.charCodeAt(i)) ? BOUNDARY_CAMEL : 0;
+}
+
 export interface Ranked {
   /** Best first; ties prefer the shorter path, then the earlier item. */
-  results: { item: string; positions: number[] }[];
+  results: string[];
   /** The same items in input order, which a longer query only narrows. */
   matched: string[];
 }
 
-/** Every item matching `query`. An empty query keeps the input order. */
+/** Every item matching `query`. An empty query keeps the input order. Scores
+ *  only: a row's positions come from `fuzzyMatch` when it is drawn. */
 export function rankMatches(query: string, items: readonly string[]): Ranked {
-  if (!query.trim()) return { results: items.map(item => ({ item, positions: [] })), matched: [...items] };
-  const ranked: { item: string; positions: number[]; score: number; index: number }[] = [];
+  const terms = compile(query);
+  if (terms.length === 0) return { results: [...items], matched: [...items] };
+  const ranked: { item: string; score: number; index: number }[] = [];
   items.forEach((item, index) => {
-    const match = fuzzyMatch(query, item);
-    if (match) ranked.push({ item, positions: match.positions, score: match.score, index });
+    const match = matchTerms(terms, item, null);
+    if (match) ranked.push({ item, score: match.score, index });
   });
   const matched = ranked.map(entry => entry.item);
   ranked.sort((a, b) => b.score - a.score || a.item.length - b.item.length || a.index - b.index);
-  return { results: ranked.map(({ item, positions }) => ({ item, positions })), matched };
+  return { results: ranked.map(entry => entry.item), matched };
 }

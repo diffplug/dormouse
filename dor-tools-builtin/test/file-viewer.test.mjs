@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { request } from 'node:http';
 import { afterEach, beforeEach, test } from 'node:test';
 import { startFileViewer } from '../dist/file-viewer.js';
-import { builtinFileAlternative, codeViewerFormat, describeBuiltin, fileViewerFormat, viewerTitle } from '../dist/file-viewer-format.js';
+import { builtinHandler, fileViewerFormat, viewerTitle } from '../dist/file-viewer-format.js';
 
 let root;
 const viewers = [];
@@ -65,11 +65,13 @@ test('editor saves require same-origin POST and a matching revision, and serve o
   assert.equal((await post(html, 'save', data)).status, 403);
 });
 
+const code = builtinHandler('tool', 'builtin:code');
+
 test('builtin:code opens Markdown, HTML, and SVG as source in Monaco, and refuses binary formats', async () => {
   for (const [name, text] of [['doc.md', '# hi'], ['page.html', '<script>bad()</script>'], ['icon.svg', '<svg/>']]) {
     const file = join(root, name);
     await writeFile(file, text);
-    const viewer = await startFileViewer(file, { code: true });
+    const viewer = await startFileViewer(file, { formatOf: code.format });
     viewers.push(viewer);
     const page = await get(viewer);
     assert.match(page.body, /assets\/editor\.js/);
@@ -79,14 +81,13 @@ test('builtin:code opens Markdown, HTML, and SVG as source in Monaco, and refuse
     assert.equal((await get(viewer, viewer.path.replace(/view$/, 'images/a.png'))).status, 404);
   }
   await writeFile(join(root, 'a.png'), 'png');
-  await assert.rejects(startFileViewer(join(root, 'a.png'), { code: true }), /unsupported/);
+  await assert.rejects(startFileViewer(join(root, 'a.png'), { formatOf: code.format }), /unsupported/);
 });
 
 test('builtin:code is an alternative only where it differs from builtin:file', () => {
-  assert.deepEqual(['a.md', 'a.html', 'a.svg', 'a.ts', 'a.png', 'a.pdf'].map(builtinFileAlternative),
-    ['builtin:code', 'builtin:code', 'builtin:code', null, null, null]);
-  assert.equal(codeViewerFormat('a.png'), null);
-  assert.deepEqual(['a.md', 'a.ts', 'a.html', 'a.png', 'a.mp4'].map(name => describeBuiltin('builtin:file', name)),
+  assert.deepEqual(['a.md', 'a.html', 'a.svg', 'a.ts', 'a.png', 'a.pdf'].map(code.offered), [true, true, true, false, false, false]);
+  assert.equal(code.format('a.png'), null);
+  assert.deepEqual(['a.md', 'a.ts', 'a.html', 'a.png', 'a.mp4'].map(builtinHandler('tool', 'builtin:file').describe),
     ['Markdown editor', 'code editor', 'HTML preview', 'image viewer', 'media player']);
 });
 

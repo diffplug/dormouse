@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { buildCommand } from '@stricli/core';
 import type { Command, DorCommandContext, WorkspaceScopedFlags } from './types.js';
-import { callerWorkingDirectory, errorMessage, printable, requireControlClient, stringParser, workspaceFlag, workspaceParam } from './shared.js';
+import { callerWorkingDirectory, requireControlClient, stringParser, workspaceFlag, workspaceParam } from './shared.js';
 import { listFiles } from './file-list.js';
 import { runFilePicker } from './open-picker.js';
 import { dispatchToolSurface, TOOL_TIMEOUT_MS } from './tool.js';
@@ -95,9 +95,8 @@ async function pickFile(context: DorCommandContext, cwd: string, flags: OpenFlag
   return runFilePicker({
     terminal,
     files: listFiles(cwd),
-    handlers: file => client.openHandlers({ target: file, cwd, ...(flags.preview ? { preview: true } : {}) })
-      .catch((error: unknown) => { throw new Error(printable(errorMessage(error))); }),
-    ...(flags.tool !== undefined ? { fixedTool: flags.tool } : {}),
+    handlers: file => client.openHandlers({ target: file, cwd, ...(flags.preview ? { preview: true } : {}) }),
+    fixedTool: flags.tool,
     home: context.options.env?.HOME ?? homedir(),
   });
 }

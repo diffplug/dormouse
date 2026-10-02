@@ -13,7 +13,7 @@
 - `dor-tools-builtin/src/folder-viewer.ts` — `builtin:folder`: listings, select, and activate.
 - `dor-tools-builtin/src/error-viewer.ts` — the page a failed OSC 367 `open` shows in the preview slot.
 - `dor-tools-builtin/src/viewer-server.ts` — the capability listener and announcement both viewers share.
-- `dor-tools-builtin/src/file-viewer-format.ts` — the pure format registry, handler names, and title.
+- `dor-tools-builtin/src/file-viewer-format.ts` — the pure format registry, the `BUILTIN_HANDLERS` table, and title.
 - `dor/src/cli.ts` — the private `__view-file` / `__view-code` / `__view-folder` / `__view-error` entries.
 
 ## Packaging
@@ -73,7 +73,7 @@ Source of truth: `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format
 - **Must refuse binary formats and folders**, and key apart from `builtin:file` (`name: code`).
 - **Must be offered as an alternative only where its page differs from `builtin:file`'s**: Markdown, HTML, SVG.
 
-Source of truth: `BUILTIN_CODE_TOOL` / `codeViewerFormat` / `builtinFileAlternative` in `dor-tools-builtin/src/file-viewer-format.ts`; `startFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`. Tests: `builtin:code` cases in `dor-tools-builtin/test/file-viewer.test.mjs` and `lib/src/host/tool-open.test.ts`.
+Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format.ts`; `startFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`. Tests: `builtin:code` cases in `dor-tools-builtin/test/file-viewer.test.mjs` and `lib/src/host/tool-open.test.ts`.
 
 ## Folder viewer
 

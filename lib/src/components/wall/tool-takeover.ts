@@ -25,7 +25,7 @@ export function isNakedToolInvocation(rawCommandLine: string | null | undefined,
   const line = rawCommandLine?.trim();
   if (!line || COMPOUND_SYNTAX.test(line)) return false;
   const [launcher, commandVerb] = primaryCommandTokens(line);
-  return canonicalDorVerb(commandVerb) === verb && commandProgramName(launcher ?? '').toLowerCase() === 'dor';
+  return canonicalDorVerb(commandVerb ?? '') === verb && commandProgramName(launcher ?? '').toLowerCase() === 'dor';
 }
 
 /** What the placement rule reads. Every field is already known to the handler. */
