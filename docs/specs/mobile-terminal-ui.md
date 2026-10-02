@@ -180,7 +180,7 @@ in `lib/src/components/MobileGestureRadialMenu.tsx`.
 **Must pack root labels as a square keypad** (rationale). Cardinal chips share
 one gap from the select circle; **each diagonal group renders three separate
 labels, never one combined pill**, with its primary nearest the circle and its
-secondaries stacked outward. Corner anchors and spacing live at
+secondaries above and below its far side. Corner anchors and spacing live at
 `rootOptionLayout`; the key inventory lives at `MOBILE_GESTURE_GROUPS`.
 
 **Must confirm `⌃C` and `Paste` in an in-pane modal before running them.**

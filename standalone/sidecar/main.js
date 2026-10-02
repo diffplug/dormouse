@@ -190,7 +190,7 @@ function handleLine(line) {
       // on the first call, so nothing can replay them.
       case 'recovery:take':
         respondAsync('recovery:commands', data.requestId, async () => ({
-          commands: await recovery.take(Array.isArray(data.paneIds) ? data.paneIds : []),
+          commands: recovery.take(Array.isArray(data.paneIds) ? data.paneIds : []),
         }));
         break;
       case 'pty:gracefulKill': mgr.gracefulKill(data.ids, data.timeout, data.requestId); break;
