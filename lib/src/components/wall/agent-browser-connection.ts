@@ -62,6 +62,8 @@ export interface AgentBrowserConnectionDeps {
   viewUrl: () => Promise<string>;
   /** Make `tabId` the active tab. */
   selectTab?: (tabId: string) => Promise<BrowserResult>;
+  /** Whether a newly observed inactive tab is selected for the pane: only a
+   *  headless view, never a popped-out window the user drives. */
   canSelectTabs?: () => boolean;
   log?: (message: string) => void;
 }
@@ -238,6 +240,8 @@ export class AgentBrowserConnection {
 
   private handleTabs(next: AgentBrowserTab[]): void {
     const previousTabs = this.snap.tabs;
+    // A transient empty report keeps the last nonempty list; the first list is
+    // the baseline no tab in it counts as new against.
     if (next.length === 0 && previousTabs.length > 0) {
       this.log(`[ab-panel] empty tabs snapshot ignored ${JSON.stringify({ stream: this.deps.stream, previous: previousTabs.length })}`);
       this.debug('tabs-empty-ignored', { previous: previousTabs.length });
