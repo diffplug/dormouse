@@ -65,6 +65,10 @@ async function openContext() {
   void flushTerminal(helper.id).then(() => { written = true; });
   await waitFor(() => expect(written).toBe(true), { timeout: 4000 });
   await settleTerminals();
+  const input = terminal(helper.id);
+  const text = Array.from({ length: input.buffer.active.length }, (_, i) =>
+    input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
+  expect(text.match(/git status/g)).toHaveLength(1);
 }
 function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {
   // Alone in the Wall, the helper avoids the cursor; beside a neighbor, it takes the neighbor's side.
