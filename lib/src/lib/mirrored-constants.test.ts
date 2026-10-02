@@ -38,7 +38,7 @@ const rsSrc = readRepoFile(rs);
 const rustMs = (name: string) =>
   Number(extract(rsSrc, rs, new RegExp(`^const ${name}: u64 = ([\\d_]+);$`, 'm')).replace(/_/g, ''));
 
-// docs/specs/terminal-escapes.md -> "iTerm2 identity"
+// docs/specs/transport.md -> "iTerm2 identity"
 describe('ITERM2_COMPAT_VERSION mirrors', () => {
   it('matches the sidecar copy in standalone/sidecar/pty-core.js', () => {
     const file = 'standalone/sidecar/pty-core.js';

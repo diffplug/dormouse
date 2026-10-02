@@ -52,7 +52,9 @@ const safeImageVisitor: LexicalVisitor = {
     for (const attribute of node.getRest()) {
       if (attribute.type === 'mdxJsxAttribute' && typeof attribute.value === 'string') img.setAttribute(attribute.name, attribute.value);
     }
-    actions.appendToParent(mdastParent, { type: 'html', value: img.outerHTML.replace(/>$/, ` src="${node.getSrc()}" />`) });
+    // Set last, as MDXEditor writes it, so outerHTML escapes it with the rest.
+    img.setAttribute('src', node.getSrc());
+    actions.appendToParent(mdastParent, { type: 'html', value: img.outerHTML.replace(/>$/, ' />') });
   },
 };
 

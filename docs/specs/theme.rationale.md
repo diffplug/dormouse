@@ -20,6 +20,14 @@
 
 **Why `list.inactiveSelectionForeground` falls back to the normal foreground.** Matches VSCode list/tree behavior: an inactive selected row does not force the active-selection white text, which materializing from `list.activeSelectionForeground` would.
 
+## Terminal color contract
+
+**Why the color queries are answered rather than passed through.** A TUI that adapts to a light or dark background asks with `OSC 11 ; ?`; with no answer it assumes dark, and on a light theme its adaptive chrome — Codex's composer "pill", for one — renders unreadable. xterm.js does not answer the query itself, so the parse boundary is the only place holding the real theme.
+
+## OSC color queries on Windows require the bundled ConPTY
+
+**Two ConPTY backends, one of which eats the query.** Which backend node-pty spawns with decides whether a program's query reaches the consumer at all: under the in-box `CreatePseudoConsole` it never does, so nothing can answer and the light-theme failure under [Terminal color contract](#terminal-color-contract) is unavoidable on Windows. The bundled OpenConsole path is the same passthrough Windows Terminal itself relies on, which is what makes the extra prebuilds worth their packaging cost on both distributions.
+
 ## Theme data
 
 **Why the active-theme subscription compares ids.** Changing the installed-theme JSON replaces cached objects even for unchanged entries, so object identity can report a theme change when the selected id stayed the same.

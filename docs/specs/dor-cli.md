@@ -408,7 +408,7 @@ snapshot-tested `findReplace` / `remove` help patches (`root` / `command-usage`
 renderer. **stricli's default `--help-all`/`-H` integration must stay
 unregistered**, leaving `--help`/`-h` the single documented help surface.
 `dor --version`/`-v` (sole argument only) is rewritten
-to `dor version` before parsing. **Must rewrite a leading `o` to `open` before parsing**, from `DOR_VERB_ALIASES` in `dor/src/protocol.ts`, which the takeover gate reads too; help lists the alias in `open`'s brief. **Must accept only the full browser command names**, with no `ab` or `pw` compatibility aliases.
+to `dor version` before parsing. **Must rewrite a leading `o` to `open` before parsing**; the takeover gate resolves the same alias through `canonicalDorVerb` in `dor/src/protocol.ts`. **Must accept only the full browser command names**, with no `ab` or `pw` compatibility aliases.
 
 The spec keeps the behavior help cannot express:
 

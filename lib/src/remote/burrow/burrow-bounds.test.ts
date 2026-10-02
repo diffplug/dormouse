@@ -957,14 +957,17 @@ describe('BurrowRuntime bounds', () => {
     expect(burrow.establishedSessionCount).toBe(0);
   });
 
-  it('pings its relay socket every interval, holding a Relay that never answers to nothing', () => {
-    clock.advance(5 * RELAY_PING_INTERVAL_MS);
-    expect(socket.texts).toEqual(Array(5).fill(RELAY_PING));
-    // An older Relay never pongs: the socket is as open as it was.
-    expect(burrow.status).toBe('connected');
+  it('pings its relay socket every interval, and ends it when the first goes unanswered', () => {
+    socket.answersPings = false;
+    clock.advance(RELAY_PING_INTERVAL_MS);
+    expect(socket.texts).toEqual([RELAY_PING]);
+    clock.advance(RELAY_PING_INTERVAL_MS);
+    expect(socket.readyState).toBe(3);
+    expect(burrow.status).toBe('stopped');
   });
 
-  it('once a pong has arrived, a ping unanswered by the next one ends the socket', () => {
+  it('a ping unanswered by the next one ends the socket', () => {
+    socket.answersPings = false;
     clock.advance(RELAY_PING_INTERVAL_MS);
     socket.receiveRaw(RELAY_PONG);
     // Answered on time, twice: still connected, and the pong reached no frame handler.

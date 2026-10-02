@@ -804,22 +804,27 @@ describe('the relay socket heartbeat', () => {
     return { harness, timers, visibility };
   }
 
-  it('pings every interval and holds a Relay that never answers to nothing', async () => {
+  it('pings every interval while answered, a pong never read as a frame', async () => {
     const { harness, timers } = await opened();
     for (let i = 1; i <= 5; i += 1) {
       timers.fireAt(RELAY_PING_INTERVAL_MS);
       expect(harness.socket.texts).toHaveLength(i);
     }
     expect(harness.socket.texts.every((text) => text === RELAY_PING)).toBe(true);
-    // An older Relay never pongs: the socket is as open as it was.
-    expect(harness.client.socketOpen).toBe(true);
-    // A pong is the heartbeat's, never a frame the Client reads.
-    harness.socket.receiveRaw(RELAY_PONG);
     expect(harness.client.socketOpen).toBe(true);
   });
 
-  it('once a pong has arrived, a ping unanswered by the next one drops the socket', async () => {
+  it('drops the socket when even the first ping goes unanswered', async () => {
     const { harness, timers } = await opened();
+    harness.socket.answersPings = false;
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    timers.fireAt(RELAY_PING_INTERVAL_MS);
+    expect(harness.client.socketOpen).toBe(false);
+  });
+
+  it('a ping unanswered by the next one drops the socket', async () => {
+    const { harness, timers } = await opened();
+    harness.socket.answersPings = false;
     timers.fireAt(RELAY_PING_INTERVAL_MS);
     harness.socket.receiveRaw(RELAY_PONG);
     // Answered on time: still open.
@@ -843,6 +848,7 @@ describe('the relay socket heartbeat', () => {
 
   it('pauses while the page is hidden, and forgives the ping it was waiting on', async () => {
     const { harness, timers, visibility } = await opened();
+    harness.socket.answersPings = false;
     timers.fireAt(RELAY_PING_INTERVAL_MS);
     harness.socket.receiveRaw(RELAY_PONG);
     timers.fireAt(RELAY_PING_INTERVAL_MS);

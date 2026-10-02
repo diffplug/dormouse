@@ -208,7 +208,7 @@ function gate(): { promise: Promise<void>; release: () => void } {
 }
 
 /** Who the session under test is to the panes it sizes. */
-const HOLDER = { id: 'holder-1', label: 'iPhone' };
+const HOLDER = { id: 'holder-1', label: 'iPhone', serviceId: 'service-1' };
 
 function makeSession(provider: FakeProvider): { session: RemoteApiSession; sent: SentPayload[] } {
   const sent: SentPayload[] = [];
@@ -1187,7 +1187,7 @@ describe('RemoteApiSession teardown', () => {
 
 describe('RemoteApiSession size holds', () => {
   /** The hold one attach took, by its request order. */
-  const heldBy = (lease: string): SurfaceHold => ({ holder: HOLDER.id, label: HOLDER.label, lease });
+  const heldBy = (lease: string): SurfaceHold => ({ holder: HOLDER.id, label: HOLDER.label, lease, serviceId: HOLDER.serviceId });
 
   it('takes each attach’s hold under this session’s holder, with a lease of its own', async () => {
     const provider = new FakeProvider();

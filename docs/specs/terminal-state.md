@@ -1,6 +1,6 @@
 # Terminal CWD and Command State
 
-> See `docs/specs/glossary.md` for Session vocabulary. Owns the per-Session terminal semantic state that layout and grouping consume.
+> See `docs/specs/glossary.md` for Session vocabulary. Owns the per-Session terminal semantic state that layout and grouping consume, and the shell integration that reports it.
 > **Defers:** alert/TODO behavior and the notification OSCs (OSC 9 / 9;4 / 99 / 777 / BEL) to `docs/specs/alert.md`; the escape-sequence registry and parsing-location rules to `docs/specs/terminal-escapes.md`.
 
 **`cwd` means "the shell/session reported this directory"** — not the internal CWD of a foreground program. **A command snapshots `cwdAtStart` at start**; grouping and header disambiguation use that snapshot while it runs.
@@ -81,6 +81,27 @@ Non-OSC title source:
 **Supported-but-malformed semantic OSCs are consumed without changing state.** Terminators, split chunks, and unsupported-OSC handling: `docs/specs/terminal-escapes.md`.
 
 Source of truth: `cwdFromManualPath` in `lib/src/lib/terminal-state.ts`; `seedTerminalManualCwd` and `seedLaunchedCommand` in `lib/src/lib/terminal-state-store.ts`, their callers in `lib/src/lib/terminal-lifecycle.ts`.
+
+## Shell-integration injection
+
+**Dormouse injects its own shell integration when it spawns a shell** (rationale). The scripts are the *emit* side of the `OSC 633` rows above: `A`/`B` prompt boundaries, `C` command start, `D;<exit>` command finish, `E;<commandline>`, `P;Cwd=`. **Injection is fail-safe**: missing scripts skip it and the shell spawns as before, on the [Keystroke fallback](#keystroke-fallback). An env channel fires as reliably as the `PATH` prepend; a `shellArgs` channel only for the launch shapes Dormouse recognizes (rationale).
+
+| Shell | Mechanism | Channel | Rules |
+|---|---|---|---|
+| zsh | `ZDOTDIR` → our dotfiles chain to the user's, then install `precmd`/`preexec` hooks | env | **Nothing may be written into our directory when shipped** — signed macOS app bundle (rationale). |
+| bash | `--init-file` → our script installs a `DEBUG`-trap / `PROMPT_COMMAND` hook | shellArgs | **Injected only when the launch args are *purely* interactive/login flags** (`-i`/`-l`/`--login`), so Git Bash's `--login -i` is covered and a specific `-c <cmd>` is not (rationale). **`E` is the submitted line, read back from history only when the last entry provably is it**, else its first simple command, `$BASH_COMMAND` (rationale). |
+| PowerShell | dot-source a script that wraps the user's `prompt` and PSReadLine's `PSConsoleHostReadLine`; covers `pwsh` and `powershell.exe` | shellArgs | **Injected for a bare launch or one carrying `-NoExit`, unless it uses `-File`/`-EncodedCommand`**, after any startup command it carries (rationale). |
+| WSL | `wsl.exe -d <distro> -- sh -c <detector>` → the detector execs the distro's bash with our `--init-file`, via its `/mnt/...` path | shellArgs (Windows-side injection cannot reach inside the distro) | **Injected only for the exact two-argument `-d <distro>` launch** the shell picker emits (rationale). **bash is the only integrated WSL shell.** |
+| cmd.exe | no per-command hook exists | — | Never gets real OSC 633; always the keystroke fallback, with no exit codes. |
+
+**Both distributions ship the scripts**: standalone through the Tauri `../sidecar/**/*` glob, the VS Code build into `dist/shell-integration`, which the host names in `DORMOUSE_SHELL_INTEGRATION_DIR`.
+
+**Emitted fields must be filtered before they are written — a security boundary, not tidiness.** An attacker-chosen directory name or command can carry an OSC terminator (BEL, `ESC \`, or the C1 ST `U+009C`), ending the `633` sequence early so the remainder arrives as a fresh, fully-trusted OSC. **The parser cannot defend against this** — it scans raw bytes — so the boundary is emit-side, in the scripts Dormouse ships (rationale):
+
+- **`E` (command line)** is escaped: BEL, ESC and the C1 ST alongside `\`, `;`, LF and CR. The parser decodes `\xNN` back, so it still reports verbatim.
+- **`Cwd=`** is read verbatim, no `\xNN` decoding, so a Windows path's backslashes arrive intact — its control characters are therefore *removed*, not escaped, preserving backslashes and semicolons.
+
+Source of truth: `applyShellIntegration` in `standalone/sidecar/pty-core.js`; `__dormouse_633_escape` and `__dormouse_633_safe_cwd` in each of `standalone/sidecar/shell-integration/bash/shellIntegration.bash`, `standalone/sidecar/shell-integration/zsh/.zshrc`, `standalone/sidecar/shell-integration/pwsh/shellIntegration.ps1`, and bash's `E` in `__dormouse_633_command_line`; pinned by `standalone/sidecar/shell-integration.test.js`.
 
 ## Reducer
 
@@ -172,3 +193,7 @@ Source of truth: `groupTerminalPanes` / `TerminalGroupingMode` / `cwdIdentity` /
 **Must abbreviate home only at a complete path boundary**, retaining the absolute path for copying and native directory operations. Compare helper and source host identity as well as directory paths.
 
 Source of truth: `explainTerminalTitle` / `cwdDisplay` in `lib/src/lib/terminal-state.ts`; `TerminalContext` in `lib/src/components/wall/TerminalContext.tsx`.
+
+## Future
+
+- **fish shell integration** — inject via `XDG_DATA_DIRS`: fish auto-sources `*/fish/vendor_conf.d/*.fish`, so the integration ships as a vendor conf file (env channel, as reliable as the `PATH` prepend). Until it lands, fish ≥ 4 reports `OSC 133` itself, command line included, and older fish uses the keystroke fallback.

@@ -3,28 +3,15 @@
 > See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
 > Owns the built-in Tools — `builtin:file` (the local-file viewer and its text and Markdown editors), `builtin:code` (the source editor), and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
 
-## Files
-
-- `dor-tools-builtin/src/file-viewer.ts` — `builtin:file`: grant construction and the listener's routes.
-- `dor-tools-builtin/src/editable-file.ts` — text reads and revision-checked saves.
-- `dor-tools-builtin/viewer/editor.ts` — the Monaco page, bundled by `dor-tools-builtin/scripts/build.mjs`.
-- `dor-tools-builtin/viewer/markdown.tsx` — the MDXEditor page; `dor-tools-builtin/viewer/document-session.ts` loads and saves for both pages.
-- `dor-tools-builtin/src/markdown-images.ts` — the Markdown editor's image reads, pastes, and renames.
-- `dor-tools-builtin/src/folder-viewer.ts` — `builtin:folder`: listings, select, and activate.
-- `dor-tools-builtin/src/error-viewer.ts` — the page a failed OSC 367 `open` shows in the preview slot.
-- `dor-tools-builtin/src/viewer-server.ts` — the capability listener and announcement both viewers share.
-- `dor-tools-builtin/src/file-viewer-format.ts` — the pure format registry, the `BUILTIN_HANDLERS` table, and title.
-- `dor/src/cli.ts` — the private `__view-file` / `__view-code` / `__view-folder` / `__view-error` entries.
-
 ## Packaging
 
 - **Must bundle the viewers and their runtime dependencies into `dist/runtime.js` in `dor-tools-builtin`**, without workspace or installed-package resolution at runtime. `dor`'s prebuild builds this package first.
-- **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` serves the files the build placed in it, by exact name, relative to the runtime module. The Markdown page's Mermaid and CodeMirror language support load as split chunks on first use.
+- **Must stage the runtime and its adjacent `viewer` assets together under `dor/dist/builtin`**. Both hosts copy that tree with the CLI; `viewerAsset` serves the files the build placed in it, by exact name, relative to the runtime module.
 - **Must keep `file-viewer-format` free of Node runtime dependencies**: lib's renderer and host modules import it, and every build of lib source maps `dor-tools-builtin/*` to this package's `src`, as it maps `dor/*`. `dor-tools-builtin/test/browser-shared.test.mjs` bundles it for a browser.
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
 
-Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tools-builtin/scripts/build.mjs`; `dor/scripts/stage-builtins.mjs`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `runCli` / `loadBuiltinViewers` in `dor/src/cli.ts`. Tests: `dor/test/builtin-viewers.test.mjs`, `dor-tools-builtin/test/browser-shared.test.mjs`.
+Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tools-builtin/scripts/build.mjs`; `dor/scripts/stage-builtins.mjs`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `loadBuiltinViewers` in `dor/src/cli.ts`. Tests: `dor/test/builtin-viewers.test.mjs`.
 
 ## File viewer
 
@@ -38,7 +25,7 @@ Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tool
 
 **Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
 
-Source of truth: `fileViewerFormat` / `viewerTitle` in `dor-tools-builtin/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `announceViewer` in `dor-tools-builtin/src/viewer-server.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor/test/builtin-viewers.test.mjs`.
+Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 
 ## Editing files
 
@@ -50,21 +37,20 @@ Source of truth: `fileViewerFormat` / `viewerTitle` in `dor-tools-builtin/src/fi
 
 **Must report dirty state immediately to the containing iframe and in order through OSC 367** (`docs/specs/dor-tool.md` → Unsaved changes), and answer the host's iframe save channel (`docs/specs/dor-tool.md` → Closing unsaved Tools) with `connectToolFrame`.
 
-Source of truth: `readEditableFile` / `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`; `saveFileOperations` in `dor-tools-builtin/src/atomic-save.ts`; `editorPage` in `dor-tools-builtin/src/editor-page.ts`; `dor-tools-builtin/viewer/editor.ts`; `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`, `dor-tools-builtin/test/editable-file.test.mjs`, `dor-tools-builtin/test/file-viewer.test.mjs`.
+Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`; `dor-tools-builtin/viewer/editor.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`.
 
 ## Markdown editor
 
 `.md` and `.markdown` open in the bundled MDXEditor page; `.mdx` and other text stay in Monaco. Saving, reloading, and dirty reports follow [Editing files](#editing-files).
 
-- **Must support GFM tables, task lists, frontmatter, code blocks, fenced `mermaid` blocks rendered as diagrams with their source a toggle away, and a whole-document source mode.** A file the rich editor cannot parse opens in source mode with the parse error shown.
-- **Must set prose in the workbench UI font at the terminal's font size (`--vscode-editor-font-size`), with tight leading and margins**; code, frontmatter, and source mode use the editor font, with code tokens in Monaco's colors. Code and Mermaid follow the light/dark theme live; Mermaid stays on 11 (rationale).
-- **Must keep a document's HTML comments verbatim** and save with its majority line ending, one final newline, and its majority list bullet and thematic-break marker; the rest follows MDXEditor's serialization. The editor's normalization of loaded text is not an edit, so an untouched document stays clean (rationale).
-- **Never let document HTML reach the live DOM outside an allowlist**: rendered elements keep only allowlisted tags and attributes, with `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths, while the node keeps every original attribute for saving; HTML images serialize in an inert document. Mermaid runs with `securityLevel: 'strict'` (rationale).
-- **Must serve images on request from any regular image-format file at or under the document's canonical directory**, by realpath, with a `sandbox` CSP on each response. Other references, external URLs included, do not load.
-- **Must write a pasted or dropped PNG, JPEG, GIF, or WebP as a new file beside the document**, named `image-YYYYMMDD-HHMMSS[-N].<ext>`, after checking its signature, bounded to 32 MiB and never replacing a file. The page inserts its relative reference as an unsaved edit.
-- **Must list the document's images in an Images panel, renaming a local one on disk at once** to another image name in its own directory, never replacing another file (a case-only rename is allowed) or starting with `.`. The page then rewrites every reference to it as an unsaved edit.
+- **Must support GFM tables, task lists, frontmatter, code blocks, fenced `mermaid` diagrams, and a whole-document source mode**, which opens with the error when the rich editor cannot parse a file. Mermaid stays on 11 (rationale).
+- **Must keep HTML comments verbatim and save with one final newline and the file's majority bullet and thematic-break marker**; the rest follows MDXEditor's serialization. Its normalization of loaded text is not an edit (rationale).
+- **Never let document HTML reach the live DOM outside an allowlist** of tags and attributes, `href` limited to `http(s):`, `mailto:`, fragments, and scheme-less paths; saving keeps every original attribute, escaped, and HTML images serialize in an inert document. Mermaid runs with `securityLevel: 'strict'` (rationale).
+- **Must serve images on request from regular image-format files at or under the document's canonical directory**, by realpath, under a `sandbox` CSP. Nothing else loads, external URLs included.
+- **Must write a pasted or dropped PNG, JPEG, GIF, or WebP beside the document as a new `image-YYYYMMDD-HHMMSS[-N].<ext>`**, signature-checked, at most 32 MiB, never replacing a file; its reference is an unsaved edit.
+- **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
 
-Source of truth: `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format.ts`; `markdownPage` in `dor-tools-builtin/src/editor-page.ts`; `openImage` / `writePastedImage` / `renameImage` in `dor-tools-builtin/src/markdown-images.ts`; `startFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `dor-tools-builtin/viewer/markdown.tsx`, `dor-tools-builtin/viewer/markdown-safety.ts`, `dor-tools-builtin/viewer/markdown-comments.tsx`, `dor-tools-builtin/viewer/mermaid-block.tsx`, `dor-tools-builtin/viewer/images-panel.tsx`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `openImage` / `writePastedImage` / `renameImage` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
 
 ## Code editor
 
@@ -73,7 +59,7 @@ Source of truth: `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format
 - **Must refuse binary formats and folders**, and key apart from `builtin:file` (`name: code`).
 - **Must be offered as an alternative only where its page differs from `builtin:file`'s**: Markdown, HTML, SVG.
 
-Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format.ts`; `startFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`. Tests: `builtin:code` cases in `dor-tools-builtin/test/file-viewer.test.mjs` and `lib/src/host/tool-open.test.ts`.
+Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format.ts`.
 
 ## Folder viewer
 
@@ -86,10 +72,10 @@ Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format
 - **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which writes it to the Tool's terminal as an OSC 367 `open` (`docs/specs/dor-tool.md` → OSC 367), `preview` for a select, in arrival order. The page learns only that it was sent, or, for a path or serialized payload the OSC encoder refuses, an error instead of a write.
 - **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)
 
-Source of truth: `startFolderViewer` / `runFolderViewer` / `oscOpen` in `dor-tools-builtin/src/folder-viewer.ts`; `folderViewerPage` in `dor-tools-builtin/src/folder-viewer-page.ts`. Tests: `dor-tools-builtin/test/folder-viewer.test.mjs`, `the folder entry selects and activates with OSC 367 open, in the order the page sends them` in `dor/test/builtin-viewers.test.mjs`.
+Source of truth: `runFolderViewer` in `dor-tools-builtin/src/folder-viewer.ts`; `folderViewerPage` in `dor-tools-builtin/src/folder-viewer-page.ts`. Tests: `dor-tools-builtin/test/folder-viewer.test.mjs`.
 
 ## Error viewer
 
 **Must show why an OSC 367 `open` failed** when the host runs `dor __view-error <target> <message>` in the preview slot (`docs/specs/dor-tool.md` → OSC 367): one page naming the target's basename and the message, both escaped, with no script, served by the shared capability listener and titled as in [File viewer](#file-viewer). No handler name selects it.
 
-Source of truth: `startErrorViewer` / `errorViewerPage` / `runErrorViewer` in `dor-tools-builtin/src/error-viewer.ts`; `VIEW_ERROR_ARGV` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/error-viewer.test.mjs`, `the error entry titles itself after its target and serves the escaped message` in `dor/test/builtin-viewers.test.mjs`.
+Source of truth: `runErrorViewer` in `dor-tools-builtin/src/error-viewer.ts`; `VIEW_ERROR_ARGV` in `dor-tools-builtin/src/file-viewer-format.ts`.

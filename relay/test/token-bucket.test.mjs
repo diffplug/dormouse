@@ -10,14 +10,14 @@ import assert from 'node:assert/strict';
 import { API_ROUTES, MAX_REQUEST_BODY_BYTES } from 'remote-lib-common';
 
 import { BURROW_ENROLL_ATTEMPT_BURST, BURROW_ENROLL_ATTEMPT_REFILL_MS } from '../dist/app.js';
-import { freshApp, makeClock, post } from './helpers.mjs';
+import { ORIGIN, freshApp, makeClock, post } from './helpers.mjs';
 
 test('burrow enrollment has one process-global budget across concurrent callers', async () => {
   const clock = makeClock();
   const { app } = await freshApp({ now: clock.now });
   const responses = await Promise.all(
     Array.from({ length: BURROW_ENROLL_ATTEMPT_BURST + 3 }, () =>
-      post(app, API_ROUTES.burrowEnroll, { password: 'wrong' }),
+      post(app, API_ROUTES.burrowEnroll, { password: 'wrong', origin: ORIGIN }),
     ),
   );
 

@@ -21,7 +21,7 @@ The command is dependency-free and advisory. Its thresholds intentionally favor 
 
 1. Read each spec and its paired rationale. Review every behavior-bearing section, including sections with no advisory hit; follow implementation imports and check both spec claims against code and relevant code branches against the spec.
 2. Inspect every resolved reference. Resolve any reported file-like reference manually; ambiguity often means the pointer itself can be clearer.
-   A `Files` / `Code Map` section should offer useful entrypoints to follow through imports, while section-local `Source of truth:` pointers locate particular rules. Keep both when they serve those distinct jobs; check map paths and role descriptions against code without requiring exhaustive coverage or a map in every spec.
+   A spec navigates by a `Files` / `Code Map` section or by section-local `Source of truth:` pointers, never both (spec-lint check 9); either names the entrypoints a reader follows through imports. Check map paths and role descriptions against code without requiring exhaustive coverage or a map in every spec.
 3. Give each hit one disposition:
 
    - `KEEP` — a non-obvious invariant or local constraint is already at its useful home.

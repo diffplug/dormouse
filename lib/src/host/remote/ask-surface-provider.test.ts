@@ -14,7 +14,7 @@ const entry = (surfaceId: string, title: string): DirectoryEntry => ({
   hasTODO: false,
 });
 
-const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '3' };
+const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '3', serviceId: 'service-1' };
 
 const inertPty = {
   writePty: () => {},
