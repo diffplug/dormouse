@@ -969,8 +969,8 @@ function nextCode(code) {
  *
  * Setup codes live five minutes, so an expired one is the likeliest thing this
  * scanner ever meets — and `parsePairingInvitationUrl` refuses it with the same
- * `null` it gives a QR off a cereal box (`docs/specs/pocket-app.md` → the
- * scanner). The scenario exists because the phone used to say the same sentence
+ * `null` it gives a QR off a cereal box (`rejectionFor` in
+ * `lib/src/remote/pocket-app/ScanInvitation.tsx`). The scenario exists because the phone used to say the same sentence
  * to both, sending a user who needed a fresh code off to look for a different
  * QR. Nothing is scanned and no ceremony starts: both codes go in by hand,
  * through the paste field beside the viewfinder.

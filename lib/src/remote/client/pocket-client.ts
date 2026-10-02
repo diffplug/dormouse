@@ -415,8 +415,8 @@ export class PocketClient {
 
   /**
    * Whether this browser has been used with Dormouse before, which decides
-   * whether the auth screen offers sign-in at all
-   * (docs/specs/pocket-app.md). The evidence is stored passkey material: setup
+   * whether the auth screen offers sign-in at all (`SetupOrSignin` in
+   * `lib/src/remote/pocket-app/App.tsx`). The evidence is stored passkey material: setup
    * and sign-in both cache the asserted public key. Blocked site data does not
    * throw past {@link localStoragePocketStorage}'s mirror, so a setup completed
    * in this tab still flips the screen; a storage that throws anyway reads as a

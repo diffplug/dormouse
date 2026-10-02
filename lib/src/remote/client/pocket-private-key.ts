@@ -3,6 +3,11 @@ import { toBase64Url } from 'remote-lib-common';
 const encoder = new TextEncoder();
 
 export type PocketKeyStorageMode = 'native' | 'encrypted';
+/**
+ * Persisted in IndexedDB and read by the worker too: every later build must
+ * decode each envelope already stored, so a change to this shape or to the
+ * `contextFor` string needs a new `format` tag, never an edit to this one.
+ */
 interface EncryptedPrivateKey {
   readonly format: 'aes-gcm-x25519-v1';
   readonly wrappingKey: CryptoKey;
