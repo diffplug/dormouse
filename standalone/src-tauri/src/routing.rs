@@ -245,14 +245,6 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
 /// drop target, and an `emit_to` it would simply be lost.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Arrival {
-    /// Preparing reserves both endpoints while disk I/O runs without the
-    /// arrival lock. Returning retains that reservation until its reverse
-    /// destination is durable. RecoveryPending parks an exhausted return for
-    /// cold recovery: only global quit may pass it. None is adoptable.
-    pub phase: ArrivalPhase,
-    /// A Preparing arrival that is cancelled has never moved the source's
-    /// shells; its return must not hide or reap those source-owned PTYs.
-    pub transferred: bool,
     pub workspace_id: String,
     /// The window that still shows the Workspace until the target adopts it.
     pub from: String,
@@ -273,9 +265,6 @@ pub struct Arrival {
     /// is built then, so its boot drains a payload that is complete.
     pub pending_window: Option<JsonValue>,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArrivalPhase { Preparing, Active, Returning, RecoveryPending }
 
 /// Every arrival in flight, oldest first. A Vec, not a map: there are a handful
 /// at most, and both the per-window drain and the by-Workspace lookup want the
@@ -310,7 +299,7 @@ pub fn take_arrival(arrivals: &mut Arrivals, workspace_id: &str, to: &str) -> Op
     Some(arrivals.remove(position))
 }
 
-/// Request return of an arrival that outlived `ARRIVAL_MAX`, but only the exact record
+/// Retire an arrival that outlived `ARRIVAL_MAX`, but **only the exact record
 /// the watchdog was armed for**: one adopted and re-dropped since would carry a
 /// later `queued_at`, and belongs to its own watchdog.
 pub fn expire_arrival(
@@ -319,48 +308,23 @@ pub fn expire_arrival(
     to: &str,
     queued_at: Instant,
 ) -> Option<Arrival> {
-    let arrival = arrivals.iter_mut().find(|arrival| {
+    let position = arrivals.iter().position(|arrival| {
         arrival.workspace_id == workspace_id && arrival.to == to && arrival.queued_at == queued_at
-            && matches!(arrival.phase, ArrivalPhase::Preparing | ArrivalPhase::Active)
     })?;
-    arrival.phase = ArrivalPhase::Returning;
-    Some(arrival.clone())
+    Some(arrivals.remove(position))
 }
 
-/// Reserve settlement before releasing the lock. A close/quit must continue
-/// waiting while the return destination is being written or retried. A parked
-/// RecoveryPending record cannot start a second return chain.
-pub fn return_arrival(arrivals: &mut Arrivals, workspace_id: &str, to: &str) -> Option<Arrival> {
-    let arrival = arrivals.iter_mut().find(|arrival| {
-        arrival.workspace_id == workspace_id && arrival.to == to
-            && matches!(arrival.phase, ArrivalPhase::Preparing | ArrivalPhase::Active)
-    })?;
-    arrival.phase = ArrivalPhase::Returning;
-    Some(arrival.clone())
-}
-
-/// Retire only the generation whose durable settlement finished.
-pub fn retire_arrival(arrivals: &mut Arrivals, expected: &Arrival) -> bool {
-    let Some(position) = arrivals.iter().position(|arrival| {
-        arrival.workspace_id == expected.workspace_id && arrival.to == expected.to
-            && arrival.queued_at == expected.queued_at && arrival.phase == expected.phase
-    }) else { return false; };
-    arrivals.remove(position);
-    true
-}
-
-/// Reserve returns for arrivals whose target is gone, retaining their teardown
-/// blockers until the reverse journal commits. Parked recovery stays reserved,
-/// and existing return workers own
-/// their generation and are not started a second time.
+/// Every arrival `label` will never take, removed: its window is gone.
 pub fn take_arrivals_to(arrivals: &mut Arrivals, label: &str) -> Vec<Arrival> {
     let mut lost = Vec::new();
-    for arrival in arrivals {
-        if arrival.to == label && matches!(arrival.phase, ArrivalPhase::Preparing | ArrivalPhase::Active) {
-            arrival.phase = ArrivalPhase::Returning;
+    arrivals.retain(|arrival| {
+        if arrival.to == label {
             lost.push(arrival.clone());
+            false
+        } else {
+            true
         }
-    }
+    });
     lost
 }
 
@@ -371,7 +335,7 @@ pub fn take_arrivals_to(arrivals: &mut Arrivals, label: &str) -> Vec<Arrival> {
 pub fn arrival_payloads(arrivals: &Arrivals, label: &str) -> Vec<JsonValue> {
     arrivals
         .iter()
-        .filter(|arrival| arrival.to == label && arrival.phase == ArrivalPhase::Active)
+        .filter(|arrival| arrival.to == label)
         .filter_map(|arrival| {
             let content = arrival.content.as_ref()?;
             let mut payload = arrival.payload.clone();
@@ -422,14 +386,13 @@ pub fn hand_back_ids(arrival: &Arrival, marks: &JsonValue) -> (Vec<String>, Vec<
 pub fn arrival_ids(arrivals: &Arrivals) -> HashSet<String> {
     arrivals
         .iter()
-        .filter(|arrival| arrival.transferred)
         .flat_map(|arrival| arrival.terminal_ids.iter().cloned())
         .collect()
 }
 
 /// What a window's own `pty:requestInit` may name — and what its teardown may
 /// kill or interrupt: the ids it owns, **minus every id an arrival claims**.
-/// Ownership moves after journal admission, so a window with a Workspace queued
+/// Ownership moves at the source's invoke, so a window with a Workspace queued
 /// for it owns those shells while the source is still showing them; listed at
 /// boot they would be placed as top-level panes beside the Workspace about to
 /// mount them, and in a teardown's kill set they would die under the source.
@@ -902,8 +865,6 @@ mod tests {
 
     fn arrival(workspace_id: &str, from: &str, to: &str, ids: &[&str]) -> Arrival {
         Arrival {
-            phase: ArrivalPhase::Active,
-            transferred: true,
             workspace_id: workspace_id.to_string(),
             from: from.to_string(),
             to: to.to_string(),
@@ -972,12 +933,10 @@ mod tests {
 
         assert_eq!(expire_arrival(&mut arrivals, "ws-a", "ws-2", armed_for), None);
         assert_eq!(arrivals, vec![second.clone()]);
-        let mut returned = second;
-        returned.phase = ArrivalPhase::Returning;
-        assert_eq!(expire_arrival(&mut arrivals, "ws-a", "ws-2", returned.queued_at), Some(returned.clone()));
-        assert_eq!(arrivals, vec![returned.clone()], "return keeps blocking teardown until its journal commits");
-        assert_eq!(expire_arrival(&mut arrivals, "ws-a", "ws-2", returned.queued_at), None);
-        assert!(retire_arrival(&mut arrivals, &returned));
+        assert_eq!(
+            expire_arrival(&mut arrivals, "ws-a", "ws-2", second.queued_at),
+            Some(second)
+        );
         assert!(arrivals.is_empty());
     }
 

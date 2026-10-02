@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve, win32 } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   PAIRING_OUTCOME_COPY,
@@ -137,12 +137,12 @@ describe('enrollment-offer path mirrors the installers', () => {
     const source = readRepoFile(file);
     const variable = extract(source, file, /^\$INSTALL_ROOT = Join-Path \$env:(\w+) '[^']+'$/m);
     const local = 'C:\\Users\\ned\\AppData\\Local';
-    const root = win32.join(
+    const root = join(
       local,
       extract(source, file, /^\$INSTALL_ROOT = Join-Path \$env:\w+ '([^']+)'$/m),
     );
-    const run = win32.join(root, extract(source, file, /^\$RUN_DIR = Join-Path \$INSTALL_ROOT '([^']+)'$/m));
-    const offerFile = win32.join(
+    const run = join(root, extract(source, file, /^\$RUN_DIR = Join-Path \$INSTALL_ROOT '([^']+)'$/m));
+    const offerFile = join(
       run,
       extract(source, file, /^\$ENROLL_OFFER_FILE = Join-Path \$RUN_DIR '([^']+)'$/m),
     );

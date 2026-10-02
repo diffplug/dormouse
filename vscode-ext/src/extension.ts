@@ -8,7 +8,7 @@ import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
 import { forgetRetiredState } from './retired-state';
-import { captureAgentRecoveryCommands, mergeAlertStates, prepareRecoveryStorage, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
+import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
@@ -27,7 +27,7 @@ let extensionContext: vscode.ExtensionContext | null = null;
  *   state VS Code preserved from the panel's `vscode.setState()`; for a fresh
  *   panel opened via `dormouse.open` this is `undefined`.
  */
-async function setupPanel(
+function setupPanel(
   context: vscode.ExtensionContext,
   panel: vscode.WebviewPanel,
   savedState?: unknown,
@@ -50,22 +50,18 @@ async function setupPanel(
     light: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-light.png')),
     dark: vscode.Uri.file(path.join(context.extensionPath, 'icon-tiny-dark.png')),
   };
-  let disposed = false;
-  let router: { dispose(): void } | undefined;
-  panel.onDidDispose(() => { disposed = true; router?.dispose(); });
   const savedSession = readPersistedSession(initialState);
   // A panel's panes are interrupted by the teardown capture along with every
   // other live PTY, so they have a recovery command waiting too — claimed by
   // pane id, since the Dormouse view is claiming its own share of the same
   // record (docs/compatible-agents.md -> "Cold restore").
-  const recoveryCommands = await takeRecoveryCommands(
+  const recoveryCommands = takeRecoveryCommands(
     context,
     (savedSession?.panes ?? []).map((pane) => pane.id),
   );
-  if (disposed) return;
   const channel = serveWebview(panel.webview, mediaPath, initialState, getSelectedShell?.(), recoveryCommands);
 
-  router = attachRouter(channel, {
+  const router = attachRouter(channel, {
     reconnect: !!savedState,
     killOnDispose: true,
     getSelectedShell,
@@ -75,6 +71,7 @@ async function setupPanel(
     // Panels persist via vscode.setState() (per-panel, managed by VS Code).
     // Don't write to workspaceState — that's for the WebviewView only.
   });
+  panel.onDidDispose(() => router.dispose());
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -94,7 +91,6 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.window.onDidChangeWindowState(reportWindowPresence));
   initToolHost(context.globalStorageUri?.fsPath);
   log.init();
-  prepareRecoveryStorage(context);
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);
   const dorRuntime = ptyManager.getDorRuntimeEnv(context.extensionPath);
@@ -145,13 +141,13 @@ export function activate(context: vscode.ExtensionContext) {
     }),
     vscode.window.registerWebviewPanelSerializer('dormouse', {
       async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: unknown) {
-        await setupPanel(context, panel, state, () => provider.getSelectedShell());
+        setupPanel(context, panel, state, () => provider.getSelectedShell());
       },
     }),
     vscode.commands.registerCommand('dormouse.focus', () => {
       vscode.commands.executeCommand('dormouse.view.focus');
     }),
-    vscode.commands.registerCommand('dormouse.open', async () => {
+    vscode.commands.registerCommand('dormouse.open', () => {
       const mediaPath = path.join(context.extensionPath, 'media');
       const panel = vscode.window.createWebviewPanel(
         'dormouse',
@@ -163,7 +159,7 @@ export function activate(context: vscode.ExtensionContext) {
           localResourceRoots: [vscode.Uri.file(mediaPath)],
         },
       );
-      await setupPanel(context, panel, undefined, () => provider.getSelectedShell());
+      setupPanel(context, panel, undefined, () => provider.getSelectedShell());
     }),
     vscode.commands.registerCommand('dormouse.debugTheme', async () => {
       await vscode.commands.executeCommand('dormouse.view.focus');

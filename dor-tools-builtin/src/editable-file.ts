@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open, realpath, type FileHandle } from 'node:fs/promises';
+import { open, realpath, unlink, type FileHandle } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { saveFileOperations, type SaveFileOperations } from './atomic-save.js';
@@ -47,7 +47,7 @@ export async function readEditableFile(target: string): Promise<{ text: string; 
   catch { throw new HttpError(415, 'This editor supports UTF-8 text. Open this file in another editor.'); }
 }
 
-/** Optimistic concurrency: write and flush a private sibling, recheck contents
+/** Optimistic concurrency: write and flush a sibling, recheck contents
  * and identity, then replace atomically. No arbitrary destination or force API.
  * Like other local editors, this cannot lock out an uncooperative writer. */
 export async function saveEditableFile(target: string, text: string, version: string, operations: SaveFileOperations = saveFileOperations) {
@@ -62,9 +62,9 @@ export async function saveEditableFile(target: string, text: string, version: st
     const stat = await writable.stat();
     if (!stat.isFile() || stat.dev !== current.stat.dev || stat.ino !== current.stat.ino) throw new HttpError(409, 'The file changed on disk.');
   } finally { await writable.close(); }
-  const temporary = join(dirname(target), `.dor-save-${randomBytes(16).toString('hex')}.tmp`);
-  const sibling = await operations.createSibling(target, temporary);
-  const file = sibling.file;
+  const name = join(dirname(target), `.dor-save-${randomBytes(16).toString('hex')}`);
+  const temporary = `${name}.tmp`, backup = `${name}.orig`;
+  const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
   let cleanup = true;
   try {
     try {
@@ -81,14 +81,14 @@ export async function saveEditableFile(target: string, text: string, version: st
     // a committed save whose reply was lost. Keep every recovery byte until
     // replacement is confirmed; never delete a possible sole surviving copy.
     cleanup = false;
-    try { await operations.replace(sibling.path, target); }
+    try { await operations.replace(temporary, target, backup); }
     catch {
-      const recovery = process.platform === 'win32' ? dirname(sibling.path) : sibling.path;
+      const recovery = process.platform === 'win32' ? `${temporary} and ${backup}` : temporary;
       throw new HttpError(500, `The save could not be confirmed. Recovery files were kept at ${recovery}. Reload before saving again.`);
     }
     cleanup = true;
     return { version: revision(bytes) };
   } finally {
-    if (cleanup) await sibling.cleanup();
+    if (cleanup) await Promise.all([temporary, backup].map(path => unlink(path).catch(() => {})));
   }
 }
