@@ -61,11 +61,6 @@ const builds = [
     entryPoints: ['src/pty-host.js'],
     outfile: 'dist/pty-host.js',
   },
-  {
-    ...common,
-    entryPoints: ['../standalone/sidecar/port-scan-worker.js'],
-    outfile: 'dist/port-scan-worker.js',
-  },
 ];
 
 if (watch) {

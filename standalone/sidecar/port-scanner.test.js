@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('node:net');
 const { createPortScanner } = require('./port-scanner');
+const { getOpenPortsForPids } = require('./pty-core');
 
 function deferred() {
   let resolve, reject;
@@ -9,7 +10,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-test('port scans batch callers and serialize work without blocking their event loop', async () => {
+test('port scans batch callers and serialize work', async () => {
   const calls = [];
   const first = deferred();
   const scanner = createPortScanner((pids) => {
@@ -41,18 +42,18 @@ test('a failed scan answers empty and releases the next batch', async () => {
   assert.deepEqual(await b, new Map([[20, []]]));
 });
 
-test('empty scans never start a worker', async () => {
+test('empty requests never scan', async () => {
   const scanner = createPortScanner(() => assert.fail('unexpected scan'));
   assert.deepEqual(await scanner([]), new Map());
 });
 
-test('the shipped worker discovers a real listener while the parent event loop runs', async () => {
+test('a real scan discovers a listener while the event loop keeps running', async () => {
   const server = net.createServer();
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
     let ticked = false;
     const timer = setTimeout(() => { ticked = true; }, 0);
-    const ports = await createPortScanner()([process.pid]);
+    const ports = await createPortScanner(getOpenPortsForPids)([process.pid]);
     clearTimeout(timer);
     assert.equal(ticked, true);
     assert.ok(ports.get(process.pid)?.some((p) => p.port === server.address().port));

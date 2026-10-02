@@ -913,9 +913,8 @@ does one layer down, extended across the callers.
 
 **A listing that spans terminals costs one `pty_get_open_ports_many`.** Both
 adapters carry it, and the sidecar answers every id from one process-table read
-and one socket scan (`getOpenPortsForPids`) in a worker, keeping PTY I/O responsive.
-A `dor list --ports` across Workspaces must not multiply scans
-by its row count (`docs/specs/dor-cli.md` → "Current Implemented Commands").
+and one socket scan (`getOpenPortsForPids`) — a `dor list --ports` across
+Workspaces must not multiply scans by its row count (`docs/specs/dor-cli.md` → "Current Implemented Commands").
 **Must follow `docs/specs/transport.md` → "Port scan deadlines" for both port commands.**
 The macOS and Windows socket scans run under
 `OPEN_PORT_TIMEOUT_MS + OPEN_PORT_TIMEOUT_PER_ID_MS × ids`, and the command waits

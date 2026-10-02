@@ -196,7 +196,7 @@ Transport constraints:
 | Direction | Message | Contract |
 | --- | --- | --- |
 | Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink. **Hosts must revalidate**, rejecting malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:` — `lib/src/lib/external-links.ts`). |
-| Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, resolved from the root pid, answered with `pty:openPorts`. `getOpenPortsForPid()` in `standalone/sidecar/pty-core.js` (VS Code loads it through the `lib/pty-core.cjs` shim). |
+| Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, resolved from the root pid, answered with `pty:openPorts`. `getOpenPortsForPids()` in `standalone/sidecar/pty-core.js` (VS Code loads it through the `lib/pty-core.cjs` shim). |
 | Host → webview | `pty:openPorts` | `ports: OpenPort[]` (`{ protocol, family, address, port, pid, processName }`), de-duplicated by `(family, address, port)`, sorted by port then address. Empty when the PTY is gone or enumeration fails. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. **Carries an optional `textData`** (string-control payloads removed, for the prompt heuristic), **omitted when it would equal `data`**. |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
@@ -247,7 +247,7 @@ Source of truth: `ManagedVoicePort` in `lib/src/lib/platform/managed-voice-types
 
 **The Window wrapping lives at the standalone adapter boundary, never in the shared save/restore code.** `window-persistence.ts` owns the JSON and the storage slot over a `SessionKeyValueStore` synchronous slot (`docs/specs/standalone.md` → Persistence); the shared save/restore code still operates on a bare `PersistedSession`, which the boot hands it per Workspace. **A Window-persisting adapter answers through `getWindowState` / `saveWindowState`, and answers nothing on the bare-Session `getState` / `saveState` pair** — its blob is a Window and every shared reader of `getState` wants a Session. **A blob written before standalone persisted Windows is wrapped as the window's one Workspace**; that is the only migration.
 
-**A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`**, falling back to one `getCwd` per id: standalone resolves them with a synchronous process scan on the sidecar's only event loop, so N panes must cost one scan rather than N. **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush, where every probe answers null and is discarded for that value anyway (`docs/specs/standalone.md` → "Quit flow"). Pinned by `lib/src/lib/session-save.test.ts`.
+**A save probes every non-browser pane's cwd in one host round trip where the adapter offers `getCwds`**, falling back to one `getCwd` per id: standalone resolves them with one `lsof` process scan, so N panes must cost one scan rather than N. **A flush may say `probeCwd: false`** and keep each pane's previously persisted cwd — the post-kill quit flush, where every probe answers null and is discarded for that value anyway (`docs/specs/standalone.md` → "Quit flow"). Pinned by `lib/src/lib/session-save.test.ts`.
 
 Source of truth: `getWindowSnapshot` / `seedWindowSession` / `installWindowSessionWriter` / `flushWindowSession` in `lib/src/lib/window-session-aggregator.ts`; `SaveSink` / `SaveOptions` in `lib/src/lib/session-save.ts`; `loadWindowState` / `saveWindowState` in `lib/src/lib/window-persistence.ts`; `restoreWindowOrFresh` in `standalone/src/window-restore.ts`.
 
@@ -309,15 +309,16 @@ scrollback is never persisted, so a cold-restored pane opens empty.
 - **Replaying a dead pane resets its modes; replaying a live one does not** — the `REPLAY_MODE_RESET` tail (`docs/specs/terminal-escapes.md` → Replay-time mode-reset tail).
 - **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
 - **Replay filtering does not re-fire alerts**, quiesce-detector events, or protocol notifications (`docs/specs/terminal-escapes.md` → "`pty:data` strip semantics").
+- **Never run a synchronous subprocess in `pty-core.js`**: its event loop carries every PTY's I/O in both hosts (rationale).
+- **Must discard a probe's answer for a PTY replaced or exited mid-probe.** Pinned by the pending-scan tests in `standalone/sidecar/pty-core.test.js`.
 
-Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/src/pty-manager.ts`; the replay filter in `lib/src/lib/terminal-report-filter.ts`.
+Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/src/pty-manager.ts`; the replay filter in `lib/src/lib/terminal-report-filter.ts`; `runText` / `answerForIds` in `standalone/sidecar/pty-core.js`.
 
 ## Port scan deadlines
 
-**Must run port enumeration outside the PTY I/O thread**, for single and batched
-requests in both hosts. **Must discard results for a PTY that exited or was
-replaced during the scan.** Pinned by `standalone/sidecar/port-scanner.test.js`
-and the pending-scan tests in `standalone/sidecar/pty-core.test.js` (rationale).
+**Must run one port scan at a time**; concurrent requests share it or the next.
+Pinned by
+`standalone/sidecar/port-scanner.test.js`.
 
 **Must budget port requests for both serial scans and an IPC margin per hop**:
 `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`.
