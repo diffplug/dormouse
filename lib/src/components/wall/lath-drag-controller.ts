@@ -10,7 +10,7 @@ import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { DRAG_THRESHOLD_PX } from '../design';
 
 /** Opacity applied to the dragged leaf while its drop preview floats elsewhere. */
-const DRAG_DIM = '0.6';
+const DRAG_DIM = 0.6;
 
 /** A live pane / Door drag session. Each frame hit-tests against the *live* store
  *  tree (read fresh, so a background `dor split`/`dor kill` commit mid-drag is
@@ -49,6 +49,8 @@ export type DragController = {
   endExternal(): void;
   /** Whether a pane/Door drag currently owns the pointer (the sash-drag guard). */
   hasDrag(): boolean;
+  /** Compose drag dimming with the animator's opacity on every paint. */
+  opacityFor(id: string, opacity: number): number;
   /** Unmount teardown: detach the window listeners and cancel any pending frame. */
   dispose(): void;
 };
@@ -57,13 +59,14 @@ export type DragController = {
  *  React refs/setters it drives. All identities are stable across renders. */
 export type DragControllerDeps = {
   latestRef: MutableRefObject<{
-    snapshot: LathWallSnapshot;
     workspaceDrag?: SurfaceWorkspaceDrag;
     onDragStart?: (id: string) => void;
     onProposeMove?: (id: string, target: DropTarget) => void;
     onProposeMinimize?: (id: string) => void;
     onExternalDrop?: (target: DropTarget | null) => void;
   }>;
+  /** Read the store directly: React may not have rendered a synchronous commit yet. */
+  getSnapshot: () => LathWallSnapshot;
   containerRef: RefObject<HTMLDivElement | null>;
   rectRef: MutableRefObject<Rect>;
   leafElsRef: MutableRefObject<Map<string, HTMLDivElement>>;
@@ -99,6 +102,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.removeEventListener('pointermove', onMove);
     window.removeEventListener('pointerup', onUp);
     window.removeEventListener('pointercancel', onCancel);
+    window.removeEventListener('blur', onCancel);
     window.removeEventListener('keydown', onKey);
     window.removeEventListener('wheel', onWheel);
     if (drag && drag.rafId !== null) {
@@ -111,6 +115,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('blur', onCancel);
     window.addEventListener('keydown', onKey);
     // Non-passive: the wheel cycles drop depth instead of scrolling.
     window.addEventListener('wheel', onWheel, { passive: false });
@@ -137,7 +142,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     // Hit-test the LIVE store tree so a background `dor split`/`dor kill` commit
     // mid-drag is reflected in the very next frame (the `candKey` reset below absorbs
     // the candidate list changing under the pointer).
-    const cands = hitTest(deps.latestRef.current.snapshot.tree, deps.rectRef.current, point, d.external ? null : d.id, LATH_LAYOUT_OPTS);
+    const cands = hitTest(deps.getSnapshot().tree, deps.rectRef.current, point, d.external ? null : d.id, LATH_LAYOUT_OPTS);
     const key = cands.map((c) => JSON.stringify(c.target)).join('|');
     if (key !== d.candKey) {
       d.candKey = key;
@@ -218,7 +223,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       if (!d.external) {
         deps.latestRef.current.onDragStart?.(d.id); // Wall applies its selection policy
         const el = deps.leafElsRef.current.get(d.id);
-        if (el) el.style.opacity = DRAG_DIM;
+        if (el) el.style.opacity = String(DRAG_DIM);
       }
     }
     scheduleHitTest();
@@ -252,7 +257,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
     beginInternal(id, clientX, clientY) {
       // One drag at a time; never during a sash drag or while a leaf is zoomed.
       if (drag || deps.sashDragRef.current) return;
-      if (deps.latestRef.current.snapshot.zoomedId !== null) return;
+      if (deps.getSnapshot().zoomedId !== null) return;
       drag = {
         id, external: false, active: false, startX: clientX, startY: clientY,
         candidates: [], depth: 0, candKey: '', lastX: clientX, lastY: clientY, rafId: null,
@@ -277,6 +282,9 @@ export function createDragController(deps: DragControllerDeps): DragController {
     },
     hasDrag() {
       return drag !== null;
+    },
+    opacityFor(id, opacity) {
+      return drag?.active && !drag.external && drag.id === id ? opacity * DRAG_DIM : opacity;
     },
     dispose() {
       finish(false);

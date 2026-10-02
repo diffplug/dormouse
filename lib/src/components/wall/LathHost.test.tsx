@@ -319,11 +319,66 @@ describe('LathHost — sash drag', () => {
     expect(parseFloat(leafDiv('a')!.style.width)).toBeGreaterThan(parseFloat(widthBefore));
     expect(onCommitResize).not.toHaveBeenCalled();
 
-    act(() => window.dispatchEvent(new MouseEvent('pointerup', {})));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140, clientY: 10 })));
     expect(onCommitResize).toHaveBeenCalledTimes(1);
     expect(onCommitResize).toHaveBeenCalledWith([], 0, 40);
     // The store commits nothing here (that's the Wall's job) → preview reverts.
     expect(leafDiv('a')!.style.width).toBe(widthBefore);
+  });
+
+  it('uses the release coordinates even when no final pointermove arrives', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onCommitResize } = mount(store);
+    act(() => firstSash().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 10 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 120, clientY: 10 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 145, clientY: 10 })));
+    expect(onCommitResize).toHaveBeenCalledWith([], 0, 45);
+  });
+
+  it('cancels on pointercancel and accepts the next sash gesture', async () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onCommitResize } = mount(store);
+    const widthBefore = leafDiv('a')!.style.width;
+    act(() => firstSash().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 140 })));
+    await flushFrame();
+    act(() => window.dispatchEvent(new MouseEvent('pointercancel')));
+    expect(leafDiv('a')!.style.width).toBe(widthBefore);
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140 })));
+    expect(onCommitResize).not.toHaveBeenCalled();
+    act(() => firstSash().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 125 })));
+    expect(onCommitResize).toHaveBeenCalledExactlyOnceWith([], 0, 25);
+  });
+
+  it('abandons an obsolete sash path after a concurrent tree mutation', async () => {
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta()], ['b', leafMeta()], ['c', leafMeta()]]);
+    const { onCommitResize } = mount(store);
+    act(() => firstSash().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 140 })));
+    await flushFrame();
+    act(() => store.removeLeaf('a'));
+    expect(leafDiv('a')).toBeNull();
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140 })));
+    expect(onCommitResize).not.toHaveBeenCalled();
+  });
+
+  it('keeps a sash gesture alive across metadata updates', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onCommitResize } = mount(store);
+    act(() => firstSash().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100 })));
+    act(() => store.setTitle('a', 'New title'));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140 })));
+    expect(onCommitResize).toHaveBeenCalledExactlyOnceWith([], 0, 40);
+  });
+
+  it('ignores secondary-button sash presses', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onCommitResize } = mount(store);
+    act(() => firstSash().dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 2, clientX: 100 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 140 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { button: 2, clientX: 140 })));
+    expect(onCommitResize).not.toHaveBeenCalled();
   });
 
   it('cancels the drag on Escape without committing', () => {
@@ -535,6 +590,38 @@ describe('LathHost — imperative animation frames', () => {
     expect(rafCbs.length).toBe(0);
   });
 
+  it('keeps the sash preview under the pointer while an earlier layout tween is running', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    mount(store, vi.fn(), vi.fn(), DUR);
+    act(() => store.addLeaf('c', leafMeta(), { refId: 'a', edge: 'right' }));
+    clock += DUR / 4;
+    flushRaf();
+    const target = layout(store.getSnapshot().tree, RECT, LATH_LAYOUT_OPTS).get('a')!.width;
+    const sash = container.querySelector<HTMLElement>('[data-lath-sash]')!;
+    act(() => sash.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 200, clientY: 10 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 240, clientY: 10 })));
+    flushRaf();
+    expect(widthOf('a')).toBe(target + 40);
+    clock += DUR / 4;
+    flushRaf();
+    expect(widthOf('a')).toBe(target + 40);
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+  });
+
+  it('keeps a dragged pane dimmed across animation frames and preview renders', () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    mount(store, vi.fn(), vi.fn(), DUR);
+    act(() => store.addLeaf('c', leafMeta(), { refId: 'a', edge: 'right' }));
+    const header = leafDiv('a')!.querySelector<HTMLElement>('.lath-leaf-header')!;
+    act(() => header.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 10 })));
+    act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 700, clientY: 300 })));
+    clock += DUR / 4;
+    flushRaf();
+    expect(leafDiv('a')!.style.opacity).toBe('0.6');
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+    expect(leafDiv('a')!.style.opacity).toBe('');
+  });
+
   it('a meta re-render mid-tween does not snap the leaf to its target', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     mount(store, vi.fn(), vi.fn(), DUR);
@@ -695,7 +782,7 @@ describe('LathHost — imperative animation frames', () => {
     const sash = container.querySelector<HTMLElement>('[data-lath-sash]')!;
     act(() => sash.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100, clientY: 10 })));
     act(() => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 160, clientY: 10 })));
-    act(() => window.dispatchEvent(new MouseEvent('pointerup', {})));
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140, clientY: 10 })));
 
     // Commit landed immediately at the resized width (snap), not tweening from `before`.
     const after = widthOf('a');
@@ -823,6 +910,31 @@ describe('LathHost — pane / Door drag', () => {
       up();
     });
     expect(onProposeMove).toHaveBeenCalledWith('a', { kind: 'swap', leaf: 'b' });
+  });
+
+  it('resolves a release against a store commit before React has rendered it', async () => {
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta()], ['b', leafMeta()], ['c', leafMeta()]]);
+    const { onProposeMove } = mountDrag(store);
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(400, 300)); // b's center
+    await flushFrame();
+    act(() => {
+      store.swapLeaves('b', 'c');
+      up(); // c now occupies this slot; React has not committed the snapshot yet
+    });
+    expect(onProposeMove).toHaveBeenCalledWith('a', { kind: 'swap', leaf: 'c' });
+  });
+
+  it('cancels a pane drag when the window loses focus', async () => {
+    const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
+    const { onProposeMove } = mountDrag(store);
+    act(() => down(header('a'), 100, 15));
+    act(() => moveTo(601, 300));
+    await flushFrame();
+    act(() => window.dispatchEvent(new Event('blur')));
+    expect(overlayEl()).toBeNull();
+    act(() => up());
+    expect(onProposeMove).not.toHaveBeenCalled();
   });
 
   it('cancels an external drop moved off-wall before its pending frame', async () => {

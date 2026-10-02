@@ -144,6 +144,16 @@ describe('move', () => {
     expect(r.a.x).toBeGreaterThanOrEqual(r.b.x + r.b.width);
   });
 
+  it('preserves pane widths when reordering siblings or dropping back at the same boundary', () => {
+    const t = tree(mk('row', [leaf('a'), 0.2], [leaf('b'), 0.3], [leaf('c'), 0.5]));
+    const same = move(t, 'b', { kind: 'edge', path: [0], edge: 'right' });
+    expect(rects(same.tree)).toEqual(rects(t));
+    const reordered = move(t, 'b', { kind: 'edge', path: [2], edge: 'right' });
+    expect(rects(reordered.tree)).toEqual({
+      a: R(0, 0, 20, 100), c: R(20, 0, 50, 100), b: R(70, 0, 30, 100),
+    });
+  });
+
   it('moves a leaf beside an ancestor split (“beside the whole column”)', () => {
     const t = tree(mk('row', [leaf('a'), 0.5], [mk('col', [leaf('b'), 0.5], [leaf('c'), 0.5]), 0.5]));
     const out = move(t, 'a', { kind: 'edge', path: [1], edge: 'right' });
@@ -186,6 +196,11 @@ describe('insert', () => {
     const out = insert(leafTree('a'), 'b', { kind: 'edge', path: [], edge: 'right' }, 0.75);
     expect(out.tree).toEqual(tree(mk('row', [leaf('a'), 0.25], [leaf('b'), 0.75])));
     expect(validate(out.tree)).toEqual([]);
+  });
+
+  it('rejects a NaN insertion weight without corrupting the tree', () => {
+    const t = leafTree('a');
+    expect(insert(t, 'b', { kind: 'edge', path: [], edge: 'right' }, NaN)).toEqual({ tree: t, ok: false });
   });
 
   it('clamps an out-of-range weight into a valid tree', () => {
@@ -238,6 +253,51 @@ describe('resize', () => {
     expect(resize(t, [], 5, 10, rect, opts).ok).toBe(false);
     expect(resize(t, [], 0, 10, R(0, 0, 0, 100), opts).ok).toBe(false);
     expect(resize(t, [9], 0, 10, rect, opts).tree).toBe(t);
+  });
+
+  it.each(['row', 'col'] as const)('resizes from the visible minimum-clamped %s boundary', (dir) => {
+    const clamped = tree(mk(dir, [leaf('a'), 0.01], [leaf('b'), 0.49], [leaf('c'), 0.5]));
+    const box = R(0, 0, 1000, 1000);
+    const min = { gap: 0, minLeaf: { width: 100, height: 100 } };
+    const before = layout(clamped, box, min);
+    const out = resize(clamped, [], 0, 25, box, min);
+    const after = layout(out.tree, box, min);
+    const extent = dir === 'row' ? 'width' : 'height';
+    expect(out.ok).toBe(true);
+    expect(after.get('a')![extent]).toBe(before.get('a')![extent] + 25);
+    expect(after.get('b')![extent]).toBe(before.get('b')![extent] - 25);
+    expect(after.get('c')).toEqual(before.get('c'));
+    expect(validate(out.tree)).toEqual([]);
+  });
+
+  it('keeps a minimum-clamped third pane fixed while dragging its neighbors', () => {
+    const clamped = tree(mk('row', [leaf('a'), 0.49], [leaf('b'), 0.49], [leaf('c'), 0.02]));
+    const box = R(0, 0, 1000, 100);
+    const min = { gap: 0, minLeaf: { width: 100, height: 0 } };
+    expect(rects(resize(clamped, [], 0, 25, box, min).tree, box, min)).toEqual({
+      a: R(0, 0, 475, 100), b: R(475, 0, 425, 100), c: R(900, 0, 100, 100),
+    });
+  });
+
+  it.each([NaN, Infinity, -Infinity])('rejects a non-finite resize delta (%s)', (delta) => {
+    const out = resize(t, [], 0, delta, rect, opts);
+    expect(out.ok).toBe(false);
+    expect(out.tree).toBe(t);
+  });
+
+  it.each([0.5, NaN])('rejects a non-integer boundary (%s) without throwing', (boundary) => {
+    expect(resize(t, [], boundary, 10, rect, opts)).toEqual({ tree: t, ok: false });
+  });
+
+  it('preserves stored weights when a minimum-clamped drag cannot move', () => {
+    const t = tree(mk('row', [leaf('a'), 0.01], [leaf('b'), 0.99]));
+    const min = { gap: 0, minLeaf: { width: 100, height: 0 } };
+    for (const [width, delta] of [[1000, 0], [1000, -50], [150, 50]]) {
+      const out = resize(t, [], 0, delta, R(0, 0, width, 100), min);
+      expect(out.ok).toBe(true);
+      expect(out.tree).not.toBe(t);
+      expect(out.tree).toEqual(t);
+    }
   });
 
   it('resizes a nested split by its path', () => {

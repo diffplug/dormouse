@@ -221,6 +221,40 @@ describe('property: layout exactly tiles', () => {
   });
 });
 
+describe('property: sash motion matches visible geometry', () => {
+  it('moves just the adjacent pair by the clamped pointer delta across random weighted rows and columns', () => {
+    for (let seed = 0; seed < 500; seed++) {
+      const rng = mulberry32(12000 + seed);
+      const count = 2 + randInt(rng, 6);
+      const dir = pick(rng, ['row', 'col'] as const);
+      const weights = Array.from({ length: count }, () => 0.001 + rng() ** 4);
+      const total = weights.reduce((a, b) => a + b, 0);
+      const t: LathTree = { root: { kind: 'split', dir, children: weights.map((weight, i) => ({ node: { kind: 'leaf', id: String(i) }, weight: weight / total })) } };
+      const minimum = 10 + randInt(rng, 90);
+      const gap = randInt(rng, 9);
+      const box = R(0, 0, 1200, 1200);
+      const options = { gap, minLeaf: { width: minimum, height: minimum } };
+      const before = layout(t, box, options);
+      const boundary = randInt(rng, count - 1);
+      const delta = randInt(rng, 501) - 250;
+      const extent = dir === 'row' ? 'width' : 'height';
+      const pos = dir === 'row' ? 'x' : 'y';
+      const a = before.get(String(boundary))!;
+      const b = before.get(String(boundary + 1))!;
+      const expectedDelta = Math.min(Math.max(delta, minimum - a[extent]), b[extent] - minimum);
+      const out = resize(t, [], boundary, delta, box, options);
+      expect(out.ok, 'seed ' + seed).toBe(true);
+      expect(validate(out.tree), 'seed ' + seed).toEqual([]);
+      const after = layout(out.tree, box, options);
+      expect(after.get(String(boundary)), 'seed ' + seed).toEqual({ ...a, [extent]: a[extent] + expectedDelta });
+      expect(after.get(String(boundary + 1)), 'seed ' + seed).toEqual({ ...b, [pos]: b[pos] + expectedDelta, [extent]: b[extent] - expectedDelta });
+      for (let i = 0; i < count; i++) if (i !== boundary && i !== boundary + 1) {
+        expect(after.get(String(i)), 'seed ' + seed).toEqual(before.get(String(i)));
+      }
+    }
+  });
+});
+
 describe('property: move edge beside a leaf ≡ remove + insert-beside', () => {
   it('keeps the leaf set, validates, and lands the moved leaf on the edge side of the target', () => {
     for (let s = 0; s < 200; s++) {
