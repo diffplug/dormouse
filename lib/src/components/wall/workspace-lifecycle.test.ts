@@ -10,7 +10,7 @@ import {
   requestWorkspaceClose,
 } from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
-import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
+import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
@@ -73,6 +73,20 @@ describe('closeWorkspaceWithSurfaces', () => {
     await decideEditorClose('discard');
     expect(await discarded).toBeNull();
     expect(closeAll).toHaveBeenCalledWith(['a', 'b']);
+  });
+
+  it('abandons a close awaiting dirty-editor consent when a newer move starts', async () => {
+    const [only] = ids();
+    const closeAll = vi.fn(async () => null);
+    handleFor(only, { closeAll, dirtyToolIds: () => ['editor'] });
+    recordToolDirty('editor', true);
+    const pending = closeWorkspaceWithSurfaces(only);
+    expect(getEditorClosePrompt()).not.toBeNull();
+    cancelPendingConfirmation();
+    await decideEditorClose('discard');
+    expect(await pending).toContain('superseded');
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(ids()).toContain(only);
   });
 
   it('refuses a second close while one is in flight, so both Walls cannot empty', async () => {

@@ -72,7 +72,7 @@ export async function closeWorkspaceWithSurfaces(
   id: WorkspaceId,
   mode: WorkspaceCloseMode = 'prompt',
 ): Promise<string | null> {
-  cancelPendingConfirmation();
+  const isCurrent = cancelPendingConfirmation();
   if (isWorkspaceTransferPending(id)) return 'Workspace is transferring';
   if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
   const handle = getWallHandle(id);
@@ -88,6 +88,7 @@ export async function closeWorkspaceWithSurfaces(
     // close refuses instead (`docs/specs/dor-tool.md` → Closing unsaved Tools).
     const editors = handle.dirtyToolIds();
     if (editors.length && (mode === 'silent' || !await confirmToolEditorsClose(editors))) return UNSAVED_TOOL_REFUSAL;
+    if (!isCurrent()) return 'Workspace close was superseded by a newer close or move';
     const refusal = await handle.closeAll(editors);
     if (refusal) {
       // A refusal returns to its prompt if the user navigated away during close.
