@@ -6,7 +6,7 @@ A mouse-friendly multitasking terminal built with pnpm, react, typescript, vite,
 
 ```
 pnpm install     # install deps
-pnpm build       # build lib, vscode extension, Pocket, and website
+pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
 ```
 
 **Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`.
@@ -31,7 +31,7 @@ The Tool shows the harness in its own pane and prints the command to drive it
 - **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process; direct-path WebRTC via node-datachannel, every platform's addon in one VSIX)
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
 - **`relay/`** — Selfhost coordinating Relay for remote control (Hono): accounts + passkey auth in local JSON files (no database), WebSocket routing between Clients and Burrows, serves the built Pocket app
-- **`hosted/`** — Hosted's three Hono Workers: account and Better Auth (`hosted.dormouse.sh`), one-time rendezvous (`relay.`), voice (`voice.`); Postgres.
+- **`hosted/`** — Hosted's three Hono Workers: account and Better Auth (`hosted.dormouse.sh`), account-scoped Relay/Pocket and one-time rendezvous (`relay.`), voice (`voice.`); Postgres.
 - **`dor/`** — The `dor` CLI (stricli) staged onto the `PATH` of every Dormouse-launched terminal; talks to its host over a private control socket
 - **`remote-lib-common/`** — Security primitives + remote wire contract shared by `relay`, the Burrow module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
@@ -75,7 +75,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/remote-network.md`** — The network policy (Nothing / Local networks / Anywhere / My Relay only): its choke points, the update reminder, the Local networks path check, Cloudflare STUN, and each level's paired-phone path.
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
 - **`docs/specs/relay.md`** — The selfhost coordinating Relay and shared Burrow-service runtime: env config, JSON-file state, WebAuthn without a library, HTTP API, relay flow, enrollment, running it end to end.
-- **`docs/specs/hosted.md`** — Hosted accounts: application boundary, login/linking policy, local development, and staged paid services.
+- **`docs/specs/hosted.md`** — Hosted accounts: login/linking policy, account-scoped Relay and enrollment, Worker deployment, local development, and staged paid services.
 - **`docs/specs/one-time.md`** — One-time connection: the link a laptop shows, its Settings panel and Baseboard indicator, the Hosted rendezvous wire that carries only its handshake, the phone page Hosted serves, and the direct-only session; no account, nothing saved.
 - **`docs/specs/security-hosted.md`** — Hosted account origin, identity, and deployment security checks.
 - **`SELF_HOST.md`** (repo root) — Self-host deployment: the assistant-run install runbook plus the Installer contract that `docs/specs/security-remote.md`'s `FAIL IF` lines and `scripts/deploy-lint.mjs` audit.
@@ -113,18 +113,20 @@ Specs are written ahead of the code: a new component's spec starts as a full des
 
 `scripts/spec-lint.mjs` (`pnpm lint:specs`, the first step of the root `pnpm test`) enforces the mechanically checkable conventions above — its header comment lists the checks — and ratchets size: every spec, this file, `SECURITY.md`, and `SELF_HOST.md` carry a word budget in `scripts/spec-word-budgets.json`, its size rounded up to the nearest 50. Rationale files carry none; evidence may grow without limit. Over budget: cut to fit, or re-baseline with `node scripts/spec-lint.mjs --ratchet <spec>` in the same PR. `SECURITY.md`, `SELF_HOST.md`, and `docs/compatible-agents.md` ride the same checks. Advisory prose reviews follow `docs/prose-audit.md` (`pnpm audit:prose`).
 
-Six sibling lints run in `pnpm test`. Five enforce one invariant a spec states in prose and name the line they enforce; only `public-docs-lint` and `e2e-lint` read that prose and fail when the line is gone. `ps1-cmdlet-lint` guards the one shipped file nothing else can parse:
+Root `package.json` owns the lint suite. This map locates each lint's owning contract; `public-docs-lint` and `e2e-lint` also require the prose they enforce to remain present:
 
 | Lint | Enforces |
 |---|---|
-| `scripts/public-docs-lint.mjs` (`pnpm lint:public-docs`) | The public-doc contracts in `docs/specs/website-docs.md`, every inventory derived from the file that owns it. |
-| `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) | The `@xterm/*` version lockstep in `docs/specs/webgl-text.md`. |
-| `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) | `docs/specs/security-local.md` -> "Loopback Listeners": a loopback bind is not an access control — a new listener references a guard module or is allowlisted with a reason. |
-| `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) | `docs/specs/security-remote.md` -> "Credentials at rest" and "Network posture (self-hosted)": the installer controls binding all three of `deploy/local/install-{macos,windows,linux}`. |
-| `scripts/ps1-cmdlet-lint.mjs` (`pnpm lint:deploy`) | Every `Verb-Noun` call in `deploy/local/install-windows.ps1` uses an approved verb and a noun that is not this project's vocabulary. No job has a PowerShell, so this is the Windows installer's only syntax gate. |
-| `scripts/e2e-lint.mjs` (`pnpm lint:e2e`) | The structural half of `docs/specs/security-remote.md` -> "Remote Control": one Noise suite with no selector, no JavaScript curve, no legacy relay discriminant, no Relay-side protocol-v1 type, no one-time reader in the Relay or `BurrowRuntime`, no store in the one-time phone, no checked-in service worker, no optional field on a ciphertext or transcript; and `docs/specs/security-hosted.md`: no frame read in Hosted's one-time room, or decoded or kept in its `RelayRoom`. |
+| `scripts/public-docs-lint.mjs` (`pnpm lint:public-docs`) | `docs/specs/website-docs.md` → "Public-doc validation". |
+| `scripts/xterm-lint.mjs` (`pnpm lint:xterm`) | `docs/specs/webgl-text.md` → "Fork pipeline", "Following upstream", "Canopy lab". |
+| `scripts/loopback-lint.mjs` (`pnpm lint:loopback`) | `docs/specs/security-local.md` → "Loopback Listeners". |
+| `scripts/deploy-lint.mjs` (`pnpm lint:deploy`) | `docs/specs/security-remote.md` → "Credentials at rest", "Network posture (self-hosted)"; `SELF_HOST.md` → "Installer contract (maintainers)". |
+| `scripts/ps1-cmdlet-lint.mjs` (`pnpm lint:deploy`) | Every `Verb-Noun` call in `deploy/local/install-windows.ps1` uses an approved verb and a noun that is not this project's vocabulary. This is the Windows installer's syntax gate. |
+| `scripts/e2e-lint.mjs` (`pnpm lint:e2e`) | `docs/specs/security-remote.md` → "Remote Control"; `docs/specs/security-hosted.md` → "Rendezvous boundary", "Relay boundary". |
 
-`scripts/spec-lint-selftest.mjs` plants one defect per finding check in the spec lint. The `deploy`, `e2e`, and `loopback` lints carry self-tests that mutate each rule in whichever direction it points: a present-control rule has its control deleted (and, for exact-count rules, a copy added), a `forbidden` rule has the banned text appended. `scripts/e2e-lint-selftest.mjs` is mostly the second kind; `scripts/deploy-lint-selftest.mjs` mostly the first. Either way the lint must go red. **A rule added to one of these lints without its self-test case is not enforced** — it is a claim that something is checked. They share plumbing, and only that, through `scripts/lint-kit.mjs`. `scripts/installer-verify-test.mjs` (also `pnpm lint:deploy`) runs the installer shell helpers lint can only read, extracted from the shipped files; `scripts/ps1-cmdlet-lint-selftest.mjs` carries the `ps1-cmdlet` lint's mutations. `pnpm test` also runs `scripts/clamp-issue-body-selftest.mjs`, the test for `scripts/clamp-issue-body.mjs` (the helper the audit workflows use to keep an issue body postable); it lives at the repo root because its callers do.
+**Must add a mutation self-test for every new finding rule in a lint that carries self-tests, and require that mutation to make the lint fail.** An untested rule is a claim, not an enforced check. Root `package.json` names the suites; their shared plumbing, and only that, is `scripts/lint-kit.mjs`.
+
+`scripts/installer-verify-test.mjs` executes extracted shipped installer helpers. `scripts/clamp-issue-body-selftest.mjs` pins the audit issue-body helper. Both run in root `pnpm test`.
 
 
 ## Design

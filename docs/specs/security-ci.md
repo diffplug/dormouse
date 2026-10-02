@@ -16,7 +16,7 @@
 
 ## Automated Maintainer (tend)
 
-This repository runs the [tend](https://github.com/max-sixty/tend) agent harness as the GitHub user `dormouse-bot`: it reviews PRs, triages issues, fixes CI failures, regenerates its own workflow files nightly, responds to mentions, and polls its notification feed. A prompt injection in that harness reaches three secrets, and **none escalates directly into malicious content on the `main` branch or into any deployment-related secret** — those paths stay admin-gated.
+This repository runs the [tend](https://github.com/max-sixty/tend) agent harness as the GitHub user `dormouse-bot`: it reviews PRs, triages issues, fixes CI failures, regenerates its own workflow files nightly, responds to mentions, and polls its notification feed.
 
 | Secret | What a compromise buys | What bounds it |
 | --- | --- | --- |
@@ -29,7 +29,7 @@ This repository runs the [tend](https://github.com/max-sixty/tend) agent harness
 
 **Instruction files are part of that surface.** On a fork PR the privileged `pull_request_target` runner workspace holds the base tree; the attacker-controlled PR tree exists only in the agent's copy-on-write view, and that is where the *project instructions* Claude Code loads (`CLAUDE.md`, `AGENTS.md`, `.claude/`, `.mcp.json`) come from. **Must revert those paths from the reviewed base branch before the agent starts**, so instructions come from code a maintainer merged — tend's `shared/steps/restore-sensitive-config.sh` does it. **That control's completeness is a property of the pinned upstream version, not of anything in this repo** — hence the `0.1.19` floor below (rationale).
 
-**Credential isolation bounds an injection.** The agent runs as a separate, non-sudo sandbox user behind a local credential-injecting proxy. **`TEND_BOT_TOKEN` and the Anthropic credential must live only in that proxy — never in the agent's environment, its disk, or `.git/config`** — setup strips the credential `actions/checkout` persists there, so an injection can make the bot *act* within its permissions, never read a token value out (rationale).
+**Must keep real `TEND_BOT_TOKEN` and Anthropic credentials out of the agent's environment, disk, and `.git/config`.** Trusted runner steps receive them and provision the credential-injecting proxy; setup strips the checkout credential before the separate, non-sudo agent starts (rationale).
 
 **Bot collaborator authority.** `dormouse-bot` is a direct repo collaborator with `push` permission and 2FA enforced by org policy; its PAT (`TEND_BOT_TOKEN`) carries the scopes `repo`, `workflow`, `notifications`, `write:discussion`, `gist`, and `user`. `workflow`, required for the nightly regeneration of `tend-*.yaml`, is the same scope that lets the harness add arbitrary new workflow files. **Ref-protection rulesets restrict where bot-controlled commits can land but do not gate workflow execution on feature branches.**
 
@@ -118,7 +118,13 @@ The extension is published by GitHub Actions, and the publishing secrets `VSCE_P
 | `EV_SIGN_PIN` | **env-only**; `jsign --storepass env:EV_SIGN_PIN` resolves it from the process environment | the physical YubiKey |
 | `APPLE_SIGN_PASS` | argv — `xcrun notarytool` offers no environment form either | the weakest of the three: unlike the PIN a standalone credential, and `--wait --timeout 30m` holds it on the command line up to half an hour per architecture |
 
-**Known gap.** The documented remedy for `APPLE_SIGN_PASS` is `notarytool store-credentials` plus `--keychain-profile`, moving the exposure to one short call instead of every submission. Not yet done — it changes the release runbook and cannot be exercised without live Apple credentials.
+The `APPLE_SIGN_PASS` exposure is a known gap; its remedy is staged under `## Future` → Notarization credentials.
 
 - **FAIL IF** `scripts/sign-and-deploy.sh` stops doing any of three things: verifying GitHub artifact attestations, verifying artifact SHA-256 manifests, or using PIV-backed Windows signing. Pinned by `scripts/sign-and-deploy.test.mjs`.
 - **FAIL IF** `TAURI_SIGNING_PRIVATE_KEY` is passed on a command line anywhere in `scripts/sign-and-deploy.sh` rather than through the environment, or `EV_SIGN_PIN` is passed literally to `jsign --storepass` instead of by environment-variable reference.
+
+## Future
+
+### Notarization credentials
+
+Use `notarytool store-credentials` plus `--keychain-profile` to move password exposure to one short provisioning call instead of every submission. Update the release runbook and verify with live Apple credentials before promotion.
