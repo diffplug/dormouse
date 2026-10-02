@@ -738,7 +738,9 @@ below reads that record rather than inferring itself from the suppression map.
   drop the in-memory record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
   both ends gone the shells are reaped rather than left owned by a dead label,
-  and the durable recovery record remains. **Must retain a failed return as an in-flight blocker, show its retry status and retry its journal write without adopting or reaping the claimed PTYs.** A late worker acts only on its own phase and generation; `a_failed_reverse_journal_retains_the_return_and_retries_without_losing_recovery` pins this boundary (rationale).
+  and the durable recovery record remains. **Must bound failed-return retries and then reserve the arrival for cold recovery without returning ownership, adopting it or reaping its claimed PTYs.** Show recovery status; permit global quit/restart through normal confirmation and watchdogs while individual closes and transfers involving either endpoint remain blocked, including after a quit cancellation. Preserve the journal and snapshots on that quit. Workers act only on their phase and generation; `permanent_return_failure_bounds_quit_and_cold_restores_exactly_once` pins this boundary (rationale).
+
+  Source of truth: `failed_arrival_return` in `standalone/src-tauri/src/lib.rs`, `ArrivalQueue` in `standalone/src-tauri/src/quit_state.rs`.
 - **Must change transfer ownership and source routing under one routing lock**,
   so output before the mark always reaches the source
   (`transfer_ownership_and_source_routing_change_together`).
@@ -1010,13 +1012,7 @@ teardown at a time. Source of truth: `QuitMachine` in
   exits** rather than leaving a process with none, and so does a trigger that
   finds none: parked in `Voting` it would have no window to vote and refuse
   every later exit.
-- **A quit keeps every window's snapshot on disk** — that is what a relaunch
-  restores from, and the whole difference from a per-window close. **A Workspace
-  in transfer is in no snapshot until its target publishes it, and neither end's
-  teardown kills its shells** (§Arrival queue). A quit mid-transfer restores it
-  at most once: from the target once it has published it, or from a source
-  handed it back because the target was destroyed first; a source torn down
-  before its target adopts leaves it in no snapshot.
+- **Must keep every Window snapshot on disk during quit and leave in-flight arrivals' claimed shells out of each endpoint's teardown.** Cold recovery follows §Arrival queue.
 
 ### Trigger interception
 

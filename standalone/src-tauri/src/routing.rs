@@ -247,7 +247,8 @@ pub fn route<'a>(event: &str, data: &'a JsonValue, view: &RouteView<'a>) -> Rout
 pub struct Arrival {
     /// Preparing reserves both endpoints while disk I/O runs without the
     /// arrival lock. Returning retains that reservation until its reverse
-    /// destination is durable. Neither phase is adoptable.
+    /// destination is durable. RecoveryPending parks an exhausted return for
+    /// cold recovery: only global quit may pass it. None is adoptable.
     pub phase: ArrivalPhase,
     /// A Preparing arrival that is cancelled has never moved the source's
     /// shells; its return must not hide or reap those source-owned PTYs.
@@ -274,7 +275,7 @@ pub struct Arrival {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArrivalPhase { Preparing, Active, Returning }
+pub enum ArrivalPhase { Preparing, Active, Returning, RecoveryPending }
 
 /// Every arrival in flight, oldest first. A Vec, not a map: there are a handful
 /// at most, and both the per-window drain and the by-Workspace lookup want the
@@ -320,18 +321,19 @@ pub fn expire_arrival(
 ) -> Option<Arrival> {
     let arrival = arrivals.iter_mut().find(|arrival| {
         arrival.workspace_id == workspace_id && arrival.to == to && arrival.queued_at == queued_at
-            && arrival.phase != ArrivalPhase::Returning
+            && matches!(arrival.phase, ArrivalPhase::Preparing | ArrivalPhase::Active)
     })?;
     arrival.phase = ArrivalPhase::Returning;
     Some(arrival.clone())
 }
 
 /// Reserve settlement before releasing the lock. A close/quit must continue
-/// waiting while the return destination is being written or retried.
+/// waiting while the return destination is being written or retried. A parked
+/// RecoveryPending record cannot start a second return chain.
 pub fn return_arrival(arrivals: &mut Arrivals, workspace_id: &str, to: &str) -> Option<Arrival> {
     let arrival = arrivals.iter_mut().find(|arrival| {
         arrival.workspace_id == workspace_id && arrival.to == to
-            && arrival.phase != ArrivalPhase::Returning
+            && matches!(arrival.phase, ArrivalPhase::Preparing | ArrivalPhase::Active)
     })?;
     arrival.phase = ArrivalPhase::Returning;
     Some(arrival.clone())
@@ -348,12 +350,13 @@ pub fn retire_arrival(arrivals: &mut Arrivals, expected: &Arrival) -> bool {
 }
 
 /// Reserve returns for arrivals whose target is gone, retaining their teardown
-/// blockers until the reverse journal commits. Existing return workers own
+/// blockers until the reverse journal commits. Parked recovery stays reserved,
+/// and existing return workers own
 /// their generation and are not started a second time.
 pub fn take_arrivals_to(arrivals: &mut Arrivals, label: &str) -> Vec<Arrival> {
     let mut lost = Vec::new();
     for arrival in arrivals {
-        if arrival.to == label && arrival.phase != ArrivalPhase::Returning {
+        if arrival.to == label && matches!(arrival.phase, ArrivalPhase::Preparing | ArrivalPhase::Active) {
             arrival.phase = ArrivalPhase::Returning;
             lost.push(arrival.clone());
         }

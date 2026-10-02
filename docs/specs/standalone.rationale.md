@@ -151,6 +151,8 @@ A target whose `adopt_done` is refused already has the arrival payload needed to
 
 The Windows audit on 2026-10-01 found that a failed initial journal write was logged before ownership moved anyway, while the source's next snapshot omitted the Workspace. A failed return write likewise removed the close/quit blocker before its durable destination changed. Admission and return reservations now hold the blockers across disk IO and release source state only after the matching generation's journal commit. Native failure tests preserve earlier journal bytes and replay the return into exactly one source snapshot.
 
+Review on 2026-10-02 found that unlimited reverse-write retries also swallowed every quit before its watchdog started. A parked return retains live ownership and the durable journal; global quit preserves snapshots, so it can use normal confirmation and bounded teardown and let cold restore settle that record at its durable destination. Individual close deletes snapshots and remains blocked, as do new transfers at those endpoints. Canceling quit leaves the reservation in place. The initial attempt and five one-second retries allow transient failures to recover without requiring a restart; exhaustion performs no further write or false hand-back.
+
 **Why the mark is stamped in the stream rather than asked for.** A mark fetched
 by request answers at some instant the sidecar chose, while the source's xterm
 stands at whatever `pty:data` had reached it — two clocks nothing aligns, so a

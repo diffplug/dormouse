@@ -6,7 +6,7 @@
 //! transitions live here, free of Tauri, and hand the caller a list of actions
 //! to perform; `lib.rs` owns the emitting, destroying and exiting.
 
-use crate::routing::{quit_order, Arrivals};
+use crate::routing::{quit_order, ArrivalPhase, Arrivals};
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 
@@ -35,13 +35,20 @@ impl DerefMut for ArrivalQueue {
 }
 
 impl ArrivalQueue {
-    /// Queue a quit while anything is in flight. `None` means nothing is in
-    /// flight and the quit runs now; otherwise whether the queued quit relaunches.
+    /// Only unsettled live work delays global quit. Exhausted returns retain
+    /// their recovery/individual-close fences, but global quit preserves the
+    /// journal and snapshots and may proceed through its normal human gate.
     pub fn defer_quit(&mut self, intent: &QuitIntent) -> Option<bool> {
-        if self.records.is_empty() { return None; }
+        if !self.blocks_quit() { return None; }
         let restart = self.quit.get_or_insert_with(|| intent.clone()).restart;
         self.closes.clear();
         Some(restart)
+    }
+    /// Global quit admission consumes the first queued intent even when a new
+    /// trigger arrives before the scheduled redrive; individual closes yield.
+    pub fn take_quit_intent(&mut self, fallback: QuitIntent) -> QuitIntent {
+        self.closes.clear();
+        self.quit.take().unwrap_or(fallback)
     }
     /// Queue `label`'s close while it is either end of a transfer; whether it
     /// was queued (a queued quit absorbs it).
@@ -50,20 +57,25 @@ impl ArrivalQueue {
         if self.quit.is_none() { self.closes.insert(label.to_string()); }
         true
     }
+    fn blocks_quit(&self) -> bool {
+        self.records.iter().any(|arrival| arrival.phase != ArrivalPhase::RecoveryPending)
+    }
     pub fn blocks_transfer(&self, from: &str, to: &str) -> bool {
         self.quit.is_some() || self.closes.contains(from) || self.closes.contains(to)
+            || self.records.iter().any(|arrival| arrival.phase == ArrivalPhase::RecoveryPending
+                && [from, to].into_iter().any(|label| arrival.from == label || arrival.to == label))
     }
     pub fn cancel_deferred(&mut self) { self.quit = None; self.closes.clear(); }
     pub fn forget_deferred_close(&mut self, label: &str) { self.closes.remove(label); }
     /// Take the requests no transfer holds any more: the quit (with its intent)
-    /// once nothing is in flight, else every close whose window is no endpoint.
+    /// once no live settlement is in flight, else every close whose window is no endpoint.
     /// `live` (the open window labels) is read only when something is queued.
     pub fn take_ready(&mut self, live: impl FnOnce() -> HashSet<String>) -> (Option<QuitIntent>, Vec<String>) {
         if self.quit.is_none() && self.closes.is_empty() { return (None, Vec::new()); }
         let live = live();
         self.closes.retain(|label| live.contains(label));
         if self.quit.is_some() {
-            if self.records.is_empty() { return (self.quit.take(), Vec::new()); }
+            if !self.blocks_quit() { return (self.quit.take(), Vec::new()); }
             return (None, Vec::new());
         }
         let endpoints: HashSet<&str> =
@@ -515,6 +527,32 @@ mod tests {
         assert_eq!(queue.take_ready(live), (None, vec![]));
         assert_eq!(queue.take_ready(quiet), (None, vec![]));
         assert!(!queue.blocks_transfer("main", "ws-2"));
+    }
+
+    #[test]
+    fn parked_recovery_allows_only_global_quit_and_keeps_fences_after_cancel() {
+        let mut queue = ArrivalQueue::default();
+        let live = || HashSet::from(["main".to_string(), "ws-2".to_string(), "ws-3".to_string()]);
+        let mut parked = arrival("main", "ws-2");
+        parked.phase = ArrivalPhase::RecoveryPending;
+        queue.push(parked);
+        queue.push(arrival("ws-3", "main"));
+        let intent = QuitIntent::restart(Some("requester".into()));
+        assert_eq!(queue.defer_quit(&intent), Some(true), "live settlements still block");
+        assert_eq!(queue.take_ready(live), (None, vec![]));
+        queue.pop();
+        assert_eq!(queue.defer_quit(&QuitIntent::default()), None, "repeated quit must reach its watchdog");
+        assert_eq!(queue.take_quit_intent(QuitIntent::default()), intent, "first queued restart owns intent");
+        assert_eq!(queue.take_ready(live), (None, vec![]));
+        queue.cancel_deferred();
+        assert!(queue.defer_close("main"));
+        assert!(queue.defer_close("ws-2"));
+        assert_eq!(queue.take_ready(live), (None, vec![]), "no destructive individual close");
+        assert!(queue.blocks_transfer("main", "ws-3"));
+        assert!(queue.blocks_transfer("ws-3", "ws-2"));
+        assert!(crate::routing::arrival_payloads(&queue, "ws-2").is_empty());
+        assert!(crate::routing::return_arrival(&mut queue, "main-to-ws-2", "ws-2").is_none());
+        assert!(crate::routing::take_arrivals_to(&mut queue, "ws-2").is_empty());
     }
 
     #[test]

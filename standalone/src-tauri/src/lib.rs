@@ -682,6 +682,7 @@ fn request_quit(app: &AppHandle, intent: QuitIntent) -> bool {
             append_log("[quit] transfer in progress; quit queued until settlement");
             return relaunches;
         }
+        let intent = arrivals.take_quit_intent(intent);
         let labels = window_labels(app);
         let mut machine = guard(&state.machine);
         let (seq, actions) = machine.request(&labels, intent);
@@ -2785,7 +2786,7 @@ fn commit_initial_arrival_with(
     Ok(())
 }
 
-/// The queue keeps Returning arrivals as close/quit blockers until their
+/// The queue keeps Returning arrivals as close/quit blockers during bounded retries until their
 /// reverse journal write succeeds. Failed writes change neither ownership nor
 /// the old durable destination, and retries cannot settle a later generation.
 fn commit_arrival_return_with(
@@ -2928,6 +2929,29 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
     });
 }
 
+// Initial attempt plus five one-second retries. Exhaustion retains the live
+// ownership fence and durable record for cold recovery, while admitting the
+// non-destructive global quit flow. Individual close still deletes snapshots
+// and must not pass it. A parked generation never resumes an old writer.
+const ARRIVAL_RETURN_RETRIES: u8 = 5;
+
+#[derive(Debug, PartialEq, Eq)]
+enum ArrivalReturnFailure { Retry(u8), RecoveryPending, Stale }
+
+fn failed_arrival_return(
+    windows: &WindowState, expected: &routing::Arrival, retries: u8,
+) -> ArrivalReturnFailure {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let mut arrivals = guard(&windows.arrivals);
+    let Some(arrival) = arrivals.iter_mut().find(|arrival| {
+        arrival.workspace_id == expected.workspace_id && arrival.to == expected.to
+            && arrival.queued_at == expected.queued_at && arrival.phase == routing::ArrivalPhase::Returning
+    }) else { return ArrivalReturnFailure::Stale; };
+    if retries > 0 { return ArrivalReturnFailure::Retry(retries - 1); }
+    arrival.phase = routing::ArrivalPhase::RecoveryPending;
+    ArrivalReturnFailure::RecoveryPending
+}
+
 /// One arrival will never be adopted: give its shells back to the source and
 /// tell the source so it clears the Workspace's transferring mark. **The
 /// Workspace simply stays where it is** — nothing was released, so there is
@@ -2942,12 +2966,20 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
 /// an id the sidecar never stamped goes straight back.
 ///
 /// The caller has marked this generation Returning in the queue. It remains
-/// there until its reverse destination is durable; no teardown may overtake it.
+/// there until its reverse destination is durable or bounded retries park it
+/// for cold recovery; only global quit may pass the parked reservation.
 fn hand_back_arrival(
     app: &AppHandle,
     windows: &WindowState,
     arrival: &routing::Arrival,
     reason: &str,
+) {
+    hand_back_arrival_with_retries(app, windows, arrival, reason, ARRIVAL_RETURN_RETRIES);
+}
+
+fn hand_back_arrival_with_retries(
+    app: &AppHandle, windows: &WindowState, arrival: &routing::Arrival,
+    reason: &str, retries: u8,
 ) {
     append_log(format!(
         "[window] {} never arrived in {} ({reason}); handing it back to {}",
@@ -2960,11 +2992,20 @@ fn hand_back_arrival(
         let marks = match returned {
             Ok(marks) => marks,
             Err(error) => {
-                append_log(format!("[window] hand-back is waiting for its journal: {error}"));
+                let status = match failed_arrival_return(windows, arrival, retries) {
+                    ArrivalReturnFailure::Retry(remaining) => {
+                        retry_arrival_return(app.clone(), arrival.clone(), reason.to_string(), remaining);
+                        format!("The Workspace could not be returned safely yet. Retrying its recovery write: {error}")
+                    }
+                    ArrivalReturnFailure::RecoveryPending => {
+                        redrive_deferred_teardown(app);
+                        format!("The Workspace recovery write failed. Quit or restart to recover it from its saved transfer record: {error}")
+                    }
+                    ArrivalReturnFailure::Stale => return,
+                };
+                append_log(format!("[window] {status}"));
                 let _ = app.emit_to(arrival.from.as_str(), "dormouse://workspace-arrival-retry",
-                    serde_json::json!({ "workspaceId": arrival.workspace_id,
-                        "reason": format!("The Workspace could not be returned safely yet. Retrying its recovery write: {error}") }));
-                retry_arrival_return(app.clone(), arrival.clone(), reason.to_string());
+                    serde_json::json!({ "workspaceId": arrival.workspace_id, "reason": status }));
                 return;
             }
         };
@@ -3018,7 +3059,7 @@ fn hand_back_arrival(
 
 /// One retry chain per Returning generation. A later drop of the same id is
 /// independent; it is never adopted, retired or written by this worker.
-fn retry_arrival_return(app: AppHandle, expected: routing::Arrival, reason: String) {
+fn retry_arrival_return(app: AppHandle, expected: routing::Arrival, reason: String, remaining: u8) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(1));
         let Some(windows) = app.try_state::<WindowState>() else { return; };
@@ -3026,7 +3067,7 @@ fn retry_arrival_return(app: AppHandle, expected: routing::Arrival, reason: Stri
             arrival.workspace_id == expected.workspace_id && arrival.to == expected.to
                 && arrival.queued_at == expected.queued_at && arrival.phase == routing::ArrivalPhase::Returning
         });
-        if live { hand_back_arrival(&app, &windows, &expected, &reason); }
+        if live { hand_back_arrival_with_retries(&app, &windows, &expected, &reason, remaining); }
     });
 }
 
@@ -3562,7 +3603,6 @@ fn forget_restart(app: &AppHandle) {
 
 // ── Per-window close (docs/specs/standalone.md §Per-window close) ─────────────
 
-// This window's close orchestrator is alive; stand its ack watchdog down.
 #[tauri::command]
 fn retry_window_close(app: AppHandle, window: tauri::Window) {
     // Retry starts a fresh native handshake too: close admission must block
@@ -3570,6 +3610,7 @@ fn retry_window_close(app: AppHandle, window: tauri::Window) {
     request_window_close(&app, window.label());
 }
 
+// This window's close orchestrator is alive; stand its ack watchdog down.
 #[tauri::command]
 fn window_close_ack(window: tauri::Window, state: tauri::State<'_, QuitState>) {
     guard(&state.close).ack(window.label());
@@ -4487,7 +4528,7 @@ mod tests {
     };
     use super::routing;
     use super::guard;
-    use super::{WindowState, QuitIntent, commit_initial_arrival_with,
+    use super::{WindowState, QuitIntent, failed_arrival_return, ArrivalReturnFailure, ARRIVAL_RETURN_RETRIES, commit_initial_arrival_with,
         commit_arrival_return_with, commit_arrival_adoption_with,
         record_arrival_in_locked_journal, return_arrival_in_locked_journal};
     use std::collections::HashSet;
@@ -4711,12 +4752,90 @@ mod tests {
         assert_eq!(guard(&windows.arrivals).defer_quit(&QuitIntent::default()), Some(false));
         assert!(routing::arrival_payloads(&guard(&windows.arrivals), "ws-2").is_empty());
 
+        assert_eq!(failed_arrival_return(&windows, &returning, ARRIVAL_RETURN_RETRIES), ArrivalReturnFailure::Retry(ARRIVAL_RETURN_RETRIES - 1));
         commit_arrival_return_with(&windows, &returning, || return_arrival_in_locked_journal(dir.path(), &returning)).unwrap();
+        assert_eq!(failed_arrival_return(&windows, &returning, 0), ArrivalReturnFailure::Stale);
         assert_eq!(windows.owned_by("main"), expected.terminal_ids);
         assert!(guard(&windows.arrivals).is_empty());
         restore_arrivals(dir.path()).unwrap();
         assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-7"]);
         assert!(read_snapshot(dir.path(), "ws-2").is_none());
+    }
+
+    #[test]
+    fn permanent_return_failure_bounds_quit_and_cold_restores_exactly_once() {
+        use super::quit_state::{QuitMachine, QuitAction};
+        let dir = TempDir::new("arrival-return-exhausted");
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Source")], "workspace-7")).unwrap();
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[], "")).unwrap();
+        commit_initial_arrival_with(&windows, &expected, || record_arrival_in_locked_journal(dir.path(), &expected)).unwrap();
+        let returning = routing::return_arrival(&mut guard(&windows.arrivals), &expected.workspace_id, &expected.to).unwrap();
+        let previous = fs::read(arrivals_path(dir.path())).unwrap();
+        let intent = QuitIntent::restart(None);
+        assert_eq!(guard(&windows.arrivals).defer_quit(&intent), Some(true));
+        for remaining in (0..=ARRIVAL_RETURN_RETRIES).rev() {
+            assert!(commit_arrival_return_with(&windows, &returning, || Err("read-only volume".into())).is_err());
+            let result = failed_arrival_return(&windows, &returning, remaining);
+            assert_eq!(result, if remaining > 0 { ArrivalReturnFailure::Retry(remaining - 1) }
+                else { ArrivalReturnFailure::RecoveryPending });
+        }
+        assert_eq!(fs::read(arrivals_path(dir.path())).unwrap(), previous);
+        assert_eq!(windows.owned_by("ws-2"), expected.terminal_ids);
+        assert!(routing::arrival_payloads(&guard(&windows.arrivals), "ws-2").is_empty());
+        assert!(commit_arrival_return_with(&windows, &returning, || panic!("parked writer must not touch disk")).is_err());
+        assert!(commit_arrival_adoption_with(&windows, &expected, || panic!("late adoption must not write")).is_err());
+        let live = || HashSet::from(["main".to_string(), "ws-2".to_string()]);
+        assert_eq!(guard(&windows.arrivals).take_ready(live), (Some(intent.clone()), vec![]));
+        assert_eq!(guard(&windows.arrivals).defer_quit(&intent), None);
+        // Actual global-quit machine takes its normal confirmation, then emits
+        // destroys without the per-window snapshot commit/removal path.
+        let mut machine = QuitMachine::default();
+        let labels = vec!["main".to_string(), "ws-2".to_string()];
+        assert_eq!(machine.request(&labels, intent.clone()).1, vec![QuitAction::RequestAll { requester: None }]);
+        assert!(!machine.all_acked(), "the normal no-ack watchdog is now reachable");
+        assert_eq!(machine.cancel(), vec![QuitAction::CancelAll]);
+        guard(&windows.arrivals).cancel_deferred();
+        assert_eq!(fs::read(arrivals_path(dir.path())).unwrap(), previous);
+        assert_eq!(windows.owned_by("ws-2"), expected.terminal_ids);
+        assert!(guard(&windows.arrivals).defer_close("main"));
+        assert!(guard(&windows.arrivals).defer_close("ws-2"));
+        assert_eq!(guard(&windows.arrivals).take_ready(live), (None, vec![]));
+        assert_eq!(guard(&windows.arrivals).defer_quit(&intent), None);
+        assert_eq!(machine.request(&labels, intent.clone()).1, vec![QuitAction::RequestAll { requester: None }]);
+        machine.ack("main"); machine.ack("ws-2");
+        assert!(machine.vote("main").is_empty());
+        assert_eq!(machine.vote("ws-2"), vec![QuitAction::Teardown { label: "ws-2".into(), last: false }]);
+        assert_eq!(machine.window_done("ws-2"), vec![QuitAction::Destroy { label: "ws-2".into() },
+            QuitAction::Teardown { label: "main".into(), last: true }]);
+        let (lost, orphaned) = windows.drop_window("ws-2");
+        assert!(lost.is_empty(), "Destroyed must not restart a parked reverse write");
+        assert!(orphaned.is_empty(), "claimed PTYs must not be sibling-close kills");
+        assert_eq!(fs::read(arrivals_path(dir.path())).unwrap(), previous);
+        assert!(read_snapshot(dir.path(), "main").is_some());
+        assert!(read_snapshot(dir.path(), "ws-2").is_some());
+        assert!(machine.proceed().contains(&QuitAction::Exit));
+        restore_arrivals(dir.path()).unwrap();
+        assert!(read_snapshot(dir.path(), "main").is_none(), "empty source is removed by cold restore");
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "ws-2").unwrap()), vec!["workspace-7"]);
+    }
+
+    #[test]
+    fn exhausted_return_cannot_park_or_write_a_newer_generation() {
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+        commit_initial_arrival_with(&windows, &expected, || Ok(())).unwrap();
+        let old = routing::return_arrival(&mut guard(&windows.arrivals), &expected.workspace_id, &expected.to).unwrap();
+        assert!(routing::retire_arrival(&mut guard(&windows.arrivals), &old));
+        let mut newer = old.clone();
+        newer.queued_at += std::time::Duration::from_millis(1);
+        guard(&windows.arrivals).push(newer.clone());
+        assert_eq!(failed_arrival_return(&windows, &old, 0), ArrivalReturnFailure::Stale);
+        assert_eq!(guard(&windows.arrivals)[0], newer);
+        assert!(commit_arrival_return_with(&windows, &old, || panic!("stale generation must not write")).is_err());
     }
 
     #[test]
