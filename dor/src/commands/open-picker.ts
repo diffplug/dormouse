@@ -142,7 +142,9 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       ranker.flush();
       const file = current();
       if (file === undefined) return;
-      const handler = handlerIndex > 0 ? handlerList()[handlerIndex] : undefined;
+      // The chosen handler belongs to `handlerFile`; a query edit in the same
+      // input chunk as Enter can change the file before a render resets it.
+      const handler = handlerIndex > 0 && file === handlerFile ? handlerList()[handlerIndex] : undefined;
       finish(handler ? { file, tool: handler.tool } : { file });
     };
 

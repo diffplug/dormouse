@@ -9,7 +9,7 @@ USAGE
 
 Opens one existing local file or folder. `dor o` is the same command. Relative paths resolve from the caller's directory (or --cwd); symlink aliases resolve to the same path. A file: URL naming this machine is accepted as its path; other URLs and Surface handles are not.
 
-The first matching rule in the user dormouse.yml selects a user Tool or a built-in viewer. --tool chooses a handler explicitly. Without a matching rule, the built-in file viewer opens supported HTML, text/source, image, and media files. PDFs require a user Tool association or --tool <name>. Use --tool builtin:file to select it explicitly. Markdown is shown as source text; a user Tool can provide rendered Markdown. Project associations and project Tools never participate in this lookup. The user file is $XDG_CONFIG_HOME/dormouse/dormouse.yml, or ~/.config/dormouse/dormouse.yml.
+The first matching rule in the user dormouse.yml selects a user Tool or a built-in viewer. --tool chooses a handler explicitly. Without a matching rule, the built-in file viewer opens supported HTML, text/source, image, and media files. PDFs require a user Tool association or --tool <name>. Use --tool builtin:file to select it explicitly. Markdown opens in the Markdown editor. Project associations and project Tools never participate in this lookup. The user file is $XDG_CONFIG_HOME/dormouse/dormouse.yml, or ~/.config/dormouse/dormouse.yml.
 
 The ordered open list contains {match, tool, preview} entries; the optional preview names the handler --preview uses instead of tool. Patterns without a slash match the filename; patterns with a slash match both the canonical absolute path and the path relative to the invocation directory. Matching uses picomatch glob syntax with forward slashes and case sensitivity. Dotfiles require explicit patterns. The built-in HTML viewer serves statically referenced relative assets within the document directory tree; root-relative and external resources are unavailable. Text previews are capped at 8 MiB.
 
@@ -32,7 +32,7 @@ FLAGS
      [--surface]    Surface to split when creating.
      [--workspace]  Workspace to act in, instead of the caller's.
      [--cwd]        Directory for resolving the path.
-     [--tool]       Use a user Tool, builtin:file, or builtin:folder.
+     [--tool]       Use a user Tool, builtin:file, builtin:code, or builtin:folder.
      [--preview]    Show it in this Workspace's preview slot.
   -h  --help        Print help information and exit
       --            All subsequent inputs should be interpreted as arguments

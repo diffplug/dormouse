@@ -80,7 +80,7 @@ const DOR_VERB_ALIASES: Readonly<Record<string, string>> = { o: 'open' };
 
 /** The verb a typed `dor` command line names, its alias resolved. */
 export function canonicalDorVerb(verb: string): string {
-  return Object.hasOwn(DOR_VERB_ALIASES, verb) ? DOR_VERB_ALIASES[verb] : verb;
+  return Object.prototype.hasOwnProperty.call(DOR_VERB_ALIASES, verb) ? DOR_VERB_ALIASES[verb] : verb;
 }
 
 /** Every method the control channel carries. */

@@ -174,6 +174,23 @@ test('the default handler opens without --tool, and a narrow terminal shows it o
   });
 });
 
+test('a handler chosen for one file never opens another that Enter lands on', async () => {
+  await withTree(async (dir) => {
+    const { terminal, client, result } = await startPicker(dir, ['o']);
+    terminal.send('main');
+    await until(() => client.requests.some(r => r.request.target === 'main.ts'), 'main.ts handlers');
+    terminal.send('\x15readme');
+    await until(() => client.requests.some(r => r.request.target === 'docs/README.md'), 'README handlers');
+    await until(() => terminal.output.includes('no open rule matches'), 'the README panel');
+    terminal.send('\t');
+    // One chunk: a new query and Enter, with no render between them.
+    terminal.send('\x15main\r');
+    await result;
+    assert.deepEqual(client.requests.find(r => r.method === 'toolSurface').request.file, 'main.ts');
+    assert.equal(client.requests.find(r => r.method === 'toolSurface').request.tool, undefined);
+  });
+});
+
 test('cancelling exits 1 silently and opens nothing', async () => {
   await withTree(async (dir) => {
     const { terminal, client, result } = await startPicker(dir, ['o']);

@@ -119,6 +119,8 @@ export type DorControlParams = {
   args?: unknown;
   global?: unknown;
   file?: unknown;
+  /** `tool.openHandlers`: the file the picker asks about. */
+  target?: unknown;
   tool?: unknown;
   setting?: unknown;
   initialViewport?: unknown;
@@ -1272,6 +1274,7 @@ export function useDorControl({
             case 'trust-recorded':
             case 'browser-config':
             case 'list':
+            case 'open-handlers':
               // Only the ops that ask for these produce them; a lookup never does.
               detail.respond({ ok: false, error: 'unexpected tool host response' });
               return;
