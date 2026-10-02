@@ -47,6 +47,11 @@ shell-integration scripts — the parser scans raw bytes and cannot defend it
 
 The attacker is the page inside a browser pane.
 
+**Known gap: Windows screenshots/clipboard images inherit parent ACLs.**
+
+Source of truth: `lib/src/host/private-capture-dir.ts`,
+`standalone/sidecar/clipboard-ops.js`, `standalone/src-tauri/src/clipboard_win.rs`.
+
 **Every listener the webview realm exposes to a framed page checks the sender's
 origin before it acts** — `IframePanel` against its own panel's proxy origin, the
 Wall's leader channel against any live grant (`docs/specs/dor-browser.md` ->
