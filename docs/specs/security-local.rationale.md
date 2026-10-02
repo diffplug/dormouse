@@ -173,8 +173,6 @@ true immediately on `win32`, and Node's `mode: 0o600` there touches only the
 read-only attribute, so unlike `remote_host_state_dir` no DACL work is done for
 it.
 
-Recovery permissions were reproduced with an actual Windows DACL containing an inherited Everyone read grant (2026-10-01). Node mode `0600` did not remove it. The shared helper now protects the exact host-owned directory before writes and separately tightens explicit legacy file grants before claims; failed setup prevents record-byte reads and writes. Cold-start claims leave the prior record untouched, while capture still attempts to unlink stale recovery.
-
 Where the standalone log is actually exposed. `env::temp_dir()` honors `TMPDIR`,
 which on macOS is the per-user `/var/folders/.../T` directory at `0700`, so the
 umask does not matter there (measured on a macOS host, 2026-09). The exposure is

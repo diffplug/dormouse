@@ -1848,7 +1848,7 @@ fn write_file_with_permissions(
     contents: &str,
     restrict: impl Fn(&Path, u32) -> Result<(), String>,
 ) -> Result<(), String> {
-    let dir = ensure_parent_with(path, &restrict)?;
+    let _dir = ensure_parent_with(path, &restrict)?;
     let tmp = temp_write_path(path);
     // Atomic replace: write a sibling temp file, fsync it, then rename over the
     // target so a crash mid-write can never truncate the previous good copy.
@@ -1878,7 +1878,7 @@ fn write_file_with_permissions(
     // equivalent dir-fsync concept, so this is unix-only.
     #[cfg(unix)]
     {
-        if let Ok(d) = std::fs::File::open(dir) {
+        if let Ok(d) = std::fs::File::open(_dir) {
             let _ = d.sync_all();
         }
     }

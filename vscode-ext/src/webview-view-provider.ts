@@ -48,13 +48,16 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): Promise<void> {
     this.view = view;
+    // Registered before the shell-discovery await: a view disposed or replaced
+    // while it is pending is never served, and a stale view's disposal never
+    // releases its successor's router.
     let disposed = false;
     let ownedRouter: vscode.Disposable | undefined;
     view.onDidDispose(() => {
       disposed = true;
       ownedRouter?.dispose();
       if (this.view !== view) return;
-      log.info('[view] onDidDispose fired - releasing router (PTYs remain alive)');
+      log.info('[view] onDidDispose fired — releasing router (PTYs remain alive)');
       this.routerDisposable = undefined;
       this.channel = undefined;
       this.view = undefined;
@@ -82,7 +85,6 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
-    if (disposed || this.view !== view) return;
     const savedSession = getSavedSessionState(this.context);
     // Recovery commands are claimed by this view's pane ids.
     const savedPaneIds = (savedSession?.panes ?? []).map((pane) => pane.id);
@@ -92,8 +94,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     // Scoped to *this* view's panes because the capture interrupts every live PTY,
     // including any owned by an editor panel — taking the record whole would delete
     // their commands before the panel ever resolved.
-    const recoveryCommands = await takeRecoveryCommands(this.context, savedPaneIds);
-    if (disposed || this.view !== view) return;
+    const recoveryCommands = takeRecoveryCommands(this.context, savedPaneIds);
     this.channel = serveWebview(
       view.webview, mediaPath, savedSession, this.selectedShell, recoveryCommands,
     );
@@ -114,8 +115,6 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
         if (this.view) this.view.badge = workspaceBadge(union);
       },
     });
-
-
   }
 
   focus(): void {

@@ -934,6 +934,8 @@ written.
   `session_temp_suffix_matches_what_the_writer_leaves`.
   Transcript migration follows `docs/specs/transport.md` → "Retiring the transcripts already on disk".
 
+Source of truth: `write_file_with_permissions` in `standalone/src-tauri/src/lib.rs`.
+
 **Must use `<app_data_dir>/dev` as the debug state root and `<app_data_dir>` for
 release builds** (rationale). `app_data_dir()` follows the Tauri identifier;
 `pnpm dev:standalone` already supplies a distinct per-worktree identifier
@@ -1181,7 +1183,7 @@ with only the exit changed.
   then `tauri::process::restart`, which on macOS re-reads `Info.plist`, so a
   bundle replaced in place starts as the new version. **Never
   `AppHandle::request_restart`** (rationale).
-- **A terminate the OS re-sends after approval clears the intent**, so logout
+- **Must clear the restart intent when macOS re-sends an OS terminate after approval**, so logout
   never relaunches.
 - **`quit_restart` refuses a debug build and an executable
   `tauri::process::current_binary` cannot resolve**, where `restart` would exit
