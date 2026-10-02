@@ -1,7 +1,7 @@
 # Built-in Tools
 
 > See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
-> Owns the built-in Tools — `builtin:file` (the local-file viewer and its text and Markdown editors) and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
+> Owns the built-in Tools — `builtin:file` (the local-file viewer and its text and Markdown editors), `builtin:code` (the source editor), and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
 
 ## Packaging
 
@@ -51,6 +51,15 @@ Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`;
 - **Must rename a listed image on disk at once**, to an image name in its own directory not starting with `.`, never replacing another file (case-only renames allowed); rewritten references are an unsaved edit.
 
 Source of truth: `dor-tools-builtin/viewer/markdown.tsx`; `safeCreateDOM` in `dor-tools-builtin/viewer/markdown-safety.ts`; `openImage` / `writePastedImage` / `renameImage` in `dor-tools-builtin/src/markdown-images.ts`. Tests: `dor-tools-builtin/test/markdown-editor.test.mjs`.
+
+## Code editor
+
+`builtin:code` runs as `dor __view-code`, opening any textual format — Markdown, HTML, and SVG included — as source in the [Editing files](#editing-files) Monaco page, granting only that file.
+
+- **Must refuse binary formats and folders**, and key apart from `builtin:file` (`name: code`).
+- **Must be offered as an alternative only where its page differs from `builtin:file`'s**: Markdown, HTML, SVG.
+
+Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format.ts`.
 
 ## Folder viewer
 

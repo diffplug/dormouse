@@ -408,7 +408,7 @@ snapshot-tested `findReplace` / `remove` help patches (`root` / `command-usage`
 renderer. **stricli's default `--help-all`/`-H` integration must stay
 unregistered**, leaving `--help`/`-h` the single documented help surface.
 `dor --version`/`-v` (sole argument only) is rewritten
-to `dor version` before parsing. **Must accept only the full browser command names**, with no `ab` or `pw` compatibility aliases.
+to `dor version` before parsing. **Must rewrite a leading `o` to `open` before parsing**; the takeover gate resolves the same alias through `canonicalDorVerb` in `dor/src/protocol.ts`. **Must accept only the full browser command names**, with no `ab` or `pw` compatibility aliases.
 
 The spec keeps the behavior help cannot express:
 
@@ -701,7 +701,7 @@ Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `d
 
 **Must route `dor tool` and `dor open` through the Tool launch contract**, including approval, explicit-key reuse, and placement (`docs/specs/dor-tool.md` → CLI). Generated help owns syntax.
 
-**The router answers `tool.list` (`dor tool --list`) before resolving any Workspace or Surface**, like `app.*`.
+**The router answers `tool.list` (`dor tool --list`) and `tool.openHandlers` (the `dor open` picker) before resolving any Workspace or Surface**, like `app.*`.
 
 Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `openCommand` in `dor/src/commands/open.ts`; `ToolSurfaceResponse` in `dor/src/commands/types.ts`; `handleToolControl` in `lib/src/components/wall/tool-control.ts`. Pinned by `dor tool reads` in `lib/src/components/wall/dor-control-router.test.ts`.
 
