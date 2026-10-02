@@ -9,7 +9,7 @@ The coordinating Relay from the remote security model, in selfhost mode, cut
 down to the smallest thing that completes this loop:
 
 > Run the Relay; it generates its setup password. Enroll your laptop's Dormouse
-> Terminal with it. Point your phone's camera at the code that Burrow shows: it creates a
+> Terminal with it. Scan the Burrow's code inside Pocket: it creates a
 > passkey, signs in, and pairs. Pick up a running terminal session from the
 > laptop on the phone.
 
@@ -60,7 +60,7 @@ Production configuration (`pnpm --filter relay start`, containers, and installer
 | `DORMOUSE_BIND_HOST`      | Interface to listen on; unset binds every interface (below). |
 | `DORMOUSE_VAPID_PUBLIC_KEY` / `DORMOUSE_VAPID_PRIVATE_KEY` | Web Push signing keypair; set both or neither. At startup the Relay decodes both, derives the P-256 public point from the private key, and exits on a missing, malformed, or mismatched pair. Unset, it mints a pair on first boot into `vapid.json`. |
 | `DORMOUSE_VAPID_SUBJECT`  | `mailto:`/`https:` contact for push-service operators (RFC 8292), defaulted from `DORMOUSE_ORIGIN` and validated at startup — Web Push below. |
-| `DORMOUSE_RUNTIME_FILE`   | Absolute path the Relay records `{pid, releaseId, port, origin, startedAt}` into once it has **bound**, mode `0600`. Unset — dev, containers, every test — writes nothing. A relative value is a `ConfigError`; the installers keep it in `run/`, outside `DORMOUSE_STATE_DIR` (`SELF_HOST.md`), which nothing in the Relay enforces (rationale). |
+| `DORMOUSE_RUNTIME_FILE`   | Absolute runtime-record path, written only after binding (POSIX mode `0600`). Unset writes nothing. A relative value is a `ConfigError`; the installers keep it in `run/`, outside `DORMOUSE_STATE_DIR` (`SELF_HOST.md`), which nothing in the Relay enforces (rationale). |
 | `DORMOUSE_RELEASE_ID`     | The release directory's name, supplied by the installer's `run-relay` wrapper, recorded in the runtime file. `null` when the Relay was not started by an installer. |
 | `DORMOUSE_ENROLL_TOKEN_FILE` | Absolute path to the installer's enrollment offer — `{origin, token, mintedAt}`, shape in `remote-lib-common/src/remote/enroll-offer.ts` — which `POST /api/burrow/enroll` accepts in place of the setup password; unset, one-click enrollment is off. A relative value is a `ConfigError` (rationale). |
 
@@ -106,8 +106,8 @@ rather than re-parsing it; `createApp` re-checks that same shape and takes
 **`startRelay` in `relay/src/start.ts` validates the VAPID pair and subject before building the
 app** — the only disk half of an otherwise pure env→config mapping.
 
-Source of truth: `readConfig` in `relay/src/config.ts`,
-`relay/src/enroll-token.ts`, `relay/scripts/dev.mjs`; pinned by `relay/test/config.test.mjs`,
+Source of truth: `readConfig` in `relay/src/config.ts`; `RuntimeInfo` in
+`relay/src/runtime-file.ts`; `relay/src/enroll-token.ts`, `relay/scripts/dev.mjs`; pinned by `relay/test/config.test.mjs`,
 `relay/test/runtime-file.test.mjs`, `relay/test/bind-host.test.mjs`,
 `relay/test/enroll-token.test.mjs`.
 
@@ -212,8 +212,7 @@ hand-editing them is the documented revocation mechanism (Guardrails):
 - `setup-password.json` — `{ password, createdAt }`; Relay-generated once
 
 **Must refuse a malformed singleton record** (`account.json`, `vapid.json`,
-`setup-password.json`) rather than read it as first boot and mint over it — a
-whole-file `null` is otherwise indistinguishable from absence. The collection files
+`setup-password.json`) rather than mint over it as first boot. Collection files
 keep their row-level tolerance. Source of truth: `loadRecord` in
 `relay/src/state.ts`; test: `relay/test/state-records.test.mjs`.
 
@@ -225,8 +224,8 @@ a per-store promise chain**, so a crash cannot leave an unparseable file and two
 concurrent read-modify-writes cannot lose each other. `burrows.json` stores
 `burrowToken` — the burrow↔Relay bearer secret — in plaintext,
 `setup-password.json` the enrollment credential, and `vapid.json` a private key,
-so the state dir is created `0o700` and every write lands in a
-`0o600` temp file before the rename. **Any new file under `$DORMOUSE_STATE_DIR`
+so POSIX creation uses `0o700` for the state directory and `0o600` for temp
+files before rename. Windows writes inherit the containing directory's DACL. **Any new file under `$DORMOUSE_STATE_DIR`
 must go through `writeAtomic`.** **Never build anything on that mode**
 (rationale); what protects the *installed* Relay’s state is the installer's
 directory permissions, in "Installing it" below.
@@ -300,14 +299,11 @@ parse. **Assertions go through `verifyPasskeyAssertion` in `remote-lib-common`,
 the same function the Burrow uses**, so Relay and Burrow cannot disagree on what a
 valid assertion is.
 
-`POST /api/setup/finish` takes `{ credentialId, publicKey, clientDataJSON }`.
-`checkRegistration`, which this and the Hosted Relay both call, checks, in
-order, each a 400: `clientDataJSON` decodes; `type === 'webauthn.create'`; its
-challenge redeems; `origin` equals the configured origin; the public key
-imports as an ECDSA P-256 verify key — refusing anything assertions could not
-later be verified against; and the credential id is bounded base64url. Each
-Relay's store then requires the credential id be new (409 otherwise, so a
-re-registered credential cannot silently displace a stored key).
+**Must share setup-registration validation through `checkRegistration` in
+both Relays**, rejecting invalid client data, challenges, origin, key, or
+credential id with 400. Its code owns check ordering and field shape. **Must
+store only a new credential id**, otherwise 409; registration never replaces
+a stored passkey.
 
 **Must verify sign-in and re-auth against the stored passkey under the Relay's
 UV policy.** Sign-in runs `verifySigninAssertion`, which both Relays call: it
@@ -767,18 +763,13 @@ rules:
 * **A store that cannot persist still holds what it is given** in memory and
   reports `persistent: false` rather than dropping writes.
 
-Each store's mechanics — the sidecar's single 0600 JSON file, rename semantics,
-and memory fallback; VS Code's SecretStorage/globalState split and cross-window
-memo invalidation — live in that burrow's spec.
+Source of truth: `FileBurrowStateStore` in `lib/src/host/remote/burrow-state-store.ts`; host persistence boundaries follow `docs/specs/standalone.md` → "Burrow service" and `docs/specs/vscode.md` → "Burrow: a service in the extension host".
 
 * **Enrollment** (Settings dialog, or the console hook, once): one credential →
   `POST /api/burrow/enroll` at the baked origin (Relay origin) → the service persists
-  `{ relayUrl, burrowId, burrowToken, origin, rpId }` (+ `requireUserVerification`
-  when the Relay sent it, + the `noiseStaticPrivateKey` /
-  `noiseStaticPublicKey` this Burrow mints locally **before** the request and
-  never sends in it —
-  [remote-security-model.md](./remote-security-model.md)) through its
-  `BurrowStateStore`, then opens and maintains `GET /ws/burrow` under every
+  the `isEnrollment`-validated record through `BurrowStateStore`. **Must mint
+  the Noise static before requesting enrollment; never include either half in the request**
+  ([remote-security-model.md](./remote-security-model.md)). It then opens and maintains `GET /ws/burrow` under every
   network policy level but `nothing`, which holds the enrollment without a socket
   ([remote-network.md](./remote-network.md) -> Policy). **Must persist the operator's
   `label` locally and disclose it only inside encrypted outcomes** — the request body
@@ -822,13 +813,9 @@ memo invalidation — live in that burrow's spec.
   - **Never change what ended until the new begin has its code.**
   - **Must detach a cancelled begin immediately**, so a new begin never joins
     its stale request.
-  - **The device code never leaves the service**, as `burrowToken` does not:
-    `status` carries `hostedEnrollment` — `waiting` with `userCode`,
-    `verificationUrl`, `expiresAt`, and `accountFull`; `redeeming`; or `ended`
-    with a reason from `HOSTED_ENROLLMENT_END_REASONS`, `answer-lost` naming its
-    `burrowId` — and `accountOrigin`
-    (`accountOriginFor`: `HOSTED_ACCOUNT_ORIGIN` in a release build, the last
-    begin's account origin in a dev one). Each change is a `status` event.
+  - **Never send the device code to the webview**, as for `burrowToken`.
+    `BurrowConsoleStatus` owns the public enrollment state and account origin;
+    each change is a service→webview `status` event.
   - **Must compose the verification URL, never take it from the Relay in a
     release build**: `enrollVerificationUrl` answers
     `HOSTED_ACCOUNT_ORIGIN/enroll#<userCode>`. A dev Hosted build
@@ -937,7 +924,8 @@ Source of truth: `lib/src/host/remote/service.ts` (`BurrowService`,
 `#enrollWith`, `#adoptEnrollment`, `#beginHostedEnrollment`,
 `#pollHostedEnrollment`, `#redeemHostedEnrollment`, `enrollVerificationUrl`,
 `accountOriginFor`, `#status`, `#setupQr`,
-`unenrolledStatus`, lifecycle + console commands),
+`unenrolledStatus`, lifecycle + console commands); `BurrowConsoleStatus` in
+`lib/src/host/remote/service-protocol.ts`,
 `lib/src/host/remote/burrow-state-store.ts`, `lib/src/host/remote/serial-queue.ts`,
 `lib/src/remote/burrow/enrollment.ts` (`performEnrollment`,
 `beginHostedEnrollment`, `pollHostedEnrollment`), `isBurrowEnrollBeginResponse`

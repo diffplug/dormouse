@@ -320,7 +320,7 @@ Paste reads the clipboard in three tiers, preferred in order:
 
 1. **File references** (a Finder/Explorer Copy of a file). Each path is shell-escaped; the space-joined list is written to the PTY with a trailing space, so the next token starts cleanly.
 2. **Plain text.** The adapter's native `readClipboardText` where it has one, else `navigator.clipboard.readText()`. **Never reverse that order** (rationale). A non-empty string goes to the PTY (bracket-wrapped, §8.5).
-3. **Raw image data.** Only when both of the above come back empty and the clipboard holds image bytes (e.g. a `Cmd+Shift+4` screenshot): the bytes are written to a newly-created private temp directory as `<uuid>-clipboard.png`, and that path is pasted as in tier 1. **On Unix-like systems the temp directory is owner-only and the image file owner-read/write**, so clipboard screenshots are not exposed to other local users. File and directory are unlinked ~5 minutes later (rationale).
+3. **Raw image data.** If file references and text are empty, save image bytes as `<uuid>-clipboard.png` in a new temp directory and paste its path as tier 1. **Must use owner-only directory and owner-read/write file modes on Unix-like systems.** Windows storage limits: `docs/specs/security-local.md` -> "Browser panes". File and directory cleanup runs after ~5 minutes while the host remains running (rationale).
 
 **Tiers 1 and 2 are read in parallel** (independent IPC roundtrips) and the file reference wins; tier 3 is sequential because it allocates a temp file. Every tier empty ⇒ silent no-op.
 
