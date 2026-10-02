@@ -10,36 +10,36 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-test('port scans batch callers and serialize work', async () => {
+test('requests in one microtask share one scan budgeted for the smallest request', async () => {
+  const calls = [];
+  const scanner = createPortScanner((pids, count) => {
+    calls.push({ pids, count });
+    return Promise.resolve(new Map([[10, ['port']]]));
+  });
+  const a = scanner([10]);
+  const b = scanner([10, 20]);
+  assert.deepEqual(await a, await b);
+  assert.deepEqual(calls, [{ pids: [10, 20], count: 1 }]);
+});
+
+test('a request during a scan starts its own rather than queueing behind it', async () => {
   const calls = [];
   const first = deferred();
   const scanner = createPortScanner((pids) => {
     calls.push(pids);
-    return calls.length === 1 ? first.promise : Promise.resolve(new Map());
+    return calls.length === 1 ? first.promise : Promise.resolve(new Map([[30, []]]));
   });
   const a = scanner([10]);
-  const b = scanner([10, 20]);
   await new Promise(setImmediate);
-  assert.deepEqual(calls, [[10, 20]]);
-  const c = scanner([30]);
-  await new Promise(setImmediate);
-  assert.equal(calls.length, 1);
-  first.resolve(new Map([[10, ['port']]]));
-  assert.deepEqual(await a, await b);
-  await c;
-  assert.deepEqual(calls, [[10, 20], [30]]);
+  assert.deepEqual(await scanner([30]), new Map([[30, []]]));
+  assert.deepEqual(calls, [[10], [30]]);
+  first.resolve(new Map());
+  await a;
 });
 
-test('a failed scan answers empty and releases the next batch', async () => {
-  const first = deferred();
-  let calls = 0;
-  const scanner = createPortScanner(() => ++calls === 1 ? first.promise : new Map([[20, []]]));
-  const a = scanner([10]);
-  await new Promise(setImmediate);
-  const b = scanner([20]);
-  first.reject(new Error('scan failed'));
-  assert.deepEqual(await a, new Map());
-  assert.deepEqual(await b, new Map([[20, []]]));
+test('a failed scan answers empty', async () => {
+  const scanner = createPortScanner(() => Promise.reject(new Error('scan failed')));
+  assert.deepEqual(await scanner([10]), new Map());
 });
 
 test('empty requests never scan', async () => {
@@ -53,7 +53,7 @@ test('a real scan discovers a listener while the event loop keeps running', asyn
   try {
     let ticked = false;
     const timer = setTimeout(() => { ticked = true; }, 0);
-    const ports = await createPortScanner(getOpenPortsForPids)([process.pid]);
+    const ports = await createPortScanner((pids) => getOpenPortsForPids(pids))([process.pid]);
     clearTimeout(timer);
     assert.equal(ticked, true);
     assert.ok(ports.get(process.pid)?.some((p) => p.port === server.address().port));

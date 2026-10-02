@@ -309,15 +309,15 @@ scrollback is never persisted, so a cold-restored pane opens empty.
 - **Replaying a dead pane resets its modes; replaying a live one does not** — the `REPLAY_MODE_RESET` tail (`docs/specs/terminal-escapes.md` → Replay-time mode-reset tail).
 - **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
 - **Replay filtering does not re-fire alerts**, quiesce-detector events, or protocol notifications (`docs/specs/terminal-escapes.md` → "`pty:data` strip semantics").
-- **Never run a synchronous subprocess in `pty-core.js`**: its event loop carries every PTY's I/O in both hosts (rationale).
+- **Never run a synchronous subprocess on a PTY host's event loop** (the Tauri sidecar, VS Code's pty-host); `/proc` reads and small state files are exempt (rationale). Pinned by `standalone/sidecar/no-sync-subprocess.test.js`.
 - **Must discard a probe's answer for a PTY replaced or exited mid-probe.** Pinned by the pending-scan tests in `standalone/sidecar/pty-core.test.js`.
 
 Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/src/pty-manager.ts`; the replay filter in `lib/src/lib/terminal-report-filter.ts`; `runText` / `answerForIds` in `standalone/sidecar/pty-core.js`.
 
 ## Port scan deadlines
 
-**Must run one port scan at a time**; concurrent requests share it or the next.
-Pinned by
+**Must coalesce port requests arriving in one microtask into one scan** budgeted
+for the smallest, never queueing one behind another (rationale). Pinned by
 `standalone/sidecar/port-scanner.test.js`.
 
 **Must budget port requests for both serial scans and an IPC margin per hop**:

@@ -888,34 +888,6 @@ test('parseCwdFromLsof returns the cwd for the requested pid', () => {
   assert.equal(parseCwdFromLsof(output, 4242), '/home/tester/project');
 });
 
-test('getCwdsForPids uses lsof with -a and parses the target pid cwd', async () => {
-  const calls = [];
-  const cwds = await getCwdsForPids([4242], {
-    fsModule: {
-      readlinkSync: () => { throw new Error('ENOENT'); },
-    },
-    execFile(file, args, options) {
-      calls.push({ file, args, options });
-      return [
-        'p100',
-        'fcwd',
-        'n/',
-        'p4242',
-        'fcwd',
-        'n/home/tester/project',
-        '',
-      ].join('\n');
-    },
-  });
-
-  assert.equal(cwds.get(4242), '/home/tester/project');
-  assert.deepEqual(calls, [{
-    file: 'lsof',
-    args: ['-a', '-d', 'cwd', '-p', '4242', '-Fn'],
-    options: { timeout: OPEN_PORT_TIMEOUT_MS },
-  }]);
-});
-
 // ── resolveSpawnConfig shell/args override ──────────────────────────────
 
 test('resolveSpawnConfig uses explicit shell and args when provided', () => {
@@ -1992,6 +1964,7 @@ test('parseCwdsFromLsof keys every process block by its pid', () => {
 test('getCwdsForPids resolves every pid in ONE lsof call', async () => {
   const calls = [];
   const cwds = await getCwdsForPids([4242, 4243], {
+    platform: 'darwin',
     fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
     execFile(file, args, options) {
       calls.push({ file, args, options });
@@ -2005,6 +1978,7 @@ test('getCwdsForPids resolves every pid in ONE lsof call', async () => {
 
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].args, ['-a', '-d', 'cwd', '-p', '4242,4243', '-Fn']);
+  assert.deepEqual(calls[0].options, { timeout: OPEN_PORT_TIMEOUT_MS });
   assert.deepEqual([...cwds], [[4242, '/home/tester/one'], [4243, '/home/tester/two']]);
 });
 
@@ -2014,6 +1988,7 @@ test('getCwdsForPids keeps the live pids when lsof exits non-zero over a dead on
   err.status = 1;
   err.stdout = ['p4242', 'fcwd', 'n/home/tester/one', ''].join('\n');
   const cwds = await getCwdsForPids([4242, 4243], {
+    platform: 'darwin',
     fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
     execFile() { throw err; },
   });
@@ -2023,6 +1998,7 @@ test('getCwdsForPids keeps the live pids when lsof exits non-zero over a dead on
 
 test('getCwdsForPids survives an lsof failure with no stdout at all', async () => {
   const cwds = await getCwdsForPids([4242], {
+    platform: 'darwin',
     fsModule: { readlinkSync: () => { throw new Error('ENOENT'); } },
     execFile() { throw new Error('spawn ENOENT'); },
   });
@@ -2033,6 +2009,7 @@ test('getCwdsForPids survives an lsof failure with no stdout at all', async () =
 test('getCwdsForPids reads /proc where it can and never spawns for those pids', async () => {
   let spawned = false;
   const cwds = await getCwdsForPids([7, 8], {
+    platform: 'linux',
     fsModule: { readlinkSync: (p) => `/proc-cwd-for${p}` },
     execFile() { spawned = true; return ''; },
   });

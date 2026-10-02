@@ -65,11 +65,17 @@ moving a Workspace and losing it.
 
 **What made it safe to persist again.** The two objections to the old store were both about content, not about persistence: it wrote transcripts, and it wrote them into a WKWebView `localStorage` WAL that grew without bound (`docs/specs/standalone.md` → "Persistence", rationale). Both were already fixed — no writer accepts a transcript-bearing shape, and the blob rides a Rust file store — before the rule changed.
 
+## Port scan deadlines
+
+**Why coalesce without queueing.** The webview fans out one `getOpenPorts` per terminal (the Dev-Server Chip) or per Tool on every poll; one scan per microtask batch keeps that to one set of subprocesses. A queue behind the in-flight scan would make a request wait for two scans, past the per-request budget the formula grants. Budgeting the batch for its smallest request keeps each caller's own deadline true.
+
 ## Universal invariants
 
 **Why no synchronous subprocess.** Measured on Windows, 2026-10-02: the installed 1.1.0 sidecar blocked its event loop for 1.7–2.3 seconds during PowerShell process/listener scans, and a real node-pty raw-echo probe measured 767–855 ms input delay during scans, versus 1 ms without. Tool discovery and dev-server chips request these in the background, so ordinary input waited behind decorative work; scheduling the request in webview idle time did not make the host's scan idle-safe, and batching limits subprocess work without keeping the loop free. The same blocking sat in helper busy checks (a Win32_Process scan), macOS cwd saves (`lsof` with no timeout) and WSL detection (`reg.exe`).
 
 **Async spawns over a worker.** A per-scan worker thread kept stalls at 1 ms but covered ports only, and needed its own entry file in every bundle of `pty-core.js`. Async `execFile` covers every probe; on the same machine a full port scan (~900 ms) stalled the loop at most 13–21 ms, the spawns' own cost, against 880–950 ms synchronously (2026-10-02).
+
+**Exempt synchronous reads.** Linux walks `/proc` with synchronous fs calls; they read kernel memory rather than wait on a child, and are unmeasured but expected in single-digit milliseconds. A dev server with thousands of fds is the case that would revisit it.
 
 **VS Code scrollback outlives the process for repeat resumes.** Recovery capture runs before any kill (`docs/compatible-agents.md` → "Capture"), but a webview reopened over an exited pane still needs its transcript. The shared PTY core formerly kept a second buffer: VS Code never read it, and standalone's reader became unreachable when the adapter stopped persisting transcripts. Removing that duplicate leaves buffering with its actual consumer.
 
