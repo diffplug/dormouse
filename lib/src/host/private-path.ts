@@ -6,16 +6,12 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 
 const WINDOWS_PRIVATE_PATH = `
 $ErrorActionPreference = 'Stop'
 $targetPath = [Console]::In.ReadToEnd()
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-$existing = Get-Acl -LiteralPath $targetPath
-if ($existing.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) {
-  throw 'Recovery path must belong to this user'
-}
 if ((Get-Item -LiteralPath $targetPath -Force).PSIsContainer) {
   $acl = [System.Security.AccessControl.DirectorySecurity]::new()
   $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'
@@ -35,7 +31,7 @@ $acl.AddAccessRule($rule)
 Set-Acl -LiteralPath $targetPath -AclObject $acl
 `;
 
-function restrictToOwnerSync(target: string, directory: boolean): void {
+function checkPath(target: string, directory: boolean): void {
   const info = fs.lstatSync(target);
   if (info.isSymbolicLink() || (directory ? !info.isDirectory() : !info.isFile())) {
     throw new Error(`Recovery path must be a plain ${directory ? 'directory' : 'file'}`);
@@ -45,8 +41,14 @@ function restrictToOwnerSync(target: string, directory: boolean): void {
     fs.chmodSync(target, directory ? 0o700 : 0o600);
     return;
   }
-  const powershell = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PRIVATE_PATH], {
+}
+
+const powershell = () => path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+
+function restrictToOwnerSync(target: string, directory: boolean): void {
+  checkPath(target, directory);
+  if (process.platform !== 'win32') return;
+  execFileSync(powershell(), ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PRIVATE_PATH], {
     // Only literal path data crosses stdin: quotes, $, backticks and newlines
     // never become PowerShell code. Use the system executable, not PATH search.
     input: path.resolve(target), encoding: 'utf8', windowsHide: true, timeout: 5_000,
@@ -63,4 +65,28 @@ export function ensurePrivateDirectorySync(dir: string): void {
  * remove. Tighten it before reading; reject symlinks and non-files outright. */
 export function ensurePrivateFileSync(file: string): void {
   restrictToOwnerSync(file, false);
+}
+
+/** Startup and cold claims do not block the host event loop on Windows ACL setup.
+ * The OS authorizes SetOwner/Set-Acl; an elevated administrator-owned legacy
+ * path may be rewritten, and any refused operation still fails closed. */
+async function restrictToOwner(target: string, directory: boolean): Promise<void> {
+  checkPath(target, directory);
+  if (process.platform !== 'win32') return;
+  await new Promise<void>((resolve, reject) => {
+    const child = execFile(powershell(), ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PRIVATE_PATH], {
+      encoding: 'utf8', windowsHide: true, timeout: 5_000, maxBuffer: 64 * 1024,
+    }, (error) => error ? reject(error) : resolve());
+    child.stdin!.on('error', () => { /* execFile reports process failure */ });
+    child.stdin!.end(path.resolve(target));
+  });
+}
+
+export async function ensurePrivateDirectory(dir: string): Promise<void> {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  await restrictToOwner(dir, true);
+}
+
+export async function ensurePrivateFile(file: string): Promise<void> {
+  await restrictToOwner(file, false);
 }
