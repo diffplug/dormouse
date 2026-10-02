@@ -15,8 +15,15 @@ vi.mock("dormouse-lib/lib/themes", () => ({
 }));
 
 const { default: Hosted } = await import("./Hosted");
-const { COHORT_SEATS_ENDPOINT } = await import("../lib/hosted-cohorts");
-const { cohortSize, tiersOnSale, LIST_ANNUAL } = await import("../lib/hosted-pricing");
+const { COHORT_ENDPOINT, MAX_SHOWN_FOUNDERS } = await import("../lib/hosted-cohorts");
+const {
+  FOUNDING_COHORT_SIZE,
+  HOSTED_MONTHLY,
+  HOSTED_YEARLY,
+  LIST_ANNUAL,
+  foundingTier,
+  tiersOnSale,
+} = await import("../lib/hosted-pricing");
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 
@@ -55,17 +62,23 @@ describe("what the Hosted page prerenders", () => {
     markup = renderToString(<Hosted />).replace(/<!-- -->/g, "");
   });
 
-  it("prints every on-sale tier's price without the billing provider", () => {
-    const tiers = tiersOnSale();
-    expect(tiers.length).toBeGreaterThan(0);
-    for (const tier of tiers) {
-      expect(markup).toContain(tier.name);
-      expect(markup).toContain(`$${tier.price}`);
-    }
-    // Exactly one tier is marked out, so the recommendation stays a
-    // recommendation (docs/specs/pricing.md -> Tiers).
-    expect(tiers.filter((tier) => tier.recommended)).toHaveLength(1);
-    expect(markup.match(/Recommended/g)).toHaveLength(1);
+  it("shows Free, Hosted, and Founding, in that order", () => {
+    const order = ["Free", "Hosted", "Founding"].map((name) => markup.indexOf(`>${name}</h3>`));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(markup).toContain("$0");
+  });
+
+  it("prerenders Hosted monthly, with yearly one toggle away", () => {
+    expect(markup).toContain(`$${HOSTED_MONTHLY.price}`);
+    expect(markup).toContain('aria-label="Buy Hosted monthly"');
+    expect(markup).not.toContain('aria-label="Buy Hosted yearly"');
+    expect(markup).toMatch(/aria-pressed="true"[^>]*>Monthly</);
+  });
+
+  it("strikes the list price the founding ladder is read against", () => {
+    expect(markup).toMatch(new RegExp(`<s [^>]*>\\$${LIST_ANNUAL}</s>`));
+    expect(markup).toContain(`$${foundingTier().price}`);
   });
 
   it("describes both grants as live, never upcoming", () => {
@@ -76,26 +89,22 @@ describe("what the Hosted page prerenders", () => {
   });
 
   it("states the refund beside every buy button", () => {
-    // Matched on the label rather than the visible text: the button reads
-    // "Buy", and the tier it buys is on its aria-label.
     const buys = markup.match(/aria-label="Buy [^"]+"/g) ?? [];
-    expect(buys).toHaveLength(tiersOnSale().length);
+    expect(buys).toHaveLength(2);
     expect(markup.match(/30-day refund/g)).toHaveLength(buys.length);
   });
 
-  it("strikes the list price the founding ladder is read against", () => {
-    expect(markup).toContain(`<s>$${LIST_ANNUAL}</s>`);
-  });
-
-  it("shows no counter until one is fetched", () => {
+  it("shows no counter and no founders until they are fetched", () => {
     // A prerendered count would be stale the moment a seat sold, and the
     // provider is not consulted at build time at all.
-    expect(markup).not.toMatch(/left at this price/);
+    expect(markup).not.toMatch(/seats left/);
+    expect(markup).not.toMatch(/founders? so far/);
   });
 
   it("carries the FAQ and the free-forever promise as text, not as script", () => {
     for (const phrase of [
       "Refunds and cancellation?",
+      "Who appears in the founders row?",
       "What if Dormouse Hosted shuts down?",
       "Do you sell team or enterprise plans?",
       "Self-hosting stays free",
@@ -105,7 +114,7 @@ describe("what the Hosted page prerenders", () => {
     }
   });
 
-  it("republishes each tier's current price as an Offer", () => {
+  it("republishes each paid plan's current price as an Offer", () => {
     const script = /<script type="application\/ld\+json">(.*?)<\/script>/s.exec(markup);
     expect(script).not.toBeNull();
     const data = JSON.parse(script![1].replace(/\\u003c/g, "<"));
@@ -118,33 +127,83 @@ describe("what the Hosted page prerenders", () => {
   });
 });
 
-describe("the cohort counters", () => {
-  it("fill in after hydration for the open cohort only", async () => {
-    const seats = { "founding-annual": 73 };
-    const el = await mount(async (url) => {
-      expect(url).toBe(COHORT_SEATS_ENDPOINT);
-      return new Response(JSON.stringify(seats), { status: 200 });
+describe("the Hosted card's billing toggle", () => {
+  it("switches price and buy target in place", async () => {
+    const el = await mount(async () => new Response("{}", { status: 404 }));
+    const yearly = [...el.querySelectorAll("button")].find((b) => b.textContent === "Yearly")!;
+    await act(async () => {
+      yearly.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
-    expect(el.textContent).toContain(`73 of ${cohortSize("founding-annual")} left at this price`);
-    // The permanent ladder said nothing, so its row shows nothing rather than
-    // a zero or a guess.
-    expect(el.textContent?.match(/left at this price/g)).toHaveLength(1);
+    expect(yearly.getAttribute("aria-pressed")).toBe("true");
+    expect(el.querySelector('[aria-label="Buy Hosted yearly"]')).not.toBeNull();
+    expect(el.querySelector('[aria-label="Buy Hosted monthly"]')).toBeNull();
+    expect(el.textContent).toContain(`$${HOSTED_YEARLY.price}/year`);
+  });
+});
+
+/** Mounts the page with the cohort endpoint answering `body`. */
+const mountCohort = (body: unknown) =>
+  mount(async (url) => {
+    expect(url).toBe(COHORT_ENDPOINT);
+    return new Response(JSON.stringify(body), { status: 200 });
   });
 
-  it("render the table without counts when the provider is unreachable", async () => {
+describe("the founding card's live half", () => {
+  it("fills in the seats left after hydration", async () => {
+    const el = await mountCohort({ seatsLeft: 73 });
+    expect(el.textContent).toContain(`73 of ${FOUNDING_COHORT_SIZE} seats left at $${foundingTier().price}`);
+  });
+
+  it("draws opted-in founders, then +N for everyone else", async () => {
+    const el = await mountCohort({
+      founders: { total: 12, shown: [{ name: "Ada", avatar: "/api/hosted/founders/ada.png" }, { name: "kim" }] },
+    });
+    const row = el.querySelector('[aria-label="12 founders so far"]');
+    expect(row).not.toBeNull();
+    expect(row!.querySelector("img")?.getAttribute("src")).toBe("/api/hosted/founders/ada.png");
+    expect(row!.textContent).toContain("K");
+    expect(row!.textContent).toContain("+10");
+  });
+
+  it("never hotlinks an avatar from another origin", async () => {
+    // docs/specs/pricing.md -> The Hosted page: avatars come from this origin.
+    const el = await mountCohort({
+      founders: {
+        total: 3,
+        shown: [
+          { name: "Gh", avatar: "https://avatars.githubusercontent.com/u/1" },
+          { name: "Proto", avatar: "//lh3.googleusercontent.com/a" },
+          { name: "Back", avatar: "/\\evil.example/a.png" },
+        ],
+      },
+    });
+    expect(el.querySelectorAll("img")).toHaveLength(0);
+    expect(el.querySelector('[aria-label="3 founders so far"]')?.textContent).toBe("GPB");
+  });
+
+  it("caps the row and folds the rest into +N", async () => {
+    const shown = Array.from({ length: MAX_SHOWN_FOUNDERS + 5 }, (_, i) => ({ name: `F${i}` }));
+    const el = await mountCohort({ founders: { total: 200, shown } });
+    const row = el.querySelector('[aria-label="200 founders so far"]')!;
+    expect(row.children).toHaveLength(MAX_SHOWN_FOUNDERS + 1);
+    expect(row.textContent).toContain(`+${200 - MAX_SHOWN_FOUNDERS}`);
+  });
+
+  it("renders the card without either when the provider is unreachable", async () => {
     const el = await mount(async () => {
       throw new Error("ECONNREFUSED");
     });
-    expect(el.textContent).not.toContain("left at this price");
+    expect(el.textContent).not.toContain("seats left");
+    expect(el.textContent).not.toMatch(/founders? so far/);
     // The prices are prerendered, so an outage costs the page nothing it sells.
-    expect(el.textContent).toContain(`$${tiersOnSale()[0].price}`);
-    expect(buyButtons(el)).toHaveLength(tiersOnSale().length);
+    expect(el.textContent).toContain(`$${foundingTier().price}`);
+    expect(buyButtons(el)).toHaveLength(2);
   });
 
-  it("ignore a body that is not a whole seat count", async () => {
-    const el = await mount(async () =>
-      new Response(JSON.stringify({ "founding-annual": "lots" }), { status: 200 }));
-    expect(el.textContent).not.toContain("left at this price");
+  it("ignores a body that is not a whole count", async () => {
+    const el = await mountCohort({ seatsLeft: "lots", founders: { total: -1, shown: [] } });
+    expect(el.textContent).not.toContain("seats left");
+    expect(el.querySelector("[aria-label$='so far']")).toBeNull();
   });
 });
 
@@ -164,7 +223,7 @@ describe("the buy buttons", () => {
     expect(dialog).not.toBeNull();
     expect(dialog?.textContent).toContain("TODO");
     expect(dialog?.textContent).toContain("Checkout is not wired up yet");
-    expect(dialog?.textContent).toContain(tiersOnSale()[0].name);
+    expect(dialog?.textContent).toContain(HOSTED_MONTHLY.name);
     expect(dialog?.textContent).toContain("You have not been charged");
   });
 

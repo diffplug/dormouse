@@ -11,6 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CheckIcon,
   CloudArrowUpIcon,
   CodeIcon,
   SpeakerHighIcon,
@@ -27,16 +28,24 @@ import {
   CARD_ACCENT_CLASS,
   CARD_CLASS,
   CARD_MUTED_TEXT_CLASS,
+  CODE_CLASS,
   LINK_CLASS,
   MUTED_TEXT_CLASS,
 } from "../components/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
-import { fetchCohortSeats, type CohortSeats } from "../lib/hosted-cohorts";
 import {
-  cohortSize,
+  fetchCohort,
+  type Cohort,
+  type Founder,
+  type Founders,
+} from "../lib/hosted-cohorts";
+import {
+  FOUNDING_COHORT_SIZE,
+  HOSTED_MONTHLY,
+  HOSTED_YEARLY,
+  YEARLY_SAVING,
+  foundingTier,
   pricingJsonLd,
-  tiersOnSale,
-  type CohortId,
   type Tier,
 } from "../lib/hosted-pricing";
 import { canonicalUrl, siteMeta, sitePath } from "../lib/site-meta";
@@ -61,91 +70,273 @@ export const HOSTED_TOC: TocEntry[] = [
   { id: "faq", text: "Questions", children: [] },
 ];
 
-/**
- * Seats remaining in this tier's open cohort.
- *
- * The line is reserved at prerender and filled after hydration, so the count
- * landing does not resize the card it sits in — and an endpoint with nothing
- * to say leaves it empty rather than printing an error a buyer cannot act on.
- */
-function SeatsLeft({ cohort, seats }: { cohort: CohortId | undefined; seats: CohortSeats | null }) {
-  const left = cohort === undefined ? undefined : seats?.[cohort];
+/** What a plan buys, one ticked line each. */
+function Includes({ items }: { items: React.ReactNode[] }) {
   return (
-    <p className={`mt-3 min-h-5 text-sm ${CARD_MUTED_TEXT_CLASS}`}>
-      {cohort !== undefined && left !== undefined
-        ? `${left} of ${cohortSize(cohort)} left at this price`
-        : null}
-    </p>
+    <ul className="mt-6 text-sm">
+      {items.map((item, i) => (
+        <li
+          key={i}
+          className="flex gap-2.5 border-b border-dashed border-[var(--color-text)]/15 py-3 leading-relaxed"
+        >
+          <CheckIcon
+            size={16}
+            weight="bold"
+            className={`mt-0.5 shrink-0 ${ACCENT_TEXT_CLASS}`}
+            aria-hidden="true"
+          />
+          <span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const CARD_ACTION_CLASS =
+  "inline-flex min-h-12 w-full items-center justify-center rounded-full border px-4 py-3 "
+  + "font-display hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 "
+  + `focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`;
+
+/**
+ * One plan, as a card in the row.
+ *
+ * The slots above and below the price are reserved on every card, but only
+ * while the cards are a row: side by side, the three prices and the three
+ * buttons each sit on one line; stacked, a reserve would be a blank gap.
+ */
+function PlanCard({
+  name,
+  accent = false,
+  above,
+  price,
+  below,
+  children,
+  action,
+  footnote,
+}: {
+  name: string;
+  accent?: boolean;
+  above?: React.ReactNode;
+  price: React.ReactNode;
+  below: React.ReactNode;
+  children: React.ReactNode;
+  action: React.ReactNode;
+  footnote: string;
+}) {
+  return (
+    <div className={`flex flex-col ${accent ? CARD_ACCENT_CLASS : CARD_CLASS}`}>
+      <h3 className={`font-display text-sm tracking-widest uppercase ${ACCENT_TEXT_CLASS}`}>{name}</h3>
+      <div className="mt-4 flex items-center md:min-h-10">{above}</div>
+      <p className="mt-3 flex flex-wrap items-baseline gap-x-2">{price}</p>
+      <div className={`mt-1 text-sm md:min-h-10 ${CARD_MUTED_TEXT_CLASS}`}>{below}</div>
+      {children}
+      {/* `mt-auto` lines the three buttons up however tall the cards run. */}
+      <div className="mt-auto pt-6">
+        {action}
+        <p className={`mt-2 text-center text-sm ${CARD_MUTED_TEXT_CLASS}`}>{footnote}</p>
+      </div>
+    </div>
+  );
+}
+
+function Price({ tier }: { tier: Pick<Tier, "price" | "per" | "listPrice"> }) {
+  return (
+    <>
+      {tier.listPrice ? (
+        <s className={`font-display text-xl ${CARD_MUTED_TEXT_CLASS}`}>${tier.listPrice}</s>
+      ) : null}
+      <span className="font-display text-4xl">${tier.price}</span>
+      {tier.per ? <span className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>{tier.per}</span> : null}
+    </>
   );
 }
 
 /**
- * One tier, as a card in the row.
- *
- * The cards read left to right from the cheapest commitment to the largest, so
- * the middle one is both the recommendation and the shape of the ladder. It is
- * marked out by the accent border and the badge rather than by a surface of
- * its own, which would be a tint no token is derived against
- * (website/src/components/docs-tokens.ts).
+ * "Buy" plus what it buys on the label a screen reader reads, since it hears
+ * the buttons out of their cards.
  */
-function TierCard({
-  tier,
-  seats,
-  onBuy,
-}: {
-  tier: Tier;
-  seats: CohortSeats | null;
-  onBuy: () => void;
-}) {
+function BuyButton({ tier, label, onBuy }: { tier: Tier; label: string; onBuy: (tier: Tier) => void }) {
   return (
-    <div className={`flex flex-col ${tier.recommended ? CARD_ACCENT_CLASS : CARD_CLASS}`}>
-      {/* Reserved on every card so the three names sit on one line — but only
-          while they are a row; stacked, the reserve is a blank gap. */}
-      <div className="flex items-center md:min-h-6">
-        {tier.recommended ? (
-          <span
-            className={`rounded-full border px-2 py-0.5 font-display text-xs ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`}
-          >
-            Recommended
-          </span>
-        ) : null}
-      </div>
+    <button
+      type="button"
+      onClick={() => onBuy(tier)}
+      aria-label={`Buy ${tier.name}`}
+      className={CARD_ACTION_CLASS}
+    >
+      {label}
+    </button>
+  );
+}
 
-      <h3 className="mt-3 font-display text-lg">{tier.name}</h3>
-
-      <p className="mt-3 flex items-baseline gap-2">
-        <span className="font-display text-3xl">${tier.price}</span>
-        <span className={`text-sm ${CARD_MUTED_TEXT_CLASS}`}>{tier.cadence}</span>
-      </p>
-      {/* Reserved likewise: side by side, without it the blurbs step out of line. */}
-      <p className={`text-sm md:min-h-5 ${CARD_MUTED_TEXT_CLASS}`}>
-        {tier.listPrice ? (
-          <>
-            <s>${tier.listPrice}</s> list
-          </>
-        ) : null}
-      </p>
-
-      <p className={`mt-4 text-sm leading-relaxed ${CARD_MUTED_TEXT_CLASS}`}>{tier.blurb}</p>
-      <SeatsLeft cohort={tier.cohort} seats={seats} />
-
-      {/* `mt-auto` lines the three buttons up however tall the cards run. */}
-      <div className="mt-auto pt-6">
-        {/* "Buy" alone, because the card around it already names the tier and
-            the longest name wrapped to two lines, breaking the row's shared
-            baseline. The full name stays on the label a screen reader reads,
-            which hears the three buttons out of their cards. */}
+function BillingToggle({ yearly, onChange }: { yearly: boolean; onChange: (yearly: boolean) => void }) {
+  const options = [
+    { label: "Monthly", value: false },
+    { label: "Yearly", value: true },
+  ];
+  return (
+    <div
+      role="group"
+      aria-label="Billing period"
+      className="inline-flex rounded-full border border-[var(--color-text)]/15 p-0.5 text-sm"
+    >
+      {options.map(({ label, value }) => (
         <button
+          key={label}
           type="button"
-          onClick={onBuy}
-          aria-label={`Buy ${tier.name}`}
-          className={`inline-flex min-h-12 w-full items-center justify-center rounded-md border px-4 py-3 font-display hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`}
+          aria-pressed={yearly === value}
+          onClick={() => onChange(value)}
+          className={`min-h-9 rounded-full px-4 font-display focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] ${
+            yearly === value ? "bg-[var(--color-text)]/15" : CARD_MUTED_TEXT_CLASS
+          }`}
         >
-          Buy
+          {label}
         </button>
-        <p className={`mt-2 text-center text-sm ${CARD_MUTED_TEXT_CLASS}`}>30-day refund</p>
-      </div>
+      ))}
     </div>
+  );
+}
+
+const AVATAR_CLASS = "-ml-1.5 size-7 shrink-0 rounded-full ring-2 ring-[var(--color-bg)]";
+
+function FounderAvatar({ founder }: { founder: Founder }) {
+  // A proxied image can still 404 after its founder opts out; the initial
+  // keeps their place in the row rather than leaving a broken-image glyph.
+  const [broken, setBroken] = useState(false);
+  if (founder.avatar && !broken) {
+    return (
+      <img
+        src={founder.avatar}
+        alt=""
+        title={founder.name}
+        loading="lazy"
+        decoding="async"
+        referrerPolicy="no-referrer"
+        onError={() => setBroken(true)}
+        className={`${AVATAR_CLASS} bg-[var(--color-text)]/10 object-cover`}
+      />
+    );
+  }
+  return (
+    <span
+      title={founder.name}
+      aria-hidden="true"
+      className={`${AVATAR_CLASS} inline-flex items-center justify-center bg-[var(--color-text)]/15 font-display text-xs`}
+    >
+      {founder.name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+/**
+ * The founders who opted in at checkout, then `+N` for everyone else.
+ *
+ * Absent until the endpoint answers, and absent for good when it cannot: an
+ * empty row would read as "nobody has bought", which is a claim, not a gap.
+ */
+function FoundersRow({ founders }: { founders: Founders | null }) {
+  if (!founders) return null;
+  const rest = founders.total - founders.shown.length;
+  return (
+    <div
+      role="img"
+      aria-label={`${founders.total} ${founders.total === 1 ? "founder" : "founders"} so far`}
+      className="mt-4 flex flex-wrap gap-y-1.5 pl-1.5"
+    >
+      {founders.shown.map((founder, i) => (
+        <FounderAvatar key={i} founder={founder} />
+      ))}
+      {rest > 0 ? (
+        <span
+          className={`${AVATAR_CLASS} inline-flex w-auto min-w-7 items-center justify-center bg-[var(--color-text)] px-1.5 font-display text-[11px] text-[var(--color-bg)]`}
+        >
+          +{rest}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function FreeCard() {
+  return (
+    <PlanCard
+      name="Free"
+      price={<span className="font-display text-4xl">$0</span>}
+      below="Forever. No account, no card."
+      action={
+        <a href={`${sitePath("/")}#download`} className={CARD_ACTION_CLASS}>
+          Download
+        </a>
+      }
+      footnote="Every platform"
+    >
+      <Includes
+        items={[
+          <>The whole terminal: panes, browsers, the notepad, and <code className={CODE_CLASS}>dor</code></>,
+          "Spoken alarms in your system voice",
+          "No Relay unless you choose one, and no network requests until then",
+          "Run your own Relay for Pocket",
+        ]}
+      />
+    </PlanCard>
+  );
+}
+
+function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
+  // Monthly is the prerendered default: it is the reference price every other
+  // number on the page is read against.
+  const [yearly, setYearly] = useState(false);
+  const tier = yearly ? HOSTED_YEARLY : HOSTED_MONTHLY;
+  return (
+    <PlanCard
+      name="Hosted"
+      accent
+      above={<BillingToggle yearly={yearly} onChange={setYearly} />}
+      price={<Price tier={tier} />}
+      below={
+        yearly
+          ? "Billed yearly · cancel any time · two months free"
+          : `Billed monthly · cancel any time · save $${YEARLY_SAVING} yearly`
+      }
+      action={<BuyButton tier={tier} label="Subscribe" onBuy={onBuy} />}
+      footnote="30-day refund"
+    >
+      <Includes
+        items={[
+          "The managed Relay: Pocket with no server to run",
+          "Sealed push notifications to your phone",
+          "Natural ElevenLabs voices for spoken alarms",
+          "One licence for every machine you use",
+        ]}
+      />
+    </PlanCard>
+  );
+}
+
+function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) => void }) {
+  const tier = foundingTier();
+  return (
+    <PlanCard
+      name="Founding"
+      above={<p className="font-display text-lg leading-snug">Locked launch price</p>}
+      price={<Price tier={tier} />}
+      below={
+        cohort.seatsLeft !== null
+          ? `${cohort.seatsLeft} of ${FOUNDING_COHORT_SIZE} seats left at $${tier.price}`
+          : null
+      }
+      action={<BuyButton tier={tier} label="Become a founder" onBuy={onBuy} />}
+      footnote="30-day refund"
+    >
+      <FoundersRow founders={cohort.founders} />
+      <Includes
+        items={[
+          "Everything in Hosted",
+          `$${tier.price} a year for as long as you stay subscribed`,
+          "A founding badge in the app and on the credits page",
+          "Your avatar in this row, if you choose",
+        ]}
+      />
+    </PlanCard>
   );
 }
 
@@ -232,14 +423,13 @@ function FaqEntry({ question, children }: { question: string; children: React.Re
 }
 
 export default function Hosted() {
-  const tiers = tiersOnSale();
-  const [seats, setSeats] = useState<CohortSeats | null>(null);
+  const [cohort, setCohort] = useState<Cohort>({ seatsLeft: null, founders: null });
   const [checkoutTodo, setCheckoutTodo] = useState<Tier | null>(null);
   const closeTodo = useCallback(() => setCheckoutTodo(null), []);
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetchCohortSeats(controller.signal).then(setSeats);
+    void fetchCohort(controller.signal).then(setCohort);
     return () => controller.abort();
   }, []);
 
@@ -260,29 +450,22 @@ export default function Hosted() {
       <section>
         <AnchoredHeading id="pricing" spacing="mt-0 mb-3">What it costs</AnchoredHeading>
         <p className={`mb-6 ${BODY_TEXT_CLASS}`}>
-          The terminal is free and stays free. One plan — Individual — buys the two things
-          I run for you: the managed Relay for Pocket and managed voices for spoken alarms.
-          One licence covers every machine you use.
+          The terminal is free and stays free. Hosted buys the two things I run for you:
+          the managed Relay for Pocket and managed voices for spoken alarms.
         </p>
 
-        {/* Cheapest commitment on the left, largest on the right, so the
-            ladder reads in one pass at desktop and stacks in the same order on
-            a phone. */}
+        {/* Free, then Hosted, then Founding: side by side from `md`, stacked
+            in the same order on a phone. */}
         <div className="grid gap-4 md:grid-cols-3">
-          {tiers.map((tier) => (
-            <TierCard
-              key={tier.id}
-              tier={tier}
-              seats={seats}
-              onBuy={() => setCheckoutTodo(tier)}
-            />
-          ))}
+          <FreeCard />
+          <HostedCard onBuy={setCheckoutTodo} />
+          <FoundingCard cohort={cohort} onBuy={setCheckoutTodo} />
         </div>
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
-          Founding prices go to the first members. The annual ladder rises $10 with each
-          cohort of 100 and closes for good when it reaches the $100 list price; permanent
-          seats stop at 100. Team and enterprise plans are not sold here.
+          Founding prices go to the first members. The price rises $10 with each cohort of
+          100 and founding closes for good when it reaches the $100 list price. Team and
+          enterprise plans are not sold here.
         </p>
       </section>
 
@@ -389,15 +572,8 @@ export default function Hosted() {
       <section className="mt-14">
         <AnchoredHeading id="faq" spacing="mt-0 mb-6">Questions</AnchoredHeading>
         <div className="grid gap-5">
-          <FaqEntry question="What does “forever” mean on the permanent plan?">
-            For as long as Dormouse Hosted operates. It grants everything the Individual
-            plan ever contains, features added later included, and never expires while I
-            run the service. It is personal and non-transferable, and it never grants team
-            or enterprise capability. If I ever stop, the Relay is still source-available
-            under FSL-1.1-MIT, so you can run it yourself.
-          </FaqEntry>
           <FaqEntry question="Refunds and cancellation?">
-            30 days, on every plan, permanent included. Monthly and annual auto-renew and
+            30 days, on every plan. Monthly, yearly, and founding all auto-renew and
             you can cancel any time — access runs to the end of the period you paid for. A
             refund revokes the licence and returns the seat to its cohort.
           </FaqEntry>
@@ -406,6 +582,12 @@ export default function Hosted() {
             every later price change; a failed renewal gets 30 days of grace before the
             lock is lost, and a lapsed founder re-subscribes at list. Founding badges are
             cosmetic — in the app and on the credits page, never a capability.
+          </FaqEntry>
+          <FaqEntry question="Who appears in the founders row?">
+            Only founders who tick the box at checkout; it starts unticked, and you can
+            take yourself out from your account at any time. Everyone else counts toward
+            the number at the end of the row. The pictures are served from this site, so
+            loading the page never tells GitHub or Google you visited.
           </FaqEntry>
           <FaqEntry question="What if Dormouse Hosted shuts down?">
             The Relay is source-available and the{" "}
