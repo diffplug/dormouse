@@ -45,7 +45,7 @@ export interface RecoveryStore {
 /**
  * The record under `dir`, or a memory-only store when no directory was given.
  *
- * Owner-only and temp-then-rename, because a kill during the write must not
+ * Owner-only on Unix and temp-then-rename, because a kill during the write must not
  * leave a torn record for the next start to parse — the same durability shape as
  * the standalone session snapshot.
  */
@@ -71,8 +71,8 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
     const tmp = `${file}.${randomUUID()}.tmp`;
     try {
       fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-      // Mode on create, so the bytes are never briefly world-readable; the rename
-      // preserves it.
+      // Unix mode applies before bytes are written and survives the rename.
+      // Windows permissions come from the containing directory.
       fs.writeFileSync(tmp, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
       fs.renameSync(tmp, file);
     } catch (err) {

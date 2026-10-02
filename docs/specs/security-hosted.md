@@ -15,8 +15,8 @@
 
 Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts`, and `hosted/server/tests/one-time.test.ts`.
 
-Known gap: `cookieAdmin` skips its Origin check on GET/HEAD, so a presented
-foreign Origin on an admin read does not meet the cookie-route rule above.
+Known gap: `cookieAdmin` skips Origin checks on GET/HEAD, admitting presented
+foreign Origins contrary to the cookie-route rule above.
 
 ## Account boundary
 
@@ -65,7 +65,7 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 - **FAIL IF** `RelayRoom` stores, logs, or decodes a frame or its `ct`, reads a frame other than through the shared frame layer (`readClientFrame`, `readBurrowFrame`), which parses only the routing envelope through the shared guards and copies `ct` field by field and reads it nowhere else, parses a frame before measuring its UTF-8 bytes against the shared `MAX_RELAY_FRAME_BYTES`, or stores anything but its account id; `scripts/e2e-lint.mjs` holds the name, parse, decode, log, storage, and attachment half textually in both modules.
 - **FAIL IF** a `RelayRoom` is named from anything but the account an authenticated token resolved to, or serves a request or RPC naming an account other than the one it stored.
 - **FAIL IF** the client socket upgrade admits an `Origin` other than exactly the relay's `APP_ORIGIN`, the Burrow upgrade admits any `Origin`, either reaches the object before its token resolves to a live session or Burrow of an entitled account, or the Worker hands the object any header, token, or parameter of the caller's.
-- **FAIL IF** the object accepts a Burrow socket without rechecking its row (enrolled, the account's, owner entitled) under `blockConcurrencyWhile`, or awaits any row read past `RELAY_ROW_READ_TIMEOUT_MS`; a removed Burrow's live socket outlives its removal's `closeBurrow`, or a removed or de-entitled Burrow's outlives the next sweep, at most `RELAY_ROOM_SWEEP_MS` while any Burrow socket is held; `RelayRoom.fetch` exposes non-upgrade routes, or public routes expose `RelayRows`, `closeBurrow`, or `onlineBurrows` RPC. Authenticated account-scoped internal calls for removal/online status remain required.
+- **FAIL IF** the object accepts a Burrow socket without rechecking its row (enrolled, the account's, owner entitled) under `blockConcurrencyWhile`, or awaits any row read past `RELAY_ROW_READ_TIMEOUT_MS`; a removed Burrow's live socket outlives its removal's `closeBurrow`, or a removed or de-entitled Burrow's outlives the next sweep, at most `RELAY_ROOM_SWEEP_MS` while any Burrow socket is held; `RelayRoom.fetch` exposes non-upgrade routes; or a public route reaches `RelayRows` or any `RelayRoom` method but the two upgrades, except authenticated, account-scoped `closeBurrow` on account-Worker removal and `onlineBurrows` on relay-Worker `GET /api/burrows`.
 - **FAIL IF** a Pocket path's response lacks Pocket's policy (`pocketContentSecurityPolicy` in `remote-lib-common/src/remote/relay-common.ts`, taken only from an `APP_ORIGIN` that is exactly an origin), any response but a Pocket path's allows the camera, `/connect/` included, or a response is classified on any path but the decoded one Hono routes on, so `/%63onnect/` would take Pocket's; inspect `relayRules` / `relayPathKind` and `secureHeaders` in `hosted/server/headers.ts`.
 
 Known gap: a failed or timed-out row sweep retains authenticated forwarding

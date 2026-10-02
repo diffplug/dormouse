@@ -119,6 +119,8 @@ Gaps rather than accepted risks: we intend to close them.
   WebSocket cookie headers are stripped, but `document.cookie` remains shared;
   cookie-authenticated iframe pages are unsupported
   ([Loopback Listeners](./security-local.md#loopback-listeners)).
+- **Browser screenshots and pasted clipboard images inherit parent ACLs on Windows.**
+  ([Browser panes](./security-local.md#browser-panes)).
 - **Neither VS Code's peer-link token, its Tool trust receipts, nor the
   `recovery.json` beside them carries a Windows ACL applied by Dormouse.**
   They are written owner-only by unix mode, which Windows makes a no-op;

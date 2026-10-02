@@ -46,9 +46,8 @@ Relay's passkey account. Hosted login is `docs/specs/security-hosted.md` ->
 **Must mint an ACL record only after the Burrow accepts one local confirmation
 of the phone's two digits.** The webview relays the immutable ceremony id and
 typed digits; it cannot read the expected code, choose the record, or fabricate
-a pending request. A compromised webview can submit the ceremony's single
-guess: uniform `00` through `99` gives it a 1/100 chance, rather than proving a
-person read the phone (rationale). Removal is
+a pending request. A compromised webview gets one guess at an honest Client's unknown uniform
+code: 1/100 success, without proving a person read the phone (rationale). Removal is
 [Revocation and the audit trail](#revocation-and-the-audit-trail).
 
 - **FAIL IF** the Burrow stops being the final authority: `BurrowRuntime.#onConnectionTransport` in `lib/src/remote/burrow/burrow-runtime.ts` must consume its own challenge, verify the presence proof with `verifyPresenceProof` against a binding built from the Burrow's own `burrowId`, connection id, challenge and handshake hash, and require one active `BurrowAclRecord` holding the account, the passkey credential, that key's hash, and the IK-authenticated Client static — before any session is established, and with no code path letting a Relay-supplied claim stand in for any of them.
@@ -289,8 +288,7 @@ every established session. Relay-pushed propagation is staged in
 **There is no structured audit trail covering connects, attaches, denials, or
 writes.** The ACL records `approvedAt` / `approvedBy`; owner-local logs report
 some rejections, without recording a complete session history. A self-hoster cannot answer
-"did anyone connect to my laptop last night", which also means an ACL entry added by
-any of the paths above would be invisible after the fact.
+"did anyone connect to my laptop last night".
 
 ## Auxiliary helpers
 
