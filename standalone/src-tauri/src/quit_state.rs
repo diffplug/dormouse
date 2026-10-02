@@ -462,6 +462,8 @@ mod tests {
 
     fn arrival(from: &str, to: &str) -> crate::routing::Arrival {
         crate::routing::Arrival {
+            phase: crate::routing::ArrivalPhase::Active,
+            transferred: true,
             workspace_id: format!("{from}-to-{to}"),
             from: from.to_string(),
             to: to.to_string(),

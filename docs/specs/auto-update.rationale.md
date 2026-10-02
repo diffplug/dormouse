@@ -2,6 +2,10 @@
 
 > Informative companion to [auto-update.md](auto-update.md): evidence and design history keyed by that spec's headings. Nothing here is normative.
 
+## How it works
+
+On Windows, 2026-10-01, a delayed launch check ran after a manual check had already approved and downloaded the update; it called `check()` again and replaced the downloaded notice with another approval prompt. The same race occurred while network-policy lookup was pending. Checking approved-update ownership after that await preserves the approval throughout both automatic and manual paths.
+
 ## Quit-time install
 
 **Why install runs last.** On Windows `install()` starts NSIS and then calls `std::process::exit` itself (`tauri-plugin-updater-2.11.0/src/updater.rs`, checked 2026-09), so starting it early interrupts teardown. This ordering originally protected persisted scrollback; what it protects now is the window's structure, which standalone does persist. The retained save/drain hooks and their completion semantics are explained in `docs/specs/standalone.rationale.md` → Quit flow.

@@ -12,7 +12,23 @@ import type { TeardownConfirmContext } from "./teardown-flow";
  * docs/specs/standalone.md §Quit flow, "Confirmation dialog".
  */
 
-export type QuitConfirmPhase = "open" | "quitting";
+export type QuitConfirmPhase = "open" | "quitting" | "close-failed";
+export interface CloseFailure { reason: string; retry: () => void; stay: () => void; }
+let closeFailure: CloseFailure | null = null;
+let progressDetail: string | null = null;
+export function getCloseFailure(): CloseFailure | null { return closeFailure; }
+export function getQuitProgressDetail(): string | null { return progressDetail; }
+export function showCloseFailure(failure: CloseFailure): void {
+  closeFailure = failure;
+  intent = { kind: 'close-window' };
+  phase = 'close-failed';
+  ownDialog();
+  emit();
+}
+export function showCloseCommitUncertain(reason: string): void {
+  progressDetail = reason;
+  emit();
+}
 
 /**
  * What the dialog is asking about. A quit tears every window down; a
@@ -127,6 +143,8 @@ export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIn
 
 /** Own the window before voting, including an all-idle request. */
 export function beginQuitProgress(next: QuitConfirmIntent): void {
+  closeFailure = null;
+  progressDetail = null;
   stopWatchingWorkspaces();
   activeCtx = null;
   intent = next;
@@ -171,6 +189,8 @@ export function dismissQuitConfirm(kind?: QuitConfirmIntent["kind"]): void {
   activeCtx = null;
   phase = null;
   intent = QUIT_INTENT;
+  closeFailure = null;
+  progressDetail = null;
   emit();
 }
 
@@ -183,4 +203,6 @@ export function _resetQuitConfirmForTesting(): void {
   intent = QUIT_INTENT;
   activeCtx = null;
   listeners.clear();
+  closeFailure = null;
+  progressDetail = null;
 }

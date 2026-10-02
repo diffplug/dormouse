@@ -136,7 +136,7 @@ async function runQuitTeardown(last: boolean): Promise<void> {
         `[quit] teardown exceeded ${QUIT_TEARDOWN_CEILING_MS}ms; proceeding to exit`,
       );
     }
-    // Install strictly after the completed final save, in the window the walk
+    // Install after bounded flush/drain attempts, in the window the walk
     // tears down last. Only `main` ever holds a pending download and the
     // updater capability (docs/specs/auto-update.md), so this is `main` or a
     // no-op. A fresh `quit_progress` gives install its own watchdog budget

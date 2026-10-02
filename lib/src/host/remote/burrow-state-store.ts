@@ -8,7 +8,8 @@
  * The interface is async because the hosts that implement it are: files the
  * sidecar owns here, `VsCodeBurrowStateStore` there (enrollment in
  * `SecretStorage`, ACL in `globalState` — `docs/specs/vscode.md`). {@link FileBurrowStateStore}
- * is the sidecar's: two files, 0600, under a directory the app passes in.
+ * is the sidecar's: private JSON state under a directory the app passes in
+ * only after establishing owner-only access (POSIX modes or a Windows DACL).
  */
 
 import { readFile, rm } from 'node:fs/promises';

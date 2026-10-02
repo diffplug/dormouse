@@ -32,6 +32,7 @@ export class TauriSessionStore implements SessionKeyValueStore {
   // queued. A queued `value` is always a JSON string (never JS null), so null is
   // a safe "nothing pending" sentinel — even an empty-string blob is distinct.
   private pending: string | null = null;
+  private retryLatestWhenIdle = false;
   // Resolvers for pending drain() calls, fired when the pipeline next goes idle.
   private drainWaiters: Array<() => void> = [];
 
@@ -47,6 +48,14 @@ export class TauriSessionStore implements SessionKeyValueStore {
     return new Promise<void>((resolve) => {
       this.drainWaiters.push(resolve);
     });
+  }
+
+  /** Remember one retry of the latest unsaved value, even if a bounded drain
+   * returned before the current save settled. Newer setItem values replace it;
+   * a successful current write needs no duplicate, and failure never loops. */
+  retryLatest(): void {
+    if (this.saveInFlight) this.retryLatestWhenIdle = true;
+    else if (this.cache !== null && this.cache !== this.savedValue) this.setItem('', this.cache);
   }
 
   /** Seed the cache from the host's persisted blob (or null) at boot. */
@@ -81,10 +90,14 @@ export class TauriSessionStore implements SessionKeyValueStore {
       .then(() => { this.savedValue = value; })
       .catch((err) => console.error("[tauri-session-store] save_session failed:", err))
       .finally(() => {
+        const retryLatest = this.retryLatestWhenIdle;
+        this.retryLatestWhenIdle = false;
         if (this.pending !== null) {
           const next = this.pending;
           this.pending = null;
           this.flush(next);
+        } else if (retryLatest && this.cache !== null && this.cache !== this.savedValue) {
+          this.flush(this.cache);
         } else {
           this.saveInFlight = false;
           // Pipeline idle: release drain waiters.

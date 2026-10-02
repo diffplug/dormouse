@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { TauriSessionStore } from "./tauri-session-store";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -128,6 +128,26 @@ describe("TauriSessionStore", () => {
     expect(saved).toEqual(["a", "a"]);
   });
 
+  it("persists an unchanged cache after close preparation refused its write and the window stayed open", async () => {
+    let closing = true;
+    let persisted = "previous";
+    const store = new TauriSessionStore(async (value) => {
+      // Rust save_open_window_session refuses rather than acknowledging a
+      // skipped write while close preparation owns the snapshot.
+      if (closing) throw new Error("window close is holding its snapshot; no session was saved");
+      persisted = value;
+    });
+    store.hydrate(persisted);
+    store.setItem("k", "newer");
+    await store.drain();
+    expect(persisted).toBe("previous");
+    expect(store.getItem("k")).toBe("newer");
+    closing = false;
+    store.setItem("k", "newer");
+    await store.drain();
+    expect(persisted).toBe("newer");
+  });
+
   it("drain resolves only after an in-flight save settles", async () => {
     let release!: () => void;
     const store = new TauriSessionStore(
@@ -193,4 +213,35 @@ describe("TauriSessionStore", () => {
     await tick();
     expect(drained).toBe(true);
   });
+  it("remembers only one idle retry and uses the latest queued value", async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      let rejectFirst!: (error: Error) => void;
+      const values: string[] = [];
+      const store = new TauriSessionStore(async (value) => {
+        values.push(value);
+        if (values.length === 1) await new Promise<void>((_, reject) => { rejectFirst = reject; });
+        else throw new Error('still unavailable');
+      });
+      store.hydrate('previous');
+      store.setItem('', 'first');
+      store.retryLatest();
+      store.setItem('', 'newest');
+      rejectFirst(new Error('refused'));
+      await store.drain();
+      expect(values).toEqual(['first', 'newest']);
+    } finally { log.mockRestore(); }
+  });
+
+  it("does not duplicate an in-flight successful save when retry is remembered", async () => {
+    let complete!: () => void;
+    const save = vi.fn(() => new Promise<void>((resolve) => { complete = resolve; }));
+    const store = new TauriSessionStore(save);
+    store.setItem('', 'latest');
+    store.retryLatest();
+    complete();
+    await store.drain();
+    expect(save).toHaveBeenCalledOnce();
+  });
+
 });

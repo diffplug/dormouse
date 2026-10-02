@@ -2,7 +2,7 @@ import { useCallback, useRef, useSyncExternalStore } from 'react';
 // Standalone reaches into the lib source directly (same relative form as the
 // sibling UpdateDebugModal.tsx). The terminal registry comes in via the
 // `dormouse-lib` alias, matching quit.ts.
-import { ModalFrame } from '../../lib/src/components/design';
+import { ModalFrame, modalActionButton } from '../../lib/src/components/design';
 import { WorkspaceKillConfirm } from '../../lib/src/components/WorkspaceKillConfirm';
 import { subscribeToTerminalPaneState } from 'dormouse-lib/lib/terminal-registry';
 import {
@@ -12,6 +12,8 @@ import {
   getQuitConfirmChar,
   getQuitConfirmWorkspaceNames,
   getQuitConfirmPhase,
+  getCloseFailure,
+  getQuitProgressDetail,
   quitRunningWork,
   subscribeQuitConfirm,
   type QuitConfirmIntent,
@@ -28,6 +30,8 @@ import {
 export function WorkspaceTeardownModalHost() {
   const phase = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmPhase);
   const intent = useSyncExternalStore(subscribeQuitConfirm, getQuitConfirmIntent);
+  const failure = useSyncExternalStore(subscribeQuitConfirm, getCloseFailure);
+  const progressDetail = useSyncExternalStore(subscribeQuitConfirm, getQuitProgressDetail);
 
   if (!phase) return null;
   return (
@@ -36,6 +40,8 @@ export function WorkspaceTeardownModalHost() {
       workspaceNames={getQuitConfirmWorkspaceNames()}
       confirming={phase === 'quitting'}
       intent={intent}
+      failure={phase === 'close-failed' ? failure : null}
+      progressDetail={progressDetail}
     />
   );
 }
@@ -47,6 +53,8 @@ export function WorkspaceTeardownModal({
   char = 'q',
   workspaceNames = [],
   intent = { kind: 'quit' },
+  failure = null,
+  progressDetail = null,
 }: {
   confirming: boolean;
   char?: string;
@@ -54,6 +62,8 @@ export function WorkspaceTeardownModal({
   /** Whether this tears down the whole app or one window, and whether that
    *  discards a downloaded update. A quit and a restart read the same. */
   intent?: QuitConfirmIntent;
+  failure?: ReturnType<typeof getCloseFailure>;
+  progressDetail?: string | null;
 }) {
   const progressRef = useRef<HTMLParagraphElement>(null);
   // Live count — the dialog stays open even if it drops to 0 (see spec).
@@ -62,12 +72,21 @@ export function WorkspaceTeardownModal({
   const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, getRunningCount);
   const hasRunning = runningCount > 0;
 
+  if (failure) {
+    return <ModalFrame titleId="workspace-close-failure-title" layer="critical" padding="spacious" align="center" initialFocusRef={progressRef}>
+      <h2 id="workspace-close-failure-title" className="text-base font-bold mb-3 text-foreground">Could not close window</h2>
+      <p ref={progressRef} tabIndex={-1} role="alert" className="text-sm text-muted">{failure.reason}</p>
+      <button className={modalActionButton()} onClick={failure.retry}>Retry</button>
+      <button className={modalActionButton()} onClick={failure.stay}>Keep window open</button>
+    </ModalFrame>;
+  }
+
   if (confirming) {
     return (
       <ModalFrame titleId="workspace-kill-progress-title" layer="critical" padding="spacious" align="center" initialFocusRef={progressRef}>
         <h2 id="workspace-kill-progress-title" className="text-base font-bold mb-3 text-foreground">Confirm kill workspace</h2>
         <p ref={progressRef} tabIndex={-1} role="status" className="text-sm text-muted">
-          {intent.kind === 'quit' ? 'Waiting for all windows, then closing…' : 'Closing workspaces…'}
+          {progressDetail ?? (intent.kind === 'quit' ? 'Waiting for all windows, then closing…' : 'Closing workspaces…')}
         </p>
       </ModalFrame>
     );

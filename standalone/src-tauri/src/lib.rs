@@ -5,6 +5,7 @@ mod panic_policy;
 mod quit_state;
 mod routing;
 mod workspaces;
+mod close_commit;
 // The Dock's Quit, an `osascript` quit and a logout reach AppKit without ever
 // raising `RunEvent::ExitRequested` (docs/specs/standalone.md §Trigger
 // interception).
@@ -140,8 +141,9 @@ struct WindowState {
     hover_target: Mutex<Option<String>>,
     /// Labels whose snapshot has been deliberately removed. A save arriving
     /// from a webview that is going away must not put the file back; the entry
-    /// is dropped once that webview is destroyed and can no longer save.
+    /// survives destruction: a previously dispatched save can still arrive.
     closing: Mutex<HashSet<String>>,
+    close_commits: Mutex<HashMap<String, Arc<close_commit::CloseCommit>>>,
     /// The next `ws-<n>`, seeded above every live and saved label at setup.
     next_ws: AtomicU64,
     /// Every window's Workspaces under their stable refs (§Workspace registry).
@@ -182,7 +184,8 @@ impl WindowState {
     }
 
     /// Refuse every later `save_session` for `label` (a deliberate close removed
-    /// its snapshot). Cleared by `Destroyed`, after which no save can arrive.
+    /// its snapshot). Kept for the process lifetime: an already dispatched
+    /// save may acquire the journal lock after `Destroyed`.
     fn begin_closing(&self, label: &str) {
         guard(&self.closing).insert(label.to_string());
     }
@@ -274,14 +277,20 @@ impl WindowState {
         // reads it: an arriving shell belongs to its source again, which
         // `hand_back` returns it to, and reaping it here would kill a terminal
         // the source is still showing.
-        let lost = {
+        let (lost, claimed) = {
             let mut arrivals = guard(&self.arrivals);
             arrivals.forget_deferred_close(label);
-            routing::take_arrivals_to(&mut arrivals, label)
+            let lost = routing::take_arrivals_to(&mut arrivals, label);
+            // A return whose journal is still being retried already has a
+            // worker, but its source's shells must not become orphan kills.
+            let claimed: Vec<String> = arrivals.iter()
+                .filter(|arrival| arrival.to == label && arrival.transferred)
+                .flat_map(|arrival| arrival.terminal_ids.clone()).collect();
+            (lost, claimed)
         };
         let owned = {
             let mut routing = guard(&self.routing);
-            for id in lost.iter().flat_map(|arrival| &arrival.terminal_ids) {
+            for id in &claimed {
                 routing.owners.remove(id);
                 routing.awaiting_replay.remove(id);
             }
@@ -798,19 +807,18 @@ fn request_window_close(app: &AppHandle, label: &str) {
 /// Tauri has actually taken the label out of `webview_windows()`.
 fn finish_window_close(app: &AppHandle, label: &str) {
     append_log(format!("[window] closing {label} and removing its snapshot"));
-    if let Some(state) = app.try_state::<WindowState>() {
-        // Before the removal, not after: a save already in flight from this
-        // webview would otherwise put the snapshot back. Reached from the
-        // watchdog too, where the webview never called `remove_window_session`.
-        state.begin_closing(label);
+    // The webview already committed removal on the normal path; the cached
+    // completion avoids another journal wait after its bounded PTY teardown.
+    if let Err(err) = remove_window_session_bounded(app, label) {
+        append_log(format!("[window] retaining {label}: {err}"));
+        if !err.starts_with("close-commit-uncertain:") {
+            if let Some(state) = app.try_state::<QuitState>() { guard(&state.close).clear(label); }
+        }
+        let _ = app.emit_to(label, "dormouse://window-close-failed", err);
+        return;
     }
     if let Some(state) = app.try_state::<QuitState>() {
         guard(&state.close).clear(label);
-    }
-    if let Ok(dir) = sessions_dir(app) {
-        if let Err(err) = close_window_snapshot(&dir, label) {
-            append_log(format!("[session] {err}"));
-        }
     }
     if let Some(window) = app.get_webview_window(label) {
         let _ = window.destroy();
@@ -1894,14 +1902,19 @@ async fn save_session(window: tauri::Window, state: String) -> Result<(), String
     // A deliberate close removes the snapshot; a save still in flight from the
     // webview that is going away must not put it back
     // (docs/specs/standalone.md §Per-window close).
-    if let Some(windows) = window.app_handle().try_state::<WindowState>() {
-        if windows.refuses_save(window.label()) {
-            return Ok(());
-        }
-    }
+    let windows = window.app_handle().try_state::<WindowState>();
     let dir = sessions_dir(window.app_handle())?;
-    write_session_to(&dir, window.label(), &state)?;
-    retire_saved_arrivals(&dir)
+    save_open_window_session(windows.as_deref(), &dir, window.label(), &state)
+}
+
+/// Caller owns ARRIVAL_DISK_LOCK. Refusal is an error, never a persistence
+/// acknowledgment: a retained window must retry its unchanged cached value.
+fn save_open_window_session(windows: Option<&WindowState>, dir: &Path, label: &str, state: &str) -> Result<(), String> {
+    if windows.is_some_and(|windows| windows.refuses_save(label)) {
+        return Err("window close is holding its snapshot; no session was saved".to_string());
+    }
+    write_session_to(dir, label, state)?;
+    retire_saved_arrivals(dir)
 }
 
 /// The suffix `write_file_atomically` leaves on a session snapshot's temp
@@ -2165,6 +2178,16 @@ fn geometry_path(dir: &Path, label: &str) -> PathBuf {
     dir.join(format!("{stem}.geometry.json"))
 }
 
+/// Platform reads and rect-cache access precede this disk lock. Recheck the
+/// closing fence here: a live webview/rect captured before close can outlive
+/// snapshot removal and must not recreate geometry or share its temp writer.
+fn write_open_window_geometry(windows: Option<&WindowState>, dir: &Path, label: &str, json: &str) -> Result<bool, String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    if windows.is_some_and(|windows| windows.refuses_save(label)) { return Ok(false); }
+    write_file_atomically(&geometry_path(dir, label), json)?;
+    Ok(true)
+}
+
 fn read_geometry(dir: &Path, label: &str) -> Option<WindowGeometry> {
     let raw = std::fs::read_to_string(geometry_path(dir, label)).ok()?;
     serde_json::from_str(&raw).ok()
@@ -2245,7 +2268,8 @@ fn note_geometry(app: &AppHandle, label: &str, origin: Option<(i32, i32)>, size:
             let Ok(json) = serde_json::to_string(&rect.to_logical()) else {
                 continue;
             };
-            if let Err(err) = write_file_atomically(&geometry_path(&dir, &label), &json) {
+            let windows = app.try_state::<WindowState>();
+            if let Err(err) = write_open_window_geometry(windows.as_deref(), &dir, &label, &json) {
                 append_log(format!("[window] geometry write for {label}: {err}"));
             }
         }
@@ -2414,6 +2438,10 @@ fn retire_saved_arrivals(dir: &Path) -> Result<(), String> {
 
 fn mark_arrival_adopted_on_disk(dir: &Path, workspace_id: &str) -> Result<(), String> {
     let _disk = guard(&ARRIVAL_DISK_LOCK);
+    mark_arrival_adopted_in_locked_journal(dir, workspace_id)
+}
+
+fn mark_arrival_adopted_in_locked_journal(dir: &Path, workspace_id: &str) -> Result<(), String> {
     let mut records = read_arrivals_from(dir)?;
     for record in &mut records {
         if record_workspace_id(record) == Some(workspace_id) { record["settled"] = JsonValue::Bool(true); }
@@ -2425,6 +2453,10 @@ fn mark_arrival_adopted_on_disk(dir: &Path, workspace_id: &str) -> Result<(), St
 /// Refusal reverses the durable destination before the source is told to save.
 fn return_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<(), String> {
     let _disk = guard(&ARRIVAL_DISK_LOCK);
+    return_arrival_in_locked_journal(dir, arrival)
+}
+
+fn return_arrival_in_locked_journal(dir: &Path, arrival: &routing::Arrival) -> Result<(), String> {
     let mut records = read_arrivals_from(dir)?;
     records.retain(|r| record_workspace_id(r) != Some(&arrival.workspace_id));
     records.push(serde_json::json!({
@@ -2440,7 +2472,18 @@ fn return_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<(), 
 /// removes that stale copy instead of resurrecting it in either window.
 fn close_window_snapshot(dir: &Path, label: &str) -> Result<(), String> {
     let _disk = guard(&ARRIVAL_DISK_LOCK);
+    close_window_snapshot_locked(dir, label, None)
+}
+
+fn close_window_snapshot_locked(dir: &Path, label: &str, token: Option<&close_commit::CloseCommit>) -> Result<(), String> {
     let mut records = read_arrivals_from(dir)?;
+    let previous_records = records.clone();
+    let geometry = geometry_path(dir, label);
+    let previous_geometry = match std::fs::read_to_string(&geometry) {
+        Ok(value) => Some(value),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(format!("read {}: {err}", geometry.display())),
+    };
     let mut changed = false;
     for record in &mut records {
         if record.get("to").and_then(JsonValue::as_str) == Some(label)
@@ -2450,9 +2493,38 @@ fn close_window_snapshot(dir: &Path, label: &str) -> Result<(), String> {
             changed = true;
         }
     }
+    // All reads and lock waits precede the cancellation fence. Neither a late
+    // worker nor a second request may mutate a retained window after it loses.
+    if let Some(token) = token { token.begin()?; }
+    let session = dir.join(session_file_name(label));
+    let remove = |path: &Path| match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(format!("remove {}: {err}", path.display())),
+    };
+    // Fail before touching recoverable state when an orphan temp is blocked.
+    remove(&temp_write_path(&session))?;
     if changed { write_arrivals_to(dir, &records)?; }
-    remove_session_from(dir, label)?;
-    retire_saved_arrivals(dir)
+    let result = remove(&geometry).and_then(|_| remove(&session));
+    if let Err(err) = result {
+        // The live snapshot was the final mutation. A failed removal leaves
+        // it present; restore the preceding journal/geometry before permitting
+        // the retained window to save or retry. An incomplete rollback keeps
+        // save refusal and the committed flow rather than claiming safety.
+        let rollback = (|| {
+            if changed { write_arrivals_to(dir, &previous_records)?; }
+            if let Some(value) = previous_geometry { write_file_atomically(&geometry, &value)?; }
+            Ok::<(), String>(())
+        })();
+        return match rollback {
+            Ok(()) => Err(err),
+            Err(rollback) => Err(format!("close-commit-uncertain: {err}; rollback failed: {rollback}")),
+        };
+    }
+    // Retirement is cleanup: retaining a settled tombstone is recoverable and
+    // must not turn a successful deletion into a retry of a retained window.
+    if let Err(err) = retire_saved_arrivals(dir) { append_log(format!("[session] close journal cleanup: {err}")); }
+    Ok(())
 }
 
 fn remove_workspace_from_disk(dir: &Path, label: &str, id: &str) -> Result<(), String> {
@@ -2495,6 +2567,13 @@ fn record_workspace_id(record: &JsonValue) -> Option<&str> {
 /// Append one arrival's record, replacing any earlier record of the same id.
 fn record_arrival_on_disk(dir: &Path, arrival: &routing::Arrival) -> Result<(), String> {
     let _disk = guard(&ARRIVAL_DISK_LOCK);
+    record_arrival_in_locked_journal(dir, arrival)
+}
+
+/// Caller owns ARRIVAL_DISK_LOCK. Initial admission checks its reservation
+/// under this same lock, so a cancelled initial write cannot overwrite a
+/// return that already committed its reverse destination.
+fn record_arrival_in_locked_journal(dir: &Path, arrival: &routing::Arrival) -> Result<(), String> {
     let Some(workspace) = arrival.payload.get("workspace") else {
         return Err("arrival payload carries no workspace".to_string());
     };
@@ -2648,6 +2727,8 @@ fn arrival_from(from: &str, to: &str, payload: JsonValue) -> Result<routing::Arr
         .to_string();
     let terminal_ids = payload_terminal_ids(&payload);
     Ok(routing::Arrival {
+        phase: routing::ArrivalPhase::Preparing,
+        transferred: false,
         workspace_id,
         from: from.to_string(),
         to: to.to_string(),
@@ -2676,12 +2757,90 @@ fn transfer_admitted(
         && [from, to].into_iter().all(|label| !close.active(label) && !closing.contains(label))
 }
 
-/// Open one arrival: reassign its shells to the target and suppress them, then
-/// queue the record. **Ownership moves synchronously here**, before either
-/// window is told anything — the single Rust reader thread processes sidecar
-/// lines in order, so every byte after this point is either dropped (and present
-/// in the replay the target is about to get) or delivered to the target
-/// (docs/specs/standalone.md §Transfer).
+/// Commit a reserved arrival without holding its queue lock across disk I/O.
+/// A return may retire the reservation while the writer runs; only the same
+/// Preparing generation may move ownership afterwards. Reverse writes share
+/// ARRIVAL_DISK_LOCK and therefore follow this initial write, never precede a
+/// late write that would put the old destination back.
+fn commit_initial_arrival_with(
+    windows: &WindowState,
+    expected: &routing::Arrival,
+    write: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let matches = |arrival: &routing::Arrival| {
+        arrival.workspace_id == expected.workspace_id && arrival.to == expected.to
+            && arrival.queued_at == expected.queued_at && arrival.phase == routing::ArrivalPhase::Preparing
+    };
+    if !guard(&windows.arrivals).iter().any(matches) {
+        return Err("the transfer reservation was retired before its journal write".to_string());
+    }
+    write()?;
+    let mut arrivals = guard(&windows.arrivals);
+    let arrival = arrivals.iter_mut().find(|arrival| matches(arrival))
+        .ok_or_else(|| "the transfer reservation was retired during its journal write".to_string())?;
+    windows.begin_transfer(&arrival.terminal_ids, &arrival.from, &arrival.to);
+    arrival.transferred = true;
+    arrival.phase = routing::ArrivalPhase::Active;
+    Ok(())
+}
+
+/// The queue keeps Returning arrivals as close/quit blockers until their
+/// reverse journal write succeeds. Failed writes change neither ownership nor
+/// the old durable destination, and retries cannot settle a later generation.
+fn commit_arrival_return_with(
+    windows: &WindowState,
+    expected: &routing::Arrival,
+    write: impl FnOnce() -> Result<(), String>,
+) -> Result<JsonValue, String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let matches = |arrival: &routing::Arrival| {
+        arrival.workspace_id == expected.workspace_id && arrival.to == expected.to
+            && arrival.queued_at == expected.queued_at && arrival.phase == routing::ArrivalPhase::Returning
+    };
+    if !guard(&windows.arrivals).iter().any(matches) {
+        return Err("the arrival return was retired before its journal write".to_string());
+    }
+    write()?;
+    let mut arrivals = guard(&windows.arrivals);
+    if !arrivals.iter().any(matches) {
+        return Err("the arrival return was retired during its journal write".to_string());
+    }
+    let marks = if expected.transferred { windows.hand_back(&expected.terminal_ids, &expected.from) }
+        else { serde_json::json!({}) };
+    routing::retire_arrival(&mut arrivals, expected);
+    Ok(marks)
+}
+
+/// Adoption releases the source only after its settled journal marker is
+/// durable. A watchdog or dead target may request a return during that write;
+/// the final phase/generation check fences the stale adoption.
+fn commit_arrival_adoption_with(
+    windows: &WindowState,
+    expected: &routing::Arrival,
+    write: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    let matches = |arrival: &routing::Arrival| {
+        arrival.workspace_id == expected.workspace_id && arrival.to == expected.to
+            && arrival.queued_at == expected.queued_at && arrival.phase == routing::ArrivalPhase::Active
+    };
+    if !guard(&windows.arrivals).iter().any(matches) {
+        return Err("the arrival was returned before its adoption write".to_string());
+    }
+    write()?;
+    let mut arrivals = guard(&windows.arrivals);
+    if !arrivals.iter().any(matches) {
+        return Err("the arrival was returned during its adoption write".to_string());
+    }
+    windows.clear_suppression(&expected.terminal_ids);
+    routing::retire_arrival(&mut arrivals, expected);
+    Ok(())
+}
+
+/// Reserve both endpoints, durably journal the move, then reassign/suppress
+/// the shells before either window is told. A failed initial write leaves the
+/// source owner and save-visible; an expired reservation cannot move ownership.
 fn begin_arrival(
     app: &AppHandle,
     windows: &WindowState,
@@ -2709,14 +2868,29 @@ fn begin_arrival(
                 arrival.workspace_id
             ));
         }
-        // Ownership moves now; suppression waits for each id's `marked` line.
-        windows.begin_transfer(&arrival.terminal_ids, &arrival.from, &arrival.to);
+        // Reserve admission while the worker writes the journal. Both endpoint
+        // teardowns wait, but the source still owns and saves every Session.
         routing::queue_arrival(&mut arrivals, arrival.clone());
+    }
+    spawn_arrival_watchdog(app.clone(), &arrival);
+    let written = sessions_dir(app).and_then(|dir| {
+        commit_initial_arrival_with(windows, &arrival, || record_arrival_in_locked_journal(&dir, &arrival))
+    });
+    if let Err(error) = written {
+        let retired = routing::retire_arrival(&mut guard(&windows.arrivals), &arrival);
+        if retired { redrive_deferred_teardown(app); }
+        return Err(format!("cannot commit the Workspace transfer: {error}"));
     }
     // The split point, stamped in the stream by the sidecar and routed to the
     // source, which serializes what it holds when it sees it (§Transfer). A
     // Workspace of browser panes alone has no ids to mark; its source sends
     // content at once.
+    let arrivals = guard(&windows.arrivals);
+    if !arrivals.iter().any(|current| current.workspace_id == arrival.workspace_id
+        && current.queued_at == arrival.queued_at && current.phase == routing::ArrivalPhase::Active)
+    {
+        return Err("the transfer was returned before its stream marks".to_string());
+    }
     if let Some(sidecar) = app.try_state::<SidecarState>() {
         let msg = serde_json::json!({
             "event": "pty:mark",
@@ -2724,27 +2898,15 @@ fn begin_arrival(
         });
         send_to_sidecar(&sidecar, msg.to_string());
     }
-    // Recorded on disk here, in neither window's snapshot: the source omits a
-    // transferring Workspace from its saves and the target writes only after
-    // adoption, so a crash in the gap would otherwise restore it nowhere
-    // (§Arrival queue). Never fatal: a failed write is logged and the transfer
-    // proceeds.
-    match sessions_dir(app) {
-        Ok(dir) => {
-            if let Err(e) = record_arrival_on_disk(&dir, &arrival) {
-                append_log(format!("[window] could not record {} on disk: {e}", arrival.workspace_id));
-            }
-        }
-        Err(e) => append_log(format!("[window] {e}")),
-    }
-    spawn_arrival_watchdog(app.clone(), &arrival);
+    drop(arrivals);
     Ok(())
 }
 
 /// Bound an arrival: a target that never settles it — alive but wedged, so
 /// `Destroyed` never hands it back either — would leave the Workspace marked
 /// transferring in the source and its shells silent for good. Past
-/// `ARRIVAL_MAX` the record is retired and handed back like any refusal.
+/// `ARRIVAL_MAX` requests a return. The reservation retires only after the
+/// reverse journal is durable, like any refusal.
 fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
     let workspace_id = arrival.workspace_id.clone();
     let to = arrival.to.clone();
@@ -2779,7 +2941,8 @@ fn spawn_arrival_watchdog(app: AppHandle, arrival: &routing::Arrival) {
 /// routing state at `pty:marked`, never from the later serialized content. Only
 /// an id the sidecar never stamped goes straight back.
 ///
-/// The record must already be out of the queue; the caller took it.
+/// The caller has marked this generation Returning in the queue. It remains
+/// there until its reverse destination is durable; no teardown may overtake it.
 fn hand_back_arrival(
     app: &AppHandle,
     windows: &WindowState,
@@ -2791,12 +2954,30 @@ fn hand_back_arrival(
         arrival.workspace_id, arrival.to, arrival.from
     ));
     if app.get_webview_window(&arrival.from).is_some() {
-        if let Ok(dir) = sessions_dir(app) {
-            if let Err(e) = return_arrival_on_disk(&dir, arrival) {
-                append_log(format!("[window] could not record hand-back: {e}"));
+        let returned = sessions_dir(app).and_then(|dir| {
+            commit_arrival_return_with(windows, arrival, || return_arrival_in_locked_journal(&dir, arrival))
+        });
+        let marks = match returned {
+            Ok(marks) => marks,
+            Err(error) => {
+                append_log(format!("[window] hand-back is waiting for its journal: {error}"));
+                let _ = app.emit_to(arrival.from.as_str(), "dormouse://workspace-arrival-retry",
+                    serde_json::json!({ "workspaceId": arrival.workspace_id,
+                        "reason": format!("The Workspace could not be returned safely yet. Retrying its recovery write: {error}") }));
+                retry_arrival_return(app.clone(), arrival.clone(), reason.to_string());
+                return;
             }
+        };
+        // The source can disappear while the reverse journal waits for disk.
+        // If Destroyed ran before hand_back, its owner sweep could not see the
+        // newly returned ids; settle those orphans here instead of assigning
+        // invisible shells to a label that no longer exists.
+        if app.get_webview_window(&arrival.from).is_none() {
+            for id in &arrival.terminal_ids { windows.forget_pty(id); }
+            reap_orphaned_ptys(app, &arrival.from, arrival.terminal_ids.clone());
+            redrive_deferred_teardown(app);
+            return;
         }
-        let marks = windows.hand_back(&arrival.terminal_ids, &arrival.from);
         let (marked, _) = routing::hand_back_ids(arrival, &marks);
         // Told before the replay is asked for, so the source is listening for
         // it (`acceptHandBackReplay` in `standalone/src/workspace-move.ts`).
@@ -2820,10 +3001,10 @@ fn hand_back_arrival(
             }
         }
     } else {
-        if let Ok(dir) = sessions_dir(app) {
-            if let Err(e) = forget_arrival_on_disk(&dir, &arrival.workspace_id) {
-                append_log(format!("[window] could not forget orphaned arrival: {e}"));
-            }
+        // No source can continue this Workspace. Keep the durable destination
+        // instead of deleting its only recoverable record.
+        if !routing::retire_arrival(&mut guard(&windows.arrivals), arrival) {
+            return;
         }
         // Both ends are gone, so these shells belong to no window and nothing
         // would ever paint them (`routing::owner`).
@@ -2833,6 +3014,20 @@ fn hand_back_arrival(
         reap_orphaned_ptys(app, &arrival.from, arrival.terminal_ids.clone());
     }
     redrive_deferred_teardown(app);
+}
+
+/// One retry chain per Returning generation. A later drop of the same id is
+/// independent; it is never adopted, retired or written by this worker.
+fn retry_arrival_return(app: AppHandle, expected: routing::Arrival, reason: String) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(1));
+        let Some(windows) = app.try_state::<WindowState>() else { return; };
+        let live = guard(&windows.arrivals).iter().any(|arrival| {
+            arrival.workspace_id == expected.workspace_id && arrival.to == expected.to
+                && arrival.queued_at == expected.queued_at && arrival.phase == routing::ArrivalPhase::Returning
+        });
+        if live { hand_back_arrival(&app, &windows, &expected, &reason); }
+    });
 }
 
 /// Tear a Workspace out into a brand-new window under the cursor.
@@ -2899,7 +3094,8 @@ fn transfer_workspace_content(
         let mut arrivals = guard(&windows.arrivals);
         let arrival = arrivals
             .iter_mut()
-            .find(|arrival| arrival.workspace_id == workspace_id && arrival.from == window.label())
+            .find(|arrival| arrival.workspace_id == workspace_id && arrival.from == window.label()
+                && arrival.phase == routing::ArrivalPhase::Active)
             .ok_or_else(|| format!("no arrival of '{workspace_id}' from {}", window.label()))?;
         arrival.content = Some(content);
         (arrival.to.clone(), arrival.pending_window.take())
@@ -2917,9 +3113,8 @@ fn transfer_workspace_content(
                 // already marked the Workspace transferring — `handOff` set
                 // it when the invoke returned. So the ids go back *and* the
                 // source is told: `arrival-failed` is what clears that mark.
-                if let Some(arrival) =
-                    routing::take_arrival(&mut guard(&windows.arrivals), &workspace_id, &to)
-                {
+                let returned = routing::return_arrival(&mut guard(&windows.arrivals), &workspace_id, &to);
+                if let Some(arrival) = returned {
                     hand_back_arrival(&app, &windows, &arrival, "the new window could not be built");
                 }
                 return Err(err);
@@ -2996,7 +3191,7 @@ fn adopt_ready(
     let (ids, marks) = {
         let arrivals = guard(&windows.arrivals);
         let arrival = routing::find_arrival(&arrivals, &workspace_id)
-            .filter(|arrival| arrival.to == label)
+            .filter(|arrival| arrival.to == label && arrival.phase == routing::ArrivalPhase::Active)
             .ok_or_else(|| format!("no arrival of '{workspace_id}' into {label}"))?;
         (arrival.terminal_ids.clone(), routing::arrival_marks(arrival))
     };
@@ -3020,19 +3215,15 @@ fn adopt_done(
     windows: tauri::State<'_, WindowState>,
     workspace_id: String,
 ) -> Result<(), String> {
-    let arrival = routing::take_arrival(
-        &mut guard(&windows.arrivals),
-        &workspace_id,
-        window.label(),
-    )
-    .ok_or_else(|| format!("no arrival of '{workspace_id}' into {}", window.label()))?;
-    windows.clear_suppression(&arrival.terminal_ids);
+    let arrival = {
+        let arrivals = guard(&windows.arrivals);
+        routing::find_arrival(&arrivals, &workspace_id)
+            .filter(|arrival| arrival.to == window.label() && arrival.phase == routing::ArrivalPhase::Active)
+            .cloned().ok_or_else(|| format!("no active arrival of '{workspace_id}' into {}", window.label()))?
+    };
     // Keep the journal until source and target saves both reflect the move.
-    if let Ok(dir) = sessions_dir(&app) {
-        if let Err(e) = mark_arrival_adopted_on_disk(&dir, &workspace_id) {
-            append_log(format!("[window] could not mark {workspace_id} adopted on disk: {e}"));
-        }
-    }
+    let dir = sessions_dir(&app)?;
+    commit_arrival_adoption_with(&windows, &arrival, || mark_arrival_adopted_in_locked_journal(&dir, &workspace_id))?;
     append_log(format!(
         "[window] {workspace_id} adopted by {}; telling {}",
         arrival.to, arrival.from
@@ -3055,7 +3246,7 @@ fn adopt_failed(
     workspace_id: String,
     reason: Option<String>,
 ) -> Result<(), String> {
-    let arrival = routing::take_arrival(
+    let arrival = routing::return_arrival(
         &mut guard(&windows.arrivals),
         &workspace_id,
         window.label(),
@@ -3163,11 +3354,53 @@ fn take_arrivals(window: tauri::Window, windows: tauri::State<'_, WindowState>) 
 /// Remove this window's persisted snapshot and stop it being written again.
 #[tauri::command]
 async fn remove_window_session(window: tauri::Window) -> Result<(), String> {
-    let app = window.app_handle();
-    if let Some(windows) = app.try_state::<WindowState>() {
-        windows.begin_closing(window.label());
+    remove_window_session_bounded(window.app_handle(), window.label())
+}
+
+/// Bound preparation/lock waits, never an irreversible kernel operation. The
+/// timeout can retire only the worker's own token before its first mutation.
+fn remove_window_session_bounded(app: &AppHandle, label: &str) -> Result<(), String> {
+    const PREPARATION_TIMEOUT: Duration = Duration::from_millis(8000);
+    let dir = sessions_dir(app)?;
+    let windows = app.state::<WindowState>();
+    let token = {
+        let mut commits = guard(&windows.close_commits);
+        if let Some(previous) = commits.get(label) {
+            if previous.done() { return Ok(()); }
+            return Err("close-commit-uncertain: an earlier close is still finishing".to_string());
+        }
+        let token = Arc::new(close_commit::CloseCommit::default());
+        commits.insert(label.to_string(), token.clone());
+        windows.begin_closing(label);
+        token
+    };
+    let (send, receive) = mpsc::channel();
+    let worker_token = token.clone();
+    let worker_label = label.to_string();
+    std::thread::spawn(move || {
+        let result = {
+            let _disk = guard(&ARRIVAL_DISK_LOCK);
+            close_window_snapshot_locked(&dir, &worker_label, Some(&worker_token))
+        };
+        if result.is_ok() { worker_token.finish(); }
+        let _ = send.send(result);
+    });
+    let result = match receive.recv_timeout(PREPARATION_TIMEOUT) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) if token.cancel() =>
+            Err("close preparation timed out; workspaces were retained".to_string()),
+        // Commit owns the files; retain the progress modal and save refusal
+        // until the result is known. Arbitrary kernel IO cannot be cancelled.
+        Err(mpsc::RecvTimeoutError::Timeout) => receive.recv()
+            .map_err(|_| "close-commit-uncertain: close worker stopped".to_string())?,
+        Err(mpsc::RecvTimeoutError::Disconnected) =>
+            Err("close-commit-uncertain: close worker stopped".to_string()),
+    };
+    if result.as_ref().is_err_and(|err| !err.starts_with("close-commit-uncertain:")) {
+        guard(&windows.close_commits).remove(label);
+        guard(&windows.closing).remove(label);
     }
-    close_window_snapshot(&sessions_dir(app)?, window.label())
+    result
 }
 
 /// Which window is under the cursor, in that window's own logical client space.
@@ -3330,6 +3563,13 @@ fn forget_restart(app: &AppHandle) {
 // ── Per-window close (docs/specs/standalone.md §Per-window close) ─────────────
 
 // This window's close orchestrator is alive; stand its ack watchdog down.
+#[tauri::command]
+fn retry_window_close(app: AppHandle, window: tauri::Window) {
+    // Retry starts a fresh native handshake too: close admission must block
+    // transfers while the new human gate is open, before removal begins.
+    request_window_close(&app, window.label());
+}
+
 #[tauri::command]
 fn window_close_ack(window: tauri::Window, state: tauri::State<'_, QuitState>) {
     guard(&state.close).ack(window.label());
@@ -3612,6 +3852,17 @@ fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPath
 // (lib/src/host/remote/burrow-state-store.ts). Created here so a first launch
 // hands the sidecar a directory that exists; if it can't be made, the sidecar is
 // told nothing and runs without persistence rather than not at all.
+// The sidecar must receive a durable directory only after its privacy boundary
+// exists. On Windows the Node store cannot repair a refused DACL installation.
+fn prepare_burrow_state_dir(
+    dir: &Path,
+    restrict: impl FnOnce(&Path, u32) -> Result<(), String>,
+) -> Result<String, String> {
+    create_dir_all(dir).map_err(|e| format!("create state dir: {e}"))?;
+    restrict(dir, 0o700).map_err(|e| format!("restrict state dir {}: {e}", dir.display()))?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
 fn burrow_state_dir(app: &AppHandle) -> Option<String> {
     let dir = match app.path().app_data_dir() {
         Ok(dir) => dir,
@@ -3620,10 +3871,6 @@ fn burrow_state_dir(app: &AppHandle) -> Option<String> {
             return None;
         }
     };
-    if let Err(e) = create_dir_all(&dir) {
-        append_log(format!("[sidecar] create state dir: {e}"));
-        return None;
-    }
     // The Node sidecar writes the Burrow enrollment here, and that record carries
     // `burrowToken` — a bearer credential for `/ws/burrow`. `FileBurrowStateStore`
     // asks for `0700`/`0600`, which Windows ignores entirely, so on Windows this
@@ -3634,17 +3881,13 @@ fn burrow_state_dir(app: &AppHandle) -> Option<String> {
     // `restrict_to_owner_leaves_one_owner_only_ace` covers with `before.json`.
     // On unix the store's own modes already do the job and this is a harmless
     // re-assert of the same intent.
-    if let Err(e) = restrict_to_owner(&dir, 0o700) {
-        // Not fatal — a Burrow that cannot start is worse than one whose state
-        // directory kept the OS default — but never silent: on Windows this
-        // call is the only thing restricting `burrowToken`, so its failure is a
-        // downgrade of the sole control and has to be visible.
-        append_log(format!(
-            "[sidecar] WARNING could not restrict state dir {}: {e}",
-            dir.display()
-        ));
+    match prepare_burrow_state_dir(&dir, restrict_to_owner) {
+        Ok(path) => Some(path),
+        Err(error) => {
+            append_log(format!("[sidecar] WARNING {error}; Burrow state is ephemeral"));
+            None
+        }
     }
-    Some(dir.to_string_lossy().into_owned())
 }
 
 /// Where the sidecar writes the single-use agent-recovery record. Under the
@@ -3669,6 +3912,9 @@ fn recovery_state_dir(app: &AppHandle) -> Option<String> {
             "[recovery] WARNING could not restrict state dir {}: {e}",
             dir.display()
         ));
+        // Recovery commands must never be persisted to a directory whose
+        // owner-only boundary could not be established.
+        return None;
     }
     Some(dir.to_string_lossy().into_owned())
 }
@@ -3996,7 +4242,8 @@ pub fn run() {
                         // Drop label-keyed ownership synchronously; only the
                         // returned arrivals need the blocking journal worker.
                         let (lost, orphaned) = state.drop_window(&label);
-                        guard(&state.closing).remove(&label);
+                        // Keep successful-close save refusal: a queued async
+                        // save can still arrive after this native event.
                         reap_orphaned_ptys(app, &label, orphaned);
                         let changed = workspaces::forget_window(&mut guard(&state.registry), &label);
                         if changed { broadcast_registry(app, &state); }
@@ -4161,6 +4408,7 @@ pub fn run() {
             quit_proceed,
             quit_restart,
             window_close_ack,
+            retry_window_close,
             window_close_cancel,
             close_window,
             open_workspace_window,
@@ -4239,6 +4487,9 @@ mod tests {
     };
     use super::routing;
     use super::guard;
+    use super::{WindowState, QuitIntent, commit_initial_arrival_with,
+        commit_arrival_return_with, commit_arrival_adoption_with,
+        record_arrival_in_locked_journal, return_arrival_in_locked_journal};
     use std::collections::HashSet;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -4295,6 +4546,53 @@ mod tests {
         }
     }
 
+    #[test]
+    fn burrow_directory_creation_failure_never_attempts_permissions() {
+        let root = TempDir::new("burrow-state-create-failure");
+        let occupied = root.path().join("not-a-directory");
+        fs::write(&occupied, b"previous").unwrap();
+        let called = std::cell::Cell::new(false);
+        let result = super::prepare_burrow_state_dir(&occupied, |_, _| {
+            called.set(true);
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!called.get());
+        assert_eq!(fs::read(occupied).unwrap(), b"previous");
+    }
+
+    #[test]
+    fn burrow_directory_permission_failure_disables_durable_state() {
+        let root = TempDir::new("burrow-state-restrict-failure");
+        let target = root.path().join("state");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("burrow.json"), b"existing enrollment").unwrap();
+        let result = super::prepare_burrow_state_dir(&target, |path, mode| {
+            assert_eq!(path, target);
+            assert_eq!(mode, 0o700);
+            Err("DACL refused".into())
+        });
+        assert!(result.unwrap_err().contains("DACL refused"));
+        assert_eq!(fs::read(target.join("burrow.json")).unwrap(), b"existing enrollment");
+        assert_eq!(fs::read_dir(target).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn burrow_directory_is_created_and_restricted_before_publication() {
+        let root = TempDir::new("burrow-state-order");
+        let target = root.path().join("nested").join("state");
+        let called = std::cell::Cell::new(false);
+        let result = super::prepare_burrow_state_dir(&target, |path, mode| {
+            assert!(path.is_dir());
+            assert_eq!(fs::read_dir(path).unwrap().count(), 0);
+            assert_eq!(mode, 0o700);
+            called.set(true);
+            Ok(())
+        });
+        assert!(called.get());
+        assert_eq!(result.unwrap(), target.to_string_lossy());
+    }
+
     // --- Pending arrivals on disk (§Arrival queue) ---------------------------
 
     fn workspace_json(id: &str, name: &str) -> JsonValue {
@@ -4303,6 +4601,8 @@ mod tests {
 
     fn arrival_of(id: &str, from: &str, to: &str) -> routing::Arrival {
         routing::Arrival {
+            phase: routing::ArrivalPhase::Active,
+            transferred: true,
             workspace_id: id.to_string(),
             from: from.to_string(),
             to: to.to_string(),
@@ -4319,6 +4619,133 @@ mod tests {
             entries.iter().map(|(id, name)| workspace_json(id, name)).collect();
         serde_json::json!({ "version": 1, "workspaces": workspaces, "activeWorkspaceId": active })
             .to_string()
+    }
+
+    fn reserve_test_arrival(windows: &WindowState) -> routing::Arrival {
+        let mut arrival = arrival_of("workspace-7", "main", "ws-2");
+        arrival.phase = routing::ArrivalPhase::Preparing;
+        arrival.transferred = false;
+        arrival.terminal_ids = vec!["pane-a".to_string()];
+        windows.mint("pane-a", "main");
+        guard(&windows.arrivals).push(arrival.clone());
+        arrival
+    }
+
+    #[test]
+    fn a_pending_journal_reserves_teardown_without_hiding_or_moving_source_ptys() {
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+        let mut arrivals = guard(&windows.arrivals);
+        arrivals[0].content = Some(serde_json::json!({}));
+        assert!(arrivals.defer_close("main"));
+        assert!(arrivals.defer_close("ws-2"));
+        assert_eq!(arrivals.defer_quit(&QuitIntent::default()), Some(false));
+        assert!(routing::arrival_payloads(&arrivals, "ws-2").is_empty());
+        assert_eq!(routing::boot_list_ids(windows.owned_by("main"), &arrivals), expected.terminal_ids);
+        assert!(guard(&windows.routing).marking.is_empty());
+    }
+
+    #[test]
+    fn failed_initial_journal_preserves_source_ownership_and_previous_durable_bytes() {
+        let dir = TempDir::new("arrival-initial-failure");
+        let old = arrival_of("workspace-3", "main", "ws-3");
+        record_arrival_on_disk(dir.path(), &old).unwrap();
+        let previous = fs::read(arrivals_path(dir.path())).unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Source")], "workspace-7")).unwrap();
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+
+        assert!(commit_initial_arrival_with(&windows, &expected, || Err("disk full".to_string())).is_err());
+        assert_eq!(windows.owned_by("main"), expected.terminal_ids);
+        assert!(guard(&windows.routing).marking.is_empty());
+        assert!(guard(&windows.routing).awaiting_replay.is_empty());
+        assert!(routing::retire_arrival(&mut guard(&windows.arrivals), &expected));
+        assert_eq!(fs::read(arrivals_path(dir.path())).unwrap(), previous);
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-7"]);
+    }
+
+    #[test]
+    fn a_target_destroyed_before_initial_commit_never_drops_source_owned_shells() {
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+        let (lost, orphaned) = windows.drop_window("ws-2");
+        assert!(orphaned.is_empty());
+        assert_eq!(lost.len(), 1);
+        assert!(!lost[0].transferred);
+        assert_eq!(windows.owned_by("main"), expected.terminal_ids);
+        assert!(commit_initial_arrival_with(&windows, &expected, || panic!("cancelled reservation must not write")).is_err());
+    }
+
+    #[test]
+    fn a_return_requested_during_initial_write_fences_late_ownership_and_recovers_source() {
+        let dir = TempDir::new("arrival-initial-return-race");
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+        write_session_to(dir.path(), "main", &snapshot_json(&[("workspace-7", "Source")], "workspace-7")).unwrap();
+        let result = commit_initial_arrival_with(&windows, &expected, || {
+            record_arrival_in_locked_journal(dir.path(), &expected)?;
+            routing::return_arrival(&mut guard(&windows.arrivals), &expected.workspace_id, &expected.to).unwrap();
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(windows.owned_by("main"), expected.terminal_ids);
+        assert!(guard(&windows.routing).marking.is_empty());
+        let returning = guard(&windows.arrivals)[0].clone();
+        commit_arrival_return_with(&windows, &returning, || return_arrival_in_locked_journal(dir.path(), &returning)).unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-7"]);
+        assert!(read_snapshot(dir.path(), "ws-2").is_none());
+    }
+
+    #[test]
+    fn a_failed_reverse_journal_retains_the_return_and_retries_without_losing_recovery() {
+        let dir = TempDir::new("arrival-return-failure");
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+        commit_initial_arrival_with(&windows, &expected, || record_arrival_in_locked_journal(dir.path(), &expected)).unwrap();
+        let returning = routing::return_arrival(&mut guard(&windows.arrivals), &expected.workspace_id, &expected.to).unwrap();
+        let previous = fs::read(arrivals_path(dir.path())).unwrap();
+        assert!(commit_arrival_return_with(&windows, &returning, || Err("permission denied".to_string())).is_err());
+        assert_eq!(windows.owned_by("ws-2"), expected.terminal_ids);
+        assert_eq!(fs::read(arrivals_path(dir.path())).unwrap(), previous);
+        assert_eq!(guard(&windows.arrivals).defer_quit(&QuitIntent::default()), Some(false));
+        assert!(routing::arrival_payloads(&guard(&windows.arrivals), "ws-2").is_empty());
+
+        commit_arrival_return_with(&windows, &returning, || return_arrival_in_locked_journal(dir.path(), &returning)).unwrap();
+        assert_eq!(windows.owned_by("main"), expected.terminal_ids);
+        assert!(guard(&windows.arrivals).is_empty());
+        restore_arrivals(dir.path()).unwrap();
+        assert_eq!(snapshot_ids(&read_snapshot(dir.path(), "main").unwrap()), vec!["workspace-7"]);
+        assert!(read_snapshot(dir.path(), "ws-2").is_none());
+    }
+
+    #[test]
+    fn a_return_retry_survives_target_destruction_without_reaping_source_shells() {
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+        commit_initial_arrival_with(&windows, &expected, || Ok(())).unwrap();
+        let returned = routing::return_arrival(&mut guard(&windows.arrivals), &expected.workspace_id, &expected.to).unwrap();
+        let (lost, orphaned) = windows.drop_window("ws-2");
+        assert!(lost.is_empty(), "one return worker is already responsible");
+        assert!(orphaned.is_empty(), "a return's PTYs are not sibling-window orphans");
+        commit_arrival_return_with(&windows, &returned, || Ok(())).unwrap();
+        assert_eq!(windows.owned_by("main"), expected.terminal_ids);
+    }
+
+    #[test]
+    fn adoption_write_failure_or_a_concurrent_return_never_releases_the_source() {
+        let windows = WindowState::default();
+        let expected = reserve_test_arrival(&windows);
+        commit_initial_arrival_with(&windows, &expected, || Ok(())).unwrap();
+        let active = guard(&windows.arrivals)[0].clone();
+        assert!(commit_arrival_adoption_with(&windows, &active, || Err("journal unavailable".to_string())).is_err());
+        assert_eq!(guard(&windows.arrivals)[0].phase, routing::ArrivalPhase::Active);
+        assert!(commit_arrival_adoption_with(&windows, &active, || {
+            routing::return_arrival(&mut guard(&windows.arrivals), &active.workspace_id, &active.to).unwrap();
+            Ok(())
+        }).is_err());
+        assert_eq!(guard(&windows.arrivals)[0].phase, routing::ArrivalPhase::Returning);
+        assert!(commit_arrival_adoption_with(&windows, &active, || panic!("stale adopter must not write")).is_err());
     }
 
     fn read_snapshot(dir: &Path, label: &str) -> Option<JsonValue> {
@@ -5300,6 +5727,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_geometry_flush_captured_before_close_cannot_recreate_removed_geometry() {
+        let dir = TempDir::new("geometry-close-fence");
+        let windows = WindowState::default();
+        write_session_to(dir.path(), "ws-2", "snapshot").unwrap();
+        assert!(super::write_open_window_geometry(Some(&windows), dir.path(), "ws-2", "previous").unwrap());
+        let captured_before_close = "new position";
+        windows.begin_closing("ws-2");
+        super::close_window_snapshot(dir.path(), "ws-2").unwrap();
+        assert!(!super::write_open_window_geometry(Some(&windows), dir.path(), "ws-2", captured_before_close).unwrap());
+        assert!(!super::geometry_path(dir.path(), "ws-2").exists());
+        windows.drop_window("ws-2");
+        assert!(!super::write_open_window_geometry(Some(&windows), dir.path(), "ws-2", captured_before_close).unwrap());
+        assert!(!super::geometry_path(dir.path(), "ws-2").exists());
+        // A recoverable refusal clears closing while the window remains live.
+        windows.begin_closing("ws-3");
+        guard(&windows.closing).remove("ws-3");
+        assert!(super::write_open_window_geometry(Some(&windows), dir.path(), "ws-3", "retained window").unwrap());
+        assert_eq!(fs::read_to_string(super::geometry_path(dir.path(), "ws-3")).unwrap(), "retained window");
+    }
+
     /// The cached box is fed by the window events alone, and it is what both the
     /// debounced write and the cross-window drag read (§Boot and geometry).
     #[test]
@@ -5400,16 +5848,69 @@ mod tests {
     /// paths set it: the webview's own `remove_window_session`, and
     /// `finish_window_close` for the ack-timeout path where it never ran.
     #[test]
-    fn a_closing_window_refuses_every_later_save_until_it_is_destroyed() {
+    fn a_successfully_closed_window_refuses_even_saves_dispatched_before_destroyed() {
         let state = super::WindowState::default();
         assert!(!state.refuses_save("ws-2"));
         state.begin_closing("ws-2");
         assert!(state.refuses_save("ws-2"));
         // Never a sibling's.
         assert!(!state.refuses_save("main"));
-        // `Destroyed` drops the refusal: no save can arrive under a dead label.
-        guard(&state.closing).remove("ws-2");
-        assert!(!state.refuses_save("ws-2"));
+        state.drop_window("ws-2");
+        assert!(state.refuses_save("ws-2"));
+    }
+
+    #[test]
+    fn cancelled_close_never_mutates_retained_or_resaved_window() {
+        let dir = TempDir::new("close-cancelled");
+        write_session_to(dir.path(), "ws-2", "retained").unwrap();
+        let token = super::close_commit::CloseCommit::default();
+        assert!(token.cancel());
+        assert!(super::close_window_snapshot_locked(dir.path(), "ws-2", Some(&token)).is_err());
+        write_session_to(dir.path(), "ws-2", "newer save").unwrap();
+        assert!(super::close_window_snapshot_locked(dir.path(), "ws-2", Some(&token)).is_err());
+        assert_eq!(read_session_from(dir.path(), "ws-2").unwrap().as_deref(), Some("newer save"));
+    }
+
+    #[test]
+    fn failed_close_rolls_back_journal_and_geometry_before_retry() {
+        let dir = TempDir::new("close-rollback");
+        let arrival = arrival_of("ws-7", "main", "ws-2");
+        record_arrival_on_disk(dir.path(), &arrival).unwrap();
+        super::mark_arrival_adopted_on_disk(dir.path(), "ws-7").unwrap();
+        let previous = fs::read(arrivals_path(dir.path())).unwrap();
+        let geometry = super::geometry_path(dir.path(), "ws-2");
+        fs::write(&geometry, "geometry").unwrap();
+        // A directory cannot be removed as a session file on any platform.
+        let session = dir.path().join(session_file_name("ws-2"));
+        fs::create_dir(&session).unwrap();
+        assert!(super::close_window_snapshot(dir.path(), "ws-2").is_err());
+        assert_eq!(fs::read(arrivals_path(dir.path())).unwrap(), previous);
+        assert_eq!(fs::read_to_string(&geometry).unwrap(), "geometry");
+        fs::remove_dir(&session).unwrap();
+        write_session_to(dir.path(), "ws-2", &snapshot_json(&[("ws-7", "Moved")], "ws-7")).unwrap();
+        write_session_to(dir.path(), "main", &snapshot_json(&[("ws-7", "Moved")], "ws-7")).unwrap();
+        super::close_window_snapshot(dir.path(), "ws-2").unwrap();
+        restore_arrivals(dir.path()).unwrap();
+        assert!(read_session_from(dir.path(), "ws-2").unwrap().is_none());
+        assert!(read_session_from(dir.path(), "main").unwrap().is_none());
+    }
+
+    #[test]
+    fn skipped_close_save_is_rejected_and_retained_window_can_retry() {
+        let dir = TempDir::new("close-cache-refusal");
+        let windows = WindowState::default();
+        write_session_to(dir.path(), "ws-2", "previous").unwrap();
+        windows.begin_closing("ws-2");
+        assert!(super::save_open_window_session(Some(&windows), dir.path(), "ws-2", "newer").is_err());
+        assert_eq!(read_session_from(dir.path(), "ws-2").unwrap().as_deref(), Some("previous"));
+        assert!(read_session_from(dir.path(), "main").unwrap().is_none());
+        guard(&windows.closing).remove("ws-2"); // recoverable close preparation failure
+        super::save_open_window_session(Some(&windows), dir.path(), "ws-2", "newer").unwrap();
+        assert_eq!(read_session_from(dir.path(), "ws-2").unwrap().as_deref(), Some("newer"));
+        windows.begin_closing("ws-2");
+        windows.drop_window("ws-2");
+        assert!(super::save_open_window_session(Some(&windows), dir.path(), "ws-2", "stale queued save").is_err());
+        assert_eq!(read_session_from(dir.path(), "ws-2").unwrap().as_deref(), Some("newer"));
     }
 
     fn queue_test_suppression(state: &super::WindowState, id: &str) {
@@ -5674,6 +6175,8 @@ mod tests {
                 "record_arrival_on_disk", "mark_arrival_adopted_on_disk", "return_arrival_on_disk",
                 "forget_arrival_on_disk", "read_arrivals_from", "write_arrivals_to", "restore_arrivals",
                 "close_window_snapshot", "finish_window_close", "begin_arrival", "hand_back_arrival",
+                "remove_window_session_bounded", "commit_initial_arrival_with",
+                "commit_arrival_adoption_with", "commit_arrival_return_with",
             ].iter().any(|helper| body.contains(helper));
             if reaches_blocking && !(is_async_attr || is_async_fn) {
                 offenders.push(name.to_string());

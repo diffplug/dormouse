@@ -28,6 +28,8 @@
 
 ## Burrow service
 
+A refused state-directory DACL leaves the Node sidecar with no privacy control on Windows: POSIX modes do nothing there. Falling back to in-memory enrollment and ACL keeps the Burrow usable without writing new credentials into an unrestricted directory. Existing durable state stays untouched until a later launch can establish the boundary.
+
 **Why one file rather than one per value.** Per-value files leave a window between two writes in which the enrollment can end up describing a different Burrow than the ACL records approved under it.
 
 **Why the correlation field cannot be `requestId`.** A `burrow:*` payload reusing that field has its results consumed by the invoke table, vanishing at random.
@@ -108,6 +110,18 @@ enumeration — which is already Rust's job, beside the snapshots it reads.
 The cap is a ceiling on one launch, not a limit on how many windows may exist:
 the excess snapshots stay on disk untouched, so raising the cap restores them.
 
+## Per-window close
+
+The October 2026 Windows review found that a skipped close-time save acknowledged as successful advanced the webview's saved-value cache. Wall dirty tracking had already completed at aggregate publication, so an unchanged retained Window could stay unsaved indefinitely. Explicit refusal plus one remembered latest-value retry covers writes outliving the bounded drains; the real store and aggregate regression holds the refused write past both timeouts. The retry is consumed once and never loops on disk failure. A failed native cancellation keeps the frontend flow guarded rather than letting its next close race the old handshake.
+
+A cancelled watchdog needs a fresh token on retry so the earlier sleeping watchdog cannot destroy the Window under another consent dialog. Pending approved downloads live only in their webview: closing loses the installer held there. Competing teardown flows share one dialog; leaving a request unanswered parks its native machine with no decision to receive.
+
+An audit on Windows, 2026-10-01, held `remove_window_session` pending for nine seconds: the frontend's eight-second ceiling never started, since it covered only the later PTY kill. Native completion then took the same journal lock a second time. A disk error was logged while the code destroyed the window anyway, leaving its old snapshot eligible for relaunch.
+
+Cancellation before the mutation boundary can retire a worker waiting for the journal lock without touching disk. Cancellation after that boundary cannot safely release save refusal: a late unlink could delete a newer snapshot from the retained window. The token therefore gives that entered commit exclusive ownership until completion. Normal deletion errors restore the earlier journal/geometry before exposing retry; rollback failure remains guarded. An arbitrary synchronous filesystem syscall has no safe forced-cancellation mechanism, so the preparation deadline is distinct from entered kernel IO and the later PTY deadline.
+
+Queued native commands also survive the window's `Destroyed` event. Keeping refusal for successfully closed labels, which are not reused in a process, prevents such a save from recreating its snapshot after native teardown.
+
 ## Transfer
 
 The `adopt_ready` hop exists because the alternative is a race with no safe
@@ -133,7 +147,9 @@ ends at `adopt_failed` or at the target's `Destroyed`, not at a timer.
 
 ## Arrival queue
 
-A target whose `adopt_done` is refused already has the arrival payload needed to release its Sessions. Preparing a new transfer first re-entered Tool startup checks and could throw while ownership was already back at the source; unwinding directly also avoids sending `adopt_failed` for that retired arrival.
+A target whose `adopt_done` is refused already has the arrival payload needed to release its Sessions. Preparing a new transfer first re-entered Tool startup checks and could throw while ownership was already back at the source. Direct unwind also handles a failed settled-journal write; an explicit `adopt_failed` then requests the durable return instead of waiting for the watchdog. A return already completed makes that request stale and harmless.
+
+The Windows audit on 2026-10-01 found that a failed initial journal write was logged before ownership moved anyway, while the source's next snapshot omitted the Workspace. A failed return write likewise removed the close/quit blocker before its durable destination changed. Admission and return reservations now hold the blockers across disk IO and release source state only after the matching generation's journal commit. Native failure tests preserve earlier journal bytes and replay the return into exactly one source snapshot.
 
 **Why the mark is stamped in the stream rather than asked for.** A mark fetched
 by request answers at some instant the sidecar chose, while the source's xterm
@@ -223,6 +239,8 @@ stays the webview's throughout and no polling loop is needed.
 **The WKWebView WAL measurement.** WKWebView stores `localStorage` as SQLite in WAL mode, and WebKit pins that WAL with a long-lived reader that never advances during a running session — so it is never checkpointed, and an external checkpoint is blocked by the same reader. Rewriting the multi-MB scrollback-bearing session blob on every save grew the WAL to ~1 GB within a few hours (recorded 2026-07); a days-long session made it pathological. The Rust file store that replaced it has no WAL and rewrites the same file each time.
 
 **Why the sessions directory is fsynced after the rename.** Fsyncing only the temp file leaves the new name recoverable-but-absent after a power loss; the directory-entry fsync is what makes the rename itself durable. Windows has no equivalent concept, hence unix-only.
+
+Checked on 2026-10-01: `write_file_with_permissions` attempts that Unix directory fsync best-effort, and session/journal unlink helpers do not fsync the directory. Their completed operations and journal ordering support process-crash recovery; they do not establish a guarantee for abrupt hardware power loss.
 
 **Why the mode is set before the bytes.** Under the bare umask the transcript-bearing blob lands `0644` in a `0755` directory any other local account can read, and tightening after the write would leave a window in which it was readable. Continuing after a permission failure would contradict the owner-only guarantee; aborting before writing preserves the previous snapshot and leaves at most an empty temp file.
 
