@@ -16,6 +16,7 @@ import {
   ONE_TIME_DENIAL_CODES,
   DIRECT_ONLY_DEADLINE_MS,
   DIRECT_SETUP_TIMEOUT_MS,
+  ONE_TIME_EXPIRY_GRACE_MS,
   ONE_TIME_LINK_TTL_MS,
   RELAY_PING,
   RELAY_PING_INTERVAL_MS,
@@ -537,6 +538,17 @@ describe('OneTimeClient: the confirmation', () => {
       ok: false,
       message: ONE_TIME_UNREACHABLE_MESSAGE,
     });
+  });
+
+  it('ends a socket that never opens at the room’s hard deadline, as the link expiring', async () => {
+    const client = makeClient({ open: false });
+    const burrow = await ScriptedBurrow.create();
+    const result = client.connectOnce(burrow.link, LABEL, () => {});
+    await flushUntil(() => sockets[0]);
+    clock.advance(burrow.link.expiry * 1000 + ONE_TIME_EXPIRY_GRACE_MS - clock.now());
+    expect(await result).toEqual({ ok: false, message: ONE_TIME_LINK_EXPIRED_MESSAGE });
+    expect(phoneSocket().closeCode).toBe(1000);
+    expect(clock.armed).toBe(0);
   });
 });
 
