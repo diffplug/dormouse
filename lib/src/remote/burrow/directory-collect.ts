@@ -1,9 +1,9 @@
 /**
  * The impure half of the directory: reads the live terminal registry, pane
  * state store, and activity store to produce the `DirectoryEntry[]` the phone's
- * picker renders. Every entry is a terminal pane (the POC is terminal-only);
- * browser/iframe surfaces never enter the xterm registry, so iterating it lists
- * exactly the terminal panes.
+ * picker renders. It projects registered terminal Surfaces except helper
+ * Sessions, including a Tool's terminal while its browser face is displayed.
+ * Standalone browser/iframe Surfaces never enter the xterm registry.
  */
 
 import type { DirectoryEntry } from 'remote-lib-common';

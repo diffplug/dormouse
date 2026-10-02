@@ -1082,14 +1082,10 @@ bundle); `describePushTargets` in `lib/src/components/SettingsDialog.tsx`;
 `lib/src/host/remote/enroll-offer.ts` for the offer's well-known per-platform
 path, read by `readUsableOffer` in `lib/src/host/remote/service.ts`.
 
-The `window.dormouseBurrow` console hook — the scripting seam — exposes the
-seven enrollment commands: `enroll(password, label)`,
-`enrollOffer(label)`, `beginHostedEnrollment(label)`,
-`cancelHostedEnrollment`, `status`, `reconnect`, `clearEnrollment`. **Pairing confirmation is never here**: it is a
-modal because it must interrupt, and because the digits it takes are read off a
-phone ([remote-security-model.md](./remote-security-model.md) -> Pairing). The
-one-time commands are not on the hook either; `status()` prints `serving`
-beside `enrolled`.
+**Never expose pairing confirmation or one-time commands on `window.dormouseBurrow`.**
+Its enrollment scripting methods belong to `installBridgeMode`; `status()` includes
+serving and enrollment state.
+Source of truth: `installBridgeMode` in `lib/src/remote/burrow/activation.ts`.
 
 `docs/stories/pairing.mdx` is a narrative Storybook page walking this section and
 the pairing modal in sequence with the rest of the setup, rendering the real

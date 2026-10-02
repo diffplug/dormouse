@@ -2,29 +2,9 @@
 
 > See `docs/specs/glossary.md` for Client, Burrow, Relay, and Session vocabulary.
 
-The trust model for remote control: three primitives between the Client
-(Dormouse Pocket), Burrow (Dormouse Terminal), and coordinating Relay.
+> Owns ceremony trust and authorization. `docs/specs/relay.md` owns message orchestration; `docs/specs/security-remote.md` owns the audited checks and open gaps.
 
-* **One end-to-end channel per ceremony** — pairing and connection each run a
-  Noise IK handshake whose two `CipherState`s carry everything after it, and the
-  Relay routes that ciphertext without reading it.
-* **Passkeys prove fresh user presence** inside that channel, over a challenge
-  derived from the handshake itself. A passkey authenticates the user; it grants
-  access to no Burrow.
-* **Each Client pairs explicitly, one-to-one, with each Burrow** — the Burrow keeps
-  its own local ACL of approved Clients, each identified by a per-Burrow X25519
-  static generated in the browser; storage follows Client statics below.
-
-Account compromise is therefore insufficient for burrow access
-([Security Guarantees](#security-guarantees)). `docs/specs/security-remote.md` -> "Remote Control"
-is this model's audited face — the properties checked nightly and the gaps left
-open (revocation, the audit trail).
-
-**Every primitive here lives in `remote-lib-common/src/security/`**, shared
-verbatim by Relay, Burrow, and Pocket so the three cannot disagree on what a
-valid credential is. Message sequences are [relay.md](./relay.md) (Relay);
-this spec defines what they must establish. Evidence:
-[remote-security-model.rationale.md](./remote-security-model.rationale.md).
+**Must share cryptographic primitives through `remote-lib-common/src/security/`.**
 
 ## Goals
 
@@ -35,10 +15,10 @@ burrow-controlled authorization; long-lived trusted client devices; passkeys.
 
 Non-goals: a compromised browser runtime or operating system; a user
 intentionally clearing browser data; permanent device identity across browser
-resets; **availability** — the relay is down whenever the machine is (a
-per-login user agent), and the Relay is a hard online dependency for every new
-session but a [one-time connection](#one-time-connection)'s
-([relay.md](./relay.md)); **traffic analysis**
+resets; **availability** — a self-host Relay shares its deployment machine's
+availability; the Relay is an online dependency for each new paired session,
+and a one-time session needs Hosted's rendezvous until the direct switch
+([relay.md](./relay.md); [One-time connection](#one-time-connection)); **traffic analysis**
 ([Residual metadata](#residual-metadata)).
 
 ## Trust Model
@@ -120,7 +100,7 @@ Source of truth: `generatePocketKeyPair` in
 `BurrowAclRecord` binds the Burrow and account to one passkey credential and public
 key hash, one Client static public key, a fresh 256-bit `deliveryId`, approval
 metadata, and a nullable revocation time. Persisted through `BurrowStateStore` — a
-0600 file in standalone, `globalState` in VS Code — **never on the Relay**
+private file in standalone (0600 on POSIX; protected user-only DACL on Windows), `globalState` in VS Code — **never on the Relay**
 ([relay.md](./relay.md)).
 
 **Authorization is the conjunction, on one record.** `BurrowAcl.authorize`
@@ -200,11 +180,11 @@ newly-added passkey is not automatically trusted; its Client must still pair.
   public key ([relay.md](./relay.md) owns the grammar); **it carries no Burrow
   static, no label, and no signature** (rationale).
 - **Invitation lifecycle, Burrow-owned**, and the QR panel renders it: `live`
-  until a valid Noise message 1 decrypts against it (`reserved`), which then
-  always ends `consumed`; an un-scanned one ends `expired` by TTL or `dropped`
+  until a valid message 1 and the responder's message 2 complete the Noise
+  handshake (`reserved`), which then always ends `consumed`; an un-scanned one ends `expired` by TTL or `dropped`
   when the Burrow discards it — lost relay socket, or evicted at the cap. **A mint
   whose keygen straddles a teardown is refused rather than inserted**
-  (rationale). **Each invitation accepts one request**; a failed decrypt leaves
+  (rationale). **Must accept one completed handshake per invitation**; a failed handshake leaves
   it live and redemption at the Relay flips nothing, and **neither may read as
   a scan**.
 - **IK against the invitation key**: Client initiator, fresh per-Burrow static as
@@ -309,9 +289,9 @@ runtime that carries these rules out ("Burrow runtime").
 - **The prologue binds every link field under its own kind** (field order:
   `docs/specs/one-time.md` -> "Link"), so a one-time transcript equals no
   pairing or connection transcript, and is useless in any other room.
-- **The first valid message 1 reserves the link**: the one-use key is erased
-  with it, a later `init` is dropped before any WebCrypto, and one that fails
-  to decrypt reserves nothing.
+- **Must reserve the link only after a valid message 1 and responder message 2
+  complete the handshake.** The one-use key is erased with it; a later `init`
+  is dropped before WebCrypto, and a failed handshake reserves nothing.
 - **The one carve-out from [Presence proofs](#presence-proofs): a fresh local
   confirmation authorizes exactly one session and writes nothing.**
   `OneTimeRequestV1` carries the phone's code and label and nothing else; the
@@ -442,13 +422,14 @@ runtime holds the same line against the rendezvous (`docs/specs/one-time.md`
   other identity at the cap gets the fixed-size `burrow-busy` and **evicts no
   other entry**. Pending caps and the token bucket stay active at the cap.
 - **A Burrow-global token bucket gates the WebCrypto an accepted `init` buys**, on
-  the Burrow's own clock, and **answers a refused frame with nothing** — as do
-  refusals by shape, size, or a pending cap (rationale).
+  the Burrow's own clock, and **must answer a refused init with nothing**, as for shape or size refusals.
+  **Must enforce pending caps after a valid handshake by evicting the oldest
+  pending entry**, with the outcome in the expiry table below (rationale).
 - **A message is processed only for its exact pending ID and expected step**:
   unknown IDs are dropped without decryption, established frames decrypt only at
   their session's next nonce, and **the first invalid ciphertext destroys its
   session** (rationale).
-- **Rejected frames perform no WebCrypto operation and allocate no entry.**
+- **Must reject malformed or over-size routing frames before WebCrypto or entry allocation.**
   **`MAX_RELAY_TO_BURROW_FRAME_LENGTH` is measured on the received string before
   `JSON.parse`** (a non-string payload is dropped) and given to the socket
   implementation's `maxPayload` where it takes one (rationale); the wire guard
@@ -561,7 +542,9 @@ construct, and by `ClientSessionCore.establish` in
 - **X25519 stays WebCrypto-only** (`generateKey` / `deriveBits` / `importKey`),
   **never a JavaScript curve** (rationale). **An X25519 rejection and an
   all-zero shared secret are one terminal handshake failure**, and the handshake
-  refuses every later call rather than resuming on half-mixed state. SHA-256 and
+  refuses every later call rather than resuming on half-mixed state. **Must treat
+  concurrent steps as terminal failure, reject the in-flight step, and publish no
+  usable transport session after failure.** (rationale) SHA-256 and
   HMAC are WebCrypto; **HKDF is Noise's own HMAC construction** (section 4.3),
   never WebCrypto HKDF.
 - **ChaChaPoly is bundled** from an exactly pinned `@noble/ciphers` release

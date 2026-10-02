@@ -579,7 +579,7 @@ export class NoiseHandshake {
 
   /** Whether both messages have been processed and `session` is available. */
   get isComplete(): boolean {
-    return this.#session !== undefined;
+    return !this.#failed && !this.#inFlight && this.#session !== undefined;
   }
 
   /** The peer's static public key: known up front by the initiator, learned in message 1 by the responder. */
@@ -588,9 +588,10 @@ export class NoiseHandshake {
     return this.#remoteStatic === undefined ? undefined : copyKey(this.#remoteStatic, 0);
   }
 
-  /** The `Split` result. Throws until the handshake completes. */
+  /** The `Split` result, visible only after the owned step commits; terminal failure never publishes it. */
   get session(): NoiseSession {
-    if (this.#session === undefined) throw new NoiseError('handshake is not complete');
+    if (this.#failed) throw new NoiseError('handshake already failed');
+    if (this.#inFlight || this.#session === undefined) throw new NoiseError('handshake is not complete');
     return this.#session;
   }
 
@@ -630,16 +631,21 @@ export class NoiseHandshake {
    */
   async #step(run: () => Promise<Uint8Array>): Promise<Uint8Array> {
     if (this.#failed) throw new NoiseError('handshake already failed');
-    if (this.#session !== undefined) throw new NoiseError('handshake already complete');
     if (this.#inFlight) {
       this.#failed = true;
       throw new NoiseError('handshake step is already in flight');
     }
+    if (this.#session !== undefined) throw new NoiseError('handshake already complete');
     this.#inFlight = true;
     try {
-      return await run();
+      const result = await run();
+      // A concurrent caller can poison this step during its WebCrypto awaits.
+      // Neither its message nor transport ciphers may escape after that failure.
+      if (this.#failed) throw new NoiseError('handshake already failed');
+      return result;
     } catch (error) {
       this.#failed = true;
+      this.#session = undefined;
       throw error instanceof NoiseError ? error : new NoiseError('handshake failed');
     } finally {
       this.#inFlight = false;
@@ -703,7 +709,9 @@ export class NoiseHandshake {
   }
 
   async #split(): Promise<NoiseSession> {
-    return await this.#symmetric.split(this.#role === 'initiator');
+    const session = await this.#symmetric.split(this.#role === 'initiator');
+    if (this.#failed) throw new NoiseError('handshake already failed');
+    return session;
   }
 
   async #useEphemeral(): Promise<NoiseKeyPair> {

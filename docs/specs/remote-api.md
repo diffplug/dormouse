@@ -19,13 +19,7 @@ One protocol, two consumption depths: the **phone** (Dormouse Pocket) shipped, a
 
 ## v1 scope
 
-**Scope: protocol-v1** — the shipped protocol, the smallest that lets a phone **sign in, pick a pane, see it live, and type into it**:
-
-* Hello (version + viewer kind)
-* `directory.watch`, snapshot-only (no deltas, no thumbnails), terminal entries only
-* `surface.attach` / `surface.detach`, one attachment per session
-* Terminal: attach-is-the-resize, live data, `terminal.write` / `terminal.resize`, last-attach-wins size authority
-* One implicit grant: every authorized session — paired or one-time — has full input (selfhost is single-user), no layout operations
+**Must restrict protocol-v1 to terminal listing, one attachment per session, and terminal input/resize; never layout operations.** The sections below own directory snapshots, attachment and size authority, and grants. Canonical method/event syntax lives in `remote-lib-common/src/remote/wire.ts`.
 
 Everything else, browser-surface remoting included, is staged in [Future](#future).
 
@@ -35,7 +29,7 @@ Source of truth: `remote-lib-common/src/remote/wire.ts` (the fixed wire contract
 
 **The Burrow runs in the process that owns the PTYs, never a webview** (`docs/specs/relay.md` → "Burrow side"). Within it, `RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids, sizes, bytes.
 
-**Every environment-specific answer sits behind `BurrowSurfaceProvider`** — `collectDirectory` / `watchDirectory`, `resolveSurface` returning a `SurfaceHandle`, `releaseSurface`, `writePty` / `resizePty` / `streamPty` — because *where* a named surface lives is a deployment fact, not a protocol concept. **The session imports no platform adapter, no store, and no `document`**, and both installations share the ask-backed half, so an attach cannot be answered differently in one burrow than the other.
+**Must keep environment-specific answers behind `BurrowSurfaceProvider`.** **The session imports no platform adapter, no store, and no `document`**, and both installations share the ask-backed half, so an attach cannot be answered differently in one burrow than the other.
 
 **`SurfaceHandle.ptyId` is a provider-local routing key**, not necessarily the PTY process's own id — the VS Code provider mints an opaque per-peer handle. (rationale)
 
@@ -45,7 +39,7 @@ Source of truth: `BurrowSurfaceProvider` in `lib/src/remote/burrow/burrow-surfac
 
 ## Terminology
 
-A Surface is named on the wire by `surfaceId`; the picker lists Panes, so attaching to a Pane means attaching to its selected Surface. Remote-only vocabulary:
+A Surface is named on the wire by `surfaceId`; the picker projects registered terminal Surfaces, as defined in "Directory (the phone's picker)". Remote-only vocabulary:
 
 * **Viewer** — one connected Client session. Multiple viewers may coexist.
 
@@ -53,7 +47,7 @@ Source of truth: the surface model the wire shapes reuse — `dor/src/protocol.t
 
 ## Transport
 
-**Every message below is JSON, carried as one length-prefixed application message on one authorized Noise session** that the WebSocket relay pipes without decoding, the Burrow multiplexing every session over its single relay socket (`docs/specs/relay.md` → "Routing", "E2E framing"). **Terminal data rides that same stream** — it is small and ordering matters; media channels arrive with browser surfaces ([Future](#future)). **The API and the security model are identical in selfhost and (future) SaaS modes**, where only account creation differs (`docs/specs/relay.md` → Future).
+**Every message below is JSON, carried as one length-prefixed application message on one authorized Noise session** that the WebSocket relay pipes without decoding, the Burrow multiplexing every session over its single relay socket (`docs/specs/relay.md` → "Routing", "E2E framing"). **Terminal data rides that same stream** — it is small and ordering matters; media channels arrive with browser surfaces ([Future](#future)). **Must use the same API and session authorization for self-host and Hosted accounts.** Account login and Burrow enrollment belong to `docs/specs/relay.md` and `docs/specs/hosted.md`.
 
 **A `RemoteApiSession` exists only for an authorized session.** Created at promotion — presence proof and ACL conjunction both passed ([remote-security-model.md](./remote-security-model.md) → Connection) — and disposed when the Client disconnects, when the Burrow reaps the session, and by any promotion that replaces it, so **a re-authorizing Client can never inherit the previous session's attachment**.
 
@@ -75,8 +69,8 @@ on.
 **Every signal rides inside the session**, as one of four control messages
 ([relay.md](./relay.md) → E2E framing) on the established session over the relay
 path: `direct-offer` (Client→Burrow, SDP), `direct-answer` (Burrow→Client, SDP),
-`direct-decline` (Burrow→Client), `direct-switch` (either direction) — each
-`{ v: 1, t }` with exact keys and no other field. **The Relay never sees an SDP,
+`direct-decline` (Burrow→Client), `direct-switch` (either direction) — all guarded by `DirectSignalV1` in
+`remote-lib-common/src/security/direct-path.ts`. **The Relay never sees an SDP,
 a candidate, or that a direct path exists.** **An unknown control shape on an
 established session is ignored, never a session failure**, so a peer without
 this stack simply stays relayed.
@@ -203,7 +197,7 @@ by `BurrowRuntime.#promoteConnection` in
 
 Requests are correlated by `requestId`, events by `subId` (`RemoteRequest`, `RemoteResponse`, `RemoteEventMsg`).
 
-**A subscribing method (`directory.watch`, `surface.attach`) opens its stream under the request's own id** — `requestId` reused as the `subId` — so the Client installs its handler before sending and never races a snapshot or a first data frame. **The six methods and three events are named constants** (`REMOTE_METHODS`, `REMOTE_EVENTS`) dispatched by name, so a future event lands additively and an old client ignores what it does not know.
+**A subscribing method (`directory.watch`, `surface.attach`) opens its stream under the request's own id** — `requestId` reused as the `subId` — so the Client installs its handler before sending and never races a snapshot or a first data frame. **Must dispatch by the canonical `REMOTE_METHODS` and `REMOTE_EVENTS` names** in `remote-lib-common/src/remote/wire.ts`, so a future event lands additively and an old client ignores what it does not know.
 
 **Every peer-supplied `cols`/`rows` passes through `clampTerminalDimension`** — 1 … `MAX_TERMINAL_DIMENSION` (2000), falling back to the current size when absent or non-finite — on the Burrow, in the webview responder driving the real xterm, and in the Client adapter. The upper bound is the security-relevant half. (rationale)
 
@@ -215,7 +209,7 @@ Reserved: a `capabilities` field on the client hello (what the client can render
 
 ## Directory (the phone's picker)
 
-`directory.watch` subscribes to a live, lightweight listing of every pane — enough to render the picker and know which pane wants attention, without attaching. `DirectoryEntry` / `DirectorySnapshot` carry the terminal-only payload: identity, derived title, focus, semantic state, PTY liveness, and the `ringing` / `hasTODO` badges. Nothing else — thumbnails are staged.
+**Must list registered terminal Surfaces, excluding helper Sessions.** A Tool remains listed through its terminal even while showing its browser capability. `directory.watch` subscribes without attaching; `DirectoryEntry` / `DirectorySnapshot` in `remote-lib-common/src/remote/wire.ts` own the payload. Thumbnails are staged.
 
 Reserved: **`paneRef` is set to the same value as `surfaceId`** and no Client
 reads it — it becomes the Pane handle when `window.watch` lands ([Future](#future),
@@ -233,7 +227,7 @@ not render yet.
 
 **A late answer — one for an ask that already settled — invalidates the directory rather than being dropped**: only the next collect repairs a snapshot missing what it names. Each burrow's ask bridge applies it (`docs/specs/standalone.md`, `docs/specs/vscode.md`).
 
-**Browser and iframe surfaces are neither listed nor attachable** — they never enter the xterm registry the directory collects from, so `surface.attach` cannot resolve them either. ([Future](#future) stages browser remoting; iframes stay unsupported even there.)
+**Never list or attach standalone browser or iframe Surfaces**: neither enters the xterm registry. ([Future](#future) stages browser remoting; iframes stay unsupported even there.)
 
 **`alive` is real PTY-process liveness**, distinct from `exitCode` — the last finished command's shell-integration status: a pane may report `alive: true` with an `exitCode` set, or `alive: false` with none. **An exited pane stays listed at `alive: false`**, since Dormouse keeps it open until the user closes it, and the picker stops offering it — attaching would transfer nothing.
 
@@ -269,7 +263,7 @@ Source of truth: `resize` in `standalone/sidecar/pty-core.js`, shared by both ho
 
 **Normal-screen history does not regenerate on resize** and is absent from the shipped protocol (see [Future](#future): in-flight replay, then semantic scrollback).
 
-Payloads: `AttachParams`, `TerminalAttachResult`, `TerminalDataEvent`, `TerminalClosedEvent`, `TerminalWriteParams`, `TerminalResizeParams`. PTY bytes are base64url.
+**Must encode PTY bytes as base64url.** Payload types live in `remote-lib-common/src/remote/wire.ts`.
 
 `terminal.data` and `terminal.closed` are the whole v1 stream: **a viewer is not notified when another display takes size authority**, and semantic state (activity/cwd/title) reaches the client only through `directory.snapshot`. The burrow→client `terminal.resize` and `terminal.semantic` events are staged in [Future](#future) (item 5).
 

@@ -352,6 +352,12 @@ phone, which the app already does for every other burrow loss.
 
 ## Noise suite
 
+Real WebCrypto concurrency tests, 2026-10, reproduced a final handshake step
+finishing after another call poisoned the handshake. A failure flag alone did
+not prevent `Split` from publishing usable ciphers; completion and session access
+now remain unavailable until the owned step commits, and failure rejects its
+in-flight result. Both initiator and responder final-step regressions cover it.
+
 **Why X25519 is WebCrypto and ChaChaPoly is bundled.** Measured 2026-06 across
 the runtimes this ships to:
 

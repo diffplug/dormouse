@@ -27,13 +27,10 @@ export type { BurrowAclRecord };
 
 export interface BurrowStateStore {
   /**
-   * Whether a write survives this process. Only the dev-harness store (no state
-   * directory) says `false`. Required rather than optional so a store that
-   * forgot to answer is not silently read as durable.
-   *
-   * Nothing reads it today — its consumer went with the webview-persisted Burrow
-   * hand-off — and it is kept as the store contract's own statement of
-   * durability, which an implementor must make before anything can rely on it.
+   * Whether a write survives this process. A host without a usable private
+   * state directory uses an ephemeral store and reports `false`. Required
+   * rather than optional: an implementor must state its durability before
+   * a consumer can rely on it.
    */
   readonly persistent: boolean;
   loadEnrollment(): Promise<BurrowEnrollment | null>;
