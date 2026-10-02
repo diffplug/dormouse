@@ -223,6 +223,7 @@ describe('bind-as-lease', () => {
     const mod = await openWindow(fakeWindow());
     const server = createServer();
     const path = derivedSocketPath();
+    if (process.platform !== 'win32') await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await mod.listenServer(server, path);
     try {
       expect(() => server.emit('error', Object.assign(new Error('EMFILE'), { code: 'EMFILE' })))
