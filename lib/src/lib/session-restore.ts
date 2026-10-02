@@ -72,7 +72,7 @@ export function restoreSession(platform: PlatformAdapter, sources: RestoreSource
     const nodes: LathNode[] = recoverable.map(pane => ({ kind: 'leaf', id: pane.id }));
     lathLayout = {
       version: 1,
-      tree: { root: nodes.length === 1 ? nodes[0] : { kind: 'split', dir: 'row', children: nodes.map(node => ({ node, weight: 1 })) } },
+      tree: { root: nodes.length === 1 ? nodes[0] : { kind: 'split', dir: 'row', children: nodes.map(node => ({ node, weight: 1 / nodes.length })) } },
       leafMeta: Object.fromEntries(recoverable.map(pane => [pane.id, pane.surfaceType === 'tool' ? {
         component: 'tool', tabComponent: 'tool', title: pane.title,
         params: { surfaceType: 'tool', command: pane.command, cwd: pane.cwd,

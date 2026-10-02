@@ -1071,6 +1071,7 @@ export function Wall({
     ownsSurface,
     selectedIdRef,
     selectedTypeRef,
+    activeRef,
     surfaceRefsForSave,
     workspaceId,
   });

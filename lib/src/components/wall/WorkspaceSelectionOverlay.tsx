@@ -121,7 +121,7 @@ interface DisplayedRing extends RingFrame {
  * is the only inset in play.
  *
  * Each edge smears only by its OWN motion across itself, so the four are
- * independent — see `docs/specs/layout.md` → "Ring travel" for why a single
+ * independent — see `docs/specs/layout.rationale.md` → "Directional motion smear" for why a single
  * ring-centre velocity gets ordinary split layouts wrong.
  *
  * Straight edges carry their width in a plain `stroke-width`. Corners cannot —

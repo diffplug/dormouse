@@ -16,7 +16,7 @@ A **Surface** is the durable occupant of a Pane — the content in a slot. Three
 
 A **Pane** is one Lath leaf, a slot in the tiling layout (`docs/specs/tiling-engine.md`); `lib/src/components/Wall.tsx` owns Panes and Surfaces both.
 
-A Pane holds exactly one Surface today, but the model reserves several (a future in-pane surface strip), so **`dor` targets content — `read` / `send` / `await` / `kill` — by Surface ref (`surface:N`)**, holding Pane refs back for layout-only commands (rationale).
+A Pane holds one primary Surface today; helpers share its Pane ([Containers](#containers)). The model reserves several primary Surfaces per Pane (a future in-pane surface strip), so **`dor` targets content by Surface ref (`surface:N`)**, reserving Pane refs for layout-only commands (rationale).
 
 **Surface kinds** — the `kind` a `dor` handle reports, derived from the Pane's params, never stored on the id:
 
@@ -30,13 +30,9 @@ A Pane holds exactly one Surface today, but the model reserves several (a future
 
 | Surface | Persisted `surfaceType` (`docs/specs/transport.md`) | `renderMode` (`docs/specs/dor-browser.md`) | CLI `kind` | CLI `render_mode` |
 |---|---|---|---|---|
-| tool Session | `'tool'` | `iframe`, `agent-browser-screencast` or `playwright-screencast` when serving | `tool` | renderer or `null` |
+| tool Session | `'tool'` | Tool renderer when serving | `tool` | renderer or `null` |
 | terminal Session | `'terminal'` (default, omitted) | — | `terminal` | `null` |
-| browser · iframe | `'browser'` | `iframe` | `browser` | `iframe` |
-| browser · screencast | `'browser'` | `agent-browser-screencast` | `browser` | `agent-browser-screencast` |
-| browser · popped out | `'browser'` | `agent-browser-popout` | `browser` | `agent-browser-popout` |
-| browser · playwright screencast | `'browser'` | `playwright-screencast` | `browser` | `playwright-screencast` |
-| browser · playwright popout | `'browser'` | `playwright-popout` | `browser` | `playwright-popout` |
+| browser Surface | `'browser'` | Browser renderer | `browser` | same as `renderMode` |
 
 **Kinds are capability sets, not exclusive categories** — terminal and browser carry one capability each, `tool` both. **Operations gate on the capability they need, never on the kind enum** ([Liskov contract](#liskov-contract)): `read` / `send` / `await` / port scans need the terminal, nav / render-mode / agent-browser verbs the browser. **`dor list --json` rows always emit `has_terminal` and `has_browser`** (rationale). **Must declare each kind's capabilities in the `hasTerminal` / `hasBrowser` table.** Persistence keeps its own `PersistedSurfaceType` discriminant (`docs/specs/transport.md`).
 
@@ -59,7 +55,7 @@ The containment hierarchy `dor` handles commit to (`docs/specs/dor-cli.md`):
 Window ⊃ Workspace ⊃ Pane ⊃ Surface  (terminal = Session | browser)
 ```
 
-**Surface identity:** a primary Surface's id is its Lath leaf id; a helper receives its Lath leaf only on promotion. A terminal Surface's *is* its `SessionId`, stable (I1); browser replacement and relaunch have different identity effects (I10).
+**Surface identity:** a primary Surface's id is its Lath leaf id; a helper receives its Lath leaf only on promotion. A terminal Surface's id is its `SessionId`, stable (I1); browser replacement and relaunch have different identity effects (I10).
 
 ## Containers
 
@@ -153,7 +149,7 @@ A **Session** is the tuple of its `SessionId` plus one state per layer (I1).
 | `Paned` | Rendered in the content area: a primary Lath leaf or its shown auxiliary helper |
 | `Zoomed` | Subset of `Paned` — the passthrough-focused pane is maximized; acquiring zoom gives focus, losing focus returns it to `Paned` |
 | `Doored` | Rendered as a door on the baseboard. DOM survival is a rendering decision, not part of this state: browser DOM retention follows **parking** (`docs/specs/tiling-engine.md` → "Parked leaves"); a terminal Surface unmounts its element (Registry: `Orphaned`) and remounts the same xterm on reattach — nothing replays |
-| `Hidden` | In neither pane nor door — webview closed or mid-transition. A Surface in a hidden Workspace is **not** `Hidden`: it stays `Paned` or `Doored`, mounted and live. Process and Activity unaffected. |
+| `Hidden` | In neither Pane nor Door — webview closed or mid-transition. A Surface in a hidden Workspace retains its `Paned` or `Doored` View state; Registry behavior follows `docs/specs/layout.md` → Workspace lifecycle. Process and Activity unaffected. |
 
 ### Link
 
@@ -214,7 +210,7 @@ A system verb is a lifecycle transition driven by the runtime.
 | Verb | Effect |
 |---|---|
 | `register` / `dispose` | Create / destroy a Registry entry |
-| `release` | Destroy a Registry entry **without** killing its Process (Registry: Mounted → Disposed, Process: Live → Live). The one verb a `transferWorkspace` runs, and never reachable from an unmount. |
+| `release` | Destroy a `Mounted` or `Orphaned` Registry entry **without** killing its `Live` or `Exited` Process. Explicit Workspace transfer and refused-adoption cleanup only, never an unmount. |
 | `mount` / `unmount` | Attach / detach the persistent DOM element (low-level op; the Registry entry survives `unmount`). A **parked** leaf stays mounted while `Doored` or `Hidden` (`docs/specs/tiling-engine.md` → "Parked leaves") |
 | `exit` | Host observes process death (Process: Live → Exited) |
 | `resume` | Webview reopens over retained PTYs (Link: Severed → Resuming → Live; Registry rebuilt from replay data; Process stays Live/Exited) |
@@ -227,14 +223,14 @@ A system verb is a lifecycle transition driven by the runtime.
 
 | Category | Valid when | Examples |
 |---|---|---|
-| **Universal** | any state combination | `kill`, `rename`, state queries |
-| **View-gated** | `View ≠ Hidden` | `focusSession` |
+| **Universal** | no layer-state gate | `kill`, `rename`, state queries |
+| **View-gated** | `View ≠ Hidden` | `focusSession(id, true)` |
 | **Process-gated** | `Process = Live` | `writePty`, `resizePty` |
 | **Registry-gated** | `Registry = Mounted` | `refitSession` |
 | **Terminal-gated** | Surface has a terminal ([Panes and Surfaces](#panes-and-surfaces)) | `dor read` / `send` / `await`, port scans |
 | **Browser-gated** | Surface has a browser | browser nav / render-mode ops |
 
-**Must check the relevant precondition for gated operations; universal operations accept every layer state.** Missing Registry entries silently no-op, while `dor` capability gates return an error. Uniform typed precondition errors are staged ([Future](#future)).
+**Must satisfy gated operations' layer preconditions at the call site or in the operation; universal operations have no layer-state gate.** Missing Registry entries silently no-op, while `dor` capability gates return an error. Uniform typed precondition errors are staged ([Future](#future)).
 
 Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecycle.ts`; `requireTerminalSurface` / `requireBrowserSurface` in `lib/src/components/wall/use-dor-control.ts`.
 
@@ -242,9 +238,9 @@ Source of truth: `focusSession` / `refitSession` in `lib/src/lib/terminal-lifecy
 
 - I1: `SessionId` is immutable for the life of a Session and stable across `resume` / `restore`.
 - I2: Process state is independent of Registry, View, and Link. A `Live` process may be `Doored` or `Hidden`; an `Exited` process may still be `Paned`.
-- I3: Activity state survives `minimize` / `reattach`. `ALERT_RINGING` fires only on a *fresh* transition, never on `mount` or `reattach`.
+- I3: **Must preserve Activity through the layout-only `minimize` / `reattach` transition.** User engagement may acknowledge a ring (`docs/specs/alert.md` → Engagement). `ALERT_RINGING` fires only on a fresh transition, never on `mount` or `reattach`.
 - I4: `Registry: Orphaned` outlives no Session state except `View: Doored` or a Surface in a hidden Workspace — at rest every other entry is `Mounted` or `Disposed`, so an `Orphaned` entry that is neither is a leak.
-- I5: `kill` is universally valid and always ends at `View: Hidden`; its per-kind effects are the [User verbs](#user-verbs) row.
+- I5: `kill` accepts every layer state; a successful closure ends at `View: Hidden`. Closure guards belong to `docs/specs/terminal-context.md` → Promotion and source closure and `docs/specs/dor-tool.md` → Closing unsaved Tools; per-kind effects are the [User verbs](#user-verbs) row.
 - I6: `rename` is universally valid including when `Process = Exited` and `View = Doored`.
 - I7: Every Surface sits in exactly one Pane; every Pane and its Surfaces belong to exactly one Workspace; every Workspace belongs to one Window.
 - I8: **Must preserve Process and Activity during `switchWorkspace`, without firing a fresh ring** (I3). A switch reattaches terminal elements but resumes and restores nothing, so no ring can fire (`docs/specs/layout.md` → Workspaces).
@@ -280,7 +276,7 @@ Remote-only vocabulary (**Viewer**, and the wire-level `DirectoryEntry` projecti
 - A persisted type is `Persisted<Shape>` where `<Shape>` is the glossary noun (`PersistedPane`, `PersistedDoor`, `PersistedWorkspace`, `PersistedWindow`).
 - A handle type is `<Layer>State` (`ActivityState`, not `SessionUiState`).
 - Surface kinds are lowercase strings; [Panes and Surfaces](#panes-and-surfaces) is canonical for how persisted `surfaceType`, `renderMode`, and CLI `kind` / `render_mode` relate.
-- Container names are `PascalCase` nouns (`Workspace`, `Window`); a Workspace's id type is `WorkspaceId`. A Window carries no id today — `dor` addresses it only through the reserved `window:<n>` ref (`docs/specs/dor-cli.md`), with `WindowId` reserved for when it needs one. Container verbs suffix the container (`createWorkspace`, `switchWorkspace`), distinct from the layer-agnostic Session `rename`.
+- Container names are `PascalCase` nouns (`Workspace`, `Window`); a Workspace's id type is `WorkspaceId`. `dor` addresses a Window by its host label (`window:<label>`, or `window:1` on a single-Window host; `docs/specs/dor-cli.md` → Handle Model); `WindowId` remains reserved for a shared identity type. Container verbs suffix the container (`createWorkspace`, `switchWorkspace`), distinct from the layer-agnostic Session `rename`.
 
 ## Future
 

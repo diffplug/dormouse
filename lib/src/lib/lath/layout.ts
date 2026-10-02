@@ -166,7 +166,7 @@ export function nodeRectAtPath(tree: LathTree, rect: Rect, opts: LayoutOpts, pat
 }
 
 /** Nearest leaf in `direction`, computed from the laid-out rects (no DOM). Candidates
- *  must lie strictly beyond the current leaf's edge in that direction; overlapping
+ *  must lie beyond or touch the current leaf's edge in that direction; overlapping
  *  candidates on the secondary axis win, then nearest edge-to-edge distance.
  *  Deterministic ties: smaller (y, x), then id.
  *  Callers pass the same `rect`/`opts` they render with. */
@@ -186,7 +186,7 @@ export function neighbors(
   const cands: Cand[] = [];
   for (const [pid, r] of rects) {
     if (pid === id) continue;
-    // Strictly beyond the current edge (boundary-touching candidates are kept).
+    // Beyond or touching the current edge.
     if (direction === 'left' && r.x + r.width > c.x) continue;
     if (direction === 'right' && r.x < c.x + c.width) continue;
     if (direction === 'up' && r.y + r.height > c.y) continue;

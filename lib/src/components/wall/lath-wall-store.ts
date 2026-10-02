@@ -300,11 +300,9 @@ export function createLathWallStore(): LathWallStore {
     restoreSnapshot(saved) { commit(saved); },
 
     seed(tree, meta) {
-      // `meta` carries the incoming Wall whole: the tree's leaves AND any Doors seeded
-      // beside them (hydration passes both). Parked Surfaces outlive it — Workspace
-      // switching parks the outgoing Wall and then seeds the incoming one, so dropping
-      // their meta here would discard exactly what the switch preserved, and would
-      // strand DOM the store no longer knows anything about. Seeded ids win.
+      // Hydration supplies tree leaves and Doors. Retain metadata for existing
+      // parked documents so reseeding cannot strand their DOM; incoming metadata
+      // wins. Workspace switching does not seed: each Workspace keeps its own Wall.
       //
       // Unparking is keyed off the TREE, not off `meta`: a parked id handed in only as
       // a Door row is still a Door, and must keep both its DOM and its held rect.

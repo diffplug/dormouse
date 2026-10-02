@@ -35,6 +35,7 @@ export function useSessionPersistence({
   doorsRef,
   selectedIdRef,
   selectedTypeRef,
+  activeRef,
   ownsSurface,
   surfaceRefsForSave,
   workspaceId,
@@ -51,6 +52,8 @@ export function useSessionPersistence({
   doorsRef: RefObject<DooredItem[]>;
   selectedIdRef: RefObject<string | null>;
   selectedTypeRef: RefObject<WallSelectionKind>;
+  /** Only the visible Workspace receives user-originated native drops. */
+  activeRef: RefObject<boolean>;
   /** Whether a Surface belongs to this Wall — panes AND Doors. The adapter fans
    *  every Session's traffic to every mounted Wall, so this is what keeps one
    *  Workspace from persisting on another's keystroke. Must be stable: the
@@ -287,7 +290,7 @@ export function useSessionPersistence({
     // (docs/specs/mouse-and-clipboard.md -> "8.7 Drag-to-Paste").
     // See diffplug/dormouse#38 and tauri-apps/tauri#14373.
     const unsubFilesDropped = platform.onFilesDropped?.((paths) => {
-      if (paths.length === 0) return;
+      if (!activeRef.current || paths.length === 0) return;
       const sid = selectedTypeRef.current === 'pane' ? selectedIdRef.current : null;
       if (!sid) return;
       if (!ownsSurface(sid)) return;
@@ -329,6 +332,7 @@ export function useSessionPersistence({
     scheduleSessionSave,
     selectedIdRef,
     selectedTypeRef,
+    activeRef,
   ]);
 
   return { flush: flushSessionSave, serialize, serializeNow };

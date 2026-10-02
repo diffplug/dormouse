@@ -6,7 +6,7 @@
 // need independent widths. Both come from the point set below, so the smear
 // provably tiles the ring instead of agreeing with it by inspection.
 //
-// See `docs/specs/layout.md` → "Ring travel" for why the smear is a separate
+// See `docs/specs/layout.rationale.md` → "Directional motion smear" for why the smear is a separate
 // layer and how the corner taper works.
 
 import type { RingRect, RingShape } from './rect-tween';

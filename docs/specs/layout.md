@@ -230,7 +230,7 @@ A Workspace's name is **auto**, italic (`AUTO_NAME_CLASS`) and derived from its 
 - **Any vote inside a git repository wins**: the name is the most common `<repo> @ <branch>`, and directories outside a repository are ignored. `<repo>` is origin's repository name, else the main checkout's folder, so every worktree shares it; a detached HEAD shows a short hash.
 - **Otherwise the most common directory**, counted by `cwdIdentity` and shown by basename: `~` for local home, a remote one with its host.
 - **A tie keeps the current name when it is among the tied**, else takes the earliest member's (Lath leaf order, then Doors).
-- **Must hold the current name through a lookup's first three misses** (rationale), then vote "no repository" so the Workspace names itself from its healthy members, else its folder; `Workspace N` until a terminal reports a directory.
+- **Must hold the current name for a never-answered path until three consecutive unanswered lookups** (rationale), then vote "no repository" so the Workspace names itself from its healthy members, else its folder; `Workspace N` until a terminal reports a directory.
 - **Never ask git about a remote cwd.** **Must re-ask after a command finishes** (rationale). A host without `gitInfo` names by directory.
 - **A path absent from a `gitInfo` answer is unanswered, never "no repository"**, as is every path of a rejected request. **A host failure must reject**, never answer `{}`. An unanswered path keeps its last answer, else holds the name, and is re-asked after a delay doubling per miss.
 - **An untouched editor never submits**: it submits on blur, and opening it must not pin an auto-name, even one that changed while it was open.
@@ -290,7 +290,7 @@ nothing (`iframeSurfaceRefs` on the Wall handle; `standalone/src/workspace-drag.
 
 - **Create** adds an auto-named Workspace, `Workspace N` until its terminals name it ([Workspace names](#workspace-names)), makes it active, and gives its Wall no restored record, so Lath's fresh branch spawns one default-shell pane.
 - **Close** confirms first when the Workspace holds touched Surfaces or running work, with a kill-confirm letter over the Window's content area, then closes every member Surface. **Must atomically replace the last closed Workspace with a fresh one and select its tab**, after disposing the old Surfaces (`lib/src/components/WorkspaceWindow.test.tsx`). **Must serialize closes across the Window.**
-- - **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past — the Wall walks the member Surfaces, so dropping it would leave its Sessions running unheld (`docs/specs/glossary.md` → "Invariants" I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, so `×` right after a create closes rather than silently doing nothing.
+- **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past — the Wall walks the member Surfaces, so dropping it would leave its Sessions running unheld (`docs/specs/glossary.md` → "Invariants" I4). **A gesture waits out the registration gap first**, as `dor workspace close` does, so `×` right after a create closes rather than silently doing nothing.
 - **Rename** edits the Workspace `name` only — no Surface title, and not the per-pane inline rename — and pins it ([Workspace names](#workspace-names)).
 - **Reorder** moves a tab in the strip and renumbers `workspace:<n>` refs with it only where they are positional (`docs/specs/dor-cli.md` → "Handle Model"); **a press inside the open rename editor never starts a reorder**.
 - **Must drop the closing Workspace’s rename editor and pending confirmation, and no other’s** (`releases the rename lease when the tab being renamed is middle-clicked closed` in `lib/src/components/WorkspaceStrip.test.tsx`; `preserves another Workspace’s rename and close confirmation when closing a sibling` in `lib/src/components/wall/workspace-lifecycle.test.ts`).
@@ -338,7 +338,7 @@ Wall starts in `command` mode. Embedders may pass `initialMode="passthrough"` wh
 
 **Enter passthrough mode:** clicking any pane body or header; `Enter` or `z` on a selected pane; creating a terminal through a manual split (`|` / `%` / `-` / `"`, a header split button) or a host New Terminal action; clicking or pressing `Enter` on a door (restoring the session first); clicking a Workspace tab's TODO pill ([Workspace tabs](#workspace-tabs)). **Focus is always deferred via `requestAnimationFrame`** so it lands after the click/mousedown event finishes.
 
-**Enter command mode:** Left Cmd keydown, then Right Cmd keydown within 500ms — or the same left-then-right gesture with Shift.
+**Enter command mode:** Left Cmd keydown, then Right Cmd keydown less than 500ms later — or the same left-then-right gesture with Shift.
 
 - Detected in a capture-phase `keydown` listener on `e.key === 'Meta'` (or `'Shift'`) plus `e.location`, so it fires even while xterm holds DOM focus. **Anything but `location === 1` counts as the right-hand key.**
 - **The Meta and Shift tracks are independent** — Left Cmd then Right Shift does not trigger — and **both are always live** (rationale).
@@ -352,9 +352,9 @@ Wall starts in `command` mode. Embedders may pass `initialMode="passthrough"` wh
 
 **Must use `,` to rename the selected terminal pane or Workspace tab in command mode**, without activating an inactive Workspace. The `+` button has no rename action. Pinned by `comma edits the highlighted Workspace without switching, then returns to navigation` in `lib/src/components/WorkspaceWindow.test.tsx`.
 
-**Must support Workspace navigation in command mode through bare `1`–`9`, arrows, and `Enter`.** Digits select by strip position; out-of-range positions are consumed without switching. **Never bind `c`, `n`/`p`, `$`, `&`, or Workspace `x`.** Rename inputs and confirmation dialogs retain their own controls. Pinned by `lib/src/components/wall/keyboard/handle-workspace-shortcuts.test.ts` and `lib/src/components/WorkspaceWindow.test.tsx`.
+**Must support Workspace navigation in command mode through bare `1`–`9`, arrows, and `Enter`.** Digits select by strip position; out-of-range positions are consumed without switching. **Never bind `c`, `n`/`p`, `$`, or `&`.** Rename inputs and confirmation dialogs retain their own controls. Pinned by `lib/src/components/wall/keyboard/handle-workspace-shortcuts.test.ts` and `lib/src/components/WorkspaceWindow.test.tsx`.
 
-All keys are handled in one capture-phase `keydown` listener on `window` (`use-wall-keyboard.ts`), which delegates in a fixed order to the modules in `lib/src/components/wall/keyboard/`: *(an inactive Workspace or an answered key stops here)* → dual-tap → editable-field clipboard → mouse-selection keys → *(passthrough stops here)* → *(a rename or the chrome lease stops here)* → kill confirmation → *(an open dialog stops here)* → Workspace shortcuts → pane shortcuts → pane navigation. **A key whose target sits inside `[data-terminal-context]` leaves that chain before dual-tap**: it reaches editable-field clipboard, then mouse-selection keys against the focused helper terminal, and stops — so no Wall gesture, the mode-exit dual-tap included, fires from inside an open context. **Must let one Wall answer each key**, even a key that activates another Workspace (`answers a key from one Wall even when that key activates another` in `lib/src/components/WorkspaceWindow.test.tsx`). **Must prevent default and stop propagation for handled command keys.** Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
+All keys are handled in one capture-phase `keydown` listener on `window` (`use-wall-keyboard.ts`), which delegates in a fixed order to the modules in `lib/src/components/wall/keyboard/`: *(an inactive Workspace or an answered key stops here)* → dual-tap → editable-field clipboard → mouse-selection keys → *(passthrough stops here)* → *(a rename or the chrome lease stops here)* → kill confirmation → *(an open dialog stops here)* → Workspace shortcuts → pane shortcuts → pane navigation. **A key whose target sits inside `[data-terminal-context]` leaves that chain before dual-tap**: it reaches diagnostic-text copy, editable-field clipboard, then mouse-selection keys against the focused context terminal, and stops — so no Wall gesture, the mode-exit dual-tap included, fires from inside an open context. **Must let one Wall answer each key**, even a key that activates another Workspace (`answers a key from one Wall even when that key activates another` in `lib/src/components/WorkspaceWindow.test.tsx`). **Must prevent default and stop propagation for handled command keys.** Bare Meta/Shift presses stop only internal dispatch; the detector leaves their DOM event untouched.
 
 That order is load-bearing twice: a rename input suppresses the pane shortcuts but **not** the mode-exit gesture or the field's own clipboard chords; and a staged kill confirmation hijacks each key reaching it before the dialog gate, so the confirm letter works even though the modal is open.
 
@@ -407,7 +407,7 @@ Source of truth: `rectUnionOutline` in `lib/src/lib/rect-union-outline.ts` and `
 
 ### Ring travel
 
-The ring's rect (and its `{tl,tr,br,bl,inset}` shape) is driven **per-frame by a JS tween, never a CSS transition**; DESIGN.md's ban on animating layout properties does not reach it (rationale). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`.
+The ring's rect and shape are driven **per-frame by a JS tween, never a CSS transition**; DESIGN.md's ban on animating layout properties does not reach it (rationale). Motion is `FOCUS_MOTION_MS` (220ms — half `LATH_MOTION_MS`) on the house curve `cubic-bezier(0.22, 1, 0.36, 1)`.
 
 Per-frame writes are **imperative**: `SelectionRing` gives the overlay refs to its stable shell; the rAF loop writes rect, path `d`, marching dash, and smear geometry, then **re-applies after structural renders, pre-paint**, so fresh nodes do not flash. **Never reintroduce per-frame React state** — reconciling this subtree competes with travel for the frame budget (rationale).
 
@@ -424,17 +424,11 @@ Source of truth: `lib/src/lib/rect-tween.ts` (position and velocity), `lib/src/l
 
 #### Directional motion smear
 
-Each travelling edge trails a soft band sized by its own motion. A line smears only by moving *across* itself, so **a horizontal edge is driven by its vertical speed and a vertical edge by its horizontal speed, and all four edges are independent.** Each speed normalizes against `cfg.focusRing.smearFullSpeed` into a single `t`; width ramps from `strokeWidth` to `smearMaxPx`, alpha from 0 to `smearPeakAlpha`. **Must give stationary edges zero alpha.** A settled or reduced-motion ring has null speeds and the smear layer is `display: none`, keeping snapshots deterministic.
+**Must smear each travelling edge by its own perpendicular analytic velocity**, with zero alpha for stationary edges and no smear when settled, under reduced motion, or around a source/helper union. **Must keep smear separate from the crisp, unbroken outline**; extent and intensity remain independent (rationale).
 
-- **Velocity is analytic**: `sampleRingVelocity` differentiates the tween (`E'` from `LATH_EASING.slope`), so the smear peaks on the opening frame and needs no smoothing. **Never finite-difference rendered positions** (rationale).
-- **Never divide alpha by the widening factor** — extent and intensity are independent knobs, and `smearFullSpeed` alone shapes a travel (rationale).
-- **Never collapse the four edge speeds to one horizontal and one vertical**, e.g. from the ring *centre's* velocity (rationale).
-- **Two layers**, because one closed path cannot carry four widths (rationale): the smear is a sibling `<g data-ring="smear">` of eight pieces drawn underneath, and **never transforms or re-alphas the outline (`<path data-ring="outline">`)**, whose own per-frame writes stay its `d` and its perimeter-fitted dash.
-- **Eight pieces: four edges plus four corners**, every one cut from ONE shared point set (`ringPoints`) that `roundedRectPath` also walks, so the smear provably tiles the ring — pinned by `lib/src/lib/ring-geometry.test.ts`. A corner reaches two widths at once through a `scale` transform that `cornerPath` compensates for, and takes the mean of its two edges' opacity (rationale; mechanism documented at `cornerPath`). **Find each piece by `data-piece`, never by index.**
-- **Dash length is computed, never measured.** `ringPerimeter` returns the outline's exact length in closed form — straight runs plus `1.6232252401402307 × r` per corner. **Never substitute `π/2`** (the quarter-*circle* value: 3% short, silently shifting every dash) **or reinstate `SVGGeometryElement.getTotalLength()`** (a synchronous style+layout flush every frame) (rationale).
-- **Never reintroduce an SVG `feGaussianBlur` here** (rationale).
+**Must compute dash length from the rendered path's geometry**, never a DOM path measurement or a quarter-circle approximation (rationale). **Never use an SVG `feGaussianBlur` here** (rationale).
 
-Source of truth: `lib/src/lib/ring-geometry.ts`.
+Source of truth: `sampleRingVelocity` in `lib/src/lib/rect-tween.ts`; `writeSmear` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`; `ringPoints` / `cornerPath` / `ringPerimeter` in `lib/src/lib/ring-geometry.ts`. Tests: `lib/src/lib/ring-geometry.test.ts`; `lib/src/components/wall/WorkspaceSelectionOverlay.test.tsx`.
 
 ### Position tracking
 
@@ -446,7 +440,7 @@ Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`; `subsc
 
 ## Spatial navigation
 
-**Arrow navigation resolves against Lath's pure `neighbors(tree, rect, id, direction, opts)` query, never a DOM rect scan** — the same laid-out rects the screen shows (`docs/specs/tiling-engine.md` → "Layout"). The keyboard handlers reach it through the engine-neutral `WallNav` seam (`lib/src/components/wall/keyboard/types.ts`), whose `findInDirection` calls `lath.store.neighborOf`: a candidate must be strictly beyond the leaf's edge on the primary axis; one overlapping on the secondary axis is preferred; ties break deterministically on nearest edge-to-edge distance; with no overlapping candidate the nearest non-overlapping one wins.
+**Must resolve arrow navigation through the engine-neutral `WallNav` seam to Lath's `neighborOf`, never a DOM rect scan.** Neighbor eligibility and precedence belong to `docs/specs/tiling-engine.md` → "Layout".
 
 **Back-navigation.** A breadcrumb tracks the last navigation direction and origin pane; **the opposite direction returns to the origin instead of doing a spatial lookup**, which is what makes asymmetric layouts navigate reversibly.
 
@@ -458,7 +452,7 @@ Source of truth: `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`; `subsc
 
 **`Cmd/Ctrl+Arrow` swap.** Swaps Surface **content** between two panes, leaving the layout shape unchanged. One Lath `swap` op trades the two leaf identities, and because per-leaf metadata and terminal-registry entries are keyed by id, title/params/session follow automatically — **never write a companion title swap** — with no DOM reattach. Selection stays on the moved Surface, so **the breadcrumb records the *partner*** (the pane now holding the old slot): the opposite `Cmd+Arrow` swaps back exactly and a plain opposite arrow selects the partner.
 
-**Must ignore swap chords while non-pane chrome is selected**, including when a prior pane move left a breadcrumb (`lib/src/components/wall/keyboard/handle-pane-shortcuts.test.ts`). Source of truth: `handlePaneShortcuts` in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`.
+**Must ignore swap chords while non-pane chrome is selected**, including when a prior pane move left a breadcrumb (`lib/src/components/wall/keyboard/handle-pane-shortcuts.test.ts`). Source of truth: `WallNav` in `lib/src/components/wall/keyboard/types.ts`; `nav` in `lib/src/components/Wall.tsx`; `handlePaneShortcuts` in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`; `handlePaneNavigation` in `lib/src/components/wall/keyboard/handle-pane-navigation.ts`.
 
 ## Minimize and reattach
 
@@ -488,11 +482,11 @@ Triggered by `,` in command mode or by clicking the session name in the pane hea
 
 The name `<span>` is replaced by an `InlineEditInput` (shared with the browser URL editor in `docs/specs/dor-browser.md`): same font (`font-mono font-medium`), `bg-transparent`, no border, seeded from the label with the failure glyph stripped. `Enter` confirms, `Escape` cancels, `blur` confirms — **whichever lands first settles the edit**, so the blur following an Enter/Escape unmount cannot submit a second time. It stops propagation on `mousedown`/`click`/`keydown` so the panel click and the header drag never fire.
 
-The field is **controlled by its own draft state**, seeded at mount and untouched by later prop changes, and **the `select()` ref callback has a stable identity** so it runs exactly once (rationale). **Mounting is the reset** — the editor exists only during a rename, so each one starts from the current label. Clipboard chords inside the field are the wall's job on hosts whose webview has no native Edit menu (`docs/specs/mouse-and-clipboard.md` §8.9).
+**Must seed each rename from the current label and preserve the user's draft and selection across header re-renders** (rationale). Clipboard chords follow `docs/specs/mouse-and-clipboard.md` §8.9.
 
 Submitted values are rejected when empty or when they fail the `setTerminalUserTitle` validation that also guards title seeding (`docs/specs/terminal-state.md` → Supported OSC Inputs). `<unnamed>` is the default panel placeholder but is otherwise allowed as a user pin. **On rejection the input still closes** — it is not a blocking dialog — and a warning popover anchored under it names the offending value, dismissing on the next pointerdown, scroll, resize, `Escape`, or after `cfg.overlays.warningAutoDismissMs` (3s; 0 under visual snapshots, pinned in `lib/.storybook/preview.ts`).
 
-Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx`, `lib/src/components/wall/use-dismiss-overlay.ts`.
+Source of truth: `InlineEditInput` in `lib/src/components/wall/InlineEditInput.tsx`; `usePaneRename` in `lib/src/components/wall/use-pane-rename.tsx`; `IllegalRenameWarning` in `lib/src/components/wall/IllegalRenameWarning.tsx`; `useDismissOverlay` in `lib/src/components/wall/use-dismiss-overlay.ts`.
 
 ## Session lifecycle and terminal registry
 
@@ -500,7 +494,7 @@ Source of truth: `lib/src/components/wall/IllegalRenameWarning.tsx`, `lib/src/co
 
 | Op | Behavior |
 |---|---|
-| **Create** `getOrCreateTerminal` | Creates xterm.js with UnicodeGraphemes, Fit, and Image addons plus a PTY; reuses an existing entry. `allowProposedApi: true` enables UnicodeGraphemesAddon. **The WebGL addon is not loaded here** ([Renderer](#renderer)). |
+| **Create** `getOrCreateTerminal` | Creates xterm.js through `createXtermHost` and a PTY; reuses an existing entry. **The WebGL addon is not loaded here** ([Renderer](#renderer)). |
 | **Resume** `resumeTerminal` | Creates the xterm entry and writes replay data, spawning no PTY. Webview recreated over retained Live or Exited PTYs (Link: Severed → Resuming → Live). |
 | **Restore** `restoreTerminal` | Creates the xterm entry and spawns a new PTY with the saved cwd; **replays no transcript** (`docs/specs/transport.md` → "What is persisted"). Cold start from a saved Snapshot (Link: Cold → Live). |
 | **mount / unmount** | `mountElement` reparents the persistent DOM element into a container, `unmountElement` removes it. **The Registry entry survives**, and **neither fits the terminal** — the caller owns fitting ([Animations](#animations)). |
@@ -533,11 +527,11 @@ Source of truth: `TerminalWebglRenderer` in `lib/src/lib/terminal-webgl.ts`; `mo
 
 ### Session persistence
 
-The snapshot is written through a debounced (500ms) save, its layout in the native Lath format (`lathLayout`; `docs/specs/tiling-engine.md` → "Persistence"); `docs/specs/transport.md` → "Persistence policy" lists what is persisted and owns the never-persist rules. **Derived command/app labels on minimized doors are display-only** — never persisted as user-pinned titles.
+**Must coalesce scheduled saves into one 500ms timer without restarting it on later commits.** The snapshot stores its layout in the native Lath format (`lathLayout`; `docs/specs/tiling-engine.md` → "Persistence"); `docs/specs/transport.md` → "Persistence policy" lists what is persisted and owns the never-persist rules. **Derived command/app labels on minimized doors are display-only** — never persisted as user-pinned titles.
 
 Three save triggers, in ascending urgency:
 
-- Any Lath store commit (add/remove/resize/swap/meta, including the active pane the layout records) **schedules** the debounced save.
+- Any Lath store commit (add/remove/resize/swap/meta, including the active pane the layout records) **schedules** the save.
 - Content changes with no Lath commit — `onPtyData` (terminal output, OSC CWD, title candidates), activity/TODO, pane title/command state, minimized-door changes — only **mark the session dirty**; a 30s heartbeat persists only when dirty, so an idle app stops writing.
 - PTY exit, `onRequestSessionFlush`, `pagehide`, unmount, and extension shutdown requests **flush immediately and unconditionally** — the correctness net for any dirty-trigger gap (a program calling `chdir()` emits no event, so its persisted CWD may go stale until the next output — accepted).
 
@@ -565,7 +559,7 @@ Renderer Activity storage is owned by `docs/specs/alert.md` → Public State.
 
 ## Theme
 
-`.lath-host` / `.lath-leaf` in `lib/src/index.css` give an app-bg host, a terminal-bg body, and a 30px header band per leaf, applied by LathHost from the shared `PANE_HEADER_HEIGHT_PX`. The content area uses a 7px top/sides inset and 2px bottom inset (`px-1.75 pt-1.75 pb-0.5` on wrapper, `inset-x-1.75 top-1.75 bottom-0.5` on container); **the `LATH_LAYOUT_OPTS` gap of `PANE_GUTTER_PX` is the only visual separator between panes**. The host paints `var(--color-app-bg)` so gutters and rounded pane/header corner cutouts match host chrome; **terminal content backgrounds are painted by the React terminal wrappers and xterm host elements, never by the leaf containers**. The two-layer `@theme --color-*` → `var(--vscode-*)` token strategy is `docs/specs/theme.md`'s.
+`.lath-host` / `.lath-leaf` in `lib/src/index.css` give an app-bg host, a terminal-bg body, and a 30px header band per leaf, applied by LathHost from the shared `PANE_HEADER_HEIGHT_PX`. The content area uses a 7px top/sides inset and 2px bottom inset (`px-1.75 pt-1.75 pb-0.5` on wrapper, `inset-x-1.75 top-1.75 bottom-0.5` on container); **the `LATH_LAYOUT_OPTS` gap of `PANE_GUTTER_PX` is the only visual separator between panes**. The host paints `var(--color-app-bg)` so gutters and rounded pane/header corner cutouts match host chrome; **terminal content backgrounds are painted by the React terminal wrappers and xterm host elements, never by the outer leaf containers**. The two-layer `@theme --color-*` → `var(--vscode-*)` token strategy is `docs/specs/theme.md`'s.
 
 ## Animations
 
