@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { $getRoot, $isElementNode, type LexicalEditor, type LexicalNode } from 'lexical';
 import { $isImageNode, type ImageNode } from '@mdxeditor/editor';
 import { message, request } from './document-session';
@@ -16,7 +16,7 @@ export function localImagePath(src: string): string | null {
 /** The URL the page loads a document image from. */
 export const imageUrl = (src: string) => {
   const path = localImagePath(src);
-  return path === null ? src : `file/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return path === null ? src : `images/${path.split('/').map(encodeURIComponent).join('/')}`;
 };
 
 /** The document's image nodes; call within a read or update. */
@@ -44,15 +44,15 @@ function renamedSource(src: string, name: string): string {
 function ImageRow({ src, editor }: { src: string; editor: LexicalEditor }) {
   const path = localImagePath(src);
   const name = path?.split('/').pop() ?? src;
+  const folder = path?.slice(0, -name.length) ?? '';
   const [draft, setDraft] = useState(name);
   const [state, setState] = useState<{ busy?: boolean; error?: string }>({});
-  useEffect(() => setDraft(name), [name]);
   async function commit() {
     const next = draft.trim();
     if (!path || !next || next === name || state.busy) { setDraft(name); return; }
     setState({ busy: true });
     try {
-      await request('rename', { from: path, to: path.slice(0, path.length - name.length) + next });
+      await request('rename', { from: path, to: folder + next });
       const replacement = renamedSource(src, next);
       editor.update(() => { for (const node of $imageNodes()) if (node.getSrc() === src) node.setSrc(replacement); });
       setState({});
@@ -70,7 +70,7 @@ function ImageRow({ src, editor }: { src: string; editor: LexicalEditor }) {
               if (event.key === 'Enter') { event.preventDefault(); void commit(); }
               if (event.key === 'Escape') { event.preventDefault(); setDraft(name); setState({}); }
             }} />}
-      {path !== null && path.includes('/') && <span className="image-folder" title={path}>{path.slice(0, -name.length)}</span>}
+      {folder && <span className="image-folder" title={path!}>{folder}</span>}
       {state.error && <span className="image-error" role="alert">{state.error}</span>}
     </li>
   );

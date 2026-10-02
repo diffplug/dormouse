@@ -3,86 +3,82 @@ import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { LexicalEditor } from 'lexical';
 import {
+  ImageNode,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
   DiffSourceToggleWrapper, frontmatterPlugin, headingsPlugin, imagePlugin, InsertCodeBlock, InsertTable, InsertThematicBreak,
   linkDialogPlugin, linkPlugin, listsPlugin, ListsToggle, markdownShortcutPlugin, MDXEditor, quotePlugin, realmPlugin,
   rootEditor$, Separator, viewMode$, tablePlugin, thematicBreakPlugin, toolbarPlugin, UndoRedo, type MDXEditorMethods, type Realm,
 } from '@mdxeditor/editor';
 import '@mdxeditor/editor/style.css';
-import { documentSession, request, type DocumentState } from './document-session';
+import { documentSession, stateLabel, type DocumentState } from './document-session';
 import { imageSources, imageUrl, ImagesPanel } from './images-panel';
 import { commentsPlugin } from './markdown-comments';
 import { markdownSafetyPlugin } from './markdown-safety';
-import { pageTheme, subscribeTheme } from './markdown-theme';
+import { pageTheme, subscribeTheme } from './page-theme';
 import { mermaidDescriptor } from './mermaid-block';
 import './markdown.css';
 
-// Page state outside React: the session reports into it, components subscribe.
-let docState: DocumentState = { loaded: false, dirty: false, saving: false };
-let error: string | null = null;
-let images: string[] = [];
-let panelOpen = false;
+// Page state outside React, replaced whole on each change: the session reports
+// into it, the editor's image nodes feed it, and components subscribe.
+let store: { doc: DocumentState; error: string | null; images: string[]; panel: boolean; editor: LexicalEditor | null } =
+  { doc: { loaded: false, dirty: false, saving: false }, error: null, images: [], panel: false, editor: null };
 const listeners = new Set<() => void>();
-const emit = () => { for (const listener of listeners) listener(); };
+const update = (change: Partial<typeof store>) => { store = { ...store, ...change }; for (const listener of listeners) listener(); };
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
+const usePage = () => useSyncExternalStore(subscribe, () => store);
 const editorRef = createRef<MDXEditorMethods>();
 let realm: Realm | undefined;
-const lexical = () => realm?.getValue(rootEditor$) ?? null;
-
-/** Line endings the file had: saves restore CRLF when it was the majority. */
-let crlf = false;
 let loads = 0;
 
-// The editor trims the document; saves end it with one newline.
+// The editor trims the document; saves end it with one newline, and the server
+// restores the file's line endings.
 const session = documentSession<string>({
   snapshot() {
     const markdown = editorRef.current!.getMarkdown();
-    const text = markdown ? `${markdown}\n` : '';
-    return { text: crlf ? text.replace(/\n/g, '\r\n') : text, mark: markdown };
+    return { text: markdown ? `${markdown}\n` : '', mark: markdown };
   },
   holds: mark => editorRef.current?.getMarkdown() === mark,
   async apply(text) {
-    const newlines = text.match(/\n/g)?.length ?? 0;
-    crlf = (text.match(/\r\n/g)?.length ?? 0) * 2 > newlines;
     // A reload mounts a fresh editor: its own normalization is then not an edit, and undo starts over.
     flushSync(() => root.render(<Page key={++loads} markdown={text.replace(/\r\n?/g, '\n')} />));
     await new Promise(resolve => setTimeout(resolve));
   },
 }, {
-  report(state) { docState = state; emit(); },
-  fail(text) { error = text; emit(); },
+  report(doc) {
+    if (doc.loaded !== store.doc.loaded || doc.dirty !== store.doc.dirty || doc.saving !== store.doc.saving) update({ doc });
+  },
+  fail(error) { update({ error }); },
 });
 
 const capture = realmPlugin({
   init(r) { realm = r; },
   postInit(r) {
     const editor = r.getValue(rootEditor$);
-    editor?.registerUpdateListener(() => refreshImages(editor));
-    refreshImages(editor);
+    if (!editor) return;
+    const refresh = () => update({ images: imageSources(editor), editor });
+    // Only image nodes change the list, so typing does not walk the document.
+    editor.registerMutationListener(ImageNode, refresh, { skipInitialization: true });
+    refresh();
   },
 });
 
+/** Sends a pasted or dropped image's bytes; the server names the new file. */
 async function upload(file: File): Promise<string> {
-  const data = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).replace(/^data:[^,]*,/, ''));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-  try { return (await request('image', { type: file.type, data })).name; }
-  catch (reason) { session.fail(reason); throw reason; }
+  try {
+    const response = await fetch('image', { method: 'POST', headers: { 'Content-Type': file.type }, body: file });
+    if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
+    return (await response.json()).name;
+  } catch (reason) { session.fail(reason); throw reason; }
 }
 
 function Controls() {
-  const state = useSyncExternalStore(subscribe, () => docState);
-  const panel = useSyncExternalStore(subscribe, () => panelOpen);
-  const count = useSyncExternalStore(subscribe, () => images.length);
+  const { doc, panel, images } = usePage();
   return (
     <div className="controls">
-      <span className="state" role="status">{!state.loaded ? 'Loading…' : state.saving ? 'Saving…' : state.dirty ? 'Unsaved' : 'Saved'}</span>
-      <button type="button" aria-pressed={panel} title="List and rename this document's images" onClick={() => { panelOpen = !panelOpen; emit(); }}>Images{count ? ` (${count})` : ''}</button>
-      <button type="button" title="Reload from disk" onClick={() => void session.reload(confirmDiscard)}>Reload</button>
-      <button type="button" className="save" disabled={!state.loaded || !state.dirty || state.saving} title="Save [Cmd/Ctrl+S]" onClick={() => void session.save()}>Save</button>
+      <span className="state" role="status">{stateLabel(doc)}</span>
+      <button type="button" aria-pressed={panel} title="List and rename this document's images" onClick={() => update({ panel: !panel })}>Images{images.length ? ` (${images.length})` : ''}</button>
+      <button type="button" title="Reload from disk" onClick={() => void session.reload()}>Reload</button>
+      <button type="button" className="save" disabled={!doc.loaded || !doc.dirty || doc.saving} title="Save [Cmd/Ctrl+S]" onClick={() => void session.save()}>Save</button>
     </div>
   );
 }
@@ -124,21 +120,13 @@ function markdownStyle(markdown: string) {
   return { bullet, rule: count(/^\*{3,}[ \t]*$/gm) > count(/^-{3,}[ \t]*$/gm) ? '*' as const : '-' as const };
 }
 
-function refreshImages(editor: LexicalEditor | null) {
-  const next = editor ? imageSources(editor) : [];
-  if (next.join('\n') !== images.join('\n')) { images = next; emit(); }
-}
-
 function Page({ markdown }: { markdown: string }) {
   const theme = useSyncExternalStore(subscribeTheme, pageTheme);
-  const message = useSyncExternalStore(subscribe, () => error);
-  const sources = useSyncExternalStore(subscribe, () => images);
-  const open = useSyncExternalStore(subscribe, () => panelOpen);
+  const { error, images, panel, editor } = usePage();
   const style = useMemo(() => markdownStyle(markdown), [markdown]);
-  const editor = lexical();
   return (
     <>
-      {message && <div className="error" role="alert">{message}</div>}
+      {error && <div className="error" role="alert">{error}</div>}
       <MDXEditor
         ref={editorRef}
         markdown={markdown}
@@ -156,17 +144,9 @@ function Page({ markdown }: { markdown: string }) {
           session.fail(`Showing source: the rich editor cannot parse this file (${reason}).`);
         }}
       />
-      {open && editor && <ImagesPanel editor={editor} sources={sources} />}
+      {panel && editor && <ImagesPanel editor={editor} sources={images} />}
     </>
   );
-}
-
-function confirmDiscard(): Promise<boolean> {
-  const dialog = document.getElementById('confirm') as HTMLDialogElement;
-  dialog.returnValue = 'cancel';
-  const answer = new Promise<boolean>(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'discard'), { once: true }));
-  dialog.showModal();
-  return answer;
 }
 
 const root = createRoot(document.getElementById('root')!);

@@ -326,27 +326,20 @@ const missingLicense = {
   "khroma": "MIT",
 };
 const missingAuthor = {
-  // DefinitelyTyped publishes these names in `contributors`, not `author`.
-  "@types/trusted-types": "Jakub Vrana, Damien Engels, Emanuel Tesar, Bjarki, Sebastian Silbermann",
   "@hono/node-ws": "Hono middleware contributors",
   "@mdxeditor/gurx": "Petyo Ivanov",
   "@preact/signals-core": "Preact Team",
-  // The addon ships a `contributors` array rather than npm's singular `author`
-  // field, and its prebuilt platform packages carry neither.
+  // node-datachannel's prebuilt platform packages carry no author or contributors.
   "@node-datachannel/darwin-arm64": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/darwin-x64": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/linux-arm64-gnu": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/linux-x64-gnu": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/win32-arm64-msvc": "Murat Doğan, Paul-Louis Ageneau",
   "@node-datachannel/win32-x64-msvc": "Murat Doğan, Paul-Louis Ageneau",
-  "node-datachannel": "Murat Doğan, Paul-Louis Ageneau",
   "@tauri-apps/api": "Tauri Apps Contributors",
   "@tauri-apps/plugin-shell": "Tauri Apps Contributors",
   "@tauri-apps/plugin-updater": "Tauri Apps Contributors",
   "@xterm/xterm": "Christopher Jeffrey, SourceLair Private Company, xterm.js authors",
-  // Both ship an `authors` array rather than npm's singular `author` field.
-  "@zxing/browser": "David Werth, Luiz Barni",
-  "@zxing/library": "Adrian Toșcă, David Werth, Luiz Barni",
   // nodeca's port of Python's argparse, under the PSF license.
   "argparse": "nodeca, Python Software Foundation",
   "atomically": "Fabio Spampinato",

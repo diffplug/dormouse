@@ -32,19 +32,19 @@ async function start(name = 'doc.md', contents = '# Doc\n\n![a](img/a%20b.png)\n
   return viewer;
 }
 const route = (viewer, path) => viewer.path.replace(/view$/, path);
-function send(viewer, path, { method = 'GET', body, origin = `http://127.0.0.1:${viewer.port}` } = {}) {
+function send(viewer, path, { method = 'GET', body, type = 'application/json', origin = `http://127.0.0.1:${viewer.port}` } = {}) {
   return new Promise((resolve, reject) => {
-    const headers = body === undefined ? {} : { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) };
+    const headers = body === undefined ? {} : { 'Content-Type': type, ...(origin ? { Origin: origin } : {}) };
     const req = request({ host: '127.0.0.1', port: viewer.port, path, method: body === undefined ? method : 'POST', headers }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
     });
     req.on('error', reject);
-    req.end(body === undefined ? undefined : JSON.stringify(body));
+    req.end(body === undefined || Buffer.isBuffer(body) ? body : JSON.stringify(body));
   });
 }
-const paste = (viewer, type, bytes, origin) => send(viewer, route(viewer, 'image'), { body: { type, data: bytes.toString('base64') }, origin });
+const paste = (viewer, type, bytes, origin) => send(viewer, route(viewer, 'image'), { body: bytes, type, origin });
 const rename = (viewer, from, to) => send(viewer, route(viewer, 'rename'), { body: { from, to } });
 
 test('Markdown opens in the rich editor page under a policy that frames and embeds nothing', async () => {
@@ -63,22 +63,23 @@ test('Markdown opens in the rich editor page under a policy that frames and embe
 
 test('serves images at or under the document folder, sandboxed, and nothing else', { skip: process.platform === 'win32' }, async () => {
   const viewer = await start();
-  const image = await send(viewer, route(viewer, 'file/img/a%20b.png'));
+  const image = await send(viewer, route(viewer, 'images/img/a%20b.png'));
   assert.equal(image.status, 200);
   assert.equal(image.headers['content-type'], 'image/png');
   assert.ok(image.body.equals(PNG));
   assert.match(image.headers['content-security-policy'], /^sandbox;/);
-  assert.equal((await send(viewer, route(viewer, 'file/secret.txt'))).status, 404);
+  assert.equal((await send(viewer, route(viewer, 'images/secret.txt'))).status, 404);
   // URL parsing removes a literal `..`; an encoded slash reaches the segment check.
-  assert.equal((await send(viewer, route(viewer, 'file/../outside.png'))).status, 404);
-  assert.equal((await send(viewer, route(viewer, 'file/..%2Foutside.png'))).status, 403);
+  assert.equal((await send(viewer, route(viewer, 'images/../outside.png'))).status, 404);
+  assert.equal((await send(viewer, route(viewer, 'images/..%2Foutside.png'))).status, 403);
   await symlink(join(root, 'outside.png'), join(docs, 'escape.png'));
-  assert.equal((await send(viewer, route(viewer, 'file/escape.png'))).status, 404);
+  assert.equal((await send(viewer, route(viewer, 'images/escape.png'))).status, 404);
   await symlink(join(docs, 'img', 'a b.png'), join(docs, 'alias.png'));
-  assert.equal((await send(viewer, route(viewer, 'file/alias.png'))).status, 200);
-  // Other text keeps its one-file grant.
+  assert.equal((await send(viewer, route(viewer, 'images/alias.png'))).status, 200);
+  // The opened document stays under its own route; other text keeps its one-file grant.
+  assert.equal((await send(viewer, route(viewer, 'file/doc.md'))).status, 200);
   const notes = await start('notes.txt', 'plain');
-  assert.equal((await send(notes, route(notes, 'file/img/a%20b.png'))).status, 404);
+  assert.equal((await send(notes, route(notes, 'images/img/a%20b.png'))).status, 404);
 });
 
 test('pasted images become new files beside the document, checked against their type', async () => {

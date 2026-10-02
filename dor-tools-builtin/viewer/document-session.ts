@@ -23,6 +23,19 @@ export async function request(path: string, body?: unknown) {
 
 export const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason);
 
+/** The status both pages show beside Save. */
+export const stateLabel = ({ loaded, dirty, saving }: DocumentState) =>
+  !loaded ? 'Loading…' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved';
+
+/** Asks through the page's `#confirm` dialog before a reload discards edits. */
+export function confirmDiscard(): Promise<boolean> {
+  const dialog = document.getElementById('confirm') as HTMLDialogElement;
+  dialog.returnValue = 'cancel';
+  const answer = new Promise<boolean>(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue === 'discard'), { once: true }));
+  dialog.showModal();
+  return answer;
+}
+
 /** Loads, saves, and reports one document for a built-in editor page
  * (docs/specs/dor-tools-builtin.md -> Editing files): revision-checked saves on
  * Save or Cmd/Ctrl+S, dirty state reported to the containing iframe at once
@@ -88,9 +101,9 @@ export function documentSession<Mark>(editor: DocumentEditor<Mark>, view: {
   return {
     load: () => load().catch(fail),
     save: () => save().catch(fail),
-    /** Reads the file again, after `confirm` agrees to discard unsaved edits. */
-    async reload(confirm: () => Promise<boolean>) {
-      if (saving || (dirty() && !await confirm())) return;
+    /** Reads the file again, after the user agrees to discard unsaved edits. */
+    async reload() {
+      if (saving || (dirty() && !await confirmDiscard())) return;
       view.fail(null);
       await load().catch(fail);
     },

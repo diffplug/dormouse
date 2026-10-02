@@ -1,16 +1,22 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { CodeMirrorEditor, type CodeBlockEditorDescriptor, type CodeBlockEditorProps } from '@mdxeditor/editor';
 import { message } from './document-session';
-import { pageTheme, subscribeTheme } from './markdown-theme';
+import { pageTheme, subscribeTheme, type PageTheme } from './page-theme';
 
 let renders = 0;
 let mermaid: Promise<typeof import('mermaid').default> | undefined;
+let initialized: PageTheme | undefined;
 
 /** Renders `code` as SVG; mermaid loads on first use. Strict security escapes
  * labels and sanitizes the SVG before the page inserts it. */
-async function renderDiagram(code: string, dark: boolean, fontFamily: string): Promise<string> {
+async function renderDiagram(code: string, theme: PageTheme): Promise<string> {
   const api = await (mermaid ??= import('mermaid').then(m => m.default));
-  api.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'default', fontFamily });
+  if (initialized !== theme) {
+    initialized = theme;
+    // Mermaid 12 defaults to ELK layouts, which this bundle leaves out (scripts/build.mjs).
+    api.initialize({ startOnLoad: false, securityLevel: 'strict', theme: theme.dark ? 'dark' : 'default', fontFamily: theme.fontFamily,
+      layout: 'dagre', state: { layout: 'dagre' } });
+  }
   await api.parse(code);
   const id = `mermaid-${++renders}`;
   try { return (await api.render(id, code)).svg; }
@@ -26,7 +32,7 @@ function MermaidBlock(props: CodeBlockEditorProps) {
     // Typing re-renders after a pause rather than per keystroke.
     const timer = setTimeout(() => {
       if (!props.code.trim()) { setDiagram({ error: 'Empty diagram' }); return; }
-      renderDiagram(props.code, theme.dark, theme.fontFamily).then(
+      renderDiagram(props.code, theme).then(
         svg => { if (current) setDiagram({ svg }); },
         error => { if (current) setDiagram({ error: message(error) }); });
     }, diagram.svg || diagram.error ? 300 : 0);

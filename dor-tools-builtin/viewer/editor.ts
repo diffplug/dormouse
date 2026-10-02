@@ -16,7 +16,8 @@ import 'monaco-editor/esm/vs/basic-languages/css/css.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution.js';
-import { documentSession } from './document-session';
+import { documentSession, stateLabel } from './document-session';
+import { pageTheme } from './page-theme';
 import './editor.css';
 
 monaco.languages.register({ id: 'json', extensions: ['.json', '.jsonl'] });
@@ -63,9 +64,9 @@ const session = documentSession<number>({
     applyTheme();
   },
 }, {
-  report({ loaded, dirty, saving }) {
-    saveButton.disabled = !loaded || !dirty || saving;
-    el('state').textContent = !loaded ? 'Loading…' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved';
+  report(state) {
+    saveButton.disabled = !state.loaded || !state.dirty || state.saving;
+    el('state').textContent = stateLabel(state);
   },
   fail(text) {
     error.textContent = text ?? '';
@@ -74,8 +75,6 @@ const session = documentSession<number>({
 });
 function applyTheme() {
   const css = getComputedStyle(document.body);
-  const light = document.body.classList.contains('vscode-light') || document.body.classList.contains('vscode-high-contrast-light')
-    || (![...document.body.classList].some(c => c.startsWith('vscode-')) && matchMedia('(prefers-color-scheme: light)').matches);
   const colors: Record<string, string> = {};
   for (const key of ['editor.background', 'editor.foreground', 'editor.selectionBackground', 'editorWidget.background',
     'editorLineNumber.foreground', 'editorCursor.foreground', 'focusBorder', 'input.background', 'input.foreground', 'input.border',
@@ -84,7 +83,7 @@ function applyTheme() {
     const value = css.getPropertyValue('--vscode-' + key.replaceAll('.', '-')).trim();
     if (/^#[\da-f]{3,8}$/i.test(value)) colors[key] = value;
   }
-  const base = light ? 'vs' : 'vs-dark';
+  const base = pageTheme().dark ? 'vs-dark' : 'vs';
   const fontFamily = css.getPropertyValue('--vscode-editor-font-family').trim() || undefined;
   const fontSize = parseFloat(css.getPropertyValue('--vscode-editor-font-size')) || 13;
   // Load delivers the same theme several times; each defineTheme rebuilds Monaco's styles.
@@ -96,13 +95,7 @@ function applyTheme() {
   editor?.updateOptions({ fontFamily, fontSize });
 }
 saveButton.addEventListener('click', () => { void session.save(); });
-el('reload').addEventListener('click', () => void session.reload(async () => {
-  const dialog = el<HTMLDialogElement>('confirm');
-  dialog.returnValue = 'cancel';
-  const answer = new Promise<string>(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true }));
-  dialog.showModal();
-  return await answer === 'discard';
-}));
+el('reload').addEventListener('click', () => void session.reload());
 el('wrap').addEventListener('click', () => {
   const on = el('wrap').getAttribute('aria-pressed') !== 'true';
   el('wrap').setAttribute('aria-pressed', String(on));

@@ -1,10 +1,9 @@
-import { constants } from 'node:fs';
-import { open, realpath, type FileHandle } from 'node:fs/promises';
+import { realpath, type FileHandle } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { stateSequence } from 'dor-tools-lib/osc';
 import { fileViewerFormat } from './file-viewer-format.js';
-import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
+import { announceViewer, contentType, HttpError, isInsideRoot, openRegularFile, pathSegments, readBody, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
 import { editorPage, markdownPage } from './editor-page.js';
 import { IMAGE_LIMIT, openImage, renameImage, writePastedImage } from './markdown-images.js';
 import { readEditableFile, readUpTo, saveEditableFile, TEXT_LIMIT } from './editable-file.js';
@@ -13,9 +12,9 @@ import { viewerAsset } from './viewer-assets.js';
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
 const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'";
-// The Markdown page renders document HTML through its own allowlist; this
-// confines what slips past it to its own scripts, images, and requests.
-const MARKDOWN_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'";
+// The editor pages load only their own scripts, workers, fonts, and images;
+// the Markdown page renders document HTML through its own allowlist.
+const EDITOR_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'";
 // An image the Markdown editor shows can be opened directly; it never runs as a document there.
 const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 type Resource = { file: FileHandle; mime: string };
@@ -109,9 +108,7 @@ export async function startFileViewer(input: string, { onDirty = () => {} }: { o
       if (resources.size >= ASSET_LIMIT) throw new ViewerLimitError('local preview exceeds 256 referenced files');
       const type = fileViewerFormat(canonical);
       if (!type) return;
-      const file = await open(canonical, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
-      try { if (!(await file.stat()).isFile()) throw new Error('not a regular file'); }
-      catch (error) { await file.close(); throw error; }
+      const file = await openRegularFile(canonical);
       const resource = { file, mime: type.mime };
       resources.set(route, resource); // the grant owns the descriptor from here
       const html = type.mime.startsWith('text/html');
@@ -140,25 +137,24 @@ export async function startFileViewer(input: string, { onDirty = () => {} }: { o
     if (!main) throw new Error('not a supported regular file');
     if (format.text) await textSize(main.file); // fail oversized text before announcing
     let saving = false;
-    const viewer = await startCapabilityViewer({ csp: format.markdown ? MARKDOWN_CSP : format.text ? CSP + "; worker-src 'self'" : CSP, post: format.text, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
+    const viewer = await startCapabilityViewer({ csp: format.text ? EDITOR_CSP : CSP, post: format.text, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
       route: async (req, res, prefix) => {
         let route: string;
         try { route = decodeURIComponent(new URL(req.url!, 'http://localhost').pathname.slice(prefix.length)); }
         catch { throw new HttpError(400); }
         if (!pathSegments(route)) throw new HttpError(403);
         if (req.method === 'POST') {
-          if (format.markdown && (route === 'image' || route === 'rename')) {
-            // Base64 carries three bytes in four characters.
-            const data = await readJsonBody(req, Math.ceil(IMAGE_LIMIT / 3) * 4 + 1024) as { type?: unknown; data?: unknown; from?: unknown; to?: unknown } | null;
-            if (route === 'image') {
-              if (typeof data?.type !== 'string' || typeof data?.data !== 'string') throw new HttpError(400);
-              const name = await writePastedImage(root, data.type, Buffer.from(data.data, 'base64'));
-              reply(res, 200, JSON.stringify({ name }), 'application/json');
-            } else {
-              if (typeof data?.from !== 'string' || typeof data?.to !== 'string') throw new HttpError(400);
-              await renameImage(root, data.from, data.to);
-              reply(res, 200, '{}', 'application/json');
-            }
+          if (format.markdown && route === 'image') {
+            // The image's own bytes, typed by Content-Type.
+            const bytes = await readBody(req, IMAGE_LIMIT, 'Pasted images are limited to 32 MiB.');
+            reply(res, 200, JSON.stringify({ name: await writePastedImage(root, contentType(req), bytes) }), 'application/json');
+            return;
+          }
+          if (format.markdown && route === 'rename') {
+            const data = await readJsonBody(req, 64 * 1024) as { from?: unknown; to?: unknown } | null;
+            if (typeof data?.from !== 'string' || typeof data?.to !== 'string') throw new HttpError(400);
+            await renameImage(root, data.from, data.to);
+            reply(res, 200, '{}', 'application/json');
             return;
           }
           if (!format.text || (route !== 'save' && route !== 'state')) throw new HttpError(404);
@@ -193,8 +189,8 @@ export async function startFileViewer(input: string, { onDirty = () => {} }: { o
         }
         const resource = resources.get(route);
         if (resource) { await stream(req, res, resource); return; }
-        if (!format.markdown || !route.startsWith('file/')) throw new HttpError(404);
-        const image = await openImage(root, route.slice('file/'.length));
+        if (!format.markdown || !route.startsWith('images/')) throw new HttpError(404);
+        const image = await openImage(root, route.slice('images/'.length));
         try {
           res.setHeader('Content-Security-Policy', IMAGE_CSP);
           await stream(req, res, image);

@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { $createParagraphNode, DecoratorNode, type LexicalNode, type NodeKey, type SerializedLexicalNode } from 'lexical';
+import { $createParagraphNode, DecoratorNode, type ElementNode, type LexicalNode, type NodeKey, type SerializedLexicalNode } from 'lexical';
 import { addExportVisitor$, addImportVisitor$, addLexicalNode$, addMdastExtension$, realmPlugin, type LexicalVisitor, type MdastExtension, type MdastImportVisitor } from '@mdxeditor/editor';
 
 // MDXEditor parses `<!-- … -->` and drops it, so a save would delete every
@@ -34,10 +34,9 @@ const fromMarkdown = {
 
 const importVisitor = {
   testNode: 'comment',
-  visitNode({ mdastNode, lexicalParent }: { mdastNode: CommentMdast; lexicalParent: LexicalNode }) {
+  visitNode({ mdastNode, lexicalParent }: { mdastNode: CommentMdast; lexicalParent: ElementNode }) {
     const node = new CommentNode(mdastNode.value);
-    if (lexicalParent.getType() === 'root') (lexicalParent as any).append($createParagraphNode().append(node));
-    else (lexicalParent as any).append(node);
+    lexicalParent.append(lexicalParent.getType() === 'root' ? $createParagraphNode().append(node) : node);
   },
 };
 

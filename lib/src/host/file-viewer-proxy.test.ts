@@ -70,7 +70,7 @@ it('preserves the real viewer policy and meta policy through HTML instrumentatio
 it.each(['readme.txt', 'readme.md'])('retains the policy and separates source data from editor markup for %s', async name => {
   const url = await frame(name, '<script>untrusted()</script>');
   const response = await read(url);
-  expectViewerPolicy(response.headers, name.endsWith('.md') ? "base-uri 'none'" : "base-uri 'self'");
+  expectViewerPolicy(response.headers, "base-uri 'none'");
   expect(response.body).not.toContain('untrusted()');
   const source = await read(new URL('source', url).href);
   expect(JSON.parse(source.body).text).toBe('<script>untrusted()</script>');

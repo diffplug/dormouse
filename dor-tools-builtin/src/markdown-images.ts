@@ -2,7 +2,7 @@ import { constants } from 'node:fs';
 import { copyFile, link, lstat, open, realpath, rename, unlink, type FileHandle } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { CONTROLS, fileViewerFormat } from './file-viewer-format.js';
-import { HttpError, isInsideRoot, pathSegments } from './viewer-server.js';
+import { HttpError, isInsideRoot, openRegularFile, pathSegments } from './viewer-server.js';
 
 /** Bound on one pasted image's decoded bytes. */
 export const IMAGE_LIMIT = 32 * 1024 * 1024;
@@ -13,7 +13,6 @@ const PASTE_TYPES: Record<string, { ext: string; magic: (b: Buffer) => boolean }
   'image/gif': { ext: 'gif', magic: b => /^GIF8[79]a/.test(b.subarray(0, 6).toString('latin1')) },
   'image/webp': { ext: 'webp', magic: b => b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' },
 };
-const NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 
 const isImage = (path: string) => !!fileViewerFormat(path)?.mime.startsWith('image/');
 
@@ -27,30 +26,25 @@ function imagePath(root: string, route: string): string {
 /** A regular image file at or under `root` (by realpath) for reading; the
  * caller closes it. A symlink whose target leaves `root` grants nothing. */
 export async function openImage(root: string, route: string): Promise<{ file: FileHandle; mime: string }> {
-  let canonical: string;
-  try { canonical = await realpath(imagePath(root, route)); }
-  catch (error) { if (error instanceof HttpError) throw error; throw new HttpError(404); }
+  const canonical = await realpath(imagePath(root, route)).catch(() => { throw new HttpError(404); });
   if (!isInsideRoot(root, canonical) || !isImage(canonical)) throw new HttpError(404);
-  const file = await open(canonical, constants.O_RDONLY | NOFOLLOW | (constants.O_NONBLOCK ?? 0)).catch(() => { throw new HttpError(404); });
-  try { if (!(await file.stat()).isFile()) throw new HttpError(404); }
-  catch (error) { await file.close(); throw error; }
+  const file = await openRegularFile(canonical).catch(() => { throw new HttpError(404); });
   return { file, mime: fileViewerFormat(canonical)!.mime };
 }
 
-const stamp = (d: Date) => [d.getFullYear(), d.getMonth() + 1, d.getDate(), '-', d.getHours(), d.getMinutes(), d.getSeconds()]
-  .map(n => typeof n === 'number' ? String(n).padStart(2, '0') : n).join('');
+const pad = (n: number) => String(n).padStart(2, '0');
+const stamp = (d: Date) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 
 /** Writes a pasted image beside the document as a new file, never replacing
  * one, and returns its name: `image-YYYYMMDD-HHMMSS[-N].<ext>`. */
 export async function writePastedImage(root: string, type: string, bytes: Buffer, now = new Date()): Promise<string> {
   const kind = Object.prototype.hasOwnProperty.call(PASTE_TYPES, type) ? PASTE_TYPES[type] : undefined;
   if (!kind) throw new HttpError(415, 'Paste a PNG, JPEG, GIF, or WebP image.');
-  if (bytes.length > IMAGE_LIMIT) throw new HttpError(413, 'Pasted images are limited to 32 MiB.');
   if (!kind.magic(bytes)) throw new HttpError(415, `The pasted data is not a ${kind.ext.toUpperCase()} image.`);
   for (let n = 1; n <= 100; n++) {
     const name = `image-${stamp(now)}${n > 1 ? `-${n}` : ''}.${kind.ext}`;
     let file: FileHandle;
-    try { file = await open(join(root, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW, 0o666); }
+    try { file = await open(join(root, name), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o666); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue; throw error; }
     try { await file.writeFile(bytes); await file.sync(); }
     catch (error) { await file.close(); await unlink(join(root, name)).catch(() => {}); throw error; }
@@ -70,6 +64,7 @@ export async function renameImage(root: string, from: string, to: string): Promi
   if (dirname(source) !== dirname(target) || CONTROLS.test(name) || name.startsWith('.')) throw new HttpError(400, 'Choose a new image name in the same folder.');
   const canonicalDir = await realpath(dirname(source)).catch(() => { throw new HttpError(404); });
   if (!isInsideRoot(root, canonicalDir)) throw new HttpError(404);
+  const taken = () => new HttpError(409, `${name} already exists.`);
   const sourcePath = join(canonicalDir, basename(source));
   const targetPath = join(canonicalDir, name);
   const stat = await lstat(sourcePath).catch(() => { throw new HttpError(404); });
@@ -78,7 +73,7 @@ export async function renameImage(root: string, from: string, to: string): Promi
   const existing = await lstat(targetPath).catch(() => null);
   if (existing) {
     // A case-only rename on a case-insensitive volume names the same file.
-    if (existing.dev !== stat.dev || existing.ino !== stat.ino) throw new HttpError(409, `${name} already exists.`);
+    if (existing.dev !== stat.dev || existing.ino !== stat.ino) throw taken();
     await rename(sourcePath, targetPath);
     return;
   }
@@ -86,10 +81,10 @@ export async function renameImage(root: string, from: string, to: string): Promi
   try { await link(sourcePath, targetPath); }
   catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'EEXIST') throw new HttpError(409, `${name} already exists.`);
+    if (code === 'EEXIST') throw taken();
     if (code !== 'EPERM' && code !== 'ENOTSUP' && code !== 'ENOSYS' && code !== 'EXDEV') throw error;
     await copyFile(sourcePath, targetPath, constants.COPYFILE_EXCL).catch(copyError => {
-      throw (copyError as NodeJS.ErrnoException).code === 'EEXIST' ? new HttpError(409, `${name} already exists.`) : copyError;
+      throw (copyError as NodeJS.ErrnoException).code === 'EEXIST' ? taken() : copyError;
     });
   }
   await unlink(sourcePath);
