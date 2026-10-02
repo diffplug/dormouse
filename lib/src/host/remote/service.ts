@@ -1280,7 +1280,7 @@ export class BurrowService {
       directPeering: directPeeringFor(policy, this.#createDirectPeer),
       // The name the phone shows: the one this machine enrolled under, else the
       // one the enrollment form would have suggested.
-      burrowLabel: this.#enrollment?.label || suggestedBurrowLabel(this.#kind),
+      burrowLabel: this.#enrollment?.label ?? suggestedBurrowLabel(this.#kind),
       requestApproval: (request) => this.#requestOneTimeApproval(runtime, request),
       dismissApproval: () => this.#dismissOneTimeApproval(runtime),
       onChange: (next) => this.#onOneTimeChanged(runtime, next),

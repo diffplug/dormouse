@@ -26,7 +26,7 @@ import { createAlertClient } from '../alert-client';
 import type { AlertStateDetail } from '../../lib/platform/types';
 import { DEFAULT_MANAGED_VOICE_ID } from '../../lib/platform/managed-voice-types';
 
-const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1' };
+const HOLD: SurfaceHold = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1' };
 
 let sent: Array<{ event: string; data: unknown }>;
 let written: Array<{ id: string; data: string }>;

@@ -307,9 +307,9 @@ describe('size holds', () => {
     expect(getSizeHolds('surface-1')).toEqual([]);
     // Nor from a hold of the wrong shape: a peer window is another build.
     for (const hold of [
-      { holder: 'a', label: 7, lease: '1' },
-      { holder: 'a', label: 'iPhone' },
-      { label: 'iPhone', lease: '1' },
+      { holder: 'a', label: 7, lease: '1', serviceId: 's' },
+      { holder: 'a', label: 'iPhone', serviceId: 's' },
+      { label: 'iPhone', lease: '1', serviceId: 's' },
     ]) {
       platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold });
       expect(getSizeHolds('surface-1')).toEqual([]);
@@ -398,7 +398,7 @@ describe('size holds', () => {
   it('takes a pane back from every session holding it', async () => {
     registerSurface('surface-1');
     holdSize('surface-1', held(PHONE, 80, 24));
-    holdSize('surface-1', { holder: 'session-b', label: 'Pixel', lease: '1', cols: 80, rows: 24 });
+    holdSize('surface-1', { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1', cols: 80, rows: 24 });
     platform.commandResult = () => ({ ended: true });
 
     await takeBackSize('surface-1');
@@ -421,7 +421,7 @@ describe('size holds', () => {
 
     // A newer holder that arrived while the command was in flight keeps the pane.
     holdSize('surface-1', held(PHONE, 80, 24));
-    const later = { holder: 'session-b', label: 'Pixel', lease: '1', cols: 80, rows: 24 };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1', cols: 80, rows: 24 };
     platform.commandResult = () => {
       holdSize('surface-1', later);
       return { ended: true };

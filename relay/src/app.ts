@@ -737,9 +737,10 @@ export function createApp(config: AppConfig): CreatedApp {
   app.post(API_ROUTES.burrowEnroll, async (c) => {
     const body = await readJson<BurrowEnrollRequest>(c);
     // A Burrow built for another origin would send every phone there, so it is
-    // refused before the credential is read — nothing spent, nothing appended.
+    // refused before the credential is read — nothing spent, nothing appended:
+    // a body naming none is malformed, one naming another a mismatch.
     const claimed: unknown = body?.origin;
-    if (claimed === undefined) return c.json({ error: 'origin is required' }, 400);
+    if (typeof claimed !== 'string') return c.json({ error: 'origin must be a string' }, 400);
     if (normalizeOrigin(claimed) !== origin) {
       const mismatch: BurrowEnrollOriginMismatch = { error: ORIGIN_MISMATCH_ERROR, origin };
       return c.json(mismatch, 409);

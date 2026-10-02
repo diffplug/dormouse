@@ -33,14 +33,6 @@ export type BurrowGate = 'enrolled' | 'serving';
 /** One gate's arming: runs on the rising edge, and returns its disarm. */
 export type GateArm = () => () => void;
 
-/** Whether `gate` is open in a `status` answer or event. */
-function gateOpen(
-  gate: BurrowGate,
-  status: Partial<Pick<BurrowStatusEvent, 'enrolled' | 'serving'>> | null | undefined,
-): boolean {
-  return !!status?.[gate];
-}
-
 /**
  * Run each arm while its gate is open and its disarm when it closes, starting
  * from whatever `status` reports. One subscription and one seed however many
@@ -61,9 +53,10 @@ export function armWhile(
     disarm: null as (() => void) | null,
   }));
 
-  const apply = (status: Partial<BurrowStatusEvent> | BurrowConsoleStatus | null | undefined): void => {
+  /** Each gate is open while its field of a `status` answer or event is true. */
+  const apply = (status: Pick<BurrowStatusEvent, BurrowGate> | null): void => {
     for (const entry of gates) {
-      const open = gateOpen(entry.gate, status);
+      const open = !!status?.[entry.gate];
       if (open === !!entry.disarm) continue;
       if (open) {
         entry.disarm = entry.arm();

@@ -250,8 +250,10 @@ test('a Burrow built for another origin is refused before anything is spent or s
 test('a Burrow naming this origin, however spelled, enrolls; one naming none is a 400', async () => {
   const { app, enrollTokenFile, stateDir } = await appWithOffer(offer());
   // Malformed before the credential is read: nothing spent, nothing appended.
-  const unnamed = await enroll(app, { password: PASSWORD, origin: undefined });
-  assert.equal(unnamed.status, 400);
+  for (const malformed of [undefined, null, 42, { href: ORIGIN }]) {
+    const unnamed = await enroll(app, { password: PASSWORD, origin: malformed });
+    assert.equal(unnamed.status, 400, JSON.stringify(malformed));
+  }
   assert.equal(existsSync(join(stateDir, 'burrows.json')), false);
   assert.equal(existsSync(enrollTokenFile), true);
   assert.equal((await enroll(app, { enrollToken: TOKEN, origin: `${ORIGIN}/` })).status, 200);

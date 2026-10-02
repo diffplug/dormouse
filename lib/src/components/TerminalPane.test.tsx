@@ -347,7 +347,7 @@ it('targets xterm when the terminal becomes focused again', () => {
 });
 
 describe('a pane a remote session holds', () => {
-  const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1', cols: 51, rows: 14 };
+  const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1', cols: 51, rows: 14 };
 
   /** The phone's attach, as the responder applies it: the hold, then the phone's grid. */
   function holdAtPhoneSize(id: string) {
@@ -385,7 +385,7 @@ describe('a pane a remote session holds', () => {
     mount();
     holdAtPhoneSize('b');
     // A later holder took it: the earlier session's release frees only its own.
-    const later = { holder: 'session-b', label: 'Pixel', lease: '1', cols: 40, rows: 20 };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1', cols: 40, rows: 20 };
     act(() => holdSize('b', later));
     act(() => void releaseSizeHold('b', PHONE));
     expect(registry.fits).not.toHaveBeenCalledWith('b');
@@ -397,7 +397,7 @@ describe('a pane a remote session holds', () => {
   it('stays held for an earlier session still attached when a later one lets go', () => {
     mount();
     holdAtPhoneSize('b');
-    const later = { holder: 'session-b', label: 'Pixel', lease: '1', cols: 40, rows: 20 };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1', cols: 40, rows: 20 };
     act(() => holdSize('b', later));
     act(() => void releaseSizeHold('b', later));
     expect(registry.fits).not.toHaveBeenCalledWith('b');
@@ -422,7 +422,7 @@ describe('a pane a remote session holds', () => {
   it('names the newest holder and counts the rest', () => {
     mount();
     holdAtPhoneSize('b');
-    act(() => holdSize('b', { holder: 'session-b', label: 'Pixel', lease: '1', cols: 40, rows: 20 }));
+    act(() => holdSize('b', { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1', cols: 40, rows: 20 }));
     expect(strip()!.textContent).toContain('Sized for Pixel +1');
     expect(strip()!.querySelector('button')!.getAttribute('aria-label')).toBe(
       'Disconnect iPhone, Pixel and resize this pane',
@@ -480,7 +480,7 @@ describe('a pane a remote session holds', () => {
     } as unknown as PlatformAdapter);
     mount();
     holdAtPhoneSize('b');
-    act(() => holdSize('b', { holder: 'session-b', label: 'Pixel', lease: '1', cols: 40, rows: 20 }));
+    act(() => holdSize('b', { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1', cols: 40, rows: 20 }));
 
     await act(async () => {
       strip()!.querySelector('button')!.click();

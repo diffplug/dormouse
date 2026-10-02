@@ -457,18 +457,16 @@ async function mintNoiseStatic(): Promise<EnrollmentStatic> {
 }
 
 /**
- * Which `BurrowEnrollResponse` fields the Relay left out or sent wrong, and the
- * caller's `label` if it passed none, for the error above. Mirrors
- * {@link isEnrollment} minus `relayUrl` and the static, which are set locally
- * and can never be the ones at fault — including its *shape* checks, so a
- * rejection can never name nothing. Pinned by `enrollment.test.ts`.
+ * Which `BurrowEnrollResponse` fields the Relay left out or sent wrong, for the
+ * error above. Mirrors {@link isEnrollment} minus `relayUrl`, which is set
+ * locally and can never be the one at fault — including its *shape* checks, so
+ * a rejection can never name nothing. Pinned by `enrollment.test.ts`.
  */
 function missingEnrollmentFields(enrollment: Record<string, unknown>): string[] {
-  const wrong: string[] = (['burrowId', 'burrowToken', 'origin', 'rpId'] as const).filter(
+  const wrong = (['burrowId', 'burrowToken', 'origin', 'rpId'] as const).filter(
     (field) => typeof enrollment[field] !== 'string',
   );
   if (!wrong.includes('burrowId') && !isE2eId(enrollment.burrowId)) wrong.unshift('burrowId');
-  if (typeof enrollment.label !== 'string') wrong.push('label');
   return wrong;
 }
 
