@@ -281,6 +281,15 @@ export class VSCodeAdapter implements PlatformAdapter {
     return result ?? [];
   }
 
+  async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+    const result = await this.requestResponse<Record<string, OpenPort[]>>(
+      'pty:getOpenPortsMany', 'pty:openPortsMany', { ids },
+      (msg) => msg.ports as Record<string, OpenPort[]>,
+      openPortRequestTimeoutMs(ids.length, 2),
+    );
+    return result ?? {};
+  }
+
   readClipboardFilePaths(): Promise<string[] | null> {
     return this.requestResponse<string[] | null>(
       'clipboard:readFiles', 'clipboard:files', {},

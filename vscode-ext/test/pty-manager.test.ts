@@ -40,6 +40,17 @@ describe('PTY manager lifetime and buffers', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('asks the child once for a batch and answers by request id', async () => {
+    const { manager, child } = await startManager();
+    const answer = manager.getOpenPortsMany(['pane-a', 'pane-b']);
+    const request = child.send.mock.calls.at(-1)![0];
+    expect(request).toMatchObject({ type: 'getOpenPortsMany', ids: ['pane-a', 'pane-b'] });
+    const ports = { 'pane-a': [{ address: '127.0.0.1', port: 5173, pid: 1 }], 'pane-b': [] };
+    child.emit('message', { type: 'openPortsMany', ports, requestId: 'someone-else' });
+    child.emit('message', { type: 'openPortsMany', ports, requestId: request.requestId });
+    expect(await answer).toEqual(ports);
+  });
+
   it('caps even a single oversized output chunk and retains absolute stream positions', async () => {
     const { manager, child } = await startManager();
     const data = 'prefix' + 'x'.repeat(1_000_000);

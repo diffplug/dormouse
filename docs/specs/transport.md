@@ -198,6 +198,8 @@ Transport constraints:
 | Webview → host | `dormouse:openExternal` | Open a user-confirmed external URI from an OSC 8 hyperlink. **Hosts must revalidate**, rejecting malformed, control-character-bearing, or blocked pseudo-scheme targets (`javascript:`, `data:`, `blob:`, `about:` — `lib/src/lib/external-links.ts`). |
 | Webview → host | `pty:getOpenPorts` | TCP listening ports of a PTY's shell **and all of its descendant subprocesses**, resolved from the root pid, answered with `pty:openPorts`. `getOpenPortsForPids()` in `standalone/sidecar/pty-core.js` (VS Code loads it through the `lib/pty-core.cjs` shim). |
 | Host → webview | `pty:openPorts` | `ports: OpenPort[]` (`{ protocol, family, address, port, pid, processName }`), de-duplicated by `(family, address, port)`, sorted by port then address. Empty when the PTY is gone or enumeration fails. |
+| Webview → host | `pty:getOpenPortsMany` | `ids: string[]`, answered by `pty:openPortsMany` from one scan. |
+| Host → webview | `pty:openPortsMany` | `ports: Record<id, OpenPort[]>`, `[]` for an id with no live PTY. |
 | Host → webview | `pty:data` | PTY output after state-driving supported OSCs are parsed/stripped; `OSC 8` and ImageAddon's inline-image `OSC 1337` forms are preserved for xterm.js, routed only to the owning router. **Carries an optional `textData`** (string-control payloads removed, for the prompt heuristic), **omitted when it would equal `data`**. |
 | Host → webview | `terminal:semanticEvents` | Normalized CWD / prompt-command / title events the owner's parser derived, in stream order. |
 | Host → webview | `terminal:toolEvents` | Ordered Tool announcements, state, and command-start resets (`docs/specs/dor-tool.md` → OSC 367). |
@@ -324,9 +326,10 @@ for the smallest, never queueing one behind another (rationale). Pinned by
 `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`.
 VS Code's child request uses one hop; its webview request uses two. Tauri's
 sidecar request uses one. **Must share the Windows socket-scan allowance across
-`Get-NetTCPConnection`, its `netstat` fallback, then optional name lookup**, reducing each
-subprocess timeout by elapsed time and starting none after exhaustion. **Must
-return enumerated ports even when optional name lookup times out.** Pinned by
+`Get-NetTCPConnection`, its `netstat` fallback, then optional name lookup**,
+reducing each subprocess timeout by elapsed time and starting none after
+exhaustion. **Must return enumerated ports even when optional name lookup
+times out.** Pinned by
 the Windows budget tests in `standalone/sidecar/pty-core.test.js` and by the port-deadline tests in
 `lib/src/lib/platform/vscode-adapter.test.ts`, `vscode-ext/test/pty-manager.test.ts`,
 and `lib/src/lib/mirrored-constants.test.ts`.
