@@ -712,14 +712,17 @@ describe('terminal-registry alert behavior', () => {
     });
   });
 
-  it('Story 9: new output while ringing latches until the user acknowledges', () => {
+  it('Story 9: new output pauses an owed ring until quiet or acknowledgement', () => {
     const id = 'story-9';
     createSession(id);
     enableAlert(id);
 
     driveToRingingNeedsAttention(id);
+    const episode = getActivity(id).episode;
     emitOutput(id, 'shell prompt');
-    expect(getActivity(id).status).toBe('ALERT_RINGING');
+    expect(getActivity(id)).toMatchObject({ status: 'NOTHING_TO_SHOW', episode });
+    advance(5_000);
+    expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
 
     clickSession(id);
     expect(getActivity(id).status).toBe('NOTHING_TO_SHOW');
@@ -887,11 +890,16 @@ describe('terminal-registry alert behavior', () => {
     enableAlert(id);
     driveToRingingNeedsAttention(id);
     const write = vi.spyOn(fakePlatform, 'writePty');
+    const episode = getActivity(id).episode;
     try {
       entry.terminal.emitInput(input);
       // Written as it came, and not as user input.
       expect(write.mock.calls).toEqual([[id, input]]);
-      expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING' });
+      // The fake PTY echoes the reply as output. It may pause presentation,
+      // but must never acknowledge or discard the owed episode.
+      expect(getActivity(id)).toMatchObject({ episode, todo: false });
+      advance(5_000);
+      expect(getActivity(id)).toMatchObject({ status: 'ALERT_RINGING', episode });
     } finally {
       write.mockRestore();
     }
