@@ -399,6 +399,7 @@ function detectReturnedShellPrompt(visible: string): string | null {
   // prompt may be the whole buffer with no leading newline, so accept that too.
   const newlineIndex = head.lastIndexOf('\n');
   const lastLine = (newlineIndex === -1 ? head : head.slice(newlineIndex + 1)).trimStart();
+  // A final line over 200 chars is never treated as a prompt.
   if (lastLine.length > 200) return null;
   // PowerShell `PS C:\path>` (with optional trailing space).
   if (/^PS\s+\S.*>\s?$/.test(lastLine)) return lastLine;

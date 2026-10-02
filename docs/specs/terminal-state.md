@@ -62,7 +62,7 @@ Source of truth: `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts`;
 
 | Shell | Channel | Injected when |
 |---|---|---|
-| zsh | env (`ZDOTDIR`) | Always. |
+| zsh | env (`ZDOTDIR`) | Always. **Nothing may be written into that directory at runtime** — it ships inside the signed macOS bundle (`.zshrc` has the why). |
 | bash | args (`--init-file`) | **The launch args are only `-i` / `-l` / `--login`** — Git Bash's `--login -i` included, a `-c <cmd>` not (rationale). |
 | PowerShell (`pwsh`, `powershell.exe`) | args (dot-source via `-Command`) | **A bare launch or one carrying `-NoExit`, unless it uses `-File` / `-EncodedCommand`**; appended after any startup command it carries (rationale). |
 | WSL | args (a `sh -c` detector inside the distro, reaching the bash script by its `/mnt/...` path) | **Only the exact two-argument `-d <distro>` launch.** **bash is the only integrated WSL shell** (rationale). |

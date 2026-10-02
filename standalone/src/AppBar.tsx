@@ -175,7 +175,7 @@ export function AppBar() {
       <DropCaret />
 
       {/* Theme and shell selection live in the Settings dialog at the
-          bottom-right of the window (docs/specs/theme.md,
+          bottom-right of the window (docs/specs/layout.md -> Baseboard,
           docs/specs/standalone.md), so the titlebar carries only the
           native-style window controls on Windows/Linux. */}
       {!IS_MAC && <WinControls />}

@@ -62,4 +62,4 @@ Native path payloads are not URLs: decoding `%20` or trimming edge spaces change
 
 **Why app-sent titles are filtered.** Under Windows ConPTY the console title is relayed for every child process whether or not it chose one, so an `OSC 0`/`OSC 2` title is frequently just the child's image path (`C:\WINDOWS\system32\cmd.exe`, which pnpm's script shell broadcasts) — no command information, so letting it through replaces a correctly detected command label with noise. A title carrying arguments or prose did come from a program that chose it.
 
-**Why the fail glyph lives in `primary` rather than only in the flag.** Plain-text title consumers — OS window titles, tab titles — render `primary` and nothing else, so a flag-only signal would lose the failure there; the flag exists alongside it so the pane header can color the glyph without re-parsing the string.
+**Why the fail glyph lives in `primary` rather than only in the flag.** Plain-text title consumers — OS window titles, tab titles — render `primary` and nothing else, so a flag-only signal would lose the failure there.

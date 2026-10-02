@@ -124,7 +124,7 @@ Drag distance from the rose center decides everything, in the order
 `RADIUS_FADE_START` < `RADIUS_HIGHLIGHT` < `RADIUS_SELECT`: root groups fade by
 alignment with the drag only past the first, the second previews the closest
 compass direction, and crossing the third (the drawn circle) selects it.
-**Reduced-motion users get every reveal's final state immediately.**
+**Reduced-motion users see the menu's opening animation (labels and select circle appearing) at its final state immediately.**
 
 Source of truth: `displayOriginAwayFromThumb` and the `RADIUS_*` constants in
 `lib/src/lib/mobile-gesture-menu.ts`; `MobileGestureRadialMenu` in
