@@ -1,7 +1,8 @@
 import { constants } from 'node:fs';
-import { open, realpath, rename, unlink, type FileHandle } from 'node:fs/promises';
+import { open, realpath, type FileHandle } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import { saveFileOperations, type SaveFileOperations } from './atomic-save.js';
 import { HttpError } from './viewer-server.js';
 
 export const TEXT_LIMIT = 8 * 1024 * 1024;
@@ -49,7 +50,7 @@ export async function readEditableFile(target: string): Promise<{ text: string; 
 /** Optimistic concurrency: write and flush a private sibling, recheck contents
  * and identity, then replace atomically. No arbitrary destination or force API.
  * Like other local editors, this cannot lock out an uncooperative writer. */
-export async function saveEditableFile(target: string, text: string, version: string) {
+export async function saveEditableFile(target: string, text: string, version: string, operations: SaveFileOperations = saveFileOperations) {
   const current = await readEditableBytes(target);
   if (current.version !== version) throw new HttpError(409, 'The file changed on disk. Your edits are safe here; compare or reload before saving.');
   const bom = current.bytes.subarray(0, UTF8_BOM.length).equals(UTF8_BOM);
@@ -62,7 +63,9 @@ export async function saveEditableFile(target: string, text: string, version: st
     if (!stat.isFile() || stat.dev !== current.stat.dev || stat.ino !== current.stat.ino) throw new HttpError(409, 'The file changed on disk.');
   } finally { await writable.close(); }
   const temporary = join(dirname(target), `.dor-save-${randomBytes(16).toString('hex')}.tmp`);
-  const file = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+  const sibling = await operations.createSibling(target, temporary);
+  const file = sibling.file;
+  let cleanup = true;
   try {
     try {
       await file.writeFile(bytes);
@@ -74,9 +77,18 @@ export async function saveEditableFile(target: string, text: string, version: st
       || latest.stat.mtimeMs !== current.stat.mtimeMs || latest.stat.ctimeMs !== current.stat.ctimeMs) {
       throw new HttpError(409, 'The file changed on disk. Reopen or reload it before saving.');
     }
-    await rename(temporary, target);
+    // Once native replacement starts, an error may mean a partial rename or
+    // a committed save whose reply was lost. Keep every recovery byte until
+    // replacement is confirmed; never delete a possible sole surviving copy.
+    cleanup = false;
+    try { await operations.replace(sibling.path, target); }
+    catch {
+      const recovery = process.platform === 'win32' ? dirname(sibling.path) : sibling.path;
+      throw new HttpError(500, `The save could not be confirmed. Recovery files were kept at ${recovery}. Reload before saving again.`);
+    }
+    cleanup = true;
     return { version: revision(bytes) };
   } finally {
-    await unlink(temporary).catch(() => {});
+    if (cleanup) await sibling.cleanup();
   }
 }

@@ -68,7 +68,7 @@ A name read from a browser or terminal passes through whatever those show mid-sw
 
 ## Opening local files
 
-The VS Code host supports Node 18, which lacks native glob matching. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity. Canonicalizing only the target mixed physical and logical paths under a symlinked CWD, so relative slash patterns missed files inside that directory. An absolute target can still be opened after its caller's CWD disappears; matching falls back to the supplied directory in that case.
+The supported VS Code host floor runs Node 20 (2026-10), which lacks native glob matching; `docs/specs/vscode.md` records the pinned runtime floor. Bundled picomatch keeps association behavior the same across hosts. Patterns with separators test both the CWD-relative and canonical absolute path: files above the CWD otherwise start with `../` and can miss patterns intended to cover an absolute directory. Canonicalization also gives symlink aliases one matching identity. Canonicalizing only the target mixed physical and logical paths under a symlinked CWD, so relative slash patterns missed files inside that directory. An absolute target can still be opened after its caller's CWD disappears; matching falls back to the supplied directory in that case.
 
 ## Folders
 
@@ -129,3 +129,11 @@ A derived URL or browser daemon binding belongs to one execution. Reusing it aft
 Routing `dor tool` to a native editor on one host would change its result from a Surface handle to a host-specific side effect. Native file opening remains a separate operation.
 
 A Workspace transfer carries the live browser binding separately from its durable record. The arrival record can reach disk while the windows coordinate, whereas the content channel stays in memory; reusing the saved-record projection alone would reopen a Tool browser and lose its current page state. Pending approvals and unfinished browser startup still own asynchronous work in the source window, so the move waits for the user to resolve the approval or retry after startup.
+
+## OSC 367
+
+JSON escaping can double the source length of a valid path, so a field within its own bound can still exceed the serialized payload cap of the host. C1 OSC and ST are literal JSON characters, unlike escaped C0 controls; allowing them in a serve path inserts terminal framing into the emitted sequence.
+
+## Closing unsaved Tools
+
+Host save request ids restart at 1 on a replacement connection. A completion that reads the current frame connection can therefore acknowledge a new request after reconnect, permitting closure before the new save finishes. The accepted host object distinguishes connection generations even when a reconnect repeats its nonce.

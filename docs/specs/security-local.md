@@ -200,7 +200,9 @@ so the modes there are VS Code's, not ours, and no transcript reaches either
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`
 with `wx`, its socket directory re-checked on every contention round. **Neither
-control does anything on Windows** (rationale).
+control does anything on Windows** (rationale). VS Code's `tool-trust` receipts
+likewise inherit the extension storage ACL; Dormouse applies no dedicated
+Windows DACL to them.
 
 **The standalone log is unprotected and names the control socket.**
 `$DORMOUSE_LOG_FILE`, else `%LOCALAPPDATA%\Dormouse Terminal\dormouse.log`, else

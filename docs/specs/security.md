@@ -118,7 +118,7 @@ Gaps rather than accepted risks: we intend to close them.
   WebSocket cookie headers are stripped, but `document.cookie` remains shared;
   cookie-authenticated iframe pages are unsupported
   ([Loopback Listeners](./security-local.md#loopback-listeners)).
-- **VS Code's peer-link token has no dedicated Windows ACL applied by Dormouse.**
+- **VS Code's peer-link token and Tool trust receipts have no dedicated Windows ACL applied by Dormouse.**
   Its unix mode is a no-op on Windows
   ([Persisted state](./security-local.md#persisted-state)).
 - **The standalone log file is written at the umask** and records the `dor`
