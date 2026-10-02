@@ -206,8 +206,9 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       const columns = Math.max(20, terminal.columns());
       const rows = Math.max(4, terminal.rows());
       const panel = wide();
-      // Narrow terminals give the handler one status line above the hints.
-      listRows = rows - 1 - (panel ? 1 : 2);
+      // The panel heads with the key hints; narrow terminals put the handler on
+      // a status line above them at the bottom.
+      listRows = rows - 1 - (panel ? 0 : 2);
       if (cursor >= scroll + listRows) scroll = cursor - listRows + 1;
       const width = listWidth();
       const lines: string[] = [];
@@ -236,8 +237,8 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       if (!panel) {
         lines.push(renderStatus(columns));
         if (handlerList().length > 1) handlerRows.set(rows - 2, -1);
+        lines.push(dim(clip(hints().join('  '), columns)));
       }
-      lines.push(renderHints(columns));
 
       let out = `${CSI}?2026h${CSI}?25l`;
       lines.forEach((line, index) => { out += `${CSI}${index + 1};1H${line}${SGR.reset}${CSI}K`; });
@@ -246,7 +247,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     };
 
     const renderPanel = (width: number): Line[] => {
-      const lines: Line[] = [{ text: `${SGR.bold}Opens with${SGR.reset}` }];
+      const lines: Line[] = [...packHints(hints(), width).map(text => ({ text: dim(text) })), { text: '' }, { text: `${SGR.bold}Opens with${SGR.reset}` }];
       const plain = (text: string) => wrap(text, width).map(line => ({ text: dim(line) }));
       if (options.fixedTool !== undefined) {
         return [...lines, { text: `${SGR.accent}›${SGR.reset} ${SGR.bold}${clip(printable(options.fixedTool), width - 2)}${SGR.reset}` },
@@ -283,10 +284,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       return `${SGR.bold}${clip(head, columns)}${SGR.reset}${dim(clip(rest, columns - displayWidth(head)))}`;
     };
 
-    const renderHints = (columns: number): string => {
-      const hints = ['↑↓ select', ...(handlerList().length > 1 ? ['⇥ handler'] : []), '⏎ open', 'esc cancel'];
-      return dim(clip(hints.join('  '), columns));
-    };
+    const hints = () => ['↑↓ select', ...(handlerList().length > 1 ? ['⇥ handler'] : []), '⏎ open', 'esc cancel'];
 
     terminal.write(ENTER_SCREEN);
     const stop = terminal.listen(onInput, () => { if (!done) render(); });
@@ -449,6 +447,17 @@ function clip(text: string, width: number): string {
 /** Styled text padded with spaces to `width` columns. */
 function padTo(text: string, width: number): string {
   return text + SGR.reset + ' '.repeat(Math.max(0, width - displayWidth(text)));
+}
+
+/** Hints packed whole onto lines of at most `width` columns. */
+function packHints(hints: readonly string[], width: number): string[] {
+  const lines: string[] = [];
+  for (const hint of hints) {
+    const last = lines[lines.length - 1];
+    if (last !== undefined && displayWidth(`${last}  ${hint}`) <= width) lines[lines.length - 1] = `${last}  ${hint}`;
+    else lines.push(clip(hint, width));
+  }
+  return lines;
 }
 
 /** Plain text broken at spaces into lines of at most `width` columns. */

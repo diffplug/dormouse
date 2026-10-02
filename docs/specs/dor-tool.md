@@ -198,7 +198,7 @@ Source of truth: `FOLDER_MATCH_SUFFIX` / `BUILTIN_HANDLERS` in `dor-tools-builti
 - **Must list the files under the resolved CWD**: inside a git work tree, tracked plus untracked less ignored and deleted; otherwise a breadth-first walk skipping dot-entries and `node_modules`; at most 200,000.
 - **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects (both read `openCandidates`), then later matching rules' `tool` and `preview`, then each built-in supporting it — each once, with what it runs and what offers it.
 - **Must open the first without `--tool` and any other as `--tool <name>`.** `--tool` fixes the handler and skips the read; a host refusing the read leaves the default openable.
-- **Must show the handlers beside the list from 100 columns, else on one status line.**
+- **Must show the handlers beside the list from 100 columns, under the key hints at the top of that pane; narrower, on one status line above the hints.**
 
 Source of truth: `openCommand` in `dor/src/commands/open.ts`; `runFilePicker` in `dor/src/commands/open-picker.ts`; `listFiles` in `dor/src/commands/file-list.ts`; `rankMatches` in `dor/src/commands/fuzzy.ts`; `listOpenHandlers` in `lib/src/host/tool-open.ts`. Tests: `dor/test/open-picker.test.mjs`, `open-handlers` in `lib/src/host/tool-open.test.ts`.
 
