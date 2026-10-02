@@ -98,6 +98,11 @@ The room closes a socket with one of six codes:
 | 4014 | `WS_CLOSE_ONE_TIME_DEADLINE` | a phone joined, and the hard deadline passed |
 | 4015 | `WS_CLOSE_ONE_TIME_VIOLATION` | a binary frame, one over the length bound, or one past the message cap |
 
+A laptop ends on a close code it does not know as `rendezvous-lost`, and the
+phone reads one as generic copy for its phase; an outcome whose guard refuses
+it, a denial code the phone does not know included, reads as `burrow-error`.
+So either deploy may add a code first.
+
 Source of truth: `remote-lib-common/src/remote/one-time-wire.ts`;
 `parseOneTimeFrame` in `lib/src/remote/one-time-rendezvous.ts`;
 `OneTimeRequestV1` / `OneTimeOutcomeV1` in
@@ -178,8 +183,8 @@ at most one session**, on `ClientSessionCore`, direct or not at all.
 - After the switch (the same carve-out), channel loss, the laptop's goodbye, or
   the idle deadline reaches `setOnEnded` once; `close()` reports nothing.
 - **Every failure resolves `{ok: false, message}` with fixed copy**, never
-  room- or Burrow-supplied text; a goodbye naming the phone's address reads
-  `networkNotAllowedMessage` (`docs/specs/remote-network.md` -> "Local networks").
+  text from the room or the Burrow but the goodbye's address, which
+  `networkNotAllowedMessage` fills in (`docs/specs/remote-network.md` -> "Local networks").
 
 Source of truth: `OneTimeClient` in `lib/src/remote/client/one-time-client.ts`.
 
@@ -268,11 +273,8 @@ empties the relay's assets directory, copies the page to
 **Serving.** The relay Worker answers `/connect`, `/connect/`, and
 `/connect/assets/*` from its assets, with no SPA fallback; an HTML answer
 under `/connect/assets/` and any other path under `/connect/` is a 404.
-Everything under `/connect` carries `oneTimePagePolicy`, built from the relay's
-`APP_ORIGIN`: scripts only from its `/connect/assets/` (plus
-`'wasm-unsafe-eval'`), other sources only from its `/connect/` or `data:`,
-`blob:`, and inline styles, one connection — the client route — no worker,
-form, base, framing, or object, and `sandbox allow-scripts allow-same-origin`. Every other relay response carries Pocket's policy or
+Everything under `/connect` carries `oneTimePagePolicy`
+(`hosted/server/headers.ts`), built from the relay's `APP_ORIGIN`. Every other relay response carries Pocket's policy or
 `RUNS_NOTHING_POLICY` (`docs/specs/security-hosted.md` -> "Relay boundary").
 
 - **An `APP_ORIGIN` that is not exactly `scheme://host[:port]` of plain host

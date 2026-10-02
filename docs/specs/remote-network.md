@@ -25,7 +25,7 @@
 
 **Must enforce the policy at its choke points** — the Burrow service, the managed-voice host, and the updater ("Updates"); **a new outbound path adds one here before it ships** (rationale). What the user clicks, and what their terminals, browser panes, and agents reach, are their own connections. **Nothing opens nothing**:
 
-- **The Burrow service's socket factory, fetch, and direct-peer factory refuse at the call while the level is `nothing` or unread, and once the service is disposed**, so a path that forgets its own check still opens nothing. Everything the service opens, the enrollment exchange included, goes through them.
+- **The Burrow service's socket factory, fetch, and direct-peer factory refuse at the call while the level is `nothing` or unread, and once the service is disposed**, so a path that forgets its own check still opens nothing. Everything the service opens, the enrollment exchange included, goes through them; the per-command checks below stay, for the error a person reads.
 - **The Burrow service never opens the relay socket**, the enrollment held as above, so push, the device list, and setup codes make no request.
 - **It refuses `enroll`, `enrollOffer`, and `beginHostedEnrollment` before any request**, the offer file unread, and a change to `nothing` ends a Hosted enrollment awaiting approval.
 - **It offers no one-time link**: the resting state is `unavailable` with reason `network-off`, and `oneTimeOpen` is refused, as under `local` with no network allowed.
