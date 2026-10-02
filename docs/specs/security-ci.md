@@ -16,7 +16,7 @@
 
 ## Automated Maintainer (tend)
 
-This repository runs the [tend](https://github.com/max-sixty/tend) agent harness as the GitHub user `dormouse-bot`: it reviews PRs, triages issues, fixes CI failures, regenerates its own workflow files nightly, responds to mentions, and polls its notification feed.
+This repository runs the [tend](https://github.com/max-sixty/tend) agent harness as the GitHub user `dormouse-bot`: it reviews PRs, triages issues, fixes CI failures, regenerates its own workflow files nightly, responds to mentions, and polls its notification feed. A prompt injection in that harness reaches the four secrets below, and **none escalates directly into malicious content on the `main` branch or into any deployment-related secret** — those paths stay admin-gated.
 
 | Secret | What a compromise buys | What bounds it |
 | --- | --- | --- |

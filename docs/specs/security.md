@@ -40,20 +40,20 @@ Cargo tests run in separate CI jobs, outside root `pnpm test`.
 | Guarantee | Rule | Pinned by |
 | --- | --- | --- |
 | **Terminal output cannot write your clipboard or steal focus.** File access requires a user action or a running designated Tool's gated OSC 367 `open`. OSC 52 only offers a copy format; links require confirmation or an allowed local preview, and deceptive links have no open action. | [Terminal output](./security-local.md#terminal-output) | `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `lib/src/components/ExternalLinkModalHost.test.tsx` |
-| **A page in a browser pane cannot forge a host message.** | [Browser panes](./security-local.md#browser-panes) | `lib/src/lib/platform/vscode-adapter.test.ts` |
-| **Only your own account can drive your terminals through `dor`.** Its token never crosses the wire. | [The dor control socket](./security-local.md#the-dor-control-socket) | `standalone/sidecar/dor-control-server.test.js` |
+| **A page in a browser pane cannot forge a host message.** In VS Code every host message carries a per-boot token it cannot read, and the standalone adapters have no inbox for it to post to. | [Browser panes](./security-local.md#browser-panes) | `lib/src/lib/platform/vscode-adapter.test.ts` |
+| **Only your own account can drive your terminals through `dor`.** The socket sits in a directory only you can open, and its token never crosses the wire. | [The dor control socket](./security-local.md#the-dor-control-socket) | `standalone/sidecar/dor-control-server.test.js` |
 | **A loopback listener grants a stranger nothing it could not get from the upstream directly.** | [Loopback Listeners](./security-local.md#loopback-listeners) | `scripts/loopback-lint.mjs` |
 | **Current persistence writers never save terminal scrollback.** Standalone snapshots are owner-only; VS Code controls access to its own storage. Older snapshots may contain transcripts. | [Persisted state](./security-local.md#persisted-state) | `cargo test` in `standalone/src-tauri` (the owner-only half); audit |
-| **Phone authorization requires local confirmation at the Burrow, which makes every access decision.** | [Pairing](./remote-security-model.md#pairing), [Burrow Authorization](./remote-security-model.md#burrow-authorization) | `remote-lib-common/test/security-guarantees.test.mjs` |
-| **A one-time connection is one session, confirmed at the laptop, with nothing saved at either end.** Terminal traffic runs directly between the devices under Settings → Network; Hosted carries only the handshake. | [One-time connection](./remote-security-model.md#one-time-connection), [its checks](./security-remote.md#one-time-connection) | `lib/src/remote/client/one-time-e2e.test.ts`, `scripts/e2e-lint.mjs` |
-| **The Relay cannot read ceremony or terminal content or grant terminal access.** Account data and routing metadata remain visible. | [Trust Model](./remote-security-model.md#trust-model), [Residual metadata](./remote-security-model.md#residual-metadata) | `scripts/e2e-lint.mjs` |
+| **Nothing but a human at the laptop can authorize a phone.** The only path into a Burrow's ACL is typing, on that Burrow, the two digits the phone shows, and the Burrow makes every access decision. | [Pairing](./remote-security-model.md#pairing), [Burrow Authorization](./remote-security-model.md#burrow-authorization) | `remote-lib-common/test/security-guarantees.test.mjs` |
+| **A one-time connection is one session, confirmed at the laptop.** Only typing, on the laptop, the two digits that phone shows authorizes it; nothing is saved at either end, and its terminal traffic runs only directly between the two devices, over a network Settings → Network allows; Hosted carries the handshake alone. | [One-time connection](./remote-security-model.md#one-time-connection), [its checks](./security-remote.md#one-time-connection) | `lib/src/remote/client/one-time-e2e.test.ts`, `scripts/e2e-lint.mjs` |
+| **The Relay cannot read ceremony or terminal content or grant terminal access.** One end-to-end channel per ceremony carries content under keys the Relay never holds; account data and routing metadata remain visible. | [Trust Model](./remote-security-model.md#trust-model), [Residual metadata](./remote-security-model.md#residual-metadata) | `scripts/e2e-lint.mjs` |
 | **Push notifications are opt-in, and a push is sealed to the one phone that receives it.** | [Push sealing](./remote-security-model.md#push-sealing) | `remote-lib-common/test/push-seal.test.mjs` |
 | **A stolen or synced passkey buys sign-in, not a terminal.** Every connection also needs the phone's own paired key and a fresh presence proof bound to that connection. | [Passkeys](./remote-security-model.md#passkeys), [Presence proofs](./remote-security-model.md#presence-proofs) | `remote-lib-common/test/security-guarantees.test.mjs` |
 | **The Burrow bounds remote session state and handshake admission independently of the Relay.** Deadlines use its own clock. | [Burrow bounds](./remote-security-model.md#burrow-bounds) | `lib/src/remote/burrow/burrow-bounds.test.ts`, `relay/test/malicious-relay.test.mjs` |
 | **Under Settings → Network → Nothing, a new install's level, Dormouse opens no connection on its own**: no relay socket, one-time link, push, managed voice, or update check. What you click, and what your terminals and browser panes reach, are yours. | [Network policy](./security-local.md#network-policy) | `lib/src/host/remote/service.test.ts`, `lib/src/host/managed-voice-host.test.ts`, `standalone/src/updater.test.ts` |
 | **A Burrow talks only to the one relay origin its build was pointed at, and a self-host build contacts Dormouse's servers only when you click a link.** A stock build reaches only Hosted. | [Relay origin](./security-remote.md#relay-origin) | `lib/src/host/relay-origin.test.ts` |
 | **The self-host installer restricts Relay credentials to the installing account**, on macOS, Windows, and Linux; Burrow enrollment uses protected app storage or VS Code's secret storage. Installer owner-check gaps are listed below. | [Credentials at rest](./security-remote.md#credentials-at-rest) | `scripts/deploy-lint.mjs` |
-| **The self-host HTTPS origin may be public; its plaintext backend may not.** Enrollment is admission-limited, cross-origin browsers receive no grant, and terminal access still requires local Burrow approval. | [The setup password](./security-remote.md#the-setup-password), [Cross-origin access](./security-remote.md#cross-origin-access), [Network posture](./security-remote.md#network-posture-self-hosted) | `relay/test/setup-password-store.test.mjs`, `relay/test/config.test.mjs`, `relay/test/token-bucket.test.mjs`, `relay/test/cors.test.mjs`, `scripts/deploy-lint.mjs` |
+| **The self-host HTTPS origin may be public; its plaintext backend may not.** The Relay generates its 256-bit setup credential with no operator-supplied value, Burrow enrollment is globally admission-limited, cross-origin browsers receive no grant, and terminal access still needs local Burrow approval. | [The setup password](./security-remote.md#the-setup-password), [Cross-origin access](./security-remote.md#cross-origin-access), [Network posture](./security-remote.md#network-posture-self-hosted) | `relay/test/setup-password-store.test.mjs`, `relay/test/config.test.mjs`, `relay/test/token-bucket.test.mjs`, `relay/test/cors.test.mjs`, `scripts/deploy-lint.mjs` |
 | **Push, when enabled, cannot be aimed back into the tailnet.** | [What crosses the boundary](./security-remote.md#what-crosses-the-boundary) | `relay/test/push-endpoint.test.mjs` |
 | **Every dependency Dormouse puts on a user's machine is disclosed** at [dormouse.sh/supply-chain](https://dormouse.sh/supply-chain), and a change without the disclosure fails CI. | [Disclosure](./security-supply-chain.md#disclosure) | `.github/workflows/ci.yml` |
 | **The bundled runtime is the version disclosed.** The build verifies the binary against the pin. | [Bundled runtime](./security-supply-chain.md#bundled-runtime) | `standalone/src-tauri/build.rs` |
@@ -130,8 +130,8 @@ Gaps rather than accepted risks: we intend to close them.
   ([Revocation and the audit trail](./security-remote.md#revocation-and-the-audit-trail)).
 - **There is no structured audit trail** covering connects, attaches, denials,
   or writes ([same](./security-remote.md#revocation-and-the-audit-trail)).
-- **The workflow audit can miss malicious changes**
-  ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
+- **The workflow audit's window has two evasions**, both in how the window is
+  computed ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 - **Audit domains share one credential.** Their contexts are separate;
   `AUDIT_PAT` is not ([Domains](./security-audit.md#domains)).
 - **The notarization password sits on a command line for up to half an hour**
@@ -142,23 +142,35 @@ Gaps rather than accepted risks: we intend to close them.
 
 ## How the guarantees are checked
 
-Root `pnpm test` runs the JavaScript checks and lint mutation suites; native
-Cargo CI jobs test platform-specific persistence. `package.json` owns the root
-suite, and [Specs in AGENTS.md](../../AGENTS.md#specs) maps its lints to their
-owning contracts. A mutation test must make its protected rule fail;
-`scripts/installer-verify-test.mjs` executes installer helpers the lints only read.
+**On every `pnpm test`**, four lints turn the cheap half of these specs into
+build failures: `scripts/spec-lint.mjs` (the specs' own conventions and word
+budgets), `scripts/e2e-lint.mjs` (one Noise suite, no negotiation, no
+plaintext path), `scripts/deploy-lint.mjs` (every installer control, on all
+three platforms), and `scripts/loopback-lint.mjs` (a new loopback bind
+references a guard). **Each carries a self-test that re-introduces the thing it
+forbids and requires the lint to go red**; a rule without one is a claim, not a
+check. `scripts/installer-verify-test.mjs` executes the installer helpers the
+lints can only read.
 
-**Every night at 04:21 UTC, and before every VS Code release**, the
-[security audit](./security-audit.md#schedule-and-gate) executes every audited
-clause and reads each domain adversarially for holes no check names. Its
-[Domains](./security-audit.md#domains) own the disjoint scopes and prompts.
-A failure or inconclusive run files a public
+**Every night at 04:21 UTC, and before every VS Code release**,
+`.github/workflows/security-audit.yaml` audits the repository against these
+specs. Four subagents, each owning the specs below, run every `FAIL IF` as a
+mechanical check with evidence, then read their domain adversarially for what
+no check names. A failure, or a run reaching no verdict, files a public
 issue labeled
 [`security-audit-failure`](https://github.com/diffplug/dormouse/issues?q=is%3Aissue+label%3Asecurity-audit-failure)
 and holds the release; a later pass closes it. Open issues are live; closed
-ones record what tripped and changed. `scripts/security-audit-local.sh` runs
-the same prompts locally. pgstencil audits the packages Hosted consumes in
-its own repository.
+ones record what tripped and changed.
+`scripts/security-audit-local.sh` runs the same prompts locally.
+[security-audit.md](./security-audit.md) is the contract. pgstencil audits the
+packages Hosted consumes in its own repository.
+
+| Domain | Specs | Covers |
+| --- | --- | --- |
+| `application-security` | [security-local.md](./security-local.md), [security-remote.md](./security-remote.md) | local boundaries, remote control, and everything no other domain claims |
+| `hosted` | [security-hosted.md](./security-hosted.md) | Hosted accounts, the one-time rendezvous, and the pgstencil provenance link |
+| `supply-chain` | [security-supply-chain.md](./security-supply-chain.md) | the dependency graph, the lockfile, the disclosure and its generator |
+| `ci-and-secrets` | [security-ci.md](./security-ci.md), [security-audit.md](./security-audit.md), this spec | GitHub Actions, the bot, releases, secrets, and the audit itself |
 
 Production dependency changes require committed regenerated
 [disclosure](./security-supply-chain.md#disclosure). Desktop release artifacts
