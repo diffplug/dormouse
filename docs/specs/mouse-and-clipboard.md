@@ -350,16 +350,16 @@ Source of truth: `useSessionPersistence` in `lib/src/components/wall/use-session
 
 ### 8.8 Right-Click and Menu Paste
 
-Right-click and OS Edit-menu paste are not implemented; users paste via §8.2's shortcuts.
+Right-click paste is not implemented. On macOS standalone, Edit → Paste clicked with a terminal focused performs WKWebView's native paste, which xterm.js inserts as plain text, skipping §8.6's tiers; the shortcut takes §8.2's path.
 
 ### 8.9 Clipboard Chords Inside Dormouse's Own Text Fields
 
-Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields — have no *native* clipboard chords in the menu-less standalone build (`docs/specs/standalone.md` → "Application menu"). `handleEditableClipboard` (`lib/src/components/wall/keyboard/handle-editable-clipboard.ts`) supplies them in JS, **ahead of the wall's mode and rename gates** so a focused field wins whatever the wall is doing:
+Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields — keep their clipboard chords in JS on the standalone hosts (`docs/specs/standalone.md` → "Application menu"). `handleEditableClipboard` (`lib/src/components/wall/keyboard/handle-editable-clipboard.ts`) supplies them in JS, **ahead of the wall's mode and rename gates** so a focused field wins whatever the wall is doing:
 
 - **Paste** reads through `readTextFromClipboard` (the §8.6 tier-2 preference, so no "Paste from <App>" popup) and replaces the field's selection. **Copy** and **cut** write the selected substring through `writeTextToClipboard`, whose false return is what stops a cut deleting; a collapsed selection copies nothing. **Text only** — the file-reference and image tiers stay terminal-only.
 - The edit goes through `document.execCommand('insertText')` where the webview allows it (native undo), else **the prototype `value` setter plus a synthetic `input` event** — a plain `value` assignment desyncs a React-controlled field.
 - Chords are §8.2's: paste takes either modifier on every platform, copy/cut take `⌘` on macOS and `Ctrl` elsewhere.
-- **Scope is narrow.** Excluded: xterm's `.xterm-helper-textarea` (the terminal owns its chords), read-only and disabled fields. The handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters, slightly over-reaching the menu-less macOS build it is written for (rationale). Elsewhere — VS Code, the website, Pocket — it never fires and the webview's own chords are untouched.
+- **Scope is narrow.** Excluded: xterm's `.xterm-helper-textarea` (the terminal owns its chords), read-only and disabled fields. The handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters, though macOS now has a native Edit menu and Windows/Linux webviews native chords (rationale). Elsewhere — VS Code, the website, Pocket — it never fires and the webview's own chords are untouched.
 - **Must skip an asynchronous edit if the field unmounts, loses focus, becomes read-only/disabled, or changes value or selection**; a cut deletes only after clipboard-write success. Pinned by `lib/src/components/wall/keyboard/handle-editable-clipboard.test.ts`.
 
 ---
@@ -370,7 +370,7 @@ Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields
 
 **Must route clipboard chords and selection operations to the focused helper**, while leaving its Escape, Tab, arrows, and digits with xterm. Which of those disarm autorun follows `docs/specs/terminal-context.md` → "Helper lifecycle".
 
-**Must copy selected context diagnostic text with Cmd+C on macOS and Ctrl+C elsewhere**, including the menu-less standalone host. Copy only a selection contained in the focused diagnostic, retaining it on clipboard failure; helper and editable-field chords keep their own routing. Pinned by `lib/src/components/wall/keyboard/handle-context-copy.test.ts`.
+**Must copy selected context diagnostic text with Cmd+C on macOS and Ctrl+C elsewhere**, including the standalone host. Copy only a selection contained in the focused diagnostic, retaining it on clipboard failure; helper and editable-field chords keep their own routing. Pinned by `lib/src/components/wall/keyboard/handle-context-copy.test.ts`.
 
 Source of truth: `handleContextCopy` in `lib/src/components/wall/keyboard/handle-context-copy.ts`; `TerminalPanel` in `lib/src/components/wall/TerminalPanel.tsx`; `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`.
 
@@ -412,7 +412,7 @@ Not implemented today; they may be added in response to user feedback.
 ### 9.2 Paste
 
 - Enable Tauri's native file drops by setting `dragDropEnabled: true`; pointer-based Lath dragging no longer needs the flag disabled (rationale at §8.7).
-- Right-click context-menu Paste and OS Edit → Paste menu wiring.
+- Right-click context-menu Paste, and routing Edit → Paste through §8.6's tiers.
 - A settings toggle to disable Ctrl+V interception on Windows and Linux.
 - A paste popup for previewing or transforming content before it is committed.
 - Paste content transformations (strip trailing whitespace, normalize line endings, convert smart quotes).

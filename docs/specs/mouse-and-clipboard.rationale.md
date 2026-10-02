@@ -92,6 +92,6 @@ The [Bash reference manual](https://www.gnu.org/software/bash/manual/html_node/C
 
 ## 8.9 Clipboard Chords Inside Dormouse's Own Text Fields
 
-**Why the standalone build has no native chords at all.** macOS routes `⌘C`/`⌘X`/`⌘V` into a WKWebView through the application's Edit menu; the standalone build replaces the default macOS menu and ships none, so the Edit items — and with them the only native path to those chords — went away.
+**Why the standalone build first had no native chords.** macOS routes `⌘C`/`⌘X`/`⌘V` into a WKWebView through the application's Edit menu, and the standalone build once shipped none. The native Edit submenu returned in 2026-10 for Tool iframes; tested in the dev build on macOS, a chord whose keydown the page cancels never reaches the menu item, so this JS path still owns Dormouse's fields without double-pasting.
 
-**Why `readClipboardText` is the gate.** It is a proxy for "this is the menu-less standalone build", and it over-reaches to `standalone/src/browser-sidecar-adapter.ts`, whose Chrome webview *does* have working native chords — there the JS path replaces a working one rather than standing down. Worth knowing when a chord misbehaves only in the browser sidecar: the suspect is the JS handler, not the webview.
+**Why `readClipboardText` is the gate.** It was a proxy for "this is the menu-less standalone build", and it over-reaches to `standalone/src/browser-sidecar-adapter.ts`, whose Chrome webview *does* have working native chords — there the JS path replaces a working one rather than standing down. Worth knowing when a chord misbehaves only in the browser sidecar: the suspect is the JS handler, not the webview.

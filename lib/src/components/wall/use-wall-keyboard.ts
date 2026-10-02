@@ -4,6 +4,7 @@ import { handleContextCopy } from './keyboard/handle-context-copy';
 import { handleEditableClipboard } from './keyboard/handle-editable-clipboard';
 import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys';
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
+import { cancelUiSelectAll } from './keyboard/handle-select-all';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';
@@ -40,6 +41,7 @@ export function useWallKeyboard(ctx: WallKeyboardCtx): void {
       // "Workspaces").
       if (!c.activeRef.current || answeredKeys.has(e)) return;
       answeredKeys.add(e);
+      cancelUiSelectAll(e);
 
       // Any other key cancels a pending leader: a left-Shift capital, a word,
       // then a right-Shift capital is typing, not the gesture.

@@ -361,19 +361,25 @@ Edge cases:
 
 ### Application menu
 
-Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
+The app replaces Tauri's default menu with macOS-only App (about / services /
+hide / hide-others / quit) and Edit (undo / redo / cut / copy / paste / select
+all) submenus, and a Window submenu (minimize / maximize / close, plus a
+macOS-only fullscreen toggle). **Must keep the fullscreen item** — it and its
+Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal
+the overlay title bar's traffic lights.
 
-The app replaces Tauri's default menu with a macOS-only App submenu (about /
-services / hide / hide-others / quit) and a Window submenu (minimize / maximize /
-close, plus a macOS-only fullscreen toggle). **Must keep the fullscreen item** —
-it and its Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does
-not reveal the overlay title bar's traffic lights. **No Edit submenu** — its predefined Paste item binds Cmd+V natively and
-would fire alongside the terminal's own DOM-level Cmd+V handling
-(`docs/specs/mouse-and-clipboard.md` §8.2). macOS therefore delivers Cmd+C/X/V to
-the webview as plain keydowns and WKWebView performs no native edit, in Dormouse's
-own text fields too; JS supplies their clipboard
-(`docs/specs/mouse-and-clipboard.md` §8.9). **A new menu item must not claim a
-chord the webview already handles.**
+- **Must keep the Edit submenu on macOS**: WKWebView edits natively only
+  through it, the only clipboard path Tool iframes have.
+- **Must cancel the keydown of any chord the page handles**, so the menu item
+  skips it: the terminal and Dormouse's fields
+  (`docs/specs/mouse-and-clipboard.md` §8.2, §8.9) do, and the Wall cancels ⌘A
+  outside a text field, so neither Select All nor xterm.js selects the UI.
+- **Never add an Edit submenu on Windows or Linux**: their webviews edit
+  natively without one, and its accelerators would take Ctrl+C from the
+  terminal.
+
+Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`;
+`cancelUiSelectAll` in `lib/src/components/wall/keyboard/handle-select-all.ts`.
 
 ## Siri affordance
 
