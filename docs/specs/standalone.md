@@ -608,12 +608,12 @@ Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in
 **Closing a window with siblings alive ends that window alone**; only the last
 window's close is the quit. Rust prevents the close and emits
 `dormouse://window-close-requested`; the webview acks (a ~2 s watchdog closes it
-anyway if that listener is dead), asks about *its own* running work, removes its snapshot, kills the PTYs it owns, and calls back
+anyway if that listener is dead), asks about *its own* running work, attempts snapshot removal, kills its PTYs, and calls back
 `close_window`.
 
-- **A close is deliberate, so it removes the blob** — geometry
-  and temp sibling included — and the next launch does not reopen the window
-  (`docs/specs/transport.md` → "The governing rule").
+- **Must attempt to remove the blob before killing this Window's PTYs** — geometry
+  and temp sibling included; successful removal prevents reopening
+  (`docs/specs/transport.md` → "The governing rule"). Removal failures are logged and close proceeds; an old snapshot may reopen.
 - **It runs no agent-recovery capture**: nothing is coming back.
 - **A cancelled close retires its watchdog's token and never reuses it**: the
   next close on that window is a fresh seq, so a watchdog still sleeping on the
@@ -622,8 +622,7 @@ anyway if that listener is dead), asks about *its own* running work, removes its
 - **It confirms on a pending download as well as on running work.** An approved,
   downloaded update lives in this webview's memory, so closing the window throws
   it away and nothing else can install it (`docs/specs/auto-update.md`).
-- **The snapshot is removed before the kill**, and Rust refuses every later save
-  for that label, so a PTY exit's save cannot write it back. **Both close paths
+- **Must refuse every later save for a closing label**, so a PTY exit cannot recreate its snapshot. **Both close paths
   set that refusal** — the webview's own `remove_window_session`, and
   `finish_window_close` for the ack-timeout path, where the webview never ran at
   all. **Must keep that refusal for the process lifetime**, geometry writes
@@ -813,7 +812,7 @@ below reads that record rather than inferring itself from the suppression map.
   `adopt_done` and checking after each `save_session` or source-window close
   (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). **Must reverse
   the durable destination on hand-back and retain the record until both
-  snapshots reflect the return** (`a_hand_back_is_recovered_in_the_source_before_its_next_flush`).
+  snapshots reflect the return** (`a_hand_back_is_recovered_in_the_source_before_its_next_flush`). Failed settlement-marker or hand-back writes are logged and do not block live adoption or return.
   **Must tombstone settled arrivals into a deliberately closed Window until
   both snapshots omit them**, including during boot recovery
   (`closing_an_adopted_target_never_resurrects_either_copy`).
@@ -953,7 +952,7 @@ written.
 - **The label is sanitized** so it cannot escape the directory.
 - **Temp-then-rename**, so a crash cannot truncate the previous snapshot. The temp
   file is fsynced before the rename and, on unix only, the sessions directory
-  *after* it (rationale).
+  *after* it, best-effort (rationale).
 - **Window identity is implicit**: each command keys by the invoking
   `tauri::Window`'s `label()`, so the frontend stays window-agnostic and every
   window (`ws-2`, …) persists to its own file rather than rewriting a sibling's.
@@ -961,8 +960,7 @@ written.
   blob (rationale).
 - **The writer removes its own temp file on every error path**, so only a crash
   can leave one behind.
-- **A per-window close removes the blob, its temp sibling and its geometry**
-  (§Per-window close); nothing else deletes a snapshot but the boot merge
+- Per-window cleanup follows §Per-window close; only the boot merge otherwise deletes a snapshot
   (§Arrival queue).
 - **Must sweep orphan session temp files once at boot** in the active sessions
   directory and, for debug builds, the legacy `<app_data_dir>/sessions` directory.
