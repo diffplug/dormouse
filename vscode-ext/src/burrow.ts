@@ -210,9 +210,9 @@ export function notifyDirectoryChanged(): void {
  * The relay socket, preferring whatever this extension host already provides.
  *
  * `globalThis.WebSocket` only landed in Node 22, and `engines.vscode` here is
- * `^1.85.0` — VS Code 1.85 shipped Electron 25 / Node 18, and the supported
- * range spans the boundary — so on an older host there is no global to use and
- * the bundled `ws` is the only implementation. Its socket satisfies the same
+ * `^1.92.0` — VS Code 1.92 shipped Node 20.14, and the supported range spans
+ * the boundary — so on an older host there is no global to use and the bundled
+ * `ws` is the only implementation. Its socket satisfies the same
  * surface `BurrowRuntime` reads and nothing more: `send`, `close`, `readyState`,
  * `addEventListener`, with `message` events carrying `.data` and `close` events
  * carrying `.code`.
@@ -628,7 +628,8 @@ function answerIdle(burrowRequestId: string, result: unknown): void {
 /**
  * Give the Burrow its storage and start it if this installation is already
  * enrolled, or another window's one-time connection is serving. Nothing
- * contends for the socket otherwise — see the module header.
+ * contends for the socket otherwise — see `docs/specs/vscode.md` → "Burrow: a
+ * service in the extension host".
  */
 export function initBurrow(ctx: vscode.ExtensionContext): vscode.Disposable {
   context = ctx;
