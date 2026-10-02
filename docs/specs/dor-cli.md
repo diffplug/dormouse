@@ -134,6 +134,9 @@ Source of truth: `dor-lib-common/src/spawn.ts`,
 
 ## Host Plumbing
 
+The control channel carries every Surface verb — `send` keystrokes in, `read`
+screen and scrollback out, `kill` — and `dor app` from `dor` to the Wall.
+
 ### Standalone
 
 `standalone/package.json`'s `stage` step (before `build` and `tauri`, not bare
@@ -159,8 +162,8 @@ name.**
 ### VS Code
 
 `vscode-ext/package.json` runs `pnpm stage:dor-cli` before bundling the
-extension host and `pty-host.js`. The extension host stages under
-`context.extensionPath/dor-cli`, forks `pty-host.js`, and sends the same dor env
+extension host and `pty-host.js`. The extension host computes the staged paths
+under `context.extensionPath/dor-cli`, forks `pty-host.js`, and sends the same dor env
 on each PTY spawn. **`getDorRuntimeEnv` must omit both control variables:** the
 token reaches `pty-host.js` through the fork env alone, and the host folds it
 with a bound socket path onto each spawn's env itself. Its `ready` message is
@@ -185,10 +188,13 @@ server's path, directory, token, handshake, and lost-bind rules.
 
 **Every valid request must preserve `host ceiling < client socket < server
 reaper`.** The client sends its own `timeoutMs` as a hint and the server reaps
-10s above it. `dor await`'s host ceiling is at most 24h and its socket deadline
-5s later, so the server accepts hints up to 24h + 5s; an absent or nonsense hint
+10s above it. `dor await`'s host ceiling is at most 24h (`--timeout` takes 1–86400 whole
+seconds, the host's `MAX_AWAIT_TIMEOUT_MS`) and its socket deadline 5s later, so the server accepts hints up to 24h + 5s; an absent or nonsense hint
 (non-finite, ≤ 0, or above that) falls back to 65s, which clears the longest
 fixed client deadline (`dor ensure --restart` at 60s).
+
+**Must answer a malformed control request with an error before forwarding it,
+and keep serving the connection** (`standalone/sidecar/dor-control-server.test.js`).
 
 **Some requests outlive their client.** When a socket closes with entries still
 pending, or the server's own timer fires, the server drops the entry and emits
@@ -232,9 +238,9 @@ Invariants:
 - **Must retire a moved Surface's source ref**, retaining its stable ID. **Must
   route a moved caller by that stable ID**: its cached `surface:N` refs now
   resolve in the destination and may name strangers; unscoped `ensure` searches
-  there and may duplicate work left behind. The moved terminal gets one
-  renderer-local notice of the new handles and scope (a pane notice in
-  alternate-screen programs), never PTY input or an Activity change.
+  there and may duplicate work left behind. After a successful move, the moved
+  terminal gets one renderer-local notice of the new handles and scope (a pane
+  notice in alternate-screen programs), never PTY input or an Activity change.
 - Surface targets also accept `title:<exact display title>`; titles drift, so
   automation should prefer refs. Action commands (`read`, `send`, `await`,
   `kill`, `dor agent-browser --surface`) resolve against listed Surfaces,
@@ -352,8 +358,8 @@ Behavior help does not carry:
 - `list` ANDs its filters client-side and **owns every Workspace read**.
   `--workspaces` admits its flags by an allowlist, so a flag added to `list` is
   refused there until it is named.
-- Every command but `await` exits only 0 or 1. `await` prints no terminal text
-  (rationale).
+- Every command exits 1 on a usage or target error; besides 0, only `await`
+  uses others (2, 3; help). `await` prints no terminal text (rationale).
 
 `list --json` carries Host identity and runtime paths but **never the control
 socket**. **Consumers must gate on `has_terminal` / `has_browser`, not `kind`**,
