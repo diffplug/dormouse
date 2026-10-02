@@ -454,7 +454,7 @@ export function upsertSubscription(
 ): Promise<PushSubscribeResponse | null> {
   return locked(db, `push:${userId}`, async () => {
     // Share-locks the Burrow row, so a subscribe racing that Burrow's removal
-    // waits for it and answers 404 rather than writing an orphan.
+    // waits for it and answers 404 rather than failing the foreign key.
     const { rowCount } = await db.query(
       `SELECT 1 FROM dormouse_relay_burrows WHERE "burrowId" = $1 AND "userId" = $2 FOR KEY SHARE`,
       [record.burrowId, userId],

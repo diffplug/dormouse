@@ -76,6 +76,7 @@ export async function social(provider: Provider, linking: boolean) {
 export interface VoiceToken {
   id: string;
   createdAt: string;
+  /** Stamped by each speak. */
   lastUsedAt: string | null;
   revokedAt: string | null;
 }
