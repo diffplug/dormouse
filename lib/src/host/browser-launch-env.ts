@@ -63,8 +63,9 @@ export async function browserLaunchEnv(cwd: string | undefined, runtime: Browser
   const marker = randomBytes(16).toString('hex');
   const { shell, args } = browserShellInvocation(runtime, [runtime.node, runtime.cli, '__launch-env', marker], env);
   // A removed project directory must not strand a restored session's close.
-  // Bounded in time and output well inside a launch's startup deadline
-  // (`REQUEST_BUDGET_MS` in ./browser-host.ts).
+  // Bounded in time and output well inside the request's budget
+  // (`REQUEST_BUDGET_MS` in ./browser-host.ts), which a launch's startup ends
+  // short of.
   const result = await spawnAndCapture(shell, args, {
     // Unlike a .cmd shim, explicit cmd.exe bypasses cross-spawn's shell wrapper.
     windowsVerbatimArguments: shellCommandKind(shell, process.platform) === 'cmd',

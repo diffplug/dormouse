@@ -85,8 +85,8 @@ web content is not destroyed to make room. A replacement transfers the target
 Surface's `surface:N` ref to the new browser Surface id. The pane context menu
 never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)).
 
-**Must open focus-neutrally**, like `dor ensure`, with one exception:
-`docs/specs/layout.md` corner case #6.
+**Must open focus-neutrally**, like `dor ensure`, except a Pane Context Menu
+placement and `docs/specs/layout.md` corner case #6.
 
 - **Must unpark a doored pane before killing it**, so its DOM dies with the Surface.
 - **Killing an automated pane — or swapping away from that renderer — must go
@@ -159,11 +159,12 @@ rather than racing a navigation into it, even in an unmounted Door. Minimized
 targets are reattached, closed ones recreated.
 
 **A new automated target starts its controller before any Pane exists; the
-split appears only once the host confirms startup, without waiting for page
-load** (rationale). A failure reports in context without changing layout or
+split appears, and takes focus, only once the host confirms startup, without
+waiting for page load** (rationale). A failure reports in context without changing layout or
 focus; concurrent requests for one target are serialized.
 
-**Must dismiss context after a successful placement or reuse**; a failed or
+**Must dismiss context after a successful placement or reuse, leaving focus on
+the browser**; a failed or
 cancelled launch keeps it open, and a completed launch never dismisses a
 replacement context. **Must cancel pending placement when its context closes or
 is replaced, its source disappears or minimizes, or its Workspace deactivates
@@ -396,8 +397,7 @@ binary `ViewerFrame`.
   host-owned device-resolution captures** (rationale).
 
 **Upstreams.** agent-browser: the daemon's stream, dialed on `127.0.0.1` only;
-**the host must drop its re-broadcast by raw comparison against the last
-frame and tab list** (rationale); **a tab list or URL is state at any size**,
+**a tab list or URL is state at any size**,
 never taken for a frame; a paste goes as key pairs. **A headed window is
 followed over its browser's CDP, held host-side and dialed on loopback only**
 (rationale): its page targets, and the shown page's viewport and ratio, which
@@ -455,16 +455,16 @@ host; standalone runs the bundled copy in the sidecar behind one Rust command.
   with one, it navigates the browser when it is up in the mode asked for, else
   relaunches it headed or headless at `url`. It resolves when the browser is up,
   not when the page loads.
-- **`attach` and `measure` never start a browser.** Only a gone browser, for a
-  caller naming a page, is relaunched there, answering `relaunched`; one it
-  cannot view is left alone.
+- **`attach` and `measure` never start a browser**, except that `attach`
+  relaunches a gone one at the page its caller names, answering `relaunched`;
+  one it cannot view is left alone.
 - **Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through
   the webview channel**: each operation is one fixed argv or client call, and
   `edit` runs fixed host-owned JS plus an OS clipboard write. The trusted `dor`
   process keeps native passthrough.
 
 **Every transport waits `BROWSER_REQUEST_TIMEOUT_MS` for any reply**, past
-agent-browser's own action timeout, so the webview never re-asks while the host
+agent-browser's own 25 s action timeout, so the webview never re-asks while the host
 still works.
 
 **Must run one lifecycle for both providers**, whose native primitives are
@@ -582,19 +582,12 @@ agents cannot drive or read it. On hosts with `createIframeProxyUrl`,
 `IframePanel` frames a per-grant loopback proxy URL; without it, a raw
 uninstrumented iframe.
 
-**Must keep a frame transparent until its first `load`, or a short timeout after
-it is given a source**, so the pane's themed background shows rather than a
-white blank (rationale).
-
 The proxy instruments any `http://` upstream, loopback and remote alike:
 
 - Headers are rewritten per the table below and the shim injected into HTML;
   HTTP and WebSocket traffic passes through. **A site's "do not embed" is
   overridden, not obeyed** (rationale); JS framebusting is neutralized
   separately, by the sandbox.
-- An unreachable or timed-out upstream gets a served Dormouse error page
-  distinguishing "couldn't connect" from "didn't respond"; **only a loopback
-  upstream is called a dev server**.
 - **Every panel error but a non-http(s) URL offers Open in agent-browser** (a
   swap to `agent-browser-screencast`) where the host can launch one, with
   `dor agent-browser open <url>` as the fallback text.
@@ -690,8 +683,6 @@ Source of truth: `iframeShim` in `lib/src/host/iframe-proxy-rewrite.ts`,
 
 - Cross-origin iframe focus blurs the parent window while `document.hasFocus()`
   remains true; **focus code must distinguish this from app backgrounding**.
-- Proxied frames adopt clicks from shim `pointerdown`; the raw fallback adopts
-  focus alone by the `window.blur` + active iframe heuristic.
 - **Every framed page is sandboxed, proxied or raw** (rationale), and the
   `sandbox` omits `allow-top-navigation` to block framebusting.
 - **The `allow` attribute grants no device or clipboard-read permission** —
