@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { noCommands, silent, type RecoveryLog } from './recovery-capture';
+import { ensurePrivateDirectorySync, ensurePrivateFileSync } from './private-path';
 
 const FILE_NAME = 'recovery.json';
 
@@ -58,9 +59,32 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
 
   // What this process has captured. Also the memory-only store's whole content.
   let captured: Record<string, string> = noCommands();
+  let captureStarted = false;
   let clearedThisProcess = false;
   // What is left of the record on disk, once read. `null` until the first `take`.
   let unclaimed: Record<string, string> | null = null;
+  let directoryPrepared = false;
+  const prepareDirectory = (): void => {
+    if (!dir || directoryPrepared) return;
+    ensurePrivateDirectorySync(dir);
+    directoryPrepared = true;
+  };
+  // Prime outside teardown: Windows ACL setup launches a bounded system process.
+  // Failed preparation remains retryable and never permits record bytes.
+  try { prepareDirectory(); } catch (err) {
+    log.error(`[recovery] private directory unavailable: ${String(err)}`);
+  }
+  const requirePrivateDirectory = (): void => {
+    // Never launch a permission helper inside the bounded teardown capture.
+    // Cold-start claims can retry a failed startup preparation.
+    if (dir && !directoryPrepared) throw new Error('Recovery directory is not private');
+  };
+  const clearPreviousRecord = (): void => {
+    if (clearedThisProcess) return;
+    requirePrivateDirectory();
+    if (file) fs.rmSync(file, { force: true });
+    clearedThisProcess = true;
+  };
 
   const persist = (): void => {
     if (!file) return;
@@ -70,7 +94,8 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
     // record. The `finally` is what keeps a failed write from leaving one behind.
     const tmp = `${file}.${randomUUID()}.tmp`;
     try {
-      fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+      requirePrivateDirectory();
+      if (captureStarted) clearPreviousRecord();
       // Mode on create, so the bytes are never briefly world-readable; the rename
       // preserves it.
       fs.writeFileSync(tmp, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
@@ -86,18 +111,18 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
     persistent: file !== null,
 
     beginCapture(): void {
-      if (clearedThisProcess) return;
-      clearedThisProcess = true;
       // Clear before anything can return early. A record is only ever consumed by
       // a cold start that actually restores, so a teardown that captures nothing
       // must not leave the last one sitting there — otherwise a run that restores
       // nothing carries the record forward and a much later restore auto-runs a
       // week-old invocation unprompted. `record` re-creates it the moment
       // anything is detected.
-      captured = noCommands();
-      if (!file) return;
+      if (!captureStarted) {
+        captureStarted = true;
+        captured = noCommands();
+      }
       try {
-        fs.rmSync(file, { force: true });
+        clearPreviousRecord();
       } catch (err) {
         log.error(`[recovery] could not clear the previous record: ${String(err)}`);
       }
@@ -105,14 +130,22 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
 
     record(id: string, command: string): void {
       captured[id] = command;
-      // Persist on every change rather than once at the end. The write is a few
-      // hundred bytes and costs well under a millisecond, and the shutdown budget
-      // can end the capture at any instant.
+      // Persist each detection: the capture deadline can end the next scan.
       persist();
     },
 
     take(paneIds: Iterable<string>): Record<string, string> {
-      unclaimed ??= file ? readAndClearRecord(file, log) : captured;
+      if (unclaimed === null) {
+        try {
+          prepareDirectory();
+          unclaimed = file ? readAndClearRecord(file, log) : captured;
+        } catch (err) {
+          // Preserve the durable record for a later successful preparation;
+          // nothing from an unprotected path is handed to a shell.
+          log.error(`[recovery] private record unavailable: ${String(err)}`);
+          return noCommands();
+        }
+      }
       const claimed: Record<string, string> = noCommands();
       for (const id of paneIds) {
         const command = unclaimed[id];
@@ -136,6 +169,7 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
  */
 function readAndClearRecord(file: string, log: RecoveryLog): Record<string, string> {
   if (!fs.existsSync(file)) return noCommands();
+  ensurePrivateFileSync(file);
 
   let recovery: PersistedRecovery | null = null;
   try {

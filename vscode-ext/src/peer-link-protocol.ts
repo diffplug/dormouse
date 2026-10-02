@@ -103,7 +103,7 @@ export class FrameDecoder {
   #discarding = false;
   readonly #maxFrameBytes: number;
 
-  /** Bounds a peer that never sends a newline; the default fits a screenful. */
+  /** Bounds each UTF-8 frame before JSON parsing; the default fits a screenful. */
   constructor(maxFrameBytes = 4 * 1024 * 1024) {
     this.#maxFrameBytes = maxFrameBytes;
   }
@@ -122,6 +122,7 @@ export class FrameDecoder {
         this.#discarding = false;
         continue;
       }
+      if (Buffer.byteLength(line, 'utf8') > this.#maxFrameBytes) continue;
       if (!line.trim()) continue;
       try {
         frames.push(JSON.parse(line));
@@ -133,7 +134,7 @@ export class FrameDecoder {
     // can never read, so it goes — but the whole frames already taken out of
     // the buffer above are real, and dropping them with it would lose traffic
     // from a link that is otherwise healthy.
-    if (this.#buffer.length > this.#maxFrameBytes) this.#discarding = true;
+    if (Buffer.byteLength(this.#buffer, 'utf8') > this.#maxFrameBytes) this.#discarding = true;
     if (this.#discarding) this.#buffer = '';
     return frames;
   }

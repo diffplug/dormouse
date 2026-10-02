@@ -33,7 +33,9 @@ export async function tempStorageDir(): Promise<string> {
  */
 export function derivedSocketPath(storageDir: string): string {
   const id = createHash('sha256').update(storageDir).digest('hex').slice(0, 12);
-  return join(tmpdir(), `dormouse-peer-${process.getuid?.() ?? 0}`, `${id}.sock`);
+  return process.platform === 'win32'
+    ? `\\\\.\\pipe\\dormouse-peer-${id}`
+    : join(tmpdir(), `dormouse-peer-${process.getuid?.() ?? 0}`, `${id}.sock`);
 }
 
 export async function removeDir(dir: string): Promise<void> {

@@ -8,7 +8,7 @@ import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
 import { forgetRetiredState } from './retired-state';
-import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
+import { captureAgentRecoveryCommands, mergeAlertStates, prepareRecoveryStorage, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
 import { resolveSelectedShell, setSelectedShellPath, getSelectedShellPath } from './shell-selection';
@@ -91,6 +91,7 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.window.onDidChangeWindowState(reportWindowPresence));
   initToolHost(context.globalStorageUri?.fsPath);
   log.init();
+  prepareRecoveryStorage(context);
   extensionContext = context;
   ptyManager.setExtensionPath(context.extensionPath);
   const dorRuntime = ptyManager.getDorRuntimeEnv(context.extensionPath);

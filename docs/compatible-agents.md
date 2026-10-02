@@ -101,12 +101,12 @@ Source of truth: `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`; `detectResum
 ### Recovery record
 
 - **Must keep one rebuilt invocation per Surface in a host-owned, single-use record outside the persisted Session.** The renderer save path never derives or writes it. (rationale)
-- **Must call `beginCapture` before capture can return early.** The first call per host process clears the previous record; subsequent calls merge, preserving captures from other Windows. (rationale)
-- **Must persist every detection synchronously through `createRecoveryStore`**, using `recovery.json` in the host-selected directory, an owner-only temporary file, and atomic rename. A failed write must not throw through teardown. Without a directory the store is memory-only and logs that limitation once.
+- **Must call `beginCapture` before capture can return early.** The first call per host process clears the previous record when private storage is available; subsequent calls merge, preserving captures from other Windows. (rationale)
+- **Must persist every detection synchronously through `createRecoveryStore`**, using `recovery.json` in the host-selected directory, an owner-only temporary file, and atomic rename. **Must prepare the exact host-owned directory before any record bytes and tighten an existing record before claiming it**, using owner-only modes on Unix and a protected current-user-only DACL on Windows. Failed preparation preserves the previous record and permits no read, write, or unlink. Preparation occurs at startup; a cold-start claim may retry, but bounded capture never launches the permission helper. A failed write must not throw through teardown. Without a directory the store is memory-only and logs that limitation once.
 - **Must read and unlink the durable record on the first claim**, including on parse failure; if unlink fails, ignore it. Discard records older than 7 days after unlinking. Within the process, each container claims only its saved pane ids, and each entry is handed out once. (rationale)
 - **Must deliver claimed commands out of band on boot through `PlatformAdapter.getRecoveryCommands()`**; adapters whose hosts capture nothing may omit it. Only cold restore consumes these commands for execution; live resume never executes them.
 
-Source of truth: `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `PlatformAdapter` in `lib/src/lib/platform/types.ts`; pinned by `lib/src/host/recovery-store.test.ts`.
+Source of truth: `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `ensurePrivateDirectorySync` / `ensurePrivateFileSync` in `lib/src/host/private-path.ts`, pinned by `lib/src/host/private-path.test.ts` and `lib/src/host/recovery-store.test.ts`; `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 
 ### Cold restore
 

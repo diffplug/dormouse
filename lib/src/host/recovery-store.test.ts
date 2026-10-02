@@ -1,8 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRecoveryStore, RECOVERY_MAX_AGE_MS } from './recovery-store';
+import * as privatePaths from './private-path';
+import { readAcl, seedEveryoneRead } from './private-path.test-utils';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs')>();
+  return { ...real, unlinkSync: vi.fn(real.unlinkSync) };
+});
 
 let dir: string;
 const messages: string[] = [];
@@ -21,6 +28,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -49,7 +57,13 @@ describe('recovery store', () => {
       store.beginCapture();
       store.record('a', 'claude --continue');
       const mode = (path: string) => fs.statSync(path).mode & 0o777;
-      expect(mode(file())).toBe(0o600);
+      if (process.platform === 'win32') {
+        const acl = readAcl(file());
+        expect(acl.rules).toEqual([{ sid: acl.currentUser, rights: 0x001F01FF, allow: true, inheritance: 0 }]);
+      } else {
+        expect(mode(dir)).toBe(0o700);
+        expect(mode(file())).toBe(0o600);
+      }
       // The temp sibling is renamed over the target, so nothing torn is left.
       expect(fs.readdirSync(dir)).toEqual(['recovery.json']);
     });
@@ -83,6 +97,44 @@ describe('recovery store', () => {
   });
 
   describe('take', () => {
+    it('never hands out commands when removing the durable record fails', () => {
+      write({ createdAt: Date.now(), commands: { a: 'claude --continue' } });
+      const store = createRecoveryStore(dir, { log });
+      vi.mocked(fs.unlinkSync).mockImplementationOnce(() => { throw new Error('unlink refused'); });
+      expect(store.take(['a'])).toEqual({});
+      expect(store.take(['a'])).toEqual({});
+      expect(read().commands).toEqual({ a: 'claude --continue' });
+      expect(messages.some((message) => message.includes('could not clear record; ignoring it'))).toBe(true);
+    });
+
+    it.skipIf(process.platform !== 'win32')('tightens explicit legacy file grants before claiming the record', () => {
+      write({ createdAt: Date.now(), commands: { a: 'claude --continue' } });
+      seedEveryoneRead(file());
+      const store = createRecoveryStore(dir, { log });
+      const original = privatePaths.ensurePrivateFileSync;
+      // Observe permissions immediately before the actual read and unlink.
+      const protect = vi.spyOn(privatePaths, 'ensurePrivateFileSync').mockImplementation((target) => {
+        original(target);
+        const acl = readAcl(target);
+        expect(acl.protected).toBe(true);
+        expect(acl.rules).toEqual([{ sid: acl.currentUser, rights: 0x001F01FF, allow: true, inheritance: 0 }]);
+      });
+      expect(store.take(['a'])).toEqual({ a: 'claude --continue' });
+      expect(protect).toHaveBeenCalledWith(file());
+      protect.mockRestore();
+      expect(fs.existsSync(file())).toBe(false);
+    });
+
+    it('does not read or unlink a record whose private file setup fails', () => {
+      write({ createdAt: Date.now(), commands: { a: 'claude --continue' } });
+      const store = createRecoveryStore(dir, { log });
+      const protect = vi.spyOn(privatePaths, 'ensurePrivateFileSync').mockImplementation(() => { throw new Error('ACL failed'); });
+      expect(store.take(['a'])).toEqual({});
+      expect(read().commands).toEqual({ a: 'claude --continue' });
+      protect.mockRestore();
+      expect(store.take(['a'])).toEqual({ a: 'claude --continue' });
+    });
+
     it('unlinks on the first call and hands out each id exactly once', () => {
       write({ createdAt: Date.now(), commands: { a: 'claude --resume A', b: 'codex resume B' } });
       const store = createRecoveryStore(dir, { log });
@@ -129,6 +181,40 @@ describe('recovery store', () => {
       expect(store.take(['toString'])).toEqual({});
       expect(store.take(['constructor'])).toEqual({ constructor: 'claude --continue' });
     });
+  });
+
+  it('never retries a failed startup helper during capture, then recovers on a cold-start claim', () => {
+    write({ createdAt: Date.now(), commands: { old: 'claude --continue' } });
+    const protect = vi.spyOn(privatePaths, 'ensurePrivateDirectorySync').mockImplementation(() => { throw new Error('helper timed out'); });
+    const store = createRecoveryStore(dir, { log });
+    expect(protect).toHaveBeenCalledTimes(1);
+    store.beginCapture();
+    store.record('a', 'codex resume A');
+    store.beginCapture();
+    store.record('b', 'codex resume B');
+    expect(protect).toHaveBeenCalledTimes(1);
+    expect(read().commands).toEqual({ old: 'claude --continue' });
+    expect(fs.readdirSync(dir)).toEqual(['recovery.json']);
+    expect(store.take([])).toEqual({});
+    expect(protect).toHaveBeenCalledTimes(2);
+    protect.mockRestore();
+    // Only startup/claim retries expensive preparation. Captured invocations
+    // remain in memory and later writes merge after successful preparation.
+    expect(store.take([])).toEqual({});
+    store.beginCapture();
+    store.record('c', 'codex resume C');
+    expect(read().commands).toEqual({ a: 'codex resume A', b: 'codex resume B', c: 'codex resume C' });
+  });
+
+  it('prepares a successful directory once across multiple captures and writes', () => {
+    const protect = vi.spyOn(privatePaths, 'ensurePrivateDirectorySync');
+    const store = createRecoveryStore(dir, { log });
+    store.beginCapture();
+    store.record('a', 'claude --continue');
+    store.beginCapture();
+    store.record('b', 'codex resume B');
+    expect(protect).toHaveBeenCalledTimes(1);
+    expect(read().commands).toEqual({ a: 'claude --continue', b: 'codex resume B' });
   });
 
   describe('without a state directory', () => {

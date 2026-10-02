@@ -209,7 +209,8 @@ function withoutInheritedMsysOriginalPath(env, platform = process.platform) {
 // glob); `DORMOUSE_SHELL_INTEGRATION_DIR` overrides it for hosts that stage the
 // sidecar elsewhere (e.g. the VS Code bundle) and for tests.
 function resolveShellIntegrationDir(env, runtime = {}) {
-  return env.DORMOUSE_SHELL_INTEGRATION_DIR || path.join(runtime.dirname || __dirname, 'shell-integration');
+  const platformPath = (runtime.platform || process.platform) === 'win32' ? path.win32 : path.posix;
+  return env.DORMOUSE_SHELL_INTEGRATION_DIR || platformPath.join(runtime.dirname || __dirname, 'shell-integration');
 }
 
 // Basename of a shell path, lowercased and with any `.exe` dropped, handling
@@ -258,11 +259,12 @@ function winPathToWslMount(winPath) {
 //        their shell. bash is the only WSL shell we integrate for now.
 function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = {}) {
   const fsModule = runtime.fsModule || fs;
+  const platformPath = (runtime.platform || process.platform) === 'win32' ? path.win32 : path.posix;
   const stem = shellStem(shell);
 
   if (stem === 'zsh') {
-    const zshDir = path.join(integrationDir, 'zsh');
-    if (fileExists(path.join(zshDir, '.zshrc'), fsModule)) {
+    const zshDir = platformPath.join(integrationDir, 'zsh');
+    if (fileExists(platformPath.join(zshDir, '.zshrc'), fsModule)) {
       return {
         env: { ...env, ZDOTDIR: zshDir, USER_ZDOTDIR: env.ZDOTDIR || env.HOME || '' },
         shellArgs,
@@ -271,14 +273,14 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
   }
 
   if (stem === 'bash' && bashArgsAreInjectable(shellArgs)) {
-    const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+    const script = platformPath.join(integrationDir, 'bash', 'shellIntegration.bash');
     if (fileExists(script, fsModule)) {
       return { env, shellArgs: ['--init-file', script] };
     }
   }
 
   if (stem === 'pwsh' || stem === 'powershell') {
-    const script = path.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
+    const script = platformPath.join(integrationDir, 'pwsh', 'shellIntegration.ps1');
     if (fileExists(script, fsModule)) {
       const integratedArgs = powerShellIntegratedArgs(shellArgs, script);
       if (integratedArgs) return { env, shellArgs: integratedArgs };
@@ -287,7 +289,7 @@ function applyShellIntegration(shell, env, shellArgs, integrationDir, runtime = 
 
   // WSL: only the standard `-d <distro>` launch (the shape the picker emits).
   if (stem === 'wsl' && shellArgs.length === 2 && shellArgs[0] === '-d') {
-    const script = path.join(integrationDir, 'bash', 'shellIntegration.bash');
+    const script = platformPath.join(integrationDir, 'bash', 'shellIntegration.bash');
     const mount = winPathToWslMount(script);
     if (mount && fileExists(script, fsModule)) {
       // A `sh -c` detector, passed as one argv element so node-pty hands it to

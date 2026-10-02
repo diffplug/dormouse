@@ -16,7 +16,7 @@
 
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import * as path from 'node:path';
 import {
   isEnrollmentOfferFresh,
   parseEnrollmentOffer,
@@ -25,7 +25,7 @@ import {
 
 export type { EnrollmentOffer };
 
-const OFFER_FILE = join('run', 'enroll-offer.json');
+const OFFER_FILE = 'enroll-offer.json';
 
 /**
  * Where each installer's offer lands, mirroring the install root that installer
@@ -44,17 +44,18 @@ export function enrollmentOfferPath(
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(),
 ): string | null {
+  const { join } = platform === 'win32' ? path.win32 : path.posix;
   switch (platform) {
     case 'darwin':
-      return join(home, 'Library', 'Application Support', 'Dormouse Relay', OFFER_FILE);
+      return join(home, 'Library', 'Application Support', 'Dormouse Relay', 'run', OFFER_FILE);
     case 'win32':
       // No `%LOCALAPPDATA%` is not a path to guess at: the installer joins onto
       // that variable, so without it this machine's install root is unknown.
-      return env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Dormouse Relay', OFFER_FILE) : null;
+      return env.LOCALAPPDATA ? join(env.LOCALAPPDATA, 'Dormouse Relay', 'run', OFFER_FILE) : null;
     default:
       // `||` and not `??`, matching the installers' `${XDG_DATA_HOME:-…}`: an
       // empty value is unset, not a root at the filesystem's top.
-      return join(env.XDG_DATA_HOME || join(home, '.local', 'share'), 'dormouse-relay', OFFER_FILE);
+      return join(env.XDG_DATA_HOME || join(home, '.local', 'share'), 'dormouse-relay', 'run', OFFER_FILE);
   }
 }
 
