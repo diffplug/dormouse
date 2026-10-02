@@ -94,7 +94,7 @@ on the Burrow), and its two other choke points,
 `lib/src/host/managed-voice-host.ts` and `standalone/src/updater.ts`.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
-— `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,
+— `docs/specs/terminal-escapes.md` and the owners its rows name, `docs/specs/dor-browser.md`,
 `docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message
 authentication", `docs/specs/standalone.md` -> "Persistence" — then the parser, the iframe shim, the
 control-socket code, and the persistence paths they point at. `## Persisted
@@ -192,7 +192,8 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   drift is a finding; say which side is wrong. The newest sections are the ones
   most likely to have drifted: `remote-security-model.md`'s Presence proofs,
   Pairing, Connection, Push sealing, Burrow bounds, Noise suite and Burrow identity,
-  and `relay.md`'s Relay and E2E framing. `scripts/e2e-lint.mjs` mechanizes the
+  `relay.md`'s Routing, E2E framing, Relay origin
+  and Burrow side. `scripts/e2e-lint.mjs` mechanizes the
   structural half of that ("one suite, no negotiation, no plaintext path, no
   legacy discriminant") — check that each of its rules still names a real
   `docs/specs/security-remote.md` line and that

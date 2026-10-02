@@ -15,12 +15,11 @@
  * security spec, which headroom alone cannot promise, so it picks the same way
  * from the specs that qualify. Check 15 is a number rather than a pattern: its
  * case removes a paired rationale file instead of planting text.
- * `scripts/lint-kit.mjs` owns the edit-and-restore. Valid-form cases also keep
- * optional navigation maps compatible with targeted implementation pointers.
+ * `scripts/lint-kit.mjs` owns the edit-and-restore.
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { makeSelftest, readRepoFile, repoRoot } from './lint-kit.mjs';
@@ -70,29 +69,33 @@ const CASES = [
   ['check 13: an unbackticked citation of a missing spec, from a spec', SPEC, `\nSee ${spec('no-such-spec.md')} -> "Heading" for more.\n`],
   ['check 14: a rule stated in a rationale file', RATIONALE, '\n**Never plant rules here.**\n'],
   ['check 17: an audited rule outside a security spec', NON_SECURITY_SPEC, '\n- **FAIL IF** this rule is audited by nobody.\n'],
+  ['check 9: a map beside a Source of truth pointer', SPEC, '\n## Files\n\n| Entrypoint | Role |\n|---|---|\n| `scripts/lint-kit.mjs` | Lint plumbing. |\n\nSource of truth: `countWords` in `scripts/spec-md.mjs`.\n'],
 ];
 
 const selftest = makeSelftest('spec-lint.mjs', '.spec-selftest.bak');
 
-// A one-entry map deliberately omits the file named by the local pointer:
-// maps are navigation aids, not exhaustive implementation inventories.
-// Run both supported headings, and prove map paths still get checked.
+// Check 9 must also pass a map alone: the fixture renames SPEC's own pointers
+// out of the way, and runs each heading spelling the lint accepts. A missing
+// map path must still fail check 4.
 const originalSpec = readRepoFile(SPEC);
 const specPath = join(repoRoot, SPEC);
-for (const heading of ['Files', 'Code Map']) {
-  const map = `\n## ${heading}\n\n| Entrypoint | Role |\n|---|---|\n| \`scripts/lint-kit.mjs\` | Lint plumbing. |\n\n## Map pointer fixture\n\nSource of truth: \`countWords\` in \`scripts/spec-md.mjs\`.\n`;
+const pointerless = originalSpec.replace(/Source of truth/g, 'Implemented in');
+const runSpecLint = () => spawnSync('node', [join(repoRoot, 'scripts/spec-lint.mjs')], { encoding: 'utf8' });
+for (const heading of ['## Files', '### Code map']) {
+  const map = `\n${heading}\n\n| Entrypoint | Role |\n|---|---|\n| \`scripts/lint-kit.mjs\` | Lint plumbing. |\n`;
   try {
-    writeFileSync(specPath, originalSpec + map);
-    execFileSync('node', [join(repoRoot, 'scripts/spec-lint.mjs')], { stdio: 'pipe' });
-    writeFileSync(specPath, originalSpec + map.replace('scripts/lint-kit.mjs', 'scripts/no-such-map-entry.mjs'));
-    const result = spawnSync('node', [join(repoRoot, 'scripts/spec-lint.mjs')], { encoding: 'utf8' });
+    writeFileSync(specPath, pointerless + map);
+    let result = runSpecLint();
+    assert.equal(result.status, 0, `${heading}: a map alone must pass lint\n${result.stdout}${result.stderr}`);
+    writeFileSync(specPath, pointerless + map.replace('scripts/lint-kit.mjs', 'scripts/no-such-map-entry.mjs'));
+    result = runSpecLint();
     assert.equal(result.status, 1, `${heading}: a missing map path must fail lint`);
     assert.match(result.stdout + result.stderr, /path does not exist -> scripts\/no-such-map-entry\.mjs/, `${heading}: require the map path diagnostic`);
   } finally {
     writeFileSync(specPath, originalSpec);
   }
 }
-console.log('spec-lint-selftest: OK (Files / Code Map coexist with pointers; partial maps pass and missing paths fail)');
+console.log('spec-lint-selftest: OK (check 9 passes a map alone; a missing map path fails)');
 
 for (const [name, target, text] of CASES) {
   selftest.withAppended(target, text, `${name}\n      planting this in ${target} stays green — spec-lint cannot see it`);

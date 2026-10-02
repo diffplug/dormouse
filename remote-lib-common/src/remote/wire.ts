@@ -163,8 +163,8 @@ export const RELAY_PING_INTERVAL_MS = 30_000;
 
 /**
  * Close code the relay sends to a Burrow socket it displaces when a newer socket
- * claims the same `burrowId` (only one socket may own a burrowId — see relay.md
- * "Relay"). In the 4000-4999 application-private range.
+ * claims the same `burrowId` (only one socket may own a burrowId —
+ * `docs/specs/relay.md` -> "Routing"). In the 4000-4999 application-private range.
  *
  * This lives on the wire contract rather than inside `relay` because the Burrow
  * keys its reconnect policy on it: every other close is transient and gets
@@ -697,7 +697,7 @@ export interface PushSendResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Relay frames (see relay.md "Relay"). One JSON frame per WS message.
+// Relay frames (`docs/specs/relay.md` -> "Routing"). One JSON frame per WS message.
 // `clientId` is assigned by the Relay per client socket; the client itself
 // never sees or sends it.
 
@@ -824,8 +824,8 @@ export function isE2eCiphertext(value: unknown): value is string {
 
 /**
  * The shape guard both a relay and a Burrow run on a Client-originated `e2e`
- * frame — the both-sides rule the relay and the Burrow share (relay.md ->
- * Relay). It cannot check the ciphertext, so all it enforces is that the
+ * frame — the both-sides rule the relay and the Burrow share
+ * (`docs/specs/relay.md` -> "Routing"). It cannot check the ciphertext, so all it enforces is that the
  * routing values are bounded. Pinned by `remote-lib-common/test/wire.test.mjs`
  * and, against real relay-minted ids, `relay/test/e2e-relay.test.mjs`.
  */

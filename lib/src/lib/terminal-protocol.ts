@@ -98,7 +98,7 @@ const BODY_LIMIT = 4096;
 // *retained*: it is re-tokenized on every header derivation and is the key
 // `dor ensure --restart` matches on, and its decoding actively re-introduces
 // control characters that the emit-side escaping had removed
-// (`docs/specs/terminal-escapes.md`). See `commandLineEvents`.
+// (`docs/specs/terminal-state.md` → Shell-integration injection). See `commandLineEvents`.
 const COMMAND_LINE_LIMIT = 2048;
 /** The longest `OSC 52` payload offered, in base64 characters; longer is
  *  dropped. Under {@link OSC_INCOMPLETE_LIMIT} with room for the introducer, so
@@ -115,7 +115,7 @@ const OSC_CONSUMED_IDS = new Set(['0', '2', '7', '9', '10', '11', '12', '50', '5
 const OSC1337_FORWARDED = ['File=', 'MultipartFile=', 'FilePart=', 'FileEnd', 'ReportCellSize'] as const;
 const TERMINAL_BELL_NOTIFICATION: ActivityNotification = { source: 'BEL', title: 'Terminal bell', body: null };
 // Mirrors ITERM2_COMPAT_VERSION in standalone/sidecar/pty-core.js — pinned by
-// mirrored-constants.test.ts (terminal-escapes.md: one compatibility version
+// mirrored-constants.test.ts (transport.md: one compatibility version
 // across env and device responses).
 export const ITERM2_COMPAT_VERSION = '3.6.6';
 export const ITERM2_DEVICE_ATTRIBUTES_RESPONSE = `\x1bP>|iTerm2 ${ITERM2_COMPAT_VERSION}\x1b\\`;

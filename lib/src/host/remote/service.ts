@@ -742,6 +742,9 @@ export class BurrowService {
    * An older webview still names the Relay — `enroll`'s `relayUrl`, or
    * `enrollOffer`'s echoed `origin` — and one naming any but the baked origin
    * is refused, rather than enrolled with this build's Relay instead.
+   *
+   * Pre-release compatibility only: no released webview (v1.2.0+) names the
+   * Relay.
    */
   #refuseOtherOrigin(named: unknown): void {
     if (named === undefined) return;

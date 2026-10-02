@@ -786,7 +786,7 @@ export const MAX_CWD_LENGTH = 4096;
  * grouping key, so it is held state rather than a transient — the same reason
  * titles and notification bodies are sanitized (`terminal-protocol.ts`). The
  * emit-side scripts already remove control characters
- * (`docs/specs/terminal-escapes.md` → the `Cwd=` rule), but the parser accepts
+ * (`docs/specs/terminal-state.md` → Shell-integration injection), but the parser accepts
  * OSC 7 / OSC 9;9 / OSC 1337 from any program, not only from those scripts.
  *
  * Interior whitespace is preserved rather than collapsed: a path may legally

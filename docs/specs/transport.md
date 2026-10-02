@@ -50,6 +50,24 @@ Source of truth: `bufferData` / `getReplayData` in `vscode-ext/src/pty-manager.t
 
 Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-core.js`, pinned by `standalone/sidecar/pty-core.test.js`.
 
+### iTerm2 identity
+
+**Every spawned PTY gets an iTerm2-compatible identity** (rationale), **one compatibility version spanning the environment and the `CSI > q` answer** (`docs/specs/terminal-escapes.md` -> "Supported CSI"):
+
+| Variable | Value |
+|---|---|
+| `TERM_PROGRAM` | `iTerm.app` |
+| `TERM_PROGRAM_VERSION` | the compatibility version, not Dormouse's package version |
+| `LC_TERMINAL` | `iTerm2` — set unconditionally, since some shell integrations key off it rather than `TERM_PROGRAM` |
+| `LC_TERMINAL_VERSION` | the same compatibility version |
+| `COLORTERM` | `truecolor` (rationale) |
+
+**Must advertise the lowest iTerm2 version that unlocks every version-gated behavior Dormouse supports** — today Claude Code's `OSC 9;4` progress, gated at 3.6.6 — **and never a version adding sequences that programs would then send and Dormouse mishandles** (rationale). **Never advertise** feature-specific support before the behavior exists.
+
+**Must strip another terminal's identity from the inherited environment before setting Dormouse's** — its session, version, and multiplexer variables — so a tool never drives a terminal that is not there (rationale).
+
+Source of truth: `ITERM2_COMPAT_VERSION` in `standalone/sidecar/pty-core.js` and `lib/src/lib/terminal-protocol.ts`, pinned together by `lib/src/lib/mirrored-constants.test.ts`; `FOREIGN_TERMINAL_ENV` in `standalone/sidecar/pty-core.js`.
+
 ### Reconnection protocol
 
 1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`).
@@ -79,6 +97,24 @@ nothing holds first paint for 500 ms, not the whole budget. Source of truth:
 `standalone/sidecar/pty-core.js`.
 
 **Seeded titles reject the sentinels.** Saved pane and door titles come back through `setTerminalUserTitle()`, which rejects the reserved `<idle>` prefix (`docs/specs/terminal-state.md` → Supported OSC Inputs), and the seed callers in `terminal-lifecycle.ts` additionally skip `<unnamed>`, the default panel placeholder (rationale).
+
+#### Report filtering on the input side
+
+xterm.js `onData` includes its *replies*. **Both classifiers require every chunk token to match**, so a report glued onto real keystrokes is never mistaken for one.
+
+- **Must drop complete terminal replies during replay through `inputIsReplayTerminalReport`**, excluding them from input recording, acknowledgement, and untouched-state updates (rationale).
+- **Must suppress input recording alone through `inputIsSyntheticTerminalReport`**, whose broader control-only grammar can include real keys; never drop those chunks.
+- **Must remove mouse reports through `stripMouseReportsFromInput` only during mouse-mode override** (`docs/specs/mouse-and-clipboard.md` -> "2. Override State"). Pointer acknowledgement follows `docs/specs/alert.md` → Engagement.
+
+**Never swallow user keyboard escape sequences**: arrows, function keys, bracketed paste, kitty modified-key reports, and win32-input-mode key records.
+
+Source of truth: `lib/src/lib/terminal-report-filter.ts`; pinned by `lib/src/lib/terminal-report-filter.test.ts` and `lib/src/lib/terminal-registry.alert.test.ts`.
+
+#### Replay-time mode-reset tail (Dormouse-emitted)
+
+**After a *dead* Session's scrollback replays, Dormouse writes the fixed `REPLAY_MODE_RESET` tail**, returning alt-screen, mouse tracking and encodings, focus reporting, bracketed paste, cursor visibility, cursor keys, and SGR to their defaults (rationale). **Never on a live resume**, where the running process owns its modes; a cold `restoreTerminal` replays nothing to reset.
+
+Source of truth: `REPLAY_MODE_RESET` in `lib/src/lib/terminal-report-filter.ts`, written only by `resumeTerminal` in `lib/src/lib/terminal-lifecycle.ts`.
 
 #### Transferring a Workspace
 
@@ -275,12 +311,10 @@ scrollback is never persisted, so a cold-restored pane opens empty.
 - **Teardown acks are correlated by request id, never by message type alone.** For `interrupt` and the graceful kill (`gracefulKillAll` in VS Code, `gracefulKill(ids)` in the sidecar, since one standalone window tears down alone) the pty-host echoes `requestId` on `interruptDone` / `gracefulKillDone` and the caller compares it — a timed-out teardown call's ack still arrives afterwards (rationale).
 - **An omitted interrupt target list is not an empty one.** `pty-core.interrupt(ids)` broadcasts to every live PTY only when `ids` is *omitted*; an empty array is a no-op. A caller whose computed set comes out empty must get silence, not the blanket second press that destroys codex's hint.
 - **Shell login args are shell-specific.** `pty-core.js` launches POSIX shells with `-l` only where the shell accepts it; `csh`/`tcsh` must be spawned without it, so a C-shell-derived login shell still opens a usable terminal in any adapter.
-- **Replay drops terminal replies only** — never a user keyboard escape sequence (`docs/specs/terminal-escapes.md` → "Report filtering on the input side").
-- **Replaying a dead pane resets its modes; replaying a live one does not** — the `REPLAY_MODE_RESET` tail (`docs/specs/terminal-escapes.md` → Replay-time mode-reset tail).
 - **Untouched defaults conservatively.** New saved panes include `untouched`; a pane read without the field defaults to `untouched: false`, so it still requires kill confirmation.
 - **Replay filtering does not re-fire alerts**, quiesce-detector events, or protocol notifications (`docs/specs/terminal-escapes.md` → "`pty:data` strip semantics").
 
-Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/src/pty-manager.ts`; the replay filter in `lib/src/lib/terminal-report-filter.ts`.
+Source of truth: `getScrollbackReceived` / `getScrollbackSince` in `vscode-ext/src/pty-manager.ts`.
 
 ## Port scan deadlines
 

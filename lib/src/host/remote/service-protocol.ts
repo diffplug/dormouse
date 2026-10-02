@@ -394,7 +394,7 @@ export interface SetupQrResult {
   /**
    * The pairing URL, composed by the service from the origin this Burrow enrolled
    * against — `remote-lib-common`'s `formatPairingInvitationUrl` owns its
-   * grammar (`docs/specs/relay.md` → QR grammar).
+   * grammar (`docs/specs/relay.md` → "Setup tokens and the pairing QR").
    */
   url: string;
   /**

@@ -50,7 +50,7 @@ export const cfg = {
      *  first image: the addon answers the DA1 / XTSMGRAPHICS / cell-size probes
      *  a program uses to decide whether to send one at all, so a Session that
      *  loads it late has already advertised no graphics support
-     *  (`docs/specs/terminal-escapes.md` → Inline graphics). Turning it off
+     *  (`docs/specs/layout.md` → Inline graphics). Turning it off
      *  drops that decode path for untrusted PTY bytes and its per-Session
      *  handlers. */
     inlineImages: true,
