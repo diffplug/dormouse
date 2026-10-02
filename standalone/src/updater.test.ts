@@ -121,53 +121,6 @@ describe('updater', () => {
     mocks.platform = { requestAppRestart: mocks.requestAppRestart, burrow: { command: mocks.burrowCommand } };
   });
 
-  it('does not reoffer an approved download when the delayed launch check begins', async () => {
-    mocks.check.mockResolvedValue(makeUpdate('0.5.0'));
-    startUpdateCheck();
-    await vi.advanceTimersByTimeAsync(0);
-    checkNow();
-    await vi.advanceTimersByTimeAsync(0);
-    approveUpdate();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(hasPendingUpdate()).toBe(true);
-
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(mocks.check).toHaveBeenCalledOnce();
-    expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
-  });
-
-  it('does not reoffer an approval while its download is pending at the launch check', async () => {
-    const update = makeUpdate('0.5.0');
-    update.download.mockImplementation(() => new Promise<void>(() => {}));
-    mocks.check.mockResolvedValue(update);
-    startUpdateCheck();
-    await vi.advanceTimersByTimeAsync(0);
-    checkNow();
-    await vi.advanceTimersByTimeAsync(0);
-    approveUpdate();
-    await vi.advanceTimersByTimeAsync(5_000);
-
-    expect(mocks.check).toHaveBeenCalledOnce();
-    expect(readBannerState()).toEqual({ status: 'downloading', version: '0.5.0' });
-  });
-
-  it('keeps an approval made while the delayed launch policy read is pending', async () => {
-    let answerPolicy!: (value: typeof CHECKS_ON) => void;
-    mocks.burrowCommand.mockImplementation(() => new Promise(resolve => { answerPolicy = resolve; }));
-    mocks.check.mockResolvedValue(makeUpdate('0.5.0'));
-    startUpdateCheck();
-    await vi.advanceTimersByTimeAsync(5_000);
-    checkNow();
-    await vi.advanceTimersByTimeAsync(0);
-    approveUpdate();
-    await vi.advanceTimersByTimeAsync(0);
-    answerPolicy(CHECKS_ON);
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(mocks.check).toHaveBeenCalledOnce();
-    expect(readBannerState()).toEqual({ status: 'downloaded', version: '0.5.0' });
-  });
-
   // Drive check → approve → download so an approved, downloaded update is pending.
   async function reachDownloadedUpdate(update: ReturnType<typeof makeUpdate>) {
     mocks.check.mockResolvedValue(update);

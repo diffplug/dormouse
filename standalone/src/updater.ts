@@ -414,9 +414,6 @@ async function runUpdateCheck(): Promise<void> {
   // Read at the check, so a change made meanwhile counts
   // (`docs/specs/remote-network.md` → "Updates").
   const policy = await readNetworkPolicy();
-  // A manual approval during the launch delay or policy lookup owns this
-  // session's update. Rechecking would offer it for approval a second time.
-  if (pendingUpdate || downloadPromise) return;
   if (policy && checksForUpdates(policy)) {
     // An update found is offered by `performCheck`.
     await performCheck().catch((e) => console.error('[updater] Check failed:', e));

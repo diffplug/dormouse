@@ -101,7 +101,7 @@ constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.j
 `#[tauri::command]` over an `async fn`, which the guard below accepts equally.
 Tauri runs a *sync* command on the main thread, where the `recv_timeout` inside
 `request_from_sidecar` / `request_from_sidecar_timeout` stops the webview painting
-for the whole round trip, up to `BROWSER_REQUEST_TIMEOUT` (40s) (rationale). **The
+for the whole round trip, up to `AGENT_BROWSER_TIMEOUT` (30s) (rationale). **The
 three clipboard readers included**: their non-Windows branches round-trip through
 the sidecar, and the declaration is per command, not per branch. A unit test in
 `lib.rs` scans the source and fails on any command that reaches the blocking
@@ -138,7 +138,7 @@ side"): the same
 as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStore`
 keeps enrollment and ACL there as **one** `burrow.json`, so a write is one atomic
 rename (rationale), and the network policy beside it (`docs/specs/remote-network.md`
-→ "Policy"), both committed by owner-only temp-then-rename (POSIX modes; inherited Windows DACL). `burrowToken` is
+→ "Policy"), both 0600 in a 0700 directory via temp-then-rename. `burrowToken` is
 a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
 
 - **Reads fail closed.** Only `ENOENT` and a read-but-unparseable file answer
@@ -150,7 +150,7 @@ a bearer credential and **never enters a webview realm**. Against the shared sto
   directory Rust already created is best-effort; failing the save over it would
   lose the Burrow instead.
 - **`persistent` is declared, never inferred.** With no state directory — Rust
-  passes an empty value when it cannot create or restrict one — the fallback store still
+  passes an empty value when it cannot create one — the fallback store still
   *holds* both values in memory, warns once, and reports `persistent: false`. The
   browser dev harness is *not* this case: its per-run temp directory makes a dev
   enrollment live and die with the run.
@@ -571,13 +571,11 @@ checks in the debounce flush.
   main thread may be driving while it waits inside `window_at_cursor` for that
   same lock. The flush reads both first and hands the scale to `refresh_rect`,
   whose signature takes no window at all.
-- **Must serialize geometry writes with snapshot removal and recheck the closing fence after platform reads.** A debounce captured before close must not recreate the removed geometry; `a_geometry_flush_captured_before_close_cannot_recreate_removed_geometry` pins the fence.
 - **The flush slot is released in the same step as the drain.** A `Moved` landing
   between the two was marked dirty with no thread left to write it — and that
   move is exactly a window's final position.
 
 Source of truth: `CachedRect` / `GeometryState` / `note_geometry` /
-`write_open_window_geometry` /
 `restore_windows` in `standalone/src-tauri/src/lib.rs`; the sequencing is pinned
 by `the_geometry_flush_slot_is_released_with_the_drain`.
 
@@ -603,41 +601,55 @@ Source of truth: `CleanupGate` and `WindowEvent::Destroyed` in
 
 ### Per-window close
 
-**Must close only the invoking Window when siblings remain; the last Window's close is a quit.**
+**Closing a window with siblings alive ends that window alone**; only the last
+window's close is the quit. Rust prevents the close and emits
+`dormouse://window-close-requested`; the webview acks (a ~2 s watchdog closes it
+anyway if that listener is dead), asks about *its own* running work, removes its snapshot, kills the PTYs it owns, and calls back
+`close_window`.
 
-1. Rust prevents native close and emits `dormouse://window-close-requested` to that Window.
-2. The webview acknowledges, obtains consent, removes its snapshot, tears down its PTYs, then invokes `close_window`.
-3. Without acknowledgement, Rust attempts close after `CLOSE_ACK_TIMEOUT_MS` (rationale).
+- **A close is deliberate, so it removes the blob** — geometry
+  and temp sibling included — and the next launch does not reopen the window
+  (`docs/specs/transport.md` → "The governing rule").
+- **It runs no agent-recovery capture**: nothing is coming back.
+- **A cancelled close retires its watchdog's token and never reuses it**: the
+  next close on that window is a fresh seq, so a watchdog still sleeping on the
+  cancelled one cannot destroy the window under the second dialog
+  (`a_cleared_close_never_hands_its_seq_to_the_next_request`).
+- **It confirms on a pending download as well as on running work.** An approved,
+  downloaded update lives in this webview's memory, so closing the window throws
+  it away and nothing else can install it (`docs/specs/auto-update.md`).
+- **The snapshot is removed before the kill**, and Rust refuses every later save
+  for that label, so a PTY exit's save cannot write it back. **Both close paths
+  set that refusal** — the webview's own `remove_window_session`, and
+  `finish_window_close` for the ack-timeout path, where the webview never ran at
+  all. It is dropped when the webview is destroyed and can no longer save.
+- **`close_window` is the one Rust half both endings share** — a deliberate close
+  and a window whose last Workspace moved away (§Transfer) — because what
+  separates them is entirely what the webview did before calling it.
+- **macOS keeps its rule**: closing the last window quits.
 
-- **Must remove the deliberately closed Window's snapshot, geometry and temp sibling** (`docs/specs/transport.md` -> "The governing rule").
-- **Never capture agent recovery for a deliberate close.**
-- **Must retire cancelled watchdog tokens without reuse** (`a_cleared_close_never_hands_its_seq_to_the_next_request`; rationale).
-- **Must confirm on pending downloads and running work** (`docs/specs/auto-update.md`).
-- **Must commit snapshot removal before killing PTYs and refuse saves for successfully closed labels for the process lifetime**, including saves dispatched before `Destroyed`.
-- **Must bound preparation and journal-lock waits to eight seconds after consent, cancelling only before the first mutation.** Cancelled generations cannot remove retained or re-saved Workspaces. **Never time out consent or abandon entered kernel IO**; await its result.
-- **Must retain the Window and live PTYs on removal failure, restoring changed journal/geometry before releasing save refusal.** Incomplete rollback retains the committed flow and refusal with a visible error; uncertain commits never resave (rationale).
-- **Must confirm native cancellation before resetting the flow**, then drain refused saves, republish the current Window aggregate and drain again with bounded waits before offering Retry / Keep window open. **Must remember one latest-value retry when a refused write outlives those waits.** Failed cancellation keeps the flow guarded (rationale).
-- **Must reject skipped saves instead of acknowledging persistence**, permitting unchanged-cache retries (`skipped_close_save_is_rejected_and_retained_window_can_retry`; `standalone/src/tauri-session-store.test.ts`).
-- **Must bound PTY teardown after successful removal to eight seconds.** `standalone/src/window-close.test.ts`, `close_commit` tests and `failed_close_rolls_back_journal_and_geometry_before_retry` pin these boundaries.
-- **Must finish both deliberate close and last-Workspace departure through `close_window`** (see Transfer).
+**The ack and confirm gates are one shared flow with the quit**
+(`createTeardownFlow` in `standalone/src/teardown-flow.ts`); what differs is only
+the step past them — a quit votes and waits its turn in the walk, a close tears
+down at once.
 
-**Must share acknowledgement and consent gates with quit** through `createTeardownFlow`: quit votes and waits its walk turn; close tears down immediately.
-
-**Never leave a competing teardown flow unanswered** (rationale):
+**Arbitration.** They are two machines over one window, one dialog and one
+human, and **a second flow is never refused in silence**: an unsettled context
+parks its own flow and leaves its host waiting out a decision that cannot come.
 
 | Arriving | Holder | Outcome |
 |---|---|---|
-| quit | close awaiting consent | cancel close with `window_close_cancel`; quit takes over |
-| quit | committed flow | acknowledge and vote |
-| close | quit in any state | immediately `window_close_cancel`; retain Window |
+| quit | a close still on its dialog | the close is cancelled (`window_close_cancel`); the quit takes over |
+| quit | any committed flow | the quit acks and **votes** — this window is ending anyway, and a window that never votes holds the machine in `Voting` with no dialog to answer |
+| close | a quit, in any state | refused at once with `window_close_cancel`; the window stays |
 
-**Must drop only quit's dialog when another Window cancels quit, and cancel any context the confirm store cannot open.** `standalone/src/teardown-arbiter.test.ts` pins both orderings.
+**A quit cancelled elsewhere drops only a quit's dialog**, never this window's
+own close question. The confirm store cancels any context it cannot open, as the
+backstop. Both orderings are pinned by
+`standalone/src/teardown-arbiter.test.ts`.
 
-Source of truth: `runCloseTeardown` / `retainWindowAfterFailure` in `standalone/src/window-close.ts`;
-`retryLatest` in `standalone/src/tauri-session-store.ts`;
-`createTeardownFlow` in `standalone/src/teardown-flow.ts`;
-`CloseCommit` in `standalone/src-tauri/src/close_commit.rs`;
-`remove_window_session_bounded` / `close_window_snapshot_locked` / `request_window_close` / `finish_window_close` in `standalone/src-tauri/src/lib.rs`.
+Source of truth: `standalone/src/window-close.ts`; `request_window_close` /
+`finish_window_close` in `standalone/src-tauri/src/lib.rs`.
 
 ### Transfer
 
@@ -688,7 +700,7 @@ below reads that record rather than inferring itself from the suppression map.
    `transfer_workspace` / `open_workspace_window`. **Must return preparation refusals as `{ moved: false, reason }` without changing ownership.** On `Ok` it marks the Workspace
    **transferring**: the Wall stays mounted, nothing is
    released, and `getWindowSnapshot` omits it.
-2. **Rust** reserves both endpoints, writes the initial arrival journal, then reassigns `terminalIds` to the target, keeps routing their output to
+2. **Rust** reassigns `terminalIds` to the target, keeps routing their output to
    the source, and asks the sidecar to stamp a `pty:marked` line per id; at that
    line the id's suppression begins, until its replay has been emitted to the
    target. The source serializes each buffer at its mark and invokes
@@ -697,16 +709,17 @@ below reads that record rather than inferring itself from the suppression map.
    for a tear-out, builds the new window, whose boot pulls a payload that is
    complete (`docs/specs/transport.md` → "Transferring a Workspace";
    rationale). **An arrival without content is not drainable**
-   (`an_arrival_is_drainable_only_once_its_content_landed`). **Must keep pending journal admission source-owned and save-visible, exclude it from target drains, and count it as an in-flight close/quit blocker.** A failed initial write leaves ownership unchanged; a cancelled generation cannot promote late ownership (rationale).
+   (`an_arrival_is_drainable_only_once_its_content_landed`).
 3. **Target** drains with `take_arrivals` and, per arrival, arms its collector
-   *before* calling `adopt_ready(workspaceId)` (rationale). Rust answers
+   *before* calling `adopt_ready(workspaceId)` — the hop that removes the whole
+   "arrived before armed" class of bug (rationale). Rust answers
    `pty:requestInit` with **that arrival's ids and no others**; `pty:list` and
    each `pty:replay` echo the collector's token. The target resumes over them,
    mounts the Workspace at the payload’s index, else the drop index.
    **Never spawns or kills**: the Sessions' alert state never left the
    sidecar, whose answer to that `pty:requestInit` re-sends it (§Alerts;
    `docs/specs/alert.md` → Live Workspace transfer).
-4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust durably marks the journal settled, then retires the in-memory record,
+4. **Target adopted** invokes `adopt_done(workspaceId)`. Rust retires the record,
    clears pending marks and suppression so live output routes to the target,
    and emits `workspace-departed` for
    **that Workspace alone** to its own source.
@@ -719,28 +732,28 @@ below reads that record rather than inferring itself from the suppression map.
   had no Sessions and no window that owned them.
 - **A transferring Workspace is in no snapshot its source writes, and neither
   end's teardown kills or interrupts its shells.** They belong to the target by
-  ownership after journal admission, and the target's `pty_graceful_kill` and
+  ownership from the invoke, and the target's `pty_graceful_kill` and
   `capture_agent_recovery` exclude every id an arrival claims (`boot_list_ids`),
-  since the source is still showing them (rationale).
+  since the source is still showing them. A quit or a close in the gap would
+  otherwise persist the same Workspace in two windows, or kill it under the
+  source.
 - **Must await `adopt_done` before installing a torn-out Window; refusal releases
   its resumed Sessions and boots fresh.**
-- **Must unwind a refused `adopt_done` mount and request handback.** Refusal can be a failed settled-journal write or an arrival already returned by its watchdog; the
+- **A refused `adopt_done` unwinds the mount.** The `ARRIVAL_MAX` watchdog has
+  already handed the shells back and the source kept the Workspace, so the
   target releases its Sessions (never kills them) and closes
   the Workspace rather than leaving it live and persisted in two windows. **Must unwind from the received payload without preparing another move.**
 - **Must remove this window's unmounted semantic and Activity state when arrival
   collection times out**, and kill nothing: the source goes on showing those
   Sessions. Source of truth: `discardArrival` in
   `standalone/src/workspace-move.ts`.
-- **Must durably reverse a refused arrival before returning ownership, retiring its reservation or notifying the source.** The target's `adopt_failed`
+- **A refused arrival hands the shells back.** The target's `adopt_failed`
   (a `planArrival` timeout, a missing list, a mount error) and a target
   `Destroyed` with the arrival still queued both return `terminalIds` to the
-  source (`a_target_closing_mid_arrival_hands_its_shells_back`),
-  drop the in-memory record, and emit `workspace-arrival-failed`; the
+  source unsuppressed (`a_target_closing_mid_arrival_hands_its_shells_back`),
+  drop the record, and emit `workspace-arrival-failed`; the
   source clears **transferring** and the Workspace is simply still there. With
-  both ends gone the shells are reaped rather than left owned by a dead label,
-  and the durable recovery record remains. **Must bound failed-return retries and then reserve the arrival for cold recovery without returning ownership, adopting it or reaping its claimed PTYs.** Show recovery status; permit global quit/restart through normal confirmation and watchdogs while individual closes and transfers involving either endpoint remain blocked, including after a quit cancellation. Preserve the journal and snapshots on that quit. Workers act only on their phase and generation; `permanent_return_failure_bounds_quit_and_cold_restores_exactly_once` pins this boundary (rationale).
-
-  Source of truth: `failed_arrival_return` in `standalone/src-tauri/src/lib.rs`, `ArrivalQueue` in `standalone/src-tauri/src/quit_state.rs`.
+  both ends gone the shells are reaped rather than left owned by a dead label.
 - **Must change transfer ownership and source routing under one routing lock**,
   so output before the mark always reaches the source
   (`transfer_ownership_and_source_routing_change_together`).
@@ -772,14 +785,20 @@ below reads that record rather than inferring itself from the suppression map.
   rationale).
 - **`planArrival` never throws into `bootstrap()`.** A refused sole arrival on
   the boot path renders a fresh one-pane Workspace, never a blank window.
-- **Must keep `take_arrivals` non-consuming and deduplicate target adoption by id.** Settlement owns retirement (rationale).
+- **`take_arrivals` does not consume.** The record settles at `adopt_done`, so a
+  webview that drains at boot and again when its listener is installed cannot
+  lose a Workspace to a drain that happened too early; the webview dedupes by id.
 - **A window with a snapshot boots as itself**, mounting whatever was dropped on
   it mid-boot over the restore rather than instead of it.
 - **`AWAITING_REPLAY_MAX` fails open only for suppressions no arrival claims.** A
   cold boot slower than it would otherwise have a real arrival's shells
   unsilenced into a window that has not resumed them yet.
-- **Must exclude transferred arrival ids from boot's `pty_request_init`, while retaining pending admission's source-owned ids.**
-- **Must journal an arrival in `sessions/arrivals.json` before ownership moves, never stage it in either window's snapshot** (rationale). **Must retain an adopted record until target
+- **A boot's `pty_request_init` excludes every id an arrival claims.** Ownership
+  moves at the invoke, so those shells would otherwise be listed as top-level
+  panes beside the Workspace about to mount them.
+- **`begin_arrival` records the arrival in `sessions/arrivals.json`** — a JSON
+  array of `{ workspaceId, from, to, workspace, settled }`, never an entry in
+  either window's snapshot (rationale); the tombstone rules below read `settled`. **Must retain an adopted record until target
   and source snapshots both reflect the move**, marking it settled at
   `adopt_done` and checking after each `save_session` or source-window close
   (`adoption_keeps_the_journal_until_both_snapshots_are_durable`). **Must reverse
@@ -794,17 +813,24 @@ below reads that record rather than inferring itself from the suppression map.
   and successful records are deleted; **must retain failed records for retry
   and roll back the target if trimming the source fails**. **Must preserve a
   settled arrival’s newer target record during boot recovery**
-  (`standalone/src-tauri/src/lib.rs` recovery tests).
+  (`an_arrival_record_round_trips_until_it_is_forgotten`,
+  `a_leftover_arrival_boots_into_an_existing_target_snapshot`,
+  `a_leftover_arrival_boots_into_a_tear_out_targets_new_snapshot`,
+  `a_leftover_arrival_leaves_a_source_snapshot_that_still_names_it`,
+  `the_arrivals_file_is_gone_after_the_boot_merge`).
 - **Must run journal I/O and its lock waits off the main thread**, including
   transfer/settlement/close commands and destroyed-window cleanup
   (`blocking_commands_run_off_the_main_thread`).
-- **Must request return after `ARRIVAL_MAX` only for the watchdog's own generation (`queued_at`)**, including admission still waiting for disk. Journal failure delays settlement under the retained blocker
+- **An arrival unadopted after `ARRIVAL_MAX` is handed back** by a watchdog armed
+  at `begin_arrival`, retiring only the record it was armed for (`queued_at`):
+  a target alive but wedged never reaches `adopt_failed` or `Destroyed`, and the
+  source would otherwise stay transferring with its shells silent for good
   (`an_expiry_retires_only_the_record_it_was_armed_for`).
 
 Source of truth: `Arrival` / `sweep_awaiting` / `expire_arrival` / `boot_list_ids` in
 `standalone/src-tauri/src/routing.rs`; `begin_arrival` / `adopt_ready` /
-`adopt_done`, `adopt_failed`, `hand_back_arrival`, `commit_initial_arrival_with`,
-`commit_arrival_adoption_with`, `commit_arrival_return_with` and `restore_arrivals` in
+`adopt_done` / `adopt_failed` / `hand_back_arrival` / `record_arrival_on_disk` /
+`forget_arrival_on_disk` / `restore_arrivals` in
 `standalone/src-tauri/src/lib.rs`; `standalone/src/workspace-move.ts`;
 `markWorkspaceTransferring` in `lib/src/lib/window-session-aggregator.ts`.
 Pinned by `standalone/src/workspace-move.test.ts`, the disk tests in
@@ -952,11 +978,22 @@ record cannot reach the installed app). The browser-dev harness sets both to its
 own per-run temp directory. Source of truth: `recovery_state_dir` in
 `standalone/src-tauri/src/lib.rs`.
 
-**Must restrict the session directory and temp file to the owner before writing bytes; permission failure must preserve the previous snapshot** (`docs/specs/security-local.md` → Persisted state; rationale). Windows uses a protected owner-only DACL, including existing files; Unix uses `0700` / `0600`. `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` and `restrict_to_owner_leaves_one_owner_only_ace` pin this. **Must disable recovery storage when its directory cannot be hardened**, logging the path; Burrow state-directory failure warns and selects the in-memory fallback.
+**Must restrict the session store to the owner before any bytes are written**
+(`docs/specs/security-local.md` -> "Persisted state"; rationale).
+`restrict_to_owner` sets `0700` on the directory and `0600` on the temp file
+*first*, since the rename preserves its mode; on Windows, where a unix mode is a
+silent no-op, it applies a protected single-entry DACL instead (mechanism in its
+doc comment). `burrow_state_dir` locks the sidecar's state directory with the
+same call and relies on it reaching a file that already *existed*, which
+`restrict_to_owner_leaves_one_owner_only_ace` pins (rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. The state-directory call remains nonfatal and logs a `WARNING` naming the path. Pinned by `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` and `session_write_tightens_directory_and_existing_temp_file`.
 
-**Must hydrate synchronous `getState()` before cold restore and coalesce asynchronous writes with latest-value-wins ordering.**
-
-Source of truth: `restrict_to_owner`, `recovery_state_dir` and `write_file_with_permissions` in `standalone/src-tauri/src/lib.rs`; `TauriSessionStore` in `standalone/src/tauri-session-store.ts`.
+**Boot + the synchronous-read constraint.** `getState()` is synchronous —
+cold-start restore reads it before React mounts — but a Tauri `invoke` is async, so
+`TauriSessionStore` keeps an in-memory write-through cache: `TauriAdapter.init()`
+`hydrate`s it from `load_session` (§Boot sequence), `getItem` reads it
+synchronously, `setItem` updates it and forwards to `save_session` asynchronously,
+coalescing bursts to at most one in-flight write (latest value wins). Mirrors the
+VS Code adapter's host-injected seed (`docs/specs/vscode.md`).
 
 Dirty tracking is shared frontend behavior (`docs/specs/layout.md` → Session persistence).
 **Must skip an unchanged store write only when that value is queued or saved.**
@@ -971,9 +1008,6 @@ which resolves when the write pipeline goes idle, including after a rejected
 write; failed writes are logged. With Session persistence disabled, the pipeline
 is already idle. Drain is a completion barrier, not a guarantee of successful
 disk persistence.
-
-**Must distinguish process-crash recovery from hardware power-loss durability.**
-Directory fsync is best-effort after writes; unlink helpers do not fsync their directory (rationale).
 
 ### Agent recovery
 
@@ -1014,7 +1048,13 @@ teardown at a time. Source of truth: `QuitMachine` in
   exits** rather than leaving a process with none, and so does a trigger that
   finds none: parked in `Voting` it would have no window to vote and refuse
   every later exit.
-- **Must keep every Window snapshot on disk during quit and leave in-flight arrivals' claimed shells out of each endpoint's teardown.** Cold recovery follows §Arrival queue.
+- **A quit keeps every window's snapshot on disk** — that is what a relaunch
+  restores from, and the whole difference from a per-window close. **A Workspace
+  in transfer is in no snapshot until its target publishes it, and neither end's
+  teardown kills its shells** (§Arrival queue). A quit mid-transfer restores it
+  at most once: from the target once it has published it, or from a source
+  handed it back because the target was destroyed first; a source torn down
+  before its target adopts leaves it in no snapshot.
 
 ### Trigger interception
 

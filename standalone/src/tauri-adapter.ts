@@ -594,16 +594,11 @@ export class TauriAdapter implements PlatformAdapter {
       this.pendingFlushRequests.set(requestId, resolve);
       // Timeout is a synthetic completion; a stale timer after a real completion
       // hits notify's map-miss guard. Fan out after registering so a synchronous
-      // completion still finds the entry. WorkspaceWindow's single listener
-      // waits for every Wall before reporting completion for this window.
+      // completion still finds the entry (first notify wins — one Wall ships).
       setTimeout(() => this.notifySessionFlushComplete(requestId), timeoutMs);
       for (const handler of this.flushHandlers) handler({ requestId, ...options });
     });
   }
-
-  /** Keep one latest-value retry after close rollback, including a refused
-   * write that outlives the bounded drain. Never retries a successful save. */
-  retrySessionSave(): void { this.sessionStore.retryLatest(); }
 
   // Await the session store's in-flight/pending save_session pipeline (the Rust
   // temp+fsync+rename that actually reaches disk). Bounded: on timeout resolve

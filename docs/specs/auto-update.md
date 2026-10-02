@@ -8,9 +8,7 @@ The standalone app checks for updates on launch, where the network policy allows
 
 **Must read and clear the post-install marker on launch** (§localStorage) and show its banner; a reported failure suppresses this launch's check. Otherwise wait 5 seconds, then read the network policy with `networkPolicy` over the Burrow link and, where it allows (`docs/specs/remote-network.md` → "Updates"), `check()` — no update is silent, an update raises the approval prompt; then the reminder, if due: `check-due`, recording `remindedAt`. **The reminder is re-evaluated hourly while the app runs**, reading no policy and never checking; **never over an undismissed notice, nor while the clock reads before 2026-09**, not yet set. Version-lookup and check failures are logged. **Only approval starts the background `download()`**; a failed one is logged and the prompt returns.
 
-**Check now** — the `check-due` and `check-failed` links, and the `updates` port — shows `checking`, then `available`, `up-to-date`, or `check-failed`. **Must join a check already in flight and preserve an approved update as `downloading` or `downloaded` instead of checking again.** This applies to both manual and delayed automatic checks, including approval while network-policy lookup is pending. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage). `standalone/src/updater.test.ts` pins the approval races.
-
-Source of truth: `runUpdateCheck` and `approveUpdate` in `standalone/src/updater.ts`.
+**Check now** — the `check-due` and `check-failed` links, and the `updates` port — shows `checking`, then `available`, `up-to-date`, or `check-failed`. **A second ask joins the check in flight. An update already approved is shown again, `downloading` or `downloaded`, instead of checked for**, which would offer it for approval twice. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage).
 
 **A self-host build never checks** (`docs/specs/relay.md` → "Relay origin"): `startUpdateCheck()` returns at once and `checkNow()` does nothing unless the webview's own baked mode, `bakedRelayMode()`, is `hosted`.
 
