@@ -1,4 +1,4 @@
-import { getWorkspaceUiSnapshot, setPendingWorkspaceClose, resetWorkspaceUi } from '../../lib/workspace-ui-store';
+import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi } from '../../lib/workspace-ui-store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { prepareWorkspaceTransfer } from './workspace-transfer';
 import type { PersistedSession } from '../../lib/session-types';
@@ -53,14 +53,16 @@ function deps(order: string[] = [], overrides: Partial<Parameters<typeof prepare
 
 describe('prepareWorkspaceTransfer', () => {
   it('keeps the pending kill until commit, then dismisses only the departing Workspace', async () => {
-    setPendingWorkspaceClose({ id: 'ws-id', char: 'q' });
+    const answer = vi.fn();
+    requestConfirmation({ id: 'ws-id', char: 'q', answer });
     const prepared = await prepareWorkspaceTransfer(deps());
-    expect(getWorkspaceUiSnapshot().pendingClose).toEqual({ id: 'ws-id', char: 'q' });
+    expect(getWorkspaceUiSnapshot().confirmation).toMatchObject({ id: 'ws-id', char: 'q' });
     prepared.commit();
-    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
-    setPendingWorkspaceClose({ id: 'sibling', char: 'k' });
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    expect(answer).toHaveBeenCalledExactlyOnceWith(false);
+    requestConfirmation({ id: 'sibling', char: 'k', answer: vi.fn() });
     prepared.commit();
-    expect(getWorkspaceUiSnapshot().pendingClose).toEqual({ id: 'sibling', char: 'k' });
+    expect(getWorkspaceUiSnapshot().confirmation).toMatchObject({ id: 'sibling', char: 'k' });
   });
 
   it('serializes with a live cwd probe before anything is detached', async () => {

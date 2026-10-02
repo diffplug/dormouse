@@ -7,7 +7,7 @@ import { tearOutWorkspace, transferWorkspaceTo } from "./workspace-move";
 import { getWallHandle } from "dormouse-lib/components/wall/wall-handles";
 import { confirmToolEditorsClose } from "dormouse-lib/lib/tool-editor";
 import { randomKillChar } from "dormouse-lib/components/KillConfirm";
-import { setPendingWorkspaceMove, setWorkspaceMoveError } from "dormouse-lib/lib/workspace-ui-store";
+import { cancelPendingConfirmation, requestConfirmation, setWorkspaceMoveError } from "dormouse-lib/lib/workspace-ui-store";
 import { workspaceTabRect } from "./workspace-tabs";
 import { DOOR_TAB_HEIGHT_PX, DOOR_TAB_MAX_WIDTH_PX } from "dormouse-lib/components/design";
 
@@ -163,6 +163,7 @@ export function onDropOnOtherWindow(
   // the caret this is about to clear.
   endGesture();
   if (insideStrip) return;
+  cancelPendingConfirmation();
   const grab = grabOffset(id);
   void (async () => {
     // Probed fresh rather than reusing the throttled answer: up to
@@ -189,7 +190,13 @@ export function onDropOnOtherWindow(
     // the same typed letter a kill takes (docs/specs/layout.md → Workspaces).
     const iframes = getWallHandle(id)?.iframeSurfaceRefs() ?? [];
     if (iframes.length > 0) {
-      setPendingWorkspaceMove({ id, char: randomKillChar(), iframeCount: iframes.length, proceed: move });
+      requestConfirmation({
+        id,
+        char: randomKillChar(),
+        title: "Move and lose page state?",
+        detail: `${iframes.length === 1 ? "An iframe Surface" : `${iframes.length} iframe Surfaces`} in this Workspace will reload at ${iframes.length === 1 ? "its" : "their"} saved URL; a page cannot leave its window.`,
+        answer: (accepted) => { if (accepted) move(); },
+      });
       return;
     }
     move();

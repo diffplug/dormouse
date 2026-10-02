@@ -24,6 +24,7 @@ import {
   type ResolvedWorkspace,
 } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
+import { cancelPendingConfirmation } from '../../lib/workspace-ui-store';
 import { computeWorkspaceUnion } from '../../lib/workspace-union';
 import { awaitWallHandle, errorText, mountingRefusal, stringParam } from './dor-control-shared';
 import { attachSurfacePorts } from './surface-ports';
@@ -247,6 +248,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
         return;
       }
       if (toWindow !== undefined && !isWindowRef(toWindow)) {
+        cancelPendingConfirmation();
         const handle = await awaitWallHandle(target.id);
         if (!handle) {
           detail.respond({ ok: false, error: mountingRefusal(target.ref) });
@@ -294,6 +296,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     }
 
     case WORKSPACE_CONTROL_METHODS.close: {
+      cancelPendingConfirmation();
       const target = requireWorkspace(detail);
       if (!target) return;
       // A close is answered only once the Workspace's Wall is there to answer

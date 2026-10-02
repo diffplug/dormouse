@@ -30,8 +30,8 @@ import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-ha
 import { resetWorkspaceBootPlans, setWorkspaceBootPlan } from './wall/workspace-boot-plans';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
-import { previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
-import { getWorkspaceUiSnapshot, resetWorkspaceUi } from '../lib/workspace-ui-store';
+import { isWorkspaceTransferPending, previousWorkspaceSession, publishWorkspaceSession, resetWindowSessionAggregator, seedWindowSession, setWorkspaceTransferPending } from '../lib/window-session-aggregator';
+import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleConfirmation } from '../lib/workspace-ui-store';
 import { resetTodoSpotlight } from '../lib/todo-spotlight';
 import {
   closeWorkspace,
@@ -160,23 +160,23 @@ describe('WorkspaceWindow', () => {
     expect(getActiveWorkspaceId()).toBe(first);
     await press(killKey);
     expect(getActiveWorkspaceId()).toBe('ws-2');
-    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('ws-2');
     expect(leafIdsIn('ws-2')).toHaveLength(1);
     await press('Escape');
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(3);
     await close();
-    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    await press(getWorkspaceUiSnapshot().confirmation!.char);
     await flush();
     expect(getActiveWorkspaceId()).toBe('ws-3');
     expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).toEqual([first, 'ws-3']);
     await close();
-    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-3');
-    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('ws-3');
+    await press(getWorkspaceUiSnapshot().confirmation!.char);
     await flush();
     expect(getActiveWorkspaceId()).toBe(first);
     await close();
-    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(first);
-    await press(getWorkspaceUiSnapshot().pendingClose!.char);
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe(first);
+    await press(getWorkspaceUiSnapshot().confirmation!.char);
     const replacement = getActiveWorkspaceId();
     expect(replacement).not.toBe(first);
     expect(getWorkspacesSnapshot().workspaces).toHaveLength(1);
@@ -184,7 +184,7 @@ describe('WorkspaceWindow', () => {
     expect(getWallHandle(first)).toBeNull();
     expect(leafIdsIn(replacement)).not.toContain('pane-a');
     await close();
-    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe(replacement);
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe(replacement);
   });
 
   it('returns from the successor tab to pane navigation after a Workspace close', async () => {
@@ -296,7 +296,7 @@ describe('WorkspaceWindow', () => {
       expect(getActiveWorkspaceId()).toBe(first);
       expect(getWorkspacesSnapshot().workspaces).toHaveLength(2);
       expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
-      expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+      expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
       expect(wallFor(first).querySelector('[data-focused="true"]')).toBeNull();
     }
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true })); });
@@ -1091,10 +1091,10 @@ describe('Surface moves between Workspaces', () => {
     await act(async () => { await expect(moveSurface('frame', request({ workspace: 'workspace:2' }))).rejects.toThrow('dangerously-destroy'); });
     let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
     await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
-    expect(getWorkspaceUiSnapshot().pendingSurfaceMove).not.toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).not.toBeNull();
     expect(document.body.textContent).toContain('saved URL');
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
-    await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(false); await pending; });
+    await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, false); await pending; });
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
     if (kind === 'tool') {
       recordToolDirty('frame', true);
@@ -1102,13 +1102,63 @@ describe('Surface moves between Workspaces', () => {
       recordToolDirty('frame', false);
       await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
       recordToolDirty('frame', true);
-      await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(true); await expect(pending).rejects.toThrow('edits'); });
+      await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, true); await expect(pending).rejects.toThrow('edits'); });
       expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
       recordToolDirty('frame', false);
     }
     await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
-    await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(true); await pending; });
+    await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, true); await pending; });
     expect(getWallHandle('ws-2')!.ownsSurface('frame')).toBe(true);
+  });
+
+  /** A source holding only a plain iframe, beside two terminal Workspaces. */
+  async function iframeWalls() {
+    const source = getActiveWorkspaceId();
+    createWorkspace({ id: 'ws-2', activate: false });
+    createWorkspace({ id: 'ws-3', activate: false });
+    const meta = browserLeafMeta('Frame', { surfaceType: 'browser', renderMode: 'iframe', url: 'http://localhost:3000/saved' });
+    await render(<><WorkspaceStrip /><WorkspaceWindow initialPlans={{ [source]: { restoredLathLayout: { version: 1, tree: leafTree('frame'), leafMeta: { frame: meta } } }, 'ws-2': { initialPaneIds: ['pane-x'] }, 'ws-3': { initialPaneIds: ['pane-y'] } }} /></>);
+    return source;
+  }
+
+  it('answers a pending confirmation no when a Surface move starts', async () => {
+    await twoWalls();
+    const answer = vi.fn();
+    requestConfirmation({ id: 'ws-2', char: 'q', answer });
+    await act(async () => { await moveSurface('pane-a', request({ workspace: 'workspace:2' })); });
+    expect(answer).toHaveBeenCalledExactlyOnceWith(false);
+    expect(getWallHandle('ws-2')!.ownsSurface('pane-a')).toBe(true);
+  });
+
+  it('answers a pending iframe consent no when a Workspace close is requested', async () => {
+    const source = await iframeWalls();
+    let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
+    expect(getWorkspaceUiSnapshot().confirmation?.title).toBe('Move iframe?');
+    await act(async () => { requestWorkspaceClose('ws-2'); expect(await pending).toBeNull(); });
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+    expect(isWorkspaceTransferPending(source)).toBe(false);
+    // The released destination is no longer guarded, so its untouched close runs.
+    await act(async () => { await vi.waitFor(() => expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([source, 'ws-3'])); });
+    expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+  });
+
+  it('lets a second GUI iframe move supersede the first one’s consent and complete', async () => {
+    const source = await iframeWalls();
+    let first!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
+    let second!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => { first = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
+    const firstConsent = getWorkspaceUiSnapshot().confirmation;
+    await act(async () => { second = moveSurface('frame', request({ workspace: workspaceStore.workspaceRefFor('ws-3') }), true); });
+    await act(async () => { expect(await first).toBeNull(); });
+    // The superseded move's cleanup leaves the second one's guards in place.
+    expect(isWorkspaceTransferPending(source)).toBe(true);
+    expect(isWorkspaceTransferPending('ws-3')).toBe(true);
+    expect(getWorkspaceUiSnapshot().confirmation).not.toBe(firstConsent);
+    await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, true); await second; });
+    expect(getWallHandle('ws-3')!.ownsSurface('frame')).toBe(true);
+    expect(getWallHandle('ws-2')!.ownsSurface('frame')).toBe(false);
+    expect([source, 'ws-2', 'ws-3'].some(isWorkspaceTransferPending)).toBe(false);
   });
 
   it('rechecks a Tool that becomes dirty in the final preparation microtask', async () => {
@@ -1149,9 +1199,9 @@ describe('Surface moves between Workspaces', () => {
     notYetServing();
     let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
     await act(async () => { pending = moveSurface('frame', request({ workspace: 'workspace:2' }), true); });
-    expect(getWorkspaceUiSnapshot().pendingSurfaceMove).not.toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).not.toBeNull();
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
-    await act(async () => { getWorkspaceUiSnapshot().pendingSurfaceMove!.answer(false); expect(await pending).toBeNull(); });
+    await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, false); expect(await pending).toBeNull(); });
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
   });
 });

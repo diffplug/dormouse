@@ -3,8 +3,8 @@ import { flushSync } from 'react-dom';
 import { awaitWallHandle, mountingRefusal } from './dor-control-shared';
 import { getWallHandle } from './wall-handles';
 import { forgetWorkspaceSession, isWorkspaceTransferPending } from '../../lib/window-session-aggregator';
-import { dismissWorkspaceUi, setPendingWorkspaceClose, setRenamingWorkspace } from '../../lib/workspace-ui-store';
-import { closeWorkspace, getActiveWorkspaceId, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
+import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setRenamingWorkspace, type WorkspaceConfirmation } from '../../lib/workspace-ui-store';
+import { closeWorkspace, getActiveWorkspaceId, getWorkspacesSnapshot, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
 import type { WorkspaceId } from '../../lib/session-types';
 import type { WorkspaceCloseMode } from './wall-types';
 import { confirmToolEditorsClose, UNSAVED_TOOL_REFUSAL } from '../../lib/tool-editor';
@@ -72,6 +72,7 @@ export async function closeWorkspaceWithSurfaces(
   id: WorkspaceId,
   mode: WorkspaceCloseMode = 'prompt',
 ): Promise<string | null> {
+  cancelPendingConfirmation();
   if (isWorkspaceTransferPending(id)) return 'Workspace is transferring';
   if (closeInFlight) return CLOSE_IN_FLIGHT_REFUSAL;
   const handle = getWallHandle(id);
@@ -113,6 +114,7 @@ export async function closeWorkspaceWithSurfaces(
  * confirmation, otherwise close immediately.
  */
 export function requestWorkspaceClose(id: WorkspaceId): void {
+  cancelPendingConfirmation();
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   void closeOnceWallRegisters(id);
 }
@@ -132,10 +134,21 @@ async function closeOnceWallRegisters(id: WorkspaceId): Promise<void> {
     // An immediate close reveals the Workspace itself.
     setActiveWorkspace(id);
     handle.selectWorkspaceTab();
-    setPendingWorkspaceClose({ id, char: randomKillChar() });
+    requestConfirmation(workspaceCloseConfirmation(id));
     return;
   }
   await closeWorkspaceWithSurfaces(id);
+}
+
+/** The typed close question; the key is ignored while the Workspace transfers. */
+export function workspaceCloseConfirmation(id: WorkspaceId, char = randomKillChar()): WorkspaceConfirmation {
+  return {
+    id,
+    char,
+    detail: getWorkspacesSnapshot().workspaces.find(workspace => workspace.id === id)?.name,
+    canConfirm: () => !isWorkspaceTransferPending(id),
+    answer: accepted => { if (accepted) void closeWorkspaceWithSurfaces(id); },
+  };
 }
 
 /** Open the strip's inline rename editor on a Workspace. */

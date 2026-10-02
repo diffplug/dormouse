@@ -17,6 +17,7 @@ import { clearTerminalActivity, setTerminalActivity } from '../../lib/session-ac
 import { createAlertEpisode } from '../../lib/alert-episode';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../../lib/workspace-surfaces';
 import { resetWindowSessionAggregator } from '../../lib/window-session-aggregator';
+import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi } from '../../lib/workspace-ui-store';
 import { setPlatform } from '../../lib/platform';
 import type { OpenPort, PlatformAdapter } from '../../lib/platform/types';
 
@@ -330,6 +331,23 @@ function listing(surfaces: Array<Record<string, unknown>>) {
 function terminalRows(prefix: string, refs: string[]): Array<Record<string, unknown>> {
   return refs.map((ref, index) => ({ ref, id: `${prefix}-${ref}`, kind: 'terminal', focused: index === 0 }));
 }
+
+it.each([
+  ['close', { workspace: 'workspace:2' }],
+  ['move', { workspace: 'workspace:2', toWindow: 'new' }],
+] as const)('answers a pending confirmation no as workspace.%s starts, even when it refuses', async (verb, params) => {
+  createWorkspace({ id: 'ws-2', activate: false });
+  handleFor('ws-2', { runningCount: () => 1 });
+  setPlatform({} as unknown as PlatformAdapter);
+  const confirmed = vi.fn();
+  requestConfirmation({ id: 'ws-2', char: 'q', answer: confirmed });
+  const detail = request(`workspace.${verb}`, params);
+  await handleWorkspaceControl(detail);
+  expect(answer(detail)).toEqual(expect.any(String));
+  expect(confirmed).toHaveBeenCalledExactlyOnceWith(false);
+  expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+  resetWorkspaceUi();
+});
 
 describe('surface.list --all', () => {
   it('tags every row with its Workspace and carries the directory', async () => {
