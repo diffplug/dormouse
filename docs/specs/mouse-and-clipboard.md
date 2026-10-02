@@ -127,6 +127,12 @@ Source of truth: `finishProgramDrag` in `lib/src/lib/terminal-mouse-router.ts`, 
 
 ---
 
+### 3.9 Select All
+
+**Must keep macOS ⌘A from selecting Dormouse's UI or a terminal's buffer**: the Wall cancels it outside text fields, and each terminal's key handler blocks xterm.js's select-all. Text fields and Tool iframes keep it.
+
+Source of truth: `isMacSelectAll` in `lib/src/lib/select-all.ts`; `cancelUiSelectAll` in `lib/src/components/wall/keyboard/cancel-ui-select-all.ts`; `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`.
+
 ## 4. Copy Editor
 
 Mouse-up over a terminal-handled drag opens the **copy editor**, as does the copy chord over a shadowed one (§3.8): the text a copy would produce, every line break the selection crossed marked (rationale).
@@ -354,12 +360,12 @@ Right-click paste is not implemented. On macOS standalone, Edit → Paste clicke
 
 ### 8.9 Clipboard Chords Inside Dormouse's Own Text Fields
 
-Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields — keep their clipboard chords in JS on the standalone hosts (`docs/specs/standalone.md` → "Application menu"). `handleEditableClipboard` (`lib/src/components/wall/keyboard/handle-editable-clipboard.ts`) supplies them in JS, **ahead of the wall's mode and rename gates** so a focused field wins whatever the wall is doing:
+Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields — get their clipboard chords from `handleEditableClipboard` (`lib/src/components/wall/keyboard/handle-editable-clipboard.ts`) **ahead of the wall's mode and rename gates** so a focused field wins whatever the wall is doing:
 
 - **Paste** reads through `readTextFromClipboard` (the §8.6 tier-2 preference, so no "Paste from <App>" popup) and replaces the field's selection. **Copy** and **cut** write the selected substring through `writeTextToClipboard`, whose false return is what stops a cut deleting; a collapsed selection copies nothing. **Text only** — the file-reference and image tiers stay terminal-only.
 - The edit goes through `document.execCommand('insertText')` where the webview allows it (native undo), else **the prototype `value` setter plus a synthetic `input` event** — a plain `value` assignment desyncs a React-controlled field.
 - Chords are §8.2's: paste takes either modifier on every platform, copy/cut take `⌘` on macOS and `Ctrl` elsewhere.
-- **Scope is narrow.** Excluded: xterm's `.xterm-helper-textarea` (the terminal owns its chords), read-only and disabled fields. The handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters, though macOS now has a native Edit menu and Windows/Linux webviews native chords (rationale). Elsewhere — VS Code, the website, Pocket — it never fires and the webview's own chords are untouched.
+- **Scope is narrow.** Excluded: xterm's `.xterm-helper-textarea` (the terminal owns its chords), read-only and disabled fields. The handler runs only where the adapter implements the optional `readClipboardText` — today the two standalone adapters (rationale). Elsewhere — VS Code, the website, Pocket — it never fires and the webview's own chords are untouched.
 - **Must skip an asynchronous edit if the field unmounts, loses focus, becomes read-only/disabled, or changes value or selection**; a cut deletes only after clipboard-write success. Pinned by `lib/src/components/wall/keyboard/handle-editable-clipboard.test.ts`.
 
 ---
@@ -370,7 +376,7 @@ Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields
 
 **Must route clipboard chords and selection operations to the focused helper**, while leaving its Escape, Tab, arrows, and digits with xterm. Which of those disarm autorun follows `docs/specs/terminal-context.md` → "Helper lifecycle".
 
-**Must copy selected context diagnostic text with Cmd+C on macOS and Ctrl+C elsewhere**, including the standalone host. Copy only a selection contained in the focused diagnostic, retaining it on clipboard failure; helper and editable-field chords keep their own routing. Pinned by `lib/src/components/wall/keyboard/handle-context-copy.test.ts`.
+**Must copy selected context diagnostic text with Cmd+C on macOS and Ctrl+C elsewhere**. Copy only a selection contained in the focused diagnostic, retaining it on clipboard failure; helper and editable-field chords keep their own routing. Pinned by `lib/src/components/wall/keyboard/handle-context-copy.test.ts`.
 
 Source of truth: `handleContextCopy` in `lib/src/components/wall/keyboard/handle-context-copy.ts`; `TerminalPanel` in `lib/src/components/wall/TerminalPanel.tsx`; `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`.
 

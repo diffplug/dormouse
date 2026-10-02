@@ -4,7 +4,7 @@ import { handleContextCopy } from './keyboard/handle-context-copy';
 import { handleEditableClipboard } from './keyboard/handle-editable-clipboard';
 import { handleMouseSelectionKeys } from './keyboard/handle-mouse-selection-keys';
 import { handleKillConfirm } from './keyboard/handle-kill-confirm';
-import { cancelUiSelectAll } from './keyboard/handle-select-all';
+import { cancelUiSelectAll } from './keyboard/cancel-ui-select-all';
 import { handlePaneShortcuts } from './keyboard/handle-pane-shortcuts';
 import { handlePaneNavigation } from './keyboard/handle-pane-navigation';
 import { handleWorkspaceShortcuts } from './keyboard/handle-workspace-shortcuts';

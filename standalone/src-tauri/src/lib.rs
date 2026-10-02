@@ -3922,10 +3922,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // Replace Tauri's default menu (docs/specs/standalone.md -> Application
-        // menu). macOS delivers Cmd+C/X/V to a WKWebView only through an Edit
-        // menu, so it keeps one; Windows and Linux webviews handle those chords
-        // themselves, where menu accelerators would take Ctrl+C from the terminal.
+        // Replace Tauri's default menu (docs/specs/standalone.md -> Application menu).
         .menu(|handle| {
             #[cfg(target_os = "macos")]
             let pkg = handle.package_info();
@@ -3963,9 +3960,6 @@ pub fn run() {
                     )?,
                 ],
             )?));
-            // Native edits reach whichever frame has focus, Tool iframes
-            // included; a page that handles a chord's keydown (the terminal,
-            // Dormouse's own fields) cancels it and the item never fires.
             #[cfg(target_os = "macos")]
             items.push(Box::new(Submenu::with_items(
                 handle,

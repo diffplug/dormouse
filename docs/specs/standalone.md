@@ -368,18 +368,13 @@ macOS-only fullscreen toggle). **Must keep the fullscreen item** — it and its
 Ctrl+Cmd+F are the only exit from native fullscreen when AppKit does not reveal
 the overlay title bar's traffic lights.
 
-- **Must keep the Edit submenu on macOS**: WKWebView edits natively only
-  through it, the only clipboard path Tool iframes have.
+- **Must keep the Edit submenu on macOS**, Tool iframes' only clipboard path
+  (rationale).
 - **Must cancel the keydown of any chord the page handles**, so the menu item
-  skips it: the terminal and Dormouse's fields
-  (`docs/specs/mouse-and-clipboard.md` §8.2, §8.9) do, and the Wall cancels ⌘A
-  outside a text field, so neither Select All nor xterm.js selects the UI.
-- **Never add an Edit submenu on Windows or Linux**: their webviews edit
-  natively without one, and its accelerators would take Ctrl+C from the
-  terminal.
+  skips it (rationale): `docs/specs/mouse-and-clipboard.md` §3.9, §8.2, §8.9.
+- **Never add an Edit submenu on Windows or Linux** (rationale).
 
-Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`;
-`cancelUiSelectAll` in `lib/src/components/wall/keyboard/handle-select-all.ts`.
+Source of truth: the `.menu(...)` builder in `standalone/src-tauri/src/lib.rs`.
 
 ## Siri affordance
 
