@@ -210,3 +210,18 @@ test('titles a viewer with its target\'s basename, controls stripped', () => {
   // C0 (BEL, ESC), DEL, and C1 (NEL, CSI, ST) could end or open a sequence.
   assert.equal(viewerTitle(join(root, 'a\x07\x1b]2;x\x7f\u0085\u009b\u009cb.txt')), 'a]2;xb.txt');
 });
+
+
+test('editor saves atomically while its retained raw grant still reads the original file', async () => {
+  const viewer = await start('save.ts', 'original');
+  const sourcePath = viewer.path.replace(/view$/, 'source');
+  const first = JSON.parse((await get(viewer, sourcePath)).body);
+  const saved = await post(viewer, 'save', { text: 'edited', version: first.version });
+  assert.equal(saved.status, 200, saved.body);
+  const next = JSON.parse((await get(viewer, sourcePath)).body);
+  assert.equal(next.text, 'edited');
+  assert.equal(next.version, JSON.parse(saved.body).version);
+  const raw = await get(viewer, viewer.path.replace(/view$/, 'file/save.ts'));
+  assert.equal(raw.status, 200);
+  assert.equal(raw.body, 'original');
+});

@@ -14,12 +14,27 @@ export function MouseOverrideBanner({ terminalId }: { terminalId: string }) {
 
   useEffect(() => {
     if (!flashed) return;
+    if (!visible) {
+      setFlashed(null);
+      return;
+    }
     const id = window.setTimeout(() => {
-      setMouseOverride(terminalId, flashed === 'sticky' ? 'permanent' : 'off');
+      if (getMouseSelectionState(terminalId).override === 'temporary') {
+        setMouseOverride(terminalId, flashed === 'sticky' ? 'permanent' : 'off');
+      }
       setFlashed(null);
     }, 260);
-    return () => window.clearTimeout(id);
-  }, [flashed, terminalId]);
+    // Observe each store transition: React can batch an override ending and
+    // restarting into one visible render. The old flash belongs to neither
+    // a later temporary override nor a new mouse-reporting program.
+    const unsubscribe = subscribeToMouseSelection(() => {
+      if (getMouseSelectionState(terminalId).override !== 'temporary') {
+        window.clearTimeout(id);
+        setFlashed(null);
+      }
+    });
+    return () => { window.clearTimeout(id); unsubscribe(); };
+  }, [flashed, terminalId, visible]);
 
   if (!visible) return null;
 

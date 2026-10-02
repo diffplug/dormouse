@@ -13,6 +13,7 @@ Install and sign in to the agent separately, then launch it from a Dormouse term
 | --- | --- | --- | --- |
 | [Claude Code](https://code.claude.com/docs/en/cli-reference) | `claude` | `claude --resume <id>` | Yes |
 | [Codex](https://developers.openai.com/codex/cli/) | `codex` | `codex resume <id>` | Yes |
+| [Pi](https://pi.dev/) | `pi` | `pi --session <id>` | No |
 | [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/copilot-cli) | `copilot` | `copilot --resume <id>` | Yes |
 | [Antigravity](https://antigravity.google/docs/cli/commands/resume) | `agy` | `agy --conversation <id>` | Yes |
 | [Warp](https://docs.warp.dev/agents/cli/reference/) | `warp` | `warp --resume <id>` | Yes |
@@ -41,7 +42,7 @@ Watching requires shell integration that reports the running command. Terminal n
 
 ## Adding an agent
 
-An agent integration normally needs one registry entry, an exit fixture, and a row in the table above; the standalone app and VS Code share the recovery implementation.
+Add a registry entry, exit fixture, and table row. Both hosts share recovery.
 
 ### Add the definition and fixture
 
@@ -56,9 +57,9 @@ An agent integration normally needs one registry entry, an exit fixture, and a r
    }
    ```
 
-2. Declare the executable names the agent actually installs and the resume option or subcommand it supports. The shared parser handles space/equals separators, terminal escapes, and command reconstruction. IDs must fit its alphanumeric, hyphen, and underscore grammar. If an agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first. Do not substitute a “latest conversation” command.
+2. Declare the installed executable names and resume option or subcommand. [Detection](#detection) owns parsing and ID rules. If the agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first; never substitute a “latest conversation” command.
 3. Add a sanitized exit excerpt to [the fixtures](../lib/src/lib/__fixtures__/coding-agents.ts), with the expected rebuilt command, agent version, and operating system. Replace personal paths, account information, and session IDs; preserve relevant wording and terminal escapes. Record real exit output rather than reconstructing a hint from documentation.
-4. Add the agent and its command forms to the supported-agents table. Set `watchByDefault` only after checking that the agent becomes quiet when it needs attention. The registry tests require fixture coverage, and the website tests compare this table with the registry.
+4. Add the agent and its command forms to the supported-agents table. Set `watchByDefault` only after checking that the agent becomes quiet when it needs attention. Registry tests pin fixture coverage; website tests pin the table.
 
 ### Verify the integration
 
@@ -90,10 +91,10 @@ Open a **draft pull request** with the entry, fixture, documentation, and verifi
 - **Must capture before killing the target PTYs**, within the host's bounded teardown. Each host owns the target scope; interrupt every live PTY within it, regardless of recognized command, and exclude exited PTYs. (rationale)
 - **Must write one `^C` into each target PTY per interrupt call, never signal it.** The shared machine alone decides the second press. Host interrupts must settle within their timeout. (rationale)
 - **Never finish early on quiet or replace the retry gates with a blanket second press.** Poll until every target yields or the capture budget expires; retry timing and ask detection live in the module's comments. (rationale)
-- **Must scan only bytes received after the mark taken before the first interrupt.** Never widen the scan into earlier output; buffer eviction may discard fresh bytes but must not promote stale bytes into the scan. (rationale)
+- **Must scan only output received after the mark taken before the first interrupt.** Never widen the scan into earlier output; buffer eviction may discard fresh output but must not promote stale output into the scan. (rationale)
 - **Must report each detected command immediately**, retaining earlier detections if a later target times out.
 
-Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recovery-capture.ts`; pinned by `lib/src/host/recovery-capture.test.ts`.
+Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recovery-capture.ts`; pinned by `lib/src/host/recovery-capture.test.ts`, including `captures Pi's double-press exit`.
 
 ### Detection
 
@@ -102,7 +103,7 @@ Source of truth: `captureAgentRecovery` / `RecoveryHost` in `lib/src/host/recove
 - **Must rebuild only a known invocation plus an opaque id.** The command is *rebuilt* as label, space, captured id, never sliced from the buffer, keeping the hint's executable alias; a long option's id may follow a space or `=`, and only Claude's legacy `claude --continue` omits it. The id must begin with an ASCII alphanumeric and contain only ASCII alphanumerics, hyphens, and underscores. The invocation must end on a word break but nothing stronger (rationale).
 - **Must observe a separator after the newest invocation before capturing it.** Buffer end is insufficient, even at the capture deadline; never fall back to an older hint while the newest is unterminated. Pinned by `waits through every ID split` in `lib/src/host/recovery-capture.test.ts` (rationale).
 - **Must strip the scan window as a whole, in one pass, with an unterminated control swallowing the rest of it** — the string controls (OSC, DCS, SOS, PM, APC) **in either introducer form, `ESC` or bare C1**, and equally a CSI the window was cut off *inside* (rationale). **Must match every escape by its full ECMA-48 shape**, never by the Fe range (rationale). **Must share one implementation**: `stripTerminalControls` removes string controls by running `TerminalControlStreamFilter`, so the batch and streaming readers cannot disagree.
-- **Must strip in boundary mode**: *every complete* control becomes a newline rather than vanishing, except SGR and charset designators, the two classes that neither move the cursor nor erase. **Must discard incomplete trailing presentation controls without creating a boundary** (rationale).
+- **Must strip in boundary mode**: complete non-string ESC/CSI sequences and standalone C1 controls become newlines, except SGR and charset designators. ESC and C1 counterparts must produce the same boundary. String controls and their payloads vanish; LF, CR, and TAB remain text boundaries; other C0 controls that do not move or erase text vanish. **Must discard incomplete trailing presentation controls without creating a boundary** (rationale).
 - **Must select the rightmost match in the last 50 lines**, newest *by position* and never by pattern order (rationale).
 
 Source of truth: `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`; `detectResumeCommand` / `normalizeResumeCommand` in `lib/src/lib/resume-patterns.ts`; `stripTerminalControls` in `lib/src/lib/terminal-controls.ts`; pinned by `lib/src/lib/coding-agents.test.ts`, `lib/src/lib/resume-patterns.test.ts`, and `lib/src/lib/terminal-controls.test.ts`.
@@ -111,7 +112,7 @@ Source of truth: `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`; `detectResum
 
 - **Must keep one rebuilt invocation per Surface in a host-owned, single-use record outside the persisted Session.** The renderer save path never derives or writes it. (rationale)
 - **Must call `beginCapture` before capture can return early.** The first call per host process clears the previous record; subsequent calls merge, preserving captures from other Windows. (rationale)
-- **Must persist every detection synchronously through `createRecoveryStore`**, using `recovery.json` in the host-selected directory, an owner-only temporary file, and atomic rename. A failed write must not throw through teardown. Without a directory the store is memory-only and logs that limitation once.
+- **Must persist every detection synchronously through `createRecoveryStore`**, using `recovery.json` in the host-selected directory, a temporary file with mode `0600` on Unix, and atomic rename. Windows storage permissions follow `docs/specs/security-local.md` -> "Persisted state". A failed write must not throw through teardown. Without a directory the store is memory-only and logs that limitation once.
 - **Must read and unlink the durable record on the first claim**, including on parse failure; if unlink fails, ignore it. Discard records older than 7 days after unlinking. Within the process, each container claims only its saved pane ids, and each entry is handed out once. (rationale)
 - **Must deliver claimed commands out of band on boot through `PlatformAdapter.getRecoveryCommands()`**; adapters whose hosts capture nothing may omit it. Only cold restore consumes these commands for execution; live resume never executes them.
 

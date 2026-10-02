@@ -344,3 +344,15 @@ test('writes each open as OSC 367, and answers an error for a path the host woul
   }
   assert.equal(written.length, 1);
 });
+
+
+test('answers a page-visible error when JSON escaping makes an open payload too large', async () => {
+  const written = [];
+  const open = oscOpen(text => written.push(text));
+  for (const path of ['/' + '"'.repeat(2047), 'C:' + '\\'.repeat(2046)]) {
+    const result = await open(path, false);
+    assert.equal(result.ok, false);
+    assert.match(result.error, /^Cannot open /);
+  }
+  assert.deepEqual(written, []);
+});

@@ -17,7 +17,7 @@
 - **Must retain exited output**, offer Reset, and avoid automatic restart loops.
 - **Must pause status and process-inspection polling while the context is hidden**, invalidating cached idle results. Reopening publishes current terminal status; source closure inspects work on demand.
 
-**Must carry one status line per helper state**, offering Reset in place of Modify only after user input and after exit.
+**Must carry one status line per helper state**, offering Reset in place of Modify only for user-touched or exited helpers.
 
 **Must make Reset an explicit discard**, confirming loss of scrollback, unfinished input, running programs, and unsaved edits. Cancellation changes nothing; confirmation disposes the old helper and launches a fresh one using the source's current directory and current global setting. Stale timers cannot write to the replacement.
 

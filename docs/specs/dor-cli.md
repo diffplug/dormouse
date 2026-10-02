@@ -101,9 +101,7 @@ tab/eval/screenshot commands, and anything added later. It owns the Windows
 recipe: cross-spawn rather than Node's own `spawn`, `windowsHide`, and
 resolution on `exit` with an exit-time output snapshot (rationale).
 
-**Never forward an argument containing a literal `%VAR%`** — `cmd.exe` expands
-it through a `.cmd` shim, an unavoidable batch limitation; today's forwarded
-arguments carry none.
+**Must leave Windows shim quoting to `spawnAndCapture`.** Forwarded argv can contain literal percent expressions; never interpolate them into an independently constructed shell command. (rationale)
 
 - **`dor agent-browser`, `dor playwright` and both browser hosts spawn the `PATH`-resolved
   absolute path, never the bare name** — cross-spawn resolves a bare name
@@ -153,9 +151,7 @@ SIGKILLs the child; **Windows must end the whole tree** with
 child is `cmd.exe` and the real CLI is its descendant (`treeKillCommand`, pinned
 through its `isWindows` argument).
 
-**Resolution.** `dor-lib-common`'s `exports` point at its built `dist`
-(Node-type-free `.d.ts`, since `dor`'s `tsc` avoids `@types/node`); every
-esbuild/Vite consumer inlines it. **The `dor` and `dormouse-lib` prebuilds must
+`dor-lib-common`'s `exports` point at built `dist`; esbuild/Vite consumers inline it. **The `dor` and `dormouse-lib` prebuilds must
 build `dor-lib-common` first**, or those `.d.ts` files are missing when either
 typechecks.
 
@@ -219,6 +215,7 @@ spec carries:
 
 - **The POSIX socket name is 8 random bytes rather than 16**, so the path clears
   macOS's `sun_path` cap (rationale).
+- **Must reject malformed control requests before reading their fields or forwarding them.** `standalone/sidecar/dor-control-server.test.js` pins continued service after a refused request.
 - **A connection that says nothing at all is dropped after 10s.**
 - The two proof domains are mirrored between client and server, pinned by
   `lib/src/lib/mirrored-constants.test.ts`.
@@ -267,9 +264,7 @@ and each host's hop in `standalone/src/tauri-adapter.ts`,
 
 ## Handle Model
 
-`Window ⊃ Workspace ⊃ Pane ⊃ Surface` (`docs/specs/glossary.md`). **Must treat a command's primary target as a Surface; `dor move` also takes a destination Workspace, while `--workspace <ref>` scopes the source** ([dor workspace](#dor-workspace)). `Reserved:` no command targets
-another Window; a request reaches the window that owns its Surface instead
-(§Standalone), and the ref grammar for one is [Future](#future).
+`Window ⊃ Workspace ⊃ Pane ⊃ Surface` (`docs/specs/glossary.md`). **Must use Surface handles for Surface verbs and container refs for container verbs.** `dor move` takes a destination Workspace, while `--workspace <ref>` scopes the source ([dor workspace](#dor-workspace)). Cross-window request routing follows [Standalone](#standalone).
 
 Invariants:
 
@@ -391,7 +386,7 @@ It picks the style (`cmd` / `posix` / `powershell`) with the same classifier
 clipboard/drop path escaping uses
 ([mouse-and-clipboard.md](mouse-and-clipboard.md) §8.6).
 
-**Every first-party command except the `dor agent-browser` and `dor playwright`
+**Every public first-party command except the `dor agent-browser` and `dor playwright`
 passthrough accepts `--json`**, emitting a stable object with the same handles
 as its text output; single-Surface responses always carry both `surface_id`
 (stable) and `surface_ref` (Workspace-stable short ref). Text output carries the
@@ -545,13 +540,7 @@ nonstandard port is the one case needing the scheme typed. This overrides
 server on https just SSL-errors. **Reject** an input that is neither a URL nor a
 `host:port`, including a purely numeric "host" like `800:600` (rationale).
 
-**Resolution is CLI-side**, so `dor agent-browser` hands `agent-browser` a real URL rather
-than a handle a binary would resolve differently. Only the `open` / `goto` /
-`navigate` verbs resolve, matching the target by **shape, not position** since
-`dor` can't know agent-browser's flag arity (`open --headed surface:3`
-resolves); **only the first special-shaped argument is rewritten**, these verbs
-taking a single target. A Surface handle requires a live control endpoint
-(failing clearly outside Dormouse); the `host:port` inference does not.
+**Must resolve navigation targets CLI-side before forwarding to the browser provider.** Only the first target of a navigation verb is eligible. Skip known option values; an unknown option leaves the argv unchanged rather than guessing its arity. A Surface handle requires a live control endpoint; `host:port` inference does not. The provider descriptors and `resolveOpenTargetArgs` own recognized verbs and option arities.
 
 A Surface handle resolves through the `surface.resolveOpen` control method,
 which runs the same host port scan as `dor list --ports` (visible panes **and**
@@ -588,13 +577,7 @@ Source of truth: `runBrowserCli` in `dor/src/commands/browser-cli.ts`; `BrowserV
 before stricli parses provider arguments.** One runner drives both; what differs
 is each provider's descriptor:
 
-| | `dor agent-browser` | `dor playwright` |
-| --- | --- | --- |
-| Session flag forwarded | `--session <s>` | `--session=<s>`; native `-s` read as `--session` |
-| Targets resolved in | `open`, `goto`, `navigate` | `open`, `goto` |
-| Never binds a Surface | `close` | `close`, `detach`, `close-all`, `kill-all`, `delete-data`, `list`, `show`, `install`, `install-browser` |
-| Informational flags | `--help`, `-h` | `--help`, `-h`, `--version`, `-v` |
-| Runs in / with | the caller's cwd and executable | the binding's project cwd and pinned executable |
+`BrowserCliDescriptor`, the provider descriptors, and `BROWSER_PROVIDERS` own session argv, navigation verbs, nonbinding/informational controls, and execution scope.
 
 - **Exactly one identity flag**: `--key` (default `default`), `--session`, or
   `--surface`, plus `--workspace`; any two fail (`--key and --surface are
@@ -642,7 +625,7 @@ stderr warning, when the bound one is gone**, and **must fail naming a bound cwd
 that no longer exists** rather than report the CLI missing.
 
 Source of truth: `runBrowserCli`, `resolveBinding` and `extractSessionFlags` in
-`dor/src/commands/browser-cli.ts`; `runAgentBrowserCli` in
+`dor/src/commands/browser-cli.ts`; `BROWSER_PROVIDERS` in `dor-lib-common/src/browser-providers.ts`; `runAgentBrowserCli` in
 `dor/src/commands/agent-browser.ts`; `runPlaywrightCli` in
 `dor/src/commands/playwright.ts`; `SURFACE_CONTROL_METHODS` in
 `dor/src/protocol.ts`; `ResolveBrowserRequest`, `BrowserSurfaceRequest` and
@@ -662,9 +645,7 @@ stays unsupported.
 named by its Workspace-stable `surface:N` ref, or rediscovered after layout
 churn by `--command` / `--cwd` / `--port`, and `dor ensure`'s command+cwd match
 is an implicit key that also lets an agent adopt a command the user started by
-hand. Only browser Surfaces carry an explicit join key (`dor agent-browser --key <name>`,
-`dor playwright --key <name>`), because their session is held externally by the browser
-CLI.
+hand. Browser join keys follow `docs/specs/dor-browser.md` → Managed identity; Tool keys follow `docs/specs/dor-tool.md` → Identity and dedupe.
 
 The worked examples are `dor/skill.md`'s "## Recipes", which ships with the
 CLI ([Agent Skill](#agent-skill)).

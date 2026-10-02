@@ -56,7 +56,7 @@ Before the editor, `OSC 52` was consumed and ignored, because a program that can
 
 ## 4.1.1 Auto
 
-The fit test reads a greedy wrapper correctly by construction: a wrapper at width W only breaks where the next word would push past W, and the paragraph's longest row is at most W, so every wrapped break also fails the test against that row. A break the test calls intentional therefore never comes from a greedy wrap. The 40-column floor exists for paragraphs of short rows, whose longest row says nothing about a wrap width: without it `Hello` / `World`, or a list of short names, read as one wrapped line. It is absolute rather than relative to the terminal because text is often wrapped far narrower than the pane: a first cut that floored at half the terminal kept every break of `fold -w 50` output in a 200-column pane (found driving the real app, 2026-09).
+The fit test reads a greedy wrapper correctly by construction: a wrapper at width W only breaks where the next word would push past W, and the longest logical line sampled near the break is at most W, so every wrapped break also fails the test against that row. A break the test calls intentional therefore never comes from a greedy wrap. The 40-column floor exists for paragraphs of short rows, whose longest row says nothing about a wrap width: without it `Hello` / `World`, or a list of short names, read as one wrapped line. It is absolute rather than relative to the terminal because text is often wrapped far narrower than the pane: a first cut that floored at half the terminal kept every break of `fold -w 50` output in a 200-column pane (found driving the real app, 2026-09).
 
 ## 5.1 Detection
 
@@ -68,7 +68,11 @@ The mouse store mutates each pane's state object in place, but replaces its map 
 
 ## 8.2 Paste Keybindings
 
-**Why paste breaks the clean macOS separation that copy keeps.** On macOS `⌘C` is copy and `Ctrl+C` is SIGINT, and honoring that split costs nothing — a Mac user reaching for copy reaches for `⌘`. Paste is not symmetric: `Ctrl+V` is the universal expectation on every platform, so a macOS build that ignored it would read as broken rather than principled. Intercepting all four combinations everywhere buys that, at the known cost of `0x16` — §8.3's `Ctrl+Q` covers the shells, and nothing covers a program implementing neither.
+**Why paste breaks the clean macOS separation that copy keeps.** On macOS `⌘C` is copy and `Ctrl+C` is SIGINT, and honoring that split costs nothing — a Mac user reaching for copy reaches for `⌘`. Paste is not symmetric: `Ctrl+V` is the universal expectation on every platform, so a macOS build that ignored it would read as broken rather than principled. Intercepting all four combinations everywhere buys that, at the known cost of `0x16`; a program's literal-next prefix cannot bypass the webview's paste-chord interception.
+
+## 8.3 Program Literal-Next Input
+
+The [Bash reference manual](https://www.gnu.org/software/bash/manual/html_node/Commands-For-Text.html) binds Readline's quoted-insert to Ctrl+Q or Ctrl+V. [Vim's insert-mode manual](https://github.com/vim/vim/blob/master/runtime/doc/insert.txt#L201-L204) also aliases Ctrl+Q to Ctrl+V, with terminal-flow-control caveats (checked 2026-10-01). These are program bindings, not a Dormouse literal-next state: the wall intercepts a subsequent Ctrl+V before the program sees it. The earlier claim that Ctrl+Q supplied a route to byte 0x16, and that Vim lacked it, conflated the two layers.
 
 ## 8.6 Paste Content
 

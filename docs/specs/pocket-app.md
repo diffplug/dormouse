@@ -28,8 +28,8 @@ Pocket is therefore:
 out on `FakePtyAdapter` by
 `website/src/components/PocketTerminalExperience.tsx`.
 
-Three phases, one component: `SetupOrSignin`, `BurrowsView`, then `ConnectedView`
-wrapping `PocketWall`. **Everything outside the PTY core no-ops or is absent** —
+`Phase` in `lib/src/remote/pocket-app/App.tsx` owns screen state; `ConnectedView`
+wraps `PocketWall`. **Everything outside the PTY core no-ops or is absent** —
 `getCwd` → null, shells/clipboard empty, alerts inert, `alertAwait` settling
 `cancelled` rather than never resolving.
 
@@ -142,7 +142,7 @@ Three details the table leaves implicit:
 - **Exited surfaces stay in the directory** with `alive:false` as history, so the
   wall filters them out of selectable sessions and the active-pane default.
 
-**The pinned record picks a row's one action.** The Burrows view — titled
+**The pinned record picks a row's primary action.** The Burrows view — titled
 **Burrows** (rationale) — lists the `KnownBurrowV1` records (no record, no row),
 labeled from the record and stamped online from `GET /api/burrows`, offering
 Connect alone or **Pair again** alone, never a Connect that can only fail.
@@ -163,7 +163,7 @@ list**, showing that copy instead where the Burrow is gone; a failed re-read
 keeps the original.
 
 Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`;
-`SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
+`Phase`, `SetupOrSignin` / `BurrowsView` / `ConnectedView` and the `probeNoiseSupport`
 gate in `lib/src/remote/pocket-app/App.tsx`; `PairingCodeView` in
 `lib/src/remote/pocket-app/views.tsx`; `mountRemoteWall` in
 `lib/src/remote/pocket-app/remote-wall.ts`;
@@ -578,18 +578,12 @@ replacement refused after the request has gone leaves none. Pinned by
 outcome arrives` and `leaves a working session alone when the replacement never
 reaches the Burrow` in `lib/src/remote/client/pocket-client.test.ts`.
 
-**The connected header names the live path** — `relay` or `direct`, captioned,
-never coloured — so a relayed fallback is visible rather than silent, **with the
-reason behind it in the hover text and never in the label**: an attempt that
-quietly stayed relayed is still `relay`, and a third state for the common case
-would read as a fault. **The transport hands up a `DirectRelayCause`, never its
-failure text**, and Pocket owns the sentence for each: what an attempt fails
-with includes a runtime's own exception message, which belongs in the operator's
-log. **A
-channel that dies after this session has switched is burrow loss**: the phone
-leaves the wall exactly as it does for a `burrow-gone`, and returning costs a
-fresh handshake and one WebAuthn prompt. Before the switch a failed channel
-costs nothing.
+**Must label the connected header with the live path, `relay` or `direct`,
+without status colours**, keeping fallback reasons in hover text. **Must pass
+only a `DirectRelayCause` to Pocket, never runtime failure text**;
+`TRANSPORT_RELAY_CAUSES` owns the displayed sentences. **Must treat a channel
+failure after the switch as Burrow loss**, returning to the list and requiring
+a fresh handshake and WebAuthn prompt; before the switch, a session permitting relay stays relayed.
 
 Source of truth: `PocketClient.connect` in
 `lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in

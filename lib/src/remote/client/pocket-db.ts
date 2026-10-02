@@ -379,7 +379,7 @@ export function promisifyTransaction(tx: IDBTransaction): Promise<void> {
 /**
  * Ask the browser to keep this origin's storage, best-effort.
  *
- * **Never throws and never blocks a write.** The keys here are recoverable by
+ * **Never throws; a refusal never prevents a write.** The keys here are recoverable by
  * re-pairing (`docs/specs/remote-security-model.md` → Client static loss), so a
  * browser that refuses, or has no `navigator.storage` at all — Safari answers
  * nothing here — gets the ordinary eviction-prone storage rather than an

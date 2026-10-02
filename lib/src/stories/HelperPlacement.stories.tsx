@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Wall } from '../components/Wall';
 import { disposeHelper, getHelper } from '../lib/helper-terminal';
-import { getTerminalInstance, refitSession } from '../lib/terminal-registry';
+import { flushTerminal, getTerminalInstance, refitSession } from '../lib/terminal-registry';
 import { flattenScenario, SCENARIO_SHELL_PROMPT } from '../lib/platform';
 import { leaves, normalizeWeights, type LathNode } from '../lib/lath/model';
 import type { LathPersistedLayout } from '../lib/lath/persistence';
@@ -57,12 +57,17 @@ async function rightClickSourceHeader() {
 async function openContext() {
   await rightClickSourceHeader();
   await settleTerminalContext();
-  expect(getHelper(SOURCE)?.status).toBe('completed');
-  const helper = terminal(getHelper(SOURCE)!.id);
-  // Host completion precedes xterm's asynchronous parsing of the final chunk.
-  await new Promise<void>(resolve => helper.write('', resolve));
-  const text = Array.from({ length: helper.buffer.active.length }, (_, i) =>
-    helper.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
+  const helper = getHelper(SOURCE)!;
+  expect(helper.status).toBe('completed');
+  // Protocol completion precedes xterm's async parsing of the command echo.
+  // Drain that queue before the paint gate captures a wrapped narrow terminal.
+  let written = false;
+  void flushTerminal(helper.id).then(() => { written = true; });
+  await waitFor(() => expect(written).toBe(true), { timeout: 4000 });
+  await settleTerminals();
+  const input = terminal(helper.id);
+  const text = Array.from({ length: input.buffer.active.length }, (_, i) =>
+    input.buffer.active.getLine(i)?.translateToString(true) ?? '').join('');
   expect(text.match(/git status/g)).toHaveLength(1);
 }
 function expectedSide({ layout, zoomed, cursor, sourceAtEnd }: Props) {

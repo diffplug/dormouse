@@ -472,6 +472,31 @@ describe('terminal-registry alert behavior', () => {
     expect(received).toEqual(['pnpm storybook\r']);
   });
 
+  it.each(['restore', 'split'])('seeds the actual %s launch after a non-integrated shell prompt', async (launch) => {
+    const id = 'launch-after-prompt-' + launch;
+    const received: string[] = [];
+    fakePlatform.setInputHandler(id, (data) => {
+      expect(getTerminalPaneState(id).currentCommand?.rawCommandLine).toBe('codex resume abc');
+      received.push(data);
+    });
+    if (launch === 'restore') restoreTerminal(id, { resumeCommand: 'codex resume abc' });
+    else { setPendingShellOpts(id, { command: 'codex resume abc' }); getOrCreateTerminal(id); }
+    fakePlatform.sendOutput(id, 'C:\\repo>');
+    await vi.advanceTimersByTimeAsync(200);
+    expect(received).toEqual(['codex resume abc\r']);
+    expect(getTerminalPaneState(id).currentCommand?.source).toBe('user_input');
+    expect(countRunningSessions()).toBe(1);
+  });
+  it('keeps reported CWD when seeding the actual launch and lets authentic boundaries win', async () => {
+    const id = 'launch-current-cwd';
+    fakePlatform.setInputHandler(id, () => {});
+    restoreTerminal(id, { command: 'pnpm dev', cwd: '/old', requireIntegration: true });
+    fakePlatform.sendOutput(id, '\x1b]633;P;Cwd=/actual\x07\x1b]633;A\x07\x1b]633;B\x07');
+    await vi.advanceTimersByTimeAsync(200);
+    expect(getTerminalPaneState(id).currentCommand).toMatchObject({ source: 'user_input', cwdAtStart: { path: '/actual', source: 'osc633' } });
+    fakePlatform.sendOutput(id, '\x1b]633;E;pnpm dev\x07\x1b]633;C\x07');
+    expect(getTerminalPaneState(id).currentCommand?.source).toBe('osc633_E');
+  });
   it('announces the resume in the pane instead of replaying a transcript', () => {
     const id = 'noticed-resume-command';
     const entry = restoreTerminal(id, { resumeCommand: 'codex resume 01JCX8ZK' });

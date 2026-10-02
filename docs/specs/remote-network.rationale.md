@@ -57,10 +57,10 @@ needs no policy to run.
 ## Settings → Network
 
 **Why the list states only what is built (2026-09-30).** The list is what a
-person reads to decide which level to trust, so a row for a connection no code
-makes — the Hosted Relay — would promise traffic that never
-happens, and a missing row would hide one that does. The prototype listed the
-whole design; the real list drops each row until its stage ships.
+person reads to decide which level to trust, so a row for unbuilt behavior
+promises traffic that never happens, and a missing row hides one that does.
+The 2026-09-30 prototype listed the whole design; `connectionsFor` now derives
+rows from the shipped policy and runtime facts, including Hosted enrollment.
 
 **Why the push row names its condition (2026-09-30).** Push is on by the
 application default or by any Workspace's own override, and Workspaces in other

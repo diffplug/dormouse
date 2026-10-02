@@ -5,7 +5,7 @@
 form. It opens an advisory visible only to you and the maintainers. Do not open
 a public issue, and do not email the maintainer: a public issue describing a
 live path into a laptop is a disclosure, not a report. Include the version or
-commit, the deployment (self-hosted Relay, standalone app, VS Code extension),
+commit, the deployment (self-hosted Relay, Hosted, standalone app, VS Code extension),
 and the shortest reproduction. Every advisory is acknowledged with what we
 intend to do about it; there is no bounty.
 

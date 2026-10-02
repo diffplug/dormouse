@@ -6,7 +6,7 @@ A mouse-friendly multitasking terminal built with pnpm, react, typescript, vite,
 
 ```
 pnpm install     # install deps
-pnpm build       # build lib, vscode extension, Pocket, and website
+pnpm build       # build lib, vscode extension, Pocket, website, and Hosted
 ```
 
 **Inside Dormouse, run `innerdogfood`** — `dor tool innerdogfood`.
@@ -31,7 +31,7 @@ The Tool shows the harness in its own pane and prints the command to drive it
 - **`vscode-ext/`** — VS Code extension wrapping the lib in a webview (esbuild; node-pty via forked child process; direct-path WebRTC via node-datachannel, every platform's addon in one VSIX)
 - **`website/`** — Marketing site (Vite) bundling part of the lib as an interactive demo on `FakePtyAdapter`
 - **`relay/`** — Selfhost coordinating Relay for remote control (Hono): accounts + passkey auth in local JSON files (no database), WebSocket routing between Clients and Burrows, serves the built Pocket app
-- **`hosted/`** — Hosted's three Hono Workers: account and Better Auth (`hosted.dormouse.sh`), one-time rendezvous (`relay.`), voice (`voice.`); Postgres.
+- **`hosted/`** — Hosted's three Hono Workers: account and Better Auth (`hosted.dormouse.sh`), account-scoped Relay/Pocket and one-time rendezvous (`relay.`), voice (`voice.`); Postgres.
 - **`dor/`** — The `dor` CLI (stricli) staged onto the `PATH` of every Dormouse-launched terminal; talks to its host over a private control socket
 - **`remote-lib-common/`** — Security primitives + remote wire contract shared by `relay`, the Burrow module in `lib`, and the Pocket app (bare ES2022 — no DOM or Node types)
 - **`dor-lib-common/`** — Cross-platform external-process spawning (`spawnAndCapture`) shared by `dor` and the `lib` host. Despite the parallel names, the two `*-lib-common` packages are unrelated: `remote-lib-common` is remote security/wire, `dor-lib-common` is spawn plumbing.
@@ -75,7 +75,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/remote-network.md`** — The network policy (Nothing / Local networks / Anywhere / My Relay only): its choke points, the update reminder, the Local networks path check, Cloudflare STUN, and each level's paired-phone path.
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
 - **`docs/specs/relay.md`** — The selfhost coordinating Relay and shared Burrow-service runtime: env config, JSON-file state, WebAuthn without a library, HTTP API, relay flow, enrollment, running it end to end.
-- **`docs/specs/hosted.md`** — Hosted accounts: application boundary, login/linking policy, local development, and staged paid services.
+- **`docs/specs/hosted.md`** — Hosted accounts: login/linking policy, account-scoped Relay and enrollment, Worker deployment, local development, and staged paid services.
 - **`docs/specs/one-time.md`** — One-time connection: the link a laptop shows, its Settings panel and Baseboard indicator, the Hosted rendezvous wire that carries only its handshake, the phone page Hosted serves, and the direct-only session; no account, nothing saved.
 - **`docs/specs/security-hosted.md`** — Hosted account origin, identity, and deployment security checks.
 - **`SELF_HOST.md`** (repo root) — Self-host deployment: the assistant-run install runbook plus the Installer contract that `docs/specs/security-remote.md`'s `FAIL IF` lines and `scripts/deploy-lint.mjs` audit.

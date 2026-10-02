@@ -2,7 +2,8 @@
  * The laptop's half of a one-time connection, driven by a **real** Noise IK
  * initiator through the in-memory rendezvous (`../test-rendezvous.ts`) and, for
  * the session, the in-memory direct path (`../direct/test-fake-peer.ts`): no
- * ceremony step is stubbed (`docs/specs/one-time.md` -> "Burrow runtime";
+ * ceremony step is stubbed but one case's stalled key generation
+ * (`docs/specs/one-time.md` -> "Burrow runtime";
  * `docs/specs/remote-security-model.md` -> "One-time connection").
  *
  * Every deadline runs on one injected test clock, shared by the runtime, the
@@ -10,6 +11,19 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+/** A key generation a case stands in for the real one, cleared after each case. */
+const keygen = vi.hoisted(() => ({
+  override: null as (() => Promise<import('remote-lib-common').NoiseKeyPair>) | null,
+}));
+
+vi.mock('remote-lib-common', async (importOriginal) => {
+  const real = await importOriginal<typeof import('remote-lib-common')>();
+  return {
+    ...real,
+    generateNoiseKeyPair: () => (keygen.override ?? real.generateNoiseKeyPair)(),
+  };
+});
 
 import {
   E2E_INIT_BURST,
@@ -116,6 +130,7 @@ beforeEach(() => {
 
 afterEach(() => {
   runtime?.end();
+  keygen.override = null;
   vi.restoreAllMocks();
 });
 
@@ -250,6 +265,15 @@ describe('OneTimeRuntime: the link', () => {
     clock.advance(1);
     expect(await opened).toEqual({ status: 'ended', reason: 'unreachable' });
     expect(rendezvous.room().burrow.closeCode).toBe(1000);
+  });
+
+  it('ends unreachable at its deadline while key generation stalls, opening no socket', async () => {
+    keygen.override = () => new Promise(() => {});
+    makeRuntime();
+    const opened = runtime.open();
+    clock.advance(ONE_TIME_OPEN_TIMEOUT_MS);
+    expect(await opened).toEqual({ status: 'ended', reason: 'unreachable' });
+    expect(rendezvous.rooms).toHaveLength(0);
   });
 
   it('ends unreachable when the room’s first message is not a room frame', async () => {
