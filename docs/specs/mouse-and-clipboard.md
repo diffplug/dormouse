@@ -48,7 +48,7 @@ It ends on the **next mouse-up inside the terminal content area** paired with a 
 
 - **Counts:** a plain primary click (down/up that never crossed the drag threshold) or a completed drag.
 - **Does not count:** a non-primary click, whose context menu the override swallows anyway; clicks on the No-Mouse icon or the banner buttons; and an orphan mouse-up from a drag that started outside the terminal. Pinned by `lib/src/lib/terminal-mouse-router.test.ts`.
-- **On end** — or on **Cancel**, after that button's 260 ms confirmation flash — reporting is restored, banner dismissed, Mouse icon back. **Must cancel a pending banner action when its temporary override ends**, never reactivating it later. **Must cancel a pending banner action when its temporary override ends**, never reactivating it later. **No timeout:** absent any mouse action the override stays indefinitely.
+- **On end** — or on **Cancel**, after that button's 260 ms confirmation flash — reporting is restored, banner dismissed, Mouse icon back. **Must cancel a pending banner action when its temporary override ends**, never reactivating it later. **No timeout:** absent any mouse action the override stays indefinitely.
 
 **Sticky override.** **Make sticky** converts it after the same flash (the store calls this state `permanent`): banner dismissed, No-Mouse icon kept with its "click to restore" hover text, mouse and wheel still going to the terminal. It persists until the user clicks the No-Mouse icon.
 
