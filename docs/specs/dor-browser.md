@@ -173,15 +173,19 @@ it against terminal panes and minimized doors.
   wanted-port store and the resolutions are window-wide.
 - **Show a chip only when exactly one terminal owns that port**; zero or
   two-plus leave it unsettled, so a later dev server still matches.
+- **Must back off an unsettled port's rescans, then stop** until a reload,
+  navigation, or Wall change wakes the loop.
+- **Must resolve every candidate from one `openPortsByTerminal` call per pass**,
+  never one host scan per terminal.
 - **Match only binds that serve localhost** — loopback or any-interface
   (`0.0.0.0`, `::`), never a specific non-loopback bind.
 - **The scan stays decorative and off the hot path**, so it may never pile onto
-  a tab open or poll forever.
+  a tab open.
 - **Must label the chip from the serving pane's live state**; a settled port is
   not rescanned when its pane is retitled.
 
 Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
-`lib/src/components/wall/port-url.ts` (`servesLoopback`),
+`lib/src/components/wall/port-url.ts` (`servesLoopback`), `lib/src/components/wall/surface-ports.ts`,
 `lib/src/components/wall/agent-browser-ports.ts`, `lib/src/components/wall/browser-url.ts`.
 
 ## Pane Context Menu Connect

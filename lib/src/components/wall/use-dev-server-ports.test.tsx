@@ -100,4 +100,37 @@ describe('dev-server port correlation across Walls', () => {
     expect(openPorts.mock.calls.length).toBe(afterFirstScan);
     expect(getDevServerResolution(PORT)?.paneId).toBe('b1');
   });
+
+  it('asks a batching host once per pass for every candidate', async () => {
+    const many = vi.fn(async (ids: string[]) => Object.fromEntries(ids.map((id) => [id, id === 'b1' ? tcp(PORT) : []])));
+    platform.getOpenPortsMany = many;
+    requestDevServerPort(PORT);
+    await act(async () => {
+      root.render(<><Harness paneIds={['a1']} /><Harness paneIds={['b1']} /></>);
+    });
+    await settleScan();
+
+    expect(getDevServerResolution(PORT)?.paneId).toBe('b1');
+    expect(many).toHaveBeenCalledTimes(1);
+    expect([...many.mock.calls[0][0]].sort()).toEqual(['a1', 'b1']);
+    expect(openPorts).not.toHaveBeenCalled();
+  });
+
+  it('backs off on an unmatched port and stops until interest changes', async () => {
+    requestDevServerPort(PORT);
+    await act(async () => { root.render(<Harness paneIds={['a1']} />); });
+    // Every back-off step (4 + 8 + 16 + 32 + 60 s) and well past it.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60_000); });
+    const scans = openPorts.mock.calls.length;
+    expect(scans).toBe(6);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60_000); });
+    expect(openPorts.mock.calls.length).toBe(scans);
+
+    // A dev server starting later still matches once the page reloads or moves.
+    openPorts.mockImplementation(async () => tcp(PORT));
+    act(() => releaseDevServerPort(PORT));
+    act(() => requestDevServerPort(PORT));
+    await settleScan();
+    expect(getDevServerResolution(PORT)?.paneId).toBe('a1');
+  });
 });

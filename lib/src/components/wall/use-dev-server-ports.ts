@@ -24,8 +24,11 @@
  *   - **idle-scheduled** — the scan runs in `requestIdleCallback` time (with a
  *     timeout fallback), yielding to rendering and the screencast;
  *   - **scan once, then settle** — a matched port is remembered and never
- *     rescanned; we only keep polling (slowly, at idle) while a wanted port is
- *     still *unmatched* (a dev server may start after the tab opened);
+ *     rescanned; we only keep polling (at idle, backing off, then giving up)
+ *     while a wanted port is still *unmatched* (a dev server may start after
+ *     the tab opened);
+ *   - **one scan per pass** — every candidate's ports come from one batched
+ *     host call (`openPortsByTerminal`), not one scan per terminal;
  *   - **re-validate on reload** — a surface reload (or navigating to a new
  *     loopback port) un-settles and rescans, but optimistically: the current
  *     chip stays until the rescan disagrees.
@@ -45,14 +48,16 @@ import type { DooredItem } from './wall-types';
 import type { LathWallEngine } from './lath-wall-engine';
 import { surfaceKindFromParams } from './browser-surface';
 import { hasTerminal } from 'dor/commands/types';
+import { openPortsByTerminal } from './surface-ports';
 import { servesLoopback } from './port-url';
 
 // Wait this long after interest changes before scanning, so a tab's open +
 // initial screencast settle first and quick navigation coalesces into one scan.
 const DEBOUNCE_MS = 600;
-// Re-scan cadence while a wanted port has no match yet (server may be starting).
-// Once matched, a port is settled and not rescanned until reload/navigation.
-const PENDING_REFRESH_MS = 4000;
+// Re-scan delays while a wanted port has no match yet (server may be starting),
+// then stop until a reload, navigation, or Wall change wakes the loop. Once
+// matched, a port is settled and not rescanned until one of those.
+const PENDING_REFRESH_MS = [4000, 8000, 16000, 32000, 60000];
 // Upper bound on how long the idle scan may be deferred before it's forced.
 const IDLE_TIMEOUT_MS = 2000;
 
@@ -121,6 +126,7 @@ function startCorrelationLoop(): () => void {
   let debounceTimer: ReturnType<typeof setTimeout> | undefined;
   let refreshTimer: ReturnType<typeof setTimeout> | undefined;
   let idleHandle: number | undefined;
+  let misses = 0;
 
   const resolveOnce = async (): Promise<ResolveOutcome> => {
     if (cancelled || running) return 'busy';
@@ -150,20 +156,15 @@ function startCorrelationLoop(): () => void {
 
       // port → the surface ids that listen on it (loopback-reachable binds only).
       const owners = new Map<number, string[]>();
-      await Promise.all([...titles.keys()].map(async (id) => {
-        let open;
-        try {
-          open = await platform.getOpenPorts!(id);
-        } catch {
-          return;
-        }
+      const portsById = await openPortsByTerminal([...titles.keys()]);
+      for (const [id, open] of Object.entries(portsById)) {
         for (const entry of open) {
           if (entry.protocol !== 'tcp' || !servesLoopback(entry.address)) continue;
           const list = owners.get(entry.port) ?? [];
           if (!list.includes(id)) list.push(id);
           owners.set(entry.port, list);
         }
-      }));
+      }
       if (cancelled) return 'busy';
 
       // Resolve only what's still wanted + unsettled — interest can churn
@@ -204,7 +205,7 @@ function startCorrelationLoop(): () => void {
         if (cancelled) return;
         // 'busy' → an in-flight scan paces itself; 'idle' → all matched (or
         // nothing wanted) so stop until reload/navigation wakes us.
-        if (outcome === 'pending') scheduleRefresh(PENDING_REFRESH_MS);
+        if (outcome === 'pending' && misses < PENDING_REFRESH_MS.length) scheduleRefresh(PENDING_REFRESH_MS[misses++]);
       });
     });
   };
@@ -218,18 +219,23 @@ function startCorrelationLoop(): () => void {
     idleHandle = undefined;
     debounceTimer = setTimeout(runIdleScan, delay);
   };
-  scheduleScanNow = scheduleScan;
+  // Interest changing restarts the back-off; a refresh tick does not.
+  const wake = (delay: number) => {
+    misses = 0;
+    scheduleScan(delay);
+  };
+  scheduleScanNow = wake;
 
   // A header showing a new loopback URL bumps "wanted"; debounce + defer so the
   // scan lands after the tab is up, not during its first paints.
-  const unsubscribeWanted = subscribeWantedDevServerPorts(() => scheduleScan(DEBOUNCE_MS));
+  const unsubscribeWanted = subscribeWantedDevServerPorts(() => wake(DEBOUNCE_MS));
   // A reload un-settles every port and re-validates — optimistically, since we
   // leave the published resolutions in place until the rescan overwrites them.
   const unsubscribeRescan = subscribeDevServerRescan(() => {
     settled.clear();
-    scheduleScan(DEBOUNCE_MS);
+    wake(DEBOUNCE_MS);
   });
-  scheduleScan(DEBOUNCE_MS);
+  wake(DEBOUNCE_MS);
 
   return () => {
     cancelled = true;
