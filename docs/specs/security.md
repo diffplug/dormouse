@@ -104,8 +104,8 @@ Cargo tests run in separate CI jobs, outside root `pnpm test`.
 - **The bot's upstream is pinned by tag, not commit**, so a hostile upstream
   could change what the bot runs without a diff here. Accepted: the trust equals
   what the harness already holds ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
-- **The Chromatic and Argos tokens are reachable by any workflow the bot can author.**
-  Accepted with rotation; each dashboard shows abuse
+- **The repo-level snapshot-testing tokens are reachable by any workflow the bot can author.**
+  Accepted with rotation; the service's dashboard shows abuse
   ([Automated Maintainer](./security-ci.md#automated-maintainer-tend)).
 
 ## Known gaps
