@@ -51,11 +51,11 @@ Three cards — Free, Hosted, Founding — side by side from `md` up, stacked in
 that order below. Each names what it includes as a ticked list, and each paid
 card carries a 30-day refund beneath its buy button.
 
-| Card | Price line | Includes | Action |
-|---|---|---|---|
-| Free | $0, no account, no card | the terminal, spoken alarms in the system voice, no Relay or network request until one is chosen, a self-hosted Relay | Download |
-| Hosted | Monthly / Yearly toggle | the managed Relay, sealed push, managed voices, one licence for every machine | Get Hosted |
-| Founding | founding price, list struck beside it | everything in Hosted, the locked price, the badge, the founders row | Become a founder |
+| Card | Above the price | Price line | Includes | Action |
+|---|---|---|---|---|
+| Free | the terminal's licence | $0, no account, no card | Pocket over a self-hosted Relay, spoken alarms in the system voice, no network request unless a Relay is chosen | Download |
+| Hosted | Monthly / Yearly toggle | the toggled price | the managed Relay, managed voices, one licence for every machine | Get Hosted |
+| Founding | the lock | founding price, list struck beside it | everything in Hosted, the badge and the founders row | Become a founder |
 
 - **Mark the Hosted card with the accent border, never a surface of its own**,
   which would be a tint no docs token is derived against.

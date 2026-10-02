@@ -126,7 +126,7 @@ function PlanCard({
   return (
     <div className={`flex flex-col ${accent ? CARD_ACCENT_CLASS : CARD_CLASS}`}>
       <h3 className={`font-display text-sm tracking-widest uppercase ${ACCENT_TEXT_CLASS}`}>{name}</h3>
-      <div className="mt-3 flex items-center md:min-h-10">{above}</div>
+      <div className="mt-3 flex items-center md:min-h-15">{above}</div>
       <p className="mt-2 flex flex-wrap items-baseline gap-x-2">{price}</p>
       <div className={`mt-1 text-sm md:min-h-5 ${CARD_MUTED_TEXT_CLASS}`}>{below}</div>
       {children}
@@ -260,6 +260,12 @@ function FreeCard() {
   return (
     <PlanCard
       name="Free"
+      above={
+        <p className="text-sm leading-snug">
+          The whole terminal is <span className="whitespace-nowrap">FSL-1.1-MIT</span>, easy to
+          run a fork
+        </p>
+      }
       price={<span className="font-display text-4xl">$0</span>}
       below="Forever. No account, no card."
       action={
@@ -272,16 +278,12 @@ function FreeCard() {
       <Includes
         items={[
           <>
-            The whole terminal is <span className="whitespace-nowrap">FSL-1.1-MIT</span>, easy
-            to run a fork
-          </>,
-          "Spoken alarms in your system voice",
-          "Zero network requests unless you choose a Relay",
-          <>
             <a href={sitePath(POCKET_PLAYGROUND_PATH)} className={LINK_CLASS}>Pocket</a> on your
             phone with a{" "}
             <a href={sitePath("/self-host")} className={LINK_CLASS}>self-hosted Relay</a>
           </>,
+          "Spoken alarms in your system voice",
+          "Zero network requests unless you choose a Relay",
         ]}
       />
     </PlanCard>
@@ -310,7 +312,6 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
       <Includes
         items={[
           "Pocket on your phone, with no server to run",
-          "Your phone buzzes when a terminal needs you",
           "A natural ElevenLabs voice for each pane",
           "One license for your whole personal fleet of machines",
         ]}
@@ -338,7 +339,6 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
       <Includes
         items={[
           "Everything in Hosted",
-          `$${tier.price} a year, never raised while you stay`,
           "A founding badge and an optional spot here",
         ]}
       />
