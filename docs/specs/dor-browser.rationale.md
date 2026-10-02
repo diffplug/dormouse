@@ -156,7 +156,7 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why one lifecycle for both providers.** The two hosts carried the same policies twice — headed tracking, relaunch generations, the blank-tab sweep, capture joins, the editing scripts — and the copies drifted: an empty copy clobbered the clipboard in one, the capture directory lacked its `chmod` in the other, and only Playwright serialized its closes with its relaunches, so the webview kept its own record of closes in flight for agent-browser (review of the browser stack, 2026-09).
 
-**Why the capture directory is private.** The frame is a picture of the user's authenticated browser, written by an external process under the ambient umask, so a derivable name in the shared temp directory is readable by anything else on the machine for as long as it exists. Precedent: `standalone/sidecar/clipboard-ops.js` applies the same discipline, cleanup included, to clipboard images.
+**Why the capture directory is private.** The frame is a picture of the user's authenticated browser, written by an external process under the ambient umask. Unguessability prevents pre-created filenames, while owner-only directory permissions prevent another local account reading a capture before its cleanup. A deliberately shared Windows temp parent reproduced an inherited Everyone read grant on both the old capture directory and its screenshot (2026-10-01); Unix mode bits alone do not remove Windows grants. The new setup rejects failures before returning any capture path and caches only success. Asynchronous permission setup may finish after removal begins; its generation fence prevents a discarded path being returned, and its promise-identity check keeps an old failure from evicting replacement setup (reviewed 2026-10-02).
 
 **Why a named launch into a live browser navigates.** A Tool re-announcing — its dev server moved — sends a named launch into the session it already has. Relaunching it stopped the daemon (`close`, then SIGTERM and SIGKILL), so an agent driving that Tool lost its tabs, page state and CDP clients on every move, and a `dor agent-browser` command in flight failed or started a daemon mid-relaunch (review of #777, 2026-09). Only a change of mode needs a new browser.
 
@@ -235,3 +235,15 @@ The built-in local-file viewer supplies its own content boundary and permits the
 **Why the policy also admits `'self'`.** Storybook and similar apps render same-origin documents in nested frames, so an app-only ancestor list blocks their inner document. Each proxy origin belongs to one grant and one fixed upstream; documents already executing there share same-origin authority. Admitting `'self'` deliberately lets a proxy document frame another document from that grant, including after a top-level navigation, but no foreign ancestor matches and no grant can frame another grant.
 
 **Why the idle timer refreshes for an absent `Origin`.** "Own origin only" would expire a grant the user is still looking at, because a live frame's navigations and sub-resource loads carry no `Origin` at all. What a foreign `Origin` must not buy is keeping a closed pane's grant — and its live upstream binding — alive indefinitely by polling.
+
+## Daemon-owned crisp captures
+
+The historical agent-browser 0.27.3 experiment (measurement date unrecorded) used
+headless CDP attachment and correct-target selection. `Page.captureScreenshot`
+was byte-identical to the CLI at DPR 1 and followed external `set viewport`, but
+returned CSS-resolution frames at higher DPR unless the client reapplied
+`Emulation.setDeviceMetricsOverride`. That override introduced another viewport
+writer; external `set device`/`set viewport` ratios were not recoverable from
+frames. `captureBeyondViewport:true` bypassed emulation and crashed the headless
+daemon; `clip.scale` returned blank frames. These results motivate the
+Future item's daemon-owned route.

@@ -1,19 +1,13 @@
-/**
- * The private per-process directory the browser host's captures are written
- * into (docs/specs/dor-browser.md → "Viewer Socket"; `./browser-capture.ts`).
- *
- * A frame is a picture of the user's authenticated browser, so the *directory*
- * is the control: one `mkdtemp` per host, which is `0700` and unguessable. A
- * derivable path directly in `os.tmpdir()` let any other local account read
- * every frame, or pre-create the name as a symlink and have the writer clobber
- * whatever it pointed at. `standalone/sidecar/clipboard-ops.js` does the same
- * for clipboard images; the paths are meant to match, cleanup included — a
- * frame of someone's authenticated browser is not something to leave in tmp for
- * the OS to reap whenever it gets round to it.
+/** Private, unguessable per-process storage for authenticated browser frames.
+ * Owner-only permissions precede every published capture path; successful
+ * setup is shared until removal, and failures permit the next capture to retry.
+ * Cleanup covers explicit shutdown and process exit. See
+ * docs/specs/dor-browser.md → "Browser Host".
  */
 import * as os from 'os';
 import * as path from 'path';
 import { promises as fs, rmSync } from 'fs';
+import { ensurePrivateDirectory } from './private-path';
 
 export interface PrivateCaptureDir {
   /** The directory, created on first use. */
@@ -24,12 +18,23 @@ export interface PrivateCaptureDir {
 
 export function privateCaptureDir(prefix: string): PrivateCaptureDir {
   let once: Promise<string> | null = null;
+  let generation = 0;
 
   function get(): Promise<string> {
-    // mkdtemp creates at 0700 already; the chmod covers an inherited-mode
-    // filesystem and is a no-op on Windows, where %TEMP% is per-user.
-    once ??= fs.mkdtemp(path.join(os.tmpdir(), prefix)).then(async (dir) => {
-      if (process.platform !== 'win32') await fs.chmod(dir, 0o700).catch(() => {});
+    if (once) return once;
+    const ownedGeneration = generation;
+    const pending = fs.mkdtemp(path.join(os.tmpdir(), prefix)).then(async (dir) => {
+      try {
+        await ensurePrivateDirectory(dir);
+        // Removal invalidates setup already in flight; never publish a path
+        // after its owner has asked to discard it.
+        if (ownedGeneration !== generation) throw new Error('Capture directory removed during setup');
+      } catch (error) {
+        // A failed ACL/mode setup must expose no screenshot path or leaked
+        // directory. The outer catch permits a later capture to retry.
+        await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+        throw error;
+      }
       // Backstop for an exit that never reaches `remove` — a crash, or a host
       // that skips its shutdown hook. An `exit` handler cannot await, hence the
       // sync removal.
@@ -38,18 +43,21 @@ export function privateCaptureDir(prefix: string): PrivateCaptureDir {
       });
       return dir;
     }).catch((err: unknown) => {
-      // Never memoize the failure. `??=` would otherwise cache the rejected
-      // promise, so one transient EACCES/ENOSPC on tmpdir would disable
-      // screenshots for the rest of this process's life with no retry.
-      once = null;
+      // Never memoize rejected setup: a transient EACCES/ENOSPC must allow
+      // a later capture to retry.
+      // A discarded setup may fail after another get has begun. It must not
+      // evict that newer generation from the cache.
+      if (once === pending) once = null;
       throw err;
     });
-    return once;
+    once = pending;
+    return pending;
   }
 
   async function remove(): Promise<void> {
     const pending = once;
     once = null;
+    generation++;
     // Awaited, so a directory still being created is dropped rather than leaked.
     const dir = await pending?.catch(() => undefined);
     if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});

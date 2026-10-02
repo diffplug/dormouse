@@ -147,6 +147,7 @@ function cdpCalls(socket: WebSocket, event: (method: string, params: Record<stri
     } catch {
       return;
     }
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return;
     if (typeof message.id === 'number') {
       replies.get(message.id)?.(message.result);
       replies.delete(message.id);
@@ -601,6 +602,7 @@ export function createAgentBrowserProvider(deps: AgentBrowserProviderDeps = {}):
       } catch {
         return;
       }
+      if (!message || typeof message !== 'object' || Array.isArray(message)) return;
       if (message.type === 'frame' && typeof message.data === 'string') {
         if (headed || lastFrame?.equals(data)) return;
         lastFrame = data;

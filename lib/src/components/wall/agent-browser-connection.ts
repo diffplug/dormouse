@@ -34,9 +34,9 @@ export type AgentBrowserConnectionEvent =
   | { type: 'status'; status: AgentBrowserStreamStatus }
   | { type: 'tabs'; tabs: AgentBrowserTab[]; previousTabs: AgentBrowserTab[] }
   /** The active tab committed a navigation. Fires at commit; the `tabs`
-   *  snapshot refreshes only when the driving command completes, which for a
-   *  slow page is the whole load (docs/specs/dor-browser.md → "Viewer
-   *  Socket"). */
+   *  snapshot may lag a commit: agent-browser refreshes it when the driving
+   *  command completes, while Playwright polls. See docs/specs/dor-browser.md
+   *  → "Viewer Socket". */
   | { type: 'url'; url: string }
   /** A popped-out window's page, as its browser reports it. */
   | { type: 'page'; url: string; title: string | null }
@@ -208,7 +208,9 @@ export class AgentBrowserConnection {
     if (typeof raw !== 'string') return;
     let msg: ViewerState;
     try {
-      msg = JSON.parse(raw) as ViewerState;
+      const parsed: unknown = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+      msg = parsed as ViewerState;
     } catch {
       return;
     }

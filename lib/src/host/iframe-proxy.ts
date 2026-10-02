@@ -181,6 +181,10 @@ export async function createIframeProxyUrl(
   grant.port = port;
   grant.proxyOrigin = `http://127.0.0.1:${port}`;
   grants.set(port, grant);
+  // A bind yields: other creations may have committed since the first sweep.
+  // Sweep after insertion as well, so neither sequential nor concurrent calls
+  // leave more than MAX_GRANTS published listeners behind.
+  sweepGrants(Date.now());
   log(`[iframe-proxy] ${upstream.href} → ${grant.proxyOrigin}`);
 
   // The proxy origin maps to one fixed upstream, so the full path resolves

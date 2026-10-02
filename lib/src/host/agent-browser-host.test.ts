@@ -689,6 +689,15 @@ describe('agent-browser host viewer', () => {
   // A frame's base64 body, large enough to be told from a control message by size.
   const frame = (fill: number, deviceWidth = 800) => ({ type: 'frame', data: Buffer.alloc(13_000, fill).toString('base64'), metadata: { deviceWidth, deviceHeight: 600 } });
 
+  it('ignores malformed JSON values from the daemon and resumes valid state', async () => {
+    const daemon = await fakeServer();
+    const viewer = await view(daemon.port);
+    await daemon.connected();
+    for (const value of [null, false, 7, 'state', []]) daemon.send(JSON.stringify(value));
+    daemon.send({ type: 'status', connected: true, screencasting: false });
+    await vi.waitFor(() => expect(viewer.states).toEqual([{ type: 'status', connected: true, screencasting: false }]));
+  });
+
   it('relays the daemon stream, dropping its unchanged re-broadcasts and decoding each changed frame once', async () => {
     running(session);
     const daemon = await fakeServer();
@@ -868,6 +877,15 @@ describe('agent-browser host viewer', () => {
 
   const cdpVerbs = () => spawnMock.mock.calls.map((call) => [(call[1] as string[]).slice(2), call[2]]);
 
+  it('ignores malformed JSON values from CDP and resumes valid page events', async () => {
+    const cdp = await fakeBrowser(['one']);
+    const { viewer } = await headedView(cdp);
+    await vi.waitFor(() => expect(viewer.states).toHaveLength(1));
+    for (const value of [null, false, 7, 'state', []]) cdp.send(JSON.stringify(value));
+    cdp.send({ method: 'Target.targetInfoChanged', params: { targetInfo: { targetId: 'one', type: 'page', url: 'https://two.example/', title: 'Two' } } });
+    await vi.waitFor(() => expect(viewer.states.at(-1)).toEqual({ type: 'page', url: 'https://two.example/', title: 'Two' }));
+  });
+
   it('follows a headed window\'s page over its browser\'s CDP, and sends it no frames', async () => {
     const cdp = await fakeBrowser(['one']);
     const { viewer, daemon } = await headedView(cdp);
@@ -1018,7 +1036,7 @@ describe('agent-browser host captures', () => {
     expect(existsSync(file)).toBe(false);
     const dir = dirname(file);
     expect(dir).not.toBe(tmpdir());
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
+    if (process.platform !== 'win32') expect(statSync(dir).mode & 0o777).toBe(0o700);
     // Never a name another capture wrote, and nothing left behind.
     expect([...await take(captures)]).toEqual([0xff, 0xd8, 2]);
     expect((spawnMock.mock.calls[1][1] as string[])[3]).not.toBe(file);
