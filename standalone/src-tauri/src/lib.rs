@@ -3610,8 +3610,8 @@ fn resolve_dor_cli_paths(sidecar_path: &Path, manifest_dir: &Path) -> DorCliPath
 // Where the sidecar's Burrow persists its enrollment (a bearer credential)
 // and its ACL, as one 0600 file it writes itself
 // (lib/src/host/remote/burrow-state-store.ts). Created here so a first launch
-// hands the sidecar a directory that exists; if it can't be made, the sidecar is
-// told nothing and runs without persistence rather than not at all.
+// hands the sidecar a directory that exists; if it can't be made or locked, the
+// sidecar is told nothing and keeps that state in memory rather than not at all.
 fn burrow_state_dir(app: &AppHandle) -> Option<String> {
     let dir = match app.path().app_data_dir() {
         Ok(dir) => dir,
@@ -3620,10 +3620,6 @@ fn burrow_state_dir(app: &AppHandle) -> Option<String> {
             return None;
         }
     };
-    if let Err(e) = create_dir_all(&dir) {
-        append_log(format!("[sidecar] create state dir: {e}"));
-        return None;
-    }
     // The Node sidecar writes the Burrow enrollment here, and that record carries
     // `burrowToken` — a bearer credential for `/ws/burrow`. `FileBurrowStateStore`
     // asks for `0700`/`0600`, which Windows ignores entirely, so on Windows this
@@ -3634,24 +3630,33 @@ fn burrow_state_dir(app: &AppHandle) -> Option<String> {
     // `restrict_to_owner_leaves_one_owner_only_ace` covers with `before.json`.
     // On unix the store's own modes already do the job and this is a harmless
     // re-assert of the same intent.
-    if let Err(e) = restrict_to_owner(&dir, 0o700) {
-        // Not fatal — a Burrow that cannot start is worse than one whose state
-        // directory kept the OS default — but never silent: on Windows this
-        // call is the only thing restricting `burrowToken`, so its failure is a
-        // downgrade of the sole control and has to be visible.
-        append_log(format!(
-            "[sidecar] WARNING could not restrict state dir {}: {e}",
-            dir.display()
-        ));
+    match prepare_owner_only_dir(&dir, restrict_to_owner) {
+        Ok(path) => Some(path),
+        Err(e) => {
+            append_log(format!("[sidecar] WARNING {e}; Burrow state stays in memory"));
+            None
+        }
     }
-    Some(dir.to_string_lossy().into_owned())
+}
+
+/// Create `dir` and lock it owner-only, publishing its path only once both
+/// succeeded. A refused restriction publishes nothing: on Windows the Node
+/// stores' modes are no-ops, so an unlocked directory would hold their
+/// credentials and commands under the inherited ACL.
+fn prepare_owner_only_dir(
+    dir: &Path,
+    restrict: impl FnOnce(&Path, u32) -> Result<(), String>,
+) -> Result<String, String> {
+    create_dir_all(dir).map_err(|e| format!("create state dir: {e}"))?;
+    restrict(dir, 0o700).map_err(|e| format!("could not restrict state dir {}: {e}", dir.display()))?;
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 /// Where the sidecar writes the single-use agent-recovery record. Under the
-/// state root, so a dev run never consumes the installed app's. Created here so
-/// a first launch hands the sidecar a directory that exists; owner-only for the
-/// same reason the Burrow's is — the record holds command lines the user typed,
-/// and a unix mode is a silent no-op on Windows.
+/// state root, so a dev run never consumes the installed app's. Owner-only for
+/// the same reason the Burrow's is — the record holds command lines the user
+/// typed, and a unix mode is a silent no-op on Windows — so a directory that
+/// cannot be locked is withheld and the record stays in memory.
 fn recovery_state_dir(app: &AppHandle) -> Option<String> {
     let dir = match state_root(app) {
         Ok(dir) => dir,
@@ -3660,17 +3665,13 @@ fn recovery_state_dir(app: &AppHandle) -> Option<String> {
             return None;
         }
     };
-    if let Err(e) = create_dir_all(&dir) {
-        append_log(format!("[recovery] create state dir: {e}"));
-        return None;
+    match prepare_owner_only_dir(&dir, restrict_to_owner) {
+        Ok(path) => Some(path),
+        Err(e) => {
+            append_log(format!("[recovery] WARNING {e}; recovery stays in memory"));
+            None
+        }
     }
-    if let Err(e) = restrict_to_owner(&dir, 0o700) {
-        append_log(format!(
-            "[recovery] WARNING could not restrict state dir {}: {e}",
-            dir.display()
-        ));
-    }
-    Some(dir.to_string_lossy().into_owned())
 }
 
 fn start_sidecar(app: &AppHandle) -> Result<SidecarState, String> {
@@ -4293,6 +4294,53 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn state_directory_creation_failure_never_attempts_permissions() {
+        let root = TempDir::new("state-dir-create-failure");
+        let occupied = root.path().join("not-a-directory");
+        fs::write(&occupied, b"previous").unwrap();
+        let called = std::cell::Cell::new(false);
+        let result = super::prepare_owner_only_dir(&occupied, |_, _| {
+            called.set(true);
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert!(!called.get());
+        assert_eq!(fs::read(occupied).unwrap(), b"previous");
+    }
+
+    #[test]
+    fn burrow_directory_permission_failure_disables_durable_state() {
+        let root = TempDir::new("burrow-state-restrict-failure");
+        let target = root.path().join("state");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("burrow.json"), b"existing enrollment").unwrap();
+        let result = super::prepare_owner_only_dir(&target, |path, mode| {
+            assert_eq!(path, target);
+            assert_eq!(mode, 0o700);
+            Err("DACL refused".into())
+        });
+        assert!(result.unwrap_err().contains("DACL refused"));
+        assert_eq!(fs::read(target.join("burrow.json")).unwrap(), b"existing enrollment");
+        assert_eq!(fs::read_dir(target).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn state_directory_is_created_and_restricted_before_publication() {
+        let root = TempDir::new("state-dir-order");
+        let target = root.path().join("nested").join("state");
+        let called = std::cell::Cell::new(false);
+        let result = super::prepare_owner_only_dir(&target, |path, mode| {
+            assert!(path.is_dir());
+            assert_eq!(fs::read_dir(path).unwrap().count(), 0);
+            assert_eq!(mode, 0o700);
+            called.set(true);
+            Ok(())
+        });
+        assert!(called.get());
+        assert_eq!(result.unwrap(), target.to_string_lossy());
     }
 
     // --- Pending arrivals on disk (§Arrival queue) ---------------------------

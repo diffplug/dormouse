@@ -975,7 +975,7 @@ owner-only first and each an empty string when it could not be:
 `DORMOUSE_STATE_DIR` (the Burrow store, `app_data_dir`) and
 `DORMOUSE_RECOVERY_DIR` (the recovery record, the state root — so a dev run's
 record cannot reach the installed app). The browser-dev harness sets both to its
-own per-run temp directory. Source of truth: `recovery_state_dir` in
+own per-run temp directory. Source of truth: `prepare_owner_only_dir` / `recovery_state_dir` in
 `standalone/src-tauri/src/lib.rs`.
 
 **Must restrict the session store to the owner before any bytes are written**
@@ -985,7 +985,7 @@ own per-run temp directory. Source of truth: `recovery_state_dir` in
 silent no-op, it applies a protected single-entry DACL instead (mechanism in its
 doc comment). `burrow_state_dir` locks the sidecar's state directory with the
 same call and relies on it reaching a file that already *existed*, which
-`restrict_to_owner_leaves_one_owner_only_ace` pins (rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. The state-directory call remains nonfatal and logs a `WARNING` naming the path. Pinned by `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` and `session_write_tightens_directory_and_existing_temp_file`.
+`restrict_to_owner_leaves_one_owner_only_ace` pins (rationale). **Must abort a snapshot save if either permission change fails**, preserving the previous snapshot. **Must withhold a state directory whose restriction fails**, logging a `WARNING` naming the path; the Burrow store and recovery record then stay in memory (`burrow_directory_permission_failure_disables_durable_state`). Pinned by `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` and `session_write_tightens_directory_and_existing_temp_file`.
 
 **Boot + the synchronous-read constraint.** `getState()` is synchronous —
 cold-start restore reads it before React mounts — but a Tauri `invoke` is async, so
