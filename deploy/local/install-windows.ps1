@@ -2040,7 +2040,9 @@ rem directly.
   # The analog of `env -i`: a scrubbed environment, so the candidate cannot
   # accidentally depend on anything in the developer's shell. SystemRoot and a
   # minimal PATH are the Windows floor -- winsock will not initialize without
-  # them.
+  # them. This and run-relay.ps1's append redirector are the only native
+  # launches that bypass the Start-Process wrapper for captured commands:
+  # Start-Process cannot clear the environment.
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $STAGED_NODE
   $psi.Arguments = '"' + (Join-Path $STAGE 'relay\dist\index.js') + '"'

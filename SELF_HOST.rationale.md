@@ -43,14 +43,15 @@ developer machine routinely has several unrelated `node.exe` processes, and the
 `Dormouse Relay` command-line substring is not on the supervisor's own
 `powershell.exe`. Matching the install root against both `ExecutablePath` and
 `CommandLine` is the same predicate `Get-DormouseProcess` uses inside the
-installer, and the traps below say why image name is never enough.
+installer, and the Mechanism map's "Stopping it" row says why image name is
+never enough.
 
 ## Invariants
 
 Why 3100 rather than 3000: the number only has to be one a casual dev server is
 unlikely to take, and 3000 is the most contended port on a developer's machine.
-Nothing depends on the value — `config/relay.env` carries it and every consumer
-reads it back — so this is a default, not a constraint.
+Nothing else depends on the number — `config/relay.env` carries it and every
+consumer reads it back.
 
 Why a failed restore must not clear `previous`: `rollback_release` re-reads
 `current` before deciding, and its call sites use `|| true`, which disables
@@ -82,21 +83,6 @@ which is why the restore is on every exit rather than on the success path.
 Why `mv -f tmp link` cannot swap `current`: with `link` an existing symlink to a
 directory, `mv -f` moves the source *into* that directory rather than replacing
 the link, and the old release stays selected with no error anywhere.
-
-Why `(Get-Command pnpm).Source` is the wrong resolution: PowerShell prefers the
-`.ps1` shim, which is a script rather than an image and cannot be launched as a
-process, so every invocation failed with a message about the shim rather than
-about pnpm.
-
-Why the `DBUS_SESSION_BUS_ADDRESS` failure is caught in preflight: under `su`,
-or anywhere no user manager runs for this uid, `systemctl --user` fails with a
-message that names the missing variable and nothing a user can act on — after
-the unit has already been written.
-
-Why systemd 240 is the floor: `StandardOutput=append:` arrived in 240. Older
-versions accept the unit and truncate the log on every restart, so `manage
-logs` would show only the current run and a crash loop would look like a single
-clean start.
 
 Why the Windows cmdlet lint exists at all: no job in CI has a PowerShell, so
 `deploy/local/install-windows.ps1` has no syntax gate but

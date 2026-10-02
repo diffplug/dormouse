@@ -11,8 +11,7 @@
 Installs the Dormouse coordinating Relay on the user's own laptop — or, to
 outlive its sleep, on an always-on tailnet box ("Keeping the relay up while the
 laptop sleeps") — reachable only from their tailnet at
-`https://<laptop>.<tailnet>.ts.net`. That is the whole self-host story today.
-One idempotent installer per platform:
+`https://<laptop>.<tailnet>.ts.net`. One idempotent installer per platform:
 
 | OS | Installer | Service | Install root |
 | --- | --- | --- | --- |
@@ -50,12 +49,10 @@ Before acting:
    written for whoever is standing here.
 3. An install root that already exists means an update or a repair: read
    `manage status` before changing anything.
-4. Recheck the linked documentation — updated 2026-08-27, and dashboards and CLI
-   syntax change.
+4. Recheck the linked documentation — dashboards and CLI syntax change.
 5. Explain the checkpoint, carry it out, verify it, then move on.
 6. **Never ask the user to paste the setup password or any other bearer
-   credential into chat.** The Relay generates it into owner-only state;
-   `manage show-password` prints it in their terminal.
+   credential into chat.** `manage show-password` prints it in their terminal.
 7. Never commit, push, merge, or delete installed state without first showing
    the exact change and obtaining approval.
 8. For a relay that outlives this laptop's sleep, read "Keeping the relay up
@@ -63,11 +60,11 @@ Before acting:
    infrastructure.
 
 Keep a worksheet, filled in as values become known: laptop OS; its Tailscale DNS
-name (derived from `tailscale status --json`); external origin
-(`https://<laptop-name>.<tailnet-dns-suffix>`); install root (the table above —
-the installer prints the exact path, honoring `$XDG_DATA_HOME` on Linux) and its
-`state/`; service; loopback port `3100`; lingering, on Linux only; and the
-installed release, which the installer and `manage status` both print.
+name (from `tailscale status --json`); external origin
+(`https://<laptop-name>.<tailnet-dns-suffix>`); install root (the installer
+prints the exact path, honoring `$XDG_DATA_HOME` on Linux) and its `state/`;
+service; loopback port `3100`; lingering, on Linux only; and the installed
+release, which the installer and `manage status` both print.
 
 ## Prerequisites
 
@@ -79,13 +76,13 @@ installed release, which the installer and `manage status` both print.
   OS, or Linux without systemd, design the native service manager with the user
   rather than translating LaunchAgent, Scheduled Task or unit-file commands
   blindly.
-- **No installer runs privileged** — root on macOS and Linux, elevated on
-  Windows, all three refuse. Use an ordinary terminal
-  ([Invariants](#invariants) → "The install belongs to one user account").
-- **On Linux, this account must be allowed to operate `tailscaled`** — the local
-  API socket is root-owned, so an unprivileged `tailscale serve` is refused.
-  Preflight checks before the build and prints the fix, but never runs `sudo`;
-  this is the only step of a Linux install needing root:
+- **An ordinary terminal.** Every installer refuses to run privileged — root on
+  macOS and Linux, elevated on Windows — because the one account owning
+  `config/` and `state/` is the whole credential posture
+  (`docs/specs/security-remote.md` → "Network posture (self-hosted)").
+- **On Linux, this account must be allowed to operate `tailscaled`.** Preflight
+  checks before the build and prints the fix, but never runs `sudo`; this is the
+  only step of a Linux install needing root (rationale):
 
   ```sh
   sudo tailscale set --operator=$USER
@@ -94,34 +91,30 @@ installed release, which the installer and `manage status` both print.
   per-login like macOS and Windows: up from login to logout. A machine reached
   over SSH, or serving with nobody logged in, needs `--linger`. Switching later
   is `loginctl enable-linger $USER` / `disable-linger`, not a reinstall.
-- **On Windows, one signed-in user at a time owns Tailscale.** `tailscaled`
-  serves its local API to a single interactive session, so a second signed-in
-  profile fails every `tailscale` call with
-  `401 Unauthorized: Tailscale already in use by <user>`; that user must sign
-  out or quit the tray app. Preflight detects it and names the account.
+- **On Windows, one signed-in user at a time owns Tailscale.** A second
+  signed-in profile fails every `tailscale` call with
+  `401 Unauthorized: Tailscale already in use by <user>`, and elevating does not
+  bypass it; that user must sign out or quit the tray app (`quser` lists the
+  sessions). Preflight detects it and names the account.
 - **A Burrow built for this Relay's origin.** The shipped standalone and VS Code
   Burrows reach only Dormouse Hosted, so a self-host Relay needs a local build of
   whichever Burrow the user runs, its `DORMOUSE_RELAY_ORIGIN` byte for byte the
-  `DORMOUSE_ORIGIN` the installer writes to `config/relay.env`,
-  `https://<laptop>.<tailnet>.ts.net`:
+  `DORMOUSE_ORIGIN` the installer writes to `config/relay.env`:
 
   ```sh
   DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:standalone
   DORMOUSE_RELAY_ORIGIN=https://<laptop>.<tailnet>.ts.net pnpm dogfood:vscode
   ```
 
-  That is a self-host build: it sends nothing to `dormouse.sh` or any host
-  under it on its own, so it has no one-time connection, no managed
-  voice, and no auto-update — update it by rebuilding
-  (`docs/specs/relay.md` → "Relay origin").
+  That self-host build has no one-time connection, no managed voice, and no
+  auto-update — update it by rebuilding (`docs/specs/relay.md` → "Relay origin").
 
 ## What the installer does
 
 It builds the exact current checkout into a self-contained release, registers a
 per-login user agent restarted on exit ([Mechanism map](#mechanism-map)) running
 the Relay on `127.0.0.1:3100`, and points `tailscale serve --bg` at it to
-terminate private HTTPS. Only under the current user's profile, with no
-administrator rights:
+terminate private HTTPS — all under the current user's profile:
 
 ```text
 <install root>/
@@ -150,28 +143,21 @@ administrator rights:
 ```
 
 Logs: `~/Library/Logs/Dormouse Relay/` on macOS, `<install root>\logs` on
-Windows, `~/.local/state/dormouse-relay/logs` on Linux. Service definition:
-`~/Library/LaunchAgents/sh.dormouse.relay.plist`, the Scheduled Task
+Windows, `~/.local/state/dormouse-relay/logs` on Linux (rationale). Service
+definition: `~/Library/LaunchAgents/sh.dormouse.relay.plist`, the Scheduled Task
 `\Dormouse Relay`, or `~/.config/systemd/user/dormouse-relay.service`.
 
-Before the first Burrow enrollment, `run/enroll-offer.json` holds the origin and a
-token that `POST /api/burrow/enroll` accepts in place of the setup password, and a
-Dormouse Burrow on this machine offers one-click enrollment from it (checkpoint 4,
-step 2). It expires after 24 hours; either credential path's first Burrow
-enrollment removes it, and no later run recreates it.
+Until the first Burrow enrolls, `run/enroll-offer.json` lets a Dormouse Burrow on
+this machine enroll in one click without the setup password (checkpoint 4, step
+2); its lifetime is `docs/specs/relay.md` → "Configuration".
 
 No installer will **ever**: run `git pull`, fetch, or switch branches; install a
-scheduled updater; ask for elevation; install or re-authenticate Tailscale;
-rewrite an origin that no longer matches the node's DNS name; or touch `config/`
-and `state/`, which survive every update, prune, and uninstall.
+scheduled updater; install or re-authenticate Tailscale; rewrite an origin that
+no longer matches the node's DNS name; or touch `config/` and `state/`, which
+survive every update, prune, and uninstall.
 
-Two [Invariants](#invariants) set day-to-day expectations. **An update is a
-short intentional restart**: Burrow and Pocket WebSockets disconnect and
-reconnect. **A per-login agent is unavailable while the laptop sleeps, is shut
-down, or has no logged-in user** — normally fine, since there is then no local
-Dormouse Burrow to control either. Windows' at-logon `LogonType=Interactive` is
-what keeps the task free of a stored password; Linux alone opts out, with
-`--linger` (Prerequisites).
+An update is a short restart: Burrow and Pocket WebSockets disconnect and
+reconnect ([Invariants](#invariants)).
 
 ## Definition of done
 
@@ -194,43 +180,28 @@ what keeps the task free of a stored password; Linux alone opts out, with
   unreachable on the laptop's Tailscale IP.
 - **`tailscale serve` proxies `/` to `127.0.0.1:3100` at the origin recorded in
   `config/relay.env`.** A failure prints the `manage serve` command that
-  re-applies it. Funnel may be on or off; verification does not treat public
-  HTTPS reachability as a defect.
-- **`config/`, `state/`, `run/` and `config/relay.env` are readable only by the
-  installing user**, by the per-platform means in the
-  [Mechanism map](#mechanism-map) and [Invariants](#invariants).
-  `run/enroll-offer.json` is held to the same standard while it is there; a
+  re-applies it.
+- **`config/`, `state/`, `run/`, `config/relay.env` and an unspent offer are
+  owner-only** (`docs/specs/security-remote.md` → "Credentials at rest"); a
   spent offer is gone, and `verify` says so rather than failing.
 - **The current release pointer resolves to a release with `RELEASE`
   metadata**, and neither the service definition nor the `run-relay` wrapper
-  refers to the source checkout. The previous-release pointer is checked too:
-  absent on a first install warns, while naming the same release as `current`,
-  or a release that is no longer on disk, fails — `manage rollback` would
-  otherwise be offered a target that is not there.
+  refers to the source checkout. An absent previous-release pointer warns (a
+  first install); one naming the same release as `current`, or a release no
+  longer on disk, fails.
 
-These cannot be proven from the laptop, and are the checkpoints below: the HTTPS
-origin answering from a second tailnet device and, when private HTTPS is intended,
-stopping when that device leaves the tailnet; the service manager restarting
-the Relay after a real kill;
-state surviving a reinstall from a newer checkout, with rollback returning the
-previous release; Pocket passkey setup and Burrow enrollment completing against
-this origin, and one command typed from the phone coming back with the laptop's
-own output; and the install root backed up somewhere off this laptop.
+What the laptop cannot prove alone — reachability from another device, a real
+restart, an update and rollback, a phone session, an off-laptop backup — is
+checkpoints 3–6.
 
 ## Checkpoint 1: preflight
 
-The installer preflights and stops with a specific error, so do not re-run these
-by hand: OS and unprivileged session; the Tailscale CLI (on `PATH`, in the macOS
-app bundle invoked with `TAILSCALE_BE_CLI=1`, or under
-`Program Files\Tailscale` on Windows); backend state `Running`; the node's
-MagicDNS name and derived origin; tailnet HTTPS certificates; an origin
-disagreeing with an existing installation; the Git SHA and dirty status (it asks
-before installing a dirty worktree); and the Node and pnpm versions pinned in
-root `package.json`. Windows also names the account holding `tailscaled`'s local
-API; Linux also checks a reachable systemd user manager, systemd 240 or newer,
-and that this account may operate `tailscaled` — that one before the build,
-since the refusal would otherwise surface only at Serve, after `current` had
-moved.
+The installer preflights and stops with a specific error, so do not re-run its
+checks by hand: OS and unprivileged session; the Tailscale CLI, backend state,
+MagicDNS name, HTTPS certificates, and (Windows) local-API owner or (Linux)
+operator role; an origin disagreeing with an existing installation; the Git SHA
+and dirty status; the Node and pnpm versions pinned in root `package.json`; and
+on Linux a reachable systemd user manager, version 240 or newer.
 
 Establish with the user what the script cannot:
 
@@ -241,7 +212,7 @@ Establish with the user what the script cannot:
 - **Port 3100 is free.** Unchecked before installation; a stale listener blocks
   the new Relay from binding and fails the post-install identity check. A dev
   Relay is not normally the culprit: `pnpm dev:relay` takes any free port unless
-  `PORT` names one.
+  `PORT` names one (rationale).
 
   ```sh
   # macOS
@@ -278,18 +249,17 @@ With the user's approval:
 ./deploy/local/install-linux.sh
 ```
 
-**A machine that ran a pre-rename install needs nothing extra**: the installer
-stops and removes the retired `sh.dormouse.server` LaunchAgent /
-`dormouse-server.service` unit before registering its own, since both bind the
-same port. The old install root and logs are left where they are — say so, and
-let the user delete them.
+On a machine with a pre-rename install, the installer removes the retired
+`sh.dormouse.server` LaunchAgent / `dormouse-server.service` unit, since both
+bind the same port, but leaves the old install root and logs: say so, and let
+the user delete them.
 
-It prints each step; read that with the user rather than summarizing. Its
-confirmations — a dirty worktree, a mismatched pnpm, repointing an
-already-claimed Serve root path — are decisions, and it refuses to assume an
-answer with no terminal. Tailscale may open a browser consent flow the first
-time Serve requests a certificate; that one is the user's to click. A first
-install ends by pointing at `manage show-password`; do not run that yet.
+Read its printed steps with the user rather than summarizing. Its confirmations
+— a dirty worktree, a mismatched pnpm, repointing an already-claimed Serve root
+path — are the user's decisions, and it refuses to assume an answer with no
+terminal. Tailscale may open a browser consent flow the first time Serve
+requests a certificate; that one is the user's to click. A first install ends by
+pointing at `manage show-password`; do not run that yet.
 
 ## Checkpoint 3: verify
 
@@ -326,9 +296,9 @@ pkill -f 'Dormouse Relay/current/relay/dist/index.js'
 ```
 
 ```powershell
-# Windows — select by image path and command line, never image name (see the
-# traps). run-relay.ps1's supervision loop restarts after its 10s throttle, so
-# wait ~15s before reading status.
+# Windows — select by install-root path and command line, never by image name
+# (rationale). The supervision loop restarts after a 10s throttle, so wait
+# ~15s before reading status.
 $root = "$env:LOCALAPPDATA\Dormouse Relay"
 Get-CimInstance Win32_Process |
   Where-Object { $_.ExecutablePath -like "$root\*" -or $_.CommandLine -like "*$root*" } |
@@ -357,50 +327,43 @@ Serve mapping both return without rerunning the installer.
 
 The Relay has no account, no passkey, and no enrolled Burrow. Same sequence as
 `docs/specs/relay.md` → "Running it", run against the tailnet origin, with the
-Relay's generated password.
-
-**The Burrow comes first**: a passkey is registered only off a code an enrolled
-Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
+Relay's generated password. **The Burrow comes first**: a passkey is registered
+only off a code an enrolled Burrow displays (`docs/specs/relay.md` → Setup
+tokens and the pairing QR).
 
 1. **The setup password.** Needed only if the step-2 offer card is gone or the
    Burrow is elsewhere: have the user run `manage show-password` in their own
    terminal, which warns before printing. Never ask for the value, and never
    print it into the conversation.
 
-2. **The Burrow.** On this same machine, launch the standalone or VS Code build
-   made with `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings →
-   Network** — the sliders icon at the far right of the baseboard — and choose
-   **My Relay only**: a new install starts at Nothing, which refuses enrollment
-   (`docs/specs/remote-network.md` → "Policy"). Its Phones section then holds
-   the remote-control choices. While the offer is unspent, its card enrolls in one click with no
-   setup password; the typed form behind "Enroll with the setup password…"
-   covers a spent offer or a Burrow on another machine (`docs/specs/relay.md`,
-   "Remote control, in the Settings dialog"). Enrollment persists in the Burrow service's
-   own store (`docs/specs/security-remote.md` → "Credentials at rest"), so later launches connect
-   on their own; the section then shows the Relay, the relay connection and the
-   paired-device count.
+2. **The Burrow.** On this same machine, launch the build made with
+   `DORMOUSE_RELAY_ORIGIN` (Prerequisites), open **Settings → Network**, and
+   choose **My Relay only**: a new install starts at Nothing, which refuses
+   enrollment (`docs/specs/remote-network.md` → "Policy"). While the offer is
+   unspent, its card enrolls in one click; "Enroll with the setup password…"
+   covers a spent offer or a Burrow on another machine
+   (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
+   Enrollment persists, so later launches connect on their own.
 
-   A stock build offers only "Enroll with hosted.dormouse.sh" under
-   **Persistent Relay**, and no setup password: the expected symptom of a stock
-   build, not a Relay problem.
+   A Burrow that offers only "Enroll with hosted.dormouse.sh" is a stock build,
+   not a Relay problem.
 
 3. **The phone, and only then the code.** On the phone, open
    `https://<laptop>.<tailnet>.ts.net` in Safari and confirm it leads with
    **Scan a setup code**. For push, add Pocket to the Home Screen and pair
-   inside the installed app (`docs/specs/pocket-app.md` → Installable web app
-   owns why, and covers the phone's camera). **A setup code is
-   live for five minutes**, so that first load — bundle, service worker, Home
-   Screen install — must not happen inside the window. With the phone waiting on
-   that screen, press **Set up a phone** in **Settings → Network**;
-   scanning or pasting the code creates the passkey and signs them in, bound to
-   this exact origin, with no password typed on the phone.
+   inside the installed app (`docs/specs/pocket-app.md` → Installable web app).
+   **A setup code is live for five minutes**, so that first load — bundle,
+   service worker, Home Screen install — must not happen inside the window.
+   With the phone waiting on that screen, press **Set up a phone** in
+   **Settings → Network**; scanning or pasting the code creates the passkey and
+   signs them in, bound to this exact origin, with no password typed on the
+   phone.
 
 4. **A real session.** The scan runs straight into pairing: read the two digits
    off the phone, type them into the modal on the laptop, and **approve — the
    last thing anyone does**. The phone answers its own biometric prompt and
-   lands on the machine's terminal. (**Connect**, on the Burrows row, is for later
-   sessions.) Only now have HTTPS proxying, the WebSocket upgrade, and the
-   security flow been exercised together.
+   lands on the machine's terminal. Only now have HTTPS proxying, the WebSocket
+   upgrade, and the security flow been exercised together.
 
 5. **State.** Confirm `account.json`, `burrows.json` and `vapid.json` — plus
    `push-subscriptions.json` if push was enabled — now exist in `state/`. Record
@@ -426,12 +389,10 @@ Prove it once, while the user is watching:
    return to the desired release.
 
 `manage uninstall` removes the service definition and installed code, keeps
-`config` and `state` and reports where they are, and keeps `manage` itself —
-so purge remains reachable. `manage purge` is the separate,
-irreversible deletion, behind a typed confirmation phrase and never part of a
-reinstall. Run them in that order; purge finishes by printing the single command
-that clears whatever is left: the install root, plus the log directory on Linux
-and macOS, where it sits outside that root.
+`config` and `state` and reports where they are, and keeps `manage` itself.
+`manage purge` is the separate, irreversible deletion behind a typed
+confirmation phrase; run it after `uninstall`, and it prints the one command
+that clears whatever is left.
 
 ## Checkpoint 6: limits and backup
 
@@ -439,10 +400,9 @@ Make these explicit: the relay is down while the laptop sleeps, is shut down,
 has Tailscale disconnected, or is logged out; the installer does not follow
 `main`, so updates happen only when the user reruns it; the HTTPS origin is tied
 to the laptop's Tailscale node name, so renaming or re-enrolling that node means
-redoing the passkey and every Burrow enrollment, and the installer stops rather
-than rewriting the origin; and Tailscale network policy still controls which
-tailnet members reach the laptop — review existing grants if the tailnet has
-other users.
+redoing the passkey and every Burrow enrollment; and Tailscale network policy
+still controls which tailnet members reach the laptop — review existing grants
+if the tailnet has other users.
 
 Confirm the install root, especially `config` and `state`, is covered by an
 encrypted backup off the laptop — Time Machine, File History,
@@ -460,8 +420,7 @@ Report concisely: the Pocket URL and its WebAuthn-origin significance; the exact
 installed Git SHA and whether the build was dirty; where runtime config, state,
 release metadata and logs live; the rollback command; backup status and restore
 location; any skipped acceptance test or remaining manual Burrow/Pocket setup;
-that updates happen only when the user reruns the installer for their platform,
-plus the sleep/shutdown/logout availability limit; and the installed
+the update and availability limits of checkpoint 6; and the installed
 `manage status`, `manage verify`, `manage logs` and `manage restart` commands.
 
 **Never print the setup password or any credential in the handoff.**
@@ -485,20 +444,12 @@ plus the sleep/shutdown/logout availability limit; and the installed
 
 For pairing-storage failures on iOS, Android, or desktop, open
 `https://<relay-origin>/diagnostics/index.html` in the affected browser and
-choose **Run checks**, then **Copy results**. No setup code is needed. The
-report distinguishes API presence from working crypto and storage; inspect it
-before sharing because it includes browser/version information.
-
-For persistence across app or phone restarts, use **Prepare restart test**,
-close and reopen the same browser/app, then **Verify saved key** and **Copy
-restart result**. Do not prepare again between those steps. Finish with
-**Remove test data** in each context where you prepared a checkpoint.
-Browser and installed-app results are separate evidence; a passing test on one
-device is not certification of another. The diagnostic contract is
-`docs/specs/pocket-app.md` -> "The capability harness".
-Harness v3 tests the production encrypted-key format, including authenticated
-context. A v1/v2 experimental checkpoint must be removed and prepared again;
-old restart reports do not establish the production-format restart result.
+choose **Run checks**, then **Copy results**; no setup code is needed. For
+persistence across app or phone restarts, follow the page's restart test, and
+remove its test data afterward in each context where you prepared one. Inspect
+a report before sharing, since it includes browser/version information; each
+result is evidence for that one browser or installed app only. The diagnostic
+contract is `docs/specs/pocket-app.md` -> "The capability harness".
 
 ### Service and deployment failures
 
@@ -520,25 +471,13 @@ about any of them.
   `journalctl --user -u dormouse-relay.service -n 50`, and
   `~/.local/state/dormouse-relay/logs`.
 - **The task shows `Ready` rather than `Running` after a reboot:** the at-logon
-  `LogonType=Interactive` trigger fires on interactive sign-in, not at boot —
-  the LaunchAgent's per-login limitation, not a fault.
-- **Every `tailscale` call returns `401 Unauthorized: Tailscale already in use
-  by <user>` (Windows):** another signed-in profile owns `tailscaled`'s local
-  API (Prerequisites); `quser` lists the sessions, and elevating does not bypass
-  it.
-- **`install-windows.ps1` refuses because the session is elevated:** use an
-  ordinary PowerShell (Prerequisites).
-- **`systemctl --user` fails with `DBUS_SESSION_BUS_ADDRESS` (Linux):** no user
-  manager for this uid, usually a shell reached with `su`. Use
-  `machinectl shell $USER@` or a fresh SSH session; preflight refuses rather
-  than installing a unit nothing will start.
+  trigger fires on interactive sign-in, not at boot — the per-login limit, not a
+  fault.
 - **`tailscale serve` is refused for a non-root user (Linux):** grant the
   operator role (Prerequisites). Preflight checks it before building, so a late
-  hit means the check regressed — and since the release is already installed and
-  running, finish with `manage serve` rather than reinstalling.
-- **The service disappears at logout (Linux):** the documented per-login
-  default, not a fault — `--linger` is the opt-out (Prerequisites); make the
-  availability change explicit in checkpoint 6 if you take it.
+  hit means the check regressed or could not read the role — the release is
+  already installed and running, so finish with `manage serve` rather than
+  reinstalling.
 - **`/api/hello` answers but the unit is not active (Linux):** something else
   holds port 3100 and the install correctly refuses to claim it.
   `ss -lntp 'sport = :3100'` names that process — unless it cannot see it, as
@@ -568,26 +507,20 @@ about any of them.
 ## Keeping the relay up while the laptop sleeps
 
 A per-login agent is down whenever its machine is — fine until the user controls
-a Burrow that is *not* this laptop.
-
-That needs no new machinery: the phone reaches the origin and the Burrow dials
-*out* to it, so the relay need not run on the laptop. Run the Linux installer
-with `--linger` on any always-on tailnet machine — a spare box, a NUC, a small
-VM — and that node's own MagicDNS name becomes the origin:
+a Burrow that is *not* this laptop. The phone reaches the origin and the Burrow
+dials *out* to it, so the relay need not run on the laptop: run the Linux
+installer with `--linger` (Prerequisites) on any always-on tailnet machine — a
+spare box, a NUC, a small VM — and that node's own MagicDNS name becomes the
+origin:
 
 ```sh
 ./deploy/local/install-linux.sh --linger
 ```
 
-Lingering is what makes it survive logout and come back at boot
-(Prerequisites); `manage verify` reports which mode is live. Two things follow,
-both the same ones any origin change brings: **`DORMOUSE_ORIGIN` becomes that
-machine's name**, so the passkey and every Burrow enrollment are redone against it
-— a deliberate migration, not an upgrade path, which is why the installers
-refuse to rewrite an origin; and **every Burrow is rebuilt with that origin**
-(Prerequisites). That machine needs the same
-backup story as any other install (checkpoint 6): `config/` and `state/` hold
-Burrow bearer credentials and a VAPID private key.
+That is an origin change, a deliberate migration rather than an upgrade path:
+the passkey and every Burrow enrollment are redone against the new
+`DORMOUSE_ORIGIN`, and every Burrow is rebuilt with it (Prerequisites). That
+machine needs the same backup as any other install (checkpoint 6).
 
 Managed cloud accounts and deployment belong to `docs/specs/hosted.md` ->
 "Application boundary".
@@ -616,27 +549,18 @@ Source of truth: `deploy/local/install-macos.sh`,
 ### Mechanism map
 
 Service and install root are in the table at the top of this file; logs and
-service-definition paths are under "What the installer does".
+service-definition paths are under "What the installer does". Both Windows
+deviations exist because the macOS mechanism has no unprivileged Windows
+equivalent (rationale).
 
 | | macOS | Windows | Linux |
 | --- | --- | --- | --- |
-| RunAtLoad | plist `RunAtLoad` | the at-logon trigger, `LogonType=Interactive`, `RunLevel=Limited` | `WantedBy=default.target` |
+| RunAtLoad | plist `RunAtLoad` | the at-logon trigger, `LogonType=Interactive` (no stored password), `RunLevel=Limited` | `WantedBy=default.target`; survives logout only with opt-in `--linger`, which the installer never enables silently and `verify` reports rather than asserts |
 | KeepAlive | plist `KeepAlive` | the supervision loop in `bin\run-relay.ps1`; Task Scheduler's `RestartCount` is defence in depth, not the mechanism | `Restart=always`, `RestartSec=10` |
-| Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; its children survive and are reaped by install root (see the traps) | `systemctl --user stop` takes the whole cgroup |
+| Stopping it | `launchctl bootout` takes the process tree | ends only the `powershell.exe`; before every start the installer reaps its children by install-root image path and command line, never image name | `systemctl --user stop` takes the whole cgroup |
 | `current`/`previous` | symlinks, swapped with `rename(2)` on the link path | `current.txt`/`previous.txt` naming a release id, swapped with `rename(2)` on the file | symlinks, swapped with `rename(2)` on the link path |
 | `0700` / `0600` | modes under `umask 077`; `verify` checks mode and owner | an owner-only DACL; `verify` also checks owner SID | modes under `umask 077`; `verify` checks mode and owner |
 | Entry | `/bin/bash bin/run-relay` | `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File bin\run-relay.ps1`, at an absolute interpreter path | `ExecStart=/bin/bash "<root>/bin/run-relay"` |
-
-Two rows are load-bearing Windows deviations, both because the macOS mechanism
-has no unprivileged Windows equivalent. **The release pointer is a file**,
-swapped atomically, and the switch still asserts the pointer advanced
-(rationale). **KeepAlive lives in the wrapper**: `run-relay.ps1` is a
-supervision loop with the plist's own 10-second throttle, and `manage verify`
-checks that loop is present rather than trusting task settings (rationale).
-Linux's one deviation: **lingering is the availability knob, and it is
-opt-in** (`--linger`, Prerequisites) — a user manager stops at logout like a
-LaunchAgent, the installer never changes that silently, and `manage verify`
-reports which mode is live rather than asserting either.
 
 ### Invariants
 
@@ -645,140 +569,71 @@ reports which mode is live rather than asserting either.
   clients reconnect across a release switch; no zero-downtime swap to attempt.
 - **Never overwrite an existing release directory while staging.** A colliding
   release id fails without deleting its contents.
-- **State outlives code.** `config/` and `state/` sit outside `releases/`, are
-  readable only by the installing user, and survive every update, prune and
-  uninstall; purging is separate and explicitly confirmed. `config/relay.env`
-  is generated once, then preserved byte-for-byte.
+- **State outlives code.** `config/` and `state/` sit outside `releases/` and
+  survive every update, prune and uninstall; purging is separate and explicitly
+  confirmed. `config/relay.env` preservation is `docs/specs/security-remote.md`
+  → "Credentials at rest".
   **Must read its last assignment for each key**, stripping only one matched
   pair of double quotes, in the installer, service wrapper, and management
   commands. `scripts/installer-verify-test.mjs` exercises the unix readers
   against the shipped wrapper parser.
-  **A preserved file missing installer-owned keys is half-written**: name them
-  and stop, never rewrite values that cannot be proven stale. The setup
-  credential the Relay generates into `state/`, and what `manage verify` walks
-  on Windows, are `docs/specs/security-remote.md` → "Credentials at rest".
-- **The enrollment offer rotates on every run before the first Burrow enrolls**,
-  and is **minted last** — after release, Serve and pruning succeed — so a
-  failure leaves the previous offer unspent. `run-relay` exports
-  `DORMOUSE_ENROLL_TOKEN_FILE`; unset, the Relay refuses every offer
-  (`docs/specs/relay.md` → Configuration). Rotation, the `state/burrows.json`
-  marker that ends it, generation and protection:
-  `docs/specs/security-remote.md` → "Credentials at rest".
-- **Loopback backend, publicly safe HTTPS origin.** The install pins
-  `DORMOUSE_BIND_HOST=127.0.0.1` and refuses to proceed without it
-  (`docs/specs/relay.md` → Configuration). Port 3100 keeps the installed
-  service off the dev Relay's default (rationale). Serve is the private
-  default; Funnel is safe to enable because the application controls, not
-  network privacy, govern admission
-  (`docs/specs/security-remote.md` → "Network posture (self-hosted)").
-- **`DORMOUSE_ORIGIN` is durable WebAuthn identity**, derived from the node's
-  MagicDNS name; an installation recording a different origin stops the
-  installer rather than rewriting it
-  (`docs/specs/security-remote.md` → "Network posture (self-hosted)").
-- **The install belongs to one user account.** Every installer refuses to run
-  privileged — root on macOS/Linux, elevated on Windows — because that account
-  owning `config/` and `state/` is the whole credential posture. Which paths
-  `manage verify` asserts that on, and by what per-platform means, is
-  `docs/specs/security-remote.md` → "Credentials at rest".
+- **`run-relay` exports `DORMOUSE_ENROLL_TOKEN_FILE`** naming `run/enroll-offer.json`
+  (`docs/specs/relay.md` → Configuration); when the offer is minted and
+  rotated is `docs/specs/security-remote.md` → "Credentials at rest".
+- **Every installer requires `PORT=3100` in `config/relay.env`**, matching its
+  Serve mapping (rationale). Bind host, Serve, Funnel and origin rules are
+  `docs/specs/security-remote.md` → "Network posture (self-hosted)".
 - **A failed update is a failure.** The candidate release is health-checked on
   an ephemeral port against a throwaway state dir *before* `current` moves; if
   the live service then fails to answer, `current` is restored to `previous` and
   the installer exits nonzero — rollback succeeding is not success. **The
-  restore also clears `previous`** on every platform, which the switch had aimed
-  at the release being restored: both pointers on one release would make
-  `verify` report a rollback target that does not exist and `rollback` swap a
-  release with itself, and both commands refuse that state independently. **On
-  macOS and Linux the clear is gated on the restore having landed**
-  (`rollback_release` re-reads `current`; its `|| true` call sites disable
-  `errexit`), so a failed restore
-  cannot strip the rollback pointer off an install still running the rejected
-  release. The restore then confirms *which* release answered (next invariant);
-  on Windows it reaps orphaned processes first (see the traps).
+  restore clears `previous` only once `current` is back on that release**, so
+  the pointers are not left naming one release (both `verify` and `rollback`
+  refuse that state) and a failed restore keeps its rollback target. The restore then
+  confirms *which* release answered (next invariant).
 - **A 200 does not say who answered.** An orphan of an older release holding the
   loopback port answers `/api/hello` exactly like a healthy current one, so
   **every check whose contract is *which release is running* proves the
   responder's identity**: the post-switch health check (rolls back and exits
-  nonzero on a mismatch), the rollback restore, `manage verify`, and — identity
-  being folded into the health *wait* — every command that waits for health
-  (`manage rollback`, `manage restart`), which also absorbs the window where an
-  outgoing process answers one last time. `run-relay` passes
-  `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_RELEASE_ID` (`docs/specs/relay.md` →
-  Configuration); the Relay writes `RuntimeInfo` only once **bound**, so
-  `listening_release` (macOS, Linux) /
-  `Get-ListeningRelease` (Windows) is a file read, a port match and a liveness
-  check. **It cannot go in `/api/hello`**, which is unauthenticated and reachable
-  through the HTTPS proxy. **Empty means unknown, never
-  "nobody"** — a stale file with a dead pid, a Relay started outside the
-  installer, and a foreign port-holder all fail the comparison. A clean exit
-  removes the file; a crash leaves it, which the liveness check reads correctly.
-  **Linux still leads with `systemctl --user is-active`**, which catches a
-  responder no port lookup can see: a foreign network namespace, or WSL with
-  `networkingMode=mirrored`, where loopback is shared with the Windows host.
+  nonzero on a mismatch), the rollback restore, `manage verify`, and every
+  command that waits for health (`manage rollback`, `manage restart`).
+  `run-relay` passes `DORMOUSE_RUNTIME_FILE` and `DORMOUSE_RELEASE_ID`
+  (`docs/specs/relay.md` → Configuration), and the Relay writes `RuntimeInfo`
+  only once **bound**, so the identity check is a file read, a port match and a
+  liveness check. **It cannot go in `/api/hello`**, which is unauthenticated and
+  reachable through the HTTPS proxy. **Empty means unknown, never "nobody"** — a
+  stale file with a dead pid, a Relay started outside the installer, and a
+  foreign port-holder all fail the comparison. **Linux still leads with
+  `systemctl --user is-active`**, which catches a responder no port lookup can
+  see: a foreign network namespace, or WSL with `networkingMode=mirrored`.
   `manage status` on all three reports what the pointers say by design.
   Source of truth: `relay/src/runtime-file.ts`.
 
 ### Mechanical traps
 
-Each fails silently unless encoded in the scripts:
+Each fails silently unless encoded in every installer it names; single-platform
+traps live as comments at their code:
 
 - **`pnpm deploy --prod --legacy` poisons the workspace.** (All three.)
   **Snapshot and restore pnpm's workspace-state file on every exit**, including
   failed installs (rationale).
 - **`mv -f tmp link` follows a symlink to a directory.** (macOS, Linux.) **Use
   `rename(2)` on the link path and assert that `current` advanced** (rationale).
-- **`pnpm` resolves to a `.ps1` before its `.CMD`.** (Windows.) **Take the
-  first `Application`-typed resolution**, not `(Get-Command pnpm).Source`
-  (rationale).
-- **Redirecting a native command's stderr inline sets `$?` to false.**
-  (Windows, PowerShell 5.1.) **Route control-flow commands through
-  `Invoke-Native`**; only the candidate probe and `run-relay.ps1` append
-  redirector bypass it, because `Start-Process` cannot express their setup.
-- **Stopping a Scheduled Task does not reap its grandchildren.** (Windows.)
-  **Before every start, reap processes belonging to the install root by image
-  path and command line, never image name**, and never accept a bare health 200.
-  Source of truth: `Get-DormouseProcess` / `Get-ListeningRelease` in `deploy/local/install-windows.ps1`.
-- **Windows `tailscaled` serves its local API to one interactive session at a
-  time.** Preflight must match the
-  `401 Unauthorized: Tailscale already in use by <user>` string and name the
-  account holding it, not report the raw 401 as "is Tailscale signed in?".
-- **Linux operator preflight must inspect the role, not a Serve read**, since
-  `tailscale serve status` can succeed when the invoking user may not write the
-  config. Read `OperatorUser` from `tailscale debug prefs`, using `ControlURL`
-  to tell a parsed-but-unset role from an unreadable response: an absent or
-  mismatched role is fatal and prints `sudo tailscale set --operator=$USER`,
-  while an unreadable one warns and degrades to the later Serve refusal, which
-  reports the install as unserved and points at `manage serve`. Test mode skips
-  this unstable CLI probe.
-- **`systemctl --user` needs a real login session, not just a shell.** (Linux.)
-  Preflight checks `systemctl --user show-environment` and names the fix — log
-  in properly, or `machinectl shell $USER@` (rationale).
-- **`StandardOutput=append:` is systemd 240 or newer.** (Linux.) **Parse
-  `systemctl --version` and refuse below 240** rather than installing a unit
-  whose logging silently lies (rationale).
 
 ### Operator surface and test hooks
 
 `bin/manage` (`bin\manage.ps1`, with a `manage.cmd` shim, on Windows) carries:
-`status`, `verify` (runs every acceptance check and exits nonzero on any
-failure), `logs`, `restart`, `show-password`, `serve` (re-apply the Serve
-mapping after a dev session repointed it), `rollback`, `uninstall`, and the
-separately-confirmed `purge`.
+`status`, `verify`, `logs`, `restart`, `show-password`, `serve` (re-apply the
+Serve mapping after a dev session repointed it), `rollback`, `uninstall`, and
+the separately-confirmed `purge`.
 
-**Teardown is two steps in that order, and `uninstall` must leave `manage`
-behind** for the second to be reachable: it removes the service definition, the
-releases, the pointers, `run/` and `bin/run-relay`, but not the `bin` directory
-`manage` lives in — deleting that strands `config/` and `state/`, the data its
-own message tells you to `purge`. **`purge` deletes `state/`, `config/` and
-`run/`** after its typed confirmation — `run/` because an unspent offer redeems
-for a Burrow enrollment with no account in existence — and, once `bin/run-relay`
-is gone, prints the one command that removes what is left, since it cannot
-delete itself from under the running shell. That command names the
-dormouse-owned log directory alongside the install root, because on Linux and
-macOS the logs live outside it — `LOG_ROOT` (`$XDG_STATE_HOME/dormouse-relay`)
-and `~/Library/Logs/Dormouse Relay`, each named at the level dormouse owns so
-no empty directory survives; on Windows `logs` is inside the root. Source of
-truth: `cmd_uninstall` / `cmd_purge` (`Invoke-Uninstall` / `Invoke-Purge` on
-Windows) in the generated `manage` script.
+**`uninstall` must leave `manage` behind**, so `purge` stays reachable for
+`config/` and `state/`. **`purge` deletes `run/` along with `state/` and
+`config/`**, and once uninstalled prints the one command removing the install
+root and, on macOS and Linux, the log directory outside it. Source of truth:
+`cmd_purge` in `deploy/local/install-linux.sh` and
+`deploy/local/install-macos.sh`; `Invoke-Purge` in
+`deploy/local/install-windows.ps1`.
 
 Two test-only hooks, each refused unless `DORMOUSE_INSTALL_TEST=1`:
 `DORMOUSE_INSTALL_ROOT` puts the whole install under a throwaway path, and —
