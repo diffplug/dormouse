@@ -23,7 +23,7 @@ The Tool shows the harness in its own pane and prints the command to drive it
 
 - **`lib/`** — Shared React + TailwindCSS frontend library: components, tests, Storybook.
   - `lib/src/lib/platform/` — platform abstraction (`PlatformAdapter` interface, fake + VSCode adapters)
-  - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `BurrowService` that runs in the Tauri sidecar and the VS Code extension host)
+  - `lib/src/host/` — Node-side host modules bundled into both hosts: the iframe proxy, the agent-browser host, and `remote/` (the `BurrowService` both hosts run)
   - `lib/src/remote/` — remote control: `burrow/` (laptop side: protocol-v1 session, security, the webview's responder + pairing UI), `client/` (phone-side protocol + `RemotePtyAdapter`), `pocket-app/` (Pocket shell), `one-time-app/` (the one-time phone page Hosted serves), `direct/` (the WebRTC direct path both ends run), `ws.ts` (shared socket surface)
 - **`standalone/`** — Tauri desktop app (Rust + Vite frontend).
   - `standalone/sidecar/` — Node.js PTY manager (native PTY via node-pty, direct-path WebRTC via node-datachannel), bundled as the Tauri sidecar
@@ -74,7 +74,8 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/remote-security-model.md`** — Remote-control trust model: one Noise channel per ceremony, passkeys proving presence inside it, per-Burrow Client statics, the Burrow (not the Relay) authorizing the pair. Read first for anything remote.
 - **`docs/specs/remote-network.md`** — The network policy (Nothing / Local networks / Anywhere / My Relay only): its choke points, the update reminder, the Local networks path check, Cloudflare STUN, and each level's paired-phone path.
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
-- **`docs/specs/relay.md`** — The selfhost coordinating Relay and shared Burrow-service runtime: env config, JSON-file state, WebAuthn without a library, HTTP API, relay flow, enrollment, running it end to end.
+- **`docs/specs/relay.md`** — The selfhost Relay server: config, JSON-file state, WebAuthn, HTTP API, routing, running and installing it.
+- **`docs/specs/burrow-service.md`** — The desktop Burrow: the baked Relay origin, `BurrowService`, enrollment, the relay socket, Settings → Remote control.
 - **`docs/specs/hosted.md`** — Hosted accounts: login/linking policy, account-scoped Relay and enrollment, Worker deployment, local development, and staged paid services.
 - **`docs/specs/one-time.md`** — One-time connection: the link a laptop shows, its Settings panel and Baseboard indicator, the Hosted rendezvous wire that carries only its handshake, the phone page Hosted serves, and the direct-only session; no account, nothing saved.
 - **`docs/specs/security-hosted.md`** — Hosted account origin, identity, and deployment security checks.

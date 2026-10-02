@@ -11,7 +11,7 @@ import { DEFAULT_MANAGED_VOICE_ID } from '../lib/platform/managed-voice-types';
 import { DEFAULT_RELAY_ORIGIN } from './relay-origin';
 
 /**
- * A fixed origin, never the relay origin (`docs/specs/relay.md` → "Relay
+ * A fixed origin, never the relay origin (`docs/specs/burrow-service.md` → "Relay
  * origin"): changing it changes where every shipped binary sends the token.
  */
 const MANAGED_VOICE_SPEAK_URL = 'https://voice.dormouse.sh/api/voice/speak';
@@ -215,7 +215,7 @@ describe('the build it runs in', () => {
 
   it('sends nothing from a self-host build, whatever a Hosted build saved', async () => {
     // A token saved by a Hosted build on this machine is still on disk; a
-    // self-host build reaches nothing of Dormouse's (docs/specs/relay.md →
+    // self-host build reaches nothing of Dormouse's (docs/specs/burrow-service.md →
     // "Relay origin"), so it reads none of it.
     await host.handle({ op: 'configure', update: { token: TOKEN } });
     const selfHost = createManagedVoiceHost({

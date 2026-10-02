@@ -107,7 +107,7 @@ describe.each([
     build.mode = "hosted";
   });
 
-  // docs/specs/relay.md → "Relay origin".
+  // docs/specs/burrow-service.md → "Relay origin".
   it("offers managed voice only in a Hosted build", async () => {
     expect((await open()).adapter.managedVoice).toBeDefined();
     build.mode = "self-host";

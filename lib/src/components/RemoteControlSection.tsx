@@ -57,7 +57,7 @@ export function removedCopy(
 /**
  * How each relay-socket state reads to someone who is not holding the spec.
  * The latched ones are the ones that need the user to act, so only they get a
- * button of their own (`docs/specs/relay.md`, "Remote control, in the Settings
+ * button of their own (`docs/specs/burrow-service.md`, "Remote control, in the Settings
  * dialog").
  */
 function describeConnection(
@@ -421,7 +421,7 @@ function displayedQr(state: SetupQrState): SetupQrResult | undefined {
  * The invitation this panel is following: the one it is drawing, or — once a
  * phone has completed a handshake against it — the one whose outcome it is
  * still waiting on. The second half is why the subscription outlives the QR
- * (`docs/specs/relay.md` → Remote control, in the Settings dialog).
+ * (`docs/specs/burrow-service.md` → Remote control, in the Settings dialog).
  */
 function trackedInviteId(state: SetupQrState): string | undefined {
   if (state?.phase === 'scanned') return state.inviteId;
@@ -500,7 +500,7 @@ function BurrowNameField({
  * This is the same `enroll` / `enrollOffer` / `beginHostedEnrollment` /
  * `cancelHostedEnrollment` / `status` / `reconnect` / `clearEnrollment`
  * surface as the `window.dormouseBurrow` console hook,
- * which stays as the scripting seam (`docs/specs/relay.md`, "Burrow side").
+ * which stays as the scripting seam (`docs/specs/burrow-service.md`, "Burrow side").
  * Pairing approval is *not* here — it is a modal, because it must interrupt
  * (`docs/specs/remote-security-model.md`, Pairing Ceremony).
  */
@@ -573,7 +573,7 @@ function RelayChoices({ status }: { status: BurrowConsoleStatus }) {
 /**
  * Persistent Relay on a machine that has not enrolled: a disclosure that
  * **stays folded until clicked**, installer's offer or not, holding what the
- * build's mode allows (`docs/specs/relay.md` → "Remote control, in the Settings
+ * build's mode allows (`docs/specs/burrow-service.md` → "Remote control, in the Settings
  * dialog"). **Folding hides the enroll view, never unmounts it**, for the same
  * reason {@link EnrollView} folds its own.
  */
@@ -853,7 +853,7 @@ function HostedEnrollmentCode({
  * would unmount whatever the user was in the middle of: a failure landing after
  * the flip would have nowhere to render, leaving silence over a spent
  * single-use token, and a half-typed setup password would vanish because a file
- * appeared on disk (`docs/specs/relay.md`).
+ * appeared on disk (`docs/specs/burrow-service.md`).
  */
 function EnrollView({
   relayOrigin,
@@ -1176,7 +1176,7 @@ function EnrolledView({
 
 /**
  * The QR a phone scans to set itself up against this machine's Relay, inline
- * in the Settings dialog (`docs/specs/relay.md` → "Remote control, in the
+ * in the Settings dialog (`docs/specs/burrow-service.md` → "Remote control, in the
  * Settings dialog").
  *
  * Purely what to draw for a {@link SetupQrState}; {@link useSetupQr} owns every
@@ -1268,7 +1268,7 @@ function SetupPhonePanel({
 /**
  * The two-field form under the one Relay this build reaches, prefilled with the
  * same suggested name the card uses. The origin is named, never typed
- * (`docs/specs/relay.md` → "Relay origin").
+ * (`docs/specs/burrow-service.md` → "Relay origin").
  *
  * `hidden` rather than an unmount, because what is typed here has to survive
  * both of the things that fold it away: refolding the disclosure, and an offer

@@ -27,7 +27,7 @@ Source of truth: `remote-lib-common/src/remote/wire.ts` (the fixed wire contract
 
 ### The provider seam
 
-**The Burrow runs in the process that owns the PTYs, never a webview** (`docs/specs/relay.md` → "Burrow side"). Within it, `RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids, sizes, bytes.
+**The Burrow runs in the process that owns the PTYs, never a webview** (`docs/specs/burrow-service.md` → "Burrow side"). Within it, `RemoteApiSession` speaks this protocol and nothing else: surface ids, PTY ids, sizes, bytes.
 
 **Must keep environment-specific answers behind `BurrowSurfaceProvider`.** **The session imports no platform adapter, no store, and no `document`**, and both installations share the ask-backed half, so an attach cannot be answered differently in one burrow than the other.
 

@@ -254,6 +254,13 @@ function refreshAfterMutation(): Promise<void> {
  * would republish every 2 s — and names its Relay `relayUrl` with no
  * `relayOrigin` or `relayMode`. The mode it lacks reads as Hosted, which shows
  * no enroll form it could not serve.
+ *
+ * Compatibility reader: the `offer` object, `relayUrl`, and a missing
+ * `relayMode`, `hostedEnrollment`, `accountOrigin`, or `suggestedLabel` are a
+ * broker built before v1.2.0, the first release carrying all of them; those
+ * defaults can go once no supported extension build predates it.
+ * `hostedEnrollmentOf`'s unknown-reason fallback serves a *newer* broker and
+ * stays.
  */
 function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
   const { relayUrl } = status as { relayUrl?: unknown };
@@ -322,7 +329,7 @@ async function readBurrowStatus(): Promise<void> {
  * The password is a bearer credential and is passed straight through to the
  * service, which is what talks to the Relay; it is never stored here. There is
  * no origin to pass: the service posts only to the build's baked relay origin
- * (`docs/specs/relay.md` → "Relay origin"). Rejections propagate verbatim —
+ * (`docs/specs/burrow-service.md` → "Relay origin"). Rejections propagate verbatim —
  * the caller renders them.
  */
 export async function enrollBurrow(password: string, label: string): Promise<void> {
@@ -369,7 +376,7 @@ export async function cancelHostedEnrollment(): Promise<void> {
 /**
  * Re-open the relay socket after a latched state — terminal by design, so
  * nothing reconnects on its own. After `displaced` this displaces the other
- * instance in turn (`docs/specs/relay.md`, "Burrow side", relay socket policy).
+ * instance in turn (`docs/specs/burrow-service.md`, "Burrow side", relay socket policy).
  */
 export async function reconnectBurrow(): Promise<void> {
   const active = requireBurrowLink();

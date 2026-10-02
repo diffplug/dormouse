@@ -14,7 +14,7 @@ const capability = (name) =>
 // The Burrow moved into the sidecar, so the webview never speaks to a relay
 // server and its connect-src must not be able to. The one relay origin the
 // build reaches is baked into the sidecar bundle by build-sidecar-proxy.mjs
-// (docs/specs/relay.md → "Relay origin").
+// (docs/specs/burrow-service.md → "Relay origin").
 test('the webview cannot reach a Relay', () => {
   assert.ok(!csp.includes('dormouse.sh'), 'no SaaS relay sources in the webview CSP');
   // Secure by default: no scheme-wide `https:`/`wss:` in connect-src that

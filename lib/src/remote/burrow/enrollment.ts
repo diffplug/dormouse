@@ -1,6 +1,6 @@
 /**
  * Burrow enrollment: the exchange, and the shape every store validates a record
- * against. `docs/specs/relay.md` → "Burrow side" owns the persistence contract.
+ * against. `docs/specs/burrow-service.md` → "Burrow side" owns the persistence contract.
  */
 
 import {
@@ -27,7 +27,7 @@ export interface BurrowEnrollment {
   /**
    * Origin the Relay is reachable at, e.g. `https://dormouse.tailnet.ts.net`:
    * the build's baked relay origin at enrollment. A build baked with any other
-   * reads this enrollment as none (`docs/specs/relay.md` → "Relay origin").
+   * reads this enrollment as none (`docs/specs/burrow-service.md` → "Relay origin").
    */
   relayUrl: string;
   burrowId: string;
@@ -191,7 +191,7 @@ function refusedError(detail: string): string | null {
 
 /**
  * What a Relay served from `reported` tells a Burrow built for `relayOrigin`:
- * both, and the two ways to make them agree (`docs/specs/relay.md` → "Relay
+ * both, and the two ways to make them agree (`docs/specs/burrow-service.md` → "Relay
  * origin").
  */
 export function originMismatchMessage(reported: string, relayOrigin: string): string {

@@ -306,7 +306,7 @@ async function stepRelay(ctx) {
  * `DORMOUSE_RELAY_ORIGIN` has to be set *here*, at launch, not later: the
  * harness re-runs `pnpm stage:dev` on the way up, which is what bakes the one
  * relay origin into `sidecar/burrow.cjs` — a dev build, the only kind that may
- * bake a plain-HTTP localhost Relay (docs/specs/relay.md → "Relay origin").
+ * bake a plain-HTTP localhost Relay (docs/specs/burrow-service.md → "Relay origin").
  * Without it the Burrow is a Hosted build with no form to enroll through.
  */
 async function stepBurrow(ctx) {
@@ -839,7 +839,7 @@ async function denyOnBurrow(ctx) {
  * The modal closing only means the request was answered. **What it was answered
  * *as* is the panel behind it**, which is the only place the two decisions
  * differ: both spend the code, and the paired count is absolute, so a mismatch
- * moves nothing (`docs/specs/relay.md` → "Remote control, in the Settings
+ * moves nothing (`docs/specs/burrow-service.md` → "Remote control, in the Settings
  * dialog"). Waiting for that report is also what keeps the screenshot below
  * from catching the panel one event early.
  */

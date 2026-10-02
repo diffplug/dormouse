@@ -105,7 +105,7 @@ describe('the baked relay origin', () => {
 
   it('speaks managed voice at the fixed voice origin, in a Hosted build only', () => {
     // Never the relay origin, and never baked: a dev Hosted build on loopback
-    // still speaks to the real voice origin (docs/specs/relay.md → "Relay origin").
+    // still speaks to the real voice origin (docs/specs/burrow-service.md → "Relay origin").
     expect(hostedVoiceOrigin({ origin: DEFAULT_RELAY_ORIGIN, mode: 'hosted' })).toBe('https://voice.dormouse.sh');
     expect(hostedVoiceOrigin({ origin: 'http://localhost:8787', mode: 'hosted' })).toBe('https://voice.dormouse.sh');
     expect(hostedVoiceOrigin({ origin: 'https://relay.example.ts.net', mode: 'self-host' })).toBeNull();

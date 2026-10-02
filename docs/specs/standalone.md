@@ -113,7 +113,7 @@ webview, where `TauriAdapter` converts dor control requests into the
 ### Burrow service
 
 The Burrow — relay socket, enrollment, ACL, pairing ceremony, remote-api v1
-— runs **in the sidecar**, never the webview (`docs/specs/relay.md` → "Burrow
+— runs **in the sidecar**, never the webview (`docs/specs/burrow-service.md` → "Burrow
 side"): the same
 `BurrowService` the VS Code extension host runs, bound by
 `lib/src/host/remote/sidecar-entry.ts` and bundled to `sidecar/burrow.cjs`
@@ -124,7 +124,7 @@ as `DORMOUSE_STATE_DIR` (§Persistence, "Rust file store"); `FileBurrowStateStor
 keeps enrollment and ACL there as **one** `burrow.json`, so a write is one atomic
 rename (rationale), and the network policy beside it (`docs/specs/remote-network.md`
 → "Policy"), both 0600 in a 0700 directory via temp-then-rename. `burrowToken` is
-a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/relay.md` → "Burrow side"):
+a bearer credential and **never enters a webview realm**. Against the shared store contract (`docs/specs/burrow-service.md` → "Burrow side"):
 
 - **Reads fail closed.** Only `ENOENT` and a read-but-unparseable file answer
   empty — but the network policy's unparseable file reads as Nothing, never
@@ -1267,7 +1267,7 @@ Source of truth: `standalone/package.json` (package scripts),
 - `tauri dev` stages `stage:dev`, as `pnpm innerdogfood` does, then runs
   `runDev` below; other subcommands reach the Tauri CLI unstaged, `build`
   staging via `beforeBuildCommand`. The sidecar bundle (a dev build under
-  `--dev`) and the webview bake `DORMOUSE_RELAY_ORIGIN` (`docs/specs/relay.md`
+  `--dev`) and the webview bake `DORMOUSE_RELAY_ORIGIN` (`docs/specs/burrow-service.md`
   → "Relay origin"); the webview CSP has no relay sources
   (`standalone/scripts/tauri-conf.test.mjs`).
 - **A self-host `tauri build` overlays no updater endpoint and no updater

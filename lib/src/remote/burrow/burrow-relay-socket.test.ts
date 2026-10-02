@@ -1,5 +1,5 @@
 /**
- * The relay socket policy with reconnection on (`docs/specs/relay.md` ->
+ * The relay socket policy with reconnection on (`docs/specs/burrow-service.md` ->
  * "Burrow side"): which closes latch, and the standing probe a socket that
  * never opened earns before its next backoff. Every timer runs on an injected
  * clock, so "arms no timer" is a count rather than a wait.

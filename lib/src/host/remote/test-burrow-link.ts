@@ -35,7 +35,7 @@ import type { OneTimeState } from '../../remote/burrow/one-time-runtime';
 import { networkPolicyResult, type NetworkPolicy, type NetworkPolicyResult } from '../../remote/network-policy';
 import type { BurrowLink } from '../../lib/platform/types';
 
-/** The self-host Relay the fixtures' build was baked for (`docs/specs/relay.md` → "Relay origin"). */
+/** The self-host Relay the fixtures' build was baked for (`docs/specs/burrow-service.md` → "Relay origin"). */
 export const SELF_HOST_RELAY_ORIGIN = 'https://ned-mac.tail9c2f1.ts.net';
 
 /**
@@ -247,7 +247,7 @@ export interface PrimedBurrow {
  * Deliberately not a scenario engine: a story is one frame, so `enroll`,
  * `enrollOffer`, `reconnect`, `clearEnrollment` and `oneTimeEnd` resolve without
  * changing the answer. The exception is `enrollError`, because a refused enrollment is a state the
- * form must render (`docs/specs/relay.md`, "Remote control, in the Settings
+ * form must render (`docs/specs/burrow-service.md`, "Remote control, in the Settings
  * dialog") and a rejected enroll is the only way to reach it. And
  * `setNetworkPolicy` holds what it was sent and answers it, as the service
  * does, so a story can walk Settings → Network's choices; `dismissPathRefusal`

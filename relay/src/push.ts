@@ -189,6 +189,7 @@ export async function sendWithinDeadline(
   }
 }
 
+/** What a log may name of an endpoint: its origin only, the full URL being a bearer capability. */
 function endpointOrigin(endpoint: string): string {
   return normalizeOrigin(endpoint) ?? '<invalid endpoint>';
 }

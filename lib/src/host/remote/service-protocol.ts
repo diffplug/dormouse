@@ -175,7 +175,7 @@ export function servingOf(
 
 /**
  * Whether `connection` is a Relay that no longer takes this Burrow (a
- * `BurrowStanding` latched, `docs/specs/relay.md` -> "Burrow side"), which the
+ * `BurrowStanding` latched, `docs/specs/burrow-service.md` -> "Burrow side"), which the
  * Burrow asks for nothing more: no push, device list, setup code, or relay row.
  */
 export function relayRefuses(connection: BurrowStatus): boolean {
@@ -297,7 +297,7 @@ export interface InvitationEvent {
 
 /**
  * No Relay URL: the only Relay a Burrow enrolls with is its build's baked
- * origin (`docs/specs/relay.md` → "Relay origin").
+ * origin (`docs/specs/burrow-service.md` → "Relay origin").
  */
 export interface EnrollParams {
   password: string;
@@ -306,7 +306,7 @@ export interface EnrollParams {
 
 /**
  * One-click enrollment against the offer an installer left on this machine
- * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
+ * (`docs/specs/burrow-service.md` → "Remote control, in the Settings dialog").
  */
 export interface EnrollOfferParams {
   /** No token: it comes off the file, which the service re-reads at the click. */
@@ -394,7 +394,7 @@ export interface SetupQrResult {
   /**
    * The pairing URL, composed by the service from the origin this Burrow enrolled
    * against — `remote-lib-common`'s `formatPairingInvitationUrl` owns its
-   * grammar (`docs/specs/relay.md` → QR grammar).
+   * grammar (`docs/specs/relay.md` → "Setup tokens and the pairing QR").
    */
   url: string;
   /**
@@ -455,7 +455,7 @@ export interface BurrowConsoleStatus {
   serving: boolean;
   /**
    * The one relay origin this build was baked with, enrolled or not, and the
-   * mode it sets — what the Settings dialog renders (`docs/specs/relay.md` →
+   * mode it sets — what the Settings dialog renders (`docs/specs/burrow-service.md` →
    * "Relay origin").
    */
   relayOrigin: string;
@@ -463,7 +463,7 @@ export interface BurrowConsoleStatus {
   burrowId: string | null;
   /**
    * The relay socket's state. The latched ones need acting on, since no timer
-   * brings them back (`docs/specs/relay.md` -> "Burrow side", relay socket
+   * brings them back (`docs/specs/burrow-service.md` -> "Burrow side", relay socket
    * policy): `displaced` — another Dormouse instance enrolled with the same
    * `burrowId` took the relay slot, and `reconnect()` takes it back;
    * `removed` — the Relay no longer knows this Burrow; `not-entitled` — its
@@ -476,7 +476,7 @@ export interface BurrowConsoleStatus {
   /**
    * Whether the installer left an enrollment offer for `relayOrigin` on this
    * machine, while this self-host Burrow has not enrolled — the Settings
-   * dialog's one-click path (`docs/specs/relay.md` → "Remote control, in the
+   * dialog's one-click path (`docs/specs/burrow-service.md` → "Remote control, in the
    * Settings dialog").
    *
    * **The offer's `token` is never here.** This is a service→webview shape, and

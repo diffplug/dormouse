@@ -475,7 +475,7 @@ describe('BurrowRuntime end-to-end ceremonies', () => {
     // `consumed` on its own reads the same whether the pairing succeeded or the
     // digits were mistyped — and the paired count, the only other signal, is
     // absolute, so on a machine that already has a phone it does not move
-    // either (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
+    // either (`docs/specs/burrow-service.md` → "Remote control, in the Settings dialog").
     makeBurrow();
     const authenticator = await newAuthenticator();
     const ended = async (clientId: string) => {

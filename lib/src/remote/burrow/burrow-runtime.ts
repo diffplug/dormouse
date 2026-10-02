@@ -877,7 +877,7 @@ export class BurrowRuntime {
   }
 
   /**
-   * The relay socket policy (`docs/specs/relay.md` -> "Burrow side"): a
+   * The relay socket policy (`docs/specs/burrow-service.md` -> "Burrow side"): a
    * latching close ({@link LATCH_FOR_CLOSE}) is terminal; a socket that never
    * opened — a refused upgrade reads only as an error event — is probed first,
    * once per failure streak; anything else backs off and reconnects.

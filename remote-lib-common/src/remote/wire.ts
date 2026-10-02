@@ -76,7 +76,7 @@ export function pushSubscriptionDeletePath(deliveryId: string): string {
  * "sign in again". Changing the string on one side without the other would
  * silently strand users on a dead session. A Burrow-gated route answers it
  * too, for a burrow token that names no Burrow, and a Burrow's standing probe
- * reads it as removal (`docs/specs/relay.md` -> "Burrow side").
+ * reads it as removal (`docs/specs/burrow-service.md` -> "Burrow side").
  */
 export const UNAUTHORIZED_ERROR = 'unauthorized';
 
@@ -163,8 +163,8 @@ export const RELAY_PING_INTERVAL_MS = 30_000;
 
 /**
  * Close code the relay sends to a Burrow socket it displaces when a newer socket
- * claims the same `burrowId` (only one socket may own a burrowId — see relay.md
- * "Relay"). In the 4000-4999 application-private range.
+ * claims the same `burrowId` (only one socket may own a burrowId —
+ * `docs/specs/relay.md` -> "Routing"). In the 4000-4999 application-private range.
  *
  * This lives on the wire contract rather than inside `relay` because the Burrow
  * keys its reconnect policy on it: every other close is transient and gets
@@ -181,7 +181,7 @@ export const WS_CLOSE_BURROW_REPLACED_REASON = 'replaced by a newer burrow conne
  * The Burrow's row is gone — removed from the account, or deleted from
  * `burrows.json` — so its bearer token names nothing. Terminal at the Burrow,
  * which reports `removed` rather than retrying an upgrade that can only 401
- * (`docs/specs/relay.md` -> "Burrow side").
+ * (`docs/specs/burrow-service.md` -> "Burrow side").
  */
 export const WS_CLOSE_BURROW_REVOKED = 4001;
 
@@ -697,7 +697,7 @@ export interface PushSendResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Relay frames (see relay.md "Relay"). One JSON frame per WS message.
+// Relay frames (`docs/specs/relay.md` -> "Routing"). One JSON frame per WS message.
 // `clientId` is assigned by the Relay per client socket; the client itself
 // never sees or sends it.
 

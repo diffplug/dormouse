@@ -170,7 +170,7 @@ async function main() {
       "Build a dev Burrow that opens its links here (e.g. `pnpm innerdogfood`) with:",
       `  DORMOUSE_RELAY_ORIGIN=${origin}`,
       // A local origin counts as Hosted only in a dev build
-      // (docs/specs/relay.md -> "Relay origin").
+      // (docs/specs/burrow-service.md -> "Relay origin").
       "  DORMOUSE_RELAY_IS_HOSTED=1",
       "",
     ].join("\n"),

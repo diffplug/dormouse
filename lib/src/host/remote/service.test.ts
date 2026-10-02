@@ -323,7 +323,7 @@ function createService(seed?: Seed, over: Partial<BurrowServiceOptions> = {}): B
     provider: fakeProvider(),
     kind: 'vscode',
     sendToUi: (event, data) => sent.push({ event, data: data as Record<string, unknown> }),
-    // A self-host build: the only kind that enrolls (docs/specs/relay.md → "Relay origin").
+    // A self-host build: the only kind that enrolls (docs/specs/burrow-service.md → "Relay origin").
     relay: { origin: ORIGIN, mode: 'self-host' },
     // One factory for both sockets, as each host passes: the rendezvous route
     // reaches the in-memory room, everything else the fake relay.
@@ -500,7 +500,7 @@ describe('status', () => {
   });
 
   it('offers no installer offer that names another origin', async () => {
-    // This build could never enroll against it (docs/specs/relay.md → "Relay origin").
+    // This build could never enroll against it (docs/specs/burrow-service.md → "Relay origin").
     offer = { ...OFFER, origin: 'https://elsewhere.example' };
     createService();
     await service.start();
@@ -599,7 +599,7 @@ describe('status', () => {
 describe('enroll', () => {
   it('refuses in a Hosted build, before the setup password leaves the machine', async () => {
     // Hosted takes no setup password: its build enrolls by device code
-    // (docs/specs/relay.md → "Relay origin").
+    // (docs/specs/burrow-service.md → "Relay origin").
     createHostedService();
     const result = await command('enroll', { password: 'setup', label: 'Laptop' });
 
@@ -805,7 +805,7 @@ describe('start', () => {
   it('reads an enrollment for another origin as none, loudly, and keeps it on disk', async () => {
     // Enrolled by another build — a stock one, or one baked for a Relay that
     // moved. Nothing connects to it, and switching back restores it
-    // (docs/specs/relay.md → "Relay origin").
+    // (docs/specs/burrow-service.md → "Relay origin").
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const elsewhere = { ...ENROLLMENT, relayUrl: 'https://relay.example.com' };
     createService({ enrollment: elsewhere });
@@ -1324,7 +1324,7 @@ describe('setup QR', () => {
   it('carries how the ceremony ended to the webview, mistyped or not', async () => {
     // The panel behind the modal has no other way to tell a success from a
     // mistyped confirmation: both spend the code and dismiss the request
-    // (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
+    // (`docs/specs/burrow-service.md` → "Remote control, in the Settings dialog").
     const socket = await running();
     for (const [clientId, typed, expected] of [
       ['c1', (code: string) => code, 'paired'],
@@ -1700,7 +1700,7 @@ describe('one-time connection', () => {
 
   it('is unavailable, and opens nothing, in a self-host build', async () => {
     // Its one origin is the user's own Relay, which serves no rendezvous, and it
-    // reaches nothing of Dormouse's (docs/specs/relay.md → "Relay origin").
+    // reaches nothing of Dormouse's (docs/specs/burrow-service.md → "Relay origin").
     createService();
 
     expect((await command('oneTimeStatus')).result).toEqual({

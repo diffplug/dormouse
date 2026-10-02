@@ -81,7 +81,7 @@ vi.mock('../../lib/src/host/remote/native-direct-peer', () => ({
 /**
  * The build's baked relay origin and mode, as the glue reads them. The test
  * runner has no esbuild define, so the real readers answer the Hosted default;
- * a case about a self-host build sets these (docs/specs/relay.md → "Relay origin").
+ * a case about a self-host build sets these (docs/specs/burrow-service.md → "Relay origin").
  */
 const relayBuild = vi.hoisted(() => ({
   origin: 'https://relay.dormouse.sh',
@@ -1121,7 +1121,7 @@ describe('burrow service glue', () => {
   });
 
   it('does not contend for an enrollment another build made', async () => {
-    // It reads as none (docs/specs/relay.md → "Relay origin"): the service would
+    // It reads as none (docs/specs/burrow-service.md → "Relay origin"): the service would
     // not start it, so it is no reason to bind the peer socket — at activation
     // or when another window writes it.
     const mod = await freshBurrow();

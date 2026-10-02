@@ -29,7 +29,7 @@ const sidecar = path.resolve(here, '../sidecar');
 
 // The one relay origin, and the mode it sets. The Burrow runs in the sidecar,
 // so this bundle is the enforcement point — there is no webview CSP in front of
-// it. `--dev` marks a dev build (docs/specs/relay.md → "Relay origin").
+// it. `--dev` marks a dev build (docs/specs/burrow-service.md → "Relay origin").
 const relay = resolveRelayOrigin(process.env, 'sidecar', { dev: process.argv.includes('--dev') });
 
 // What the sidecar installs at runtime, read from the manifest that installs

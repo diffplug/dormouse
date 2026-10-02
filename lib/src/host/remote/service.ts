@@ -1,6 +1,6 @@
 /**
  * Environment-free Burrow service shared by both Node burrows; see
- * `docs/specs/relay.md` → "Burrow side", `docs/specs/one-time.md` → "Service
+ * `docs/specs/burrow-service.md` → "Burrow side", `docs/specs/one-time.md` → "Service
  * and hosts" for the one-time connection it also holds, and
  * `docs/specs/remote-network.md` → "Policy" for the network policy it holds
  * and enforces. Surface ownership is injected through
@@ -125,7 +125,7 @@ export interface BurrowServiceOptions {
   /** Emit one of the `burrow:*` events to the webview. */
   sendToUi: (event: string, data: unknown) => void;
   /**
-   * This build's `bakedRelay()` (`docs/specs/relay.md` → "Relay origin"): the
+   * This build's `bakedRelay()` (`docs/specs/burrow-service.md` → "Relay origin"): the
    * only Relay this Burrow enrolls with or connects to, and in a Hosted build
    * the one-time rendezvous too. **Never webview input**: no command carries
    * an origin.
@@ -329,7 +329,7 @@ export async function readUsableOffer(
 /**
  * The stored enrollment, or `null` — including for one whose Relay URL or
  * phone-facing `origin` names another origin, which **reads as none** and stays
- * on disk (`docs/specs/relay.md` → "Relay origin"). Both are checked because an
+ * on disk (`docs/specs/burrow-service.md` → "Relay origin"). Both are checked because an
  * enrollment from before the one baked origin could carry an `origin` apart from
  * its Relay URL. One reader for the service's start and VS Code's contention.
  */
@@ -742,6 +742,10 @@ export class BurrowService {
    * An older webview still names the Relay — `enroll`'s `relayUrl`, or
    * `enrollOffer`'s echoed `origin` — and one naming any but the baked origin
    * is refused, rather than enrolled with this build's Relay instead.
+   *
+   * Compatibility reader for webviews built before v1.2.0 (a VS Code window
+   * not yet reloaded onto this broker's build); removable once no supported
+   * build predates it.
    */
   #refuseOtherOrigin(named: unknown): void {
     if (named === undefined) return;
@@ -754,7 +758,7 @@ export class BurrowService {
 
   /**
    * One-click enrollment from the offer an installer left on this machine
-   * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
+   * (`docs/specs/burrow-service.md` → "Remote control, in the Settings dialog").
    */
   async #enrollOffer(params: EnrollOfferParams): Promise<EnrollResult> {
     if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
@@ -804,7 +808,7 @@ export class BurrowService {
     if (!isRelayOrigin(enrollment.origin, this.#relay.origin)) {
       // An older Relay, which ignores the request's `origin` and so enrolled a
       // Burrow built for another: nothing is persisted here, and the row it
-      // appended is named for the operator (docs/specs/relay.md → "Relay origin").
+      // appended is named for the operator (docs/specs/burrow-service.md → "Relay origin").
       const mismatch = originMismatchMessage(enrollment.origin, this.#relay.origin);
       throw new Error(leftBehind ? `${mismatch} ${leftBehind}` : mismatch);
     }

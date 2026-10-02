@@ -74,7 +74,7 @@ export const MAX_RELAY_ORIGIN_LENGTH =
   ONE_TIME_LINK_MAX_LENGTH - ONE_TIME_PAGE_PATH.length - ONE_TIME_HASH_PREFIX.length - ONE_TIME_FRAGMENT_LENGTH;
 
 /**
- * Whether a desktop build may bake `origin` (`docs/specs/relay.md` → "Relay
+ * Whether a desktop build may bake `origin` (`docs/specs/burrow-service.md` → "Relay
  * origin"): a bare origin as `new URL` spells it, on a link scheme
  * ({@link isLinkScheme}), of at most {@link MAX_RELAY_ORIGIN_LENGTH}
  * characters. `scripts/relay-origin.mjs` fails the build on anything else.

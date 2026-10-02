@@ -155,7 +155,7 @@ Source of truth: `relaySocketRoutes` in `hosted/server/relay-sockets.ts`; `relay
 
 ## Burrow enrollment
 
-A Burrow joins an account by device code, in place of the self-host setup password. The account owns the Burrow; the Burrow's own ACL still authorizes every Client. The relay serves the Burrow's two routes, the account the rest; wire types are `BurrowEnrollBeginResponse` / `BurrowEnrollPollResponse` in `remote-lib-common/src/remote/wire.ts`. The desktop's side is `docs/specs/relay.md` -> "Burrow side".
+A Burrow joins an account by device code, in place of the self-host setup password. The account owns the Burrow; the Burrow's own ACL still authorizes every Client. The relay serves the Burrow's two routes, the account the rest; wire types are `BurrowEnrollBeginResponse` / `BurrowEnrollPollResponse` in `remote-lib-common/src/remote/wire.ts`. The desktop's side is `docs/specs/burrow-service.md` -> "Burrow side".
 
 1. The Burrow sends `{ origin }` to `POST /api/burrow/enroll/begin`. Another origin, or none, is the self-host 409 `ORIGIN_MISMATCH_ERROR`. The answer: `deviceCode`, `userCode` (`XXXX-XXXX`), `verificationUrl` (`ACCOUNT_ORIGIN/enroll#<userCode>`, absent without `ACCOUNT_ORIGIN`), `expiresAt` (`ENROLLMENT_TTL_MS`, 10 minutes), and `interval` (5 seconds).
 2. The user opens the link, signs in, compares the code, and approves, writing the approval `{ userCode, userId, expiresAt }`.

@@ -1,7 +1,7 @@
 /**
  * The enrollment offer a Dormouse Relay installer left on *this* machine, read
  * from the Node side of a Burrow so the Settings dialog can offer one-click
- * enrollment (`docs/specs/relay.md` → "Remote control, in the Settings
+ * enrollment (`docs/specs/burrow-service.md` → "Remote control, in the Settings
  * dialog").
  *
  * The file is the installer's `run/enroll-offer.json` — the same one the Relay
