@@ -103,7 +103,7 @@ Source of truth: `useHeaderTier` in `lib/src/components/wall/use-header-tier.ts`
 
 ## Baseboard
 
-**Must group the right-hand controls**, in order: the `N more →` overflow arrow, the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then the always-present spoken-alarm, push, and Settings buttons. The two status buttons toggle their alarm settings and expose state through shape and `aria-pressed`; Settings opens `docs/specs/alert.md` → Settings dialog. With no Doors, the baseboard shows the command-mode gesture hint.
+**Must group the right-hand controls**, in order: the `N more →` overflow arrow, the host-supplied `notice` slot, the one-time connection indicator (`docs/specs/one-time.md` -> "Laptop UI"), then the always-present spoken-alarm, push, and Settings buttons. The two status buttons toggle their alarm settings and expose state through shape and `aria-pressed`; Settings opens `docs/specs/alert.md` → Settings dialog. With no Doors and room for it, the baseboard shows the command-mode gesture hint.
 
 A minimized session becomes a **door**, showing its label plus the alert badge cluster (`docs/specs/alert.md` → Door); both speech states also name themselves in the Door's `title` and accessible name. **A Door's label is header-derived only for a terminal-backed Surface** (`hasTerminal`); any other keeps its stored title, and a browser Door adds the display glyphs from `docs/specs/dor-browser.md` → "Browser Chrome".
 
@@ -116,7 +116,7 @@ A minimized session becomes a **door**, showing its label plus the alert badge c
 
 ### Baseboard responsive sizing
 
-- **The right cluster's always-present part is never available to Doors; never measure the overflow arrow into it**, since its presence is an output of the fit.
+- **Everything in the right cluster but the overflow arrow — notice, one-time indicator, the three buttons — is never available to Doors; never measure the overflow arrow into it**, since its presence is an output of the fit.
 - **At least one door is always shown**, even if it overflows; past that, Doors fit while room remains for an overflow arrow. A scrolled baseboard shows `← N more` and/or `N more →`; clicking one reveals one Door in that direction. One Door too long to fit between both arrows keeps both and truncates its title.
 - **An arrow hiding a ringing or TODO Door must say so**, wearing the Door shape with a static alarm inset and TODO pill, its accessible name counting them (`3 more, 1 ringing, 1 TODO`). **Every arrow must reserve the width of the TODO one**, so the fit never depends on which Doors an arrow hides.
 - **Must reveal the selected Door when selection or membership changes**, without overriding manual overflow scrolling.
@@ -188,7 +188,7 @@ Each Wall renders one Workspace. Standalone mounts one Wall **per Workspace**; V
 - **Never unmount a Wall before its Surfaces are disposed** — `closeAll` waits for the kill fade to commit, bounded by the engine's exit duration (`docs/specs/glossary.md` → "Invariants" I4). **The deadline refuses rather than reporting clean**, and the walk re-reads membership until nothing is left, so a Surface born behind it is closed too.
 - **A closing Workspace takes no new Surfaces**: while `closeAll` walks, this Wall answers every Surface-creating `dor` verb with an error, **rechecked after any host round trip the verb makes before creating** (`CREATING_CONTROL_METHODS` in `lib/src/components/wall/use-dor-control.ts`).
 - **Must reject duplicate Workspace IDs before mutating the model.**
-- **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.** Deactivation blurs the pane; activation focuses it one frame later.
+- **Must retain mode and selection across switches unless the [activation gesture](#workspace-tabs) changes them.**
 - **Close confirms first when the Workspace holds touched Surfaces or running work**, then closes every member Surface. **Must select the fresh Workspace that replaces the last closed one. Must serialize closes across the Window.**
 - **A Workspace whose Wall has not registered is refused** (`workspace '<ref>' is still mounting`, one wording for every caller), never closed past (I4). **A gesture waits out the registration gap first**, as `dor workspace close` does.
 - **Rename edits the Workspace `name` only**, never a Surface title or the per-pane inline rename, and pins it ([Workspace names](#workspace-names)). **A press inside the open rename editor never starts a reorder.**
@@ -211,11 +211,9 @@ Wall starts in `command` mode. Embedders may pass `initialMode="passthrough"` wh
 - Keyboard input routes to the active session's xterm.js instance, which holds DOM focus.
 - **Three interceptions only**: the mode-exit gesture (below), the terminal selection/copy/paste chords (`docs/specs/mouse-and-clipboard.md`), and clipboard chords inside one of Dormouse's own text fields.
 - In VS Code, selected workbench chords are mirrored: xterm still processes the key and the extension host runs the matching VS Code command (`docs/specs/vscode.md`).
-- Selection overlay: solid.
 
 ### Command mode
 - Keyboard drives navigation and commands; the Session receives no input.
-- Selection overlay: marching ants.
 
 ### Mode switching
 
@@ -278,14 +276,14 @@ A fixed-positioned element over the Lath host, covering the active pane inflated
 - **Exactly one pane or door is active at a time**, drawn by one SVG renderer.
 - **Passthrough:** a 1px solid stroke, no glow (rationale).
 - **Command:** marching ants. **March for as long as command mode lasts** (rationale). **Never restart or retime the march for travel** — only the dash resizes to the moving perimeter — and draw the smear separately ([Ring travel](#ring-travel)). **While unfocused, pause and desaturate the ring.**
-- **Never pause the ants in a focused window except during Workspace title editing**, resuming when editing ends without changing mode, **under reduced motion**, which holds a still dashed ring, **or under `cfg.marchingAnts.paused`** (visual snapshots).
+- **Never pause the ants in a focused window except during Workspace title editing**, resuming when editing ends without changing mode, **under reduced motion**, which holds a still dashed ring, **or under `cfg.marchingAnts.paused`**.
 - Under `WorkspaceWindow` it renders into `document.body`, outside the Workspace's transform and stacking context. **Every modal must render into `document.body` too, at a `MODAL_LAYERS` value above the ring's**, or the ring crosses it — by value, never insertion order.
 
 Source of truth: `WorkspaceSelectionOverlay` in `lib/src/components/wall/WorkspaceSelectionOverlay.tsx`.
 
 ### Ring travel
 
-The ring's rect and shape are driven **per-frame by a JS tween, never a CSS transition** (rationale), over `FOCUS_MOTION_MS` on the house curve; the unfocused desaturation is the one CSS transition. Per-frame writes are imperative and re-applied pre-paint after structural renders. **Never reintroduce per-frame React state** (rationale).
+The ring's rect and shape are driven **per-frame by a JS tween, never a CSS transition** (rationale), over `FOCUS_MOTION_MS` on the house curve. Per-frame writes are imperative and re-applied pre-paint after structural renders. **Never reintroduce per-frame React state** (rationale).
 
 - **Identity change → tween.** A measurement whose identity (`${selectedType}:${selectedId}`) differs from the one on screen glides from the current interpolated position, **clock restarted**, so arrow-key spam stays responsive. An open helper appends its side to the identity.
 - **Same identity → snap 1:1** when no tween is in flight; **during one, retarget the destination without resetting the clock**, so the ring converges on a moving target and lands on the original completion instant.
@@ -385,7 +383,7 @@ Source of truth: `TerminalWebglRenderer` in `lib/src/lib/terminal-webgl.ts`.
 
 ### Inline graphics
 
-**Must support SIXEL (`DCS ... q ... ST`), iTerm IIP (`OSC 1337 ; File=` and its multipart forms), and Kitty graphics (`APC G ... ST`) in every Session through stock `@xterm/addon-image`**, gated by `cfg.terminal.inlineImages`. **Must load the addon at Session creation, never on the first image**: it answers the DA1, XTSMGRAPHICS, and cell-size probes a program reads before sending one (rationale).
+**Must support SIXEL (`DCS ... q ... ST`), iTerm IIP (`OSC 1337 ; File=` and its multipart forms), and Kitty graphics (`APC G ... ST`) in every Session through stock `@xterm/addon-image`**, gated by `cfg.terminal.inlineImages`; Kitty support follows the addon's alpha-quality subset. **Must load the addon at Session creation, never on the first image**: it answers the DA1, XTSMGRAPHICS, and cell-size probes a program reads before sending one (rationale).
 
 **Must bound each Session to 8,388,608 pixels per image, 33,554,432 bytes per SIXEL/IIP/Kitty sequence, and 34 MB of FIFO image storage** (rationale). **Dormouse forwards only the bytes carried in the sequence and resolves no filename**; ImageAddon discards a transfer without `inline=1`.
 
@@ -403,7 +401,7 @@ Three save triggers, in ascending urgency:
 - Content changes with no Lath commit — PTY output, activity/TODO, pane title/command state, minimized-door changes — only **mark the session dirty**; a heartbeat persists only when dirty, so an idle app stops writing.
 - PTY exit, `onRequestSessionFlush`, `pagehide`, unmount, and extension shutdown requests **flush immediately and unconditionally** — the net for any dirty-trigger gap (a program calling `chdir()` emits no event, so its persisted CWD may go stale until the next output — accepted).
 
-Dirty-gating mechanism: `docs/specs/standalone.md` §Persistence.
+**A save clears dirty only up to the generation it captured before serializing**, so a change arriving mid-save leaves the session dirty for the next heartbeat; a fresh Wall starts dirty, so the first heartbeat after boot persists. Source of truth: `createSessionDirtyTracker` in `lib/src/lib/session-dirty.ts`.
 
 **Under a Workspace, a Wall publishes its record to the Window aggregator instead of the platform slot**, comparing each save against its own Workspace's previous record (`docs/specs/transport.md` → "Persisted session types"). **A Wall marks itself dirty only for Surfaces it owns.** VS Code persists one Workspace per webview.
 
@@ -459,6 +457,8 @@ A store commit that empties the tree (last pane killed or minimized) spawns one 
 **The refill adopts the replacement only when the current selection points at nothing real** — null or still naming the removed pane. **A valid selection is left alone** — the just-created door on the minimize path, or a live pane after an unselected kill. Only an explicit user selection of a pane — a click, a drag, or an embed focusing itself — moves selection off that door afterwards.
 
 ## Corner cases
+
+> Numbers are cited from other specs and code: never renumber; leave a retired one retired.
 
 - **#2 — A focused iframe surface is not a window blur**: it blurs the window while `document.hasFocus()` stays true, so **presence ends only on a *real* blur** (`docs/specs/alert.md` → Engagement). Source of truth: `subscribeWindowFocus` in `lib/src/lib/window-focus.ts`.
 - **#6 — Focus-neutral surface creation (`dor ensure` / `dor iframe` / `dor agent-browser`)**: unlike `dor split`, these open in the background without moving focus off the caller (`docs/specs/dor-cli.md`, `docs/specs/dor-browser.md`); the create never re-parents the caller's subtree, steals activation, or selects. **The one exception**: `dor iframe` / `dor agent-browser` replacing the pane the user is *currently selected on* moves selection to the replacement, else it would dangle on the removed leaf; any other pane, or a door selection, is left untouched. Any completed teardown preserves the caller's live selection.
