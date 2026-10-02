@@ -27,21 +27,30 @@ describe('RelayHeartbeat', () => {
       expect(heartbeat.read(data)).toBe(false);
   });
 
-  it('with onDead, ends a socket that stops answering once it has answered', () => {
+  it('with onDead, ends a socket whose ping is unanswered when the next is due', () => {
     const timers = fakeTimers();
     const { ws, sent } = socket();
     const onDead = vi.fn();
     const heartbeat = new RelayHeartbeat(ws, timers.setTimer, onDead);
     timers.fire();
-    timers.fire();
-    // Never answered: a Relay that never pongs is held to nothing.
-    expect(onDead).not.toHaveBeenCalled();
     heartbeat.read(RELAY_PONG);
+    timers.fire();
+    expect(onDead).not.toHaveBeenCalled();
+    timers.fire();
+    expect(onDead).toHaveBeenCalledOnce();
+    expect(sent).toEqual([RELAY_PING, RELAY_PING]);
+    expect(timers.live).toHaveLength(0);
+  });
+
+  it('with onDead, holds even the first ping to the deadline', () => {
+    const timers = fakeTimers();
+    const { ws, sent } = socket();
+    const onDead = vi.fn();
+    new RelayHeartbeat(ws, timers.setTimer, onDead);
     timers.fire();
     timers.fire();
     expect(onDead).toHaveBeenCalledOnce();
-    expect(sent).toEqual([RELAY_PING, RELAY_PING, RELAY_PING]);
-    expect(timers.live).toHaveLength(0);
+    expect(sent).toEqual([RELAY_PING]);
   });
 
   it('without onDead, only keeps the path alive', () => {

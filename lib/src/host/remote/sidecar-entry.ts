@@ -25,11 +25,7 @@ import type {
 } from '../../remote/burrow/burrow-surface-provider';
 import { createAskSurfaceProvider } from './ask-surface-provider';
 import { createNativeDirectPeerFactory, disposeNativeDirectPeers } from './native-direct-peer';
-import {
-  createEphemeralBurrowStateStore,
-  FileBurrowStateStore,
-  forgetRetiredState,
-} from './burrow-state-store';
+import { createEphemeralBurrowStateStore, FileBurrowStateStore } from './burrow-state-store';
 import { BurrowService } from './service';
 import {
   ASK_BUDGET_MS,
@@ -474,9 +470,6 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
   const store = options.stateDir
     ? new FileBurrowStateStore(options.stateDir)
     : createEphemeralBurrowStateStore((message) => console.error(message));
-  // Boot work, not read work: nothing waits on it, and nothing reads what it
-  // deletes (`burrow-state-store.ts`).
-  if (options.stateDir) void forgetRetiredState(options.stateDir);
 
   const bridge = createSidecarSurfaceBridge({ send, mgr, alerts });
   const pty = alertedPty(alerts, mgr);

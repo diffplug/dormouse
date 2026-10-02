@@ -1154,7 +1154,7 @@ export class PocketClient {
         this.#core.rejectAll(new Error(BURROW_UNAVAILABLE_MESSAGE));
         return;
       default:
-        // Every legacy frame is ignored: this Client speaks one protocol.
+        // Every other frame is ignored: this Client speaks one protocol.
         return;
     }
   }

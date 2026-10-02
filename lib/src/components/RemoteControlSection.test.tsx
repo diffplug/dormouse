@@ -2118,8 +2118,8 @@ describe('One-time connection', () => {
   });
 
   it('renders a reason this build does not know with the fallback', async () => {
-    // An older VS Code broker in another window still says `origin-not-allowed`.
-    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'origin-not-allowed' } as never));
+    // A newer VS Code broker in another window may name a reason this build lacks.
+    await renderOneTime(oneTimeService({ status: 'unavailable', reason: 'a-newer-reason' } as never));
     expect(buttonLabelled('One-time connection')!.disabled).toBe(true);
     expect(text()).toContain('Not available in this build.');
     expect(text()).not.toContain('Open a link on your phone');

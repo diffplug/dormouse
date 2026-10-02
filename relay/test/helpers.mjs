@@ -117,10 +117,11 @@ export function padBase64Url(text) {
 /**
  * Enroll a throwaway Burrow and mint one setup token from it — the only credential
  * `/api/setup/*` takes, so every registration in this suite starts at a code an
- * enrolled Burrow displayed. Pass `burrow` to mint another from one already enrolled.
+ * enrolled Burrow displayed. Pass `burrow` to mint another from one already enrolled,
+ * and `origin` for an app configured with another than {@link ORIGIN}.
  */
-export async function mintSetupToken(app, burrow) {
-  const minter = burrow ?? (await enrollBurrow(app)).body;
+export async function mintSetupToken(app, burrow, origin = ORIGIN) {
+  const minter = burrow ?? (await enrollBurrow(app, origin)).body;
   const res = await app.request(API_ROUTES.burrowSetupToken, {
     method: 'POST',
     headers: { authorization: `Bearer ${minter.burrowToken}` },
@@ -136,7 +137,7 @@ export async function mintSetupToken(app, burrow) {
  */
 export async function register(app, authenticator, options = {}) {
   const { origin = ORIGIN, label = 'Test Passkey' } = options;
-  const credential = options.credential ?? { setupToken: (await mintSetupToken(app)).token };
+  const credential = options.credential ?? { setupToken: (await mintSetupToken(app, undefined, origin)).token };
   const begin = await post(app, API_ROUTES.setupBegin, credential);
   if (begin.status !== 200) return begin;
   const { challenge } = await begin.json();
@@ -216,9 +217,9 @@ export function wsConnect(url) {
   return socket;
 }
 
-/** POST /api/burrow/enroll with the setup password; returns the JSON body. */
-export async function enrollBurrow(app) {
-  const res = await post(app, API_ROUTES.burrowEnroll, { password: PASSWORD });
+/** POST /api/burrow/enroll with the setup password, naming `origin`; returns the JSON body. */
+export async function enrollBurrow(app, origin = ORIGIN) {
+  const res = await post(app, API_ROUTES.burrowEnroll, { password: PASSWORD, origin });
   return { res, body: await res.json() };
 }
 

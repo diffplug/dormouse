@@ -7,7 +7,6 @@ import { closeBrowserSessions, setBrowserShellRuntime } from './agent-browser-ho
 import { serveWebview } from './webview-messaging';
 import { log } from './log';
 import { initToolHost } from './tool-host';
-import { forgetRetiredState } from './retired-state';
 import { captureAgentRecoveryCommands, mergeAlertStates, refreshSavedSessionStateFromPtys, takeRecoveryCommands } from './session-state';
 import { readPersistedSession } from '../../lib/src/lib/session-types';
 import { workspaceTitle } from './workspace-chrome';
@@ -78,9 +77,6 @@ export function activate(context: vscode.ExtensionContext) {
   // Storage location only; nothing binds a socket until there is a Burrow to run
   // (burrow.ts).
   initPeerLink(context);
-  // Whatever the Host→Burrow rename stranded, deleted unread and once
-  // (`retired-state.ts`).
-  void forgetRetiredState(context);
   context.subscriptions.push({ dispose: () => void disposePeerLink() });
   // The Burrow runs here, in the extension host that owns the PTYs — in
   // whichever window wins the bind (burrow.ts).
