@@ -5,39 +5,36 @@
  * A browser-surface header can't see other panes' open ports, so it registers
  * the loopback port it's showing in the shared store (`useDevServerMatch`) and
  * this module resolves it: scan every terminal Surface's listening ports
- * (`getOpenPorts`), find the single one serving that port, and publish back
+ * (`openPortsByTerminal`), find the single one serving that port, and publish back
  * `{ paneId, fallbackTitle }`; the header derives the label live.
  *
  * **One loop per WINDOW, over every mounted Wall's Surfaces.** The wanted-port
  * store and the resolutions are window-wide, so a per-Wall loop would answer
  * another Workspace's port with "no match", clobber the owner's resolution, and
- * never settle — polling `lsof` forever. Each Wall registers its Surfaces as a
+ * never settle. Each Wall registers its Surfaces as a
  * candidate source instead, and the loop is reference-counted so a lone Wall
  * still runs exactly one.
  *
- * The scan is **purely decorative and strictly off the hot path.**
- * `getOpenPorts` shells out (per-OS `lsof`/PowerShell) on the host that also
- * drives the live screencast, so scans must never pile onto tab-open or run on a
- * timer forever:
+ * The scan is **purely decorative and strictly off the hot path.** It shells
+ * out (per-OS `lsof`/PowerShell) on the host that also drives the live
+ * screencast, so scans must never pile onto tab-open or run on a timer forever:
  *   - **deferred & debounced** — a loopback URL appearing schedules a scan a
  *     beat later, coalescing rapid navigation, so tab-open finishes first;
  *   - **idle-scheduled** — the scan runs in `requestIdleCallback` time (with a
  *     timeout fallback), yielding to rendering and the screencast;
  *   - **scan once, then settle** — a matched port is remembered and never
- *     rescanned; we only keep polling (at idle, backing off, then giving up)
- *     while a wanted port is still *unmatched* (a dev server may start after
- *     the tab opened);
- *   - **one scan per pass** — every candidate's ports come from one batched
- *     host call (`openPortsByTerminal`), not one scan per terminal;
+ *     rescanned; an *unmatched* one is rescanned on a back-off after each wake,
+ *     and a terminal starting a command wakes the loop, since that is how a
+ *     dev server appears after the tab opened;
  *   - **re-validate on reload** — a surface reload (or navigating to a new
  *     loopback port) un-settles and rescans, but optimistically: the current
  *     chip stays until the rescan disagrees.
- * At most one scan is in flight (`running`), and `getOpenPorts`' own ~3s timeout
+ * At most one scan is in flight (`running`), and the host scan's own timeout
  * keeps a stuck pane from wedging the loop.
  */
 import { useEffect } from 'react';
-import { getPlatform } from '../../lib/platform';
 import { createRefCount } from '../../lib/ref-count';
+import { getTerminalPaneState, subscribeToTerminalPaneState } from '../../lib/terminal-state-store';
 import {
   getWantedDevServerPorts,
   setDevServerResolution,
@@ -54,10 +51,10 @@ import { servesLoopback } from './port-url';
 // Wait this long after interest changes before scanning, so a tab's open +
 // initial screencast settle first and quick navigation coalesces into one scan.
 const DEBOUNCE_MS = 600;
-// Re-scan delays while a wanted port has no match yet (server may be starting),
-// then stop until a reload, navigation, or Wall change wakes the loop. Once
-// matched, a port is settled and not rescanned until one of those.
-const PENDING_REFRESH_MS = [4000, 8000, 16000, 32000, 60000];
+// Re-scan delays after a wake while a wanted port has no match yet (a server
+// takes a moment to bind), then stop until the next wake. Once matched, a port
+// is settled and not rescanned until a reload, navigation, or Wall change.
+export const PENDING_REFRESH_MS = [4000, 8000, 16000, 32000, 60000];
 // Upper bound on how long the idle scan may be deferred before it's forced.
 const IDLE_TIMEOUT_MS = 2000;
 
@@ -142,14 +139,6 @@ function startCorrelationLoop(): () => void {
     const unsettled = wanted.filter((port) => !settled.has(port));
     if (unsettled.length === 0) return 'idle';
 
-    const platform = getPlatform();
-    if (!platform.getOpenPorts) {
-      // No port enumeration on this host: nothing will ever match, so settle
-      // to "no match" and stop (don't poll).
-      for (const port of unsettled) setDevServerResolution(port, null);
-      return 'idle';
-    }
-
     running = true;
     try {
       const titles = collectCandidates();
@@ -194,7 +183,7 @@ function startCorrelationLoop(): () => void {
   const scheduleRefresh = (delay: number) => {
     if (cancelled) return;
     if (refreshTimer) clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => scheduleScan(0), delay);
+    refreshTimer = setTimeout(runIdleScan, delay);
   };
 
   // Run a scan during idle time; keep polling only while ports are unmatched.
@@ -205,37 +194,45 @@ function startCorrelationLoop(): () => void {
         if (cancelled) return;
         // 'busy' → an in-flight scan paces itself; 'idle' → all matched (or
         // nothing wanted) so stop until reload/navigation wakes us.
-        if (outcome === 'pending' && misses < PENDING_REFRESH_MS.length) scheduleRefresh(PENDING_REFRESH_MS[misses++]);
+        const step = PENDING_REFRESH_MS[misses++];
+        if (outcome === 'pending' && step) scheduleRefresh(step);
       });
     });
   };
 
-  // Coalesce triggers: debounce, then scan at idle. Never scans synchronously
-  // on the triggering event (tab open / navigation / reload).
+  // Coalesce wakes: debounce, then scan at idle, restarting the back-off. Never
+  // scans synchronously on the triggering event (tab open / navigation / reload).
   const scheduleScan = (delay: number) => {
     if (cancelled) return;
+    misses = 0;
+    if (refreshTimer) clearTimeout(refreshTimer);
     if (debounceTimer) clearTimeout(debounceTimer);
     cancelIdle(idleHandle);
     idleHandle = undefined;
     debounceTimer = setTimeout(runIdleScan, delay);
   };
-  // Interest changing restarts the back-off; a refresh tick does not.
-  const wake = (delay: number) => {
-    misses = 0;
-    scheduleScan(delay);
-  };
-  scheduleScanNow = wake;
+  scheduleScanNow = scheduleScan;
 
   // A header showing a new loopback URL bumps "wanted"; debounce + defer so the
   // scan lands after the tab is up, not during its first paints.
-  const unsubscribeWanted = subscribeWantedDevServerPorts(() => wake(DEBOUNCE_MS));
+  const unsubscribeWanted = subscribeWantedDevServerPorts(() => scheduleScan(DEBOUNCE_MS));
   // A reload un-settles every port and re-validates — optimistically, since we
   // leave the published resolutions in place until the rescan overwrites them.
   const unsubscribeRescan = subscribeDevServerRescan(() => {
     settled.clear();
-    wake(DEBOUNCE_MS);
+    scheduleScan(DEBOUNCE_MS);
   });
-  wake(DEBOUNCE_MS);
+  // A command starting may be the dev server an unmatched port is waiting for.
+  const runs = new Map<string, string>();
+  const unsubscribeRuns = subscribeToTerminalPaneState((id) => {
+    if (!id) return;
+    const run = getTerminalPaneState(id).currentCommand?.id;
+    if (!run) { runs.delete(id); return; }
+    if (runs.get(id) === run) return;
+    runs.set(id, run);
+    if (getWantedDevServerPorts().some((port) => !settled.has(port))) scheduleScan(DEBOUNCE_MS);
+  });
+  scheduleScan(DEBOUNCE_MS);
 
   return () => {
     cancelled = true;
@@ -244,6 +241,7 @@ function startCorrelationLoop(): () => void {
     cancelIdle(idleHandle);
     unsubscribeWanted();
     unsubscribeRescan();
+    unsubscribeRuns();
     settled.clear();
     scheduleScanNow = null;
   };

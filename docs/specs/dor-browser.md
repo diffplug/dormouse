@@ -166,15 +166,15 @@ Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
 ## Dev-Server Chip
 
 For loopback URLs (`localhost`, `*.localhost`, `127.0.0.1`, `::1`) the header
-registers interest in the port, and `PlatformAdapter.getOpenPorts(id)` resolves
-it against terminal panes and minimized doors.
+registers interest in the port, and the Window's scan loop resolves it against
+terminal panes and minimized doors.
 
 - **One scan loop per Window**, over every mounted Wall's Surfaces; the
   wanted-port store and the resolutions are window-wide.
 - **Show a chip only when exactly one terminal owns that port**; zero or
   two-plus leave it unsettled, so a later dev server still matches.
-- **Must back off an unsettled port's rescans, then stop** until a reload,
-  navigation, or Wall change wakes the loop.
+- **Must back off an unsettled port's rescans, then stop** until a wake: a
+  reload, navigation, Wall change, or a terminal starting a command.
 - **Must resolve every candidate from one `openPortsByTerminal` call per pass**,
   never one host scan per terminal.
 - **Match only binds that serve localhost** — loopback or any-interface
@@ -185,7 +185,8 @@ it against terminal panes and minimized doors.
   not rescanned when its pane is retitled.
 
 Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
-`lib/src/components/wall/port-url.ts` (`servesLoopback`), `lib/src/components/wall/surface-ports.ts`,
+`lib/src/components/wall/port-url.ts` (`servesLoopback`),
+`lib/src/components/wall/surface-ports.ts`,
 `lib/src/components/wall/agent-browser-ports.ts`, `lib/src/components/wall/browser-url.ts`.
 
 ## Pane Context Menu Connect
