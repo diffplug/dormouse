@@ -5,7 +5,8 @@
 > shared `dor` CLI, surface handle model, and host control plumbing this surface
 > builds on.
 > Owns the browser Surface end to end — params, chrome, the renderers, the
-> iframe proxy boundary. Evidence behind the rules:
+> iframe proxy boundary. Its security boundaries are audited in
+> `docs/specs/security-local.md`. Evidence behind the rules:
 > [dor-browser.rationale.md](dor-browser.rationale.md).
 
 One body component renders all web content: `BrowserPanel`, persisted as
@@ -18,36 +19,32 @@ mapping.
 
 Browser entry points take a URL, a schemeless `host:port`, or a terminal Surface
 handle (`docs/specs/dor-cli.md` → Browser Open Target Resolution):
-
-- `dor agent-browser ...` forwards to the user's own
-  `agent-browser` binary and binds that session to a browser pane.
-- `dor playwright ...` binds the user-installed Playwright CLI.
-- `dor iframe <url>` uses the iframe renderer, for `http://` pages
-  ([Iframe Renderer](#iframe-renderer)).
+`dor agent-browser ...` and `dor playwright ...` bind the user's own installed
+CLI to a browser pane; `dor iframe <url>` uses the
+[Iframe Renderer](#iframe-renderer).
 
 Source of truth: `lib/src/components/wall/BrowserPanel.tsx`,
-`lib/src/components/wall/browser-surface.ts` (`resolveRenderMode`,
-`surfaceKindFromParams`), `lib/src/components/wall/LathHost.tsx`
-(`BODY_COMPONENTS`), `lib/src/components/Wall.tsx`
-(`surfaceRenderModeFromParams`, `createContentSurface`).
+`lib/src/components/wall/browser-surface.ts` (`resolveRenderMode`),
+`lib/src/components/Wall.tsx` (`createContentSurface`).
 
 ## Providers
-
-**Must name automated actions by provider and offer one adjacent “switch to <provider>” link**, shared by port actions and the Display modal and shown only when another provider is available. Remember explicit port-row switches and applied automated Display choices in renderer-local storage; default to agent-browser, falling back to an available provider. Opening Display selects the current browser's provider before the preference; changing provider preserves presentation when supported, otherwise selects screencast. Cancel does not change the preference.
-
-Source of truth: `BrowserProviderSwitch`, `browserProviderSwitch`, and `useBrowserProvider` in `lib/src/components/wall/BrowserProviderSwitch.tsx`; `lib/src/components/wall/TerminalContext.test.tsx` and `lib/src/components/wall/AgentBrowserScreenModal.test.tsx`.
 
 An automated renderer belongs to one **provider**, the CLI that drives its
 browser. **Must read every per-provider fact from the one registry** — render
 modes, CLI, binary for `dor`, the hosts and the webview; label
 and viewport hint for the GUI — never a ternary on the provider or a mode
-prefix. **Must spell provider names in full and lowercase in UI, commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` decodes one
-to its provider and presentation (`screencast` / `popout`), reading anything
-else as `iframe`.
+prefix. **Must spell provider names in full and lowercase in UI, commands and renderer identifiers**, including public `render_mode` and `dormouse.yml` `render` values; abbreviated modes are not aliases. `parseRenderMode` reads anything
+but a provider's mode as `iframe`.
+
+**Must name automated actions by provider, with one "switch to <provider>" link
+shown only when another provider is available.** The remembered preference
+defaults to agent-browser, falling back to an available provider; the Display
+modal opens on the current browser's provider.
 
 Source of truth: `BROWSER_PROVIDERS` and `parseRenderMode` in
 `dor-lib-common/src/browser-providers.ts`; `BROWSER_PROVIDER_GUI` in
-`lib/src/components/wall/browser-automation.ts`.
+`lib/src/components/wall/browser-automation.ts`; `BrowserProviderSwitch` in
+`lib/src/components/wall/BrowserProviderSwitch.tsx`.
 
 ## Canonical Params
 
@@ -55,50 +52,43 @@ Invariants on the flat persisted `BrowserPanelParams`:
 
 - **`renderMode` is canonical**; an absent one resolves to `iframe`, never to a
   live agent-browser. **Only params may omit it** — a live `ScreenSnapshot`
-  always carries one, so nothing defaults it a second time.
+  always carries one.
 - **`url` is the canonical target** across render swaps and relaunches.
   Agent-browser mirrors the newest http(s) active tab URL into it — the host
   relaunches at nothing else; iframe persists only navigations initiated by
   Dormouse chrome.
-- **Must keep persisted browser params flat**, using `BrowserPanelParams`;
-  `browserViewport` stores resolved sizing, and `launchFallback` may carry restore
-  params. **Must derive popped-out presentation from `renderMode`**, never a
-  separate persisted flag.
+- **Must keep persisted browser params flat**; `browserViewport` stores resolved
+  sizing, and `launchFallback` may carry restore params. **Must derive
+  popped-out presentation from `renderMode`**, never a separate persisted flag.
 - **Never carry a stream in params**: the port `dor agent-browser` reads, or the stream
   the host's `attach` answers for `dor playwright`, goes straight to the Surface's
   controller (rationale).
-- **`contextPortKey` is declared and persisted like any other param.** Only a
-  Surface the pane context menu opened for a port carries it, and reuse looks
-  one up by it ([Pane Context Menu Connect](#pane-context-menu-connect)).
-  **Must keep agent-browser's provider suffix `agent`**, the value persisted
-  before Playwright existed, so a restored pane still matches.
+- **`contextPortKey` is persisted like any other param**, carried only by a
+  Surface the pane context menu opened for a port
+  ([Pane Context Menu Connect](#pane-context-menu-connect)). **Must keep
+  agent-browser's provider suffix `agent`**, the value persisted before
+  Playwright existed, so a restored pane still matches.
 - **Never move a browser Surface's DOM, and never let a minimize unmount it**
-  (rationale): Lath never re-parents its leaf div, and a minimize **parks** it
-  (`docs/specs/tiling-engine.md` → "Parked leaves"), so the document returns with
-  scroll, form, and script state intact. A restart is still a cold load: every
-  param above survives it, no document state does.
+  (rationale): a minimize **parks** the leaf (`docs/specs/tiling-engine.md` →
+  "Parked leaves"), so the document returns with scroll, form, and script state
+  intact. A restart is still a cold load: every param above survives it, no
+  document state does.
 
-Source of truth: `lib/src/components/wall/BrowserPanel.tsx` (`BrowserPanelParams`), `lib/src/components/wall/browser-surface.ts`,
-`lib/src/components/Wall.tsx` (`replaceSurface`), `lib/src/components/wall/agent-browser-surface-controller.ts`
-(`rememberRestorableUrl`, `handOverBrowserStream`), `lib/src/components/wall/IframePanel.tsx` (`applyFrameUrl`).
+Source of truth: `BrowserPanelParams` in `lib/src/components/wall/BrowserPanel.tsx`.
 
 ## Placement And Lifetime
 
-**Must share one placement rule across browser entry points** (`createContentSurface`):
+**Must share one placement rule across browser entry points**:
 replace an untouched, helper-less *terminal* caller in place, else split next to
 the reference surface. **Never replace a reference that already has a browser** —
 web content is not destroyed to make room. A replacement transfers the target
-Surface's `surface:N` ref to the new browser Surface id.
+Surface's `surface:N` ref to the new browser Surface id. The pane context menu
+never replaces ([Pane Context Menu Connect](#pane-context-menu-connect)).
 
-**Must open focus-neutrally**, like `dor ensure`, with one exception: replacing
-the pane the user is currently selected on moves selection to the replacement
-(`docs/specs/layout.md` corner case #6, which owns both halves).
+**Must open focus-neutrally**, like `dor ensure`, with one exception:
+`docs/specs/layout.md` corner case #6.
 
-Surface lifetime owns backing resources:
-
-- **Must retain the mounted DOM when minimizing.** Agent-browser connection
-  parking follows [Browser Connection](#browser-connection).
-  **Must unpark a doored pane before killing it**, so its DOM dies with the Surface.
+- **Must unpark a doored pane before killing it**, so its DOM dies with the Surface.
 - **Killing an automated pane — or swapping away from that renderer — must go
   through `closeBrowserSurface`**: it closes the session through the controller
   (or from params when none holds it) and releases every client resource.
@@ -111,210 +101,182 @@ Surface lifetime owns backing resources:
 - Iframe proxy grants are reclaimed by the proxy idle sweep, not a per-surface
   teardown hook.
 
-Source of truth: `lib/src/components/Wall.tsx` (`createContentSurface`'s `focusNeutral`,
-`settleAddSelection`, `killPaneImmediately`, `replaceSurface`),
+Source of truth: `createContentSurface` in `lib/src/components/Wall.tsx`,
 `closeBrowserSurface` in `lib/src/components/wall/agent-browser-surface-controller.ts`,
-`prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`,
-`lib/src/host/iframe-proxy.ts` (`GRANT_IDLE_TTL_MS`, `MAX_GRANTS`).
+`prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
 
 ## Browser Chrome
 
 Chrome is keyed by a screen controller. **Both renderers must register one
-unconditionally**; render swaps are separately host-gated. The chrome below is a
-browser Surface's; a Tool's header keeps only its Display trigger
-(`docs/specs/layout.md` → Pane header).
+unconditionally**; render swaps are separately host-gated. A Tool's header keeps
+only its Display trigger (`docs/specs/layout.md` → Pane header).
 
-Header contract:
+**The Display trigger shows a capability-first identity, labelled
+`<provider> <view>`, and browser Doors reuse it** (rationale):
 
-- **Must open the Display modal from this capability-first identity**
-  (rationale):
+| Display | Icon cluster |
+| --- | --- |
+| resizes with pane (`syncEngaged`) | wide robot + frame corners |
+| fixed size | wide robot + picture-in-picture |
+| popout | wide robot + arrow-square-out |
+| iframe embed | frame corners only |
 
-  | Display, labelled `<provider> <view>` | Icon cluster |
-  | --- | --- |
-  | resizes with pane (`syncEngaged`) | wide robot + frame corners |
-  | fixed size | wide robot + picture-in-picture |
-  | popout | wide robot + arrow-square-out |
-  | iframe embed | frame corners only |
-
-- **Must reuse this mapping in browser Doors** (`docs/specs/layout.md` →
-  Baseboard owns the Door label rule).
-- **Must show the URL as primary text:** host+path without query, or path behind
-  a dev-server chip; the HTML title is its tooltip. An iframe surface's
-  persisted title keeps the query.
-- **Must open a pre-selected `InlineEditInput` from the URL.** Blur discards;
-  `normalizeNavUrl` follows CLI scheme selection plus bare loopback → `http://`
-  and bare remote → `https://` (rationale). **Must refuse any other scheme with
-  a warning under the field**, since no renderer opens one.
-- **Must keep back/forward/reload enabled.** Agent-browser uses native commands;
-  iframe uses parent history and re-resolves its proxy.
-- **Must show non-default managed `--key` as a badge, never a title prefix.**
-- Width tiers and the narrow-pane popover: `docs/specs/layout.md` → "Pane header responsive sizing".
+**The URL editor follows CLI scheme selection plus bare loopback → `http://`
+and bare remote → `https://` (`normalizeNavUrl`; rationale), and refuses any
+other scheme**, since no renderer opens one.
 
 Source of truth: `lib/src/components/wall/SurfacePaneHeader.tsx`,
-`lib/src/components/wall/agent-browser-screen.ts`,
 `lib/src/components/wall/BrowserDisplayIcon.tsx`,
-`lib/src/components/Door.tsx`,
-`lib/src/components/wall/browser-url.ts`, Storybook
-`lib/src/stories/BrowserChromeHeader.stories.tsx`,
-`lib/src/stories/Baseboard.stories.tsx`.
+`lib/src/components/wall/browser-url.ts`.
 
 ## Dev-Server Chip
 
 For loopback URLs (`localhost`, `*.localhost`, `127.0.0.1`, `::1`) the header
-registers interest in the port, and `PlatformAdapter.getOpenPorts(id)` resolves
-it against mounted terminal-backed Surfaces and minimized terminal Doors.
+asks which terminal-backed Surface — mounted, or a minimized Door — serves the
+port (`PlatformAdapter.getOpenPorts`).
 
-- **One scan loop per Window**, over every mounted Wall's Surfaces; the
-  wanted-port store and the resolutions are window-wide.
 - **Show a chip only when exactly one candidate Surface owns that port**; zero
   or two-plus leave it unsettled, so a later dev server still matches.
 - **Match only binds that serve localhost** — loopback or any-interface
   (`0.0.0.0`, `::`), never a specific non-loopback bind.
-- **Must defer scans off the tab-open path and allow only one in flight.**
-  Unmatched wanted ports keep polling; matched ports settle until reload, a
-  navigation changes port interest, or the set of mounted Walls changes.
-- **Must label the chip from the serving pane's live state**; a retitle alone
-  does not rescan its settled port.
 
 Source of truth: `lib/src/components/wall/use-dev-server-ports.ts`,
-`lib/src/components/wall/port-url.ts` (`servesLoopback`),
-`lib/src/components/wall/agent-browser-ports.ts`, `lib/src/components/wall/browser-url.ts`.
+`servesLoopback` in `lib/src/components/wall/port-url.ts`.
 
 ## Pane Context Menu Connect
 
-**Must scan once per context opening**, using the shared per-port URL selection in `docs/specs/dor-cli.md` → Browser Open Target Resolution. Zero/one port uses an inline row; multiple ports use a selector. Failed scans are distinct from no listeners.
+**Must scan once per context opening**, using the shared per-port URL selection
+in `docs/specs/dor-cli.md` → Browser Open Target Resolution; a failed scan is
+distinct from no listeners. **Must offer system browser, iframe, and each
+provider's screencast and popout for the selected port.** **Opening a browser
+from context always preserves the source terminal, including an untouched one.**
 
-**Must offer system browser, iframe, and provider-named screencast and popout once for the selected port**, using the provider switch in Providers for automated targets. Disabled targets explain unavailable capabilities. Opening a browser from context always preserves the source terminal, including an untouched one.
+**Must reuse targets per source, port, and provider**: a provider's screencast
+and popout share a browser session. **A reuse is one intent,
+`setRenderMode(mode, { url })`, reaching the Surface's controller by id**
+(`requestBrowserRenderMode`), so a mode switch relaunches at the port's page
+rather than racing a navigation into it, even in an unmounted Door. Minimized
+targets are reattached, closed ones recreated.
 
-**Must reuse targets per source, port, and provider**: each provider’s screencast and popout share a browser session and switch display modes. **A reuse is one intent, `setRenderMode(mode, { url })`, reaching the Surface's controller by id** (`requestBrowserRenderMode`), so a mode switch relaunches at the port's page rather than racing a navigation into it, even in an unmounted Door. Reattach minimized targets and recreate closed ones. System browser follows the OS opener's behavior.
+**A new automated target starts its controller before any Pane exists; the
+split appears only once the host confirms startup, without waiting for page
+load** (rationale). A failure reports in context without changing layout or
+focus; concurrent requests for one target are serialized.
 
-**Must acknowledge a port click with `opening…` and suppress repeat activation while pending.** For a new automated target, start its controller before creating a Pane; split and focus only after the host confirms startup, without waiting for page load. Failure reports in context without changing layout or focus. Concurrent requests for the same target are serialized. (rationale)
+**Must dismiss context after a successful placement or reuse**; a failed or
+cancelled launch keeps it open, and a completed launch never dismisses a
+replacement context. **Must cancel pending placement when its context closes or
+is replaced, its source disappears or minimizes, or its Workspace deactivates
+or closes**, closing a browser that arrives after cancellation or cannot be
+placed.
 
-**Must dismiss context after a successful browser placement or reuse, preserving browser focus.** System browser dismisses after dispatch to the OS opener; failed or cancelled launches keep context open. A completed launch must not dismiss a replacement context.
-
-**Must cancel pending placement when its context closes or is replaced, its source disappears or minimizes, or its Workspace deactivates or closes.** Close a browser that arrives after cancellation or cannot be placed. A successful placement adopts the prepared controller and binding without launching or navigating again.
-
-Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`; `prepareForPlacement` in `lib/src/components/wall/agent-browser-surface-controller.ts`; tests in `lib/src/components/Wall.test.tsx`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`; `TerminalContextView` in `lib/src/components/wall/TerminalContextView.tsx`.
+Source of truth: `openContextPort` in `lib/src/components/Wall.tsx`;
+`prepareForPlacement` in `lib/src/components/wall/agent-browser-surface-controller.ts`;
+`listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`.
 
 ## Display Modal And Render Swaps
 
-**Must make the Display modal the GUI for render mode and screencast
-resolution**, the pop-out stub's own Pop back in aside. It splits the Browser
-Chrome icon pair across its nesting: the
-robot rides the selected provider’s single screencast option, each nested resolution row carrying only
-its presentation glyph.
+**The Display modal is the GUI for render mode and screencast resolution.**
+**Must offer only the render modes the Surface's screen controller declares**
+(`renderModes`), never the host's global capabilities: both presentations of a
+provider its host drives (`browserProviders`), the running one's screencast even
+where it does not; always `iframe`; for a Tool, only its declarable renders
+(`docs/specs/dor-tool.md` → Declaring tools). **`setRenderMode` refuses any
+other mode.** Screencast resolution is Resize with pane or Fixed size; device
+emulation is CLI-only.
 
-**Must offer only the render modes the Surface's screen controller declares** (`renderModes`), never the host's global capabilities: both presentations of a provider its host drives (`browserProviders`), the running one's screencast even where it does not; always `iframe`; for a Tool, only its declarable renders (`docs/specs/dor-tool.md` → Declaring tools). **`setRenderMode` refuses any other mode.**
-The iframe option lists that the embed keeps no logins or cookies (for
-`https://`, see [Iframe Renderer](#iframe-renderer)).
-
-**Must offer only Resize with pane and Fixed size for screencast resolution.** Fixed size places its preset selector, including Custom, beside the mode label, with editable width, height, and DPR below. Choosing a preset fills the fields; editing a field selects Custom. Preset selection preserves omitted DPR until explicitly edited. Device emulation is CLI-only. **Resize with pane is owned by the host** (rationale).
+**Resize with pane is owned by the host** (rationale):
 
 - **Must send the pane's laid-out CSS size — never `getBoundingClientRect()`,
   which a Workspace presentation scales — and display ratio over the viewer
-  socket while engaged, never from a popped-out pane**: when the socket opens,
-  once a resize settles (200ms), and at once on a `(resolution: <dpr>dppx)`
-  media query `change`.
+  socket while engaged, never from a popped-out pane.**
 - **Each choice of Resize with pane is a new engagement**, named in every size
   sent, which reclaims the viewport even at the size last written.
 - **The host serializes all viewport writes per browser**, through the provider's
   viewport primitive, never while a launch or close settles it; a write in
-  flight keeps only the latest pane size, so a drag coalesces.
+  flight keeps only the latest pane size.
 - **The host judges a write only by a viewport taken after it landed**, as the
   provider vouches for it: agent-browser's changed frames, Playwright's poll
-  measurement tagged with when it began; never `status`, Playwright's
-  screencast metadata, or the ratio (rationale). **One still differing 250ms
-  later, with no write since, is another writer's**: the host stops that
-  browser's sync, reports `off`, and writes no later size of that engagement.
-  **A page shown anew (the active tab) is written, never judged.**
-- **A Fixed viewport ends the browser's sync**, after its write in
-  flight; **refused if a launch or close of that browser began meanwhile, or
-  the host shut down**. **Must carry the pane's ended engagement to the host,
-  which rejects its later socket intents even when none arrived before Fixed.**
+  measurement; never `status`, Playwright's screencast metadata, or the ratio
+  (rationale). **One still differing a settle window later, with no write
+  since, is another writer's**: the host stops that browser's sync, reports
+  `off`, and writes no later size of that engagement. **A page shown anew (the
+  active tab) is written, never judged.**
+- **A Fixed viewport ends the browser's sync**, after its write in flight;
+  **refused if a launch or close of that browser began meanwhile, or the host
+  shut down**. **Must carry the pane's ended engagement to the host, which
+  rejects its later socket intents even when none arrived before Fixed.**
+- **The webview disengages only on the host's `off` for its engagement.**
 
-**Must persist resolved viewport settings**, restoring them when the browser is recreated without rereading a preset definition. **The webview disengages only on the host's `off` for its
-engagement**; `SYNCED` only while the host reports it `synced`. **The modal shows
-the ratio the browser measures (a Playwright page, a popped-out window), else the
-one this Surface last fixed on this browser, else the display's.**
+**Must persist resolved viewport settings**, restoring them when the browser is
+recreated without rereading a preset definition.
 
 | From -> To | Behavior |
 | --- | --- |
-| `iframe` or the other provider -> `agent-browser-*` / `playwright-*` | **The pane swaps at once** to a session-less pane whose controller launches at the current URL, headed for a popout (rationale). **A failed launch restores the previous renderer in place** (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability. **A non-http(s) `url` refuses the swap** — the same `browserSurfaceUrl` check the iframe sink applies. |
-| `agent-browser-screencast` <-> `agent-browser-popout` | Same Surface id and session, headed/headless relaunch in the surface controller; preserves only the active URL. |
-| `agent-browser-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires the user to press `c` in the warning overlay, because only the active tab survives. |
+| `iframe` or the other provider -> `agent-browser-*` / `playwright-*` | **The pane swaps at once** to a session-less pane whose controller launches at the current URL, headed for a popout (rationale). **A failed launch restores the previous renderer in place** (`launchFallback: { restore }`), even minimized: the embed, or the previous provider reopened in its own session, keeping its `key` (rationale). Inert without the capability. **A non-http(s) `url` refuses the swap** (`browserSurfaceUrl`). |
+| `agent-browser-screencast` <-> `agent-browser-popout` | Same Surface id and session, headed/headless relaunch; preserves only the active URL. |
+| `agent-browser-*` -> `iframe` | Uses canonical `params.url`; with multiple tabs, requires confirmation, because only the active tab survives. |
 
 Source of truth: `lib/src/components/wall/AgentBrowserScreenModal.tsx`,
 `offeredRenderModes` in `lib/src/components/wall/browser-automation.ts`,
-`lib/src/components/wall/agent-browser-surface-controller.ts` (`screenActions`, `syncToPane`,
-`applyHostSync`, pop-out/pop-in), `createViewportSync` and `SYNC_SETTLE_MS` in
-`lib/src/host/browser-sync.ts`, `lib/src/components/Wall.tsx` (`onSwapRenderMode`), Storybook
-`lib/src/stories/AgentBrowserScreenModal.stories.tsx`. Pinned by `restores a failed provider swap minimized meanwhile in place` in `lib/src/components/Wall.test.tsx`,
-and `sync-to-pane` in `lib/src/host/browser-host.test.ts`,
-`lib/src/host/playwright-host.lifecycle.test.ts` and
-`lib/src/components/wall/agent-browser-surface-controller.test.ts`.
+`onSwapRenderMode` in `lib/src/components/Wall.tsx`, `createViewportSync` in
+`lib/src/host/browser-sync.ts`.
 
 ## Viewport presets
 
-**Must default new automated screencasts to fixed `desktop` sizing**, independent of pane layout. Splitting, resizing, minimizing and maximizing change presentation only. **Must preserve live browser sizing on reuse**, including native resize/device choices and externally attached browsers. Iframes remain pane-sized; popouts remain window-sized.
+**Must default new automated screencasts to fixed `desktop` sizing**, independent of pane layout; splitting, resizing, minimizing and maximizing change presentation only. **Must preserve live browser sizing on reuse**, including native resize/device choices and externally attached browsers. Iframes remain pane-sized; popouts remain window-sized.
 
 **Must resolve the nearest ancestor `dormouse.yml` browser settings over user configuration over built-ins**, using the browser's bound working directory. A named preset replaces its whole lower-priority definition. `pane-sync` is reserved and cannot be redefined. `browser.default_viewport` defaults to `desktop`; a Tool's explicit viewport takes precedence. User-only Tool lookup excludes project settings. Browser configuration is data and grants no Tool execution authority. **Must parse browser preferences independently of Tool declarations**; invalid YAML or browser settings still fail explicitly.
 
-**Must preserve the current device-pixel ratio when DPR is omitted.** A requested ratio unsupported by the provider fails before changing dimensions; playwright can accept only its current context ratio. **Never turn an observed playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices. **Must label pixel density DPR; fit fractional ratios, padding to two decimals without rounding.**
+**Must preserve the current device-pixel ratio when DPR is omitted.** A requested ratio unsupported by the provider fails before changing dimensions; playwright can accept only its current context ratio. **Never turn an observed playwright DPR into an explicit request for future contexts.** Presets describe viewport geometry, not devices.
 
-**Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Agent-browser launches blank, sets the viewport and then navigates; playwright uses its context viewport configuration. Deferred `pane-sync` launches start at 1440 × 900 until placement; **must engage sync when resolving that preset and send the actual pane dimensions on first attach**. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer**, not discard sizing during a swap.
+**Must apply initial dimensions before the destination page's first script runs**, for managed CLI, GUI and Tool launches. Deferred `pane-sync` launches start at a fixed size until placement; **must engage sync when resolving that preset and send the actual pane dimensions on first attach**. A failed initialization never navigates at a silently substituted size. **Must apply a renderer and viewport chosen together to the new renderer**, not discard sizing during a swap.
 
-**Must query the active page's measured CSS dimensions and DPR**, never infer them from the pane or screenshot. Dormouse sizing commands require an existing bound Surface, do not create a browser, and use the same serialized writes as the Display modal. The command contract belongs to `docs/specs/dor-cli.md` → Browser viewport control.
+**Must query the active page's measured CSS dimensions and DPR**, never infer them from the pane or screenshot. Dormouse sizing commands require an existing bound Surface, never create a browser, and use the same serialized writes as the Display modal; their contract is `docs/specs/dor-cli.md` → Browser viewport control.
 
-Source of truth: `BUILTIN_BROWSER_VIEWPORTS`, `PANE_SYNC_PRESET` and `resolveBrowserViewport` in `dor-lib-common/src/browser-viewports.ts`; `parseBrowserConfig` / `mergeBrowserConfig` in `lib/src/host/browser-config.ts`; `createToolHost` in `lib/src/host/tool-host.ts`; `lib/src/host/browser-config.test.ts`, `lib/src/host/tool-host.test.ts`.
+Source of truth: `resolveBrowserViewport` in `dor-lib-common/src/browser-viewports.ts`; `parseBrowserConfig` in `lib/src/host/browser-config.ts`.
 
 ## Automated Browser
 
 **Dormouse is a viewer/client for the user's installed provider CLI** — it
-neither bundles nor forks a browser ([Providers](#providers)). `dor agent-browser` / `dor playwright` extract identity flags, handle
-`dor-embed-size` and prepare initial sizing ([Viewport presets](#viewport-presets)); native commands then run against the resolved session. A
-navigation verb's Dormouse target (`surface:N`, `:port`, `host:port`) is resolved
-to a URL first (`docs/specs/dor-cli.md` → Browser Surface Addressing). Flags
-Dormouse does not model still pass through.
+neither bundles nor forks a browser. `dor agent-browser` / `dor playwright` extract identity flags, handle
+`dor-embed-size` and prepare initial sizing ([Viewport presets](#viewport-presets)); native commands then run against the resolved session, and flags
+Dormouse does not model pass through (`docs/specs/dor-cli.md` → Browser Surface Addressing).
 
 **Must resolve new GUI launches in a fresh shell environment**, in the browser's
-cwd while it exists (rationale). The host runs the staged `dor __launch-env`
-helper through a short-lived, pipe-backed shell, creating no terminal Surface;
-it captures exported startup settings, not an already-running terminal's
+cwd while it exists (rationale): the host runs the staged `dor __launch-env`
+helper through a short-lived, pipe-backed shell, creating no terminal Surface,
+so it captures exported startup settings, not an already-running terminal's
 mutations or prompt hooks. **Must preserve the selected shell's initialization arguments**, replacing stay-open flags with the helper command. The shell is VS Code's selected native one, else:
 
 - **POSIX:** `SHELL`, then the account shell, as an interactive login shell
   (csh and tcsh interactive only).
 - **Windows:** ComSpec; PowerShell loads profiles. **Must pass explicit cmd.exe command strings verbatim**, without MSVCRT quote escaping. A WSL selection uses ComSpec: browser providers and their Playwright library run on the native host, not in a WSL distribution.
 
-**Must retain that environment only for the browser session's lifetime**, sharing
-concurrent initialization and using it for provider discovery, CLI commands,
-and daemon state paths. **Must close without starting or waiting for a shell**:
-use the resolved session environment when available, otherwise the host environment
-and validated binding; provider cleanup errors still surface. A close discards the
-environment and refuses launches it overtook. Failed initialization and host
-shutdown discard it too; the next non-close request initializes afresh. **Never send this environment to the
-webview, persist it, or include helper output in diagnostics.** Startup is
-bounded to 15 seconds and 2 MiB combined output within the launch deadline;
-Launch initialization failure is reported without falling back to the GUI environment.
+**Must retain that environment only for the browser session's lifetime**, for
+provider discovery, CLI commands, and daemon state paths. **Must close without
+starting or waiting for a shell**, using the session environment when available,
+otherwise the host environment and validated binding. A close, failed
+initialization, or host shutdown discards it; a close refuses launches it
+overtook. **Never send this environment to the webview, persist it, or include
+helper output in diagnostics.** A failed initialization is reported without
+falling back to the GUI environment.
 
 **Must resolve each new GUI browser independently**, without borrowing another
-session's executable. Existing bindings retain their validated executable hint;
-`dor` resolves from its calling terminal. **Must spawn provider CLIs through
-`spawnAndCapture`** (`dor-lib-common`), including absolute executables
+session's executable; `dor` resolves from its calling terminal. **Must spawn
+provider CLIs through `spawnAndCapture`**, including absolute executables
 (`docs/specs/dor-cli.md` → Spawning External Binaries).
 
 Source of truth: `browserLaunchEnv` in `lib/src/host/browser-launch-env.ts`,
-`createBrowserHost` in `lib/src/host/browser-host.ts`, `runCli` in
-`dor/src/cli.ts`. Pinned by `lib/src/host/browser-launch-env.test.ts` (executed on native Windows and macOS in `.github/workflows/ci.yml`),
-`lib/src/host/browser-host.test.ts` ("launch environment") and
-`dor/test/launch-env.test.mjs`.
+`createBrowserHost` in `lib/src/host/browser-host.ts`. The launch environment
+is pinned on native Windows and macOS by `lib/src/host/browser-launch-env.test.ts`
+(`.github/workflows/ci.yml`).
 
 ### Managed identity
 
 - Default is `--key default`; **`--key <name>` must match `[A-Za-z0-9._-]+`**,
   because it becomes part of a session name that becomes a filesystem path.
-  **`--key`, raw `--session`, and `--surface` are mutually exclusive** — naming
-  a browser twice is a mistake, never a precedence question.
+  Identity-flag exclusivity: `docs/specs/dor-cli.md` → "Browser Surface Addressing".
 - **A key names the Surface of that provider holding it in the answering Wall**,
   whose stored binding — session, cwd, executable — the command runs with; so a
   Surface keeps its session however keys were named when it was made.
@@ -322,27 +284,22 @@ Source of truth: `browserLaunchEnv` in `lib/src/host/browser-launch-env.ts`,
   Workspace that will hold the browser — its *stable* id, so a strip reorder
   renames nothing. **A bare Wall, which has no Workspace id (a VS Code webview,
   the website, Pocket), mints a scope of its own for its life**, so two
-  webviews' `--key default` are two browsers. Its first commands that may bind
-  reserve the caller's cwd and executable for two minutes, shared by concurrent
-  first commands; one that succeeds without a viewer (a non-Chromium Playwright)
-  keeps it until a Surface binds, and binding removes it. **A key never mints a
-  session a Surface anywhere in the Window holds, or the provider's reservation
-  of another key**: it takes the first free `.2`, `.3`, … suffix (rationale).
+  webviews' `--key default` are two browsers. A key's concurrent first
+  commands share one reservation of the caller's cwd and executable
+  (`BrowserBindingReservations`). **A key never mints a session a Surface anywhere in the
+  Window holds, or the provider's reservation of another key**: it takes the
+  first free `.2`, `.3`, … suffix (rationale).
 - **Only the answering Workspace can name a key**, so `dor` asks the host
   (`surface.resolveBrowser`) before it forwards anything, and names the key
   itself (`dormouse.1.<name>`) only when there is no control endpoint at all —
   outside Dormouse, where `dor` is a pure passthrough. **Every managed
   invocation depends on the host answering** — a passthrough verb included —
-  with no CLI-side fallback: a refusal (a Wall still mounting, a webview
-  mid-reload, the VS Code guard) fails the command with the host's message
-  before the binary runs, and the router answers the no-Wall case after its
-  bounded retry rather than leaving `dor` to its deadline (`docs/specs/dor-cli.md`
-  → "Handle Model"). A CLI-namespaced fallback would name the wrong Workspace's
-  browser.
+  with no CLI-side fallback, which would name the wrong Workspace's browser: a
+  refusal fails the command with the host's message before the binary runs
+  (`docs/specs/dor-cli.md` → "Handle Model").
 - GUI-spawned sessions use `dormouse.1.gui-<hex>`, minted host-wide, which no
-  `--key` names; they are reachable by `--surface <handle>`
-  (`docs/specs/dor-cli.md` → Browser Surface Addressing). **The host answers only
-  for a Surface its provider renders** — an `iframe`-rendered Surface has a
+  `--key` names; they are reachable by `--surface <handle>`. **The host answers
+  only for a Surface its provider renders** — an `iframe`-rendered Surface has a
   browser but no session to drive.
 - **One browser maps to one Dormouse surface**, found by its host-reported
   native identity (agent-browser: the session; Playwright: installation,
@@ -355,239 +312,159 @@ Source of truth: `browserLaunchEnv` in `lib/src/host/browser-launch-env.ts`,
 Source of truth: `sessionForKey` in `dor-lib-common/src/browser-providers.ts`,
 `runBrowserCli` in `dor/src/commands/browser-cli.ts`, `BrowserBindingReservations`
 in `lib/src/components/wall/browser-binding-reservations.ts`,
-`lib/src/components/wall/use-dor-control.ts` (`findBrowserSurface`,
-`ensureBrowserSurface`, `browserKeyScope`). Pinned by `resolves a browser surface
-handle to its agent-browser session, and gates the rest` in
-`lib/src/components/Wall.test.tsx`.
+`ensureBrowserSurface` in `lib/src/components/wall/use-dor-control.ts`.
 
 ### Browser Connection
 
-A surface-id-keyed controller registry (mirroring `terminal-lifecycle.ts`) owns
-one `AgentBrowserConnection`, its end of a [Viewer Socket](#viewer-socket). **The controller is
-Surface-scoped, not panel-scoped** — it survives panel unmount. **Must keep the
-daemon/session alive while parked.** **A view must key its controller by
-provider as well as Surface id, and the registry must replace one driving the
-other provider**: a minimized pane stays mounted while a failed cross-provider
-swap is restored in place, and a controller's provider is fixed for its life.
-**A view whose controller was released takes a new one on its next params
-change, never on the release itself** (a kill's, as its fade starts).
+A surface-id-keyed controller registry owns one connection per Surface, its end
+of a [Viewer Socket](#viewer-socket). **The controller is Surface-scoped, not
+panel-scoped** — it survives panel unmount — **and keeps the daemon/session
+alive while parked.** **A view must key its controller by provider as well as
+Surface id, and the registry must replace one driving the other provider**: a
+controller's provider is fixed for its life.
 
-**Phase.** The controller holds one `Phase`; the viewer socket exists exactly
-in `live`. A hidden headless pane enters `parked` in place of `live`; a `dor`
-handover moves any phase but `launching` and `relaunching` to its stream; a new
-`session` in params rebinds. A **stream** is what a launch or `attach` answers
-for a live browser — agent-browser's daemon stream port, the host's number for
-a Playwright connection — and what `view` takes back.
+A **stream** is what a launch or `attach` answers for a live browser —
+agent-browser's daemon stream port, the host's number for a Playwright
+connection — and what `view` takes back. The viewer socket exists only while the
+controller is `live`.
 
-`Phase` owns the controller's local transition state; the caller-facing gates,
-pending intents, and parking rules follow below.
-
-- **Every browser operation must pass one gate (`driver`), open only in
-  `live`** — chrome and Display modal actions, tabs, edit chords (rationale);
-  sync-to-pane rides the viewer socket, which exists only there. **An unpark
-  catches up on a pending intent only once its socket opens.** The gate orders the Surface's own intents; the host is what
-  keeps an operation off a browser mid-relaunch ([Browser Host](#browser-host)).
+- **Every browser operation must pass one gate (`driver`), open only while
+  `live`** — chrome and Display modal actions, tabs, edit chords (rationale).
+  The gate orders the Surface's own intents; the host is what keeps an
+  operation off a browser mid-relaunch ([Browser Host](#browser-host)).
 - **A navigation or a Fixed viewport asked for outside `live` is kept as the
   one latest intent**, run on the next `live` (a viewport never on a headed
-  window); **so is a pop-out or pop-in asked before the browser
-  is bound** (`idle`, `launching`, `attaching`), run as a relaunch, and so is
-  a new `url` in params while `launching` (rationale). **A launch or relaunch
-  opens the pending page itself; one the host opened never loads again**
-  (rationale).
+  window); **so is a pop-out or pop-in asked before the browser is bound**, run
+  as a relaunch, and so is a new `url` in params while launching (rationale).
+  **A launch or relaunch opens the pending page itself; one the host opened
+  never loads again** (rationale).
 - **The controller never asks a daemon-spawning CLI verb for a stream**:
   streams come from a launch or relaunch answer, a `dor` handover, or `attach`.
 - **A failed first launch is reported once to the Wall, which applies the
   Surface's `launchFallback`**: `close` the pane, `embed` (a Tool's iframe), or
-  `{ restore }` the params a swap replaced. A param cleared on success, it
-  survives a restore mid-launch (rationale). **A launch into a named session is
-  sent only once every close of that session this webview sent has been
-  answered**, whatever the transport's order; **a Surface's close is sent at
-  once**, for its bound session or the one its launch names
-  ([Browser Host](#browser-host)).
-- **Params predating the controller's own `session` or `renderMode` write are
-  ignored until they show it back.**
-- **One relaunch at a time, only of a bound browser** (`live`, `parked`,
-  `ended`). **A relaunch leaves `live` before headedness changes** (rationale).
+  `{ restore }` the params a swap replaced (rationale). **A launch into a named
+  session is sent only once every close of that session this webview sent has
+  been answered**, whatever the transport's order; **a Surface's close is sent
+  at once**, for its bound session or the one its launch names.
 
-**Parking.** A Lath leaf is always mounted, so nothing else stops a hidden pane's
-~20Hz stream and its crisp captures (rationale). A pane that goes off-screen —
-or whose view unmounts — parks after a ~1s debounce: its viewer socket closed,
-which ends the host's subscription, daemon/session alive, daemon-side streaming
-stopping on its own because clients trigger it.
+**Parking.** A pane that goes off-screen, or whose view unmounts, parks after a
+debounce: its viewer socket closes, the daemon/session stays alive, and
+daemon-side streaming stops because no client triggers it (rationale).
 
-- **An unpark keeps the last good frame on screen**, re-priming from the
-  stream's re-broadcast frame/tabs; a fresh reattach mounts a blank canvas and
-  asks the host to `repaint`, showing the placeholder until a frame lands.
+- **An unpark keeps the last good frame on screen**; a fresh reattach asks the
+  host to `repaint`.
 - **Never park a popped-out pane**: its viewer socket brings the window's page
   and its close, which auto-reverts, even while minimized.
 - **Never set `AGENT_BROWSER_IDLE_TIMEOUT_MS`** for Dormouse-managed sessions —
   daemon self-exit when idle would defeat "alive while parked".
 
-**The webview paints what the socket sends, latest-only**: one frame decodes at
-a time, and a newer arrival replaces the one waiting behind it. **A provisional
-frame of the canvas's shape draws scaled into it**; only a crisp frame, or one
-of another shape, sizes the canvas, so switching between the two reallocates
-nothing (rationale).
+Input crossing to the host:
 
-Input rules:
-
-- **Canvas pointer coordinates map through one width-derived scale on both
-  axes**; frame/device heights would stretch input when a stream frame is shorter
-  than the viewport.
-- `input_keyboard.text` is always sent; non-text keys use `text: ""`.
-- **`windowsVirtualKeyCode` comes from a real key map, never
-  `key.charCodeAt(0)`** (`.` is char 46 = VK_DELETE, so periods would otherwise
-  become Delete presses).
-- **Must send a local paste as `input_text` messages of at most 8192
-  characters** (`viewerTextInputs`), never a key pair per character from the
-  webview; the host inserts each whole (rationale).
+- **Must send a local paste as bounded `input_text` messages** (`viewerTextInputs`),
+  never a key pair per character from the webview; the host inserts each whole
+  (rationale).
 - **Select-all/copy/cut go through the host `edit` operation on every
   platform**, since those chords do not survive CDP input. Undo/redo is not
   emulated.
+- Tab select/close use the host `tab` operation.
 
-**Must render the tab strip only at two or more tabs**, using the ordinary URL
-header for one. Select/close use the host `tab` operation. **Must preserve the
-last nonempty tab list through transient empty reports and select newly
-observed inactive tabs only in a headless view**; the first list is baseline.
-`maybeSelectNewTab` follows a provisional duplicate URL to its destination. The daemon gate is pinned by
-`reaches no daemon from the header, Display modal, tabs, sync or edit chords
-mid-relaunch` in `lib/src/components/wall/agent-browser-surface-controller.test.ts`.
-
-Source of truth: `lib/src/components/wall/AgentBrowserPanel.tsx` (`toDevice`, the
-tab strip, placeholders), `lib/src/components/wall/agent-browser-surface-controller.ts`
-(`Phase`, `driver`, `launch`, `attach`, `paintFrame`, `paintBitmap`), `onBrowserLaunchFailed` in `lib/src/components/Wall.tsx`,
-`lib/src/components/wall/agent-browser-connection.ts`, `lib/src/components/wall/agent-browser-input.ts`,
-`viewerTextInputs` in `lib/src/lib/platform/browser-automation.ts`,
-`lib/src/components/wall/use-surface-visibility.ts`, `lib/src/lib/agent-browser-tab.ts` (the tab record
-shared by the stream and `tab list --json`).
+Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts`
+(`Phase`, `driver`), `lib/src/components/wall/AgentBrowserPanel.tsx`,
+`lib/src/components/wall/agent-browser-input.ts`, `onBrowserLaunchFailed` in
+`lib/src/components/Wall.tsx`.
 
 ### Viewer Socket
 
 **The webview reaches a browser only through its host's viewer socket** —
 never a daemon's stream, never CDP. One loopback listener in the host serves a
-socket per Surface, onto the browser at the stream `view` names:
+socket per Surface, onto the browser at the stream `view` names; its upgrade
+gate and input rebuilding are audited in `docs/specs/security-local.md` →
+"Loopback Listeners". The messages are `ViewerState`, `ViewerInput` and the
+binary `ViewerFrame`.
 
-| Message | Direction | Carries |
-| --- | --- | --- |
-| frame | host → webview, binary | `ViewerFrame`: provisional/crisp JPEG and optional viewport CSS size |
-| `status`, `tabs` | host → webview | Whether the browser is up, its viewport size and, for a headed window or a Playwright page, device pixel ratio; the tab list |
-| `sync` | webview → host | The pane's CSS size and display ratio while Resize with pane is engaged, and its engagement |
-| `sync` | host → webview | That engagement's sync: `applying`, `synced`, or `off` ([Display Modal And Render Swaps](#display-modal-and-render-swaps)) |
-| `url` | host → webview | A navigation the active tab committed |
-| `page` | host → webview | A popped-out window's page URL and title |
-| `input_mouse`, `input_keyboard`, `input_text` | webview → host | Native input; a paste as text |
-| `repaint` | webview → host | Resend the last frame to a canvas that mounted blank |
-
-- **Must authorize every upgrade with the listener's own loopback `Host` and a
-  single-use, 60-second grant for that one view**, capped at 1024; a plain
-  request is refused (`docs/specs/security-local.md` → Loopback Listeners).
-- **Must rebuild every webview message field by field before a provider sees
-  it** (`parseViewerInput`); inbound messages are capped at 64 KiB.
 - **Must send state only on change, and current state to a connecting socket,
   except `sync`, which answers each size sent.** Agent-browser's `url` is an
-  undeduplicated commit edge; Playwright publishes changed URLs from its poll.
-  **Must clear the previous title on each received commit**, even at the same
-  URL, until `tabs` supplies its replacement. (rationale)
+  undeduplicated commit edge; Playwright publishes changed URLs from its poll
+  (rationale).
 - **A browser that goes on its own is reported `status { connected: false }`
   before its socket closes**, ending a headless pane and auto-reverting a
-  headed one seen connected. **A launch or close of the browser ends every
-  socket on it**; a URL granted before one opens nothing.
-- **A headed browser with no page but DevTools for 1 s has gone**
-  (rationale); a tab closed and replaced inside that grace has not. One host
-  policy for both providers, which report only their page count.
-- **A headed socket carries no frames**; a socket with more than 2 MB queued
-  skips a provisional one.
-
-**Must paint changed stream frames provisionally and replace them with
-host-owned device-resolution captures.** `BrowserView` owns input-window,
-backlog, pacing and overdue-frame mechanics. **Never overlap captures or
-replace a newer input-driven provisional paint with an older capture**;
-active-tab changes owe a capture, and an uncapturable browser stays provisional.
-(rationale)
-
-Source of truth: `BrowserView` in `lib/src/host/browser-viewer.ts`, pinned by
-`lib/src/host/browser-viewer.test.ts`.
+  headed one seen connected. A headed browser left with no page is gone after a
+  grace (rationale). **A launch or close of the browser ends every socket on
+  it**; a URL granted before one opens nothing.
+- **A headed socket carries no frames.**
+- **Must paint changed stream frames provisionally and replace them with
+  host-owned device-resolution captures** (rationale).
 
 **Upstreams.** agent-browser: the daemon's stream, dialed on `127.0.0.1` only;
-**the host must drop its ~20 Hz re-broadcast by raw comparison against the last
-frame and tab list**, decoding a changed frame once (rationale); **a tab list or
-URL is state at any size**, never taken for a frame; a paste goes as key pairs.
-**A headed window is followed over its browser's CDP, held host-side and
-dialed on loopback only** (rationale): its page targets, and each second the
-shown page's viewport and ratio, which replace the daemon's own in `status`
-(rationale). **The CDP endpoint is asked of a daemon once** (rationale).
-**Every upstream dial ends by 5 s**, and `get cdp-url` by 10 s. Playwright: its
-CDP screencast ([Playwright](#playwright)).
+**the host must drop its re-broadcast by raw comparison against the last
+frame and tab list** (rationale); **a tab list or URL is state at any size**,
+never taken for a frame; a paste goes as key pairs. **A headed window is
+followed over its browser's CDP, held host-side and dialed on loopback only**
+(rationale): its page targets, and the shown page's viewport and ratio, which
+replace the daemon's own in `status` (rationale). **The CDP endpoint is asked
+of a daemon once** (rationale). **Every upstream dial is bounded.** Playwright:
+its CDP screencast ([Playwright](#playwright)).
 
-Source of truth: `createViewerServer`, `BrowserView` (`pages`,
-`WINDOW_GONE_GRACE_MS`), `measuredViewport` and `parseViewerInput` in
-`lib/src/host/browser-viewer.ts`; `BrowserStreamGrants` in
-`lib/src/host/browser-stream-guard.ts`; `ViewerFrame`, `encodeViewerFrame`, `decodeViewerFrame` and `ViewerState` in
-`lib/src/lib/platform/browser-automation.ts`; `viewStream`, `observeWindow` and
-`cdpEndpoint` in `lib/src/host/agent-browser-host.ts`. Pinned also by
-`lib/src/host/agent-browser-host.test.ts` and `lib/src/host/browser-host.test.ts`.
+Source of truth: `createViewerServer` and `BrowserView` in
+`lib/src/host/browser-viewer.ts`; `ViewerState` in
+`lib/src/lib/platform/browser-automation.ts`; `viewStream` and `observeWindow`
+in `lib/src/host/agent-browser-host.ts`.
 
 ### Pop-Out
 
-A popout (`agent-browser-popout`, `playwright-popout`) relaunches the same session headed, because
-Chrome fixes headed/headless at launch. The pane becomes a stub with Pop back in;
-while the window is still opening (a launch, attach or relaunch in flight) the
-stub offers nothing. **State carried in v1 is only the last
-http(s) active URL**, and on a pop-in the window's resolution: other tabs, DOM
-state, scroll, form inputs, session storage, cookies/logins do not survive.
+A popout relaunches the same session headed, because Chrome fixes
+headed/headless at launch; the pane becomes a stub with Pop back in. **State
+carried is only the last http(s) active URL**, and on a pop-in the window's
+resolution: other tabs, DOM state, scroll, form inputs, session storage,
+cookies/logins do not survive.
 
-A pop-out or pop-in is a `launch` of the bound session, under the host's
-lifecycle ([Browser Host](#browser-host)).
+A pop-out or pop-in is a `launch` of the bound session ([Browser Host](#browser-host)).
 agent-browser's relaunch runs `close`, **then terminates the daemon its state
 files prove live ([agent-browser](#agent-browser)) and waits for it to exit**
-(rationale), then reopens. **Never wait for the
-page to load** (rationale): its launch resolves once the *relaunched* daemon is
-up, asking `stream status` only after `open` returns. **A non-zero `open` exit
+(rationale), then reopens. **Never wait for the page to load** (rationale): the
+launch resolves once the *relaunched* daemon is up. **A non-zero `open` exit
 with the daemon up is a page still loading, not a failed launch**; only a launch
 without a published port fails, including after a zero exit. **Never query the
-daemon during the close/reopen gap** (rationale) — the host refuses every
-operation on a browser mid-launch ([Browser Host](#browser-host)) — so
-**Dormouse supplies the active-tab URL and the host trusts it**.
+daemon during the close/reopen gap** (rationale), so **Dormouse supplies the
+active-tab URL and the host trusts it**.
 
-While popped out, the pane's viewer socket carries no frames: **the host
-follows the window's page and resolution and reports it gone**
-([Viewer Socket](#viewer-socket)), and a window seen connected that goes
-auto-reverts to the pane. **Nothing but the pop-in's own `close` may run a CLI
-verb for a browser whose window closed** (rationale).
+While popped out, **the host follows the window's page and resolution and
+reports it gone** ([Viewer Socket](#viewer-socket)), and a window seen connected
+that goes auto-reverts to the pane. **Nothing but the pop-in's own `close` may
+run a CLI verb for a browser whose window closed** (rationale).
 
 **A pop-in, by the window closing or Pop back in, fixes the screencast at the
-window's last reported viewport and ratio**: sync disengages, and one
-`set viewport <w> <h> <dpr>` waits as the pending intent for the headless
-browser ([Browser Connection](#browser-connection)). A window that reported
+window's last reported viewport and ratio**: sync disengages, and that size
+waits as the pending intent for the headless browser. A window that reported
 none leaves sync as it was.
 
-Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts` (pop-out state,
-auto-revert, `windowViewport`, `fixViewport`), `lib/src/host/agent-browser-host.ts` (`killDaemon`, `observeWindow`),
-VS Code/standalone shutdown wiring. Pinned by `relaunch (pop-out / pop-in)` in
-`lib/src/components/wall/agent-browser-surface-controller.test.ts`.
+Source of truth: `lib/src/components/wall/agent-browser-surface-controller.ts`
+(`fixViewport`), `killDaemon` in `lib/src/host/agent-browser-host.ts`.
 
 ### Browser Host
 
 **Every browser operation rides one `PlatformAdapter.browser(request)`**: a
-provider-tagged `BrowserRequest` — `{ provider, binding: { session?, cwd?,
-binaryPath? } }` plus one operation — answered by a `BrowserResult`. A host lists
+provider-tagged `BrowserRequest` answered by a `BrowserResult`. A host lists
 the providers it drives in `browserProviders`; one without them (the web demo)
 offers no automated renderer. VS Code runs the shared host in the extension
 host; standalone runs the bundled copy in the sidecar behind one Rust command.
 **No frame rides a request's transport**: frames reach the webview over the
 [Viewer Socket](#viewer-socket), never the sidecar stdio PTY traffic shares.
 
-| Operation | Contract |
-| --- | --- |
-| `launch` | Without a session, open an http(s) `url` in a new GUI session; with one, navigate it when it is up in the mode asked for, else relaunch it headed or headless at `url`, blank when that page is not http(s). Resolves when the browser is up, not when the page loads ([Pop-Out](#pop-out)). |
-| `attach` | The live browser's stream, found without starting a browser ([agent-browser](#agent-browser), [Playwright](#playwright)), with headedness where the provider can tell. Only a gone browser, for a caller naming a page, is relaunched there (headed on request), answering `relaunched`; one it cannot view is left alone. |
-| `measure` | Measure the active page's CSS width, height and device-pixel ratio without starting a browser. |
-| `view` | A single-use viewer socket URL for the browser at a `stream`, `headed` for a popped-out pane ([Viewer Socket](#viewer-socket)). |
-| `edit` | select-all/copy/cut via fixed host-owned JS plus an OS clipboard write. |
-| `navigate`, `history`, `tab`, `viewport`, `close` | One fixed argv (agent-browser) or client call (Playwright) each. |
+- **`launch`** without a session opens an http(s) `url` in a new GUI session;
+  with one, it navigates the browser when it is up in the mode asked for, else
+  relaunches it headed or headless at `url`. It resolves when the browser is up,
+  not when the page loads.
+- **`attach` and `measure` never start a browser.** Only a gone browser, for a
+  caller naming a page, is relaunched there, answering `relaunched`; one it
+  cannot view is left alone.
+- **Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through
+  the webview channel**: each operation is one fixed argv or client call, and
+  `edit` runs fixed host-owned JS plus an OS clipboard write. The trusted `dor`
+  process keeps native passthrough.
 
-**Every transport waits `BROWSER_REQUEST_TIMEOUT_MS` (40s) for any reply**, past
-agent-browser's 25s action timeout, so the webview never re-asks while the host
+**Every transport waits `BROWSER_REQUEST_TIMEOUT_MS` for any reply**, past
+agent-browser's own action timeout, so the webview never re-asks while the host
 still works.
 
 **Must run one lifecycle for both providers**, whose native primitives are
@@ -597,79 +474,58 @@ canonical in `BrowserProvider`:
   native identity**, in arrival order, so two panes restoring one session
   relaunch it once. **A close runs after the launch or attach already running,
   closing what it brings up, and supersedes one sent before it that has not
-  begun**, which answers that the browser was closed (rationale). **A close
-  also cancels, by webview-minted `requestId`, the closing Surface's own
-  launches, relaunches and page-naming attaches still unanswered
-  (`cancels`); one arriving after it answers the same and opens nothing.**
-  The host keeps a cancelled id five minutes, at most 256.
+  begun** (rationale). **A close also cancels, by webview-minted `requestId`,
+  the closing Surface's own launches, relaunches and page-naming attaches still
+  unanswered; one arriving after it opens nothing.**
 - **A launch naming a session whose browser is up in the mode it asks for
   must navigate it, never stop it** (a Tool re-announced); only one gone or in
   the other mode is relaunched (rationale). agent-browser cannot report its
   mode: one this host did not launch headed counts as headless.
 - **Must refuse every operation but `launch`, `attach` and `close` on a
   browser a launch is replacing or a close is ending**, `view` included, until
-  it is done, so nothing reaches a browser in the close/reopen gap
-  ([Pop-Out](#pop-out)), whichever Surface asks; the launch or close has ended
-  every viewer socket on it first, so no capture does either.
-- **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**: startup,
-  queueing included, gets 30 s from the request's arrival. A relaunch stops
-  what runs the session first, then resolves once the provider reports the
-  browser up, **never waiting for the page**.
-- **A launch that gives up must let its `open` land, for up to 4 s, before
+  it is done, whichever Surface asks.
+- **Must answer a launch inside `BROWSER_REQUEST_TIMEOUT_MS`**, queueing
+  included. **A launch that gives up must let its `open` land briefly before
   closing the session**, and close again when a later `open` lands unless a
   newer launch owns the session (rationale).
 - **Once `open` returns, only a still-current launch closes stray blank and
-  new-tab pages (`isBlankUrl`), last first, and only while a real page is
-  open**, so it never closes the sole tab (rationale). One policy for every
-  launch of either provider, fresh or relaunched.
-- **Every provider call a browser's queue waits on must be bounded** — a
-  launch's by its deadline, a close by 10 s — so one hung CLI holds that
-  browser's later requests only that long; **shutdown waits on the queue at
-  most 10 s** (rationale).
+  new-tab pages (`isBlankUrl`), and only while a real page is open**, so it
+  never closes the sole tab (rationale).
+- **Every provider call a browser's queue waits on must be bounded**, and so is
+  shutdown's wait on the queue (rationale).
 - **A headed launch is tracked for shutdown before it starts**, so a window
-  whose page never loads is still closed; a headless relaunch or a close drops
-  it. **Shutdown supersedes pending launches and sweeps, then closes every
-  tracked headed browser**, so quitting orphans no window.
-
-Pinned by `lib/src/host/browser-host.test.ts`, and against the controller by
-`a closed Surface and the next launch into its session` in
-`lib/src/components/wall/agent-browser-surface-controller.test.ts`.
+  whose page never loads is still closed. **Shutdown supersedes pending
+  launches and sweeps, then closes every tracked headed browser**, so quitting
+  orphans no window.
 
 **Host-side validation is the security boundary: `parseBrowserRequest` rebuilds
 every request field by field before a provider sees it** — a known provider and
 operation, an http(s) navigation or new-session URL, bounded dimensions, a tab
-id that cannot read as an option, a session name neither
-CLI reads as an option or a path, and request ids of at most 64 `[A-Za-z0-9-]`,
-32 per close (rationale). Pinned by
-`lib/src/host/agent-browser-host.test.ts`.
+id that cannot read as an option, a session name neither CLI reads as an option
+or a path, and bounded request ids (rationale).
 
 **`binaryPath` crosses from the webview realm, so it is checked at the spawn**
 (rationale). Accepted: the provider's executable by file name — absolute, or
 bare and resolved on `PATH` — plus the host's own override variable by exact
-match. **A refused path is dropped, never fatal**, so the host's own candidates
-run. The webview applies the same predicate before sending one
-(`browserHandle`) or storing one.
+match (`DORMOUSE_AGENT_BROWSER_BIN`, `DORMOUSE_PLAYWRIGHT_BIN`). **A refused
+path is dropped, never fatal**, so the host's own candidates
+run. The webview applies the same predicate before sending or storing one.
 
 **A crisp capture a CLI writes lands in a fresh, randomly named file in a
-private per-process directory, is read into memory and deleted — read or not,
-failed or killed — and the directory is removed at shutdown** (rationale).
-**One capture per browser is in flight**: a viewer socket asking meanwhile joins
-it — never one from before the browser's close or relaunch — and an
-agent-browser capture's spawn is killed past 30s. **Must use a per-process
-`mkdtemp` directory, mode `0700` on Unix, and retry failed creation.** Windows
-permission limits are `docs/specs/security-local.md` -> "Browser panes".
+private per-process `mkdtemp` directory (mode `0700` on Unix), is read into
+memory and deleted — read or not, failed or killed — and the directory is
+removed at shutdown** (rationale). **One capture per browser is in flight**;
+a viewer socket asking meanwhile joins it, never one from before the browser's
+close or relaunch. Windows permission limits are `docs/specs/security-local.md`
+-> "Browser panes".
 
-Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
-`createBrowserHost`, `BrowserProvider`), `BROWSER_PROVIDERS` (`isSessionName`,
-`isAllowedBinary`) in `dor-lib-common/src/browser-providers.ts`, `BrowserRequest` in
-`lib/src/lib/platform/browser-automation.ts`, `browserHandle` in
-`lib/src/components/wall/browser-automation.ts`,
-`createBrowserCaptures` in `lib/src/host/browser-capture.ts`,
-`privateCaptureDir` in `lib/src/host/private-capture-dir.ts`,
-`vscode-ext/src/agent-browser-host.ts`,
-`vscode-ext/src/webview-html.ts`, `standalone/src/tauri-adapter.ts`,
-`standalone/src-tauri/src/lib.rs` (`browser_request`),
-`standalone/sidecar/main.js`.
+Source of truth: `parseBrowserRequest` and `createBrowserHost` in
+`lib/src/host/browser-host.ts`, `isAllowedBinary` in
+`dor-lib-common/src/browser-providers.ts`, `BrowserRequest` in
+`lib/src/lib/platform/browser-automation.ts`, `createBrowserCaptures` in
+`lib/src/host/browser-capture.ts`, `vscode-ext/src/agent-browser-host.ts`,
+`standalone/sidecar/main.js`. The lifecycle is pinned by
+`lib/src/host/browser-host.test.ts`.
 
 ### agent-browser
 
@@ -679,86 +535,73 @@ argv per operation. `--headed` is a no-op against a *live* daemon; only a
 relaunch changes the mode.
 
 - **`attach` reads the live port from `<session>.pid` / `<session>.stream` and a
-  port probe, never spawning** — any CLI verb starts a daemon to answer. A
-  daemon up but not streaming is left alone; its native identity is its session.
-  **A state file written before this boot reads as absent.**
+  port probe, never spawning** — any CLI verb starts a daemon at `about:blank`
+  to answer. A daemon up but not streaming is left alone. **A state file
+  written before this boot reads as absent.**
 - **Never signal a pid its state files do not prove to be the session's live
   daemon** (`liveDaemon`): named by a pid file from this boot, alive, beside a
   stream port that accepts, checked before `close` (rationale).
+- **Only a launch's own steps may run a CLI verb with no daemon up**: an
+  operation, a capture or `get cdp-url` runs only on that same proof; **a stream
+  is captured only when the proof names its port**.
 - **A launch runs `open` in the binding's project directory while it exists**,
   so a relaunch reads the same `./agent-browser.json` the `dor agent-browser` there did;
   every other call runs in the host's.
-- **Every spawn passes the `binaryPath` gate in `runWithBinaryFallback`**, the
-  host's `DORMOUSE_AGENT_BROWSER_BIN` being the exact-match override.
-- **Only a launch's own steps may run a CLI verb with no daemon up**: an
-  operation, a capture or `get cdp-url` runs only on that same proof, since
-  any verb starts a daemon at `about:blank` to answer; **a stream is captured
-  only when the proof names its port**.
 - **`dor agent-browser` must read the stream port itself after a command that may bind**
-  (`stream status --json`, safe once the command made the daemon) and hand it
-  over; the host views it on loopback without reading the caller's socket
-  directory (rationale). **Never carry a socket directory to the host** — it
-  kills the pid it reads there. **Host-side operations and captures for a
-  session in a socket directory the host does not share are refused**, as the
-  host sees no daemon for it; its viewer socket still sends every changed
-  frame, and a close runs the CLI under the session's shell environment.
+  (`stream status --json`) and hand it over; the host views it on loopback
+  without reading the caller's socket directory (rationale). **Never carry a
+  socket directory to the host** — it kills the pid it reads there.
+  **Host-side operations and captures for a session in a socket directory the
+  host does not share are refused**; its viewer socket still sends every
+  changed frame, and a close runs the CLI under the session's shell environment.
 - **The post-launch sweep lists and closes page targets over the browser's
   CDP, never `tab list`** (rationale).
 
-Source of truth: `createAgentBrowserProvider` (`listTabs`, `closeTab`,
-`browserCall`) and `runWithBinaryFallback` in
-`lib/src/host/agent-browser-host.ts`, `isAllowedAgentBrowserBinary` and
-`streamStatusArgs` in `dor-lib-common/src/browser-providers.ts`,
-`streamStatus` in `dor/src/commands/agent-browser.ts`. Pinned by
-`lib/src/host/agent-browser-host.test.ts`.
+Source of truth: `createAgentBrowserProvider` in
+`lib/src/host/agent-browser-host.ts`, `streamStatus` in
+`dor/src/commands/agent-browser.ts`.
 
 ### Playwright
 
-**Must use the user's installed `@playwright/cli`, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH`.** GUI launches use Chromium. Native commands retain Playwright semantics: `open` restarts, `goto` navigates; commands for unsupported engines still run, with a viewer warning. The viewer requires CLI 0.1.19’s local browser-binding endpoint; installation errors name this requirement. A Playwright session lives in its CLI project scope, so a binding's cwd and executable pin every later command, relative paths included; `--session` uses the caller's own scope. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
+**Must use the user's installed `@playwright/cli`, resolved from `DORMOUSE_PLAYWRIGHT_BIN` or `PATH`**, with `playwright-cli` as the accepted executable name under the agent-browser rule for `binaryPath`. GUI launches use Chromium. Native commands retain Playwright semantics: `open` restarts, `goto` navigates; commands for unsupported engines still run, with a viewer warning. The viewer requires CLI 0.1.19's local browser-binding endpoint; installation errors name this requirement. **A Playwright session lives in its CLI project scope, so a binding's cwd and executable pin every later command**, relative paths included; `--session` uses the caller's own scope. GUI Connect inherits the source terminal's cwd; a swap without one uses the host cwd.
 
-**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. Never load modules from the registry's library path. The host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor playwright`'s binding attaches with no page, and reports the browser's headedness. Native CLI tabs and the pane share the selected tab; the host polls tab selection and metadata every 750ms while viewed, broadcasting only changes, and the current state to each connecting viewer; each also reports the browser's page count ([Viewer Socket](#viewer-socket)) and the active page's viewport and ratio. Captures reuse tab state for up to 750ms; explicit host controls refresh immediately. **The controller must apply a host-reported mode before the new stream**, so sync never sizes a headed window, except mid-relaunch or as an echo ([Browser Connection](#browser-connection)).
+**Must discover the native session in its CLI project scope and connect using that installation's matching Playwright client.** Accept only a unique registry entry matching session, workspace and library, with a local pipe endpoint and Chromium engine. **Never load modules from the registry's library path**; the host derives the client from the validated CLI installation. **`attach` relaunches at the page only when the registry lists no browser for the session**, never one it cannot view; `dor playwright`'s binding attaches with no page. It reports the browser's headedness, and **the controller must apply a host-reported mode before the new stream**, so sync never sizes a headed window, except mid-relaunch or as an echo. Native CLI tabs and the pane share the selected tab, which the host polls while viewed.
 
-Arbitrary CLI arguments, JavaScript and CDP methods are unavailable through the webview channel; the trusted `dor playwright` process retains native passthrough. Executable hints use the same filename/exact-host-override boundary as agent-browser, with `playwright-cli` as the accepted name; `dor playwright` applies it to the executable a binding returns (`docs/specs/dor-cli.md` → Browser Surface Addressing).
+**Every CLI call a launch waits on is killed at its deadline; every other one is bounded, except `open`**, whose end could take its browser down. Viewer disconnect alone leaves the CLI browser alive; **a browser that disconnects on its own is reported gone to its viewers**. **A screencast that fails to start must forget its page**, so the next poll retries.
 
-A relaunch closes the previous CLI session, and a launch completes when the browser endpoint is ready; its stream is the host's number for that connection. **Every CLI call a launch waits on is killed at its deadline; every other one at 10 s, except `open`**, which lasts as long as the page load and whose end could take its browser down; nothing waits on it past a launch's own bounds. Shutdown also disconnects viewers. Viewer disconnect alone leaves the CLI browser alive; **a browser that disconnects on its own is reported gone to its viewers**. Concurrent input/captures share CDP attachments; disposal releases late attachments. **A screencast that fails to start must forget its page**, so the next poll releases the attachment and retries.
-
-The viewer socket ([Viewer Socket](#viewer-socket)) takes its frames from the CDP screencast, **decoded once and acknowledged no faster than 20 a second** (rationale), and inserts a paste with CDP `Input.insertText`. **Must drop a frame byte-identical to the last, still acknowledging it** (rationale). **Input waiting on CDP past 256 messages closes the viewer socket.**
+Frames come from the CDP screencast, **decoded once with acknowledgements paced** (rationale); a paste is inserted with CDP `Input.insertText`. **Must drop a frame byte-identical to the last, still acknowledging it** (rationale).
 
 **Must write a page's viewport only through Playwright's own `setViewportSize`** — sync and a Fixed size alike — **never a CDP metrics override from the host's session** (rationale). **Must preserve the browser context's measured ratio when DPR is omitted, and reject an explicit different DPR before writing dimensions.**
 
-Source of truth: `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`; `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`. Pinned by `lib/src/host/playwright-host.test.ts` (opt-in real CLI via `DORMOUSE_PLAYWRIGHT_TEST_BIN`), `lib/src/host/playwright-host.lifecycle.test.ts`, and `AgentBrowserPanel Playwright params` in `lib/src/components/wall/AgentBrowserPanel.test.tsx`.
+Source of truth: `createPlaywrightProvider` in `lib/src/host/playwright-host.ts`; `resolvePlaywrightInstall` in `lib/src/host/playwright-install.ts`; `followParamsHeadedness` in `lib/src/components/wall/agent-browser-surface-controller.ts`. `lib/src/host/playwright-host.test.ts` runs against a real CLI when `DORMOUSE_PLAYWRIGHT_TEST_BIN` is set.
 
 ## Iframe Renderer
 
 `dor iframe <url>` frames the page's own DOM — zero-lag for human inspection, but
 agents cannot drive or read it. On hosts with `createIframeProxyUrl`,
-`IframePanel` frames a per-surface loopback proxy URL; without it, a raw
+`IframePanel` frames a per-grant loopback proxy URL; without it, a raw
 uninstrumented iframe.
 
-**Must keep a frame transparent until its first `load`, or 1s after it is
-given a source**, so the pane's themed background shows rather than a white
-blank (rationale); its `bg-white` stays for pages that expect a white canvas.
-Navigation, reload, and history mount frames that never hide again; only losing
-the URL starts over.
+**Must keep a frame transparent until its first `load`, or a short timeout after
+it is given a source**, so the pane's themed background shows rather than a
+white blank (rationale).
 
 The proxy instruments any `http://` upstream, loopback and remote alike:
 
-- HTTP (any host): headers rewritten per the table below, the shim injected into
-  HTML, HTTP and WebSocket traffic passed through. **A site's "do not embed" is
+- Headers are rewritten per the table below and the shim injected into HTML;
+  HTTP and WebSocket traffic passes through. **A site's "do not embed" is
   overridden, not obeyed** (rationale); JS framebusting is neutralized
   separately, by the sandbox.
-- Unreachable / timed-out upstream: served Dormouse error page, distinct for
-  "couldn't connect" and "didn't respond in 30s of socket idle", in the system
-  color scheme; **only a loopback upstream is called a dev server**.
-- HTTPS: refused, per the table below. **Every panel error but a non-http(s)
-  URL offers Open in agent-browser** (a swap to `agent-browser-screencast`) where the host
-  can launch one, with `dor agent-browser open <url>` as the fallback text.
+- An unreachable or timed-out upstream gets a served Dormouse error page
+  distinguishing "couldn't connect" from "didn't respond"; **only a loopback
+  upstream is called a dev server**.
+- **Every panel error but a non-http(s) URL offers Open in agent-browser** (a
+  swap to `agent-browser-screencast`) where the host can launch one, with
+  `dor agent-browser open <url>` as the fallback text.
 - **Must refuse link-local / cloud-metadata address literals (`scheme`) after
   canonicalizing equivalent spellings**, including decimal/octal/hex, short
   forms, and IPv4-mapped IPv6. This checks the URL's hostname literal, not DNS
   answers; named targets remain the user's command authority.
-  Source of truth: `isBlockedAddress` in `lib/src/host/iframe-proxy-rewrite.ts`,
-  pinned by `lib/src/host/iframe-proxy-rewrite.test.ts`.
 
 **Must refuse `https://` at every entry to the iframe renderer on a host with
 the proxy, in the one `IFRAME_HTTP_ONLY` wording** (a host without it frames
@@ -768,26 +611,24 @@ https raw):
 | --- | --- |
 | `surface.iframe` (`dor iframe`) | refused before any pane opens, naming `dor agent-browser open <url>` |
 | Display modal | iframe option disabled, showing the wording |
-| Render swap to `iframe`, tool or not | refused with a console warning; the modal never offers it, since both judge the page on screen (chrome URL, then `params.url`) |
-| New-tab request from a framed page | `agent-browser-screencast` where supported, bound to its launch and closed on failure; otherwise the iframe refusal |
-| A pane already holding one | `scheme` panel error with Open in agent-browser and `dor agent-browser open <url>` |
-
-The terminal context's port rows are always `http://` (`listenerUrlsByPort`).
+| Render swap to `iframe`, tool or not | refused, judged on the page on screen (chrome URL, then `params.url`) |
+| New-tab request from a framed page | `agent-browser-screencast` where supported, closed on a failed launch; otherwise the iframe refusal |
+| A pane already holding one | `scheme` panel error |
 
 Header rewriting:
 
 | Direction | Header | Treatment |
 | --- | --- | --- |
 | request | `Host` | upstream host |
-| request | `Origin` | upstream origin **only** when it is the proxy's own; else forwarded untouched (absent stays absent) |
-| request | `Referer` | proxy origin replaced with the upstream origin |
+| request | `Origin` | upstream origin **only** when it is the proxy's own; else forwarded untouched (absent stays absent), on request and upgrade paths |
+| request | `Referer` | an exact parsed proxy origin replaced with the upstream origin, path and query kept |
 | request | `Accept-Encoding` | deleted on a document load (`Sec-Fetch-Dest` `document`, `iframe`, `frame`, `embed`, `object`, or none sent), so its HTML comes back identity; kept on every other request |
 | request | `Cookie` | dropped, including WebSocket handshakes |
 | response | `Set-Cookie` | dropped, including successful and refused WebSocket handshakes |
 | response | `X-Frame-Options`, CSP headers | with validated chain, replaced by `frame-ancestors 'self' <validated chain>`; opted-in CSP policies remain alongside it (rationale) |
 | response | `X-Dormouse-Preserve-CSP: 1` | consumed; preserves upstream CSP headers and meta policies |
 | response | hop-by-hop (RFC 7230 §6.1) | dropped |
-| response | `Location` | upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
+| response | `Location` | an exact upstream origin rewritten back to the proxy origin, so a redirect stays inside the proxy |
 | response | `Vary` | `Sec-Fetch-Dest` appended, since the `Accept-Encoding` sent upstream depends on it |
 | response body | `<meta http-equiv="content-security-policy">` | removed unless the response opts into CSP preservation |
 
@@ -797,15 +638,14 @@ Header rewriting:
 its `content-type` as sent**, charset included; a compressed body, or a UTF-16
 one (any WHATWG label, or a byte-order mark), passes through uninstrumented
 (rationale). **Never place the shim ahead of the doctype, a `<meta charset>` or a
-UTF-8 BOM**: it goes before `</head>`, else after `<body…>`, else after the
-document's leading BOM/doctype/`<html>`/`<head>`/`<meta charset>` tags.
+UTF-8 BOM.**
 
-**Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`.** Add the validated ancestor policy separately, for every MIME type; preserve meta policies during HTML instrumentation. Never infer this opt-in from request headers. Additional upstream restrictions may prevent framing or shim execution. (rationale)
+**Must preserve enforced and report-only CSP verbatim when the upstream response sends `X-Dormouse-Preserve-CSP: 1`**, for every MIME type, adding the validated ancestor policy separately. **Never infer this opt-in from request headers.** Additional upstream restrictions may prevent framing or shim execution. (rationale)
 
 **One dedicated `127.0.0.1:0` server per grant, with no token in the path** — the
 origin itself is the grant boundary (rationale). Grants have a sliding idle TTL
-and a hard cap; **a request refused by the `Host` check must not refresh the
-TTL**, so a stranger cannot hold one open.
+and a hard cap; **a request the `Host` check refuses never refreshes the TTL**,
+so a stranger cannot hold one open.
 
 Current limits: absolute-origin subresources (`http://localhost:5173/...`,
 `ws://localhost:5173/...`) bypass the proxy uninstrumented — acceptable for
@@ -814,11 +654,9 @@ keyboard and pointer interaction inside the frame by design.
 
 Source of truth: `lib/src/components/wall/IframePanel.tsx`,
 `lib/src/host/iframe-proxy.ts`, `lib/src/host/iframe-proxy-rewrite.ts`
-(`FRAMING_RESPONSE_HEADERS`, `HOP_BY_HOP_RESPONSE_HEADERS`, `instrumentHtml`,
-`isBlockedAddress`, `errorPageHtml`), `lib/src/lib/platform/iframe-proxy-types.ts`
-(`IFRAME_HTTP_ONLY`), `iframeRefusal` in `lib/src/components/wall/browser-url.ts`,
-`isLoopbackHostname` in `lib/src/lib/ip-literal.ts`. Tests: `before its first
-paint` in `lib/src/components/wall/IframePanel.test.tsx`.
+(`instrumentHtml`, `isBlockedAddress`), `IFRAME_HTTP_ONLY` in
+`lib/src/lib/platform/iframe-proxy-types.ts`, `iframeRefusal` in
+`lib/src/components/wall/browser-url.ts`.
 
 ### Iframe Shim
 
@@ -835,109 +673,70 @@ it — the header's URL editor writes there too. (rationale)
 **Parent listeners must validate the message origin against live proxy grants.**
 Leader messages feed the same Wall command-mode exit path as in-document
 dual-tap; `IframePanel` maps proxy-origin `location` URLs back to upstream URLs
-for chrome/history without reloading the frame.
-
-New-tab requests show an overlay: accept opens an adjacent browser pane (for
-`https://`, see [Iframe Renderer](#iframe-renderer)); cancel drops it.
+for chrome/history without reloading the frame. A new-tab request asks before
+opening an adjacent browser pane.
 
 **Once a proxied frame's shim has reported, a `load` with no `location` report
-within 1s marks the document uninstrumented** (not HTML, off the proxy, refused,
+soon after marks the document uninstrumented** (not HTML, off the proxy, refused,
 or its grant gone), and a banner offers Reload and Open in agent-browser. Only a
-`loaded` report naming the proxy origin counts, including one up to 250ms before
-the load — a clicked link's report comes from the page being left; a new frame
-source waits for its first report again, since a non-HTML
-document served from the start carries no shim (rationale).
+`loaded` report naming the proxy origin counts; a new frame source waits for its
+first report again (rationale).
 
-Source of truth: `lib/src/host/iframe-proxy-rewrite.ts` (`iframeShim`),
-`lib/src/components/wall/browser-url.ts` (`browserSurfaceUrl`),
-`lib/src/components/Wall.tsx` (`onOpenBrowserPane`),
-`lib/src/lib/iframe-proxy-registry.ts`,
-`lib/src/components/wall/use-wall-keyboard.ts`, `lib/src/components/wall/IframePanel.tsx`.
+Source of truth: `iframeShim` in `lib/src/host/iframe-proxy-rewrite.ts`,
+`browserSurfaceUrl` in `lib/src/components/wall/browser-url.ts`,
+`lib/src/lib/iframe-proxy-registry.ts`, `lib/src/components/wall/IframePanel.tsx`.
 
 ### Iframe Focus And Rendering Notes
 
 - Cross-origin iframe focus blurs the parent window while `document.hasFocus()`
   remains true; **focus code must distinguish this from app backgrounding**.
 - Proxied frames adopt clicks from shim `pointerdown`; the raw fallback adopts
-  focus alone, acknowledging nothing, by the older `window.blur` + active iframe
-  heuristic.
-- **`IframePanel` must apply `transform: translateZ(0)` to its immediate
-  container**, or Chromium offsets out-of-process iframe pointer events from a
-  far-away compositing ancestor.
+  focus alone by the `window.blur` + active iframe heuristic.
 - **Every framed page is sandboxed, proxied or raw** (rationale), and the
   `sandbox` omits `allow-top-navigation` to block framebusting.
 - **The `allow` attribute grants no device or clipboard-read permission** —
   `autoplay`, `clipboard-write`, `fullscreen` only. (rationale)
 
-Source of truth: `lib/src/components/wall/IframePanel.tsx`, `subscribeWindowFocus` in `lib/src/lib/window-focus.ts`,
-`lib/src/lib/terminal-lifecycle.ts` (`registerSurfaceFocusHandle`, which
-focuses/blurs the iframe element like other surfaces).
+Source of truth: `lib/src/components/wall/IframePanel.tsx`, `subscribeWindowFocus` in `lib/src/lib/window-focus.ts`.
 
 ## Iframe Host Capability And CSP
 
 The optional `PlatformAdapter.createIframeProxyUrl` method and the
 `IframeProxyResult` union are canonical in the platform types. Reachability is
-diagnosed lazily by served error pages after the iframe loads the proxy URL, and
-frame refusal only as an uninstrumented load ([Iframe Shim](#iframe-shim)), so
-v1 mostly returns `ok` or `scheme`.
+diagnosed lazily by served error pages, and frame refusal only as an
+uninstrumented load ([Iframe Shim](#iframe-shim)). VS Code routes the request
+to `vscode-ext/src/iframe-proxy-host.ts`; standalone through the sidecar's
+`iframe:createProxyUrl`. The VS Code webview CSP must allow loopback frames
+(`docs/specs/vscode.md` → CSP policy).
 
 **The webview passes its own ancestor chain with every request for a proxy
 URL** — `location.origin` plus `location.ancestorOrigins`, knowable only in the
 realm that has a `location` (rationale). **Validated host-side and used
 all-or-nothing**: an unparseable or opaque (`"null"`) entry means no chain
-(rationale).
+(rationale). **With no chain the proxy preserves framing headers and injects
+nothing.**
 
-VS Code routes this through webview request/response messages to
-`vscode-ext/src/iframe-proxy-host.ts`; standalone routes through
-`standalone/src/tauri-adapter.ts` -> `standalone/src-tauri/src/lib.rs` ->
-sidecar `iframe:createProxyUrl`.
+Security boundaries — the `Host`, `Origin`, cookie, `frame-ancestors`, shim
+targeting and grant-refresh rules are audited in `docs/specs/security-local.md`
+→ "Loopback Listeners" and "Browser panes"; **never relax one without updating
+that audit**:
 
-The VS Code webview CSP must allow loopback frames (`docs/specs/vscode.md` →
-CSP policy, which prints the directive and its consequence).
-
-Security boundaries:
-
-- the proxy binds loopback only — a mitigation, **not** the boundary; the two
-  gates below are,
-- **`Host` must name the grant's own loopback port**, on the request and upgrade
-  paths alike, so DNS rebinding fails,
-- **the `Origin` rewrite applies only to a caller the proxy itself served**,
-- each grant fronts exactly one upstream,
-- no user script is injected,
-- link-local/cloud-metadata address literals follow [Iframe Renderer](#iframe-renderer),
+- the proxy binds loopback only — a mitigation, **not** the boundary;
+- each grant fronts exactly one upstream;
+- no user script is injected;
+- link-local/cloud-metadata address literals follow [Iframe Renderer](#iframe-renderer);
 - every other user-supplied `http://` target is trusted as the user's command,
   at the cost of the upstream's own XSS policy unless it opts into preservation.
 
-**Must replace framing controls with exactly `frame-ancestors 'self'
-<validated embedder chain>`.** `'self'` permits same-grant nesting; foreign
-ancestors fail. **Each shim hop must target only its origin and that chain's
-innermost origin, never `'*'`** (rationale; `docs/specs/security-local.md` →
-"Loopback Listeners"). **With no chain it preserves headers and injects nothing.**
-
-**Must refresh a grant's idle timer for every caller except one that named itself
-foreign.** `isOwnOrigin` and `isForeignOrigin` are not each other's negation — an
-*absent* `Origin` must keep refreshing. (rationale)
-
-**Must rewrite `Origin` only when it names the proxy itself.** Forward a foreign
-origin unchanged and keep an absent origin absent, on request and upgrade paths;
-`Referer` substitutes only an exact parsed proxy origin, preserving its path and query; redirects likewise substitute only an exact upstream origin. (rationale) The shared rule
-for all loopback listeners lives in `lib/src/host/loopback-guard.ts` and is
-audited by `docs/specs/security-local.md` → "Loopback Listeners".
-
-Iframe cookies and script-access limits: `docs/specs/security-local.md` → "Loopback Listeners".
-
-**Never relax** the `Host` validation, the conditional `Origin` gate, or the
-`frame-ancestors` replacement without updating that `docs/specs/security-local.md` audit. Pinned
-by `lib/src/host/iframe-proxy.test.ts`, which covers the upgrade path as well as
-the request path.
+**`'self'` in the replacement policy permits same-grant nesting; foreign
+ancestors fail.** `isOwnOrigin` and `isForeignOrigin` are not each other's
+negation — an *absent* `Origin` keeps refreshing a grant's idle timer (rationale).
 
 Source of truth: `lib/src/lib/platform/iframe-proxy-types.ts`,
-`lib/src/lib/platform/types.ts`, `lib/src/lib/platform/vscode-adapter.ts`,
-`lib/src/lib/embedder-origins.ts` (`embedderOrigins`),
-`lib/src/host/iframe-proxy-rewrite.ts` (`normalizeEmbedderOrigins`),
-`vscode-ext/src/message-types.ts`,
-`vscode-ext/src/message-router.ts`, `vscode-ext/src/webview-html.ts`,
-`standalone/src/tauri-adapter.ts`.
+`embedderOrigins` in `lib/src/lib/embedder-origins.ts`,
+`normalizeEmbedderOrigins` in `lib/src/host/iframe-proxy-rewrite.ts`,
+`lib/src/host/loopback-guard.ts`. Pinned by `lib/src/host/iframe-proxy.test.ts`,
+which covers the upgrade path as well as the request path.
 
 A moved iframe Surface remounts at its saved URL after consent: `docs/specs/layout.md` → Moving Surfaces between Workspaces.
 
