@@ -35,7 +35,7 @@ function TerminalContainer({
     if (!held) return;
     // After the pane's own mount (a child's effect runs first), before its first
     // fit: the hold makes that fit a no-op, as the phone's attach would.
-    holdSize(id, { holder: 'story-session', label: held.label, lease: '1', cols: held.cols, rows: held.rows });
+    holdSize(id, { holder: 'story-session', label: held.label, lease: '1', serviceId: 'story-service', cols: held.cols, rows: held.rows });
     getTerminalInstance(id)?.resize(held.cols, held.rows);
     return () => clearSizeHold(id);
   }, [id, held]);

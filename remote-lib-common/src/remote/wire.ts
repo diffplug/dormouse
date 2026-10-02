@@ -327,10 +327,9 @@ export type BurrowEnrollRequest = (
   /**
    * The relay origin the Burrow was built for. A Relay whose own origin differs
    * refuses the request before it reads the credential
-   * ({@link BurrowEnrollOriginMismatch}). Optional and additive: an older
-   * Burrow sends none and enrolls as before.
+   * ({@link BurrowEnrollOriginMismatch}); one that names none is a 400.
    */
-  origin?: string;
+  origin: string;
 };
 
 /** The 409 body for a {@link BurrowEnrollRequest} naming another origin. */
@@ -350,9 +349,7 @@ export interface BurrowEnrollResponse {
    * Whether the Burrow must demand a user-verified assertion (biometric/PIN,
    * not merely presence).
    *
-   * Optional and additive: an older Burrow reading a newer Relay's response
-   * ignores it, and a newer Burrow reading an older Relay's sees `undefined`,
-   * which is the same as `false`. It travels here rather than being
+   * Sent only when `true`; absent is `false`. It travels here rather than being
    * configured on the Burrow because the invariant is that the two sides
    * *mirror* — a Relay demanding UV while the Burrow does not means the Burrow is
    * the weaker verifier, and the Burrow is the one that decides access.
@@ -984,8 +981,6 @@ export interface TerminalDataEvent {
    * Base64url of the UTF-8 text projection: the same chunk with string-control
    * payloads removed, for a consumer reading output as text. Omitted means
    * identical to `bytes`; present is authoritative, an empty string included.
-   * Additive on protocol-v1 — an older Client that ignores it falls back to
-   * `bytes`, which is what it always used.
    */
   text?: string;
 }

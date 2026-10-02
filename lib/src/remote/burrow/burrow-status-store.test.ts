@@ -253,118 +253,8 @@ describe('publishing', () => {
 });
 
 
-describe('an answer from an older broker', () => {
-  /**
-   * A VS Code broker window may run the extension from before a field existed
-   * (`docs/specs/vscode.md` → the peer link), so the typed shape is filled in
-   * at the one seam where the untrusted one becomes it.
-   */
-  it('reads a missing `serving` as `enrolled`, and publishes when it flips', async () => {
-    vi.useFakeTimers();
-    let status: Record<string, unknown> = {
-      enrolled: true,
-      relayUrl: 'https://laptop.tailnet.ts.net',
-      burrowId: 'burrow-1',
-      connection: 'connected',
-      pairedClients: 0,
-      suggestedLabel: 'ned-mac',
-      offer: null,
-    };
-    burrowLink = {
-      command: async () => ({ ...status }),
-      respond: () => {},
-      notify: () => {},
-      on: () => () => {},
-    };
-
-    const listener = vi.fn();
-    const unsubscribe = subscribeToBurrowStatus(listener);
-    try {
-      await vi.advanceTimersByTimeAsync(0);
-      expect(getBurrowStatusSnapshot()).toMatchObject({
-        kind: 'ready',
-        status: { enrolled: true, serving: true },
-      });
-
-      status = { ...status, enrolled: false, relayUrl: null, burrowId: null };
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(getBurrowStatusSnapshot()).toMatchObject({ status: { enrolled: false, serving: false } });
-
-      // A current service's own answer wins, and `serving` alone moving is a change.
-      status = { ...status, serving: true };
-      const calls = listener.mock.calls.length;
-      await vi.advanceTimersByTimeAsync(2000);
-      expect(getBurrowStatusSnapshot()).toMatchObject({ status: { enrolled: false, serving: true } });
-      expect(listener.mock.calls.length).toBe(calls + 1);
-    } finally {
-      unsubscribe();
-    }
-  });
-
-  it('reads the shape from before one baked relay origin, and does not republish it', async () => {
-    // `offer` was `{ origin }`, a fresh object every poll; there was no
-    // `relayOrigin` or `relayMode` (docs/specs/relay.md → "Relay origin").
-    vi.useFakeTimers();
-    const command = vi.fn(async () => ({
-      enrolled: false,
-      serving: false,
-      relayUrl: null,
-      burrowId: null,
-      connection: 'stopped',
-      pairedClients: 0,
-      suggestedLabel: 'ned-mac',
-      offer: { origin: 'https://ned-mac.tail9c2f1.ts.net' },
-    }));
-    burrowLink = { command, respond: () => {}, notify: () => {}, on: () => () => {} };
-
-    const listener = vi.fn();
-    const unsubscribe = subscribeToBurrowStatus(listener);
-    try {
-      await vi.advanceTimersByTimeAsync(0);
-      expect(getBurrowStatusSnapshot()).toMatchObject({
-        kind: 'ready',
-        // No mode reads as Hosted: no enroll form the old broker's `enroll`
-        // could be sent from.
-        status: { offer: true, relayOrigin: '', relayMode: 'hosted' },
-      });
-      await vi.advanceTimersByTimeAsync(3 * 2000);
-      expect(command.mock.calls.length).toBeGreaterThan(1);
-      expect(listener).toHaveBeenCalledTimes(1);
-    } finally {
-      unsubscribe();
-    }
-  });
-
-  it('names an older broker\'s enrolled Relay from its `relayUrl`', async () => {
-    burrowLink = {
-      command: async () => ({
-        enrolled: true,
-        relayUrl: 'https://laptop.tailnet.ts.net',
-        burrowId: 'burrow-1',
-        connection: 'connected',
-        pairedClients: 1,
-        suggestedLabel: 'ned-mac',
-        offer: null,
-      }),
-      respond: () => {},
-      notify: () => {},
-      on: () => () => {},
-    };
-    const unsubscribe = subscribeToBurrowStatus(() => {});
-    try {
-      await vi.waitFor(() =>
-        expect(getBurrowStatusSnapshot()).toMatchObject({
-          status: { relayOrigin: 'https://laptop.tailnet.ts.net', offer: false },
-        }),
-      );
-    } finally {
-      unsubscribe();
-    }
-  });
-});
-
 describe('a Hosted enrollment in the status', () => {
-  it('reads one waiting without republishing it, and none from a broker without the field', async () => {
+  it('reads one waiting without republishing it, and none of a shape it does not draw', async () => {
     vi.useFakeTimers();
     let hostedEnrollment: unknown = {
       status: 'waiting',
@@ -383,6 +273,7 @@ describe('a Hosted enrollment in the status', () => {
       pairedClients: 0,
       suggestedLabel: 'ned-mac',
       offer: false,
+      accountOrigin: null,
       // A fresh object every answer, as the bridge delivers it.
       ...(hostedEnrollment === undefined ? {} : { hostedEnrollment: structuredClone(hostedEnrollment) }),
     }));
@@ -393,8 +284,6 @@ describe('a Hosted enrollment in the status', () => {
     try {
       await vi.advanceTimersByTimeAsync(0);
       expect(shown()).toEqual(hostedEnrollment);
-      // A broker older than `accountOrigin` names no account page.
-      expect((getBurrowStatusSnapshot() as { status: { accountOrigin: unknown } }).status.accountOrigin).toBeNull();
       await vi.advanceTimersByTimeAsync(3 * 2000);
       expect(listener).toHaveBeenCalledTimes(1);
 

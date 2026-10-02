@@ -189,7 +189,7 @@ Paths and shapes are `API_ROUTES` / `WS_ROUTES` and their types in
 | `POST /api/signin/finish` | — | Verifies the assertion; issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin` | session token | Takes a `PresenceBinding`, mints a single-use `relayNonce`, answers `presenceChallenge(binding, nonce)` with the bound credential as the sole `allowCredentials` entry; 404 for an unregistered credential, 400 for a missing or malformed binding |
 | `POST /api/reauth/finish` | session token | Verifies against the **stored** key for that credential; **extends nothing** — not the session, not the relay socket |
-| `POST /api/burrow/enroll` | setup password or enroll token | Exactly one credential, else 400. **Takes no label.** A foreign `origin` is a 409 `ORIGIN_MISMATCH_ERROR` naming the Relay's, ahead of the credential (rationale); absent, it enrolls (a pre-release Burrow). `MAX_ENROLLED_BURROWS` is a 409 naming `burrows.json`, checked after the credential (rationale) |
+| `POST /api/burrow/enroll` | setup password or enroll token | Exactly one credential, else 400. **Takes no label.** A foreign `origin` is a 409 `ORIGIN_MISMATCH_ERROR` naming the Relay's, ahead of the credential (rationale), and a missing one a 400. `MAX_ENROLLED_BURROWS` is a 409 naming `burrows.json`, checked after the credential (rationale) |
 | `POST /api/burrow/setup-token` | burrow token | Mints the token behind this Burrow's QR (below) |
 | `GET /api/burrows` | session token | Enrolled Burrows and whether each is connected |
 | `GET /api/push/config` | — | The public VAPID key, or `null` when push is off |
@@ -376,9 +376,9 @@ Resource bounds:
 
 **Must answer the text `RELAY_PING` with `RELAY_PONG`** on either socket kind,
 compared whole before any parse, never forwarded and never an `error`. **The
-Burrow and Pocket ping every `RELAY_PING_INTERVAL_MS` and enforce a deadline
-only once a pong has arrived on that socket**, so a Relay that never answers is
-never held to one; Pocket pauses while the page is hidden.
+Burrow and Pocket ping every `RELAY_PING_INTERVAL_MS`, and a ping still
+unanswered when the next is due ends the socket**; Pocket pauses while the page
+is hidden.
 
 **Only one socket may own a `burrowId`.** A second registration displaces the
 first: its Clients get `burrow-gone`, **their bindings are cleared at
@@ -487,9 +487,7 @@ The origin sets the build's mode (rationale):
   **Every other build is a release build and fails when the flag is set or the
   origin is loopback `http:`** (rationale). Unflagged, a loopback origin is a
   local self-host Relay.
-- **A retired variable set non-blank fails the build**:
-  `DORMOUSE_REMOTE_CONNECT_SRC`, `DORMOUSE_HOSTED_ORIGIN`,
-  `DORMOUSE_ONE_TIME_ORIGIN`.
+- **The retired `DORMOUSE_REMOTE_CONNECT_SRC` set non-blank fails the build.**
 - **Managed voice's origin is the constant `HOSTED_VOICE_ORIGIN`, never baked
   or overridden**, a loopback dev Hosted build included (rationale). **The
   account's origin is the constant `HOSTED_ACCOUNT_ORIGIN`, never baked and never
@@ -506,9 +504,8 @@ refuses all three under the network policy's `nothing`
 restores it (rationale). Origins compare as `new URL(...).origin`.
 
 **The enroll request carries the baked origin**, which a Relay served from
-another refuses ("HTTP API"). **An older Relay enrolls anyway, so the Burrow refuses a reported
-`origin` other than its own before persisting**, naming the `burrows.json` row
-left behind.
+another refuses ("HTTP API"). **The Burrow refuses a reported `origin` other
+than its own before persisting**, naming the `burrows.json` row left behind.
 
 **Both build failure modes are silent, so the build catches both**
 (rationale): a bad variable, and a bundle the `define` did not reach, the

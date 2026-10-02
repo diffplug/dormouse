@@ -18,7 +18,6 @@
 
 import {
   HOSTED_ENROLLMENT_END_REASONS,
-  servingOf,
   type HostedEnrollmentState,
   type InvitationEvent,
   type PushSendSummary,
@@ -238,44 +237,18 @@ function refreshAfterMutation(): Promise<void> {
 }
 
 /**
- * The answer as *this* build's shape, whoever answered it.
- *
- * The cast above is a claim about a value from another process, and in VS Code
- * that process may be an older build than the webview asking it: a broker window
- * running the extension from before a field was added answers without it
- * (`docs/specs/vscode.md` → the peer link). `suggestedLabel` reaches
- * `label.trim()` while the enroll form renders, where an `undefined` throws the
- * whole section away rather than degrading, so it is defaulted here — at the
- * seam where the untrusted shape becomes the typed one — instead of at each of
- * the two forms that read it. `serving` is read through `servingOf`.
- *
- * A pre-release broker (v1.2.0+ sends every field) answers `offer` as
- * `{ origin } | null` — a fresh object every poll, which the field-wise compare
- * would republish every 2 s — and names its Relay `relayUrl` with no
- * `relayOrigin` or `relayMode`. The mode it lacks reads as Hosted, which shows
- * no enroll form it could not serve. Every default for a missing field serves
- * only such a broker, except `hostedEnrollmentOf`'s unknown-reason fallback,
- * which serves a newer one.
+ * The answer with its `hostedEnrollment` read through {@link hostedEnrollmentOf},
+ * the one field whose shape a newer broker may extend: in VS Code the process
+ * answering may be another window's (`docs/specs/vscode.md` → the peer link).
  */
 function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
-  const { relayUrl } = status as { relayUrl?: unknown };
-  return {
-    ...status,
-    serving: servingOf(status),
-    suggestedLabel: status.suggestedLabel ?? '',
-    relayOrigin: status.relayOrigin ?? (typeof relayUrl === 'string' ? relayUrl : ''),
-    relayMode: status.relayMode === 'self-host' ? 'self-host' : 'hosted',
-    offer: Boolean(status.offer),
-    hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment),
-    // Absent from a broker older than the field, which names no account page.
-    accountOrigin: typeof status.accountOrigin === 'string' ? status.accountOrigin : null,
-  };
+  return { ...status, hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment) };
 }
 
 /**
- * A `hostedEnrollment` as this build can draw it, or `null` — absent from a
- * broker older than the field, or of a shape this build does not know. Built
- * field by field, in a fixed order, which {@link STATUS_FIELDS} compares on.
+ * A `hostedEnrollment` as this build can draw it, or `null` for a shape it does
+ * not know. Built field by field, in a fixed order, which {@link STATUS_FIELDS}
+ * compares on.
  */
 function hostedEnrollmentOf(value: unknown): HostedEnrollmentState | null {
   if (!value || typeof value !== 'object') return null;

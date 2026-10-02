@@ -5,7 +5,7 @@
  */
 
 import { clampTerminalDimension, type DirectoryEntry } from 'remote-lib-common';
-import { serviceIdOf, type BurrowStatusEvent } from '../../host/remote/service-protocol';
+import type { BurrowStatusEvent } from '../../host/remote/service-protocol';
 import { getPlatform } from '../../lib/platform';
 import type { BurrowLink } from '../../lib/platform/types';
 import { subscribeToActivity } from '../../lib/session-activity-store';
@@ -37,8 +37,7 @@ export interface PeerSurfaceParams {
   rows?: number;
   /**
    * Who takes the size (`attach`, `resize`), or which hold to give back
-   * (`release`). Absent from a Burrow older than holds, whose attach then sizes
-   * the pane without holding it.
+   * (`release`).
    */
   hold?: SurfaceHold;
 }
@@ -79,10 +78,9 @@ function answerPeers<K extends keyof PeerOps>(
 function holdOf(value: unknown): SurfaceHold | null {
   const hold = value as Partial<Record<keyof SurfaceHold, unknown>> | null | undefined;
   if (typeof hold?.holder !== 'string' || typeof hold.label !== 'string') return null;
-  if (typeof hold.lease !== 'string') return null;
+  if (typeof hold.lease !== 'string' || typeof hold.serviceId !== 'string') return null;
   const { holder, label, lease, serviceId } = hold;
-  // A malformed instance id is read as none: such a hold is kept, never dropped.
-  return typeof serviceId === 'string' ? { holder, label, lease, serviceId } : { holder, label, lease };
+  return { holder, label, lease, serviceId };
 }
 
 /**
@@ -194,7 +192,7 @@ export function installPeerSurfaceResponder(): void {
   // here — a broker window that closed, a sidecar that restarted — is gone, and
   // its releases with it (`docs/specs/remote-api.md` → "Size authority").
   link.on('status', (data) => {
-    const serviceId = serviceIdOf(data as Partial<BurrowStatusEvent> | null);
+    const serviceId = (data as BurrowStatusEvent | null)?.serviceId;
     if (serviceId) dropSizeHoldsFromOtherServices(serviceId);
   });
   // Announcing is not free — one crossing per pane-state change, activity

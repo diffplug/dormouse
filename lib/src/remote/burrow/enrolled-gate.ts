@@ -24,11 +24,7 @@
  *   one-time phone needs both and no enrollment.
  */
 
-import {
-  servingOf,
-  type BurrowConsoleStatus,
-  type BurrowStatusEvent,
-} from '../../host/remote/service-protocol';
+import type { BurrowConsoleStatus, BurrowStatusEvent } from '../../host/remote/service-protocol';
 import type { BurrowLink } from '../../lib/platform/types';
 
 /** What a gate arms on: a field of the service's `status`. */
@@ -42,7 +38,7 @@ function gateOpen(
   gate: BurrowGate,
   status: Partial<Pick<BurrowStatusEvent, 'enrolled' | 'serving'>> | null | undefined,
 ): boolean {
-  return gate === 'enrolled' ? !!status?.enrolled : servingOf(status);
+  return !!status?.[gate];
 }
 
 /**

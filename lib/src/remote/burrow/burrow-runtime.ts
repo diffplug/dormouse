@@ -781,17 +781,15 @@ export class BurrowRuntime {
   /**
    * Import the enrolled Noise static once, nonextractably.
    *
-   * Resolves `null` rather than rejecting when there is nothing usable: the
-   * service refuses to start a Burrow whose halves disagree
+   * Resolves `null` rather than rejecting when it will not import: the service
+   * refuses to start a Burrow whose halves disagree
    * (`lib/src/host/remote/service.ts`), so reaching that here means the state
    * file changed underneath us, and a connection that finds no static simply
    * never answers.
    */
   #loadNoiseStatic(): Promise<NoiseKeyPair | null> {
     this.#noiseStatic ??= (async () => {
-      const pkcs8 = this.#enrollment.noiseStaticPrivateKey;
-      const publicKey = this.#enrollment.noiseStaticPublicKey;
-      if (pkcs8 === undefined || publicKey === undefined) return null;
+      const { noiseStaticPrivateKey: pkcs8, noiseStaticPublicKey: publicKey } = this.#enrollment;
       try {
         return { privateKey: await importNoiseStaticPrivateKey(pkcs8), publicKey: fromBase64Url(publicKey) };
       } catch (error) {
@@ -1275,16 +1273,6 @@ export class BurrowRuntime {
       return;
     }
     const burrowStaticPublicKey = this.#enrollment.noiseStaticPublicKey;
-    if (burrowStaticPublicKey === undefined) {
-      // There is nothing for the Client to pin. Writing a record here would
-      // authorize a Client whose very next connection cannot complete IK
-      // against a static this Burrow does not have — a pairing into a dead end,
-      // reported as success. The service refuses to start such a Burrow
-      // (`lib/src/host/remote/service.ts`), so this is the belt to that brace.
-      console.warn('[burrow] refusing to pair: this Burrow has no Noise static to present');
-      this.#finishPairing(clientId, 'burrow-error');
-      return;
-    }
     if (!constantTimeEqual(utf8Encode(code), utf8Encode(pending.approval.code))) {
       this.#finishPairing(clientId, 'confirmation-mismatch');
       return;
@@ -1603,7 +1591,7 @@ export class BurrowRuntime {
           burrowId: this.#enrollment.burrowId,
           send,
           // Bounded again rather than trusted: a record off disk may have been
-          // written by an older build or by hand, and this is shown on a pane.
+          // written by hand, and this is shown on a pane.
           label: boundedPairingLabel(label),
           end: () => this.#disposeEstablished(clientId, { goodbye: true, only: e2e }),
         }),

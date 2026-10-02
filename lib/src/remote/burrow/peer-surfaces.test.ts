@@ -29,7 +29,7 @@ class ServicePlatform {
   notified = 0;
   /** What `status` answers — the gate the notify sources arm on. */
   enrolled = true;
-  /** Absent, as a broker from before one-time connections answers, unless a case sets it. */
+  /** What `status` answers for `serving`: `enrolled`, unless a case sets it. */
   serving: boolean | undefined = undefined;
 
   /** Every non-`status` command this webview sent, with its params. */
@@ -40,7 +40,7 @@ class ServicePlatform {
   readonly burrow = {
     command: async (cmd: string, params?: unknown) => {
       if (cmd === 'status') {
-        return { enrolled: this.enrolled, ...(this.serving === undefined ? {} : { serving: this.serving }) };
+        return { enrolled: this.enrolled, serving: this.serving ?? this.enrolled };
       }
       this.commands.push({ cmd, params });
       return this.commandResult(cmd);
@@ -266,7 +266,7 @@ describe('surface responder', () => {
 });
 
 describe('size holds', () => {
-  const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1' };
+  const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1' };
   /** A hold as the pane records it: as the Burrow named it, with the size it set. */
   const held = <T extends object>(hold: T, cols: number, rows: number) => ({ ...hold, cols, rows });
 
@@ -285,7 +285,7 @@ describe('size holds', () => {
     const phone = held(PHONE, 51, 14);
     expect(getSizeHolds('surface-1')).toEqual([phone]);
 
-    const later = { holder: 'session-b', label: 'Pixel', lease: '4' };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '4', serviceId: 'service-1' };
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'resize', cols: 40, rows: 20, hold: later });
     expect(getSizeHolds('surface-1')).toEqual([phone, held(later, 40, 20)]);
     expect(heldAtResize).toEqual([[phone], [phone, held(later, 40, 20)]]);
@@ -332,7 +332,7 @@ describe('size holds', () => {
   it('keeps each holder’s hold until that holder releases it', () => {
     registerSurface('surface-1');
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
-    const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1' };
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 40, rows: 20, hold: later });
 
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'release', hold: later });
@@ -347,7 +347,7 @@ describe('size holds', () => {
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: PHONE });
     // The size that holder last set, not the one it attached at.
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'resize', cols: 60, rows: 30, hold: PHONE });
-    const later = { holder: 'session-b', label: 'Pixel', lease: '1' };
+    const later = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-1' };
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 40, rows: 20, hold: later });
     expect(terminal).toMatchObject({ cols: 40, rows: 20 });
 
@@ -434,23 +434,17 @@ describe('size holds', () => {
     registerSurface('surface-1');
     registerSurface('surface-2');
     const gone = { ...PHONE, serviceId: 'service-1' };
-    // An older Burrow's hold names no instance, and is never dropped for it.
-    const legacy = { holder: 'session-c', label: 'iPad', lease: '1' };
     platform.answer('surfaceOp', { surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: gone });
     platform.answer('surfaceOp', { surfaceId: 'surface-2', op: 'attach', cols: 51, rows: 14, hold: gone });
-    platform.answer('surfaceOp', { surfaceId: 'surface-2', op: 'attach', cols: 51, rows: 14, hold: legacy });
-    expect(getSizeHolds('surface-1')).toEqual([held(gone, 51, 14)]);
 
-    // A broker older than the field names none, and the service that took
-    // them is still the one speaking: nothing is dropped.
-    platform.emit({ name: 'status', enrolled: true, serving: true });
+    // The service that took them is still the one speaking: nothing is dropped.
     platform.emit({ name: 'status', enrolled: true, serving: true, serviceId: 'service-1' });
     expect(getSizeHolds('surface-1')).toEqual([held(gone, 51, 14)]);
-    expect(getSizeHolds('surface-2')).toEqual([held(gone, 51, 14), held(legacy, 51, 14)]);
+    expect(getSizeHolds('surface-2')).toEqual([held(gone, 51, 14)]);
 
     platform.emit({ name: 'status', enrolled: false, serving: true, serviceId: 'service-2' });
     expect(getSizeHolds('surface-1')).toEqual([]);
-    expect(getSizeHolds('surface-2')).toEqual([held(legacy, 51, 14)]);
+    expect(getSizeHolds('surface-2')).toEqual([]);
 
     // What the new instance's sessions take, it keeps.
     const current = { holder: 'session-b', label: 'Pixel', lease: '1', serviceId: 'service-2' };
@@ -459,14 +453,15 @@ describe('size holds', () => {
     expect(getSizeHolds('surface-1')).toEqual([held(current, 40, 20)]);
   });
 
-  it('reads a malformed service instance as none, keeping its hold', () => {
-    registerSurface('surface-1');
-    platform.answer('surfaceOp', {
-      surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: { ...PHONE, serviceId: 7 },
-    });
-    expect(getSizeHolds('surface-1')).toEqual([held(PHONE, 51, 14)]);
-    platform.emit({ name: 'status', enrolled: true, serving: true, serviceId: 'service-2' });
-    expect(getSizeHolds('surface-1')).toEqual([held(PHONE, 51, 14)]);
+  it('sizes without holding for a hold that names no service instance', () => {
+    const terminal = registerSurface('surface-1');
+    for (const serviceId of [7, undefined]) {
+      platform.answer('surfaceOp', {
+        surfaceId: 'surface-1', op: 'attach', cols: 51, rows: 14, hold: { ...PHONE, serviceId },
+      });
+      expect(getSizeHolds('surface-1')).toEqual([]);
+    }
+    expect(terminal.resize).toHaveBeenCalledWith(51, 14);
   });
 
   it('sends nothing for a pane nobody holds', async () => {

@@ -62,8 +62,8 @@ export interface RemoteApiSessionOptions {
 export interface SessionHolder {
   readonly id: string;
   readonly label: string;
-  /** {@link SurfaceHold.serviceId}; absent where no service instance names itself. */
-  readonly serviceId?: string;
+  /** {@link SurfaceHold.serviceId}. */
+  readonly serviceId: string;
 }
 
 export class RemoteApiSession {
@@ -275,12 +275,7 @@ export class RemoteApiSession {
     // an attachment this session has since replaced — the same pane included —
     // cannot free the hold its successor took.
     const { id, label, serviceId } = this.#holder;
-    const hold: SurfaceHold = {
-      holder: id,
-      label,
-      lease: String(generation),
-      ...(serviceId === undefined ? {} : { serviceId }),
-    };
+    const hold: SurfaceHold = { holder: id, label, lease: String(generation), serviceId };
     void this.#provider.resolveSurface(params.surfaceId, params, hold).then(
       (handle) => {
         if (!handle) {

@@ -62,8 +62,9 @@ async function appWithOffer(contents, options = {}) {
   return { ...created, enrollTokenFile };
 }
 
+/** Enroll naming this Relay's origin, as every Burrow does, unless `body` says otherwise. */
 function enroll(app, body) {
-  return post(app, API_ROUTES.burrowEnroll, body);
+  return post(app, API_ROUTES.burrowEnroll, { origin: ORIGIN, ...body });
 }
 
 test('a valid enroll token enrolls the burrow and consumes the offer', async () => {
@@ -246,11 +247,14 @@ test('a Burrow built for another origin is refused before anything is spent or s
   assert.equal((await enroll(app, { password: 'wrong', origin: 'https://elsewhere.example' })).status, 409);
 });
 
-test('a Burrow naming this origin, however spelled, enrolls; one naming none still does', async () => {
-  const { app } = await appWithOffer(offer());
+test('a Burrow naming this origin, however spelled, enrolls; one naming none is a 400', async () => {
+  const { app, enrollTokenFile, stateDir } = await appWithOffer(offer());
+  // Malformed before the credential is read: nothing spent, nothing appended.
+  const unnamed = await enroll(app, { password: PASSWORD, origin: undefined });
+  assert.equal(unnamed.status, 400);
+  assert.equal(existsSync(join(stateDir, 'burrows.json')), false);
+  assert.equal(existsSync(enrollTokenFile), true);
   assert.equal((await enroll(app, { enrollToken: TOKEN, origin: `${ORIGIN}/` })).status, 200);
-  const older = await appWithOffer(offer());
-  assert.equal((await enroll(older.app, { password: PASSWORD })).status, 200);
 });
 
 // --- redeemEnrollToken directly: the claim race and the operator warning ---

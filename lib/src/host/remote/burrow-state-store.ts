@@ -12,7 +12,7 @@
  * only after establishing owner-only access (POSIX modes or a Windows DACL).
  */
 
-import { readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { BurrowAclRecord } from 'remote-lib-common';
 import { filterAclRecords } from '../../remote/burrow/acl';
@@ -55,24 +55,6 @@ const FILE_NAME = 'burrow.json';
  * knows, and a policy it dropped would let the default recompute.
  */
 const NETWORK_POLICY_FILE_NAME = 'network-policy.json';
-
-/** What {@link FILE_NAME} was called before the Burrow rename. */
-const RETIRED_FILE_NAME = 'remote-host.json';
-
-/**
- * Delete what the rename stranded in `stateDir`. Called once at boot
- * (`sidecar-entry.ts`), never from a read: the retired file holds a live
- * `burrowToken`, and an install upgraded across the rename would otherwise keep
- * that credential on disk with no code left that knows the name.
- *
- * **Never fatal** — nothing here is read, so a failure is logged and stepped
- * over. `docs/specs/security-remote.md` → "Credentials at rest".
- */
-export async function forgetRetiredState(stateDir: string): Promise<void> {
-  await rm(join(stateDir, RETIRED_FILE_NAME), { force: true }).catch((error: unknown) => {
-    console.warn(`[burrow] could not remove the retired ${RETIRED_FILE_NAME}`, error);
-  });
-}
 
 interface BurrowStateFile {
   version: 1;
