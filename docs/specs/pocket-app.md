@@ -287,7 +287,9 @@ compatible build or pairing again.
 **One module owns the IndexedDB name, its version, its upgrade, and every open**
 (rationale). `dormouse-pocket` is at **v4**: `known-burrows` (`KnownBurrowV1`,
 keyed by `burrowId`) and `pending-deletions` (`PendingDeliveryDeletionV1`, keyed
-`burrowId:deliveryId`); every earlier version upgrades to that shape.
+`burrowId:deliveryId`); every earlier version upgrades to that shape. **A
+version bump is a compatibility event: it must never empty `pending-deletions`
+for a store already at v4**, which would discard owed deletions.
 **`navigator.storage.persist()` is requested best-effort**: a browser that
 refuses gets ordinary eviction-prone storage, which re-pairing survives
 ([remote-security-model.md](./remote-security-model.md) → Client static loss).
@@ -389,9 +391,9 @@ none.
 **Must label the connected header with the live path, `relay` or `direct`,
 without status colours**, keeping fallback reasons in hover text. **Must pass
 only a `DirectRelayCause` to Pocket, never runtime failure text**;
-`TRANSPORT_RELAY_CAUSES` owns the displayed sentences. **A channel failure after
-the switch is Burrow loss** (remote-api.md → Direct path): Pocket returns to
-the list, and reconnecting costs a fresh handshake and WebAuthn prompt.
+`TRANSPORT_RELAY_CAUSES` owns the displayed sentences. After the switch, a
+channel failure ends the session (remote-api.md → Direct path): Pocket returns
+to the list, and reconnecting costs a fresh handshake and WebAuthn prompt.
 
 Source of truth: `PocketClient.connect` in
 `lib/src/remote/client/pocket-client.ts`; `deploymentDirectPeer` in
@@ -400,9 +402,10 @@ Source of truth: `PocketClient.connect` in
 
 ## An expired session drops to sign-in
 
-Sessions live only in the Relay's memory ([relay.md](./relay.md)), so they end
-on expiry *and* on every Relay restart, while the passkey and paired Burrow
-records outlive both. **Pocket therefore treats a dead session as actionable,
+Sessions expire ([relay.md](./relay.md)) and, on a self-host Relay, also end on
+every restart, while the passkey and paired Burrow records outlive both; Hosted
+also ends the session of an account no longer entitled
+(`docs/specs/hosted.md` -> "Relay"). **Pocket therefore treats a dead session as actionable,
 not reportable** (rationale): `PocketClient` clears its in-memory token and
 throws `SessionExpiredError`; the app tears down any live adapter and returns
 to sign-in carrying that message. One passkey prompt restores the Burrows list,

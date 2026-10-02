@@ -52,7 +52,7 @@ mode. [WebKit's iOS Web Push guidance](https://webkit.org/blog/13878/web-push-fo
 
 ## Detecting install state, and what cannot be detected
 
-**Why the registration set is read from the Relay, once, on entering the Burrows list.** Which paired Burrows the Relay holds a push row for is not local knowledge: tracking it locally would re-offer an action already taken after any reload, and would let a row the Relay pruned on a 410 go on claiming push is on. Skipping the refetch on connect keeps the terminal path free of a call it does not need.
+**Why the registration set is read from the Relay, once, on entering the Burrows list.** Which paired Burrows the Relay holds a push row for is not local knowledge: tracking it locally would re-offer an action already taken after any reload, and would let a row the Relay pruned on a 410 go on claiming push is on.
 
 **Why the readback is by capability.** `POST /api/push/subscriptions/query` answers only about delivery ids the caller already presented, so no one can enumerate another device's registrations by guessing at ids.
 

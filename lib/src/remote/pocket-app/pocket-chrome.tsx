@@ -36,7 +36,8 @@ export const pkButton = tv({
       outline: 'shadow-[inset_0_0_0_1px] shadow-app-fg/25 text-app-fg',
       ghost: 'text-inherit hover:bg-current/10',
     },
-    // A step larger than desktop chrome (DESIGN.md's Two-Step Rule): desktop's
+    // A step larger than desktop chrome, a phone-only exception to DESIGN.md's
+    // Two-Step Rule: desktop's
     // secondary sizes are illegible at thumb distance, and a fingertip needs a
     // taller target than a cursor.
     size: {

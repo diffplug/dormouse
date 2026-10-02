@@ -19,7 +19,8 @@ export const POCKET_DB_NAME = 'dormouse-pocket';
 
 /**
  * v1 was `device-key` alone; v2 added the two E2E stores beside it; v3 deletes
- * `device-key`, which nothing reads any more; v4 renames `known-hosts` and
+ * `device-key`, which nothing reads any more; v4 drops `known-hosts` (the
+ * pre-rename store; its records are not migrated, so the phone re-pairs) and
  * empties `pending-deletions`, whose records both name a `hostId` nothing here
  * reads. A phone arriving from any earlier version lands in the same shape, and
  * each deletion is what stops a superseded Client identity from outliving the
@@ -330,7 +331,9 @@ export function openPocketDb(): Promise<IDBDatabase> {
       }
       // Kept its name but not its record shape — every row names a `hostId` —
       // so v4 empties it by dropping and remaking. Explicit keys: the key is a
-      // pair of fields, not one of them.
+      // pair of fields, not one of them. Correct only for upgrades from below
+      // v4: the next version bump must gate this on `event.oldVersion < 4`, or
+      // it discards owed deletions.
       if (db.objectStoreNames.contains(PENDING_DELETIONS_STORE)) {
         db.deleteObjectStore(PENDING_DELETIONS_STORE);
       }
