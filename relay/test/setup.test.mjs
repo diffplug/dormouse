@@ -262,7 +262,7 @@ test('origin/rpId derive from config', async () => {
 test('the configured origin drives setup and Burrow policy', async () => {
   const { app } = await freshApp({ origin: 'https://example.com' });
   const authenticator = await newAuthenticator();
-  const { token } = await mintSetupToken(app);
+  const { token } = await mintSetupToken(app, undefined, 'https://example.com');
   const begin = await post(app, API_ROUTES.setupBegin, { setupToken: token });
   const { challenge, rpId } = await begin.json();
   assert.equal(rpId, 'example.com');
@@ -276,7 +276,7 @@ test('the configured origin drives setup and Burrow policy', async () => {
   });
   assert.equal(finish.status, 200);
 
-  const { res, body } = await enrollBurrow(app);
+  const { res, body } = await enrollBurrow(app, 'https://example.com');
   assert.equal(res.status, 200);
   assert.equal(body.origin, 'https://example.com');
   assert.equal(body.rpId, 'example.com');

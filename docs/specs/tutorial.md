@@ -45,6 +45,8 @@ Every visible pane gets a `TutorialShell` via `PlaygroundShellRegistry`. **`ensu
 navigation screen**, through `MobileTerminalUi.onGestureScroll` and
 `onGestureInput`, wired in `website/src/components/PocketTerminalExperience.tsx`.
 
+Source of truth: `PlaygroundDesktop` in `website/src/pages/PlaygroundDesktop.tsx`; `PocketPlayground` in `website/src/pages/PocketPlayground.tsx`.
+
 ### Pocket gesture opening screen
 
 **Must credit both edge-scroll directions (`gn-scroll`), then all four arrows
@@ -122,18 +124,11 @@ Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observabili
 - **`MobileTerminalUi.onGestureScroll`** — optional, reports signed line counts only for edge scrolling.
 - **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, watched to credit `th-theme`. **Must seed the detector’s previous theme at `start()` and compare consecutive ids**, so boot-time restore cannot grant the item and choosing the startup theme after a reset still can. Pinned by `website/src/lib/tut-detector.test.ts` (rationale).
 
-Source of truth: `WallEvent` in `lib/src/components/wall/wall-types.ts`; event emitters in `lib/src/components/Wall.tsx` and `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`; `FakePtyAdapter` in `lib/src/lib/platform/fake-adapter.ts`; `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`; `TutDetector` in `website/src/lib/tut-detector.ts`.
+Source of truth: `WallEvent` in `lib/src/components/wall/wall-types.ts`, emitted from `lib/src/components/Wall.tsx`; `FakePtyAdapter` in `lib/src/lib/platform/fake-adapter.ts`; `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`.
 
 ## Mouse and Clipboard Feature Coverage
 
 Primary dogfood surface for `docs/specs/mouse-and-clipboard.md`. What the three-pane layout exercises, partly exercises, and cannot reach today is audited in the rationale; the two gaps worth closing are the `## Future` scenarios below.
-
-## Files
-
-- Routes + pages — `website/src/routes.ts`, `website/src/pages/Playground.tsx`, `website/src/pages/PlaygroundDesktop.tsx`, `website/src/pages/PocketPlayground.tsx`, `website/src/pages/Pocket.tsx`
-- Playground plumbing — `website/src/lib/playground-routing.ts`, `website/src/lib/playground-desktop-layout.ts`, `website/src/lib/playground-shells.ts`, `website/src/lib/tutorial-shell.ts`
-- Fake programs — `website/src/lib/ascii-splash-runner.ts`, `website/src/lib/changelog-runner.ts`
-- Lib contracts this spec owns — `WallEvent` in `lib/src/components/wall/wall-types.ts`; `sendOutput` / `pumpActivity` / `onPtySpawn` in `lib/src/lib/platform/fake-adapter.ts`
 
 ## Future
 

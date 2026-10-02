@@ -7,7 +7,7 @@ import { xtermVtExtensions } from './xterm-options';
 
 /**
  * The advertised iTerm2 version promises dark-mode reporting
- * (`docs/specs/terminal-escapes.md` -> iTerm2 identity): a real xterm.js with
+ * (`docs/specs/transport.md` -> iTerm2 identity): a real xterm.js with
  * Dormouse's extensions answers the query.
  */
 async function colorSchemeReply(theme: { background: string; foreground: string }): Promise<string[]> {

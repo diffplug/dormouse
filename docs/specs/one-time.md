@@ -416,16 +416,15 @@ enrolled runtime's, under the level's path rules (`docs/specs/remote-network.md`
 - **`status` and its event carry `serving`**: a running Burrow (none under
   Nothing), or a one-time status
   of `opening`, `waiting`, `confirming`, `connecting`, or `connected`; a flip
-  emits `status`. **A reader missing `serving` takes `enrolled`** (an older VS
-  Code broker). What arms on each: `docs/specs/vscode.md` -> "Burrow: a
+  emits `status`. What arms on each: `docs/specs/vscode.md` -> "Burrow: a
   service in the extension host".
 - **Approval carries a `kind`** (`pairing` | `one-time`) on `PendingPairing`,
   `PairingQueueItem`, `ApproveParams`, and `DenyParams`. The one-time request
   has a slot of its own — `clientId: ''`, a fresh random `pairingId` ticket,
   after the pairings in the snapshot — and **its answer goes straight to the
-  runtime, never behind the lifecycle chain**. **A missing `kind` is a
-  `pairing`**, so an older webview's answer finds nothing to approve. The
-  mirror keys by `(kind, clientId)`. The one-time modal keeps Pairing's fixed
+  runtime, never behind the lifecycle chain**. **The service reads any `kind`
+  but `one-time` as a `pairing`**, so a malformed answer finds nothing to
+  approve. The mirror keys by `(kind, clientId)`. The one-time modal keeps Pairing's fixed
   warning under "Allow a one-time connection", then says "This phone gets full
   control of every terminal here until it disconnects or you end it. Nothing is
   saved." beside a "Confirm and allow" button.
@@ -442,8 +441,8 @@ every `burrow:event` unchanged. VS Code's bootstrap, idle answers, and serving
 marker are `docs/specs/vscode.md` -> "Burrow: a service in the extension host".
 
 Source of truth: `BurrowService` and `oneTimeServing` in
-`lib/src/host/remote/service.ts`; `idleOneTimeState`, `OneTimeEvent`,
-`servingOf`, and `approvalKind` in `lib/src/host/remote/service-protocol.ts`;
+`lib/src/host/remote/service.ts`; `idleOneTimeState`, `OneTimeEvent`, and
+`approvalKind` in `lib/src/host/remote/service-protocol.ts`;
 `bakedRelay` / `hostedOrigin` in `lib/src/host/relay-origin.ts`;
 `mirrorPairingQueue` in `lib/src/remote/burrow/activation.ts`;
 `RemotePairingModal` in `lib/src/remote/burrow/RemotePairingModal.tsx`. Pinned by

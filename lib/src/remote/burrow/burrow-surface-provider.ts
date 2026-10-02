@@ -30,9 +30,9 @@ export interface SurfaceHold {
   /**
    * Which service instance serves the session (`BurrowStatusEvent.serviceId`),
    * so a webview can drop the hold once another instance speaks for this
-   * machine. Absent from a Burrow older than the field, whose holds are kept.
+   * machine.
    */
-  readonly serviceId?: string;
+  readonly serviceId: string;
 }
 
 export interface SurfaceHandle {

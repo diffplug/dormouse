@@ -648,7 +648,7 @@ Every source is the app's own origin
   other directive is `'self'`.
 
 **`script-src` stays `'self'` plus `'wasm-unsafe-eval'`
-([terminal-escapes.md](./terminal-escapes.md#inline-graphics)), with no nonce
+([layout.md](./layout.md#inline-graphics)), with no nonce
 pipeline**, and the build keeps earning it: `assertPocketShell`
 fails `build:pocket` on any inline `<script>` body or off-origin `src`/`href`
 in the emitted `index.html`. (rationale)

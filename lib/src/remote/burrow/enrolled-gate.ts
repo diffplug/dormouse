@@ -24,11 +24,7 @@
  *   one-time phone needs both and no enrollment.
  */
 
-import {
-  servingOf,
-  type BurrowConsoleStatus,
-  type BurrowStatusEvent,
-} from '../../host/remote/service-protocol';
+import type { BurrowConsoleStatus, BurrowStatusEvent } from '../../host/remote/service-protocol';
 import type { BurrowLink } from '../../lib/platform/types';
 
 /** What a gate arms on: a field of the service's `status`. */
@@ -36,14 +32,6 @@ export type BurrowGate = 'enrolled' | 'serving';
 
 /** One gate's arming: runs on the rising edge, and returns its disarm. */
 export type GateArm = () => () => void;
-
-/** Whether `gate` is open in a `status` answer or event. */
-function gateOpen(
-  gate: BurrowGate,
-  status: Partial<Pick<BurrowStatusEvent, 'enrolled' | 'serving'>> | null | undefined,
-): boolean {
-  return gate === 'enrolled' ? !!status?.enrolled : servingOf(status);
-}
 
 /**
  * Run each arm while its gate is open and its disarm when it closes, starting
@@ -65,9 +53,10 @@ export function armWhile(
     disarm: null as (() => void) | null,
   }));
 
-  const apply = (status: Partial<BurrowStatusEvent> | BurrowConsoleStatus | null | undefined): void => {
+  /** Each gate is open while its field of a `status` answer or event is true. */
+  const apply = (status: Pick<BurrowStatusEvent, BurrowGate> | null): void => {
     for (const entry of gates) {
-      const open = gateOpen(entry.gate, status);
+      const open = !!status?.[entry.gate];
       if (open === !!entry.disarm) continue;
       if (open) {
         entry.disarm = entry.arm();

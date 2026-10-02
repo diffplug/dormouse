@@ -22,8 +22,6 @@ MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes
 
 Mermaid stays on 11: 12 makes its ELK layout (a 1.4 MB elkjs chunk) the default and restyles state diagrams, so diagrams would look different here than in renderers on dagre and the classic look; 12.0 was also three weeks old (2026-10).
 
-MDXEditor fixes CodeMirror to a light theme. The page adds `classHighlighter`'s stable `tok-*` classes and colors them in CSS per theme, so a theme switch needs no CodeMirror reconfiguration.
-
 The page keeps `'unsafe-inline'` scripts because the host injects its iframe shim inline (`docs/specs/theme.md` → Tool iframe themes), so the CSP alone does not stop inline event handlers. MDXEditor's stock `GenericHTMLNode` copies every document attribute onto a live element, and its image export builds an `<img>` with the document's attributes in the live document, where a `srcset` loads and fires `onerror`; both ran document script in Chromium (2026-10) with the page's save and paste routes in reach.
 
 ## Folder viewer

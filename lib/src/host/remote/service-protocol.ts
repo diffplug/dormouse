@@ -85,14 +85,13 @@ export interface BurrowAsk {
  * which writes an ACL record, or a one-time connection, which authorizes one
  * session and writes nothing (`docs/specs/one-time.md`).
  *
- * **A message that names none is a `pairing`.** A webview or broker from before
- * the field existed sends none, and reading that as a pairing fails closed: the
- * one-time request is never in the pairing queue, so an old modal's answer
- * finds nothing to approve.
+ * **A message that names anything but `one-time` is a `pairing`**, which fails
+ * closed: the one-time request is never in the pairing queue, so a malformed
+ * answer finds nothing to approve.
  */
 export type ApprovalKind = 'pairing' | 'one-time';
 
-/** The kind an untrusted message names, with a missing or unknown one read as `pairing`. */
+/** The kind an untrusted message names, with any other value read as `pairing`. */
 export function approvalKind(value: { kind?: unknown } | null | undefined): ApprovalKind {
   return value?.kind === 'one-time' ? 'one-time' : 'pairing';
 }
@@ -146,8 +145,7 @@ export interface BurrowStatusEvent {
    * Whether anything can reach this machine's terminals: enrolled, or a
    * one-time connection opening, waiting, confirming, or live. What the
    * surface responder and the approval mirror arm on; push stays on
-   * `enrolled`. Absent from a broker older than the field: read it through
-   * {@link servingOf}.
+   * `enrolled`.
    */
   serving: boolean;
   /**
@@ -155,22 +153,9 @@ export interface BurrowStatusEvent {
    * carried on every size hold its sessions take (`SurfaceHold.serviceId`). A
    * webview drops the holds of any other instance — a VS Code broker window
    * that closed, a sidecar that restarted — since nothing will release them
-   * (`docs/specs/remote-api.md` → "Size authority"). Absent from a broker
-   * older than the field: read it through {@link serviceIdOf}.
+   * (`docs/specs/remote-api.md` → "Size authority").
    */
   serviceId: string;
-}
-
-/**
- * Whether a `status` answer or event says something can reach this machine's
- * terminals. **A missing `serving` reads as `enrolled`**: a VS Code broker from
- * before one-time connections sends none, and enrolled is all it could be
- * serving on.
- */
-export function servingOf(
-  status: Partial<Pick<BurrowStatusEvent, 'enrolled' | 'serving'>> | null | undefined,
-): boolean {
-  return typeof status?.serving === 'boolean' ? status.serving : !!status?.enrolled;
 }
 
 /**
@@ -180,14 +165,6 @@ export function servingOf(
  */
 export function relayRefuses(connection: BurrowStatus): boolean {
   return connection === 'removed' || connection === 'not-entitled';
-}
-
-/**
- * The service instance a `status` event names, or `null` where it names none —
- * a broker older than the field — which drops no hold.
- */
-export function serviceIdOf(status: { serviceId?: unknown } | null | undefined): string | null {
-  return typeof status?.serviceId === 'string' && status.serviceId ? status.serviceId : null;
 }
 
 /**
@@ -325,8 +302,8 @@ export interface HostedEnrollParams {
 
 /** `kind`, `clientId`, and `pairingId` echo the {@link PairingQueueItem} the modal displayed. */
 export interface ApproveParams {
-  /** Read through {@link approvalKind}: absent is a `pairing`. */
-  kind?: ApprovalKind;
+  /** Read through {@link approvalKind}. */
+  kind: ApprovalKind;
   clientId: string;
   pairingId: string;
   /** The two digits the person read off the phone; the Burrow compares them. */
@@ -334,8 +311,8 @@ export interface ApproveParams {
 }
 
 export interface DenyParams {
-  /** Read through {@link approvalKind}: absent is a `pairing`. */
-  kind?: ApprovalKind;
+  /** Read through {@link approvalKind}. */
+  kind: ApprovalKind;
   clientId: string;
   pairingId: string;
 }
@@ -394,7 +371,7 @@ export interface SetupQrResult {
   /**
    * The pairing URL, composed by the service from the origin this Burrow enrolled
    * against — `remote-lib-common`'s `formatPairingInvitationUrl` owns its
-   * grammar (`docs/specs/relay.md` → QR grammar).
+   * grammar (`docs/specs/relay.md` → "Setup tokens and the pairing QR").
    */
   url: string;
   /**

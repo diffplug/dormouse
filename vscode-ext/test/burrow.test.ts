@@ -49,6 +49,13 @@ type LinkModule = typeof import('../src/peer-link');
  */
 const BURROW_ID = 'S6kyjjqOS7mw3l8ye89U3g';
 
+/** What every stored enrollment carries beside the Relay's answer: its label and Noise static. */
+const ENROLLMENT_LOCAL = {
+  label: 'Laptop',
+  noiseStaticPublicKey: 'A'.repeat(43),
+  noiseStaticPrivateKey: 'A'.repeat(64),
+};
+
 /**
  * The installer's offer file is the one thing an idle `status` reads off the
  * real disk, and whether the machine running these tests happens to have a
@@ -108,6 +115,7 @@ function enrollmentJson(origin: string): string {
     burrowToken: 'token',
     origin,
     rpId: new URL(origin).hostname,
+    ...ENROLLMENT_LOCAL,
   });
 }
 
@@ -438,6 +446,7 @@ describe('burrow state store', () => {
       burrowToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
+      ...ENROLLMENT_LOCAL,
     };
 
     await target.saveEnrollment(enrollment);
@@ -447,29 +456,6 @@ describe('burrow state store', () => {
 
     await target.clearEnrollment();
     expect(await target.loadEnrollment()).toBeNull();
-  });
-
-  it('reads an enrollment the webview-resident Burrow left behind', async () => {
-    // The legacy path wrote the same JSON string under the same key through
-    // `store:write`, so an already-enrolled installation needs no migration.
-    const { VsCodeBurrowStateStore } = await import('../src/burrow-store');
-    const { context, store } = fakeContext();
-    const enrollment = {
-      relayUrl: 'https://relay.dormouse.sh',
-      burrowId: BURROW_ID,
-      burrowToken: 'token',
-      origin: 'https://relay.dormouse.sh',
-      rpId: 'relay.dormouse.sh',
-    };
-    store.secrets.set('dormouse.burrow.enrollment', JSON.stringify(enrollment));
-    store.global.set(
-      `dormouse.burrow.acl.${BURROW_ID}`,
-      JSON.stringify([aclRecord(BURROW_ID, 'client-1')]),
-    );
-
-    const target = new VsCodeBurrowStateStore(context);
-    expect(await target.loadEnrollment()).toEqual(enrollment);
-    expect(await target.loadAcl(BURROW_ID)).toEqual([aclRecord(BURROW_ID, 'client-1')]);
   });
 
   it('forgets a failed keychain read instead of memoizing it', async () => {
@@ -485,6 +471,7 @@ describe('burrow state store', () => {
       burrowToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
+      ...ENROLLMENT_LOCAL,
     };
     store.secrets.set('dormouse.burrow.enrollment', JSON.stringify(enrollment));
     const workingGet = context.secrets.get;
@@ -514,6 +501,7 @@ describe('burrow state store', () => {
       burrowToken: 'token',
       origin: 'https://relay.dormouse.sh',
       rpId: 'relay.dormouse.sh',
+      ...ENROLLMENT_LOCAL,
     };
     store.secrets.set(ENROLLMENT_KEY, JSON.stringify(enrollment));
 

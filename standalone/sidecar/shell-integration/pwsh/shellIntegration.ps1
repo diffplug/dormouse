@@ -59,7 +59,7 @@ function Global:__dormouse_633_escape([string]$value) {
 	$value = $value.Replace("`n", '\x0a')
 	$value = $value.Replace("`r", '\x0d')
 	# BEL, ESC (which begins ST) and the C1 ST end an OSC string and so must not
-	# survive; docs/specs/terminal-escapes.md -> OSC 633 has the why. Escaping
+	# survive; docs/specs/terminal-state.md -> "Shell-integration injection" has the why. Escaping
 	# costs nothing here because the parser decodes \xNN back. Written as char
 	# codes rather than `a/`e so this still works on Windows PowerShell 5.1, where
 	# `e does not exist.
