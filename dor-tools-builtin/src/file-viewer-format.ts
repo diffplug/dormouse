@@ -8,7 +8,7 @@ const MIME: Record<string, string> = {
   json: 'application/json', woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
   mp4: 'video/mp4', webm: 'video/webm', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg',
 };
-const TEXT = new Set(['txt', 'md', 'mdx', 'log', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'xml',
+const TEXT = new Set(['txt', 'md', 'markdown', 'mdx', 'log', 'csv', 'tsv', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'xml',
   'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'rs', 'go', 'java', 'c', 'h', 'cpp', 'sh', 'ps1', 'sql', 'ini', 'conf']);
 
 /** The handler name an `open` rule or `--tool` uses to select the viewer, and
@@ -50,7 +50,10 @@ export function viewerTitle(target: string): string {
   return Array.from(title).filter(c => !CONTROLS.test(c)).join('');
 }
 
-export function fileViewerFormat(path: string): { mime: string; text: boolean } | null {
+/** Text the rich Markdown editor opens (docs/specs/dor-tools-builtin.md -> Markdown editor). */
+const MARKDOWN = new Set(['md', 'markdown']);
+
+export function fileViewerFormat(path: string): { mime: string; text: boolean; markdown?: true } | null {
   const name = path.replace(/\\/g, '/').split('/').pop()!.toLowerCase();
   const ext = name.includes('.') ? name.split('.').pop()! : '';
   // PDF plugins cannot run inside the viewer's iframe sandbox. Exclude PDFs
@@ -59,5 +62,6 @@ export function fileViewerFormat(path: string): { mime: string; text: boolean } 
   const knownMime = Object.prototype.hasOwnProperty.call(MIME, ext) ? MIME[ext] : undefined;
   const text = TEXT.has(ext) || (!knownMime && /^(readme|license|licence|makefile|dockerfile|\.gitignore|\.env)(\..*)?$/.test(name));
   const mime = knownMime ?? (text ? 'text/plain; charset=utf-8' : null);
-  return mime ? { mime, text } : null;
+  if (!mime) return null;
+  return MARKDOWN.has(ext) ? { mime, text, markdown: true } : { mime, text };
 }

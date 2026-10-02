@@ -38,9 +38,9 @@ function read(url: string, method = 'GET', headers: Record<string, string> = {})
   });
 }
 
-function expectViewerPolicy(headers: import('node:http').IncomingHttpHeaders) {
+function expectViewerPolicy(headers: import('node:http').IncomingHttpHeaders, baseUri = "base-uri 'self'") {
   const policy = headers['content-security-policy'];
-  for (const directive of ["default-src 'none'", "script-src 'self' 'unsafe-inline'", "connect-src 'self'", "base-uri 'self'", "form-action 'none'"]) {
+  for (const directive of ["default-src 'none'", "script-src 'self' 'unsafe-inline'", "connect-src 'self'", baseUri, "form-action 'none'"]) {
     expect(policy).toContain(directive);
   }
   expect(policy).toContain(`frame-ancestors 'self' ${EMBEDDERS.join(' ')}`);
@@ -67,13 +67,14 @@ it('preserves the real viewer policy and meta policy through HTML instrumentatio
   expect((await read(new URL('private.txt', url).href)).status).toBe(404);
 });
 
-it('retains the policy and separates source data from editor markup', async () => {
-  const url = await frame('readme.md', '<script>untrusted()</script>');
+it.each(['readme.txt', 'readme.md'])('retains the policy and separates source data from editor markup for %s', async name => {
+  const url = await frame(name, '<script>untrusted()</script>');
   const response = await read(url);
-  expectViewerPolicy(response.headers);
+  expectViewerPolicy(response.headers, name.endsWith('.md') ? "base-uri 'none'" : "base-uri 'self'");
   expect(response.body).not.toContain('untrusted()');
   const source = await read(new URL('source', url).href);
   expect(JSON.parse(source.body).text).toBe('<script>untrusted()</script>');
+  // The host's theme shim still runs under the editor's policy.
   expect(response.body).toContain('__dormouse');
 });
 

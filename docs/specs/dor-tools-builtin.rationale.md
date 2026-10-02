@@ -16,6 +16,14 @@ Keeping the built-in viewer in the Tool's process tree reuses port discovery, ki
 
 Without a title, a viewer's header falls back to its running command, `dor __view-file <path>`, where an editor would show the file name. The title strips controls because a file name can carry an OSC terminator, C1 ST included, that would end the sequence early.
 
+## Markdown editor
+
+MDXEditor 4.3 parses `<!-- … -->` and discards it, and trims and re-serializes the whole document on export; without the comment node and style detection, saving a typical README after a one-word edit deleted its comments and rewrote every `-` bullet as `*` (measured 2026-10). Its `onChange` reports the first export after load as normalization, which is how a load stays clean.
+
+Mermaid 12 loads elkjs for its `layout: elk` diagrams: a 1.4 MB chunk under EPL-2.0, the only copyleft code the page would ship. Its default layouts cover ordinary diagrams, so the build stubs elkjs out (2026-10).
+
+The page keeps `'unsafe-inline'` scripts because the host injects its iframe shim inline (`docs/specs/theme.md` → Tool iframe themes), so the CSP alone does not stop inline event handlers. MDXEditor's stock `GenericHTMLNode` copies every document attribute onto a live element, and its image export builds an `<img>` with the document's attributes in the live document, where a `srcset` loads and fires `onerror`; both ran document script in Chromium (2026-10) with the page's save and paste routes in reach.
+
 ## Folder viewer
 
 A names-only folder viewer leaves file contents behind the existing one-file grant. A content-serving folder grant cannot hold descriptors for a whole tree from launch, so it would need open-per-request containment and a rewrite of the Local-file viewer checks.

@@ -77,7 +77,10 @@ asset discovery, descriptor lifetime, and every request gate. Also read
 `dor-tools-builtin/src/viewer-assets.ts`, and
 `dor-tools-builtin/viewer/editor.ts`: writes must target only the opened text
 file, compare disk revisions, reject substituted symlinks, and never expose
-arbitrary assets or execute the source document. The folder viewer shares that
+arbitrary assets or execute the source document. The Markdown editor widens
+both: read `dor-tools-builtin/src/markdown-images.ts` for image containment and
+its no-replace pastes and renames, and `dor-tools-builtin/viewer/markdown-safety.ts`
+for how document HTML reaches the page, which allows inline script. The folder viewer shares that
 listener and guard: read `dor-tools-builtin/src/folder-viewer.ts` and
 `dor-tools-builtin/src/folder-viewer-page.ts` for path containment, the POST
 gate, how names reach the page, and the git invocation; its POSTs become OSC

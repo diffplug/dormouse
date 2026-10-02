@@ -1,16 +1,23 @@
 import { constants } from 'node:fs';
 import { open, realpath, type FileHandle } from 'node:fs/promises';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { basename, dirname, relative, resolve, sep } from 'node:path';
 import { stateSequence } from 'dor-tools-lib/osc';
 import { fileViewerFormat } from './file-viewer-format.js';
 import { announceViewer, HttpError, isInsideRoot, pathSegments, readJsonBody, reply, startCapabilityViewer } from './viewer-server.js';
-import { editorPage } from './editor-page.js';
+import { editorPage, markdownPage } from './editor-page.js';
+import { IMAGE_LIMIT, openImage, renameImage, writePastedImage } from './markdown-images.js';
 import { readEditableFile, readUpTo, saveEditableFile, TEXT_LIMIT } from './editable-file.js';
 import { viewerAsset } from './viewer-assets.js';
 
 const ASSET_LIMIT = 256;
 const CHUNK = 64 * 1024;
 const CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; font-src 'self'; connect-src 'self'; frame-src 'self'; object-src 'self'; base-uri 'self'; form-action 'none'";
+// The Markdown page renders document HTML through its own allowlist; this
+// confines what slips past it to its own scripts, images, and requests.
+const MARKDOWN_CSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-src 'none'; object-src 'none'; media-src 'none'; base-uri 'none'; form-action 'none'";
+// An image the Markdown editor shows can be opened directly; it never runs as a document there.
+const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 type Resource = { file: FileHandle; mime: string };
 /** A bound on the grant itself: fatal even when reached through an optional asset. */
 class ViewerLimitError extends Error {}
@@ -43,6 +50,41 @@ function references(text: string, html: boolean): string[] {
     refs.push(match[1] ?? match[2] ?? match[3] ?? match[4]);
   }
   return refs;
+}
+
+/** `resource`'s bytes, honoring one byte range and HEAD. */
+async function stream(req: IncomingMessage, res: ServerResponse, resource: Resource): Promise<void> {
+  const size = (await resource.file.stat()).size;
+  let start = 0;
+  let end = size - 1;
+  const range = req.headers.range;
+  if (range) {
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match || (!match[1] && !match[2])) { res.setHeader('Content-Range', `bytes */${size}`); throw new HttpError(416); }
+    start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+    end = match[1] && match[2] ? Math.min(Number(match[2]), end) : end;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start < 0 || start >= size) {
+      res.setHeader('Content-Range', `bytes */${size}`); throw new HttpError(416);
+    }
+    res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+  }
+  res.writeHead(range ? 206 : 200, { 'Content-Type': resource.mime, 'Content-Length': Math.max(0, end - start + 1), 'Accept-Ranges': 'bytes' });
+  if (req.method === 'HEAD' || size === 0) { res.end(); return; }
+  // Positional reads let simultaneous range requests share a descriptor,
+  // and a disconnected response must not destroy the grant's shared handle.
+  // Each chunk is a fresh buffer because res.write queues it without copying.
+  for (let offset = start; offset <= end && !res.destroyed;) {
+    const chunk = Buffer.allocUnsafe(Math.min(CHUNK, end - offset + 1));
+    const { bytesRead } = await resource.file.read(chunk, 0, chunk.length, offset);
+    if (!bytesRead) { res.destroy(); return; }
+    offset += bytesRead;
+    if (!res.write(bytesRead === chunk.length ? chunk : chunk.subarray(0, bytesRead)) && !res.destroyed) await new Promise<void>(done => {
+      const complete = () => { res.off('drain', complete); res.off('close', complete); done(); };
+      res.once('drain', complete);
+      res.once('close', complete);
+    });
+  }
+  res.end();
 }
 
 /** One Tool process owns one file grant and its file descriptors. Restarting
@@ -98,13 +140,27 @@ export async function startFileViewer(input: string, { onDirty = () => {} }: { o
     if (!main) throw new Error('not a supported regular file');
     if (format.text) await textSize(main.file); // fail oversized text before announcing
     let saving = false;
-    const viewer = await startCapabilityViewer({ csp: format.text ? CSP + "; worker-src 'self'" : CSP, post: format.text, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
+    const viewer = await startCapabilityViewer({ csp: format.markdown ? MARKDOWN_CSP : format.text ? CSP + "; worker-src 'self'" : CSP, post: format.text, chunked: true, unavailable: 'File preview unavailable', release: closeFiles,
       route: async (req, res, prefix) => {
         let route: string;
         try { route = decodeURIComponent(new URL(req.url!, 'http://localhost').pathname.slice(prefix.length)); }
         catch { throw new HttpError(400); }
         if (!pathSegments(route)) throw new HttpError(403);
         if (req.method === 'POST') {
+          if (format.markdown && (route === 'image' || route === 'rename')) {
+            // Base64 carries three bytes in four characters.
+            const data = await readJsonBody(req, Math.ceil(IMAGE_LIMIT / 3) * 4 + 1024) as { type?: unknown; data?: unknown; from?: unknown; to?: unknown } | null;
+            if (route === 'image') {
+              if (typeof data?.type !== 'string' || typeof data?.data !== 'string') throw new HttpError(400);
+              const name = await writePastedImage(root, data.type, Buffer.from(data.data, 'base64'));
+              reply(res, 200, JSON.stringify({ name }), 'application/json');
+            } else {
+              if (typeof data?.from !== 'string' || typeof data?.to !== 'string') throw new HttpError(400);
+              await renameImage(root, data.from, data.to);
+              reply(res, 200, '{}', 'application/json');
+            }
+            return;
+          }
           if (!format.text || (route !== 'save' && route !== 'state')) throw new HttpError(404);
           // JSON escapes a byte as at most six (`\u00XX`).
           const data = await readJsonBody(req, TEXT_LIMIT * 6 + 1024) as { dirty?: unknown; text?: unknown; version?: unknown } | null;
@@ -132,42 +188,17 @@ export async function startFileViewer(input: string, { onDirty = () => {} }: { o
           return;
         }
         if (route === 'view' && format.text) {
-          reply(res, 200, editorPage(basename(target)), 'text/html; charset=utf-8');
+          reply(res, 200, (format.markdown ? markdownPage : editorPage)(basename(target)), 'text/html; charset=utf-8');
           return;
         }
         const resource = resources.get(route);
-        if (!resource) throw new HttpError(404);
-        const size = (await resource.file.stat()).size;
-        let start = 0;
-        let end = size - 1;
-        const range = req.headers.range;
-        if (range) {
-          const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-          if (!match || (!match[1] && !match[2])) { res.setHeader('Content-Range', `bytes */${size}`); throw new HttpError(416); }
-          start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
-          end = match[1] && match[2] ? Math.min(Number(match[2]), end) : end;
-          if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start < 0 || start >= size) {
-            res.setHeader('Content-Range', `bytes */${size}`); throw new HttpError(416);
-          }
-          res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
-        }
-        res.writeHead(range ? 206 : 200, { 'Content-Type': resource.mime, 'Content-Length': Math.max(0, end - start + 1), 'Accept-Ranges': 'bytes' });
-        if (req.method === 'HEAD' || size === 0) { res.end(); return; }
-        // Positional reads let simultaneous range requests share a descriptor,
-        // and a disconnected response must not destroy the grant's shared handle.
-        // Each chunk is a fresh buffer because res.write queues it without copying.
-        for (let offset = start; offset <= end && !res.destroyed;) {
-          const chunk = Buffer.allocUnsafe(Math.min(CHUNK, end - offset + 1));
-          const { bytesRead } = await resource.file.read(chunk, 0, chunk.length, offset);
-          if (!bytesRead) { res.destroy(); return; }
-          offset += bytesRead;
-          if (!res.write(bytesRead === chunk.length ? chunk : chunk.subarray(0, bytesRead)) && !res.destroyed) await new Promise<void>(done => {
-            const complete = () => { res.off('drain', complete); res.off('close', complete); done(); };
-            res.once('drain', complete);
-            res.once('close', complete);
-          });
-        }
-        res.end();
+        if (resource) { await stream(req, res, resource); return; }
+        if (!format.markdown || !route.startsWith('file/')) throw new HttpError(404);
+        const image = await openImage(root, route.slice('file/'.length));
+        try {
+          res.setHeader('Content-Security-Policy', IMAGE_CSP);
+          await stream(req, res, image);
+        } finally { await image.file.close(); }
       },
     });
     return { port: viewer.port, path: `${viewer.prefix}${format.text ? 'view' : `file/${encodeURIComponent(basename(target))}`}`, target, close: viewer.close };

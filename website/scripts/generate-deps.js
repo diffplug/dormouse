@@ -85,6 +85,13 @@ function formatAuthor(author) {
   return author.name || author.email || author.url || null;
 }
 
+/** Names from a `contributors` or `authors` array, for a package without `author`. */
+function formatPeople(people) {
+  if (!Array.isArray(people)) return null;
+  const names = [...new Set(people.map(formatAuthor).filter(Boolean))];
+  return names.length ? names.join(", ") : null;
+}
+
 function normalizeRepositoryUrl(repository) {
   const repositoryUrl = typeof repository === "string" ? repository : repository?.url;
   if (!repositoryUrl) return null;
@@ -121,6 +128,8 @@ const visitedWorkspacePackageNames = new Set();
  * docs/specs/security-supply-chain.md -> "Disclosure".
  */
 const undescribedPackages = new Map();
+/** Each package's `contributors` (or `authors`), the last resort for its author. */
+const listedPeople = new Map();
 
 /**
  * Identity of a disclosed package. Two installs of one name that agree on all
@@ -137,6 +146,8 @@ function addExternalPackage(pkg) {
     author: formatAuthor(pkg.author),
     homepage: getHomepage(pkg),
   };
+  const people = formatPeople(pkg.contributors) ?? formatPeople(pkg.authors);
+  if (people) listedPeople.set(pkg.name, people);
   const key = externalPackageKey(identity);
   const existing = externalPackages.get(key);
   if (existing) {
@@ -309,11 +320,17 @@ deps.push(
 // Manual overrides for dependencies missing license or author in their metadata
 const missingLicense = {
   "Solarized & Selenized": "MIT",
+  // Declared in the legacy `licenses` array.
+  "format": "MIT",
+  // Stated only in its LICENSE file.
+  "khroma": "MIT",
 };
 const missingAuthor = {
   // DefinitelyTyped publishes these names in `contributors`, not `author`.
   "@types/trusted-types": "Jakub Vrana, Damien Engels, Emanuel Tesar, Bjarki, Sebastian Silbermann",
   "@hono/node-ws": "Hono middleware contributors",
+  "@mdxeditor/gurx": "Petyo Ivanov",
+  "@preact/signals-core": "Preact Team",
   // The addon ships a `contributors` array rather than npm's singular `author`
   // field, and its prebuilt platform packages carry neither.
   "@node-datachannel/darwin-arm64": "Murat Doğan, Paul-Louis Ageneau",
@@ -330,19 +347,44 @@ const missingAuthor = {
   // Both ship an `authors` array rather than npm's singular `author` field.
   "@zxing/browser": "David Werth, Luiz Barni",
   "@zxing/library": "Adrian Toșcă, David Werth, Luiz Barni",
+  // nodeca's port of Python's argparse, under the PSF license.
+  "argparse": "nodeca, Python Software Foundation",
   "atomically": "Fabio Spampinato",
   "inherits": "Isaac Z. Schlueter",
+  "lexical": "Meta Platforms, Inc. and affiliates",
   "minimalistic-assert": "Calvin Metcalf",
   "ms": "Vercel, Inc.",
   "node-addon-api": "Node.js API collaborators",
   "pngjs": "pngjs contributors",
+  "prop-types": "Meta Platforms, Inc. and affiliates",
   "react": "Meta Platforms, Inc. and affiliates",
   "react-dom": "Meta Platforms, Inc. and affiliates",
+  "react-is": "Meta Platforms, Inc. and affiliates",
   "scheduler": "Meta Platforms, Inc. and affiliates",
   "stubborn-fs": "Fabio Spampinato",
   "stubborn-utils": "Fabio Spampinato",
   "tailwindcss": "Tailwind Labs, Inc.",
   "when-exit": "Fabio Spampinato",
+  // Holders named only in each package's LICENSE file.
+  "@braintree/sanitize-url": "Braintree",
+  "acorn": "Acorn contributors",
+  "acorn-jsx": "Ingvar Stepanyan",
+  "cose-base": "iVis@Bilkent",
+  "cytoscape": "The Cytoscape Consortium",
+  "cytoscape-cose-bilkent": "The Cytoscape Consortium",
+  "diff": "Kevin Decker",
+  "es-toolkit": "Viva Republica, Inc.",
+  "katex": "Khan Academy and other contributors",
+  "khroma": "Fabio Spampinato, Andrew Maney",
+  "layout-base": "iVis@Bilkent",
+  "uuid": "Robert Kieffer and other contributors",
+  "uvu": "Luke Edwards",
+};
+// Every package under these scopes names its holder only in its LICENSE.
+const missingAuthorScopes = {
+  "@chevrotain/": "Shahar Soel",
+  "@lexical/": "Meta Platforms, Inc. and affiliates",
+  "@radix-ui/": "WorkOS",
 };
 for (const dep of deps) {
   if (!dep.license) {
@@ -354,7 +396,9 @@ for (const dep of deps) {
     dep.license = override;
   }
   if (!dep.author) {
-    const override = missingAuthor[dep.name];
+    const override = missingAuthor[dep.name]
+      ?? Object.entries(missingAuthorScopes).find(([scope]) => dep.name.startsWith(scope))?.[1]
+      ?? listedPeople.get(dep.name);
     if (!override) {
       console.error(`ERROR: "${dep.name}" has no author. Add it to missingAuthor in generate-deps.js`);
       process.exit(1);

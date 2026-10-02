@@ -16,7 +16,7 @@ import 'monaco-editor/esm/vs/basic-languages/css/css.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution.js';
 import 'monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution.js';
-import { connectToolFrame } from 'dor-tools-lib/frame';
+import { documentSession } from './document-session';
 import './editor.css';
 
 monaco.languages.register({ id: 'json', extensions: ['.json', '.jsonl'] });
@@ -28,65 +28,50 @@ monaco.languages.setMonarchTokensProvider('json', { tokenizer: { root: [
 
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const saveButton = el<HTMLButtonElement>('save');
-const reloadButton = el<HTMLButtonElement>('reload');
 const error = el('error');
-const state = el('state');
 let editor: monaco.editor.IStandaloneCodeEditor;
 let model: monaco.editor.ITextModel;
-let savedRevision = 0;
-let version = '';
-let saving: Promise<void> | null = null;
-let lastDirty: boolean | undefined;
-let stateQueue = Promise.resolve();
 let appliedTheme = '';
 
 (self as typeof self & { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
   getWorker: () => new Worker(new URL('./editor.worker.js', import.meta.url), { type: 'module' }),
 };
 
-async function request(path: string, body?: unknown) {
-  const response = await fetch(path, body === undefined ? undefined : {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
-  return response.json();
-}
-function fail(reason: unknown) {
-  error.textContent = reason instanceof Error ? reason.message : String(reason);
-  error.hidden = false;
-}
-function dirty() { return !!model && model.getAlternativeVersionId() !== savedRevision; }
-// The host's close prompt saves through this channel (docs/specs/dor-tool.md -> Closing unsaved Tools).
-const host = connectToolFrame({
-  dirty: () => model ? dirty() : undefined,
-  save: () => save().catch(reason => { fail(reason); throw reason; }),
+const session = documentSession<number>({
+  snapshot() {
+    model.pushStackElement(); // Further typing must be undoable back to this save.
+    return { text: model.getValue(), mark: model.getAlternativeVersionId() };
+  },
+  holds: mark => model.getAlternativeVersionId() === mark,
+  apply(text, name) {
+    const language = monaco.languages.getLanguages().find(l => l.filenames?.includes(name)
+      || l.extensions?.some(ext => name.toLowerCase().endsWith(ext)))?.id ?? 'plaintext';
+    if (!model) {
+      model = monaco.editor.createModel(text, language);
+      editor = monaco.editor.create(el('editor'), { model, automaticLayout: true, theme: 'workbench',
+        minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, lineNumbersMinChars: 3,
+        padding: { top: 10, bottom: 10 }, renderLineHighlight: 'gutter', overviewRulerLanes: 0,
+        fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
+      // Reload reports once after establishing the replacement's saved revision.
+      model.onDidChangeContent(event => { if (!event.isFlush) session.changed(); });
+      editor.onDidChangeCursorPosition(({ position }) => {
+        el('position').textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
+      });
+    } else model.setValue(text);
+    el('language').textContent = language === 'plaintext' ? 'Plain Text' : language;
+    el('encoding').textContent = `UTF-8 · ${model.getEOL() === '\r\n' ? 'CRLF' : 'LF'}`;
+    applyTheme();
+  },
+}, {
+  report({ loaded, dirty, saving }) {
+    saveButton.disabled = !loaded || !dirty || saving;
+    el('state').textContent = !loaded ? 'Loading…' : saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved';
+  },
+  fail(text) {
+    error.textContent = text ?? '';
+    error.hidden = text === null;
+  },
 });
-function report() {
-  const changed = dirty();
-  saveButton.disabled = !model || !changed || saving !== null;
-  state.textContent = saving ? 'Saving…' : changed ? 'Unsaved' : 'Saved';
-  // Post immediately so the preview is pinned before a second selection can
-  // replace it. The ordered OSC reports also cover automated browser renders.
-  host.report();
-  if (changed !== lastDirty) {
-    lastDirty = changed;
-    stateQueue = stateQueue.then(() => request('state', { dirty: changed })).then(() => {}, fail);
-  }
-}
-async function save() {
-  if (saving) return saving;
-  if (!dirty()) return;
-  model.pushStackElement(); // Further typing must be undoable back to this save.
-  const text = model.getValue();
-  const revision = model.getAlternativeVersionId();
-  error.hidden = true;
-  saving = request('save', { text, version }).then(result => {
-    version = result.version;
-    savedRevision = revision; // Undo restores this revision; newer edits stay dirty.
-  }).finally(() => { saving = null; report(); });
-  report();
-  return saving;
-}
 function applyTheme() {
   const css = getComputedStyle(document.body);
   const light = document.body.classList.contains('vscode-light') || document.body.classList.contains('vscode-high-contrast-light')
@@ -110,56 +95,19 @@ function applyTheme() {
   monaco.editor.setTheme('workbench');
   editor?.updateOptions({ fontFamily, fontSize });
 }
-async function load() {
-  const source = await request('source');
-  version = source.version;
-  const language = monaco.languages.getLanguages().find(l => l.filenames?.includes(source.name)
-    || l.extensions?.some(ext => source.name.toLowerCase().endsWith(ext)))?.id ?? 'plaintext';
-  if (!model) {
-    model = monaco.editor.createModel(source.text, language);
-    editor = monaco.editor.create(el('editor'), { model, automaticLayout: true, theme: 'workbench',
-      minimap: { enabled: false }, scrollBeyondLastLine: false, fontSize: 13, lineNumbersMinChars: 3,
-      padding: { top: 10, bottom: 10 }, renderLineHighlight: 'gutter', overviewRulerLanes: 0,
-      fixedOverflowWidgets: true, accessibilitySupport: 'auto' });
-    // Reload reports once after establishing the replacement's saved revision.
-    model.onDidChangeContent(event => { if (!event.isFlush) report(); });
-    editor.onDidChangeCursorPosition(({ position }) => {
-      el('position').textContent = `Ln ${position.lineNumber}, Col ${position.column}`;
-    });
-  } else model.setValue(source.text);
-  el('language').textContent = language === 'plaintext' ? 'Plain Text' : language;
-  el('encoding').textContent = `UTF-8 · ${model.getEOL() === '\r\n' ? 'CRLF' : 'LF'}`;
-  savedRevision = model.getAlternativeVersionId();
-  applyTheme();
-  report();
-}
-saveButton.addEventListener('click', () => { void save().catch(fail); });
-// Capture phase: runs before Monaco, and outside it too.
-window.addEventListener('keydown', event => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
-    event.preventDefault(); void save().catch(fail);
-  }
-}, true);
-reloadButton.addEventListener('click', async () => {
-  if (saving) return;
-  if (dirty()) {
-    const dialog = el<HTMLDialogElement>('confirm');
-    dialog.returnValue = 'cancel';
-    const answer = new Promise<string>(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true }));
-    dialog.showModal();
-    if (await answer !== 'discard') return;
-  }
-  error.hidden = true;
-  void load().catch(fail);
-});
+saveButton.addEventListener('click', () => { void session.save(); });
+el('reload').addEventListener('click', () => void session.reload(async () => {
+  const dialog = el<HTMLDialogElement>('confirm');
+  dialog.returnValue = 'cancel';
+  const answer = new Promise<string>(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true }));
+  dialog.showModal();
+  return await answer === 'discard';
+}));
 el('wrap').addEventListener('click', () => {
   const on = el('wrap').getAttribute('aria-pressed') !== 'true';
   el('wrap').setAttribute('aria-pressed', String(on));
   editor?.updateOptions({ wordWrap: on ? 'on' : 'off' });
 });
 window.addEventListener('dormouse:theme', applyTheme);
-window.addEventListener('beforeunload', event => {
-  if (window.parent === window && dirty()) { event.preventDefault(); event.returnValue = ''; }
-});
 applyTheme();
-void load().catch(fail);
+void session.load();
