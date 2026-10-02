@@ -919,9 +919,9 @@ async function pairedNothing(ctx, { decide, burrowShot, pocketShot, as, complain
   await ctx.shot(burrowShot);
 
   // "Nothing was paired" is an absence, and the count is re-read on a 2 s poll
-  // (`docs/specs/relay.md`), so it is given a cycle to move before being
-  // believed — a count read the instant the outcome lands would pass whether or
-  // not the Burrow wrote a record.
+  // (`POLL_MS` in `lib/src/remote/burrow/burrow-status-store.ts`), so it is
+  // given a cycle to move before being believed — a count read the instant the
+  // outcome lands would pass whether or not the Burrow wrote a record.
   await delay(2_500);
   const after = await pairedCount(burrow);
   if (after !== before) {

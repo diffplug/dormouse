@@ -1,4 +1,4 @@
-# Relay (selfhost) — Rationale
+# Relay (selfhost) and Burrow service — Rationale
 
 > Informative companion to [relay.md](relay.md): the evidence, measurements, and dead-approach history behind its rules, keyed by that spec's headings (AGENTS.md → "What, not why"). Nothing here is normative — every rule it explains is stated in the spec.
 
@@ -23,20 +23,6 @@
 **Why only the exact string `true` turns user verification on.** Enabling it without UV-capable authenticators locks the account out of its own Relay: the cost of reading a misspelling as on.
 
 **Why the origin is normalized rather than compared as typed.** A trailing slash reads as correct in an `.env` file and then fails every compare it reaches, unless every compare site re-parses it first.
-
-## Relay origin
-
-**Why one origin rather than an allowlist.** The retired `DORMOUSE_REMOTE_CONNECT_SRC` default, `https://*.dormouse.sh wss://*.dormouse.sh`, was a wildcard only to leave room for BYOT's per-tenant hosts, which nothing shipped used; any DNS name added under `dormouse.sh` widened what every stock binary would talk to. The Hosted origin was a second baked value (`DORMOUSE_HOSTED_ORIGIN`) that had to agree with the list, or one-time links went dark. One exact origin is both narrower and one fact: a build is Hosted or points at exactly one self-host Relay, and nothing else it reaches in the background is left to configure.
-
-**Why a self-host build reaches nothing of Dormouse's in the background.** A self-hoster runs their own Relay to keep their traffic off infrastructure they do not control. An update check, a rendezvous room, or a voice request would each tell `dormouse.sh` that the machine exists and when it runs, and the updater would do worse: the manifest names the stock binaries, so installing one over a source build replaces its baked origin with Hosted's and silently drops its Relay.
-
-**Why a release build refuses the Hosted flag and a loopback origin.** The flag turns on Hosted behavior — the voice token, the rendezvous — for an origin Dormouse may not operate; that is useful against a local `pnpm dev:hosted` or a PR preview and wrong in anything installed. A loopback `http:` origin in an installed binary points it at whatever listens on that port of the user's own machine.
-
-**Why managed voice speaks at a fixed origin rather than a baked one.** A second baked value would be the drift `DORMOUSE_HOSTED_ORIGIN` was (above): a variable that must agree with the relay origin, or a feature goes dark. Voice has no self-host counterpart, so nothing needs to point it elsewhere; a dev Hosted build on loopback speaks to the real service. It is its own origin, not the relay's, so the Worker holding `ELEVENLABS_API_KEY` serves nothing else.
-
-**Why an enrollment for another origin is kept rather than deleted.** The `burrowToken` in it cannot be re-minted without the setup password, so a user moving between a stock build and a self-host build — or between two dogfood builds — would lose every pairing on each switch. Reading it as none is enough: nothing connects to an origin the build was not baked with.
-
-**The build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped default — Hosted — instead of the self-hoster's Relay: a build that looks correct and has no Relay at all, so `assertRelayOriginBaked` greps the emitted bundle for the value. An origin outside the accepted rule would never match what the runtime composes, and a retired variable left over from older instructions would build a stock Hosted binary without a word, so `resolveRelayOrigin` fails the build on both.
 
 ## State files
 
@@ -86,9 +72,19 @@
 
 **Why the Burrow cannot lean on the Relay's shape guard.** Trusting the relay's own `isE2eClientFrame` would take a relay-supplied object on faith where that is least acceptable: the routing values it uses as map keys, and the ciphertext it is about to spend WebCrypto on. The relay's copy keeps a bad frame off the wire; the Burrow's exists because the model does not trust the relay.
 
-## E2E framing
+## Relay origin
 
-**Why reassembled bodies compact into one buffer.** A peer may legally split one application message into single-byte bodies, so a queue of bodies is bounded in bytes but unbounded in entries, and concatenating each body onto the accumulated bytes as it arrives would be quadratic. A geometrically-grown buffer is neither.
+**Why one origin rather than an allowlist.** The retired `DORMOUSE_REMOTE_CONNECT_SRC` default, `https://*.dormouse.sh wss://*.dormouse.sh`, was a wildcard only to leave room for BYOT's per-tenant hosts, which nothing shipped used; any DNS name added under `dormouse.sh` widened what every stock binary would talk to. The Hosted origin was a second baked value (`DORMOUSE_HOSTED_ORIGIN`) that had to agree with the list, or one-time links went dark. One exact origin is both narrower and one fact: a build is Hosted or points at exactly one self-host Relay, and nothing else it reaches in the background is left to configure.
+
+**Why a self-host build reaches nothing of Dormouse's in the background.** A self-hoster runs their own Relay to keep their traffic off infrastructure they do not control. An update check, a rendezvous room, or a voice request would each tell `dormouse.sh` that the machine exists and when it runs, and the updater would do worse: the manifest names the stock binaries, so installing one over a source build replaces its baked origin with Hosted's and silently drops its Relay.
+
+**Why a release build refuses the Hosted flag and a loopback origin.** The flag turns on Hosted behavior — the voice token, the rendezvous — for an origin Dormouse may not operate; that is useful against a local `pnpm dev:hosted` or a PR preview and wrong in anything installed. A loopback `http:` origin in an installed binary points it at whatever listens on that port of the user's own machine.
+
+**Why managed voice speaks at a fixed origin rather than a baked one.** A second baked value would be the drift `DORMOUSE_HOSTED_ORIGIN` was (above): a variable that must agree with the relay origin, or a feature goes dark. Voice has no self-host counterpart, so nothing needs to point it elsewhere; a dev Hosted build on loopback speaks to the real service. It is its own origin, not the relay's, so the Worker holding `ELEVENLABS_API_KEY` serves nothing else.
+
+**Why an enrollment for another origin is kept rather than deleted.** The `burrowToken` in it cannot be re-minted without the setup password, so a user moving between a stock build and a self-host build — or between two dogfood builds — would lose every pairing on each switch. Reading it as none is enough: nothing connects to an origin the build was not baked with.
+
+**The build-time guards.** A lost esbuild `define` compiles fine, surfacing only as a Burrow quietly using the shipped default — Hosted — instead of the self-hoster's Relay: a build that looks correct and has no Relay at all, so `assertRelayOriginBaked` greps the emitted bundle for the value. An origin outside the accepted rule would never match what the runtime composes, and a retired variable left over from older instructions would build a stock Hosted binary without a word, so `resolveRelayOrigin` fails the build on both.
 
 ## Burrow side (`lib` + the two Node hosts)
 
@@ -112,8 +108,6 @@
 
 **What the offer read is bounded to.** The un-enrolled state, not the dialog: the 2 s poll is the loudest reader, but the enrolled-gate seeds itself from `status` too, so an un-enrolled machine pays roughly two ENOENT opens per webview activation on top of it. An enrolled machine, left running for days, pays nothing.
 
-**Why the connection is polled, and its answer compared field-wise.** Without the 2 s poll, a machine that finished connecting a moment after the dialog opened would read as permanently "Connecting…"; and since the service returns a fresh object every poll, an identity comparison publishes a change every 2 s, re-rendering the section twice a minute to paint identical text.
-
-**Why losing the last subscriber drops the read in flight.** A reopened dialog answered with a status fetched for the closed one would sit on "Checking…" until that stale read settled. The same holds for `enroll`, `reconnect` and `clearEnrollment`: an answer fetched before the command is no longer the question anyone asked.
+**Why the connection is polled.** Without the 2 s poll, a machine that finished connecting a moment after the dialog opened would read as permanently "Connecting…".
 
 **Why the QR panel names the decision that ended a code.** Every outcome — approval, denial, mismatch — spends the invitation and dismisses the modal, so with one attempt and no retry a mismatch would look exactly like a success, the paired-device count being absolute rather than a delta.

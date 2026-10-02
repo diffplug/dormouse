@@ -8,8 +8,8 @@ import {
   subscribeToSizeHolds,
 } from './size-hold-store';
 
-const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1', cols: 51, rows: 14 };
-const TABLET = { holder: 'session-b', label: 'iPad', lease: '1', cols: 40, rows: 20 };
+const PHONE = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'current', cols: 51, rows: 14 };
+const TABLET = { holder: 'session-b', label: 'iPad', lease: '1', serviceId: 'current', cols: 40, rows: 20 };
 
 afterEach(() => {
   clearSizeHold('pane-1');
@@ -57,15 +57,13 @@ describe('size holds', () => {
     const changed = vi.fn();
     const unsubscribe = subscribeToSizeHolds(changed);
     holdSize('pane-1', { ...PHONE, serviceId: 'gone' });
-    holdSize('pane-1', { ...TABLET, serviceId: 'current' });
+    holdSize('pane-1', TABLET);
     holdSize('pane-2', { ...PHONE, serviceId: 'gone' });
-    const legacy = { holder: 'session-c', label: 'Pixel', lease: '1', cols: 60, rows: 30 };
-    holdSize('pane-2', legacy);
     changed.mockClear();
 
     dropSizeHoldsFromOtherServices('current');
-    expect(getSizeHolds('pane-1')).toEqual([{ ...TABLET, serviceId: 'current' }]);
-    expect(getSizeHolds('pane-2')).toEqual([legacy]);
+    expect(getSizeHolds('pane-1')).toEqual([TABLET]);
+    expect(getSizeHolds('pane-2')).toEqual([]);
     expect(changed).toHaveBeenCalledTimes(1);
 
     dropSizeHoldsFromOtherServices('current');

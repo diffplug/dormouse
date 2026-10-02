@@ -6,7 +6,7 @@
 
 ## Overview
 
-Owns terminal selection, copy, paste, mouse override, and their chrome across platforms. Header placement: `docs/specs/layout.md`; sequence registry: `docs/specs/terminal-escapes.md`.
+Owns terminal selection, copy, paste, link activation, mouse override, and their chrome across platforms. Header placement: `docs/specs/layout.md`; sequence registry: `docs/specs/terminal-escapes.md`.
 
 For tools, these rules apply while the terminal is forward; the browser or conflict view owns the keys otherwise.
 
@@ -40,7 +40,7 @@ Source of truth: `lib/src/components/wall/TerminalPaneHeader.tsx` (icons), `lib/
 
 **Temporary override.** Clicking the Mouse icon starts one. While active:
 
-- Mouse events go to the terminal, not the inside program; belt and braces, any report xterm still emits is stripped from its `onData` stream before the write reaches the PTY (`stripMouseReportsFromInput`, `docs/specs/terminal-escapes.md`).
+- Mouse events go to the terminal, not the inside program; belt and braces, any report xterm still emits is stripped from its `onData` stream before the write reaches the PTY (`stripMouseReportsFromInput`, `docs/specs/transport.md` -> "Report filtering on the input side").
 - **Wheel events are suppressed too**, so xterm cannot turn scroll into mouse reports or alternate-screen arrow keys.
 - The No-Mouse icon replaces the Mouse icon, and a banner at the top-right of the pane content area reads `Temporary mouse override until mouse-up.` plus **Make sticky** and **Cancel**.
 
@@ -52,7 +52,7 @@ It ends on the **next mouse-up inside the terminal content area** paired with a 
 
 **Sticky override.** **Make sticky** converts it after the same flash (the store calls this state `permanent`): banner dismissed, No-Mouse icon kept with its "click to restore" hover text, mouse and wheel still going to the terminal. It persists until the user clicks the No-Mouse icon.
 
-**Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?1000l`/`?1002l`/`?1003l`); icon and banner go with it. A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/terminal-escapes.md`), so a mode latched by a dead TUI cannot block selection in the restored pane.
+**Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?1000l`/`?1002l`/`?1003l`); icon and banner go with it. A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/transport.md` -> "Replay-time mode-reset tail (Dormouse-emitted)"), so a mode latched by a dead TUI cannot block selection in the restored pane.
 
 **No keyboard path is designed** for the icons or banner buttons, and focus-based activation is not actively prevented.
 
@@ -373,6 +373,25 @@ Dormouse's own `<input>`s — pane rename, the browser URL editor, dialog fields
 **Must copy selected context diagnostic text with Cmd+C on macOS and Ctrl+C elsewhere**, including the menu-less standalone host. Copy only a selection contained in the focused diagnostic, retaining it on clipboard failure; helper and editable-field chords keep their own routing. Pinned by `lib/src/components/wall/keyboard/handle-context-copy.test.ts`.
 
 Source of truth: `handleContextCopy` in `lib/src/components/wall/keyboard/handle-context-copy.ts`; `TerminalPanel` in `lib/src/components/wall/TerminalPanel.tsx`; `useWallKeyboard` in `lib/src/components/wall/use-wall-keyboard.ts`; `markSessionTouched` in `lib/src/lib/terminal-lifecycle.ts`.
+
+
+---
+
+## OSC 8 hyperlinks
+
+Neither `params` nor the URI is parsed at the PTY boundary.
+
+**Activation never opens directly**: xterm.js's `linkHandler` reads the link's rendered display text from the buffer range xterm supplies. A local `file:` link whose display text names its target previews (`docs/specs/dor-tool.md` -> "Terminal links"); every other click, and any preview that fails, opens the confirmation dialog carrying the URI *and* the display text. The dialog shows the full target in one of three states:
+
+| State | Target | Dialog |
+|---|---|---|
+| **Openable** | any absolute URI with a scheme — `http:`, `https:`, `mailto:`, `file:`, custom app schemes such as `vscode:` | cancel plus an open action labelled by scheme |
+| **Deceptive** | display text URL-shaped (a full URL or a bare domain) but resolving to a different host than the target; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
+| **Blocked** | malformed URIs, control-character-bearing targets, browser-executable or opaque pseudo-schemes (`javascript:`, `data:`, `blob:`, `about:`) | **Never silently dropped**: the dialog opens with the reason, close the only action |
+
+**Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
+
+Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinned by `lib/src/lib/external-links.test.ts`), `lib/src/lib/external-link-confirmation.ts`, `lib/src/components/ExternalLinkModal.tsx`, and the host's own verdict re-check in `lib/src/components/ExternalLinkModalHost.tsx`.
 
 
 ## 9. Future

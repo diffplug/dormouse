@@ -65,16 +65,6 @@ test('isSetupTokenResponse accepts a real mint', () => {
   assert.equal(isSetupTokenResponse({ ...MINT, token: 'a'.repeat(128) }), true);
 });
 
-test('isSetupTokenResponse no longer demands a mint handle', () => {
-  // Redemption at the Relay flips nothing on the Burrow any more — the
-  // invitation the same QR carries is Burrow memory, and its state is what the
-  // panel renders — so `mintId` is gone from the response and from the guard. A
-  // Relay that still sends one is accepted as any other additive field.
-  assert.equal(isSetupTokenResponse({ token: 'aZ0-_abc', expiresAt: 1 }), true);
-  assert.equal(isSetupTokenResponse({ ...MINT, mintId: 'mint-1' }), true);
-  assert.equal(isSetupTokenResponse({ ...MINT, mintId: 42 }), true);
-});
-
 test('isSetupTokenResponse rejects a 200 that is not one', () => {
   // The Burrow puts the token straight into a QR encoder and `expiresAt` straight
   // into a `setTimeout` delay, so a missing, mistyped, oversized, or

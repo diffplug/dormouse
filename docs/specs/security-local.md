@@ -8,22 +8,22 @@
 
 The attacker is any program writing to a PTY.
 
-**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC at 16,384 code units, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-escapes.md` -> "Parsing location", "Inline graphics").
+**Must bound retained output by representation**: `TerminalProtocolParser` semantic values by code points and control stripping, an incomplete semantic OSC at 16,384 code units, and ImageAddon data by encoded bytes, decoded pixels, and FIFO storage (`docs/specs/terminal-escapes.md` -> "Parsing location", `docs/specs/layout.md` -> "Inline graphics").
 
-**Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 50` and unsupported `OSC 1337`; consume `OSC 52`, which only offers its text to the copy editor over the user's own drag, copied when the user picks it (`docs/specs/mouse-and-clipboard.md` §4.6). **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/terminal-escapes.md` -> "Inline graphics").
+**Never let untrusted PTY output write the clipboard or access a file**: consume `OSC 50` and unsupported `OSC 1337`; consume `OSC 52`, which only offers its text to the copy editor over the user's own drag, copied when the user picks it (`docs/specs/mouse-and-clipboard.md` §4.6). **Inline images carry their own bytes**: no path is resolved, ImageAddon dropping any non-`inline=1` transfer (`docs/specs/layout.md` -> "Inline graphics").
 
 **An `OSC 8` hyperlink opens only after a confirmation dialog**, except a local
 `file:` link whose display text names its target, which previews through the
 user's `open` rules (`docs/specs/dor-tool.md` -> "Terminal links"); a target whose
 display text names a different host gets **no open action at all** — close and
 copy only, copy holding initial focus
-(`docs/specs/terminal-escapes.md` -> "OSC 8 hyperlinks"). **Nothing opens without
+(`docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks"). **Nothing opens without
 a second pass through `normalizeExternalUri`** (VS Code's in the extension
 host); the dialog is consent, not the boundary.
 
 **Unsupported escape sequences must fail inertly** — consumed or ignored, with
 no visible garbage, clipboard, file, focus, or privilege effect
-(`docs/specs/terminal-escapes.md` -> "iTerm2 identity"; rationale).
+(rationale).
 
 **Notification text is untrusted terminal output**: sanitized at protocol-parse
 time, rendered as plain text and never as markup, re-bounded by a second pass
@@ -31,10 +31,10 @@ before speech or push (`docs/specs/alert.md` -> "Text And Security").
 
 **The `OSC 633` terminator escape is emit-side**, in the shipped
 shell-integration scripts — the parser scans raw bytes and cannot defend it
-(`docs/specs/terminal-escapes.md` -> "Shell-integration injection"; rationale).
+(`docs/specs/terminal-state.md` -> "Shell-integration injection"; rationale).
 
 **Must confine output to the screen, Session state, and bounded terminal reports** — rendered text/images, alerts, titles, prompt/command boundaries, CWD, and `OSC 8` — except a running designated Tool's OSC 367 `open`, gated below. **The PTY-boundary parser writes exactly three answer families**: `OSC 10/11/12 ; ?` color, `OSC 99` capability, `CSI > q` device. xterm.js and ImageAddon answer cursor, device, focus, size, and graphics reports
-(`docs/specs/terminal-escapes.md` -> "Report filtering on the input side").
+(`docs/specs/transport.md` -> "Report filtering on the input side").
 
 - **FAIL IF** `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts` stops consuming `OSC 52` or `OSC 50`, or a parse site stops running it before `pty:data` leaves it (rationale). Pinned by `lib/src/lib/terminal-protocol.test.ts`.
 - **FAIL IF** an `OSC 52` payload can reach the clipboard except as the copy editor's program format the user chose and copied, is retained unbounded or with control characters other than newline and tab, or is accepted into a pane with no shadowed drag: `parseOsc52` and `CLIPBOARD_OFFER_LIMIT` in `lib/src/lib/terminal-protocol.ts`, `offerProgramCopy` in `lib/src/lib/mouse-selection.ts`, `copySelection` in `lib/src/lib/copy-selection.ts`. Pinned by `lib/src/lib/terminal-protocol.test.ts`, `lib/src/lib/mouse-selection.test.ts`, and `lib/src/lib/copy-editor.test.ts`.
@@ -147,9 +147,9 @@ Source of truth: the shared rule and predicates — `isLoopbackHost`, `isOwnOrig
 
 ### Local-file viewer
 
-**FAIL IF** `dor-tools-builtin/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own case-insensitive loopback `Host`, and an absent or same-listener `Origin`. Methods are GET/HEAD, plus text-editor save/state POSTs requiring its own non-null Origin, JSON, and a bounded body. Compare capability prefixes by SHA-256 then `timingSafeEqual`, including malformed lengths. `allowsFileViewerRequest` in `dor-tools-builtin/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
+**FAIL IF** `dor-tools-builtin/src/file-viewer.ts` serves any request without the fresh 256-bit URL capability, its own case-insensitive loopback `Host`, and an absent or same-listener `Origin`. Methods are GET/HEAD, plus text-editor save/state and Markdown image paste/rename POSTs requiring its own non-null Origin, JSON, and a bounded body. Compare capability prefixes by SHA-256 then `timingSafeEqual`, including malformed lengths. `allowsFileViewerRequest` in `dor-tools-builtin/src/file-viewer-loopback-guard.ts` gates every route. Never grant CORS access to foreign origins, cache responses, or send the capability as a referrer.
 
-**FAIL IF** the file viewer exposes directory listings, arbitrary path reads/writes, or a file outside its opened-document grant and fixed shipped-editor assets. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains media/HTML descriptors. Text reads/saves revalidate the exact canonical file and reject symlink substitution; saves compare content revisions and file identity before atomic replacement. Only text viewers accept writes. Viewer resources and editor workers are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; source text is JSON data, never executable markup. The viewer preserves upstream CSP (`docs/specs/dor-browser.md` → Iframe Renderer).
+**FAIL IF** the file viewer exposes directory listings, arbitrary path reads/writes, or a file outside its opened-document grant and fixed shipped-editor assets. Grant construction permits only regular files, rejects symlinks escaping the canonical document directory, bounds static dependency discovery, and retains media/HTML descriptors. Text reads/saves revalidate the exact canonical file and reject symlink substitution; saves compare content revisions and file identity before atomic replacement. Only text viewers accept writes. The Markdown editor's grant adds regular image-format files at or under the document's canonical directory, opened per request by realpath and served with a `sandbox` CSP; its other writes create signature-checked images exclusively beside the document and rename such images within their own directory without replacing a file (`dor-tools-builtin/src/markdown-images.ts`), and its page renders document HTML only through `safeCreateDOM`'s allowlist in `dor-tools-builtin/viewer/markdown-safety.ts`. Viewer resources and editor workers are restricted by CSP to its own origin plus inline scripts/styles and data images, including through the iframe proxy; source text is JSON data, never executable markup. The viewer preserves upstream CSP (`docs/specs/dor-browser.md` → Iframe Renderer).
 
 **Must not describe the viewer CSP as confining active documents' navigation.** HTML/SVG scripts can navigate their frame to external URLs, including with granted contents; the resource policy is not a no-egress boundary. (rationale)
 
@@ -245,7 +245,7 @@ Approval workflow, declaration and resolution belong to `docs/specs/dor-tool.md`
 
 **Must keep named-tool inputs as argv until the renderer quotes them for the target shell.** User configuration is the local user's authority; a project name cannot replace a user Tool during user-only lookup.
 
-**Must escape C0, DEL, and C1 characters in every repo-sourced field `dor tool` prints, its warnings, `--list --json`, and the host errors `dor tool` and `dor open` relay included**, since each is bound for a terminal. Source of truth: `printable` / `renderPrintableJson` in `dor/src/commands/shared.ts`; `dispatchToolSurface` in `dor/src/commands/tool.ts`. Tests: `tool --list escapes control characters in repo text, in every output` and `open, tool, and tool --list escape control characters in a host error` in `dor/test/cli-output.test.mjs`.
+**Must escape C0, DEL, and C1 characters in every repo-sourced field `dor tool` prints, its warnings, `--list --json`, the host errors `dor tool` and `dor open` relay, and the file names and handlers the `dor open` picker draws included**, since each is bound for a terminal. Source of truth: `printable` / `renderPrintableJson` in `dor/src/commands/shared.ts`; `dispatchToolSurface` in `dor/src/commands/tool.ts`; `runFilePicker` in `dor/src/commands/open-picker.ts`. Tests: `tool --list escapes control characters in repo text, in every output` and `open, tool, and tool --list escape control characters in a host error` in `dor/test/cli-output.test.mjs`; `dor/test/open-picker.test.mjs`.
 
 **Must reject C0 and DEL characters in Tool argv, substituted argv, and local targets before launch**, including controls exposed by canonicalizing symlinks or by decoding a `file:` URL, which a filesystem error would otherwise echo. Shell quotes do not protect terminal editing keys. String `run` remains explicit shell code. Source of truth: `hasShellInputControls` in `dor/src/commands/shell-quote.ts`; `resolveToolInput` in `lib/src/host/tool-input.ts`; `useDorControl` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-input.test.ts`, `lib/src/components/Wall.test.tsx`.
 

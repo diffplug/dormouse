@@ -503,7 +503,7 @@ Source of truth: `InlineEditInput` in `lib/src/components/wall/InlineEditInput.t
 
 - **Untouched**: new `getOrCreateTerminal` sessions start untouched; `isUntouched(id)` exposes the flag, user-originated PTY input clears it, and resume/restore seed the persisted one. **Missing legacy snapshot data defaults to touched (`false`)**, keeping close confirmation conservative.
 - **Shell selection replacement**: the standalone Settings dialog's Shell row and the VS Code shell picker send `dormouse:new-terminal` with `replaceUntouched` when the selected shell type changes. **A shell is identified by executable path plus ordered arguments**, so WSL distributions and Windows Developer shells sharing an executable stay distinct. **`Wall` always mints a new session id and a fresh `surface:N` ref.** An untouched selected plain terminal pane or door has the new terminal take over its leaf via a Lath `replace` op (an atomic identity swap; doors reattach through the normal restore path first), the old session disposed and its ref retired; a touched selection, or none, spawns a new pane beside it. Announced spawns show a transient pane-anchored notice (`Switched to zsh`, `Opened bash`).
-- **Replay-time terminal reports must be dropped; user input must not be** — during **resume** replay the registry drops the replies xterm.js emits to queries embedded in buffered output, before they reach the retained PTY (`docs/specs/terminal-escapes.md` → "Report filtering on the input side").
+- **Replay-time terminal reports must be dropped; user input must not be** — during **resume** replay the registry drops the replies xterm.js emits to queries embedded in buffered output, before they reach the retained PTY (`docs/specs/transport.md` → "Report filtering on the input side").
 
 Source of truth: `lib/src/lib/terminal-store.ts` (registry maps and pending shell opts, imported directly, including by `lib/src/remote/burrow/`), `lib/src/lib/terminal-lifecycle.ts` (the ops), `lib/src/lib/terminal-registry.ts` (the facade).
 
@@ -513,7 +513,7 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 
 ### Renderer
 
-**Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under visual snapshots. ImageAddon owns its separate canvas layers (`docs/specs/terminal-escapes.md` → "Inline graphics"). (rationale)
+**Must use `@xterm/addon-webgl` for mounted terminals when available**, falling back to xterm's DOM renderer on unsupported WebGL, activation failure, or context-budget eviction. `cfg.terminal.webglRenderer` disables WebGL and is off under visual snapshots. ImageAddon owns its separate canvas layers ([Inline graphics](#inline-graphics)). (rationale)
 
 - **Must acquire GPU resources at mount, never at Session creation**, and keep a successfully activated renderer when context capture or explicit loss is unavailable. (rationale)
 - **Must dispose the addon on unmount/minimize, Workspace deactivation, helper parking, and Session disposal**, then explicitly lose its context when captured and supported. Report addon or extension failures without aborting teardown. Minimize preserves the xterm, grid, buffers, PTY, and other addons.
@@ -524,6 +524,16 @@ On cold restore, a terminal pane with a host-captured recovery invocation runs i
 **Must report the active renderer as `data-renderer="webgl"|"dom"`** on the persistent terminal host.
 
 Source of truth: `TerminalWebglRenderer` in `lib/src/lib/terminal-webgl.ts`; `mountElement` / `unmountElement` / `parkElement` / `disposeSession` in `lib/src/lib/terminal-lifecycle.ts`. Tests: `lib/src/lib/terminal-webgl.test.ts`, `lib/src/lib/terminal-registry.alert.test.ts`.
+
+### Inline graphics
+
+**Must support SIXEL (`DCS ... q ... ST`), iTerm IIP (`OSC 1337 ; File=` and its multipart forms), and Kitty graphics (`APC G ... ST`) in every Session through stock `@xterm/addon-image`**, gated by `cfg.terminal.inlineImages`; Kitty support follows the addon's alpha-quality subset. **Must load the addon at Session creation, never on the first image**: it answers the DA1, XTSMGRAPHICS, and cell-size probes a program reads before sending one (rationale).
+
+**Must bound each Session to 8,388,608 pixels per image, 33,554,432 bytes per SIXEL/IIP/Kitty sequence, and 34 MB of FIFO image storage** (rationale). **Dormouse forwards only the bytes carried in the sequence and resolves no filename**; ImageAddon discards a transfer without `inline=1`.
+
+**Every host's CSP must grant `'wasm-unsafe-eval'`, never `'unsafe-eval'`** — the addon compiles a vendored WebAssembly SIXEL decoder from `activate()`, making this a Session-creation requirement rather than a first-image one (rationale).
+
+Source of truth: `IMAGE_ADDON_OPTIONS` in `lib/src/lib/terminal-lifecycle.ts`; `OSC1337_FORWARDED` in `lib/src/lib/terminal-protocol.ts`; `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.security.csp` in `standalone/src-tauri/tauri.conf.json`, `pocketContentSecurityPolicy` in `remote-lib-common/src/remote/relay-common.ts`.
 
 ### Session persistence
 

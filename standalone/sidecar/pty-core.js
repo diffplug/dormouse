@@ -26,7 +26,7 @@ function resolveDefaultShell(platform = process.platform, env = process.env) {
 
 const LOGIN_ARG_UNSUPPORTED_SHELLS = new Set(['csh', 'tcsh']);
 // Mirrors ITERM2_COMPAT_VERSION in lib/src/lib/terminal-protocol.ts — pinned by
-// lib/src/lib/mirrored-constants.test.ts (terminal-escapes.md: one
+// lib/src/lib/mirrored-constants.test.ts (transport.md: one
 // compatibility version across env and device responses).
 const ITERM2_COMPAT_VERSION = '3.6.6';
 
@@ -138,7 +138,7 @@ function withPrependedPath(env, dir, platform = process.platform) {
 
 // Another terminal's identity, inherited when the host was launched from it.
 // Dormouse is the pane's terminal now, and tools read these to decide what to
-// emit (docs/specs/terminal-escapes.md -> "iTerm2 identity"). Names match
+// emit (docs/specs/transport.md -> "iTerm2 identity"). Names match
 // case-insensitively on win32, like its environment.
 const FOREIGN_TERMINAL_ENV = new RegExp(`^(?:${[
   'VTE_VERSION', 'WT_SESSION', 'WT_PROFILE_ID', 'TERM_FEATURES', 'TERM_SESSION_ID',
@@ -236,7 +236,8 @@ function winPathToWslMount(winPath) {
 // Enable OSC 633 shell integration for shells that support reliable injection,
 // returning possibly-modified { env, shellArgs }. The keystroke-based command
 // heuristic remains the fallback for shells we can't inject (cmd.exe, others)
-// or when the scripts aren't present on disk. See docs/specs/terminal-escapes.md.
+// or when the scripts aren't present on disk. See docs/specs/terminal-state.md ->
+// "Shell-integration injection".
 //
 // zsh        — injected purely via env (`ZDOTDIR`), as reliable as a PATH prepend.
 //        We point ZDOTDIR at our scripts and pass the user's real ZDOTDIR through

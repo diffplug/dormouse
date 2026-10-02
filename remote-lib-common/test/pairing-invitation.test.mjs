@@ -1,6 +1,6 @@
 /**
- * The QR grammar and its one parser (docs/specs/relay.md -> `## Future` -> QR
- * grammar, Parser).
+ * The QR grammar and its one parser (docs/specs/relay.md -> "Setup tokens and
+ * the pairing QR").
  *
  * The fragment is positional and carries no field names, so the emitter and the
  * parser disagreeing about order or length would be a silent mis-pairing rather

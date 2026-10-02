@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { constants } from 'node:fs';
+import { open, type FileHandle } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isAbsolute, relative, sep } from 'node:path';
 import { serveSequence } from 'dor-tools-lib/osc';
@@ -26,7 +28,16 @@ export function reply(res: ServerResponse, status: number, body: string | Buffer
  * bytes (read to the end, buffering none past it, so the refusal is delivered),
  * 400 unparsable. */
 export async function readJsonBody(req: IncomingMessage, limit: number): Promise<unknown> {
-  if ((req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase() !== 'application/json') throw new HttpError(415);
+  if (contentType(req) !== 'application/json') throw new HttpError(415);
+  const body = await readBody(req, limit);
+  try { return JSON.parse(body.toString('utf8')); } catch { throw new HttpError(400); }
+}
+
+/** A request's media type, lowercased, without parameters. */
+export const contentType = (req: IncomingMessage) => (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+
+/** A request body; 413 with `tooLarge` past `limit` bytes, as `readJsonBody`. */
+export async function readBody(req: IncomingMessage, limit: number, tooLarge = ''): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
   await new Promise<void>((done, fail) => {
@@ -34,8 +45,17 @@ export async function readJsonBody(req: IncomingMessage, limit: number): Promise
     req.on('end', done);
     req.on('error', fail);
   });
-  if (size > limit) throw new HttpError(413);
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new HttpError(400); }
+  if (size > limit) throw new HttpError(413, tooLarge);
+  return Buffer.concat(chunks);
+}
+
+/** `path` opened read-only without following a final symlink, when it is a
+ * regular file; the caller owns the descriptor. */
+export async function openRegularFile(path: string): Promise<FileHandle> {
+  const file = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  try { if (!(await file.stat()).isFile()) throw new Error('not a regular file'); }
+  catch (error) { await file.close(); throw error; }
+  return file;
 }
 
 /** Whether the absolute `path` is `root` or under it. */

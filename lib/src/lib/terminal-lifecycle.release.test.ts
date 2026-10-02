@@ -72,7 +72,7 @@ describe('a size hold', () => {
   // A remote session holding a pane that goes away must not leave a strip for a
   // later Session reusing the id (docs/specs/remote-api.md → "Size authority").
   it('goes with the Session, however it leaves this webview', () => {
-    const hold = { holder: 'session-a', label: 'iPhone', lease: '1', cols: 51, rows: 14 };
+    const hold = { holder: 'session-a', label: 'iPhone', lease: '1', serviceId: 'service-1', cols: 51, rows: 14 };
     getOrCreateTerminal('pane-1');
     holdSize('pane-1', hold);
     disposeSession('pane-1');

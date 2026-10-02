@@ -56,6 +56,11 @@ export function printable(text: string): string {
   return text.replace(TERMINAL_CONTROLS, escapeControl);
 }
 
+/** The same controls removed rather than escaped. */
+export function stripControls(text: string): string {
+  return text.replace(TERMINAL_CONTROLS, '');
+}
+
 /** `renderJson` for repo text: `JSON.stringify` escapes only C0, so DEL and C1
  *  are escaped too, which leaves the parsed value unchanged. */
 export function renderPrintableJson(payload: unknown): string {

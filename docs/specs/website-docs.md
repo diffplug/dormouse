@@ -152,7 +152,7 @@ and
 
 **Must retain ordered-list starts and blank-separated paragraphs within their own list item.** `website/scripts/generate-docs.test.js` pins the published first-run setup sequence; `website/src/components/MarkdownDocument.test.tsx` pins resumed numbering. **Must interpret backslash escapes only before ASCII punctuation**, preserving ordinary path characters.
 
-Source of truth: `IMG_ALLOWED_ATTRS`, `parseMarkdown`, `parseInline`, and `createSlugger` in `website/scripts/docs-parser.js`.
+Source of truth: `parseMarkdown` and `createSlugger` in `website/scripts/docs-parser.js`.
 
 ## Markdown rendering contract
 
@@ -209,10 +209,7 @@ separators. **Never** let such a hint change what the span's `textContent`
 yields, so a path still pastes into a shell. No HTML string is ever injected —
 `dangerouslySetInnerHTML` is absent.
 
-Source of truth: `buildDocument`, `applyDelta`, `resolveRemovedAnchors`,
-`assertAnchorsResolve`, `resolveRepoLinks`, `assertRouteFragments`, and
-`localizeSiteLinks` in `website/scripts/generate-docs.js`; `MarkdownDocument`
-and `CodeSpan` in `website/src/components/MarkdownDocument.tsx`.
+Source of truth: `buildDocument` in `website/scripts/generate-docs.js`; `MarkdownDocument` in `website/src/components/MarkdownDocument.tsx`.
 
 ## Per-page head tags
 
@@ -307,10 +304,11 @@ Keyed on the website's own `dormouse:docs-theme-prompt-dismissed`, because
 hidden, so a returning reader never sees dismissed UI flash. Pinned by
 `website/src/components/DocsThemeControl.test.tsx`.
 
+Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` in `website/src/components/DocsLayout.tsx`; `website/public/_redirects`; `website/src/components/SiteHeader.tsx`.
+
 ## `/hosted` preview
 
 **Must describe the account service and link its account app, privacy policy, and terms.**
-Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`.
 
 **Must mark both services unavailable:** Hosted operates Pocket's Relay;
 optional ElevenLabs replaces browser voice. Terminals stay on an awake, online
@@ -327,6 +325,8 @@ discloses metadata, and links the model.
 
 **Must also link the preview from** Pocket marketing/tutorial, self-host docs,
 and the speech and remote-control settings; `linkedFrom` owns the rest.
+
+Source of truth: `Hosted` in `website/src/pages/Hosted.tsx`; `HostingRequirementNotice` in `website/src/components/HostingRequirementNotice.tsx`.
 
 ## Hosted policies
 
@@ -357,7 +357,7 @@ Generation fails on a malformed snapshot envelope, duplicate command id, missing
 or extra snapshot, or root inventory mismatch. Semantic parsing may fall back to
 prose but never silently discards source text.
 
-Source of truth: `buildCli` and `CLI_COMMANDS_SECTION` in `website/scripts/generate-docs.js`; `parseSnapshot`, `parseHelp`, and `definitionRows` in `website/scripts/help-parser.js`; `DorCommandReference` in `website/src/components/DorCommandReference.tsx`.
+Source of truth: `buildCli` in `website/scripts/generate-docs.js`; `parseHelp` in `website/scripts/help-parser.js`; `DorDocs` in `website/src/pages/DorDocs.tsx`.
 
 ## `/compatible-agents` guide
 
@@ -365,7 +365,7 @@ Source of truth: `buildCli` and `CLI_COMMANDS_SECTION` in `website/scripts/gener
 `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`**, pinned by
 `compatible agents` in `website/scripts/generate-docs.test.js`.
 
-Source of truth: `generateDocs` in `website/scripts/generate-docs.js`.
+Source of truth: `COMPATIBLE_AGENTS_DELTA` in `website/scripts/generate-docs.js`; `CompatibleAgentsDocs` in `website/src/pages/CompatibleAgentsDocs.tsx`.
 
 ## `/agent-skill` guide
 
@@ -375,8 +375,7 @@ Source of truth: `generateDocs` in `website/scripts/generate-docs.js`.
 
 **Never inject website URLs into the bundled skill; must reject links to the website's origin rather than rewriting them** (rationale). Known gap: the current prefix check misses bare-origin, case, default-port, and protocol-relative spellings. `buildCli` reuses the same intro block objects, so a site URL in the skill would also reach `/dor`.
 
-Source of truth: `buildSkill`, `assertNoSiteLinks`, and `linkSkillHeadings` in `website/scripts/generate-docs.js`; `AgentSkillDocs` in `website/src/pages/AgentSkillDocs.tsx`.
-Tests: `website/scripts/generate-docs.test.js`.
+Source of truth: `buildSkill` in `website/scripts/generate-docs.js`; `AgentSkillDocs` in `website/src/pages/AgentSkillDocs.tsx`.
 
 ## `/self-host` runbook
 
@@ -407,6 +406,8 @@ bullets — guarantees, what is not defended, known gaps — from
 `docs.security.json` ([`/security` spec](#security-spec)), then the
 disclosure link and the advice to use an assistant.
 
+Source of truth: `SELF_HOST_DELTA` in `website/scripts/generate-docs.js`; `SelfHostDocs` in `website/src/pages/SelfHostDocs.tsx`.
+
 ## `/security` spec
 
 `docs/specs/security.md` stays canonical in `docs/specs/` because it is a spec:
@@ -436,6 +437,8 @@ are, and each specialized page links
 `website/src/pages/security-pages.test.tsx` pins the rendered entries and the
 links.
 
+Source of truth: `SECURITY_DELTA` and `securityAudiences` in `website/scripts/generate-docs.js`; `SecurityDocs` in `website/src/pages/SecurityDocs.tsx`.
+
 ## Generated documentation boundary
 
 **Must generate public references from their canonical sources at build time.** `generateDocs` owns the inputs; `PUBLISHED_PAGES` owns which results are emitted. **Must write a separate gitignored `website/src/data/docs.<page>.json` per published result, never one combined module** (rationale).
@@ -446,7 +449,7 @@ The generated data carries Markdown block/heading inventories after explicit del
 
 **Must run generation from website `predev`, `pretest`, and `prebuild`, and reproduce output from a clean checkout.**
 
-Source of truth: `generateDocs`, `PUBLISHED_PAGES`, `BUILD_ONLY_FIELDS`, `publishable`, and `main` in `website/scripts/generate-docs.js`; scripts in `website/package.json`; generated paths in `.gitignore`.
+Source of truth: `generateDocs` and `main` in `website/scripts/generate-docs.js`; scripts in `website/package.json`; generated paths in `.gitignore`.
 
 ## Homepage browser proof
 
@@ -515,40 +518,6 @@ of aborting the run and hiding every other problem behind a stack trace.
 Nuanced product prose is not checked with phrase blacklists. When a public
 feature section changes, review compares it with its owning implementation
 spec.
-
-## Code map
-
-| File | Role |
-| --- | --- |
-| `vscode-ext/README.md` | The canonical product guide; published off-site, parsed here |
-| `SELF_HOST.md` | The self-host runbook and Installer contract; the runbook half is published |
-| `docs/specs/security.md` | The security spec; every section publishes, its rows split across three pages |
-| `docs/compatible-agents.md` | The agent guide and recovery contract; the public guide publishes at `/compatible-agents` |
-| `vscode-ext/package.json` | Listing metadata and VS Code command inventory |
-| `README.md` | Repository and contributor entry point |
-| `vscode-ext/images/` | Guide media; the generator copies it to `public/guide/images/`, which the Marketplace listing loads from |
-| `dor/skill.md` | The bundled agent skill, rendered exactly at `/agent-skill` |
-| `dor/test/snapshots/help/` | Tested CLI help, the source for `/dor` |
-| `website/src/lib/site-meta.ts` | Every page's title, description, canonical, and social cards |
-| `website/src/lib/docs-pages.ts` | The rail's pages and their order; routes, prerender, rail, and lint all read it |
-| `website/src/pages/Changelog.tsx`, `website/src/pages/SupplyChain.tsx` | Rail pages deriving their own sections |
-| `website/public/_redirects` | The `/docs` entrypoint and the changelog SPA fallback |
-| `website/src/routes.ts`, `website/src/components/SiteHeader.tsx` | The published routes and the marketing nav, which carries `Docs` on desktop |
-| `website/scripts/docs-parser.js` | Markdown subset parser, slugger, `<img>` allowlist |
-| `website/scripts/help-parser.js` | Narrow CLI-help parser with losslessness |
-| `website/scripts/generate-docs.js` | Codegen: the delta tables, `buildDocument`, `localizeSiteLinks`, `resolveRemovedAnchors`, `resolveRepoLinks` and `SITE_ROUTES`, `assertRouteFragments`, `securityAudiences` and `audienceBlocks`, `linkSkillHeadings` |
-| `website/src/components/MarkdownDocument.tsx` | Renders parsed Markdown blocks |
-| `website/src/components/DocsLayout.tsx` | Docs chrome: header, the rail and its mobile drawer, prev/next, theme restore |
-| `website/src/components/DocsThemeControl.tsx` | The picker's two placements and its first-visit prompt |
-| `website/src/lib/docs-accent.ts` | The themed text colors, contrast-corrected per rendered surface |
-| `website/src/lib/docs-theme.ts` | Default docs theme, and whether the reader has chosen |
-| `website/src/components/DorCommandReference.tsx` | One CLI command section |
-| `website/src/pages/DorDocs.tsx` | `/dor` |
-| `website/src/pages/AgentSkillDocs.tsx` | `/agent-skill` |
-| `website/src/pages/CompatibleAgentsDocs.tsx` | `/compatible-agents` |
-| `website/src/pages/SelfHostDocs.tsx`, `website/src/pages/Hosted.tsx`; `website/src/components/HostingRequirementNotice.tsx` | The two hosting choices and their shared server boundary |
-| `website/src/pages/SecurityDocs.tsx` | `/security` |
-| `scripts/public-docs-lint.mjs` | Public-doc validation |
 
 ## Future
 

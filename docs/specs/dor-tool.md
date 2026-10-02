@@ -3,19 +3,11 @@
 > See `docs/specs/glossary.md` for Surface / Session / Pane / Door vocabulary.
 > Owns tool designation, configuration, trust workflow, serving, naming, and command lifecycle. Browser chrome belongs to `docs/specs/dor-browser.md`; helpers belong to `docs/specs/terminal-context.md`; the built-in Tools themselves to `docs/specs/dor-tools-builtin.md`; the integration library to `docs/specs/dor-tools-lib.md`.
 
-## Files
-
-- `dor/src/commands/tool.ts` — CLI entry and generated help.
-- `lib/src/host/tool-host.ts` — shared host lookup and trust entry.
-- `lib/src/components/wall/use-dor-control.ts` — launch, approval placement, dedupe, and response orchestration.
-- `lib/src/components/wall/use-tool-serving.ts` — port discovery and browser lifetime.
-- `lib/src/components/wall/ToolPanel.tsx` — terminal/browser composition.
-
 ## Availability
 
 **Must make `dor tool` and `dor open` available without a feature flag or Settings opt-in.** Project execution follows [Trust](#trust).
 
-Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/components/Wall.test.tsx`.
+Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## The tool capability set
 
@@ -28,7 +20,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`;
 - **Never apply the untouched-shell kill or shell-replacement shortcut to a Tool**, which spawns touched.
 - **Must classify Tool params before browser params**, since a serving Tool carries `renderMode` too.
 
-Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` / `requestKill` / `isUntouchedShell` in `lib/src/components/Wall.tsx`; `isToolRender` in `lib/src/lib/platform/tool-types.ts`; `lib/src/components/wall/tool-surface.test.ts`; `allows a Tool to use playwright screencast but refuses popouts` in `lib/src/components/Wall.test.tsx`.
+Source of truth: `surfaceKindFromParams` in `lib/src/components/wall/browser-surface.ts`; `onSwapRenderMode` / `requestKill` in `lib/src/components/Wall.tsx`.
 
 ## Declaring tools
 
@@ -49,11 +41,11 @@ Source of truth: `surfaceKindFromParams` / `isToolParams` in `lib/src/components
 
 **Must require exactly one existing local regular file or directory when `$TARGET` appears in the run list or dedupe key.** Resolve relative paths against the invocation CWD and follow symlinks to a canonical absolute path before substitution and reuse. **Must accept a `file:` URL only when its host is empty, `localhost`, or this machine's name** (case-insensitive, either side in its short form before the first dot), converting it with the host platform's `fileURLToPath`; reject other URLs, missing paths, and every other file kind (fifo, socket, device). Validate run and key inputs before showing approval. Pending approval distinguishes the original arguments and invocation CWD; [Trust](#trust) owns re-resolution and recovery. Input control-character restrictions belong to `docs/specs/security-local.md` → Dor Tool configuration.
 
-Source of truth: `lookupTool` in `lib/src/host/tool-trust.ts`; `ToolEntry` / `parseToolFile` / `resolveDedupeKey` in `lib/src/host/tool-registry.ts`; `resolveToolInput` / `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`; `readUserToolFile` in `lib/src/host/tool-user-config.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`; `lib/src/host/tool-host.test.ts`, `lib/src/host/tool-trust.test.ts`, `lib/src/host/tool-input.test.ts`, `lib/src/host/tool-open.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `ToolEntry` / `parseToolFile` in `lib/src/host/tool-registry.ts`; `toolRunCommand` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-input.test.ts`.
 
 **Must resolve a Tool's initial viewport host-side with its declaration, including after approval.** Iframe Tools accept only `pane-sync`; automated Tools accept a preset or inline dimensions. **Must preserve live user/agent sizing when reusing a Tool**, rather than reapplying its declaration.
 
-Source of truth: `toolViewport` in `lib/src/host/browser-config.ts`; `createToolHost` in `lib/src/host/tool-host.ts`; `lib/src/host/browser-config.test.ts` and `lib/src/host/tool-host.test.ts`.
+Source of truth: `toolViewport` in `lib/src/host/browser-config.ts`; `createToolHost` in `lib/src/host/tool-host.ts`.
 
 ## Identity and dedupe
 
@@ -70,7 +62,7 @@ Source of truth: `toolViewport` in `lib/src/host/browser-config.ts`; `createTool
 - **Must apply runtime re-keys only to the announcing Tool**, without merging Surfaces, transferring state, or killing either side of a collision. (rationale)
 - A marked preview slot never matches ([Preview slot](#preview-slot)).
 
-Source of truth: `queueToolSpawn` / the `surface.tool` handler in `lib/src/components/wall/use-dor-control.ts`; `namespacedToolKey` / `toolKeysEqual` in `lib/src/components/wall/browser-surface.ts`; `lib/src/components/Wall.test.tsx`.
+Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `namespacedToolKey` in `lib/src/components/wall/browser-surface.ts`.
 
 ## Trust
 
@@ -93,7 +85,7 @@ Approval layout follows `docs/specs/layout.md` → Pane body.
 
 **Must keep implicit file dispatch user-global and limited to user-global Tools or the built-in viewer.** Reserved: any future repo `prespawn_*` execution uses the same approval; see scope **dor-tools** under [Future](#future).
 
-Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrustStore` / `lookupTool` in `lib/src/host/tool-trust.ts`; `resolveUpstreamUrl` in `lib/src/host/git-upstream.ts`; `ToolApproval` in `lib/src/components/wall/ToolApproval.tsx`; `resolveToolApproval` in `lib/src/components/Wall.tsx`; `toolPendingFromParams` in `lib/src/components/wall/browser-surface.ts`. Tests: `lib/src/host/tool-trust.test.ts`, `lib/src/components/Wall.test.tsx`, `lib/src/components/wall/tool-surface.test.ts`.
+Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrustStore` in `lib/src/host/tool-trust.ts`; `ToolApproval` in `lib/src/components/wall/ToolApproval.tsx`; `resolveToolApproval` in `lib/src/components/Wall.tsx`. Tests: `lib/src/host/tool-trust.test.ts`.
 
 ## Serving
 
@@ -114,7 +106,7 @@ Source of truth: `createToolHost` in `lib/src/host/tool-host.ts`; `FileToolTrust
 
 Reserved: **Must derive a Tool's URL again on cold restore**, compatible with future `prespawn_port` and `DORMOUSE_TOOL_PORT` in scope **dor-tools**; [Persistence and hosts](#persistence-and-hosts) owns the saved projection.
 
-Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`; `toolBrowserLaunchParams` in `lib/src/components/wall/browser-surface.ts`; `listenerUrlsByPort` in `lib/src/components/wall/port-url.ts`. Tests: `lib/src/components/wall/use-tool-serving.test.tsx`.
+Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.ts`.
 
 ## Lifecycle
 
@@ -137,7 +129,7 @@ Source of truth: `useToolServing` in `lib/src/components/wall/use-tool-serving.t
 
 Tool context follows `docs/specs/terminal-context.md` → Tool context.
 
-Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focusSession` in `lib/src/lib/terminal-lifecycle.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`; `toolLeafMeta` / `shouldParkOnMinimize` in `lib/src/components/wall/lath-wall-engine.ts`; `closeSurface` in `lib/src/components/Wall.tsx`. Tests: `lib/src/components/wall/ToolPanel.test.tsx`, `lib/src/components/Wall.test.tsx`, `lib/src/components/TerminalPane.test.tsx`, `lib/src/lib/terminal-registry.alert.test.ts`.
+Source of truth: `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `toolLeafMeta` / `shouldParkOnMinimize` in `lib/src/components/wall/lath-wall-engine.ts`; `closeSurface` in `lib/src/components/Wall.tsx`.
 
 ## Naming
 
@@ -150,7 +142,7 @@ Source of truth: `TerminalPane` in `lib/src/components/TerminalPane.tsx`; `focus
 
 The terminal face and the Door keep the derived terminal label, which carries command status, except where a switch's hold names the retargeted Tool (`docs/specs/layout.md` → Pane header).
 
-Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`. Tests: `lib/src/components/wall/tool-name.test.ts`, `lib/src/components/wall/ToolPaneHeader.test.tsx`.
+Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`; `ToolPaneHeader` in `lib/src/components/wall/ToolPaneHeader.tsx`.
 
 ## CLI
 
@@ -160,13 +152,13 @@ Source of truth: `toolSemanticName` in `lib/src/components/wall/tool-name.ts`; `
 
 **Must answer `dor tool --list` from the files `dor tool <name>` resolves from the same directory, executing nothing.** A project lists without a grant and reports whether it has one. Each entry carries the comment block directly above it as its description, and a user Tool hidden by a same-named project Tool is `shadowed`. A malformed file fails the listing as it fails lookup.
 
-Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `lib/src/host/tool-list.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `dor/test/snapshots/help/tool.md`; `ToolSurfaceResponse` / `ToolListResponse` in `dor/src/commands/types.ts`. Tests: `list` in `lib/src/host/tool-host.test.ts`, `Tool descriptions` in `lib/src/host/tool-registry.test.ts`.
+Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `lib/src/host/tool-list.ts`; `ToolSurfaceResponse` / `ToolListResponse` in `dor/src/commands/types.ts`.
 
 ## Opening local files
 
 **Must accept exactly one existing local regular file or directory for `dor open`**, resolved by the `$TARGET` rules in [Declaring tools](#declaring-tools); [Folders](#folders) owns directories.
 
-**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or the built-in handler of its kind. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
+**Must select the first matching entry of the user file's ordered `open` list.** Every association must name an argument-list Tool in that same user file or a built-in handler of its kind. **Never discover project configuration during this lookup**; project `open` rules are ignored with a warning during explicit project-tool lookup.
 
 **Must use a matching rule's optional `preview` handler for a `--preview` request**, validated as `tool` is, and its `tool` otherwise; an explicit `--tool` overrides both.
 
@@ -176,19 +168,30 @@ Source of truth: `toolCommand` in `dor/src/commands/tool.ts`; `listTools` in `li
 
 **Must reject declared Tool names beginning with `builtin:` in either configuration scope.** Built-in handler names cannot be shadowed.
 
-**Must fail without fallback on an explicit unknown handler or malformed user configuration**; `builtin:file` named for an unsupported format reports that limitation and suggests a user Tool. Built-in identity is the canonical file path in its own scope, separate from user and project Tools. The built-in handlers `builtin:file` and `builtin:folder` belong to `docs/specs/dor-tools-builtin.md`.
+**Must fail without fallback on an explicit unknown handler or malformed user configuration**; a built-in named for a format it cannot open reports that limitation and suggests a user Tool. Built-in identity is the canonical file path in its own scope, separate from user and project Tools. The built-in handlers `builtin:file`, `builtin:code`, and `builtin:folder` belong to `docs/specs/dor-tools-builtin.md`.
 
-Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseToolFile` in `lib/src/host/tool-registry.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`. Tests: `lib/src/host/tool-open.test.ts`, `dor/test/cli-output.test.mjs`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## Folders
 
 **Must match a directory as its name suffixed with `.📁` (U+1F4C1)**, in the filename and both path forms. **A pattern ending in `.📁` matches only directories, and a directory matches only such patterns**, so a catch-all file rule never captures one (rationale). Dot-directories follow the dotfile rule: `*.📁` skips them and `.*.📁` names them.
 
-**Must open `builtin:folder` for a directory no rule matches.** **Never let `builtin:file` open a directory or `builtin:folder` a file**: a rule naming the other kind fails the configuration, and `--tool` fails the open, naming the handler that fits.
+**Must open `builtin:folder` for a directory no rule matches.** **Never let `builtin:file` or `builtin:code` open a directory, or `builtin:folder` a file**: a rule naming the other kind fails the configuration, and `--tool` fails the open, naming the handler that fits.
 
 A folder viewer is any Tool that selects on single-click and activates on double-click through the [Preview slot](#preview-slot) invocations. `builtin:folder`, the default, belongs to `docs/specs/dor-tools-builtin.md` → Folder viewer.
 
-Source of truth: `FOLDER_MATCH_SUFFIX` / `builtinFor` in `dor-tools-builtin/src/file-viewer-format.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseOpenRules` in `lib/src/host/tool-registry.ts`. Tests: `folders` in `lib/src/host/tool-open.test.ts`, `folder rules and preview handlers` in `lib/src/host/tool-registry.test.ts`, `a folder in the slot` in `lib/src/components/wall/preview-slot.test.tsx`.
+Source of truth: `BUILTIN_HANDLERS` in `dor-tools-builtin/src/file-viewer-format.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `parseOpenRules` in `lib/src/host/tool-registry.ts`.
+
+## Choosing a file
+
+**Must open a fuzzy file picker for `dor open` with no path when stdin and stdout are TTYs**, else fail asking for a path. The chosen file opens as `dor open <file>` with the invocation's flags; a cancel prints nothing and exits 1.
+
+- **Must list the files under the resolved CWD as git does in a work tree** — tracked and untracked, less ignored and deleted. Outside one, a walk lists each work tree it reaches likewise and skips dot-entries, `node_modules`, and the macOS home `Library`.
+- **Must stream the listing, ranking as files arrive without blocking input**; an Enter before ranking settles opens the best match then.
+- **Must offer the highlighted file's `tool.openHandlers` answer in order**: what [Opening local files](#opening-local-files) selects, then later matching rules' `tool` and `preview`, then each built-in supporting it — each once, with what it runs and the rule or built-in that offers it.
+- **Must open the first handler without `--tool` and any other as `--tool <name>`.** `--tool` fixes the handler; a host refusing the read leaves the default openable.
+
+Source of truth: `runFilePicker` in `dor/src/commands/open-picker.ts`; `listOpenHandlers` in `lib/src/host/tool-open.ts`.
 
 ## Preview slot
 
@@ -217,7 +220,7 @@ A preview is answered by the first of:
 - **Must pin at once when the slot's Tool reports unsaved changes** ([Unsaved changes](#unsaved-changes)); clean and unreported state never pin. A double-click on its Pane header, or Keep open in its terminal context, pins too (`docs/specs/layout.md` → Pane header). **Never pin on keyboard input or focus** (rationale).
 - **Must pin without restarting when `dor open` resolves the slot's running Tool and target**, revealing it as a keyed match is and reporting `existing`; a slot not running is re-run as in rule 2, then pinned. A pinned Tool with the resolved key is revealed first, leaving the slot untouched. A different Tool for that target retargets the slot, then pins it. From the slot's own Session, `dor open` pins it and continues as an ordinary open; `--fresh` bypasses the slot.
 
-Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`; `surface.tool` / `PREVIEW_INTERRUPT_GRACE_MS` / `restoreOnLatePrompt` in `lib/src/components/wall/use-dor-control.ts`; `decidePreviewSlot` / `retargetToolLeaf` / `usePreviewSlotPin` in `lib/src/components/wall/preview-slot.ts`; `matchesToolKey` / `isPreviewSlotParams` / `TOOL_IDENTITY_PARAMS` in `lib/src/components/wall/browser-surface.ts`; `revealSurface` / `createSplitSurface` in `lib/src/components/Wall.tsx`; `retireToolRun` in `lib/src/components/wall/use-tool-serving.ts`. Tests: `lib/src/components/wall/preview-slot.test.tsx`; `a preview retarget` in `lib/src/components/wall/use-tool-serving.test.tsx`; `lib/src/host/tool-open.test.ts`; `dor/test/cli-output.test.mjs`.
+Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `decidePreviewSlot` in `lib/src/components/wall/preview-slot.ts`; `resolveOpenTool` in `lib/src/host/tool-open.ts`. Tests: `lib/src/components/wall/preview-slot.test.tsx`.
 
 ### Switching the slot
 
@@ -229,16 +232,16 @@ Source of truth: `openCommand` in `dor/src/commands/open.ts`; `resolveOpenTool` 
 
 The header holds as `docs/specs/layout.md` → Pane header states.
 
-Source of truth: `beginPreviewTransition` / `commitPreviewTransition` / `endPreviewTransition` in `lib/src/lib/preview-transition-store.ts`; `beginSlotSwitch` / `capturePreviewGhost` in `lib/src/components/wall/preview-transition.ts`; `beginPreviewSwitch` / `watchTerminalReady` in `lib/src/components/wall/use-dor-control.ts`; `ToolPanel` in `lib/src/components/wall/ToolPanel.tsx`; `.preview-ghost` in `lib/src/theme.css`. Tests: `a switching slot` in `lib/src/components/wall/preview-slot.test.tsx`; `lib/src/lib/preview-transition-store.test.ts`; `a preview slot switch` in `lib/src/components/wall/ToolPanel.test.tsx`; `lib/src/components/wall/preview-transition.test.ts`; `lib/src/components/wall/use-dor-control.test.ts`.
+Source of truth: `beginPreviewSwitch` in `lib/src/components/wall/use-dor-control.ts`; `beginSlotSwitch` in `lib/src/components/wall/preview-transition.ts`; `lib/src/lib/preview-transition-store.ts`; `.preview-ghost` in `lib/src/theme.css`.
 
 ### Terminal links
 
 **Must open a local `file:` `OSC 8` link as a `dor open` from the Session showing it**: a click previews, a double-click's second click (`MouseEvent.detail` 2) pins, and later clicks of that burst do nothing (rationale). The request carries the URL ([Declaring tools](#declaring-tools)) and the Session's local CWD, else the target's directory.
 
-- **Must send a link to the confirmation dialog unless its display text names its target**: trimmed, with at most one trailing `ls -F` classifier removed, the text equals the decoded path or a whole-component suffix of it, case-sensitively — `x/README.md` names `/x/README.md`, `EADME.md` does not. A host that is not a plain name, or a control character in the decoded path, sends it there too. The dialog belongs to `docs/specs/terminal-escapes.md` -> "OSC 8 hyperlinks".
+- **Must send a link to the confirmation dialog unless its display text names its target**: trimmed, with at most one trailing `ls -F` classifier removed, the text equals the decoded path or a whole-component suffix of it, case-sensitively — `x/README.md` names `/x/README.md`, `EADME.md` does not. A host that is not a plain name, or a control character in the decoded path, sends it there too. The dialog belongs to `docs/specs/mouse-and-clipboard.md` -> "OSC 8 hyperlinks".
 - **Must fall back to the dialog when the open fails**, a superseded preview excepted — its status, or its error while there is no slot. A double-click's pin never reopens the dialog its failed preview opened. A host without Tool operations sends every link to the dialog.
 
-Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`; `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`; `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`. Tests: `lib/src/lib/external-links.test.ts`, `lib/src/lib/terminal-link-activation.test.ts`, `local file URLs` in `lib/src/host/tool-input.test.ts`, `file URLs` in `lib/src/host/tool-open.test.ts`, `a terminal link` in `lib/src/components/wall/preview-slot.test.tsx`.
+Source of truth: `activateTerminalLink` in `lib/src/lib/terminal-link-activation.ts`; `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; `resolveLocalToolTarget` in `lib/src/host/tool-input.ts`.
 
 ## Take-over
 
@@ -246,7 +249,7 @@ Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; 
 
 | Condition | Required state |
 | --- | --- |
-| Verb | `dor tool` or `dor open` |
+| Verb | `dor tool` or `dor open` (or its alias `dor o`) |
 | Caller | Visible pane of the active Workspace; integrated plain terminal (not an existing Tool); not closing or dying |
 | Command line | OSC 633 reports the invocation alone; compound shell syntax rejects takeover |
 | Directory | Resolved Tool CWD equals the caller's reported CWD |
@@ -266,7 +269,7 @@ Source of truth: `localFileLinkPreviewPath` in `lib/src/lib/external-links.ts`; 
 - **May interleave user keystrokes arriving between the prompt and command injection.**
 - **Must include already-owned background listeners in the usual process-tree scan.** [Serving](#serving) owns selection.
 
-Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlaceable` / `callerStillRunnable` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`; `becomeToolMeta` in `lib/src/components/wall/lath-wall-engine.ts`; `setMeta` in `lib/src/components/wall/lath-wall-store.ts`. Tests: `lib/src/components/wall/tool-takeover.test.ts`, `lib/src/components/Wall.test.tsx`.
+Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` in `lib/src/components/wall/tool-takeover.ts`; `runToolInCallerPane` in `lib/src/components/wall/use-dor-control.ts`.
 
 ## OSC 367
 
@@ -283,7 +286,7 @@ Source of truth: `toolTakesOverCaller` / `toolRerunsInCaller` / `callerStillPlac
 - **Must show a failed `open` in the preview slot**: a preview whose lookup fails runs the built-in error viewer there instead (`docs/specs/dor-tools-builtin.md` → Error viewer), and a failed activate is sent again as a preview unless a newer `open` from that Session followed it.
 - Reserved: **Never assign an OSC 367 verb beyond `serve`, `state`, `open`, and `dehydrate`**; `dehydrate` belongs to D2 under [Future](#future), while existing title/progress protocols keep those roles.
 
-Source of truth: `TerminalProtocolParser` / `collectTerminalToolEvents` in `lib/src/lib/terminal-protocol.ts`; `serveSequence` / `stateSequence` / `openSequence` / `parseToolAnnounce` / `parseToolOpen` in `dor-tools-lib/src/osc.ts`; `applyLiveToolEvents` in `lib/src/lib/tool-events.ts`; `dispatchToolOpens` in `lib/src/lib/tool-open-requests.ts`; `surface.tool` in `lib/src/components/wall/use-dor-control.ts`; `recordToolAnnounce` in `lib/src/lib/tool-announce-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`. Tests: `dor-tools-lib/test/osc.test.mjs`, `lib/src/lib/tool-announce.test.ts`, `an OSC 367 open` in `lib/src/components/wall/preview-slot.test.tsx`, `lib/src/host/remote/sidecar-entry.test.ts`, `vscode-ext/test/message-router.test.ts`, `standalone/scripts/dev-agent-browser-announce.test.mjs`.
+Source of truth: `dor-tools-lib/src/osc.ts`; `TerminalProtocolParser` in `lib/src/lib/terminal-protocol.ts`; `applyLiveToolEvents` / `recordToolEvents` in `lib/src/lib/tool-events.ts`; `dispatchToolOpens` in `lib/src/lib/tool-open-requests.ts`; `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
 
 ## Unsaved changes
 
@@ -302,15 +305,15 @@ printf '\033]367;state;{"v":1,"dirty":true}\033\\'
 printf '\033]367;state;{"v":1,"dirty":false}\033\\'
 ```
 
-Source of truth: `parseToolState` in `dor-tools-lib/src/osc.ts`; `getToolDirty` / `recordToolDirty` in `lib/src/lib/tool-dirty-store.ts`; `recordToolEvents` in `lib/src/lib/tool-events.ts`; `ToolDirtyIndicator` in `lib/src/components/ToolDirtyIndicator.tsx`. Tests: `dor-tools-lib/test/osc.test.mjs`, `lib/src/lib/tool-state.test.ts`, `lib/src/components/wall/SurfacePaneHeader.test.tsx`, `lib/src/components/Baseboard.test.tsx`.
+Source of truth: `parseToolState` in `dor-tools-lib/src/osc.ts`; `recordToolDirty` in `lib/src/lib/tool-dirty-store.ts`; `ToolDirtyIndicator` in `lib/src/components/ToolDirtyIndicator.tsx`.
 
 ### Closing unsaved Tools
 
-The iframe save channel, connected only to a `builtin:file` frame (`docs/specs/dor-tools-builtin.md` → Editing files), binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure. **Must bind each save completion to its accepted connection generation and discard it after reconnect or close**, even when a replacement connection reuses the request id or nonce. (rationale) **Must ignore a save-channel message naming another `dorTool` version or malformed for its kind**; a save error reaches the prompt control-stripped and bounded.
+The iframe save channel, connected only to a `builtin:file` or `builtin:code` frame (`docs/specs/dor-tools-builtin.md` → Editing files), binds its window, proxy origin, and a per-mount connection nonce. Save completion carries the request id and current dirty state; a timeout or disconnected editor never permits a Save closure. **Must bind each save completion to its accepted connection generation and discard it after reconnect or close**, even when a replacement connection reuses the request id or nonce. (rationale) **Must ignore a save-channel message naming another `dorTool` version or malformed for its kind**; a save error reaches the prompt control-stripped and bounded.
 
 **Must offer Save / Discard / Cancel before closing dirty Tools through Dormouse**: Pane closure, standalone window/app teardown, iframe reload or renderer change, and Workspace movement to another Window; **a Workspace close asks once, before any Surface closes.** Discard authorizes that action without declaring the edit clean; Save proceeds only after successful acknowledgement and no newer edits. A Tool without a connected save handler must be saved in its own UI or discarded. **Never prompt for a command close or move**: `dor kill`, `dor workspace close` (even `--force`), and cross-window `dor workspace move` (even `--dangerously-destroy-iframe-page-state`) refuse a dirty Tool. VS Code webview/host closure, forced termination, and crashes cannot be vetoed; drafts are not persisted.
 
-Source of truth: `readHostMessage` / `readFrameMessage` in `dor-tools-lib/src/protocol.ts`; `connectToolFrame` in `dor-tools-lib/src/frame.ts`; `confirmToolEditorsClose` / `connectToolEditor` in `lib/src/lib/tool-editor.ts`; `IframePanel` in `lib/src/components/wall/IframePanel.tsx`; `ToolEditorCloseModalHost` in `lib/src/components/ToolEditorCloseModalHost.tsx`; `closeSurface` in `lib/src/components/Wall.tsx`; `closeWorkspaceWithSurfaces` in `lib/src/components/wall/workspace-lifecycle.ts`; `createTeardownFlow` in `standalone/src/teardown-flow.ts`; `startMove` in `standalone/src/workspace-move.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`. Tests: `dor-tools-lib/test/protocol.test.mjs`, `dor-tools-lib/test/frame.test.mjs`, `lib/src/lib/tool-editor.test.ts`, `lib/src/components/wall/workspace-lifecycle.test.ts`, `standalone/src/teardown-arbiter.test.ts`, `standalone/src/workspace-drag.test.ts`, `standalone/src/workspace-move.test.ts`, `lib/src/components/wall/workspace-control.test.ts`.
+Source of truth: `dor-tools-lib/src/protocol.ts`; `confirmToolEditorsClose` / `connectToolEditor` in `lib/src/lib/tool-editor.ts`; `closeSurface` in `lib/src/components/Wall.tsx`; `closeWorkspaceWithSurfaces` in `lib/src/components/wall/workspace-lifecycle.ts`; `createTeardownFlow` in `standalone/src/teardown-flow.ts`; `startMove` in `standalone/src/workspace-move.ts`; `onDropOnOtherWindow` in `standalone/src/workspace-drag.ts`. Tests: `lib/src/lib/tool-editor.test.ts`.
 
 ## Security
 
@@ -334,11 +337,11 @@ Dirty or pending Tools refuse Surface moves between Workspaces: `docs/specs/layo
 
 **Must pause serving updates during Workspace closure or transfer**, and recheck that a Workspace remains available after asynchronous launch lookup. Approval completion must not launch into a closing or transferring Workspace.
 
-Source of truth: `captureToolParams` / `restoreToolParams` in `lib/src/components/wall/tool-transfer.ts`; `captureTransferContent` in `lib/src/components/wall/workspace-transfer.ts`; `planArrival` in `standalone/src/workspace-move.ts`. Tests: `lib/src/components/wall/tool-transfer.test.ts`, `lib/src/components/WorkspaceWindow.test.tsx`, `lib/src/components/wall/use-tool-serving.test.tsx`.
+Source of truth: `captureToolParams` / `restoreToolParams` in `lib/src/components/wall/tool-transfer.ts`; `planArrival` in `standalone/src/workspace-move.ts`.
 
 **Must provide Tool host operations in standalone and VS Code.** Remote terminal transport remains protocol-v1; remote browser presentation is staged in `docs/specs/remote-api.md`.
 
-Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `restoreTerminal` in `lib/src/lib/terminal-lifecycle.ts`; `toolControl` in `lib/src/lib/platform/types.ts`. Tests: `lib/src/lib/session-save.test.ts`, `lib/src/lib/session-restore.test.ts`.
+Source of truth: `PersistedToolMetadata` in `lib/src/lib/session-types.ts`; `saveSession` in `lib/src/lib/session-save.ts`; `restoreSession` in `lib/src/lib/session-restore.ts`; `toolControl` in `lib/src/lib/platform/types.ts`.
 
 ## Future
 

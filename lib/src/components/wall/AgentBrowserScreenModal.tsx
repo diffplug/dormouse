@@ -142,6 +142,8 @@ export function AgentBrowserScreenModal({
   const providers = BROWSER_PROVIDER_IDS.filter(provider => offered(renderModeFor(provider, 'screencast')) || offered(renderModeFor(provider, 'popout')));
   const [provider, setChosenProvider] = useBrowserProvider(providers, parseRenderMode(currentMode).provider);
   const selected = parseRenderMode(renderMode);
+  // A provider switch keeps the presentation where offered, else screencast.
+  // Only Apply remembers the provider; Cancel leaves the preference alone.
   const chooseProvider = (value: typeof provider) => {
     setChosenProvider(value);
     if (selected.presentation !== 'iframe') {

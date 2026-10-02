@@ -18,6 +18,16 @@ Measured on macOS 27 with Claude Code 2.1.274 and Codex 0.154.0, 2026-09 (issue 
 
 **Why not the webview.** A hidden webview's timers are throttled to about once a second, which would stretch a paced send from milliseconds to minutes. The PTY owner's Node timers are not throttled, and it is the last hop before the kernel.
 
+## iTerm2 identity
+
+**Why claim to be iTerm2.** Shells, build systems and agent clients gate their richest escape output on a terminal they recognize, and iTerm2 is the identity that unlocks the largest set of the sequences Dormouse actually implements; the fail-inertly rule pays for the ones it also provokes.
+
+**Why 3.6.6, and not newer.** Tools gate features on the version, not just the name: Claude Code 2.1.281 turns on `OSC 9;4` progress only at iTerm2 3.6.6 or later (its version check, read from the binary, 2026-09-23). Recorded the same day under each identity, Claude emitted no progress at 3.5.0; at 3.6.6 it ran one cycle per turn (the recorded turn, `a Claude Code turn` in `lib/src/lib/alert-engagement.test.ts`) and set DECSET 2031 at startup. iTerm2's changelogs (read 2026-09-23): 3.6.6 (released 2025-11-17) added `OSC 9;4` progress bars, DSR 996/997 with DECSET 2031 dark-mode reporting — xterm.js 6.1's `colorSchemeQuery`, on by default — and `OSC 52` in its DA reply, which Dormouse does not claim and a DA reader only misses. A newer version only invites more sequences: 3.6.7's `OSC 8` `target=` (built 2026-02-19) happens to fail inertly, the link still opening, but 3.7.0 (built 2026-06-08) adds dual-mode `SGR 38:12` colors, which programs would then send and Dormouse mishandles.
+
+**Why another terminal's identity is stripped.** A pane inherits the host's environment, and the host inherits whatever launched it. Fedora's `vte.sh` sees `VTE_VERSION` and emits an `OSC 777` notification after every command; `WT_SESSION`, `ConEmuANSI`, `TERM_FEATURES` and the Konsole and Ptyxis versions switch on cargo's `OSC 9;4` progress, so every build rang; `TMUX` / `STY` send tools to a multiplexer that is not there — Codex and Claude Code wrap their notifications in tmux's passthrough; and `CURSOR_TRACE_ID` makes Claude Code believe it runs in Cursor's terminal, which leaves it no notification channel (audit, 2026-09-23). `COLORFGBG` would contradict the background the OSC 11 answer reports.
+
+**Why `COLORTERM` is set even though it is not iTerm2's.** The PTY is spawned as `xterm-256color` with no other depth hint, so env-sniffing tools — `supports-color` and everything built on it — quantize RGB output to the nearest palette entry.
+
 ## Reconnection protocol
 
 **The `<unnamed>` seed skip is lossy, deliberately.** Persistence cannot tell a deliberate `<unnamed>` pin from the default panel placeholder, so a user who pinned it gets the derived header back on reload — cheaper than seeding every default placeholder as a real user title.
@@ -33,6 +43,14 @@ refuses on `timedOut` because it knows those shells are running, but the boot
 path has nothing else to fall back on and restores. Asking again costs 3 s only
 in the case where the first ask genuinely got nothing, and a host that holds no
 PTYs answers the second ask as fast as the first.
+
+## Report filtering on the input side
+
+**Why replayed reports are dropped rather than forwarded.** Replayed scrollback routinely contains terminal-generated replies from a long-dead app — cursor-position reports, device attributes, focus events. Forwarding them into the freshly spawned shell corrupts whatever it was parsing, and the user sees garbage typed into a prompt they never touched.
+
+## Replay-time mode-reset tail (Dormouse-emitted)
+
+**Why a reset tail at all.** Saved scrollback can end mid-TUI with private modes still latched — mouse tracking, the alt-screen, a hidden cursor, application cursor keys. Replaying it verbatim re-applies those DECSETs with no process alive to ever DECRST them, leaving a restored pane unable to select text, showing an alt-screen frame nothing will ever repaint, or with no visible cursor at its new shell's prompt.
 
 ## Transferring a Workspace
 

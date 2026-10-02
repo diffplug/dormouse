@@ -94,7 +94,7 @@ export class VSCodeAdapter implements PlatformAdapter {
     // The extension-host parser has no DOM, so it can't read the theme to answer
     // OSC 10/11/12 color queries. Push the resolved colors up whenever the theme
     // changes (initial push happens in requestInit) so it can — matching the
-    // standalone frontend adapter. See docs/specs/terminal-escapes.md.
+    // standalone frontend adapter. See docs/specs/vscode.md -> "OSC color query answering".
     onTerminalThemeChange(() => this.pushThemeColors());
 
     window.addEventListener('message', (event: MessageEvent) => {

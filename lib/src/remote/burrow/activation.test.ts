@@ -72,7 +72,7 @@ function fakeLink(): FakeLink {
  * gate's own cases is about.
  */
 async function installBridge(link: FakeLink) {
-  link.results.status ??= { enrolled: true };
+  link.results.status ??= { enrolled: true, serving: true };
   burrowLink = link;
   vi.resetModules();
   const mod = await import('./activation');
@@ -114,11 +114,11 @@ describe('burrow bridge mode', () => {
 
   it('forwards every console method to the service', async () => {
     const link = fakeLink();
-    link.results.status = { enrolled: true };
+    link.results.status = { enrolled: true, serving: true };
     await installBridge(link);
 
     await consoleHook().enroll('password', 'Laptop');
-    expect(await consoleHook().status()).toEqual({ enrolled: true });
+    expect(await consoleHook().status()).toEqual({ enrolled: true, serving: true });
     await consoleHook().reconnect();
     await consoleHook().clearEnrollment();
     await consoleHook().beginHostedEnrollment('Laptop');
@@ -149,7 +149,7 @@ describe('burrow bridge mode', () => {
 
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
+      queue: [{ kind: 'pairing', clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
     });
 
     const head = pairing.getPairingApprovalSnapshot()[0]!;
@@ -209,12 +209,12 @@ describe('burrow bridge mode', () => {
 
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
+      queue: [{ kind: 'pairing', clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
     });
     const stale = pairing.getPairingApprovalSnapshot()[0]!;
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p2', label: 'Android Chrome', requestedAt: 9 }],
+      queue: [{ kind: 'pairing', clientId: 'c1', pairingId: 'p2', label: 'Android Chrome', requestedAt: 9 }],
     });
 
     const head = pairing.getPairingApprovalSnapshot();
@@ -242,7 +242,7 @@ describe('burrow bridge mode', () => {
     const { pairing } = await installBridge(link);
     const snapshot = () => ({
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
+      queue: [{ kind: 'pairing', clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 }],
     });
 
     link.emit('pairing-queue', snapshot());
@@ -254,7 +254,7 @@ describe('burrow bridge mode', () => {
     // its ticket still has to replace the closures that answer the old one.
     link.emit('pairing-queue', {
       name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p2', label: 'iPhone Safari', requestedAt: 5 }],
+      queue: [{ kind: 'pairing', clientId: 'c1', pairingId: 'p2', label: 'iPhone Safari', requestedAt: 5 }],
     });
     expect(pairing.getPairingApprovalSnapshot()[0]).not.toBe(first);
     expect(pairing.getPairingApprovalSnapshot()[0]!.pairingId).toBe('p2');
@@ -263,7 +263,7 @@ describe('burrow bridge mode', () => {
   it('seeds the mirror, for a webview that reloaded mid-pairing', async () => {
     const link = fakeLink();
     link.results.pairingQueue = [
-      { clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 },
+      { kind: 'pairing', clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 },
     ];
     const { pairing } = await installBridge(link);
 
@@ -276,21 +276,21 @@ describe('burrow bridge mode', () => {
     // misses: the service pushes the queue only when it changes, so the modal
     // would stay hidden until the pairing was answered somewhere else.
     const link = fakeLink();
-    link.results.status = { enrolled: false };
+    link.results.status = { enrolled: false, serving: false };
     link.results.pairingQueue = [
-      { clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 },
+      { kind: 'pairing', clientId: 'c1', pairingId: 'p1', label: 'iPhone Safari', requestedAt: 5 },
     ];
     const { pairing } = await installBridge(link);
     expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(false);
 
-    link.emit('status', { name: 'status', enrolled: true });
+    link.emit('status', { name: 'status', enrolled: true, serving: true });
     await settle();
     expect(pairing.getPairingApprovalSnapshot()).toHaveLength(1);
 
     // And again after the Burrow goes and comes back.
-    link.emit('status', { name: 'status', enrolled: false });
+    link.emit('status', { name: 'status', enrolled: false, serving: false });
     link.commands.length = 0;
-    link.emit('status', { name: 'status', enrolled: true });
+    link.emit('status', { name: 'status', enrolled: true, serving: true });
     await settle();
     expect(link.commands.filter((c) => c.cmd === 'pairingQueue')).toHaveLength(1);
   });
@@ -311,7 +311,7 @@ describe('burrow bridge mode', () => {
     // The common case: no device fetch, no queue seed, and no crossing per
     // activity change — only the one `status` that says so.
     const link = fakeLink();
-    link.results.status = { enrolled: false };
+    link.results.status = { enrolled: false, serving: false };
     await installBridge(link);
 
     expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(false);
@@ -321,16 +321,16 @@ describe('burrow bridge mode', () => {
 
   it('arms when the service announces a Burrow, and disarms when it goes', async () => {
     const link = fakeLink();
-    link.results.status = { enrolled: false };
+    link.results.status = { enrolled: false, serving: false };
     await installBridge(link);
 
     // An enroll from any webview reaches every webview as this event.
-    link.emit('status', { name: 'status', enrolled: true });
+    link.emit('status', { name: 'status', enrolled: true, serving: true });
     await settle();
     expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(true);
 
     // `clearEnrollment` announces the same way.
-    link.emit('status', { name: 'status', enrolled: false });
+    link.emit('status', { name: 'status', enrolled: false, serving: false });
     // The dialog must stop naming devices nothing can push to — including any
     // list still on the wire, which would otherwise put them back on arrival.
     expect(devices.cleared).toBe(1);
@@ -382,22 +382,6 @@ describe('burrow bridge mode', () => {
     ]);
   });
 
-  it('reads an item that names no kind as a pairing, and answers it as one', async () => {
-    // A broker from before the field: nothing it sends can be a one-time
-    // request, and an answer naming `pairing` fails closed on the new service.
-    const link = fakeLink();
-    const { pairing } = await installBridge(link);
-    link.emit('pairing-queue', {
-      name: 'pairing-queue',
-      queue: [{ clientId: 'c1', pairingId: 'p1', label: 'iPad', requestedAt: 5 }],
-    });
-
-    const head = pairing.getPairingApprovalSnapshot()[0]!;
-    expect(head.kind).toBe('pairing');
-    head.approve('47');
-    expect(link.commands.at(-1)).toMatchObject({ params: { kind: 'pairing', clientId: 'c1' } });
-  });
-
   it('seeds the mirror while serving un-enrolled, and fetches no devices', async () => {
     // A one-time connection needs the approval modal and no Relay: the queue
     // arms on `serving`, the Relay's device list on `enrolled` alone.
@@ -420,15 +404,6 @@ describe('burrow bridge mode', () => {
     link.emit('status', { name: 'status', enrolled: true, serving: true });
     await settle();
     expect(link.commands.map((c) => c.cmd)).toEqual(['pushDevices']);
-  });
-
-  it('reads a status with no `serving` as serving exactly when enrolled', async () => {
-    // What a broker from before one-time connections sends.
-    const link = fakeLink();
-    link.results.status = { enrolled: true };
-    await installBridge(link);
-    expect(link.commands.some((c) => c.cmd === 'pairingQueue')).toBe(true);
-    expect(link.commands.some((c) => c.cmd === 'pushDevices')).toBe(true);
   });
 
   it('is idempotent under a StrictMode double mount', async () => {

@@ -147,10 +147,32 @@ pushed to a DOM-less host must all be present** or the push is dropped whole.
 A `MutationObserver` re-reads these on class or style mutations of `body` or
 `html`, so applying a theme updates existing terminals. **Adapters must use the
 `terminal-theme.ts` API directly** — it is not re-exported through the
-`terminal-registry` facade. Its `themeColorProvider` answers OSC 10/11/12 color
-queries; the escape contract is [terminal-escapes.md](./terminal-escapes.md)'s.
+`terminal-registry` facade. Its `themeColorProvider` feeds the OSC 10/11/12
+color-query answer.
 
-Source of truth: `getTerminalTheme()` in `lib/src/lib/terminal-theme.ts`.
+**The owner's parser consumes `OSC 10/11/12 ; ?` and answers
+`OSC <code> ; rgb:RRRR/GGGG/BBBB ST`** (8-bit channels doubled) from the active
+terminal theme (rationale). **Only the `?` (report) form is intercepted**; *set*
+requests pass through, and an unknown or unparseable theme falls the query
+through to xterm.js. A parser with a DOM reads the theme; one without has it
+pushed up ([vscode.md](vscode.md#osc-color-query-answering),
+[standalone.md](standalone.md#burrow-service)).
+
+Source of truth: `getTerminalTheme()` in `lib/src/lib/terminal-theme.ts`;
+`formatOscColorResponse` in `lib/src/lib/terminal-protocol.ts`.
+
+### OSC color queries on Windows require the bundled ConPTY
+
+**Windows must spawn with `useConptyDll: true`** — the in-box
+`CreatePseudoConsole` silently swallows color queries, while node-pty's bundled
+OpenConsole (`conpty.dll`) forwards them (rationale). **Both distributions must
+ship** `node-pty/prebuilds/<arch>/conpty.node` plus its sibling
+`conpty/{conpty.dll,OpenConsole.exe}`: standalone via the Tauri
+`resources: ["../sidecar/**/*"]` glob, the VS Code extension via
+`cp -RL node_modules/node-pty dist/node-pty`. The flag also has an installer
+consequence ([auto-update.md](auto-update.md#sidecar-teardown-on-windows)).
+
+Source of truth: `useConptyDll` in `standalone/sidecar/pty-core.js`.
 
 ## Theme data
 

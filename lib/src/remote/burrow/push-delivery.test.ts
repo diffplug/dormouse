@@ -399,9 +399,9 @@ describe('sealed push', () => {
     expect(summary.targeted).toBe(1);
   });
 
-  it('reaches nobody, loudly, when this Burrow has no usable static', async () => {
-    // `sealPushForClient` answers null when the enrollment carries no importable
-    // static; a send that silently reported success would read as "delivered".
+  it('reaches nobody, loudly, when no recipient would seal', async () => {
+    // `sealPushForClient` answers null for a Client static that will not seal;
+    // a send that silently reported success would read as "delivered".
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const summary = await sendPush(deps({ seal: async () => null }), 'pty-1', 'build');
 
