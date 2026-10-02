@@ -58,7 +58,7 @@ export type ExtensionMessage =
   | { type: 'pty:contextResult'; result: TerminalContextInfo; requestId: string }
   // `textData` is the chunk with string-control payloads removed, for the
   // prompt heuristic. Omitted when it would equal `data` — the common case —
-  // so this never doubles the bytes on the wire (docs/specs/transport.md).
+  // so this never doubles the bytes on the wire.
   | { type: 'pty:data'; id: string; data: string; textData?: string }
   | { type: 'pty:exit'; id: string; exitCode: number }
   // A parse's Tool announcements, state and command-start resets, in stream order.

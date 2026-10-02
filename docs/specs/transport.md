@@ -32,13 +32,15 @@ Source of truth: `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
 
 ### PTY buffering
 
-**Every host keeps a bounded, in-memory-only output buffer per PTY that survives natural, signal-driven, and graceful exit; only an explicit kill (`kill` / `killAll`), a spawn reusing the id, or host-process exit releases it** (rationale). Each host's bound: `docs/specs/vscode.md` → Webview hosting, `docs/specs/standalone.md` → "Rust ↔ sidecar bridge". Stream positions follow Universal invariants.
+**Both Node-resident hosts (VS Code's extension host, standalone's sidecar) keep a bounded, in-memory-only scrollback per PTY that survives natural, signal-driven, and graceful exit; only an explicit kill (`kill` / `killAll`), a spawn reusing the id, or host-process exit releases it** (rationale). Each host's bound: `docs/specs/vscode.md` → Webview hosting, `docs/specs/standalone.md` → "Rust ↔ sidecar bridge". Stream positions follow Universal invariants.
 
 ### Paced input
 
 `writePty(id, data, { paced: true })` delivers input the way a person types it; every host carries the flag to `pty-core.write`. `surface.send` (`dor send`) is the only paced writer — every other write is one burst.
 
-- **Must write paced text in short runs with a gap between them, and hold a key until the paced text before it has settled**, even when a later request sends the key (rationale).
+- **Must write paced text in runs of at most 256 UTF-8 bytes, 10 ms apart** (rationale).
+- **Must hold a key until 100 ms after the paced text before it**, even when a later request sends the key (rationale). A key is one escape sequence, DEL, or a C0 control other than tab and line feed; tab and line feed are text.
+- **Never split a code point or an escape sequence across writes.**
 - **Must queue any write that arrives while paced input is pending**, so input keeps its order.
 - **Must discard pending paced input when its PTY exits, is killed, or is respawned, and on any lone `^C`** — typed, `interrupt`, or the `dor send --key ctrl-c` that `dor/skill.md` teaches — which is then written at once.
 - **Never pace in the webview**; the PTY owner paces (rationale).
