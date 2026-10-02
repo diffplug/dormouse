@@ -36,6 +36,8 @@ xterm.js paints only its own rendered surface, and integer row fitting leaves a 
 
 **Why a perimeter ring rather than an inset border.** An inset border at the leaf's edge covers nothing, and a ring below the header would break the one-rounded-rectangle read that is the point of the treatment.
 
+**Why `SPOKEN` keeps the light wash.** It persists until the ring clears, an unbounded window, so its wash stays as light as the plain ring's to keep terminal text readable through it.
+
 **Why header popovers are not a factor.** Every one — pane context menu, title candidates, notification preview, rename warning — portals to `document.body` with `position: fixed`, so it renders in the root stacking context above the whole wall regardless of leaf z-indices.
 
 ## Workspaces
