@@ -85,7 +85,6 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 |---|---|---|
 | `DCS ... q ... ST` | SIXEL graphics; forwarded whole to ImageAddon | [layout.md](layout.md#inline-graphics) |
 | `APC G ... ST` | Kitty graphics; forwarded whole, its queries answered by the owner's ImageAddon | [layout.md](layout.md#inline-graphics) |
-| `REPLAY_MODE_RESET` (Dormouse-emitted) | Private-mode and SGR reset written after a dead Session's replay | [transport.md](transport.md#replay-time-mode-reset-tail-dormouse-emitted) |
 
 ## Supported CSI
 
@@ -100,6 +99,7 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 | `CSI 14 t` / `CSI 16 t` / `CSI 18 t` | Window-pixel, cell-pixel, and window-character size queries | Enabled and answered by the owner's xterm.js for image preparation. | [layout.md](layout.md#inline-graphics) |
 | `CSI ? 80 h/l` | SIXEL scrolling off/on | Observed by ImageAddon; xterm.js continues handling the private mode. | [layout.md](layout.md#inline-graphics) |
 | `CSI ? <item> ; <action> [; <value>] S` | XTSMGRAPHICS palette/canvas geometry | The owner's ImageAddon answers supported read/set actions and an error status for the rest. | [layout.md](layout.md#inline-graphics) |
+| `REPLAY_MODE_RESET` (Dormouse-emitted) | Private-mode and SGR reset written after a dead Session's replay | DECRSTs plus one DECSET and `SGR 0`, written by Dormouse into the renderer; no program sends it. | [transport.md](transport.md#replay-time-mode-reset-tail-dormouse-emitted) |
 
 ### Pass-through and fail-inertly
 
