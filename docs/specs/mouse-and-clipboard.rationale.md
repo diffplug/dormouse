@@ -76,12 +76,6 @@ The [Bash reference manual](https://www.gnu.org/software/bash/manual/html_node/C
 
 ## 8.6 Paste Content
 
-Source audit, 2026-10: Node's `mkdtemp` and `chmod(0700/0600)` do not establish
-a Windows owner-only DACL. The Rust clipboard bitmap path likewise creates
-the directory and file without restricting inherited permissions. This is an
-unfixed clipboard-storage gap, separate from the private browser capture
-directory. Both cleanup timers depend on the host process remaining alive.
-
 **Why native text reads outrank `navigator.clipboard`.** On macOS WKWebView, `navigator.clipboard.readText()` pops a `Paste from <App>` confirmation menu at the cursor on *every* invocation, not once per grant; a paste shortcut that then needs a second click on a menu appearing under the mouse defeats its own purpose. The `navigator` call stays as the fallback for hosts that ship no native reader.
 
 **Why the image temp file lives ~5 minutes.** Long enough for whatever command the user launches against the pasted path to have opened it — the path lands at a prompt they still have to finish typing and submit — and short enough that a long session of screenshot pastes does not accumulate one file per paste in a private temp directory nobody ever cleans. Nothing in the code depends on the exact number.

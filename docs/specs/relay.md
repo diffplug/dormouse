@@ -299,11 +299,16 @@ parse. **Assertions go through `verifyPasskeyAssertion` in `remote-lib-common`,
 the same function the Burrow uses**, so Relay and Burrow cannot disagree on what a
 valid assertion is.
 
-**Must share setup-registration validation through `checkRegistration` in
-both Relays**, rejecting invalid client data, challenges, origin, key, or
-credential id with 400. Its code owns check ordering and field shape. **Must
-store only a new credential id**, otherwise 409; registration never replaces
-a stored passkey.
+`POST /api/setup/finish` takes `{ credentialId, publicKey, clientDataJSON, label? }`.
+`checkRegistration`, which this and the Hosted Relay both call, checks, in
+order, each a 400: `clientDataJSON` decodes; `type === 'webauthn.create'`; its
+challenge redeems; `origin` equals the configured origin; the public key
+imports as an ECDSA P-256 verify key — refusing anything assertions could not
+later be verified against; and the credential id is bounded base64url. **Must
+redeem the challenge before the origin check**, so a wrong-origin registration
+still burns its challenge. Each
+Relay's store then requires the credential id be new (409 otherwise, so a
+re-registered credential cannot silently displace a stored key).
 
 **Must verify sign-in and re-auth against the stored passkey under the Relay's
 UV policy.** Sign-in runs `verifySigninAssertion`, which both Relays call: it
