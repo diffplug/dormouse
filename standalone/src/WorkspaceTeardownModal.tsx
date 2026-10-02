@@ -56,8 +56,8 @@ export function WorkspaceTeardownModal({
   intent?: QuitConfirmIntent;
 }) {
   const progressRef = useRef<HTMLParagraphElement>(null);
-  // Live count. The dialog stays open even if it drops to 0: only the user's
-  // answer closes it.
+  // Live count. The dialog stays open even if it drops to 0: a zero count
+  // never closes it by itself.
   const { requester } = intent;
   const getRunningCount = useCallback(() => quitRunningWork({ requester }), [requester]);
   const runningCount = useSyncExternalStore(subscribeToTerminalPaneState, getRunningCount);

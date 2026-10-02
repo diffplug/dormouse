@@ -3406,7 +3406,8 @@ fn close_window(app: AppHandle, window: tauri::Window) {
 // Normal app quit should let the Node sidecar run its shutdown handler first:
 // that handler closes headed agent-browser pop-out windows before killing PTYs.
 // If the sidecar is wedged, fall back to the same hard kill path so quit remains
-// bounded.
+// bounded. The grace must exceed the sidecar's 1.5s browser-cleanup deadline
+// (`shutdown` in standalone/sidecar/main.js).
 fn shutdown_sidecar_and_wait(state: &SidecarState) {
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
     const MAX_POLLS: u32 = 125;

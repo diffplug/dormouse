@@ -26,13 +26,15 @@ the step order. The ordering invariants:
    `installPeerSurfaceResponder()`**: init registers the listeners resume replay
    and the responder's seeding `status` answer arrive on, and hydrates the
    session cache (§Persistence; rationale).
-4. **The shell store is seeded, awaited, before the Wall mounts**, so the first
-   restored pane spawns with the persisted shell (`docs/specs/layout.md`).
-5. Tauri only: the quit flow and the per-window close listener are installed,
-   then a tear-out boot or `restoreWindowOrFresh`; **`armWorkspaceMoves()` runs
-   strictly after that restore**, since arming drains whatever was dropped on
-   this window while it booted (§Arrival queue).
-6. **`startUpdateCheck()` runs in `main` only** (§Windows); the app renders
+4. Tauri only, the quit flow and the per-window close listener are installed.
+5. **The shell store is seeded, awaited, before the restore and the Wall
+   mount**, so the first restored pane spawns with the persisted shell
+   (`docs/specs/layout.md`).
+6. Tauri only, a tear-out boot is tried; otherwise, in both hosts,
+   `restoreWindowOrFresh`. **`armWorkspaceMoves()` runs strictly after that
+   restore**, since arming drains whatever was dropped on this window while it
+   booted (§Arrival queue).
+7. **`startUpdateCheck()` runs in `main` only** (§Windows); the app renders
    with `multiWorkspace` and `enableBurrow`, which gates only the Burrow UI
    chunk (§Burrow service).
 
@@ -62,7 +64,7 @@ and the Windows `clipboard` readers (`clipboard_win.rs`;
 
 **A blocking command must be async** — `#[tauri::command(async)]` or a plain
 `#[tauri::command]` over an `async fn`. Tauri runs a sync command on the main
-thread, where waiting on the sidecar stops the webview painting for the whole
+thread, where waiting on the sidecar or the arrival-journal lock stops the webview painting for the whole
 round trip (rationale). **The three clipboard readers included**: their
 non-Windows branches round-trip through the sidecar. A source-scanning test in
 `lib.rs` enforces it.
@@ -209,8 +211,9 @@ with `build.rs`. Source of truth: `withoutGuiNodeDir` in
 Source of truth: `standalone/sidecar/main.js`. Browser cleanup is pinned by `standalone/sidecar/shutdown.test.js`.
 
 **Shutdown** (`sidecar:shutdown`, stdin EOF, or SIGTERM) **is idempotent and
-ordered**: browser-host cleanup first, awaited under one deadline
-(`docs/specs/dor-browser.md` owns the teardown contract); then the dor control
+ordered**: browser-host cleanup first, awaited under one 1.5 s deadline that
+must stay inside Rust's `shutdown_sidecar_and_wait` grace (~2.5 s) before it
+kills the process group (`docs/specs/dor-browser.md` owns the teardown contract); then the dor control
 socket; then `host.dispose()`, the alerts then the Burrow, settling every
 outstanding ask; then every PTY; then exit.
 
@@ -587,8 +590,8 @@ adapters fold the calls of one microtask into a single invoke
 read and one socket scan; its deadline is `docs/specs/transport.md` → "Port scan
 deadlines".
 
-**Nothing is deleted at boot but orphaned session temp files**
-(`docs/specs/transport.md` → "Retiring the transcripts already on disk").
+**Nothing is deleted at boot but orphaned session temp files and what the
+arrival merge settles** (`docs/specs/transport.md` → "Retiring the transcripts already on disk").
 
 **Never back the session blob with WebKit `localStorage`** — a WAL that grows
 without bound (rationale). The blob rides the `SessionKeyValueStore` seam over
@@ -713,10 +716,12 @@ A **watchdog** thread keeps quit bounded against a dead or wedged webview:
 |---|---|---|
 | 1 — ack | some window has not acked | short; a listener is dead ⇒ log and `app.exit(0)` |
 | 2 — voting | acked, no window walking yet | **none** — a window may be waiting on a human, who must never be force-quit; only approval or a `seq` bump ends it |
-| 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
+| 3 — walking | one window tearing down | `QUIT_PHASE_TIMEOUT_MS` (14 s) per phase, refreshed by `quit_progress` and by the walk advancing; no progress ⇒ log and exit |
 
-**Phase 3's budget must exceed the webview's teardown ceiling**
-(`lib/src/lib/mirrored-constants.test.ts`). Watchdog exits also pass the cleanup
+**Phase 3's budget must exceed the webview's teardown ceiling and the install
+phase's sidecar-kill cap** (`docs/specs/auto-update.md` → "Sidecar teardown on
+Windows"); `lib/src/lib/mirrored-constants.test.ts` pins the ceiling, nothing
+pins the install phase. Watchdog exits also pass the cleanup
 gate. Each watchdog captures its `seq`, so a repeated trigger leaves the stale
 one to exit without acting.
 
@@ -874,7 +879,7 @@ and the root `package.json` for `dev:standalone` and `innerdogfood`;
 
 - **Must bind OS-assigned ports for Vite and the HTTP bridge by default**, and **derive the default browser key from the canonical worktree path**, so parallel worktrees are isolated.
 - **May pin ports with `DORMOUSE_BROWSER_DEV_VITE_PORT` / `DORMOUSE_BROWSER_DEV_HOST_PORT` and the session with `DORMOUSE_BROWSER_DEV_AB_SESSION`.** An occupied pinned port fails startup; `0` requests an OS-assigned port. Explicit overrides are the caller's isolation responsibility.
-- **Must open through `dor agent-browser` when `DORMOUSE_SURFACE_ID` is set**, otherwise `agent-browser`, and print the app URL, the browser identity, and the command to drive it. **Must print a `--key` as a key, never as a session** (`docs/specs/dor-browser.md` → "Managed identity"). **Must leave the browser to the Tool when its own terminal is a Tool** and no session is pinned, printing the Tool's handle.
+- **Must open through `dor agent-browser` when `DORMOUSE_SURFACE_ID` is set**, otherwise `agent-browser`, and print the app URL, the bridge token, the browser identity, and the command to drive it. **Must print a `--key` as a key, never as a session** (`docs/specs/dor-browser.md` → "Managed identity"). **Must leave the browser to the Tool when its own terminal is a Tool** and no session is pinned, printing the Tool's handle.
 - **Must give its sidecar a private `AGENT_BROWSER_SOCKET_DIR`**, since the inner app names managed sessions as the installed app does; the harness's own browser keeps the caller's.
 - **Must await Vite's own listener before opening the browser and use the actual ports for bridge authentication and CORS**, and **close the bridge and Vite and terminate owned children on startup failure or shutdown**. Pinned by `standalone/scripts/dev-agent-browser.test.mjs`.
 - **Must keep logging the Burrow state directory in the form the pairing walkthrough parses**; pinned by `lib/src/lib/mirrored-constants.test.ts`.
