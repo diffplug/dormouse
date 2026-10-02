@@ -263,7 +263,7 @@ function FreeCard() {
       above={
         <p className="text-sm leading-snug">
           The whole terminal is <span className="whitespace-nowrap">FSL-1.1-MIT</span>, easy to
-          run a fork
+          fork
         </p>
       }
       price={<span className="font-display text-4xl">$0</span>}
@@ -278,12 +278,12 @@ function FreeCard() {
       <Includes
         items={[
           <>
-            <a href={sitePath(POCKET_PLAYGROUND_PATH)} className={LINK_CLASS}>Pocket</a> on your
-            phone with a{" "}
+            <a href={sitePath(POCKET_PLAYGROUND_PATH)} className={LINK_CLASS}>Pocket</a> and push
+            notifications on your phone with a{" "}
             <a href={sitePath("/self-host")} className={LINK_CLASS}>self-hosted Relay</a>
           </>,
           "Spoken alarms in your system voice",
-          "Zero network requests unless you choose a Relay",
+          "Zero network requests unless you enroll with a Relay",
         ]}
       />
     </PlanCard>
@@ -311,8 +311,11 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
     >
       <Includes
         items={[
-          "Pocket on your phone, with no server to run",
-          "A natural ElevenLabs voice for each pane",
+          <>
+            <a href={sitePath(POCKET_PLAYGROUND_PATH)} className={LINK_CLASS}>Pocket</a> and push
+            notifications on your phone, with no server to run
+          </>,
+          "High-quality ElevenLabs speech synthesis",
           "One license for your whole personal fleet of machines",
         ]}
       />
