@@ -1,6 +1,6 @@
 /**
  * The one relay origin this build was baked with, and the mode it sets
- * (`docs/specs/burrow-service.md` → "Relay origin"): the Burrow's only Relay, and — in a
+ * (`docs/specs/relay.md` → "Relay origin"): the Burrow's only Relay, and — in a
  * Hosted build — where the one-time rendezvous goes too. Managed voice speaks
  * at {@link HOSTED_VOICE_ORIGIN} instead, and enrollment is approved at
  * {@link HOSTED_ACCOUNT_ORIGIN}.
@@ -22,7 +22,7 @@ export const DEFAULT_RELAY_ORIGIN = 'https://relay.dormouse.sh';
 /**
  * Where a Hosted build's managed voice speaks. A fixed constant, never baked
  * and never overridden: a dev Hosted build whose relay origin is loopback still
- * speaks here (`docs/specs/burrow-service.md` → "Relay origin").
+ * speaks here (`docs/specs/relay.md` → "Relay origin").
  */
 export const HOSTED_VOICE_ORIGIN = 'https://voice.dormouse.sh';
 
@@ -30,7 +30,7 @@ export const HOSTED_VOICE_ORIGIN = 'https://voice.dormouse.sh';
  * The Hosted account's origin, where a Hosted build's enrollment is approved
  * and its computers are managed. A fixed constant, never baked: **the desktop
  * never requests it**, and opens it only on the user's click
- * (`docs/specs/burrow-service.md` → "Relay origin").
+ * (`docs/specs/relay.md` → "Relay origin").
  */
 export const HOSTED_ACCOUNT_ORIGIN = 'https://hosted.dormouse.sh';
 

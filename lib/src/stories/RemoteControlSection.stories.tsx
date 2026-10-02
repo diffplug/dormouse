@@ -17,7 +17,7 @@ import { TEST_SETUP_PASSWORD } from '../remote/test-setup-password';
 
 /**
  * The Remote control choices in Settings → Network's Phones section — the one
- * step a self-hoster cannot skip (`docs/specs/burrow-service.md`, "Remote control, in
+ * step a self-hoster cannot skip (`docs/specs/relay.md`, "Remote control, in
  * the Settings dialog"). Rendered on its own rather than through
  * `SettingsDialog` so these stories are about the enrollment states
  * themselves; `SettingsDialog`'s `WithRemoteControl` covers it in place.
@@ -473,7 +473,7 @@ export const SetupPhoneExpired: Story = {
  * They all spend the code and dismiss the modal, and the paired count above is
  * absolute — so without these the panel said the same thing for a phone that
  * paired and for one whose digits were mistyped
- * (`docs/specs/burrow-service.md` → "Remote control, in the Settings dialog").
+ * (`docs/specs/relay.md` → "Remote control, in the Settings dialog").
  */
 export const PairingOutcomePaired: Story = {
   parameters: {

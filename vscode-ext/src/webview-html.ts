@@ -106,7 +106,7 @@ export function getWebviewHtml(
     // ws: entries cover the agent-browser stream relay (frames + input for
     // browser surfaces; see docs/specs/dor-browser.md). No relay origin here:
     // the Burrow holds its `/ws/burrow` socket from the extension host, which
-    // reaches only its baked relay origin (docs/specs/burrow-service.md → "Relay origin").
+    // reaches only its baked relay origin (docs/specs/relay.md → "Relay origin").
     `connect-src ${webview.cspSource} ws://127.0.0.1:* ws://localhost:*`,
     // `dor iframe` frames its target through a loopback transparent proxy that
     // the extension host stands up (iframe-proxy-host.ts), so the only origin we

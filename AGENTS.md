@@ -74,8 +74,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/remote-security-model.md`** — Remote-control trust model: one Noise channel per ceremony, passkeys proving presence inside it, per-Burrow Client statics, the Burrow (not the Relay) authorizing the pair. Read first for anything remote.
 - **`docs/specs/remote-network.md`** — The network policy (Nothing / Local networks / Anywhere / My Relay only): its choke points, the update reminder, the Local networks path check, Cloudflare STUN, and each level's paired-phone path.
 - **`docs/specs/remote-api.md`** — What an authorized Client speaks: the shipped terminal-only **protocol-v1** and the staged remainder.
-- **`docs/specs/relay.md`** — The selfhost Relay server: config, JSON-file state, WebAuthn, HTTP API, routing, running and installing it.
-- **`docs/specs/burrow-service.md`** — The desktop Burrow: the baked Relay origin, `BurrowService`, enrollment, the relay socket, Settings → Remote control.
+- **`docs/specs/relay.md`** — The selfhost Relay plus the desktop Burrow service the Tauri sidecar and VS Code extension host run: config, state files, HTTP API, routing, the baked Relay origin, enrollment, Settings → Remote control, installing it.
 - **`docs/specs/hosted.md`** — Hosted accounts: login/linking policy, account-scoped Relay and enrollment, Worker deployment, local development, and staged paid services.
 - **`docs/specs/one-time.md`** — One-time connection: the link a laptop shows, its Settings panel and Baseboard indicator, the Hosted rendezvous wire that carries only its handshake, the phone page Hosted serves, and the direct-only session; no account, nothing saved.
 - **`docs/specs/security-hosted.md`** — Hosted account origin, identity, and deployment security checks.

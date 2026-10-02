@@ -89,7 +89,7 @@ The Settings dialog's Network topic (`docs/specs/alert.md` -> "Settings dialog")
 - **Choosing Local networks with nothing allowed must first allow every prefix of this machine's `lan` interfaces**, never a `vpn` or `virtual` one; the panel fills them, not the service (rationale). **Any other choice must keep `allowed`.**
 - **The connection list states only what is built** (rationale): `connectionsFor` answers these rows and no others. Under `nothing` it answers none, and the list reads "Nothing. Terminals and browser panes still reach whatever you open in them, including panes restored at launch."
 
-The relay socket runs ("persistent" below) where `runsBurrow` holds, in a self-host build or with an enrollment, unless the Burrow latched `removed` or `not-entitled` (`relayRefuses`; `docs/specs/burrow-service.md` -> "Burrow side").
+The relay socket runs ("persistent" below) where `runsBurrow` holds, in a self-host build or with an enrollment, unless the Burrow latched `removed` or `not-entitled` (`relayRefuses`; `docs/specs/relay.md` -> "Burrow side").
 
 | Row | Listed when |
 |---|---|
@@ -102,7 +102,7 @@ The relay socket runs ("persistent" below) where `runsBurrow` holds, in a self-h
 | `dormouse.sh`, each launch | `autoUpdate` on, in a build that updates itself ("Updates" below), in every window |
 
 - **Allowed networks**, under `local`: one switch per interface, on when all its prefixes are allowed. **Must list every allowed range no switch reading On covers**, with Remove, naming the interface a partly allowed one belongs to; **switching one off keeps a range another switch reading On needs**. A typed range goes to the service, which saves its canonical form; more than 32 is refused in the panel. **With nothing allowed it says no phone can connect.** **A held path refusal shows above the switches, with Dismiss.**
-- **Phones**: under any level but `nothing`, the Remote control choices (`docs/specs/burrow-service.md` -> "Remote control, in the Settings dialog"); under `nothing`, the levels that allow a phone, each choosing itself, and Disconnect for a held enrollment, which is local.
+- **Phones**: under any level but `nothing`, the Remote control choices (`docs/specs/relay.md` -> "Remote control, in the Settings dialog"); under `nothing`, the levels that allow a phone, each choosing itself, and Disconnect for a held enrollment, which is local.
 - **Updates**: a self-host build says it never updates itself, and a host with `hostOwnsUpdates` (VS Code) names the Marketplace. Any other build updates itself: the automatic-check switch, absent under `nothing`, over "Checked at each launch." or "Checked only when you ask."; **only with the platform's `updates` port** (`docs/specs/auto-update.md` -> "Threading") the last successful check — "Never checked on this computer." for none — Check now, and the week the Baseboard waits.
 - **Under `nothing`, Notifications' push and managed-voice lines say they are off because Network is set to Nothing**, each linking to this topic. **The Baseboard holds the policy store for the window's life**, so its settings preview reads the level on its first frame; the Network panel re-reads on mount, and **a failed re-read never replaces a policy already read**.
 

@@ -321,7 +321,7 @@ describe('RemoteControlSection', () => {
     await openPersistent();
     expect(buttonLabelled('Persistent Relay')!.getAttribute('aria-expanded')).toBe('true');
     expect(persistentPanel().hidden).toBe(false);
-    // Its one Relay is Hosted's (docs/specs/burrow-service.md → "Relay origin"): no
+    // Its one Relay is Hosted's (docs/specs/relay.md → "Relay origin"): no
     // password form, no offer card, and the self-host path named as a build.
     expect(container.querySelector('input[type="password"]')).toBeNull();
     expect(buttonLabelled('Connect')).toBeUndefined();

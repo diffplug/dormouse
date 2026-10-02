@@ -26,7 +26,7 @@ const COPY: Record<ApprovalKind, { title: string; consequence: string; confirm: 
 };
 
 /**
- * The Burrow's local pairing confirmation (`docs/specs/burrow-service.md` → "Burrow side";
+ * The Burrow's local pairing confirmation (`docs/specs/relay.md` → "Burrow side";
  * same pattern as KillConfirm). Confirming a pairing here is the only path that
  * writes the ACL; confirming a one-time request authorizes one session and
  * writes nothing.

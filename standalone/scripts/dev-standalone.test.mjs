@@ -104,7 +104,7 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
     b.start(['dev'], { DORMOUSE_LOG_FILE: path.join(b.root, 'custom.log') }).ready(),
   ]);
   assert.equal(custom.logFile, path.join(b.root, 'custom.log'));
-  // A dev run stages a dev build (docs/specs/burrow-service.md → "Relay origin").
+  // A dev run stages a dev build (docs/specs/relay.md → "Relay origin").
   assert.match(custom.output, /STAGE stage:dev\r?\n/);
   await custom.stop();
   assert.notEqual(one.url, two.url);
@@ -140,7 +140,7 @@ test('parallel native dev runs isolate listeners, app data and logs, and stop on
 
 test('the dev server bakes the webview under the dev rule', { timeout: 60000 }, async t => {
   // A dev build may count a loopback origin as Hosted; `vite build` may not
-  // (docs/specs/burrow-service.md → "Relay origin").
+  // (docs/specs/relay.md → "Relay origin").
   const a = await fixture(t);
   const run = await a.start(['dev'], {
     DORMOUSE_RELAY_ORIGIN: 'http://localhost:8787', DORMOUSE_RELAY_IS_HOSTED: '1',

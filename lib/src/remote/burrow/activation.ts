@@ -116,7 +116,7 @@ function installBridgeMode(link: BurrowLink): void {
   // `reconnect()` are promises here.
   target.dormouseBurrow = {
     // No Relay argument, and no token: the only Relay is the build's baked
-    // origin (`docs/specs/burrow-service.md` → "Relay origin"), and the service reads the
+    // origin (`docs/specs/relay.md` → "Relay origin"), and the service reads the
     // installer's token off its file.
     enroll: (password: string, label: string) => link.command('enroll', { password, label }),
     enrollOffer: (label: string) => link.command('enrollOffer', { label }),

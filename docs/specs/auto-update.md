@@ -10,7 +10,7 @@ The standalone app checks for updates on launch, where the network policy allows
 
 **Check now** — the `check-due` and `check-failed` links, and the `updates` port — shows `checking`, then `available`, `up-to-date`, or `check-failed`. **A second ask joins the check in flight. An update already approved is shown again, `downloading` or `downloaded`, instead of checked for**, which would offer it for approval twice. **Every successful check, automatic or asked for, records `checkedAt`** (§localStorage).
 
-**A self-host build never checks** (`docs/specs/burrow-service.md` → "Relay origin"): `startUpdateCheck()` returns at once and `checkNow()` does nothing unless the webview's own baked mode, `bakedRelayMode()`, is `hosted`.
+**A self-host build never checks** (`docs/specs/relay.md` → "Relay origin"): `startUpdateCheck()` returns at once and `checkNow()` does nothing unless the webview's own baked mode, `bakedRelayMode()`, is `hosted`.
 
 **A failed download leaves the *available* update in place** so a second approval retries rather than no-ops; only a successful `download()` promotes `check()`'s in-memory *available* `Update` to *pending*.
 

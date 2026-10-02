@@ -43,7 +43,7 @@ change to both.
 
 Before acting:
 
-1. Read `docs/specs/relay.md` ("Configuration"), `docs/specs/burrow-service.md` ("Relay origin"), `docs/specs/remote-security-model.md` for the
+1. Read `docs/specs/relay.md` ("Configuration", "Relay origin"), `docs/specs/remote-security-model.md` for the
    trust model, and the [Installer contract](#installer-contract-maintainers).
 2. Establish the OS and pick the installer column; run its `--help` / `-Help`,
    skim the script, and quote its errors rather than paraphrasing — they are
@@ -113,7 +113,7 @@ installed release, which the installer and `manage status` both print.
   That is a self-host build: it sends nothing to `dormouse.sh` or any host
   under it on its own, so it has no one-time connection, no managed
   voice, and no auto-update — update it by rebuilding
-  (`docs/specs/burrow-service.md` → "Relay origin").
+  (`docs/specs/relay.md` → "Relay origin").
 
 ## What the installer does
 
@@ -374,7 +374,7 @@ Burrow displays (`docs/specs/relay.md` → Setup tokens and the pairing QR).
    (`docs/specs/remote-network.md` → "Policy"). Its Phones section then holds
    the remote-control choices. While the offer is unspent, its card enrolls in one click with no
    setup password; the typed form behind "Enroll with the setup password…"
-   covers a spent offer or a Burrow on another machine (`docs/specs/burrow-service.md`,
+   covers a spent offer or a Burrow on another machine (`docs/specs/relay.md`,
    "Remote control, in the Settings dialog"). Enrollment persists in the Burrow service's
    own store (`docs/specs/security-remote.md` → "Credentials at rest"), so later launches connect
    on their own; the section then shows the Relay, the relay connection and the

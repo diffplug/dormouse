@@ -17,7 +17,7 @@ const port = Number(process.env.DORMOUSE_BROWSER_DEV_VITE_PORT || 1420);
 export default defineConfig(({ command }) => ({
   plugins: [react(), tailwindcss()],
   // The relay pair the sidecar bakes, under the same rule: the dev server is a
-  // dev build and `vite build` a release one (docs/specs/burrow-service.md → "Relay origin").
+  // dev build and `vite build` a release one (docs/specs/relay.md → "Relay origin").
   define: relayOriginDefine(resolveRelayOrigin(process.env, "webview", { dev: command === "serve" })),
   resolve: {
     dedupe: ["react", "react-dom"],

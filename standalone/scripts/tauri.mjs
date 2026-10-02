@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Wraps the Tauri CLI. `tauri dev` stages the sidecar bundles as a dev build
 // first; `tauri build` leaves staging to `beforeBuildCommand` (`pnpm build`), a
-// release build. Which builds may bake what: docs/specs/burrow-service.md → "Relay
+// release build. Which builds may bake what: docs/specs/relay.md → "Relay
 // origin". The webview's CSP in tauri.conf.json has no relay sources at all.
 //
 // cross-spawn (matches the other scripts here): resolves the local `tauri`

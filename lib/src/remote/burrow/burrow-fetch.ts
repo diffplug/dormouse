@@ -158,7 +158,7 @@ export type BurrowStanding = 'removed' | 'not-entitled';
 /**
  * Ask the Relay whether this Burrow's token still stands, through the one
  * Burrow-gated read both Relays serve, `GET /api/push/devices`
- * (`docs/specs/burrow-service.md` -> "Burrow side", relay socket policy): a 401
+ * (`docs/specs/relay.md` -> "Burrow side", relay socket policy): a 401
  * naming the token unknown is `removed`, a 403 `NOT_ENTITLED_ERROR` is
  * `not-entitled`, and any other 2xx, 401, or 403 `null`. **Rejects when no
  * answer came, or any other status did** — a 5xx, a 404 — which proves

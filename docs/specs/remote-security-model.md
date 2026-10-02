@@ -198,11 +198,11 @@ newly-added passkey is not automatically trusted; its Client must still pair.
   *Only authorize if your phone is showing a two-digit code. If it shows an
   error or no code, cancel this request.* **The Burrow holds the expected code and
   never displays, mirrors, or retransmits it**, and compares the typed digits
-  without early exit ([burrow-service.md](./burrow-service.md) owns the webview echo). **Exactly
+  without early exit ([relay.md](./relay.md) owns the webview echo). **Exactly
   one attempt** (rationale).
 - **Every terminal outcome consumes the invitation, erases handshake material,
   and is reported at both ends in fixed local copy, never text off the wire**
-  ([burrow-service.md](./burrow-service.md) -> "Remote control, in the Settings dialog"):
+  ([relay.md](./relay.md) -> "Remote control, in the Settings dialog"):
   mismatch, denial, pairing-TTL timeout, replacement by a newer pairing from the
   same Client, malformed input, or a failed proof.
 - **Confirmation writes one record, then answers.** On a match the Burrow durably

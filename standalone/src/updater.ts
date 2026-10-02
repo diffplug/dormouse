@@ -220,7 +220,7 @@ function publishChecks(): void {
 
 /**
  * Whether this build checks at all: never a self-host build
- * (`docs/specs/burrow-service.md` → "Relay origin") or the browser-dev harness.
+ * (`docs/specs/relay.md` → "Relay origin") or the browser-dev harness.
  */
 function buildChecks(): boolean {
   return !BROWSER_DEV_HOST && bakedRelayMode() === 'hosted';

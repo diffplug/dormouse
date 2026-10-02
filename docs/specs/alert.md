@@ -336,7 +336,7 @@ Source of truth: `toSpokenText` / `startAlertSpeech` in `lib/src/lib/alert-speec
 Every rule above holds for both engines.
 
 - **Must try managed voice first while the adapter's `managedVoice` status says a token is saved** (`docs/specs/transport.md` → "Managed voice"); otherwise the utterance goes straight to Web Speech.
-- **A host speaks only at its build's voice origin; a self-host build's has none** and makes no request (`docs/specs/burrow-service.md` → "Relay origin"), **nor does any host under the network policy's `nothing`** (`docs/specs/remote-network.md` → "Policy").
+- **A host speaks only at its build's voice origin; a self-host build's has none** and makes no request (`docs/specs/relay.md` → "Relay origin"), **nor does any host under the network policy's `nothing`** (`docs/specs/remote-network.md` → "Policy").
 - **Must fall back to Web Speech for the same utterance, inside the same attempt, on any failure before managed audio starts** — `unconfigured`, offline, non-2xx, host timeout, undecodable or refused playback. **Never play both**: audio that started and then failed ends the attempt instead (rationale). Nothing is retried.
 - `speaking` / `spoken` follow the audio element's `playing` / `ended`. **Cut-off and teardown must stop the audio**; a request still in flight runs out in the host and its answer is ignored.
 - **Never let the voice token reach a renderer**; the host adds it to the request (rationale). Where it may go: `docs/specs/security-local.md` → "Persisted state".

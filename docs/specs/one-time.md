@@ -384,7 +384,7 @@ migration, and rate limits, and carries no route or production secret (its
 `RELAY_ENROLL_SECRET` is the fixed, public `DEV_ENROLL_SECRET`); `vite build --watch`
 rebuilds the page into the folder Wrangler serves. Once the page answers, the
 loop prints the origin and the dev Burrow build variables
-(`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/burrow-service.md`
+(`DORMOUSE_RELAY_ORIGIN`, `DORMOUSE_RELAY_IS_HOSTED=1`; `docs/specs/relay.md`
 -> "Relay origin") and announces the page over OSC 367, since Wrangler's
 inspector binds a second port.
 
@@ -431,7 +431,7 @@ enrolled runtime's, under the level's path rules (`docs/specs/remote-network.md`
   saved." beside a "Confirm and allow" button.
 
 **The origin is the build's Hosted origin, which only a Hosted build has**
-(`docs/specs/burrow-service.md` -> "Relay origin", whose "Accepted origins" bounds it). **Availability is decided before any socket exists**:
+(`docs/specs/relay.md` -> "Relay origin", whose "Accepted origins" bounds it). **Availability is decided before any socket exists**:
 without a Hosted origin the state is `unavailable` with reason `self-host`, and
 the service builds no runtime; the network policy's `nothing` makes it
 `unavailable` with reason `network-off`, and a policy change ends a live

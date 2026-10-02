@@ -324,7 +324,7 @@ async function readBurrowStatus(): Promise<void> {
  * The password is a bearer credential and is passed straight through to the
  * service, which is what talks to the Relay; it is never stored here. There is
  * no origin to pass: the service posts only to the build's baked relay origin
- * (`docs/specs/burrow-service.md` → "Relay origin"). Rejections propagate verbatim —
+ * (`docs/specs/relay.md` → "Relay origin"). Rejections propagate verbatim —
  * the caller renders them.
  */
 export async function enrollBurrow(password: string, label: string): Promise<void> {
@@ -371,7 +371,7 @@ export async function cancelHostedEnrollment(): Promise<void> {
 /**
  * Re-open the relay socket after a latched state — terminal by design, so
  * nothing reconnects on its own. After `displaced` this displaces the other
- * instance in turn (`docs/specs/burrow-service.md`, "Burrow side", relay socket policy).
+ * instance in turn (`docs/specs/relay.md`, "Burrow side", relay socket policy).
  */
 export async function reconnectBurrow(): Promise<void> {
   const active = requireBurrowLink();

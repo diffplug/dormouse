@@ -303,7 +303,7 @@ describe('an answer from an older broker', () => {
 
   it('reads the shape from before one baked relay origin, and does not republish it', async () => {
     // `offer` was `{ origin }`, a fresh object every poll; there was no
-    // `relayOrigin` or `relayMode` (docs/specs/burrow-service.md → "Relay origin").
+    // `relayOrigin` or `relayMode` (docs/specs/relay.md → "Relay origin").
     vi.useFakeTimers();
     const command = vi.fn(async () => ({
       enrolled: false,

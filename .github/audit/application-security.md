@@ -13,7 +13,7 @@ PAT — do not use one.
 
 Read, at minimum: `docs/specs/remote-security-model.md` **and its paired
 `docs/specs/remote-security-model.rationale.md`**, `docs/specs/relay.md`,
-`docs/specs/burrow-service.md`, `docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `SELF_HOST.md`, and then
+`docs/specs/remote-api.md`, `docs/specs/pocket-app.md`, `SELF_HOST.md`, and then
 the code they point at — `remote-lib-common/src/security/`, `relay/src/`,
 `lib/src/remote/`, `lib/src/host/remote/`, `vscode-ext/src/burrow*.ts`,
 `scripts/relay-origin.mjs`, and all three installers —
@@ -192,7 +192,7 @@ Be adversarial, and go past the `FAIL IF` list. Ask specifically:
   drift is a finding; say which side is wrong. The newest sections are the ones
   most likely to have drifted: `remote-security-model.md`'s Presence proofs,
   Pairing, Connection, Push sealing, Burrow bounds, Noise suite and Burrow identity,
-  `relay.md`'s Routing and E2E framing, and `burrow-service.md`'s Relay origin
+  `relay.md`'s Routing, E2E framing, Relay origin
   and Burrow side. `scripts/e2e-lint.mjs` mechanizes the
   structural half of that ("one suite, no negotiation, no plaintext path, no
   legacy discriminant") — check that each of its rules still names a real

@@ -76,7 +76,7 @@ export function pushSubscriptionDeletePath(deliveryId: string): string {
  * "sign in again". Changing the string on one side without the other would
  * silently strand users on a dead session. A Burrow-gated route answers it
  * too, for a burrow token that names no Burrow, and a Burrow's standing probe
- * reads it as removal (`docs/specs/burrow-service.md` -> "Burrow side").
+ * reads it as removal (`docs/specs/relay.md` -> "Burrow side").
  */
 export const UNAUTHORIZED_ERROR = 'unauthorized';
 
@@ -181,7 +181,7 @@ export const WS_CLOSE_BURROW_REPLACED_REASON = 'replaced by a newer burrow conne
  * The Burrow's row is gone — removed from the account, or deleted from
  * `burrows.json` — so its bearer token names nothing. Terminal at the Burrow,
  * which reports `removed` rather than retrying an upgrade that can only 401
- * (`docs/specs/burrow-service.md` -> "Burrow side").
+ * (`docs/specs/relay.md` -> "Burrow side").
  */
 export const WS_CLOSE_BURROW_REVOKED = 4001;
 

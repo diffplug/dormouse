@@ -279,7 +279,7 @@ describe('updater', () => {
       expect(mocks.check).toHaveBeenCalledOnce();
     });
 
-    // docs/specs/burrow-service.md → "Relay origin".
+    // docs/specs/relay.md → "Relay origin".
     it('never checks in a self-host build', async () => {
       mocks.relayMode = 'self-host';
       const info = vi.spyOn(console, 'info').mockImplementation(() => {});

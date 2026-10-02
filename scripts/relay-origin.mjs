@@ -1,5 +1,5 @@
 // The one relay origin a desktop build bakes, and the mode it sets
-// (docs/specs/burrow-service.md → "Relay origin"). Both host builds read it here —
+// (docs/specs/relay.md → "Relay origin"). Both host builds read it here —
 // `standalone/scripts/build-sidecar-proxy.mjs` and `vscode-ext/scripts/esbuild.mjs`
 // — and esbuild-`define` the result into the Node bundle that holds the relay
 // socket, where `lib/src/host/relay-origin.ts` is the only reader.
@@ -45,9 +45,9 @@ function blank(value) {
  * - a retired variable set to anything non-blank;
  * - an origin outside {@link isAcceptedRelayOrigin};
  * - in any build but a dev build, `DORMOUSE_RELAY_IS_HOSTED` set at all, or a
- *   loopback `http:` origin (docs/specs/burrow-service.md → "Relay origin").
+ *   loopback `http:` origin (docs/specs/relay.md → "Relay origin").
  *
- * `dev` marks a dev build (docs/specs/burrow-service.md → "Relay origin"); every other
+ * `dev` marks a dev build (docs/specs/relay.md → "Relay origin"); every other
  * build is a release build. Logs to stderr whenever the result is not the
  * stock one.
  */
@@ -56,7 +56,7 @@ export function resolveRelayOrigin(env = process.env, label = 'build', { dev = f
     if (!blank(env[name])) {
       throw new Error(
         `[${label}] ${name} is retired: a build bakes exactly one relay origin, ` +
-          'DORMOUSE_RELAY_ORIGIN (docs/specs/burrow-service.md → "Relay origin"). Unset it.',
+          'DORMOUSE_RELAY_ORIGIN (docs/specs/relay.md → "Relay origin"). Unset it.',
       );
     }
   }
