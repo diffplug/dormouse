@@ -6,7 +6,7 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 
 const WINDOWS_PRIVATE_PATH = `
 $ErrorActionPreference = 'Stop'
@@ -45,28 +45,6 @@ function checkPath(target: string, directory: boolean): void {
 
 const powershell = () => path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 
-function restrictToOwnerSync(target: string, directory: boolean): void {
-  checkPath(target, directory);
-  if (process.platform !== 'win32') return;
-  execFileSync(powershell(), ['-NoProfile', '-NonInteractive', '-Command', WINDOWS_PRIVATE_PATH], {
-    // Only literal path data crosses stdin: quotes, $, backticks and newlines
-    // never become PowerShell code. Use the system executable, not PATH search.
-    input: path.resolve(target), encoding: 'utf8', windowsHide: true, timeout: 5_000,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-}
-
-export function ensurePrivateDirectorySync(dir: string): void {
-  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  restrictToOwnerSync(dir, true);
-}
-
-/** A legacy record may have explicit grants that directory inheritance cannot
- * remove. Tighten it before reading; reject symlinks and non-files outright. */
-export function ensurePrivateFileSync(file: string): void {
-  restrictToOwnerSync(file, false);
-}
-
 /** Startup and cold claims do not block the host event loop on Windows ACL setup.
  * The OS authorizes SetOwner/Set-Acl; an elevated administrator-owned legacy
  * path may be rewritten, and any refused operation still fails closed. */
@@ -87,6 +65,7 @@ export async function ensurePrivateDirectory(dir: string): Promise<void> {
   await restrictToOwner(dir, true);
 }
 
+/** Tighten explicit legacy grants before reading; reject symlinks and non-files. */
 export async function ensurePrivateFile(file: string): Promise<void> {
   await restrictToOwner(file, false);
 }
