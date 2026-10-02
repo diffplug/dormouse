@@ -196,7 +196,7 @@ the heading, and the rule gets a `(rationale)` marker.
 | Concern | Code | Spec |
 |---|---|---|
 | Strip look, tabs, menus, rename, indicators | `lib/src/components/WorkspaceStrip.tsx`, `workspace-strip-drag.ts`, stories in `lib/src/stories/` | `docs/specs/layout.md` → Workspaces; `standalone.md` → AppBar; `alert.md` → Workspace union |
-| Shared Workspace kill confirmation and iframe move gate | `lib/src/components/WorkspaceKillConfirm.tsx` ("Confirm kill workspace"), `lib/src/components/WorkspaceStrip.tsx` (`confirmation`), `standalone/src/WorkspaceTeardownModal.tsx` (window close / app quit), `lib/src/lib/workspace-ui-store.ts` | `layout.md` → Workspaces; `standalone.md` → Confirmation UI |
+| Shared Workspace kill confirmation and iframe move gate | `lib/src/components/WorkspaceKillConfirm.tsx` ("Confirm kill workspace"), `lib/src/components/WorkspaceStrip.tsx` (`confirmation`), `standalone/src/WorkspaceTeardownModal.tsx` (window close / app quit), `lib/src/lib/workspace-ui-store.ts` | `layout.md` → Workspaces; `standalone.md` → Quit protocol |
 | Command-mode keys (`c n p l 1-9 W & !` etc.) | `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts` | `layout.md` → Workspaces, `shortcuts.md` |
 | Composition, active/hidden Wall, input gating | `lib/src/components/WorkspaceWindow.tsx`, `Wall.tsx` (`WorkspaceActiveContext`) | `layout.md` → Workspaces |
 | Hidden-Workspace terminal minimize | `lib/src/components/TerminalPane.tsx` mount effect (gated on `workspaceActive`), `lib/src/lib/terminal-lifecycle.ts` (`mountElement`/`unmountElement`), `terminal-webgl.ts` | `layout.md` → Workspaces, Renderer; `layout.rationale.md` → Workspaces |

@@ -9,7 +9,7 @@ import type { TeardownConfirmContext } from "./teardown-flow";
  * Module store backing the quit-confirmation dialog. The quit orchestrator's
  * gate (`openQuitConfirm`, wired via `setQuitConfirmGate` in bootstrap) opens
  * it; `<WorkspaceTeardownModalHost>` renders off the phase. Behavior:
- * docs/specs/standalone.md §Quit flow, "Confirmation dialog".
+ * docs/specs/standalone.md -> "Quit protocol".
  */
 
 export type QuitConfirmPhase = "open" | "quitting";
@@ -118,6 +118,8 @@ export function openQuitConfirm(ctx: TeardownConfirmContext, next: QuitConfirmIn
   }
   activeCtx = ctx;
   intent = next;
+  // One letter per request: a Workspace switch or a repeat quit trigger never
+  // re-rolls it (the orchestrator does not re-invoke this gate while it is up).
   confirmChar = randomKillChar();
   phase = "open";
   ownDialog();
