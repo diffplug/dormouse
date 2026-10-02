@@ -738,9 +738,8 @@ export function createApp(config: AppConfig): CreatedApp {
     const body = await readJson<BurrowEnrollRequest>(c);
     // A Burrow built for another origin would send every phone there, so it is
     // refused before the credential is read — nothing spent, nothing appended.
-    // Absent is an older Burrow, which enrolls as before: a compatibility
-    // reader for pre-release source or dogfood Burrows only — v1.2.0, the
-    // first release with any Burrow, sends `origin`.
+    // Absent only from a pre-release Burrow (v1.2.0+ sends `origin`), which
+    // enrolls as before.
     const claimed: unknown = body?.origin;
     if (claimed !== undefined && normalizeOrigin(claimed) !== origin) {
       const mismatch: BurrowEnrollOriginMismatch = { error: ORIGIN_MISMATCH_ERROR, origin };

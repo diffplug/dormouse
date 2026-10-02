@@ -249,19 +249,13 @@ function refreshAfterMutation(): Promise<void> {
  * seam where the untrusted shape becomes the typed one — instead of at each of
  * the two forms that read it. `serving` is read through `servingOf`.
  *
- * A broker from before the one baked relay origin answers `offer` as
+ * A pre-release broker (v1.2.0+ sends every field) answers `offer` as
  * `{ origin } | null` — a fresh object every poll, which the field-wise compare
  * would republish every 2 s — and names its Relay `relayUrl` with no
  * `relayOrigin` or `relayMode`. The mode it lacks reads as Hosted, which shows
- * no enroll form it could not serve.
- *
- * Compatibility reader: the `offer` object, `relayUrl`, and a missing
- * `relayMode`, `hostedEnrollment`, `accountOrigin`, or `suggestedLabel` come
- * only from a pre-release source or dogfood broker. v1.2.0, the first release
- * with any Burrow, carries all of them, so no released build needs these
- * defaults.
- * `hostedEnrollmentOf`'s unknown-reason fallback serves a *newer* broker and
- * stays.
+ * no enroll form it could not serve. Every default for a missing field serves
+ * only such a broker, except `hostedEnrollmentOf`'s unknown-reason fallback,
+ * which serves a newer one.
  */
 function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
   const { relayUrl } = status as { relayUrl?: unknown };

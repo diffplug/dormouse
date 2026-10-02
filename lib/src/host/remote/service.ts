@@ -743,10 +743,8 @@ export class BurrowService {
    * `enrollOffer`'s echoed `origin` — and one naming any but the baked origin
    * is refused, rather than enrolled with this build's Relay instead.
    *
-   * Compatibility reader for a pre-release source or dogfood webview (a VS
-   * Code window not yet reloaded onto this broker's build): v1.2.0, the first
-   * release with any Burrow, never names the Relay, so no released build needs
-   * it.
+   * Pre-release compatibility only: no released webview (v1.2.0+) names the
+   * Relay.
    */
   #refuseOtherOrigin(named: unknown): void {
     if (named === undefined) return;

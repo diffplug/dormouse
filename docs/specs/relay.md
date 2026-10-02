@@ -189,7 +189,7 @@ Paths and shapes are `API_ROUTES` / `WS_ROUTES` and their types in
 | `POST /api/signin/finish` | — | Verifies the assertion; issues a 12-hour in-memory session token |
 | `POST /api/reauth/begin` | session token | Takes a `PresenceBinding`, mints a single-use `relayNonce`, answers `presenceChallenge(binding, nonce)` with the bound credential as the sole `allowCredentials` entry; 404 for an unregistered credential, 400 for a missing or malformed binding |
 | `POST /api/reauth/finish` | session token | Verifies against the **stored** key for that credential; **extends nothing** — not the session, not the relay socket |
-| `POST /api/burrow/enroll` | setup password or enroll token | Exactly one credential, else 400. **Takes no label.** A foreign `origin` is a 409 `ORIGIN_MISMATCH_ERROR` naming the Relay's, ahead of the credential (rationale); absent, it enrolls (an older Burrow). `MAX_ENROLLED_BURROWS` is a 409 naming `burrows.json`, checked after the credential (rationale) |
+| `POST /api/burrow/enroll` | setup password or enroll token | Exactly one credential, else 400. **Takes no label.** A foreign `origin` is a 409 `ORIGIN_MISMATCH_ERROR` naming the Relay's, ahead of the credential (rationale); absent, it enrolls (a pre-release Burrow). `MAX_ENROLLED_BURROWS` is a 409 naming `burrows.json`, checked after the credential (rationale) |
 | `POST /api/burrow/setup-token` | burrow token | Mints the token behind this Burrow's QR (below) |
 | `GET /api/burrows` | session token | Enrolled Burrows and whether each is connected |
 | `GET /api/push/config` | — | The public VAPID key, or `null` when push is off |
