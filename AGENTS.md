@@ -64,7 +64,7 @@ A spec is the accurate reference for the current code: it states the invariants 
 - **`docs/specs/dor-tool.md`** — Dor Tools: the `tool` Surface — a terminal and a browser on one Session spine — its capability-gated verbs, OSC 367 contract, designation, trust, serving, and persistence.
 - **`docs/specs/dor-tools-builtin.md`** — The built-in Tools `builtin:file` (local-file viewer and text editor) and `builtin:folder`: formats, grants, disk saves, listings, and their runtime packaging.
 - **`docs/specs/dor-tools-lib.md`** — `dor-tools-lib`, the MIT Tool-protocol package: its license and dependency boundary, entry points, consumers, and the road to publishing 1.0.
-- **`docs/specs/vscode.md`** — VS Code host: webview hosting, webview ↔ Workspace mapping, persistence ordering, theme integration, CSP, the build/dogfood pipeline.
+- **`docs/specs/vscode.md`** — VS Code: webview ↔ Workspace mapping, persistence ordering, CSP, the build (typecheck wiring, update policy, `engines.vscode` floor).
 - **`docs/specs/standalone.md`** — Tauri host: the Rust ↔ Node-sidecar bridge, boot sequence, AppBar, persistence, shutdown ordering, the build/dev workflow.
 - **`docs/specs/auto-update.md`** — Standalone auto-update: check → approved download → install-on-quit, the Baseboard notice, Windows sidecar teardown, per-platform quit behavior.
 - **`docs/specs/mobile-terminal-ui.md`** — The mobile composition (`MobileTerminalUi` / `MobileWall`): stable viewport + keyboard reserve, touch modes, the radial gesture menu; shipped in the Pocket playground and the Pocket app.

@@ -164,7 +164,7 @@ The shared `BurrowService` (`docs/specs/relay.md` → "Burrow side", which owns 
 
 Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`.
 
-**Which window: bind-as-lease.** Unarbitrated, every window's extension host would start a Burrow against the same enrollment and fight over the one `/ws/burrow` socket (rationale), so **the bind is the lease**. Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash derived from `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
+**Which window: bind-as-lease.** Unarbitrated, every window's extension host would start a Burrow against the same enrollment and fight over the one `/ws/burrow` socket (rationale), so **the bind is the lease**. Every contending window binds one fixed path — `<hash>.sock` in a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — **the hash is the first 12 hex characters of SHA-256 over `context.globalStorageUri.fsPath`**, so every window, whatever its build, computes the same path (hashed for the platform path cap; rationale). The winner is the broker and runs the service; everyone else connects to it as a client.
 
 - **Roles never flip downward**: no `onRole(false)` after a `true` (rationale).
 - **Contend on broker death, not on a timer**: when the broker exits every client's socket closes and they race to bind; `bind` picks exactly one. No TTL, heartbeat file, or watcher.
@@ -188,7 +188,7 @@ Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `
 
 **A command that arrives mid-contention is held, not refused** (rationale): commands queue, bounded with the oldest refused on overflow, and drain when a role settles — to the service if this window brokered, over the link if not. **Each carries its own deadline, under the adapter's command timeout**, so a contention that never settles produces a reason rather than a timeout.
 
-**A window with no Burrow at all still answers the read-only commands** — `status`, `pushDevices`, `pairingQueue`, `oneTimeStatus`, `networkPolicy`, `oneTimeEnd`, `cancelHostedEnrollment`, `takeBack` — **exactly as an idle service would**, from builders shared with the service; the policy is read and never saved. `pushDevices` answers `null` for "nowhere to push" and rejects only when the Relay could not be asked (rationale). The idle `status` reads the installer's offer file, so the one-click card renders on a machine no window has a Burrow for. **Everything else refuses with an error**, so the console hook fails fast.
+**A window with no Burrow at all still answers the read-only commands** — `status`, `pushDevices`, `pairingQueue`, `oneTimeStatus`, `networkPolicy`, `dismissPathRefusal`, `oneTimeEnd`, `cancelHostedEnrollment`, `takeBack` — **exactly as an idle service would**, from builders shared with the service; the policy is read and never saved. `pushDevices` answers `null` for "nowhere to push" and rejects only when the Relay could not be asked (rationale). The idle `status` reads the installer's offer file, so the one-click card renders on a machine no window has a Burrow for. **Everything else refuses with an error**, so the console hook fails fast.
 
 Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
 
@@ -210,7 +210,7 @@ Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `
 
 ### Peer surfaces
 
-The service owns the PTYs but not the *view* of them: each webview is its own JS realm with its own xterm registry, and only a webview knows what a pane is called, whether it is focused, and how big its xterm is. So the service asks, and every webview answers for its own. **Peers on both tiers may run different builds** — VS Code windows of one installation keep their build until reloaded.
+The service owns the PTYs but not the *view* of them: each webview is its own JS realm with its own xterm registry, and only a webview knows what a pane is called, whether it is focused, and how big its xterm is. So the service asks, and every webview answers for its own. **Peers on both tiers may run different builds** — VS Code windows of one installation keep their build until reloaded, and `status.hostedEnrollment` is the one field a newer broker may extend.
 
 | Contract | In-window tier | Cross-window tier |
 |---|---|---|
@@ -218,7 +218,7 @@ The service owns the PTYs but not the *view* of them: each webview is its own JS
 | Operation schema | `(op, params) → zero or more results`; `op` opaque to the transport, the typed map only in `peer-surfaces.ts`. | Same seam; only a reserved `ptyId` is interpreted, for routing. |
 | Ownership / miss | Presence is ownership; every webview answers, including with no results. | Every peer answers; disconnect settles its pending asks empty. |
 | Fan-out order | All webviews in parallel. | `askBothTiers` runs local and all peers in parallel, local concatenated first. |
-| Budget | `ASK_BUDGET_MS`; disposal removes that webview from the outstanding set. | `PEER_REPLY_BUDGET_MS` covers the inner ask plus socket hops, and **is defined as `ASK_BUDGET_MS + 2_000`** so it cannot fall under it. |
+| Budget | `ASK_BUDGET_MS` (1 s; another build's peer runs its inner ask inside this window's 3 s `PEER_REPLY_BUDGET_MS`, so never raise it to 3 s or more); disposal removes that webview from the outstanding set. | `PEER_REPLY_BUDGET_MS` covers the inner ask plus socket hops, and **is defined as `ASK_BUDGET_MS + 2_000`** so it cannot fall under it. |
 | Invalidation | `peer:notify` carries no subject; pane/activity/focus bursts coalesce before crossing. | `notify`, webview membership, and peer membership each trigger a fresh directory collect. |
 | PTY stream | One window-wide keyed registry distributes already-processed data/exit. | Opaque routed handles select one peer; `subscribe` is reference-counted, streaming the same processed data/exit. |
 | Burrow command | This window calls its service, broadcasting the uniquely correlated result to its webviews. | `command` goes to the broker, `commandResult` returns only to its origin window, `uiEvent` broadcasts. |
@@ -247,7 +247,7 @@ The broker window listens on the authenticated local socket and every other wind
 
 **Pairing UI events are unaddressed and broadcast to every window's webviews**, so the approval modal appears wherever the user is looking. **When a window completes the handshake the broker sends it the current `status` and `one-time` events**, which are otherwise emitted only on change.
 
-**Must bound every peer frame in UTF-8 bytes before parsing** (`FrameDecoder`), complete frames and partial tails included; an oversized frame is discarded through its newline without losing adjacent valid frames. **Socket bind errors reject startup** and are handled as an unavailable peer link, never a pending promise or an uncaught extension-host error.
+**Must bound every peer frame at 4 MiB of UTF-8 (`FrameDecoder`'s default; never lower it, since another build's windows send up to it) before parsing**, complete frames and partial tails included; an oversized frame is discarded through its newline without losing adjacent valid frames. **Socket bind errors reject startup** and are handled as an unavailable peer link, never a pending promise or an uncaught extension-host error.
 
 Source of truth: `vscode-ext/src/peer-link.ts`; `vscode-ext/src/peer-link-protocol.ts`, pinned by `vscode-ext/test/peer-link-protocol.test.ts`; `askBothTiers` in `vscode-ext/src/burrow.ts`; `brokerRequest` in `vscode-ext/src/message-router.ts`.
 
