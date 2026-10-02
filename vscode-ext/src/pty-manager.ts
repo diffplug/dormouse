@@ -439,8 +439,7 @@ export function getCwd(id: string): Promise<string | null> {
 }
 
 export function getOpenPorts(id: string): Promise<OpenPort[]> {
-  return requestChild<{ ports?: OpenPort[] }>({ type: 'getOpenPorts', id }, (msg) => msg.type === 'openPorts' && msg.id === id, openPortRequestTimeoutMs(1))
-    .then((msg) => msg.ports || [], () => []);
+  return getOpenPortsMany([id]).then((ports) => ports[id] ?? []);
 }
 
 let openPortsSequence = 0;

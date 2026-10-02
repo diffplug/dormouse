@@ -275,12 +275,12 @@ export interface PlatformAdapter {
   getOpenPorts(id: string): Promise<OpenPort[]>;
   /**
    * One answer per id, for a whole listing at once (`dor list --ports`, and
-   * `--all` across every Workspace) or a Dev-Server Chip / Tool serving pass. Present where a host can resolve many in
-   * one scan, for the reason `getCwds` is: each scan spawns process-table and
-   * socket-table subprocesses, so N terminals must cost one pass rather than N. Absent falls back to
-   * `getOpenPorts` per id.
+   * `--all` across every Workspace) or a Dev-Server Chip / Tool serving pass.
+   * Every host answers from one scan, for the reason `getCwds` is: each scan
+   * spawns process-table and socket-table subprocesses, so N terminals must
+   * cost one pass rather than N. An id absent from the answer was not scanned.
    */
-  getOpenPortsMany?(ids: string[]): Promise<Record<string, OpenPort[]>>;
+  getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>>;
 
   // Clipboard support for file references and raw images.
   readClipboardFilePaths(): Promise<string[] | null>;

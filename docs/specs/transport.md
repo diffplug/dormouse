@@ -326,11 +326,10 @@ for the smallest, never queueing one behind another (rationale). Pinned by
 `2 × OPEN_PORT_TIMEOUT_MS + count × OPEN_PORT_TIMEOUT_PER_ID_MS + hops × OPEN_PORT_ROUND_TRIP_MARGIN_MS`.
 VS Code's child request uses one hop; its webview request uses two. Tauri's
 sidecar request uses one. **Must share the Windows socket-scan allowance across
-`Get-NetTCPConnection`, its `netstat` fallback, then optional name lookup**,
-reducing each subprocess timeout by elapsed time and starting none after
-exhaustion. **Must take Windows names from a successful process-table read**,
-skipping the lookup (rationale). **Must return enumerated ports even when
-optional name lookup times out.** Pinned by
+`Get-NetTCPConnection` and its `netstat` fallback**, reducing each subprocess
+timeout by elapsed time and starting none after exhaustion. **Must name Windows
+ports only from the process-table read**, leaving them unnamed when it failed
+(rationale). Pinned by
 the Windows budget tests in `standalone/sidecar/pty-core.test.js` and by the port-deadline tests in
 `lib/src/lib/platform/vscode-adapter.test.ts`, `vscode-ext/test/pty-manager.test.ts`,
 and `lib/src/lib/mirrored-constants.test.ts`.

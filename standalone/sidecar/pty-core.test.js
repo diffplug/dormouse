@@ -1687,15 +1687,12 @@ test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () =
   const execFile = (cmd, args) => {
     assert.equal(cmd, 'powershell.exe');
     const script = args[args.length - 1];
-    if (script.includes('Win32_Process')) {
-      return JSON.stringify([{ ProcessId: 4242, Name: 'node.exe' }]);
-    }
     if (script.includes('Get-NetTCPConnection')) {
       return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
     }
     throw new Error(`unexpected script: ${script}`);
   };
-  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile });
+  const ports = await getListeningPortsForPids([4242], { platform: 'win32', execFile }, new Map([[4242, 'node.exe']]));
   assert.deepEqual(ports, [
     { protocol: 'tcp', family: 'IPv4', address: '0.0.0.0', port: 3000, pid: 4242, processName: 'node.exe' },
   ]);
@@ -1704,8 +1701,6 @@ test('getListeningPortsForPids (win32) prefers Get-NetTCPConnection', async () =
 test('getListeningPortsForPids (win32) falls back to netstat when the cmdlet fails', async () => {
   const execFile = (cmd, args) => {
     if (cmd === 'powershell.exe') {
-      const script = args[args.length - 1];
-      if (script.includes('Win32_Process')) return JSON.stringify([]);
       throw new Error('Get-NetTCPConnection: not recognized');
     }
     if (cmd === 'netstat') {
@@ -1751,7 +1746,6 @@ test('Windows does not start netstat after the socket deadline expires', async (
   const commands = [];
   const execFile = (cmd, args, options) => {
     commands.push(cmd);
-    if (args.at(-1).includes('Win32_Process')) return '[]';
     now += options.timeout;
     throw new Error('timed out');
   };
@@ -1759,25 +1753,6 @@ test('Windows does not start netstat after the socket deadline expires', async (
     platform: 'win32', execFile, now: () => now, scanTimeoutMs: 3100,
   }), []);
   assert.deepEqual(commands, ['powershell.exe']);
-  assert.equal(now, 3100);
-});
-
-test('a slow optional Windows name lookup cannot hide already enumerated ports', async () => {
-  let now = 0;
-  const execFile = (cmd, args, options) => {
-    if (args.at(-1).includes('Get-NetTCPConnection')) {
-      now += 10;
-      return JSON.stringify([{ LocalAddress: '0.0.0.0', LocalPort: 3000, OwningProcess: 4242 }]);
-    }
-    assert.ok(args.at(-1).includes('Win32_Process'));
-    assert.equal(options.timeout, 3090);
-    now += options.timeout;
-    throw new Error('WMI timed out');
-  };
-  const ports = await getListeningPortsForPids([4242], {
-    platform: 'win32', execFile, now: () => now, scanTimeoutMs: 3100,
-  });
-  assert.deepEqual(ports.map(({ port, processName }) => ({ port, processName })), [{ port: 3000, processName: undefined }]);
   assert.equal(now, 3100);
 });
 

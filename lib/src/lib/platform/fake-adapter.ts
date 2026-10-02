@@ -319,6 +319,19 @@ export class FakePtyAdapter implements PlatformAdapter {
     return this.openPortsMap.get(id) ?? [];
   }
 
+  /** Per id through `getOpenPorts`, so a test overriding it covers both;
+   *  an id whose lookup throws is left out, as a failed host scan is. */
+  async getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+    const entries = await Promise.all(ids.map(async (id) => {
+      try {
+        return [[id, await this.getOpenPorts(id)] as const];
+      } catch {
+        return [];
+      }
+    }));
+    return Object.fromEntries(entries.flat());
+  }
+
   getPtySize(id: string): FakePtySize {
     return this.terminalSizes.get(id) ?? DEFAULT_PTY_SIZE;
   }

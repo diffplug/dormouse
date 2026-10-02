@@ -33,9 +33,10 @@ describe('PTY manager lifetime and buffers', () => {
     try {
       const { manager, child } = await startManager();
       const answer = manager.getOpenPorts('pane-a');
+      const request = child.send.mock.calls.at(-1)![0];
       await vi.advanceTimersByTimeAsync(6500);
       const ports = [{ address: '127.0.0.1', port: 5173, pid: 1 }];
-      child.emit('message', { type: 'openPorts', id: 'pane-a', ports });
+      child.emit('message', { type: 'openPortsMany', ports: { 'pane-a': ports }, requestId: request.requestId });
       expect(await answer).toEqual(ports);
     } finally { vi.useRealTimers(); }
   });

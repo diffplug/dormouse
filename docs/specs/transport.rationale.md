@@ -67,7 +67,7 @@ moving a Workspace and losing it.
 
 ## Port scan deadlines
 
-**Why names ride the process table.** Names and parent ids come from the same `Win32_Process` query; asking twice cost one more PowerShell launch per scan. Folding them dropped a scan of a process with a listener from ~1.21 s to ~0.93 s on Windows (2026-10-02).
+**Why names ride the process table.** Names and parent ids come from the same `Win32_Process` query; asking twice cost one more PowerShell launch per scan. Folding them dropped a scan of a process with a listener from ~1.21 s to ~0.93 s on Windows (2026-10-02). No separate lookup remains for a failed table read: it would repeat the query that just failed, on what is left of the socket budget.
 
 **Why coalesce without queueing.** The webview fans out one `getOpenPorts` per terminal (the Dev-Server Chip) or per Tool on every poll; one scan per microtask batch keeps that to one set of subprocesses. A queue behind the in-flight scan would make a request wait for two scans, past the per-request budget the formula grants. Budgeting the batch for its smallest request keeps each caller's own deadline true.
 

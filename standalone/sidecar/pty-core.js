@@ -1058,11 +1058,9 @@ async function runPowerShellJson(script, runtime, timeout) {
   return normalizeJsonArray(JSON.parse(await runPowerShell(script, runtime, timeout)));
 }
 
-async function windowsListeningPorts(pids, runtime = {}) {
+async function windowsListeningPorts(pids, runtime = {}, names) {
   const now = runtime.now || (() => performance.now());
   const deadline = now() + (runtime.scanTimeoutMs ?? OPEN_PORT_TIMEOUT_MS);
-  // Mandatory port enumeration gets the budget first; optional process names
-  // spend only what remains after the cmdlet or its netstat fallback.
   const remaining = () => {
     const ms = Math.ceil(deadline - now());
     if (ms <= 0) throw new Error('port scan deadline exhausted');
@@ -1082,28 +1080,17 @@ async function windowsListeningPorts(pids, runtime = {}) {
       ports = parseNetstatListening(await runText(runtime, 'netstat', ['-ano', '-p', 'TCP'], { timeout: remaining() }), pidSet);
     } catch { return []; }
   }
-  if (!ports.length) return ports;
-
-  // Names are best-effort: exhaustion here must still return the ports. A
-  // process table read just before already named every pid; reuse it.
-  if (runtime.processNames) return ports.map((port) => ({ ...port, processName: runtime.processNames.get(port.pid) }));
-  const nameByPid = new Map();
-  try {
-    const rows = await runPowerShellJson(
-      'Get-CimInstance Win32_Process | Select-Object ProcessId,Name | ConvertTo-Json -Compress',
-      runtime,
-      remaining(),
-    );
-    for (const row of rows) nameByPid.set(Number(row.ProcessId), String(row.Name));
-  } catch { /* names are optional */ }
-  return ports.map((port) => ({ ...port, processName: nameByPid.get(port.pid) }));
+  // Names come from the process-table read; a failed read leaves ports unnamed.
+  return ports.map((port) => ({ ...port, processName: names?.get(port.pid) }));
 }
 
-async function getListeningPortsForPids(pids, runtime = {}) {
+/** `names` (pid -> process name) labels the Windows ports, whose socket table
+ *  carries none; other platforms read names alongside their sockets. */
+async function getListeningPortsForPids(pids, runtime = {}, names) {
   const platform = runtime.platform || process.platform;
   if (platform === 'linux') return linuxListeningPorts(pids, runtime);
   if (platform === 'darwin') return macListeningPorts(pids, runtime);
-  if (platform === 'win32') return windowsListeningPorts(pids, runtime);
+  if (platform === 'win32') return windowsListeningPorts(pids, runtime, names);
   return [];
 }
 
@@ -1144,14 +1131,11 @@ async function getOpenPortsForPids(rootPids, runtime = {}) {
   // The socket scan's budget scales with the request (`budgetCount` when
   // coalesced requests share this scan); the process-table read above does
   // not, its cost being the whole table either way.
-  const processNames = pairs?.some((row) => row[2] !== undefined)
-    ? new Map(pairs.map(([pid, , name]) => [pid, name]))
-    : undefined;
-  const ports = await getListeningPortsForPids([...union], {
-    ...runtime,
-    scanTimeoutMs: openPortScanTimeoutMs(runtime.budgetCount ?? roots.length),
-    processNames,
-  });
+  const ports = await getListeningPortsForPids(
+    [...union],
+    { ...runtime, scanTimeoutMs: openPortScanTimeoutMs(runtime.budgetCount ?? roots.length) },
+    pairs ? new Map(pairs.map(([pid, , name]) => [pid, name])) : undefined,
+  );
   for (const [root, pids] of owned) {
     byRoot.set(root, dedupeListeningPorts(ports.filter((entry) => pids.has(entry.pid))));
   }
@@ -1655,9 +1639,9 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
     send('openPorts', { id, ports: (await answerForIds([id], [], scanPorts))[id], requestId });
   }
 
-  /** One answer for every id a listing asks about, so N terminals cost one
-   *  process scan rather than N (`docs/specs/dor-cli.md` -> "Current Implemented
-   *  Commands"). */
+  /** One answer for every id a listing or a Dev-Server Chip / Tool serving pass
+   *  asks about, so N terminals cost one process scan rather than N
+   *  (docs/specs/transport.md -> "Port scan deadlines"). */
   async function getOpenPortsMany(ids, requestId) {
     send('openPortsMany', { ports: await answerForIds(ids, [], scanPorts), requestId });
   }
