@@ -101,7 +101,7 @@ constants in `lib/src/lib/platform/types.ts` (and `standalone/sidecar/pty-core.j
 `#[tauri::command]` over an `async fn`, which the guard below accepts equally.
 Tauri runs a *sync* command on the main thread, where the `recv_timeout` inside
 `request_from_sidecar` / `request_from_sidecar_timeout` stops the webview painting
-for the whole round trip, up to `AGENT_BROWSER_TIMEOUT` (30s) (rationale). **The
+for the whole round trip, up to `BROWSER_REQUEST_TIMEOUT` (40s) (rationale). **The
 three clipboard readers included**: their non-Windows branches round-trip through
 the sidecar, and the declaration is per command, not per branch. A unit test in
 `lib.rs` scans the source and fails on any command that reaches the blocking
