@@ -30,7 +30,7 @@ Only `watching` requires WATCHING. **Every source obeys one engagement rule — 
 
 Public `status` is a projection — first match wins:
 
-1. `ALERT_RINGING` if the ring is active and not paused; consumers test a pause with `isAlertPaused` in `lib/src/lib/alert-episode.ts`.
+1. `ALERT_RINGING` if the ring is active and not paused; consumers use `isAlertPaused` in `lib/src/lib/alert-episode.ts`.
 2. `OSC_NOTIF_BUSY` if a progress cycle is active.
 3. The output/silence detector's own state if WATCHING is on. The detector runs regardless; the rule only makes its state public. **Never reorder 3 and 4** (rationale).
 4. `COMMAND_EXIT_ARMED` if command-exit alerting is armed.
@@ -85,12 +85,12 @@ Claimants get first refusal per Session in registration order; the first to retu
 
 With `deferAlertsUntilQuiet` enabled:
 
-- **Must defer an eligible terminal notification until five seconds after the last accepted output**, including unconfirmed activity and WATCHING off. An idle pane with no recent output rings immediately (rationale).
-- **Must pause the whole unresolved ring while output is recent**, derived, never stored, keeping sources, detail, episode, TODO, and pending alarm deadlines. Quiet restores it without confirmed BUSY; publishing a pause arms the wake that ends it.
-- **Never defer a command-finish ring or pause one carrying an `exit` source**; a pending terminal notification joins it immediately. A held exit leaves the ring paused until it escalates.
+- **Must defer an eligible terminal notification until five seconds after the last accepted output**, including unconfirmed activity and WATCHING off. Idle panes ring immediately (rationale).
+- **Must derive pauses from recent output, never store them**, keeping the unresolved ring's sources, detail, episode, TODO, and pending alarm deadlines. Quiet restores it without confirmed BUSY; publishing a pause arms its wake.
+- **Never defer a command-finish ring or pause one carrying an `exit` source**; a pending terminal notification joins it immediately. A held exit does not release an existing pause.
 - **Must defer after claimants and ring eligibility, never redispatch the historical `CompletionEvent`** (rationale). A claimed new settle answers a retained `watching` source, never an earlier report.
 - **Keep initial pending intent live-only and bounded** to one notification, chosen by richness (Clearing And TODO). Accepted output moves the quiet deadline; command-boundary detector resets preserve it.
-- **Never cap a deferral or pause**, however long output continues (rationale).
+- **Never cap a deferral or pause** (rationale).
 - **Cancel pending delivery on acknowledgement, a dismissal that clears a ring, TODO changes, removal, seeding, or teardown.** A dismiss without a ring leaves initial deferral alone. Disabling the setting releases pending notifications immediately.
 
 Two ordering rules:
