@@ -89,6 +89,9 @@ export default defineConfig({
       },
     },
     outDir: fileURLToPath(new URL("./dist-pocket", import.meta.url)),
+    // Wipes `dist-pocket` every build, so nothing may be dropped in by hand:
+    // the manifest and icons are checked-in source under `pocket/public/`,
+    // which Vite copies verbatim.
     emptyOutDir: true,
   },
 });

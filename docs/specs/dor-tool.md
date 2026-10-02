@@ -230,7 +230,7 @@ Source of truth: `surface.tool` in `lib/src/components/wall/use-dor-control.ts`;
 - **Must blur the ghost 2px at once, easing out to 8px over 600ms, and never dim it** (rationale); instant motion (`motionIsInstant`) holds a static 8px blur. The ghost takes no input; a press on it selects the pane.
 - **Must count the new view ready** a frame after its browser layer's first document load or screencast frame; for a terminal-only Tool, after visible output (neither OSC nor its command's echo) then 250ms of quiet on the terminal face, or once its command finishes, so a failure shows; and 3s after the retarget regardless. It fades in over the ghost in 120ms, at once under instant motion. Session disposal ends a switch.
 
-The header holds as `docs/specs/layout.md` → Pane header states.
+The header holds as `docs/specs/layout.md` → Pane header.
 
 Source of truth: `beginPreviewSwitch` in `lib/src/components/wall/use-dor-control.ts`; `beginSlotSwitch` in `lib/src/components/wall/preview-transition.ts`; `lib/src/lib/preview-transition-store.ts`; `.preview-ghost` in `lib/src/theme.css`.
 
