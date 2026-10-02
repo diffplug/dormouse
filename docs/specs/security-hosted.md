@@ -2,18 +2,21 @@
 
 > See `docs/specs/glossary.md` for Burrow, Client, and Relay vocabulary.
 > Owns the security checks of Hosted's three Workers, account, relay, and voice. Defers identity behavior and the Worker split to `docs/specs/hosted.md` and terminal access to `docs/specs/remote-security-model.md`.
-> Read `docs/specs/security.md` first; provisioning and real-provider acceptance are pending.
+> Read `docs/specs/security.md` first; live production controls and real-provider acceptance still require verification.
 
 ## Origin boundary
 
 - **FAIL IF** a Worker routes a request whose URL origin is not its own `APP_ORIGIN`, a sibling's included, rather than answering 421; inspect `workerApp` in `hosted/server/worker-app.ts`.
-- **FAIL IF** a cookie route admits any `Origin` but its own exactly, sibling origins under `dormouse.sh` included — they are same-site, so the browser sends them the `SameSite=Lax` login cookie — or a state-changing auth request skips the CSRF check, or any Worker grants credentialed CORS; inspect `cookieAdmin` in `hosted/server/account-gate.ts` and the packed adapter.
+- **FAIL IF** a cookie route admits any presented `Origin` but its own exactly, sibling origins under `dormouse.sh` included, or a state-changing cookie request lacks that Origin, a state-changing auth request skips the CSRF check, or any Worker grants credentialed CORS; inspect `cookieAdmin` in `hosted/server/account-gate.ts` and the packed adapter.
 - **FAIL IF** the relay or voice Worker's bindings mapper passes an auth secret (`AUTH_SECRET`, a provider credential, or `POSTMARK_SERVER_TOKEN`), the account's or relay's passes `ELEVENLABS_API_KEY`, the account's or voice's passes `RELAY_ENROLL_SECRET` or `RELAY_VAPID_PRIVATE_KEY`, or the relay or voice entry imports Better Auth; inspect `hosted/server/bindings.ts` and each entry's import graph.
 - **FAIL IF** authentication cookies have a Domain attribute, lack `__Host-`, Secure, HttpOnly, or Path=/ in HTTPS, or session tokens appear in browser JSON or persistent browser storage; inspect the adapter and `hosted/src/api.ts`.
 - **FAIL IF** the account origin's policy permits third-party scripts, framing, inline script execution, or any worker (`worker-src 'none'`); a voice response, or a relay response under a `RELAY_NON_PAGE_PREFIXES` prefix (`/api`, `/ws`), carries any policy but `RUNS_NOTHING_POLICY`; any response but a 101 WebSocket upgrade bypasses `secureHeaders`, a misconfigured deployment's error included; or a response is cached past its class: immutable only for a content-hashed file under the account's `/assets/` or the relay's `/assets/` and `/connect/assets/`, `no-cache` only on Pocket's other paths, `no-store` everywhere else, the account's SPA shell included. Inspect `secureHeaders` / `accountRules` / `relayRules` / `relayPathKind` in `hosted/server/headers.ts`, binding resolution in `hosted/server/worker-app.ts`, and asset routing in `hosted/wrangler.jsonc` and `hosted/wrangler.relay.jsonc`.
 - **FAIL IF** marketing scripts, analytics, provider avatars, or remote fonts enter the Hosted frontend; inspect the frontend import graph and deployed response when available.
 
 Pinned by `hosted/server/tests/boundary.test.ts`, `hosted/server/tests/workers.test.ts`, and `hosted/server/tests/one-time.test.ts`.
+
+Known gap: `cookieAdmin` skips its Origin check on GET/HEAD, so a presented
+foreign Origin on an admin read does not meet the cookie-route rule above.
 
 ## Account boundary
 
@@ -62,14 +65,15 @@ Pinned by `hosted/server/tests/workers.test.ts` and `hosted/server/tests/policy.
 - **FAIL IF** `RelayRoom` stores, logs, or decodes a frame or its `ct`, reads a frame other than through the shared frame layer (`readClientFrame`, `readBurrowFrame`), which parses only the routing envelope through the shared guards and copies `ct` field by field and reads it nowhere else, parses a frame before measuring its UTF-8 bytes against the shared `MAX_RELAY_FRAME_BYTES`, or stores anything but its account id; `scripts/e2e-lint.mjs` holds the name, parse, decode, log, storage, and attachment half textually in both modules.
 - **FAIL IF** a `RelayRoom` is named from anything but the account an authenticated token resolved to, or serves a request or RPC naming an account other than the one it stored.
 - **FAIL IF** the client socket upgrade admits an `Origin` other than exactly the relay's `APP_ORIGIN`, the Burrow upgrade admits any `Origin`, either reaches the object before its token resolves to a live session or Burrow of an entitled account, or the Worker hands the object any header, token, or parameter of the caller's.
-- **FAIL IF** the object accepts a Burrow socket without rechecking its row (enrolled, the account's, owner entitled) under `blockConcurrencyWhile`, or awaits any row read past `RELAY_ROW_READ_TIMEOUT_MS`, so a stalled database resets every socket of the account; a removed Burrow's live socket outlives its removal's `closeBurrow`, or a removed or de-entitled Burrow's outlives the next sweep, at most `RELAY_ROOM_SWEEP_MS` while any Burrow socket is held; or a route reaches `closeBurrow`, `onlineBurrows`, `RelayRows`, or any other `RelayRoom` method but the two upgrades.
+- **FAIL IF** the object accepts a Burrow socket without rechecking its row (enrolled, the account's, owner entitled) under `blockConcurrencyWhile`, or awaits any row read past `RELAY_ROW_READ_TIMEOUT_MS`; a removed Burrow's live socket outlives its removal's `closeBurrow`, or a removed or de-entitled Burrow's outlives the next sweep, at most `RELAY_ROOM_SWEEP_MS` while any Burrow socket is held; `RelayRoom.fetch` exposes non-upgrade routes, or public routes expose `RelayRows`, `closeBurrow`, or `onlineBurrows` RPC. Authenticated account-scoped internal calls for removal/online status remain required.
 - **FAIL IF** a Pocket path's response lacks Pocket's policy (`pocketContentSecurityPolicy` in `remote-lib-common/src/remote/relay-common.ts`, taken only from an `APP_ORIGIN` that is exactly an origin), any response but a Pocket path's allows the camera, `/connect/` included, or a response is classified on any path but the decoded one Hono routes on, so `/%63onnect/` would take Pocket's; inspect `relayRules` / `relayPathKind` and `secureHeaders` in `hosted/server/headers.ts`.
+
+Known gap: a failed or timed-out row sweep retains authenticated forwarding
+until a later sweep, contrary to the next-sweep revocation obligation above.
 
 Pinned by `hosted/server/tests/relay.test.ts`, `hosted/server/tests/relay-push.test.ts`, `hosted/server/tests/relay-room.test.ts`, `hosted/server/tests/workers.test.ts`, `hosted/server/tests/pocket.test.ts`, `hosted/server/tests/boundary.test.ts`, and `remote-lib-common/test/web-push.test.mjs`.
 
 ## Deployment boundary
-
-**Must depend on a released pgstencil** whose installed `dist/provenance.json` names a commit on pgstencil `main` with a passing `security-audit`. The core and auth packages must name the same clean commit.
 
 - **FAIL IF** a production Worker exposes the captured-email inbox or deterministic clock controls, or imports the testing injection module; inspect `hosted/server/worker.ts`, `hosted/server/relay-worker.ts`, `hosted/server/voice-worker.ts`, the build configuration, and `hosted/server/tests/worker-entry.ts`.
 - **FAIL IF** either installed pgstencil package lacks `dist/provenance.json`, records `dirty`, or names a different commit; `pnpm-lock.yaml` resolves either package from outside npm; or a runtime import depends on a sibling pgstencil checkout. Inspect `verifyPackages` in `hosted/scripts/production.mjs`, `hosted/server/tests/artifacts.test.ts`, and Hosted runtime imports.
@@ -84,6 +88,6 @@ Pinned by `hosted/server/tests/artifacts.test.ts`, `hosted/server/tests/workers.
 
 ## Future
 
-**Production activation**, not checked until Hosted is provisioned: the live Hyperdrive and role values that `preflight` reads, and Cloudflare script injection excluded for the Hosted hostname (`hosted/README.md`). Checked-in placeholders prove none of them.
+**Live production acceptance**: verify Hyperdrive and role values that `preflight` reads, and Cloudflare script injection excluded for the Hosted hostname (`hosted/README.md`). Recorded configuration proves neither live controls nor browser acceptance.
 
-Public hosted voice and Relay need their own abuse, authorization, data-disclosure, and recovery checks first, and paid use an independent review of the remote model; `docs/specs/hosted.md` owns the staged work.
+Public voice and Relay need abuse, authorization, data-disclosure, and recovery checks, and paid use independent remote-model review; `docs/specs/hosted.md` owns the staged work.
