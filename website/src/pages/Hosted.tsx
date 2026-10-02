@@ -93,7 +93,7 @@ function Includes({ items }: { items: React.ReactNode[] }) {
 }
 
 const CARD_ACTION_CLASS =
-  "inline-flex min-h-12 w-full items-center justify-center rounded-full border px-4 py-3 "
+  "inline-flex min-h-12 w-full items-center justify-center rounded-md border px-4 py-3 "
   + "font-display hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 "
   + `focus-visible:outline-[var(--docs-accent)] ${ACCENT_BORDER_CLASS} ${ACCENT_TEXT_CLASS}`;
 
@@ -177,7 +177,7 @@ function BillingToggle({ yearly, onChange }: { yearly: boolean; onChange: (yearl
     <div
       role="group"
       aria-label="Billing period"
-      className="inline-flex rounded-full border border-[var(--color-text)]/15 p-0.5 text-sm"
+      className="inline-flex rounded-lg border border-[var(--color-text)]/15 p-0.5 text-sm"
     >
       {options.map(({ label, value }) => (
         <button
@@ -185,7 +185,7 @@ function BillingToggle({ yearly, onChange }: { yearly: boolean; onChange: (yearl
           type="button"
           aria-pressed={yearly === value}
           onClick={() => onChange(value)}
-          className={`min-h-9 rounded-full px-4 font-display focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] ${
+          className={`min-h-9 rounded-md px-4 font-display focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--docs-accent)] ${
             yearly === value ? "bg-[var(--color-text)]/15" : CARD_MUTED_TEXT_CLASS
           }`}
         >
@@ -305,7 +305,7 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
           "The managed Relay: Pocket with no server to run",
           "Sealed push notifications to your phone",
           "Natural ElevenLabs voices for spoken alarms",
-          "One licence for every machine you use",
+          "One license for your whole personal fleet of machines",
         ]}
       />
     </PlanCard>
@@ -386,7 +386,7 @@ function CheckoutTodo({ tier, onClose }: { tier: Tier; onClose: () => void }) {
         </h2>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
           {tier.name} is priced and specified, but nothing here takes payment: purchase,
-          the signed licence, and activation are the next stage of work. You have not been
+          the signed license, and activation are the next stage of work. You have not been
           charged, and no seat has been taken.
         </p>
         <p className={`mt-4 leading-relaxed ${MUTED_TEXT_CLASS}`}>
@@ -575,7 +575,7 @@ export default function Hosted() {
           <FaqEntry question="Refunds and cancellation?">
             30 days, on every plan. Monthly, yearly, and founding all auto-renew and
             you can cancel any time — access runs to the end of the period you paid for. A
-            refund revokes the licence and returns the seat to its cohort.
+            refund revokes the license and returns the seat to its cohort.
           </FaqEntry>
           <FaqEntry question="What exactly does a founding price lock?">
             The price you paid, for as long as the subscription stays active. It survives
