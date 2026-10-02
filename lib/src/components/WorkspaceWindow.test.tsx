@@ -27,6 +27,7 @@ import { FakePtyAdapter } from '../lib/platform/fake-adapter';
 import { getActivitySnapshot, setTerminalActivity } from '../lib/terminal-registry';
 import { createAlertEpisode } from '../lib/alert-episode';
 import { getWallHandle, listWallHandles, resetWallHandles } from './wall/wall-handles';
+import * as wallHandles from './wall/wall-handles';
 import { resetWorkspaceBootPlans, setWorkspaceBootPlan } from './wall/workspace-boot-plans';
 import { mountWallHarness, type WallHarness } from './wall/wall-test-utils';
 import { getWorkspaceSurfacesSnapshot, resetWorkspaceSurfaces } from '../lib/workspace-surfaces';
@@ -1021,8 +1022,19 @@ describe('Surface moves between Workspaces', () => {
     await act(async () => { await expect(moveSurface('pane-a', request({ workspace: 'workspace:2' }))).rejects.toThrow('placement failed'); });
     expect(getWallHandle(source)!.surfaceIds()).toEqual(['pane-a', 'pane-b']);
     expect(target.surfaceIds()).toEqual(['pane-x']);
-    expect((await getWallHandle(source)!.serializePersistence({ probeCwd: false })).surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'pane-b': 'surface:2' });
+    expect(getWallHandle(source)!.serializeNow().surfaceRefs).toEqual({ 'pane-a': 'surface:1', 'pane-b': 'surface:2' });
     adoption.mockRestore();
+  });
+
+  it('refuses a move to a new Workspace whose Wall is not registered synchronously, and discards it', async () => {
+    const source = await twoWalls();
+    const real = wallHandles.getWallHandle;
+    vi.spyOn(wallHandles, 'getWallHandle').mockImplementation(id => id === source || id === 'ws-2' ? real(id) : null);
+    await act(async () => { await expect(moveSurface('pane-a', request({ new: true }))).rejects.toThrow('The new Workspace did not mount'); });
+    vi.mocked(wallHandles.getWallHandle).mockRestore();
+    expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([source, 'ws-2']);
+    expect(getWallHandle(source)!.surfaceIds()).toEqual(['pane-a', 'pane-b']);
+    expect(getActiveWorkspaceId()).toBe(source);
   });
 
   it('fences a pre-departure save collected during new Workspace mounting', async () => {

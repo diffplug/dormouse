@@ -1,13 +1,13 @@
 import { flushSync } from 'react-dom';
 import type { MoveSurfaceRequest, MoveSurfaceResponse } from 'dor/commands/types';
 import { closeWorkspace, createWorkspace, generateWorkspaceId, getActiveWorkspaceId, hasWorkspace, resolveWorkspaceRef, setActiveWorkspace, workspaceRefFor } from '../../lib/workspace-store';
-import { beginWorkspaceSessionBatch, forgetWorkspaceSession, invalidateWorkspaceSaves, isWorkspaceTransferPending, moveRetainedSurfaceRecord, previousWorkspaceSession, publishWorkspaceSession, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
+import { forgetWorkspaceSession, invalidateWorkspaceSaves, isWorkspaceTransferPending, moveRetainedSurfaceRecord, publishWorkspaceSessions, setWorkspaceTransferPending } from '../../lib/window-session-aggregator';
 import { cancelPendingConfirmation, dismissWorkspaceUi, requestConfirmation, setWorkspaceMoveError } from '../../lib/workspace-ui-store';
-import type { PersistedSession, WorkspaceId } from '../../lib/session-types';
+import type { WorkspaceId } from '../../lib/session-types';
 import { sanitizeText } from '../../lib/osc-sanitize';
 import { getTerminalInstance } from '../../lib/terminal-registry';
 import { randomKillChar } from '../KillConfirm';
-import { awaitWallHandle, errorText } from './dor-control-shared';
+import { errorText } from './dor-control-shared';
 import { forgetWorkspaceBootPlan, setWorkspaceBootPlan } from './workspace-boot-plans';
 import { getWallHandle, wallHandleOwning, type WallHandle } from './wall-handles';
 
@@ -53,7 +53,8 @@ function discardWorkspace(id: WorkspaceId): void {
 }
 
 /** One coordinator for GUI and dor. Preparation and consent change no membership;
- * the synchronous departure/adoption is reversible until both records are published. */
+ * after the last await, departure, adoption and both records' publication run
+ * in one synchronous step, reversible until both Walls finish. */
 export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 'surface' | 'workspace'>, gui = false): Promise<MoveSurfaceResponse | null> {
   // A move still awaiting its consent is answered no and released here.
   cancelPendingConfirmation();
@@ -102,11 +103,8 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
   const oldWorkspaceRef = workspaceRefFor(source.workspaceId);
   let created = false;
   let committed = false;
-  let endBatch: (() => void) | undefined;
   let undoDeparture: (() => void) | undefined;
   let undoAdoption: (() => void) | undefined;
-  let sourceRecord: PersistedSession | null = null;
-  let targetRecord: PersistedSession | null = null;
   try {
     if (!await ensureIframeConsent()) return null;
     // Neither a dialog nor a cwd probe reserves the Surface's kind or dirty state.
@@ -116,24 +114,22 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
     // A Tool may start serving an iframe while the persistence flush awaits.
     if (!await ensureIframeConsent()) return null;
     checkEndpoints();
-    endBatch = beginWorkspaceSessionBatch();
-    sourceRecord = previousWorkspaceSession(source.workspaceId);
-    invalidateWorkspaceSaves(source.workspaceId);
+    // From here to the end nothing awaits: no save, write or verb interleaves.
     if (!targetId) {
       targetId = generateWorkspaceId();
       setWorkspaceBootPlan(targetId, { emptyForMove: true });
+      // A synchronous render flushes the new Wall's registering effects.
       flushSync(() => createWorkspace({ id: targetId!, activate: false }));
       created = true;
       setWorkspaceTransferPending(targetId, true);
-      target = getWallHandle(targetId) ?? await awaitWallHandle(targetId);
+      target = getWallHandle(targetId);
       if (!target) throw new Error('The new Workspace did not mount');
-      // Revalidate after the new Wall's passive registration; no prompt here.
       checkEndpoints();
     }
-    // No await may separate this final dirty/kind check from departure.
     prepared = source.prepareSurfaceMove(id);
     if (prepared.iframe && !iframeConsented) throw new Error('This Surface started serving an iframe; retry the move to confirm its refresh');
-    targetRecord = previousWorkspaceSession(targetId);
+    // Fence saves collected before the ownership change, a new Wall's included.
+    invalidateWorkspaceSaves(source.workspaceId);
     invalidateWorkspaceSaves(targetId);
     const receiver = target!;
     let surfaceRef = '';
@@ -147,19 +143,11 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
       receiver.finishSurfaceMove();
       source.finishSurfaceMove();
     });
-    // Mounting a new Wall can let saves collect the pre-departure layout. Fence
-    // those too, once both ownership changes have completed synchronously.
-    invalidateWorkspaceSaves(source.workspaceId);
-    invalidateWorkspaceSaves(targetId);
-    moveRetainedSurfaceRecord(id, source.workspaceId, targetId);
-    const [sourceSession, targetSession] = await Promise.all([
-      source.serializePersistence({ probeCwd: false }), receiver.serializePersistence({ probeCwd: false }),
-    ]);
-    publishWorkspaceSession(source.workspaceId, sourceSession);
-    publishWorkspaceSession(targetId, targetSession);
-    // Closing the source is irreversible. Later UI/notice failures must never
-    // restore membership into a Wall that has already unmounted.
+    // A finished Wall may have refilled, and closing the source is
+    // irreversible: nothing after this point restores membership.
     committed = true;
+    moveRetainedSurfaceRecord(id, source.workspaceId, targetId);
+    publishWorkspaceSessions([[source.workspaceId, source.serializeNow()], [targetId, receiver.serializeNow()]]);
     const sourceEmpty = source.surfaceIds().length === 0;
     flushSync(() => {
       if (sourceEmpty) discardWorkspace(source.workspaceId);
@@ -185,19 +173,14 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
     return { status: 'moved', surfaceId: id, surfaceRef, workspaceId: targetId, workspaceRef };
   } catch (error) {
     if (committed) throw error;
-    invalidateWorkspaceSaves(source.workspaceId);
-    if (targetId) invalidateWorkspaceSaves(targetId);
     flushSync(() => {
       undoAdoption?.(); undoDeparture?.();
       source.finishSurfaceMove(); target?.finishSurfaceMove();
       if (created && targetId) discardWorkspace(targetId);
       if (hasWorkspace(activeBefore)) setActiveWorkspace(activeBefore);
     });
-    if (sourceRecord) publishWorkspaceSession(source.workspaceId, sourceRecord);
-    if (!created && targetId && targetRecord) publishWorkspaceSession(targetId, targetRecord);
     throw error;
   } finally {
-    endBatch?.();
     release();
   }
 }

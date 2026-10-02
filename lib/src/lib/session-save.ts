@@ -58,6 +58,14 @@ async function probeCwds(
   return cwds;
 }
 
+/** The Surfaces whose cwd a save probes: every non-browser pane and Door. */
+function cwdSurfaceIds(panes: SavePaneInput[], doors: PersistedDoor[]): string[] {
+  const browser = new Map<string, boolean>();
+  for (const pane of panes) browser.set(pane.id, pane.surfaceType === 'browser');
+  for (const door of doors) browser.set(door.id, door.component === 'browser');
+  return [...browser].filter(([, isBrowser]) => !isBrowser).map(([id]) => id);
+}
+
 /**
  * Build one Workspace's `PersistedSession` from its live panes and Doors.
  *
@@ -80,6 +88,27 @@ export async function buildPersistedSession(
   previous?: PersistedSession | null,
   options: SaveOptions = {},
 ): Promise<PersistedSession> {
+  // One probe for the whole set: a terminal pane's cwd is the only field here
+  // that costs a host round trip.
+  const cwds = await probeCwds(platform, cwdSurfaceIds(panes, doors), options.probeCwd !== false);
+  return assemblePersistedSession(panes, doors, lathLayout, surfaceRefs, surfaceRefsNext, previous, cwds, options.alertDelivery);
+}
+
+/**
+ * `buildPersistedSession` past its probe, synchronously: `cwds` null keeps each
+ * terminal's previous cwd. A Surface move publishes both Workspaces with no
+ * await between ownership change and publication.
+ */
+export function assemblePersistedSession(
+  panes: SavePaneInput[],
+  doors: PersistedDoor[],
+  lathLayout: unknown,
+  surfaceRefs: PersistedSurfaceRefs | undefined,
+  surfaceRefsNext: number | undefined,
+  previous: PersistedSession | null | undefined,
+  cwds: Record<string, string | null> | null,
+  alertDeliveryOverrides?: AlertDeliveryOverrides,
+): PersistedSession {
   const previousPanes = previousPaneMap(previous ?? null);
   const allPanes = new Map<string, { id: string; title: string; surfaceType: PersistedSurfaceType; params?: Record<string, unknown> }>();
   for (const pane of panes) {
@@ -102,14 +131,6 @@ export async function buildPersistedSession(
       : 'terminal';
     allPanes.set(item.id, { id: item.id, title: item.title, surfaceType: doorSurfaceType, params: item.params });
   }
-
-  // One probe for the whole set, before the per-pane build: a terminal pane's cwd
-  // is the only field here that costs a host round trip.
-  const cwds = await probeCwds(
-    platform,
-    [...allPanes.values()].filter((pane) => pane.surfaceType !== 'browser').map((pane) => pane.id),
-    options.probeCwd !== false,
-  );
 
   const persisted: PersistedPane[] = [...allPanes.values()].map((pane) => {
     const previousPane = previousPanes.get(pane.id);
@@ -138,7 +159,7 @@ export async function buildPersistedSession(
       ...(tool ? { tool } : {}),
     };
   });
-  const alertDelivery = normalizeAlertDeliveryOverrides(options.alertDelivery ?? previous?.alertDelivery);
+  const alertDelivery = normalizeAlertDeliveryOverrides(alertDeliveryOverrides ?? previous?.alertDelivery);
   return {
     version: 3,
     ...(Object.keys(alertDelivery).length ? { alertDelivery } : {}),

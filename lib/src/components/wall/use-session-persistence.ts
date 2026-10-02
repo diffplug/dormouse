@@ -2,7 +2,7 @@ import { DEFAULT_WORKSPACE_ID, readPersistedSession } from '../../lib/session-ty
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 import { pasteFilePaths } from '../../lib/clipboard';
 import { getPlatform } from '../../lib/platform';
-import { buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
+import { assemblePersistedSession, buildPersistedSession, saveSession, type SaveOptions, type SaveSink } from '../../lib/session-save';
 import { createSessionDirtyTracker } from '../../lib/session-dirty';
 import { previousWorkspaceSession, publishWorkspaceSession, workspaceSessionRevision, SESSION_SAVE_DEBOUNCE_MS } from '../../lib/window-session-aggregator';
 import { getWorkspace, setWorkspaceAlertDelivery, subscribeToWorkspaces, hasWorkspace } from '../../lib/workspace-store';
@@ -24,6 +24,9 @@ export interface SessionPersistenceHandle {
   /** Build this Workspace's record without publishing it — what a Workspace
    *  leaving for another Window carries with it. */
   serialize: (options?: SaveOptions) => Promise<PersistedSession>;
+  /** This Workspace's record now, with no cwd probe: what a Surface move
+   *  publishes in the same synchronous run as its ownership change. */
+  serializeNow: () => PersistedSession;
 }
 
 export function useSessionPersistence({
@@ -137,6 +140,14 @@ export function useSessionPersistence({
     return buildPersistedSession(
       getPlatform(), panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
       sink?.previous() ?? null, saveOptions(options),
+    );
+  }, [collect, sink, saveOptions]);
+
+  const serializeNow = useCallback((): PersistedSession => {
+    const { panes, doors, lathLayout, surfaceRefs } = collect();
+    return assemblePersistedSession(
+      panes, doors, lathLayout, surfaceRefs?.refs, surfaceRefs?.next,
+      sink?.previous() ?? null, null, saveOptions().alertDelivery,
     );
   }, [collect, sink, saveOptions]);
 
@@ -320,5 +331,5 @@ export function useSessionPersistence({
     selectedTypeRef,
   ]);
 
-  return { flush: flushSessionSave, serialize };
+  return { flush: flushSessionSave, serialize, serializeNow };
 }

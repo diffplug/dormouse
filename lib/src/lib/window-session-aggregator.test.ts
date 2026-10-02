@@ -4,7 +4,6 @@
 // and there is no unload without a `window`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  beginWorkspaceSessionBatch,
   clearWorkspaceTransferring,
   flushWindowSession,
   forgetWorkspaceSession,
@@ -13,6 +12,7 @@ import {
   markWorkspaceTransferring,
   previousWorkspaceSession,
   publishWorkspaceSession,
+  publishWorkspaceSessions,
   resetWindowSessionAggregator,
   seedWindowSession,
 } from './window-session-aggregator';
@@ -274,20 +274,20 @@ describe('window session aggregator', () => {
 });
 
 
-it('holds every write through a Surface move, including pagehide and explicit flush, then writes both records once', async () => {
+it.each([false, true])('publishes several records behind one write (unloading: %s)', async (unloading) => {
   const first = getWorkspacesSnapshot().workspaces[0].id;
   const second = createWorkspace({ name: 'Second' }).id;
   publishWorkspaceSession(first, session('moving'));
   publishWorkspaceSession(second, session('other'));
   const write = vi.fn();
   installWindowSessionWriter(write);
-  const end = beginWorkspaceSessionBatch();
-  publishWorkspaceSession(first, { version: 3, panes: [] });
-  window.dispatchEvent(new Event('pagehide'));
-  await flushWindowSession();
-  expect(write).not.toHaveBeenCalled();
-  publishWorkspaceSession(second, { version: 3, panes: [...session('other').panes, ...session('moving').panes] });
-  end();
+  if (unloading) {
+    window.dispatchEvent(new Event('pagehide'));
+    write.mockClear();
+  }
+  publishWorkspaceSessions([[first, { version: 3, panes: [] }], [second, { version: 3, panes: [...session('other').panes, ...session('moving').panes] }]]);
+  // An unloading Window writes on every publish, synchronously; one publish is one write.
+  if (!unloading) await flushWindowSession();
   expect(write).toHaveBeenCalledTimes(1);
   const saved = write.mock.calls[0][0] as PersistedWindow;
   expect(saved.workspaces[0].session.panes).toEqual([]);
