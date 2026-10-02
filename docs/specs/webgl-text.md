@@ -74,16 +74,33 @@ upstream behavior untouched when off) and `sdfGlyphSize: number`.
   glyphs, decorated cells (underline/strikethrough/overline), glyphs treated as
   background colors, and probable color emoji. **`isProbablyEmoji` widens the
   shared `isEmoji` range table and must err toward raster** (rationale).
-- **Must let the distance field decay to zero inside glyph padding, preventing atlas bleed.** `SdfGlyphRasterizer` owns its mapbox/tiny-sdf attribution, metrics, canvas sizing, and distance-field padding.
+- **Rasterization**: `SdfGlyphRasterizer` vendors mapbox/tiny-sdf
+  (BSD-2-Clause, attribution in its header), adapted to xterm's `TEXT_BASELINE`
+  metrics, to wide/CJK and combined-character strings, and to per-draw font
+  weight/style. **Its padding buffer must let the distance field
+  decay to zero inside the bitmap**, so LINEAR atlas sampling never bleeds
+  between packed glyphs.
 - **`sdfGlyphSize`**: the fixed base font size (px) glyphs are rasterized at —
   explicit, default 32, **never derived from the terminal font size or
   devicePixelRatio** (rationale).
-- **Must share one atlas entry per shape across colors, with each variant registered for page bookkeeping and independently mutable coordinates** (rationale). `_drawToCacheSdf` and `AtlasPage.addGlyphAlias` own the copy/share and used-pixel accounting.
+- **Color-free atlas**: exactly one texture entry per shape (chars + weight +
+  style); each additional color is a lightweight record sharing that entry with
+  its own tint, via `AtlasPage.addGlyphAlias`. **A color variant must carry its
+  own coordinate vectors and be registered on the page** — page merge/delete
+  bookkeeping mutates every registered record in place exactly once (rationale).
+  **Aliases do not count toward used-pixels**; the canonical record owns the
+  texels.
 - **Texel format**: distance in the atlas alpha channel with white RGB
   (rationale); the SDF shader path reads only alpha. Reserved: one plain
   distance field per texel, never multiple glyphs packed into color channels,
   keeping the layout compatible with the MSDF item in `## Future`.
-- **Must keep shader reconstruction matched to rasterizer distance encoding and device-font scaling** (rationale). `GlyphRenderer` owns instance layout, `renderScale`, derivative-based coverage, and its imported `SDF_CUTOFF`. FORK.md owns the upstream-merge review procedure.
+- **Shader/renderer**: 16 floats per cell (upstream: 11), adding a
+  straight-alpha tint vec4 and an SDF flag. Quads scale by the glyph's
+  `renderScale` (device font px ÷ `sdfGlyphSize`) (rationale). The fragment
+  shader reconstructs coverage with an `fwidth`-based smoothstep at the edge
+  threshold `1 - SDF_CUTOFF`, **imported from the rasterizer** so encode and
+  decode cannot drift. **Upstream merges that touch GlyphRenderer vertex code
+  need care** (FORK.md).
 
 Source of truth (fork repo): `SdfGlyphRasterizer` in
 `addons/addon-webgl/src/SdfGlyphRasterizer.ts`; `_drawToCacheSdf`,
