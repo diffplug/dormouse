@@ -561,7 +561,8 @@ const QUIT_ACK_TIMEOUT_MS: u64 = 2_000;
 // sum of all teardown work. Sits above the webview's own teardown
 // ceiling (docs/specs/standalone.md §Quit flow) — `QUIT_TEARDOWN_CEILING_MS` in
 // `standalone/src/quit.ts`, pinned under this by
-// `lib/src/lib/mirrored-constants.test.ts`.
+// `lib/src/lib/mirrored-constants.test.ts`. Also above `kill_sidecar_and_wait`'s
+// ~5s cap, which the Windows install phase awaits under one refresh.
 const QUIT_PHASE_TIMEOUT_MS: u64 = 14_000;
 const QUIT_POLL_STEP_MS: u64 = 500;
 // A per-window close whose webview never acks: its listener is dead, so close it.
@@ -3458,7 +3459,7 @@ fn shutdown_sidecar_and_wait(state: &SidecarState) {
 // and can't hang, whereas the job-object `wait()` consumes a completion-port
 // message the reaper thread may already have drained (e.g. if the sidecar had
 // crashed earlier), which would block forever. The ~5s cap means a wedged
-// sidecar can't stall quit indefinitely.
+// sidecar can't stall quit indefinitely. Must stay under `QUIT_PHASE_TIMEOUT_MS`.
 fn kill_sidecar_and_wait(child: &SharedChild) {
     // Poll for exit at this cadence, up to ~5s total (MAX_POLLS × POLL_INTERVAL).
     const POLL_INTERVAL: Duration = Duration::from_millis(20);
