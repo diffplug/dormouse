@@ -45,7 +45,16 @@ An agent integration normally needs one registry entry, an exit fixture, and a r
 
 ### Add the definition and fixture
 
-1. Add an entry following `CodingAgent` in [the coding agent registry](../lib/src/lib/coding-agents.ts).
+1. Edit [the coding agent registry](../lib/src/lib/coding-agents.ts). For example, Copilot's definition is:
+
+   ```ts
+   {
+     name: 'GitHub Copilot',
+     commands: ['copilot'],
+     resume: '--resume',
+     watchByDefault: true,
+   }
+   ```
 
 2. Declare the executable names the agent actually installs and the resume option or subcommand it supports. The shared parser handles space/equals separators, terminal escapes, and command reconstruction. IDs must fit its alphanumeric, hyphen, and underscore grammar. If an agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first. Do not substitute a “latest conversation” command.
 3. Add a sanitized exit excerpt to [the fixtures](../lib/src/lib/__fixtures__/coding-agents.ts), with the expected rebuilt command, agent version, and operating system. Replace personal paths, account information, and session IDs; preserve relevant wording and terminal escapes. Record real exit output rather than reconstructing a hint from documentation.
