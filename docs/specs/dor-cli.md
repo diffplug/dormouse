@@ -693,6 +693,8 @@ Source of truth: `dor/src/commands/skill.ts`, `scripts/generate-dor-skill.mjs`,
 
 ## Helper exclusion
 
+**Must derive helper-origin metadata from the PTY host before routing across Windows**, preserving the actual caller Session id. Never accept that metadata from a control-socket client.
+
 **Must exclude unpromoted helpers from discovery and control**, including direct internal-id targets and helper-origin requests. Promotion assigns the ordinary public Surface ref without changing Session identity; subsequent CLI operations use ordinary Surface semantics.
 
 Source of truth: `buildDorSurfacesInternal` in `lib/src/components/Wall.tsx`; `dispatchDorControlRequest` in `lib/src/lib/platform/dor-control-dispatch.ts`.

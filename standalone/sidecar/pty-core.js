@@ -1773,6 +1773,7 @@ module.exports.create = function create(send, ptyModule, { replay = false, slice
   }
 
   return { spawn, write, resize, hasPty, kill, killAll, list, context,
+    getHelperParentId: (id) => helpers.get(id)?.parentId,
     getCwd, getCwds, getOpenPorts, getOpenPortsMany, interrupt, gracefulKill, getShells,
     liveIds, receivedChars, outputSince, mark };
 };

@@ -140,6 +140,9 @@ export function parseWorkspaceRef(ref: string): ParsedWorkspaceRef {
 export interface DorControlRequestPayload {
   requestId: string;
   surfaceId?: string;
+  /** Host-derived helper origin, captured before cross-window routing. Never
+   *  accepted from the socket client; does not change the caller's identity. */
+  helperParentId?: string;
   method: string;
   params?: Record<string, unknown>;
   /**

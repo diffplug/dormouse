@@ -534,3 +534,33 @@ test('authenticated null and non-object requests are rejected without crashing t
     assert.equal((await response).lines[2].ok, true);
   } finally { server.close(); }
 });
+
+
+test('host helper identity survives forwarding and cannot be supplied by the client', async () => {
+  const socketPath = testSocketPath('helper-origin');
+  const forwarded = [];
+  const server = createDorControlServer({ socketPath, token: 'secret',
+    getHelperParentId: id => id === 'helper' ? 'parent' : undefined,
+    send(event, data) {
+      if (event !== 'dor:controlRequest') return;
+      forwarded.push(data);
+      server.respond({ requestId: data.requestId, ok: true });
+    },
+  });
+  await server.ready;
+  try {
+    for (const surfaceId of ['helper', 'ordinary']) {
+      await sendSocketRequest(socketPath, { requestId: surfaceId, surfaceId,
+        helperParentId: 'forged', method: 'surface.split', params: { workspace: 'workspace:other' } });
+    }
+    assert.equal(forwarded[0].surfaceId, 'helper');
+    assert.equal(forwarded[0].helperParentId, 'parent');
+    assert.equal(forwarded[1].helperParentId, undefined);
+    for (const surface of ['surface:self', 'helper', 'surface:helper']) {
+      const { lines } = await sendSocketRequest(socketPath, { requestId: surface, surfaceId: 'helper',
+        method: 'surface.kill', params: { surface } });
+      assert.match(lines.at(-1).error, /not public Surface targets/);
+    }
+    assert.equal(forwarded.length, 2);
+  } finally { server.close(); }
+});

@@ -457,6 +457,7 @@ export function attachRouter(
       type: 'dor:controlRequest',
       requestId: request.requestId,
       surfaceId: request.surfaceId,
+      helperParentId: request.helperParentId,
       method: request.method,
       params: request.params ?? {},
     } satisfies ExtensionMessage).then(
