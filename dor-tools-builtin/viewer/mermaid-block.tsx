@@ -13,9 +13,7 @@ async function renderDiagram(code: string, theme: PageTheme): Promise<string> {
   const api = await (mermaid ??= import('mermaid').then(m => m.default));
   if (initialized !== theme) {
     initialized = theme;
-    // Mermaid 12 defaults to ELK layouts, which this bundle leaves out (scripts/build.mjs).
-    api.initialize({ startOnLoad: false, securityLevel: 'strict', theme: theme.dark ? 'dark' : 'default', fontFamily: theme.fontFamily,
-      layout: 'dagre', state: { layout: 'dagre' } });
+    api.initialize({ startOnLoad: false, securityLevel: 'strict', theme: theme.dark ? 'dark' : 'default', fontFamily: theme.fontFamily });
   }
   await api.parse(code);
   const id = `mermaid-${++renders}`;

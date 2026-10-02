@@ -77,10 +77,31 @@ body .mdxeditor [class*=codeMirrorWrapper]{padding:4px 6px;margin-bottom:.6em}
 /* MDXEditor fixes CodeMirror to a light theme; its chrome follows the workbench here. */
 body .mdxeditor .cm-editor{background:transparent!important;color:var(--baseTextContrast)!important}
 body .mdxeditor .cm-gutters{background:transparent!important;color:var(--baseText)!important;border-right:1px solid var(--baseLine)!important}
-body .mdxeditor .cm-activeLine,body .mdxeditor .cm-activeLineGutter{background:var(--baseBgHover)!important}
+body .mdxeditor .cm-activeLine,body .mdxeditor .cm-activeLineGutter{background:transparent!important}
+body .mdxeditor .cm-focused :is(.cm-activeLine,.cm-activeLineGutter){background:var(--baseBgHover)!important}
 body .mdxeditor .cm-content{caret-color:var(--baseTextContrast)!important}
 body .mdxeditor .cm-cursor{border-left-color:var(--baseTextContrast)!important}
 body .mdxeditor .cm-selectionBackground,body .mdxeditor .cm-content ::selection{background:var(--vscode-editor-selectionBackground,Highlight)!important}
+/* Code tokens in Monaco's vs / vs-dark colors, so code here matches the file
+ * editor. Every tok-* class is reset first, overriding the light theme's own. */
+body .mdxeditor{--tok-keyword:#0000ff;--tok-string:#a31515;--tok-string2:#800000;--tok-number:#098658;--tok-comment:#008000;--tok-type:#008080;--tok-property:#001188;--tok-meta:#808080;--tok-invalid:#cd3131;--tok-link:#0451a5;--tok-inserted:#098658;--tok-deleted:#a31515}
+body .mdxeditor.dark-theme{--tok-keyword:#569cd6;--tok-string:#ce9178;--tok-string2:#d16969;--tok-number:#b5cea8;--tok-comment:#6a9955;--tok-type:#4ec9b0;--tok-property:#9cdcfe;--tok-meta:#9b9b9b;--tok-invalid:#f44747;--tok-link:#3794ff;--tok-inserted:#b5cea8;--tok-deleted:#ce9178}
+body .mdxeditor .cm-editor [class*=tok-]{color:inherit;font-style:normal;font-weight:inherit;text-decoration:none}
+body .mdxeditor .cm-editor :is(.tok-keyword,.tok-atom,.tok-bool,.tok-heading){color:var(--tok-keyword)}
+body .mdxeditor .cm-editor :is(.tok-string,.tok-literal){color:var(--tok-string)}
+body .mdxeditor .cm-editor .tok-string2{color:var(--tok-string2)}
+body .mdxeditor .cm-editor .tok-number{color:var(--tok-number)}
+body .mdxeditor .cm-editor .tok-comment{color:var(--tok-comment)}
+body .mdxeditor .cm-editor :is(.tok-typeName,.tok-className,.tok-namespace,.tok-macroName){color:var(--tok-type)}
+body .mdxeditor .cm-editor :is(.tok-propertyName,.tok-variableName2,.tok-labelName){color:var(--tok-property)}
+body .mdxeditor .cm-editor .tok-meta{color:var(--tok-meta)}
+body .mdxeditor .cm-editor .tok-invalid{color:var(--tok-invalid)}
+body .mdxeditor .cm-editor :is(.tok-link,.tok-url){color:var(--tok-link)}
+body .mdxeditor .cm-editor .tok-link{text-decoration:underline}
+body .mdxeditor .cm-editor .tok-inserted{color:var(--tok-inserted)}
+body .mdxeditor .cm-editor .tok-deleted{color:var(--tok-deleted)}
+body .mdxeditor .cm-editor :is(.tok-heading,.tok-strong){font-weight:600}
+body .mdxeditor .cm-editor .tok-emphasis{font-style:italic}
 body .mdxeditor-source-editor .cm-editor{font-family:var(--font-mono);font-size:var(--vscode-editor-font-size,13px);height:100%}
 body .mdxeditor-source-editor .cm-scroller{line-height:1.35}
 

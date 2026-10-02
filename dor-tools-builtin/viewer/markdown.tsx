@@ -2,6 +2,8 @@ import { createRef, useMemo, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { flushSync } from 'react-dom';
 import type { LexicalEditor } from 'lexical';
+import { syntaxHighlighting } from '@codemirror/language';
+import { classHighlighter } from '@lezer/highlight';
 import {
   ImageNode,
   BlockTypeSelect, BoldItalicUnderlineToggles, codeBlockPlugin, codeMirrorPlugin, CodeToggle, CreateLink, diffSourcePlugin,
@@ -96,6 +98,10 @@ function Toolbar() {
   );
 }
 
+// Stable `tok-*` classes on code tokens, which markdown.css colors per theme;
+// MDXEditor's own CodeMirror theme is light-only.
+const tokenClasses = [syntaxHighlighting(classHighlighter)];
+
 const plugins = [
   capture(), markdownSafetyPlugin(), commentsPlugin(),
   headingsPlugin(), listsPlugin(), quotePlugin(), thematicBreakPlugin(), linkPlugin(), linkDialogPlugin(),
@@ -106,8 +112,8 @@ const plugins = [
     '': 'Plain text', sh: 'Shell', bash: 'Bash', js: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', tsx: 'TSX', json: 'JSON',
     css: 'CSS', html: 'HTML', py: 'Python', rust: 'Rust', go: 'Go', java: 'Java', c: 'C', cpp: 'C++', sql: 'SQL', yaml: 'YAML',
     toml: 'TOML', diff: 'Diff', md: 'Markdown', mermaid: 'Mermaid',
-  } }),
-  diffSourcePlugin({ viewMode: 'rich-text' }),
+  }, codeMirrorExtensions: tokenClasses }),
+  diffSourcePlugin({ viewMode: 'rich-text', codeMirrorExtensions: tokenClasses }),
   toolbarPlugin({ toolbarContents: Toolbar }),
 ];
 

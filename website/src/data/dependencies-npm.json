@@ -21,39 +21,11 @@
     "homepage": "https://github.com/braintree/sanitize-url#readme"
   },
   {
-    "name": "@chevrotain/cst-dts-gen",
-    "version": "11.1.2",
-    "license": "Apache-2.0",
-    "author": "Shahar Soel",
-    "homepage": "https://github.com/Chevrotain/chevrotain"
-  },
-  {
-    "name": "@chevrotain/gast",
-    "version": "11.1.2",
-    "license": "Apache-2.0",
-    "author": "Shahar Soel",
-    "homepage": "https://github.com/Chevrotain/chevrotain"
-  },
-  {
-    "name": "@chevrotain/regexp-to-ast",
-    "version": "11.1.2",
-    "license": "Apache-2.0",
-    "author": "Shahar Soel",
-    "homepage": "https://github.com/Chevrotain/chevrotain"
-  },
-  {
     "name": "@chevrotain/types",
     "version": "11.1.2",
     "license": "Apache-2.0",
     "author": "Shahar Soel",
     "homepage": "https://chevrotain.io/documentation/"
-  },
-  {
-    "name": "@chevrotain/utils",
-    "version": "11.1.2",
-    "license": "Apache-2.0",
-    "author": "Shahar Soel",
-    "homepage": "https://github.com/Chevrotain/chevrotain"
   },
   {
     "name": "@codemirror/autocomplete",
@@ -638,7 +610,7 @@
   },
   {
     "name": "@mermaid-js/parser",
-    "version": "2.0.0",
+    "version": "1.2.1",
     "license": "MIT",
     "author": "Yokozuna59",
     "homepage": "https://github.com/mermaid-js/mermaid/tree/develop/packages/mermaid/parser/#readme"
@@ -1435,13 +1407,6 @@
     "homepage": "https://github.com/wooorm/character-reference-invalid"
   },
   {
-    "name": "chevrotain",
-    "version": "11.1.2",
-    "license": "Apache-2.0",
-    "author": "Shahar Soel",
-    "homepage": "https://chevrotain.io/docs/"
-  },
-  {
     "name": "classnames",
     "version": "2.5.1",
     "license": "MIT",
@@ -1862,13 +1827,6 @@
     "homepage": "https://github.com/Brightspace/node-ecdsa-sig-formatter#readme"
   },
   {
-    "name": "elkjs",
-    "version": "0.9.3",
-    "license": "EPL-2.0",
-    "author": "Ulf Rüegg",
-    "homepage": "https://github.com/kieler/elkjs"
-  },
-  {
     "name": "es-toolkit",
     "version": "1.52.0",
     "license": "MIT",
@@ -1895,6 +1853,13 @@
     "license": "MIT",
     "author": "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)",
     "homepage": "https://github.com/syntax-tree/estree-util-visit"
+  },
+  {
+    "name": "fastdom",
+    "version": "1.0.12",
+    "license": "MIT",
+    "author": "Wilson Page",
+    "homepage": "https://github.com/wilsonpage/fastdom"
   },
   {
     "name": "fault",
@@ -2087,7 +2052,7 @@
   },
   {
     "name": "lodash-es",
-    "version": "4.17.23, 4.18.1",
+    "version": "4.18.1",
     "license": "MIT",
     "author": "John-David Dalton <john.david.dalton@gmail.com>",
     "homepage": "https://lodash.com/custom-builds"
@@ -2220,7 +2185,7 @@
   },
   {
     "name": "mermaid",
-    "version": "12.0.0",
+    "version": "11.17.2",
     "license": "MIT",
     "author": "Knut Sveidqvist",
     "homepage": "https://github.com/mermaid-js/mermaid"
@@ -2700,6 +2665,13 @@
     "license": "MIT",
     "author": "santoso-wijaya",
     "homepage": "https://github.com/santoso-wijaya/vscode-helios-selene"
+  },
+  {
+    "name": "strictdom",
+    "version": "1.0.1",
+    "license": "MIT",
+    "author": "Wilson Page",
+    "homepage": "https://github.com/wilsonpage/strictdom"
   },
   {
     "name": "stringify-entities",

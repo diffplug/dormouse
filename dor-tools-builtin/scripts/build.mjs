@@ -6,17 +6,6 @@ import { fileURLToPath } from 'node:url';
 // `dist/runtime.js`, and the Monaco and Markdown pages land beside it in
 // `dist/viewer`, whose files `viewerAsset` serves by name.
 const absWorkingDir = fileURLToPath(new URL('../', import.meta.url));
-// Mermaid's optional ELK layouts load elkjs (EPL-2.0, 1.4 MB); the page ships
-// without it, so a `layout: elk` diagram shows this error instead.
-const withoutElk = {
-  name: 'without-elk',
-  setup(build) {
-    build.onResolve({ filter: /^elkjs(\/|$)/ }, () => ({ path: 'elkjs', namespace: 'without-elk' }));
-    build.onLoad({ filter: /.*/, namespace: 'without-elk' }, () => ({
-      contents: "export default class { constructor() { throw new Error('ELK layouts are not available in this editor.'); } }",
-    }));
-  },
-};
 // Chunk names carry content hashes; a stale one would still be served.
 await rm(new URL('../dist/viewer/', import.meta.url), { recursive: true, force: true });
 await Promise.all([
@@ -41,6 +30,5 @@ await Promise.all([
     target: 'es2022', minify: true, jsx: 'automatic', chunkNames: 'markdown-[hash]',
     loader: { '.ttf': 'file', '.woff': 'file', '.woff2': 'file' }, assetNames: 'markdown-[name]-[hash]',
     define: { 'process.env.NODE_ENV': '"production"' },
-    plugins: [withoutElk],
   }),
 ]);
