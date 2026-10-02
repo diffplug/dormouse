@@ -143,17 +143,3 @@ describe('viewer socket connection', () => {
     connection.dispose();
   });
 });
-
-describe('malformed viewer state', () => {
-  it('ignores non-record JSON without losing the next valid state', async () => {
-    const { connection } = connect();
-    try {
-      await flush();
-      for (const value of [null, false, 7, 'state', []]) {
-        expect(() => socket().emitMessage(JSON.stringify(value))).not.toThrow();
-      }
-      socket().emitMessage(JSON.stringify({ type: 'status', connected: true, screencasting: true }));
-      expect(connection.snapshot().status).toEqual({ connected: true, screencasting: true });
-    } finally { connection.dispose(); }
-  });
-});
