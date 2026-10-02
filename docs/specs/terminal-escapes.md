@@ -22,7 +22,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **Must buffer an unterminated consumed OSC up to `OSC_INCOMPLETE_LIMIT` (16,384 UTF-16 code units), then discard through its terminator or cancellation**, retaining only a split `ESC`, never promoting payload to text or its terminating BEL to an alert (rationale). A complete sequence in a single read is parsed whole. Pinned by `discards an oversized consumed OSC through its %j terminator` in `lib/src/lib/terminal-protocol.test.ts`. **An unterminated OSC the parser will forward streams to xterm.js instead**, preserving a split `ESC \` terminator (rationale). **Route by the OSC id, and decide nothing while more digits could follow** — `133` becomes `1337` — for `1337` by the subcommand ([Inline graphics](#inline-graphics)).
 
-**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the command line (`OSC 633 ; E`, `OSC 133 ; C`), bounded *before* its decoding and sanitized *after* it (rationale), **line breaks kept as `\n`**; `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Every limit counts code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
+**Every semantic value `TerminalProtocolParser` *retains* is bounded and stripped of control characters before storage**, whatever the emitter: `TITLE_LIMIT` / `BODY_LIMIT` for titles and notification bodies, whose whitespace controls collapse to spaces before the trim; `COMMAND_LINE_LIMIT` for the command line (`OSC 633 ; E`, `OSC 133 ; C`), source bounded at 4× `COMMAND_LINE_LIMIT` code points for OSC 633 or shell-quoted input, or 12× for percent-encoded UTF-8, then decoded, sanitized, and capped at `COMMAND_LINE_LIMIT` code points (rationale), **line breaks kept as `\n`**; `MAX_CWD_LENGTH` for every CWD source, interior whitespace preserved. **Semantic value limits count code points**, so a cut never splits a surrogate pair. **A value that reduces to nothing is dropped, never stored empty.**
 
 **The owner alone acts on the events** its parse produced — writing the responses, feeding its `AlertManager`, forwarding the semantic and Tool events to the owning renderer — and hands every consumer the same chunk ([remote-api.md](remote-api.md#terminal-surfaces)).
 
@@ -30,7 +30,7 @@ State-driving and security-sensitive OSCs — plus the `CSI > q` query — are p
 
 **The owner splits a PTY read above `MAX_PARSER_INPUT_CHARS` (64 Ki UTF-16 code units) before parsing it, and never through a surrogate pair**, so **both** projections — one message, not two — fit the 1 MiB application-message cap after base64url and JSON framing (rationale; [remote-api.md](remote-api.md)).
 
-Source of truth: `oscDispositionAt` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
+Source of truth: `oscDispositionAt` / `commandLineEvents` in `lib/src/lib/terminal-protocol.ts`, `boundedCwdValue` in `lib/src/lib/terminal-state.ts`, `createProcessedPtyStream` in `lib/src/lib/processed-pty-stream.ts`, `createOwnerPtyStream` in `lib/src/host/owner-pty.ts`.
 
 ### `pty:data` strip semantics
 
@@ -129,11 +129,13 @@ Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `app.secu
 
 `onData` includes xterm.js *replies*. **Both classifiers require every chunk token to match**, so a report glued onto real keystrokes is never mistaken for one.
 
-- **`inputIsReplayTerminalReport`** — dropped outright while `isReplaying` (rationale). Shapes: cursor-position / device-status (`CSI [?]<params> R` / `n`), device attributes (`CSI [?>=]<params> c`), window-manipulation reports (`CSI <params> t` / `x`), DECRQSS and XTSMGRAPHICS reports (`CSI [?]<params> $y` and `CSI ? <params> S`), focus in/out (`CSI I` / `CSI O`), kitty keyboard-query replies (`CSI ? <flags> u`), and OSC, DCS, or APC replies of any shape. Also gates recording, acknowledgement ([alert.md](alert.md)), and untouched state ([layout.md](layout.md)).
-- **`inputIsSyntheticTerminalReport`** — the broader prompt-recording guard (any chunk built only of CSI, SS3 `ESC O <final>`, OSC, or APC tokens). **Never dropped, and must suppress input recording alone** — these sequences can encode real keys.
-- **`stripMouseReportsFromInput`** — removes X10 (`CSI M <3 bytes>`), SGR (`CSI < b;x;y M/m`) and urxvt (`CSI b;x;y M`) mouse reports during mouse-mode override, so reports bypassing DOM interception never reach the PTY ([mouse-and-clipboard.md](mouse-and-clipboard.md)). Acknowledgement gating: `docs/specs/alert.md` → Engagement.
+- **Must drop complete terminal replies during replay through `inputIsReplayTerminalReport`**, excluding them from input recording, acknowledgement, and untouched-state updates (rationale).
+- **Must suppress input recording alone through `inputIsSyntheticTerminalReport`**, whose broader control-only grammar can include real keys; never drop those chunks.
+- **Must remove mouse reports through `stripMouseReportsFromInput` only during mouse-mode override**, so reports bypassing DOM interception cannot reach the PTY. Pointer acknowledgement follows `docs/specs/alert.md` → Engagement.
 
-**No filter may swallow user keyboard escape sequences** — arrows, function keys, bracketed paste, kitty modified-key reports, win32-input-mode key records (`CSI …_`). Source of truth: `lib/src/lib/terminal-report-filter.ts`.
+**Never swallow user keyboard escape sequences**: arrows, function keys, bracketed paste, kitty modified-key reports, and win32-input-mode key records.
+
+Source of truth: the three classifiers and their canonical reply grammars in `lib/src/lib/terminal-report-filter.ts`; pinned by `lib/src/lib/terminal-report-filter.test.ts` and `lib/src/lib/terminal-registry.alert.test.ts`.
 
 ### Replay-time mode-reset tail (Dormouse-emitted)
 

@@ -12,7 +12,7 @@
 
 **Why the incomplete-OSC buffer is capped.** The parser must hold bytes across PTY reads for a sequence split mid-flight, so an OSC that is never terminated would otherwise accumulate forever. No legitimate emitter sends a 16 KiB title, so dropping the held bytes past `OSC_INCOMPLETE_LIMIT` turns an unbounded-growth primitive into a discarded chunk.
 
-**Why `COMMAND_LINE_LIMIT` is applied on both sides of the unescape.** Bounding first stops a hostile command line from making the unescape allocate; sanitizing after catches the `\xNN` decoding, which is precisely what puts control characters back into a value that looked clean going in.
+**Why command-line source and decoded output have separate bounds.** The source caps allow encoding expansion (4× for OSC 633 or shell quoting, 12× for percent-encoded UTF-8) while bounding decoder allocation. The retained result has its own cap; post-decode sanitization removes controls introduced by decoding.
 
 **Why the sidecar no longer parses a second time.** It used to: standalone stripped in the frontend adapter, which the sidecar's stream to the phone never passed through, so without a second strip-only pass the phone saw OSC sequences the laptop never rendered. That pass needed a fake colour provider — "discarded" and "not parsed" are different things, and a *declined* OSC 10/11/12 survives in `visibleData` for the phone's xterm to answer a second time — and it began at first attach, so it could start mid-sequence. One parse at the process that owns the PTY removes the duplicate, the workaround, and the mid-sequence start together. What it costs is the theme push, since the sidecar has no DOM, and a webview that is told the semantic and Tool events rather than deriving them.
 

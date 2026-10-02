@@ -50,7 +50,7 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why the Fe range is not enough to match an escape.** `ESC 7` / `ESC 8` and `ESC c` have final bytes outside it, so a matcher keyed on the introducer alone strips the ESC and leaks the final byte into the text.
 
-**Why boundary-mode stripping inverts the rule.** Observed in the wild: a stored `claude --resume <uuid>codex`. Deleting controls instead of replacing them with a newline welded two fragments never adjacent on screen into one id-shaped token, which then passed the id grammar. Erasures count too — `\x1b[2K` means the text before it on that line is gone — while SGR and charset designators are the only classes where the text either side really is contiguous.
+**Why boundary-mode stripping inverts the rule.** Observed in the wild: a stored `claude --resume <uuid>codex`. Deleting controls instead of replacing them with a newline welded two fragments never adjacent on screen into one id-shaped token, which then passed the id grammar. Erasures count too — `\x1b[2K` means the text before it on that line is gone. Among the non-string ESC/CSI presentation sequences, SGR and charset designators leave the surrounding text contiguous. String payloads are removed by the earlier framing pass; this policy does not imply that every string protocol leaves the cursor unchanged.
 
 ## Recovery record
 

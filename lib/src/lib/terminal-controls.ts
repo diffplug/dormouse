@@ -182,19 +182,21 @@ function stripPresentationControls(stringsRemoved: string, boundaries: boolean):
       // An unfinished CSI or ESC sequence has not moved the cursor yet. Drop
       // its tail without a synthetic boundary: it may become SGR or a charset
       // designator whose following text continues the same word on the next read.
-      .replace(/\x1b(?:\[[0-?]*[ -/]*|[ -/]*)$/, '')
+      .replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*$|\x1b[ -/]*$/, '')
       // CSI.
-      .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, csi)
+      .replace(/(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]/g, csi)
       // Charset designators (G0–G3): no cursor movement, no erase, so like SGR
       // they leave the text either side genuinely contiguous.
       .replace(/\x1b[()*+][A-Za-z0-9]/g, '')
       // Remaining ESC sequences use the full Fp/Fe/Fs/nF final-byte range;
       // matching only the introducer would leak finals such as `7`, `8`, or `c`.
       .replace(/\x1b[ -/]*[0-~]/g, boundary)
-      // Backspace, VT and FF move the cursor, so they seam two regions the same
-      // way a CSI move does — give them the same boundary when asked.
-      .replace(/[\x08\x0b\x0c]/g, boundary)
-      // Preserve LF/CR/TAB as text boundaries; discard other C0/C1 controls.
-      .replace(/[\x00-\x08\x0e-\x1f\x7f-\x9f]/g, '')
+      // BS, VT and FF move the cursor. Remaining standalone C1 controls
+      // take the same conservative boundary as their ESC Fe equivalents;
+      // string controls and CSI were already consumed above.
+      .replace(/[\x08\x0b\x0c\x80-\x9f]/g, boundary)
+      // Preserve LF/CR/TAB as text boundaries. Other C0 controls (e.g. BEL,
+      // ENQ and charset shifts) do not move or erase text and are discarded.
+      .replace(/[\x00-\x08\x0e-\x1f\x7f]/g, '')
   );
 }

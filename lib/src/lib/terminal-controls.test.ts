@@ -57,6 +57,19 @@ describe('TerminalControlStreamFilter', () => {
 });
 
 describe('stripTerminalControls', () => {
+  it.each(['\x1b[', '\x9b'])('treats CSI introducer %j consistently in both readings', (csi) => {
+    expect(stripTerminalControls('a' + csi + '31mb')).toBe('ab');
+    expect(stripTerminalControls('a' + csi + '31mb', { boundaries: true })).toBe('ab');
+    expect(stripTerminalControls('a' + csi + '2Kb', { boundaries: true })).toBe('a\nb');
+    expect(stripTerminalControls('a' + csi + '?1049hb')).toBe('ab');
+    expect(stripTerminalControls('a' + csi + '38;5', { boundaries: true })).toBe('a');
+    expect(stripTerminalControls('a' + csi, { boundaries: true })).toBe('a');
+  });
+  it.each(['\x1bD', '\x84', '\x1bE', '\x85', '\x1bM', '\x8d'])('seams cursor movement %j in either representation', (move) => {
+    expect(stripTerminalControls('a' + move + 'b', { boundaries: true })).toBe('a\nb');
+    expect(stripTerminalControls('a' + move + 'b')).toBe('ab');
+  });
+
   it('removes terminated string controls with their payload', () => {
     expect(stripTerminalControls('\x1b]0;window title\x07user$ ')).toBe('user$ ');
     expect(stripTerminalControls('\x1bP+q544e\x1b\\user$ ')).toBe('user$ ');
@@ -169,4 +182,15 @@ describe('stripTerminalControls', () => {
       }
     });
   });
+  it.each(Array.from({ length: 32 }, (_, index) => index + 0x40)
+    .filter(final => ![0x50, 0x58, 0x5b, 0x5d, 0x5e, 0x5f].includes(final)))
+  ('standalone C1 and ESC Fe counterpart 0x%s preserve the same boundary', final => {
+    const esc = '\x1b' + String.fromCharCode(final);
+    const c1 = String.fromCharCode(final + 0x40);
+    for (const control of [esc, c1]) {
+      expect(stripTerminalControls('left' + control + 'right', { boundaries: true })).toBe('left\nright');
+      expect(stripTerminalControls('left' + control + 'right')).toBe('leftright');
+    }
+  });
+
 });

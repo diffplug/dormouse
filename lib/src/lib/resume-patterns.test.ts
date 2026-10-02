@@ -2,6 +2,15 @@ import { describe, it, expect } from 'vitest';
 import { detectResumeCommand } from './resume-patterns';
 
 describe('detectResumeCommand', () => {
+  it.each(['\x1b[', '\x9b'])('preserves recovery ID boundaries for CSI %j', (csi) => {
+    expect(detectResumeCommand('codex resume abc' + csi + '31mdef\n')).toBe('codex resume abcdef');
+    expect(detectResumeCommand('codex resume abc' + csi + '2Kxyz\n')).toBe('codex resume abc');
+    expect(detectResumeCommand('codex resume abc' + csi + '38;5')).toBeNull();
+  });
+  it.each(['\x1bD', '\x84', '\x1bE', '\x85', '\x1bM', '\x8d'])('does not weld recovery IDs across movement %j', (move) => {
+    expect(detectResumeCommand('codex resume abc' + move + 'xyz\n')).toBe('codex resume abc');
+  });
+
   it.each(['\n', '\r', '\t', ' ', '`', "'", ')', '.', '\x1b[K'])(
     'accepts an observed separator %j after the ID', (separator) => {
       expect(detectResumeCommand(`codex resume abc123${separator}`)).toBe('codex resume abc123');

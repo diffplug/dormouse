@@ -155,7 +155,7 @@ An **await** parks on one Session until it finishes what it is doing, then repor
 
 **An await crosses from the renderer to the host process that holds the manager**, and the wait itself never leaves the host:
 
-- The renderer asks to park (`await`, under an `awaitId` its client mints) and, if it gives up, to cancel (`awaitCancel`); **the host answers exactly one `alert:awaitResult {awaitId, outcome}` per await, to the realm that parked it**, a cancel included. **A realm's repeated `awaitId` is ignored, never answered twice**; a malformed `id` or `until` is answered `cancelled`.
+- The renderer asks to park (`await`, under an `awaitId` its client mints) and, if it gives up, to cancel (`awaitCancel`); **the host answers exactly one `alert:awaitResult {awaitId, outcome}` per await, to the realm that parked it**, a cancel included. **An `awaitId` already parked in that realm is ignored**; a malformed `id` or `until` is answered `cancelled`.
 - **A realm that ends — a disposed or recreated webview, a reloaded or closed window — has everything it parked cancelled and answered by the host, *synchronously*** (rationale); a disposing adapter settles its own.
 - `cancelled` has no wire outcome of its own: the renderer reports it to `dor` as an error, which is also what forgets the in-flight control request.
 - The fake adapter runs the same host in process. The Pocket phone adapter has no `dor` and protocol-v1 carries no await, so it settles every request `cancelled` at once.
@@ -175,7 +175,7 @@ Source of truth: `awaitCompletion` in `lib/src/lib/alert-manager.ts`; `AlertComm
 
 Rules:
 
-- **The key is `commandWatchKey(rawCommandLine)`**: the last command of a list (`&&`, `||`, `;`, `&`, newline) and the first stage of its pipeline, grouping dropped, leading `VAR=value` words and transparent wrappers (`sudo`, `npx`, …) skipped, then argv[0]'s basename minus any launcher suffix (`docs/specs/terminal-state.md`). **Reserved words are grammar, fish's included**: a leading `do`, `then`, `if`, `!`, `and`, `not`, `begin`, … is stripped, a segment a closer (`done`, `fi`, `esac`, `end`) leads is skipped with its redirection or pipe, and a `for` header, a case pattern, and fish's `case` line are dropped, so `for f in *; do make; done` keys on `make` (rationale). **A redirection is never the program or a runner's script**, a separate target skipped with it (rationale). **An unknown wrapper flag stops the skip**, keying the wrapper itself. **A script runner keys as `<runner> <script>`**, a leading `run` dropped, so `cd web && pnpm run dev` keys on `pnpm dev`; a script that is no valid key (a path) keys the runner (rationale). Where bash's `E` falls back to a line's first simple command (`docs/specs/terminal-escapes.md` → Shell-integration injection), that command keys. Pinned by `WATCHING key` in `lib/src/lib/terminal-state.test.ts`.
+- **Must derive the key only from the shell-reported raw command line through `commandWatchKey`**, never the display title or keystroke fallback; its lexical grammar belongs to that function. Where bash's `E` falls back to the line's first simple command, that command keys (`docs/specs/terminal-escapes.md` → Shell-integration injection; rationale). Pinned by `WATCHING key` in `lib/src/lib/terminal-state.test.ts`.
 - **A rule covers a key it equals, and a bare runner rule covers every `<runner> <script>` key of that runner** (rationale). `watchRuleFor` is the one matcher, for WATCHING, rule-removal silencing, and the terminal context's row.
 - **Every command boundary resets the detector** — `commandStart`, `commandFinish`, `promptStart`, `promptEnd`, and PTY exit — even without a command watch. Pinned by `resets unwatched output history on %s without a command watch` in `lib/src/lib/alert-manager.test.ts`.
 - **Editing the rule set re-derives WATCHING across every live Session immediately**, never restarting the detector (rationale).
@@ -185,27 +185,15 @@ Rules:
 
 **Limitation:** WATCHING needs the shell to report its command line — `OSC 633 ; E`, or `cmdline_url` / `cmdline` on `OSC 133 ; C` (fish ≥ 4) — beside the boundaries. A shell reporting bare `OSC 133` boundaries, or none (`docs/specs/terminal-escapes.md`), never names a command, so WATCHING never engages and the terminal context reports `No command running`. Terminal reports still work; command-exit alerting also requires semantic command boundaries. **Never route the keystroke fallback in `docs/specs/terminal-state.md` into the `AlertManager`** (rationale).
 
-| State | Meaning |
-|---|---|
-| `WATCHING_DISABLED` | No rule matches, so the detector's state is not shown. |
-| `NOTHING_TO_SHOW` | A rule matches, but no reminder is owed. |
-| `MIGHT_BE_BUSY` | Output may be turning into ongoing work. Debounce. |
-| `BUSY` | Enough output to treat the Session as doing work. |
-| `MIGHT_NEED_ATTENTION` | A busy Session went quiet. Debounce. |
-| `ALERT_RINGING` | Likely completion observed while the Session was not engaged. |
-
 Meaningful output excludes resize redraw noise during `T_RESIZE_DEBOUNCE`, **a grace the host opens before it resizes the PTY**, a Client's resize included; theme changes, remounts, DOM reparenting, selection, and focus changes are not output. Invariants:
 
-- Output drives the detector up `NOTHING_TO_SHOW` -> `MIGHT_BE_BUSY` -> `BUSY`; silence drives it down `BUSY` -> `MIGHT_NEED_ATTENTION` -> settled. The `MIGHT_*` states are debounce windows in both directions.
-- First output starts candidate tracking without changing status; unconfirmed `MIGHT_BE_BUSY` returns to `NOTHING_TO_SHOW`.
 - **Must discard unconfirmed candidate history after an output gap beyond `busyCandidateGap + busyConfirmGap`, including when a timer runs late** (rationale). Pinned by `forgets stale candidate history` and `expires candidate history even when the confirmation timer has not run` in `lib/src/lib/quiesce-detector.test.ts`.
-- **The detector never holds `ALERT_RINGING`.** It reports each settle once and returns to `NOTHING_TO_SHOW`; the ring latches instead.
 - **Must preserve an owed `watching` source when output resumes**; Completion events owns animation pauses (rationale).
 - **A settle rings only if** a rule matches the foreground command; an engaged Session holds it (Completion events).
 - **Never reset the detector for engagement alone**; settles must reach awaits. **Must reset to `NOTHING_TO_SHOW` when a user verb or an await clears a ring with a `watching` source**, preventing its output tail from settling again; resumed work and rule removal leave it running.
 - **New WATCHING summons must be caused by a fresh settle**, never rerender, theme change, remount, minimize, or reattach; Completion events owns resuming a paused summons.
 
-Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` in `lib/src/lib/quiesce-detector.ts`; `onSettled` / `isPaused` in `lib/src/lib/alert-manager.ts` (pinned by `lib/src/lib/alert-resumed-output.test.ts`); renderer mirror `lib/src/lib/watched-commands.ts`, multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
+Source of truth: `commandWatchKey` / `watchRuleFor` in `lib/src/lib/terminal-state.ts`; `QuiesceDetector` / `QuiesceStatus` in `lib/src/lib/quiesce-detector.ts`; `onSettled` / `isPaused` in `lib/src/lib/alert-manager.ts` (pinned by `lib/src/lib/alert-resumed-output.test.ts`); renderer mirror `lib/src/lib/watched-commands.ts`, multi-renderer coordinator `lib/src/lib/watched-command-host.ts`.
 
 ## Terminal reports
 
@@ -291,12 +279,7 @@ Source of truth: `teardownSession` in `lib/src/lib/terminal-lifecycle.ts`; `plan
 
 Application alarm defaults live beside the WATCHING rule set, edited in **Settings** (below). **Every other store reached from Settings stays its own — never fold one into `AlertSettings`**, which is relayed wholesale to the host. Both stores run the same two classes in either host (`lib/src/lib/watched-command-host.ts`, `lib/src/lib/alert-settings-host.ts`), bound to its manager by `createAlertHost`; the shape, its defaults and its validation are the platform-free `lib/src/lib/alert-settings-model.ts`.
 
-| Field | Meaning |
-|---|---|
-| `inactivityTimeoutMs` | The presence window (Engagement), and nothing else; only the renderer's presence tracker reads it. |
-| `deferAlertsUntilQuiet` | Gates animation deferral and pauses (Completion events). Default on. (rationale) |
-| `speakEnabled` / `speakDelayMs` | Spoken alarms, below. |
-| `pushEnabled` / `pushDelayMs` | Push notifications, below. |
+**Must use `AlertSettings` and its documented fields, defaults, and bounds from `lib/src/lib/alert-settings-model.ts`.** Engagement and Completion events own detection behavior; the sink sections below own speech and push.
 
 The speech row's managed-voice link follows
 [website-docs.md](./website-docs.md) -> `/hosted` preview.
@@ -332,7 +315,7 @@ Neither sink ever carries the ringing `ActivityNotification`.
 | Failure | A refused or unavailable engine produces no marker. | Warn on non-2xx, partial, or zero delivery; **never retry** stale alarms. |
 | Authority | The renderer plays host-fetched managed-voice audio, else invokes `window.speechSynthesis`. | The host names Session and title; the Burrow selects active ACL devices, the Relay intersects subscriptions. |
 
-Source of truth: `AlertSettings` in `lib/src/lib/alert-settings.ts` (renderer mirror, persisted at `dormouse:alert-settings`); `lib/src/lib/alert-settings-host.ts`.
+Source of truth: `AlertSettings` / `DEFAULT_ALERT_SETTINGS` / `normalizeAlertSettings` in `lib/src/lib/alert-settings-model.ts`; renderer mirror in `lib/src/lib/alert-settings.ts` (persisted at `dormouse:alert-settings`); `AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`.
 
 ### Spoken alarms
 
@@ -369,10 +352,10 @@ Source of truth: `SpeechEngine` / `webSpeechEngine` / `withFallback` in `lib/src
 
 - **The label is sanitized by `toPushText` at send time, in the Burrow, and not by `toSpokenText`'s rule** (rationale). It keeps angle brackets and instead strips control characters and the Unicode bidi and zero-width format characters (including the Arabic letter mark); the cap counts code points, so a cut never ships half a surrogate pair. `toPushText` is only this sink's limit and fallback over `boundedPushText` in `remote-lib-common/src/security/push.ts`.
 - **The Burrow bounds, then seals; the worker re-bounds at the render sink.** Title, body, and tag are sealed to each recipient's own Client static and the Relay forwards ciphertext, so the second pass runs in `lib/src/remote/pocket-app/sw.ts`, which imports the *same* `boundedPushText` rather than mirroring it (`docs/specs/remote-security-model.md` -> Push sealing).
-- **The Burrow names its targets; the Relay rejects a send that does not.** Targets are the Burrow's *active* ACL records, read at send time so a revocation during the delay takes effect, and the Relay intersects them with its own subscriptions (rationale). **One sealed envelope per recipient** — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it. The Burrow does **not** ask which devices are subscribed first (rationale).
-- **The settings dialog re-reads the device list when it opens; the transient preview never refreshes.** The list is the Burrow's join of the Relay's subscriptions against its own ACL labels. **A disarmed enrolled gate invalidates every in-flight refresh and clears the list**, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to.
+- **The Burrow names its targets; the Relay rejects a send that does not.** Targets are the Burrow's newest active ACL records in approval order, read at send time so a revocation during the delay takes effect, and the Relay intersects them with its own subscriptions (rationale). **One sealed envelope per recipient** — a Client static is not a group key — so a send names each `deliveryId` beside the ciphertext only that phone can open, **clamped to `MAX_PUSH_QUERY_DELIVERY_IDS`** because the route refuses the whole POST past it. The Burrow does **not** ask which devices are subscribed first (rationale).
+- **The settings dialog re-reads the device list when it opens; the transient preview never refreshes.** **Must preview the same bounded target set a send selects**, joined with the Relay's subscriptions and the Burrow's ACL labels. **A disarmed enrolled gate invalidates every in-flight refresh and clears the list**, so nothing already on the wire can repopulate the dialog with phones there is no longer anything to push to.
 
-Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`; `sendPush` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `commitPushDevices` / `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
+Source of truth: `push` in `lib/src/host/remote/service.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`; `sendPush` / `loadPushDevices` / `pushTargets` / `toPushText` in `lib/src/remote/burrow/push-delivery.ts`; `commitPushDevices` / `refreshPushDevicesNow` / `clearPushDevices` / `resetPushDevices` in `lib/src/lib/push-devices.ts`.
 
 ### Settings dialog
 
