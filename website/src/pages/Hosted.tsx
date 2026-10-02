@@ -52,6 +52,9 @@ import { canonicalUrl, siteMeta, sitePath } from "../lib/site-meta";
 
 const PAGE_PATH = "/hosted";
 
+/** Where team and enterprise inquiries go; nothing on this page sells them. */
+const TEAMS_EMAIL = "teams@dormouse.sh";
+
 export function meta({ location }: MetaArgs) {
   return siteMeta(location.pathname, {
     title: "Dormouse Hosted",
@@ -262,8 +265,15 @@ function FreeCard() {
       name="Free"
       above={
         <p className="text-sm leading-snug">
-          The whole terminal is <span className="whitespace-nowrap">FSL-1.1-MIT</span>, easy to
-          fork
+          The whole terminal is <span className="whitespace-nowrap">FSL-1.1-MIT</span>,{" "}
+          <a
+            href="https://github.com/diffplug/dormouse"
+            className={LINK_CLASS}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            easy to fork
+          </a>
         </p>
       }
       price={<span className="font-display text-4xl">$0</span>}
@@ -273,7 +283,7 @@ function FreeCard() {
           Download
         </a>
       }
-      footnote="Desktop app or VS Code"
+      footnote="Win/Mac/Linux or VS Code"
     >
       <Includes
         items={[
@@ -313,7 +323,7 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
         items={[
           <>
             <a href={sitePath(POCKET_PLAYGROUND_PATH)} className={LINK_CLASS}>Pocket</a> and push
-            notifications on your phone, with no server to run
+            notifications on your phone — we’ll run the server for you
           </>,
           "High-quality ElevenLabs speech synthesis",
           "One license for your whole personal fleet of machines",
@@ -342,7 +352,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
       <Includes
         items={[
           "Everything in Hosted",
-          "A founding badge and an optional spot here",
+          "A founding badge and an optional avatar here",
         ]}
       />
     </PlanCard>
@@ -474,8 +484,8 @@ export default function Hosted() {
 
         <p className={`mt-5 text-sm ${MUTED_TEXT_CLASS}`}>
           The founding price rises as each cohort of 100 sells out, and founding closes for
-          good at the $100 list price. Whatever you paid stays locked. Team and enterprise
-          plans are not sold here.
+          good at the $100 list price. Whatever you paid stays locked. For team and enterprise
+          plans, email <a href={`mailto:${TEAMS_EMAIL}`} className={LINK_CLASS}>{TEAMS_EMAIL}</a>.
         </p>
       </section>
 
@@ -608,17 +618,10 @@ export default function Hosted() {
             system voice, which needs nothing from me at all.
           </FaqEntry>
           <FaqEntry question="Do you sell team or enterprise plans?">
-            Not on this page. Org accounts, SSO, and audit export are a separate piece of work and
-            are not sold through this page. If you need them,{" "}
-            <a
-              href="https://github.com/diffplug/dormouse/issues"
-              className={LINK_CLASS}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              open an issue
-            </a>{" "}
-            and say so — that is how I will know what to build.
+            Not on this page. Org accounts, SSO, and audit export are a separate piece of work. If
+            you need them, email{" "}
+            <a href={`mailto:${TEAMS_EMAIL}`} className={LINK_CLASS}>{TEAMS_EMAIL}</a> and say
+            what you need — that is how I will know what to build.
           </FaqEntry>
         </div>
       </section>

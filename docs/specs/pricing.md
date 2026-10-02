@@ -30,7 +30,7 @@ section ids.
 **Content, in order:** the Relay boundary notice; the plan cards; what a member
 gets, as prose; "Self-hosting stays free"; and a short FAQ — refunds and
 cancellation, the founding lock, who appears in the founders row, what happens
-if Hosted shuts down, and that team pricing is not offered.
+if Hosted shuts down, and that team pricing goes by email to `teams@dormouse.sh`.
 
 **Prices, inclusions, and the FAQ are prerendered text**, and the page emits
 `Product` / `Offer` JSON-LD carrying one `Offer` per paid plan at its current
