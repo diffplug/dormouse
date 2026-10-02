@@ -44,8 +44,8 @@ checkable and by review otherwise:
 
 - The alert explanation matches [alert.md](alert.md): notification protocols
   and unattended command exit ring with zero configuration, independent of
-  WATCHING; command exit and WATCHING need `OSC 633` / `OSC 133` shell
-  integration. The guide must not promise that every quiet Pane is
+  WATCHING; command exit needs `OSC 633` / `OSC 133` boundaries, and WATCHING
+  the reported command line (alert.md → Limitation). The guide must not promise that every quiet Pane is
   automatically marked done after a fixed interval.
 - Pocket is described only as shipped or explicitly in development.
 - Browser Surfaces are explained to match [dor-browser.md](dor-browser.md)
@@ -141,9 +141,10 @@ delta is structural:
 7. Add the shared site header and footer.
 8. Mark same-site and external navigation appropriately.
 
-Operations 1–5 run in the generator's `buildDocument`, so they apply to every
-Markdown source; 6–8 live in the page components. `dor/skill.md` is exempt
-from operation 5 and asserted instead ([`/agent-skill` guide](#agent-skill-guide)).
+Operations 1–5 run in the generator's `buildDocument`, so they apply to the
+guide and every document `SITE_ROUTES` publishes; 6–8 live in the page
+components. `dor/skill.md` does not pass through `buildDocument`: it is asserted
+free of site links instead ([`/agent-skill` guide](#agent-skill-guide)).
 
 **Never** publish a relative repository link as-is; `resolveRepoLinks` sends it
 to the publishing page or the canonical file and fails the build when the
@@ -239,7 +240,8 @@ Source of truth: `DOCS_PAGES` in `website/src/lib/docs-pages.ts`; `DocsLayout` i
 **Must describe the account service and link its account app, privacy policy, and terms.**
 
 **Must mark both services — Hosted's Pocket Relay and optional managed voice —
-unavailable.**
+unavailable;** terminals stay on an awake, online computer; browser speech and
+self-hosting remain.
 
 **Must open both hosting pages with the Relay boundary:** Dormouse needs none;
 remote features require a configured Relay and otherwise make no network
