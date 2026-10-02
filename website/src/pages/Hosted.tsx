@@ -73,11 +73,11 @@ export const HOSTED_TOC: TocEntry[] = [
 /** What a plan buys, one ticked line each. */
 function Includes({ items }: { items: React.ReactNode[] }) {
   return (
-    <ul className="mt-6 text-sm">
+    <ul className="mt-4 text-sm">
       {items.map((item, i) => (
         <li
           key={i}
-          className="flex gap-2.5 border-b border-dashed border-[var(--color-text)]/15 py-3 leading-relaxed"
+          className="flex gap-2.5 border-b border-dashed border-[var(--color-text)]/15 py-2 leading-snug"
         >
           <CheckIcon
             size={16}
@@ -126,12 +126,12 @@ function PlanCard({
   return (
     <div className={`flex flex-col ${accent ? CARD_ACCENT_CLASS : CARD_CLASS}`}>
       <h3 className={`font-display text-sm tracking-widest uppercase ${ACCENT_TEXT_CLASS}`}>{name}</h3>
-      <div className="mt-4 flex items-center md:min-h-10">{above}</div>
-      <p className="mt-3 flex flex-wrap items-baseline gap-x-2">{price}</p>
-      <div className={`mt-1 text-sm md:min-h-10 ${CARD_MUTED_TEXT_CLASS}`}>{below}</div>
+      <div className="mt-3 flex items-center md:min-h-10">{above}</div>
+      <p className="mt-2 flex flex-wrap items-baseline gap-x-2">{price}</p>
+      <div className={`mt-1 text-sm md:min-h-5 ${CARD_MUTED_TEXT_CLASS}`}>{below}</div>
       {children}
       {/* `mt-auto` lines the three buttons up however tall the cards run. */}
-      <div className="mt-auto pt-6">
+      <div className="mt-auto pt-5">
         {action}
         <p className={`mt-2 text-center text-sm ${CARD_MUTED_TEXT_CLASS}`}>{footnote}</p>
       </div>
@@ -294,8 +294,8 @@ function HostedCard({ onBuy }: { onBuy: (tier: Tier) => void }) {
       price={<Price tier={tier} />}
       below={
         yearly
-          ? "Billed yearly · cancel any time · two months free"
-          : `Billed monthly · cancel any time · save $${YEARLY_SAVING} yearly`
+          ? "Two months free against monthly"
+          : `Save $${YEARLY_SAVING} by paying yearly`
       }
       action={<BuyButton tier={tier} label="Subscribe" onBuy={onBuy} />}
       footnote="30-day refund"
@@ -332,8 +332,7 @@ function FoundingCard({ cohort, onBuy }: { cohort: Cohort; onBuy: (tier: Tier) =
         items={[
           "Everything in Hosted",
           `$${tier.price} a year for as long as you stay subscribed`,
-          "A founding badge in the app and on the credits page",
-          "Your avatar in this row, if you choose",
+          "A founding badge, and your avatar in this row if you choose",
         ]}
       />
     </PlanCard>
