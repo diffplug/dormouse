@@ -85,10 +85,23 @@ export async function refreshSavedSessionStateFromPtys(
   log.info(`[session] refreshFromPtys: saved ${panes.length} panes`);
 }
 
-/** One recovery store per activation, prepared before teardown. It shares the
- * sidecar's private record and destructive claim implementation; each webview
- * claims only its saved pane ids. Synchronous file writes avoid VS Code's
- * teardown storage-service flush (vscode.md -> Capturing agent recovery).
+/**
+ * This activation's recovery record, in extension storage.
+ *
+ * A plain file, written synchronously — NOT `workspaceState`.
+ * `workspaceState.update()` hands the value to VS Code's storage service, which
+ * batches its SQLite flush on its own schedule. By the time `deactivate()` runs
+ * that service is already tearing down, so the write never reaches disk however
+ * early it is issued: measured on a real machine, detection completed at +276ms
+ * and the record still never appeared. A synchronous `writeFileSync` is durable
+ * the instant it returns and needs no budget at all.
+ *
+ * The store itself is the Tauri sidecar's (`lib/src/host/recovery-store.ts`) —
+ * one record format, one destructive read, one set of file modes for both hosts.
+ * Created once per activation, because the remainder of a claimed record lives in
+ * it: `captureAgentRecoveryCommands` interrupts every live PTY, and those panes
+ * are spread across the Dormouse view and any number of editor panels, each
+ * restoring its own pane ids from its own saved state.
  */
 let store: RecoveryStore | null = null;
 function recoveryStore(context: vscode.ExtensionContext): RecoveryStore {
@@ -97,12 +110,6 @@ function recoveryStore(context: vscode.ExtensionContext): RecoveryStore {
     { log: { info: (message) => log.info(message), error: (message) => log.error(message) } },
   );
   return store;
-}
-
-/** Prepare private storage during activation, before a bounded teardown can
- * need it. A failed permission setup is logged and persistence fails closed. */
-export function prepareRecoveryStorage(context: vscode.ExtensionContext): void {
-  recoveryStore(context);
 }
 
 /**
@@ -163,9 +170,9 @@ export async function captureAgentRecoveryCommands(
  * the webview has nothing to write back and no save/restore cycle can resurrect it
  * (docs/compatible-agents.md -> "Cold restore").
  */
-export async function takeRecoveryCommands(
+export function takeRecoveryCommands(
   context: vscode.ExtensionContext,
   paneIds: Iterable<string>,
-): Promise<Record<string, string>> {
+): Record<string, string> {
   return recoveryStore(context).take(paneIds);
 }

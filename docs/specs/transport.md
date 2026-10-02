@@ -52,11 +52,10 @@ Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-cor
 
 ### Reconnection protocol
 
-1. The visible or deserialized webview requests initialization.
-2. The host lists owned PTYs, then sends their replay and alert state.
+1. The visible or deserialized webview calls `requestInit` (VS Code: `{ type: 'dormouse:init' }`).
+2. The host answers `pty:list` (one `PtyInfo` per owned PTY: `id`, `alive`, `exitCode`, `shell`), then `pty:replay` for each PTY with buffered output, then `alert:state` for each.
 3. The webview resumes terminals with their launch shells for Session-specific clipboard/drop escaping.
 4. A saved layout is reused only when its leaves match the live visible pane set; saved minimized PTYs are registered as Doors.
-
 
 **A collection finishes only on its own answer.** A `requestInit` carries the
 asking collector's token, and a host serving several windows echoes it on the

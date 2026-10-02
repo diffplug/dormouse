@@ -98,7 +98,7 @@ For the rest of `docs/specs/security-local.md`, read each section's owner first
 `docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message
 authentication", `docs/specs/standalone.md` -> "Persistence" — then the parser, the iframe shim, the
 control-socket code, and the persistence paths they point at. `## Persisted
-state` covers session snapshots, written through `write_file_atomically` on standalone and through VS Code storage in the extension, plus shared recovery storage. Read `lib/src/host/private-path.ts`, `lib/src/host/recovery-store.ts`, their tests, and early activation in `vscode-ext/src/extension.ts`; verify actual Windows ACLs as well as Unix modes, legacy explicit file grants, and no helper retry inside bounded capture.
+state` covers session snapshots, written through `write_file_atomically` on standalone and through VS Code storage in the extension.
 The attacker there is a program printing to the terminal, a page in a browser
 pane, or another local account, never the network.
 
