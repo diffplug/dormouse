@@ -17,7 +17,7 @@ export interface PickerChoice {
 export interface PickerOptions {
   terminal: PickerTerminal;
   /** Streams the files, batch by batch, until the listing ends. */
-  listFiles(onFiles: (paths: string[]) => void): Promise<{ truncated: boolean }>;
+  listFiles(onFiles: (paths: string[]) => void, signal: AbortSignal): Promise<{ truncated: boolean }>;
   /** What could open a file; rejects when the host cannot say. */
   handlers(file: string): Promise<OpenHandlersResponse>;
   /** `--tool` fixed the handler. */
@@ -57,11 +57,6 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
   /** Null while listing, then whether the limit cut the listing short. */
   let listed: { truncated: boolean } | null = null;
   let query = '';
-  let cursor = 0;
-  /** The file the person moved to, kept under the cursor as results arrive. */
-  let pinned: string | undefined;
-  /** Enter arrived while the query was still ranking: open the best match once it settles. */
-  let acceptWhenRanked = false;
   let scroll = 0;
   let handlerIndex = 0;
   let handlerFile: string | undefined;
@@ -73,6 +68,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
   let handlerRows = new Map<number, number>();
   let listRows = 0;
   let redrawTimer: ReturnType<typeof setTimeout> | undefined;
+  const listing = new AbortController();
 
   return new Promise((resolve) => {
     let done = false;
@@ -81,28 +77,19 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       done = true;
       clearTimeout(handlerTimer);
       clearTimeout(redrawTimer);
+      listing.abort();
+      ranker.dispose();
       stop();
       terminal.write(LEAVE_SCREEN);
       resolve(choice);
     };
 
-    /** Results change as files stream in and slices rank: keep a pinned file
-     *  under the cursor, otherwise the best match. */
+    /** Streamed files and ranking slices redraw at most every REDRAW_MS. */
     const ranker = new Ranker(() => {
-      const position = pinned === undefined ? -1 : ranker.positionOf(pinned);
-      if (position < 0) pinned = undefined;
-      cursor = Math.max(0, position);
-      if (cursor < scroll) scroll = cursor;
-      requestHandlers();
-      if (acceptWhenRanked && !ranker.scanning) {
-        acceptWhenRanked = false;
-        accept();
-        return;
-      }
       if (redrawTimer === undefined) redrawTimer = setTimeout(() => { redrawTimer = undefined; if (!done) render(); }, REDRAW_MS);
     });
 
-    const current = (): string | undefined => ranker.at(cursor);
+    const current = (): string | undefined => ranker.at(ranker.cursor);
     const handlerState = (): HandlerState | undefined => {
       const file = current();
       return file === undefined ? undefined : handlerCache.get(file);
@@ -138,27 +125,21 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     };
 
     const move = (delta: number) => {
-      if (ranker.count === 0) return;
-      cursor = Math.max(0, Math.min(ranker.count - 1, cursor + delta));
-      pinned = current();
-      if (cursor < scroll) scroll = cursor;
-      if (cursor >= scroll + listRows) scroll = cursor - listRows + 1;
-      requestHandlers();
+      if (ranker.count > 0) ranker.select(Math.max(0, Math.min(ranker.count - 1, ranker.cursor + delta)));
     };
 
+    /** Choosing a handler also holds its file under the cursor as results arrive. */
+    const chooseHandler = (index: number) => {
+      handlerIndex = index;
+      ranker.select(ranker.cursor);
+    };
     const cycleHandler = (delta: number) => {
       const count = handlerList().length;
-      if (count > 1) {
-        handlerIndex = (handlerIndex + delta + count) % count;
-        pinned = current();
-      }
+      if (count > 1) chooseHandler((handlerIndex + delta + count) % count);
     };
 
     const accept = () => {
-      if (ranker.scanning && pinned === undefined) {
-        acceptWhenRanked = true;
-        return;
-      }
+      ranker.flush();
       const file = current();
       if (file === undefined) return;
       const handler = handlerIndex > 0 ? handlerList()[handlerIndex] : undefined;
@@ -168,29 +149,23 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     const setQuery = (next: string) => {
       if (next === query) return;
       query = next;
-      pinned = undefined;
-      acceptWhenRanked = false;
-      cursor = 0;
-      scroll = 0;
       ranker.setQuery(query);
-      requestHandlers();
     };
 
     const click = (row: number, column: number) => {
       const handler = handlerRows.get(row);
       if (handler !== undefined && (column >= listWidth() + 2 || row > listRows)) {
         if (handler < 0) cycleHandler(1);
-        else handlerIndex = handler;
-        pinned = current();
+        else chooseHandler(handler);
         return;
       }
       if (row < 1 || row > listRows || column >= listWidth()) return;
       const index = scroll + row - 1;
       if (index >= ranker.count) return;
       const now = Date.now();
-      const repeat = lastClick.row === row && now - lastClick.at < DOUBLE_CLICK_MS && index === cursor;
+      const repeat = lastClick.row === row && now - lastClick.at < DOUBLE_CLICK_MS && index === ranker.cursor;
       lastClick = { row, at: now };
-      move(index - cursor);
+      ranker.select(index);
       if (repeat) accept();
     };
 
@@ -205,7 +180,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
           case 'down': move(1); break;
           case 'pageUp': move(-Math.max(1, listRows - 1)); break;
           case 'pageDown': move(Math.max(1, listRows - 1)); break;
-          case 'home': move(-cursor); break;
+          case 'home': move(-ranker.count); break;
           case 'end': move(ranker.count); break;
           case 'nextHandler': cycleHandler(1); break;
           case 'previousHandler': cycleHandler(-1); break;
@@ -228,7 +203,10 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
       // The panel heads with the key hints; narrow terminals put the handler on
       // a status line above them at the bottom.
       listRows = rows - 1 - (panel ? 0 : 2);
+      const cursor = ranker.cursor;
+      if (cursor < scroll) scroll = cursor;
       if (cursor >= scroll + listRows) scroll = cursor - listRows + 1;
+      if (current() !== handlerFile) requestHandlers();
       const width = listWidth();
       const lines: string[] = [];
       handlerRows = new Map();
@@ -308,7 +286,7 @@ export function runFilePicker(options: PickerOptions): Promise<PickerChoice | nu
     terminal.write(ENTER_SCREEN);
     const stop = terminal.listen(onInput, () => { if (!done) render(); });
     render();
-    options.listFiles(paths => { if (!done) ranker.add(paths); }).then(
+    options.listFiles(paths => ranker.add(paths), listing.signal).then(
       result => { listed = result; },
       () => { listed = { truncated: false }; },
     ).finally(() => { if (!done) render(); });

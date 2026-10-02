@@ -95,7 +95,7 @@ async function pickFile(context: DorCommandContext, cwd: string, flags: OpenFlag
   const home = context.options.env?.HOME ?? homedir();
   return runFilePicker({
     terminal,
-    listFiles: onFiles => listFiles(cwd, { onFiles, home }),
+    listFiles: (onFiles, signal) => listFiles(cwd, { onFiles, signal, home }),
     handlers: file => client.openHandlers({ target: file, cwd, ...(flags.preview ? { preview: true } : {}) }),
     fixedTool: flags.tool,
     home,

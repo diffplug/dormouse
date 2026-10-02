@@ -8,13 +8,16 @@ import { fuzzyMatch, Ranker } from '../dist/commands/fuzzy.js';
 import { parseKeys } from '../dist/commands/open-picker.js';
 import { listFiles } from '../dist/commands/file-list.js';
 import { execFileSync } from 'node:child_process';
+import { setImmediate } from 'node:timers/promises';
 
-/** Ranks `items` against `query` to completion, best first. */
+const settle = async (ranker) => { while (ranker.scanning) await setImmediate(); };
+
+/** Ranks the batches against `query` to completion, best first. */
 async function rank(query, ...batches) {
   const ranker = new Ranker(() => {});
   for (const batch of batches) ranker.add(batch);
   ranker.setQuery(query);
-  while (ranker.scanning) await new Promise(resolve => setImmediate(resolve));
+  await settle(ranker);
   return Array.from({ length: ranker.count }, (_, i) => ranker.at(i));
 }
 
@@ -26,21 +29,25 @@ test('ranking prefers basename and boundary matches, then shorter paths', async 
   assert.deepEqual(await rank('', files), files);
 });
 
-test('the ranker merges streamed batches, narrows an extended query, and yields between slices', async () => {
+test('the ranker merges streamed batches, narrows mid-scan, and keeps the selection in place', async () => {
   const many = Array.from({ length: 50_000 }, (_, i) => `src/module${i}/index.ts`);
-  const ranker = new Ranker(() => {}, 0);
+  const ranker = new Ranker(() => {});
   ranker.add(many);
   ranker.setQuery('module4');
-  assert.equal(ranker.scanning, true, 'a large scan does not finish synchronously');
-  while (ranker.scanning) await new Promise(resolve => setImmediate(resolve));
-  const first = ranker.count;
-  ranker.add(['zz/module4.ts']);
-  while (ranker.scanning) await new Promise(resolve => setImmediate(resolve));
-  assert.equal(ranker.count, first + 1);
-  assert.equal(ranker.at(0), 'zz/module4.ts', 'a later batch ranks into place');
+  assert.equal(ranker.scanning, true, 'ranking runs after setQuery returns');
   ranker.setQuery('module49');
-  while (ranker.scanning) await new Promise(resolve => setImmediate(resolve));
-  assert.ok(ranker.count > 0 && ranker.count < first);
+  await settle(ranker);
+  assert.deepEqual(await rank('module49', many), Array.from({ length: ranker.count }, (_, i) => ranker.at(i)), 'narrowing mid-scan loses nothing');
+  ranker.select(3);
+  const chosen = ranker.at(3);
+  ranker.add(['zz/module49.ts']);
+  await settle(ranker);
+  assert.equal(ranker.at(0), 'zz/module49.ts', 'a later batch ranks into place');
+  assert.equal(ranker.at(ranker.cursor), chosen, 'the selection follows its file');
+  ranker.setQuery('module');
+  ranker.flush();
+  assert.equal(ranker.scanning, false, 'flush ranks everything listed now');
+  assert.equal(ranker.cursor, 0, 'a new query drops the selection');
 });
 
 test('matching is smart-case and reports matched indices', () => {
@@ -229,6 +236,9 @@ test('outside git, the walk hands each repo it reaches to git and skips macOS Li
     const repo = join(dir, 'projects', 'app');
     for (const sub of ['.github', 'build', 'src']) await mkdir(join(repo, sub), { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: repo });
+    await writeFile(join(repo, 'gone.ts'), '');
+    execFileSync('git', ['add', 'gone.ts'], { cwd: repo });
+    await rm(join(repo, 'gone.ts'));
     await writeFile(join(repo, '.gitignore'), 'build/\n');
     await writeFile(join(repo, '.github', 'ci.yml'), '');
     await writeFile(join(repo, 'build', 'out.js'), '');
@@ -246,6 +256,11 @@ test('outside git, the walk hands each repo it reaches to git and skips macOS Li
       ...(process.platform === 'darwin' ? [] : ['Library/Caches/junk']),
       'notes.txt', 'projects/app/.github/ci.yml', 'projects/app/.gitignore', 'projects/app/src/a.ts',
     ]);
+    const aborted = new AbortController();
+    aborted.abort();
+    const none = [];
+    await listFiles(dir, { onFiles: paths => none.push(...paths), signal: aborted.signal });
+    assert.deepEqual(none, [], 'an aborted walk lists nothing');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

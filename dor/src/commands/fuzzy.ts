@@ -114,12 +114,16 @@ function boundaryBonus(text: string, i: number): number {
 
 interface Entry { index: number; score: number }
 
+/** How long one ranking slice may hold the event loop. */
+const SLICE_MS = 8;
+
 /**
  * Ranks a growing list against a changing query a time slice at a time, so a
- * keystroke never waits on a large list: a new query restarts the scan, and
- * one that extends a finished query rescans only that query's matches. Best
- * first; ties prefer the shorter path, then the earlier item. An empty query
- * keeps the list order.
+ * keystroke never waits on a large list. A query extending the last one
+ * rescans only its matches so far plus what it had not reached. Best first;
+ * ties prefer the shorter path, then the earlier item, so the order is total.
+ * An empty query keeps the list order. It also holds the selection, by item,
+ * so arriving results never move what the person chose.
  */
 export class Ranker {
   private readonly items: string[] = [];
@@ -128,28 +132,52 @@ export class Ranker {
   /** Item indices the scan tests, or null for every item in order. */
   private queue: number[] | null = null;
   private next = 0;
-  /** Indices matching `query` so far, in list order. */
-  private matched: number[] = [];
+  /** Sorted matches, and matches found since, merged when the order is read. */
   private ranked: Entry[] = [];
+  private pending: Entry[] = [];
+  /** The chosen entry; none follows the best match. */
+  private selected: Entry | undefined;
   private scheduled = false;
+  private disposed = false;
 
-  constructor(private readonly onChange: () => void, private readonly sliceMs = 8) {}
+  constructor(private readonly onChange: () => void) {}
 
   /** Every item listed so far. */
   get size(): number { return this.items.length; }
   /** The items matching so far. */
-  get count(): number { return this.terms.length ? this.ranked.length : this.items.length; }
+  get count(): number { return this.terms.length ? this.ranked.length + this.pending.length : this.items.length; }
   /** Whether matches may still arrive for the items listed so far. */
   get scanning(): boolean { return this.terms.length > 0 && this.next < this.scanLength(); }
 
   at(position: number): string | undefined {
-    return this.terms.length ? this.items[this.ranked[position]?.index ?? -1] : this.items[position];
+    if (!this.terms.length) return this.items[position];
+    this.settle();
+    return this.items[this.ranked[position]?.index ?? -1];
   }
 
-  /** Where `item` ranks now, or -1. */
-  positionOf(item: string): number {
-    if (!this.terms.length) return this.items.indexOf(item);
-    return this.ranked.findIndex(entry => this.items[entry.index] === item);
+  /** Where the selection ranks now: 0 when nothing is chosen. */
+  get cursor(): number {
+    if (!this.selected) return 0;
+    if (!this.terms.length) return this.selected.index;
+    this.settle();
+    // The order is total, so the chosen entry's place is a binary search.
+    let low = 0;
+    let high = this.ranked.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (this.compare(this.ranked[middle], this.selected) < 0) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  }
+
+  select(position: number): void {
+    if (!this.terms.length) {
+      this.selected = position < this.items.length ? { index: position, score: 0 } : undefined;
+      return;
+    }
+    this.settle();
+    this.selected = this.ranked[position];
   }
 
   add(paths: readonly string[]): void {
@@ -161,14 +189,30 @@ export class Ranker {
   }
 
   setQuery(query: string): void {
-    const narrows = this.terms.length > 0 && query.startsWith(this.query) && !this.scanning;
-    this.queue = narrows ? this.matched : null;
+    // A longer query matches a subset of what the shorter one matched (smart
+    // case included), so only those and the unscanned rest need testing.
+    if (this.terms.length && query.startsWith(this.query)) {
+      const remaining = this.queue ? this.queue.slice(this.next) : range(this.next, this.items.length);
+      this.queue = [...this.ranked, ...this.pending].map(entry => entry.index).concat(remaining);
+    } else {
+      this.queue = null;
+    }
     this.query = query;
     this.terms = compile(query);
     this.next = 0;
-    this.matched = [];
     this.ranked = [];
+    this.pending = [];
+    this.selected = undefined;
     this.schedule();
+  }
+
+  /** Ranks everything listed so far, now: Enter opens what is best. */
+  flush(): void {
+    this.step(Infinity);
+  }
+
+  dispose(): void {
+    this.disposed = true;
   }
 
   private scanLength(): number {
@@ -176,33 +220,41 @@ export class Ranker {
   }
 
   private schedule(): void {
-    if (this.scheduled || !this.scanning) return;
+    if (this.scheduled || this.disposed || !this.scanning) return;
     this.scheduled = true;
-    setImmediate(() => { this.scheduled = false; this.step(); });
+    setImmediate(() => {
+      this.scheduled = false;
+      if (this.disposed) return;
+      this.step(SLICE_MS);
+      this.onChange();
+      this.schedule();
+    });
   }
 
-  private step(): void {
-    const deadline = performance.now() + this.sliceMs;
-    const terms = this.terms;
-    const found: Entry[] = [];
+  private step(sliceMs: number): void {
+    const deadline = performance.now() + sliceMs;
     const end = this.scanLength();
     while (this.next < end) {
       const index = this.queue ? this.queue[this.next] : this.next;
       this.next++;
-      const match = matchTerms(terms, this.items[index], null);
-      if (match) {
-        this.matched.push(index);
-        found.push({ index, score: match.score });
-      }
+      const match = matchTerms(this.terms, this.items[index], null);
+      if (match) this.pending.push({ index, score: match.score });
       if ((this.next & 1023) === 0 && performance.now() > deadline) break;
     }
-    if (found.length) this.ranked = merge(this.ranked, found.sort(this.compare), this.compare);
-    this.onChange();
-    this.schedule();
+  }
+
+  private settle(): void {
+    if (!this.pending.length) return;
+    this.ranked = merge(this.ranked, this.pending.sort(this.compare), this.compare);
+    this.pending = [];
   }
 
   private readonly compare = (a: Entry, b: Entry): number =>
     b.score - a.score || this.items[a.index].length - this.items[b.index].length || a.index - b.index;
+}
+
+function range(start: number, end: number): number[] {
+  return Array.from({ length: Math.max(0, end - start) }, (_, i) => start + i);
 }
 
 /** Two arrays sorted by `compare`, as one, in linear time. */

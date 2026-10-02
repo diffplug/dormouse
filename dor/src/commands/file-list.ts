@@ -18,17 +18,19 @@ export interface FileListOptions {
   onFiles(paths: string[]): void;
   /** The home directory, whose macOS `Library` the walk skips. */
   home?: string;
+  /** Stops the walk; files already found may still arrive from git runs in flight. */
+  signal?: AbortSignal;
 }
 
 /** Resolves when the listing ends; `truncated` when the limit cut it short. */
-export async function listFiles(cwd: string, { onFiles, home }: FileListOptions): Promise<{ truncated: boolean }> {
+export async function listFiles(cwd: string, { onFiles, home, signal }: FileListOptions): Promise<{ truncated: boolean }> {
   // PATH-resolved, never the bare name, which Windows also searches for in the
   // cwd (docs/specs/dor-cli.md -> "Spawning External Binaries").
   const git = resolveBinaryPath('git', process.env);
   let count = 0;
   let truncated = false;
   const emit = (paths: string[]) => {
-    if (truncated || paths.length === 0) return;
+    if (truncated || signal?.aborted || paths.length === 0) return;
     if (paths.length > FILE_LIST_LIMIT - count) {
       paths = paths.slice(0, FILE_LIST_LIMIT - count);
       truncated = true;
@@ -46,6 +48,7 @@ export async function listFiles(cwd: string, { onFiles, home }: FileListOptions)
   // system's prompts for access to other apps' data.
   const library = process.platform === 'darwin' && home ? join(home, 'Library') : undefined;
   const queue = [''];
+  let head = 0;
 
   /** One directory: a work tree goes to git whole, else its files are listed
    *  and its directories queued, dot-entries and `node_modules` skipped. */
@@ -53,7 +56,7 @@ export async function listFiles(cwd: string, { onFiles, home }: FileListOptions)
     const absolute = join(cwd, directory);
     const entries = await readdir(absolute, { withFileTypes: true }).catch(() => []);
     // `.git` is a directory in a clone and a file in a worktree or submodule.
-    const repo = git && directory && entries.some(entry => entry.name === '.git') ? await gitFiles(git, absolute) : null;
+    const repo = git && directory && !signal?.aborted && entries.some(entry => entry.name === '.git') ? await gitFiles(git, absolute) : null;
     if (repo) {
       emit(repo.map(path => `${directory}/${path}`));
       return;
@@ -76,11 +79,12 @@ export async function listFiles(cwd: string, { onFiles, home }: FileListOptions)
   let active = 0;
   await new Promise<void>((resolve) => {
     const pump = () => {
-      while (!truncated && active < WALK_CONCURRENCY && queue.length > 0) {
+      const stopped = truncated || signal?.aborted;
+      while (!stopped && active < WALK_CONCURRENCY && head < queue.length) {
         active++;
-        void visit(queue.shift()!).finally(() => { active--; pump(); });
+        void visit(queue[head++]).finally(() => { active--; pump(); });
       }
-      if (active === 0 && (truncated || queue.length === 0)) resolve();
+      if (active === 0 && (stopped || head === queue.length)) resolve();
     };
     pump();
   });
@@ -94,12 +98,13 @@ const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
  *  dot-folders included. Null outside a work tree. */
 async function gitFiles(git: string, cwd: string): Promise<string[] | null> {
   // Reading the index runs `core.fsmonitor`, which the listed repo's own config may name.
-  const run = (args: string[]) => spawnAndCapture(git, ['-c', 'core.fsmonitor=false', 'ls-files', '-z', ...args], {
+  const listed = await spawnAndCapture(git, ['-c', 'core.fsmonitor=false', 'ls-files', '-z', '-t', '--cached', '--others', '--deleted', '--exclude-standard'], {
     cwd, timeoutMs: GIT_TIMEOUT_MS, maxOutputBytes: 256 * 1024 * 1024,
   });
-  const [listed, deleted] = await Promise.all([run(['--cached', '--others', '--exclude-standard']), run(['--deleted'])]);
   if (!listed.ok || listed.exitCode !== 0) return null;
-  const gone = new Set(deleted.ok && deleted.exitCode === 0 ? deleted.stdout.split('\0') : []);
-  // An unmerged path is listed once per stage.
-  return [...new Set(listed.stdout.split('\0'))].filter(path => path && !gone.has(path)).sort(byPath);
+  // Each entry is `<tag> <path>`; a deleted file is listed again tagged `R`,
+  // and an unmerged one once per stage.
+  const entries = listed.stdout.split('\0').filter(Boolean);
+  const gone = new Set(entries.filter(entry => entry.startsWith('R ')).map(entry => entry.slice(2)));
+  return [...new Set(entries.map(entry => entry.slice(2)))].filter(path => !gone.has(path)).sort(byPath);
 }
