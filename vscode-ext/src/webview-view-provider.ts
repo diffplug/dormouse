@@ -48,6 +48,17 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): Promise<void> {
     this.view = view;
+    let disposed = false;
+    let ownedRouter: vscode.Disposable | undefined;
+    view.onDidDispose(() => {
+      disposed = true;
+      ownedRouter?.dispose();
+      if (this.view !== view) return;
+      log.info('[view] onDidDispose fired - releasing router (PTYs remain alive)');
+      this.routerDisposable = undefined;
+      this.channel = undefined;
+      this.view = undefined;
+    });
     if (this.description !== undefined) view.description = this.description;
 
     const mediaPath = path.join(this.context.extensionPath, 'media');
@@ -62,6 +73,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     // is cached; this blocks only on a true cold start.
     if (!this.selectedShell) {
       const shells = await ptyManager.getAvailableShells();
+      if (disposed || this.view !== view) return;
       const shell = resolveSelectedShell(this.context, shells);
       this.selectedShell = shell ? { shell: shell.path, args: shell.args } : null;
       if (shell) {
@@ -70,6 +82,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       }
     }
 
+    if (disposed || this.view !== view) return;
     const savedSession = getSavedSessionState(this.context);
     // Recovery commands are claimed by this view's pane ids.
     const savedPaneIds = (savedSession?.panes ?? []).map((pane) => pane.id);
@@ -79,13 +92,14 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     // Scoped to *this* view's panes because the capture interrupts every live PTY,
     // including any owned by an editor panel — taking the record whole would delete
     // their commands before the panel ever resolved.
-    const recoveryCommands = takeRecoveryCommands(this.context, savedPaneIds);
+    const recoveryCommands = await takeRecoveryCommands(this.context, savedPaneIds);
+    if (disposed || this.view !== view) return;
     this.channel = serveWebview(
       view.webview, mediaPath, savedSession, this.selectedShell, recoveryCommands,
     );
 
     this.routerDisposable?.dispose();
-    this.routerDisposable = attachRouter(this.channel, {
+    this.routerDisposable = ownedRouter = attachRouter(this.channel, {
       reconnect: true,
       onSaveState: (state) => {
         return saveSessionState(this.context, mergeAlertStates(state, getAlertStates()));
@@ -101,13 +115,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       },
     });
 
-    view.onDidDispose(() => {
-      log.info('[view] onDidDispose fired — releasing router (PTYs remain alive)');
-      this.routerDisposable?.dispose();
-      this.routerDisposable = undefined;
-      this.channel = undefined;
-      this.view = undefined;
-    });
+
   }
 
   focus(): void {

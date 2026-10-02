@@ -60,7 +60,7 @@ Rows 1–2 are why a blanket second press is wrong; `Press Ctrl-C again` was abs
 
 **Why each webview claims only its own pane ids.** Two containers resolve inside one activation; a claim-everything read would let whichever resolved first delete the other's commands. Per-id claiming also means a disposed-and-re-resolved view restores without re-running the agent — its entries were already taken.
 
-Windows Node mode bits left recovery files inheriting Everyone read access in an actual deliberately loose directory (Windows, 2026-10-01). A protected current-user-only inheritable DACL removed foreign grants from new files; legacy explicit file grants needed separate tightening. System PowerShell setup took about 303 ms in the probe, which motivated startup preparation and successful caching rather than spending the capture budget on each detection.
+Windows Node mode bits left recovery files inheriting Everyone read access in an actual deliberately loose directory (Windows, 2026-10-01). A protected current-user-only inheritable DACL removed foreign grants from new files; legacy explicit file grants needed separate tightening. System PowerShell setup took about 303 ms in the probe, which motivated asynchronous startup preparation and successful caching rather than blocking activation or spending the capture budget on each detection. Deleting a stale record exposes no bytes, so capture can clear it even when permission setup fails. Windows may assign an elevated process's new path to the Administrators group; SetOwner and Set-Acl authorization, rather than a preexisting-owner equality test, governs migration to the current user.
 
 ## Cold restore
 

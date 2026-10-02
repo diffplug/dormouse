@@ -163,9 +163,9 @@ export async function captureAgentRecoveryCommands(
  * the webview has nothing to write back and no save/restore cycle can resurrect it
  * (docs/compatible-agents.md -> "Cold restore").
  */
-export function takeRecoveryCommands(
+export async function takeRecoveryCommands(
   context: vscode.ExtensionContext,
   paneIds: Iterable<string>,
-): Record<string, string> {
+): Promise<Record<string, string>> {
   return recoveryStore(context).take(paneIds);
 }
