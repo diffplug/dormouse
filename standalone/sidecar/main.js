@@ -254,7 +254,8 @@ async function shutdown() {
   shuttingDown = true;
   // Close any headed pop-out windows so quitting never orphans a real Chrome
   // window (spec → "Pop-Out" lifecycle). Bounded so a hung agent-browser
-  // can't wedge the exit; mirrors the VS Code host's deactivate().
+  // can't wedge the exit; mirrors the VS Code host's deactivate(). Must stay
+  // inside Rust's `shutdown_sidecar_and_wait` grace (~2.5s) in lib.rs.
   try {
     await Promise.race([
       browserHost.close(),
