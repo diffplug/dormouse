@@ -542,9 +542,7 @@ construct, and by `ClientSessionCore.establish` in
 - **X25519 stays WebCrypto-only** (`generateKey` / `deriveBits` / `importKey`),
   **never a JavaScript curve** (rationale). **An X25519 rejection and an
   all-zero shared secret are one terminal handshake failure**, and the handshake
-  refuses every later call rather than resuming on half-mixed state. **Must treat
-  concurrent steps as terminal failure, reject the in-flight step, and publish no
-  usable transport session after failure.** (rationale) SHA-256 and
+  refuses every later call rather than resuming on half-mixed state. SHA-256 and
   HMAC are WebCrypto; **HKDF is Noise's own HMAC construction** (section 4.3),
   never WebCrypto HKDF.
 - **ChaChaPoly is bundled** from an exactly pinned `@noble/ciphers` release
