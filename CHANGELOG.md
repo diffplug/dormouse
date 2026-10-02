@@ -11,17 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/). Release 
 ## [Unreleased]
 
 ## [1.2.0] - 2026-10-01
-
 ### Added
-
 - **Pairing improvements and phone connections**
-  - Connect without an account using a one-time QR link, approve on the computer, and control terminals over an encrypted direct connection. Choose Local networks or Anywhere for the allowed connection path ([#836](https://github.com/diffplug/dormouse/pull/836), [#865](https://github.com/diffplug/dormouse/pull/865)).
-  - Persistent pairing uses QR setup, passkeys, and end-to-end encryption. Self-hosted Relay installers are available for macOS, Windows, and Linux ([#512](https://github.com/diffplug/dormouse/pull/512), [#517](https://github.com/diffplug/dormouse/pull/517), [#422](https://github.com/diffplug/dormouse/pull/422), [#458](https://github.com/diffplug/dormouse/pull/458), [#467](https://github.com/diffplug/dormouse/pull/467)).
+  - Connect without an account using a one-time QR link. ([#836](https://github.com/diffplug/dormouse/pull/836), [#865](https://github.com/diffplug/dormouse/pull/865)).
+  - Persistent pairing via hosted.dormouse.sh is allowed for beta users ([#512](https://github.com/diffplug/dormouse/pull/512), [#517](https://github.com/diffplug/dormouse/pull/517), [#422](https://github.com/diffplug/dormouse/pull/422), [#458](https://github.com/diffplug/dormouse/pull/458), [#467](https://github.com/diffplug/dormouse/pull/467)).
   - Enroll with Hosted from Settings; persistent Hosted connections and encrypted push delivery are available as an admin-only preview ([#872](https://github.com/diffplug/dormouse/pull/872), [#870](https://github.com/diffplug/dormouse/pull/870)).
 - **Dor Tools and local files**
   - Run project-defined Tools with terminal and browser views. Browse files and folders with `dor open`, or reuse one preview pane with `--preview` ([#676](https://github.com/diffplug/dormouse/pull/676), [#835](https://github.com/diffplug/dormouse/pull/835)).
-  - Edit text in Monaco with find/replace, undo, and Cmd/Ctrl+S. Tools follow the app theme, show unsaved changes, and protect edits when disk contents change ([#851](https://github.com/diffplug/dormouse/pull/851)).
-- **Copy preview** — edit selected terminal text before copying, choose Auto / Exact / Spaces / No breaks, expand the selection, and adjust individual line breaks ([#885](https://github.com/diffplug/dormouse/pull/885)).
+  - Added a built-in VS Code-style text editor and folder browser. ([#851](https://github.com/diffplug/dormouse/pull/851)).
+- **Copy preview** — edit selected terminal text before copying ([#885](https://github.com/diffplug/dormouse/pull/885)).
 - **Terminal context and agent controls**
   - Inspect commands, directories, notifications, and listening ports; open a helper terminal beside its source and promote it to a pane ([#573](https://github.com/diffplug/dormouse/pull/573), [#768](https://github.com/diffplug/dormouse/pull/768)).
   - Use `dor await` to wait for completion and paced `dor send` input to drive TUIs reliably ([#434](https://github.com/diffplug/dormouse/pull/434), [#689](https://github.com/diffplug/dormouse/pull/689)).
@@ -35,14 +33,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/). Release 
   - Move panes between Workspaces by dragging or `dor move`; automatic names reflect the repository and branch, and tab TODO buttons jump to pending work ([#887](https://github.com/diffplug/dormouse/pull/887), [#760](https://github.com/diffplug/dormouse/pull/760), [#787](https://github.com/diffplug/dormouse/pull/787)).
 
 ### Changed
-
 - **Agent recovery** — supported agents automatically resume captured conversations after orderly shutdown; cold starts restore layouts and working directories without replaying saved scrollback. Standalone can restart from the app menu or updater ([#391](https://github.com/diffplug/dormouse/pull/391), [#786](https://github.com/diffplug/dormouse/pull/786), [#686](https://github.com/diffplug/dormouse/pull/686)).
 - **Browser controls** — use `dor agent-browser` and `dor playwright` in place of `dor ab` and `dor pw`. Update saved Tool renderer names to the full provider names and reopen old automated browser panes. Viewports default to 1440×900, with fixed presets or pane synchronization ([#791](https://github.com/diffplug/dormouse/pull/791), [#833](https://github.com/diffplug/dormouse/pull/833)).
 - **Settings and network policy** — search Settings by topic and choose which connections Dormouse opens automatically. New installs start at Nothing; enable a network policy for remote control and automatic desktop update checks. Self-hosting requires a build configured for your Relay ([#792](https://github.com/diffplug/dormouse/pull/792), [#863](https://github.com/diffplug/dormouse/pull/863), [#857](https://github.com/diffplug/dormouse/pull/857)).
 - **Rendering** — WebGL terminal text, smoother focus-ring motion, and preserved browser state when panes are minimized ([#326](https://github.com/diffplug/dormouse/pull/326), [#611](https://github.com/diffplug/dormouse/pull/611), [#612](https://github.com/diffplug/dormouse/pull/612)).
 
 ### Fixed
-
 - **Security hardening** — safer paste and shell-path handling, authenticated control sockets, and stronger browser-proxy and VS Code message boundaries ([#453](https://github.com/diffplug/dormouse/pull/453), [#432](https://github.com/diffplug/dormouse/pull/432), [#433](https://github.com/diffplug/dormouse/pull/433), [#378](https://github.com/diffplug/dormouse/pull/378)).
 - **Browser launches** — use the shell's environment to find provider commands, leave layout and focus intact on failure, and keep viewport resizing synchronized ([#830](https://github.com/diffplug/dormouse/pull/830), [#820](https://github.com/diffplug/dormouse/pull/820), [#788](https://github.com/diffplug/dormouse/pull/788)).
 - 🖥️ Fixed the macOS 27 event-loop crash and slow clipboard reads freezing the app; Workspace moves and confirmations no longer lose saved state or act on superseded requests ([#824](https://github.com/diffplug/dormouse/pull/824), [#321](https://github.com/diffplug/dormouse/pull/321), [#888](https://github.com/diffplug/dormouse/pull/888)).
