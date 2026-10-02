@@ -574,8 +574,12 @@ checks in the debounce flush.
 - **The flush slot is released in the same step as the drain.** A `Moved` landing
   between the two was marked dirty with no thread left to write it — and that
   move is exactly a window's final position.
+- **Must recheck the save refusal under the journal lock before writing
+  geometry.** The flush reads the window and rect first; a close in between
+  removed the file (§Per-window close), and the write would put it back
+  (`a_geometry_flush_captured_before_close_cannot_recreate_removed_geometry`).
 
-Source of truth: `CachedRect` / `GeometryState` / `note_geometry` /
+Source of truth: `CachedRect` / `GeometryState` / `note_geometry` / `write_open_window_geometry` /
 `restore_windows` in `standalone/src-tauri/src/lib.rs`; the sequencing is pinned
 by `the_geometry_flush_slot_is_released_with_the_drain`.
 
@@ -622,7 +626,10 @@ anyway if that listener is dead), asks about *its own* running work, removes its
   for that label, so a PTY exit's save cannot write it back. **Both close paths
   set that refusal** — the webview's own `remove_window_session`, and
   `finish_window_close` for the ack-timeout path, where the webview never ran at
-  all. It is dropped when the webview is destroyed and can no longer save.
+  all. **Must keep that refusal for the process lifetime**, geometry writes
+  included: a save dispatched before `Destroyed` can reach the disk lock after
+  it, and no label is reused within a process
+  (`a_closed_window_refuses_saves_for_the_process_lifetime`).
 - **`close_window` is the one Rust half both endings share** — a deliberate close
   and a window whose last Workspace moved away (§Transfer) — because what
   separates them is entirely what the webview did before calling it.

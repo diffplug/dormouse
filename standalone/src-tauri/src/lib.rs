@@ -139,8 +139,9 @@ struct WindowState {
     /// one can be told to clear it.
     hover_target: Mutex<Option<String>>,
     /// Labels whose snapshot has been deliberately removed. A save arriving
-    /// from a webview that is going away must not put the file back; the entry
-    /// is dropped once that webview is destroyed and can no longer save.
+    /// from a webview that is going away must not put the file back. Kept for
+    /// the process lifetime: a save dispatched before `Destroyed` can still
+    /// reach the disk lock after it, and labels are never reused in a process.
     closing: Mutex<HashSet<String>>,
     /// The next `ws-<n>`, seeded above every live and saved label at setup.
     next_ws: AtomicU64,
@@ -181,8 +182,8 @@ impl WindowState {
             .store(routing.awaiting_replay.len(), Ordering::Relaxed);
     }
 
-    /// Refuse every later `save_session` for `label` (a deliberate close removed
-    /// its snapshot). Cleared by `Destroyed`, after which no save can arrive.
+    /// Refuse every later `save_session` and geometry write for `label` (a
+    /// deliberate close removed its snapshot), for the rest of the process.
     fn begin_closing(&self, label: &str) {
         guard(&self.closing).insert(label.to_string());
     }
@@ -2165,6 +2166,16 @@ fn geometry_path(dir: &Path, label: &str) -> PathBuf {
     dir.join(format!("{stem}.geometry.json"))
 }
 
+/// The window and rect were read before this lock, so a close may have removed
+/// the geometry since: recheck the save refusal under the lock that removal
+/// holds, or a debounce captured before the close writes the file back.
+fn write_open_window_geometry(windows: Option<&WindowState>, dir: &Path, label: &str, json: &str) -> Result<bool, String> {
+    let _disk = guard(&ARRIVAL_DISK_LOCK);
+    if windows.is_some_and(|windows| windows.refuses_save(label)) { return Ok(false); }
+    write_file_atomically(&geometry_path(dir, label), json)?;
+    Ok(true)
+}
+
 fn read_geometry(dir: &Path, label: &str) -> Option<WindowGeometry> {
     let raw = std::fs::read_to_string(geometry_path(dir, label)).ok()?;
     serde_json::from_str(&raw).ok()
@@ -2245,7 +2256,8 @@ fn note_geometry(app: &AppHandle, label: &str, origin: Option<(i32, i32)>, size:
             let Ok(json) = serde_json::to_string(&rect.to_logical()) else {
                 continue;
             };
-            if let Err(err) = write_file_atomically(&geometry_path(&dir, &label), &json) {
+            let windows = app.try_state::<WindowState>();
+            if let Err(err) = write_open_window_geometry(windows.as_deref(), &dir, &label, &json) {
                 append_log(format!("[window] geometry write for {label}: {err}"));
             }
         }
@@ -3997,7 +4009,6 @@ pub fn run() {
                         // Drop label-keyed ownership synchronously; only the
                         // returned arrivals need the blocking journal worker.
                         let (lost, orphaned) = state.drop_window(&label);
-                        guard(&state.closing).remove(&label);
                         reap_orphaned_ptys(app, &label, orphaned);
                         let changed = workspaces::forget_window(&mut guard(&state.registry), &label);
                         if changed { broadcast_registry(app, &state); }
@@ -5448,16 +5459,37 @@ mod tests {
     /// paths set it: the webview's own `remove_window_session`, and
     /// `finish_window_close` for the ack-timeout path where it never ran.
     #[test]
-    fn a_closing_window_refuses_every_later_save_until_it_is_destroyed() {
+    fn a_closed_window_refuses_saves_for_the_process_lifetime() {
         let state = super::WindowState::default();
         assert!(!state.refuses_save("ws-2"));
         state.begin_closing("ws-2");
         assert!(state.refuses_save("ws-2"));
         // Never a sibling's.
         assert!(!state.refuses_save("main"));
-        // `Destroyed` drops the refusal: no save can arrive under a dead label.
-        guard(&state.closing).remove("ws-2");
-        assert!(!state.refuses_save("ws-2"));
+        // A save dispatched before `Destroyed` can reach the disk lock after
+        // it, so neither the label sweep nor the arm itself drops the refusal.
+        state.drop_window("ws-2");
+        assert!(state.refuses_save("ws-2"));
+        let src = include_str!("lib.rs").split("#[cfg(test)]").next().unwrap();
+        let destroyed = src.split("WindowEvent::Destroyed => {").nth(1).unwrap()
+            .split("if let Some(state) = app.try_state::<GeometryState>()").next().unwrap();
+        assert!(!destroyed.contains(".closing"), "Destroyed must not clear save refusal");
+    }
+
+    #[test]
+    fn a_geometry_flush_captured_before_close_cannot_recreate_removed_geometry() {
+        let dir = TempDir::new("geometry-close-fence");
+        let windows = super::WindowState::default();
+        write_session_to(dir.path(), "ws-2", "snapshot").unwrap();
+        assert!(super::write_open_window_geometry(Some(&windows), dir.path(), "ws-2", "previous").unwrap());
+        assert_eq!(fs::read_to_string(super::geometry_path(dir.path(), "ws-2")).unwrap(), "previous");
+        windows.begin_closing("ws-2");
+        super::close_window_snapshot(dir.path(), "ws-2").unwrap();
+        assert!(!super::write_open_window_geometry(Some(&windows), dir.path(), "ws-2", "captured before close").unwrap());
+        assert!(!super::geometry_path(dir.path(), "ws-2").exists());
+        windows.drop_window("ws-2");
+        assert!(!super::write_open_window_geometry(Some(&windows), dir.path(), "ws-2", "captured before close").unwrap());
+        assert!(!super::geometry_path(dir.path(), "ws-2").exists());
     }
 
     fn queue_test_suppression(state: &super::WindowState, id: &str) {
