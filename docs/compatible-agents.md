@@ -41,15 +41,24 @@ Watching requires shell integration that reports the running command. Terminal n
 
 ## Adding an agent
 
-An agent integration normally needs one registry entry, an exit fixture, and a row in the table above; the standalone app and VS Code share the recovery implementation.
+Add a registry entry, exit fixture, and table row. Both hosts share recovery.
 
 ### Add the definition and fixture
 
-1. Add an entry following `CodingAgent` in [the coding agent registry](../lib/src/lib/coding-agents.ts).
+1. Edit [the coding agent registry](../lib/src/lib/coding-agents.ts). For example, Copilot's definition is:
 
-2. Declare the executable names the agent actually installs and the resume option or subcommand it supports. The shared parser handles space/equals separators, terminal escapes, and command reconstruction. IDs must fit its alphanumeric, hyphen, and underscore grammar. If an agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first. Do not substitute a “latest conversation” command.
+   ```ts
+   {
+     name: 'GitHub Copilot',
+     commands: ['copilot'],
+     resume: '--resume',
+     watchByDefault: true,
+   }
+   ```
+
+2. Declare the installed executable names and resume option or subcommand. [Detection](#detection) owns parsing and ID rules. If the agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first; never substitute a “latest conversation” command.
 3. Add a sanitized exit excerpt to [the fixtures](../lib/src/lib/__fixtures__/coding-agents.ts), with the expected rebuilt command, agent version, and operating system. Replace personal paths, account information, and session IDs; preserve relevant wording and terminal escapes. Record real exit output rather than reconstructing a hint from documentation.
-4. Add the agent and its command forms to the supported-agents table. Set `watchByDefault` only after checking that the agent becomes quiet when it needs attention. The registry tests require fixture coverage, and the website tests compare this table with the registry.
+4. Add the agent and its command forms to the supported-agents table. Set `watchByDefault` only after checking that the agent becomes quiet when it needs attention. Registry tests pin fixture coverage; website tests pin the table.
 
 ### Verify the integration
 
