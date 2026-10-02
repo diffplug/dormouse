@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { flushWindowSession } from "dormouse-lib/lib/window-session-aggregator";
 import { countRunningSessions } from "dormouse-lib/lib/terminal-registry";
-import { dismissQuitConfirm, openQuitConfirm, showCloseFailure, showCloseCommitUncertain } from "./quit-confirm-store";
+import { openQuitConfirm } from "./quit-confirm-store";
 import { createTeardownFlow } from "./teardown-flow";
 import type { TauriAdapter } from "./tauri-adapter";
 import { hasPendingUpdate } from "./updater";
@@ -24,10 +23,8 @@ import { listenToWindow } from "./window-label";
  */
 
 const GRACEFUL_KILL_MS = 2000;
-/** PTY teardown after durable removal; native preparation has its own bound. */
+/** The whole teardown, past the human decision. Well under Rust's own budget. */
 const CLOSE_TEARDOWN_CEILING_MS = 8000;
-const RETAINED_WINDOW_DRAIN_MS = 2000;
-const RETAINED_WINDOW_WRITE_MS = 1000;
 
 let closeAdapter: TauriAdapter | null = null;
 
@@ -52,65 +49,15 @@ export function initWindowClose(adapter: TauriAdapter): void {
       ...(hasPendingUpdate() ? { discardsUpdate: true } : {}),
     });
   });
-  void listenToWindow<string>("dormouse://window-close-failed", (event) => {
-    void retainWindowAfterFailure(event.payload);
-  });
-}
-
-async function retainWindowAfterFailure(error: unknown): Promise<void> {
-  const reason = String(error);
-  if (reason.includes('close-commit-uncertain:')) {
-    // The native commit still owns its files: never release the arbiter or
-    // enable a resave/second close while a late unlink may finish.
-    showCloseCommitUncertain(`Closing could not finish safely: ${reason}`);
-    return;
-  }
-  // Retire the previous native handshake before offering a retry. A late
-  // cancel must never clear the retry's fresh token while its dialog is open.
-  try {
-    await invoke('window_close_cancel');
-  } catch (cancelError) {
-    showCloseCommitUncertain('The Window is retained, but its save refusal could not be released: ' + String(cancelError));
-    return;
-  }
-  // A refused in-flight write must settle before publishing the same value:
-  // the synchronous cache coalesces identical values while its save is pending.
-  // Wall dirty tracking already ended when it published into the aggregate;
-  // a heartbeat may never republish this retained Window without this retry.
-  try {
-    if (closeAdapter) await closeAdapter.drainSessionSaves(RETAINED_WINDOW_DRAIN_MS);
-    await withTimeout(
-      flushWindowSession(),
-      RETAINED_WINDOW_WRITE_MS,
-      '[window-close] retained Window write timed out; Window stays open',
-    );
-    closeAdapter?.retrySessionSave();
-    if (closeAdapter) await closeAdapter.drainSessionSaves(RETAINED_WINDOW_DRAIN_MS);
-  } catch (saveError) {
-    console.warn('[window-close] retained Window resave failed:', saveError);
-  }
-  flow.reset();
-  showCloseFailure({
-    reason: `Workspaces were retained. ${reason}`,
-    retry: () => {
-      dismissQuitConfirm('close-window');
-      void invoke('retry_window_close').catch(retainWindowAfterFailure);
-    },
-    stay: () => dismissQuitConfirm('close-window'),
-  });
 }
 
 async function runCloseTeardown(): Promise<void> {
   const adapter = closeAdapter;
   try {
-    // Cancellation can win only before native disk mutation. A failure retains
-    // this window and its live PTYs; the old best-effort path lost recovery.
-    await invoke("remove_window_session");
-  } catch (error) {
-    await retainWindowAfterFailure(error);
-    return;
-  }
-  try {
+    // Remove the snapshot BEFORE the kill, so an exit-triggered save cannot
+    // write it back: Rust refuses every later save for this label.
+    await invoke("remove_window_session").catch((err) =>
+      console.warn("[window-close] remove_window_session failed; proceeding", err));
     // No `ids`: Rust scopes the kill to this window's own PTYs, and a sibling's
     // terminals must never be reachable from here.
     if (adapter) {

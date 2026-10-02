@@ -1,6 +1,6 @@
 import { clearToolDirty, recordToolDirty } from 'dormouse-lib/lib/tool-dirty-store';
 import { UNSAVED_TOOL_MOVE_REFUSAL } from 'dormouse-lib/lib/tool-editor';
-import { dismissWorkspaceUi, setWorkspaceMoveError } from 'dormouse-lib/lib/workspace-ui-store';
+import { dismissWorkspaceUi } from 'dormouse-lib/lib/workspace-ui-store';
 import { restoreToolParams } from 'dormouse-lib/components/wall/tool-transfer';
 import { recordToolAnnounce } from 'dormouse-lib/lib/tool-announce-store';
 import { invoke } from "@tauri-apps/api/core";
@@ -511,7 +511,6 @@ async function adoptWorkspace(platform: PlatformAdapter, payload: MovePayload): 
       // new move here can fail on a Tool that is still starting.
       console.error("[workspace-move] adopt_done refused; unwinding the mount", err);
       discardArrival(payload);
-      settle("adopt_failed", id, reasonOf(err));
     }
   } catch (err) {
     console.error("[workspace-move] adoption failed; handing the Workspace back", err);
@@ -557,10 +556,6 @@ export function initWorkspaceMoves(platform: PlatformAdapter): void {
     "dormouse://workspace-arrival-failed",
     (event) => handleArrivalFailed(event.payload.workspaceId, event.payload.reason ?? "no reason given", event.payload.replayIds ?? []),
   );
-  void listenToWindow<{ workspaceId: WorkspaceId; reason: string }>(
-    "dormouse://workspace-arrival-retry",
-    (event) => setWorkspaceMoveError({ id: event.payload.workspaceId, reason: event.payload.reason }),
-  );
   // Immediately, and not only on the nudge: a Workspace dropped on this window
   // while it was still booting is already in the queue, and its `emit_to`
   // reached no listener.
@@ -601,7 +596,6 @@ export async function bootFromTearOut(platform: PlatformAdapter): Promise<WallBo
   } catch (err) {
     console.error("[workspace-move] torn-out adoption refused; starting fresh", err);
     discardArrival(first);
-    settle("adopt_failed", id, reasonOf(err));
     adopting.delete(id);
     return null;
   }

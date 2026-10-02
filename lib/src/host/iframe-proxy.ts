@@ -180,6 +180,7 @@ export async function createIframeProxyUrl(
   }
   grant.port = port;
   grant.proxyOrigin = `http://127.0.0.1:${port}`;
+  grant.lastUsed = Date.now();
   grants.set(port, grant);
   // A bind yields: other creations may have committed since the first sweep.
   // Sweep after insertion as well, so neither sequential nor concurrent calls

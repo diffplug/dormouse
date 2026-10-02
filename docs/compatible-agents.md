@@ -41,15 +41,24 @@ Watching requires shell integration that reports the running command. Terminal n
 
 ## Adding an agent
 
-An agent integration normally needs one registry entry, an exit fixture, and a row in the table above; the standalone app and VS Code share the recovery implementation.
+Add a registry entry, exit fixture, and table row. Both hosts share recovery.
 
 ### Add the definition and fixture
 
-1. Add an entry following `CodingAgent` in [the coding agent registry](../lib/src/lib/coding-agents.ts).
+1. Edit [the coding agent registry](../lib/src/lib/coding-agents.ts). For example, Copilot's definition is:
 
-2. Declare the executable names the agent actually installs and the resume option or subcommand it supports. The shared parser handles space/equals separators, terminal escapes, and command reconstruction. IDs must fit its alphanumeric, hyphen, and underscore grammar. If an agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first. Do not substitute a “latest conversation” command.
+   ```ts
+   {
+     name: 'GitHub Copilot',
+     commands: ['copilot'],
+     resume: '--resume',
+     watchByDefault: true,
+   }
+   ```
+
+2. Declare the installed executable names and resume option or subcommand. [Detection](#detection) owns parsing and ID rules. If the agent cannot identify the exact conversation on exit, discuss its capture mechanism in an issue first; never substitute a “latest conversation” command.
 3. Add a sanitized exit excerpt to [the fixtures](../lib/src/lib/__fixtures__/coding-agents.ts), with the expected rebuilt command, agent version, and operating system. Replace personal paths, account information, and session IDs; preserve relevant wording and terminal escapes. Record real exit output rather than reconstructing a hint from documentation.
-4. Add the agent and its command forms to the supported-agents table. Set `watchByDefault` only after checking that the agent becomes quiet when it needs attention. The registry tests require fixture coverage, and the website tests compare this table with the registry.
+4. Add the agent and its command forms to the supported-agents table. Set `watchByDefault` only after checking that the agent becomes quiet when it needs attention. Registry tests pin fixture coverage; website tests pin the table.
 
 ### Verify the integration
 
@@ -101,12 +110,12 @@ Source of truth: `CODING_AGENTS` in `lib/src/lib/coding-agents.ts`; `detectResum
 ### Recovery record
 
 - **Must keep one rebuilt invocation per Surface in a host-owned, single-use record outside the persisted Session.** The renderer save path never derives or writes it. (rationale)
-- **Must call `beginCapture` before capture can return early.** The first call per host process clears the previous record even if private-storage preparation failed; subsequent calls merge, preserving captures from other Windows. (rationale)
-- **Must persist every detection synchronously through `createRecoveryStore`**, through a host-selected `recovery.json`, an owner-only temporary file, and atomic rename. **Must prepare the exact host-owned directory before any record bytes and tighten an existing record before claiming it**, using owner-only modes on Unix and a protected current-user-only DACL on Windows. Failed preparation permits no record-byte read or write; capture still removes the stale record. **Must start preparation asynchronously at startup and await it only for cold-start claims.** Claims may retry failed preparation, but bounded capture never waits for or launches the permission helper. Concurrent claims share one destructive read; if capture starts during setup, the claim must neither return old commands nor remove the new record. Failed writes must not escape teardown. Without a directory, use memory-only storage and log once.
+- **Must call `beginCapture` before capture can return early.** The first call per host process clears the previous record; subsequent calls merge, preserving captures from other Windows. (rationale)
+- **Must persist every detection synchronously through `createRecoveryStore`**, using `recovery.json` in the host-selected directory, an owner-only temporary file, and atomic rename. A failed write must not throw through teardown. Without a directory the store is memory-only and logs that limitation once.
 - **Must read and unlink the durable record on the first claim**, including on parse failure; if unlink fails, ignore it. Discard records older than 7 days after unlinking. Within the process, each container claims only its saved pane ids, and each entry is handed out once. (rationale)
 - **Must deliver claimed commands out of band on boot through `PlatformAdapter.getRecoveryCommands()`**; adapters whose hosts capture nothing may omit it. Only cold restore consumes these commands for execution; live resume never executes them.
 
-Source of truth: `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `ensurePrivateDirectory` / `ensurePrivateFile` in `lib/src/host/private-path.ts`, pinned by `lib/src/host/private-path.test.ts` and `lib/src/host/recovery-store.test.ts`; `PlatformAdapter` in `lib/src/lib/platform/types.ts`.
+Source of truth: `createRecoveryStore` in `lib/src/host/recovery-store.ts`; `PlatformAdapter` in `lib/src/lib/platform/types.ts`; pinned by `lib/src/host/recovery-store.test.ts`.
 
 ### Cold restore
 

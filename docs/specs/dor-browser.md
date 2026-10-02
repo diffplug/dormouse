@@ -655,10 +655,9 @@ private per-process directory, is read into memory and deleted — read or not,
 failed or killed — and the directory is removed at shutdown** (rationale).
 **One capture per browser is in flight**: a viewer socket asking meanwhile joins
 it — never one from before the browser's close or relaunch — and an
-agent-browser capture's spawn is killed past 30s. **Must restrict the exact capture directory to its owner before returning a
-path**, with Unix modes or a protected current-user-only Windows DACL. Failed
-creation or permission setup fails the capture without publishing a path;
-**must attempt cleanup of a newly created directory**, and retry on the next capture. Successful setup is shared until removal. **Must prevent a removed setup from publishing a capture path or invalidating a newer setup.**
+agent-browser capture's spawn is killed past 30s. **Must use a per-process
+`mkdtemp` directory, mode `0700` on Unix, and retry failed creation.** Windows
+permission limits are `docs/specs/security-local.md` -> "Browser panes".
 
 Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
 `createBrowserHost`, `BrowserProvider`), `BROWSER_PROVIDERS` (`isSessionName`,
@@ -666,9 +665,8 @@ Source of truth: `lib/src/host/browser-host.ts` (`parseBrowserRequest`,
 `lib/src/lib/platform/browser-automation.ts`, `browserHandle` in
 `lib/src/components/wall/browser-automation.ts`,
 `createBrowserCaptures` in `lib/src/host/browser-capture.ts`,
-`privateCaptureDir` in `lib/src/host/private-capture-dir.ts`, pinned by
-`lib/src/host/private-capture-dir.test.ts`; `ensurePrivateDirectory` in
-`lib/src/host/private-path.ts`, `vscode-ext/src/agent-browser-host.ts`,
+`privateCaptureDir` in `lib/src/host/private-capture-dir.ts`,
+`vscode-ext/src/agent-browser-host.ts`,
 `vscode-ext/src/webview-html.ts`, `standalone/src/tauri-adapter.ts`,
 `standalone/src-tauri/src/lib.rs` (`browser_request`),
 `standalone/sidecar/main.js`.

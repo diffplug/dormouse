@@ -44,7 +44,7 @@ Source of truth: `fileViewerFormat` / `viewerTitle` in `dor-tools-builtin/src/fi
 
 **Must save only on Save or Cmd/Ctrl+S, to the opened canonical file.** Preserve UTF-8 BOM and the dominant line ending (mixed endings are normalized). Bound text to 8 MiB; reject invalid UTF-8. Atomically replace only after comparing the submitted revision with current disk bytes and file identity; a conflict or write failure keeps the edit dirty. New edits during a save remain dirty after that save succeeds. Reload asks before discarding edits and reads the current file at the authorized path, including atomic replacements.
 
-**Must preserve document permissions on replacement and stage draft bytes owner-only before writing.** An unconfirmed replacement retains its recovery files and reports their location. Windows stages the draft in an owner-only directory and keeps an original-file backup there with document permissions. A failure can mean partial replacement or a commit before its reply. (rationale)
+**Must preserve document permissions on replacement.** Drafts sit beside the document (POSIX `0600`, then the document's mode; Windows inherits the directory ACL). Windows replaces via one PowerShell `[IO.File]::Replace`, which backs up the original beside it. **Must keep the draft and backup when replacement is unconfirmed** and report their location: failure can mean partial replacement or a commit before its reply. (rationale)
 
 **Must report dirty state immediately to the containing iframe and in order through OSC 367** (`docs/specs/dor-tool.md` → Unsaved changes), and answer the host's iframe save channel (`docs/specs/dor-tool.md` → Closing unsaved Tools) with `connectToolFrame`.
 

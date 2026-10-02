@@ -89,7 +89,6 @@ import { disposeAllSessions, getOrCreateTerminal } from "dormouse-lib/lib/termin
 import { FakePtyAdapter } from "dormouse-lib/lib/platform/fake-adapter";
 import { createAlertEpisode } from "dormouse-lib/lib/alert-episode";
 import { clearTerminalActivity, getActivitySnapshot, setTerminalActivity } from "dormouse-lib/lib/session-activity-store";
-import { getWorkspaceUiSnapshot, resetWorkspaceUi } from 'dormouse-lib/lib/workspace-ui-store';
 
 const WORKSPACE_ID = "ws-moving";
 
@@ -235,19 +234,6 @@ const emit = async (event: string, data: unknown) => {
 };
 
 describe("the source half", () => {
-  it('keeps a failed durable handback pending while making its retry visible', async () => {
-    resetWorkspaceUi();
-    registerWallHandle(stubWallHandle(WORKSPACE_ID, { prepareWorkspaceTransfer: async () => prepared() }));
-    initWorkspaceMoves(fakePlatform());
-    const moved = transferWorkspaceTo(WORKSPACE_ID, 'ws-2');
-    await contentSent();
-    await emit('dormouse://workspace-arrival-retry', { workspaceId: WORKSPACE_ID, reason: 'Waiting for recovery write' });
-    expect(getWorkspaceUiSnapshot().moveError).toEqual({ id: WORKSPACE_ID, reason: 'Waiting for recovery write' });
-    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(true);
-    await emit('dormouse://workspace-arrival-failed', { workspaceId: WORKSPACE_ID, reason: 'returned', replayIds: [] });
-    await expect(moved).resolves.toEqual({ moved: false, reason: 'returned' });
-    expect(isWorkspaceTransferPending(WORKSPACE_ID)).toBe(false);
-  });
   it.each([true, false])("refuses dirty editors without explicit discard (existing window: %s)", async (existing) => {
     const prepare = vi.fn(async () => prepared());
     registerWallHandle(stubWallHandle(WORKSPACE_ID, {
@@ -646,23 +632,6 @@ describe("the source half", () => {
 });
 
 describe("the target half", () => {
-  it('requests handback promptly when durable adoption fails', async () => {
-    const platform = fakePlatform();
-    const kill = vi.spyOn(platform, 'killPty');
-    const host = mocks.invoke.getMockImplementation()!;
-    mocks.invoke.mockImplementation(async (command, args) => {
-      if (command === 'adopt_done') throw new Error('journal unavailable');
-      return host(command, args);
-    });
-    arrivals = [payload()];
-    initWorkspaceMoves(platform);
-    await settle();
-    await settle();
-    expect(mocks.invoke).toHaveBeenCalledWith('adopt_failed', { workspaceId: WORKSPACE_ID, reason: 'journal unavailable' });
-    expect(arrivals).toHaveLength(0);
-    expect(getWorkspacesSnapshot().workspaces.map(workspace => workspace.id)).not.toContain(WORKSPACE_ID);
-    expect(kill).not.toHaveBeenCalled();
-  });
 
   // The Sessions' alert state never left the sidecar's one manager, which
   // re-sends it to whichever window collects them. A spawn starts it over and a
@@ -778,11 +747,7 @@ describe("the target half", () => {
     expect(prepare).not.toHaveBeenCalled();
     expect(getTerminalInstance("pane-a")).toBeNull();
     expect(killPty).not.toHaveBeenCalled();
-    // A refused settled write explicitly requests durable handback. The
-    // watchdog may already have returned it; that stale request is harmless.
-    expect(mocks.invoke).toHaveBeenCalledWith("adopt_failed", {
-      workspaceId: WORKSPACE_ID, reason: `no arrival of '${WORKSPACE_ID}'`,
-    });
+    expect(mocks.invoke).not.toHaveBeenCalledWith("adopt_failed", expect.anything());
   });
 
   it("discards this window's copy of the alert state when adopt_done is refused before the Wall mounts", async () => {

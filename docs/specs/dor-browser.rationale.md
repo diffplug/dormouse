@@ -156,7 +156,11 @@ A post-open blank-tab sweep can become such a query when a later relaunch, expli
 
 **Why one lifecycle for both providers.** The two hosts carried the same policies twice — headed tracking, relaunch generations, the blank-tab sweep, capture joins, the editing scripts — and the copies drifted: an empty copy clobbered the clipboard in one, the capture directory lacked its `chmod` in the other, and only Playwright serialized its closes with its relaunches, so the webview kept its own record of closes in flight for agent-browser (review of the browser stack, 2026-09).
 
-**Why the capture directory is private.** The frame is a picture of the user's authenticated browser, written by an external process under the ambient umask. Unguessability prevents pre-created filenames, while owner-only directory permissions prevent another local account reading a capture before its cleanup. A deliberately shared Windows temp parent reproduced an inherited Everyone read grant on both the old capture directory and its screenshot (2026-10-01); Unix mode bits alone do not remove Windows grants. The new setup rejects failures before returning any capture path and caches only success. Asynchronous permission setup may finish after removal begins; its generation fence prevents a discarded path being returned, and its promise-identity check keeps an old failure from evicting replacement setup (reviewed 2026-10-02).
+**Why captures use a private directory.** External screenshot writers use the
+ambient umask; a random directory prevents pre-created names and Unix `0700`
+blocks other accounts. A shared Windows temp parent reproduced inherited
+Everyone read grants on the directory and screenshot (2026-10-01); Unix modes
+do not remove those grants. Windows therefore relies on the temp parent's ACL.
 
 **Why a named launch into a live browser navigates.** A Tool re-announcing — its dev server moved — sends a named launch into the session it already has. Relaunching it stopped the daemon (`close`, then SIGTERM and SIGKILL), so an agent driving that Tool lost its tabs, page state and CDP clients on every move, and a `dor agent-browser` command in flight failed or started a daemon mid-relaunch (review of #777, 2026-09). Only a change of mode needs a new browser.
 

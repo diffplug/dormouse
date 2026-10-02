@@ -1,8 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { flushWindowSession, installWindowSessionWriter, resetWindowSessionAggregator, seedWindowSession } from "dormouse-lib/lib/window-session-aggregator";
-import { withTimeout } from "./with-timeout";
-import { TauriSessionStore } from "./tauri-session-store";
-import type { PersistedWindow } from "dormouse-lib/lib/session-types";
 import type { TauriAdapter } from "./tauri-adapter";
 
 /**
@@ -16,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(async (_cmd: string) => undefined as unknown),
   listen: vi.fn(),
   countRunningSessions: vi.fn(() => 0),
-  getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys", nameIsAuto: false }], activeId: "w1" })),
+  getWorkspacesSnapshot: vi.fn(() => ({ workspaces: [{ id: "w1", name: "Deploys" }], activeId: "w1" })),
   hasPendingUpdate: vi.fn(() => false),
 }));
 
@@ -41,9 +37,6 @@ import {
   cancelQuit as dismissDialog,
   getQuitConfirmIntent,
   getQuitConfirmPhase,
-  getCloseFailure,
-  getQuitProgressDetail,
-  confirmQuit,
   _resetQuitConfirmForTesting,
 } from "./quit-confirm-store";
 
@@ -55,8 +48,6 @@ const commands = () => mocks.invoke.mock.calls.map((call) => call[0]);
 function fakeAdapter(order: string[] = []): TauriAdapter {
   return {
     gracefulKillPtys: vi.fn(async () => void order.push("gracefulKill")),
-    retrySessionSave: vi.fn(),
-    drainSessionSaves: vi.fn(async () => void order.push('drain')),
     captureAgentRecovery: vi.fn(async () => void order.push("captureRecovery")),
   } as unknown as TauriAdapter;
 }
@@ -64,7 +55,6 @@ function fakeAdapter(order: string[] = []): TauriAdapter {
 describe("per-window close", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetWindowSessionAggregator();
     _resetWindowCloseForTesting();
     _resetQuitConfirmForTesting();
     listeners.clear();
@@ -77,7 +67,7 @@ describe("per-window close", () => {
     mocks.hasPendingUpdate.mockReturnValue(false);
   });
 
-  afterEach(() => { _resetWindowCloseForTesting(); resetWindowSessionAggregator(); });
+  afterEach(() => _resetWindowCloseForTesting());
 
   it("acks, removes the snapshot, kills, and proceeds — with no recovery capture", async () => {
     const order: string[] = [];
@@ -175,188 +165,5 @@ describe("per-window close", () => {
     await settle();
 
     expect(commands()).toContain("close_window");
-  });
-
-  it("retains live PTYs after failed snapshot removal and permits a fresh retry", async () => {
-    let refusals = 1;
-    mocks.invoke.mockImplementation(async (cmd) => {
-      if (cmd === 'remove_window_session' && refusals-- > 0) throw new Error('disk full');
-      if (cmd === 'retry_window_close') closeRequested();
-    });
-    const adapter = fakeAdapter();
-    initWindowClose(adapter);
-    closeRequested();
-    await settle();
-    expect(getQuitConfirmPhase()).toBe('close-failed');
-    expect(getCloseFailure()?.reason).toContain('disk full');
-    expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
-    expect(commands()).not.toContain('close_window');
-    expect(commands()).toContain('window_close_cancel');
-    getCloseFailure()?.retry();
-    await settle();
-    expect(commands().filter((cmd) => cmd === 'remove_window_session')).toHaveLength(2);
-    expect(commands()).toContain('retry_window_close');
-    expect(adapter.gracefulKillPtys).toHaveBeenCalledOnce();
-    expect(commands()).toContain('close_window');
-  });
-
-  it("drains a refused save and republishes unchanged aggregate state after close rollback", async () => {
-    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
-    try {
-      let rejectRefused!: (error: Error) => void;
-      let disk = 'previous';
-      let saveCalls = 0;
-      const store = new TauriSessionStore(async (value) => {
-        if (++saveCalls === 1) await new Promise<void>((_, reject) => { rejectRefused = reject; });
-        disk = value;
-      });
-      store.hydrate(disk);
-      const latest: PersistedWindow = { version: 1, activeWorkspaceId: 'w1', workspaces: [
-        { id: 'w1', name: 'Deploys', nameIsAuto: false, session: { version: 3, panes: [] } },
-      ] };
-      seedWindowSession(latest);
-      installWindowSessionWriter((snapshot) => store.setItem('state', JSON.stringify(snapshot)));
-      await flushWindowSession(); // the native close fence has refused this pending save
-      const order: string[] = [];
-      mocks.invoke.mockImplementation(async (cmd) => {
-        order.push(cmd);
-        if (cmd === 'remove_window_session') throw new Error('disk full');
-      });
-      const adapter = fakeAdapter(order);
-      adapter.drainSessionSaves = vi.fn(async () => { order.push('drain'); await store.drain(); });
-      adapter.retrySessionSave = () => store.retryLatest();
-      initWindowClose(adapter);
-      closeRequested();
-      await settle();
-      expect(order).toEqual(['window_close_ack', 'remove_window_session', 'window_close_cancel', 'drain']);
-      expect(saveCalls).toBe(1);
-      expect(getQuitConfirmPhase()).toBe('quitting');
-      rejectRefused(new Error('window close is holding its snapshot; no session was saved'));
-      await settle();
-      expect(saveCalls).toBe(2);
-      expect(JSON.parse(disk)).toMatchObject(latest);
-      expect(adapter.drainSessionSaves).toHaveBeenCalledTimes(2);
-      expect(getQuitConfirmPhase()).toBe('close-failed');
-      expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
-    } finally { errorLog.mockRestore(); }
-  });
-
-  it("retries after a refused save outlives both bounded recovery drains", async () => {
-    vi.useFakeTimers();
-    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      let rejectFirst!: (error: Error) => void;
-      let disk = 'previous';
-      let saves = 0;
-      const store = new TauriSessionStore(async (value) => {
-        if (++saves === 1) await new Promise<void>((_, reject) => { rejectFirst = reject; });
-        disk = value;
-      });
-      store.hydrate(disk);
-      seedWindowSession({ version: 1, activeWorkspaceId: 'w1', workspaces: [
-        { id: 'w1', name: 'Deploys', nameIsAuto: false, session: { version: 3, panes: [] } },
-      ] });
-      installWindowSessionWriter((snapshot) => store.setItem('', JSON.stringify(snapshot)));
-      await flushWindowSession();
-      mocks.invoke.mockImplementation(async (cmd) => {
-        if (cmd === 'remove_window_session') throw new Error('disk full');
-      });
-      const adapter = fakeAdapter();
-      adapter.drainSessionSaves = (ms) => withTimeout(store.drain(), ms, 'test drain timeout');
-      adapter.retrySessionSave = () => store.retryLatest();
-      initWindowClose(adapter);
-      closeRequested();
-      await vi.advanceTimersByTimeAsync(4001);
-      expect(getQuitConfirmPhase()).toBe('close-failed');
-      expect(saves).toBe(1);
-      expect(disk).toBe('previous');
-      rejectFirst(new Error('close refused the earlier write'));
-      await vi.advanceTimersByTimeAsync(0);
-      expect(saves).toBe(2);
-      expect(JSON.parse(disk).workspaces[0].name).toBe('Deploys');
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(saves).toBe(2); // one remembered retry, no loop
-    } finally { errorLog.mockRestore(); warn.mockRestore(); vi.useRealTimers(); }
-  });
-
-  it("keeps the flow guarded if native cancellation does not confirm release", async () => {
-    mocks.invoke.mockImplementation(async (cmd) => {
-      if (cmd === 'remove_window_session') throw new Error('disk full');
-      if (cmd === 'window_close_cancel') throw new Error('native bridge unavailable');
-    });
-    const adapter = fakeAdapter();
-    initWindowClose(adapter);
-    closeRequested();
-    await settle();
-    expect(getQuitConfirmPhase()).toBe('quitting');
-    expect(getQuitProgressDetail()).toContain('save refusal could not be released');
-    expect(getCloseFailure()).toBeNull();
-    expect(adapter.drainSessionSaves).not.toHaveBeenCalled();
-    closeRequested();
-    await settle();
-    expect(commands().filter((cmd) => cmd === 'remove_window_session')).toHaveLength(1);
-  });
-
-  it("bounds the aggregate resave without discarding retained live PTYs", async () => {
-    vi.useFakeTimers();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      installWindowSessionWriter(() => new Promise<void>(() => {}));
-      mocks.invoke.mockImplementation(async (cmd) => {
-        if (cmd === 'remove_window_session') throw new Error('disk full');
-      });
-      const adapter = fakeAdapter();
-      initWindowClose(adapter);
-      closeRequested();
-      await vi.advanceTimersByTimeAsync(1001);
-      expect(getQuitConfirmPhase()).toBe('close-failed');
-      expect(adapter.drainSessionSaves).toHaveBeenCalledTimes(2);
-      expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
-      expect(commands()).not.toContain('close_window');
-    } finally { warn.mockRestore(); vi.useRealTimers(); }
-  });
-
-  it("leaves an entered uncertain commit guarded without offering a duplicate close", async () => {
-    mocks.invoke.mockImplementation(async (cmd) => {
-      if (cmd === 'remove_window_session') throw new Error('close-commit-uncertain: rollback failed');
-    });
-    const adapter = fakeAdapter();
-    initWindowClose(adapter);
-    closeRequested();
-    await settle();
-    expect(getQuitConfirmPhase()).toBe('quitting');
-    expect(getQuitProgressDetail()).toContain('rollback failed');
-    expect(getCloseFailure()).toBeNull();
-    closeRequested();
-    await settle();
-    expect(commands().filter((cmd) => cmd === 'remove_window_session')).toHaveLength(1);
-    expect(commands()).not.toContain('window_close_cancel');
-    expect(adapter.drainSessionSaves).not.toHaveBeenCalled();
-    expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
-  });
-
-  it("does not time out a human confirmation or an entered native commit", async () => {
-    vi.useFakeTimers();
-    try {
-      mocks.countRunningSessions.mockReturnValue(1);
-      let resolveRemoval!: () => void;
-      mocks.invoke.mockImplementation((cmd) => cmd === 'remove_window_session'
-        ? new Promise<void>((resolve) => { resolveRemoval = resolve; }) : Promise.resolve());
-      const adapter = fakeAdapter();
-      initWindowClose(adapter);
-      closeRequested();
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(getQuitConfirmPhase()).toBe('open');
-      expect(commands()).not.toContain('remove_window_session');
-      confirmQuit();
-      await vi.advanceTimersByTimeAsync(60_000);
-      expect(getQuitConfirmPhase()).toBe('quitting');
-      expect(adapter.gracefulKillPtys).not.toHaveBeenCalled();
-      expect(commands()).not.toContain('close_window');
-      resolveRemoval();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(adapter.gracefulKillPtys).toHaveBeenCalledOnce();
-    } finally { vi.useRealTimers(); }
   });
 });

@@ -14,7 +14,6 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { noCommands, silent, type RecoveryLog } from './recovery-capture';
-import { ensurePrivateDirectory, ensurePrivateFile } from './private-path';
 
 const FILE_NAME = 'recovery.json';
 
@@ -29,8 +28,6 @@ interface PersistedRecovery {
 }
 
 export interface RecoveryStore {
-  /** Startup privacy setup has finished; failures are logged, never rejected here. */
-  readonly ready: Promise<void>;
   /**
    * A teardown is about to capture. The FIRST call of a process replaces
    * whatever the last run left; later calls merge, because a Window captures
@@ -40,7 +37,7 @@ export interface RecoveryStore {
   /** Merge one detected invocation and persist immediately. */
   record(id: string, command: string): void;
   /** Claim the commands belonging to `paneIds`, removing each as it is handed out. */
-  take(paneIds: Iterable<string>): Promise<Record<string, string>>;
+  take(paneIds: Iterable<string>): Record<string, string>;
   /** Whether a write survives this process. `false` is the no-directory store. */
   readonly persistent: boolean;
 }
@@ -61,35 +58,9 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
 
   // What this process has captured. Also the memory-only store's whole content.
   let captured: Record<string, string> = noCommands();
-  let captureStarted = false;
   let clearedThisProcess = false;
   // What is left of the record on disk, once read. `null` until the first `take`.
   let unclaimed: Record<string, string> | null = null;
-  let directoryPrepared = false;
-  let preparation: Promise<void> | null = null;
-  const prepareDirectory = (): Promise<void> => {
-    if (!dir || directoryPrepared) return Promise.resolve();
-    preparation ??= ensurePrivateDirectory(dir).then(() => { directoryPrepared = true; })
-      .finally(() => { preparation = null; });
-    return preparation;
-  };
-  // Begin startup work immediately without blocking extension activation or sidecar I/O.
-  const ready = prepareDirectory().catch((err) => {
-    log.error(`[recovery] private directory unavailable: ${String(err)}`);
-  });
-  let claim: Promise<void> | null = null;
-  const requirePrivateDirectory = (): void => {
-    // Never launch a permission helper inside the bounded teardown capture.
-    // Cold-start claims can retry a failed startup preparation.
-    if (dir && !directoryPrepared) throw new Error('Recovery directory is not private');
-  };
-  const clearPreviousRecord = (): void => {
-    if (clearedThisProcess) return;
-    // Unlink exposes no record bytes. Even failed preparation must not preserve
-    // a stale invocation across a teardown that captured nothing.
-    if (file) fs.rmSync(file, { force: true });
-    clearedThisProcess = true;
-  };
 
   const persist = (): void => {
     if (!file) return;
@@ -99,8 +70,7 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
     // record. The `finally` is what keeps a failed write from leaving one behind.
     const tmp = `${file}.${randomUUID()}.tmp`;
     try {
-      requirePrivateDirectory();
-      if (captureStarted) clearPreviousRecord();
+      fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
       // Mode on create, so the bytes are never briefly world-readable; the rename
       // preserves it.
       fs.writeFileSync(tmp, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 });
@@ -114,22 +84,20 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
 
   return {
     persistent: file !== null,
-    ready,
 
     beginCapture(): void {
+      if (clearedThisProcess) return;
+      clearedThisProcess = true;
       // Clear before anything can return early. A record is only ever consumed by
       // a cold start that actually restores, so a teardown that captures nothing
       // must not leave the last one sitting there — otherwise a run that restores
       // nothing carries the record forward and a much later restore auto-runs a
       // week-old invocation unprompted. `record` re-creates it the moment
       // anything is detected.
-      if (!captureStarted) {
-        captureStarted = true;
-        captured = noCommands();
-        if (file) unclaimed = noCommands();
-      }
+      captured = noCommands();
+      if (!file) return;
       try {
-        clearPreviousRecord();
+        fs.rmSync(file, { force: true });
       } catch (err) {
         log.error(`[recovery] could not clear the previous record: ${String(err)}`);
       }
@@ -137,36 +105,25 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
 
     record(id: string, command: string): void {
       captured[id] = command;
-      // Persist each detection: the capture deadline can end the next scan.
+      // Persist on every change rather than once at the end. The write is a few
+      // hundred bytes and costs well under a millisecond, and the shutdown budget
+      // can end the capture at any instant.
       persist();
     },
 
-    async take(paneIds: Iterable<string>): Promise<Record<string, string>> {
-      if (unclaimed === null) {
-        claim ??= (async () => {
-          await ready;
-          await prepareDirectory();
-          // Teardown can start while permission setup is pending. Never read
-          // this activation's newly captured record as a cold-start invocation.
-          unclaimed = file ? (captureStarted ? noCommands() : await readAndClearRecord(file, log, () => !captureStarted)) : captured;
-        })().finally(() => { claim = null; });
-        try { await claim; } catch (err) {
-          log.error(`[recovery] private record unavailable: ${String(err)}`);
-          return noCommands();
-        }
-      }
-      const remaining = unclaimed ?? noCommands();
+    take(paneIds: Iterable<string>): Record<string, string> {
+      unclaimed ??= file ? readAndClearRecord(file, log) : captured;
       const claimed: Record<string, string> = noCommands();
       for (const id of paneIds) {
-        const command = remaining[id];
+        const command = unclaimed[id];
         if (command === undefined) continue;
         claimed[id] = command;
         // Entries leave the map as they are claimed, so no id is ever handed out
         // twice — a second container claiming its share sees only the remainder.
-        delete remaining[id];
+        delete unclaimed[id];
       }
       log.info(`[recovery] handing ${Object.keys(claimed).length} command(s) to a cold restore`
-        + ` (${Object.keys(remaining).length} unclaimed)`);
+        + ` (${Object.keys(unclaimed).length} unclaimed)`);
       return claimed;
     },
   };
@@ -177,10 +134,8 @@ export function createRecoveryStore(dir?: string, opts: { log?: RecoveryLog } = 
  * the durable copy is gone before anything can act on it and a failed start
  * cannot replay it.
  */
-async function readAndClearRecord(file: string, log: RecoveryLog, mayClaim: () => boolean): Promise<Record<string, string>> {
+function readAndClearRecord(file: string, log: RecoveryLog): Record<string, string> {
   if (!fs.existsSync(file)) return noCommands();
-  await ensurePrivateFile(file);
-  if (!mayClaim()) return noCommands();
 
   let recovery: PersistedRecovery | null = null;
   try {

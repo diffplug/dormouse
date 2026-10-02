@@ -138,9 +138,9 @@ needs no host-side per-panel store.
 
 #### Capturing agent recovery
 
-**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture. **Must start private recovery-storage preparation asynchronously at activation.** Cold-start webviews await claims; bounded teardown never waits for or launches permission setup. Shared record behavior follows `docs/compatible-agents.md` → Recovery record.
+**Must offer every live extension-host PTY to shared capture**, across the view and editor panels. **Must store the record under `storageUri`, falling back to `globalStorageUri`; never `workspaceState`** (rationale). If neither directory exists, skip capture. Shared behavior follows `docs/compatible-agents.md`.
 
-Source of truth: `prepareRecoveryStorage` / `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `interrupt` in `vscode-ext/src/pty-manager.ts`.
+Source of truth: `captureAgentRecoveryCommands` / `takeRecoveryCommands` in `vscode-ext/src/session-state.ts`; `interrupt` in `vscode-ext/src/pty-manager.ts`.
 
 ### Theme integration
 

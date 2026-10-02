@@ -43,6 +43,17 @@ describe('FrameDecoder', () => {
     expect(new FrameDecoder(cap - 1).push(encoded)).toEqual([]);
   });
 
+  it('counts UTF-8 bytes across a frame delivered one character at a time', () => {
+    const frame = { kind: 'data', ptyId: 'p', data: '\u00e9'.repeat(20) } as const;
+    const encoded = encodeFrame(frame);
+    const cap = Buffer.byteLength(encoded.slice(0, -1), 'utf8');
+    const trickle = (decoder: FrameDecoder) => [...encoded].flatMap((ch) => decoder.push(ch));
+    expect(trickle(new FrameDecoder(cap))).toEqual([frame]);
+    const over = new FrameDecoder(cap - 1);
+    expect(trickle(over)).toEqual([]);
+    expect(over.push(encodeFrame({ kind: 'notify' }))).toEqual([{ kind: 'notify' }]);
+  });
+
   it('reads one frame per line', () => {
     const decoder = new FrameDecoder();
     const frames = decoder.push(
