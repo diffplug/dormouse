@@ -65,9 +65,6 @@ Cargo tests run in separate CI jobs, outside root `pnpm test`.
 
 ## What is not defended
 
-Stated so the audit does not rediscover them and a reader deciding whether to
-run this knows what they are taking on.
-
 - **A process running as you.** `dor`, its socket, and every file mode bound
   other local accounts, never a program already running under your own account;
   an agent holding `dor` has exactly the power of the person at the keyboard
