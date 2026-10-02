@@ -74,7 +74,7 @@ describe('handleWorkspaceShortcuts', () => {
     }
     expect(getWorkspacesSnapshot()).toBe(before);
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
-    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
   });
 
   it.each(['active', 'inactive'])('renames the selected %s Workspace without activating it', target => {

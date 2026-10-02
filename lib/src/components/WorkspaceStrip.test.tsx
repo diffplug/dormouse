@@ -8,7 +8,7 @@ import { WorkspaceStrip } from './WorkspaceStrip';
 import { chromeKeyboardHeld, resetChromeKeyboardLeases } from './wall/chrome-keyboard-lease';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall/wall-handles';
 import { ensureResizeObserver } from './wall/wall-test-utils';
-import { requestWorkspaceClose, requestWorkspaceRename } from './wall/workspace-lifecycle';
+import { requestWorkspaceClose, requestWorkspaceRename, workspaceCloseConfirmation } from './wall/workspace-lifecycle';
 import { resetWorkspaceSurfaces, setWorkspaceSurfaces } from '../lib/workspace-surfaces';
 import { clearTerminalActivity, setTerminalActivity } from '../lib/terminal-registry';
 import { createAlertEpisode } from '../lib/alert-episode';
@@ -18,8 +18,7 @@ import {
   getWorkspaceUiSnapshot,
   dismissWorkspaceUi,
   resetWorkspaceUi,
-  setPendingWorkspaceClose,
-  setPendingWorkspaceMove,
+  requestConfirmation,
   setWorkspaceMoveError,
 } from '../lib/workspace-ui-store';
 import {
@@ -525,8 +524,7 @@ describe('WorkspaceStrip', () => {
     await render();
     await act(async () => { requestWorkspaceRename(first); });
     await act(async () => {
-      if (kind === 'close') setPendingWorkspaceClose({ id: 'ws-2', char: 'q' });
-      else setPendingWorkspaceMove({ id: 'ws-2', char: 'q', iframeCount: 1, proceed });
+      requestConfirmation(kind === 'close' ? workspaceCloseConfirmation('ws-2', 'q') : { id: 'ws-2', char: 'q', answer: ok => { if (ok) void proceed(); } });
     });
     const input = container.querySelector<HTMLInputElement>(`[data-workspace-rename-for="${first}"]`)!;
     expect(document.body.querySelector('#kill-confirm-title')).toBeNull();
@@ -540,7 +538,7 @@ describe('WorkspaceStrip', () => {
     expect(proceed).toHaveBeenCalledOnce();
   });
 
-  it('keeps the move gate behind a close confirmation, and ignores modifiers and chords', async () => {
+  it('answers the pending confirmation no when a newer one is raised, and ignores modifiers and chords', async () => {
     const first = getWorkspacesSnapshot().workspaces[0].id;
     await act(async () => { createWorkspace({ id: 'ws-2' }); });
     stubHandle(first);
@@ -548,7 +546,8 @@ describe('WorkspaceStrip', () => {
     stubHandle('ws-2', { closeAll: closed });
     await render();
     const proceed = vi.fn();
-    await act(async () => { setPendingWorkspaceMove({ id: first, char: 'k', iframeCount: 1, proceed }); });
+    const move = vi.fn((ok: boolean) => { if (ok) proceed(); });
+    await act(async () => { requestConfirmation({ id: first, char: 'k', title: 'Move and lose page state?', answer: move }); });
     expect(document.body.querySelector('#kill-confirm-title')).not.toBeNull();
 
     // A bare modifier or a chord is never an answer, even on the gate's letter.
@@ -559,27 +558,22 @@ describe('WorkspaceStrip', () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }));
     });
-    expect(proceed).not.toHaveBeenCalled();
-    expect(getWorkspaceUiSnapshot().pendingMove).not.toBeNull();
+    expect(move).not.toHaveBeenCalled();
+    expect(getWorkspaceUiSnapshot().confirmation).not.toBeNull();
 
-    // A close raised over it shows its own letter; the same letter typed at it
-    // closes and must not also move, however the two were minted.
-    await act(async () => { setPendingWorkspaceClose({ id: 'ws-2', char: 'k' }); });
+    // A close raised over it answers the move no; the same letter typed at the
+    // close closes and must not also move, however the two were minted.
+    await act(async () => { requestConfirmation(workspaceCloseConfirmation('ws-2', 'k')); });
+    expect(move).toHaveBeenCalledExactlyOnceWith(false);
+    expect(document.body.querySelector('#kill-confirm-title')?.textContent).toBe('Confirm kill workspace');
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }));
     });
     await act(async () => { await Promise.resolve(); });
     expect(closed).toHaveBeenCalledTimes(1);
     expect(proceed).not.toHaveBeenCalled();
-    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
-    expect(getWorkspaceUiSnapshot().pendingMove).not.toBeNull();
-
-    // With the close resolved the gate is armed again, and its letter moves.
-    await act(async () => {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', bubbles: true }));
-    });
-    expect(proceed).toHaveBeenCalledTimes(1);
-    expect(getWorkspaceUiSnapshot().pendingMove).toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    expect(document.body.querySelector('#kill-confirm-title')).toBeNull();
   });
 
   it('releases the rename lease when the tab being renamed is middle-clicked closed', async () => {
@@ -637,13 +631,13 @@ describe('WorkspaceStrip', () => {
     const closeAll = vi.fn(async () => null);
     stubHandle('ws-2', { hasTouchedSurfaces: () => true, closeAll });
     await render();
-    await act(async () => { setPendingWorkspaceClose({ id: 'ws-2', char: 'q' }); });
+    await act(async () => { requestConfirmation(workspaceCloseConfirmation('ws-2', 'q')); });
     expect(document.body.querySelector('#kill-confirm-title')?.textContent).toBe('Confirm kill workspace');
     expect(chromeKeyboardHeld()).toBe(true);
     setWorkspaceTransferPending('ws-2', true);
     await act(async () => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'q', bubbles: true })); });
     expect(closeAll).not.toHaveBeenCalled();
-    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('ws-2');
     // A failed transfer leaves this prompt usable; successful commit dismisses it.
     setWorkspaceTransferPending('ws-2', false);
     await act(async () => { dismissWorkspaceUi('ws-2'); });

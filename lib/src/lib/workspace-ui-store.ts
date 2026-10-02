@@ -1,5 +1,20 @@
 import type { WorkspaceId } from './session-types';
 
+/** A typed-letter question about one Workspace: its close, a cross-Window move
+ *  losing iframe page state, or a Surface move refreshing an iframe. `answer`
+ *  runs once, after the slot has cleared. */
+export interface WorkspaceConfirmation {
+  id: WorkspaceId;
+  /** Minted once, so a re-render cannot change the letter on screen. */
+  char: string;
+  title?: string;
+  detail?: string;
+  cancelHint?: string;
+  /** False ignores the key, leaving the question up. */
+  canConfirm?: () => boolean;
+  answer: (accepted: boolean) => void;
+}
+
 /**
  * The Workspace strip's transient UI states, held outside it because the
  * Workspace verbs open them from outside any component (`docs/specs/layout.md`
@@ -9,24 +24,17 @@ import type { WorkspaceId } from './session-types';
 export interface WorkspaceUiState {
   /** The Workspace whose inline rename editor is open. */
   renamingId: WorkspaceId | null;
-  /** The Workspace awaiting its typed close confirmation, and the letter that
-   *  accepts it (minted once, so a re-render cannot change the letter on screen). */
-  pendingClose: { id: WorkspaceId; char: string } | null;
+  /** The one pending confirmation; a newer one answers it no
+   *  (`docs/specs/layout.md` → "Workspace lifecycle"). */
+  confirmation: WorkspaceConfirmation | null;
   /** A refused move stays visible until dismissed or retried. */
   moveError: { id: WorkspaceId; reason: string } | null;
-  /** A Surface move between Workspaces awaiting its typed iframe-refresh
-   *  confirmation; `answer` settles the move
-   *  (`docs/specs/layout.md` → "Moving Surfaces between Workspaces"). */
-  pendingSurfaceMove: { id: WorkspaceId; char: string; answer: (accepted: boolean) => void } | null;
-  /** A move between Windows awaiting its typed confirmation, because it would
-   *  destroy the page state of `iframeCount` iframe Surfaces; `proceed` runs the
-   *  move (`docs/specs/layout.md` → "Workspaces"). */
-  pendingMove: { id: WorkspaceId; char: string; iframeCount: number; proceed: () => void } | null;
 }
 
-const EMPTY: WorkspaceUiState = { renamingId: null, pendingClose: null, pendingMove: null, pendingSurfaceMove: null, moveError: null };
+const EMPTY: WorkspaceUiState = { renamingId: null, confirmation: null, moveError: null };
 
 let state: WorkspaceUiState = EMPTY;
+let confirmationGeneration = 0;
 const listeners = new Set<() => void>();
 
 function emit(next: WorkspaceUiState): void {
@@ -51,18 +59,33 @@ export function setRenamingWorkspace(id: WorkspaceId | null): void {
   emit({ ...state, renamingId: id });
 }
 
-export function setPendingWorkspaceClose(pending: WorkspaceUiState['pendingClose']): void {
-  if (state.pendingClose?.id === pending?.id && state.pendingClose?.char === pending?.char) return;
-  emit({ ...state, pendingClose: pending });
+/** Ask `next`, first answering any pending confirmation no. */
+export function requestConfirmation(next: WorkspaceConfirmation): void {
+  confirmationGeneration++;
+  const previous = state.confirmation;
+  state = { ...state, confirmation: null };
+  previous?.answer(false);
+  emit({ ...state, confirmation: next });
 }
 
-export function setPendingWorkspaceMove(pending: WorkspaceUiState['pendingMove']): void {
-  if (state.pendingMove === pending) return;
-  emit({ ...state, pendingMove: pending });
+/** Close and move verbs call this as they start. Answer the pending question no;
+ *  the returned guard prevents asynchronous preparation from raising an older
+ *  question or acting after a newer verb starts, even when no question was up. */
+export function cancelPendingConfirmation(): () => boolean {
+  const generation = ++confirmationGeneration;
+  const previous = state.confirmation;
+  if (previous) {
+    emit({ ...state, confirmation: null });
+    previous.answer(false);
+  }
+  return () => generation === confirmationGeneration;
 }
 
-export function setPendingSurfaceMove(pending: WorkspaceUiState['pendingSurfaceMove']): void {
-  emit({ ...state, pendingSurfaceMove: pending });
+/** Answer `confirmation` if it is still the pending one; a stale answer is ignored. */
+export function settleConfirmation(confirmation: WorkspaceConfirmation, accepted: boolean): void {
+  if (state.confirmation !== confirmation) return;
+  emit({ ...state, confirmation: null });
+  confirmation.answer(accepted);
 }
 
 export function setWorkspaceMoveError(error: WorkspaceUiState['moveError']): void {
@@ -72,21 +95,21 @@ export function setWorkspaceMoveError(error: WorkspaceUiState['moveError']): voi
 /** Clear every transient Workspace UI state in one notification: the host's
  *  teardown dialog taking the window, and tests. */
 export function resetWorkspaceUi(): void {
+  confirmationGeneration++;
   if (state === EMPTY) return;
-  state.pendingSurfaceMove?.answer(false);
+  const { confirmation } = state;
   emit(EMPTY);
+  confirmation?.answer(false);
 }
 
 /** Forget only the departing Workspace's chrome, preserving sibling dialogs. */
 export function dismissWorkspaceUi(id: WorkspaceId): void {
-  const { renamingId, pendingClose, pendingMove, pendingSurfaceMove, moveError } = state;
-  if (renamingId !== id && pendingClose?.id !== id && pendingMove?.id !== id && pendingSurfaceMove?.id !== id && moveError?.id !== id) return;
-  if (pendingSurfaceMove?.id === id) pendingSurfaceMove.answer(false);
+  const { renamingId, confirmation, moveError } = state;
+  if (renamingId !== id && confirmation?.id !== id && moveError?.id !== id) return;
   emit({
-    pendingSurfaceMove: pendingSurfaceMove?.id === id ? null : pendingSurfaceMove,
     renamingId: renamingId === id ? null : renamingId,
-    pendingClose: pendingClose?.id === id ? null : pendingClose,
-    pendingMove: pendingMove?.id === id ? null : pendingMove,
+    confirmation: confirmation?.id === id ? null : confirmation,
     moveError: moveError?.id === id ? null : moveError,
   });
+  if (confirmation?.id === id) confirmation.answer(false);
 }

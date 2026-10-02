@@ -28,7 +28,7 @@ import {
 } from "./workspace-drag";
 import { _setWindowLabelForTesting } from "./window-label";
 import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
-import { getWorkspaceUiSnapshot, resetWorkspaceUi } from "dormouse-lib/lib/workspace-ui-store";
+import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleConfirmation } from "dormouse-lib/lib/workspace-ui-store";
 
 import { cancelEditorClose, decideEditorClose, getEditorClosePrompt } from "dormouse-lib/lib/tool-editor";
 import { recordToolDirty, resetToolDirty } from "dormouse-lib/lib/tool-dirty-store";
@@ -185,7 +185,7 @@ describe("releasing the drag", () => {
     drop();
     await settle();
     expect(getEditorClosePrompt()?.items).toMatchObject([{ id: "editor" }]);
-    expect(getWorkspaceUiSnapshot().pendingMove).toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
     await decideEditorClose("cancel");
     await settle();
     expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
@@ -195,11 +195,11 @@ describe("releasing the drag", () => {
     await settle();
     await decideEditorClose("discard");
     await settle();
-    const pending = getWorkspaceUiSnapshot().pendingMove;
-    expect(pending).toMatchObject({ iframeCount: 1 });
+    const pending = getWorkspaceUiSnapshot().confirmation;
+    expect(pending).toMatchObject({ detail: expect.stringContaining("An iframe Surface") });
     expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
     expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
-    pending!.proceed();
+    settleConfirmation(pending!, true);
     if (existing) expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 }, undefined, ["editor"]);
     else expect(mocks.tearOutWorkspace).toHaveBeenCalledWith("ws-1", expect.any(Object), ["editor"]);
   });
@@ -230,10 +230,10 @@ describe("releasing the drag", () => {
     await settle();
     // Nothing moved: the gate is up, naming what it would cost.
     expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
-    const pending = getWorkspaceUiSnapshot().pendingMove;
-    expect(pending).toMatchObject({ id: "ws-1", iframeCount: 2 });
+    const pending = getWorkspaceUiSnapshot().confirmation;
+    expect(pending).toMatchObject({ id: "ws-1", title: "Move and lose page state?", detail: expect.stringContaining("2 iframe Surfaces") });
     // The strip's key handler settles it; here, the letter's own effect.
-    pending!.proceed();
+    settleConfirmation(pending!, true);
     expect(mocks.transferWorkspaceTo).toHaveBeenCalledWith("ws-1", "ws-2", { x: 120, y: 9 }, undefined, []);
     resetWallHandles();
     resetWorkspaceUi();
@@ -246,8 +246,43 @@ describe("releasing the drag", () => {
     onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
     await settle();
     expect(mocks.tearOutWorkspace).toHaveBeenCalled();
-    expect(getWorkspaceUiSnapshot().pendingMove).toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
     resetWallHandles();
+  });
+
+  it("abandons an older window probe when a newer confirmation is raised", async () => {
+    let resolveProbe!: (hit: { label: string; x: number; y: number }) => void;
+    const probe = new Promise<{ label: string; x: number; y: number }>(resolve => { resolveProbe = resolve; });
+    mocks.invoke.mockImplementation(async cmd => cmd === "window_at_cursor" ? probe : undefined);
+    onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
+    const newer = { id: "ws-other", char: "q", answer: vi.fn() };
+    requestConfirmation(newer);
+    resolveProbe({ label: "ws-2", x: 120, y: 9 });
+    await settle();
+    expect(getWorkspaceUiSnapshot().confirmation).toBe(newer);
+    expect(newer.answer).not.toHaveBeenCalled();
+    expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
+  });
+
+  it("abandons a dirty-editor decision when a newer move starts", async () => {
+    recordToolDirty("editor", true);
+    registerWallHandle(stubWallHandle("ws-1", { dirtyToolIds: () => ["editor"], iframeSurfaceRefs: () => ["surface:4"] }));
+    onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
+    await settle();
+    expect(getEditorClosePrompt()).not.toBeNull();
+    cancelPendingConfirmation();
+    await decideEditorClose("discard");
+    await settle();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("answers a pending confirmation no as the drop starts its move", () => {
+    const answer = vi.fn();
+    requestConfirmation({ id: "ws-other", char: "q", answer });
+    onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
+    expect(answer).toHaveBeenCalledExactlyOnceWith(false);
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
   });
 
   it("tears out when released over no window", async () => {

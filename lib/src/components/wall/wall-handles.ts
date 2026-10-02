@@ -29,7 +29,8 @@ export interface WallHandle {
   finishSurfaceMove(): void;
   focusSurface(id: string, acknowledge: boolean): void;
   showMoveNotice(id: string, text: string): void;
-  serializePersistence(options?: SaveOptions): Promise<PersistedSession>;
+  /** This Workspace's record now, with no cwd probe. */
+  serializeNow(): PersistedSession;
   workspaceId: WorkspaceId;
   /** The Wall's member Surfaces: visible panes ∪ Doors. */
   surfaceIds(): string[];
@@ -128,7 +129,7 @@ export function stubWallHandle(workspaceId: WorkspaceId, overrides: Partial<Wall
     finishSurfaceMove: () => {},
     focusSurface: () => {},
     showMoveNotice: () => {},
-    serializePersistence: async () => ({ version: 3, panes: [] }),
+    serializeNow: () => ({ version: 3, panes: [] }),
     surfaceIds: () => [],
     ownsSurface: () => false,
     iframeSurfaceRefs: () => [],

@@ -61,7 +61,9 @@ function hosted(policy: NetworkPolicy, status = UNENROLLED_STATUS, refusal: Path
 }
 
 /** 10:42 this morning, on whatever clock renders the story. */
-const AT_10_42 = new Date(2026, 9, 1, 10, 42).getTime();
+const morning = new Date();
+morning.setHours(10, 42, 0, 0);
+const AT_10_42 = morning.getTime();
 
 /** A self-host build holding `policy`. */
 function selfHost(policy: NetworkPolicy, status = SELF_HOST_UNENROLLED_STATUS) {

@@ -15,19 +15,9 @@ import type { PersistedSession, PersistedWindow, PersistedWorkspace, WorkspaceId
  */
 
 const revisions = new Map<WorkspaceId, number>();
-/** Set while a Surface move publishes both Walls: no write sees one half. */
-let batchHeld = false;
 /** Fence asynchronous saves collected before ownership changed. */
 export function workspaceSessionRevision(id: WorkspaceId): number { return revisions.get(id) ?? 0; }
 export function invalidateWorkspaceSaves(id: WorkspaceId): void { revisions.set(id, workspaceSessionRevision(id) + 1); }
-
-/** Hold every write until both Walls have published. */
-export function beginWorkspaceSessionBatch(): () => void {
-  if (batchHeld) throw new Error('A Workspace persistence batch is already running');
-  batchHeld = true;
-  cancelPending();
-  return () => { batchHeld = false; scheduleWrite(); };
-}
 
 /** Preserve a dead Session's retained cwd/alert while its Wall changes. */
 export function moveRetainedSurfaceRecord(id: string, source: WorkspaceId, destination: WorkspaceId): void {
@@ -76,7 +66,13 @@ export function seedWindowSession(snapshot: PersistedWindow | null): void {
 /** Record a Workspace's latest session and schedule the Window write. Also how a
  *  Workspace arriving from another Window installs the record it brought. */
 export function publishWorkspaceSession(workspaceId: WorkspaceId, session: PersistedSession): void {
-  records.set(workspaceId, session);
+  publishWorkspaceSessions([[workspaceId, session]]);
+}
+
+/** Record several Workspaces' sessions behind one scheduled write, so no write
+ *  (not even one during `pagehide`) holds some of them without the rest. */
+export function publishWorkspaceSessions(entries: ReadonlyArray<readonly [WorkspaceId, PersistedSession]>): void {
+  for (const [workspaceId, session] of entries) records.set(workspaceId, session);
   scheduleWrite();
 }
 
@@ -226,7 +222,7 @@ export async function flushWindowSession(): Promise<void> {
 }
 
 function scheduleWrite(): void {
-  if (!writer || batchHeld) return;
+  if (!writer) return;
   // A publish that lands during `pagehide` — the Walls flush there too — has no
   // later tick to be written on.
   if (unloading) {
@@ -242,7 +238,7 @@ function scheduleWrite(): void {
 }
 
 function writeNow(): void {
-  if (!writer || batchHeld) return;
+  if (!writer) return;
   const result = writer(getWindowSnapshot());
   inFlight = result ? Promise.resolve(result).catch(() => undefined) : null;
 }
@@ -257,7 +253,6 @@ function cancelPending(): void {
 export function resetWindowSessionAggregator(): void {
   records.clear();
   revisions.clear();
-  batchHeld = false;
   transferring.clear();
   pendingTransfers.clear();
   writer = null;

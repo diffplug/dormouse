@@ -24,6 +24,7 @@ import {
   type ResolvedWorkspace,
 } from '../../lib/workspace-store';
 import { getWorkspaceSurfacesSnapshot } from '../../lib/workspace-surfaces';
+import { cancelPendingConfirmation } from '../../lib/workspace-ui-store';
 import { computeWorkspaceUnion } from '../../lib/workspace-union';
 import { awaitWallHandle, errorText, mountingRefusal, stringParam } from './dor-control-shared';
 import { attachSurfacePorts } from './surface-ports';
@@ -237,9 +238,10 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     }
 
     case WORKSPACE_CONTROL_METHODS.move: {
+      const toWindow = stringParam(params.toWindow)?.trim();
+      const isCurrent = toWindow !== undefined && !isWindowRef(toWindow) ? cancelPendingConfirmation() : () => true;
       const target = requireWorkspace(detail);
       if (!target) return;
-      const toWindow = stringParam(params.toWindow)?.trim();
       const index = typeof params.index === 'number' && Number.isInteger(params.index) && params.index >= 0
         ? params.index : undefined;
       if (toWindow === undefined && index === undefined) {
@@ -248,6 +250,10 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       }
       if (toWindow !== undefined && !isWindowRef(toWindow)) {
         const handle = await awaitWallHandle(target.id);
+        if (!isCurrent()) {
+          detail.respond({ ok: false, error: 'Workspace move was superseded by a newer close or move' });
+          return;
+        }
         if (!handle) {
           detail.respond({ ok: false, error: mountingRefusal(target.ref) });
           return;
@@ -294,6 +300,7 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
     }
 
     case WORKSPACE_CONTROL_METHODS.close: {
+      const isCurrent = cancelPendingConfirmation();
       const target = requireWorkspace(detail);
       if (!target) return;
       // A close is answered only once the Workspace's Wall is there to answer
@@ -302,6 +309,10 @@ export async function handleWorkspaceControl(detail: DorControlRequest): Promise
       // (`docs/specs/glossary.md` → "Invariants" I4).
       if (!await awaitWallHandle(target.id)) {
         detail.respond({ ok: false, error: mountingRefusal(target.ref) });
+        return;
+      }
+      if (!isCurrent()) {
+        detail.respond({ ok: false, error: 'Workspace close was superseded by a newer close or move' });
         return;
       }
       // Like `dor kill`, a command close raises no prompt: it refuses instead,

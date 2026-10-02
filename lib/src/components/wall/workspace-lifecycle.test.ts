@@ -10,7 +10,7 @@ import {
   requestWorkspaceClose,
 } from './workspace-lifecycle';
 import { registerWallHandle, resetWallHandles, stubWallHandle, type WallHandle } from './wall-handles';
-import { getWorkspaceUiSnapshot, resetWorkspaceUi, setPendingWorkspaceClose, setPendingWorkspaceMove, setRenamingWorkspace } from '../../lib/workspace-ui-store';
+import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, setRenamingWorkspace } from '../../lib/workspace-ui-store';
 import {
   closeWorkspace,
   createWorkspace,
@@ -75,6 +75,20 @@ describe('closeWorkspaceWithSurfaces', () => {
     expect(closeAll).toHaveBeenCalledWith(['a', 'b']);
   });
 
+  it('abandons a close awaiting dirty-editor consent when a newer move starts', async () => {
+    const [only] = ids();
+    const closeAll = vi.fn(async () => null);
+    handleFor(only, { closeAll, dirtyToolIds: () => ['editor'] });
+    recordToolDirty('editor', true);
+    const pending = closeWorkspaceWithSurfaces(only);
+    expect(getEditorClosePrompt()).not.toBeNull();
+    cancelPendingConfirmation();
+    await decideEditorClose('discard');
+    expect(await pending).toContain('superseded');
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(ids()).toContain(only);
+  });
+
   it('refuses a second close while one is in flight, so both Walls cannot empty', async () => {
     const [first] = ids();
     createWorkspace({ id: 'ws-2' });
@@ -89,7 +103,7 @@ describe('closeWorkspaceWithSurfaces', () => {
     expect(secondCloseAll).not.toHaveBeenCalled();
     // The verb the strip and the keys share takes the same lock.
     requestWorkspaceClose('ws-2');
-    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
 
     releaseFirst();
     expect(await firstClose).toBeNull();
@@ -125,13 +139,13 @@ describe('closeWorkspaceWithSurfaces', () => {
     // The rename editor is open on the Workspace being closed: nothing unmounts
     // it through `blur`, so the verb itself has to clear it.
     setRenamingWorkspace('ws-2');
-    setPendingWorkspaceClose({ id: 'ws-2', char: 'x' });
-    setPendingWorkspaceMove({ id: 'ws-2', char: 'a', iframeCount: 1, proceed: vi.fn() });
+    const answer = vi.fn();
+    requestConfirmation({ id: 'ws-2', char: 'a', answer });
 
     expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
-    expect(getWorkspaceUiSnapshot().pendingMove).toBeNull();
+    expect(answer).toHaveBeenCalledExactlyOnceWith(false);
     expect(getWorkspaceUiSnapshot().renamingId).toBeNull();
-    expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
   });
 });
 
@@ -152,7 +166,7 @@ describe('requestWorkspaceClose', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(closeAll).toHaveBeenCalled();
       expect(ids()).toEqual([first]);
-      expect(getWorkspaceUiSnapshot().pendingClose).toBeNull();
+      expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -164,7 +178,7 @@ describe('requestWorkspaceClose', () => {
     handleFor('ws-2', { runningCount: () => 1 });
     requestWorkspaceClose('ws-2');
     await Promise.resolve();
-    expect(getWorkspaceUiSnapshot().pendingClose?.id).toBe('ws-2');
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe('ws-2');
     expect(ids()).toEqual([first, 'ws-2']);
   });
 });
@@ -172,13 +186,22 @@ describe('requestWorkspaceClose', () => {
 it('preserves another Workspace’s rename and close confirmation when closing a sibling', async () => {
   const [first] = ids();
   createWorkspace({ id: 'ws-2' });
-  handleFor('ws-2');
+  const answer = vi.fn();
+  // A confirmation raised while the close walks its Surfaces is a newer question.
+  handleFor('ws-2', { closeAll: async () => { requestConfirmation({ id: first, char: 'x', answer }); return null; } });
   setRenamingWorkspace(first);
-  setPendingWorkspaceClose({ id: first, char: 'x' });
-  setPendingWorkspaceMove({ id: first, char: 'a', iframeCount: 1, proceed: vi.fn() });
-  const before = getWorkspaceUiSnapshot();
   expect(await closeWorkspaceWithSurfaces('ws-2')).toBeNull();
-  expect(getWorkspaceUiSnapshot()).toBe(before);
+  expect(getWorkspaceUiSnapshot()).toMatchObject({ renamingId: first, confirmation: { id: first, char: 'x' } });
+  expect(answer).not.toHaveBeenCalled();
+});
+
+it('answers a pending confirmation no when a close is requested', () => {
+  createWorkspace({ id: 'ws-2' });
+  const answer = vi.fn();
+  requestConfirmation({ id: 'ws-2', char: 'a', answer });
+  requestWorkspaceClose('ws-2');
+  expect(answer).toHaveBeenCalledExactlyOnceWith(false);
+  expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
 });
 
 

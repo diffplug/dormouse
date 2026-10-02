@@ -1768,7 +1768,8 @@ export function Wall({
   // re-render never replaces a registered entry.
   // Capture before a synchronous commit. Rollback restores the complete Wall,
   // including a Door's held rect and the ref allocator, without killing Sessions.
-  const captureMoveRollback = (incomingId?: string) => {
+  // It runs only before `finishSurfaceMove`, so no refill has mounted a shell.
+  const captureMoveRollback = () => {
     const snapshot = lath.store.getSnapshot();
     const savedDoors = doorsRef.current;
     const refs = new Map(dorSurfaceRefsRef.current);
@@ -1780,10 +1781,6 @@ export function Wall({
     const context = terminalContextRef.current;
     return () => {
       movingSurfaceRef.current = true;
-      // A temporary auto-refill may already have mounted its default shell.
-      for (const member of memberSurfaceIds()) {
-        if (member !== incomingId && !snapshot.leafMeta.has(member)) disposeSession(member);
-      }
       doorsRef.current = savedDoors; setDoors(savedDoors);
       dorSurfaceRefsRef.current = refs; nextDorSurfaceRefIndexRef.current = next;
       lath.store.restoreSnapshot(snapshot);
@@ -1833,7 +1830,7 @@ export function Wall({
     },
     adoptSurfaceMove: (id, meta) => {
       if (ownsSurface(id) || closingWorkspaceRef.current) throw new Error('The destination cannot accept this Surface');
-      const rollback = captureMoveRollback(id);
+      const rollback = captureMoveRollback();
       movingSurfaceRef.current = true;
       const ref = livePaneId();
       if (!lath.store.addLeaf(id, meta, ref ? { refId: ref, edge: lath.store.autoEdgeFor(ref) } : null).ok) throw new Error('Could not place the Surface');
@@ -1850,7 +1847,7 @@ export function Wall({
       else enterTerminalMode(id);
     },
     showMoveNotice: (id, text) => showShellSpawnNotice(id, text, 8000),
-    serializePersistence: persistence.serialize,
+    serializeNow: persistence.serializeNow,
 
     surfaceIds: memberSurfaceIds,
     ownsSurface,

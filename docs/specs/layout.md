@@ -254,7 +254,7 @@ Source of truth: `createWorkspaceMotion` in `lib/src/components/workspace-motion
 - **Must offer `+` and New workspace only when the source has more than one Surface**, counting Panes and Doors; create a receiving Wall with only the moved Surface. Disable the picker item and `+` drop otherwise, and refuse CLI `--new`.
 - **Must offer Move to workspace in terminal and Tool context** (placement: the Title row above), using the same coordinator as dragging. **Never add a browser context menu. Never add a command-mode move binding.** Browser Surfaces move by dragging or CLI.
 - **Must retain stable Surface identity and Session state while remounting in the destination Wall**: terminals keep their registry instance, browser automation reconnects, and a retained helper follows its source. Never close a departing Session. Pin a moved preview slot by removing its preview mark.
-- **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with a stable random character over the Window content area. Doors remain minimized while waiting. Show “moving this iframe will trigger a refresh and reopen at its saved URL, possibly losing page state or returning to an earlier page”; the prompted character confirms, anything else cancels. Saved URLs are last-known URLs, not necessarily the page's current location. CLI consent follows `docs/specs/dor-cli.md` → dor move.
+- **Must confirm plain iframe and serving iframe Tool moves before creating a destination or changing membership**, with a stable random character over the Window content area ([one pending confirmation](#workspace-lifecycle)). Doors remain minimized while waiting. Show “moving this iframe will trigger a refresh and reopen at its saved URL, possibly losing page state or returning to an earlier page”; the prompted character confirms, anything else cancels. Saved URLs are last-known URLs, not necessarily the page's current location. CLI consent follows `docs/specs/dor-cli.md` → dor move.
 - **Must refuse dirty Tools, pending Tool approval, browser startup, closing Surfaces/Workspaces and helper promotion**, rechecking after consent and asynchronous preparation. Dirty/pending refusals cannot be bypassed by iframe consent.
 - **Must follow a GUI move into destination passthrough** (acknowledgement: `docs/specs/alert.md` → Workspace union); CLI focus policy follows `docs/specs/dor-cli.md` → dor move. Remove a source with no Panes or Doors; if Doors remain but no pane does, refill normally.
 - **Must prepare before departure and roll back failed adoption**, restoring layout, Doors, parked state, selection, zoom, metadata and refs. Ref allocation belongs to `docs/specs/dor-cli.md` → Handle Model; coordinated durable publication belongs to `docs/specs/transport.md` → Persisted session types; Activity follows `docs/specs/alert.md` → Workspace union.
@@ -296,17 +296,22 @@ nothing (`iframeSurfaceRefs` on the Wall handle; `standalone/src/workspace-drag.
 - **Must drop the closing Workspace’s rename editor and pending confirmation, and no other’s** (`releases the rename lease when the tab being renamed is middle-clicked closed` in `lib/src/components/WorkspaceStrip.test.tsx`; `preserves another Workspace’s rename and close confirmation when closing a sibling` in `lib/src/components/wall/workspace-lifecycle.test.ts`).
 - **Every Workspace verb runs outside the strip**, which renders the rename editor and confirmation from a store, so tab gestures and `dor` commands take one path.
 
-**Must use `WorkspaceKillConfirm` for Workspace close, the iframe move gate,
+**Must use `WorkspaceKillConfirm` for Workspace close, the iframe move gates,
 and host termination confirmations**, titled “Confirm kill workspace” except the
-move gate: **a bare matching letter confirms, another bare key cancels, and a
+move gates: **a bare matching letter confirms, another bare key cancels, and a
 modifier or chord never answers**, so `Cmd+Q` still quits. **Must ignore
-its confirmation key while that Workspace transfers.** A successful transfer
-dismisses only the departing Workspace's pending close, move, and rename UI;
-a failed transfer retains them. No pending kill follows a Workspace to its
+the close confirmation's key while that Workspace transfers.**
+**Must hold at most one pending Workspace confirmation** (close, cross-Window
+move gate, Surface move iframe consent), **answered no when a newer one is
+raised or any close, cross-Window move, or Surface move starts**, by gesture or
+`dor`, even one that refuses. **Must abandon superseded preparation while awaiting a Wall, window probe or editor decision**, so an older verb cannot later act or replace the newer question. A move refusal waits behind it and rename
+(`lib/src/components/WorkspaceWindow.test.tsx`, `lib/src/lib/workspace-ui-store.test.ts`).
+A successful transfer dismisses only the departing Workspace's pending
+confirmation and rename UI; a failed transfer retains them. No pending kill follows a Workspace to its
 destination. Pinned by `does not accept a pending kill during transfer and releases its keyboard lease on departure`
 in `lib/src/components/WorkspaceStrip.test.tsx` and `keeps the pending kill until commit, then dismisses only the departing Workspace`
 in `lib/src/components/wall/workspace-transfer.test.ts`.
-Source of truth: `dismissWorkspaceUi` in `lib/src/lib/workspace-ui-store.ts`;
+Source of truth: `requestConfirmation` / `cancelPendingConfirmation` / `dismissWorkspaceUi` in `lib/src/lib/workspace-ui-store.ts`;
 `prepareWorkspaceTransfer` in `lib/src/components/wall/workspace-transfer.ts`.
 
 The union projection and its indicators are owned by `docs/specs/alert.md` → Workspace union; the strip that renders them by `docs/specs/standalone.md` → AppBar. Persisted containers are owned by `docs/specs/transport.md`: standalone stores one `PersistedWindow` per window, so a relaunch restores every Workspace ([Session persistence](#session-persistence)).
@@ -355,7 +360,7 @@ That order is load-bearing twice: a rename input suppresses the pane shortcuts b
 
 **Every open dialog holds its own reference-counted lease on that gate**, and command-mode dispatch resumes only once the last lease is released — so a dialog closing over another cannot lift the survivor's suppression (`createDialogKeyboardCoordinator` in `lib/src/components/wall/wall-context.tsx`).
 
-**Must defer Workspace close and move confirmations while an inline Workspace rename editor is open**, leaving its keys to the input; the pending gate appears after rename ends. Pinned by `defers the %s gate while another Workspace is being renamed` in `lib/src/components/WorkspaceStrip.test.tsx`.
+**Must defer the pending Workspace confirmation while an inline Workspace rename editor is open**, leaving its keys to the input; it appears after rename ends. Pinned by `defers the %s gate while another Workspace is being renamed` in `lib/src/components/WorkspaceStrip.test.tsx`.
 
 **Chrome outside every Wall takes the chrome keyboard lease instead**: the Workspace strip's rename editor and close confirmation live in the app bar, where `stopPropagation` cannot reach a capture-phase window listener. **The Workspace branch is inert on a Wall with no Workspace id**, which is what leaves those keys unbound on a bare Wall. Source of truth: `acquireChromeKeyboardLease` in `lib/src/components/wall/chrome-keyboard-lease.ts`; `handleWorkspaceShortcuts` in `lib/src/components/wall/keyboard/handle-workspace-shortcuts.ts`.
 

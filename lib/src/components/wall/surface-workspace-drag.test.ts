@@ -5,7 +5,7 @@ import { registerWallHandle, resetWallHandles, stubWallHandle } from './wall-han
 import { requestSurfaceMove } from './surface-move';
 import { surfaceWorkspaceDrag } from './surface-workspace-drag';
 
-vi.mock('./surface-move', () => ({ requestSurfaceMove: vi.fn() }));
+vi.mock('./surface-move', async importOriginal => ({ ...await importOriginal<typeof import('./surface-move')>(), requestSurfaceMove: vi.fn() }));
 
 let count: number;
 let sourceTab: HTMLElement;

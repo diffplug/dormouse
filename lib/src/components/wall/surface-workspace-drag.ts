@@ -1,7 +1,6 @@
-import { getWorkspaceUiSnapshot } from '../../lib/workspace-ui-store';
 import { workspaceStripElement, workspaceTabElement, workspaceTabElements } from '../workspace-tab-elements';
 import { wallHandleOwning } from './wall-handles';
-import { requestSurfaceMove } from './surface-move';
+import { requestSurfaceMove, surfaceMoveRefusal } from './surface-move';
 
 /** A pane press owns this path; only a tab press owns reorder/tear-out. */
 export interface SurfaceWorkspaceDrag {
@@ -20,11 +19,14 @@ function targetAt(x: number, y: number): HTMLElement | null {
   const targets = [...workspaceTabElements(), workspaceTabElement(null)];
   return targets.find(target => target && inside(target.getBoundingClientRect(), x, y)) ?? strip;
 }
+/** The drop's destination, or null for the strip's gaps. */
+function destinationOf(target: HTMLElement): { workspace: string } | { new: true } | null {
+  if (target.hasAttribute('data-workspace-new')) return { new: true };
+  return target.dataset.workspaceTab ? { workspace: target.dataset.workspaceTab } : null;
+}
 function eligible(id: string, target: HTMLElement): boolean {
-  const source = wallHandleOwning(id);
-  const ui = getWorkspaceUiSnapshot();
-  return !!source?.canMoveSurfaces && !ui.pendingSurfaceMove && !ui.pendingMove && !ui.pendingClose
-    && (target.hasAttribute('data-workspace-new') ? source.surfaceIds().length > 1 : !!target.dataset.workspaceTab && target.dataset.workspaceTab !== source.workspaceId);
+  const destination = destinationOf(target);
+  return !!destination && !surfaceMoveRefusal(wallHandleOwning(id), destination);
 }
 function highlight(target: HTMLElement | null): void {
   if (target === highlighted) return;
@@ -45,7 +47,7 @@ export const surfaceWorkspaceDrag: SurfaceWorkspaceDrag = {
     const target = targetAt(x, y);
     end();
     if (!target) return false;
-    if (eligible(id, target)) requestSurfaceMove(id, target.hasAttribute('data-workspace-new') ? { new: true } : { workspace: target.dataset.workspaceTab! });
+    if (eligible(id, target)) requestSurfaceMove(id, destinationOf(target)!);
     return true;
   },
   end,
