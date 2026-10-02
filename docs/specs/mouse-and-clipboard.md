@@ -129,7 +129,7 @@ Source of truth: `finishProgramDrag` in `lib/src/lib/terminal-mouse-router.ts`, 
 
 ### 3.9 Select All
 
-**Must keep macOS ⌘A from selecting Dormouse's UI or a terminal's buffer**: the Wall cancels it outside text fields, and each terminal's key handler blocks xterm.js's select-all. Text fields and Tool iframes keep it.
+**Must keep macOS ⌘A from selecting Dormouse's UI or a terminal's buffer**: the Wall cancels it outside text fields, and terminals keep it from xterm.js. Text fields, Tool iframes, and browser panes keep it.
 
 Source of truth: `isMacSelectAll` in `lib/src/lib/select-all.ts`; `cancelUiSelectAll` in `lib/src/components/wall/keyboard/cancel-ui-select-all.ts`; `createXtermHost` in `lib/src/lib/terminal-lifecycle.ts`.
 
