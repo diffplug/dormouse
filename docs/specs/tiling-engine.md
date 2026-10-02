@@ -74,7 +74,7 @@ All ops are pure and synchronous, take the tree as their first argument (elided 
 | `insert(id, target: DropTarget, weight = 0.5)` | The insert half of `move`, public for external (Door) drops: a NEW leaf at a drop target carrying `weight`, clamped into (0,1); NaN rejects. Swap targets, existing ids, empty trees, and paths off the tree are rejected. |
 | `restore(token, opts?)` | Reinserts a removed leaf, best effort (below). |
 
-**Must accept edge drops onto a node or a contiguous child range of a split.** The range is ephemeral: materialize it for insertion, then normalize the committed tree. Existing weighted multi-child nodes and version-1 persistence remain canonical. Invalid ranges reject. `group-drop.test.ts` pins scope remapping and persistence compatibility. Source of truth: `DropTarget` / `materializeTarget` / `targetByLeafSet` in `lib/src/lib/lath/drop-target.ts`.
+**Must accept edge drops onto a node or a contiguous child range of a split.** The range is ephemeral: materialize it for insertion, then normalize the committed tree. Existing weighted multi-child nodes and version-1 persistence remain canonical. Invalid ranges reject. `lib/src/lib/lath/group-drop.test.ts` pins scope remapping and persistence compatibility. Source of truth: `DropTarget` / `materializeTarget` / `targetByLeafSet` in `lib/src/lib/lath/drop-target.ts`.
 
 **Must preserve visible geometry when a pane is dropped back at its existing sibling boundary.** Tests: `preserves pane widths when reordering siblings or dropping back at the same boundary` in `lib/src/lib/lath/ops.test.ts`; `property: sash motion matches visible geometry` in `lib/src/lib/lath/property.test.ts`.
 
