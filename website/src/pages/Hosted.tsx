@@ -32,6 +32,7 @@ import {
   MUTED_TEXT_CLASS,
 } from "../components/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
+import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
 import {
   fetchCohort,
   type Cohort,
@@ -270,10 +271,17 @@ function FreeCard() {
     >
       <Includes
         items={[
-          "The whole terminal, nothing held back",
+          <>
+            The whole terminal is <span className="whitespace-nowrap">FSL-1.1-MIT</span>, easy
+            to run a fork
+          </>,
           "Spoken alarms in your system voice",
-          "Zero network requests until you choose a Relay",
-          "Pocket over a Relay you run yourself",
+          "Zero network requests unless you choose a Relay",
+          <>
+            <a href={sitePath(POCKET_PLAYGROUND_PATH)} className={LINK_CLASS}>Pocket</a> on your
+            phone with a{" "}
+            <a href={sitePath("/self-host")} className={LINK_CLASS}>self-hosted Relay</a>
+          </>,
         ]}
       />
     </PlanCard>
