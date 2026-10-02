@@ -317,7 +317,7 @@ state and clear WCAG AA both at rest and on hover** (rationale).
 WCAG AA against the surface carrying it; never dim text with opacity**
 (rationale). `docsMutedTextForSurfaces` and `website/src/lib/docs-accent.test.ts` pin
 the base and every registered tinted surface composition across bundled themes;
-`checkNoDimmedDocsText` pins the call sites, allowlisting what is not text.
+`checkNoDimmedDocsText` pins the call sites, allowlisting what is not text. **Must follow transitive relative imports with repository-relative paths on every platform.** `scripts/docs-surfaces.test.mjs` pins the graph traversal.
 
 **Must prompt a reader to pick a theme until they answer, and dismiss both
 responsive placements together.** Picking one and closing the prompt both count.

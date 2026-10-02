@@ -16,7 +16,7 @@ const unknown = args.filter((arg) => !['--all', '--json', '--help', '--changed']
 if (args.includes('--help')) {
   console.log(`Usage: pnpm audit:prose [--changed[=<base>]] [--all] [--json]
 
-Without --changed, audits every spec and the code files it references.
+Without --changed, audits every spec, companion contract, rationale, and referenced code.
 --changed audits specs or references changed from <base> (default: origin/main),
 including staged, unstaged, and untracked files. --all expands the concise report.
 Findings are advisory.`);
@@ -29,7 +29,7 @@ if (unknown.length > 0) {
 
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
 const git = (...gitArgs) => execFileSync('git', gitArgs, { cwd: ROOT, encoding: 'utf8' });
-const tracked = git('ls-files').trim().split('\n').filter(Boolean);
+const tracked = git('ls-files', '--cached', '--others', '--exclude-standard').trim().split('\n').filter(Boolean);
 const trackedSet = new Set(tracked);
 const basenameIndex = new Map();
 for (const rel of tracked) {
@@ -43,7 +43,7 @@ const specFiles = readdirSync(join(ROOT, 'docs/specs'))
   .filter((name) => name.endsWith('.md') && !name.endsWith('.rationale.md'))
   .map((name) => `docs/specs/${name}`)
   .sort();
-specFiles.push('SELF_HOST.md');
+specFiles.push('AGENTS.md', 'SECURITY.md', 'SELF_HOST.md', 'docs/compatible-agents.md');
 const budgets = JSON.parse(read('scripts/spec-word-budgets.json'));
 const codeExtensions = new Set(SOURCE_EXTENSIONS.map((ext) => `.${ext}`));
 const extension = (rel) => /\.[^.\/]+$/.exec(rel)?.[0] ?? '';
@@ -211,27 +211,38 @@ function changedFiles(base) {
 
 let reports = specFiles.map((spec) => {
   const text = read(spec);
-  const rationale = spec === 'SELF_HOST.md' ? null : spec.replace(/\.md$/, '.rationale.md');
-  const { refs, unresolved } = referencesOf(spec, text);
+  const rationalePath = spec.replace(/\.md$/, '.rationale.md');
+  const rationaleText = existsSync(join(ROOT, rationalePath)) ? read(rationalePath) : null;
+  const specReferences = referencesOf(spec, text);
+  const rationaleReferences = rationaleText === null ? { refs: [], unresolved: [] } : referencesOf(rationalePath, rationaleText);
+  const refs = [...new Set([...specReferences.refs, ...rationaleReferences.refs])].sort();
+  const unresolved = [...new Set([...specReferences.unresolved, ...rationaleReferences.unresolved])].sort();
   const prose = proseCandidates(text);
-  const code = codeCandidates(text, refs);
+  const rationale = rationaleText === null ? null : {
+    path: rationalePath,
+    words: wordCount(rationaleText),
+    references: rationaleReferences.refs,
+    unresolved: rationaleReferences.unresolved,
+    prose: proseCandidates(rationaleText),
+  };
+  const code = codeCandidates(text + '\n' + (rationaleText ?? ''), refs);
   return {
     spec,
     words: wordCount(text),
     budget: budgets[spec],
-    rationale: rationale && existsSync(join(ROOT, rationale)) ? { path: rationale, words: wordCount(read(rationale)) } : null,
+    rationale,
     references: refs,
     unresolved,
     prose,
     code,
-    score: prose.length + code.reduce((sum, file) => sum + file.findings.length, 0),
+    score: prose.length + (rationale?.prose.length ?? 0) + code.reduce((sum, file) => sum + file.findings.length, 0),
   };
 });
 
 if (changedArg) {
   const base = changedArg.includes('=') ? changedArg.slice(changedArg.indexOf('=') + 1) : 'origin/main';
   const changed = changedFiles(base);
-  reports = reports.filter((report) => changed.has(report.spec) || changed.has(report.rationale?.path) || report.references.some((ref) => changed.has(ref)));
+  reports = reports.filter((report) => changed.has(report.spec) || changed.has(report.spec.replace(/\.md$/, '.rationale.md')) || report.references.some((ref) => changed.has(ref)));
 }
 
 if (json) {
@@ -245,6 +256,7 @@ for (const report of reports) {
   const rationale = report.rationale ? `; rationale ${report.rationale.words}w` : '';
   console.log(`${report.spec} — ${report.words}/${budget}w; ${report.references.length} refs${rationale}; ${report.score} hit(s)`);
   const hits = report.prose.map((hit) => ({ ...hit, path: report.spec }));
+  for (const hit of report.rationale?.prose ?? []) hits.push({ ...hit, path: report.rationale.path });
   for (const file of report.code) {
     for (const hit of file.findings) hits.push({ ...hit, path: file.path });
   }

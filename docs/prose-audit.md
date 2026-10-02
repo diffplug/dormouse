@@ -11,13 +11,15 @@ pnpm audit:prose
 pnpm audit:prose --changed=origin/main
 ```
 
-The full pass proves corpus coverage. The changed pass selects any spec whose text or referenced code changed from the given base, plus working-tree changes. Use the stacked PR's actual base branch rather than assuming `main`. `--json` emits machine-readable results.
+The full pass inventories the corpus; it does not prove that its claims match implementation. The changed pass selects any spec whose text, rationale, or code referenced by either changed from the given base, plus working-tree changes. Use the stacked PR's actual base branch rather than assuming `main`. `--json` emits machine-readable results.
+
+The inventory includes `AGENTS.md`, `SECURITY.md`, `SELF_HOST.md`, and `docs/compatible-agents.md`, plus each existing rationale and its references. Imported implementation files still need manual inspection: changed selection follows explicit references, not transitive imports.
 
 The command is dependency-free and advisory. Its thresholds intentionally favor recall: a hit is a review prompt, not a lint failure or permission to delete text. The default report caps each spec's detail; add `--all` or `--json` to inspect every hit.
 
 ## Review one cluster
 
-1. Read each spec and the rationale sections matching the headings being touched.
+1. Read each spec and its paired rationale. Review every behavior-bearing section, including sections with no advisory hit; follow implementation imports and check both spec claims against code and relevant code branches against the spec.
 2. Inspect every resolved reference. Resolve any reported file-like reference manually; ambiguity often means the pointer itself can be clearer.
    A `Files` / `Code Map` section should offer useful entrypoints to follow through imports, while section-local `Source of truth:` pointers locate particular rules. Keep both when they serve those distinct jobs; check map paths and role descriptions against code without requiring exhaustive coverage or a map in every spec.
 3. Give each hit one disposition:

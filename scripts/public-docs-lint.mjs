@@ -24,6 +24,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { repoRoot, readRepoFile, trackedFiles } from './lint-kit.mjs';
+import { collectDocsSurfaces } from './docs-surfaces.mjs';
 import {
   hasScheme,
   inlineToText,
@@ -78,24 +79,9 @@ function docsSurfaces() {
     `${WEBSITE_SRC}/components/DocsLayout.tsx`,
     ...DOCS_PAGES.map((page) => `${WEBSITE_SRC}/${page.module.replace(/^\.\//, '')}`),
   ];
-  const tracked = new Set(trackedFiles());
-  const seen = new Set();
-  const queue = [...seed];
-  while (queue.length > 0) {
-    const rel = queue.shift();
-    if (seen.has(rel) || !tracked.has(rel)) continue;
-    seen.add(rel);
-    for (const [, spec] of readRepoFile(rel).matchAll(/from\s+["'](\.[^"']+)["']/g)) {
-      const resolved = join(dirname(rel), spec);
-      for (const ext of ['.tsx', '.ts']) {
-        if (tracked.has(resolved + ext)) queue.push(resolved + ext);
-      }
-    }
-  }
-  for (const rel of seed) {
-    if (!tracked.has(rel)) fail(`${rel}: docsSurfaces seed names a file that does not exist`);
-  }
-  return [...seen].filter((rel) => rel.endsWith('.tsx')).sort();
+  const { surfaces, missingSeeds } = collectDocsSurfaces(seed, trackedFiles(), readRepoFile);
+  for (const rel of missingSeeds) fail(`${rel}: docsSurfaces seed names a file that does not exist`);
+  return surfaces;
 }
 
 /** Each source read once and parsed once, then shared by every check. */
