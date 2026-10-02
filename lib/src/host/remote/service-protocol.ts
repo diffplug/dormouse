@@ -446,7 +446,7 @@ export interface HostedEnrollmentEnded {
 }
 
 /**
- * What `window.dormouseBurrow.status()` prints. `docs/specs/relay.md`
+ * What `window.dormouseBurrow.status()` prints. `docs/specs/burrow-service.md`
  * documents the console hook, so these field names are user-facing surface.
  */
 export interface BurrowConsoleStatus {

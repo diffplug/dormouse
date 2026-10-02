@@ -256,9 +256,10 @@ function refreshAfterMutation(): Promise<void> {
  * no enroll form it could not serve.
  *
  * Compatibility reader: the `offer` object, `relayUrl`, and a missing
- * `relayMode`, `hostedEnrollment`, `accountOrigin`, or `suggestedLabel` are a
- * broker built before v1.2.0, the first release carrying all of them; those
- * defaults can go once no supported extension build predates it.
+ * `relayMode`, `hostedEnrollment`, `accountOrigin`, or `suggestedLabel` come
+ * only from a pre-release source or dogfood broker. v1.2.0, the first release
+ * with any Burrow, carries all of them, so no released build needs these
+ * defaults.
  * `hostedEnrollmentOf`'s unknown-reason fallback serves a *newer* broker and
  * stays.
  */

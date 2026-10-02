@@ -29,7 +29,9 @@ The origin sets the build's mode (rationale):
 - **Accepted origins**: a bare origin as `new URL` spells it, on `https:` or on
   loopback `http:` (`localhost`, `127.0.0.1`, `[::1]`), of at most
   `MAX_RELAY_ORIGIN_LENGTH`, the longest a one-time link fits. Anything else
-  fails the build.
+  fails the build. A self-host origin past the pairing QR's tighter limit still
+  builds, then cannot set up a phone (`docs/specs/relay.md` -> "Setup tokens and
+  the pairing QR").
 - **`DORMOUSE_RELAY_IS_HOSTED=1` counts a non-default origin as Hosted in a dev
   build only** — `pnpm dev:standalone`, `pnpm innerdogfood`, VS Code's `watch`.
   **Every other build is a release build and fails when the flag is set or the
@@ -197,9 +199,7 @@ rejected. **Confirming after the invitation expires answers
 `invitation-expired`, ACL untouched.** In VS Code the queue reaches every
 window.
 
-**Terminal bridge**: a `BurrowSurfaceProvider` (`docs/specs/remote-api.md` ->
-"The provider seam") over the webviews that own the panes. **Last-attach-wins
-size authority holds at the PTY**, through the owning webview's resize path.
+**Terminal bridge**: `docs/specs/remote-api.md` -> "The provider seam".
 
 Source of truth: `BurrowService` in `lib/src/host/remote/service.ts`;
 `BurrowConsoleStatus` in `lib/src/host/remote/service-protocol.ts`;
@@ -232,7 +232,7 @@ absent** — the website and the lib dev server have no Burrow service.
   message.
 - **"Set up a phone" mints only when its panel opens**, replaces its code before
   `expiresAt` while open, and **reports which decision ended the code** in fixed
-  local copy (rationale; `docs/specs/remote-security-model.md` -> "Pairing").
+  local copy (`docs/specs/remote-security-model.md` -> "Pairing"; rationale).
 - **`removed` and `not-entitled` offer no "Set up a phone"**; a Hosted
   `removed` offers Enroll again, which clears the enrollment and then begins a
   device-code enrollment.

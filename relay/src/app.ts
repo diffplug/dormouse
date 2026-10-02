@@ -739,8 +739,8 @@ export function createApp(config: AppConfig): CreatedApp {
     // A Burrow built for another origin would send every phone there, so it is
     // refused before the credential is read — nothing spent, nothing appended.
     // Absent is an older Burrow, which enrolls as before: a compatibility
-    // reader for Burrows built before v1.2.0, the first to send `origin`,
-    // removable once no supported Burrow build predates it.
+    // reader for pre-release source or dogfood Burrows only — v1.2.0, the
+    // first release with any Burrow, sends `origin`.
     const claimed: unknown = body?.origin;
     if (claimed !== undefined && normalizeOrigin(claimed) !== origin) {
       const mismatch: BurrowEnrollOriginMismatch = { error: ORIGIN_MISMATCH_ERROR, origin };

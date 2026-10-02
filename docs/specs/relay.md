@@ -128,8 +128,11 @@ process.
   a key rotation reads as stale.
 * **An upsert whose endpoint differs drops every row on an address this delivery
   is moving off**, under every Burrow, one service-worker scope having one
-  subscription. **A brand-new `deliveryId` cannot know its scope's previous
-  address**, so those rows survive a re-pair until a 404/410 retires them
+  subscription. The addresses moved off are read from every row carrying this
+  `deliveryId`; the rows dropped are matched on endpoint, which reaches
+  siblings whose delivery ids the request never names; and a row already on the
+  presented endpoint stays, so a second Burrow's registration is additive. **A
+  brand-new `deliveryId` cannot know its scope's previous address**, so those rows survive a re-pair until a 404/410 retires them
   (rationale).
 * **The upsert answers the state it left** — every Burrow the endpoint is
   registered with under the current VAPID key — so retrying a committed POST
@@ -184,9 +187,9 @@ Paths and shapes are `API_ROUTES` / `WS_ROUTES` and their types in
 | `POST /api/setup/retire` | session token | Spends a live setup token, registering nothing (rationale); 204, or 401 `SETUP_TOKEN_INVALID_ERROR` |
 | `POST /api/signin/begin` | — | Sign-in challenge |
 | `POST /api/signin/finish` | — | Verifies the assertion; issues a 12-hour in-memory session token |
-| `POST /api/reauth/begin` | session token | Takes a `PresenceBinding`, mints a single-use `relayNonce`, answers `presenceChallenge(binding, nonce)` with the bound credential as the sole `allowCredentials` entry; 404 for an unregistered credential |
+| `POST /api/reauth/begin` | session token | Takes a `PresenceBinding`, mints a single-use `relayNonce`, answers `presenceChallenge(binding, nonce)` with the bound credential as the sole `allowCredentials` entry; 404 for an unregistered credential, 400 for a missing or malformed binding |
 | `POST /api/reauth/finish` | session token | Verifies against the **stored** key for that credential; **extends nothing** — not the session, not the relay socket |
-| `POST /api/burrow/enroll` | setup password or enroll token | Exactly one credential, else 400. **Takes no label.** A foreign `origin` is a 409 `ORIGIN_MISMATCH_ERROR` naming the Relay's, ahead of the credential (rationale); absent, it enrolls (an older Burrow). `MAX_ENROLLED_BURROWS` is checked after the credential (rationale) |
+| `POST /api/burrow/enroll` | setup password or enroll token | Exactly one credential, else 400. **Takes no label.** A foreign `origin` is a 409 `ORIGIN_MISMATCH_ERROR` naming the Relay's, ahead of the credential (rationale); absent, it enrolls (an older Burrow). `MAX_ENROLLED_BURROWS` is a 409 naming `burrows.json`, checked after the credential (rationale) |
 | `POST /api/burrow/setup-token` | burrow token | Mints the token behind this Burrow's QR (below) |
 | `GET /api/burrows` | session token | Enrolled Burrows and whether each is connected |
 | `GET /api/push/config` | — | The public VAPID key, or `null` when push is off |
@@ -211,7 +214,7 @@ is still 413. **Only `/api/push/send` is exempt**, at
 `MAX_PUSH_SEND_BODY_BYTES`, derived from what a maximal fan-out costs.
 
 **Must admit Burrow enrollment through one process-global `TokenBucket` before
-body parsing** (`BURROW_ENROLL_ATTEMPT_*`); empty, it answers 429 with
+body parsing** (`BURROW_ENROLL_ATTEMPT_BURST`, `BURROW_ENROLL_ATTEMPT_REFILL_MS`); empty, it answers 429 with
 `Retry-After`.
 
 **Must compare the setup password in constant time, and delay only that
@@ -252,7 +255,10 @@ fragment is positional and dot-delimited, with no field names:
 | `ephPub` | 32-byte X25519 public key as 43-character unpadded base64url | one-use Burrow Noise responder key for this invitation |
 
 **`PAIRING_QR_URL_MAX_LENGTH` (256) is enforced before any encoder runs**, so a
-mint over it fails naming the origin.
+mint over it fails naming the origin. **The fixed tail leaves a self-host origin
+103 characters**, tighter than the build's `MAX_RELAY_ORIGIN_LENGTH`, which
+comes from the one-time link a self-host build never uses: an origin of 104–167
+characters builds and enrolls, then every "Set up a phone" fails.
 
 **`parsePairingInvitationUrl` answers the complete invitation or `null`** —
 never a partial parse, never an error a caller can distinguish. Two of its
@@ -315,7 +321,9 @@ service, via `web-push`; the Burrow and webview halves are
   sender's**, so it holds for any injected `PushSender` (rationale). **Must count
   sender throws as `failed`**, preserving sibling deliveries.
 - **Push is disabled, not half-working, and only a missing VAPID subject
-  disables it**: `/api/push/config` answers `null` and subscribe/send 503.
+  disables it** (`startRelay` always resolves a keypair; an absent key reaches
+  only an injected `createApp` config): `/api/push/config` answers `null` and
+  subscribe/send 503.
 - **A VAPID subject naming a loopback host is a startup error, not a default**
   (rationale): the default is `DORMOUSE_ORIGIN` when that is https and not
   loopback, else none.
@@ -364,7 +372,9 @@ Resource bounds:
   upgrade answers with. **Only a registered conn is routed or torn down**, so a
   frame buffered behind that close cannot open a ceremony.
 * **A half-open socket is closed by heartbeat**: unanswered within
-  `RELAY_IDLE_TIMEOUT_MS`, it is unregistered and closed 1001.
+  `RELAY_IDLE_TIMEOUT_MS`, three ping intervals, so a peer pinging every
+  `RELAY_PING_INTERVAL_MS` (30 s) is never retired; it is unregistered and
+  closed 1001.
 
 **Must answer the text `RELAY_PING` with `RELAY_PONG`** on either socket kind,
 compared whole before any parse, never forwarded and never an `error`. **The
@@ -428,12 +438,12 @@ What each step establishes: `docs/specs/remote-security-model.md` ->
 
 - **Transport plaintext is `[kind: u8][body]`**: `0x00` keepalive, exactly 32
   zero bytes; `0x01` stream, a slice of the application byte stream; `0x02`
-  control, UTF-8 JSON NUL-padded to exactly `CONTROL_PAYLOAD_SIZE`, so an
+  control, UTF-8 JSON NUL-padded to exactly `CONTROL_PAYLOAD_SIZE` (4096), so an
   approval and a denial are one size on the wire. Any other kind, body length,
   or non-object JSON is rejected.
 - **Each application message is `u32 big-endian length || bytes`**, chunked so
   every Noise message fits 65,535 bytes. **A declared length over
-  `MAX_APP_MESSAGE_LENGTH` is rejected as soon as its prefix arrives.**
+  `MAX_APP_MESSAGE_LENGTH` (1 MiB) is rejected as soon as its prefix arrives.**
 - **The first failure poisons the session**: a decrypt failure, a nonce gap or
   reorder, or a framing violation destroys it and every later call throws.
 - **The control messages are the two ceremonies' outcomes, the direct path's
@@ -482,31 +492,21 @@ DORMOUSE_VAPID_SUBJECT=mailto:you@example.com pnpm dev:relay
 ```
 
 **2. Burrow**: a dev build baked with the local origin
-(`docs/specs/burrow-service.md` -> "Relay origin"):
+(`docs/specs/burrow-service.md` -> "Relay origin"), enrolled with the `password`
+from the generated `setup-password.json` (`docs/specs/burrow-service.md` ->
+"Remote control, in the Settings dialog"):
 
 ```sh
 DORMOUSE_RELAY_ORIGIN=http://localhost:3000 pnpm dev:standalone
-```
-
-Enroll once in **Settings → Network**: choose **My Relay only**, then the
-`password` from the generated `setup-password.json` and a name. The scripting
-seam does the same from the webview's devtools console:
-
-```js
-await window.dormouseBurrow.enroll('<64 hex characters>', 'My Laptop')
 ```
 
 For a headless stand-in Burrow, `node relay/scripts/fake-burrow.mjs
 http://localhost:3000` reads the same state, prints a pairing URL, and
 auto-approves.
 
-**3. Phone** (or any other browser profile): open the Relay origin, show a code
-on the laptop (**Settings → Network → Set up a phone**), and scan or paste it;
-read the two digits into the laptop's modal. A code the phone's own camera opens
-only bootstraps the origin; scan again inside the app
-(`docs/specs/pocket-app.md`). For push, add Pocket to the Home Screen before
-scanning (`docs/specs/pocket-app.md` -> "Installable web app"); **the Enable tap
-is the user gesture iOS requires**.
+**3. Phone**: open the Relay origin there, then set up a phone from the laptop
+(`docs/specs/pocket-app.md`; for push, `docs/specs/pocket-app.md` ->
+"Installable web app").
 
 Limitations: each browser partition needs its own pairing; clearing site data
 destroys it; a dropped WebSocket returns to the Burrows view, where Connect

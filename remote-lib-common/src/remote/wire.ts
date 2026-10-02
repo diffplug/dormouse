@@ -824,8 +824,8 @@ export function isE2eCiphertext(value: unknown): value is string {
 
 /**
  * The shape guard both a relay and a Burrow run on a Client-originated `e2e`
- * frame — the both-sides rule the relay and the Burrow share (relay.md ->
- * Relay). It cannot check the ciphertext, so all it enforces is that the
+ * frame — the both-sides rule the relay and the Burrow share
+ * (`docs/specs/relay.md` -> "Routing"). It cannot check the ciphertext, so all it enforces is that the
  * routing values are bounded. Pinned by `remote-lib-common/test/wire.test.mjs`
  * and, against real relay-minted ids, `relay/test/e2e-relay.test.mjs`.
  */
