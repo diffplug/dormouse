@@ -62,7 +62,9 @@ export function AlertRingIndicator({ sessionId }: { sessionId: string }) {
         aria-atomic="true"
         aria-label={ALERT_RING_LABEL[row].pane}
         // Stacking context and geometry only; the wash strengths live on the
-        // child below — see `docs/specs/layout.md` -> Alarm overlay.
+        // child below as element opacity over the solid alarm colour, never a
+        // color-alpha utility: its `color-mix()` is unsupported by the standalone
+        // Safari 15 / Chrome 105 targets (`docs/specs/layout.md` -> Alarm overlay).
         className={clsx(layer, 'z-[19]')}
       >
         <div
