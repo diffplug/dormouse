@@ -1010,8 +1010,8 @@ export const MAX_TERMINAL_DIMENSION = 2000;
 /**
  * Coerce a requested terminal dimension (cols or rows) to a positive integer,
  * falling back to `fallback` when the value is absent or not finite. Shared so
- * the Burrow api, the client adapter, and the test harness all sanitize sizes the
- * same way.
+ * the Burrow api, the owning webview's responder, the client adapter, and the
+ * test harness all sanitize sizes the same way.
  *
  * Clamped at **both** ends, and the upper bound is the security-relevant half:
  * a local resize is derived from element geometry and cannot be large, but
