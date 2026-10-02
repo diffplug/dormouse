@@ -19,7 +19,7 @@ One protocol, two consumption depths: the **phone** (Dormouse Pocket) shipped, a
 
 ## v1 scope
 
-**Must restrict protocol-v1 to terminal listing, one attachment per session, and terminal input/resize; never layout operations.** The sections below own directory snapshots, attachment and size authority, and grants. Canonical method/event syntax lives in `remote-lib-common/src/remote/wire.ts`.
+**Scope: protocol-v1** — the shipped protocol, the smallest that lets a phone **sign in, pick a pane, see it live, and type into it**. **Must restrict it to terminal listing, one attachment per session, and terminal input/resize; never layout operations.** The sections below own directory snapshots, attachment and size authority, and grants. Canonical method/event syntax lives in `remote-lib-common/src/remote/wire.ts`.
 
 Everything else, browser-surface remoting included, is staged in [Future](#future).
 
