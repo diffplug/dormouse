@@ -34,7 +34,7 @@ It ends on the **next mouse-up inside the terminal content area** paired with a 
 
 **Sticky override.** **Make sticky** converts it (the store calls this state `permanent`): banner dismissed, No-Mouse icon kept, mouse and wheel still going to the terminal. It persists until the user clicks the No-Mouse icon.
 
-**Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?1000l`/`?1002l`/`?1003l`); icon and banner go with it. A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/transport.md` -> "Replay-time mode-reset tail (Dormouse-emitted)"), so a mode latched by a dead TUI cannot block selection in the restored pane.
+**Auto-clear on reporting off.** **Either override clears when the inside program stops requesting mouse reporting** (it exits, or DECRSTs `?9l`/`?1000l`/`?1002l`/`?1003l`); icon and banner go with it. A **dead** session's replay ends in the `REPLAY_MODE_RESET` tail that DECRSTs mouse tracking (`docs/specs/transport.md` -> "Replay-time mode-reset tail (Dormouse-emitted)"), so a mode latched by a dead TUI cannot block selection in the restored pane.
 
 Source of truth: `setOverride` / `setMouseReporting` in `lib/src/lib/mouse-selection.ts`; `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx`, pinned by `lib/src/components/wall/mouse-chrome.test.tsx`.
 
@@ -235,7 +235,7 @@ Source of truth: `terminalOwnsEvent` in `lib/src/lib/terminal-mouse-router.ts`.
 
 **Must keep selection and hint updates from rerendering pane headers or override banners** (rationale). Outlines and hints draw above the cell grid from xterm's measured cell geometry, remeasured on every render tick.
 
-Source of truth: `SelectionOverlay` in `lib/src/components/SelectionOverlay.tsx`.
+Source of truth: `TerminalPaneHeader` in `lib/src/components/wall/TerminalPaneHeader.tsx` and `MouseOverrideBanner` in `lib/src/components/wall/MouseOverrideBanner.tsx`, pinned by `lib/src/components/wall/mouse-chrome.test.tsx`; `SelectionOverlay` in `lib/src/components/SelectionOverlay.tsx`.
 
 ---
 
