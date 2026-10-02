@@ -27,7 +27,8 @@ the playground tutorial land on `/hosted#voice`, and the plan cards sit within
 one screen of that anchor. `#remote-control` and `#voice` keep resolving as
 section ids.
 
-**Content, in order:** the Relay boundary notice; the plan cards; what a member
+**Content, in order:** the plan cards, directly under the title and anchored
+`#pricing`; what a member
 gets, as prose; "Self-hosting stays free"; and a short FAQ — refunds and
 cancellation, the founding lock, who appears in the founders row, what happens
 if Hosted shuts down, and that team pricing goes by email to `teams@dormouse.sh`.
@@ -41,8 +42,8 @@ price, so an assistant fetching the page can quote it. **Offers stay
 the tests read `website/src/lib/hosted-pricing.ts` rather than restating a
 number.
 
-**Must describe both grants as live, never upcoming.** The Relay boundary
-notice carries the one qualifier: the independent review
+**Must describe both grants as live, never upcoming.** The managed Relay
+section carries the one qualifier: the independent review
 `docs/specs/security-remote.md` -> "Cloud-hosted mode" requires.
 
 ### Plan cards

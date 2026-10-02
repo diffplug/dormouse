@@ -67,14 +67,15 @@ describe("every page in the rail", () => {
     });
   }
 
-  it("discloses Hosted's metadata and its pending review", () => {
+  it("discloses Hosted's metadata and its pending review in the managed Relay section", () => {
     const markup = renderToStaticMarkup(<MemoryRouter><Hosted /></MemoryRouter>);
-    expect(markup).toContain("Its independent security review is pending");
-    expect(markup).toContain("It sees connection metadata, never");
-    expect(markup).toContain("remote-security-model.md");
+    const relay = markup.slice(markup.indexOf('id="remote-control"'));
+    expect(relay).toContain("Its independent security review is pending");
+    expect(relay).toContain("connection metadata");
+    expect(relay).toContain("remote-security-model.md");
   });
 
-  it("opens both hosting choices with the Relay boundary", () => {
+  it("opens self-host with the Relay boundary and Hosted with its plans", () => {
     const selfHostMarkup = renderToStaticMarkup(
       <MemoryRouter><SelfHostDocs /></MemoryRouter>,
     );
@@ -82,17 +83,17 @@ describe("every page in the rail", () => {
       <MemoryRouter><Hosted /></MemoryRouter>,
     );
 
-    for (const markup of [selfHostMarkup, hostedMarkup]) {
-      expect(markup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
-      expect(markup).toContain("They require a Relay to");
-      expect(markup).toContain("Dormouse’s remote features make no network requests");
-    }
+    expect(selfHostMarkup).toContain("Dormouse is just a terminal — it needs no server or hosting.");
+    expect(selfHostMarkup).toContain("They require a Relay to");
+    expect(selfHostMarkup).toContain("Dormouse’s remote features make no network requests");
     expect(selfHostMarkup.indexOf("Dormouse is just a terminal —"))
       .toBeLessThan(selfHostMarkup.indexOf('id="security-model"'));
-    expect(hostedMarkup.indexOf("Dormouse is just a terminal —"))
-      .toBeLessThan(hostedMarkup.indexOf('id="remote-control"'));
     expect(selfHostMarkup).toContain("See Dormouse Hosted");
-    expect(hostedMarkup).toContain("Its independent security review is pending");
+
+    // The plan cards are the first thing under the title; the box is gone.
+    expect(hostedMarkup).not.toContain("Dormouse is just a terminal —");
+    expect(hostedMarkup.indexOf('id="pricing"')).toBeGreaterThan(-1);
+    expect(hostedMarkup.indexOf('id="pricing"')).toBeLessThan(hostedMarkup.indexOf('id="voice"'));
   });
 
   it("names the two hosting choices", () => {

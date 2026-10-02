@@ -1,16 +1,13 @@
 import { CARD_ACCENT_CLASS, CARD_MUTED_TEXT_CLASS, LINK_CLASS } from "./docs-tokens";
 import { sitePath } from "../lib/site-meta";
 
-const SECURITY_MODEL_URL =
-  "https://github.com/diffplug/dormouse/blob/main/docs/specs/remote-security-model.md";
-
-export function HostingRequirementNotice({
-  mode,
-}: {
-  mode: "self-hosted" | "hosted";
-}) {
-  const hosted = mode === "hosted";
-
+/**
+ * The Relay boundary `/self-host` opens with: Dormouse needs no server, and
+ * the remote features that do need one make no requests until it exists.
+ * `/hosted` opens with its plan cards instead, and its managed Relay section
+ * carries the hosted half (docs/specs/website-docs.md -> `/hosted`).
+ */
+export function HostingRequirementNotice() {
   return (
     <aside
       aria-label="When Dormouse needs a Relay"
@@ -24,31 +21,12 @@ export function HostingRequirementNotice({
         connect your computer and phone and pass encrypted traffic between them. Until you
         configure one, Dormouse’s remote features make no network requests.
       </p>
-      {hosted ? (
-        <>
-          <p className={`mt-4 leading-relaxed ${CARD_MUTED_TEXT_CLASS}`}>
-            Dormouse Hosted runs that Relay for you. It sees connection metadata, never
-            terminal content. Its independent security review is pending.
-          </p>
-          <p className="mt-4 text-sm">
-            <a
-              href={SECURITY_MODEL_URL}
-              className={LINK_CLASS}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Read the trust model →
-            </a>
-          </p>
-        </>
-      ) : (
-        <p className="mt-4 text-sm">
-          Prefer not to run it?{" "}
-          <a href={`${sitePath("/hosted")}#remote-control`} className={LINK_CLASS}>
-            See Dormouse Hosted →
-          </a>
-        </p>
-      )}
+      <p className="mt-4 text-sm">
+        Prefer not to run it?{" "}
+        <a href={`${sitePath("/hosted")}#remote-control`} className={LINK_CLASS}>
+          See Dormouse Hosted →
+        </a>
+      </p>
     </aside>
   );
 }

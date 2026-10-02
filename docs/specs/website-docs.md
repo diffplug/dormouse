@@ -321,11 +321,11 @@ awake, online computer, and self-hosting remains.
 tab. **Must use native required-email validation.**
 `website/src/components/NotifySignupForm.test.tsx` pins all three.
 
-**Must open both hosting pages with the Relay boundary:** Dormouse needs none;
+**Must open `/self-host` with the Relay boundary:** Dormouse needs none;
 remote features require a configured Relay and otherwise make no network
-requests. `/self-host` links `/hosted`; `/hosted` labels hosting pending review,
-discloses metadata, and links the model.
-`website/src/lib/docs-rail.test.tsx` pins this.
+requests; it links `/hosted`. **`/hosted` opens with its plan cards** instead,
+and its managed Relay section discloses metadata, labels the review pending,
+and links the model. `website/src/lib/docs-rail.test.tsx` pins both.
 
 **Must also link it from** Pocket marketing/tutorial, self-host docs, and the
 speech and remote-control settings; `linkedFrom` owns the rest. `/pricing`

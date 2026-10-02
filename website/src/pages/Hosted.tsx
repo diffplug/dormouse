@@ -18,7 +18,6 @@ import {
 } from "@phosphor-icons/react";
 import { type MetaArgs } from "react-router";
 import DocsLayout from "../components/DocsLayout";
-import { HostingRequirementNotice } from "../components/HostingRequirementNotice";
 import { AnchoredHeading } from "../components/MarkdownDocument";
 import { NotifySignupForm } from "../components/NotifySignupForm";
 import {
@@ -30,6 +29,7 @@ import {
   CARD_MUTED_TEXT_CLASS,
   LINK_CLASS,
   MUTED_TEXT_CLASS,
+  SCROLL_MT_CLASS,
 } from "../components/docs-tokens";
 import { type TocEntry } from "../lib/docs-pages";
 import { POCKET_PLAYGROUND_PATH } from "../lib/playground-routing";
@@ -52,6 +52,9 @@ import { canonicalUrl, siteMeta, sitePath } from "../lib/site-meta";
 
 const PAGE_PATH = "/hosted";
 
+const SECURITY_MODEL_URL =
+  "https://github.com/diffplug/dormouse/blob/main/docs/specs/remote-security-model.md";
+
 /** Where team and enterprise inquiries go; nothing on this page sells them. */
 const TEAMS_EMAIL = "teams@dormouse.sh";
 
@@ -65,7 +68,6 @@ export function meta({ location }: MetaArgs) {
 }
 
 export const HOSTED_TOC: TocEntry[] = [
-  { id: "pricing", text: "What it costs", children: [] },
   { id: "voice", text: "Managed voices", children: [] },
   { id: "remote-control", text: "The managed Relay", children: [] },
   { id: "self-hosting", text: "Self-hosting stays free", children: [] },
@@ -456,7 +458,6 @@ export default function Hosted() {
     <DocsLayout
       activePath={PAGE_PATH}
       title="Dormouse Hosted"
-      intro={<HostingRequirementNotice mode="hosted" />}
       toc={HOSTED_TOC}
     >
       {/* Prerendered with the prices it repeats, so an assistant fetching the
@@ -466,14 +467,9 @@ export default function Hosted() {
         dangerouslySetInnerHTML={{ __html: pricingJsonLd(canonicalUrl(PAGE_PATH)) }}
       />
 
-      <section>
-        <AnchoredHeading id="pricing" spacing="mt-0 mb-3">What it costs</AnchoredHeading>
-        <p className={`mb-6 ${BODY_TEXT_CLASS}`}>
-          The terminal is free and stays free. Hosted is for when you walk away: a terminal
-          needs you, your phone buzzes, and you answer with your thumb, with no server of
-          your own to run.
-        </p>
-
+      {/* The cards open the page: no heading of their own, but `#pricing`
+          stays an anchor, since the JSON-LD offers point at it. */}
+      <section id="pricing" aria-label="Plans and prices" className={SCROLL_MT_CLASS}>
         {/* Free, then Hosted, then Founding: side by side from `md`, stacked
             in the same order on a phone. */}
         <div className="grid gap-4 md:grid-cols-3">
@@ -539,8 +535,16 @@ export default function Hosted() {
         <p className={`leading-relaxed ${MUTED_TEXT_CLASS}`}>
           Terminal traffic is end-to-end encrypted between your computer and your phone,
           so the Relay I operate carries it without reading it. What it does see is
-          connection metadata, and the trust model linked at the top of this page lists
-          exactly which.
+          connection metadata, and the{" "}
+          <a
+            href={SECURITY_MODEL_URL}
+            className={LINK_CLASS}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            trust model
+          </a>{" "}
+          lists exactly which. Its independent security review is pending.
         </p>
       </section>
 
