@@ -3,8 +3,8 @@ import { layout } from './layout';
 import { createHitTester, hitTest } from './hit-test';
 import { isLathPersistedLayout, lathLayoutFromStore } from './persistence';
 import { targetRect } from './drop-target';
-import { type LathNode, leafTree, leaves, validate } from './model';
-import { insert, move, split as splitLeaf } from './ops';
+import { type LathNode, findLeafPath, nodeAtPath, leafTree, leaves, validate } from './model';
+import { insert, move, remove, restore, split as splitLeaf } from './ops';
 import { leaf, split, tree, R } from './test-util';
 
 const opts = { gap: 0, minLeaf: { width: 0, height: 0 } };
@@ -227,4 +227,60 @@ describe('gesture hit-test cache', () => {
     expect(cached(row, box, { x: -1, y: 5 }, 'd', opts)).toEqual([]);
     expect(cached(row, box, point, 'd', opts)).toEqual(first);
   });
+});
+
+
+describe('restore scopes after normalization', () => {
+  it.each(['row', 'col'] as const)('restores beside an entire split sibling flattened into a %s grandparent', (dir) => {
+    const across = dir === 'row' ? 'col' : 'row';
+    const original = tree(split(dir,
+      [split(across, [leaf('a'), 0.3], [split(dir, [leaf('b'), 0.2], [leaf('c'), 0.8]), 0.7]), 0.4],
+      [leaf('d'), 0.6],
+    ));
+    const removed = remove(original, 'a');
+    const restored = restore(removed.tree, JSON.parse(JSON.stringify(removed.token)));
+    expect(restored.ok).toBe(true);
+    expect(restored.tier).toBe('exact');
+    expect(validate(restored.tree)).toEqual([]);
+    expect(layout(restored.tree, box, opts)).toEqual(layout(original, box, opts));
+  });
+
+  it('does not reclaim an unrelated pane added inside the former sibling group', () => {
+    const original = tree(split('row',
+      [split('col', [leaf('a'), 0.3], [split('row', [leaf('b'), 0.2], [leaf('c'), 0.8]), 0.7]), 0.4],
+      [leaf('d'), 0.6],
+    ));
+    const removed = remove(original, 'a');
+    const changed = splitLeaf(removed.tree, 'b', 'bottom', 'new').tree;
+    const restored = restore(changed, removed.token!);
+    expect(restored.ok).toBe(true);
+    expect(restored.tier).toBe('neighbor');
+    expect(validate(restored.tree)).toEqual([]);
+    expect(new Set(leaves(restored.tree))).toEqual(new Set(['a', 'b', 'c', 'd', 'new']));
+  });
+});
+
+
+it('round-trips exact restore geometry across 100 seeded nested layouts', () => {
+  let seed = 0x727374;
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 0x100000000; };
+  let checked = 0;
+  for (let run = 0; run < 100; run++) {
+    let original = leafTree('0');
+    for (let i = 1; i < 9; i++) {
+      original = splitLeaf(original, String(Math.floor(random() * i)), (['left', 'right', 'top', 'bottom'] as const)[Math.floor(random() * 4)], String(i)).tree;
+    }
+    for (const id of leaves(original)) {
+      const path = findLeafPath(original, id)!;
+      const parent = nodeAtPath(original, path.slice(0, -1))!;
+      if (parent.kind !== 'split' || parent.children.length === 2 && parent.children.every(child => child.node.kind === 'leaf')) continue;
+      const removed = remove(original, id);
+      const restored = restore(removed.tree, removed.token!);
+      expect(restored.tier).toBe('exact');
+      expect(validate(restored.tree)).toEqual([]);
+      expect(layout(restored.tree, box, opts)).toEqual(layout(original, box, opts));
+      checked++;
+    }
+  }
+  expect(checked).toBeGreaterThan(200);
 });

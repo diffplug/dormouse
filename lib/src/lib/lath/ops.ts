@@ -73,26 +73,6 @@ function findSplitPathByFingerprint(tree: LathTree, fingerprint: string): number
   return result;
 }
 
-function findPathByLeafSet(tree: LathTree, target: Set<LeafId>): number[] | null {
-  if (target.size === 0) return null;
-  let result: number[] | null = null;
-  const eq = (s: Set<LeafId>): boolean => s.size === target.size && [...s].every((x) => target.has(x));
-  const walk = (node: LathNode, path: number[]): Set<LeafId> => {
-    let set: Set<LeafId>;
-    if (node.kind === 'leaf') set = new Set([node.id]);
-    else {
-      set = new Set();
-      node.children.forEach((c, i) => {
-        for (const id of walk(c.node, [...path, i])) set.add(id);
-      });
-    }
-    if (eq(set) && (result === null || path.length < result.length)) result = path;
-    return set;
-  };
-  if (tree.root) walk(tree.root, []);
-  return result;
-}
-
 /** Insert `newId` beside `at`. Always builds a nested split of the edge's axis at
  *  0.5/0.5 (order per edge) in `at`'s place; `normalize` then flattens it into the
  *  parent when directions match (extending the split, both siblings ending at half
@@ -201,11 +181,12 @@ export function restore(
     }
 
     if (token.siblingLeafIds && token.siblingLeafIds.length > 1 && token.siblingFingerprint) {
-      const siblingPath = findPathByLeafSet(tree, new Set(token.siblingLeafIds));
-      if (siblingPath !== null) {
-        const sibling = nodeAtPath(tree, siblingPath);
+      const siblingTarget = targetByLeafSet(tree, new Set(token.siblingLeafIds), token.edge);
+      const resolved = siblingTarget && materializeTarget(tree, siblingTarget);
+      if (resolved) {
+        const sibling = nodeAtPath(resolved.tree, resolved.path);
         if (sibling && structureFingerprint(sibling) === token.siblingFingerprint) {
-          const r = insert(tree, token.leafId, { kind: 'edge', path: siblingPath, edge: token.edge }, token.weight);
+          const r = insert(tree, token.leafId, siblingTarget, token.weight);
           if (r.ok) return { tree: r.tree, ok: true, tier: 'exact' };
         }
       }

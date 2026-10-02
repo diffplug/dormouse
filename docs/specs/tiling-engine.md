@@ -115,7 +115,7 @@ Source of truth: `hitTest` / `createHitTester` in `lib/src/lib/lath/hit-test.ts`
 3. **fallback** — split beside `opts.fallbackRef` via `autoEdge`, or `'right'` with no rect. Restoring into an empty tree makes the leaf the root.
 
 - A leaf removed from a two-child split whose survivor is a single leaf **always degrades to neighbor** — the collapse erases the fingerprinted parent, and neighbor reproduces the same position at 50/50 rather than the original weights.
-- A survivor that is a split subtree keeps **exact**, targeted by `siblingLeafIds` / `siblingFingerprint`, so `A | (B over C)` restores beside the whole `B/C` column rather than inside it.
+- **Must retain exact restoration beside an unchanged split sibling even when it flattened into its grandparent.** Resolve `siblingLeafIds` as a node or contiguous range and compare `siblingFingerprint` before inserting; a changed group degrades to neighbor. `restore scopes after normalization` in `lib/src/lib/lath/group-drop.test.ts` pins this rule.
 - **Must supply a live `fallbackRef` when exact/neighbor tiers fail in a nonempty tree**; otherwise restore returns `ok: false`.
 
 Tokens serialize with Doors (`PersistedDoor.token`) as the sole restore payload. A parked leaf still carries one: parking decides whether the DOM survives, the token decides where the leaf lands.
