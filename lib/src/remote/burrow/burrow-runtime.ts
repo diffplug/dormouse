@@ -373,8 +373,8 @@ export class BurrowRuntime {
    * (`docs/specs/remote-security-model.md` → Pairing).
    *
    * Kept on the Burrow rather than in the service that composes the QR so its
-   * lifetime *is* this Burrow's: a new Burrow starts with none, and a Burrow that
-   * reconnects keeps the codes still on screen. Capped at
+   * lifetime *is* this Burrow's: a new Burrow starts with none, and losing its
+   * Relay socket retires every outstanding invitation. Capped at
    * {@link MAX_TOKENS_PER_BURROW}, the Relay's own bound on the setup tokens
    * these ride with, so the two sides agree on live-versus-spent.
    */
@@ -1153,8 +1153,8 @@ export class BurrowRuntime {
       session = new NoiseTransportSession(handshake.session);
       handshakeHash = toBase64Url(session.handshakeHash);
     } catch {
-      // The invitation stays live: nothing decrypted against it, so no scanner
-      // has been spent — only a valid message 1 reserves one.
+      // The invitation stays live until both handshake messages complete;
+      // a failed read or response spends no scanner.
       return;
     }
     // Nothing above allocated a client entry: a handshake that fails must cost

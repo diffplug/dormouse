@@ -1,7 +1,7 @@
 /**
  * Activation glue: wires this webview to the Burrow service behind the
  * platform adapter, and exposes a `window.dormouseBurrow` console hook for
- * enrolling in the POC (no settings UI needed).
+ * enrollment scripting alongside the Settings UI.
  *
  * The Burrow itself is a service in the process that owns the PTYs
  * (`lib/src/host/remote/service.ts`) — the Tauri sidecar, the VS Code extension

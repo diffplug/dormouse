@@ -1,7 +1,7 @@
 /**
  * `dor tool --list` (`docs/specs/dor-tool.md` -> CLI): the Tools `dor tool
  * <name>` would resolve from a directory, each with the comment its author
- * wrote above it. Listing reads and executes nothing, so a project needs no
+ * wrote above it. Listing only reads configuration and executes no Tool, so a project needs no
  * grant to be listed; the answer reports whether it has one.
  */
 import type { ToolListEntry, ToolListRequest, ToolListResponse } from 'dor/commands/types';

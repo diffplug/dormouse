@@ -304,10 +304,17 @@ describe('the pre-approval read (regression: review finding 13, PR #493 review)'
     expect((await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream })).status).toBe('untrusted');
   });
 
-  it('refuses a symlink instead of following it before trust', async () => {
+  it('refuses a symlink instead of following it before trust', async (context) => {
     const target = join(root, 'repo-controlled-target.yml');
     await writeFile(target, YML);
-    await symlink(target, join(root, 'dormouse.yml'));
+    try {
+      await symlink(target, join(root, 'dormouse.yml'));
+    } catch (error) {
+      if (process.platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') {
+        context.skip('Windows file symlinks require Developer Mode or symlink privilege');
+      }
+      throw error;
+    }
 
     const result = await lookupTool('storybook', root, new MemoryToolTrustStore(), { resolveUpstream: noUpstream });
     expect(result).toMatchObject({ status: 'error' });

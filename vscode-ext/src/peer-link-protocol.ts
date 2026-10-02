@@ -93,7 +93,9 @@ export function encodeFrame(frame: PeerLinkFrame | PeerLinkHandshake): string {
  * killing the link.
  */
 export class FrameDecoder {
+  /** The unterminated frame so far, and its UTF-8 size, counted per chunk. */
   #buffer = '';
+  #bufferBytes = 0;
   /**
    * Set once one frame has outgrown the cap: everything up to the next newline
    * belongs to that frame and is dropped, and normal accumulation resumes after
@@ -103,25 +105,29 @@ export class FrameDecoder {
   #discarding = false;
   readonly #maxFrameBytes: number;
 
-  /** Bounds a peer that never sends a newline; the default fits a screenful. */
+  /** Bounds each UTF-8 frame before JSON parsing; the default fits a screenful. */
   constructor(maxFrameBytes = 4 * 1024 * 1024) {
     this.#maxFrameBytes = maxFrameBytes;
   }
 
   push(chunk: string): unknown[] {
-    this.#buffer += chunk;
     const frames: unknown[] = [];
-    for (;;) {
-      const newline = this.#buffer.indexOf('\n');
-      if (newline === -1) break;
-      const line = this.#buffer.slice(0, newline);
-      this.#buffer = this.#buffer.slice(newline + 1);
+    // Each piece is measured once, as it arrives — re-measuring the whole
+    // buffer on every chunk would be quadratic in a large frame.
+    const pieces = chunk.split('\n');
+    const tail = pieces.pop()!;
+    for (const piece of pieces) {
+      const line = this.#buffer + piece;
+      const bytes = this.#bufferBytes + Buffer.byteLength(piece, 'utf8');
+      this.#buffer = '';
+      this.#bufferBytes = 0;
       if (this.#discarding) {
         // That was the oversized frame's terminator; the bytes after it are a
         // frame boundary again.
         this.#discarding = false;
         continue;
       }
+      if (bytes > this.#maxFrameBytes) continue;
       if (!line.trim()) continue;
       try {
         frames.push(JSON.parse(line));
@@ -130,11 +136,18 @@ export class FrameDecoder {
       }
     }
     // Whatever is left is one unterminated frame. Past the cap it is a frame we
-    // can never read, so it goes — but the whole frames already taken out of
-    // the buffer above are real, and dropping them with it would lose traffic
-    // from a link that is otherwise healthy.
-    if (this.#buffer.length > this.#maxFrameBytes) this.#discarding = true;
-    if (this.#discarding) this.#buffer = '';
+    // can never read, so it goes — but the whole frames already taken out
+    // above are real, and dropping them with it would lose traffic from a link
+    // that is otherwise healthy.
+    if (!this.#discarding) {
+      this.#buffer += tail;
+      this.#bufferBytes += Buffer.byteLength(tail, 'utf8');
+      if (this.#bufferBytes > this.#maxFrameBytes) this.#discarding = true;
+    }
+    if (this.#discarding) {
+      this.#buffer = '';
+      this.#bufferBytes = 0;
+    }
     return frames;
   }
 }
