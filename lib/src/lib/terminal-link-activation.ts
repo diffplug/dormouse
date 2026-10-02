@@ -31,9 +31,10 @@ export function activateTerminalLink(
   const ownPreview = !preview && lastPreview?.id === id && lastPreview.uri === uri ? lastPreview : null;
   if (preview) lastPreview = null;
   const path = localFileLinkPreviewPath(uri, displayText);
+  const source = { surfaceId: id, cwd: terminalLinkCwd(id, uri) };
   // Only a host that resolves open rules can answer.
   if (path === null || !getPlatform().toolControl) {
-    requestExternalLinkConfirmation(uri, displayText);
+    requestExternalLinkConfirmation(uri, displayText, source);
     return;
   }
   // A triple-click's third click would open the file again, unkeyed Tools twice.
@@ -44,12 +45,24 @@ export function activateTerminalLink(
     requestId: `link-${crypto.randomUUID()}`,
     surfaceId: id,
     method: SURFACE_CONTROL_METHODS.tool,
-    params: { file: uri, preview, cwd: getInheritableCwd(id) ?? directoryOf(normalizeFileUriPath(path)) },
+    params: { file: uri, preview, cwd: source.cwd },
   }, (response) => {
     if (response.ok || response.error === PREVIEW_SUPERSEDED_ERROR || ownPreview?.failed) return;
     if (record) record.failed = true;
-    requestExternalLinkConfirmation(uri, displayText);
+    requestExternalLinkConfirmation(uri, displayText, source);
   });
+}
+
+/** Preserve the click's directory across confirmation and viewer selection. The
+ * host still validates locality, controls, existence, and file kind. */
+function terminalLinkCwd(id: string, uri: string): string | undefined {
+  const cwd = getInheritableCwd(id);
+  if (cwd) return cwd;
+  try {
+    const url = new URL(uri);
+    if (url.protocol === 'file:') return directoryOf(normalizeFileUriPath(decodeURIComponent(url.pathname)));
+  } catch { /* Invalid URLs are explained by the confirmation dialog. */ }
+  return undefined;
 }
 
 /** The parent of a native path with `/` separators; a root keeps its slash,

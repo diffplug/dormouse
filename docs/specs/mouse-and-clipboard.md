@@ -389,7 +389,9 @@ Neither `params` nor the URI is parsed at the PTY boundary.
 | **Deceptive** | display text URL-shaped (a full URL or a bare domain) but resolving to a different host than the target; one that merely *differs* — a human phrase, a same-host sibling URL — is **plain**, not deceptive, and stays openable | **No open action at all**: close and copy only, the copy button taking initial focus so a reflexive Enter cannot open anything |
 | **Blocked** | malformed URIs, control-character-bearing targets, browser-executable or opaque pseudo-schemes (`javascript:`, `data:`, `blob:`, `about:`) | **Never silently dropped**: the dialog opens with the reason, close the only action |
 
-**Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
+**Cancel/close is the safe default; long targets must wrap and scroll without truncation.** **The confirmation host must reject deceptive verdicts even if its callback runs.** **Every external-URL adapter must revalidate through `normalizeExternalUri` before opening** (VS Code before `vscode.env.openExternal`) — consent does not replace validation.
+
+`docs/specs/dor-tool.md` → "Terminal links" owns confirmed file opening and viewer selection.
 
 Source of truth: `normalizeExternalUri` in `lib/src/lib/external-links.ts` (pinned by `lib/src/lib/external-links.test.ts`), `lib/src/lib/external-link-confirmation.ts`, `lib/src/components/ExternalLinkModal.tsx`, and the host's own verdict re-check in `lib/src/components/ExternalLinkModalHost.tsx`.
 

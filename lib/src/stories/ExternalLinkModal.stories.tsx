@@ -1,8 +1,10 @@
+import { useState, type ComponentProps } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { ExternalLinkModal } from '../components/ExternalLinkModal';
 import { classifyDisplayMatch, inspectExternalUri } from '../lib/external-links';
 
-function ExternalLinkModalStory({ uri, displayText }: { uri: string; displayText: string }) {
+function ExternalLinkModalStory({ uri, displayText, ...dialog }: { uri: string; displayText: string } & Pick<ComponentProps<typeof ExternalLinkModal>, 'handlers' | 'error' | 'busy'>) {
+  const [selectedTool, setSelectedTool] = useState('');
   return (
     <div className="relative h-[360px] w-[680px] overflow-hidden rounded bg-app-bg font-mono text-terminal-fg">
       <div className="p-4 text-sm">
@@ -10,6 +12,9 @@ function ExternalLinkModalStory({ uri, displayText }: { uri: string; displayText
         <div className="text-muted">See the linked report for details.</div>
       </div>
       <ExternalLinkModal
+        {...dialog}
+        selectedTool={selectedTool}
+        onSelectTool={setSelectedTool}
         request={{
           uri,
           displayText,
@@ -96,5 +101,24 @@ export const Blocked: Story = {
   args: {
     uri: 'javascript:alert(document.cookie)',
     displayText: '',
+  },
+};
+
+export const FileViewers: Story = {
+  args: {
+    uri: 'file:///Users/dev/project/report.md',
+    displayText: '[Report]',
+    handlers: [
+      { tool: 'builtin:file', description: 'Markdown editor', reason: 'built-in; no open rule matches' },
+      { tool: 'builtin:code', description: 'code editor (source)', reason: 'built-in' },
+    ],
+  },
+};
+
+export const FileOpenFailed: Story = {
+  args: {
+    uri: 'file:///Users/dev/project/image.png',
+    displayText: '[Image #2]',
+    error: 'no such file or folder: file:///Users/dev/project/image.png',
   },
 };

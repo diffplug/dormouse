@@ -18,7 +18,7 @@ import * as terminalRegistry from '../../lib/terminal-registry';
 import { recordToolDirty, resetToolDirty } from '../../lib/tool-dirty-store';
 import { pendingShellOpts } from '../../lib/terminal-store';
 import { doubleClick, mountWallHarness, reportRunning, waitUntil, type WallHarness } from './wall-test-utils';
-import { getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
+import { clearExternalLinkConfirmation, getExternalLinkConfirmationSnapshot } from '../../lib/external-link-confirmation';
 import { activateTerminalLink } from '../../lib/terminal-link-activation';
 import { applyLiveToolEvents } from '../../lib/tool-events';
 import { parseReplay } from '../../lib/platform/replay-parse';
@@ -61,6 +61,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => { requests.abort(); await new Promise(resolve => setTimeout(resolve, 125)); });
   harness.dispose();
+  clearExternalLinkConfirmation();
   for (const id of sessions) {
     fake.clearInputHandler(id);
     pendingShellOpts.delete(id);
@@ -934,6 +935,35 @@ describe('an OSC 367 open', () => {
 });
 
 describe('a terminal link', () => {
+  it('confirms a labelled link through the real Wall and pins its existing preview', async () => {
+    await mountSlot();
+    fake.toolControl = vi.fn(async request => request.op === 'open-handlers'
+      ? { status: 'open-handlers' as const, handlers: { handlers: [{ tool: 'viewer', description: 'view', reason: 'open rule' }], config: '/config/dormouse.yml' } }
+      : openLookup('a.md'));
+    await act(async () => activateTerminalLink('pane-a', { detail: 1 }, 'file:///repo/a.md', '[Report]'));
+    expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
+    expect(fake.toolControl).toHaveBeenCalledTimes(1);
+    const open = [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Open file')!;
+    await act(async () => open.click());
+    await waitUntil(() => getExternalLinkConfirmationSnapshot() === null);
+    expect(fake.toolControl).toHaveBeenLastCalledWith({ op: 'open', target: 'file:///repo/a.md', cwd: '/repo', tool: undefined });
+    expect(container.querySelector('[data-lath-leaf="slot"] .italic')).toBeNull();
+    expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
+  });
+
+  it('reports a closed source instead of opening next to an unrelated terminal', async () => {
+    await mountSlot();
+    fake.toolControl = vi.fn(async () => ({ status: 'open-handlers' as const, handlers: { handlers: [], config: '/config/dormouse.yml' } }));
+    await act(async () => activateTerminalLink('closed-pane', { detail: 1 }, 'file:///repo/a.md', '[Report]'));
+    const open = [...document.body.querySelectorAll('button')].find(button => button.textContent === 'Open file')!;
+    await act(async () => open.click());
+    await waitUntil(() => document.body.querySelector('[role="alert"]') !== null);
+    expect(getExternalLinkConfirmationSnapshot()).not.toBeNull();
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The originating terminal is no longer available.');
+    expect(fake.toolControl).toHaveBeenCalledTimes(1);
+    expect(container.querySelectorAll('[data-lath-leaf]')).toHaveLength(2);
+  });
+
   it('previews a local file link on a click and pins it on a double-click', async () => {
     const toolControl = await mountSlot();
     // The host resolves a link's URL to the file it names.
