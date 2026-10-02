@@ -188,14 +188,19 @@ upgrade rewrites the snapshot without it, and a boot sweep deletes orphaned
 `*.json.tmp` files no save would ever overwrite. Snapshots older versions left
 behind do carry transcripts (rationale).
 
-Recovery storage and single-use claiming follow `docs/compatible-agents.md` → Recovery record.
+**Standalone writes `recovery.json` beside its sessions directory**, under the
+state root, owner-only: one rebuilt agent-resume invocation per Surface, never a
+buffer, unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The managed-voice token is a bearer credential at rest** — `<state dir>/managed-voice.json` beside the Burrow's enrollment, written by `writeJsonAtomic` (`0700`/`0600`; on Windows the owner-only DACL `burrow_state_dir` applies before the sidecar spawns), with the voice id (rationale); `docs/specs/alert.md` → "Managed voice" keeps it from any webview. **The token must go only to `hostedVoiceOrigin`'s answer**, never following a redirect (`redirect: 'error'`); a self-host build, answered `null`, sends it nowhere (`docs/specs/relay.md` -> "Relay origin").
 
 **VS Code persists pane structure in VS Code's own storage** — `workspaceState`
 under `dormouse.session`, and `vscode.setState()`, a WebviewPanel's only store —
 so the modes there are VS Code's, not ours, and no transcript reaches either
-(`docs/specs/vscode.md` -> "Serialization and restore").
+(`docs/specs/vscode.md` -> "Serialization and restore"). Dormouse also writes
+`recovery.json` under the extension's storage directory, owner-only and
+temp-then-rename: one rebuilt agent-resume invocation per Surface, no buffer,
+unlinked as it is read (`docs/compatible-agents.md` -> "Recovery record").
 
 **The VS Code peer-link token is a local credential at rest** —
 `burrow.peer-token` in the extension's global storage, written mode `0600`
@@ -210,8 +215,6 @@ shared (rationale). No log call carries PTY bytes; the `dor` control socket path
 does. A gap, not an accepted risk.
 
 - **FAIL IF** `write_file_atomically` in `standalone/src-tauri/src/lib.rs` stops restricting the directory and the file it writes to the owning user on **every** platform `restrict_to_owner` has an arm for — `0700`/`0600` on unix, and on Windows a DACL protected from inheritance carrying exactly one ACE for the current user, asserted by `restrict_to_owner_leaves_one_owner_only_ace` — or if **any** of its callers stops going through it. Enumerate them from the file rather than from this line: every writer under the state root is one, the legacy-transcript scrub and `arrivals.json` included. `session_write_tightens_directory_and_existing_temp_file` pins unix modes; `session_permission_failures_preserve_previous_snapshot_without_writing_bytes` pins both failure gates. The mode reaches the temp file *before* any bytes are written (rationale).
-
-- **FAIL IF** recovery record bytes are read or written before owner-only permission setup succeeds, bounded capture waits for or launches permission setup, or failed preparation prevents capture from attempting to clear stale records. Read `createRecoveryStore` in `lib/src/host/recovery-store.ts` and `ensurePrivateDirectory` / `ensurePrivateFile` in `lib/src/host/private-path.ts`; `lib/src/host/private-path.test.ts` and `lib/src/host/recovery-store.test.ts` pin real Windows DACLs, Unix modes, legacy file grants, failed setup, capture-safe caching, and claims racing teardown.
 
 Source of truth: `SESSION_STATE_KEY` in `vscode-ext/src/session-state.ts`,
 `ensureToken` in `vscode-ext/src/peer-link.ts`, `default_log_path` in
