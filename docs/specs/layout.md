@@ -304,7 +304,7 @@ the close confirmation's key while that Workspace transfers.**
 **Must hold at most one pending Workspace confirmation** (close, cross-Window
 move gate, Surface move iframe consent), **answered no when a newer one is
 raised or any close, cross-Window move, or Surface move starts**, by gesture or
-`dor`, even one that refuses. A move refusal waits behind it and rename
+`dor`, even one that refuses. **Must abandon superseded preparation while awaiting a Wall, window probe or editor decision**, so an older verb cannot later act or replace the newer question. A move refusal waits behind it and rename
 (`lib/src/components/WorkspaceWindow.test.tsx`, `lib/src/lib/workspace-ui-store.test.ts`).
 A successful transfer dismisses only the departing Workspace's pending
 confirmation and rename UI; a failed transfer retains them. No pending kill follows a Workspace to its

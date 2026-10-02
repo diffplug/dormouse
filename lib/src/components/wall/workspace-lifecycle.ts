@@ -114,9 +114,9 @@ export async function closeWorkspaceWithSurfaces(
  * confirmation, otherwise close immediately.
  */
 export function requestWorkspaceClose(id: WorkspaceId): void {
-  cancelPendingConfirmation();
+  const isCurrent = cancelPendingConfirmation();
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
-  void closeOnceWallRegisters(id);
+  void closeOnceWallRegisters(id, isCurrent);
 }
 
 /**
@@ -126,8 +126,9 @@ export function requestWorkspaceClose(id: WorkspaceId): void {
  * one effect away and having the close refused where nobody reads the refusal
  * (`docs/specs/layout.md` → "Workspaces").
  */
-async function closeOnceWallRegisters(id: WorkspaceId): Promise<void> {
+async function closeOnceWallRegisters(id: WorkspaceId, isCurrent: () => boolean): Promise<void> {
   const handle = await awaitWallHandle(id);
+  if (!isCurrent()) return;
   if (closeInFlight || isWorkspaceTransferPending(id)) return;
   if (!handle) return;
   if (workspaceNeedsCloseConfirmation(id)) {

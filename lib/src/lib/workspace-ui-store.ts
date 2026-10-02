@@ -34,6 +34,7 @@ export interface WorkspaceUiState {
 const EMPTY: WorkspaceUiState = { renamingId: null, confirmation: null, moveError: null };
 
 let state: WorkspaceUiState = EMPTY;
+let confirmationGeneration = 0;
 const listeners = new Set<() => void>();
 
 function emit(next: WorkspaceUiState): void {
@@ -60,19 +61,24 @@ export function setRenamingWorkspace(id: WorkspaceId | null): void {
 
 /** Ask `next`, first answering any pending confirmation no. */
 export function requestConfirmation(next: WorkspaceConfirmation): void {
+  confirmationGeneration++;
   const previous = state.confirmation;
   state = { ...state, confirmation: null };
   previous?.answer(false);
   emit({ ...state, confirmation: next });
 }
 
-/** Every Workspace verb calls this as it starts: a pending confirmation is
- *  answered no. */
-export function cancelPendingConfirmation(): void {
+/** Close and move verbs call this as they start. Answer the pending question no;
+ *  the returned guard prevents asynchronous preparation from raising an older
+ *  question or acting after a newer verb starts, even when no question was up. */
+export function cancelPendingConfirmation(): () => boolean {
+  const generation = ++confirmationGeneration;
   const previous = state.confirmation;
-  if (!previous) return;
-  emit({ ...state, confirmation: null });
-  previous.answer(false);
+  if (previous) {
+    emit({ ...state, confirmation: null });
+    previous.answer(false);
+  }
+  return () => generation === confirmationGeneration;
 }
 
 /** Answer `confirmation` if it is still the pending one; a stale answer is ignored. */
@@ -89,6 +95,7 @@ export function setWorkspaceMoveError(error: WorkspaceUiState['moveError']): voi
 /** Clear every transient Workspace UI state in one notification: the host's
  *  teardown dialog taking the window, and tests. */
 export function resetWorkspaceUi(): void {
+  confirmationGeneration++;
   if (state === EMPTY) return;
   const { confirmation } = state;
   emit(EMPTY);

@@ -305,6 +305,8 @@ describe('workspace.close', () => {
 
     const first = request('workspace.close', { workspace: 'workspace:2', force: true });
     const running = handleWorkspaceControl(first);
+    // The first close has passed its Wall lookup and acquired the close lock.
+    await Promise.resolve();
 
     const second = request('workspace.close', { workspace: 'workspace:3', force: true });
     await handleWorkspaceControl(second);
@@ -346,6 +348,28 @@ it.each([
   expect(answer(detail)).toEqual(expect.any(String));
   expect(confirmed).toHaveBeenCalledExactlyOnceWith(false);
   expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+  resetWorkspaceUi();
+});
+
+it.each(['close', 'move'] as const)('refuses workspace.%s if a newer confirmation supersedes its Wall lookup', async verb => {
+  createWorkspace({ id: 'ws-2', activate: false });
+  handleFor('ws-2');
+  const detail = request(`workspace.${verb}`, { workspace: 'workspace:2', toWindow: 'new', force: true });
+  const pending = handleWorkspaceControl(detail);
+  const newer = { id: 'ws-2', char: 'q', answer: vi.fn() };
+  requestConfirmation(newer);
+  await pending;
+  expect(answer(detail)).toContain('superseded');
+  expect(getWorkspaceUiSnapshot().confirmation).toBe(newer);
+  expect(newer.answer).not.toHaveBeenCalled();
+  resetWorkspaceUi();
+});
+
+it('cancels pending consent even when a cross-Window move names an invalid Workspace', async () => {
+  const answer = vi.fn();
+  requestConfirmation({ id: 'ws-2', char: 'q', answer });
+  await handleWorkspaceControl(request('workspace.move', { workspace: 'missing', toWindow: 'new' }));
+  expect(answer).toHaveBeenCalledExactlyOnceWith(false);
   resetWorkspaceUi();
 });
 

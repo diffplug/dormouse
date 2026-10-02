@@ -163,15 +163,16 @@ export function onDropOnOtherWindow(
   // the caret this is about to clear.
   endGesture();
   if (insideStrip) return;
-  cancelPendingConfirmation();
+  const isCurrent = cancelPendingConfirmation();
   const grab = grabOffset(id);
   void (async () => {
     // Probed fresh rather than reusing the throttled answer: up to
     // HIT_TEST_THROTTLE_MS of pointer travel could otherwise choose the window.
     const hit = await probe();
+    if (!isCurrent()) return;
     const handle = getWallHandle(id);
     const dirtyEditors = handle?.dirtyToolIds() ?? [];
-    if (!await confirmToolEditorsClose(dirtyEditors)) return;
+    if (!await confirmToolEditorsClose(dirtyEditors) || !isCurrent()) return;
     // Save must not authorize discarding edits typed later, while the iframe
     // confirmation or transfer preparation is awaiting. Only Discard leaves
     // these originally dirty editors dirty after consent.

@@ -28,7 +28,7 @@ import {
 } from "./workspace-drag";
 import { _setWindowLabelForTesting } from "./window-label";
 import { registerWallHandle, resetWallHandles, stubWallHandle } from "dormouse-lib/components/wall/wall-handles";
-import { getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleConfirmation } from "dormouse-lib/lib/workspace-ui-store";
+import { cancelPendingConfirmation, getWorkspaceUiSnapshot, requestConfirmation, resetWorkspaceUi, settleConfirmation } from "dormouse-lib/lib/workspace-ui-store";
 
 import { cancelEditorClose, decideEditorClose, getEditorClosePrompt } from "dormouse-lib/lib/tool-editor";
 import { recordToolDirty, resetToolDirty } from "dormouse-lib/lib/tool-dirty-store";
@@ -248,6 +248,33 @@ describe("releasing the drag", () => {
     expect(mocks.tearOutWorkspace).toHaveBeenCalled();
     expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
     resetWallHandles();
+  });
+
+  it("abandons an older window probe when a newer confirmation is raised", async () => {
+    let resolveProbe!: (hit: { label: string; x: number; y: number }) => void;
+    const probe = new Promise<{ label: string; x: number; y: number }>(resolve => { resolveProbe = resolve; });
+    mocks.invoke.mockImplementation(async cmd => cmd === "window_at_cursor" ? probe : undefined);
+    onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
+    const newer = { id: "ws-other", char: "q", answer: vi.fn() };
+    requestConfirmation(newer);
+    resolveProbe({ label: "ws-2", x: 120, y: 9 });
+    await settle();
+    expect(getWorkspaceUiSnapshot().confirmation).toBe(newer);
+    expect(newer.answer).not.toHaveBeenCalled();
+    expect(mocks.transferWorkspaceTo).not.toHaveBeenCalled();
+  });
+
+  it("abandons a dirty-editor decision when a newer move starts", async () => {
+    recordToolDirty("editor", true);
+    registerWallHandle(stubWallHandle("ws-1", { dirtyToolIds: () => ["editor"], iframeSurfaceRefs: () => ["surface:4"] }));
+    onDropOnOtherWindow("ws-1", { clientX: 2000, clientY: 800 }, false);
+    await settle();
+    expect(getEditorClosePrompt()).not.toBeNull();
+    cancelPendingConfirmation();
+    await decideEditorClose("discard");
+    await settle();
+    expect(getWorkspaceUiSnapshot().confirmation).toBeNull();
+    expect(mocks.tearOutWorkspace).not.toHaveBeenCalled();
   });
 
   it("answers a pending confirmation no as the drop starts its move", () => {

@@ -143,6 +143,11 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
       receiver.finishSurfaceMove();
       source.finishSurfaceMove();
     });
+    // React effects and store subscribers can collect saves synchronously
+    // during the commit, before the retained cwd/alert migrates. Their promise
+    // callbacks run later: fence them as well as pre-departure saves.
+    invalidateWorkspaceSaves(source.workspaceId);
+    invalidateWorkspaceSaves(targetId);
     // A finished Wall may have refilled, and closing the source is
     // irreversible: nothing after this point restores membership.
     committed = true;
@@ -179,6 +184,8 @@ export async function moveSurface(id: string, request: Omit<MoveSurfaceRequest, 
       if (created && targetId) discardWorkspace(targetId);
       if (hasWorkspace(activeBefore)) setActiveWorkspace(activeBefore);
     });
+    invalidateWorkspaceSaves(source.workspaceId);
+    if (targetId) invalidateWorkspaceSaves(targetId);
     throw error;
   } finally {
     release();

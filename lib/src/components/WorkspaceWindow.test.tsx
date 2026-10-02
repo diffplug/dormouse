@@ -969,6 +969,23 @@ describe('Surface moves between Workspaces', () => {
     expect(respond).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
   });
 
+  it('fences a save collected during adoption before the retained cwd migrates', async () => {
+    const source = await twoWalls();
+    publishWorkspaceSession(source, { version: 3, panes: [{ id: 'pane-a', title: 'exited', cwd: '/retained' }, { id: 'pane-b', title: 'other' }] });
+    const target = getWallHandle('ws-2')!;
+    const finish = target.finishSurfaceMove;
+    let duringCommit!: Promise<void>;
+    vi.spyOn(target, 'finishSurfaceMove').mockImplementation(() => {
+      finish();
+      duringCommit = target.flushPersistence({ probeCwd: false });
+    });
+    await act(async () => {
+      await moveSurface('pane-a', request({ workspace: 'workspace:2' }));
+      await duringCommit;
+    });
+    expect(previousWorkspaceSession('ws-2')?.panes.find(pane => pane.id === 'pane-a')?.cwd).toBe('/retained');
+  });
+
   it('routes a moved dor caller to its destination: short refs can name another pane and ensure can duplicate work left behind', async () => {
     const source = await twoWalls();
     terminalRegistry.seedTerminalManualCwd('pane-b', '/repo');
@@ -1153,6 +1170,19 @@ describe('Surface moves between Workspaces', () => {
     // The released destination is no longer guarded, so its untouched close runs.
     await act(async () => { await vi.waitFor(() => expect(getWorkspacesSnapshot().workspaces.map(ws => ws.id)).toEqual([source, 'ws-3'])); });
     expect(getWallHandle(source)!.ownsSurface('frame')).toBe(true);
+  });
+
+  it('does not let an older close awaiting its Wall replace a newer iframe consent', async () => {
+    const source = await iframeWalls();
+    vi.spyOn(getWallHandle('ws-2')!, 'hasTouchedSurfaces').mockReturnValue(true);
+    let pending!: Promise<Awaited<ReturnType<typeof moveSurface>>>;
+    await act(async () => {
+      requestWorkspaceClose('ws-2');
+      pending = moveSurface('frame', request({ workspace: workspaceStore.workspaceRefFor('ws-3') }), true);
+    });
+    expect(getWorkspaceUiSnapshot().confirmation?.title).toBe('Move iframe?');
+    expect(getWorkspaceUiSnapshot().confirmation?.id).toBe(source);
+    await act(async () => { settleConfirmation(getWorkspaceUiSnapshot().confirmation!, false); await pending; });
   });
 
   it('lets a second GUI iframe move supersede the first one’s consent and complete', async () => {
