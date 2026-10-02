@@ -91,7 +91,7 @@ import {
 import { createEphemeralBurrowStateStore, type BurrowStateStore } from './burrow-state-store';
 import { DEFAULT_RELAY_ORIGIN } from '../relay-origin';
 import type { BurrowDirectPeerFactory } from './native-direct-peer';
-import { BurrowService, enrollVerificationUrl, type BurrowServiceOptions } from './service';
+import { BurrowService, enrollVerificationUrl, suggestedBurrowLabel, type BurrowServiceOptions } from './service';
 import { ANYWHERE_ON, LAN, LOCAL_ON, RELAY_ON } from './test-burrow-link';
 import { idleOneTimeState, isOneTimeState } from './service-protocol';
 import type {
@@ -635,6 +635,23 @@ describe('enroll', () => {
     expect(statusEvents()).toEqual([]);
   });
 
+  it('names a console call with no label by the suggested one, before the exchange', async () => {
+    // `window.dormouseBurrow.enroll(password)` passes whatever it was given;
+    // an enrollment is never stored without a label, so it is resolved before
+    // the one request that spends the credential.
+    createService();
+    const result = await command('enroll', { password: 'setup' });
+
+    expect(result.result).toEqual({ burrowId: BURROW_ID });
+    expect(requests).toHaveLength(1);
+    expect(store.enrollment?.label).toBe(suggestedBurrowLabel('vscode'));
+
+    offer = OFFER;
+    createService();
+    expect((await command('enrollOffer', { label: '   ' })).result).toEqual({ burrowId: BURROW_ID });
+    expect(store.enrollment?.label).toBe(suggestedBurrowLabel('vscode'));
+  });
+
   it('refuses what a Relay enrolled for another origin, naming the row it left', async () => {
     // It answered for an origin the request did not name, so its
     // `burrows.json` already holds a row nobody has the token for.
@@ -776,6 +793,22 @@ describe('enrollOffer', () => {
 });
 
 describe('start', () => {
+  it('keeps a Burrow whose Noise static halves disagree down, loudly, touching nothing', async () => {
+    // A corrupt or hand-edited state file: starting would present an identity
+    // every paired Client reads as changed (docs/specs/remote-security-model.md
+    // → Burrow identity).
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const other = await mintNoiseStaticKeyPair();
+    const corrupt = { ...ENROLLMENT, noiseStaticPublicKey: other.publicKey };
+    createService({ enrollment: corrupt });
+    await service.start();
+
+    expect(sockets).toEqual([]);
+    expect(store.enrollment).toEqual(corrupt);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('does not match its public half'));
+    warn.mockRestore();
+  });
+
   it('reads an enrollment for another origin as none, loudly, and keeps it on disk', async () => {
     // Enrolled by another build — a stock one, or one baked for a Relay that
     // moved. Nothing connects to it, and switching back restores it

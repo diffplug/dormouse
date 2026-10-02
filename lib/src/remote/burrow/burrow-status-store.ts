@@ -237,15 +237,6 @@ function refreshAfterMutation(): Promise<void> {
 }
 
 /**
- * The answer with its `hostedEnrollment` read through {@link hostedEnrollmentOf},
- * the one field whose shape a newer broker may extend: in VS Code the process
- * answering may be another window's (`docs/specs/vscode.md` → the peer link).
- */
-function normalizeStatus(status: BurrowConsoleStatus): BurrowConsoleStatus {
-  return { ...status, hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment) };
-}
-
-/**
  * A `hostedEnrollment` as this build can draw it, or `null` for a shape it does
  * not know. Built field by field, in a fixed order, which {@link STATUS_FIELDS}
  * compares on.
@@ -280,7 +271,13 @@ async function readBurrowStatus(): Promise<void> {
   try {
     const status = (await active.command('status')) as BurrowConsoleStatus | null;
     if (mine !== generation) return;
-    setState(status ? { kind: 'ready', status: normalizeStatus(status) } : UNSUPPORTED);
+    // `hostedEnrollment` is the one field a newer broker in another VS Code
+    // window may extend (`docs/specs/vscode.md` → the peer link).
+    setState(
+      status
+        ? { kind: 'ready', status: { ...status, hostedEnrollment: hostedEnrollmentOf(status.hostedEnrollment) } }
+        : UNSUPPORTED,
+    );
   } catch (error) {
     if (mine !== generation) return;
     // A status already read stands, and the next tick retries: publishing one

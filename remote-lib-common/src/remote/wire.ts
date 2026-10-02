@@ -155,9 +155,8 @@ export const RELAY_PING = 'ping';
 export const RELAY_PONG = 'pong';
 
 /**
- * How often either end pings its relay socket. Once a pong has arrived on a
- * socket, a ping unanswered by the next one ends it; a Relay that never
- * answers is never held to a deadline.
+ * How often either end pings its relay socket. A ping unanswered by the next
+ * one ends the socket, the first ping included.
  */
 export const RELAY_PING_INTERVAL_MS = 30_000;
 

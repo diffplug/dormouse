@@ -720,7 +720,17 @@ export class BurrowService {
     if (this.#relay.mode !== 'self-host') throw new Error(this.#hostedEnrollmentRefusal());
     await this.#networkPolicy();
     this.#refuseNothing();
-    return this.#enrollWith({ password: params.password }, params.label);
+    return this.#enrollWith({ password: params.password }, this.#labelFrom(params));
+  }
+
+  /**
+   * The name to keep for this machine: the one typed, trimmed, or the suggested
+   * one when none was. Resolved before any exchange, since the console hook
+   * passes whatever it was given and an enrollment is never stored without one.
+   */
+  #labelFrom(params: { label?: unknown } | undefined): string {
+    const named = typeof params?.label === 'string' ? params.label.trim() : '';
+    return named || suggestedBurrowLabel(this.#kind);
   }
 
   /**
@@ -753,7 +763,7 @@ export class BurrowService {
           'redeemed already. Re-run the installer to mint a new one, or enroll with the setup password.',
       );
     }
-    return await this.#enrollWith({ enrollToken: offer.token }, params.label);
+    return await this.#enrollWith({ enrollToken: offer.token }, this.#labelFrom(params));
   }
 
   /**
@@ -829,8 +839,7 @@ export class BurrowService {
    */
   async #beginHostedEnrollment(params: HostedEnrollParams | undefined): Promise<HostedEnrollmentState> {
     if (this.#relay.mode === 'self-host') throw new Error(SELF_HOST_DEVICE_CODE_REFUSAL);
-    const named = typeof params?.label === 'string' ? params.label.trim() : '';
-    const label = named || suggestedBurrowLabel(this.#kind);
+    const label = this.#labelFrom(params);
     await this.#networkPolicy();
     this.#refuseNothing();
     this.#refuseEnrolled();

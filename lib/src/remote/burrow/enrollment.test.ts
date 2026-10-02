@@ -408,6 +408,13 @@ describe('burrow enrollment', () => {
     );
   });
 
+  it('names a missing label rather than nothing', async () => {
+    const fetch = enrollResponder();
+    await expect(
+      performEnrollment('https://dormouse.example', { password: TEST_SETUP_PASSWORD }, undefined as unknown as string, fetch),
+    ).rejects.toThrow(/missing or invalid: label$/);
+  });
+
   it('takes both halves of the Noise static, never one or none', () => {
     // A missing half is a truncated write or a hand-edited file, and a Burrow
     // that believed it had an identity it cannot use is worse than one that
