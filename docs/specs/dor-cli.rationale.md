@@ -83,6 +83,8 @@ redirects Unix stderr to a log or `/dev/null`, and daemon diagnostics discard
 write errors. Closing capture's read ends does not signal or kill descendants;
 a descendant that continues writing must tolerate a closed output sink.
 
+A Windows reproduction in 2026-10 (Node 22.22.3, cross-spawn 7.0.6) passed a literal percent-delimited environment expression unchanged through simple and npm-shaped global/local batch shims. The earlier claim that forwarded arguments contain no such expression did not describe browser passthrough; bypassing the shared shim escaping would reintroduce expansion.
+
 ## Control-channel security
 
 **Who the threat is.** Not the network — the channel is a local socket or named pipe. The attacker is a second account on the same box, or any process running as the user; interposing inherits the whole verb set at once — keystrokes in, screen and scrollback out, pane destroyed.

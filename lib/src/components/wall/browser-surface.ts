@@ -135,7 +135,7 @@ export function toolPendingFromParams(params: unknown): ToolPending | null {
 }
 
 /**
- * Which of a tool's faces is forward. A three-state answer rather than a
+ * Which Tool view is shown. A named state rather than a
  * boolean because the header and the body must agree: a port conflict occupies
  * the browser's place (there is nothing to frame, so the pane shows *why*
  * where the browser would have been) but has no URL to edit, so it must not

@@ -14,7 +14,7 @@ import { getWorkspaceSurfacesSnapshot } from './workspace-surfaces';
  * settings). The host decides when a ring is spoken or pushed, and sends the
  * push itself; the realm tells it what only the renderer knows — each
  * Session's Pane label and its Workspace's overrides — and speaks what it is
- * handed, which needs `window.speechSynthesis`.
+ * handed, which needs the renderer's audio or `window.speechSynthesis`.
  */
 
 /** How long a label change waits to be published: Claude Code animates its

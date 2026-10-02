@@ -981,10 +981,10 @@ export class AlertManager {
    * publish a paused ring's end, re-arming if output moved it — so
    * continuing output costs one timer per quiet window rather than one per PTY
    * chunk. A timer already waiting stays: the due time only moves later, and
-   * the wake re-checks it. Mostly the detector's own settle gets there first;
-   * the timer is load-bearing after a command boundary resets the detector,
-   * which kills the settle that would have flushed, and for output that never
-   * goes quiet.
+   * the wake re-checks it. The detector's own settle fires only from busy, so
+   * the timer is what releases a deferral after output that never confirmed
+   * busy, after a command boundary resets the detector (killing the settle that
+   * would have flushed), and at the end of a pause.
    */
   private scheduleDeferredNotification(id: string, entry: AlertEntry): void {
     if (entry.deferredTimer !== null) return;

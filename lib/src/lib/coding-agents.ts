@@ -12,6 +12,7 @@ export interface CodingAgent {
 export const CODING_AGENTS: readonly CodingAgent[] = [
   { name: 'Claude Code', commands: ['claude'], resume: '--resume', watchByDefault: true },
   { name: 'Codex', commands: ['codex'], resume: 'resume', watchByDefault: true },
+  { name: 'Pi', commands: ['pi'], resume: '--session', watchByDefault: false },
   { name: 'GitHub Copilot', commands: ['copilot'], resume: '--resume', watchByDefault: true },
   { name: 'Antigravity', commands: ['agy'], resume: '--conversation', watchByDefault: true },
   { name: 'Warp', commands: ['warp'], resume: '--resume', watchByDefault: true },

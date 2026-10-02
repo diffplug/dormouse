@@ -14,7 +14,8 @@ import { DEFAULT_ALERT_SETTINGS, type AlertSettings } from './alert-settings-mod
  * When a ring is spoken or pushed (`docs/specs/alert.md` -> Alarm settings),
  * decided in the host beside the `AlertManager`, which sees every episode from
  * its start and outlives every renderer. A push goes from here; speech needs
- * `window.speechSynthesis`, so it goes to the realm showing the Session.
+ * the renderer's audio or `window.speechSynthesis`, so it goes to the realm
+ * showing the Session.
  * Platform-free, like the manager: both hosts run it inside `createAlertHost`.
  */
 

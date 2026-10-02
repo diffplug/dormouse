@@ -26,7 +26,7 @@ export type ToolAnnounce = {
   port: number | null;
   /** Same-origin path/query for the discovered port; never an authority. */
   path?: string;
-  /** Title candidate, feeding the existing channel in terminal-state.md. */
+  /** Reserved announced-name title candidate; currently retained but inert. */
   name: string | null;
   /** Re-key request. Never dedupes — a runtime re-key only re-labels its own
    *  Surface, because a late collision between two Surfaces that both hold work
@@ -102,7 +102,7 @@ export function parseToolAnnounce(content: string): ToolAnnounce | null {
 /** Reject authority changes rather than trying to repair process output. */
 export function validToolServePath(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 2048 && value.startsWith('/')
-    && !value.startsWith('//') && !/[\\\u0000-\u0020\u007f]/.test(value);
+    && !value.startsWith('//') && !/[\\\u0000-\u0020\u007f-\u009f]/.test(value);
 }
 
 export interface ToolState { dirty: boolean }
@@ -146,6 +146,7 @@ export function serveSequence({ port, path }: { port: number; path?: string }): 
 
 /** The `state` report a Tool writes whenever its unsaved state changes. */
 export function stateSequence({ dirty }: ToolState): string {
+  if (typeof dirty !== 'boolean') throw new TypeError('dirty must be a boolean');
   return sequence('state', { v: 1, dirty });
 }
 
@@ -154,7 +155,14 @@ export function stateSequence({ dirty }: ToolState): string {
  * a failure shows in the preview slot. Throws on a path the host would ignore. */
 export function openSequence({ path, preview = false }: { path: string; preview?: boolean }): string {
   if (!validToolOpenPath(path)) throw new RangeError(`not an absolute path: ${JSON.stringify(path)}`);
+  if (typeof preview !== 'boolean') throw new TypeError('preview must be a boolean');
   return sequence('open', { v: 1, path, preview });
 }
 
-const sequence = (verb: string, payload: object) => `\x1b]367;${verb};${JSON.stringify(payload)}\x07`;
+function sequence(verb: string, payload: object): string {
+  // JSON escaping can expand a field beyond its own bound. The host caps the
+  // serialized payload before parsing, so never emit a sequence it will ignore.
+  const raw = JSON.stringify(payload);
+  if (raw.length > PAYLOAD_LIMIT) throw new RangeError('Tool payload exceeds its serialized size limit');
+  return `\x1b]367;${verb};${raw}\x07`;
+}

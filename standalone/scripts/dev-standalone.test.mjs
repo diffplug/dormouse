@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { cleanEnv, devWorkspace, runner, writeShims } from './dev-fixture.mjs';
@@ -54,7 +54,7 @@ async function fixture(t) {
   return {
     root,
     start(args = ['dev'], overrides = {}) {
-      const child = spawn(process.execPath, ['--import', signals, path.join(standalone, 'scripts/tauri.mjs'), ...args], {
+      const child = spawn(process.execPath, ['--import', pathToFileURL(signals).href, path.join(standalone, 'scripts/tauri.mjs'), ...args], {
         cwd: standalone, env: { ...cleanEnv(bin), ...overrides }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
       });
       // Object.assign, not a spread: `runner`'s `output`/`closed` are getters

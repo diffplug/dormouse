@@ -103,6 +103,16 @@ export interface AlertPushDeps {
 }
 
 /**
+ * The send route refuses the whole POST above its recipient bound. Approval
+ * order places replacements after stale statics, so both sending and its
+ * preview select the newest records before intersecting Relay subscriptions.
+ * Keeping this choice shared prevents Settings naming phones a send omits.
+ */
+function pushTargets(records: readonly BurrowAclRecord[]): readonly BurrowAclRecord[] {
+  return records.slice(-MAX_PUSH_QUERY_DELIVERY_IDS);
+}
+
+/**
  * The devices the settings dialog names: subscribed on the Relay **and** still
  * active in the Burrow's ACL, joined by `deliveryId` to the ACL's human labels.
  *
@@ -119,7 +129,7 @@ export async function loadPushDevices(deps: AlertPushDeps): Promise<PushDevice[]
   const response = await burrowFetch(deps, API_ROUTES.pushDevices);
   const body = (await response.json()) as PushDevicesResponse;
 
-  const labels = new Map(deps.activeRecords().map((r) => [r.deliveryId, r.label]));
+  const labels = new Map(pushTargets(deps.activeRecords()).map((r) => [r.deliveryId, r.label]));
   return body.devices
     .filter((device) => labels.has(device.deliveryId))
     .map((device) => ({ label: labels.get(device.deliveryId) || 'Unnamed device' }));
@@ -144,15 +154,7 @@ export async function sendPush(
   // (`docs/specs/alert.md` -> Push notifications owns the recipient rule).
   const all = deps.activeRecords();
   if (all.length === 0) return { targeted: 0, delivered: 0, failed: 0 };
-  // The send route refuses more than this, and it refuses the *whole* POST — so
-  // an unclamped fan-out past the bound would reach nobody rather than most.
-  //
-  // **The newest end, not the oldest.** `activeRecords()` is in approval order,
-  // and re-pairing a phone that lost its IndexedDB mints a fresh Client static,
-  // which supersedes nothing — so the old record stays active forever, ahead of
-  // its own replacement. Clamping from the front would push to dead records and
-  // drop the phones actually in use.
-  const records = all.slice(-MAX_PUSH_QUERY_DELIVERY_IDS);
+  const records = pushTargets(all);
   if (records.length !== all.length) {
     console.warn(
       `burrow: ${all.length} devices are paired; pushing to the ${MAX_PUSH_QUERY_DELIVERY_IDS} most recent`,

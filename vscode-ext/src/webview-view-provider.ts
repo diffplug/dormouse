@@ -48,6 +48,20 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken,
   ): Promise<void> {
     this.view = view;
+    // Registered before the shell-discovery await: a view disposed or replaced
+    // while it is pending is never served, and a stale view's disposal never
+    // releases its successor's router.
+    let disposed = false;
+    let ownedRouter: vscode.Disposable | undefined;
+    view.onDidDispose(() => {
+      disposed = true;
+      ownedRouter?.dispose();
+      if (this.view !== view) return;
+      log.info('[view] onDidDispose fired — releasing router (PTYs remain alive)');
+      this.routerDisposable = undefined;
+      this.channel = undefined;
+      this.view = undefined;
+    });
     if (this.description !== undefined) view.description = this.description;
 
     const mediaPath = path.join(this.context.extensionPath, 'media');
@@ -62,6 +76,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     // is cached; this blocks only on a true cold start.
     if (!this.selectedShell) {
       const shells = await ptyManager.getAvailableShells();
+      if (disposed || this.view !== view) return;
       const shell = resolveSelectedShell(this.context, shells);
       this.selectedShell = shell ? { shell: shell.path, args: shell.args } : null;
       if (shell) {
@@ -85,7 +100,7 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
     );
 
     this.routerDisposable?.dispose();
-    this.routerDisposable = attachRouter(this.channel, {
+    this.routerDisposable = ownedRouter = attachRouter(this.channel, {
       reconnect: true,
       onSaveState: (state) => {
         return saveSessionState(this.context, mergeAlertStates(state, getAlertStates()));
@@ -99,14 +114,6 @@ export class DormouseViewProvider implements vscode.WebviewViewProvider {
       onUnion: (union) => {
         if (this.view) this.view.badge = workspaceBadge(union);
       },
-    });
-
-    view.onDidDispose(() => {
-      log.info('[view] onDidDispose fired — releasing router (PTYs remain alive)');
-      this.routerDisposable?.dispose();
-      this.routerDisposable = undefined;
-      this.channel = undefined;
-      this.view = undefined;
     });
   }
 
