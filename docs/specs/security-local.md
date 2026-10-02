@@ -23,7 +23,7 @@ host); the dialog is consent, not the boundary.
 
 **Unsupported escape sequences must fail inertly** — consumed or ignored, with
 no visible garbage, clipboard, file, focus, or privilege effect
-(`docs/specs/terminal-escapes.md` -> "Pass-through and fail-inertly"; rationale).
+(rationale).
 
 **Notification text is untrusted terminal output**: sanitized at protocol-parse
 time, rendered as plain text and never as markup, re-bounded by a second pass

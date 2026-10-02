@@ -60,7 +60,7 @@ Source of truth: `pacedInputSegments` and `write` in `standalone/sidecar/pty-cor
 | `TERM_PROGRAM_VERSION` | the compatibility version, not Dormouse's package version |
 | `LC_TERMINAL` | `iTerm2` — set unconditionally, since some shell integrations key off it rather than `TERM_PROGRAM` |
 | `LC_TERMINAL_VERSION` | the same compatibility version |
-| `COLORTERM` | `truecolor` — a color-*depth* signal, **independent** of the background the OSC 11 answer reports, and not iTerm2-specific (rationale) |
+| `COLORTERM` | `truecolor` (rationale) |
 
 **Must advertise the lowest iTerm2 version that unlocks every version-gated behavior Dormouse supports** — today Claude Code's `OSC 9;4` progress, gated at 3.6.6 — **and never a version adding sequences that programs would then send and Dormouse mishandles** (rationale). **Never advertise** feature-specific support before the behavior exists.
 

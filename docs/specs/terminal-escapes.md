@@ -79,6 +79,14 @@ Replay (`pty:replay`) is the raw stream requiring re-parse: **the webview runs a
 
 `OSC 9 ; <message>`, `OSC 99` and `OSC 777 ; notify` also feed the title-candidate channel, whose promotion rules [terminal-state.md](terminal-state.md#supported-osc-inputs) owns.
 
+## Supported string controls
+
+| Sequence | Purpose | Spec |
+|---|---|---|
+| `DCS ... q ... ST` | SIXEL graphics; forwarded whole to ImageAddon | [layout.md](layout.md#inline-graphics) |
+| `APC G ... ST` | Kitty graphics; forwarded whole, its queries answered by the owner's ImageAddon | [layout.md](layout.md#inline-graphics) |
+| `REPLAY_MODE_RESET` (Dormouse-emitted) | Private-mode and SGR reset written after a dead Session's replay | [transport.md](transport.md#replay-time-mode-reset-tail-dormouse-emitted) |
+
 ## Supported CSI
 
 | Sequence | Role | Disposition | Where |

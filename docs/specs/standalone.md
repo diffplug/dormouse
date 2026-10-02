@@ -1275,7 +1275,8 @@ Source of truth: `standalone/package.json` (package scripts),
   key. Pinned by `standalone/scripts/dev-standalone.test.mjs`.
 - The Tauri bundle ships the whole sidecar via the `../sidecar/**/*` resources
   glob — including node-pty's prebuilds + bundled ConPTY and the
-  shell-integration scripts (`docs/specs/theme.md`, `docs/specs/terminal-state.md`).
+  shell-integration scripts (`docs/specs/theme.md` -> "OSC color queries on Windows require the bundled ConPTY",
+  `docs/specs/terminal-state.md` -> "Shell-integration injection").
 - **Must start native dev with Vite on an OS-assigned loopback port and pass its
   bound URL to Tauri**, with `beforeDevCommand` disabled in a per-run overlay.
   Direct `pnpm exec tauri dev` keeps
