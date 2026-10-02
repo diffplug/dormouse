@@ -426,6 +426,7 @@ describe('burrow enrollment', () => {
     expect(isEnrollment({ ...base, noiseStaticPublicKey, noiseStaticPrivateKey })).toBe(true);
     // The label is the operator's answer, kept beside every enrollment.
     expect(isEnrollment({ ...base, label: undefined, noiseStaticPublicKey, noiseStaticPrivateKey })).toBe(false);
+    expect(isEnrollment({ ...base, label: ' ', noiseStaticPublicKey, noiseStaticPrivateKey })).toBe(false);
     expect(isEnrollment({ ...base, noiseStaticPublicKey })).toBe(false);
     expect(isEnrollment({ ...base, noiseStaticPrivateKey })).toBe(false);
     // Well-formed base64url of the right decoded length: the value goes

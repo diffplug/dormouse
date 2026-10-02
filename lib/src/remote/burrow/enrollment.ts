@@ -89,7 +89,9 @@ export function isEnrollment(value: unknown): value is BurrowEnrollment {
     typeof v.burrowToken === 'string' &&
     typeof v.origin === 'string' &&
     typeof v.rpId === 'string' &&
+    // Non-blank: phones show it as this Burrow's name.
     typeof v.label === 'string' &&
+    v.label.trim() !== '' &&
     // Optional — absent is the documented default. Present-but-wrong-typed is
     // still a rejection: a store that round-trips `"false"` as truthy would be
     // the silent disagreement this field exists to prevent.
