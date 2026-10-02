@@ -3,17 +3,6 @@
 > See `docs/specs/glossary.md` for Surface / Session / Pane vocabulary.
 > Owns the built-in Tools — `builtin:file` (the local-file viewer and its text editor) and `builtin:folder` — and their runtime package launched through `dor`. `dor open` dispatch, the Preview slot, OSC 367, and close consent belong to `docs/specs/dor-tool.md`; the listeners' audited rules to `docs/specs/security-local.md` → Local-file viewer.
 
-## Files
-
-- `dor-tools-builtin/src/file-viewer.ts` — `builtin:file`: grant construction and the listener's routes.
-- `dor-tools-builtin/src/editable-file.ts` — text reads and revision-checked saves.
-- `dor-tools-builtin/viewer/editor.ts` — the Monaco page, bundled by `dor-tools-builtin/scripts/build.mjs`.
-- `dor-tools-builtin/src/folder-viewer.ts` — `builtin:folder`: listings, select, and activate.
-- `dor-tools-builtin/src/error-viewer.ts` — the page a failed OSC 367 `open` shows in the preview slot.
-- `dor-tools-builtin/src/viewer-server.ts` — the capability listener and announcement both viewers share.
-- `dor-tools-builtin/src/file-viewer-format.ts` — the pure format registry, handler names, and title.
-- `dor/src/cli.ts` — the private `__view-file` / `__view-folder` / `__view-error` entries.
-
 ## Packaging
 
 - **Must bundle the viewers and their runtime dependencies into `dist/runtime.js` in `dor-tools-builtin`**, without workspace or installed-package resolution at runtime. `dor`'s prebuild builds this package first.
@@ -22,7 +11,7 @@
 - **Must load the runtime only for valid `__view-*` invocations, in the launcher's process**, through a URL relative to `dor.js`. Other CLI commands never load the viewer implementation; `./runtime` exports only types, so a value import fails `dor`'s build.
 - **Must speak the Tool protocol through `dor-tools-lib`** (`docs/specs/dor-tools-lib.md`): the viewers announce and report with its `osc` encoders, and the editor answers the save channel with its `frame` client.
 
-Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tools-builtin/scripts/build.mjs`; `dor/scripts/stage-builtins.mjs`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `runCli` / `loadBuiltinViewers` in `dor/src/cli.ts`. Tests: `dor/test/builtin-viewers.test.mjs`, `dor-tools-builtin/test/browser-shared.test.mjs`.
+Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tools-builtin/scripts/build.mjs`; `dor/scripts/stage-builtins.mjs`; `viewerAsset` in `dor-tools-builtin/src/viewer-assets.ts`; `loadBuiltinViewers` in `dor/src/cli.ts`. Tests: `dor/test/builtin-viewers.test.mjs`.
 
 ## File viewer
 
@@ -36,7 +25,7 @@ Source of truth: `dor/package.json`, `dor-tools-builtin/package.json`; `dor-tool
 
 **Must retain media/HTML grant descriptors until the Tool exits.** Refresh reads those files again; replacements and dependency-graph changes require restarting. Text editing follows [Editing files](#editing-files). Cold restore creates a fresh URL capability; Workspace movement keeps the live binding.
 
-Source of truth: `fileViewerFormat` / `viewerTitle` in `dor-tools-builtin/src/file-viewer-format.ts`; `startFileViewer` / `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `announceViewer` in `dor-tools-builtin/src/viewer-server.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`, `dor/test/builtin-viewers.test.mjs`.
+Source of truth: `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`; `fileViewerFormat` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/file-viewer.test.mjs`.
 
 ## Editing files
 
@@ -48,7 +37,7 @@ Source of truth: `fileViewerFormat` / `viewerTitle` in `dor-tools-builtin/src/fi
 
 **Must report dirty state immediately to the containing iframe and in order through OSC 367** (`docs/specs/dor-tool.md` → Unsaved changes), and answer the host's iframe save channel (`docs/specs/dor-tool.md` → Closing unsaved Tools) with `connectToolFrame`.
 
-Source of truth: `readEditableFile` / `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`; `saveFileOperations` in `dor-tools-builtin/src/atomic-save.ts`; `editorPage` in `dor-tools-builtin/src/editor-page.ts`; `dor-tools-builtin/viewer/editor.ts`; `runFileViewer` in `dor-tools-builtin/src/file-viewer.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`, `dor-tools-builtin/test/editable-file.test.mjs`, `dor-tools-builtin/test/file-viewer.test.mjs`.
+Source of truth: `saveEditableFile` in `dor-tools-builtin/src/editable-file.ts`; `dor-tools-builtin/viewer/editor.ts`. Tests: `dor-tools-builtin/test/atomic-save.test.mjs`.
 
 ## Folder viewer
 
@@ -61,10 +50,10 @@ Source of truth: `readEditableFile` / `saveEditableFile` in `dor-tools-builtin/s
 - **Must route the page's select and activate through its own process**: a same-origin POST to its capability listener, which writes it to the Tool's terminal as an OSC 367 `open` (`docs/specs/dor-tool.md` → OSC 367), `preview` for a select, in arrival order. The page learns only that it was sent, or, for a path or serialized payload the OSC encoder refuses, an error instead of a write.
 - **Must hold an activate until every select in flight settles**, keeping selects concurrent. (rationale)
 
-Source of truth: `startFolderViewer` / `runFolderViewer` / `oscOpen` in `dor-tools-builtin/src/folder-viewer.ts`; `folderViewerPage` in `dor-tools-builtin/src/folder-viewer-page.ts`. Tests: `dor-tools-builtin/test/folder-viewer.test.mjs`, `the folder entry selects and activates with OSC 367 open, in the order the page sends them` in `dor/test/builtin-viewers.test.mjs`.
+Source of truth: `runFolderViewer` in `dor-tools-builtin/src/folder-viewer.ts`; `folderViewerPage` in `dor-tools-builtin/src/folder-viewer-page.ts`. Tests: `dor-tools-builtin/test/folder-viewer.test.mjs`.
 
 ## Error viewer
 
 **Must show why an OSC 367 `open` failed** when the host runs `dor __view-error <target> <message>` in the preview slot (`docs/specs/dor-tool.md` → OSC 367): one page naming the target's basename and the message, both escaped, with no script, served by the shared capability listener and titled as in [File viewer](#file-viewer). No handler name selects it.
 
-Source of truth: `startErrorViewer` / `errorViewerPage` / `runErrorViewer` in `dor-tools-builtin/src/error-viewer.ts`; `VIEW_ERROR_ARGV` in `dor-tools-builtin/src/file-viewer-format.ts`. Tests: `dor-tools-builtin/test/error-viewer.test.mjs`, `the error entry titles itself after its target and serves the escaped message` in `dor/test/builtin-viewers.test.mjs`.
+Source of truth: `runErrorViewer` in `dor-tools-builtin/src/error-viewer.ts`; `VIEW_ERROR_ARGV` in `dor-tools-builtin/src/file-viewer-format.ts`.

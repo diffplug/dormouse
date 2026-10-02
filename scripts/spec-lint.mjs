@@ -31,9 +31,9 @@
  *      heading in the spec), and has no `## Future` — rationale files are
  *      informative, the fold belongs to the spec. Rationale files are not
  *      specs: they skip checks 1, 2, and 5 but ride 3 and 4.
- *   9. Retired: navigation maps and section-local pointers may coexist.
- *      Maps are optional and need not cover every file; check 4 validates
- *      their repo paths, while check 12 validates targeted pointers.
+ *   9. A spec navigates by one form: a `Files` / `Code Map` heading (any
+ *      level, any case) or section-local `Source of truth` pointers, never
+ *      both. Check 4 validates a map's repo paths, check 12 the pointers.
  *  10. Word-budget ratchet: every spec, plus AGENTS.md and SECURITY.md, stays
  *      under its budget in scripts/spec-word-budgets.json. A budget is the
  *      file's size rounded up to the nearest BUDGET_STEP words. Growth past
@@ -329,6 +329,19 @@ for (const rat of rationaleFiles) {
       problems.push(`${rat}: "## ${h.title}" is not a heading in ${spec}`);
     }
   }
+}
+
+// --- Check 9: a map or pointers, never both ----------------------------------
+const MAP_HEADING_RE = /^(?:Files|Code Map)$/i;
+for (const spec of foldCheckedFiles) {
+  const map = headings(spec).find((h) => MAP_HEADING_RE.test(h.title));
+  if (!map) continue;
+  const pointer = proseLines(spec).findIndex((line) => /Source of truth\b[^:\n]*:/.test(line));
+  if (pointer === -1) continue;
+  problems.push(
+    `${spec}:${pointer + 1}: \`Source of truth\` pointer beside "${'#'.repeat(map.level)} ${map.title}" (line ${map.line}) — ` +
+    'choose the map or section pointers, never both (AGENTS.md -> "Specs")',
+  );
 }
 
 // --- Check 10: word-budget ratchet ------------------------------------------

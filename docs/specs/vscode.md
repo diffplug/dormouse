@@ -6,18 +6,6 @@
 >
 > Defers to `docs/specs/transport.md` — PTY lifecycle, buffering, reconnection, the message protocol, persisted-session types, and every adapter-agnostic invariant — for all sections below.
 
-## Code Map
-
-Start on the side of the webview boundary involved, then follow imports:
-
-| Entrypoint | Role |
-|---|---|
-| `vscode-ext/src/extension.ts` | Activation, panel setup, and deactivation; wires host services and view registration. |
-| `vscode-ext/src/message-router.ts` | Per-webview command dispatch and PTY ownership. |
-| `vscode-ext/src/pty-manager.ts` | Extension-side PTY API and forked child-process bridge. |
-| `lib/src/main.tsx` | Shared webview bootstrap, recovery, and app mount. |
-| `lib/src/lib/platform/vscode-adapter.ts` | Frontend adapter over VS Code's message bridge. |
-
 ## What's built
 
 The shared frontend runs in the bottom-panel `WebviewView` and independent editor-tab `WebviewPanel`s. Their ownership, visibility, and restore contracts are in Webview hosting and Serialization and restore.
@@ -76,7 +64,7 @@ Each hosting primitive uses the chrome it has, following the in-app `<title> [TO
 - **Editor tab (`WebviewPanel`):** `panel.title` takes the suffix — `Dormouse` + ` 🔔` (ringing) + ` [TODO]` (todo), both when both apply; the bell emoji stands in for the Pane's alarm ring because a tab title is plain text. `panel.iconPath` stays the Dormouse mascot.
 - **Panel view (`WebviewView`):** a presence **badge** — `view.badge.value = 1` whenever anything owes attention, ring-vs-TODO in the tooltip. **Never use `view.title`** — this single-view bottom-panel container shows the static `viewsContainers[].title`, which has no runtime API (rationale). **Clear with `0`, never `undefined`** — VS Code hides a 0-value badge but does not clear an `undefined` one on a panel container. `view.description` stays the shell name.
 
-Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim` / `release`. Source of truth: `computeWorkspaceUnion` in `lib/src/lib/workspace-union.ts`, `notifyUnion` in `vscode-ext/src/message-router.ts`, `workspaceTitle` / `workspaceBadge` in `vscode-ext/src/workspace-chrome.ts`, `setupPanel` in `vscode-ext/src/extension.ts`, `DormouseViewProvider` in `vscode-ext/src/webview-view-provider.ts`.
+Reflection updates on every owned-PTY `AlertManager.onStateChange` and on `claim` / `release`. Source of truth: `notifyUnion` in `vscode-ext/src/message-router.ts`; `setupPanel` in `vscode-ext/src/extension.ts`.
 
 WATCHING rules and the alarm settings (`docs/specs/alert.md` → Alarm settings)
 are app-global rather than per-Workspace, riding the seed / mutate / broadcast
@@ -90,12 +78,9 @@ window is one more alert viewer, with no focus, present while `WindowState`
 reports it `focused` and `active`**; one that never reports `active` adds none
 (rationale).
 
-Source of truth: `WatchedCommandHost` in `lib/src/lib/watched-command-host.ts`,
-`AlertSettingsHost` in `lib/src/lib/alert-settings-host.ts`, the `alert:command`
-case, `connectWebview`, and `reportWindowPresence` in
+Source of truth: `connectWebview` / `reportWindowPresence` in
 `vscode-ext/src/message-router.ts`; `pushAlert` in `vscode-ext/src/burrow.ts`.
-Pinned by `alarm delivery` in `vscode-ext/test/message-router.test.ts` and
-`vscode-ext/test/burrow.test.ts`.
+Pinned by `vscode-ext/test/message-router.test.ts`.
 
 ### Shell selection
 
@@ -196,7 +181,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 Chromium enforces CSP and a failure presents remote from its cause, so **string inspection proves nothing** (rationale) and two checks cover it, **neither replacing the other**: `vscode-ext/test/webview-boot.smoketest.ts` loads the real bundle under the real policy in a real engine, and `vscode-ext/test/webview-html.test.ts` pins the transform against a fixture of real Vite output.
 
-Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `CSP_NONCE_PLACEHOLDER` in `vscode-ext/src/csp-nonce-placeholder.ts`, `assertRelayOriginBaked` in `scripts/relay-origin.mjs`, `bakedRelay` in `lib/src/host/relay-origin.ts`.
+Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `assertRelayOriginBaked` in `scripts/relay-origin.mjs`, `bakedRelay` in `lib/src/host/relay-origin.ts`.
 
 ### Webview message authentication
 
@@ -211,7 +196,7 @@ Source of truth: `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `CSP_NONC
 
 Messages from proxied iframes are guarded by origin instead (`docs/specs/dor-browser.md`) and are unaffected by the token, which covers only the adapter's host channel. **Scope is VS Code**: standalone receives equivalent events over Tauri's `listen()` IPC or the browser-dev HTTP/SSE bridge (`docs/specs/standalone.md` → "Standalone browser-dev harness"), never `window.postMessage`.
 
-Source of truth: `isHostMessage` in `lib/src/lib/vscode-message-token.ts`, `WebviewChannel` / `serveWebview` in `vscode-ext/src/webview-messaging.ts`, `getWebviewHtml` in `vscode-ext/src/webview-html.ts`, `VSCodeAdapter` in `lib/src/lib/platform/vscode-adapter.ts`; pinned by the `host message authentication` block in `lib/src/lib/platform/vscode-adapter.test.ts`.
+Source of truth: `serveWebview` in `vscode-ext/src/webview-messaging.ts`, `VSCodeAdapter` in `lib/src/lib/platform/vscode-adapter.ts`; pinned by `lib/src/lib/platform/vscode-adapter.test.ts`.
 
 ### Burrow: a service in the extension host
 
@@ -227,7 +212,7 @@ The service reads both **in-process**, through the async `BurrowStateStore`. **T
 
 **Import `ENROLLMENT_KEY`, never mirror it** (`lib/src/remote/burrow/store.ts`) — a key that drifted between the two sides would strand an enrollment still on disk. The ACL prefix is this store's own, one entry per `burrowId` so a re-enrollment inherits no stale ACL. **A record written before the end-to-end cutover is dropped by `isBurrowAclRecord`**, which is the whole of the Burrow-state version: the window offers enrollment again and every phone pairs once more.
 
-Source of truth: `VsCodeBurrowStateStore` and `ONE_TIME_SERVING_KEY` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`, `BurrowStateStore` in `lib/src/host/remote/burrow-state-store.ts`.
+Source of truth: `VsCodeBurrowStateStore` in `vscode-ext/src/burrow-store.ts`, `markOneTimeServing` and `contendIfServing` in `vscode-ext/src/burrow.ts`.
 
 **Which window: bind-as-lease.** One extension host runs per window, so unarbitrated they would all start a Burrow against the same enrollment and fight endlessly over the one `/ws/burrow` socket (rationale). Arbitration is the socket itself: **the bind is the lease**. Every contending window tries to bind one fixed path — `<hash>.sock` inside a per-user `dormouse-peer-<uid>` directory in the temp dir, or `\\.\pipe\dormouse-peer-<hash>` on Windows — the hash derived from `context.globalStorageUri.fsPath`: **derived rather than random** because it must be *the same* in every window, **hashed rather than joined** because of the platform path cap (rationale). The winner is the broker and runs the service; everyone else connects to it as a client. The invariants, each with its mechanism at the code:
 
@@ -254,7 +239,7 @@ Source of truth: `VsCodeBurrowStateStore` and `ONE_TIME_SERVING_KEY` in `vscode-
 
 **A command that arrives mid-contention is held, not refused** (rationale). Commands queue (bounded at a dozen, oldest refused on overflow) and drain when a role settles — to the service if this window brokered, over the link if it did not. **Each carries its own deadline, under the adapter's 15 s timeout**, so a contention that never settles produces a reason rather than a timeout. `enroll`, `enrollOffer`, `beginHostedEnrollment`, `oneTimeOpen`, and `setNetworkPolicy` are the only commands that may *start* the contention — the last **so the service stays the policy's only writer**; everything else refuses only where there is genuinely nothing to reach.
 
-Source of truth: `vscode-ext/src/burrow.ts` (service glue, provider, command routing), `ensurePeerNet` / `attempt` / `stillOurs` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
+Source of truth: `vscode-ext/src/burrow.ts`, `ensurePeerNet` in `vscode-ext/src/peer-link.ts`; pinned by `vscode-ext/test/burrow.test.ts` and `vscode-ext/test/peer-link.test.ts`.
 
 **The webview bridge.** A webview reaches the service over `BurrowLink` (`lib/src/lib/platform/types.ts`), implemented in `vscode-adapter.ts` on three messages, each wrapping the shared client's shape in a `payload`: `burrow:command { payload: BurrowCommand }` out, `burrow:result { payload: BurrowResult }` and `burrow:event { payload }` back. **Everything but those three `postMessage` shapes is the shared client** in `lib/src/host/remote/link-client.ts` (`docs/specs/transport.md` → Message protocol).
 
@@ -274,7 +259,7 @@ Events are pushed rather than answered: `pairing-queue` (the complete snapshot; 
 
 **One universal VSIX carries every platform's addon.** pnpm installs only the host's platform package, so the build has `pnpm deploy` the extension's production closure for every os and cpu, fetched and verified against `pnpm-lock.yaml` by pnpm (rationale), and stages the addon, its dependencies, and the platform packages `vscode-ext/package.json` declares under `optionalDependencies` into `dist/node_modules`. `node-pty` needs no staging: its one package carries every platform's prebuild. **Keep the addon `external` to `dist/extension.js`**, which the build asserts.
 
-Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `startService` and `initBurrow` in `vscode-ext/src/burrow.ts`, pinned by `vscode-ext/test/burrow.test.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `assertNothingInlined` in `scripts/assert-not-inlined.mjs`.
+Source of truth: `vscode-ext/scripts/stage-native-direct.mjs`; `initBurrow` in `vscode-ext/src/burrow.ts`, pinned by `vscode-ext/test/burrow.test.ts`; `createNativeDirectPeerFactory` in `lib/src/host/remote/native-direct-peer.ts`; `assertNothingInlined` in `scripts/assert-not-inlined.mjs`.
 
 ### Peer surfaces
 
@@ -316,7 +301,7 @@ bursts on one microtask (a focus move alone emits `focusout` plus `focusin`).
 
 **Local streams go through one keyed registry**, shared by the Burrow provider and the peer-link forwarder, holding each sink's own subscription to its PTY's parse plus one window-wide exit listener. **A sink subscribes to the PTY it watches and to no other**, so an unattached terminal costs nothing and each sink gets its own mid-string hold (`docs/specs/terminal-escapes.md`). **The exit listener goes in on the first attachment and out with the last**, so a window with no remote viewer pays nothing.
 
-Source of truth: `installPeerSurfaceResponder` and the operation map in `lib/src/remote/burrow/peer-surfaces.ts`, wired from `lib/src/main.tsx` (pinned by `lib/src/remote/burrow/peer-surfaces.test.ts`), `vscode-ext/src/processed-pty-streams.ts`.
+Source of truth: `installPeerSurfaceResponder` in `lib/src/remote/burrow/peer-surfaces.ts`, wired from `lib/src/main.tsx`; `vscode-ext/src/processed-pty-streams.ts`.
 
 ### Peer surfaces across windows
 
@@ -341,7 +326,7 @@ Two UI events *are* addressed: **when a window completes the handshake the broke
 
 **Socket bind errors reject startup** and are handled as an unavailable peer link; they never leave the listen promise pending or surface as an uncaught extension host error.
 
-Source of truth: `vscode-ext/src/peer-link.ts` (sockets, arbitration, `HANDSHAKE_BUDGET_MS`, and the `routes` / `routePtyIds` routing table); `vscode-ext/src/peer-link-protocol.ts` (frame shapes, framing, handshake helpers, `PEER_REPLY_BUDGET_MS`), pinned by `vscode-ext/test/peer-link-protocol.test.ts`; `askBothTiers` in `vscode-ext/src/burrow.ts`; `brokerRequest` and the `peer:*` / `burrow:command` cases in `vscode-ext/src/message-router.ts`; `lib/src/remote/burrow/remote-api.ts`.
+Source of truth: `vscode-ext/src/peer-link.ts`; `vscode-ext/src/peer-link-protocol.ts`, pinned by `vscode-ext/test/peer-link-protocol.test.ts`; `askBothTiers` in `vscode-ext/src/burrow.ts`; `brokerRequest` in `vscode-ext/src/message-router.ts`.
 
 ### Testing the extension host
 
