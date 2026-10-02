@@ -25,6 +25,9 @@ import {
 } from './model';
 import { type LayoutOpts, allocateChildSpans, autoEdge, minSpan, nodeRectAtPath } from './layout';
 
+import { type DropTarget, materializeTarget, targetByLeafSet } from './drop-target';
+export type { DropTarget } from './drop-target';
+
 type SplitNode = Extract<LathNode, { kind: 'split' }>;
 
 /** JSON-serializable restore context captured by `remove`, persisted with Doors. */
@@ -51,11 +54,6 @@ export type RestoreToken = {
    *  the root leaf. Restore's exact tier matches this against the sibling's live parent. */
   fingerprint: string | null;
 };
-
-/** A resolved drop, produced by hit-testing. */
-export type DropTarget =
-  | { kind: 'edge'; path: number[]; edge: Edge }
-  | { kind: 'swap'; leaf: LeafId };
 
 function mkLeaf(id: LeafId): LathNode {
   return { kind: 'leaf', id };
@@ -312,10 +310,11 @@ export function insert(
   if (target.kind === 'swap' || Number.isNaN(weight)) return { tree, ok: false };
   if (tree.root === null) return { tree, ok: false };
   if (findLeafPath(tree, id) !== null) return { tree, ok: false };
-  if (nodeAtPath(tree, target.path) === null) return { tree, ok: false };
+  const resolved = materializeTarget(tree, target);
+  if (!resolved) return { tree, ok: false };
   const eps = 1e-6;
   const w = Math.min(Math.max(weight, eps), 1 - eps);
-  return { tree: insertBesideNode(tree, target.path, target.edge, id, w), ok: true };
+  return { tree: insertBesideNode(resolved.tree, resolved.path, target.edge, id, w), ok: true };
 }
 
 /** Move a leaf to a drop target as one op (no token). A `swap` target defers to
@@ -330,8 +329,9 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
 
   const idPath = findLeafPath(tree, id);
   if (idPath === null) return { tree, ok: false };
-  const targetNode = nodeAtPath(tree, target.path);
-  if (targetNode === null) return { tree, ok: false };
+  const resolved = materializeTarget(tree, target);
+  if (!resolved) return { tree, ok: false };
+  const targetNode = nodeAtPath(resolved.tree, resolved.path)!;
 
   const targetLeaves = leaves({ root: targetNode });
   // The dragged leaf is the whole target subtree / its only descendant leaf — nothing to be beside.
@@ -342,16 +342,9 @@ export function move(tree: LathTree, id: LeafId, target: DropTarget): { tree: La
   const t2 = remove(tree, id).tree;
 
   const targetSet = new Set(targetLeaves.filter((l) => l !== id));
-  let insertPath = findPathByLeafSet(t2, targetSet);
-  if (insertPath === null) {
-    // Rare: the target subtree dissolved (its split flattened as the removal collapsed a
-    // neighbor). Degrade to inserting beside the target's first surviving leaf.
-    const anchor = targetLeaves.find((l) => l !== id);
-    insertPath = anchor !== undefined ? findLeafPath(t2, anchor) : null;
-    if (insertPath === null) return { tree, ok: false };
-  }
-
-  const r = insert(t2, id, { kind: 'edge', path: insertPath, edge: target.edge }, w);
+  const destination = targetByLeafSet(t2, targetSet, target.edge);
+  if (!destination) return { tree, ok: false };
+  const r = insert(t2, id, destination, w);
   return r.ok ? r : { tree, ok: false };
 }
 

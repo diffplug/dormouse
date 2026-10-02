@@ -980,6 +980,41 @@ describe('LathHost — pane / Door drag', () => {
     expect(onProposeMove).toHaveBeenCalledWith('c', { kind: 'edge', path: [0], edge: 'top' });
   });
 
+  it('shows and cycles contiguous group choices, then commits the selected group', async () => {
+    const store = seeded(rowOf('a', 'b', 'c', 'd'), ['a', 'b', 'c', 'd'].map(id => [id, leafMeta()]));
+    const { onProposeMove } = mountDrag(store);
+    act(() => down(header('d'), 700, 15));
+    act(() => moveTo(300, 5));
+    await flushFrame();
+    const choice = () => container.querySelector('[data-lath-drop-choice]')!.textContent;
+    expect(choice()).toContain('one pane');
+    expect(choice()).toContain('1/4');
+    expect(choice()).toContain('scroll to choose');
+    act(() => window.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, cancelable: true })));
+    expect(choice()).toContain('2 panes');
+    expect(choice()).toContain('2/4');
+    const target: DropTarget = { kind: 'edge', path: [], edge: 'top', range: { start: 0, end: 2 } };
+    expect(overlayRect()).toEqual(movePreview(store.getSnapshot().tree, 'd', target));
+    const scope = container.querySelector<HTMLElement>('[data-lath-drop-scope]')!;
+    expect(parseFloat(scope.style.left)).toBe(0);
+    expect(parseFloat(scope.style.width)).toBeGreaterThan(390);
+    act(() => up());
+    expect(onProposeMove).toHaveBeenCalledWith('d', target);
+    expect(container.querySelector('[data-lath-drop-choice]')).toBeNull();
+  });
+
+  it('uses the latest pointer position before cycling group choices', () => {
+    const store = seeded(rowOf('a', 'b', 'c', 'd'), ['a', 'b', 'c', 'd'].map(id => [id, leafMeta()]));
+    const { onProposeMove } = mountDrag(store);
+    act(() => down(header('d'), 700, 15));
+    act(() => {
+      moveTo(300, 5);
+      window.dispatchEvent(new WheelEvent('wheel', { deltaY: 10, cancelable: true }));
+      up();
+    });
+    expect(onProposeMove).toHaveBeenCalledWith('d', { kind: 'edge', path: [], edge: 'top', range: { start: 0, end: 2 } });
+  });
+
   it('proposes a minimize when dropped below the wall (baseboard zone)', async () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta({ title: 'A' })], ['b', leafMeta({ title: 'B' })]]);
     const { onProposeMinimize, onProposeMove } = mountDrag(store);

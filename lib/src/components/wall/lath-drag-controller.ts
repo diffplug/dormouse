@@ -5,12 +5,20 @@ import type { SurfaceWorkspaceDrag } from './surface-workspace-drag';
 import type { MutableRefObject, RefObject } from 'react';
 import { type Rect, rectKey } from '../../lib/lath/model';
 import type { DropTarget } from '../../lib/lath/ops';
-import { type DropCandidate, hitTest } from '../../lib/lath/hit-test';
+import { type DropCandidate, createHitTester } from '../../lib/lath/hit-test';
 import { type LathWallSnapshot, LATH_LAYOUT_OPTS } from './lath-wall-store';
 import { DRAG_THRESHOLD_PX } from '../design';
 
 /** Opacity applied to the dragged leaf while its drop preview floats elsewhere. */
 const DRAG_DIM = 0.6;
+
+export type DragPreview = {
+  rect: Rect;
+  scopeRect: Rect | null;
+  label: string;
+  choice: number;
+  count: number;
+};
 
 /** A live pane / Door drag session. Each frame hit-tests against the *live* store
  *  tree (read fresh, so a background `dor split`/`dor kill` commit mid-drag is
@@ -73,29 +81,39 @@ export type DragControllerDeps = {
   /** Sash-drag session — the pane drag never starts while one is live. Read-only
    *  here; the session's shape is LathHost's own concern. */
   sashDragRef: { readonly current: object | null };
-  setDragPreview: (rect: Rect | null) => void;
+  setDragPreview: (preview: DragPreview | null) => void;
   suppressNextClickRef: MutableRefObject<boolean>;
 };
 
 export function createDragController(deps: DragControllerDeps): DragController {
   // The live drag session (mutated in place by the window handlers).
   let drag: PaneDragState | null = null;
+  const hitTest = createHitTester();
   // The last preview rect published to React state (`x,y,w,h`); a frame that lands in
   // the same band skips the redundant setState (and its forced re-layout).
   let lastPreviewKey = '';
 
-  const publishPreview = (rect: Rect | null): void => {
-    if (rect === null) {
+  const publishPreview = (candidate: DropCandidate | null): void => {
+    if (candidate === null) {
       if (lastPreviewKey !== '') {
         lastPreviewKey = '';
         deps.setDragPreview(null);
       }
       return;
     }
-    const key = rectKey(rect);
+    const preview: DragPreview = {
+      rect: candidate.previewRect,
+      scopeRect: candidate.target.kind === 'edge' ? candidate.scopeRect : null,
+      label: candidate.target.kind === 'swap' ? 'swap panes'
+        : candidate.target.path.length === 0 && !candidate.target.range ? 'whole layout'
+        : candidate.scopeLeafCount === 1 ? 'one pane' : candidate.scopeLeafCount + ' panes',
+      choice: (drag?.depth ?? 0) + 1,
+      count: drag?.candidates.length ?? 1,
+    };
+    const key = [rectKey(preview.rect), preview.scopeRect && rectKey(preview.scopeRect), preview.label, preview.choice, preview.count].join('|');
     if (key === lastPreviewKey) return;
     lastPreviewKey = key;
-    deps.setDragPreview(rect);
+    deps.setDragPreview(preview);
   };
 
   const detach = (): void => {
@@ -154,7 +172,7 @@ export function createDragController(deps: DragControllerDeps): DragController {
       return;
     }
     d.depth = Math.min(d.depth, cands.length - 1);
-    publishPreview(cands[d.depth].previewRect);
+    publishPreview(cands[d.depth]);
   };
 
   const scheduleHitTest = (): void => {
@@ -245,12 +263,14 @@ export function createDragController(deps: DragControllerDeps): DragController {
 
   function onWheel(e: WheelEvent): void {
     const d = drag;
-    if (!d || !d.active || d.candidates.length === 0) return;
+    if (!d || !d.active || e.deltaY === 0) return;
+    runHitTest(); // flush a pending pointer/tree change before choosing its next scope
+    if (d.candidates.length === 0) return;
     e.preventDefault();
     const n = d.candidates.length;
     const step = e.deltaY > 0 ? 1 : -1; // scroll away/down → one level outward, wrap
     d.depth = ((d.depth + step) % n + n) % n;
-    publishPreview(d.candidates[d.depth].previewRect);
+    publishPreview(d.candidates[d.depth]);
   }
 
   return {

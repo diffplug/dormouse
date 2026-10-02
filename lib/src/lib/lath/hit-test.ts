@@ -6,11 +6,18 @@
 // raycast intersections). No DOM, React, or timing. See docs/specs/tiling-engine.md
 // ("Hierarchical drag and drop").
 
-import { type Edge, type LathTree, type LeafId, type Rect, findLeafPath, rectKey, rectsClose } from './model';
+import { type Edge, type LathTree, type LeafId, type Rect, findLeafPath, nodeAtPath, leaves, edgeAxis, rectKey, rectsClose } from './model';
 import { type LayoutOpts, layout, nodeRectAtPath } from './layout';
 import { type DropTarget, insert, move } from './ops';
+import { materializeTarget, targetRect } from './drop-target';
 
-export type DropCandidate = { target: DropTarget; previewRect: Rect; depth: number };
+export type DropCandidate = {
+  target: DropTarget;
+  previewRect: Rect;
+  scopeRect: Rect;
+  scopeLeafCount: number;
+  depth: number;
+};
 
 /** Placeholder leaf id for the speculative `insert` of an external (Door) drag. */
 const EXTERNAL_ID = '__lath_external_drop__';
@@ -59,12 +66,34 @@ function sameLayout(a: Map<LeafId, Rect>, b: Map<LeafId, Rect>): boolean {
  *
  *  The pointer is hit-tested against the layout WITHOUT removing `dragged`: it may
  *  hover its own slot, and self-targeting candidates fall out through the filters. */
-export function hitTest(
+export function hitTest(...args: HitTestArgs): DropCandidate[] {
+  return resolveHitTest(...args);
+}
+
+type HitTestArgs = [tree: LathTree, rect: Rect, point: { x: number; y: number }, dragged: LeafId | null, opts: LayoutOpts];
+type HitTestCache = {
+  tree?: LathTree;
+  geometry?: string;
+  rects?: Map<LeafId, Rect>;
+  region?: string;
+  candidates?: DropCandidate[];
+};
+
+/** One gesture owner may reuse the latest region's speculative layouts. Tree identity,
+ * geometry, options, and dragged identity invalidate the cache; pointer movement
+ * within the same leaf edge does not change the available operations. */
+export function createHitTester(): (...args: HitTestArgs) => DropCandidate[] {
+  const cache: HitTestCache = {};
+  return (...args) => resolveHitTest(...args, cache);
+}
+
+function resolveHitTest(
   tree: LathTree,
   rect: Rect,
   point: { x: number; y: number },
   dragged: LeafId | null,
   opts: LayoutOpts,
+  cache?: HitTestCache,
 ): DropCandidate[] {
   if (tree.root === null) return [];
   // Off-wall → no candidates.
@@ -72,7 +101,16 @@ export function hitTest(
     return [];
   }
 
-  const rects = layout(tree, rect, opts);
+  const geometry = JSON.stringify([rect, opts, dragged]);
+  if (cache && (cache.tree !== tree || cache.geometry !== geometry)) {
+    cache.tree = tree;
+    cache.geometry = geometry;
+    cache.rects = undefined;
+    cache.region = undefined;
+    cache.candidates = undefined;
+  }
+  const rects = cache?.rects ?? layout(tree, rect, opts);
+  if (cache) cache.rects = rects;
   // Leaf under the point; a point in a gap (or a hairline overshoot) attributes to the
   // nearest leaf so there are no dead zones along split boundaries.
   let leafId: LeafId | null = null;
@@ -109,15 +147,17 @@ export function hitTest(
   if (dt < bandY) bands.push({ edge: 'top', dist: dt });
   if (db < bandY) bands.push({ edge: 'bottom', dist: db });
 
+  // The nearest in-band edge wins the corner; deterministic tie-break by edge order.
+  const rank: Record<Edge, number> = { left: 0, right: 1, top: 2, bottom: 3 };
+  bands.sort((a, b) => a.dist - b.dist || rank[a.edge] - rank[b.edge]);
+  const edge = bands[0]?.edge;
+  const region = JSON.stringify([leafId, edge]);
+  if (cache?.region === region && cache.candidates) return cache.candidates;
   const raw: DropTarget[] = [];
-  if (bands.length === 0) {
+  if (edge === undefined) {
     // Center → swap (internal only; never with yourself).
     if (dragged !== null && leafId !== dragged) raw.push({ kind: 'swap', leaf: leafId });
   } else {
-    // The nearest in-band edge wins the corner; deterministic tie-break by edge order.
-    const rank: Record<Edge, number> = { left: 0, right: 1, top: 2, bottom: 3 };
-    bands.sort((a, b) => a.dist - b.dist || rank[a.edge] - rank[b.edge]);
-    const edge = bands[0].edge;
     // Innermost: this leaf's own level. Then each ancestor (up to the root, path []) whose
     // `edge` boundary coincides with the hovered leaf's — "beside this whole column/row".
     raw.push({ kind: 'edge', path: leafPath, edge });
@@ -125,17 +165,32 @@ export function hitTest(
       const ancestorPath = leafPath.slice(0, k);
       const ar = nodeRectAtPath(tree, rect, opts, ancestorPath);
       if (ar && Math.abs(edgeCoord(ar, edge) - edgeCoord(leafRect, edge)) <= COINCIDE_EPS) {
+        const ancestor = nodeAtPath(tree, ancestorPath);
+        if (ancestor?.kind === 'split' && ancestor.dir !== edgeAxis(edge)) {
+          const hovered = leafPath[k];
+          // Virtual rectangles: every adjacent run containing the hovered child,
+          // shortest first. The complete run is the ordinary ancestor below.
+          for (let length = 2; length < ancestor.children.length; length++) {
+            const first = Math.max(0, hovered - length + 1);
+            const last = Math.min(hovered, ancestor.children.length - length);
+            for (let start = first; start <= last; start++) {
+              raw.push({ kind: 'edge', path: ancestorPath, edge, range: { start, end: start + length } });
+            }
+          }
+        }
         raw.push({ kind: 'edge', path: ancestorPath, edge });
       }
     }
   }
 
   // Speculatively commit each candidate; drop rejected ops, beside-itself no-ops, and
-  // duplicates (candidates that land the moved leaf in the same place — the flatten
-  // invariant collapses some ancestor levels into their child's result).
+  // duplicates of the whole resulting layout: equal destinations alone may still
+  // leave the other panes arranged differently.
   const out: DropCandidate[] = [];
   const seen = new Set<string>();
-  const previewId = dragged !== null ? dragged : EXTERNAL_ID;
+  let previewId = dragged ?? EXTERNAL_ID;
+  if (dragged === null) while (rects.has(previewId)) previewId += '_';
+  const resultIds = [...rects.keys(), ...(dragged === null ? [previewId] : [])].sort();
   for (const target of raw) {
     const r = dragged !== null ? move(tree, dragged, target) : insert(tree, previewId, target);
     if (!r.ok) continue;
@@ -144,10 +199,21 @@ export function hitTest(
     if (!pr) continue;
     // Beside-itself: a committed layout identical to the current one is not a real move.
     if (dragged !== null && target.kind === 'edge' && sameLayout(rects, resultRects)) continue;
-    const key = rectKey(pr);
+    const key = resultIds.map(id => rectKey(resultRects.get(id)!)).join(';');
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ target, previewRect: pr, depth: out.length });
+    let scopeRect = leafRect;
+    let scopeLeafCount = 1;
+    if (target.kind === 'edge') {
+      scopeRect = targetRect(tree, rect, opts, target)!;
+      const scope = materializeTarget(tree, target)!;
+      scopeLeafCount = leaves({ root: nodeAtPath(scope.tree, scope.path) }).filter(id => id !== dragged).length;
+    }
+    out.push({ target, previewRect: pr, scopeRect, scopeLeafCount, depth: out.length });
+  }
+  if (cache) {
+    cache.region = region;
+    cache.candidates = out;
   }
   return out;
 }

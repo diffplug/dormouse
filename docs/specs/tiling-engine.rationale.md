@@ -26,6 +26,10 @@ Lath is named for the strips hidden behind a plaster wall. The five taxes dockvi
 
 ## Hierarchical drag and drop
 
+**Flexible scopes without a new tree format.** A flat row already models any number of children. The missing expression was a temporary rectangle spanning adjacent children: forcing that group into the stored tree conflicts with same-direction flattening. A child range captures the drop scope without making split history observable. Removing a pane can dissolve an old subtree into siblings; resolving the entire surviving leaf set retains the chosen rectangle.
+
+**Repeated preview cost.** Measured on Windows in October 2026, exhaustive group enumeration took about 1.3ms for a 10-pane row, 15ms for 40 panes, and 98ms for 80 panes in a middle-edge hover. The gesture-local cache reuses the last leaf-edge result while the tree, geometry, options, and dragged identity match. Very large flat rows still pay that initial enumeration cost when entering a different edge; typical small layouts retain every contiguous choice without a scope limit.
+
 **Why duplicate ancestor candidates exist to be filtered.** Removing the dragged leaf frequently collapses the column it came from, and once the flatten invariant runs, an `edge` target at the ancestor level and the same edge at its surviving child level lay out identically. Both are legitimate ops with distinct descriptors and only the committed result coincides, so the filter compares committed layouts, not targets: a descriptor-level dedupe would keep both and hand the user two wheel stops that look the same.
 
 **The header-press quirk.** A pane drag starts from a `pointerdown` the header has already handled as a click, so the pane is selected and in passthrough by the time the 5px threshold trips. Suppressing it would mean deferring the header's own click until the gesture resolves, and the end state is the one a drag wants anyway — the dragged pane is the selected pane.

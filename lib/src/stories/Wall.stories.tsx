@@ -221,3 +221,43 @@ export const TerminalContext: Story = {
     await settleTerminalContext();
   },
 };
+
+/** Same-direction splits remain one weighted row, independent of creation order. */
+function flatRowArgs(ids: string[]) {
+  return {
+    initialPaneIds: ids,
+    restoredLathLayout: {
+      version: 1,
+      tree: { root: { kind: 'split', dir: 'row', children: ids.map(id => ({ node: { kind: 'leaf', id }, weight: 1 / ids.length })) } },
+      leafMeta: Object.fromEntries(ids.map(id => [id, { component: 'terminal', tabComponent: 'terminal', title: id }])),
+    },
+  };
+}
+
+export const ThreePaneSplits: Story = {
+  args: flatRowArgs(['split-a', 'split-b', 'split-c']),
+  parameters: {
+    fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
+    docs: { description: { story: 'Drag a header to a pane edge, then scroll to choose one pane or the whole row. Every two-plus-one arrangement is available from this flat three-pane row.' } },
+  },
+};
+
+export const ContiguousGroupDrop: Story = {
+  args: flatRowArgs(['group-a', 'group-b', 'group-c', 'group-d']),
+  parameters: {
+    fakePty: { scenario: flattenScenario(SCENARIO_SHELL_PROMPT) },
+    docs: { description: { story: 'The dashed outline shows the chosen group; the solid area is the exact drop destination. Scroll while dragging to choose a larger or smaller group.' } },
+  },
+  play: async () => {
+    await settleTerminals();
+    const source = await requireElement<HTMLElement>('[data-lath-leaf="group-d"] .lath-leaf-header', 'drag source');
+    const target = await requireElement<HTMLElement>('[data-lath-leaf="group-b"]', 'drag target');
+    const from = source.getBoundingClientRect();
+    const to = target.getBoundingClientRect();
+    source.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: from.x + 20, clientY: from.y + 15 }));
+    window.dispatchEvent(new PointerEvent('pointermove', { clientX: to.x + to.width / 2, clientY: to.y + 5 }));
+    await waitForCondition(() => document.querySelector('[data-lath-drop-choice]') !== null);
+    window.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, cancelable: true }));
+    await waitForCondition(() => document.querySelector('[data-lath-drop-choice]')?.textContent?.includes('2/4') === true);
+  },
+};
