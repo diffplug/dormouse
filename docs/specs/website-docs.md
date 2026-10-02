@@ -45,7 +45,7 @@ shapes, or staged `## Future` material.
 guide. It works without prose forks in the VS Code Marketplace, Open VSX, and
 GitHub.
 
-**Must parse and validate the guide on every build without publishing a guide page** (rationale).
+The guide has no page on this site; its build-time parse is owned by [Generated documentation boundary](#generated-documentation-boundary) (rationale).
 
 The guide is written for a VS Code user, because every channel that publishes
 it is an extension listing or the extension's folder on GitHub; the standalone
@@ -373,7 +373,7 @@ Source of truth: `generateDocs` in `website/scripts/generate-docs.js`.
 
 **Must derive contextual CLI links from skill headings.** Backticked `dor <command>` tokens select the first spelling with a matching CLI section, labelled by the first authored spelling. Targeting and Surface handles match by heading prefix and link to the corresponding CLI introductions. Generation fails on missing or ambiguous introduction headings, or a command heading with no matching anchor.
 
-**Never inject website URLs into the bundled skill; must reject links to the website's origin rather than rewriting them** (rationale). Known gap: the current prefix check misses bare-origin, case, default-port, and protocol-relative spellings. `buildCli` reuses the same intro block objects.
+**Never inject website URLs into the bundled skill; must reject links to the website's origin rather than rewriting them** (rationale). Known gap: the current prefix check misses bare-origin, case, default-port, and protocol-relative spellings. `buildCli` reuses the same intro block objects, so a site URL in the skill would also reach `/dor`.
 
 Source of truth: `buildSkill`, `assertNoSiteLinks`, and `linkSkillHeadings` in `website/scripts/generate-docs.js`; `AgentSkillDocs` in `website/src/pages/AgentSkillDocs.tsx`.
 Tests: `website/scripts/generate-docs.test.js`.
