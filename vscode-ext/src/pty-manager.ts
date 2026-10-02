@@ -46,6 +46,8 @@ interface PtyBufferEntry {
 
 const MAX_BUFFER_CHARS = 1_000_000;
 const ptyBuffers = new Map<string, PtyBufferEntry>();
+// Tombstones: a killed id is never resumable, so late output the child still
+// sends for it must not recreate a buffer. Cleared when `spawn` reuses the id.
 const killedPtyIds = new Set<string>();
 
 function trimChunks(chunks: string[], totalChars: number): number {

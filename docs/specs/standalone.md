@@ -72,8 +72,8 @@ non-Windows branches round-trip through the sidecar. A source-scanning test in
 **`pty_graceful_kill` SIGTERMs the calling window's live PTYs** (§Routing) and
 resolves one grace tick after the last exits, or at its timeout for
 SIGTERM-ignoring programs. **Must forward final output during that grace
-period**; the sidecar retains no scrollback. Under ConPTY the SIGTERM is an
-immediate kill. Pinned by `standalone/sidecar/pty-core.test.js`.
+period**. Under ConPTY the SIGTERM is an immediate kill. **The sidecar
+keeps each PTY's latest 200,000 UTF-16 code units for replay.** Pinned by `standalone/sidecar/pty-core.test.js`.
 
 Sidecar events reach the webview, where `TauriAdapter` converts dor control
 requests into the `dormouse:control-request` CustomEvent that `Wall` handles

@@ -34,6 +34,7 @@ The extension host is the platform host of `docs/specs/transport.md` → "PTY li
 - Hiding or toggling the Dormouse panel neither kills its PTYs nor destroys sessions.
 - **Closing an editor-tab `WebviewPanel` kills that panel's owned PTYs** (`killOnDispose`), and VS Code discards the tab's per-panel state. **Disposing the `WebviewView` releases its router and leaves the PTYs alive.**
 - Each VS Code window gets its own extension host, and therefore its own pty-host child.
+- **Must cap each PTY's replay and scrollback at 1,000,000 characters each**; replay clears on its first read.
 
 ### Workspaces
 

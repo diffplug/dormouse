@@ -17,7 +17,7 @@ type AppWindow = {
 };
 
 /** The browser-dev harness has no windows at all, so it gets no window ops and
- *  no cross-window drag (docs/specs/transport.md → "Standalone browser-dev
+ *  no cross-window drag (docs/specs/standalone.md → "Standalone browser-dev
  *  harness"). */
 const BROWSER_DEV = !!import.meta.env.VITE_DORMOUSE_BROWSER_DEV_HOST;
 
