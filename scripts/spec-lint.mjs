@@ -331,12 +331,19 @@ for (const rat of rationaleFiles) {
   }
 }
 
+// A `Source of truth` lead-in, however punctuated, that points into this repo;
+// `Source of truth (<name> repo):` points outside it. Checks 9 and 12 share it.
+function sourceOfTruthLead(line) {
+  const lead = /Source of truth\b([^:\n]*):/.exec(line);
+  return lead && !/\brepo\)/.test(lead[1]) ? lead : null;
+}
+
 // --- Check 9: a map or pointers, never both ----------------------------------
 const MAP_HEADING_RE = /^(?:Files|Code Map)$/i;
 for (const spec of foldCheckedFiles) {
   const map = headings(spec).find((h) => MAP_HEADING_RE.test(h.title));
   if (!map) continue;
-  const pointer = proseLines(spec).findIndex((line) => /Source of truth\b[^:\n]*:/.test(line));
+  const pointer = proseLines(spec).findIndex(sourceOfTruthLead);
   if (pointer === -1) continue;
   problems.push(
     `${spec}:${pointer + 1}: \`Source of truth\` pointer beside "${'#'.repeat(map.level)} ${map.title}" (line ${map.line}) — ` +
@@ -431,9 +438,8 @@ const SYMBOLS_IN_FILE_RE = /((?:`[^`\n]+`\s*(?:\/|,|and|\+)?\s*)+)\bin\s+`([^`\n
 for (const spec of foldCheckedFiles) {
   const lines = proseLines(spec);
   lines.forEach((line, i) => {
-    const lead = /Source of truth\b([^:\n]*):/.exec(line);
+    const lead = sourceOfTruthLead(line);
     if (!lead) return;
-    if (/\brepo\)/.test(lead[1])) return; // `Source of truth (<name> repo):` — outside this repo
     const para = blockAt(lines, i, line.slice(lead.index));
     const tokens = [...para.matchAll(TICK_RE)].map((m) => m[1]);
     if (!tokens.some(checkablePath)) {
