@@ -666,7 +666,7 @@ export function useDorControl({
      *  terminal but renders both capabilities. */
     leafMeta?: LeafMeta;
     /** Create the leaf but stage no shell and spawn no PTY — a pane awaiting
-     *  approval (docs/specs/dor-tool.md -> Trust rule 3). */
+     *  approval (docs/specs/dor-tool.md -> Trust rule 2). */
     deferTerminal?: boolean;
     /** Lay the leaf out even beside a Door reference, which otherwise makes
      *  it a Door. */
@@ -1364,7 +1364,7 @@ export function useDorControl({
                 focusNeutral: true,
                 // No shell until a human approves: `createSplitSurface` would
                 // otherwise stage shell opts and, on some paths, spawn the PTY
-                // outright (docs/specs/dor-tool.md -> Trust rule 3).
+                // outright (docs/specs/dor-tool.md -> Trust rule 2).
                 deferTerminal: true,
                 leafMeta: toolLeafMeta(lookup.name, {
                   surfaceType: 'tool',
