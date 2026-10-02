@@ -47,7 +47,9 @@ shell-integration scripts — the parser scans raw bytes and cannot defend it
 
 The attacker is the page inside a browser pane.
 
-**Known gap: Windows screenshots/clipboard images inherit parent ACLs.**
+**Known gap: Windows screenshots and pasted clipboard images inherit their
+parent's ACL** — private under the default per-user `%TEMP%`, exposed only when
+it (or the capture parent) is shared or loosened.
 
 Source of truth: `lib/src/host/private-capture-dir.ts`,
 `standalone/sidecar/clipboard-ops.js`, `standalone/src-tauri/src/clipboard_win.rs`.
