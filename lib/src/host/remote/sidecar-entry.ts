@@ -601,7 +601,7 @@ export function createSidecarHost(options: SidecarHostOptions): SidecarHost {
           );
           return true;
         // The webview's resolved terminal theme, so the parser here can answer
-        // OSC 10/11/12 (docs/specs/terminal-escapes.md → Supported OSCs).
+        // OSC 10/11/12 (docs/specs/theme.md → Terminal color contract).
         case 'pty:themeColors':
           bridge.setThemeColors(data);
           return true;

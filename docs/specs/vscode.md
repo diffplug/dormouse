@@ -144,7 +144,7 @@ files**.
 
 ### OSC color query answering
 
-PTY parsing happens in the **extension host**, which has no DOM to read the theme from, so **the webview pushes its resolved colors up**: `VSCodeAdapter.pushThemeColors()` reads `getTerminalTheme()` and posts `dormouse:themeColors { foreground, background, cursor }` on `requestInit` and again whenever `onTerminalThemeChange` fires. `message-router.ts` caches the latest colors and feeds them to every PTY's parser via a `TerminalColorProvider`, so the parser answers and consumes `OSC 10/11/12 ; ?` exactly like the standalone sidecar ([terminal-escapes.md](terminal-escapes.md#supported-oscs)). Before the first push, or for an unparseable color, the provider returns `null` and the query falls through to xterm.js. Windows additionally needs `useConptyDll: true` for the query to reach the extension host ([terminal-escapes.md](terminal-escapes.md#osc-color-queries-on-windows-require-the-bundled-conpty)).
+PTY parsing happens in the **extension host**, which has no DOM to read the theme from, so **the webview pushes its resolved colors up**: `VSCodeAdapter.pushThemeColors()` reads `getTerminalTheme()` and posts `dormouse:themeColors { foreground, background, cursor }` on `requestInit` and again whenever `onTerminalThemeChange` fires. `message-router.ts` caches the latest colors and feeds them to every PTY's parser via a `TerminalColorProvider`, so the parser answers and consumes `OSC 10/11/12 ; ?` exactly like the standalone sidecar ([theme.md](theme.md#terminal-color-contract)). Before the first push, or for an unparseable color, the provider returns `null` and the query falls through to xterm.js. Windows additionally needs `useConptyDll: true` for the query to reach the extension host ([theme.md](theme.md#osc-color-queries-on-windows-require-the-bundled-conpty)).
 
 ### CSP policy
 
@@ -177,7 +177,7 @@ frame-src   http://127.0.0.1:* http://localhost:*
 
 **Keep `'strict-dynamic'`** even though no experiment shows it load-bearing (rationale): it is the mechanism CSP specifies for "a script the nonce vouched for may load more", and the alternative that happens to work would make the policy correct by accident.
 
-**`'wasm-unsafe-eval'` permits WebAssembly compilation and nothing else** — `eval` stays blocked, and unlike a host source it survives `'strict-dynamic'`. What needs it is [terminal-escapes.md](terminal-escapes.md#inline-graphics). (rationale)
+**`'wasm-unsafe-eval'` permits WebAssembly compilation and nothing else** — `eval` stays blocked, and unlike a host source it survives `'strict-dynamic'`. What needs it is [layout.md](layout.md#inline-graphics). (rationale)
 
 Chromium enforces CSP and a failure presents remote from its cause, so **string inspection proves nothing** (rationale) and two checks cover it, **neither replacing the other**: `vscode-ext/test/webview-boot.smoketest.ts` loads the real bundle under the real policy in a real engine, and `vscode-ext/test/webview-html.test.ts` pins the transform against a fixture of real Vite output.
 

@@ -1140,7 +1140,7 @@ fn pty_resize(state: tauri::State<'_, SidecarState>, id: String, cols: u16, rows
 }
 
 // The webview's resolved terminal colors, so the sidecar's parser can answer
-// OSC 10/11/12 (docs/specs/terminal-escapes.md). Opaque here: the shape belongs
+// OSC 10/11/12 (docs/specs/theme.md). Opaque here: the shape belongs
 // to the parser at the other end, and Rust has no reason to know it.
 #[tauri::command]
 fn pty_theme_colors(state: tauri::State<'_, SidecarState>, colors: JsonValue) {

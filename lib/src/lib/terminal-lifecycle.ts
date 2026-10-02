@@ -435,7 +435,9 @@ export function resumeTerminal(
 
   if (replayData) {
     // Dead session: append the reset tail. A live resume leaves the modes to
-    // the still-running process that owns them (see REPLAY_MODE_RESET).
+    // the still-running process that owns them (see REPLAY_MODE_RESET). The
+    // tail goes through writeReplay so the replay filter drops any report it
+    // provokes, and its DECRSTs re-sync the mouse-selection store.
     writeReplay(entry, replayData, ...(isDead ? [REPLAY_MODE_RESET] : []));
     seedPromptShapeFromScrollback(id, replayData);
   }

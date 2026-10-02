@@ -94,7 +94,7 @@ on the Burrow), and its two other choke points,
 `lib/src/host/managed-voice-host.ts` and `standalone/src/updater.ts`.
 
 For the rest of `docs/specs/security-local.md`, read each section's owner first
-— `docs/specs/terminal-escapes.md`, `docs/specs/dor-browser.md`,
+— `docs/specs/terminal-escapes.md` and the owners its rows name, `docs/specs/dor-browser.md`,
 `docs/specs/dor-cli.md`, `docs/specs/vscode.md` -> "Webview message
 authentication", `docs/specs/standalone.md` -> "Persistence" — then the parser, the iframe shim, the
 control-socket code, and the persistence paths they point at. `## Persisted
