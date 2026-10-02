@@ -369,8 +369,8 @@ order.
 **Port enumeration is opt-in.** With `includePorts` set (`dor list --ports` /
 `--port`) the host scans each terminal Surface's process tree
 (`docs/specs/dor-browser.md` → Dev-Server Chip), shelling out (`lsof` /
-`Get-NetTCPConnection`). **One listing costs one scan where the adapter can
-batch it** (`PlatformAdapter.getOpenPortsMany`).
+`Get-NetTCPConnection`). **One listing costs one scan**
+(`PlatformAdapter.getOpenPortsMany`).
 **A `--all` listing never forwards `includePorts` to a Wall**, scanning once for
 every Workspace's terminals instead. A remote paired session reports none, and
 any error degrades to an empty list rather than failing the call.

@@ -439,8 +439,15 @@ export function getCwd(id: string): Promise<string | null> {
 }
 
 export function getOpenPorts(id: string): Promise<OpenPort[]> {
-  return requestChild<{ ports?: OpenPort[] }>({ type: 'getOpenPorts', id }, (msg) => msg.type === 'openPorts' && msg.id === id, openPortRequestTimeoutMs(1))
-    .then((msg) => msg.ports || [], () => []);
+  return getOpenPortsMany([id]).then((ports) => ports[id] ?? []);
+}
+
+let openPortsSequence = 0;
+/** Every id's ports from one pty-host scan (`docs/specs/transport.md` -> "Port scan deadlines"). */
+export function getOpenPortsMany(ids: string[]): Promise<Record<string, OpenPort[]>> {
+  const requestId = `ports-${++openPortsSequence}`;
+  return requestChild<{ ports?: Record<string, OpenPort[]> }>({ type: 'getOpenPortsMany', ids, requestId }, (msg) => msg.type === 'openPortsMany' && msg.requestId === requestId, openPortRequestTimeoutMs(ids.length))
+    .then((msg) => msg.ports || {}, () => ({}));
 }
 
 export function write(id: string, data: string, options: WritePtyOptions = {}): void {

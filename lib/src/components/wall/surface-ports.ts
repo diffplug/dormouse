@@ -1,7 +1,7 @@
 /**
- * The opt-in port scan behind `dor list --ports` / `--port`
- * (`docs/specs/dor-cli.md` → "Current Implemented Commands"), shared by the Wall
- * answering for its own Workspace and the Window answering `--all` across them.
+ * Batched terminal port scans: the opt-in scan behind `dor list --ports` /
+ * `--port` (`docs/specs/dor-cli.md` → "Current Implemented Commands"), the
+ * Dev-Server Chip, and Tool serving.
  */
 
 import { hasTerminal, type Surface, type SurfacePort } from 'dor/commands/types';
@@ -19,35 +19,23 @@ function toSurfacePort(port: OpenPort): SurfacePort {
 }
 
 /**
- * Enumerate every terminal Surface's listening ports, in **one host call where
- * the adapter can batch it** (`getOpenPortsMany`) and one call per Surface in
- * parallel where it cannot. The scan shells out per process table, so a listing
- * spanning Workspaces must not pay for it once per row. A failure degrades to no
- * ports for the Surfaces it covered, never a rejected listing.
+ * Listening ports for every terminal id from **one host call**
+ * (`getOpenPortsMany`): the scan shells out per process table, so a caller
+ * spanning many terminals must not pay for it once per id. An id whose scan
+ * failed is absent from the answer, never a rejection.
  */
+export async function openPortsByTerminal(ids: string[]): Promise<Record<string, OpenPort[]>> {
+  if (ids.length === 0) return {};
+  try {
+    return await getPlatform().getOpenPortsMany(ids);
+  } catch { return {}; }
+}
+
+/** Every terminal Surface's listening ports, from one `openPortsByTerminal`. */
 export async function attachSurfacePorts<T extends Surface>(surfaces: T[]): Promise<T[]> {
-  const platform = getPlatform();
   const terminals = surfaces.filter((surface) => hasTerminal(surface.kind));
-  if (terminals.length === 0) return surfaces;
-
-  const batched = platform.getOpenPortsMany;
-  if (batched) {
-    let ports: Record<string, OpenPort[]> = {};
-    try {
-      ports = await batched.call(platform, terminals.map((surface) => surface.id));
-    } catch { ports = {}; }
-    return surfaces.map((surface) => (hasTerminal(surface.kind)
-      ? { ...surface, ports: (ports[surface.id] ?? []).map(toSurfacePort) }
-      : surface));
-  }
-
-  return Promise.all(surfaces.map(async (surface) => {
-    if (!hasTerminal(surface.kind)) return surface;
-    try {
-      const ports = await platform.getOpenPorts(surface.id);
-      return { ...surface, ports: ports.map(toSurfacePort) };
-    } catch {
-      return { ...surface, ports: [] };
-    }
-  }));
+  const ports = await openPortsByTerminal(terminals.map((surface) => surface.id));
+  return surfaces.map((surface) => (hasTerminal(surface.kind)
+    ? { ...surface, ports: (ports[surface.id] ?? []).map(toSurfacePort) }
+    : surface));
 }
