@@ -45,11 +45,7 @@ shapes, or staged `## Future` material.
 guide. It works without prose forks in the VS Code Marketplace, Open VSX, and
 GitHub.
 
-The guide is not served by this site. It was rendered at `/docs`; that page and
-every link to it were removed, and the guide is now read where it is published.
-The generator still parses it on every build, and the lint's guide checks still
-run, because both constrain the guide as a *Marketplace listing* rather than as
-a website page (rationale).
+**Must parse and validate the guide on every build without publishing a guide page** (rationale).
 
 The guide is written for a VS Code user, because every channel that publishes
 it is an extension listing or the extension's folder on GitHub; the standalone
@@ -105,8 +101,7 @@ stays within Marketplace-compatible Markdown:
   **Never** reference remote media, `github.com/user-attachments` URLs least of
   all (rationale).
 
-Each renderer resolves those relative paths differently, and all four are
-verified:
+Each renderer resolves those relative paths as follows:
 
 | Renderer | How `images/x.gif` resolves |
 | --- | --- |
@@ -149,31 +144,15 @@ and
 
 ## Markdown parsing
 
-The Markdown parser is in-repo and takes no third-party dependency. It
-therefore supports a deliberate *subset* of CommonMark and raises
-`UnsupportedMarkdownError` outside it, rather than degrading silently the way a
-general parser would. The public-doc lint turns that error into a build
-failure, which is what makes a hand-rolled parser safe as the guide grows.
+**Must reject unsupported Markdown with `UnsupportedMarkdownError`, never silently degrade it.** The parser is in-repo and dependency-free; public-doc lint reports parsing failures.
 
-Raw HTML is disabled except for a narrow `<img>` allowlist carrying only `src`,
-`alt`, `width`, `height`, and `title`, with a relative or `https:` source. Every other tag,
-and every other attribute on `<img>`, is rejected outright. The exception exists
-because the guide's inline 22px alert-state icons need sizing and portable
-Markdown has no syntax for it; it is not a general licence for HTML. An HTML
-comment on its own lines is dropped, as GitHub drops it; one sharing a line is
-rejected.
+**May accept raw HTML only through the parser's `<img>` attribute allowlist, with a relative or `https:` source.** Other tags or attributes fail. Standalone HTML comments are dropped; inline comments fail (rationale).
 
-**Must assign unique heading ids**, reserving authored and generated numeric
-suffixes alike. Heading ids come from one GitHub-style slugger, including
-replacing each space individually rather than collapsing runs — so a heading
-whose punctuation sits between two spaces yields a double hyphen exactly as on
-GitHub. `website/scripts/docs-parser.test.js` pins slug collisions.
+**Must assign unique GitHub-style heading ids, reserving authored and generated numeric suffixes alike and replacing each space individually.** `website/scripts/docs-parser.test.js` pins slug collisions.
 
-**Must retain ordered-list starts and blank-separated paragraphs within their
-own list item.** `website/scripts/generate-docs.test.js` pins the published
-first-run setup sequence; `website/src/components/MarkdownDocument.test.tsx`
-pins resumed numbering. **Must interpret backslash escapes only before ASCII
-punctuation**, preserving ordinary characters in paths.
+**Must retain ordered-list starts and blank-separated paragraphs within their own list item.** `website/scripts/generate-docs.test.js` pins the published first-run setup sequence; `website/src/components/MarkdownDocument.test.tsx` pins resumed numbering. **Must interpret backslash escapes only before ASCII punctuation**, preserving ordinary path characters.
+
+Source of truth: `IMG_ALLOWED_ATTRS`, `parseMarkdown`, `parseInline`, and `createSlugger` in `website/scripts/docs-parser.js`.
 
 ## Markdown rendering contract
 
@@ -209,7 +188,7 @@ to the publishing page or the canonical file and fails the build when the
 target does not exist, and `assertRouteFragments` fails it when a fragment into
 a published page names no heading that page renders. A source keeps its
 repo-relative link, which spec-lint verifies down to the fragment as it cannot
-for a URL.
+for a URL. Known gap: `assertRouteFragments` skips query-bearing links.
 
 **Never** use a regular expression to turn a canonical source's prose into
 site prose. Channel-specific differences are explicit entries in one fixed
@@ -218,23 +197,22 @@ the runbook, `SECURITY_DELTA` for the security spec. Each entry names exactly
 one source target and fails the build when its target matches zero blocks or
 more than one. Fuzzy text and line-number patches are forbidden.
 
-Two operations exist. `remove` drops the matched block. `remove-section`
-requires a heading and drops it with every block up to the next heading of the
-same or shallower depth, so a removed `##` takes its `###` subsections with it.
+**Must remove a withheld section with all its subsections, stopping at the next same-depth or shallower heading.**
 
 **Must** leave no `#anchor` link pointing at a heading the delta removed.
-`resolveRemovedAnchors` rewrites such a link to the canonical file on GitHub —
-the material still exists, it is just not published here — and
-`assertAnchorsResolve` then fails the build on any that remain. Both run on
-every page built from a delta, so the guarantee does not depend on remembering
-to ask for it.
+**Must redirect withheld-section links to the canonical file on GitHub and fail generation on remaining dangling anchors.**
 
 The renderer preserves selectable code, authored image alt text, safe
 external-link attributes, mobile table access, and mobile-width media and prose
 without horizontal overflow — an inline code span offers a break at each of its
 separators. **Never** let such a hint change what the span's `textContent`
 yields, so a path still pastes into a shell. No HTML string is ever injected —
-`dangerouslySetInnerHTML` is deliberately absent.
+`dangerouslySetInnerHTML` is absent.
+
+Source of truth: `buildDocument`, `applyDelta`, `resolveRemovedAnchors`,
+`assertAnchorsResolve`, `resolveRepoLinks`, `assertRouteFragments`, and
+`localizeSiteLinks` in `website/scripts/generate-docs.js`; `MarkdownDocument`
+and `CodeSpan` in `website/src/components/MarkdownDocument.tsx`.
 
 ## Per-page head tags
 
@@ -363,9 +341,7 @@ The CLI page consumes the Markdown snapshots generated by
 inventory. That existing test remains responsible for proving every command's
 snapshot equals real help output.
 
-Stable anchors: `#targeting`, `#surface-handles`, `#dor`, one per canonical
-command snapshot filename, and `#agent-browser` for both `dor agent-browser` and
-the `dor agent-browser` alias.
+**Must retain `#targeting`, `#surface-handles`, `#dor`, `#commands`, and one anchor per canonical command snapshot filename.** `dor agent-browser` links to `#agent-browser`.
 
 The targeting and Surface-handle introduction is extracted from the matching
 sections of `dor/skill.md`; it is not re-authored in the website.
@@ -375,23 +351,13 @@ monospace lines, normally wrapped descriptive prose, separate examples and
 text/JSON output blocks, responsive flag and argument definition tables, and a
 collapsed disclosure containing the original help byte for byte.
 
-The narrow help parser recognizes only the current column-zero markers `USAGE`,
-`COMMANDS`, `FLAGS`, `ARGUMENTS`, `Examples:`, `Text output:`, and
-`JSON output:`. A marker section owns only its indented body: the first
-column-zero non-blank line that is not itself a marker ends it and begins
-prose. Unclassified content remains ordered prose. Every parsed node retains its
-raw source slice, and a losslessness test reconstructs the complete raw help
-from those slices for every shipped snapshot.
-
-Definition rows split on the block's aligned description column rather than the
-first whitespace run, because a term may contain its own gap (`-h  --help`). A
-description that wrapped onto the next line is one whose indent sits nearer the
-description column than the term column; `dor split --help` produces exactly
-that for its long direction flag.
+**Must preserve unclassified help as ordered prose and reconstruct each shipped snapshot byte for byte from parsed source slices.** The parser owns marker recognition and aligned definition-row parsing; `website/scripts/help-parser.test.js` pins their boundaries and wrapped descriptions.
 
 Generation fails on a malformed snapshot envelope, duplicate command id, missing
 or extra snapshot, or root inventory mismatch. Semantic parsing may fall back to
 prose but never silently discards source text.
+
+Source of truth: `buildCli` and `CLI_COMMANDS_SECTION` in `website/scripts/generate-docs.js`; `parseSnapshot`, `parseHelp`, and `definitionRows` in `website/scripts/help-parser.js`; `DorCommandReference` in `website/src/components/DorCommandReference.tsx`.
 
 ## `/compatible-agents` guide
 
@@ -403,31 +369,14 @@ Source of truth: `generateDocs` in `website/scripts/generate-docs.js`.
 
 ## `/agent-skill` guide
 
-The agent page renders `dor/skill.md` exactly. Page chrome adds a table of
-contents, stable heading ids, styled code blocks, copy buttons for `dor skill`
-and `dor skill --install`, and reference links, but adds nothing to the skill
-body. The raw Markdown is deliberately **not** emitted into the generated data:
-nothing renders it, and a copy of the generator's own input proves nothing about
-the generator. A test instead re-parses the file independently and compares the
-resulting heading inventory and ids.
+**Must render `dor/skill.md` exactly, adding only page chrome:** table of contents, stable heading ids, styled code, copy buttons for `dor skill` and `dor skill --install`, and contextual CLI links. **Never emit the unused raw skill Markdown into browser data.** An independent re-parse compares the generated headings and ids.
 
-**Must derive contextual CLI links from skill headings.** A backticked
-`dor <command>` token links to that command's anchor; headings naming aliases
-use the first token with a matching CLI section and label it with the first
-authored spelling. Targeting and Surface handles match by heading prefix and
-link to the corresponding CLI introductions.
+**Must derive contextual CLI links from skill headings.** Backticked `dor <command>` tokens select the first spelling with a matching CLI section, labelled by the first authored spelling. Targeting and Surface handles match by heading prefix and link to the corresponding CLI introductions. Generation fails on missing or ambiguous introduction headings, or a command heading with no matching anchor.
 
-These links are presentation adjacent to the skill body. **Website URLs are
-never injected into `dor/skill.md`** — an older installed CLI must remain
-self-contained and version-matched rather than directing its instructions to
-the latest website reference — and **the generator asserts the skill names no
-site URL rather than rewriting one**, which would repair the violation instead
-of reporting it. `buildCli` lifts the intro sections out of these same block
-objects, so a site URL here would reach `/dor` too. Pinned by
-`website/scripts/generate-docs.test.js`.
+**Never inject website URLs into the bundled skill; must reject links to the website's origin rather than rewriting them** (rationale). Known gap: the current prefix check misses bare-origin, case, default-port, and protocol-relative spellings. `buildCli` reuses the same intro block objects.
 
-Generation fails when an introduction heading is missing or ambiguous, or a
-command heading names no anchor in the generated CLI reference.
+Source of truth: `buildSkill`, `assertNoSiteLinks`, and `linkSkillHeadings` in `website/scripts/generate-docs.js`; `AgentSkillDocs` in `website/src/pages/AgentSkillDocs.tsx`.
+Tests: `website/scripts/generate-docs.test.js`.
 
 ## `/self-host` runbook
 
@@ -489,48 +438,15 @@ links.
 
 ## Generated documentation boundary
 
-One build-time generator reads the canonical inputs and writes a gitignored
-website data module:
+**Must generate public references from their canonical sources at build time.** `generateDocs` owns the inputs; `PUBLISHED_PAGES` owns which results are emitted. **Must write a separate gitignored `website/src/data/docs.<page>.json` per published result, never one combined module** (rationale).
 
-```text
-website/scripts/generate-docs.js
-website/scripts/docs-parser.js
-website/scripts/help-parser.js
-website/src/data/docs.selfhost.json
-website/src/data/docs.security.json
-website/src/data/docs.cli.json
-website/src/data/docs.skill.json
-```
+**Must parse and validate the unpublished product guide and sync its media without emitting its data.** Reserved: **Scope: guide-page-return** restores that write. **Must strip `BUILD_ONLY_FIELDS` from emitted results while retaining them in memory for tests and public-doc lint.**
 
-**Only a document with a page is written.** The guide is parsed and validated
-on every build, and its media synced, but writing its data file shipped 48 KB
-nothing imports; `Scope: guide-page-return` restores the write. **The fields
-the generator derives for its own assertions — the applied delta and the three
-rewrite logs — are stripped at the write** and kept on the in-memory result,
-which is what the tests and the public-doc lint read.
+The generated data carries Markdown block/heading inventories after explicit deltas, semantic CLI nodes with exact raw help, and skill blocks with validated contextual links. **Never import Node-based Dor command implementations into browser pages.**
 
-One file per document rather than one combined module: a shared import made
-every docs route pull the others' content into one chunk.
+**Must run generation from website `predev`, `pretest`, and `prebuild`, and reproduce output from a clean checkout.**
 
-Inputs:
-
-```text
-vscode-ext/README.md
-SELF_HOST.md
-docs/specs/security.md
-dor/test/snapshots/help/*.md
-dor/skill.md
-```
-
-The generated data contains each published document's blocks and heading
-inventory with the explicit fixed delta applied, ordered semantic CLI nodes
-plus exact raw help, and the skill blocks plus validated heading-to-reference
-links. The raw skill Markdown is deliberately not emitted.
-
-Website `predev`, `pretest`, and `prebuild` run the generator, mirroring
-`generate-changelog.js`. Browser code consumes generated data rather than
-importing Dor command implementation modules, which use Node APIs. Generated
-output stays out of version control and is reproducible from a clean checkout.
+Source of truth: `generateDocs`, `PUBLISHED_PAGES`, `BUILD_ONLY_FIELDS`, `publishable`, and `main` in `website/scripts/generate-docs.js`; scripts in `website/package.json`; generated paths in `.gitignore`.
 
 ## Homepage browser proof
 

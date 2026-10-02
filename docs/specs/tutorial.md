@@ -22,12 +22,16 @@ Both `tut` profiles open inside their `initialSectionId`:
 
 ## Architecture
 
-Browser-side xterm alt-screen behind `FakePtyAdapter`, **never Node `terminal-kit`**:
+**Must run the tutorial as a browser-side xterm alt-screen program behind `FakePtyAdapter`, never Node `terminal-kit`.** `TutorialShell` dispatches input to `TutRunner`; `TutorialState` derives profile totals from its supplied sections and notifies the runner.
 
-- **`tut-runner.ts`** (`TutRunner`) — profile-aware alt-screen TUI; subscribes to `TutorialState`, re-renders on progress, takes input from `TutorialShell`.
-- **`tut-detector.ts`** (`TutDetector`) — wires app events to `TutorialState.markComplete(id)` and **must never touch the tiling engine**. `start()` seeds its prev-state maps and subscribes to `subscribeToActivity` + `subscribeToWatchedCommands` (`dormouse-lib/lib/terminal-registry`), `subscribeToMouseSelection` (`dormouse-lib/lib/mouse-selection`), `subscribeToActiveTheme` (`dormouse-lib/lib/themes`); everything else arrives on the `WallEvent` stream (`handleWallEvent`). **A keyboard split is credited before the split's automatic passthrough transition** (rationale), and **the `kb-arrows` hint that follows must tell the user to re-enter command mode** — the split left them in passthrough. **`kb-arrows` is credited from `selectionChange`** — to a distinct pane, in command mode — so an arrow key *or* a click counts. **Must credit `al-spreads` only when newly enabled WATCHING shares a command key with another live pane.** Each transition guard is commented where it lives, pinned by `website/src/lib/tut-detector.test.ts`.
-- **`tutorial-state.ts`** (`TutorialState`) — in-memory progress store ([Storage](#storage)); profile totals come from the section list handed to the constructor.
-- **`tut-items.ts`** — sections, items, and both profiles; read by the runner and by `TutorialState` (the detector reaches ids only through `ItemId`).
+**Must derive progress from app events and semantic snapshots, never touch the tiling engine.**
+
+- **Must credit a keyboard split before its automatic passthrough transition**, and tell the user to re-enter command mode for the following navigation item (rationale).
+- **Must credit `kb-arrows` only on command-mode selection of a distinct pane**; an arrow or click counts, a swap's resulting focus does not.
+- **Must credit `al-spreads` only when newly enabled WATCHING shares a command key with another live pane.**
+
+Source of truth: `TutRunner` in `website/src/lib/tut-runner.ts`; `TutDetector` in `website/src/lib/tut-detector.ts`; `TutorialState` in `website/src/lib/tutorial-state.ts`; profiles in `website/src/lib/tut-items.ts`.
+Tests: `website/src/lib/tut-detector.test.ts`.
 
 ## Layout
 
@@ -95,7 +99,7 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 
 ## Storage
 
-`TutorialState` persists to `localStorage`. **Unknown ids in a stored payload are filtered on load**, so renaming an id is a one-way reset. **Both profiles share the completion key**, so **`markComplete` must reject an id outside the profile's own sections** — a Pocket detection that names a desktop-only item would otherwise arrive pre-checked. An id completed under one profile loads under the other, kept but uncounted.
+`TutorialState` persists to `localStorage`. **Unknown ids in a stored payload are filtered on load**, so renaming an id is a one-way reset. **Both profiles share the completion key**, so **`markComplete` must reject an id outside the profile's own sections** — a Pocket detection that names a desktop-only item would otherwise arrive pre-checked. **Must share completed common items across profiles; keep absent-profile ids stored but exclude them from that profile's totals.**
 
 **Must keep progress and reset working without storage**, pinned by `website/src/lib/tutorial-state.test.ts`.
 
@@ -110,13 +114,15 @@ Pocket reuses `cp-select` / `cp-raw` / `cp-rewrap` but drops `cp-override`: Sele
 Hooks in `dormouse-lib` / `MobileTerminalUi` that exist for tutorial observability:
 
 - **`WallEvent.kill` / `move` / `paneAdded`** — discriminants on the `WallEvent` union. `kill` fires from `killPaneImmediately`, so every kill path (confirm dialog, tmux `x`, door kill, `dor kill`) credits `kb-kill`. **`move` must fire from both** the Cmd/Ctrl-Arrow swap in `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts` **and** the center-drop swap in `Wall.onProposeMove` (rationale). **`paneAdded` fires once per pane that becomes visible** — seed ids, splits, dor surfaces, restores, auto-spawn — via Lath’s leaf-id diff, with seeds announced explicitly.
-- **`FakePtyAdapter.pumpActivity(id, durationMs, intervalMs)`** — drives the alert manager for a fixed duration with no data output (the `s` demo). Returns a cancel handle; stops on its own if the pty dies mid-duration.
-- **`FakePtyAdapter.sendOutput(id, data, { skipActivity })`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.** `TutRunner` passes `skipActivity: true` for every frame.
+- **`FakePtyAdapter.pumpActivity`** — drives the alert manager for a fixed duration with no data output (the `s` demo). Returns a cancel handle; stops on its own if the pty dies mid-duration.
+- **`FakePtyAdapter.sendOutput`** — pushes data through the real protocol parser as if the PTY produced it (rationale). **Unlike `writePty` it is not suppressed while a scenario is playing.** `TutRunner` passes `skipActivity: true` for every frame.
 - **`FakePtyAdapter.onPtySpawn`** — fires synchronously inside `spawnPty`, before the scenario plays, so a page attaches a shell without racing `TerminalPane`'s mount.
 - **`subscribeToWatchedCommands` / `getWatchedCommands`** (`lib/src/lib/watched-commands.ts`, re-exported from `terminal-registry`) — the WATCHING rule set; **must credit `al-watch-cmd` only once `longtask` is watched**.
-- **`MobileTerminalUi.onGestureInput(input, data)`** — optional, reports radial-menu input only; **must fire before the input is sent**, so the final Escape is credited before it leaves the tutorial screen. Pinned by `lib/src/components/MobileTerminalUi.test.tsx`.
-- **`MobileTerminalUi.onGestureScroll(lines)`** — optional, reports signed line counts only for edge scrolling.
+- **`MobileTerminalUi.onGestureInput`** — optional, reports radial-menu input only; **must fire before the input is sent**, so the final Escape is credited before it leaves the tutorial screen. Pinned by `lib/src/components/MobileTerminalUi.test.tsx`.
+- **`MobileTerminalUi.onGestureScroll`** — optional, reports signed line counts only for edge scrolling.
 - **`subscribeToActiveTheme` / `getActiveThemeId`** (`lib/src/lib/themes/`) — the active theme, watched to credit `th-theme`. **Must seed the detector’s previous theme at `start()` and compare consecutive ids**, so boot-time restore cannot grant the item and choosing the startup theme after a reset still can. Pinned by `website/src/lib/tut-detector.test.ts` (rationale).
+
+Source of truth: `WallEvent` in `lib/src/components/wall/wall-types.ts`; event emitters in `lib/src/components/Wall.tsx` and `lib/src/components/wall/keyboard/handle-pane-shortcuts.ts`; `FakePtyAdapter` in `lib/src/lib/platform/fake-adapter.ts`; `MobileTerminalUi` in `lib/src/components/MobileTerminalUi.tsx`; `TutDetector` in `website/src/lib/tut-detector.ts`.
 
 ## Mouse and Clipboard Feature Coverage
 

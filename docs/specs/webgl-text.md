@@ -33,8 +33,7 @@
   package name, version and counter before writing pins; select the upstream
   addon by matching commit and peer. `scripts/xterm-bump.test.mjs` pins that,
   standalone drift repair, and the lint's canopy checks.
-- **Every pin must be exact, and every addon's core peer must equal its
-  workspace's core pin** — the `@xterm/*` packages share a repo but carry
+- **Every pin must be exact, and every addon's core peer must be `^<workspace-core-pin>`** — the `@xterm/*` packages share a repo but carry
   independent beta counters (rationale). `scripts/xterm-lint.mjs` owns the full
   check list in its header comment; `scripts/xterm-bump.mjs` (`pnpm bump:xterm`)
   writes the newest coherent per-commit set for `lib` and `standalone` alike.
@@ -57,13 +56,13 @@ PR:
    `addons/addon-webgl/` files touched since canopy's fork base. Most betas
    touch none; otherwise review that diff.
 2. **May retain canopy's older baseline after reviewing a bump that leaves the
-   forked addon unchanged.** Otherwise, **must rebase and release the fork** per
+   forked addon unchanged.** Otherwise, **must update the fork base and release it** per
    FORK.md's `Merging upstream` —
    **a conflict-free merge is not a correct one** (rationale).
-3. **After rebasing, bump `canopy/package.json`** with `--canopy <forkVersion>`
+3. **After updating the fork base, bump `canopy/package.json`** with `--canopy <forkVersion>`
    and update its recorded triple ("Canopy lab"), which the lint requires.
 
-**Must land any required fork rebase with the `@xterm/*` bump in one PR.**
+**Must land any required fork-base update with the `@xterm/*` bump in one PR.**
 
 ## SDF glyph architecture
 
@@ -75,33 +74,16 @@ upstream behavior untouched when off) and `sdfGlyphSize: number`.
   glyphs, decorated cells (underline/strikethrough/overline), glyphs treated as
   background colors, and probable color emoji. **`isProbablyEmoji` widens the
   shared `isEmoji` range table and must err toward raster** (rationale).
-- **Rasterization**: `SdfGlyphRasterizer` vendors mapbox/tiny-sdf
-  (BSD-2-Clause, attribution in its header), adapted to xterm's `TEXT_BASELINE`
-  metrics, to wide/CJK and combined-character strings, and to per-draw font
-  weight/style. **Its padding buffer must let the distance field
-  decay to zero inside the bitmap**, so LINEAR atlas sampling never bleeds
-  between packed glyphs.
+- **Must let the distance field decay to zero inside glyph padding, preventing atlas bleed.** `SdfGlyphRasterizer` owns its mapbox/tiny-sdf attribution, metrics, canvas sizing, and distance-field padding.
 - **`sdfGlyphSize`**: the fixed base font size (px) glyphs are rasterized at —
   explicit, default 32, **never derived from the terminal font size or
   devicePixelRatio** (rationale).
-- **Color-free atlas**: exactly one texture entry per shape (chars + weight +
-  style); each additional color is a lightweight record sharing that entry with
-  its own tint, via `AtlasPage.addGlyphAlias`. **A color variant must carry its
-  own coordinate vectors and be registered on the page** — page merge/delete
-  bookkeeping mutates every registered record in place exactly once (rationale).
-  **Aliases do not count toward used-pixels**; the canonical record owns the
-  texels.
+- **Must share one atlas entry per shape across colors, with each variant registered for page bookkeeping and independently mutable coordinates** (rationale). `_drawToCacheSdf` and `AtlasPage.addGlyphAlias` own the copy/share and used-pixel accounting.
 - **Texel format**: distance in the atlas alpha channel with white RGB
   (rationale); the SDF shader path reads only alpha. Reserved: one plain
   distance field per texel, never multiple glyphs packed into color channels,
   keeping the layout compatible with the MSDF item in `## Future`.
-- **Shader/renderer**: 16 floats per cell (upstream: 11), adding a
-  straight-alpha tint vec4 and an SDF flag. Quads scale by the glyph's
-  `renderScale` (device font px ÷ `sdfGlyphSize`) (rationale). The fragment
-  shader reconstructs coverage with an `fwidth`-based smoothstep at the edge
-  threshold `1 - SDF_CUTOFF`, **imported from the rasterizer** so encode and
-  decode cannot drift. **Upstream merges that touch GlyphRenderer vertex code
-  need care** (FORK.md).
+- **Must keep shader reconstruction matched to rasterizer distance encoding and device-font scaling** (rationale). `GlyphRenderer` owns instance layout, `renderScale`, derivative-based coverage, and its imported `SDF_CUTOFF`. FORK.md owns the upstream-merge review procedure.
 
 Source of truth (fork repo): `SdfGlyphRasterizer` in
 `addons/addon-webgl/src/SdfGlyphRasterizer.ts`; `_drawToCacheSdf`,
