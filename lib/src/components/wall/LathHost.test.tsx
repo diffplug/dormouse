@@ -363,6 +363,18 @@ describe('LathHost — sash drag', () => {
     expect(onCommitResize).not.toHaveBeenCalled();
   });
 
+  it('ignores a sash press from a render superseded by a synchronous tree commit', () => {
+    const store = seeded(rowOf('a', 'b', 'c'), [['a', leafMeta()], ['b', leafMeta()], ['c', leafMeta()]]);
+    const { onCommitResize } = mount(store);
+    const staleSash = firstSash();
+    act(() => {
+      store.removeLeaf('a');
+      staleSash.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 100 }));
+    });
+    act(() => window.dispatchEvent(new MouseEvent('pointerup', { clientX: 140 })));
+    expect(onCommitResize).not.toHaveBeenCalled();
+  });
+
   it('keeps a sash gesture alive across metadata updates', () => {
     const store = seeded(rowOf('a', 'b'), [['a', leafMeta()], ['b', leafMeta()]]);
     const { onCommitResize } = mount(store);

@@ -124,3 +124,8 @@ describe('hitTest — misses', () => {
     expect(hitTest(tree(null), RECT, { x: 100, y: 100 }, 'a', opts)).toEqual([]);
   });
 });
+
+it('filters a drop back at the same boundary in a three-pane row', () => {
+  const t = tree(mk('row', [leaf('a'), 0.2], [leaf('b'), 0.3], [leaf('c'), 0.5]));
+  expect(hitTest(t, RECT, { x: 199, y: 300 }, 'b', opts)).toEqual([]);
+});

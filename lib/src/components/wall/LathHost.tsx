@@ -752,7 +752,10 @@ export function LathHost({
             className="lath-sash"
             style={style}
             onPointerDown={(e) => {
-              if (e.button !== 0 || dragRef.current || snapshot.zoomedId !== null) return;
+              if (e.button !== 0 || dragRef.current) return;
+              const current = store.getSnapshot();
+              // The displayed sash belongs to this render, not a newer tree.
+              if (current.tree !== snapshot.tree || current.zoomedId !== null) return;
               if (dragController.hasDrag()) return; // a pane drag has the pointer
               e.preventDefault();
               (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
