@@ -3,7 +3,22 @@ name: running-tend
 description: Project-specific guidance for tend workflows running on this repo.
 ---
 
-No project-specific tend preferences yet beyond the notes below. Add guidance here as needed — this file is loaded by tend workflows alongside AGENTS.md.
+Project-specific guidance for tend workflows. Add to it as needed; tend workflows load this file alongside AGENTS.md.
+
+## Reviewing PRs: judge necessity before correctness
+
+On this repo, "does the change carry its weight?" outranks "is it correct?" Agent-authored PRs here often bundle real fixes with speculative hardening, and a review that only checks correctness pushes each one toward more machinery. On the spec-audit stack #890–#907, every bot finding asked for more completeness: a bound on a retry chain, an elevated-owner case for a DACL helper, the same gap in one more file. The bot approved all of it. A maintainer pass then removed roughly 2,000 lines and restored content that the bot had approved deleting. Apply these checks in **Review**, and fold what they find into the same review:
+
+- **Must name the trigger for every new guard, retry, fallback, or state.** Name the actor (user action, peer, Relay, local same-user process) and the shipping configuration that reaches it, and cite the caller. If nothing reachable triggers it, that is the finding: drop it, or file an issue. Do not review the robustness of a mechanism that should not exist.
+- **Never answer a gap in a hardening mechanism by asking for more of it.** When a fix needs a fix (an unbounded retry, a missed owner case, a stuck state), first ask whether a smaller design avoids the problem, and propose that instead. For example, write the journal before ownership moves and refuse the move on failure, rather than adding phases, retries, and parking.
+- **Must weigh platform code that no CI job runs.** Windows-only branches, PowerShell, and named pipes run only on the author's machine. Say so, and require a proportionally stronger trigger.
+- **Must flag bundling.** A spec-audit or cleanup PR that also carries unrelated code fixes or test-portability work should be split.
+- **Must diff removed spec text against AGENTS.md "What, not why".** A word budget is a ceiling, not a goal. Flag every constant, ordering, behavior table, or "only/never" fact that a pointer replaced. These cut-and-pointer swaps lost the `checkRegistration` order, the `connectionsFor` table, and the SDF constants.
+- **Never approve a cut to a reader-facing surface without a finding.** These surfaces are `SECURITY.md` (shown to vulnerability reporters), `docs/specs/security.md` (published at /security), website docs, and `docs/compatible-agents.md`. A removed guarantee, reporting instruction, or example is a finding. So is a newly published gap worded more broadly than its evidence, for example "inherits `%TEMP%`'s ACL" when only a shared `%TEMP%` exposes it.
+- **Never accept a spec "Known gap" as a place to park an audit finding.** Verify each new gap against the code. A gap whose own section has a FAIL IF the code fails is a blocker: fix the code or narrow the rule. An unverified or unreproduced gap belongs in an issue.
+- **Must flag tests that patch globals by injection**, such as string-built `--import` preloads, `Proxy`-wrapped `crypto.subtle`, or monkeypatched `fs`. They pass vacuously or write real files when the patch misses.
+
+When these checks are the only findings, submit `COMMENT`, not `APPROVE`. Unnecessary code that merges is a cost, not a style nit.
 
 ## Filing issues in other repos
 
