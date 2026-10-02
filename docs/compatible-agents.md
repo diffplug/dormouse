@@ -13,7 +13,7 @@ Install and sign in to the agent separately, then launch it from a Dormouse term
 | --- | --- | --- | --- |
 | [Claude Code](https://code.claude.com/docs/en/cli-reference) | `claude` | `claude --resume <id>` | Yes |
 | [Codex](https://developers.openai.com/codex/cli/) | `codex` | `codex resume <id>` | Yes |
-| Pi | `pi` | `pi --session <id>` | No |
+| [Pi](https://pi.dev/) | `pi` | `pi --session <id>` | No |
 | [GitHub Copilot](https://docs.github.com/en/copilot/how-tos/copilot-cli) | `copilot` | `copilot --resume <id>` | Yes |
 | [Antigravity](https://antigravity.google/docs/cli/commands/resume) | `agy` | `agy --conversation <id>` | Yes |
 | [Warp](https://docs.warp.dev/agents/cli/reference/) | `warp` | `warp --resume <id>` | Yes |
